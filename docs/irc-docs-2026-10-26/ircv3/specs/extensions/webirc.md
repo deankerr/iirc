@@ -1,0 +1,141 @@
+> Source: https://ircv3.net/specs/extensions/webirc Captured: 2026-10-26
+
+# WebIRC Extension
+
+Copyright © 2017 MuffinMedic
+
+Copyright © 2017 Darren Whitlen \<prawnsalad@kiwiirc.com>
+
+Unlimited redistribution and modification of this document is allowed provided that the above copyright notice and this permission notice remains intact.
+
+---
+
+<a id="motivation"></a>
+
+## Motivation [🔗](#motivation)
+
+This specification is intended to document the existing `WEBIRC` command that is already in use by multiple IRC servers and WebIRC gateways to provide a standard specification for implementation. This specification does not add any new features or changes, although new features, such as use of public-key cryptography instead of password authentication, can be submitted as extensions.
+
+<a id="introduction"></a>
+
+## Introduction [🔗](#introduction)
+
+When a user connects through an indirect connection to the IRC server, the user’s actual IP address and hostname are not visible. The `WEBIRC` command allows the WebIRC gateway to pass on the user’s actual IP address and hostname to the IRC server. This information can be used by the network as if the user was connecting directly.
+
+<a id="format"></a>
+
+## Format [🔗](#format)
+
+The `WEBIRC` command MUST be the first command sent from the WebIRC gateway to the IRC server and MUST be sent before capability negotiation.
+
+The `WEBIRC` command takes four or five parameters: `password`, `gateway`, `hostname`, `ip`, and `options`.
+
+- `password` Password authenticating the WebIRC gateway to the IRC server which must be agreed upon ahead of time
+- `gateway` WebIRC gateway service name
+- `hostname` User’s resolved hostname
+- `ip` IPv4 or IPv6 address of the connecting user. If the IP address cannot be resolved to a DNS name, the IP address MUST be sent as both the `hostname` and `ip`. If the IP address is an IPv6 address beginning with a colon, it MUST be sent with a canonically-acceptable preceding zero.
+- `options` is an optional set of space-separated arguments detailing other information about the connection.
+
+If forward and reverse DNS do not match, the IP address SHOULD be sent as the `hostname` and the unverified `hostname` SHOULD NOT be sent (see [Security Considerations](#security-considerations)). If the connection fails to the IRC server, the WebIRC gateway MUST return an `ERROR` with an appropriate message and terminate the connection.
+
+Note: Previous implementations referred to the `gateway` field as `user`. This change is for documentation clarity only and maintains compatibility with all existing implementations.
+
+<a id="options"></a>
+
+### Options [🔗](#options)
+
+The `options` parameter is a space-separated set of additional arguments, each argument having the form `<name>[=<value>]`.
+
+The option values are escaped using the same escaping method as [message tags values](message-tags.md#escaping-values). It is acknowledged that some of the escaping rules are not strictly required, but the same escaping method is used for consistency.
+
+These options are defined and may be sent by clients while connecting:
+
+- `secure`: This flag indicates that the client has a TLS-secured connection to the gateway. Servers MUST ONLY treat the connection as secure if this flag is sent and the connection from the gateway to the server is also secure with TLS.
+- `remote-port=<port>`: This flag indicates the remote port the client has connected to the gateway from.
+- `local-port=<port>`: This flag indicates the port the gateway accepted the client connection on (e.g. `6697`, `6667`).
+- `certfp-<algo>=<fingerprint>`: This flag indicates the TLS client certificate fingerprint supplied to the WebIRC gateway by the user’s actual client application.
+- `spkifp-<algo>=<fingerprint>`: This flag indicates the public key fingerprint for the TLS client certificate supplied to the WebIRC gateway by the user’s actual client application.
+
+`<algo>` should be the hash algorithm used to produce the fingerprint supplied such as `sha-256`. Its value should be taken from IANA’s [Hash Function Textual Names](https://www.iana.org/assignments/hash-function-text-names/hash-function-text-names.xhtml) registry, or if using an algorithm not listed should use a name consisting of only lower case letters, numbers or hyphens.
+
+`<fingerprint>` should be the hash of the certificate (certfp) or public key (spkifp) encoded in hexadecimal without colon (:) separators. Servers should accept either upper case or lower case hexadecimal characters.
+
+Servers MUST be able to handle options that don’t currently have defined values gaining values in the future. For example, they MUST treat the options `secure` and `secure=examplevalue123` in exactly the same way.
+
+<a id="examples"></a>
+
+### Examples [🔗](#examples)
+
+Generic format.
+
+```
+WEBIRC password gateway hostname ip [:option1 option2...]
+```
+
+IP address resolves to hostname.
+
+```
+WEBIRC hunter2 ExampleGateway 3-100-51-198.location.example-isp.com 198.51.100.3
+```
+
+IP address does not resolve to hostname.
+
+```
+WEBIRC hunter2 ExampleGateway 198.51.100.3 198.51.100.3
+```
+
+Secure connection.
+
+```
+WEBIRC hunter2 ExampleGateway 198.51.100.3 198.51.100.3 secure
+```
+
+Secure connection with ports passed through.
+
+```
+WEBIRC hunter2 ExampleGateway 198.51.100.3 198.51.100.3 :secure=examplevalue local-port=6697 remote-port=21726
+```
+
+Secure connection including a client certificate fingerprint using the sha-256 hash algorithm.
+
+```
+WEBIRC hunter2 ExampleGateway 198.51.100.3 198.51.100.3 :secure local-port=6697 remote-port=21726 certfp-sha-256=22e88c7d6da9b73fbb515ed6a8f6d133c680527a799e3069ca7ce346d90649b2
+```
+
+Error from invalid password.
+
+```
+ERROR :Invalid WebIRC password
+```
+
+<a id="use-cases"></a>
+
+## Use Cases [🔗](#use-cases)
+
+Webchat applications that proxy the connection to the IRC server are the primary intended use case. WebIRC allows network and channel operators to use available moderation and security tools to their full extent by exposing user IP addresses and hosts.
+
+Other use cases include bouncer services that wish to pass user information to the IRC server.
+
+<a id="limitations"></a>
+
+## Limitations [🔗](#limitations)
+
+WebIRC requires that the both WebIRC gateway and IRC server be configured to accept the connection in advance. Specific recommendations are outlined below in the [Security Considerations](#security-considerations) section.
+
+<a id="security-considerations"></a>
+
+## Security Considerations [🔗](#security-considerations)
+
+WebIRC allows anyone with a valid password to successfully connect to the IRC server and spoof any desired hostname. IRC servers SHOULD use secure passwords and SHOULD whitelist the IP addresses for the allowed WebIRC gateway servers. If the `WEBIRC` command does not originate from a whitelisted IP address or uses an incorrect password, the gateway SHOULD close any connections with an `ERROR` command.
+
+Because the possibility for hostname spoofing exists, IRC servers MAY attempt to further validate or resolve hostnames and match them to an IP address. It is the responsibility of IRC servers to verify the authenticity of connecting users and perform additional security checks as they see fit. To assist network operators and prevent abuse, IRC servers SHOULD show when a WebIRC connection is in use and SHOULD provide the original host when possible. This behavior is non-normative and implementation defined.
+
+<a id="errata"></a>
+
+## Errata [🔗](#errata)
+
+A previous version of this specification did not include handling the occurrence of an IPv6 address beginning with a colon, which would break the message argument format.
+
+---
+
+Software supporting WebIRC: [Codename IRCat](https://ircat.xyz), [Ergo](https://ergo.chat/), [ircd-hybrid](https://github.com/ircd-hybrid/ircd-hybrid), [InspIRCd](https://www.inspircd.org), [ircu2](https://github.com/UndernetIRC/ircu2), [Nefarious IRCu](https://github.com/evilnet/nefarious2), [Solanum](https://github.com/solanum-ircd/solanum), [UnrealIRCd](https://www.unrealircd.org), [The Lounge](https://thelounge.chat/), [girc](https://github.com/lrstanley/girc), [Kitteh IRC Client Library](https://github.com/KittehOrg/KittehIRCClientLib), [Biboumi](https://biboumi.codeberg.page/)

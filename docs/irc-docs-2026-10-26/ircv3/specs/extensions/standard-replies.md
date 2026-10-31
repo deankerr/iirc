@@ -1,0 +1,140 @@
+> Source: https://ircv3.net/specs/extensions/standard-replies Captured: 2026-10-26
+
+# Standard Replies
+
+Copyright © 2019 Daniel Oaks \<daniel@danieloaks.net>
+
+Unlimited redistribution and modification of this document is allowed provided that the above copyright notice and this permission notice remains intact.
+
+---
+
+<a id="introduction"></a>
+
+## Introduction [🔗](#introduction)
+
+This document specifies the standard `FAIL`, `WARN`, and `NOTE` messages, intended to provide a clean, consistent interface for sending general errors, warnings, and informational messages to clients. Implementers should not need to reserve new numerics for error, warning, or general informational messages, especially as numerics themselves and the mapping of numerics to names can be unclear or conflicting.
+
+The `FAIL` message indicates a complete failure to process a given command/function, or simply some error about the current session that clients should be aware of.
+
+The `WARN` message indicates some non-fatal feedback about a given command/function, or some less vital feedback on the current session.
+
+The `NOTE` message indicates some informational message about a given command/function, or about the current session.
+
+<a id="message-format"></a>
+
+## Message Format [🔗](#message-format)
+
+The `FAIL`, `WARN`, and `NOTE` messages have the same format. Here, we describe the basic format (using `<type>` as a placeholder for the specific message type), before covering some of the differences of each message type.
+
+```
+<type> <command> <code> [<context>...] <description>
+```
+
+Some non-normative examples:
+
+```
+FAIL * NEED_REGISTRATION :You need to be registered to continue
+NOTE AUTHENTICATE ACCOUNT_PASSPHRASE_UPDATED :Your passphrase hash has been automatically updated to use our new, more secure method
+```
+
+Here’s what each parameter means:
+
+- `<type>`: Either `FAIL`, `WARN`, or `NOTE`, this indicates the message type.
+- `<command>`: Indicates the client command which this reply is related to. If the reply is initiated outside the context of a client command (for example, an on-connect message), or if the client command is not available or cannot be relayed (for example, if the client’s message could not be parsed), `*` is substituted.
+- `<code>`: Machine-readable reply code representing the meaning of the message to client software.
+- `<context>`: Optional parameters that give humans extra context as to where and why the reply was spawned (for example, a particular subcommand or sub-process).
+- `<description>`: A required plain-text description of the reply which is shown to users.
+
+`<type>` is the verb of the reply, and is one of `FAIL` (indicating that a command/function could not be processed, or some significant issue with the current session), `WARN` (indicating some non-fatal feedback about a command/function or the session), or `NOTE` (indicating an informational message).
+
+`<command>` is a case-insensitive, required parameter which is either a command name (e.g. `MODE`, `AUTHENTICATE`, `NICK`, etc), or is `*` to indicate a message that was not spawned from a particular command. This message SHOULD also be given a [label](labeled-response.md), if one was provided by the client with the original command that spawned this reply.
+
+`<code>` is a case-insensitive, required parameter which lets the client software handle the message appropriately. The [IRCv3 Reply Code Registry](http://ircv3.net/registry) lists the reply codes currently in use, and implementers MUST use an existing code if one is already defined.
+
+Reply codes (especially more widely-applicable ones such as `NO_SUCH_NICK`) may require different action or mean different things when referring to different commands. Because of this, clients acting on an incoming reply code should also take the `<command>` into account, or ensure that the given `<code>` is intended to be globally-unique.
+
+`<context>` is a set of optional parameters that give extra context to humans debugging and working out why a certain reply was occurred. These parameters are not intended for end users, but for developers gathering more information.
+
+`<description>` is a required final parameter, containing a plain-text description of the reply message. For example, for a `FAIL` message, the description should clearly state what error occurred, and how the user should act to resolve it. Implementers should write their descriptions to be easily understood by end users, for example _“Passwords must contain lowercase and uppercase letters, and be 8 or more characters”_ is a more clear description than _“Password consistency and strength enumerability (sec/\* internal) check failed”_.
+
+<a id="capabilities"></a>
+
+### Capabilities [🔗](#capabilities)
+
+This specification adds the `standard-replies` capability. This capability allows servers to send arbitrary standard replies other than ones enabled by a specific specification. It also allows clients to indicate support for receiving any well-formed standard reply, whether or not it is recognised and used.
+
+It is RECOMMENDED that servers use standard replies instead of vendor-specific error numerics or server notices for non-standardised features when responding to a client which supports this capability. It is NOT RECOMMENDED that servers which support this capability add new custom error numerics. Servers which support this capability SHOULD NOT replace standardised error numerics with standard replies, unless the replacement is explicitly described by some other specification.
+
+<a id="examples"></a>
+
+## Examples [🔗](#examples)
+
+The below are non-normative examples showing how a server may wish to respond to various failing situations. For actual reply code usage, check the relevant specification(s).
+
+<a id="account-registration-attempt"></a>
+
+### Account registration attempt [🔗](#account-registration-attempt)
+
+```
+Client: ACC REGISTER * mailto:dan@examplecom passphrase :this is my passphrase
+Server: FAIL ACC REG_INVALID_CALLBACK REGISTER :Email address is not valid
+```
+
+In this example, the command is `ACC`, with the argument `REGISTER`. The code is `REG_INVALID_CALLBACK`, and the description tells the user that the email address they’ve given is invalid.
+
+<a id="box-stacking"></a>
+
+### Box Stacking [🔗](#box-stacking)
+
+```
+Client: BOX STACK CLOCKWISE UPRIGHT FROM_START b1,x2,z3
+Server: FAIL BOX BOXES_INVALID STACK CLOCKWISE :Given boxes are not supported
+```
+
+In this example, the command is `BOX`, with the arguments `STACK` and `CLOCKWISE`. The code is `BOXES_INVALID`, and the description tells the user that the boxes they’ve given are not supported.
+
+<a id="rehash-failure"></a>
+
+### Rehash Failure [🔗](#rehash-failure)
+
+```
+Client: REHASH
+Server: FAIL REHASH CONFIG_BAD :Could not reload config from disk
+```
+
+In this example, the command is `REHASH`, with no arguments. The code is `CONFIG_BAD`, and the description tells the user that the config could not be reloaded from disk.
+
+<a id="rehash-warning"></a>
+
+### Rehash Warning [🔗](#rehash-warning)
+
+```
+Client: REHASH
+Server: WARN REHASH CERTS_EXPIRED :Certificate [blahblah.irc.example.com] has expired
+```
+
+In this example, the command is `REHASH`, with no arguments. The code is `CERTS_EXPIRED`, and the description tells the user that the certificates have expired, but the rehash still completed successfully.
+
+<a id="note-on-connecting-to-the-network"></a>
+
+### Note on connecting to the network [🔗](#note-on-connecting-to-the-network)
+
+```
+Server: NOTE * OPER_MESSAGE :Registering new accounts and channels has been disabled temporarily while we deal with the spam. Thanks for flying ExampleNet! -dan
+```
+
+In this example, this reply isn’t initiated by any particular command. The code is `OPER_MESSAGE`, and the description indicates the message the oper is giving to newly-connected users.
+
+<a id="message-history"></a>
+
+### Message History [🔗](#message-history)
+
+```
+Server: FAIL * ACCOUNT_REQUIRED_TO_CONNECT :An account is required to connect to the network
+```
+
+In this example, the failure isn’t initiated by any particular command. The code is `ACCOUNT_REQUIRED_TO_CONNECT`, and the description tells the user that they need an account to connect to the network.
+
+---
+
+Software supporting standard-replies: [Ergo](https://ergo.chat/), [InspIRCd](https://www.inspircd.org), [juno](https://github.com/cooper/juno), [UnrealIRCd](https://www.unrealircd.org), [AdiIRC](https://www.adiirc.com), [bIRC](https://birc.app), [catgirl](https://git.causal.agency/catgirl/about/), [Circe](https://github.com/emacs-circe/circe), [Halloy](https://halloy.chat), [IRCafe](https://github.com/wodencafe/ircafe), [Mango](https://mangoirc.chat), [mIRC](https://www.mirc.com), [senpai](https://git.sr.ht/~delthas/senpai), [ZoiteChat](https://zoitechat.org), [IRCCloud](https://www.irccloud.com), [Tubes](https://tubes.pronounmail.com), [Obby](https://github.com/obbyworld/obby), [Eggdrop](https://github.com/eggheads/eggdrop), [Limnoria](https://github.com/progval/Limnoria), [Kitteh IRC Client Library](https://github.com/KittehOrg/KittehIRCClientLib), [Matrix2051](https://github.com/progval/matrix2051)

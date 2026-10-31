@@ -1,0 +1,373 @@
+[
+  {
+    "source": "https://modern.ircdocs.horse/",
+    "file": "modern/client-protocol.md",
+    "title": "Modern IRC Client Protocol",
+    "headings": 288,
+    "code_examples": 283
+  },
+  {
+    "source": "https://modern.ircdocs.horse/formatting",
+    "file": "modern/formatting.md",
+    "title": "IRC Formatting",
+    "headings": 27,
+    "code_examples": 9
+  },
+  {
+    "source": "https://ircv3.net/irc/",
+    "file": "ircv3/index.md",
+    "title": "IRCv3 Specifications",
+    "headings": 29,
+    "code_examples": 0
+  },
+  {
+    "source": "https://ircv3.net/docs/sasl-mechs",
+    "file": "ircv3/docs/sasl-mechs.md",
+    "title": "SASL Mechanisms",
+    "headings": 8,
+    "code_examples": 0
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/capability-negotiation",
+    "file": "ircv3/specs/extensions/capability-negotiation.md",
+    "title": "Client Capability Negotiation",
+    "headings": 22,
+    "code_examples": 37
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/message-tags",
+    "file": "ircv3/specs/extensions/message-tags.md",
+    "title": "Message Tags",
+    "headings": 20,
+    "code_examples": 20
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/account-registration",
+    "file": "ircv3/specs/extensions/account-registration.md",
+    "title": "`account-registration` Extension",
+    "headings": 16,
+    "code_examples": 24
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/sasl-3.1",
+    "file": "ircv3/specs/extensions/sasl-3.1.md",
+    "title": "IRCv3.1 SASL Authentication",
+    "headings": 6,
+    "code_examples": 17
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/sasl-3.2",
+    "file": "ircv3/specs/extensions/sasl-3.2.md",
+    "title": "IRCv3.2 SASL Authentication",
+    "headings": 9,
+    "code_examples": 4
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/account-extban",
+    "file": "ircv3/specs/extensions/account-extban.md",
+    "title": "Account Extended Ban",
+    "headings": 4,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/account-notify",
+    "file": "ircv3/specs/extensions/account-notify.md",
+    "title": "`account-notify` Extension",
+    "headings": 3,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/account-tag",
+    "file": "ircv3/specs/extensions/account-tag.md",
+    "title": "`account-tag` Extension",
+    "headings": 4,
+    "code_examples": 1
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/extended-join",
+    "file": "ircv3/specs/extensions/extended-join.md",
+    "title": "`extended-join` Extension",
+    "headings": 2,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/away-notify",
+    "file": "ircv3/specs/extensions/away-notify.md",
+    "title": "`away-notify` Extension",
+    "headings": 3,
+    "code_examples": 1
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/batch",
+    "file": "ircv3/specs/extensions/batch.md",
+    "title": "`batch` Extension",
+    "headings": 9,
+    "code_examples": 5
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/client-batch",
+    "file": "ircv3/specs/extensions/client-batch.md",
+    "title": "Client initiated batch Extension",
+    "headings": 10,
+    "code_examples": 0
+  },
+  {
+    "source": "https://ircv3.net/specs/batches/netsplit",
+    "file": "ircv3/specs/batches/netsplit.md",
+    "title": "`netsplit` and `netjoin` Batch Types",
+    "headings": 4,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/batches/chathistory",
+    "file": "ircv3/specs/batches/chathistory.md",
+    "title": "`chathistory` Batch Type",
+    "headings": 5,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/bot-mode",
+    "file": "ircv3/specs/extensions/bot-mode.md",
+    "title": "Bot Mode",
+    "headings": 8,
+    "code_examples": 3
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/channel-rename",
+    "file": "ircv3/specs/extensions/channel-rename.md",
+    "title": "Channel Renaming",
+    "headings": 11,
+    "code_examples": 9
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/chathistory",
+    "file": "ircv3/specs/extensions/chathistory.md",
+    "title": "`chathistory` Extension",
+    "headings": 22,
+    "code_examples": 18
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/message-redaction",
+    "file": "ircv3/specs/extensions/message-redaction.md",
+    "title": "Message redaction",
+    "headings": 15,
+    "code_examples": 5
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/read-marker",
+    "file": "ircv3/specs/extensions/read-marker.md",
+    "title": "Read marker",
+    "headings": 14,
+    "code_examples": 11
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/pre-away",
+    "file": "ircv3/specs/extensions/pre-away.md",
+    "title": "`pre-away` Extension",
+    "headings": 5,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/chghost",
+    "file": "ircv3/specs/extensions/chghost.md",
+    "title": "`chghost` Extension",
+    "headings": 7,
+    "code_examples": 5
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/setname",
+    "file": "ircv3/specs/extensions/setname.md",
+    "title": "`setname` Extension",
+    "headings": 5,
+    "code_examples": 7
+  },
+  {
+    "source": "https://ircv3.net/specs/client-tags/channel-context",
+    "file": "ircv3/specs/client-tags/channel-context.md",
+    "title": "`channel-context` client tag",
+    "headings": 8,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/client-tags/reply",
+    "file": "ircv3/specs/client-tags/reply.md",
+    "title": "`reply` client tag",
+    "headings": 7,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/client-tags/react",
+    "file": "ircv3/specs/client-tags/react.md",
+    "title": "`react` client tag",
+    "headings": 10,
+    "code_examples": 7
+  },
+  {
+    "source": "https://ircv3.net/specs/client-tags/typing",
+    "file": "ircv3/specs/client-tags/typing.md",
+    "title": "`typing` client tag",
+    "headings": 9,
+    "code_examples": 3
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/echo-message",
+    "file": "ircv3/specs/extensions/echo-message.md",
+    "title": "`echo-message` Extension",
+    "headings": 6,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/invite-notify",
+    "file": "ircv3/specs/extensions/invite-notify.md",
+    "title": "`invite-notify` Extension",
+    "headings": 5,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/extended-isupport",
+    "file": "ircv3/specs/extensions/extended-isupport.md",
+    "title": "`extended-isupport` Extension",
+    "headings": 8,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/network-icon",
+    "file": "ircv3/specs/extensions/network-icon.md",
+    "title": "Network Icon",
+    "headings": 5,
+    "code_examples": 2
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/labeled-response",
+    "file": "ircv3/specs/extensions/labeled-response.md",
+    "title": "Labeled Responses",
+    "headings": 14,
+    "code_examples": 5
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/multi-prefix",
+    "file": "ircv3/specs/extensions/multi-prefix.md",
+    "title": "`multi-prefix` Extension",
+    "headings": 3,
+    "code_examples": 1
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/userhost-in-names",
+    "file": "ircv3/specs/extensions/userhost-in-names.md",
+    "title": "`userhost-in-names` Extension",
+    "headings": 2,
+    "code_examples": 1
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/whox",
+    "file": "ircv3/specs/extensions/whox.md",
+    "title": "WHOX",
+    "headings": 8,
+    "code_examples": 4
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/no-implicit-names",
+    "file": "ircv3/specs/extensions/no-implicit-names.md",
+    "title": "`no-implicit-names` Extension",
+    "headings": 3,
+    "code_examples": 0
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/oper-tag",
+    "file": "ircv3/specs/extensions/oper-tag.md",
+    "title": "`oper-tag` Extension",
+    "headings": 4,
+    "code_examples": 1
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/message-ids",
+    "file": "ircv3/specs/extensions/message-ids.md",
+    "title": "Message IDs",
+    "headings": 13,
+    "code_examples": 8
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/metadata",
+    "file": "ircv3/specs/extensions/metadata.md",
+    "title": "Metadata",
+    "headings": 69,
+    "code_examples": 50
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/monitor",
+    "file": "ircv3/specs/extensions/monitor.md",
+    "title": "Monitor",
+    "headings": 16,
+    "code_examples": 6
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/extended-monitor",
+    "file": "ircv3/specs/extensions/extended-monitor.md",
+    "title": "`extended-monitor` Extension",
+    "headings": 3,
+    "code_examples": 0
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/multiline",
+    "file": "ircv3/specs/extensions/multiline.md",
+    "title": "Multiline Messages",
+    "headings": 19,
+    "code_examples": 13
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/server-time",
+    "file": "ircv3/specs/extensions/server-time.md",
+    "title": "`server-time` Extension",
+    "headings": 4,
+    "code_examples": 4
+  },
+  {
+    "source": "https://ircv3.net/docs/sni",
+    "file": "ircv3/docs/sni.md",
+    "title": "Server Name Indication",
+    "headings": 4,
+    "code_examples": 0
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/standard-replies",
+    "file": "ircv3/specs/extensions/standard-replies.md",
+    "title": "Standard Replies",
+    "headings": 11,
+    "code_examples": 8
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/sts",
+    "file": "ircv3/specs/extensions/sts.md",
+    "title": "Strict Transport Security",
+    "headings": 34,
+    "code_examples": 11
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/utf8-only",
+    "file": "ircv3/specs/extensions/utf8-only.md",
+    "title": "UTF8ONLY ISUPPORT token",
+    "headings": 6,
+    "code_examples": 3
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/webirc",
+    "file": "ircv3/specs/extensions/webirc.md",
+    "title": "WebIRC Extension",
+    "headings": 10,
+    "code_examples": 7
+  },
+  {
+    "source": "https://ircv3.net/specs/extensions/websocket",
+    "file": "ircv3/specs/extensions/websocket.md",
+    "title": "WebSocket support",
+    "headings": 6,
+    "code_examples": 1
+  },
+  {
+    "source": "https://ircv3.net/specs/deprecated/tls",
+    "file": "ircv3/specs/deprecated/tls.md",
+    "title": "`tls` Extension",
+    "headings": 5,
+    "code_examples": 2
+  }
+]

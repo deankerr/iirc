@@ -1,0 +1,152 @@
+/** A single unit of the IRC protocol, parsed from text. */
+export interface Line {
+  readonly tags: ReadonlyMap<string, string>;
+  readonly source: string | undefined;
+  readonly command: string;
+  readonly params: readonly string[];
+}
+
+/** Why some text could not be parsed into a {@link Line}. */
+export type UnparseableReason = "Empty" | "NoCommand";
+
+/** The result of parsing text, which always keeps that text. */
+export type Parsed =
+  | { readonly _tag: "Line"; readonly text: string; readonly line: Line }
+  | { readonly _tag: "Unparseable"; readonly text: string; readonly reason: UnparseableReason };
+
+const strictDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const fallbackDecoder = new TextDecoder("latin1");
+
+const decode = (frame: Uint8Array) => {
+  try {
+    return strictDecoder.decode(frame);
+  } catch {
+    // Older networks are not UTF-8, and any bytes are valid latin1.
+    return fallbackDecoder.decode(frame);
+  }
+};
+
+const tagEscapes = new Map([
+  [":", ";"],
+  ["\\", "\\"],
+  ["n", "\n"],
+  ["r", "\r"],
+  ["s", " "],
+]);
+
+const unescapeTagValue = (value: string) => {
+  let unescaped = "";
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value.charAt(index);
+
+    if (char === "\\") {
+      index += 1;
+      const escaped = value.charAt(index);
+      unescaped += tagEscapes.get(escaped) ?? escaped;
+    } else {
+      unescaped += char;
+    }
+  }
+
+  return unescaped;
+};
+
+const parseTags = (text: string) => {
+  const tags = new Map<string, string>();
+
+  for (const tag of text.split(";")) {
+    const separator = tag.indexOf("=");
+    const key = separator === -1 ? tag : tag.slice(0, separator);
+
+    if (key !== "") {
+      tags.set(key, separator === -1 ? "" : unescapeTagValue(tag.slice(separator + 1)));
+    }
+  }
+
+  return tags;
+};
+
+const untilInvalid = (text: string) => {
+  const end = text.search(/[\0\r\n]/u);
+
+  return end === -1 ? text : text.slice(0, end);
+};
+
+// `toUpperCase` is locale-free but maps non-ASCII, and commands are ASCII.
+const upperCaseAscii = (text: string) =>
+  text.replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
+
+// Reads space-separated tokens from text, treating runs of spaces as one.
+const tokenReader = (text: string) => {
+  let position = 0;
+
+  const skipSpaces = () => {
+    while (text.charAt(position) === " ") {
+      position += 1;
+    }
+  };
+
+  return {
+    done: () => {
+      skipSpaces();
+
+      return position >= text.length;
+    },
+    peek: () => {
+      skipSpaces();
+
+      return text.charAt(position);
+    },
+    rest: () => {
+      const rest = text.slice(position + 1);
+      position = text.length;
+
+      return rest;
+    },
+    token: () => {
+      skipSpaces();
+      const end = text.indexOf(" ", position);
+      const token = text.slice(position, end === -1 ? text.length : end);
+      position += token.length;
+
+      return token;
+    },
+  };
+};
+
+/**
+ * Parses the text of one Line, without ever throwing.
+ * @param text - The Line's text, without its line ending.
+ * @returns The parsed Line, or the reason there isn't one.
+ */
+export const parseLine = (text: string): Parsed => {
+  const reader = tokenReader(untilInvalid(text));
+
+  if (reader.done()) {
+    return { _tag: "Unparseable", reason: "Empty", text };
+  }
+
+  const tags = reader.peek() === "@" ? parseTags(reader.token().slice(1)) : new Map();
+  const source = reader.peek() === ":" ? reader.token().slice(1) : undefined;
+
+  if (reader.done()) {
+    return { _tag: "Unparseable", reason: "NoCommand", text };
+  }
+
+  const command = upperCaseAscii(reader.token());
+  const params: string[] = [];
+
+  while (!reader.done()) {
+    params.push(reader.peek() === ":" ? reader.rest() : reader.token());
+  }
+
+  return { _tag: "Line", line: { command, params, source, tags }, text };
+};
+
+/**
+ * Parses one frame of bytes, falling back to latin1 when they are not UTF-8.
+ * @param frame - The frame's bytes, without its line ending.
+ * @returns The parsed Line, or the reason there isn't one.
+ */
+export const parseFrame = (frame: Uint8Array) => parseLine(decode(frame));
