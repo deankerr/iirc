@@ -9,8 +9,8 @@
     "packages/daemon": {
       "ignoreDependencies": ["@effect/platform-bun", "@iirc/api", "@iirc/log", "effect"],
     },
-    "packages/lifecycle": { "ignoreDependencies": ["@iirc/protocol"] },
-    "packages/log": { "ignoreDependencies": ["@effect/platform-bun", "@effect/sql-sqlite-bun"] },
+    // Spawned by path from the kill tests, so nothing imports it.
+    "packages/log": { "entry": ["src/recording-child.ts"] },
     "packages/session": {
       "ignoreDependencies": [
         "@effect/platform-bun",

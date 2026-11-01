@@ -1,5 +1,7 @@
-import { setup, types } from "xstate";
+import { initialTransition, transition } from "xstate";
 import type { SnapshotFrom } from "xstate";
+
+import { commandsOf, network } from "./machine.ts";
 
 /** Who to be on a Network, and where to go once registered. */
 export interface NetworkInput {
@@ -35,35 +37,6 @@ export type Command =
 /** The coarse state of a Network, as the machine's host sees it. */
 export type Phase = "idle" | "connecting" | "registering" | "session" | "closed";
 
-type Payload<Type extends NetworkEvent["type"]> = Omit<
-  Extract<NetworkEvent, { readonly type: Type }>,
-  "type"
->;
-
-const network = setup({
-  schemas: {
-    context: types<NetworkInput>(),
-    events: {
-      ATTEMPT: types<Payload<"ATTEMPT">>(),
-      CLOSED: types<Payload<"CLOSED">>(),
-      DEADLINE: types<Payload<"DEADLINE">>(),
-      LINE: types<Payload<"LINE">>(),
-      OPENED: types<Payload<"OPENED">>(),
-    },
-    input: types<NetworkInput>(),
-  },
-}).createMachine({
-  context: ({ input }) => input,
-  initial: "idle",
-  states: {
-    closed: {},
-    connecting: {},
-    idle: {},
-    registering: {},
-    session: {},
-  },
-});
-
 /** A Network's machine at one point in its fold. */
 export type NetworkSnapshot = SnapshotFrom<typeof network>;
 
@@ -72,8 +45,10 @@ export type NetworkSnapshot = SnapshotFrom<typeof network>;
  * @param input - Who to be on the Network.
  * @returns The first snapshot.
  */
-export const start: (input: NetworkInput) => NetworkSnapshot = () => {
-  throw new Error("not implemented");
+export const start: (input: NetworkInput) => NetworkSnapshot = (input) => {
+  const [snapshot] = initialTransition(network, input);
+
+  return snapshot;
 };
 
 /**
@@ -85,8 +60,13 @@ export const start: (input: NetworkInput) => NetworkSnapshot = () => {
 export const step: (
   snapshot: NetworkSnapshot,
   event: NetworkEvent
-) => { readonly commands: readonly Command[]; readonly next: NetworkSnapshot } = () => {
-  throw new Error("not implemented");
+) => { readonly commands: readonly Command[]; readonly next: NetworkSnapshot } = (
+  snapshot,
+  event
+) => {
+  const [next, effects] = transition(network, snapshot, event);
+
+  return { commands: effects.flatMap(commandsOf), next };
 };
 
 /**
@@ -96,11 +76,17 @@ export const step: (
  * @param input - Who to be on the Network.
  * @returns The snapshot after the last event.
  */
-export const fold: (
-  events: Iterable<NetworkEvent>,
-  input: NetworkInput
-) => NetworkSnapshot = () => {
-  throw new Error("not implemented");
+export const fold: (events: Iterable<NetworkEvent>, input: NetworkInput) => NetworkSnapshot = (
+  events,
+  input
+) => {
+  let snapshot = start(input);
+
+  for (const event of events) {
+    snapshot = step(snapshot, event).next;
+  }
+
+  return snapshot;
 };
 
 /**
@@ -110,15 +96,21 @@ export const fold: (
  */
 export const deadline: (
   snapshot: NetworkSnapshot
-) => { readonly at: number; readonly name: string } | undefined = () => {
-  throw new Error("not implemented");
-};
+) => { readonly at: number; readonly name: string } | undefined = ({ context }) =>
+  context.deadlines.toSorted((one, other) => one.at - other.at)[0];
 
 /**
  * Reads a snapshot's Phase.
  * @param snapshot - The machine so far.
  * @returns The Phase.
  */
-export const phase: (snapshot: NetworkSnapshot) => Phase = () => {
-  throw new Error("not implemented");
-};
+export const phase: (snapshot: NetworkSnapshot) => Phase = ({ value }) =>
+  value === "idle" || value === "closed" ? value : value.connection;
+
+/**
+ * Reads why the last Connection closed.
+ * @param snapshot - The machine so far.
+ * @returns The reason, or `undefined` unless the Network is closed.
+ */
+export const closeReason = (snapshot: NetworkSnapshot): string | undefined =>
+  snapshot.context.closeReason;

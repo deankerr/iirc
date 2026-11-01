@@ -52,8 +52,10 @@
       "name": "@iirc/lifecycle",
       "version": "0.0.0",
       "dependencies": {
-        "@iirc/protocol": "workspace:*",
         "xstate": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
       },
     },
     "packages/log": {
@@ -62,7 +64,9 @@
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
+        "@iirc/protocol": "workspace:*",
         "@iirc/session": "workspace:*",
+        "@iirc/state": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

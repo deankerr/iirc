@@ -12,7 +12,9 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
+    "@iirc/protocol": "workspace:*",
     "@iirc/session": "workspace:*",
+    "@iirc/state": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
