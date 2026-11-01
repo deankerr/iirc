@@ -6,8 +6,7 @@
   "exports": {
     "./frame": "./src/frame.ts",
     "./line": "./src/line.ts",
-    "./outbound": "./src/outbound.ts",
-    "./state": "./src/state.ts"
+    "./outbound": "./src/outbound.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

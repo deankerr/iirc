@@ -1,0 +1,18 @@
+{
+  "name": "@iirc/state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/state.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

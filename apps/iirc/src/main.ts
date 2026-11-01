@@ -1,0 +1,5 @@
+#!/usr/bin/env bun
+import { BunRuntime } from "@effect/platform-bun";
+import { Effect } from "effect";
+
+BunRuntime.runMain(Effect.void);

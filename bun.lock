@@ -6,9 +6,7 @@
       "name": "bex-template",
       "devDependencies": {
         "@effect/tsgo": "0.63.0",
-        "@oxlint/plugins": "1.90.0",
         "@types/bun": "1.4.4",
-        "@xstate/effect": "catalog:",
         "eslint-plugin-jsdoc": "^65.4.2",
         "eslint-plugin-tsdoc": "^0.5.4",
         "knip": "6.44.0",
@@ -18,6 +16,18 @@
         "oxlint-tsgolint": "7.0.2005",
         "typescript": "7.0.2",
         "ultracite": "8.1.0",
+      },
+    },
+    "apps/iirc": {
+      "name": "@iirc/app",
+      "version": "0.0.0",
+      "bin": {
+        "iirc": "./src/main.ts",
+      },
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/daemon": "workspace:*",
+        "effect": "catalog:",
       },
     },
     "packages/api": {
@@ -30,13 +40,28 @@
     "packages/daemon": {
       "name": "@iirc/daemon",
       "version": "0.0.0",
-      "bin": {
-        "iirc-daemon": "./src/main.ts",
-      },
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@iirc/api": "workspace:*",
+        "@iirc/log": "workspace:*",
+        "@iirc/session": "workspace:*",
+        "effect": "catalog:",
+      },
+    },
+    "packages/lifecycle": {
+      "name": "@iirc/lifecycle",
+      "version": "0.0.0",
+      "dependencies": {
         "@iirc/protocol": "workspace:*",
+        "xstate": "catalog:",
+      },
+    },
+    "packages/log": {
+      "name": "@iirc/log",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@effect/sql-sqlite-bun": "catalog:",
         "@iirc/session": "workspace:*",
         "effect": "catalog:",
       },
@@ -57,22 +82,32 @@
       "name": "@iirc/session",
       "version": "0.0.0",
       "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/lifecycle": "workspace:*",
         "@iirc/protocol": "workspace:*",
-        "@xstate/effect": "catalog:",
+        "@iirc/state": "workspace:*",
         "effect": "catalog:",
-        "xstate": "catalog:",
       },
       "devDependencies": {
-        "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/state": {
+      "name": "@iirc/state",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/protocol": "workspace:*",
+      },
+      "devDependencies": {
         "vitest": "catalog:",
       },
     },
   },
   "catalog": {
     "@effect/platform-bun": "4.1.1",
+    "@effect/sql-sqlite-bun": "4.1.1",
     "@effect/vitest": "4.1.1",
-    "@xstate/effect": "1.0.0-alpha.10",
     "effect": "4.1.1",
     "vitest": "5.0.5",
     "xstate": "6.0.0-alpha.71",
@@ -97,6 +132,8 @@
     "@effect/platform-bun": ["@effect/platform-bun@4.1.1", "", { "dependencies": { "@effect/platform-node-shared": "^4.1.1" }, "peerDependencies": { "effect": "^4.1.1" } }, "sha512-//p0xPsbvuRfcO+cvq5JqVzR0TLUUS5yNC40xbZ08JNiszg5IxypAgrpKswKpjs2lYvybxdw5DSyVcEWW33Cbg=="],
 
     "@effect/platform-node-shared": ["@effect/platform-node-shared@4.1.1", "", { "dependencies": { "@types/ws": "^8.18.2", "ws": "^8.22.0" }, "peerDependencies": { "effect": "^4.1.1" } }, "sha512-29zdEDs3i5W+t92+mWTFNSfzSHsTpZMcFZ9k4lkkz4tETlC1m4lRwjdjieJtvQ/bKHMnYrCtZwizsBFSf3L5Yg=="],
+
+    "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.1.1", "", { "peerDependencies": { "effect": "^4.1.1" } }, "sha512-NkkE5GQbrzMpD83+hKhPihuqp2rYMdIlNOqSosjp/3S1+RQXuZQC8u5pwhwNKrz7U0unbdN27zU+6JOSRr/3Cw=="],
 
     "@effect/tsgo": ["@effect/tsgo@0.63.0", "", { "optionalDependencies": { "@effect/tsgo-darwin-arm64": "0.63.0", "@effect/tsgo-darwin-x64": "0.63.0", "@effect/tsgo-linux-arm": "0.63.0", "@effect/tsgo-linux-arm64": "0.63.0", "@effect/tsgo-linux-x64": "0.63.0", "@effect/tsgo-win32-arm64": "0.63.0", "@effect/tsgo-win32-x64": "0.63.0" }, "bin": { "effect-tsgo": "dist/effect-tsgo.cjs" } }, "sha512-bRbvVj+YLE/nBmcBWGAwsul3mjEYlqqOmWMxvwSVKq/oNnJEuZYgi2OFDeUf7q49E2g3w+oMHMWyN2QayZ77RQ=="],
 
@@ -156,11 +193,19 @@
 
     "@iirc/api": ["@iirc/api@workspace:packages/api"],
 
+    "@iirc/app": ["@iirc/app@workspace:apps/iirc"],
+
     "@iirc/daemon": ["@iirc/daemon@workspace:packages/daemon"],
+
+    "@iirc/lifecycle": ["@iirc/lifecycle@workspace:packages/lifecycle"],
+
+    "@iirc/log": ["@iirc/log@workspace:packages/log"],
 
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 
     "@iirc/session": ["@iirc/session@workspace:packages/session"],
+
+    "@iirc/state": ["@iirc/state@workspace:packages/state"],
 
     "@jridgewell/resolve-uri": ["@jridgewell/resolve-uri@3.1.2", "", {}, "sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw=="],
 
@@ -350,8 +395,6 @@
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.90.0", "", { "os": "win32", "cpu": "x64" }, "sha512-30JiaFEBUB9peEOcvVM8ggo88SoN/IdSr9DW505JdBji/R6dM66gKEiG65hw6qcaF2f4mO0cEJ+RwRZprmun9g=="],
 
-    "@oxlint/plugins": ["@oxlint/plugins@1.90.0", "", {}, "sha512-FT0JJDNbj9oobVWHpAzFckHY/bx1ftPjulBx4UCMXqmDUGqVWOkbKe5bj4zdEL+D5Ud7y/RfioLwSvlHBMjI4w=="],
-
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.16", "", { "os": "android", "cpu": "arm" }, "sha512-ia3DwAs0OsMGS7+IConptSiyk9pEXkOx/AbJ2n/lAGxH3QkWQus1t8d7gnAT38FCU2sQu8lUbeR6AiZFv4JxaA=="],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.2.16", "", { "os": "android", "cpu": "arm64" }, "sha512-kx5wBiMB6E7TEvpl2B9gjLU004BkvEm2Dr941BFjx/SontPwSzNuQUIoVKxHHoSjpFIfHMmcguyLOtyn0hObRg=="],
@@ -465,8 +508,6 @@
     "@vitest/mocker": ["@vitest/mocker@5.0.5", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.31", "@vitest/spy": "5.0.5", "estree-walker": "^3.0.3", "magic-string": "^1.4.3" }, "peerDependencies": { "msw": "^2.4.9 || ^3.0.0", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0" }, "optionalPeers": ["msw", "vite"] }, "sha512-xLL3lkDegJZw+MGoGaCCsFayDZthGgpAtr3Vziyfc4p7xH89K7KRPcRBBh/kEYm0Aqkt5DtTmkYpBtRV/FrHZg=="],
 
     "@vitest/spy": ["@vitest/spy@5.0.5", "", {}, "sha512-lwJRExuH417257Q5wv9QYugN9IMJkoxcrKrYxGPQkBzl7wlNpTUxD/5yNX4ESKVUIShKPgkGchYPFMWOOk0wzw=="],
-
-    "@xstate/effect": ["@xstate/effect@1.0.0-alpha.10", "", { "peerDependencies": { "@oxlint/plugins": "^1.76.0", "effect": "^4.0.0", "xstate": "^6.0.0-alpha.71" }, "optionalPeers": ["@oxlint/plugins"] }, "sha512-Wh0eRE2o6xT9uhY2w7vGHFE/pcTTfEXq5IVGRYgR7TmvXk4HPb6RovKLodhSEr7KjOAF9KeVCHbIaisKYXvCLg=="],
 
     "acorn": ["acorn@8.19.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw=="],
 

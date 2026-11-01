@@ -1,4 +1,4 @@
-import type { Line } from "./line.ts";
+import type { Line } from "@iirc/protocol/line";
 
 /** What a Session knows about itself, derived entirely from inbound Lines. */
 export interface SessionState {

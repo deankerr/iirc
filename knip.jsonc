@@ -2,4 +2,22 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // The tsconfig plugin name is served by @effect/tsgo, not its own package.
   "ignoreDependencies": ["@effect/language-service"],
+  // Skeleton only: dependencies these packages take on as milestone 1 fills them
+  // in. Delete each one as its first import lands, and this whole key at the end.
+  "workspaces": {
+    "apps/iirc": { "ignoreDependencies": ["@iirc/daemon"] },
+    "packages/daemon": {
+      "ignoreDependencies": ["@effect/platform-bun", "@iirc/api", "@iirc/log", "effect"],
+    },
+    "packages/lifecycle": { "ignoreDependencies": ["@iirc/protocol"] },
+    "packages/log": { "ignoreDependencies": ["@effect/platform-bun", "@effect/sql-sqlite-bun"] },
+    "packages/session": {
+      "ignoreDependencies": [
+        "@effect/platform-bun",
+        "@iirc/lifecycle",
+        "@iirc/protocol",
+        "@iirc/state",
+      ],
+    },
+  },
 }

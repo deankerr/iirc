@@ -2,25 +2,15 @@
   "name": "@iirc/daemon",
   "version": "0.0.0",
   "private": true,
-  "bin": {
-    "iirc-daemon": "./src/main.ts"
-  },
   "type": "module",
   "exports": {
     ".": "./src/daemon.ts"
   },
-  "scripts": {
-    "test": "bun --bun vitest run"
-  },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@iirc/api": "workspace:*",
-    "@iirc/protocol": "workspace:*",
+    "@iirc/log": "workspace:*",
     "@iirc/session": "workspace:*",
     "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "vitest": "catalog:"
   }
 }

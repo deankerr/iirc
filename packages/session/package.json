@@ -4,21 +4,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./lifecycle": "./src/lifecycle.ts",
-    "./session": "./src/session.ts",
+    "./entry": "./src/entry.ts",
+    "./recorder": "./src/recorder.ts",
     "./testing": "./src/testing.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"
   },
   "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@iirc/lifecycle": "workspace:*",
     "@iirc/protocol": "workspace:*",
-    "@xstate/effect": "catalog:",
-    "effect": "catalog:",
-    "xstate": "catalog:"
+    "@iirc/state": "workspace:*",
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
     "vitest": "catalog:"
   }

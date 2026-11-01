@@ -1,0 +1,13 @@
+{
+  "name": "@iirc/lifecycle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/lifecycle.ts"
+  },
+  "dependencies": {
+    "@iirc/protocol": "workspace:*",
+    "xstate": "catalog:"
+  }
+}

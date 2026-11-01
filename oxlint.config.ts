@@ -11,7 +11,7 @@ export default defineConfig({
   ...(core.env && { env: core.env }),
   extends: [core, antiSlop, jsPlugins, vitest, effect],
   ignorePatterns: core.ignorePatterns ?? [],
-  jsPlugins: [...jsPlugins.jsPlugins, "@xstate/effect/oxlint"],
+  jsPlugins: jsPlugins.jsPlugins,
   options: { typeAware: true, typeCheck: true },
   rules: {
     // `effect/cli` and the platform runtimes are still marked unstable, and we
@@ -37,7 +37,5 @@ export default defineConfig({
     "typescript/strict-void-return": "off",
     // Mistakes `Schema.TaggedError<Self>()(...)` for a thrown error call.
     "unicorn/throw-new-error": "off",
-
-    "xstate-effect/no-inline-effect": "error",
   },
 });

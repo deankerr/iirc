@@ -1,7 +1,7 @@
+import type { Line } from "@iirc/protocol/line";
+import { parseLine } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
-import type { Line } from "./line.ts";
-import { parseLine } from "./line.ts";
 import { initialState, messageOf, reduce } from "./state.ts";
 
 const lineOf = (text: string): Line => {
