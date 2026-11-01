@@ -11,13 +11,6 @@
     },
     // Spawned by path from the kill tests, so nothing imports it.
     "packages/log": { "entry": ["src/recording-child.ts"] },
-    "packages/session": {
-      "ignoreDependencies": [
-        "@effect/platform-bun",
-        "@iirc/lifecycle",
-        "@iirc/protocol",
-        "@iirc/state",
-      ],
-    },
+    "packages/session": { "ignoreDependencies": ["@iirc/state"] },
   },
 }

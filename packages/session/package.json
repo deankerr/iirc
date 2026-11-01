@@ -5,8 +5,11 @@
   "type": "module",
   "exports": {
     "./entry": "./src/entry.ts",
+    "./events": "./src/events.ts",
+    "./network": "./src/network.ts",
     "./recorder": "./src/recorder.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./transport": "./src/transport.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

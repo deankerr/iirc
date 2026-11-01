@@ -9,36 +9,61 @@ const withoutCarriageReturn = (frame: Uint8Array) =>
 
 /** The complete frames found so far, and the bytes still waiting for a line ending. */
 export interface Framed {
+  /** Which of `frames`, by index, are pieces of a frame over the limit. */
+  readonly cut: ReadonlySet<number>;
+  /** Whether `pending` continues a frame that was cut, so it is a piece too. */
+  readonly cutting: boolean;
   readonly frames: readonly Uint8Array[];
   readonly pending: Uint8Array;
 }
 
 /**
- * Splits a byte stream into frames. An over-long frame is cut at
- * {@link maxFrameBytes}, so a peer that never ends a line cannot grow the buffer.
+ * Splits a byte stream into frames. A frame over {@link maxFrameBytes} is cut into
+ * pieces at that limit, so a peer that never ends a line cannot grow the buffer, and
+ * every piece is marked, including the last, which is not a Line on its own.
  * @param pending - The bytes left over from the previous call.
  * @param chunk - The bytes that just arrived.
+ * @param cutting - The `cutting` the previous call returned.
  * @returns The frames completed by `chunk`, and the bytes left over.
  */
-export const takeFrames = (pending: Uint8Array, chunk: Uint8Array): Framed => {
+export const takeFrames = (pending: Uint8Array, chunk: Uint8Array, cutting = false): Framed => {
   const buffer = new Uint8Array(pending.length + chunk.length);
   buffer.set(pending);
   buffer.set(chunk, pending.length);
 
   const frames: Uint8Array[] = [];
+  const cut = new Set<number>();
+  let continuing = cutting;
   let start = 0;
-  let end = buffer.indexOf(lineFeed);
 
-  while (end !== -1) {
-    frames.push(withoutCarriageReturn(buffer.subarray(start, end)));
-    start = end + 1;
-    end = buffer.indexOf(lineFeed, start);
+  const cutUntilWithin = (end: number) => {
+    while (end - start > maxFrameBytes) {
+      cut.add(frames.length);
+      frames.push(buffer.subarray(start, start + maxFrameBytes));
+      start += maxFrameBytes;
+      continuing = true;
+    }
+  };
+
+  let lineEnd = buffer.indexOf(lineFeed);
+
+  while (lineEnd !== -1) {
+    const end = start + withoutCarriageReturn(buffer.subarray(start, lineEnd)).length;
+
+    cutUntilWithin(end);
+
+    if (continuing) {
+      cut.add(frames.length);
+    }
+
+    frames.push(buffer.subarray(start, end));
+    continuing = false;
+    start = lineEnd + 1;
+    lineEnd = buffer.indexOf(lineFeed, start);
   }
 
-  while (buffer.length - start > maxFrameBytes) {
-    frames.push(buffer.subarray(start, start + maxFrameBytes));
-    start += maxFrameBytes;
-  }
+  // A trailing carriage return may be half a line ending, so it doesn't count yet.
+  cutUntilWithin(start + withoutCarriageReturn(buffer.subarray(start)).length);
 
-  return { frames, pending: buffer.slice(start) };
+  return { cut, cutting: continuing, frames, pending: buffer.slice(start) };
 };

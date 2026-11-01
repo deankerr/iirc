@@ -48,7 +48,10 @@ export class Recorder extends Context.Service<
               // Committing only after `within` returns is what rolls a throw back.
               const result = within(recorded);
 
-              log.push(...recorded);
+              // Not a spread: one read can hold more Lines than a call has arguments.
+              for (const entry of recorded) {
+                log.push(entry);
+              }
 
               return result;
             })
