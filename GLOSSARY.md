@@ -10,7 +10,15 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Owner**: The one human a deployment belongs to. _Avoid_: User, admin, operator
 
-**Log**: The Daemon's ordered record of every Line in both directions. _Avoid_: History, scrollback, buffer
+**Log**: The Daemon's ordered record of everything that happened, as Entries. _Avoid_: History, scrollback, buffer
+
+**Entry**: One numbered record in the Log, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
+
+**Change**: Something the Owner altered, such as Configuration or a Read Marker. _Avoid_: Update, mutation
+
+**Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
+
+**Credential**: A secret the Daemon uses on the Owner's behalf, which it can use but never reveal. _Avoid_: Password, secret
 
 ## The IRC side
 
@@ -32,6 +40,8 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Session**: The registered presence on a Network, lasting from welcome until its Connection ends. A reconnect is always a new Session. _Avoid_: Connection, login
 
+**Gap**: A period when the Daemon was not on a Network, so anything said then is unknown. _Avoid_: Downtime, outage
+
 ## What is exchanged
 
 **Line**: Any single unit of the IRC protocol, in either direction. _Avoid_: Message, raw message
@@ -41,3 +51,15 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 **Target**: The Channel or User a Message is addressed to. _Avoid_: Conversation, query, buffer
 
 **Direct Message**: A Message whose Target is a User. Grouping these by the other participant is a Frontend's concern. _Avoid_: Query, private message, PM
+
+**Activity**: Something that changed on a Network rather than something said, such as a join, a quit, or a topic change. _Avoid_: Event, notice, status
+
+**Lookup**: Asking a Network for information and collecting the reply, which may span many Lines. _Avoid_: Query, request
+
+## What a Frontend sees
+
+**Timeline**: The ordered Messages and Activity of one Channel, Direct Message partner, or Network. _Avoid_: Buffer, window, scrollback, conversation
+
+**Read Marker**: How far through a Timeline the Owner has read, shared by every Frontend. _Avoid_: Unread pointer, last seen
+
+**Highlight**: A Message that calls for the Owner's attention, such as one that mentions Self. _Avoid_: Mention, ping, alert
