@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Exit } from "effect";
+import type { Array as Arr } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { NewEntry } from "./entry.ts";
@@ -15,7 +16,7 @@ const line: NewEntry = {
   network: "libera",
 };
 
-const record = (entries: readonly NewEntry[]) =>
+const record = (entries: Arr.NonEmptyReadonlyArray<NewEntry>) =>
   Recorder.use(({ record }) => record(entries, (recorded) => recorded));
 
 const sequences = Effect.map(
@@ -36,8 +37,8 @@ describe("Recorder.memory", () => {
   it.effect("stays gapless when Fibers record concurrently", () =>
     Effect.gen(function* () {
       yield* Effect.forEach(
-        Array.from({ length: 50 }, (_, index) => [deadline(`${index}`), deadline(`${index}`)]),
-        record,
+        Array.from({ length: 50 }, (_, index) => `${index}`),
+        (name) => record([deadline(name), deadline(name)]),
         { concurrency: "unbounded" }
       );
 
@@ -83,15 +84,6 @@ describe("Recorder.memory", () => {
 
       assert.deepStrictEqual(seen, [1, 2]);
     }).pipe(Effect.provide(Recorder.memory))
-  );
-
-  it.effect("calls `within` when there is nothing to append", () =>
-    Effect.gen(function* () {
-      const result = yield* Recorder.use(({ record }) => record([], (recorded) => recorded.length));
-
-      assert.strictEqual(result, 0);
-      assert.deepStrictEqual(yield* sequences, []);
-    }).pipe(Effect.provide(Recorder.memoryReadable))
   );
 
   it.effect("rolls back and dies when `within` throws, consuming no sequence", () =>

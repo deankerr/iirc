@@ -29,6 +29,13 @@
         "@iirc/daemon": "workspace:*",
         "effect": "catalog:",
       },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@iirc/api": "workspace:*",
+        "@iirc/lifecycle": "workspace:*",
+        "@iirc/session": "workspace:*",
+        "vitest": "catalog:",
+      },
     },
     "packages/api": {
       "name": "@iirc/api",
@@ -41,11 +48,17 @@
       "name": "@iirc/daemon",
       "version": "0.0.0",
       "dependencies": {
-        "@effect/platform-bun": "catalog:",
         "@iirc/api": "workspace:*",
+        "@iirc/lifecycle": "workspace:*",
         "@iirc/log": "workspace:*",
+        "@iirc/protocol": "workspace:*",
         "@iirc/session": "workspace:*",
         "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/lifecycle": {
@@ -89,7 +102,6 @@
         "@effect/platform-bun": "catalog:",
         "@iirc/lifecycle": "workspace:*",
         "@iirc/protocol": "workspace:*",
-        "@iirc/state": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

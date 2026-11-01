@@ -18,7 +18,6 @@
     "@effect/platform-bun": "catalog:",
     "@iirc/lifecycle": "workspace:*",
     "@iirc/protocol": "workspace:*",
-    "@iirc/state": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -2,7 +2,7 @@ import { writeSync } from "node:fs";
 
 import { BunRuntime } from "@effect/platform-bun";
 import { Recorder } from "@iirc/session/recorder";
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 
 import { Log } from "./log.ts";
 
@@ -39,10 +39,10 @@ const program = Effect.gen(function* () {
     line(":bob!u@h PRIVMSG #iirc :one", "inbound"),
     line(":bob!u@h PRIVMSG #iirc :two", "inbound"),
     line("PRIVMSG #iirc :three", "outbound"),
-  ];
+  ] as const;
 
   // Only `record` returning means committed, because `within` runs before that.
-  const commit = record(batch, (recorded) => recorded.at(-1)?.sequence).pipe(
+  const commit = record(batch, (recorded) => Arr.lastNonEmpty(recorded).sequence).pipe(
     Effect.tap((sequence) =>
       Effect.sync(() => {
         writeSync(stdout, `${sequence}\n`);

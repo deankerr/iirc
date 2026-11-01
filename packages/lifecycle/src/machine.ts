@@ -146,7 +146,9 @@ export const network = setup({
                 enq(actions.closeConnection, { reason: textOf(event) });
               }
 
-              return event.command === "001"
+              // A welcome that names nobody leaves no Self for a Session to be, so
+              // it agrees with `@iirc/state` and the deadline keeps running.
+              return event.command === "001" && event.params.length > 0
                 ? { context: { ...context, deadlines: [] }, target: "session" }
                 : undefined;
             },

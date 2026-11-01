@@ -52,12 +52,11 @@ bun build --compile --minify --sourcemap --feature WEB --asset ./dist \
                      │      │                │
                ┌─────┘      └─────┐      @iirc/client  typed client, holds the cursor
            @iirc/log          @iirc/api ─────┘         contract: HttpApi and Schemas
-               │
-           @iirc/session                               Effect runtime for one Network
           ┌────┴─────┐
-  @iirc/lifecycle  @iirc/state                         pure: Network machine, IRC state fold
-          └────┬─────┘
-          @iirc/protocol                               pure: bytes to Lines and back
+  @iirc/session  @iirc/state                           Effect runtime for one Network, IRC state fold
+     ┌────┴────┐     │
+     │         └──┬──┘
+@iirc/lifecycle  @iirc/protocol                        pure: Network machine, bytes to Lines and back
 ```
 
 Dependencies point down only, and each package stands alone for whoever wants it. The library is the bottom four. The jesopo lineage maps onto it directly: `protocol` is irctokens, `state` is ircstates, and `session` is ircrobots.
@@ -66,12 +65,12 @@ Dependencies point down only, and each package stands alone for whoever wants it
 | --- | --- | --- |
 | `@iirc/protocol` | Frames, Lines, safe outbound construction, `RPL_ISUPPORT`, casefolding, mode parsing, formatting, CTCP, splitting, nick candidates, token bucket, Lookup tables, refusal classifier | None |
 | `@iirc/state` | Folds Lines into Channels, members, modes, and Self. Moves out of `protocol` | `protocol` |
-| `@iirc/lifecycle` | The Network machine, `step`, `fold`, and its command type | `protocol`, `xstate` |
-| `@iirc/session` | Hosts one Network: Transport, lanes, watchdog, Lookup queue, reconnect | `lifecycle`, `state`, `effect`, `@effect/platform-bun` |
-| `@iirc/log` | SQLite, the writer, the Worker reader, migrations, derived tables, Entry schemas | `session`, `effect`, `@effect/sql-sqlite-bun` |
+| `@iirc/lifecycle` | The Network machine, `step`, `fold`, and its command type | `xstate` |
+| `@iirc/session` | Hosts one Network: Transport, lanes, watchdog, Lookup queue, reconnect | `lifecycle`, `protocol`, `effect`, `@effect/platform-bun` |
+| `@iirc/log` | SQLite, the writer, the Worker reader, migrations, derived tables, Entry schemas | `session`, `state`, `protocol`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | `@iirc/api` | `DaemonApi`, Schemas, typed errors | `effect` |
 | `@iirc/client` | `HttpApiClient` plus cursor tracking, reconnect, and `resync` handling | `api`, `effect` |
-| `@iirc/daemon` | Network supervision, operations, Configuration, Credentials, Keys, handlers. Exports `DaemonCore` and `ApiRoutes` | `log`, `api`, `session` |
+| `@iirc/daemon` | Network supervision, operations, Configuration, Credentials, Keys, handlers. Exports `DaemonCore` and `ApiRoutes` | `log`, `api`, `session`, `lifecycle`, `protocol`, `effect` |
 | `@iirc/web` | The web frontend | `client` |
 | `apps/iirc` | The only place that reads argv or touches `bun:bundle` | everything above |
 
@@ -89,12 +88,12 @@ Each surface is a Layer that adds routes to one `HttpRouter`. One router has alr
 
 ```ts
 // @iirc/daemon: no argv, no Bun.serve. Each line is a seam.
-export const DaemonCore = (config: DaemonConfig) =>
+export const DaemonCore = (config: DaemonConfig, transport = Transport.layer) =>
   Networks.layer.pipe(
     Layer.provideMerge(Daemon.layer),
     Layer.provideMerge(Log.layer),
     Layer.provideMerge(LogReader.layerWorker(config)),
-    Layer.provideMerge(Layer.mergeAll(Transport.layer, Credentials.layer(config), Keys.layer)),
+    Layer.provideMerge(Layer.mergeAll(transport, Credentials.layer(config), Keys.layer)),
     Layer.provideMerge(Storage.layer(config)) // lock, backup, migrate, SqlClient
   );
 
@@ -118,7 +117,7 @@ const webRoutes = (config) =>
 
 - The `import()` above sits behind `feature("WEB")` in the real code.
 - Anything shared must be provided outside `HttpRouter.serve`, or it is built twice.
-- SIGINT and SIGTERM interrupt main through `BunRuntime.runMain`, so LIVE-9's `QUIT` is a finalizer. `gracefulShutdownTimeout` must be set low and `QUIT` ordered first, because the default held a shutdown for 25 seconds.
+- SIGINT and SIGTERM interrupt main through `BunRuntime.runMain`, so LIVE-9's `QUIT` is a finalizer. `gracefulShutdownTimeout` must be set low and `QUIT` ordered first, because the default held a shutdown for 20 seconds.
 
 ## The Network host
 
@@ -133,7 +132,7 @@ socket read ──> frames ──> one transaction: append Entries, update deriv
 
 - **The only way into a machine is Entries.** A reader, a Change, a watchdog, and an expired deadline all append first, then step. `/state?at=` and status are therefore the same fold (OBS-4, VIEW-7).
 - **`transition` is synchronous**, so it runs inside the append transaction. `createEffectActor` cannot, because its `send` only queues.
-- **Machines hold no timers.** They store absolute deadlines in context, computed from the Entry's own time. The host's loop waits on its inbox with a timeout, and a deadline that passes becomes a Deadline Entry (LOG-2). After a crash, the wait resumes from Entries.
+- **Machines hold no timers.** They store absolute deadlines in context, computed from the Entry's own time. The host's loop waits on its inbox with a timeout, and a deadline that passes becomes a Deadline Entry (LOG-2).
 - **Commands are data.** Registered actions come back from `transition`, and the host runs them after commit. Replay discards them, because their outcomes are already Entries.
 
 ```ts

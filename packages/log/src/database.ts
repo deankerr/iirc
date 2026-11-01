@@ -34,20 +34,22 @@ const migrations = SqliteMigrator.fromRecord({
         version TEXT
       ) STRICT
     `;
-
-    yield* sql`
-      CREATE TABLE messages (
-        sequence INTEGER PRIMARY KEY,
-        at INTEGER NOT NULL,
-        kind TEXT NOT NULL,
-        network TEXT NOT NULL,
-        sender TEXT NOT NULL,
-        target TEXT NOT NULL,
-        text TEXT NOT NULL
-      ) STRICT
-    `;
   }),
 });
+
+// A derived table is no part of the Log, so it is here and not in a migration: anyone
+// may drop it, and the next start brings it back for the rebuild to fill (LOG-10).
+const createDerivedTables = (sql: SqlClient.SqlClient) => sql`
+  CREATE TABLE IF NOT EXISTS messages (
+    sequence INTEGER PRIMARY KEY,
+    at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    network TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    target TEXT NOT NULL,
+    text TEXT NOT NULL
+  ) STRICT
+`;
 
 const configure = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) {
   // SQLite answers with the mode it ended up in, and may keep the old one silently.
@@ -82,6 +84,7 @@ export const openDatabase = (
     yield* SqliteMigrator.run({ loader: migrations }).pipe(
       Effect.provideService(SqlClient.SqlClient, sql)
     );
+    yield* createDerivedTables(sql);
 
     return sql;
   }).pipe(

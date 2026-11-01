@@ -4,13 +4,23 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/daemon.ts"
+    ".": "./src/daemon.ts",
+    "./routes": "./src/routes.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@effect/platform-bun": "catalog:",
     "@iirc/api": "workspace:*",
+    "@iirc/lifecycle": "workspace:*",
     "@iirc/log": "workspace:*",
+    "@iirc/protocol": "workspace:*",
     "@iirc/session": "workspace:*",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "vitest": "catalog:"
   }
 }

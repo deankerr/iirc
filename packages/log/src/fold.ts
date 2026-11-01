@@ -46,16 +46,19 @@ const foldParsed = (
   return messageOf({ ...line, source: undefined }, state.self);
 };
 
-// An unparseable Line stays an Entry, but it says nothing and changes nothing.
+// An unparseable Line stays an Entry, but it says nothing and changes nothing. Nor does
+// a cut one: a fragment is not a Line to trust, and `toEvent` ignores it for the machine.
 const foldLine = (sessions: Map<NetworkId, SessionState>, entry: LineEntry) => {
   const parsed = parseFrame(entry.bytes);
 
-  return parsed._tag === "Line" ? foldParsed(sessions, entry, parsed.line) : undefined;
+  return parsed._tag === "Line" && entry.cut !== true
+    ? foldParsed(sessions, entry, parsed.line)
+    : undefined;
 };
 
 /**
- * Derives what a run of Entries adds. `record`, startup, and `rebuild` all come
- * through here, so a rebuilt table can only differ from a live one if the code did.
+ * Derives what a run of Entries adds. `record` and `rebuild` both come through here,
+ * so a rebuilt table can only differ from a live one if the code did.
  * @param sessions - The Sessions so far, which stay as they are.
  * @param entries - The Entries that follow them, in sequence order.
  * @returns The Messages those Entries carry, and the Sessions after them.

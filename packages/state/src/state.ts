@@ -33,8 +33,9 @@ export const reduce = (state: SessionState, line: Line): SessionState => {
   const fromSelf = state.self !== undefined && nickOf(line.source) === state.self;
 
   switch (line.command) {
+    // The first welcome names Self, and an Ircd may only rename us with a `NICK`.
     case "001": {
-      return first === undefined ? state : { ...state, self: first };
+      return first === undefined || state.self !== undefined ? state : { ...state, self: first };
     }
 
     case "NICK": {

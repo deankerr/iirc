@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Layer } from "effect";
+import { Array as Arr, Context, Data, Effect, Layer, pipe } from "effect";
 
 import type { Entry, NewEntry } from "./entry.ts";
 
@@ -17,14 +17,15 @@ export class MemoryEntries extends Context.Service<
  * Appends Entries before anything acts on them, which keeps `session` ignorant of
  * how they are stored. `record` appends atomically and runs `within` synchronously
  * in the same transaction, then returns its result after commit. If `within`
- * throws, the whole transaction rolls back and `record` dies.
+ * throws, the whole transaction rolls back and `record` dies. Recording nothing is
+ * not a thing, so whoever holds what was recorded holds at least one Entry.
  */
 export class Recorder extends Context.Service<
   Recorder,
   {
     readonly record: <A>(
-      entries: readonly NewEntry[],
-      within: (recorded: readonly Entry[]) => A
+      entries: Arr.NonEmptyReadonlyArray<NewEntry>,
+      within: (recorded: Arr.NonEmptyReadonlyArray<Entry>) => A
     ) => Effect.Effect<A, RecordFailed>;
   }
 >()("@iirc/session/Recorder") {
@@ -39,11 +40,14 @@ export class Recorder extends Context.Service<
             Effect.sync(() => {
               const at = clock.currentTimeMillisUnsafe();
 
-              const recorded = entries.map((entry, index): Entry => ({
-                ...entry,
-                at,
-                sequence: log.length + index + 1,
-              }));
+              const recorded = pipe(
+                entries,
+                Arr.map((entry, index): Entry => ({
+                  ...entry,
+                  at,
+                  sequence: log.length + index + 1,
+                }))
+              );
 
               // Committing only after `within` returns is what rolls a throw back.
               const result = within(recorded);

@@ -2,15 +2,8 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // The tsconfig plugin name is served by @effect/tsgo, not its own package.
   "ignoreDependencies": ["@effect/language-service"],
-  // Skeleton only: dependencies these packages take on as milestone 1 fills them
-  // in. Delete each one as its first import lands, and this whole key at the end.
   "workspaces": {
-    "apps/iirc": { "ignoreDependencies": ["@iirc/daemon"] },
-    "packages/daemon": {
-      "ignoreDependencies": ["@effect/platform-bun", "@iirc/api", "@iirc/log", "effect"],
-    },
     // Spawned by path from the kill tests, so nothing imports it.
     "packages/log": { "entry": ["src/recording-child.ts"] },
-    "packages/session": { "ignoreDependencies": ["@iirc/state"] },
   },
 }

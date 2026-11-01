@@ -1,8 +1,21 @@
 import { BunServices } from "@effect/platform-bun";
 import { assert, describe, it } from "@effect/vitest";
 import type { Entry, NewEntry } from "@iirc/session/entry";
+import { toEvent } from "@iirc/session/events";
 import { Recorder, RecordFailed } from "@iirc/session/recorder";
-import { Cause, Clock, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Stream } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Clock,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  pipe,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
 
@@ -30,6 +43,15 @@ const inbound = (text: string, network = "libera"): NewEntry => ({
   network,
 });
 
+const cutInbound = (text: string): NewEntry => ({
+  _tag: "Line",
+  bytes: encoder.encode(text),
+  connection: 1,
+  cut: true,
+  direction: "inbound",
+  network: "libera",
+});
+
 const outbound = (text: string, network = "libera"): NewEntry => ({
   _tag: "Line",
   bytes: encoder.encode(text),
@@ -43,9 +65,9 @@ const deadline = (name: string): NewEntry => ({ _tag: "Deadline", name, network:
 
 const everyFifth = (index: number) => index % 5 === 0;
 
-const numbers = (length: number) => Array.from({ length }, (_, index) => index + 1);
+const numbers = (length: number) => Arr.range(1, length);
 
-const record = (entries: readonly NewEntry[]) =>
+const record = (entries: Arr.NonEmptyReadonlyArray<NewEntry>) =>
   Recorder.use(({ record }) => record(entries, (recorded) => recorded));
 
 const everything = { after: 0, limit: 100_000 };
@@ -91,7 +113,7 @@ const execute = (dataDir: string, statement: string) =>
   }).pipe(Effect.scoped);
 
 // A fixture touching everything the fold cares about, and the Messages it should give.
-const mixed: readonly NewEntry[] = [
+const mixed: Arr.NonEmptyReadonlyArray<NewEntry> = [
   { _tag: "Daemon", phase: "started", version: "0.0.0" },
   attempt(),
   inbound(":ircd NOTICE * :Looking up your hostname"),
@@ -245,19 +267,6 @@ describe("the durable Log", () => {
       )
     );
 
-    it.effect("runs `within` when there is nothing to append", () =>
-      withLog(
-        Effect.gen(function* () {
-          const result = yield* Recorder.use(({ record }) =>
-            record([], (recorded) => recorded.length)
-          );
-
-          assert.strictEqual(result, 0);
-          assert.strictEqual(yield* Log.use(({ head }) => head), 0);
-        })
-      )
-    );
-
     it.effect("rolls back and dies when `within` throws, consuming no sequence", () =>
       withLog(
         Effect.gen(function* () {
@@ -285,7 +294,10 @@ describe("the durable Log", () => {
     it.effect("LOG-4: commits a batch whole, so a batch is contiguous", () =>
       withLog(
         Effect.gen(function* () {
-          const batch = numbers(5000).map((index) => inbound(`:a!u@h PRIVMSG #iirc :${index}`));
+          const batch = pipe(
+            numbers(5000),
+            Arr.map((index) => inbound(`:a!u@h PRIVMSG #iirc :${index}`))
+          );
 
           yield* record(batch);
 
@@ -349,7 +361,7 @@ describe("the durable Log", () => {
 
           yield* Effect.forEach(
             numbers(10),
-            (index) => record([...padding, inbound(`:n${index - 1}!u@h NICK :n${index}`)]),
+            (index) => record(Arr.append(padding, inbound(`:n${index - 1}!u@h NICK :n${index}`))),
             { concurrency: "unbounded" }
           );
 
@@ -482,7 +494,7 @@ describe("the durable Log", () => {
         Effect.gen(function* () {
           const frame = new Uint8Array([9, 0, 0xff, 0xfe, 0, 0x80, 10, 13, 9]);
 
-          const entries: readonly NewEntry[] = [
+          const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
             {
               _tag: "Line",
               bytes: frame.subarray(1, 8),
@@ -549,7 +561,12 @@ describe("the durable Log", () => {
     it.effect("pages by cursor, ascending, at most `limit`", () =>
       withLog(
         Effect.gen(function* () {
-          yield* record(numbers(5).map((index) => inbound(`:a!u@h PRIVMSG #iirc :${index}`)));
+          yield* record(
+            pipe(
+              numbers(5),
+              Arr.map((index) => inbound(`:a!u@h PRIVMSG #iirc :${index}`))
+            )
+          );
 
           const { entries, messages } = yield* Log;
           const page = yield* entries({ after: 1, limit: 2 });
@@ -627,7 +644,12 @@ describe("the durable Log", () => {
         Effect.gen(function* () {
           yield* record([attempt(), inbound(":ircd 001 alice :Welcome")]);
 
-          for (const entries of [[inbound(":alice!u@h NICK :alicia")], [attempt()]]) {
+          const batches: readonly Arr.NonEmptyReadonlyArray<NewEntry>[] = [
+            [inbound(":alice!u@h NICK :alicia")],
+            [attempt()],
+          ];
+
+          for (const entries of batches) {
             yield* Recorder.use(({ record }) =>
               record(entries, () => {
                 throw new Error("machine threw");
@@ -640,17 +662,122 @@ describe("the durable Log", () => {
       )
     );
 
-    it.effect("LOG-10: picks up the fold from Entries after a restart", () =>
+    it.effect("HOST-2: a cut Line says nothing, and agrees with the machine", () =>
+      withLog(
+        Effect.gen(function* () {
+          const fragments = [
+            cutInbound(":mallory!u@h PRIVMSG #iirc :a fragment of something longer"),
+            cutInbound(":ircd 001 mallory :Welcome"),
+            cutInbound(":alice!u@h NICK :mallory"),
+          ] as const;
+
+          const recorded = yield* record([
+            attempt(),
+            inbound(":ircd 001 alice :Welcome"),
+            ...fragments,
+          ]);
+
+          assert.deepStrictEqual(yield* allSaid, []);
+          assert.strictEqual(yield* currentSelf(), "alice");
+
+          // Its bytes stay in the Log, whatever the fold makes of them.
+          const stored = yield* allEntries;
+
+          assert.deepStrictEqual(stored.slice(0, recorded.length), [...recorded]);
+          assert.deepStrictEqual(recorded.slice(-fragments.length).map(toEvent), [
+            undefined,
+            undefined,
+            undefined,
+          ]);
+
+          yield* Log.use(({ rebuild }) => rebuild);
+
+          assert.lengthOf(yield* allSaid, 1);
+          assert.strictEqual(yield* currentSelf(), "alice");
+        })
+      )
+    );
+
+    it.effect("RUN-3: a restart picks up Self and the sequence from Entries alone", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
           yield* record(mixed).pipe(Effect.provide(Log.layer({ dataDir })));
 
           yield* Effect.gen(function* () {
-            assert.deepStrictEqual(yield* allSaid, mixedSaid);
             assert.strictEqual(yield* currentSelf(), "alice_");
             assert.strictEqual(yield* currentSelf("oftc"), "ally");
             assert.strictEqual(yield* Log.use(({ head }) => head), mixed.length + 2);
           }).pipe(Effect.provide(Log.layer({ dataDir })));
+        })
+      )
+    );
+  });
+
+  describe("restarting", () => {
+    for (const vandalism of ["DELETE FROM messages", "DROP TABLE messages"]) {
+      it.effect(`LOG-10: a restart after \`${vandalism}\` gives identical Messages`, () =>
+        inTempDirectory((dataDir) =>
+          Effect.gen(function* () {
+            const before = yield* Effect.andThen(record(mixed), allMessages).pipe(
+              Effect.provide(Log.layer({ dataDir }))
+            );
+
+            yield* execute(dataDir, vandalism);
+
+            yield* Effect.gen(function* () {
+              assert.deepStrictEqual(yield* allMessages, before);
+              assert.deepStrictEqual(yield* allSaid, mixedSaid);
+
+              // The same pass leaves the fold ready for what comes next.
+              assert.strictEqual(yield* currentSelf(), "alice_");
+              assert.strictEqual(yield* currentSelf("oftc"), "ally");
+            }).pipe(Effect.provide(Log.layer({ dataDir })));
+          })
+        )
+      );
+    }
+
+    it.effect("LOG-10: drops a row that Entries do not support", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const before = yield* Effect.andThen(record(mixed), allMessages).pipe(
+            Effect.provide(Log.layer({ dataDir }))
+          );
+
+          yield* execute(
+            dataDir,
+            "INSERT INTO messages VALUES (9999, 0, 'PRIVMSG', 'libera', 'x', '#x', 'forged')"
+          );
+
+          const after = yield* allMessages.pipe(Effect.provide(Log.layer({ dataDir })));
+
+          assert.deepStrictEqual(after, before);
+        })
+      )
+    );
+
+    it.effect("refuses to open, keeping the old rows, when it cannot rebuild", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const before = yield* Effect.andThen(record(mixed), allMessages).pipe(
+            Effect.provide(Log.layer({ dataDir }))
+          );
+
+          yield* execute(
+            dataDir,
+            "CREATE TRIGGER refuse BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'no'); END"
+          );
+
+          const failure = yield* Effect.flip(opening(dataDir));
+
+          assert.strictEqual(failure._tag, "StorageFailed");
+
+          yield* execute(dataDir, "DROP TRIGGER refuse");
+
+          assert.deepStrictEqual(
+            yield* allMessages.pipe(Effect.provide(Log.layer({ dataDir }))),
+            before
+          );
         })
       )
     );
@@ -692,7 +819,7 @@ describe("the durable Log", () => {
               : inbound(`:bob!u@h PRIVMSG #iirc :${index}`)
           );
 
-          yield* record([...self, ...chatter, inbound(":alice!u@h NICK :alicia")]);
+          yield* record(Arr.append([...self, ...chatter], inbound(":alice!u@h NICK :alicia")));
 
           const before = yield* allMessages;
 
@@ -705,6 +832,28 @@ describe("the durable Log", () => {
         }).pipe(Effect.provide(Log.layer({ dataDir })))
       )
     );
+
+    for (const count of [1, 127, 128, 129, 256, 257, 999, 1000, 1001]) {
+      it.effect(`LOG-10: rebuilds ${count} Messages, row for row`, () =>
+        inTempDirectory((dataDir) =>
+          Effect.gen(function* () {
+            const chatter = numbers(count).map((index) =>
+              inbound(`:bob!u@h PRIVMSG #iirc :${index} it's "quoted" \u{1F980}`)
+            );
+
+            yield* record([attempt(), inbound(":ircd 001 alice :Welcome"), ...chatter]);
+
+            const before = yield* allMessages;
+
+            yield* execute(dataDir, "DELETE FROM messages");
+            yield* Log.use(({ rebuild }) => rebuild);
+
+            assert.lengthOf(before, count);
+            assert.deepStrictEqual(yield* allMessages, before);
+          }).pipe(Effect.provide(Log.layer({ dataDir })))
+        )
+      );
+    }
 
     it.effect("rolls back whole, keeping the old rows, when it fails", () =>
       inTempDirectory((dataDir) =>

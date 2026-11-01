@@ -1,7 +1,7 @@
 import type { Entry } from "@iirc/session/entry";
 import { RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
-import { Clock, Effect, Ref, Semaphore } from "effect";
+import { Array as Arr, Clock, Effect, pipe, Ref, Schema, Semaphore } from "effect";
 import { SqlSchema } from "effect/sql";
 import type { SqlClient } from "effect/sql";
 import { isSqlError } from "effect/sql/SqlError";
@@ -14,11 +14,17 @@ import { EntryRow, MessageRow, Page } from "./rows.ts";
 // How many Entries a replay holds in memory at once.
 const replayPageSize = 1000;
 
+// How many Messages a rebuild inserts with one statement. At seven columns that is under
+// the 999 bound parameters of the smallest limit SQLite has shipped with, so no build of
+// it can refuse one, whatever a page of Entries turns out to hold.
+const rebuildBatchSize = 128;
+
 const toStorageFailed = (cause: unknown) => new StorageFailed({ cause });
 
 /**
- * Builds what the Log does over an open database, replaying Entries to pick up
- * where the last process left off.
+ * Builds what the Log does over an open database. It rebuilds first, which is the one
+ * pass over Entries at startup: it makes every derived table whole, and it leaves the
+ * Sessions to pick up from where the last process left off (LOG-10).
  * @param sql - The migrated client, which must have no other writer.
  * @returns The operations of both `Log` and `Recorder`.
  */
@@ -57,6 +63,15 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   const insertMessages = (messages: readonly LoggedMessage[]) =>
     Effect.forEach(messages, insertMessage, { discard: true });
 
+  // Only a rebuild, which has a known page size and a whole table to fill, does this.
+  const insertMessageBatch = SqlSchema.void({
+    Request: Schema.NonEmptyArray(MessageRow),
+    execute: (rows) => sql`INSERT INTO messages ${sql.insert(rows)}`,
+  });
+
+  const insertMessageBatches = (messages: readonly LoggedMessage[]) =>
+    Effect.forEach(Arr.chunksOf(messages, rebuildBatchSize), insertMessageBatch, { discard: true });
+
   const replay = Effect.fnUntraced(function* <E>(
     onMessages: (messages: readonly LoggedMessage[]) => Effect.Effect<void, E>
   ) {
@@ -78,10 +93,7 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     return sessions;
   });
 
-  const sessions = yield* replay(() => Effect.void).pipe(
-    Effect.flatMap(Ref.make),
-    Effect.mapError(toStorageFailed)
-  );
+  const sessions = yield* Ref.make(noSessions);
 
   // One writer at a time, so that the Sessions a transaction folds from are the ones
   // the last commit left. The client's own lock is no use here, because it is
@@ -117,11 +129,10 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
         const at = yield* Clock.currentTimeMillis;
         const head = yield* readHead;
 
-        const recorded = entries.map((entry, index): Entry => ({
-          ...entry,
-          at,
-          sequence: head + index + 1,
-        }));
+        const recorded = pipe(
+          entries,
+          Arr.map((entry, index): Entry => ({ ...entry, at, sequence: head + index + 1 }))
+        );
 
         yield* Effect.forEach(recorded, insertEntry, { discard: true });
 
@@ -140,11 +151,13 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     Effect.gen(function* () {
       yield* sql`DELETE FROM messages`;
 
-      const rebuilt = yield* replay(insertMessages);
+      const rebuilt = yield* replay(insertMessageBatches);
 
       return [undefined, rebuilt] as const;
     }).pipe(Effect.interruptible)
   ).pipe(Effect.mapError(toStorageFailed));
+
+  yield* rebuild;
 
   return {
     entries: (query: Page): Effect.Effect<readonly Entry[], StorageFailed> =>

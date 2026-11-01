@@ -3,7 +3,7 @@ import { closeReason, fold, phase } from "@iirc/lifecycle";
 import type { NetworkInput } from "@iirc/lifecycle";
 import { maxFrameBytes } from "@iirc/protocol/frame";
 import { outbound } from "@iirc/protocol/outbound";
-import { Effect, Exit, Layer } from "effect";
+import { Array as Arr, Clock, Effect, Exit, Layer, pipe } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { Entry, Ircd, NewEntry } from "./entry.ts";
@@ -66,8 +66,8 @@ const safe = (command: string, params: readonly string[]) => {
   return built.line;
 };
 
-const host = (ircd: FakeIrcd, options?: Partial<Pick<NetworkOptions, "history" | "input">>) =>
-  hostNetwork({ history: [], id: "libera", input, ircd: address, ...options }).pipe(
+const host = (ircd: FakeIrcd, options?: Partial<Pick<NetworkOptions, "input">>) =>
+  hostNetwork({ id: "libera", input, ircd: address, ...options }).pipe(
     Effect.provideService(Transport, ircd.transport),
     Effect.tap(() => settled)
   );
@@ -106,7 +106,10 @@ const probed = (probe: RecorderProbe) =>
 
               if (probe.failsAfterWithin?.(entries) === true) {
                 within(
-                  entries.map((entry, index): Entry => ({ ...entry, at: 0, sequence: index }))
+                  pipe(
+                    entries,
+                    Arr.map((entry, index): Entry => ({ ...entry, at: 0, sequence: index }))
+                  )
                 );
 
                 yield* probe.beforeFailing ?? Effect.void;
@@ -130,6 +133,17 @@ const probed = (probe: RecorderProbe) =>
       )
     )
   ).pipe(Layer.provideMerge(Recorder.memoryReadable));
+
+// The machine walks `channels` as it enters a Session, so this makes a real
+// transition throw, with no test-only path through the host.
+const throwing: NetworkInput = {
+  ...input,
+  channels: Object.defineProperty<string[]>([], Symbol.iterator, {
+    value: () => {
+      throw new Error("the transition threw");
+    },
+  }),
+};
 
 const isClosed = (entry: NewEntry) => entry._tag === "Connection" && entry.phase === "closed";
 
@@ -444,6 +458,8 @@ describe("hostNetwork deadlines", () => {
 
       yield* TestClock.adjust("1 millis");
       yield* settled;
+      yield* ircd.hangUp;
+      yield* settled;
 
       const log = yield* entries;
       const fired = log.find(({ _tag }) => _tag === "Deadline");
@@ -492,12 +508,71 @@ describe("hostNetwork deadlines", () => {
       const ircd = yield* fakeIrcd();
 
       yield* host(ircd);
+      yield* ircd.hangUp;
+      yield* settled;
 
       const log = yield* entries;
       const fired = log.find(({ _tag }) => _tag === "Deadline");
 
       assert.strictEqual(fired?.at, 61_000);
       assert.lengthOf(connectionsOf(log, "closed"), 1);
+    }).pipe(Effect.provide(layer));
+  });
+});
+
+describe("hostNetwork under a flood while registering", () => {
+  it.effect("fires the deadline though reads never stop, and ends in bounded time", () => {
+    const layer = probed({
+      // Each read costs a second, so the inbox never empties, as a real flood would.
+      duringRecord: (recording) =>
+        recording.some(isLineWith("flood")) ? TestClock.adjust("1 second") : Effect.void,
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* host(ircd);
+      yield* Effect.forEach(Array.from({ length: 200 }), () => ircd.read("flood\r\n"), {
+        discard: true,
+      });
+      yield* settled;
+
+      const log = yield* entries;
+      const fired = log.find(({ _tag }) => _tag === "Deadline");
+      const [closed] = connectionsOf(log, "closed");
+
+      // Only the reads already held, each of which was in time, can go ahead of it.
+      assert.isAtMost(fired?.at ?? Infinity, 80_000);
+      assert.strictEqual(closed?.reason, "registration timed out");
+      assert.isAtMost(closed?.at ?? Infinity, (fired?.at ?? 0) + 6000);
+      assert.isAbove(yield* ircd.unread, 0);
+      assert.isTrue(yield* ircd.released);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("lets a `001` read in time beat the deadline, though it is taken after it", () => {
+    const layer = probed({
+      // The clock passes the deadline while the read ahead of the `001` commits.
+      duringRecord: (recording) =>
+        recording.some(isLineWith("NOTICE * :slow")) ? TestClock.adjust("2 seconds") : Effect.void,
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* host(ircd);
+
+      yield* TestClock.adjust("59 seconds");
+      yield* settled;
+
+      yield* ircd.read("NOTICE * :slow\r\n");
+      yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
+      yield* settled;
+
+      assert.lengthOf(
+        (yield* entries).filter(({ _tag }) => _tag === "Deadline"),
+        0
+      );
+      assert.strictEqual((yield* hosted.status).phase, "session");
     }).pipe(Effect.provide(layer));
   });
 });
@@ -514,6 +589,7 @@ describe("hostNetwork as a fold", () => {
       assert.deepStrictEqual(yield* hosted.status, statusFolded(yield* entries));
 
       yield* ircd.read("ERROR :Closing Link\r\n");
+      yield* ircd.hangUp;
       yield* settled;
 
       const status = yield* hosted.status;
@@ -523,76 +599,23 @@ describe("hostNetwork as a fold", () => {
     }).pipe(Effect.provide(Recorder.memoryReadable))
   );
 
-  it.effect("resumes a run that crashed in a Session with a new `attempt`", () =>
+  it.effect("starts a new `attempt` after a run that crashed in a Session", () =>
     Effect.gen(function* () {
       const crashed = yield* fakeIrcd();
 
       yield* Effect.scoped(inSession(crashed));
 
-      const history = yield* entries;
+      const earlier = yield* entries;
       const ircd = yield* fakeIrcd();
-      const hosted = yield* host(ircd, { history });
+      const hosted = yield* host(ircd);
       const log = yield* entries;
       const attempts = connectionsOf(log, "attempt");
 
       assert.lengthOf(attempts, 2);
-      assert.strictEqual(attempts[1]?.sequence, history.length + 1);
-      assert.strictEqual(connectionsOf(log, "opened")[1]?.connection, history.length + 1);
+      assert.strictEqual(attempts[1]?.sequence, earlier.length + 1);
+      assert.strictEqual(connectionsOf(log, "opened")[1]?.connection, earlier.length + 1);
       assert.strictEqual((yield* hosted.status).phase, "registering");
       assert.deepStrictEqual(yield* wire(ircd), ["NICK iirc\r\n", "USER user 0 * :I IRC\r\n"]);
-    }).pipe(Effect.provide(Recorder.memoryReadable))
-  );
-
-  it.effect("does not fire a deadline from history at the new Connection", () =>
-    Effect.gen(function* () {
-      const crashed = yield* fakeIrcd();
-
-      yield* Effect.scoped(host(crashed));
-
-      const history = yield* entries;
-
-      yield* TestClock.adjust("1 hour");
-
-      const ircd = yield* fakeIrcd();
-      const hosted = yield* host(ircd, { history });
-
-      yield* settled;
-
-      assert.lengthOf(
-        (yield* entries).filter(({ _tag }) => _tag === "Deadline"),
-        0
-      );
-      assert.strictEqual((yield* hosted.status).phase, "registering");
-
-      // The new Connection has its own 60 seconds, counted from its own `opened`.
-      yield* TestClock.adjust("60 seconds");
-      yield* settled;
-
-      const fired = (yield* entries).find(({ _tag }) => _tag === "Deadline");
-
-      assert.strictEqual(fired?.at, 3_660_000);
-    }).pipe(Effect.provide(Recorder.memoryReadable))
-  );
-
-  it.effect("starts cleanly from history that ended in a close", () =>
-    Effect.gen(function* () {
-      const earlier = yield* fakeIrcd();
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* inSession(earlier);
-          yield* earlier.hangUp;
-          yield* settled;
-        })
-      );
-
-      const ircd = yield* fakeIrcd();
-      const hosted = yield* host(ircd, { history: yield* entries });
-
-      assert.deepStrictEqual(yield* hosted.status, {
-        closeReason: undefined,
-        phase: "registering",
-      });
     }).pipe(Effect.provide(Recorder.memoryReadable))
   );
 });
@@ -604,6 +627,7 @@ describe("hostNetwork closing", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.read("ERROR :first\r\nERROR :second\r\n");
+      yield* ircd.hangUp;
       yield* settled;
 
       const closed = connectionsOf(yield* entries, "closed");
@@ -623,6 +647,7 @@ describe("hostNetwork closing", () => {
       const before = (yield* wire(ircd)).length;
 
       yield* ircd.read("ERROR :gone\r\nPING :1\r\n");
+      yield* ircd.hangUp;
       yield* settled;
 
       const log = yield* entries;
@@ -705,12 +730,18 @@ describe("hostNetwork closing", () => {
       yield* ircd.read("PING :1\r\n");
       yield* TestClock.adjust("9999 millis");
       yield* settled;
+      yield* ircd.hangUp;
+      yield* settled;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* TestClock.adjust("1 millis");
       yield* settled;
 
+      const [closed] = connectionsOf(yield* entries, "closed");
+
+      assert.strictEqual(closed?.reason, "write timed out");
+      assert.strictEqual(closed?.at, 10_000);
       assert.deepStrictEqual(yield* hosted.status, {
         closeReason: "write timed out",
         phase: "closed",
@@ -730,6 +761,10 @@ describe("hostNetwork closing", () => {
       yield* settled;
 
       assert.deepStrictEqual(exit, Exit.fail(new NotInSession({ phase: "closed" })));
+
+      yield* ircd.hangUp;
+      yield* settled;
+
       assert.strictEqual((yield* hosted.status).phase, "closed");
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
     }).pipe(Effect.provide(Recorder.memoryReadable))
@@ -775,6 +810,7 @@ describe("hostNetwork closing", () => {
       });
 
       yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
+      yield* ircd.hangUp;
       yield* settled;
 
       assert.deepStrictEqual(yield* hosted.status, {
@@ -808,6 +844,340 @@ describe("hostNetwork closing", () => {
       });
     }).pipe(Effect.provide(Recorder.memoryReadable))
   );
+});
+
+describe("hostNetwork draining a close", () => {
+  const bad = { ...input, channels: ["#bad\r\nQUIT"] };
+
+  // Every cause of a close that is not a write failing, each from a live Connection.
+  const causes = [
+    {
+      name: "an `ERROR` Line",
+      provoke: (ircd: FakeIrcd) => ircd.read("ERROR :Closing Link\r\n"),
+      reason: "Closing Link",
+      setup: inSession,
+    },
+    {
+      name: "the registration deadline",
+      provoke: () => TestClock.adjust("60 seconds"),
+      reason: "registration timed out",
+      setup: host,
+    },
+    {
+      name: "a refusal while registering",
+      provoke: (ircd: FakeIrcd) => ircd.read(":ircd 433 * iirc :Nickname in use\r\n"),
+      reason: "Nickname in use",
+      setup: host,
+    },
+    {
+      name: "a Line that cannot be built",
+      provoke: (ircd: FakeIrcd) => ircd.read(":ircd 001 iirc :Welcome\r\n"),
+      reason: "could not send a JOIN Line: InvalidParameter",
+      setup: (ircd: FakeIrcd) => host(ircd, { input: bad }),
+    },
+    {
+      name: "a machine that threw",
+      provoke: (ircd: FakeIrcd) => ircd.read(":ircd 001 iirc :Welcome\r\n"),
+      reason: "the machine threw on Entry",
+      setup: (ircd: FakeIrcd) => host(ircd, { input: throwing }),
+    },
+  ];
+
+  for (const { name, provoke, reason, setup } of causes) {
+    it.effect(`records all the Ircd sends after ${name}, and acts on none of it`, () =>
+      Effect.gen(function* () {
+        const ircd = yield* fakeIrcd();
+        const hosted = yield* setup(ircd);
+
+        yield* provoke(ircd);
+        yield* settled;
+
+        const before = (yield* wire(ircd)).length;
+
+        assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
+        assert.deepStrictEqual(
+          yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test")),
+          Exit.fail(new NotInSession({ phase: "closed" }))
+        );
+
+        yield* ircd.read("PING :after\r\n", ":a!b@c PRIVMSG #one :after\r\n");
+        yield* settled;
+        yield* TestClock.adjust("4999 millis");
+        yield* settled;
+
+        assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
+
+        yield* ircd.read("half a li");
+        yield* ircd.hangUp;
+        yield* settled;
+
+        const log = yield* entries;
+        const [closed] = connectionsOf(log, "closed");
+
+        assert.includeMembers(texts(log, "inbound"), [
+          "PING :after",
+          ":a!b@c PRIVMSG #one :after",
+          "half a li",
+        ]);
+        assert.notInclude(texts(log, "outbound"), "PONG after");
+        assert.lengthOf(yield* wire(ircd), before);
+        assert.include(closed?.reason, reason);
+        assert.strictEqual(log.at(-1), closed);
+        assert.deepStrictEqual(yield* hosted.status, statusFolded(log));
+        assert.isTrue(yield* ircd.released);
+      }).pipe(Effect.provide(Recorder.memoryReadable))
+    );
+
+    it.effect(`closes 5 seconds after ${name}, when the Ircd does not hang up`, () =>
+      Effect.gen(function* () {
+        const ircd = yield* fakeIrcd();
+
+        yield* setup(ircd);
+        yield* provoke(ircd);
+        yield* settled;
+
+        const provoked = yield* Clock.currentTimeMillis;
+
+        yield* TestClock.adjust("4999 millis");
+        yield* settled;
+
+        assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
+        assert.isFalse(yield* ircd.released);
+
+        yield* TestClock.adjust("1 millis");
+        yield* settled;
+
+        const [closed] = connectionsOf(yield* entries, "closed");
+
+        assert.include(closed?.reason, reason);
+        assert.strictEqual(closed?.at, provoked + 5000);
+        assert.isTrue(yield* ircd.released);
+      }).pipe(Effect.provide(Recorder.memoryReadable))
+    );
+  }
+
+  it.effect("does not let a flood after a close hold the Connection open past the limit", () => {
+    const layer = probed({
+      duringRecord: (recording) =>
+        recording.some(isLineWith("flood")) ? TestClock.adjust("1 second") : Effect.void,
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* inSession(ircd);
+      yield* ircd.read("ERROR :Closing Link\r\n");
+      yield* settled;
+      yield* Effect.forEach(Array.from({ length: 100 }), () => ircd.read("flood\r\n"), {
+        discard: true,
+      });
+      yield* settled;
+
+      assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
+      assert.isTrue(yield* ircd.released);
+      assert.isAbove(yield* ircd.unread, 0);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("closes at once when the Log goes during a drain, with the first reason", () => {
+    const layer = probed({
+      failsAfterWithin: (recording) => recording.some(isLineWith("NOTICE * :unrecordable")),
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+
+      yield* ircd.read("ERROR :Closing Link\r\n");
+      yield* settled;
+      yield* ircd.read("NOTICE * :unrecordable\r\n");
+      yield* settled;
+
+      assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
+      assert.strictEqual((yield* hosted.status).closeReason, "Closing Link");
+      assert.isTrue(yield* ircd.released);
+    }).pipe(Effect.provide(layer));
+  });
+});
+
+describe("hostNetwork after a failed write", () => {
+  it.effect("records every read that follows, acts on none, and keeps the first reason", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+
+      yield* ircd.setWrites("fail");
+      yield* ircd.read("PING :1\r\n");
+      yield* settled;
+
+      // Writes work again, so only the host's own decision can keep these off the wire.
+      yield* ircd.setWrites("accept");
+
+      const before = (yield* wire(ircd)).length;
+
+      yield* ircd.read("PING :2\r\n:a!b@c PRIVMSG #one :after\r\nERROR :a later reason\r\n");
+      yield* settled;
+
+      assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
+
+      yield* ircd.read("half a li");
+      yield* ircd.hangUp;
+      yield* settled;
+
+      const log = yield* entries;
+
+      assert.includeMembers(texts(log, "inbound"), [
+        "PING :2",
+        ":a!b@c PRIVMSG #one :after",
+        "ERROR :a later reason",
+        "half a li",
+      ]);
+      assert.notInclude(texts(log, "outbound"), "PONG 2");
+      assert.lengthOf(yield* wire(ircd), before);
+      assert.strictEqual(connectionsOf(log, "closed")[0]?.reason, "write failed: broken pipe");
+      assert.strictEqual(log.at(-1)?._tag, "Connection");
+      assert.deepStrictEqual(yield* hosted.status, statusFolded(log));
+      assert.isTrue(yield* ircd.released);
+    }).pipe(Effect.provide(Recorder.memoryReadable))
+  );
+
+  it.effect("refuses a `send` at once, while status stays the fold until `closed` lands", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+      const line = safe("PRIVMSG", ["#one", "hi"]);
+
+      yield* ircd.setWrites("fail");
+      yield* ircd.read("PING :1\r\n");
+      yield* settled;
+
+      assert.deepStrictEqual(yield* hosted.status, statusFolded(yield* entries));
+      assert.strictEqual((yield* hosted.status).phase, "session");
+      assert.deepStrictEqual(
+        yield* Effect.exit(hosted.send(line, "test")),
+        Exit.fail(new NotInSession({ phase: "closed" }))
+      );
+    }).pipe(Effect.provide(Recorder.memoryReadable))
+  );
+
+  it.effect("closes at the limit when the read side never ends", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+
+      yield* ircd.setWrites("fail");
+      yield* ircd.read("PING :1\r\n");
+      yield* TestClock.adjust("4999 millis");
+      yield* settled;
+
+      assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
+
+      yield* TestClock.adjust("1 millis");
+      yield* settled;
+
+      const [closed] = connectionsOf(yield* entries, "closed");
+
+      assert.strictEqual(closed?.reason, "write failed: broken pipe");
+      assert.strictEqual(closed?.at, 5000);
+      assert.deepStrictEqual(yield* hosted.status, statusFolded(yield* entries));
+      assert.isTrue(yield* ircd.released);
+    }).pipe(Effect.provide(Recorder.memoryReadable))
+  );
+
+  it.effect("does not let a flood hold a dead Connection open past the limit", () => {
+    const layer = probed({
+      // Each read takes a second to record, so the limit passes with reads still queued.
+      duringRecord: (recording) =>
+        recording.some(isLineWith("flood")) ? TestClock.adjust("1 second") : Effect.void,
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* inSession(ircd);
+      yield* ircd.setWrites("fail");
+      yield* ircd.read("PING :1\r\n");
+      yield* settled;
+
+      yield* Effect.forEach(Array.from({ length: 100 }), () => ircd.read("flood\r\n"), {
+        discard: true,
+      });
+      yield* settled;
+
+      assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
+      assert.isTrue(yield* ircd.released);
+      assert.isAbove(yield* ircd.unread, 0);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("wakes a loop parked on a quiet Connection when `send` is what failed", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+
+      yield* ircd.setWrites("fail");
+      yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
+      yield* settled;
+      yield* TestClock.adjust("5 seconds");
+      yield* settled;
+
+      const [closed] = connectionsOf(yield* entries, "closed");
+
+      assert.strictEqual(closed?.reason, "write failed: broken pipe");
+      assert.strictEqual(closed?.at, 5000);
+      assert.isTrue(yield* ircd.released);
+    }).pipe(Effect.provide(Recorder.memoryReadable))
+  );
+
+  it.effect("closes at once when a write fails because the Log did", () => {
+    const layer = probed({
+      failsAfterWithin: (recording) => recording.some(isLineWith("PRIVMSG #one hi")),
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+
+      yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
+      yield* settled;
+
+      assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
+      assert.isTrue(yield* ircd.released);
+    }).pipe(Effect.provide(layer));
+  });
+});
+
+describe("hostNetwork under a flood", () => {
+  it.effect("leaves reads in the kernel while it cannot keep up", () => {
+    const layer = probed({
+      duringRecord: (recording) =>
+        recording.some(isLineWith("slow")) ? Effect.sleep("1 second") : Effect.void,
+    });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* inSession(ircd);
+      const flood = 100;
+
+      yield* Effect.forEach(Array.from({ length: flood }), () => ircd.read("slow\r\n"), {
+        discard: true,
+      });
+      yield* settled;
+
+      // One in the commit, a small inbox, and one in the reader's hand. Nothing else.
+      assert.isAbove(yield* ircd.unread, flood - 20);
+      assert.strictEqual((yield* hosted.status).phase, "session");
+
+      yield* TestClock.adjust(`${flood} seconds`);
+      yield* settled;
+
+      assert.strictEqual(yield* ircd.unread, 0);
+      assert.lengthOf(
+        texts(yield* entries, "inbound").filter((text) => text === "slow"),
+        flood
+      );
+    }).pipe(Effect.provide(layer));
+  });
 });
 
 describe("hostNetwork `send`", () => {
@@ -1117,6 +1487,7 @@ describe("hostNetwork with hostile input", () => {
       yield* ircd.read("half a li");
       yield* ircd.setWrites("fail");
       yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
+      yield* TestClock.adjust("5 seconds");
       yield* settled;
 
       const [partial] = linesOf(yield* entries).slice(-1);
@@ -1141,6 +1512,7 @@ describe("hostNetwork with hostile input", () => {
 
       yield* ircd.read("ERROR :gone\r\n");
       yield* ircd.read("PING :1\r\n", "half a li");
+      yield* ircd.hangUp;
       yield* settled;
 
       const log = yield* entries;
@@ -1168,23 +1540,13 @@ describe("hostNetwork with hostile input", () => {
 });
 
 describe("hostNetwork when something inside it fails", () => {
-  // The machine walks `channels` as it enters a Session, so this makes a real
-  // transition throw, with no test-only path through the host.
-  const throwing: NetworkInput = {
-    ...input,
-    channels: Object.defineProperty<string[]>([], Symbol.iterator, {
-      value: () => {
-        throw new Error("the transition threw");
-      },
-    }),
-  };
-
   it.effect("commits the Entries of a throwing transition and closes with a reason", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
       const hosted = yield* host(ircd, { input: throwing });
 
       yield* ircd.read("NOTICE * :before\r\n:ircd 001 iirc :Welcome\r\nNOTICE * :after\r\n");
+      yield* ircd.hangUp;
       yield* settled;
 
       const log = yield* entries;
@@ -1201,25 +1563,6 @@ describe("hostNetwork when something inside it fails", () => {
         closeReason: closed?.reason,
         phase: "closed",
       });
-    }).pipe(Effect.provide(Recorder.memoryReadable))
-  );
-
-  it.effect("resumes past an Entry that throws, rather than dying on the replay", () =>
-    Effect.gen(function* () {
-      const earlier = yield* fakeIrcd();
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* host(earlier, { input: throwing });
-          yield* earlier.read(":ircd 001 iirc :Welcome\r\n");
-          yield* settled;
-        })
-      );
-
-      const ircd = yield* fakeIrcd();
-      const hosted = yield* host(ircd, { history: yield* entries, input: throwing });
-
-      assert.strictEqual((yield* hosted.status).phase, "registering");
     }).pipe(Effect.provide(Recorder.memoryReadable))
   );
 

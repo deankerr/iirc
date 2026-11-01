@@ -29,6 +29,14 @@ describe(reduce, () => {
     expect(replay(":ircd 001 claude :Welcome").self).toBe("claude");
   });
 
+  it("takes Self from the first welcome of a Session, and no other", () => {
+    expect(replay(":ircd 001 claude :Hi", ":x 001 mallory :Hi").self).toBe("claude");
+  });
+
+  it("learns nothing from a welcome that names nobody", () => {
+    expect(replay(":ircd 001", ":ircd 001 claude :Hi").self).toBe("claude");
+  });
+
   it("follows Self through a nick change", () => {
     expect(replay(":ircd 001 claude :Hi", ":claude!u@h NICK :claudia").self).toBe("claudia");
   });

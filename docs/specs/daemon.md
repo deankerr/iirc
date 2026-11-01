@@ -140,6 +140,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 - **LIVE-9.** Disconnecting through the API or stopping the Daemon sends `QUIT` with a configured reason through the control lane, waits up to 2 seconds for the queue, and does not reconnect.
 - **LIVE-10.** Time the Daemon was away from a Network is a Gap. Gaps are visible, derived from Connection and Daemon Entries, and shown in the affected Timelines. The Daemon never implies that nothing happened.
   - On a Network that keeps us attached, a Gap means only that we were not listening. Other Users may not have seen us leave.
+- **LIVE-11.** A local close stops acting at once, and keeps recording what the Ircd already sent until it hangs up or 5 seconds pass, so that `ERROR` and whatever follows it are not lost. Sends are refused during this time, and status shows the phase once the close is recorded.
 
 ### Sending
 
@@ -307,6 +308,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | --- | --- |
 | `GET /bootstrap` | Every Target, the latest items, and members, with one `at` |
 | `GET /entries` | The Log, by cursor, with filters by Network and kind |
+| `GET /messages` | Messages, by cursor, each with the sequence of its Line |
 | `GET /stream` | Replay from a cursor, then live, with no gap or duplicate at the join |
 | `GET /status` | The Daemon and all Networks at a glance |
 | `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state |
@@ -332,6 +334,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | Operation   | Effect                                                                |
 | ----------- | --------------------------------------------------------------------- |
 | Send        | A Message of kind `privmsg`, `notice`, or `action`, or a CTCP request |
+| Thin Send   | `POST /messages`: one `PRIVMSG` to one Target, until Send replaces it |
 | Membership  | Join with an optional key, part, invite, kick                         |
 | Channel     | Set a topic, change modes in `MODES`-sized batches                    |
 | Self        | Change nick, set or clear away, set user modes, `OPER`                |

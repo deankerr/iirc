@@ -133,6 +133,13 @@ describe("connecting", () => {
 });
 
 describe("registering", () => {
+  it("stays put on a 001 that names nobody, with the deadline still running", () => {
+    const snapshot = fold([...histories.registering, line("001")], input);
+
+    expect(phase(snapshot)).toBe("registering");
+    expect(deadline(snapshot)).toBeDefined();
+  });
+
   it("reaches a Session on 001 and clears the deadline", () => {
     const { next } = step(inPhase("registering"), welcome);
 
