@@ -52,10 +52,11 @@ bun build --compile --minify --sourcemap --feature WEB --asset ./dist \
                      │      │                │
                ┌─────┘      └─────┐      @iirc/client  typed client, holds the cursor
            @iirc/log          @iirc/api ─────┘         contract: HttpApi and Schemas
-          ┌────┴─────┐
-  @iirc/session  @iirc/state                           Effect runtime for one Network, IRC state fold
-     ┌────┴────┐     │
-     │         └──┬──┘
+               │
+     @iirc/session                                     Effect runtime for one Network
+     ┌────┴─────┐
+     │     @iirc/state                                 IRC state fold
+     │          │
 @iirc/lifecycle  @iirc/protocol                        pure: Network machine, bytes to Lines and back
 ```
 
@@ -65,9 +66,9 @@ Dependencies point down only, and each package stands alone for whoever wants it
 | --- | --- | --- |
 | `@iirc/protocol` | Frames, Lines, safe outbound construction, `RPL_ISUPPORT`, casefolding, mode parsing, formatting, CTCP, splitting, nick candidates, token bucket, Lookup tables, refusal classifier | None |
 | `@iirc/state` | Folds Lines into Channels, members, modes, and Self. Moves out of `protocol` | `protocol` |
-| `@iirc/lifecycle` | The Network machine, `step`, `fold`, and its command type | `xstate` |
-| `@iirc/session` | Hosts one Network: Transport, lanes, watchdog, Lookup queue, reconnect | `lifecycle`, `protocol`, `effect`, `@effect/platform-bun` |
-| `@iirc/log` | SQLite, the writer, the Worker reader, migrations, derived tables, Entry schemas | `session`, `state`, `protocol`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
+| `@iirc/lifecycle` | The Network machine, `step`, `fold`, `Tuning`, and its command type | `xstate`, `protocol` |
+| `@iirc/session` | Hosts one Network: Transport, lanes, `Standing`, Lookup queue, reconnect | `lifecycle`, `state`, `protocol`, `effect`, `@effect/platform-bun` |
+| `@iirc/log` | SQLite, the writer, the Worker reader, migrations, derived tables, Entry schemas | `session`, `state`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | `@iirc/api` | `DaemonApi`, Schemas, typed errors | `effect` |
 | `@iirc/client` | `HttpApiClient` plus cursor tracking, reconnect, and `resync` handling | `api`, `effect` |
 | `@iirc/daemon` | Network supervision, operations, Configuration, Credentials, Keys, handlers. Exports `DaemonCore` and `ApiRoutes` | `log`, `api`, `session`, `lifecycle`, `protocol`, `effect` |
@@ -104,7 +105,8 @@ const serve = (routes, listen) =>
   );
 
 const daemon = (config) =>
-  serve(Layer.mergeAll(ApiRoutes, StreamSocket, webRoutes(config)), config.listen).pipe(
+  Daemon.stopsFirst.pipe(
+    Layer.provide(serve(Layer.mergeAll(ApiRoutes, StreamSocket, webRoutes(config)), config.listen)),
     Layer.provide(DaemonCore(config)), // outside serve, which forks the MemoMap
     Layer.provide(Telemetry.layer)
   );
@@ -117,7 +119,9 @@ const webRoutes = (config) =>
 
 - The `import()` above sits behind `feature("WEB")` in the real code.
 - Anything shared must be provided outside `HttpRouter.serve`, or it is built twice.
-- SIGINT and SIGTERM interrupt main through `BunRuntime.runMain`, so LIVE-9's `QUIT` is a finalizer. `gracefulShutdownTimeout` must be set low and `QUIT` ordered first, because the default held a shutdown for 20 seconds.
+- SIGINT and SIGTERM interrupt main through `BunRuntime.runMain`, so LIVE-9's `QUIT` is a finalizer, and the teardown calls that interrupt exit 0 where its default says 130.
+- Layers close in reverse, which would stop `serve` first, so a Send waiting on a stalled socket could hold up `QUIT`. `Daemon.stopsFirst` is built last for that reason: the Network goes first and answers that Send, then the `stopped` Entry, then `serve`, and the Log last.
+- `gracefulShutdownTimeout` must be set low, because the default held a shutdown for 20 seconds, and it must exceed `quitWaitMillis` plus a second. After it runs out, the serve scope interrupts whatever handlers are left.
 
 ## The Network host
 
@@ -148,8 +152,9 @@ export const fold = (events, input) => {
   return snapshot;
 };
 
-// @iirc/session: one fiber per Network, about 40 lines, replacing createEffectActor
-const item = yield * Queue.take(inbox).pipe(Effect.timeoutOption(Duration.millis(wait)));
+// @iirc/session: one fiber per Connection, replacing createEffectActor. It waits with
+// `Queue.peek` under a timeout, because a timed `take` can lose its item to the timer.
+const waited = yield * Queue.peek(inbox).pipe(Effect.timeoutOption(Duration.millis(wait)));
 ```
 
 ### Who owns each behaviour
@@ -162,13 +167,38 @@ const item = yield * Queue.take(inbox).pipe(Effect.timeoutOption(Duration.millis
 | CONN-5 nick regain | XState parallel region of the Session |
 | CONN-6 login wait, CONN-7 burst | XState, pure classifier |
 | CAP negotiation | XState substates of registering, pure capability fold |
-| LIVE-2 liveness | Effect watchdog. It appends a close, and the machine sees only that |
-| LIVE-4 reconnect | Pure fold over Connection Entries gives the delay, with jitter seeded by sequence. XState holds the waiting state |
-| LIVE-5 refusal | Pure classifier, XState holds the reason |
-| Rejoining Channels | Pure fold plus an Effect reconciler: Configuration minus derived state gives `JOIN` batches |
+| LIVE-2 liveness, LIVE-3 lag checks, CONN-7 burst | Deadlines in the machine's context, recorded as Deadline Entries when they expire |
+| LIVE-4 reconnect | Pure fold over Entries gives the time of the next attempt, with jitter seeded by sequence. The host waits for it |
+| LIVE-5 refusal | Pure classifier in the machine, recorded on the `closed` Entry |
+| LIVE-9 stopping | A `closing` Entry moves the machine, which asks for `QUIT` and a close |
+| Rejoining Channels | Pure plan over `Standing`, which an Effect reconciler carries out: wanted Channels minus derived state gives `JOIN` batches |
 | Lookups | Pure correlator table, `Semaphore` and `Deferred` |
 | FILL Gap filling | Effect paging loop over a pure Gap fold |
 | Frontend stream | Effect on the Daemon, a plain fold in the Frontend |
+
+### Staying on a Network
+
+A machine lives for one Connection: every `attempt` resets it. What outlasts a Connection is `Standing`, a pure fold over Entries.
+
+- **`Standing` is everything a host needs from a Network's past.** That is the recent Connections and how many failed in a row, any refusal, the `NICKLEN` of the last Session, lag, Channels joined, Channels kicked from, and each Channel's last `JOIN` failure.
+  - It lives in `session`, and `@iirc/session` gains a dependency on `@iirc/state`. Both Recorders keep one per Network and update it in the same transaction as the Entries, and `Recorder.standing(network)` reads it.
+  - It replaces the Log's own `Sessions`, so there is one fold. It rebuilds in the existing pass at startup, which is why a crash loop cannot outrun its own backoff.
+  - The host holds no copy, and reads `standing` when it needs to decide something.
+- **The next attempt is a pure function of `Standing`:** `nextAttempt(standing, { ircds, tuning })` gives a time and the Ircd.
+  - The delay doubles from 5 seconds up to 5 minutes for each failure in a row, and `jitter` moves it within the upper half of that delay, seeded by the sequence of the last `attempt`, so a restart computes the same time.
+  - `Standing` keeps the last 64 Connection outcomes and `Tuning` decides at read time what counts as stable, so that a tuned value applies to the past too.
+  - A Session that lasted 5 minutes resets the count, and an unexpected close still waits the first delay. A close that followed `closing` is not a failure and retries at once.
+  - A Connection with no `closed` Entry, because the process was killed, ended at its last Entry and counts as a failure unless it had already lasted 5 minutes.
+  - A refusal waits at least 30 minutes from its close.
+  - Ircds rotate after the one the last `attempt` used.
+- **The `attempt` Entry records the candidate nicks,** worked out from Configuration and `Standing`. The machine takes them from its event, so replaying an old Connection gives the choices it really made.
+- **Each Connection has its own lanes and pump.** The machine's `sendLine` Command names a lane, the loop offers it to that lane, and one pump fiber records and writes.
+  - The control lane is bounded too, and the loop waits to offer to it, so that a `PING` flood backs up into the kernel rather than into memory.
+  - When the Connection ends, its queues become Dropped Entries in the same commit as `closed`.
+  - The loop never waits on a write, because a stalled socket must not stop it reading.
+- **The reconciler runs from burst complete until the Connection ends.** The pure `joinPlan(standing, wanted, now, tuning)` returns what to `JOIN` now and when to look again, and the reconciler offers that to the background lane. The Daemon passes the wanted Channels as options for now, and they come from Configuration in step 3.
+- **A host cannot stay dead.** A defect during a Connection becomes a `closed` Entry and a normal backoff, so `/health` needs no second opinion. A failed `record` backs off in the same way with no dial, which is LOG-9's recovery, and status shows the fault until a `record` succeeds.
+- **Tuning is one value.** Every timing and limit in LIVE, CONN, and SEND that an Owner might change lives in a `Tuning` record with the spec's defaults, on the machine's input and on the host's options. Until Configuration exists, `iirc daemon --tuning <json>` overrides any of it, so that tests of the real binary need not wait minutes.
 
 ### Effect pieces
 
@@ -180,7 +210,7 @@ const item = yield * Queue.take(inbox).pipe(Effect.timeoutOption(Duration.millis
 | SEND-2 flood control | Pure token bucket driven by `Clock` | `RateLimiter`, whose delay would break strict priority |
 | `/stream` fan-out | `PubSub.sliding({ capacity: 1, replay: 1 })` of the head sequence, published from `sql.afterCommit`. Each subscriber pages from its own cursor | A payload `PubSub`, which stalls the writer or loses data |
 | LOOK-4, LOOK-5 | `Semaphore.withPermit` per Network, `Deferred` for the result. A caller leaving cancels its queued Lookup |  |
-| LIVE-3, CONN-5 timing | `Schedule.spaced`, `Schedule.exponential` |  |
+| CONN-5 timing | `Schedule.exponential` |  |
 | CRED-3 | `Redacted`, `Schema.Redacted`, `Config.Redacted` |  |
 | LOG-11 reads | `RpcClient` to `BunWorker` |  |
 | Tests | `@effect/vitest`, `TestClock`, `it.prop`, `HttpApiTest.groups` | `bun test`, because `@effect/vitest` needs vitest |
@@ -219,7 +249,7 @@ These cost nothing to avoid now and would each cost a debugging session later.
 - `sql.stream` is not implemented on Bun. Page by cursor.
 - `busyTimeout` blocks the event loop for up to 5 seconds by default. Lower it.
 - `PRAGMA synchronous=FULL` is stated explicitly, because the client has no option for it.
-- `BunSocket.makeTls` cannot do CONN-1: with `rejectUnauthorized: false`, `checkServerIdentity` never ran, so pinning failed. A small adapter over `BunSocket.fromDuplex` passes both ways. It belongs behind `Transport`.
+- `BunSocket.makeTls` cannot do CONN-1: with `rejectUnauthorized: false`, `checkServerIdentity` never ran, so pinning failed. `Transport` therefore dials with `node:net` and `node:tls` itself, and reads the stream directly in pieces of at most 16 KB, so that the host can stop reading while what it has read is unrecorded (LOG-4). A write counts only once its callback fires, because before that the bytes are in a buffer that a close discards.
 - WebSockets silently lose data unless `closeOnBackpressureLimit: true` is set, and that setting also gives HOST-5's disconnect.
 - Offer the `iirc.v1` subprotocol first. Bun echoes the first one offered, so offering the key first reflects it back.
 - `Stream.timeout` fires only when the server pulls, so a stalled reader trips nothing. Use `idleTimeout`, and send typed heartbeats, because `StreamSse` cannot send comment lines.
@@ -261,9 +291,7 @@ These cost nothing to avoid now and would each cost a debugging session later.
 ## Unproven
 
 - The stand-alone `iirc web` proxy has not been built.
-- Lanes on `TxQueue` have not been run.
 - Effect's overhead on the append path has been measured only in memory, and commit latency only on synthetic data.
 - `@xstate/test` needs a check against vitest 5. Its graph paths passed under Bun.
 - arm64, musl, macOS, and Windows builds compile but have not run. FTS5 on macOS is unverified.
-
-The first code should prove these on a vertical slice: one Network, the durable Log, the machine as a fold, and a kill test.
+- Ergo has not been run. Its behaviour here, such as replaying always-on `JOIN`s after `376`, comes from reading its source.

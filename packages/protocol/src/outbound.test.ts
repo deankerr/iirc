@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeLine, maxLineBytes, outbound, privmsg } from "./outbound.ts";
+import { maxFrameBytes } from "./frame.ts";
+import { pingToken } from "./line.ts";
+import { encodeLine, maxLineBytes, outbound, pong, privmsg } from "./outbound.ts";
+import type { Outbound } from "./outbound.ts";
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+const wire = (built: Outbound) => {
+  if (built._tag === "Rejected") {
+    throw new Error(built.reason);
+  }
+
+  return encodeLine(built.line);
+};
 
 describe(outbound, () => {
   it("formats a last parameter that needs a colon", () => {
-    expect(outbound("USER", ["claude", "0", "*", "Claude Code"])).toMatchObject({
-      line: { text: "USER claude 0 * :Claude Code" },
-    });
+    expect(decoder.decode(wire(outbound("USER", ["claude", "0", "*", "Claude Code"])))).toBe(
+      "USER claude 0 * :Claude Code\r\n"
+    );
   });
 
   it.each([
@@ -35,15 +49,104 @@ describe(outbound, () => {
   });
 });
 
+const replyTo = (frame: Uint8Array) => wire(pong(pingToken(frame)));
+
+describe(pong, () => {
+  it("LIVE-1: echoes a token that is not UTF-8, byte for byte", () => {
+    const frame = Uint8Array.of(...encoder.encode("PING :"), 0xff, 0xfe, 0x80, 0xe9);
+
+    expect(replyTo(frame)).toStrictEqual(
+      Uint8Array.of(...encoder.encode("PONG "), 0xff, 0xfe, 0x80, 0xe9, 0x0d, 0x0a)
+    );
+  });
+
+  it("LIVE-1: keeps every byte a windows-1252 decoder would have changed", () => {
+    const token = Uint8Array.from({ length: 0x20 }, (_unused, index) => 0x80 + index);
+
+    expect(pingToken(Uint8Array.of(...encoder.encode("PING "), ...token))).toStrictEqual(token);
+  });
+
+  it("LIVE-1: keeps working for an ordinary colon-prefixed trailing token", () => {
+    expect(decoder.decode(replyTo(encoder.encode(":irc.test PING :abc123")))).toBe(
+      "PONG abc123\r\n"
+    );
+  });
+
+  it("LIVE-1: echoes valid UTF-8 unchanged", () => {
+    expect(decoder.decode(replyTo(encoder.encode("PING ☃")))).toBe("PONG ☃\r\n");
+  });
+
+  it("LIVE-1: keeps a token with spaces whole", () => {
+    expect(decoder.decode(replyTo(encoder.encode("PING :two words")))).toBe("PONG :two words\r\n");
+  });
+
+  it("LIVE-1: keeps a token that starts with a colon", () => {
+    expect(decoder.decode(replyTo(encoder.encode("PING ::odd")))).toBe("PONG ::odd\r\n");
+  });
+
+  it("LIVE-1: answers an empty trailing token with an empty one", () => {
+    expect(decoder.decode(replyTo(encoder.encode("PING :")))).toBe("PONG :\r\n");
+  });
+
+  it("LIVE-1: answers a PING with no token with a bare PONG", () => {
+    expect(decoder.decode(replyTo(encoder.encode("PING")))).toBe("PONG\r\n");
+  });
+
+  it("LIVE-1: echoes only the first parameter", () => {
+    expect(decoder.decode(replyTo(encoder.encode("PING first second")))).toBe("PONG first\r\n");
+  });
+
+  it("LIVE-1: finds the token past tags and a source, in any case", () => {
+    expect(decoder.decode(replyTo(encoder.encode("@a=b :irc.test ping token")))).toBe(
+      "PONG token\r\n"
+    );
+  });
+
+  it.each([0x00, 0x0a, 0x0d])("HOST-1: never lets 0x%x reach the wire from a token", (byte) => {
+    expect(pong(Uint8Array.of(0x61, byte, 0x62))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+  });
+
+  it.each([0x00, 0x0d])("HOST-1: a frame holding 0x%x loses the rest, as any Line does", (byte) => {
+    const frame = Uint8Array.of(...encoder.encode("PING :abc"), byte, 0x51, 0x55, 0x49, 0x54);
+
+    expect(decoder.decode(replyTo(frame))).toBe("PONG abc\r\n");
+  });
+
+  it("reports a token too long to fit a Line", () => {
+    const frame = encoder.encode(`PING :${"x".repeat(maxFrameBytes - 6)}`);
+
+    expect(pong(pingToken(frame))).toStrictEqual({ _tag: "Rejected", reason: "TooLong" });
+  });
+
+  it("fits a token that lands exactly on the limit, and refuses one byte more", () => {
+    const longest = maxLineBytes - "PONG ".length;
+
+    expect(pong(new Uint8Array(longest).fill(0x78))._tag).toBe("Safe");
+    expect(pong(new Uint8Array(longest + 1).fill(0x78))._tag).toBe("Rejected");
+  });
+
+  it("never throws or breaks framing, whatever the frame", () => {
+    const frames = Array.from({ length: 2000 }, (_unused, seed) =>
+      Uint8Array.from({ length: seed % 97 }, (_byte, index) => (seed * index * 31) % 256)
+    );
+
+    const unsafe = frames
+      .map((noise) => pong(pingToken(Uint8Array.of(...encoder.encode("PING "), ...noise))))
+      .flatMap((built) => (built._tag === "Safe" ? [encodeLine(built.line).subarray(0, -2)] : []))
+      .filter((body) => body.some((byte) => [0x00, 0x0a, 0x0d].includes(byte)));
+
+    expect(unsafe).toStrictEqual([]);
+  });
+});
+
 describe(privmsg, () => {
   it("builds a Line ending in CRLF", () => {
-    const built = privmsg("#iirc", "hello there");
-
-    if (built._tag === "Rejected") {
-      throw new Error(built.reason);
-    }
-
-    expect(new TextDecoder().decode(encodeLine(built.line))).toBe("PRIVMSG #iirc :hello there\r\n");
+    expect(decoder.decode(wire(privmsg("#iirc", "hello there")))).toBe(
+      "PRIVMSG #iirc :hello there\r\n"
+    );
   });
 
   it.each(["#a,#b", "", "a b"])("rejects %j as a Target", (target) => {

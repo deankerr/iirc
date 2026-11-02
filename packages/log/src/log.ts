@@ -1,6 +1,7 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import type { Entry } from "@iirc/session/entry";
 import { Recorder } from "@iirc/session/recorder";
+import type { Gap } from "@iirc/session/standing";
 import { Context, Effect, FileSystem, Layer } from "effect";
 
 import { openDatabase } from "./database.ts";
@@ -13,6 +14,8 @@ import { makeStore } from "./store.ts";
 export { DataDirectoryLocked, StorageFailed } from "./errors.ts";
 
 export type { LoggedMessage } from "./fold.ts";
+
+export type { Gap } from "@iirc/session/standing";
 
 /** Where the Log keeps its files. */
 export interface LogOptions {
@@ -44,6 +47,15 @@ export class Log extends Context.Service<
       readonly after: number;
       readonly limit: number;
     }) => Effect.Effect<readonly Entry[], StorageFailed>;
+    /**
+     * Gaps that began at a sequence greater than `after`, ascending, at most `limit`,
+     * from every Network unless `network` names one. An open Gap has no `ended`.
+     */
+    readonly gaps: (query: {
+      readonly after: number;
+      readonly limit: number;
+      readonly network?: string;
+    }) => Effect.Effect<readonly Gap[], StorageFailed>;
     /** Messages with a sequence greater than `after`, ascending, at most `limit`. */
     readonly messages: (query: {
       readonly after: number;

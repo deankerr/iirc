@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/daemon.ts",
-    "./routes": "./src/routes.ts"
+    "./routes": "./src/routes.ts",
+    "./tuning": "./src/tuning.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

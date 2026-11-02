@@ -3,10 +3,13 @@ const safe: unique symbol = Symbol("OutboundLine");
 /** The most bytes a Line may hold before its line ending. */
 export const maxLineBytes = 510;
 
-/** A Line that is safe to send. The only way to get one is {@link outbound}. */
+/**
+ * A Line that is safe to send, as the bytes it will be on the wire. The only ways to
+ * get one are {@link outbound} and {@link pong}.
+ */
 export interface OutboundLine {
   readonly [safe]: true;
-  readonly text: string;
+  readonly bytes: Uint8Array;
 }
 
 /** Why a Line cannot be sent. */
@@ -23,8 +26,27 @@ export type Outbound =
   | { readonly _tag: "Rejected"; readonly reason: OutboundRejection };
 
 const encoder = new TextEncoder();
+const lineEnding = encoder.encode("\r\n");
+const space = 0x20;
+const colon = 0x3a;
+const forbiddenBytes: ReadonlySet<number> = new Set([0x00, 0x0a, 0x0d]);
+
 const rejected = (reason: OutboundRejection): Outbound => ({ _tag: "Rejected", reason });
 const hasLineBreakOrNull = (text: string) => /[\0\r\n]/u.test(text);
+
+const safeLine = (bytes: Uint8Array): Outbound =>
+  bytes.length > maxLineBytes
+    ? rejected("TooLong")
+    : { _tag: "Safe", line: { bytes, [safe]: true } };
+
+const concatenate = (head: Uint8Array, tail: Uint8Array) => {
+  const joined = new Uint8Array(head.length + tail.length);
+
+  joined.set(head);
+  joined.set(tail, head.length);
+
+  return joined;
+};
 
 const isMiddleParameter = (param: string) =>
   param !== "" && !param.includes(" ") && !param.startsWith(":") && !hasLineBreakOrNull(param);
@@ -52,9 +74,27 @@ export const outbound = (command: string, params: readonly string[]): Outbound =
 
   const text = [command, ...middle, ...(last === undefined ? [] : [formatLast(last)])].join(" ");
 
-  return encoder.encode(text).length > maxLineBytes
-    ? rejected("TooLong")
-    : { _tag: "Safe", line: { [safe]: true, text } };
+  return safeLine(encoder.encode(text));
+};
+
+/**
+ * Builds the reply to a `PING`, echoing its token byte for byte (LIVE-1). A token is
+ * whatever the Ircd sent, in any encoding, so this never goes through text.
+ * @param token - The `PING`'s first parameter, from `pingToken`, if it had one.
+ * @returns The safe Line, or why it can't be built, such as a token too long to fit.
+ */
+export const pong = (token: Uint8Array | undefined): Outbound => {
+  if (token === undefined) {
+    return safeLine(encoder.encode("PONG"));
+  }
+
+  if (token.some((byte) => forbiddenBytes.has(byte))) {
+    return rejected("InvalidParameter");
+  }
+
+  const isTrailing = token.length === 0 || token.includes(space) || token[0] === colon;
+
+  return safeLine(concatenate(encoder.encode(isTrailing ? "PONG :" : "PONG "), token));
 };
 
 /**
@@ -76,4 +116,4 @@ export const privmsg = (target: string, text: string): Outbound => {
  * @param line - The Line to encode.
  * @returns The bytes to write, with the line ending.
  */
-export const encodeLine = (line: OutboundLine) => encoder.encode(`${line.text}\r\n`);
+export const encodeLine = (line: OutboundLine) => concatenate(line.bytes, lineEnding);

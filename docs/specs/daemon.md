@@ -26,18 +26,22 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
 - **LOG-1.** There is one Log per Daemon. Sequence numbers are global, start at 1, have no gaps, and are never reused, so one cursor can resume everything.
 - **LOG-2.** An Entry is one of:
   - **Line:** one Line in either direction, with its Network, its Connection, and a cause if outbound.
-  - **Connection:** an attempt, opening, or close, with the Ircd, TLS details, and reason.
+  - **Connection:** an attempt, opening, closing, or close, with the Ircd, TLS details, and reason. An attempt names the nicks it will try.
+    - Closing is recorded whenever the Daemon decides to end a Connection, with its reason and whether it chose to leave (LIVE-9). Only a chosen leave is not a failure.
+    - A close says whether it was a refusal (LIVE-5). A refusal seen while a close is under way outranks the reason that started it, because a Network that bans us at accept closes the socket before we can read why.
+    - A Connection the Log could not close, because appends were failing (LOG-9), gets its close once appends succeed, with that reason, so that it is never mistaken for a killed process.
   - **Change:** something the Owner altered, such as Configuration, a Read Marker, or an ignore, with the Frontend that altered it.
   - **Daemon:** a start or stop, with its version.
-  - **Dropped:** an outbound Line that was queued and never written, with the reason.
+  - **Dropped:** an outbound Line that was queued and never written, or whose write did not complete, with the reason. A Line counts as written once the kernel has taken it, not once a buffer in the process has.
   - **Deadline:** a timer that expired with no trace on the wire, such as the end of the login wait (CONN-6) or the burst (CONN-7). Without it, past state could not derive those phases.
 - **LOG-3.** A Line Entry stores the bytes that crossed the Connection, not a decoded or parsed form. Fixing the parser later therefore fixes old history too. Redaction (LOG-6, LOG-7) is the only exception.
 - **LOG-4.** Nothing acts on a Line before it is recorded.
-  - Every complete Line from one socket read is committed in one transaction, and only then acted on, including replying to `PING`.
+  - Complete Lines from a socket read are committed together, at most 1024 to a transaction, and only then acted on, including replying to `PING`. The cap keeps a flood of tiny Lines from holding the writer.
   - An outbound Line is appended as it leaves its queue, immediately before the write, so Log order matches wire order.
   - A crash can leave a Line recorded but unsent, and can never leave one sent but unrecorded.
   - SQLite runs with `synchronous=FULL`, because a Line that was committed must survive power loss as well as a killed process.
   - Bytes the Ircd sent that the Daemon never read are lost with the Connection. They fall inside a Gap.
+  - What the Daemon has read but not yet recorded is bounded in bytes, so that the rest of a flood waits in the kernel. Everything it has read is recorded before the Connection's close, including when it is stopping.
 - **LOG-5.** An outbound Entry records its cause, so "Why did the Daemon send that?" always has an answer.
   - A Frontend's request is recorded with its key name and request ID.
   - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `away-restore`, `ctcp-reply`, or `nick-regain`.
@@ -50,6 +54,8 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
   - An `admin` key can redact an Entry's bytes, for the day a secret gets through. The Entry and its sequence remain, and a Change records who redacted it.
   - Deferred: pruning and retention. Nothing is pruned until we know what a year of Log costs, including large `LIST` replies.
 - **LOG-8.** Times are when the Daemon recorded the Entry. Order comes from sequence numbers, never from clocks, because clocks can jump.
+  - No wait for a reconnect is ever longer than its own delay from now, so a clock set back cannot keep a Network offline.
+  - Deferred: deadlines within a Session still use wall-clock times, so a clock set back by some amount delays noticing a dead Connection by as much.
 - **LOG-9.** If the Log cannot be appended to, the Daemon closes its Connections and reports the fault. It never carries on unrecorded, and it resumes on its own once appends succeed.
 - **LOG-10.** Projections are disposable. Deleting every derived table and restarting gives identical API results.
   - A fold depends only on Entries and the code. Time-sensitive rules, such as casefolding and Highlights, use what was in force at that Entry.
@@ -75,14 +81,15 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - **Channels:** name, autojoin, rejoin-on-kick, key by Credential name, and notification level.
   - **Tuning:** encoding, flood control, liveness, and CTCP replies.
 - **CONF-4.** The process itself needs only a data directory and a listen address, both given as flags or environment variables. Networks are added through the API, so a fresh Daemon needs no config file.
-- ❓ Should Configuration be readable and editable as a TOML file?
-  - **As a view (recommended):** the Log stays the truth, and `iirc config export` and `import` turn it into TOML and back. An import is one Change, and a file is only ever an input.
-  - **As the truth:** the file is what the Daemon obeys, and the Log records each version so that past state stays derivable. API writes must rewrite the file, so the Owner's editor and the API become two writers, and a plain rewrite drops comments.
 - **CONF-5.** What the Owner does through the API is intent, and it survives a reconnect.
   - Join adds the Channel to Configuration with autojoin on, unless asked not to. Part removes it.
   - Changing nick updates the configured nick, unless marked temporary. Otherwise nick regain would undo it.
   - Setting away stores the reason, and it is reapplied after `001`.
   - A Channel entered any other way, such as through Raw or an Ircd forcing it, is not remembered.
+- **CONF-6.** TOML is a view of Configuration, never its truth ([ADR 0004](../adr/0004-configuration-lives-in-the-log.md)).
+  - `iirc config export` writes Configuration as TOML, with Credentials as names only.
+  - `iirc config import` applies a file as one Change. A file is only ever an input, and the Daemon never watches or rewrites one.
+  - Both are Frontends of API operations (API-1).
 
 ### Credentials
 
@@ -120,7 +127,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 
 ### Staying connected
 
-- **LIVE-1.** `PING` always gets a `PONG`, in every phase, through the control lane (SEND-1).
+- **LIVE-1.** `PING` always gets a `PONG`, in every phase until the Connection starts to close, through the control lane (SEND-1). The `PONG` echoes the token's bytes exactly, whatever their encoding. A closing Connection answers nothing, because a `PONG` could only follow the `QUIT`.
 - **LIVE-2.** Silence decides whether a Connection is dead. Any inbound Line proves it is alive. With no inbound Line for 90 seconds, the Daemon declares it dead, so a silently dropped TCP connection is noticed within that time.
 - **LIVE-3.** The Daemon sends its own `PING` with a unique token every 60 seconds, busy or not, through the control lane. The round trip is the Network's lag, derived from the Log.
 - **LIVE-4.** An unexpected close starts a reconnect.
@@ -130,17 +137,20 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - A relevant Change, or an explicit connect, retries straight away.
 - **LIVE-5.** A refusal backs off for at least 30 minutes, and status shows the Network's own text verbatim.
   - A refusal is `463`, `464`, `465`, or any `ERROR` or `FAIL` before `001`, unless it is known to be transient, such as a ping or registration timeout.
+  - `FAIL NICK` is not a refusal, because Ergo sends it after `433` for a reserved nick, and that is CONN-4's fallback.
   - Wording is at most a hint, never the rule. Ergo never sends `465`, and bans with a bare `ERROR`.
-- **LIVE-6.** A reconnect is a new Session. Derived Channel state and every `RPL_ISUPPORT` token are cleared on close, then rebuilt from what the Ircd says, never carried over.
+  - Known transient wordings are limits and restarts, such as ngircd's `Server going down`, `Connection limit reached`, and `too many connections from your IP address`, and Ergo's connection throttle, `Too many clients from your network`, and temporary restrictions. They back off like any failure, which already reaches 5 minutes. Bans and `Access denied` are refusals.
+- **LIVE-6.** A reconnect is a new Session. Derived Channel state, lag, and every `RPL_ISUPPORT` token are cleared on close, then rebuilt from what the Ircd says, never carried over.
 - **LIVE-7.** After the burst, the Daemon rejoins Channels with autojoin on.
   - It batches `JOIN`s by line length, with keyed Channels first (SEND-11).
-  - An unsolicited `JOIN` from the Ircd is the truth, so a Network that kept us attached is not rejoined. Ergo's always-on mode does this.
+  - An unsolicited `JOIN` from the Ircd is the truth, so a Network that kept us attached is not rejoined. Ergo's always-on mode does this, and replays those `JOIN`s just after `376`, so rejoining waits 1 second after the burst for them.
   - Each Channel's failure appears in status. `471`, `473`, `474`, `477`, and `437` retry with backoff, and `475` does not.
 - **LIVE-8.** A kick wins over autojoin. The Channel is not rejoined, in this Session or the next, until the Owner joins again or the Channel has rejoin-on-kick, which waits 10 seconds. An `INVITE` is recorded and never followed automatically.
 - **LIVE-9.** Disconnecting through the API or stopping the Daemon sends `QUIT` with a configured reason through the control lane, waits up to 2 seconds for the queue, and does not reconnect.
 - **LIVE-10.** Time the Daemon was away from a Network is a Gap. Gaps are visible, derived from Connection and Daemon Entries, and shown in the affected Timelines. The Daemon never implies that nothing happened.
   - On a Network that keeps us attached, a Gap means only that we were not listening. Other Users may not have seen us leave.
 - **LIVE-11.** A local close stops acting at once, and keeps recording what the Ircd already sent until it hangs up or 5 seconds pass, so that `ERROR` and whatever follows it are not lost. Sends are refused during this time, and status shows the phase once the close is recorded.
+  - A stop keeps recording for at most the `QUIT` wait (LIVE-9). A silent Connection and a Log that cannot append do not wait, because there is nothing to read or nowhere to record it.
 
 ### Sending
 
@@ -298,8 +308,8 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 - **API-1.** Anything the Daemon can do is an API operation. No ability exists only as a flag, a file, or a console command. The first key is the one exception (AUTH-4).
 - **API-2.** A Frontend never has to parse IRC. Every derived item carries the sequence of the Entry behind it, so that it can always be traced to bytes.
-- **API-3.** Errors are typed and tagged. Operations distinguish a bad request, no Session, a full queue, and a Network refusal.
-- **API-4.** Line bytes are returned as base64 beside the decoded text, because hostile bytes must survive JSON.
+- **API-3.** Errors are typed and tagged. Operations distinguish a bad request, no Session, a full queue, a Line lost to its Connection, a failed write, a Log that is down, and a Network refusal.
+- **API-4.** Line bytes, in a Line or a Dropped Entry, are returned as base64 beside the decoded text, because hostile bytes must survive JSON.
 - **API-5.** `/status` reports the API version, and responses are compressed when asked.
 
 ### Reading
@@ -309,6 +319,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | `GET /bootstrap` | Every Target, the latest items, and members, with one `at` |
 | `GET /entries` | The Log, by cursor, with filters by Network and kind |
 | `GET /messages` | Messages, by cursor, each with the sequence of its Line |
+| `GET /gaps` | Gaps, by cursor, optionally for one Network |
 | `GET /stream` | Replay from a cursor, then live, with no gap or duplicate at the join |
 | `GET /status` | The Daemon and all Networks at a glance |
 | `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state |
@@ -383,6 +394,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - Deferred: an RPM, once the executable is stable.
 - **RUN-2.** Backup uses `VACUUM INTO` from a read connection, so it is safe while running. Credentials held in `Bun.secrets` are not part of a backup.
 - **RUN-3.** A restart is safe at any moment. The new process starts new Sessions, records the Gap, and resumes every Frontend from its cursor.
+  - `SIGTERM` and `SIGINT` are a clean stop: the Network goes first (LIVE-9), then a Daemon `stopped` Entry, then the Log, and the process exits 0.
 - **RUN-4.** The Daemon takes an exclusive lock on its data directory, so that two processes can never hold Sessions for one Log. The lock releases itself if the process is killed.
 - **RUN-5.** Migrations run at startup, after an automatic backup, and never rewrite stored Line bytes. A Log newer than the binary is refused.
 
@@ -391,6 +403,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 - **PROOF-1.** Every requirement has a test that cites its ID where a test is possible. Scripted Ircds cover failure modes that a real Ircd will not produce on demand, and clocks are injected so timer behaviour is tested exactly.
 - **PROOF-2.** `testdata` conformance vectors cover the library. Protocol parsing is fuzzed with random bytes.
 - **PROOF-3.** Before a release, the Daemon passes against each real Ircd in the matrix: ngircd as the floor, and Ergo under `default.yaml`, `traditional.yaml`, and `precis` casemapping.
+  - `bun run proof:floor` covers ngircd: it starts a private one on a free loopback port and checks LIVE, CONN-4, and SEND-2 through the built binary.
 - **PROOF-4.** Kill tests send `SIGKILL` during traffic, then check that no recorded Line is missing or duplicated and that projections rebuild identically. This does not test power loss, which rests on `synchronous=FULL`.
 - **PROOF-5.** Soak test: two Daemons share a Channel on the floor Ircd, one sends a counted Message each minute, and the other checks that none are missing. The first proof in the vision is 30 days of this passing on a real Network as well, with every Gap explained.
 
@@ -478,9 +491,9 @@ Each milestone is a working Daemon. Order is by what makes the next one possible
 Milestone 1 is built in this order, each step a working Daemon:
 
 1. One Network, the durable Log, the machine as a fold, and a kill test.
-2. Reconnecting and refusals.
-3. Configuration, multiple Networks, and API keys.
-4. Credentials and the service unit.
+2. Reconnecting and refusals: LIVE, CONN-3, CONN-4, CONN-7, SEND-1 to SEND-4, and LOG-9.
+3. Configuration, multiple Networks, API keys, Channel membership, LOG-11's reader, and TLS key pinning.
+4. Credentials, CONN-2's `PASS`, CONN-6, and the service unit.
 
 The soak test (PROOF-5) starts after step 4 and runs in the background. Nothing waits for it, and the Daemon runs alongside whatever IRC client the Owner uses.
 

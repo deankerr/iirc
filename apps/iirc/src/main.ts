@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import { DaemonCore } from "@iirc/daemon";
+import { Daemon, DaemonCore } from "@iirc/daemon";
 import { ApiRoutes } from "@iirc/daemon/routes";
-import { Config, Duration, Effect, Layer, Schema } from "effect";
+import { TuningFromJson } from "@iirc/daemon/tuning";
+import { Cause, Config, Duration, Effect, Exit, Layer, Runtime, Schema } from "effect";
 import { Command, Flag } from "effect/cli";
 import { HttpRouter } from "effect/http";
 
@@ -11,14 +12,19 @@ import { version } from "../package.json";
 // AUTH-5: the API listens on loopback, and remote access goes through a proxy.
 const apiHost = "127.0.0.1";
 
-// Stopping must not wait for a Frontend that is slow to hang up.
-const shutdownTimeout = Duration.seconds(1);
+// How long past `quitWaitMillis` a Frontend may take to hang up once the Network has gone:
+// at least the second `hostNetwork` allows itself past that wait.
+const frontendWait = 1500;
 
 const Port = Schema.Int.check(Schema.isBetween({ maximum: 65_535, minimum: 1 }));
 
 const flags = {
+  alternateNick: Flag.String("alternate-nick").pipe(
+    Flag.withDescription("Nick to try when the nick is taken, repeatable, in order"),
+    Flag.atLeast(0)
+  ),
   channel: Flag.String("channel").pipe(
-    Flag.withDescription("Channel to join once registered, repeatable"),
+    Flag.withDescription("Channel to autojoin once registered, repeatable"),
     Flag.atLeast(0)
   ),
   dataDir: Flag.String("data-dir").pipe(
@@ -41,6 +47,10 @@ const flags = {
     Flag.withDescription("Port of the Ircd"),
     Flag.withDefault(6697)
   ),
+  quitReason: Flag.String("quit-reason").pipe(
+    Flag.withDescription("What QUIT says when the Daemon stops"),
+    Flag.withDefault("iirc")
+  ),
   realname: Flag.String("realname").pipe(
     Flag.withDescription("Real name to register with"),
     Flag.withDefault("iirc")
@@ -48,6 +58,13 @@ const flags = {
   tls: Flag.Boolean("tls").pipe(
     Flag.withDescription("Connect with TLS. Pass --no-tls for plaintext."),
     Flag.withDefault(true)
+  ),
+  tuning: Flag.String("tuning").pipe(
+    Flag.withDescription(
+      'JSON overriding any Tuning number, such as {"reconnectInitialMillis":1000}'
+    ),
+    Flag.withDefault("{}"),
+    Flag.withSchema(TuningFromJson)
   ),
   username: Flag.String("username").pipe(
     Flag.withDescription("Username to register with"),
@@ -58,22 +75,45 @@ const flags = {
 const daemon = Command.make(
   "daemon",
   flags,
-  ({ channel, dataDir, host, httpPort, network, nick, port, realname, tls, username }) =>
-    HttpRouter.serve(ApiRoutes, { disableLogger: true }).pipe(
+  ({
+    alternateNick,
+    channel,
+    dataDir,
+    host,
+    httpPort,
+    network,
+    nick,
+    port,
+    quitReason,
+    realname,
+    tls,
+    tuning,
+    username,
+  }) =>
+    Daemon.stopsFirst.pipe(
       Layer.provide(
-        BunHttpServer.layer({
-          gracefulShutdownTimeout: shutdownTimeout,
-          hostname: apiHost,
-          port: httpPort,
-        })
+        HttpRouter.serve(ApiRoutes, { disableLogger: true }).pipe(
+          Layer.provide(
+            BunHttpServer.layer({
+              gracefulShutdownTimeout: Duration.millis(tuning.quitWaitMillis + frontendWait),
+              hostname: apiHost,
+              port: httpPort,
+            })
+          )
+        )
       ),
       // Outside `serve`, which forks the MemoMap.
       Layer.provide(
         DaemonCore({
           dataDir,
-          input: { channels: channel, nick, realname, username },
-          ircd: { host, port, tls },
-          network,
+          network: {
+            channels: channel.map((name) => ({ name })),
+            id: network,
+            identity: { alternates: alternateNick, nick, realname, username },
+            ircds: [{ host, port, tls }],
+            quitReason,
+            tuning,
+          },
           version,
         })
       ),
@@ -86,4 +126,17 @@ const iirc = Command.make("iirc").pipe(
   Command.withSubcommands([daemon])
 );
 
-Command.run(iirc, { version }).pipe(Effect.provide(BunServices.layer), BunRuntime.runMain);
+// `runMain` interrupts main on SIGINT and SIGTERM, which is how a Daemon is asked to stop,
+// so here an interrupt is a clean exit, and the default would call it 130.
+const teardown: Runtime.Teardown = (exit, onExit) => {
+  if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) {
+    onExit(0);
+  } else {
+    Runtime.defaultTeardown(exit, onExit);
+  }
+};
+
+Command.run(iirc, { version }).pipe(
+  Effect.provide(BunServices.layer),
+  BunRuntime.runMain({ teardown })
+);

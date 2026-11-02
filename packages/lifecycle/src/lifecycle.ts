@@ -2,27 +2,48 @@ import { initialTransition, transition } from "xstate";
 import type { SnapshotFrom } from "xstate";
 
 import { commandsOf, network } from "./machine.ts";
+import type { Tuning } from "./tuning.ts";
 
-/** Who to be on a Network, and where to go once registered. */
+/** What stays the same for every Connection to a Network. */
 export interface NetworkInput {
-  readonly channels: readonly string[];
-  readonly nick: string;
   readonly realname: string;
+  readonly tuning: Tuning;
   readonly username: string;
 }
 
 /** Everything that can move a Network's machine. `at` is epoch milliseconds. */
 export type NetworkEvent =
-  | { readonly type: "ATTEMPT"; readonly at: number }
+  /** A new Connection, and the nicks it will try, as recorded so replay makes the same choices. */
+  | { readonly type: "ATTEMPT"; readonly at: number; readonly nicks: readonly string[] }
   | { readonly type: "OPENED"; readonly at: number }
+  /** An inbound Line that parsed. A `PING` arrives as `PING`, never as this. */
   | {
       readonly type: "LINE";
       readonly at: number;
       readonly command: string;
       readonly params: readonly string[];
     }
-  | { readonly type: "CLOSED"; readonly at: number; readonly reason: string }
+  /** An inbound `PING`, with its first parameter exactly as it arrived. */
+  | { readonly type: "PING"; readonly at: number; readonly token: Uint8Array | undefined }
+  /** An inbound Line with no command to obey: it proves the Connection is alive, and no more. */
+  | { readonly type: "HEARD"; readonly at: number }
+  /** The Daemon chose to leave (LIVE-9). */
+  | { readonly type: "CLOSING"; readonly at: number; readonly reason: string }
+  /**
+   * The Daemon's host is ending the Connection for a reason the machine did not decide. No
+   * welcome starts a Session after this, and a refusal that follows is still read (LOG-2).
+   */
+  | { readonly type: "LEAVING"; readonly at: number }
+  | {
+      readonly type: "CLOSED";
+      readonly at: number;
+      readonly reason: string;
+      readonly refused?: true;
+    }
   | { readonly type: "DEADLINE"; readonly at: number; readonly name: string };
+
+/** Which queue an outbound Line waits in (SEND-1). */
+export type Lane = "control" | "interactive" | "background";
 
 /** What the machine asks its host to do. */
 export type Command =
@@ -31,18 +52,32 @@ export type Command =
       readonly command: string;
       readonly params: readonly string[];
       readonly cause: string;
+      readonly lane: Lane;
     }
-  | { readonly type: "closeConnection"; readonly reason: string };
+  /** A `PONG`, kept apart from `sendLine` because its token is bytes, not text (LIVE-1). */
+  | {
+      readonly type: "sendPong";
+      readonly token: Uint8Array | undefined;
+      readonly cause: string;
+      readonly lane: Lane;
+    }
+  /** `refused` is copied to the `closed` Entry, where backoff reads it (LIVE-5). */
+  | { readonly type: "closeConnection"; readonly reason: string; readonly refused?: true }
+  /** The burst is over, once per Session, so what waits on it can start (CONN-7). */
+  | { readonly type: "burstComplete" };
 
-/** The coarse state of a Network, as the machine's host sees it. */
-export type Phase = "idle" | "connecting" | "registering" | "session" | "closed";
+/**
+ * The coarse state of a Network, as the machine's host sees it. `closing` is any close
+ * under way, whoever started it. A `closing` Entry is what says the Daemon chose it.
+ */
+export type Phase = "idle" | "connecting" | "registering" | "session" | "closing" | "closed";
 
 /** A Network's machine at one point in its fold. */
 export type NetworkSnapshot = SnapshotFrom<typeof network>;
 
 /**
  * Starts a Network's machine.
- * @param input - Who to be on the Network.
+ * @param input - What stays the same for every Connection.
  * @returns The first snapshot.
  */
 export const start: (input: NetworkInput) => NetworkSnapshot = (input) => {
@@ -73,7 +108,7 @@ export const step: (
  * Replays events into a snapshot, discarding Commands because their outcomes are
  * already in the events.
  * @param events - Everything that happened, in order.
- * @param input - Who to be on the Network.
+ * @param input - What stays the same for every Connection.
  * @returns The snapshot after the last event.
  */
 export const fold: (events: Iterable<NetworkEvent>, input: NetworkInput) => NetworkSnapshot = (
@@ -105,7 +140,7 @@ export const deadline: (
  * @returns The Phase.
  */
 export const phase: (snapshot: NetworkSnapshot) => Phase = ({ value }) =>
-  value === "idle" || value === "closed" ? value : value.connection;
+  value === "idle" || value === "closed" || value === "closing" ? value : value.connection;
 
 /**
  * Reads why the last Connection closed.

@@ -29,10 +29,20 @@ const program = Effect.gen(function* () {
     _tag: "Connection",
     ircd: { host: "irc.example", port: 6697, tls: true },
     network: "libera",
+    nicks: ["alice"],
     phase: "attempt",
   } as const;
 
-  yield* record([attempt, line(":ircd 001 alice :Welcome", "inbound")], Array.isArray);
+  // The first Entry of a fresh Log, so its sequence is 1.
+  const opened = {
+    _tag: "Connection",
+    connection: 1,
+    ircd: attempt.ircd,
+    network: "libera",
+    phase: "opened",
+  } as const;
+
+  yield* record([attempt, opened, line(":ircd 001 alice :Welcome", "inbound")], Array.isArray);
 
   // Three Lines from one socket read, which must survive whole or not at all.
   const batch = [

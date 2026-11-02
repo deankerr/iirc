@@ -1,15 +1,17 @@
 import type { Entry } from "@iirc/session/entry";
 import { RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
+import { noStanding, noStandings } from "@iirc/session/standing";
+import type { Gap, Standings } from "@iirc/session/standing";
 import { Array as Arr, Clock, Effect, pipe, Ref, Schema, Semaphore } from "effect";
 import { SqlSchema } from "effect/sql";
 import type { SqlClient } from "effect/sql";
 import { isSqlError } from "effect/sql/SqlError";
 
 import { StorageFailed } from "./errors.ts";
-import { foldEntries, noSessions } from "./fold.ts";
-import type { LoggedMessage, Sessions } from "./fold.ts";
-import { EntryRow, MessageRow, Page } from "./rows.ts";
+import { foldEntries } from "./fold.ts";
+import type { Folded, LoggedMessage } from "./fold.ts";
+import { EntryRow, GapPage, GapRow, MessageRow, Page } from "./rows.ts";
 
 // How many Entries a replay holds in memory at once.
 const replayPageSize = 1000;
@@ -24,7 +26,7 @@ const toStorageFailed = (cause: unknown) => new StorageFailed({ cause });
 /**
  * Builds what the Log does over an open database. It rebuilds first, which is the one
  * pass over Entries at startup: it makes every derived table whole, and it leaves the
- * Sessions to pick up from where the last process left off (LOG-10).
+ * Standings to pick up from where the last process left off (LOG-10).
  * @param sql - The migrated client, which must have no other writer.
  * @returns The operations of both `Log` and `Recorder`.
  */
@@ -48,6 +50,17 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
       sql`SELECT * FROM messages WHERE sequence > ${after} ORDER BY sequence LIMIT ${limit}`,
   });
 
+  // `network` is NULL to ask for every Network, which the table is small enough to scan.
+  const readGaps = SqlSchema.findAll({
+    Request: GapPage,
+    Result: GapRow,
+    execute: ({ after, limit, network = null }) => sql`
+      SELECT * FROM gaps
+      WHERE sequence > ${after} AND (${network} IS NULL OR network = ${network})
+      ORDER BY sequence LIMIT ${limit}
+    `,
+  });
+
   // One statement per row, because a socket read can hold more Lines than a single
   // statement can bind, and those Lines are chosen by the Network.
   const insertEntry = SqlSchema.void({
@@ -63,6 +76,14 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   const insertMessages = (messages: readonly LoggedMessage[]) =>
     Effect.forEach(messages, insertMessage, { discard: true });
 
+  // Keyed by where a Gap began, so a Gap's end replaces its own row.
+  const writeGap = SqlSchema.void({
+    Request: GapRow,
+    execute: (row) => sql`INSERT OR REPLACE INTO gaps ${sql.insert(row)}`,
+  });
+
+  const writeGaps = (gaps: readonly Gap[]) => Effect.forEach(gaps, writeGap, { discard: true });
+
   // Only a rebuild, which has a known page size and a whole table to fill, does this.
   const insertMessageBatch = SqlSchema.void({
     Request: Schema.NonEmptyArray(MessageRow),
@@ -73,45 +94,45 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     Effect.forEach(Arr.chunksOf(messages, rebuildBatchSize), insertMessageBatch, { discard: true });
 
   const replay = Effect.fnUntraced(function* <E>(
-    onMessages: (messages: readonly LoggedMessage[]) => Effect.Effect<void, E>
+    onPage: (folded: Folded) => Effect.Effect<void, E>
   ) {
-    let sessions = noSessions;
+    let standings = noStandings;
     let after = 0;
     let page: readonly Entry[] = [];
 
     do {
       page = yield* readEntries({ after, limit: replayPageSize });
 
-      const folded = foldEntries(sessions, page);
+      const folded = foldEntries(standings, page);
 
-      yield* onMessages(folded.messages);
+      yield* onPage(folded);
 
-      ({ sessions } = folded);
+      ({ standings } = folded);
       after = page.at(-1)?.sequence ?? after;
     } while (page.length === replayPageSize);
 
-    return sessions;
+    return standings;
   });
 
-  const sessions = yield* Ref.make(noSessions);
+  const standings = yield* Ref.make(noStandings);
 
-  // One writer at a time, so that the Sessions a transaction folds from are the ones
+  // One writer at a time, so that the Standings a transaction folds from are the ones
   // the last commit left. The client's own lock is no use here, because it is
-  // released before `sessions` is set, and the next writer would read stale state.
+  // released before `standings` is set, and the next writer would read stale state.
   const writer = yield* Semaphore.make(1);
 
-  // Runs a transaction that yields new Sessions, and publishes them only once they
+  // Runs a transaction that yields new Standings, and publishes them only once they
   // are durable, so that a rollback has nothing to undo. Nothing here can be
-  // interrupted, so `sessions` never misses a commit, and what `within` saw is
+  // interrupted, so `standings` never misses a commit, and what `within` saw is
   // always either committed or reported as a failure.
   const commit = <A, E>(
-    transaction: (current: Sessions) => Effect.Effect<readonly [A, Sessions], E>
+    transaction: (current: Standings) => Effect.Effect<readonly [A, Standings], E>
   ) =>
     Effect.gen(function* () {
-      const current = yield* Ref.get(sessions);
+      const current = yield* Ref.get(standings);
       const [result, next] = yield* sql.withTransaction(transaction(current));
 
-      yield* Ref.set(sessions, next);
+      yield* Ref.set(standings, next);
 
       return result;
     }).pipe(
@@ -139,10 +160,11 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
         const folded = foldEntries(current, recorded);
 
         yield* insertMessages(folded.messages);
+        yield* writeGaps(folded.gaps);
 
         const result = yield* Effect.sync(() => within(recorded));
 
-        return [result, folded.sessions] as const;
+        return [result, folded.standings] as const;
       })
     ).pipe(Effect.mapError((cause) => new RecordFailed({ cause })));
 
@@ -150,8 +172,11 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   const rebuild = commit(() =>
     Effect.gen(function* () {
       yield* sql`DELETE FROM messages`;
+      yield* sql`DELETE FROM gaps`;
 
-      const rebuilt = yield* replay(insertMessageBatches);
+      const rebuilt = yield* replay(({ gaps, messages }) =>
+        Effect.andThen(insertMessageBatches(messages), writeGaps(gaps))
+      );
 
       return [undefined, rebuilt] as const;
     }).pipe(Effect.interruptible)
@@ -162,10 +187,14 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   return {
     entries: (query: Page): Effect.Effect<readonly Entry[], StorageFailed> =>
       readEntries(query).pipe(Effect.mapError(toStorageFailed)),
+    gaps: (query: GapPage): Effect.Effect<readonly Gap[], StorageFailed> =>
+      readGaps(query).pipe(Effect.mapError(toStorageFailed)),
     head: readHead.pipe(Effect.mapError(toStorageFailed)),
     messages: (query: Page): Effect.Effect<readonly LoggedMessage[], StorageFailed> =>
       readMessages(query).pipe(Effect.mapError(toStorageFailed)),
     rebuild,
     record,
+    standing: (network: string) =>
+      Effect.map(Ref.get(standings), (held) => held.get(network) ?? noStanding),
   };
 });

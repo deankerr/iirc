@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { parseFrame, parseLine } from "./line.ts";
+import { parseFrame, parseLine, pingToken } from "./line.ts";
 
 const Vectors = Schema.Struct({
   tests: Schema.Array(
@@ -80,5 +80,30 @@ describe(parseFrame, () => {
     const frame = new Uint8Array([0x40, 0x61, 0x3d, 0xff, 0x20, 0x50, 0x49, 0x4e, 0x47]);
 
     expect(parseFrame(frame)).toMatchObject({ _tag: "Line", line: { command: "PING" } });
+  });
+});
+
+describe(pingToken, () => {
+  const encoder = new TextEncoder();
+
+  it("LIVE-1: finds the token as bytes, past tags and a source", () => {
+    const frame = Uint8Array.of(...encoder.encode("@t=1 :irc.test PING :"), 0xff, 0x20, 0x41);
+
+    expect(pingToken(frame)).toStrictEqual(Uint8Array.of(0xff, 0x20, 0x41));
+  });
+
+  it("LIVE-1: has no token for a bare PING", () => {
+    expect(pingToken(encoder.encode("PING"))).toBeUndefined();
+  });
+
+  it.each(["", "   ", ":source-only"])("has no token for %j, which is not a Line", (text) => {
+    expect(pingToken(encoder.encode(text))).toBeUndefined();
+  });
+
+  it("LIVE-1: agrees with parseFrame on where a valid token starts and ends", () => {
+    const parsed = parseFrame(encoder.encode(":a PING   ☃  second"));
+
+    expect(parsed).toMatchObject({ line: { params: ["☃", "second"] } });
+    expect(new TextDecoder().decode(pingToken(encoder.encode(":a PING   ☃  second")))).toBe("☃");
   });
 });

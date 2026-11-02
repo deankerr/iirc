@@ -9,17 +9,11 @@ import {
   welcoming,
 } from "@iirc/session/testing";
 import type { Certificate } from "@iirc/session/testing";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, Exit, FileSystem, Layer, Scope } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import {
-  appRoot,
-  buildBinary,
-  buildTimeout,
-  freePort,
-  healthyClient,
-  startBinary,
-} from "./testing.ts";
+import { appRoot, freePort, healthyClient, startBinary } from "./binary.ts";
+import { buildBinary, buildTimeout } from "./testing.ts";
 
 // CONN-1 against the real thing: the minified binary, on a real socket, with nothing
 // faked but the authority it trusts. It trusts what `NODE_EXTRA_CA_CERTS` names, and a
@@ -225,6 +219,104 @@ describe("the compiled binary over TLS (CONN-1)", () => {
   );
 
   it.live(
+    "verifies again on a reconnect, and carries on over TLS",
+    () =>
+      Effect.gen(function* () {
+        const authority = yield* testAuthority("iirc test CA");
+
+        const ircd = yield* scriptedIrcd(welcoming(nick), {
+          tls: authority.issue(`DNS:${localhost}`),
+        });
+
+        const { daemon } = yield* startDaemon(
+          { host: localhost, port: ircd.port },
+          {
+            caFile: authority.caFile,
+            flags: ["--tuning", '{"reconnectInitialMillis":50,"reconnectMaxMillis":50}'],
+          }
+        );
+
+        yield* assertBothWays(daemon, ircd);
+        yield* ircd.hangUp;
+
+        yield* eventually(ircd.accepted, (accepted) => accepted === 2, settleLimit);
+        yield* eventually(daemon.status(), inSession, settleLimit);
+        yield* eventually(ircd.receivedOn(1), includesAll(`JOIN ${channel}`), settleLimit);
+
+        yield* daemon.send({ payload: { target: channel, text: "after the reconnect" } });
+        yield* eventually(
+          ircd.receivedOn(1),
+          includesAll(`PRIVMSG ${channel} :after the reconnect`)
+        );
+
+        const entries = yield* allEntries(daemon);
+
+        assert.deepStrictEqual(yield* ircd.serverNames, [localhost, localhost]);
+        assert.deepStrictEqual(
+          entries.flatMap((entry) => (entry._tag === "Connection" ? [entry.phase] : [])),
+          ["attempt", "opened", "closed", "attempt", "opened"]
+        );
+        assert.isTrue(
+          entries.every((entry) => entry._tag !== "Connection" || entry.ircd.tls),
+          "a reconnect must not fall back to plaintext"
+        );
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    { timeout: testTimeout }
+  );
+
+  it.live(
+    "will not go back to an Ircd whose certificate has stopped being good, on a reconnect",
+    () =>
+      Effect.gen(function* () {
+        const authority = yield* testAuthority("iirc test CA");
+        const stranger = yield* testAuthority("iirc stranger CA");
+        const port = yield* freePort;
+
+        const started = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+          Scope.close(scope, Exit.void)
+        );
+
+        const ircd = yield* scriptedIrcd(welcoming(nick), {
+          port,
+          tls: authority.issue(`DNS:${localhost}`),
+        }).pipe(Scope.provide(started));
+
+        const { daemon } = yield* startDaemon(
+          { host: localhost, port },
+          {
+            caFile: authority.caFile,
+            flags: ["--tuning", '{"reconnectInitialMillis":50,"reconnectMaxMillis":50}'],
+          }
+        );
+
+        yield* eventually(daemon.status(), inSession, settleLimit);
+        yield* eventually(ircd.received, includesAll(`JOIN ${channel}`), settleLimit);
+        yield* Scope.close(started, Exit.void);
+
+        const impostor = yield* scriptedIrcd(welcoming(nick), {
+          port,
+          tls: stranger.issue(`DNS:${localhost}`),
+        });
+
+        const closes = yield* eventually(
+          allEntries(daemon),
+          (entries) =>
+            entries.some(
+              (entry) =>
+                entry._tag === "Connection" &&
+                entry.phase === "closed" &&
+                entry.reason?.includes("unable to verify") === true
+            ),
+          settleLimit
+        );
+
+        assert.isNotEmpty(closes);
+        assert.deepStrictEqual(yield* impostor.received, []);
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    { timeout: testTimeout }
+  );
+
+  it.live(
     "refuses a certificate for another hostname",
     () =>
       Effect.gen(function* () {
@@ -336,7 +428,8 @@ describe("the compiled binary over TLS (CONN-1)", () => {
         const entries = yield* allEntries(daemon);
 
         assert.strictEqual(bytes[0], tlsHandshakeRecord);
-        assert.deepStrictEqual(yield* ircd.received, []);
+        // Not `received` being empty: a handshake is random, and holds a CRLF now and then.
+        assert.notInclude(Buffer.from(bytes).toString("latin1"), `NICK ${nick}`);
         assert.lengthOf(
           entries.filter(({ _tag }) => _tag === "Line"),
           0

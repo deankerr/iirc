@@ -8,6 +8,7 @@
     "./events": "./src/events.ts",
     "./network": "./src/network.ts",
     "./recorder": "./src/recorder.ts",
+    "./standing": "./src/standing.ts",
     "./testing": "./src/testing.ts",
     "./transport": "./src/transport.ts"
   },
@@ -15,9 +16,9 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@effect/platform-bun": "catalog:",
     "@iirc/lifecycle": "workspace:*",
     "@iirc/protocol": "workspace:*",
+    "@iirc/state": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

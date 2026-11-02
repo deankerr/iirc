@@ -5,6 +5,7 @@ import { TestClock } from "effect/testing";
 
 import type { NewEntry } from "./entry.ts";
 import { MemoryEntries, Recorder } from "./recorder.ts";
+import { foldStandings, noStanding, noStandings } from "./standing.ts";
 
 const deadline = (name: string): NewEntry => ({ _tag: "Deadline", name, network: "libera" });
 
@@ -16,8 +17,33 @@ const line: NewEntry = {
   network: "libera",
 };
 
+const attempt = (network: string): NewEntry => ({
+  _tag: "Connection",
+  ircd: { host: "irc.example", port: 6697, tls: true },
+  network,
+  nicks: ["alice"],
+  phase: "attempt",
+});
+
+const welcome = (network: string): NewEntry => ({
+  ...line,
+  bytes: new TextEncoder().encode(":ircd 001 alice :Welcome"),
+  network,
+});
+
+// The `attempt` is always the first Entry of these tests, so its sequence is 1.
+const opened = (network: string): NewEntry => ({
+  _tag: "Connection",
+  connection: 1,
+  ircd: { host: "irc.example", port: 6697, tls: true },
+  network,
+  phase: "opened",
+});
+
 const record = (entries: Arr.NonEmptyReadonlyArray<NewEntry>) =>
   Recorder.use(({ record }) => record(entries, (recorded) => recorded));
+
+const standing = (network: string) => Recorder.use(({ standing }) => standing(network));
 
 const sequences = Effect.map(
   MemoryEntries.use(({ entries }) => entries),
@@ -106,6 +132,62 @@ describe("Recorder.memory", () => {
       assert.strictEqual(next?.sequence, 2);
       assert.deepStrictEqual(yield* sequences, [1, 2]);
     }).pipe(Effect.provide(Recorder.memoryReadable))
+  );
+
+  it.effect("knows nothing of a Network nothing was recorded for", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* standing("libera"), noStanding);
+    }).pipe(Effect.provide(Recorder.memory))
+  );
+
+  it.effect("keeps one Standing per Network, from the Entries recorded", () =>
+    Effect.gen(function* () {
+      yield* record([attempt("libera"), opened("libera"), welcome("libera"), attempt("oftc")]);
+
+      const libera = yield* standing("libera");
+      const oftc = yield* standing("oftc");
+
+      assert.strictEqual(libera.self, "alice");
+      assert.strictEqual(libera.attempt?.sequence, 1);
+      assert.isUndefined(oftc.self);
+      assert.strictEqual(oftc.attempt?.sequence, 4);
+    }).pipe(Effect.provide(Recorder.memory))
+  );
+
+  it.effect("agrees with folding what it kept", () =>
+    Effect.gen(function* () {
+      yield* record([attempt("libera")]);
+      yield* record([welcome("libera"), deadline("a")]);
+      yield* record([{ _tag: "Daemon", phase: "started", version: "0.0.0" }]);
+
+      const entries = yield* MemoryEntries.use(({ entries }) => entries);
+
+      assert.deepStrictEqual(
+        yield* standing("libera"),
+        foldStandings(noStandings, entries).get("libera")
+      );
+    }).pipe(Effect.provide(Recorder.memoryReadable))
+  );
+
+  it.effect("a rollback leaves the Standing as it was", () =>
+    Effect.gen(function* () {
+      yield* record([attempt("libera"), opened("libera")]);
+
+      const before = yield* standing("libera");
+
+      const exit = yield* Recorder.use(({ record }) =>
+        record([welcome("libera")], () => {
+          throw new Error("machine threw");
+        })
+      ).pipe(Effect.exit);
+
+      assert.isTrue(Exit.isFailure(exit));
+      assert.strictEqual(yield* standing("libera"), before);
+
+      yield* record([welcome("libera")]);
+
+      assert.strictEqual((yield* standing("libera")).self, "alice");
+    }).pipe(Effect.provide(Recorder.memory))
   );
 
   it.effect("starts empty for each build of the Layer", () =>

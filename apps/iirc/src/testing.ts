@@ -1,13 +1,12 @@
 import { BunServices } from "@effect/platform-bun";
 import { assert } from "@effect/vitest";
-import { DaemonApi } from "@iirc/api";
-import { Effect, FileSystem, Schedule, Stream } from "effect";
-import { constVoid } from "effect/Function";
-import { HttpApiClient } from "effect/http-api";
+import type { LogEntry } from "@iirc/api";
+import type { Tuning } from "@iirc/lifecycle/tuning";
+import { nextAttempt, noStanding, reduceStanding } from "@iirc/session/standing";
+import { Effect, FileSystem } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-/** Where this package's sources sit above. */
-export const appRoot = `${import.meta.dirname}/..`;
+import { appRoot } from "./binary.ts";
 
 /** How long a build takes, far past what it needs. */
 export const buildTimeout = 30_000;
@@ -32,63 +31,56 @@ export const buildBinary = (binary: string) =>
     assert.strictEqual(Number(code), 0, "the binary did not build");
   }).pipe(Effect.scoped, Effect.provide(BunServices.layer));
 
-/** Asks the kernel for a port nothing is using. */
-export const freePort = Effect.acquireUseRelease(
-  Effect.sync(() => Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data: constVoid } })),
-  ({ port }) => Effect.succeed(port),
-  (listening) =>
-    Effect.sync(() => {
-      listening.stop(true);
-    })
-);
+/**
+ * What LIVE-4 lets the Nth failure in a row wait, at the least: the first half of its
+ * delay, because jitter only moves it within the upper half.
+ * @param failures - How many have failed in a row.
+ * @param tuning - The Network's Tuning.
+ * @returns The shortest wait, in milliseconds.
+ */
+export const shortestWait = (
+  failures: number,
+  { reconnectInitialMillis, reconnectMaxMillis }: Tuning
+) => Math.ceil(Math.min(reconnectInitialMillis * 2 ** (failures - 1), reconnectMaxMillis) / 2);
 
 /**
- * Starts a binary in the enclosing scope, which kills whatever is left of it, and keeps
- * everything it prints. The environment is empty so that nothing leaks in.
- * @param binary - The binary to run.
- * @param flags - Its arguments.
- * @param environment - All of its environment, but for `PATH`.
- * @returns The child, and what it has printed so far.
+ * Checks that every `attempt` after a run that was killed waited as long as it should.
+ * `nextAttempt` is what the Daemon obeys, and the floor beneath it comes from the spec's
+ * own numbers, or a broken `nextAttempt` would pass itself.
+ * @param entries - The whole Log, with every run before the last ending in a kill.
+ * @param tuningOf - The Tuning in force for an `attempt`, counting from 0.
  */
-export const startBinary = Effect.fnUntraced(function* (
-  binary: string,
-  flags: readonly string[],
-  environment: Readonly<Record<string, string>>
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const output: string[] = [];
+export const assertBackoff = (
+  entries: readonly LogEntry[],
+  tuningOf: (attempt: number) => Tuning
+) => {
+  let standing = noStanding;
+  let failures = 0;
+  let previous: LogEntry | undefined;
 
-  const child = yield* spawner.spawn(
-    ChildProcess.make(binary, flags, {
-      env: { PATH: process.env.PATH, ...environment },
-      extendEnv: false,
-    })
-  );
+  for (const entry of entries) {
+    if (entry._tag === "Connection" && entry.phase === "attempt") {
+      const tuning = tuningOf(failures);
+      const label = `attempt ${failures + 1}, Entry ${entry.sequence}`;
 
-  const reader = yield* child.all.pipe(
-    Stream.decodeText(),
-    Stream.runForEach((text) =>
-      Effect.sync(() => {
-        output.push(text);
-      })
-    ),
-    Effect.ignore,
-    Effect.forkScoped
-  );
+      if (failures > 0) {
+        assert.isAtLeast(
+          entry.at,
+          nextAttempt(standing, { ircds: [entry.ircd], tuning }).at,
+          `${label} came before Standing allowed it`
+        );
+        assert.isAtLeast(
+          entry.at - (previous?.at ?? 0),
+          shortestWait(failures, tuning),
+          `${label} did not wait out the first half of its delay`
+        );
+      }
 
-  return { child, output: () => output.join(""), reader };
-});
+      failures += 1;
+    }
 
-/**
- * Builds a client for a Daemon's API, once that API is answering.
- * @param httpPort - The Daemon's API port.
- * @returns The client.
- */
-export const healthyClient = (httpPort: number) =>
-  Effect.tap(
-    HttpApiClient.make(DaemonApi, { baseUrl: `http://127.0.0.1:${httpPort}` }),
-    ({ health }) =>
-      health
-        .health()
-        .pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 250 }), Effect.orDie)
-  );
+    // A `started` Entry comes after the kill, and is no part of what was killed.
+    previous = entry._tag === "Daemon" ? previous : entry;
+    standing = reduceStanding(standing, entry);
+  }
+};

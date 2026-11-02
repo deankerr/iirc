@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import type { Entry, NewEntry } from "@iirc/session/entry";
 import { toEvent } from "@iirc/session/events";
 import { Recorder, RecordFailed } from "@iirc/session/recorder";
+import { foldStandings, noStanding, noStandings } from "@iirc/session/standing";
 import {
   Array as Arr,
   Cause,
@@ -28,10 +29,11 @@ const encoder = new TextEncoder();
 const ircd = { host: "irc.example", port: 6697, tls: true };
 const childScript = `${import.meta.dirname}/recording-child.ts`;
 
-const attempt = (network = "libera"): NewEntry => ({
+const attempt = (network = "libera", nicks: readonly string[] = ["alice", "alice_"]): NewEntry => ({
   _tag: "Connection",
   ircd,
   network,
+  nicks,
   phase: "attempt",
 });
 
@@ -52,16 +54,78 @@ const cutInbound = (text: string): NewEntry => ({
   network: "libera",
 });
 
-const outbound = (text: string, network = "libera"): NewEntry => ({
+const sent = (text: string, cause: string, network = "libera"): NewEntry => ({
   _tag: "Line",
   bytes: encoder.encode(text),
-  cause: "test",
+  cause,
   connection: 1,
   direction: "outbound",
   network,
 });
 
+const outbound = (text: string, network = "libera") => sent(text, "test", network);
+
 const deadline = (name: string): NewEntry => ({ _tag: "Deadline", name, network: "libera" });
+
+const opened = (connection: number, network = "libera"): NewEntry => ({
+  _tag: "Connection",
+  connection,
+  ircd,
+  network,
+  phase: "opened",
+});
+
+const closing = (
+  connection: number,
+  reason: string,
+  network = "libera",
+  chosen = true
+): NewEntry => ({
+  _tag: "Connection",
+  chosen,
+  connection,
+  ircd,
+  network,
+  phase: "closing",
+  reason,
+});
+
+const closed = (connection: number, reason: string, network = "libera"): NewEntry => ({
+  _tag: "Connection",
+  connection,
+  ircd,
+  network,
+  phase: "closed",
+  reason,
+});
+
+const refused = (connection: number, reason: string, network = "libera"): NewEntry => ({
+  _tag: "Connection",
+  connection,
+  ircd,
+  network,
+  phase: "closed",
+  reason,
+  refused: true,
+});
+
+const dropped = (text: string): NewEntry => ({
+  _tag: "Dropped",
+  bytes: encoder.encode(text),
+  cause: "api",
+  connection: 1,
+  network: "libera",
+  reason: "the Connection ended",
+});
+
+const daemon = (phase: "started" | "stopped"): NewEntry => ({
+  _tag: "Daemon",
+  phase,
+  version: "0.0.0",
+});
+
+const welcome = (nick = "alice", network = "libera") =>
+  inbound(`:ircd 001 ${nick} :Welcome`, network);
 
 const everyFifth = (index: number) => index % 5 === 0;
 
@@ -74,6 +138,8 @@ const everything = { after: 0, limit: 100_000 };
 
 const allEntries = Log.use(({ entries }) => entries(everything));
 const allMessages = Log.use(({ messages }) => messages(everything));
+const allGaps = Log.use(({ gaps }) => gaps(everything));
+const standing = (network = "libera") => Recorder.use(({ standing }) => standing(network));
 const sequences = allEntries.pipe(Effect.map((entries) => entries.map(({ sequence }) => sequence)));
 
 // Reads a Message down to the fields a fold decides, for comparing with what's expected.
@@ -138,12 +204,14 @@ const mixed: Arr.NonEmptyReadonlyArray<NewEntry> = [
     network: "libera",
   },
   attempt("oftc"),
+  opened(18, "oftc"),
   inbound(":ircd 001 ally :Welcome", "oftc"),
   outbound("PRIVMSG #other :on another Network", "oftc"),
   deadline("burst"),
   { _tag: "Connection", connection: 2, ircd, network: "libera", phase: "closed", reason: "gone" },
   attempt(),
   outbound("PRIVMSG #iirc :a reconnect forgets Self"),
+  opened(24),
   inbound(":ircd 001 alice_ :Welcome"),
   outbound("PRIVMSG #iirc :back"),
   outbound("PRIVMSG #other :still ally", "oftc"),
@@ -162,6 +230,70 @@ const mixedSaid = [
 ];
 
 const opening = (dataDir: string) => Effect.scoped(Layer.build(Log.layer({ dataDir })));
+
+const attempted = (network = "libera") =>
+  Effect.map(record([attempt(network)]), ([entry]) => entry.sequence);
+
+// Kills, refusals, kicks, reconnects, and a clean stop, on two Networks, in many commits.
+const eventful = Effect.gen(function* () {
+  yield* record([daemon("started")]);
+
+  const first = yield* attempted();
+
+  yield* record([
+    opened(first),
+    welcome(),
+    inbound(":ircd 005 alice NICKLEN=16 :are supported"),
+    inbound(":alice!u@h JOIN #iirc"),
+    inbound(":alice!u@h JOIN #rust"),
+    outbound("PRIVMSG #iirc :hello"),
+  ]);
+
+  const other = yield* attempted("oftc");
+
+  yield* record([
+    opened(other, "oftc"),
+    welcome("ally", "oftc"),
+    inbound(":a!u@h JOIN #o", "oftc"),
+  ]);
+  yield* TestClock.adjust("1 minute");
+  yield* record([sent("PING lag-1", "lag-check")]);
+  yield* TestClock.adjust("40 millis");
+  yield* record([inbound(":ircd PONG ircd :lag-1"), inbound(":mod!u@h KICK #rust alice :out")]);
+  yield* TestClock.adjust("1 minute");
+
+  // Killed: no `closed`, on either Network.
+  yield* record([outbound("PRIVMSG #iirc :the last thing Self said")]);
+  yield* TestClock.adjust("1 minute");
+  yield* record([daemon("started")]);
+
+  const refusedAttempt = yield* attempted();
+
+  yield* record([opened(refusedAttempt), inbound("ERROR :You are banned")]);
+  yield* record([refused(refusedAttempt, "You are banned")]);
+  yield* TestClock.adjust("30 minutes");
+
+  const second = yield* attempted();
+
+  yield* record([opened(second), welcome("alice_"), sent("JOIN #iirc,#rust", "rejoin")]);
+  yield* record([inbound(":ircd 475 alice_ #iirc :Bad key"), dropped("PRIVMSG #iirc :too late")]);
+  yield* TestClock.adjust("6 minutes");
+  yield* record([closing(second, "iirc stopping"), closed(second, "iirc stopping")]);
+
+  const another = yield* attempted("oftc");
+
+  yield* record([opened(another, "oftc"), welcome("ally_", "oftc"), daemon("stopped")]);
+});
+
+// Everything a rebuild must reproduce, in one value to compare.
+const derived = Effect.gen(function* () {
+  return {
+    gaps: yield* allGaps,
+    libera: yield* standing("libera"),
+    messages: yield* allMessages,
+    oftc: yield* standing("oftc"),
+  };
+});
 
 describe("the durable Log", () => {
   describe("opening", () => {
@@ -215,6 +347,8 @@ describe("the durable Log", () => {
           assert.strictEqual(yield* Log.use(({ head }) => head), 0);
           assert.deepStrictEqual(yield* allEntries, []);
           assert.deepStrictEqual(yield* allMessages, []);
+          assert.deepStrictEqual(yield* allGaps, []);
+          assert.strictEqual(yield* standing(), noStanding);
         })
       )
     );
@@ -307,6 +441,38 @@ describe("the durable Log", () => {
       )
     );
 
+    it.effect("LOG-4: stays correct at the host's cap of 1024 Lines to a transaction", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection), welcome()]);
+
+          const before = yield* Log.use(({ head }) => head);
+
+          const batch = pipe(
+            numbers(1024),
+            Arr.map((index) =>
+              index % 2 === 0
+                ? inbound(`:a!u@h PRIVMSG #iirc :${index}`)
+                : inbound(`:alice!u@h JOIN #c${index}`)
+            )
+          );
+
+          yield* record(batch);
+
+          const { entries } = yield* Log;
+          const held = yield* standing();
+          const stored = yield* entries(everything);
+
+          assert.strictEqual(yield* Log.use(({ head }) => head), before + 1024);
+          assert.strictEqual((yield* allMessages).length, 512);
+          assert.strictEqual(held.channels.size, 512);
+          assert.deepStrictEqual(held, foldStandings(noStandings, stored).get("libera"));
+        })
+      )
+    );
+
     it.effect("stays gapless and whole under many concurrent Fibers, some failing", () =>
       withLog(
         Effect.gen(function* () {
@@ -354,7 +520,7 @@ describe("the durable Log", () => {
     it.effect("folds each writer from the last commit, when transactions yield mid-way", () =>
       withLog(
         Effect.gen(function* () {
-          yield* record([attempt(), inbound(":ircd 001 n0 :Welcome")]);
+          yield* record([attempt(), opened(1), inbound(":ircd 001 n0 :Welcome")]);
 
           // Long enough to outlast a Fiber's turn, so the writers really do overlap.
           const padding = numbers(500).map((index) => deadline(`${index}`));
@@ -373,7 +539,7 @@ describe("the durable Log", () => {
     it.effect("commits what `within` saw, even if interrupted while it ran", () =>
       withLog(
         Effect.gen(function* () {
-          yield* record([attempt(), inbound(":ircd 001 alice :Welcome")]);
+          yield* record([attempt(), opened(1), inbound(":ircd 001 alice :Welcome")]);
 
           const fiber = yield* Effect.gen(function* () {
             const running = yield* Effect.fiber;
@@ -387,7 +553,7 @@ describe("the durable Log", () => {
           const exit = yield* Fiber.await(fiber);
 
           assert.isTrue(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
-          assert.strictEqual(yield* Log.use(({ head }) => head), 3);
+          assert.strictEqual(yield* Log.use(({ head }) => head), 4);
           assert.strictEqual(yield* currentSelf(), "alicia");
         })
       )
@@ -397,9 +563,11 @@ describe("the durable Log", () => {
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
           const sql = yield* openDatabase(dataDir);
-          const { messages, record } = yield* makeStore(sql);
+          const { messages, record, standing } = yield* makeStore(sql);
 
-          yield* record([attempt(), inbound(":ircd 001 alice :Welcome")], Array.isArray);
+          yield* record([attempt(), opened(1), inbound(":ircd 001 alice :Welcome")], Array.isArray);
+
+          const before = yield* standing("libera");
 
           // SQLite checks a deferred foreign key at COMMIT, and nothing sooner can fail.
           yield* sql`PRAGMA foreign_keys = ON`;
@@ -420,14 +588,15 @@ describe("the durable Log", () => {
           );
 
           assert.instanceOf(failure, RecordFailed);
-          assert.deepStrictEqual(seen, [3]);
+          assert.deepStrictEqual(seen, [4]);
+          assert.strictEqual(yield* standing("libera"), before);
 
           yield* sql`DROP TRIGGER orphan`;
 
           const next = yield* record([outbound("PRIVMSG #iirc :still me")], (recorded) => recorded);
           const [message] = yield* messages(everything);
 
-          assert.strictEqual(next[0]?.sequence, 3);
+          assert.strictEqual(next[0]?.sequence, 4);
           assert.strictEqual(message?.sender, "alice");
         })
       )
@@ -436,7 +605,7 @@ describe("the durable Log", () => {
     it.effect("keeps the fold and the Log agreed when Fibers are interrupted", () =>
       withLog(
         Effect.gen(function* () {
-          yield* record([attempt(), inbound(":ircd 001 n0 :Welcome")]);
+          yield* record([attempt(), opened(1), inbound(":ircd 001 n0 :Welcome")]);
 
           const fibers = yield* Effect.forEach(numbers(100), (index) =>
             record([inbound(`:n${index - 1}!u@h NICK :n${index}`)]).pipe(Effect.forkChild)
@@ -464,7 +633,7 @@ describe("the durable Log", () => {
     it.effect("reports a storage failure as RecordFailed, then carries on", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
-          yield* record([attempt(), inbound(":ircd 001 alice :Welcome")]);
+          yield* record([attempt(), opened(1), inbound(":ircd 001 alice :Welcome")]);
 
           yield* execute(
             dataDir,
@@ -477,12 +646,12 @@ describe("the durable Log", () => {
           );
 
           assert.instanceOf(failure, RecordFailed);
-          assert.deepStrictEqual(yield* sequences, [1, 2]);
+          assert.deepStrictEqual(yield* sequences, [1, 2, 3]);
 
           yield* execute(dataDir, "DROP TRIGGER refuse");
 
           assert.strictEqual(yield* currentSelf(), "alice");
-          assert.deepStrictEqual(yield* sequences, [1, 2, 3]);
+          assert.deepStrictEqual(yield* sequences, [1, 2, 3, 4]);
         }).pipe(Effect.provide(Log.layer({ dataDir })))
       )
     );
@@ -529,6 +698,29 @@ describe("the durable Log", () => {
               phase: "closed",
               reason: "",
             },
+            {
+              _tag: "Connection",
+              connection: 4,
+              ircd,
+              network: "libera",
+              phase: "closed",
+              reason: "banned",
+              refused: true,
+            },
+            { _tag: "Connection", connection: 4, ircd, network: "libera", phase: "closed" },
+            opened(4),
+            closing(4, "iirc stopping"),
+            closing(4, "write timed out", "libera", false),
+            attempt("libera", []),
+            attempt("libera", ["caf\u00E9", "a,b", 'quo"te']),
+            {
+              _tag: "Dropped",
+              bytes: new Uint8Array([0xff, 0, 0x80]),
+              cause: "rejoin",
+              connection: 4,
+              network: "libera",
+              reason: "the Connection ended",
+            },
             deadline("burst"),
             { _tag: "Daemon", phase: "stopped", version: "1.2.3" },
           ];
@@ -550,7 +742,7 @@ describe("the durable Log", () => {
           for (const entry of read) {
             assert.notInclude(Object.values(entry), null);
 
-            if (entry._tag === "Line") {
+            if (entry._tag === "Line" || entry._tag === "Dropped") {
               assert.strictEqual(Object.getPrototypeOf(entry.bytes), Uint8Array.prototype);
             }
           }
@@ -639,10 +831,24 @@ describe("the durable Log", () => {
       )
     );
 
+    it.effect("SEND-4: a Dropped Line was never sent, so it is no Message", () =>
+      withLog(
+        Effect.gen(function* () {
+          yield* record([attempt(), opened(1), welcome(), dropped("PRIVMSG #iirc :never sent")]);
+
+          assert.deepStrictEqual(yield* allMessages, []);
+
+          yield* Log.use(({ rebuild }) => rebuild);
+
+          assert.deepStrictEqual(yield* allMessages, []);
+        })
+      )
+    );
+
     it.effect("leaves the fold unchanged by a record that rolls back", () =>
       withLog(
         Effect.gen(function* () {
-          yield* record([attempt(), inbound(":ircd 001 alice :Welcome")]);
+          yield* record([attempt(), opened(1), inbound(":ircd 001 alice :Welcome")]);
 
           const batches: readonly Arr.NonEmptyReadonlyArray<NewEntry>[] = [
             [inbound(":alice!u@h NICK :alicia")],
@@ -673,6 +879,7 @@ describe("the durable Log", () => {
 
           const recorded = yield* record([
             attempt(),
+            opened(1),
             inbound(":ircd 001 alice :Welcome"),
             ...fragments,
           ]);
@@ -685,9 +892,9 @@ describe("the durable Log", () => {
 
           assert.deepStrictEqual(stored.slice(0, recorded.length), [...recorded]);
           assert.deepStrictEqual(recorded.slice(-fragments.length).map(toEvent), [
-            undefined,
-            undefined,
-            undefined,
+            { at: 0, type: "HEARD" },
+            { at: 0, type: "HEARD" },
+            { at: 0, type: "HEARD" },
           ]);
 
           yield* Log.use(({ rebuild }) => rebuild);
@@ -713,7 +920,348 @@ describe("the durable Log", () => {
     );
   });
 
+  describe("keeping Standing", () => {
+    it.effect("keeps one per Network, and agrees with folding the Entries", () =>
+      withLog(
+        Effect.gen(function* () {
+          yield* eventful;
+
+          const stored = yield* allEntries;
+          const folded = foldStandings(noStandings, stored);
+
+          assert.deepStrictEqual(yield* standing(), folded.get("libera"));
+          assert.deepStrictEqual(yield* standing("oftc"), folded.get("oftc"));
+          assert.strictEqual(yield* standing("never heard of"), noStanding);
+        })
+      )
+    );
+
+    it.effect("publishes nothing from a record that rolls back", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection), welcome()]);
+
+          const before = yield* standing();
+
+          const exit = yield* Recorder.use(({ record }) =>
+            record([closed(connection, "gone"), attempt()], () => {
+              throw new Error("machine threw");
+            })
+          ).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          assert.strictEqual(yield* standing(), before);
+          assert.deepStrictEqual(yield* allGaps, []);
+        })
+      )
+    );
+
+    it.effect("LOG-9: a storage failure leaves Standing as it was, then carries on", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection), welcome()]);
+
+          const before = yield* standing();
+
+          yield* execute(
+            dataDir,
+            "CREATE TRIGGER refuse BEFORE INSERT ON gaps BEGIN SELECT RAISE(ABORT, 'no'); END"
+          );
+
+          // The Entry goes in first, and the Gap refuses, so all of it must undo.
+          const failure = yield* Effect.flip(record([closed(connection, "gone")]));
+
+          assert.instanceOf(failure, RecordFailed);
+          assert.strictEqual(yield* standing(), before);
+          assert.strictEqual(yield* Log.use(({ head }) => head), 3);
+
+          yield* execute(dataDir, "DROP TRIGGER refuse");
+          yield* record([closed(connection, "gone")]);
+
+          const [gap] = yield* allGaps;
+
+          assert.strictEqual(gap?.sequence, 4);
+          assert.isUndefined((yield* standing()).connection);
+        }).pipe(Effect.provide(Log.layer({ dataDir })))
+      )
+    );
+
+    it.effect("LOG-9: recovers from another writer holding the lock, with no restart", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection), welcome()]);
+
+          const before = yield* standing();
+          const other = yield* openDatabase(dataDir);
+
+          yield* other.unsafe("BEGIN IMMEDIATE");
+
+          const failures = yield* Effect.forEach([1, 2, 3], () =>
+            Effect.flip(record([outbound("PRIVMSG #iirc :held up")]))
+          );
+
+          for (const failure of failures) {
+            assert.instanceOf(failure, RecordFailed);
+          }
+
+          assert.strictEqual(yield* standing(), before);
+
+          yield* other.unsafe("ROLLBACK");
+
+          const [recorded] = yield* record([outbound("PRIVMSG #iirc :through")]);
+
+          assert.strictEqual(recorded.sequence, 4);
+          assert.strictEqual((yield* allMessages)[0]?.sender, "alice");
+        }).pipe(Effect.provide(Log.layer({ dataDir })))
+      )
+    );
+
+    it.effect("LOG-9: recovers from a full disk, with no restart", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const sql = yield* openDatabase(dataDir);
+          const { record: write, standing: read } = yield* makeStore(sql);
+
+          yield* write([attempt(), opened(1), welcome()], Array.isArray);
+
+          const before = yield* read("libera");
+
+          const [pages] = yield* sql<{ page_count: number }>`PRAGMA page_count`;
+
+          yield* sql.unsafe(`PRAGMA max_page_count = ${pages?.page_count ?? 0}`);
+
+          const large = pipe(
+            numbers(2000),
+            Arr.map((index) => inbound(`:alice!u@h JOIN #${"x".repeat(1000)}${index}`))
+          );
+
+          const failure = yield* Effect.flip(write(large, Array.isArray));
+
+          assert.instanceOf(failure, RecordFailed);
+          assert.match(Bun.inspect(failure.cause, { depth: 6 }), /full/iu);
+          assert.strictEqual(yield* read("libera"), before);
+
+          yield* sql.unsafe("PRAGMA max_page_count = 1073741823");
+
+          const recorded = yield* write(large, (entries) => entries.length);
+
+          assert.strictEqual(recorded, 2000);
+          assert.strictEqual((yield* read("libera")).channels.size, 1024);
+        })
+      )
+    );
+
+    it.effect("RUN-3: a restart carries on from Entries alone, with backoff intact", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const { before, entries } = yield* Effect.gen(function* () {
+            yield* eventful;
+
+            return { before: yield* derived, entries: yield* allEntries };
+          }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+          const after = yield* derived.pipe(Effect.provide(Log.layer({ dataDir })));
+
+          assert.deepStrictEqual(after, before);
+          assert.deepStrictEqual(after.libera, foldStandings(noStandings, entries).get("libera"));
+        })
+      )
+    );
+
+    it.effect("LOG-2: agrees with the machine that a cut Line proves only life", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection)]);
+          yield* TestClock.adjust("1 second");
+          yield* record([cutInbound(":ircd 001 mallory :Welcome")]);
+
+          const held = yield* standing();
+
+          assert.deepStrictEqual(held.connection?.last, { at: 1000, sequence: 3 });
+          assert.strictEqual(held.connection?.registration._tag, "Registering");
+          assert.isUndefined(held.self);
+        })
+      )
+    );
+  });
+
+  describe("deriving Gaps", () => {
+    it.effect("LIVE-10: writes a Gap with the Entries, and ends it with the next 001", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* TestClock.adjust("1 minute");
+          yield* record([opened(connection), welcome()]);
+          yield* TestClock.adjust("1 minute");
+          yield* record([closed(connection, "Connection reset by peer")]);
+
+          assert.deepStrictEqual(yield* allGaps, [
+            {
+              at: 120_000,
+              network: "libera",
+              reason: "Connection reset by peer",
+              sequence: 4,
+            },
+          ]);
+
+          yield* TestClock.adjust("1 minute");
+
+          const next = yield* attempted();
+
+          yield* record([opened(next), welcome()]);
+
+          assert.deepStrictEqual(yield* allGaps, [
+            {
+              at: 120_000,
+              ended: { at: 180_000, sequence: 7 },
+              network: "libera",
+              reason: "Connection reset by peer",
+              sequence: 4,
+            },
+          ]);
+        })
+      )
+    );
+
+    it.effect("LIVE-10: a Gap can begin and end in one commit", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection), welcome()]);
+
+          // The second `attempt` would be sequence 5, whatever this batch is.
+          yield* record([closed(connection, "gone"), attempt(), opened(5), welcome()]);
+
+          assert.deepStrictEqual(yield* allGaps, [
+            {
+              at: 0,
+              ended: { at: 0, sequence: 7 },
+              network: "libera",
+              reason: "gone",
+              sequence: 4,
+            },
+          ]);
+        })
+      )
+    );
+
+    it.effect("LIVE-10: pages by cursor, optionally for one Network", () =>
+      withLog(
+        Effect.gen(function* () {
+          yield* eventful;
+
+          const { gaps } = yield* Log;
+          const all = yield* gaps(everything);
+
+          assert.deepStrictEqual(
+            all.map(({ network, reason }) => [network, reason]),
+            [
+              ["oftc", "the Daemon was killed"],
+              ["libera", "the Daemon was killed"],
+              ["libera", "iirc stopping"],
+              ["oftc", "the Daemon stopped"],
+            ]
+          );
+
+          assert.deepStrictEqual(yield* gaps({ after: 0, limit: 1 }), all.slice(0, 1));
+          assert.deepStrictEqual(
+            yield* gaps({ after: all[0]?.sequence ?? 0, limit: 1 }),
+            all.slice(1, 2)
+          );
+          assert.deepStrictEqual(
+            (yield* gaps({ ...everything, network: "oftc" })).map(({ reason }) => reason),
+            ["the Daemon was killed", "the Daemon stopped"]
+          );
+          assert.deepStrictEqual(yield* gaps({ ...everything, network: "nowhere" }), []);
+          assert.deepStrictEqual(yield* gaps({ after: Number.MAX_SAFE_INTEGER, limit: 10 }), []);
+        })
+      )
+    );
+
+    it.effect("LIVE-10: says when a Gap began and that it ended, across a kill", () =>
+      withLog(
+        Effect.gen(function* () {
+          yield* eventful;
+
+          const entries = yield* allEntries;
+          const gaps = yield* allGaps;
+          const killed = gaps.find(({ network }) => network === "libera");
+          const self = "PRIVMSG #iirc :the last thing Self said";
+
+          // The killed Session's last Entry is its last Line, not the restart.
+          const last = entries.find(
+            (entry) => entry._tag === "Line" && new TextDecoder().decode(entry.bytes) === self
+          );
+
+          assert.strictEqual(killed?.sequence, last?.sequence);
+          assert.strictEqual(killed?.at, last?.at);
+          assert.isDefined(killed?.ended);
+        })
+      )
+    );
+
+    it.effect("LIVE-10: an open Gap reads back with no end", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* record([opened(connection), welcome(), closed(connection, "gone")]);
+
+          const [gap] = yield* allGaps;
+
+          assert.isDefined(gap);
+          assert.notProperty(gap, "ended");
+        })
+      )
+    );
+  });
+
   describe("restarting", () => {
+    for (const vandalism of ["DELETE FROM gaps", "DROP TABLE gaps"]) {
+      it.effect(`LOG-10: a restart after \`${vandalism}\` gives identical results`, () =>
+        inTempDirectory((dataDir) =>
+          Effect.gen(function* () {
+            const before = yield* Effect.andThen(eventful, derived).pipe(
+              Effect.provide(Log.layer({ dataDir }))
+            );
+
+            yield* execute(dataDir, vandalism);
+
+            const after = yield* derived.pipe(Effect.provide(Log.layer({ dataDir })));
+
+            assert.lengthOf(before.gaps, 4);
+            assert.deepStrictEqual(after, before);
+          })
+        )
+      );
+    }
+
+    it.effect("LOG-10: drops a Gap that Entries do not support", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const before = yield* Effect.andThen(eventful, allGaps).pipe(
+            Effect.provide(Log.layer({ dataDir }))
+          );
+
+          yield* execute(dataDir, "INSERT INTO gaps VALUES (9999, 0, 'libera', 'forged', NULL)");
+
+          const after = yield* allGaps.pipe(Effect.provide(Log.layer({ dataDir })));
+
+          assert.deepStrictEqual(after, before);
+        })
+      )
+    );
+
     for (const vandalism of ["DELETE FROM messages", "DROP TABLE messages"]) {
       it.effect(`LOG-10: a restart after \`${vandalism}\` gives identical Messages`, () =>
         inTempDirectory((dataDir) =>
@@ -808,10 +1356,104 @@ describe("the durable Log", () => {
       )
     );
 
+    it.effect("LOG-10: live and rebuilt tables match after kills, refusals, and kicks", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          yield* eventful;
+
+          const live = yield* derived;
+
+          // A fixture that derives nothing would pass everything below.
+          assert.lengthOf(live.gaps, 4);
+          assert.strictEqual(live.libera.refusal, undefined);
+          assert.deepStrictEqual([...live.libera.kicked.keys()], ["#rust"]);
+          assert.isUndefined(live.libera.lagMillis);
+          assert.deepStrictEqual(
+            live.libera.recent.map(({ reason }) => reason),
+            ["the Daemon was killed", "You are banned", "iirc stopping"]
+          );
+          assert.strictEqual(live.libera.nickLength, 16);
+          assert.strictEqual(live.libera.recent.length, 3);
+          assert.strictEqual(live.libera.joinFailures.get("#iirc")?.numeric, "475");
+          assert.lengthOf(live.messages, 2);
+
+          yield* Log.use(({ rebuild }) => rebuild);
+
+          assert.deepStrictEqual(yield* derived, live);
+
+          // A rebuild that kept the old rows would pass the check above.
+          yield* execute(dataDir, "DELETE FROM gaps");
+          yield* execute(dataDir, "DELETE FROM messages");
+          assert.deepStrictEqual(yield* allGaps, []);
+
+          yield* Log.use(({ rebuild }) => rebuild);
+
+          assert.deepStrictEqual(yield* derived, live);
+        }).pipe(Effect.provide(Log.layer({ dataDir })))
+      )
+    );
+
+    it.effect("LOG-10: a refusal in force rebuilds, with the time it allows", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* TestClock.adjust("1 second");
+          yield* record([refused(connection, "You are banned")]);
+
+          const live = yield* standing();
+
+          yield* Log.use(({ rebuild }) => rebuild);
+
+          const rebuilt = yield* standing();
+
+          assert.deepStrictEqual(rebuilt, live);
+          assert.deepStrictEqual(rebuilt.refusal, { at: 1000, reason: "You are banned" });
+        }).pipe(Effect.provide(Log.layer({ dataDir })))
+      )
+    );
+
+    // A rebuild pages by 1000. Self, a kill, and a Gap all carry state across a boundary.
+    for (const boundary of [997, 998, 999, 1000, 1001, 1002]) {
+      it.effect(`LOG-10: a page ending at Entry ${boundary} changes nothing`, () =>
+        inTempDirectory((dataDir) =>
+          Effect.gen(function* () {
+            const padding = numbers(boundary - 4).map((index) => deadline(`${index}`));
+
+            yield* record(Arr.prepend(padding, attempt()));
+            yield* record([opened(1), welcome()]);
+            yield* record([outbound("PRIVMSG #iirc :Self came from the page before")]);
+            yield* record([outbound("PRIVMSG #iirc :and still does")]);
+            yield* record([daemon("started")]);
+
+            const again = yield* attempted();
+
+            yield* record([opened(again), welcome("alice_")]);
+            yield* record([outbound("PRIVMSG #iirc :back")]);
+
+            const live = yield* derived;
+
+            assert.deepStrictEqual(
+              live.messages.map(({ sender }) => sender),
+              ["alice", "alice", "alice_"]
+            );
+            assert.lengthOf(live.gaps, 1);
+            assert.isDefined(live.gaps[0]?.ended);
+
+            yield* execute(dataDir, "DELETE FROM messages");
+            yield* execute(dataDir, "DELETE FROM gaps");
+            yield* Log.use(({ rebuild }) => rebuild);
+
+            assert.deepStrictEqual(yield* derived, live);
+          }).pipe(Effect.provide(Log.layer({ dataDir })))
+        )
+      );
+    }
+
     it.effect("pages through more Entries than one page holds", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
-          const self = [attempt(), inbound(":ircd 001 alice :Welcome")];
+          const self = [attempt(), opened(1), inbound(":ircd 001 alice :Welcome")];
 
           const chatter = numbers(2498).map((index) =>
             index % 2 === 0
@@ -841,7 +1483,7 @@ describe("the durable Log", () => {
               inbound(`:bob!u@h PRIVMSG #iirc :${index} it's "quoted" \u{1F980}`)
             );
 
-            yield* record([attempt(), inbound(":ircd 001 alice :Welcome"), ...chatter]);
+            yield* record([attempt(), opened(1), inbound(":ircd 001 alice :Welcome"), ...chatter]);
 
             const before = yield* allMessages;
 
@@ -867,10 +1509,12 @@ describe("the durable Log", () => {
             "CREATE TRIGGER refuse BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'no'); END"
           );
 
+          const held = yield* standing();
           const failure = yield* Effect.flip(Log.use(({ rebuild }) => rebuild));
 
           assert.strictEqual(failure._tag, "StorageFailed");
           assert.deepStrictEqual(yield* allMessages, before);
+          assert.strictEqual(yield* standing(), held);
         }).pipe(Effect.provide(Log.layer({ dataDir })))
       )
     );
@@ -978,8 +1622,8 @@ describe("the durable Log", () => {
               assert.isAtLeast(reopened, reported.at(-1) ?? Infinity);
               assert.deepStrictEqual(yield* sequences, numbers(reopened));
 
-              // Two Entries to start, then whole batches of three, each saying three things.
-              const batches = (reopened - 2) / 3;
+              // Three Entries to start, then whole batches of three, each saying three things.
+              const batches = (reopened - 3) / 3;
               const before = yield* allMessages;
 
               assert.isTrue(Number.isInteger(batches));

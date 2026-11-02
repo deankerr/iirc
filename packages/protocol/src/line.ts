@@ -150,3 +150,24 @@ export const parseLine = (text: string): Parsed => {
  * @returns The parsed Line, or the reason there isn't one.
  */
 export const parseFrame = (frame: Uint8Array) => parseLine(decode(frame));
+
+// One character per byte. Not `fallbackDecoder`: WHATWG's "latin1" is windows-1252,
+// which maps 0x80 to 0x9f elsewhere, so its text would not map back to the same bytes.
+const byteText = (frame: Uint8Array) =>
+  Array.from(frame, (byte) => String.fromCodePoint(byte)).join("");
+
+/**
+ * Finds a `PING` frame's token as the bytes that arrived, which text cannot promise,
+ * because a token that is not UTF-8 would be re-encoded. It runs {@link parseLine} over
+ * one character per byte, so it reads the frame exactly as {@link parseFrame} does.
+ * @param frame - The frame's bytes, without its line ending.
+ * @returns The bytes of the first parameter, or `undefined` if there is none.
+ */
+export const pingToken = (frame: Uint8Array): Uint8Array | undefined => {
+  const parsed = parseLine(byteText(frame));
+  const token = parsed._tag === "Line" ? parsed.line.params[0] : undefined;
+
+  return token === undefined
+    ? undefined
+    : Uint8Array.from({ length: token.length }, (_unused, index) => token.codePointAt(index) ?? 0);
+};

@@ -1,5 +1,5 @@
 import type { NetworkEvent } from "@iirc/lifecycle";
-import { parseFrame } from "@iirc/protocol/line";
+import { parseFrame, pingToken } from "@iirc/protocol/line";
 
 import type { Entry } from "./entry.ts";
 
@@ -7,28 +7,59 @@ type ConnectionEntry = Extract<Entry, { readonly _tag: "Connection" }>;
 
 type LineEntry = Extract<Entry, { readonly _tag: "Line" }>;
 
-const connectionEvent = ({ at, phase, reason }: ConnectionEntry): NetworkEvent => {
-  if (phase === "attempt") {
-    return { at, type: "ATTEMPT" };
-  }
+const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
+  const { at } = entry;
 
-  return phase === "opened"
-    ? { at, type: "OPENED" }
-    : { at, reason: reason ?? "the Connection closed", type: "CLOSED" };
+  switch (entry.phase) {
+    case "attempt": {
+      return { at, nicks: entry.nicks, type: "ATTEMPT" };
+    }
+
+    case "opened": {
+      return { at, type: "OPENED" };
+    }
+
+    // Only a chosen leave sends `QUIT`. Any other close was decided by the machine already,
+    // or by its host, and a machine still registering must be free to read the refusal
+    // that often follows it, though no welcome may start a Session then (LOG-2).
+    case "closing": {
+      return entry.chosen ? { at, reason: entry.reason, type: "CLOSING" } : { at, type: "LEAVING" };
+    }
+
+    case "closed": {
+      return {
+        at,
+        reason: entry.reason ?? "the Connection closed",
+        type: "CLOSED",
+        ...(entry.refused && { refused: true }),
+      };
+    }
+
+    default: {
+      return entry satisfies never;
+    }
+  }
 };
 
-// Our own Lines say nothing to the machine, or an outbound `PING` would answer
-// itself. A cut Line is a fragment, whose first word is not a command worth obeying.
+// Our own Lines say nothing to the machine, or an outbound `PING` would answer itself.
+// Anything inbound proves the Connection is alive, but a cut Line is a fragment whose
+// first word is not a command worth obeying, so it says that and nothing more.
 const lineEvent = ({ at, bytes, cut, direction }: LineEntry): NetworkEvent | undefined => {
-  if (direction === "outbound" || cut === true) {
+  if (direction === "outbound") {
     return undefined;
   }
 
   const parsed = parseFrame(bytes);
 
-  return parsed._tag === "Line"
-    ? { at, command: parsed.line.command, params: parsed.line.params, type: "LINE" }
-    : undefined;
+  if (cut === true || parsed._tag === "Unparseable") {
+    return { at, type: "HEARD" };
+  }
+
+  const { command, params } = parsed.line;
+
+  return command === "PING"
+    ? { at, token: pingToken(bytes), type: "PING" }
+    : { at, command, params, type: "LINE" };
 };
 
 /**
@@ -51,7 +82,8 @@ export const toEvent = (entry: Entry): NetworkEvent | undefined => {
       return lineEvent(entry);
     }
 
-    case "Daemon": {
+    case "Daemon":
+    case "Dropped": {
       return undefined;
     }
 

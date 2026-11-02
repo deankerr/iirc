@@ -1,8 +1,7 @@
-import type { Line } from "@iirc/protocol/line";
-import { parseFrame } from "@iirc/protocol/line";
 import type { Entry, NetworkId } from "@iirc/session/entry";
-import { initialState, messageOf, reduce } from "@iirc/state";
-import type { Message, SessionState } from "@iirc/state";
+import { foldStandings } from "@iirc/session/standing";
+import type { Gap, Standings, StandingStep } from "@iirc/session/standing";
+import { messageOf } from "@iirc/state";
 
 /** Something a participant said, derived from a Line. */
 export interface LoggedMessage {
@@ -15,74 +14,54 @@ export interface LoggedMessage {
   readonly text: string;
 }
 
-/** What the fold keeps between Entries: each Network's current Session. */
-export type Sessions = ReadonlyMap<NetworkId, SessionState>;
-
-/** Sessions as they stand before the first Entry. */
-export const noSessions: Sessions = new Map();
-
 /** What a run of Entries adds to what came before it. */
 export interface Folded {
+  /** Each Gap as it stood after each change, in order, so the last write of one wins. */
+  readonly gaps: readonly Gap[];
   readonly messages: readonly LoggedMessage[];
-  readonly sessions: Sessions;
+  readonly standings: Standings;
 }
 
-type LineEntry = Extract<Entry, { readonly _tag: "Line" }>;
-
-const foldParsed = (
-  sessions: Map<NetworkId, SessionState>,
-  entry: LineEntry,
-  line: Line
-): Message | undefined => {
-  const state = sessions.get(entry.network) ?? initialState;
-
-  if (entry.direction === "inbound") {
-    sessions.set(entry.network, reduce(state, line));
-
-    return messageOf(line);
+// Self sent an outbound Line whatever the Line claims, and only Ircds move state, so
+// who Self was before it is who Self is.
+const messageFrom = ({ before, entry, line }: StandingStep): LoggedMessage | undefined => {
+  if (entry._tag !== "Line" || line === undefined) {
+    return undefined;
   }
 
-  // Self sent this whatever the Line claims, and state follows only what Ircds say.
-  return messageOf({ ...line, source: undefined }, state.self);
-};
+  const { at, direction, network, sequence } = entry;
 
-// An unparseable Line stays an Entry, but it says nothing and changes nothing. Nor does
-// a cut one: a fragment is not a Line to trust, and `toEvent` ignores it for the machine.
-const foldLine = (sessions: Map<NetworkId, SessionState>, entry: LineEntry) => {
-  const parsed = parseFrame(entry.bytes);
+  const message =
+    direction === "inbound"
+      ? messageOf(line)
+      : messageOf({ ...line, source: undefined }, before.self);
 
-  return parsed._tag === "Line" && entry.cut !== true
-    ? foldParsed(sessions, entry, parsed.line)
-    : undefined;
+  return message === undefined ? undefined : { ...message, at, network, sequence };
 };
 
 /**
  * Derives what a run of Entries adds. `record` and `rebuild` both come through here,
  * so a rebuilt table can only differ from a live one if the code did.
- * @param sessions - The Sessions so far, which stay as they are.
+ * @param standings - The Standings so far, which stay as they are.
  * @param entries - The Entries that follow them, in sequence order.
- * @returns The Messages those Entries carry, and the Sessions after them.
+ * @returns The Messages and Gaps those Entries carry, and the Standings after them.
  */
-export const foldEntries = (sessions: Sessions, entries: readonly Entry[]): Folded => {
-  const folded = new Map(sessions);
+export const foldEntries = (standings: Standings, entries: readonly Entry[]): Folded => {
+  const gaps: Gap[] = [];
   const messages: LoggedMessage[] = [];
 
-  for (const entry of entries) {
-    if (entry._tag === "Line") {
-      const message = foldLine(folded, entry);
+  const folded = foldStandings(standings, entries, (step) => {
+    const { after, before } = step;
+    const message = messageFrom(step);
 
-      if (message !== undefined) {
-        const { at, network, sequence } = entry;
-
-        messages.push({ ...message, at, network, sequence });
-      }
+    if (after.gap !== undefined && after.gap !== before.gap) {
+      gaps.push(after.gap);
     }
 
-    // A reconnect is a new Session, so nothing carries over (LIVE-6).
-    if (entry._tag === "Connection" && entry.phase === "attempt") {
-      folded.delete(entry.network);
+    if (message !== undefined) {
+      messages.push(message);
     }
-  }
+  });
 
-  return { messages, sessions: folded };
+  return { gaps, messages, standings: folded };
 };

@@ -3,20 +3,23 @@ import { writeSync } from "node:fs";
 
 import { BunServices } from "@effect/platform-bun";
 import { assert, beforeAll, describe, it } from "@effect/vitest";
-import type { LogEntry } from "@iirc/api";
-import { closeReason, fold, phase } from "@iirc/lifecycle";
+import type { Gap, LogEntry } from "@iirc/api";
+import { fold, phase } from "@iirc/lifecycle";
+import { defaultTuning } from "@iirc/lifecycle/tuning";
+import type { Tuning } from "@iirc/lifecycle/tuning";
 import { toEvent } from "@iirc/session/events";
+import {
+  consecutiveFailures,
+  foldStandings,
+  nextAttempt,
+  noStanding,
+  noStandings,
+} from "@iirc/session/standing";
 import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Random, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import {
-  appRoot,
-  buildBinary,
-  buildTimeout,
-  freePort,
-  healthyClient,
-  startBinary,
-} from "./testing.ts";
+import { appRoot, freePort, healthyClient, logTail, startBinary } from "./binary.ts";
+import { assertBackoff, buildBinary, buildTimeout } from "./testing.ts";
 
 // PROOF-4 against the real thing: the minified binary, because XState Commands can
 // vanish under minification with no error, on a real socket, killed for real. Set
@@ -32,7 +35,19 @@ const channel = "#kill";
 const nick = "iirc";
 const username = "user";
 const realname = "Kill Test";
-const input = { channels: [channel], nick, realname, username };
+
+// A kill counts as a failed Connection, so the runs that follow one wait out a real delay.
+// This keeps that delay short enough for a dozen rounds, and no less real.
+const killRounds = { reconnectInitialMillis: 40, reconnectMaxMillis: 320 };
+
+// The last run must hold still while it is read after its Connection ends, which needs a
+// wait far longer than any read. Restarts on that Log inherit it, and it only costs once.
+const finalRounds = { reconnectInitialMillis: 2000, reconnectMaxMillis: 2000 };
+
+const tuned = (overrides: Partial<Tuning>) => ({ ...defaultTuning, ...overrides });
+
+const finalTuning = tuned(finalRounds);
+const tuningFlag = (overrides: Partial<Tuning>) => ["--tuning", JSON.stringify(overrides)];
 
 // How long a healthy run may take to do each thing, all far past what it needs.
 const startLimit = "10 seconds";
@@ -229,9 +244,16 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
       Deferred.doneUnsafe(expected.registered, Exit.void);
 
       if (!expected.holdRegistration) {
-        send(socket, [encoder.encode(`:ircd 001 ${nick} :Welcome c${socket.data.id}`)]);
+        send(socket, [
+          encoder.encode(`:ircd 001 ${nick} :Welcome c${socket.data.id}`),
+          encoder.encode(`:ircd 422 ${nick} :No MOTD`),
+        ]);
         cycle(socket);
       }
+    }
+
+    if (line.startsWith("JOIN ")) {
+      send(socket, [encoder.encode(`:${nick}!~u@host ${line}`)]);
     }
 
     if (line.startsWith("PONG ")) {
@@ -408,7 +430,7 @@ const killRound = (ircd: Ircd, plan: KillPlan, httpPort: number, dataDir: string
     const progress = ircd.expect({ holdRegistration: plan._tag === "Registering" });
 
     // Not `--data-dir`, which the second process below covers.
-    const running = yield* startKillable(daemonArguments(ircd, httpPort, []), {
+    const running = yield* startKillable(daemonArguments(ircd, httpPort, tuningFlag(killRounds)), {
       IIRC_DATA_DIR: dataDir,
     });
 
@@ -489,7 +511,7 @@ const finalRun = (ircd: Ircd, runs: number, dataDir: string) =>
     const httpPort = yield* freePort;
     const progress = ircd.expect({ holdRegistration: false });
 
-    const running = yield* startKillable(daemonArguments(ircd, httpPort, []), {
+    const running = yield* startKillable(daemonArguments(ircd, httpPort, tuningFlag(finalRounds)), {
       IIRC_DATA_DIR: dataDir,
     });
 
@@ -510,6 +532,7 @@ const finalRun = (ircd: Ircd, runs: number, dataDir: string) =>
       .pipe(Effect.repeat({ schedule: Schedule.spaced("10 millis"), times: 200, until: isClosed }));
 
     const entries = yield* pagedFrom((query) => daemon.entries({ query }));
+    const gaps = yield* pagedFrom((query) => daemon.gaps({ query }));
     const messages = yield* pagedFrom((query) => daemon.messages({ query }));
     const stopping = Date.now();
 
@@ -517,6 +540,8 @@ const finalRun = (ircd: Ircd, runs: number, dataDir: string) =>
 
     return {
       entries,
+      exitCode: Number(yield* running.child.exitCode),
+      gaps,
       messages,
       output: running.output(),
       shutdownMillis: Date.now() - stopping,
@@ -612,6 +637,26 @@ const assertConnection = (entries: readonly LineEntry[], wire: Wire, clean: bool
   }
 };
 
+// 8. One Gap per Session, each ended by the next Session's `001`, and only the last open.
+const assertGaps = (entries: readonly LogEntry[], gaps: readonly Gap[]) => {
+  const welcomes = lineEntries(entries).filter(
+    (line) => line.direction === "inbound" && textOf(line).startsWith(":ircd 001 ")
+  );
+
+  assert.lengthOf(gaps, welcomes.length, "every Session that ended must leave a Gap");
+  assert.deepStrictEqual(
+    gaps.slice(0, -1).map(({ ended }) => ended?.sequence),
+    welcomes.slice(1).map(({ sequence }) => sequence),
+    "each Gap is ended by the `001` of the next Session"
+  );
+  assert.isTrue(
+    gaps.slice(0, -1).every(({ reason }) => reason === "the Daemon was killed"),
+    "a kill leaves nothing but a killed Session behind it"
+  );
+  assert.deepInclude(gaps.at(-1), { network, reason: "end of the test" });
+  assert.notProperty(gaps.at(-1), "ended");
+};
+
 const assertLog = (entries: readonly LogEntry[], wires: readonly Wire[], runs: number) => {
   // 1. Sequences are gapless from 1.
   assert.deepStrictEqual(
@@ -649,39 +694,46 @@ const assertLog = (entries: readonly LogEntry[], wires: readonly Wire[], runs: n
   }
 };
 
-// Damages the derived table with no Daemon running, and reports what is left of it.
-const vandalise = (dataDir: string, statement: string) =>
+const derivedTables = ["messages", "gaps"];
+
+// Damages the derived tables with no Daemon running, and reports what is left of them.
+const vandalise = (dataDir: string, damage: (table: string) => string) =>
   Effect.sync(() => {
     const database = new Database(`${dataDir}/iirc.sqlite`);
 
-    database.run(statement);
+    const left = derivedTables.map((table) => {
+      database.run(damage(table));
 
-    const tables = database.query("SELECT name FROM sqlite_master WHERE name = 'messages'").all();
-    const rows = tables.length === 0 ? [] : database.query("SELECT * FROM messages").all();
+      const tables = database.query(`SELECT name FROM sqlite_master WHERE name = '${table}'`).all();
+      const rows = tables.length === 0 ? [] : database.query(`SELECT * FROM ${table}`).all();
+
+      return { rows: rows.length, tables: tables.length };
+    });
 
     database.close();
 
-    return { rows: rows.length, tables: tables.length };
+    return left;
   });
 
-// A real restart, then `/messages`. It dials a port nobody listens on, so nothing new
-// can be said, and whatever it serves can only have come from Entries.
-const messagesAfterRestart = (dataDir: string) =>
+// A real restart, then `/messages` and `/gaps`. It dials a port nobody listens on, so
+// nothing new can be said, and whatever it serves can only have come from Entries.
+const derivedAfterRestart = (dataDir: string) =>
   Effect.gen(function* () {
     const ircdPort = yield* freePort;
     const httpPort = yield* freePort;
 
     const running = yield* startKillable(
-      daemonArguments({ host: "127.0.0.1", port: ircdPort }, httpPort, []),
+      daemonArguments({ host: "127.0.0.1", port: ircdPort }, httpPort, tuningFlag(finalRounds)),
       { IIRC_DATA_DIR: dataDir }
     );
 
     const { daemon } = yield* healthyClient(httpPort);
+    const gaps = yield* pagedFrom((query) => daemon.gaps({ query }));
     const messages = yield* pagedFrom((query) => daemon.messages({ query }));
 
     yield* running.child.kill({ killSignal: "SIGTERM" });
 
-    return messages;
+    return { gaps, messages };
   }).pipe(Effect.scoped);
 
 const makePlans = Effect.gen(function* () {
@@ -778,53 +830,70 @@ describe("the compiled binary", () => {
           { discard: true }
         );
 
-        const { entries, messages, output, shutdownMillis, status } = yield* finalRun(
-          ircd,
-          plans.length + 1,
-          dataDir
-        );
+        const { entries, exitCode, gaps, messages, output, shutdownMillis, status } =
+          yield* finalRun(ircd, plans.length + 1, dataDir);
 
         report(
           `final run: ${entries.length} Entries, ${messages.length} Messages, ` +
-            `stopped in ${shutdownMillis} ms, at ${Date.now() - started} ms`
+            `${gaps.length} Gaps, stopped in ${shutdownMillis} ms, at ${Date.now() - started} ms`
         );
+        report(`Connections: ${ircd.wires.length} from ${plans.length + 1} runs`);
 
         assertLog(entries, ircd.wires, plans.length + 1);
+        // 7. Every run but the first follows a kill, so its `attempt` must wait.
+        assertBackoff(entries, (attempt) =>
+          tuned(attempt < plans.length ? killRounds : finalRounds)
+        );
+        assertGaps(entries, gaps);
         assert.notInclude(output, "ERROR", "HOST-1: nothing here should reach the error log");
         assert.isBelow(shutdownMillis, shutdownLimit, "stopping must not hang on a Frontend");
+        assert.strictEqual(exitCode, 0, "SIGTERM is a clean stop");
+        assert.deepStrictEqual(yield* logTail(dataDir, 1), ["Daemon stopped"]);
 
-        // 6. Status is a fold, and nothing else.
+        // 6. Status is a fold, and nothing else: between Connections it is `Standing`'s,
+        // and the machine agrees on the phase.
         const folded = fold(
           entries
             .filter((entry) => "network" in entry && entry.network === network)
             .flatMap((entry) => toEvent(entry) ?? []),
-          input
+          { realname, tuning: finalTuning, username }
         );
 
-        assert.deepStrictEqual(status, {
-          closeReason: closeReason(folded) ?? null,
+        const standing = foldStandings(noStandings, entries).get(network) ?? noStanding;
+
+        assert.deepInclude(status, {
+          closeReason: standing.recent.at(-1)?.reason ?? null,
+          consecutiveFailures: consecutiveFailures(standing, finalTuning, Date.now()),
           head: entries.at(-1)?.sequence ?? 0,
+          joined: [],
           network,
+          nextAttemptAt: nextAttempt(standing, {
+            ircds: [{ host: ircdHost, port: ircd.port, tls: false }],
+            tuning: finalTuning,
+          }).at,
           phase: phase(folded),
+          refused: false,
+          self: null,
         });
         assert.strictEqual(status.phase, "closed");
         assert.strictEqual(status.closeReason, "end of the test");
 
-        // 5. LOG-10: Messages are disposable, and a restart is all it takes to get them
+        // 5. LOG-10: what is derived is disposable, and a restart is all it takes to get it
         // back. Last, because these restarts add Entries of their own.
         assert.isNotEmpty(messages);
+        assert.isNotEmpty(gaps);
 
-        assert.deepStrictEqual(yield* vandalise(dataDir, "DELETE FROM messages"), {
-          rows: 0,
-          tables: 1,
-        });
-        assert.deepStrictEqual(yield* messagesAfterRestart(dataDir), messages);
+        assert.deepStrictEqual(yield* vandalise(dataDir, (table) => `DELETE FROM ${table}`), [
+          { rows: 0, tables: 1 },
+          { rows: 0, tables: 1 },
+        ]);
+        assert.deepStrictEqual(yield* derivedAfterRestart(dataDir), { gaps, messages });
 
-        assert.deepStrictEqual(yield* vandalise(dataDir, "DROP TABLE messages"), {
-          rows: 0,
-          tables: 0,
-        });
-        assert.deepStrictEqual(yield* messagesAfterRestart(dataDir), messages);
+        assert.deepStrictEqual(yield* vandalise(dataDir, (table) => `DROP TABLE ${table}`), [
+          { rows: 0, tables: 0 },
+          { rows: 0, tables: 0 },
+        ]);
+        assert.deepStrictEqual(yield* derivedAfterRestart(dataDir), { gaps, messages });
       }).pipe(Effect.scoped, Effect.provide(layers)),
     { timeout: testTimeout }
   );

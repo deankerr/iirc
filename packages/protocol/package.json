@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./flood": "./src/flood.ts",
     "./frame": "./src/frame.ts",
+    "./join": "./src/join.ts",
     "./line": "./src/line.ts",
-    "./outbound": "./src/outbound.ts"
+    "./nick": "./src/nick.ts",
+    "./outbound": "./src/outbound.ts",
+    "./refusal": "./src/refusal.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

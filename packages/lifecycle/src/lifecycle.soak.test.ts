@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { fold, step } from "./lifecycle.ts";
+import { deadline, fold, phase, step } from "./lifecycle.ts";
 import type { NetworkEvent, NetworkInput, NetworkSnapshot } from "./lifecycle.ts";
+import { defaultTuning } from "./tuning.ts";
 
 const input: NetworkInput = {
-  channels: ["#first", "#second"],
-  nick: "claude",
   realname: "Claude Code",
+  tuning: defaultTuning,
   username: "cc",
 };
 
@@ -17,12 +17,22 @@ const budgetMillis = 30_000;
 const batches = measuredSteps / batchSteps;
 const windowBatches = batches / 10;
 
-// Half the Lines are `PING`, which takes a transition, and half are `PRIVMSG`,
-// which matters to nothing. Each is a fresh object, as a real Entry would be.
-const eventAt = (at: number): NetworkEvent =>
-  at % 2 === 0
-    ? { at, command: "PING", params: ["token"], type: "LINE" }
+// Stamps stay the same width throughout, so a change in the snapshot's size is growth.
+const startAt = 1_000_000_000_000;
+const token = new TextEncoder().encode("token");
+
+// A quarter of the Lines are `PING`, which takes a transition and answers, a quarter
+// cannot be read, and the rest matter to nothing. Every one moves the silence deadline,
+// so that is the cost measured here. Each is a fresh object, as a real Entry would be.
+const eventAt = (at: number): NetworkEvent => {
+  if (at % 4 === 0) {
+    return { at, token, type: "PING" };
+  }
+
+  return at % 4 === 1
+    ? { at, type: "HEARD" }
     : { at, command: "PRIVMSG", params: ["#first", "hello"], type: "LINE" };
+};
 
 const median = (values: readonly number[]) =>
   values.toSorted((one, other) => one - other)[Math.floor(values.length / 2)] ?? Number.NaN;
@@ -35,26 +45,47 @@ describe("a long chain of steps", () => {
   it("costs the same per step at the end as at the start", { timeout: 60_000 }, () => {
     let snapshot: NetworkSnapshot = fold(
       [
-        { at: 0, type: "ATTEMPT" },
-        { at: 0, type: "OPENED" },
-        { at: 0, command: "001", params: ["claude", "Welcome"], type: "LINE" },
+        { at: startAt, nicks: ["claude"], type: "ATTEMPT" },
+        { at: startAt, type: "OPENED" },
+        { at: startAt, command: "001", params: ["claude", "Welcome"], type: "LINE" },
+        { at: startAt, command: "376", params: ["claude", "End"], type: "LINE" },
       ],
       input
     );
 
     const sizeBefore = JSON.stringify(snapshot).length;
 
+    let lines = 0;
+    let lagChecks = 0;
     let pongs = 0;
-    let at = 0;
+    let at = startAt;
 
+    const apply = (event: NetworkEvent) => {
+      const stepped = step(snapshot, event);
+
+      for (const { type } of stepped.commands) {
+        pongs += type === "sendPong" ? 1 : 0;
+        lagChecks += type === "sendLine" ? 1 : 0;
+      }
+
+      snapshot = stepped.next;
+    };
+
+    // Takes each deadline as a host would, which the lag check needs, and which would
+    // close the Connection here if a Line ever failed to move the silence deadline.
     const advance = (steps: number) => {
       const startedAt = performance.now();
 
       for (let done = 0; done < steps; done += 1) {
         at += 1;
-        const stepped = step(snapshot, eventAt(at));
-        pongs += stepped.commands.length;
-        snapshot = stepped.next;
+        lines += 1;
+        apply(eventAt(at));
+
+        const due = deadline(snapshot);
+
+        if (due !== undefined && due.at <= at) {
+          apply({ at, name: due.name, type: "DEADLINE" });
+        }
       }
 
       return performance.now() - startedAt;
@@ -78,12 +109,17 @@ describe("a long chain of steps", () => {
     const growth = last / first;
 
     console.info(
-      `soak: ${at} steps, ${first.toFixed(2)} µs per step at the start, ` +
+      `soak: ${lines} Lines, ${first.toFixed(2)} µs per step at the start, ` +
         `${last.toFixed(2)} µs at the end, growth ${growth.toFixed(3)}`
     );
 
     expect(timings).toHaveLength(batches);
-    expect(pongs).toBe(at / 2);
+    expect({ lagChecks, lines, pongs }).toStrictEqual({
+      lagChecks: Math.floor((warmupSteps + measuredSteps) / defaultTuning.lagCheckMillis),
+      lines: warmupSteps + measuredSteps,
+      pongs: Math.floor((warmupSteps + measuredSteps) / 4),
+    });
+    expect(phase(snapshot)).toBe("session");
     expect(JSON.stringify(snapshot)).toHaveLength(sizeBefore);
     expect(growth).toBeLessThan(1.5);
   });

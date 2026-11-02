@@ -7,18 +7,21 @@ import {
 } from "node:tls";
 
 import { assert, describe, it } from "@effect/vitest";
-import type { NetworkInput } from "@iirc/lifecycle";
+import { defaultTuning as specTuning } from "@iirc/lifecycle/tuning";
+import type { Tuning } from "@iirc/lifecycle/tuning";
 import { privmsg } from "@iirc/protocol/outbound";
 import { Deferred, Effect, Exit, Fiber, Layer, Ref, References } from "effect";
 import { Socket } from "effect/socket";
 import { TestClock } from "effect/testing";
 
 import type { Entry, NewEntry } from "./entry.ts";
-import { hostNetwork, NotInSession } from "./network.ts";
+import { hostNetwork, WriteFailed } from "./network.ts";
+import type { NetworkOptions, NetworkStatus } from "./network.ts";
 import { MemoryEntries, Recorder } from "./recorder.ts";
 import {
   eventually,
   listenOn,
+  movingClockWhileClosing,
   scriptedIrcd,
   testAuthority,
   testWire,
@@ -26,12 +29,20 @@ import {
 } from "./testing.ts";
 import { ConnectFailed, Transport } from "./transport.ts";
 
-const input: NetworkInput = {
-  channels: ["#one"],
-  nick: "iirc",
-  realname: "I IRC",
-  username: "user",
-};
+// These are about sockets, and joining at once keeps a test's own waits short. The wait
+// before rejoining has its own tests.
+const defaultTuning = { ...specTuning, rejoinSettleMillis: 0 };
+
+const options = (port: number, host: string, tls = false): NetworkOptions => ({
+  channels: [{ name: "#one" }],
+  id: "local",
+  identity: { alternates: [], nick: "iirc", realname: "I IRC", username: "user" },
+  ircds: [{ host, port, tls }],
+  quitReason: "leaving",
+  tuning: defaultTuning,
+});
+
+const brief = ({ closeReason, phase }: NetworkStatus) => ({ closeReason, phase });
 
 // A throwaway self-signed pair for `localhost`, trusted by nothing.
 const testKey = `-----BEGIN PRIVATE KEY-----
@@ -107,12 +118,9 @@ const trustedTlsIrcd = (respond: (line: string) => readonly string[]) =>
     return { ircd, wire: yield* testWire(ircd.port, quietAddress) };
   });
 
-const hostOn = (port: number) =>
-  hostNetwork({
-    id: "local",
-    input,
-    ircd: { host: "127.0.0.1", port, tls: false },
-  });
+const hostOn = (port: number) => hostNetwork(options(port, "127.0.0.1"));
+
+type Ircd = Effect.Success<ReturnType<typeof scriptedIrcd>>;
 
 const closedPort = Effect.scoped(
   Effect.map(
@@ -121,8 +129,8 @@ const closedPort = Effect.scoped(
   )
 );
 
-const connect = (host: string, port: number, tls: boolean) =>
-  Transport.use(({ connect }) => connect({ host, port, tls }));
+const connect = (host: string, port: number, tls: boolean, tuning: Tuning = defaultTuning) =>
+  Transport.use(({ connect }) => connect({ host, port, tls }, tuning));
 
 // The real socket, but with one write failing as a broken pipe would.
 const writesFailOn = (text: string) =>
@@ -132,8 +140,8 @@ const writesFailOn = (text: string) =>
       const real = yield* Transport;
 
       return Transport.of({
-        connect: Effect.fnUntraced(function* (ircd) {
-          const { reader, writer } = yield* real.connect(ircd);
+        connect: Effect.fnUntraced(function* (ircd, limits) {
+          const { reader, writer } = yield* real.connect(ircd, limits);
           const open = yield* writer;
 
           const write: Socket.Writer["write"] = (chunk) =>
@@ -184,8 +192,6 @@ const tlsListener = Effect.gen(function* () {
   return { names, port };
 });
 
-type Ircd = Effect.Success<ReturnType<typeof scriptedIrcd>>;
-
 const outboundLine = (text: string) => {
   const built = privmsg("#one", text);
 
@@ -215,12 +221,13 @@ const holdingCommitOf = (text: string, hold: Effect.Effect<void>) =>
   Layer.effect(
     Recorder,
     Recorder.pipe(
-      Effect.map(({ record }) =>
+      Effect.map((recorder) =>
         Recorder.of({
+          ...recorder,
           record: (entries, within) =>
             Effect.andThen(
               entries.some(carries(text)) ? hold : Effect.void,
-              record(entries, within)
+              recorder.record(entries, within)
             ),
         })
       )
@@ -229,8 +236,10 @@ const holdingCommitOf = (text: string, hold: Effect.Effect<void>) =>
 
 const allEntries = MemoryEntries.use(({ entries }) => entries);
 
+// Under the drain's 5 seconds, so a close that waited it out would fail. Bursts here are
+// megabytes, read 16 KB at a time, which a machine running other suites takes a while over.
 const until = (hosted: Effect.Success<ReturnType<typeof hostOn>>) =>
-  eventually(allEntries, (entries) => closedReason(entries).length > 0).pipe(
+  eventually(allEntries, (entries) => closedReason(entries).length > 0, "4 seconds").pipe(
     Effect.tap(() => hosted.status)
   );
 
@@ -255,6 +264,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
 
       assert.deepStrictEqual(lineTexts(entries, "inbound"), [
         ":ircd 001 iirc :Welcome",
+        ":ircd 422 iirc :No MOTD",
         ":iirc!~u@host JOIN #one",
         ...burstLines,
         "PING :last",
@@ -281,6 +291,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
 
       assert.deepStrictEqual(lineTexts(entries, "inbound"), [
         ":ircd 001 iirc :Welcome",
+        ":ircd 422 iirc :No MOTD",
         ":iirc!~u@host JOIN #one",
         "PING :first",
         ...burstLines,
@@ -312,7 +323,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
 
         const entries = yield* until(hosted);
 
-        assert.deepStrictEqual(lineTexts(entries, "inbound").slice(2), lines);
+        assert.deepStrictEqual(lineTexts(entries, "inbound").slice(3), lines);
         assert.include(closedReason(entries)[0], "ECONNRESET");
       }).pipe(
         Effect.provide([
@@ -339,6 +350,7 @@ describe("Transport.layer when a close starts locally", () => {
 
       assert.deepStrictEqual(lineTexts(entries, "inbound"), [
         ":ircd 001 iirc :Welcome",
+        ":ircd 422 iirc :No MOTD",
         ":iirc!~u@host JOIN #one",
         "ERROR :Closing Link",
         ...burstLines,
@@ -353,11 +365,7 @@ describe("Transport.layer when a close starts locally", () => {
       Effect.gen(function* () {
         const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
 
-        const hosted = yield* hostNetwork({
-          id: "local",
-          input,
-          ircd: { host: quietAddress, port: ircd.port, tls: false },
-        });
+        const hosted = yield* hostNetwork(options(ircd.port, quietAddress));
 
         yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
         yield* ircd.push("ERROR :Closing Link");
@@ -370,7 +378,7 @@ describe("Transport.layer when a close starts locally", () => {
 
         assert.isAtLeast(waited, 4900);
         assert.isBelow(waited, 7000);
-        assert.deepStrictEqual(yield* hosted.status, {
+        assert.deepStrictEqual(brief(yield* hosted.status), {
           closeReason: "Closing Link",
           phase: "closed",
         });
@@ -432,11 +440,12 @@ describe("Transport.layer against a stream that is going", () => {
     Effect.gen(function* () {
       const { ircd, wire } = yield* trustedTlsIrcd(welcoming("iirc"));
 
-      const hosted = yield* hostNetwork({
-        id: "local",
-        input,
-        ircd: { host: quietAddress, port: wire.port, tls: true },
-      });
+      const hosted = yield* movingClockWhileClosing(
+        hostNetwork({
+          ...options(wire.port, quietAddress, true),
+          tuning: { ...defaultTuning, floodBurst: 1_000_000, sendWaitMillis: 3_600_000 },
+        })
+      );
 
       yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
       yield* wire.stall;
@@ -474,7 +483,7 @@ describe("Transport.layer against a stream that is going", () => {
 
       const ended = yield* Fiber.join(sending);
 
-      assert.deepStrictEqual(ended, Exit.fail(new NotInSession({ phase: "closed" })));
+      assert.deepStrictEqual(ended, Exit.fail(new WriteFailed({ reason: "write timed out" })));
 
       // The write has gone, so this is the drain's limit, and then the stream goes too.
       yield* TestClock.adjust("5 seconds");
@@ -482,7 +491,7 @@ describe("Transport.layer against a stream that is going", () => {
       yield* wire.resume;
       yield* wire.untilGone;
 
-      assert.deepStrictEqual(yield* hosted.status, {
+      assert.deepStrictEqual(brief(yield* hosted.status), {
         closeReason: "write timed out",
         phase: "closed",
       });
@@ -561,6 +570,12 @@ describe("Transport.layer against a stream that is going", () => {
       while (Exit.isSuccess(ending)) {
         pulls += 1;
         chunks.push(...ending.value);
+
+        // What a read takes is bounded, so the rest of a flood waits in the kernel (LOG-4).
+        assert.isAtMost(
+          ending.value.reduce((total, chunk) => total + chunk.length, 0),
+          16 * 1024
+        );
         assert.isBelow(pulls, 100_000, "a pull after a reset must end, not spin");
         ending = yield* Effect.exit(pull);
       }
@@ -592,6 +607,180 @@ describe("Transport.layer against a stream that is going", () => {
 
       yield* assertPrefixAfterReset(quietAddress, ircd.port, true, ircd);
     }).pipe(Effect.provide(Transport.layer))
+  );
+});
+
+describe("Transport.layer and what counts as written", () => {
+  it.live(
+    "LOG-2: a Line is written once the kernel has it, and one that never got there is Dropped",
+    () =>
+      Effect.gen(function* () {
+        const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
+        const wire = yield* testWire(ircd.port, quietAddress);
+
+        const hosted = yield* hostNetwork({
+          ...options(wire.port, quietAddress),
+          channels: [],
+          tuning: { ...defaultTuning, floodBurst: 1_000_000, writeTimeoutMillis: 300 },
+        });
+
+        yield* eventually(hosted.status, ({ phase }) => phase === "session");
+        yield* wire.stall;
+
+        const written = new Set<number>();
+
+        // Until the kernels on both sides are full and a write times out.
+        for (let first = 0; (yield* hosted.status).phase === "session"; first += 50) {
+          const batch = Array.from({ length: 50 }, (_unused, index) => first + index);
+
+          yield* Effect.forEach(
+            batch,
+            (number) =>
+              hosted.send(outboundLine(`${number} ${"x".repeat(380)}`), "test").pipe(
+                Effect.tap((sent) =>
+                  Effect.sync(() => {
+                    if (sent._tag === "Written") {
+                      written.add(number);
+                    }
+                  })
+                ),
+                Effect.ignore
+              ),
+            { concurrency: "unbounded" }
+          );
+        }
+
+        yield* wire.resume;
+        yield* eventually(hosted.status, ({ phase }) => phase === "closed", "8 seconds");
+        yield* realMillis(300);
+
+        const received = new Set(
+          (yield* ircd.received).flatMap((line) => {
+            const number = /^PRIVMSG #one :(?<number>\d+) /u.exec(line)?.groups?.number;
+
+            return number === undefined ? [] : [Number(number)];
+          })
+        );
+
+        const entries = yield* allEntries;
+
+        const unfinished = entries.filter(
+          (entry) =>
+            entry._tag === "Dropped" && entry.cause === "test" && entry.reason === "write timed out"
+        );
+
+        assert.isAbove(written.size, 100);
+        assert.deepStrictEqual(
+          [...written].filter((number) => !received.has(number)),
+          []
+        );
+        assert.lengthOf(unfinished, 1);
+      }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer])),
+    { timeout: 20_000 }
+  );
+});
+
+describe("Transport.layer staying on", () => {
+  it.live("LIVE-2: survives a stall that ends with its Lines still in the kernel", () =>
+    Effect.gen(function* () {
+      const silenceMillis = 200;
+      const rounds = 10;
+      const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
+
+      const hosted = yield* hostNetwork({
+        ...options(ircd.port, quietAddress),
+        tuning: { ...defaultTuning, lagCheckMillis: 3_600_000, silenceMillis },
+      });
+
+      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+
+      for (let round = 0; round < rounds; round += 1) {
+        // The Line reaches the kernel, and then the whole process stops, as it does when
+        // it is suspended. It wakes with the deadline past and the Line unread.
+        yield* ircd.push(`NOTICE * :${round}`);
+        Bun.sleepSync(silenceMillis + 50);
+
+        yield* eventually(allEntries, (entries) =>
+          lineTexts(entries, "inbound").includes(`NOTICE * :${round}`)
+        );
+      }
+
+      const entries = yield* allEntries;
+
+      assert.lengthOf(closedReason(entries), 0);
+      assert.deepStrictEqual(
+        entries.filter(({ _tag }) => _tag === "Deadline"),
+        []
+      );
+      assert.strictEqual((yield* hosted.status).phase, "session");
+
+      // Nothing here hides a dead Connection: with no Line waiting, it dies on time.
+      const closed = yield* eventually(hosted.status, ({ phase }) => phase === "closed");
+
+      assert.include(closed.closeReason, "heard nothing");
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
+  );
+
+  it.live("LIVE-4: reconnects over a real port after the Ircd goes", () =>
+    Effect.gen(function* () {
+      const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
+
+      const hosted = yield* hostNetwork({
+        ...options(ircd.port, quietAddress),
+        tuning: { ...defaultTuning, reconnectInitialMillis: 20 },
+      });
+
+      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* ircd.hangUp;
+      yield* eventually(ircd.accepted, (accepted) => accepted === 2);
+
+      const second = yield* eventually(ircd.receivedOn(1), (lines) => lines.includes("JOIN #one"));
+
+      assert.deepStrictEqual(second, ["NICK iirc", "USER user 0 * :I IRC", "JOIN #one"]);
+      assert.strictEqual((yield* hosted.status).phase, "session");
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
+  );
+
+  it.live("LIVE-9: says `QUIT` over a real port as its Scope closes", () =>
+    Effect.gen(function* () {
+      const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* hostNetwork(options(ircd.port, quietAddress));
+          yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+        })
+      );
+
+      assert.strictEqual((yield* ircd.received).at(-1), "QUIT leaving");
+
+      const entries = yield* allEntries;
+
+      assert.deepStrictEqual(closedReason(entries), ["leaving"]);
+      yield* eventually(ircd.closed, (closed) => closed === 1);
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
+  );
+
+  it.live("LIVE-9: lets go of a handshake when stopped during it", () =>
+    Effect.gen(function* () {
+      const silent = yield* scriptedIrcd(() => [], { hostname: quietAddress });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* hostNetwork(options(silent.port, quietAddress, true));
+          yield* eventually(silent.accepted, (accepted) => accepted === 1);
+        })
+      );
+
+      yield* eventually(silent.closed, (closed) => closed === 1);
+
+      const entries = yield* allEntries;
+
+      assert.deepStrictEqual(
+        entries.map((entry) => (entry._tag === "Connection" ? entry.phase : entry._tag)),
+        ["attempt", "closing", "closed"]
+      );
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
   );
 });
 
@@ -652,6 +841,30 @@ describe("Transport.layer over a real port", () => {
 
       assert.instanceOf(failure, ConnectFailed);
       assert.include(failure.reason, "self signed");
+    }).pipe(Effect.provide(Transport.layer))
+  );
+
+  it.effect("takes the limit on connecting from Tuning (CONN-1)", () =>
+    Effect.gen(function* () {
+      const silent = yield* scriptedIrcd(() => [], { hostname: quietAddress });
+
+      const fiber = yield* Effect.forkChild(
+        Effect.scoped(
+          connect(quietAddress, silent.port, true, {
+            ...defaultTuning,
+            connectTimeoutMillis: 2000,
+          })
+        )
+      );
+
+      yield* untilReally(silent.accepted, (accepted) => accepted === 1);
+      yield* TestClock.adjust("1999 millis");
+
+      assert.isUndefined(fiber.pollUnsafe());
+
+      yield* TestClock.adjust("1 millis");
+
+      assert.include((yield* Effect.flip(Fiber.join(fiber))).reason, "timed out");
     }).pipe(Effect.provide(Transport.layer))
   );
 

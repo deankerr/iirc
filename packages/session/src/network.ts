@@ -1,545 +1,451 @@
-import { closeReason, deadline, phase, start, step } from "@iirc/lifecycle";
-import type { Command, NetworkInput, NetworkSnapshot, Phase } from "@iirc/lifecycle";
-import { takeFrames } from "@iirc/protocol/frame";
-import { encodeLine, outbound } from "@iirc/protocol/outbound";
+import { start } from "@iirc/lifecycle";
+import type { Phase } from "@iirc/lifecycle";
+import type { Tuning } from "@iirc/lifecycle/tuning";
+import { joinLines } from "@iirc/protocol/join";
+import type { JoinChannel, JoinRejection } from "@iirc/protocol/join";
 import type { OutboundLine } from "@iirc/protocol/outbound";
-import { Array as Arr, Clock, Data, Duration, Effect, Option, Queue, Ref, Semaphore } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Clock,
+  Data,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Option,
+  Ref,
+} from "effect";
 import type { Scope } from "effect";
-import { constFalse, constVoid } from "effect/Function";
-import { Socket } from "effect/socket";
 
-import type { Entry, Ircd, NetworkId, NewEntry } from "./entry.ts";
-import { toEvent } from "./events.ts";
-import { Recorder } from "./recorder.ts";
-import type { RecordFailed } from "./recorder.ts";
-import { describeSocketError, Transport } from "./transport.ts";
+import { hostConnection, logDown, makeCommit, phaseOf } from "./connection.ts";
+import type { Host, Hosted } from "./connection.ts";
+import type { Ircd, NetworkId } from "./entry.ts";
+import { LaneFull } from "./lanes.ts";
+import type { LaneDepths, LineFailure, QueuedLine } from "./lanes.ts";
+import { Recorder, RecordFailed } from "./recorder.ts";
+import { candidateNicks, consecutiveFailures, nextAttempt, noStanding } from "./standing.ts";
+import type { HeldJoinFailure, Standing, WantedChannel } from "./standing.ts";
+import { Transport } from "./transport.ts";
 
-// CONN-1.
-const writeTimeout = Duration.seconds(10);
+export { LaneFull, LineDropped, WriteFailed } from "./lanes.ts";
 
-// How long a Connection that is closing has to finish delivering what the Ircd already
-// sent. An Ircd that hangs up ends this far sooner, so it only stops one that never does.
-const drainLimit = Duration.seconds(5);
+// Past `quitWaitMillis`, a stop that has not finished is told to close at once, and past
+// this again, its loop is let go of. A clean stop never waits either, because the loop's
+// own limit is `quitWaitMillis`, and what it has read and not recorded is bounded.
+const stopMarginMillis = 500;
 
-// Small, so that a flood waits in the kernel and not in this process.
-const inboxCapacity = 16;
-
-// A Line Entry holds a frame, and `takeFrames` drops the line ending from those, so
-// an outbound Entry holds what was written minus the CRLF that `encodeLine` adds.
-const lineEndingBytes = 2;
-
-const pingReply = "ping-reply";
-const ircdClosed = "the Ircd closed the Connection";
-const logDown = "the Log could not record this Connection";
 const hostStopped = "the host stopped";
+const hostLost = "the host lost a Connection and could not record it";
 
-/** Who to be on which Network, and where to reach it. */
-export interface NetworkOptions {
-  readonly id: NetworkId;
-  readonly input: NetworkInput;
-  readonly ircd: Ircd;
+const noLanes: LaneDepths = { background: 0, control: 0, interactive: 0 };
+
+/** Who to be on a Network. */
+export interface Identity {
+  readonly alternates: readonly string[];
+  readonly nick: string;
+  readonly realname: string;
+  readonly username: string;
 }
 
-/** A Line could not be sent because there is no Session on the Network. */
+/** Everything a host needs to stay on a Network. */
+export interface NetworkOptions {
+  /** The Channels to be in, each spelled as it should be sent. */
+  readonly channels: readonly WantedChannel[];
+  readonly id: NetworkId;
+  readonly identity: Identity;
+  /** Tried in turn, starting after whichever the last `attempt` used (LIVE-4). */
+  readonly ircds: Arr.NonEmptyReadonlyArray<Ircd>;
+  /** What `QUIT` says when the host stops (LIVE-9). */
+  readonly quitReason: string;
+  readonly tuning: Tuning;
+}
+
+/** A Line could not be sent because there is no Session on the Network (API-10). */
 export class NotInSession extends Data.TaggedError("NotInSession")<{ readonly phase: Phase }> {}
 
-/** A Network being hosted. */
+/** Everything `send` can refuse with. */
+export type SendFailure = LaneFull | LineFailure | NotInSession;
+
+/** What became of a Line that was not refused (API-9). */
+export type Sent =
+  /** The Line left, and this is the sequence of its Entry. */
+  | { readonly _tag: "Written"; readonly sequence: number }
+  /** The Line is still waiting its turn, and it stays in its lane. */
+  | { readonly _tag: "StillQueued" };
+
+/** A Channel's latest `JOIN` failure, by the name it is compared under. */
+export interface ChannelFailure extends HeldJoinFailure {
+  readonly channel: string;
+}
+
+/** A Channel no `JOIN` Line can carry, so it is never tried. */
+export interface RejectedChannel {
+  readonly channel: JoinChannel;
+  readonly reason: JoinRejection;
+}
+
+/** Why the Log could not be appended to has not been resolved (LOG-9). */
+export interface LogFault {
+  /** The outage, and each try to resume since. */
+  readonly failures: number;
+  /** When a `record` will next be tried, in epoch milliseconds. */
+  readonly retryAt: number;
+  /** The wait `retryAt` stands for, which caps it if the clock is set back (LOG-8). */
+  readonly retryMillis: number;
+}
+
+/** A Channel Self was kicked from, and when (LIVE-8). */
+export interface KickedChannel {
+  readonly at: number;
+  readonly channel: string;
+}
+
+/** What a Frontend needs to know about a Network, derived each time it is asked for. */
+export interface NetworkStatus {
+  /** Why the last Connection closed, while nothing has replaced it. */
+  readonly closeReason: string | undefined;
+  readonly consecutiveFailures: number;
+  /** Channels Self is in now. */
+  readonly joined: readonly string[];
+  readonly joinFailures: readonly ChannelFailure[];
+  readonly kicked: readonly KickedChannel[];
+  readonly lagMillis: number | undefined;
+  readonly lanes: LaneDepths;
+  /** Set from a failed `record` until one succeeds. */
+  readonly logFault: LogFault | undefined;
+  /** When the next `attempt` is due, in epoch milliseconds, unless a Connection is under way. */
+  readonly nextAttemptAt: number | undefined;
+  /** Only `session` while a Line can be sent. */
+  readonly phase: Phase;
+  /** The Network's own words, verbatim, while its refusal stands (LIVE-5). */
+  readonly refusal: string | undefined;
+  readonly refused: boolean;
+  readonly rejectedChannels: readonly RejectedChannel[];
+  /** Self's nick in the current Session. */
+  readonly self: string | undefined;
+}
+
+/** A Network being hosted. Stopping it is closing the Scope it was started in. */
 export interface NetworkHost {
-  /** Records a Line, then writes it. Fails unless the Network is in a Session. */
-  readonly send: (
-    line: OutboundLine,
-    cause: string
-  ) => Effect.Effect<void, NotInSession | RecordFailed>;
-  readonly status: Effect.Effect<{
-    readonly closeReason: string | undefined;
-    readonly phase: Phase;
-  }>;
+  /**
+   * Queues a Line on the interactive lane and waits for it to be written. Never held
+   * for later: with no Session it fails at once, and a full lane refuses at once. A
+   * caller who walks away leaves the Line queued.
+   */
+  readonly send: (line: OutboundLine, cause: string) => Effect.Effect<Sent, SendFailure>;
+  readonly status: Effect.Effect<NetworkStatus>;
 }
 
-class WriteFailed extends Data.TaggedError("WriteFailed")<{ readonly reason: string }> {}
+const isKept = (channels: readonly RejectedChannel[], { name }: WantedChannel) =>
+  !channels.some(({ channel }) => channel.name === name);
 
-type InboxItem =
-  // `at` is when it was read, which says whether it arrived ahead of a deadline.
-  | { readonly _tag: "Read"; readonly at: number; readonly chunks: readonly Uint8Array[] }
-  | { readonly _tag: "Ended"; readonly reason: string }
-  // Says nothing itself: the loop looks at `writes` again before its next wait.
-  | { readonly _tag: "Wake" };
-
-interface OpenWrites {
-  readonly _tag: "Open";
-  readonly connection: number;
-  readonly writer: Socket.Writer;
-}
-
-// Whether Lines can leave. `Draining` is a Connection that is closing, and only read
-// from until `readsUntil`, and its `reason` is the first thing to go wrong.
-type Writes =
-  | { readonly _tag: "None" }
-  | OpenWrites
-  | { readonly _tag: "Draining"; readonly reason: string; readonly readsUntil: number };
-
-const noWrites: Writes = { _tag: "None" };
-
-interface Hosted {
-  readonly snapshot: NetworkSnapshot;
-  // Why hosting ended, for when no `closed` Entry says so.
-  readonly unrecorded: string | undefined;
-  readonly writes: Writes;
-}
-
-interface Stepped {
-  readonly commands: readonly Command[];
-  readonly next: NetworkSnapshot;
-}
-
-interface Framing {
-  readonly cutting: boolean;
-  readonly pending: Uint8Array;
-}
-
-// A transition that throws leaves the machine where it was and closes the Connection
-// (HOST-1).
-const stepEntry = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
-  const event = toEvent(entry);
-
-  if (event === undefined) {
-    return { commands: [], next: snapshot };
-  }
-
-  try {
-    return step(snapshot, event);
-  } catch {
-    const reason = `the machine threw on Entry ${entry.sequence}`;
-
-    return { commands: [{ reason, type: "closeConnection" }], next: snapshot };
-  }
-};
-
-const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>) => {
-  const commands: Command[] = [];
-  let next = snapshot;
-
-  for (const entry of entries) {
-    const stepped = stepEntry(next, entry);
-
-    commands.push(...stepped.commands);
-    ({ next } = stepped);
-  }
-
-  return { commands, next };
-};
-
-const isClosed = ({ snapshot, unrecorded }: Hosted) =>
-  unrecorded !== undefined || phase(snapshot) === "closed";
-
-// Status is the fold, and only says otherwise where the Log could not record the end.
-const statusOf = ({ snapshot, unrecorded }: Hosted): Effect.Success<NetworkHost["status"]> => ({
-  closeReason: unrecorded ?? closeReason(snapshot),
-  phase: unrecorded === undefined ? phase(snapshot) : "closed",
-});
-
-const toEnding = (error: Socket.SocketError) =>
-  error.reason._tag === "SocketCloseError"
-    ? ircdClosed
-    : `read failed: ${describeSocketError(error)}`;
-
-const toWriteFailed = (error: Socket.SocketError) =>
-  new WriteFailed({
-    reason:
-      error.reason._tag === "SocketCloseError"
-        ? ircdClosed
-        : `write failed: ${describeSocketError(error)}`,
-  });
+const retryDelay = (failures: number, tuning: Tuning) =>
+  Math.min(tuning.reconnectInitialMillis * 2 ** (failures - 1), tuning.reconnectMaxMillis);
 
 /**
- * Starts hosting a Network in the enclosing Scope, which releases the socket when it
- * closes. One fiber owns the machine and every step of it, a second feeds it what the
- * socket reads, and `send` may come from any other fiber. It never fails: every
- * ending is an Entry, or `status` says that the Log could not take one. The machine
- * starts afresh, because the `attempt` this records resets it whatever came before.
- * @param options - Who to be on which Network.
+ * Stays on a Network for as long as the enclosing Scope lasts: one loop reads `Standing`,
+ * waits until the next `attempt` is due, and runs one Connection after another, each in
+ * its own Scope. It never fails. A failed `record` or a defect ends a Connection and
+ * backs off like anything else, and `status` says so. Should the loop itself ever die,
+ * `status` reads `closed` with no next attempt, and the cause is logged.
+ *
+ * Closing the Scope records `closing`, says `QUIT`, and waits up to `quitWaitMillis` for
+ * the queue and the Ircd. That all happens on the loop's own fiber, which is detached so
+ * that closing the Scope cannot interrupt it first, and the finalizer here is the only
+ * thing that ends it.
+ * @param options - Who to be on which Network, and where to reach it.
  * @returns The running host.
  */
 export const hostNetwork: (
   options: NetworkOptions
 ) => Effect.Effect<NetworkHost, never, Recorder | Scope.Scope | Transport> = Effect.fn(
   "hostNetwork"
-)(function* ({ id, input, ircd }: NetworkOptions) {
-  const { record } = yield* Recorder;
+)(function* ({ channels, id, identity, ircds, quitReason, tuning }: NetworkOptions) {
+  const recorder = yield* Recorder;
   const { connect } = yield* Transport;
 
-  const state = yield* Ref.make<Hosted>({
-    snapshot: start(input),
+  const { rejected } = joinLines(channels);
+  const joinable = channels.filter((channel) => isKept(rejected, channel));
+
+  const hosted = yield* Ref.make<Hosted>({
+    live: undefined,
+    snapshot: start({ realname: identity.realname, tuning, username: identity.username }),
+    stopped: false,
+    unclosed: [],
     unrecorded: undefined,
-    writes: noWrites,
   });
 
-  const inbox = yield* Queue.bounded<InboxItem>(inboxCapacity);
+  const logFault = yield* Ref.make<LogFault | undefined>(undefined);
+  const stop = yield* Deferred.make<undefined>();
+  const hurry = yield* Deferred.make<undefined>();
+  const stopping = () => Deferred.isDoneUnsafe(stop);
+  const hurrying = () => Deferred.isDoneUnsafe(hurry);
 
-  // Held across record and write, so Log order is wire order (LOG-4), and across the
-  // close, so nothing is recorded on a Connection after its `closed` Entry.
-  const outboundLock = yield* Semaphore.make(1);
-
-  // Only the loop's fiber calls this. A step that a failed commit rolls back never
-  // reaches `state`, because `within` only works out the next snapshot.
-  const commit = Effect.fnUntraced(function* (entries: Arr.NonEmptyReadonlyArray<NewEntry>) {
-    const { snapshot } = yield* Ref.get(state);
-
-    const stepped = yield* record(entries, (recorded) => ({
-      ...stepEntries(snapshot, recorded),
-      recorded,
-    }));
-
-    yield* Ref.update(state, (hosted) => ({ ...hosted, snapshot: stepped.next }));
-
-    return stepped;
+  // One outage is one failure, however many appends fail during it. Each try to resume
+  // after it is another, which is what the backoff counts.
+  const faultFrom = (now: number, failures: number): LogFault => ({
+    failures,
+    retryAt: now + retryDelay(failures, tuning),
+    retryMillis: retryDelay(failures, tuning),
   });
 
-  // Must run under `outboundLock`. Its Entry steps nothing, because `toEvent` has no
-  // event for an outbound Line, which is why any fiber may do this.
-  const transmit = Effect.fnUntraced(function* (
-    { connection, writer }: OpenWrites,
-    line: OutboundLine,
-    cause: string
-  ) {
-    const wire = encodeLine(line);
-
-    yield* record(
-      [
-        {
-          _tag: "Line",
-          bytes: wire.subarray(0, -lineEndingBytes),
-          cause,
-          connection,
-          direction: "outbound",
-          network: id,
-        },
-      ],
-      constVoid
-    );
-
-    yield* writer.write(wire).pipe(
-      Effect.mapError(toWriteFailed),
-      Effect.timeoutOrElse({
-        duration: writeTimeout,
-        orElse: () => Effect.fail(new WriteFailed({ reason: "write timed out" })),
-      })
-    );
-  });
-
-  // How every close starts, whatever caused it. Nothing more is written or acted on,
-  // and only the first reason counts. The loop reads on from here, because what the
-  // Ircd sent is still worth recording (HOST-1), and calls `close` when that ends.
-  const drain = Effect.fnUntraced(function* (reason: string) {
+  const noteFault = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
-    const readsUntil = now + Duration.toMillis(drainLimit);
 
-    yield* Ref.update(state, (hosted): Hosted =>
-      hosted.writes._tag === "Open"
-        ? { ...hosted, writes: { _tag: "Draining", readsUntil, reason } }
-        : hosted
-    );
+    yield* Ref.update(logFault, (held) => held ?? faultFrom(now, 1));
   });
 
-  const whileOpen = <E, R>(act: (writes: OpenWrites) => Effect.Effect<void, E, R>) =>
-    Effect.flatMap(Ref.get(state), ({ writes }) =>
-      writes._tag === "Open" ? act(writes) : Effect.void
-    );
-
-  // Waits with `peek`, because a timed `take` can lose its item to the timer. Only the
-  // loop takes, so what `peek` saw is still there, and `late` can leave it there.
-  const takeUnless = Effect.fnUntraced(function* <A>(
-    millis: number,
-    otherwise: A,
-    late: (item: InboxItem) => boolean = constFalse
-  ) {
-    const waited = yield* Queue.peek(inbox).pipe(
-      Effect.timeoutOption(Duration.millis(Math.max(millis, 0)))
-    );
-
-    return Option.isSome(waited) && !late(waited.value) ? yield* Queue.take(inbox) : otherwise;
-  });
-
-  // Runs until the socket ends, so a read ending is one more thing the loop takes.
-  const feed = (pull: Effect.Effect<readonly Uint8Array[], Socket.SocketError>) =>
+  // `before` is the fault as the try began, so the try that finds an outage counts once.
+  const noteFailedResume = (before: LogFault | undefined) =>
     Effect.gen(function* () {
-      const chunks = yield* pull;
-      const at = yield* Clock.currentTimeMillis;
-
-      yield* Queue.offer(inbox, { _tag: "Read", at, chunks });
-    }).pipe(
-      Effect.forever,
-      Effect.catch((error) => Queue.offer(inbox, { _tag: "Ended", reason: toEnding(error) })),
-      Effect.catchDefect(() => Queue.offer(inbox, { _tag: "Ended", reason: "the reader died" }))
-    );
-
-  const hostConnection = Effect.fn("hostConnection")(function* (connection: number) {
-    let framing: Framing = { cutting: false, pending: new Uint8Array() };
-
-    const lineEntry = (bytes: Uint8Array, cut: boolean): NewEntry => ({
-      _tag: "Line",
-      bytes,
-      connection,
-      direction: "inbound",
-      network: id,
-      ...(cut && { cut }),
-    });
-
-    const connectionEntry = (phase: "opened" | "closed", reason?: string): NewEntry => ({
-      _tag: "Connection",
-      connection,
-      ircd,
-      network: id,
-      phase,
-      ...(reason !== undefined && { reason }),
-    });
-
-    const takeLines = (chunks: readonly Uint8Array[]) => {
-      const entries: NewEntry[] = [];
-
-      for (const chunk of chunks) {
-        const { cut, cutting, frames, pending } = takeFrames(
-          framing.pending,
-          chunk,
-          framing.cutting
-        );
-
-        for (const [index, frame] of frames.entries()) {
-          entries.push(lineEntry(frame, cut.has(index)));
-        }
-
-        framing = { cutting, pending };
-      }
-
-      return entries;
-    };
-
-    // The one way a Connection ends, and the first reason wins. Whatever was read and
-    // not yet framed goes down with it, so no Line is lost, but its Commands have no
-    // Connection to run on. Only a read side that has ended, or a Log that has gone,
-    // comes here directly, and everything else goes through `drain`.
-    const close = Effect.fnUntraced(function* (reason: string) {
-      yield* outboundLock.withPermit(
-        Effect.gen(function* () {
-          const hosted = yield* Ref.get(state);
-
-          if (isClosed(hosted)) {
-            return;
-          }
-
-          const first = hosted.writes._tag === "Draining" ? hosted.writes.reason : reason;
-          const backlog = yield* Queue.clear(inbox);
-
-          const entries = takeLines(
-            backlog.flatMap((item) => (item._tag === "Read" ? item.chunks : []))
-          );
-
-          if (framing.pending.length > 0) {
-            entries.push(lineEntry(framing.pending, true));
-          }
-
-          // With the Log down there is nothing left to try, so only `status` knows.
-          yield* commit(Arr.append(entries, connectionEntry("closed", first))).pipe(
-            Effect.catchTag("RecordFailed", () =>
-              Ref.update(state, (latest) => ({
-                ...latest,
-                unrecorded: `${first}, and ${logDown}'s close`,
-              }))
-            )
-          );
-
-          yield* Ref.update(state, (latest) => ({ ...latest, writes: noWrites }));
-        })
-      );
-    });
-
-    const runCommand = Effect.fnUntraced(function* (command: Command) {
-      if (command.type === "closeConnection") {
-        return yield* drain(command.reason);
-      }
-
-      const built = outbound(command.command, command.params);
-
-      if (built._tag === "Safe") {
-        return yield* outboundLock
-          .withPermit(whileOpen((writes) => transmit(writes, built.line, command.cause)))
-          .pipe(
-            Effect.catchTags({
-              RecordFailed: () => close(logDown),
-              WriteFailed: ({ reason }) => drain(reason),
-            })
-          );
-      }
-
-      // A `PONG` echoes the Ircd's own token, so one that cannot be built is the
-      // Ircd's bad bytes, and those never close a Session (HOST-1).
-      return command.cause === pingReply
-        ? yield* Effect.logWarning(`Dropped a ${command.command}: ${built.reason}`)
-        : yield* drain(`could not send a ${command.command} Line: ${built.reason}`);
-    });
-
-    // Nothing acts on a Line once the Connection has started to close.
-    const runCommands = Effect.fnUntraced(function* (commands: readonly Command[]) {
-      yield* Effect.forEach(commands, (command) => whileOpen(() => runCommand(command)), {
-        discard: true,
-      });
-    });
-
-    const onEntries = Effect.fnUntraced(
-      function* (entries: Arr.NonEmptyReadonlyArray<NewEntry>) {
-        const { commands } = yield* commit(entries);
-
-        yield* runCommands(commands);
-      },
-      Effect.catchTag("RecordFailed", () => close(logDown))
-    );
-
-    // A deadline already past waits for nothing, but a Read from before it still goes
-    // first, so a `001` that arrived in time beats the registration deadline. A Read
-    // from after it does not, and neither does anything once the limit on a close has
-    // passed, or a flood could hold either off for good.
-    const nextItem = Effect.fnUntraced(function* () {
-      const { snapshot, writes } = yield* Ref.get(state);
       const now = yield* Clock.currentTimeMillis;
 
-      if (writes._tag === "Draining") {
-        const ended = { _tag: "Ended", reason: writes.reason } as const;
+      yield* Ref.update(logFault, (held) =>
+        before === undefined ? (held ?? faultFrom(now, 1)) : faultFrom(now, before.failures + 1)
+      );
+    });
 
-        return now < writes.readsUntil ? yield* takeUnless(writes.readsUntil - now, ended) : ended;
-      }
+  const record: Host["record"] = (entries, within) =>
+    recorder.record(entries, within).pipe(
+      Effect.tapError(() => noteFault),
+      Effect.tap(() => Ref.set(logFault, undefined))
+    );
 
-      const due = deadline(snapshot);
+  const standing = Effect.tapError(recorder.standing(id), () => noteFault);
+  const commit = makeCommit(hosted, record);
 
-      return due === undefined
-        ? yield* Queue.take(inbox)
-        : yield* takeUnless(
-            due.at - now,
-            { _tag: "Deadline", name: due.name } as const,
-            (item) => item._tag === "Read" && item.at >= due.at
+  const host: Host = {
+    channels: joinable,
+    commit,
+    connect,
+    hosted,
+    hurrying,
+    id,
+    quitReason,
+    record,
+    standing,
+    stopping,
+    tuning,
+  };
+
+  // The Log has no say while it is down, so a fault adds to what `Standing` works out. No
+  // wait is longer than its own delay from now, so a clock set back cannot keep the
+  // Network offline (LOG-8).
+  const attemptDue = (held: Standing, fault: LogFault | undefined, now: number) => {
+    const next = nextAttempt(held, { ircds, tuning });
+    const afterStanding = Math.min(next.at, now + next.delayMillis);
+    const afterFault = fault === undefined ? 0 : Math.min(fault.retryAt, now + fault.retryMillis);
+
+    return { ...next, at: Math.max(afterStanding, afterFault) };
+  };
+
+  // What a Log outage left unrecorded goes first, so that its Connection is closed for the
+  // reason it really closed, and not taken for one a killed process left (LOG-2).
+  const recordUnclosed = Effect.gen(function* () {
+    const { unclosed } = yield* Ref.get(hosted);
+
+    for (const batch of Arr.chunksOf(unclosed, 1024)) {
+      yield* commit(batch);
+    }
+
+    yield* Ref.update(hosted, (state) => ({ ...state, unclosed: [] }));
+  });
+
+  const waitUntil = Effect.fnUntraced(function* (at: number) {
+    const now = yield* Clock.currentTimeMillis;
+
+    if (at > now) {
+      yield* Effect.raceFirst(Effect.sleep(Duration.millis(at - now)), Deferred.await(stop));
+    }
+  });
+
+  const tryConnection = Effect.gen(function* () {
+    const held = yield* standing;
+    const { at, ircd } = attemptDue(held, yield* Ref.get(logFault), yield* Clock.currentTimeMillis);
+
+    yield* waitUntil(at);
+
+    if (stopping()) {
+      return;
+    }
+
+    yield* recordUnclosed;
+
+    const { commands, recorded } = yield* commit([
+      {
+        _tag: "Connection",
+        ircd,
+        network: id,
+        nicks: candidateNicks(held, identity, tuning),
+        phase: "attempt",
+      },
+    ]);
+
+    const connection = recorded[0]?.sequence ?? 0;
+
+    yield* Effect.scoped(hostConnection(host, { commands, connection, ircd }));
+  });
+
+  const oneConnection = Effect.gen(function* () {
+    const faultBefore = yield* Ref.get(logFault);
+
+    return yield* tryConnection.pipe(
+      // No dial without a recorded `attempt`, so this waits out the fault and tries again.
+      Effect.catchTag("RecordFailed", () =>
+        Effect.gen(function* () {
+          yield* noteFailedResume(faultBefore);
+          yield* Ref.update(hosted, (state) => ({
+            ...state,
+            unrecorded: state.unrecorded ?? logDown,
+          }));
+
+          const fault = yield* Ref.get(logFault);
+          const now = yield* Clock.currentTimeMillis;
+
+          yield* waitUntil(
+            fault === undefined ? 0 : Math.min(fault.retryAt, now + fault.retryMillis)
           );
-    });
-
-    const serve = Effect.fnUntraced(function* () {
-      while (!isClosed(yield* Ref.get(state))) {
-        const item = yield* nextItem();
-
-        switch (item._tag) {
-          case "Deadline": {
-            yield* onEntries([{ _tag: "Deadline", name: item.name, network: id }]);
-            break;
-          }
-
-          case "Ended": {
-            yield* close(item.reason);
-            break;
-          }
-
-          case "Read": {
-            const entries = takeLines(item.chunks);
-
-            if (Arr.isReadonlyArrayNonEmpty(entries)) {
-              yield* onEntries(entries);
-            }
-
-            break;
-          }
-
-          case "Wake": {
-            break;
-          }
-
-          default: {
-            item satisfies never;
-          }
-        }
-      }
-    });
-
-    const open = Effect.gen(function* () {
-      const socket = yield* connect(ircd);
-      const pull = yield* Socket.readerBytes(socket);
-      const writer = yield* socket.writer;
-
-      yield* Ref.update(state, (hosted): Hosted => ({
-        ...hosted,
-        writes: { _tag: "Open", connection, writer },
-      }));
-
-      const { commands } = yield* commit([connectionEntry("opened")]);
-
-      yield* Effect.forkScoped(feed(pull));
-      yield* runCommands(commands);
-      yield* serve();
-    });
-
-    yield* open.pipe(
-      Effect.catchTags({
-        ConnectFailed: ({ reason }) => close(reason),
-        RecordFailed: () => close(logDown),
-        SocketError: (error) => close(`could not read: ${describeSocketError(error)}`),
-      })
+        })
+      ),
+      // A defect `hostConnection` could not turn into a `closed` Entry: most likely the
+      // Recorder died on that as well. It counts as a fault, so this cannot spin.
+      Effect.catchCauseIf(
+        (cause) => !Cause.hasInterruptsOnly(cause),
+        (cause) =>
+          Effect.gen(function* () {
+            yield* Effect.logError("A Connection could not be recorded", cause);
+            yield* noteFailedResume(faultBefore);
+            yield* Ref.update(hosted, (state) => ({
+              ...state,
+              live: undefined,
+              unrecorded: state.unrecorded ?? hostLost,
+            }));
+          })
+      )
     );
   });
 
-  // One Connection for now. A reconnect is a loop around this, and `Effect.scoped`
-  // is what releases each socket as its Connection ends.
-  yield* commit([{ _tag: "Connection", ircd, network: id, phase: "attempt" }]).pipe(
-    Effect.flatMap(({ recorded: [attempt] }) => hostConnection(attempt.sequence)),
-    Effect.catchTag("RecordFailed", () =>
-      Ref.update(state, (hosted) => ({ ...hosted, unrecorded: logDown }))
-    ),
-    Effect.scoped,
+  const loop = Effect.gen(function* () {
+    while (!stopping()) {
+      yield* oneConnection;
+    }
+
+    // One last chance for an outage's end to reach the Log before the host goes.
+    yield* Effect.ignore(recordUnclosed);
+  }).pipe(
     Effect.tapDefect((defect) => Effect.logError("The Network host died", defect)),
-    Effect.ensuring(
-      Effect.andThen(
-        Queue.shutdown(inbox),
-        Ref.update(state, (hosted) => ({
-          ...hosted,
-          unrecorded: isClosed(hosted) ? hosted.unrecorded : hostStopped,
-          writes: noWrites,
-        }))
-      )
-    ),
-    Effect.forkScoped
+    Effect.onExit(() =>
+      Ref.update(hosted, (held): Hosted => ({
+        ...held,
+        live: undefined,
+        stopped: true,
+        unrecorded: held.live === undefined ? held.unrecorded : (held.unrecorded ?? hostStopped),
+      }))
+    )
   );
 
-  const send = Effect.fnUntraced(
-    function* (line: OutboundLine, cause: string) {
-      yield* outboundLock.withPermit(
-        Effect.gen(function* () {
-          const hosted = yield* Ref.get(state);
-          const { phase } = statusOf(hosted);
+  // Finalizers run uninterruptibly, so this has to ask for a timeout to be able to win.
+  const finish = Effect.fnUntraced(function* (fiber: Fiber.Fiber<void>) {
+    yield* Deferred.succeed(stop, undefined);
 
-          if (hosted.writes._tag === "Draining") {
-            return yield* new NotInSession({ phase: "closed" });
-          }
+    const { live } = yield* Ref.get(hosted);
 
-          if (phase !== "session" || hosted.writes._tag !== "Open") {
-            return yield* new NotInSession({ phase });
-          }
+    if (live !== undefined) {
+      yield* live.lanes.quit;
+      yield* live.wake;
+    }
 
-          return yield* transmit(hosted.writes, line, cause);
-        })
-      );
-    },
-    // Only the loop may close, and it may be parked on the inbox or waiting for the
-    // lock, so each of these wakes it after the lock is released. A caller who has
-    // gone away must not take that with them, or the Connection would never end.
-    Effect.catchTags({
-      RecordFailed: (failed) =>
-        Effect.andThen(
-          Effect.uninterruptible(Queue.offer(inbox, { _tag: "Ended", reason: logDown })),
-          Effect.fail(failed)
-        ),
-      WriteFailed: ({ reason }) =>
-        Effect.andThen(
-          Effect.uninterruptible(
-            Effect.andThen(drain(reason), Queue.offer(inbox, { _tag: "Wake" }))
-          ),
-          Effect.fail(new NotInSession({ phase: "closed" }))
-        ),
-    })
-  );
+    const awaited = (millis: number) =>
+      Fiber.await(fiber).pipe(Effect.timeoutOption(Duration.millis(millis)), Effect.interruptible);
 
-  return { send, status: Effect.map(Ref.get(state), statusOf) };
+    // Past its wait, a stop closes at once, recording what it read and its `closed`. Only a
+    // Recorder that never returns is left behind.
+    if (Option.isNone(yield* awaited(tuning.quitWaitMillis + stopMarginMillis))) {
+      yield* Deferred.succeed(hurry, undefined);
+
+      const { live: hurried } = yield* Ref.get(hosted);
+
+      yield* hurried?.wake ?? Effect.void;
+
+      if (Option.isNone(yield* awaited(stopMarginMillis))) {
+        fiber.interruptUnsafe();
+      }
+    }
+  });
+
+  yield* Effect.acquireRelease(Effect.forkDetach(loop), finish);
+
+  const send = Effect.fnUntraced(function* (line: OutboundLine, cause: string) {
+    const held = yield* Ref.get(hosted);
+    const phase = yield* phaseOf(held);
+
+    // The fault is why there is no Session, and nothing can be recorded to send one.
+    if (phase !== "session" && (yield* Ref.get(logFault)) !== undefined) {
+      return yield* new RecordFailed({ cause: logDown });
+    }
+
+    if (held.live === undefined || phase !== "session") {
+      return yield* new NotInSession({ phase });
+    }
+
+    const outcome = Deferred.makeUnsafe<number, LineFailure>();
+    const queued: QueuedLine = { cause, lane: "interactive", line, outcome };
+    const offered = yield* held.live.lanes.offerNow(queued);
+
+    if (offered === "full") {
+      return yield* new LaneFull({ lane: queued.lane });
+    }
+
+    if (offered === "shut") {
+      return yield* new NotInSession({ phase: "closing" });
+    }
+
+    const written = yield* Deferred.await(outcome).pipe(
+      Effect.timeoutOption(Duration.millis(tuning.sendWaitMillis))
+    );
+
+    return Option.match(written, {
+      onNone: (): Sent => ({ _tag: "StillQueued" }),
+      onSome: (sequence): Sent => ({ _tag: "Written", sequence }),
+    });
+  });
+
+  // Between Connections, what the last one came to is in `Standing`, so a restart reads the
+  // same. A Connection the Log could not close still holds a Session there, and none of it
+  // is current once its host has let go of it (LOG-9, OBS-1).
+  const status = Effect.gen(function* () {
+    const held = yield* Ref.get(hosted);
+    const fault = yield* Ref.get(logFault);
+    const { live, stopped, unrecorded } = held;
+    const known = yield* Effect.orElseSucceed(recorder.standing(id), () => noStanding);
+    const now = yield* Clock.currentTimeMillis;
+    const lastClose = known.recent.at(-1);
+    const between = live === undefined;
+
+    const phaseBetween =
+      unrecorded === undefined && !stopped && lastClose === undefined ? "idle" : "closed";
+
+    return {
+      closeReason: unrecorded ?? (between ? lastClose?.reason : undefined),
+      consecutiveFailures: consecutiveFailures(known, tuning, now),
+      joinFailures: [...known.joinFailures].map(([channel, failure]) => ({ ...failure, channel })),
+      joined: between ? [] : [...known.channels.values()],
+      kicked: [...known.kicked].map(([channel, at]) => ({ at, channel })),
+      lagMillis: between ? undefined : known.lagMillis,
+      lanes: between ? noLanes : yield* live.lanes.depths,
+      logFault: fault,
+      nextAttemptAt:
+        between && !stopped && !stopping()
+          ? Math.max(attemptDue(known, fault, now).at, now)
+          : undefined,
+      phase: between ? phaseBetween : yield* phaseOf(held),
+      refusal: known.refusal?.reason,
+      refused: known.refusal !== undefined,
+      rejectedChannels: rejected,
+      self: between ? undefined : known.self,
+    } satisfies NetworkStatus;
+  });
+
+  return { send, status };
 });

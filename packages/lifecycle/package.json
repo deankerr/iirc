@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/lifecycle.ts"
+    ".": "./src/lifecycle.ts",
+    "./tuning": "./src/tuning.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"
   },
   "dependencies": {
+    "@iirc/protocol": "workspace:*",
     "xstate": "catalog:"
   },
   "devDependencies": {
