@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { closeReason, fold, phase } from "@iirc/lifecycle";
+import { closeReason, phase, start, step } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import { maxFrameBytes } from "@iirc/protocol/frame";
 import { Cause, Clock, Effect, Exit } from "effect";
@@ -33,7 +33,7 @@ import {
 } from "./network.fixture.ts";
 import { NotInSession, WriteFailed } from "./network.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
-import { fakeIrcd } from "./testing.ts";
+import { attemptInput, fakeIrcd } from "./testing.ts";
 import type { FakeIrcd } from "./testing.ts";
 
 // A small deterministic generator, so that a failure can be replayed.
@@ -64,11 +64,18 @@ const framesOf = (bytes: Uint8Array) => {
   return { frames, rest: bytes.subarray(start) };
 };
 
+// Each `attempt` brings the input its Connection ran with, a throwing Tuning included, so
+// this does what the host does: a transition that throws leaves the machine as it was.
 const statusFolded = (log: readonly Entry[]) => {
-  const snapshot = fold(
-    log.flatMap((entry) => toEvent(entry) ?? []),
-    input
-  );
+  let snapshot = start(input);
+
+  for (const event of log.flatMap((entry) => toEvent(entry) ?? [])) {
+    try {
+      snapshot = step(snapshot, event).next;
+    } catch {
+      // The host closes the Connection, and the machine hears of that from the Log.
+    }
+  }
 
   return { closeReason: closeReason(snapshot), phase: phase(snapshot) };
 };
@@ -522,6 +529,7 @@ describe("hostNetwork as a fold", () => {
             ircd: address,
             network: "libera",
             nicks: ["iirc"],
+            ...attemptInput,
             phase: "attempt",
           },
           { ...connection, _tag: "Connection", phase: "opened" },

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { maxFrameBytes } from "./frame.ts";
 import { pingToken } from "./line.ts";
-import { encodeLine, maxLineBytes, outbound, pong, privmsg } from "./outbound.ts";
+import { encodeLine, maxLineBytes, outbound, part, pong, privmsg, quit, user } from "./outbound.ts";
 import type { Outbound } from "./outbound.ts";
 
 const encoder = new TextEncoder();
@@ -155,5 +155,49 @@ describe(privmsg, () => {
 
   it("rejects empty text", () => {
     expect(privmsg("#a", "")).toStrictEqual({ _tag: "Rejected", reason: "EmptyText" });
+  });
+});
+
+describe(part, () => {
+  it("CONF-5: leaves one Channel, with a reason if given", () => {
+    expect(decoder.decode(wire(part("#iirc")))).toBe("PART #iirc\r\n");
+    expect(decoder.decode(wire(part("#iirc", "off to bed")))).toBe("PART #iirc :off to bed\r\n");
+  });
+
+  it.each(["#a,#b", "", "#a b", ":#a", "#a\r\nQUIT"])("rejects %j as a Channel", (channel) => {
+    expect(part(channel)).toStrictEqual({ _tag: "Rejected", reason: "InvalidTarget" });
+  });
+
+  it("rejects a reason that would break the framing", () => {
+    expect(part("#a", "bye\r\nQUIT :pwned")).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+  });
+});
+
+describe(quit, () => {
+  it("LIVE-9: says why, as the last parameter", () => {
+    expect(decoder.decode(wire(quit("back soon")))).toBe("QUIT :back soon\r\n");
+  });
+
+  it("LIVE-9: rejects a reason no Line can carry", () => {
+    expect(quit("x".repeat(maxLineBytes))).toStrictEqual({ _tag: "Rejected", reason: "TooLong" });
+    expect(quit("bye\r\nJOIN 0")._tag).toBe("Rejected");
+  });
+});
+
+describe(user, () => {
+  it("CONN-2: registers in RFC 2812's form, with mode 0", () => {
+    expect(decoder.decode(wire(user("cc", "Claude Code")))).toBe("USER cc 0 * :Claude Code\r\n");
+  });
+
+  it("CONN-2: rejects a username that is not one word, and a realname too long", () => {
+    expect(user("two words", "x")._tag).toBe("Rejected");
+    expect(user("", "x")._tag).toBe("Rejected");
+    expect(user("cc", "x".repeat(maxLineBytes))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "TooLong",
+    });
   });
 });

@@ -6,7 +6,7 @@ import { nickCandidates } from "@iirc/protocol/nick";
 import type { Array as Arr } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { Entry, Ircd, NetworkId, NewEntry } from "./entry.ts";
+import type { Entry, Ircd, Json, NetworkId, NewEntry } from "./entry.ts";
 import { toEvent } from "./events.ts";
 import {
   candidateNicks,
@@ -21,6 +21,7 @@ import {
   sessionSince,
 } from "./standing.ts";
 import type { Gap, WantedChannel } from "./standing.ts";
+import { attemptInput } from "./testing.ts";
 
 const encoder = new TextEncoder();
 const started = 1_000_000;
@@ -78,6 +79,7 @@ class Script {
       ircd,
       network: this.network,
       nicks,
+      ...attemptInput,
       phase: "attempt",
     });
   }
@@ -125,6 +127,15 @@ class Script {
       reason,
       refused: true,
     });
+  }
+
+  // Something the Owner altered, which only whoever reads Changes can make sense of.
+  change(change: Json = null) {
+    return this.append({ _tag: "Change", by: "local", change, network: this.network });
+  }
+
+  get head() {
+    return this.entries.length;
   }
 
   daemon(phase: "started" | "stopped") {
@@ -186,8 +197,12 @@ class Script {
     return foldOne(this.entries);
   }
 
-  next(ircds: Arr.NonEmptyReadonlyArray<Ircd> = oneIrcd, tuning: Tuning = defaultTuning) {
-    return nextAttempt(this.standing, { ircds, tuning });
+  next(
+    ircds: Arr.NonEmptyReadonlyArray<Ircd> = oneIrcd,
+    tuning: Tuning = defaultTuning,
+    retrySince?: number
+  ) {
+    return nextAttempt(this.standing, { ircds, retrySince, tuning });
   }
 
   delay() {
@@ -1475,7 +1490,7 @@ describe("LIVE-8: kicks", () => {
     script.daemon("started").session();
 
     expect(planned(script, wantedIirc)).toStrictEqual([]);
-    expect(script.standing.kicked.get("#iirc")).toBe(started + 10);
+    expect(script.standing.kicked.get("#iirc")).toStrictEqual({ at: started + 10, sequence: 5 });
   });
 
   it("LIVE-8: a JOIN of that Channel by Self clears it", () => {
@@ -2107,5 +2122,138 @@ describe("properties over random Entries", () => {
     }
 
     expect(unended).toStrictEqual([]);
+  });
+});
+
+describe("LIVE-4: a retry the Owner asked for", () => {
+  const refusal = defaultTuning.refusalBackoffMillis;
+
+  it("LIVE-4: a Change no attempt has answered retries now, whatever the backoff", () => {
+    const script = new Script().failure().failure().failure().change();
+
+    expect(script.next().at).toBeGreaterThan(script.at);
+    expect(script.next(oneIrcd, defaultTuning, script.head)).toStrictEqual({
+      at: 0,
+      delayMillis: 0,
+      ircd: first,
+    });
+  });
+
+  it("LIVE-4, LIVE-5: and whatever is left of a refusal's wait", () => {
+    const script = new Script().attempt().refused("banned").wait(1000).change();
+
+    expect(script.next().at).toBe(started + refusal);
+    expect(script.next(oneIrcd, defaultTuning, script.head).at).toBe(0);
+  });
+
+  it("LIVE-4: an attempt after the Change answers it, and backoff resumes", () => {
+    const script = new Script().failure().failure().change();
+    const since = script.head;
+
+    script.failure();
+
+    expect(script.next(oneIrcd, defaultTuning, since)).toStrictEqual(script.next());
+    expect(script.failures()).toBe(3);
+  });
+
+  it("LIVE-4: rotates Ircds as any attempt does", () => {
+    const script = new Script().attempt(first).closed("gone").change();
+
+    expect(script.next(threeIrcds, defaultTuning, script.head).ircd).toStrictEqual(second);
+  });
+
+  it("LIVE-4: a restart folding the same Log decides the same", () => {
+    const script = new Script().failure().failure().change().wait(10).daemon("started");
+    const since = script.head - 1;
+    const restarted = foldStandings(noStandings, script.entries).get("libera") ?? noStanding;
+
+    expect(
+      nextAttempt(restarted, { ircds: oneIrcd, retrySince: since, tuning: defaultTuning })
+    ).toStrictEqual(script.next(oneIrcd, defaultTuning, since));
+    expect(script.next(oneIrcd, defaultTuning, since).at).toBe(0);
+  });
+});
+
+describe("LIVE-8: the Owner joining again", () => {
+  const kickRejoin = defaultTuning.kickRejoinMillis;
+
+  it("LIVE-8, CONF-5: a Join recorded after the kick clears it, with no Session", () => {
+    const script = kicked().closed("gone").change({ join: "#iirc" });
+    const wanted = [{ name: "#iirc", since: script.head }];
+
+    script.session();
+
+    expect(planned(script, wantedIirc)).toStrictEqual([]);
+    expect(planned(script, wanted)).toStrictEqual(["#iirc"]);
+  });
+
+  it("LIVE-8: a kick after the Join still counts", () => {
+    const script = new Script().session().change({ join: "#iirc" });
+    const wanted = [{ name: "#iirc", since: script.head }];
+
+    script.in(":alice!u@h JOIN #iirc").in(":mod!u@h KICK #iirc alice :out");
+
+    expect(planned(script, wanted)).toStrictEqual([]);
+  });
+
+  it("LIVE-8: a cleared kick leaves no rejoin-on-kick wait behind", () => {
+    const script = kicked().change({ join: "#iirc" });
+    const wanted = [{ name: "#iirc", rejoinOnKick: true, since: script.head }];
+
+    expect(plan(script, wanted).channels.map(({ name }) => name)).toStrictEqual(["#iirc"]);
+    expect(planned(script, [{ name: "#iirc", rejoinOnKick: true }])).toStrictEqual([]);
+    expect(plan(script, [{ name: "#iirc", rejoinOnKick: true }]).lookAgainAt).toBe(
+      started + 10 + kickRejoin
+    );
+  });
+
+  it("LIVE-8: a restart folding the same Log plans the same", () => {
+    const script = kicked().closed("gone").change({ join: "#iirc" });
+    const wanted = [{ name: "#iirc", since: script.head }, { name: "#rust" }];
+
+    script.daemon("started").session().in(":mod!u@h KICK #rust alice :out");
+
+    const restarted = foldStandings(noStandings, script.entries).get("libera") ?? noStanding;
+
+    expect(joinPlan(restarted, wanted, script.at, defaultTuning)).toStrictEqual(
+      plan(script, wanted)
+    );
+  });
+});
+
+const withChanges = () =>
+  new Script()
+    .change({ network: "libera" })
+    .session()
+    .change(null)
+    .in(":alice!u@h JOIN #iirc")
+    .change([1, "two", { three: false }]);
+
+const withoutChanges = (script: Script) => script.entries.filter(({ _tag }) => _tag !== "Change");
+
+describe("LOG-2: a Change says nothing to Standing", () => {
+  it("LOG-2: a fold with Changes in it is the fold without them", () => {
+    const script = withChanges();
+    const without = foldOne(withoutChanges(script));
+
+    expect(script.standing.channels).toStrictEqual(without.channels);
+    expect(script.standing.connection?.registration).toStrictEqual(
+      without.connection?.registration
+    );
+    expect(sessionSince(script.standing)).toBe(sessionSince(without));
+  });
+
+  it("LOG-2: no machine event comes of one", () => {
+    expect(
+      withChanges()
+        .entries.filter(({ _tag }) => _tag === "Change")
+        .map(toEvent)
+    ).toStrictEqual([undefined, undefined, undefined]);
+  });
+
+  it("LOG-2: one for no Network makes no Standing", () => {
+    const entry: Entry = { _tag: "Change", at: 1, by: "phone", change: {}, sequence: 1 };
+
+    expect(foldStandings(noStandings, [entry]).size).toBe(0);
   });
 });

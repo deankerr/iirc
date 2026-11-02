@@ -18,7 +18,16 @@ import {
 import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Random, Schedule } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import { appRoot, freePort, healthyClient, logTail, startBinary } from "./binary.ts";
+import {
+  appRoot,
+  createKey,
+  freePort,
+  healthyClient,
+  logTail,
+  networkStatus,
+  settingsFor,
+  startBinary,
+} from "./binary.ts";
 import { assertBackoff, buildBinary, buildTimeout } from "./testing.ts";
 
 // PROOF-4 against the real thing: the minified binary, because XState Commands can
@@ -36,18 +45,16 @@ const nick = "iirc";
 const username = "user";
 const realname = "Kill Test";
 
-// A kill counts as a failed Connection, so the runs that follow one wait out a real delay.
-// This keeps that delay short enough for a dozen rounds, and no less real.
-const killRounds = { reconnectInitialMillis: 40, reconnectMaxMillis: 320 };
-
-// The last run must hold still while it is read after its Connection ends, which needs a
-// wait far longer than any read. Restarts on that Log inherit it, and it only costs once.
-const finalRounds = { reconnectInitialMillis: 2000, reconnectMaxMillis: 2000 };
+// A kill counts as a failed Connection, so the runs that follow one wait out a real delay,
+// which doubles from 40 ms. The last run must hold still while it is read after its
+// Connection ends, which needs a wait far longer than any read, and by then the doubling
+// has reached the 2 seconds that gives. Tuning is Configuration, so one value serves every
+// run: changing it between runs would itself ask for a retry (CONF-2).
+const killTuning = { reconnectInitialMillis: 40, reconnectMaxMillis: 2000 };
 
 const tuned = (overrides: Partial<Tuning>) => ({ ...defaultTuning, ...overrides });
 
-const finalTuning = tuned(finalRounds);
-const tuningFlag = (overrides: Partial<Tuning>) => ["--tuning", JSON.stringify(overrides)];
+const finalTuning = tuned(killTuning);
 
 // How long a healthy run may take to do each thing, all far past what it needs.
 const startLimit = "10 seconds";
@@ -358,31 +365,26 @@ const assertConnections = (wires: readonly Wire[], expected: number, why: string
   assert.strictEqual(wires.length, expected, `${why}\n${describeWires(wires)}`);
 };
 
-const daemonArguments = (
-  ircd: { readonly host: string; readonly port: number },
-  httpPort: number,
-  extra: readonly string[]
-) => [
+// CONF-4: a data directory and a listen address, and nothing else.
+const daemonArguments = (httpPort: number, extra: readonly string[] = []) => [
   "daemon",
-  "--no-tls",
-  "--network",
-  network,
-  "--host",
-  ircd.host,
-  "--port",
-  String(ircd.port),
-  "--nick",
-  nick,
-  "--username",
-  username,
-  "--realname",
-  realname,
-  "--channel",
-  channel,
   "--http-port",
   String(httpPort),
   ...extra,
 ];
+
+// What the flags used to say, as settings, which the first run adds through the API.
+const killNetwork = (ircd: { readonly host: string; readonly port: number }) =>
+  settingsFor({
+    channels: [channel],
+    host: ircd.host,
+    id: network,
+    nick,
+    port: ircd.port,
+    realname,
+    tuning: killTuning,
+    username,
+  });
 
 const startKillable = (flags: readonly string[], environment: Readonly<Record<string, string>>) =>
   startBinary(binary, flags, environment);
@@ -425,16 +427,27 @@ const killedAndGone = (ircd: Ircd, running: Running) =>
     yield* lastWireClosed(ircd);
   });
 
-const killRound = (ircd: Ircd, plan: KillPlan, httpPort: number, dataDir: string) =>
+const killRound = (
+  ircd: Ircd,
+  plan: KillPlan,
+  httpPort: number,
+  dataDir: string,
+  // Only the first run has a Network to add. Every later one finds it in the Log.
+  configureWith: string | undefined
+) =>
   Effect.gen(function* () {
     const progress = ircd.expect({ holdRegistration: plan._tag === "Registering" });
 
     // Not `--data-dir`, which the second process below covers.
-    const running = yield* startKillable(daemonArguments(ircd, httpPort, tuningFlag(killRounds)), {
-      IIRC_DATA_DIR: dataDir,
-    });
+    const running = yield* startKillable(daemonArguments(httpPort), { IIRC_DATA_DIR: dataDir });
 
     const { pid } = running.child;
+
+    if (configureWith !== undefined) {
+      const client = yield* healthyClient(httpPort, configureWith);
+
+      yield* client.networks.add({ payload: killNetwork(ircd) });
+    }
 
     yield* awaitDaemon(running, "registering", progress.registered);
 
@@ -470,10 +483,7 @@ const refusedSecondProcess = (ircd: Ircd, dataDir: string) =>
     const httpPort = yield* freePort;
     const connections = ircd.wires.length;
 
-    const second = yield* startKillable(
-      daemonArguments(ircd, httpPort, ["--data-dir", dataDir]),
-      {}
-    );
+    const second = yield* startKillable(daemonArguments(httpPort, ["--data-dir", dataDir]), {});
 
     const code = yield* second.child.exitCode.pipe(
       Effect.timeoutOrElse({
@@ -506,34 +516,40 @@ const pagedFrom = <A extends { readonly sequence: number }, E>(
 
 const isClosed = ({ phase: current }: { readonly phase: string }) => current === "closed";
 
-const finalRun = (ircd: Ircd, runs: number, dataDir: string) =>
+const finalRun = (ircd: Ircd, runs: number, dataDir: string, key: string) =>
   Effect.gen(function* () {
     const httpPort = yield* freePort;
     const progress = ircd.expect({ holdRegistration: false });
 
-    const running = yield* startKillable(daemonArguments(ircd, httpPort, tuningFlag(finalRounds)), {
-      IIRC_DATA_DIR: dataDir,
-    });
+    const running = yield* startKillable(daemonArguments(httpPort), { IIRC_DATA_DIR: dataDir });
 
     yield* awaitDaemon(running, "any traffic", progress.traffic);
     assertConnections(ircd.wires, runs, "the final run must dial once");
     yield* refusedSecondProcess(ircd, dataDir);
 
-    const { daemon } = yield* healthyClient(httpPort);
+    const client = yield* healthyClient(httpPort, key);
 
-    yield* daemon.send({ payload: { target: channel, text: "sent through the API" } });
+    yield* client.daemon.send({
+      payload: { network, target: channel, text: "sent through the API" },
+    });
 
     ircd.finish();
 
     yield* lastWireClosed(ircd);
 
-    const status = yield* daemon
-      .status()
-      .pipe(Effect.repeat({ schedule: Schedule.spaced("10 millis"), times: 200, until: isClosed }));
+    const status = yield* networkStatus(client, network).pipe(
+      Effect.repeat({ schedule: Schedule.spaced("10 millis"), times: 200, until: isClosed })
+    );
 
-    const entries = yield* pagedFrom((query) => daemon.entries({ query }));
-    const gaps = yield* pagedFrom((query) => daemon.gaps({ query }));
-    const messages = yield* pagedFrom((query) => daemon.messages({ query }));
+    const { head } = yield* client.daemon.status();
+
+    const entries = yield* pagedFrom((query) => client.daemon.entries({ query }));
+    const gaps = yield* pagedFrom((query) => client.daemon.gaps({ query }));
+    const messages = yield* pagedFrom((query) => client.daemon.messages({ query }));
+
+    // So that the restarts below, which only read, never dial the Ircd and add to them.
+    yield* client.networks.disconnect({ params: { id: network } });
+
     const stopping = Date.now();
 
     yield* running.child.kill({ killSignal: "SIGTERM" });
@@ -542,6 +558,7 @@ const finalRun = (ircd: Ircd, runs: number, dataDir: string) =>
       entries,
       exitCode: Number(yield* running.child.exitCode),
       gaps,
+      head,
       messages,
       output: running.output(),
       shutdownMillis: Date.now() - stopping,
@@ -715,19 +732,15 @@ const vandalise = (dataDir: string, damage: (table: string) => string) =>
     return left;
   });
 
-// A real restart, then `/messages` and `/gaps`. It dials a port nobody listens on, so
+// A real restart, then `/messages` and `/gaps`. The Network is disconnected by now, so
 // nothing new can be said, and whatever it serves can only have come from Entries.
-const derivedAfterRestart = (dataDir: string) =>
+const derivedAfterRestart = (dataDir: string, key: string) =>
   Effect.gen(function* () {
-    const ircdPort = yield* freePort;
     const httpPort = yield* freePort;
 
-    const running = yield* startKillable(
-      daemonArguments({ host: "127.0.0.1", port: ircdPort }, httpPort, tuningFlag(finalRounds)),
-      { IIRC_DATA_DIR: dataDir }
-    );
+    const running = yield* startKillable(daemonArguments(httpPort), { IIRC_DATA_DIR: dataDir });
 
-    const { daemon } = yield* healthyClient(httpPort);
+    const { daemon } = yield* healthyClient(httpPort, key);
     const gaps = yield* pagedFrom((query) => daemon.gaps({ query }));
     const messages = yield* pagedFrom((query) => daemon.messages({ query }));
 
@@ -805,6 +818,8 @@ describe("the compiled binary", () => {
           prefix: "iirc-kill-",
         });
 
+        // AUTH-4: the first key comes before any Daemon, and starts no run of its own.
+        const key = yield* createKey(binary, dataDir);
         const ircdHost = yield* random(loopbackAlias);
 
         report(`Ircd on ${ircdHost}`);
@@ -817,7 +832,7 @@ describe("the compiled binary", () => {
           plans,
           (plan, index) =>
             Effect.gen(function* () {
-              yield* killRound(ircd, plan, httpPort, dataDir);
+              yield* killRound(ircd, plan, httpPort, dataDir, index === 0 ? key : undefined);
               assertConnections(ircd.wires, index + 1, `round ${index + 1} must dial once`);
 
               const wire = ircd.wires.at(-1);
@@ -830,8 +845,8 @@ describe("the compiled binary", () => {
           { discard: true }
         );
 
-        const { entries, exitCode, gaps, messages, output, shutdownMillis, status } =
-          yield* finalRun(ircd, plans.length + 1, dataDir);
+        const { entries, exitCode, gaps, head, messages, output, shutdownMillis, status } =
+          yield* finalRun(ircd, plans.length + 1, dataDir, key);
 
         report(
           `final run: ${entries.length} Entries, ${messages.length} Messages, ` +
@@ -841,9 +856,7 @@ describe("the compiled binary", () => {
 
         assertLog(entries, ircd.wires, plans.length + 1);
         // 7. Every run but the first follows a kill, so its `attempt` must wait.
-        assertBackoff(entries, (attempt) =>
-          tuned(attempt < plans.length ? killRounds : finalRounds)
-        );
+        assertBackoff(entries, () => finalTuning);
         assertGaps(entries, gaps);
         assert.notInclude(output, "ERROR", "HOST-1: nothing here should reach the error log");
         assert.isBelow(shutdownMillis, shutdownLimit, "stopping must not hang on a Frontend");
@@ -851,7 +864,9 @@ describe("the compiled binary", () => {
         assert.deepStrictEqual(yield* logTail(dataDir, 1), ["Daemon stopped"]);
 
         // 6. Status is a fold, and nothing else: between Connections it is `Standing`'s,
-        // and the machine agrees on the phase.
+        // and the machine agrees on the phase. Each `attempt` brings the Tuning its round
+        // ran with, so the input here only stands before the first. `Standing` reads take
+        // today's Tuning, because backoff is policy and not a record.
         const folded = fold(
           entries
             .filter((entry) => "network" in entry && entry.network === network)
@@ -864,9 +879,8 @@ describe("the compiled binary", () => {
         assert.deepInclude(status, {
           closeReason: standing.recent.at(-1)?.reason ?? null,
           consecutiveFailures: consecutiveFailures(standing, finalTuning, Date.now()),
-          head: entries.at(-1)?.sequence ?? 0,
+          id: network,
           joined: [],
-          network,
           nextAttemptAt: nextAttempt(standing, {
             ircds: [{ host: ircdHost, port: ircd.port, tls: false }],
             tuning: finalTuning,
@@ -877,6 +891,7 @@ describe("the compiled binary", () => {
         });
         assert.strictEqual(status.phase, "closed");
         assert.strictEqual(status.closeReason, "end of the test");
+        assert.strictEqual(head, entries.at(-1)?.sequence ?? 0);
 
         // 5. LOG-10: what is derived is disposable, and a restart is all it takes to get it
         // back. Last, because these restarts add Entries of their own.
@@ -887,13 +902,13 @@ describe("the compiled binary", () => {
           { rows: 0, tables: 1 },
           { rows: 0, tables: 1 },
         ]);
-        assert.deepStrictEqual(yield* derivedAfterRestart(dataDir), { gaps, messages });
+        assert.deepStrictEqual(yield* derivedAfterRestart(dataDir, key), { gaps, messages });
 
         assert.deepStrictEqual(yield* vandalise(dataDir, (table) => `DROP TABLE ${table}`), [
           { rows: 0, tables: 0 },
           { rows: 0, tables: 0 },
         ]);
-        assert.deepStrictEqual(yield* derivedAfterRestart(dataDir), { gaps, messages });
+        assert.deepStrictEqual(yield* derivedAfterRestart(dataDir, key), { gaps, messages });
       }).pipe(Effect.scoped, Effect.provide(layers)),
     { timeout: testTimeout }
   );

@@ -115,6 +115,11 @@ export interface Gap extends Moment {
  * Everything a host needs from a Network's past, which outlasts any one Connection.
  * Channel maps are keyed by {@link channelKey}, and the reads that depend on `Tuning`
  * are functions below, because an Entry's meaning cannot depend on today's numbers.
+ *
+ * Those reads take today's Tuning on purpose, unlike the machine, which replays each
+ * Connection with the Tuning its `attempt` recorded. The machine says what a Connection
+ * did, which cannot change. Backoff and rejoining decide what to do next, which is policy,
+ * so a tuned value applies to the past as well, and a lowered delay takes effect at once.
  */
 export interface Standing {
   /** Channels whose `JOIN` was sent on this Connection and has not worked yet. */
@@ -129,8 +134,11 @@ export interface Standing {
   readonly gap: Gap | undefined;
   /** Each Channel's last `JOIN` failure, until Self gets in. These outlive Connections. */
   readonly joinFailures: ReadonlyMap<string, HeldJoinFailure>;
-  /** When Self was kicked from each Channel. A `JOIN` by Self is all that clears one. */
-  readonly kicked: ReadonlyMap<string, number>;
+  /**
+   * Where Self was kicked from each Channel. A `JOIN` by Self clears one here, and the
+   * Owner wanting the Channel again outranks it in {@link joinPlan} (LIVE-8).
+   */
+  readonly kicked: ReadonlyMap<string, Moment>;
   /** Lag checks waiting for a `PONG` on this Connection. */
   readonly lagChecks: readonly LagCheck[];
   /** The round trip of the latest lag check answered on this Connection. */
@@ -163,6 +171,11 @@ export interface StandingStep {
 export interface WantedChannel extends JoinChannel {
   /** Go back after a kick, once `kickRejoinMillis` has passed (LIVE-8). */
   readonly rejoinOnKick?: boolean;
+  /**
+   * The sequence of the Change that last wanted it. A kick recorded before it no longer
+   * counts, because the Owner asked for the Channel after it (LIVE-8, CONF-5).
+   */
+  readonly since?: number;
 }
 
 /**
@@ -298,7 +311,11 @@ export const sessionSince = ({ connection }: Standing): number | undefined =>
 const ended = (
   standing: Standing,
   { at, sequence }: Moment,
-  { deliberate, reason }: { readonly deliberate: boolean; readonly reason: string }
+  {
+    deliberate,
+    endedAt = at,
+    reason,
+  }: { readonly deliberate: boolean; readonly endedAt?: number; readonly reason: string }
 ): Standing => {
   const { connection } = standing;
 
@@ -312,7 +329,7 @@ const ended = (
   return {
     ...withoutSession(standing),
     connection: undefined,
-    gap: since === undefined ? standing.gap : { at, network, reason, sequence },
+    gap: since === undefined ? standing.gap : { at: endedAt, network, reason, sequence },
     recent: [
       ...standing.recent,
       { at, deliberate, reason, sessionMillis: since === undefined ? undefined : at - since },
@@ -397,11 +414,14 @@ const afterConnection = (standing: Standing, entry: ConnectionEntry): Standing =
     }
 
     case "closed": {
-      const { at, reason, refused } = entry;
+      const { at, endedAt, reason, refused } = entry;
 
+      // A close recorded late says when the Connection really ended, which is where the
+      // time away began. Its place in order is still its sequence (LOG-8).
       const closed = ended(standing, entry, {
         deliberate: connection.closing?.chosen === true,
         reason: reason ?? connection.closing?.reason ?? "the Connection closed",
+        ...(endedAt !== undefined && { endedAt }),
       });
 
       return refused === true ? { ...closed, refusal: { at, reason } } : closed;
@@ -561,14 +581,14 @@ const afterJoined = (standing: Standing, channel: string): Standing => {
 
 // A kick from a Channel Self is not in removes nothing, and would otherwise block it until
 // the Owner joins again.
-const afterKicked = (standing: Standing, { at }: Entry, channel: string): Standing => {
+const afterKicked = (standing: Standing, { at, sequence }: Entry, channel: string): Standing => {
   const key = channelKey(channel);
 
   return standing.channels.has(key)
     ? {
         ...standing,
         channels: withoutHeld(standing.channels, key),
-        kicked: withHeld(standing.kicked, key, at),
+        kicked: withHeld(standing.kicked, key, { at, sequence }),
       }
     : standing;
 };
@@ -727,6 +747,11 @@ const advance = (standing: Standing, entry: Entry, line: Line | undefined): Stan
     return afterDaemon(standing, entry);
   }
 
+  // What the Owner wants is not what happened, and whoever reads Changes compares the two.
+  if (entry._tag === "Change") {
+    return standing;
+  }
+
   if (standing.network !== undefined && standing.network !== entry.network) {
     return standing;
   }
@@ -792,7 +817,7 @@ export const foldStandings = (
       for (const [network, before] of folded) {
         advanced(network, before, entry, undefined);
       }
-    } else {
+    } else if (entry._tag !== "Change") {
       advanced(entry.network, folded.get(entry.network) ?? noStanding, entry, readLine(entry));
     }
   }
@@ -868,19 +893,34 @@ const ircdAfter = (ircds: Arr.NonEmptyReadonlyArray<Ircd>, used: Ircd | undefine
   return ircds[(index + 1) % ircds.length] ?? ircds[0];
 };
 
+/** What {@link nextAttempt} needs from Configuration. */
+export interface AttemptOptions {
+  readonly ircds: Arr.NonEmptyReadonlyArray<Ircd>;
+  /** The sequence of the Change that last asked for a retry (LIVE-4). */
+  readonly retrySince?: number | undefined;
+  readonly tuning: Tuning;
+}
+
 /**
  * When to make the next `attempt` and where (LIVE-4, LIVE-5). It needs no clock, so a
- * restart computes exactly the same answer from the same Entries.
+ * restart computes exactly the same answer from the same Entries and Configuration.
  * @param standing - The Network's Standing.
- * @param options - The Ircds configured now, and the Network's Tuning.
+ * @param options - The Ircds configured now, the Network's Tuning, and the latest retry.
  * @returns When, in epoch milliseconds, and which Ircd. A time already past, which is 0
  * for a Network never attempted, means now.
  */
 export const nextAttempt = (
   standing: Standing,
-  { ircds, tuning }: { readonly ircds: Arr.NonEmptyReadonlyArray<Ircd>; readonly tuning: Tuning }
+  { ircds, retrySince, tuning }: AttemptOptions
 ): NextAttempt => {
   const settled = endedWithoutClose(standing, killed);
+  const ircd = ircdAfter(ircds, settled.attempt?.ircd);
+
+  // A retry no `attempt` has answered yet outranks backoff and a refusal alike.
+  if (retrySince !== undefined && (settled.attempt?.sequence ?? 0) < retrySince) {
+    return { at: 0, delayMillis: 0, ircd };
+  }
+
   const endedAt = settled.recent.at(-1)?.at;
   const { refusal } = settled;
   const delay = endedAt === undefined ? 0 : reconnectDelay(settled, tuning);
@@ -890,7 +930,7 @@ export const nextAttempt = (
   return {
     at: Math.max(afterFailure, afterRefusal),
     delayMillis: afterRefusal > afterFailure ? tuning.refusalBackoffMillis : delay,
-    ircd: ircdAfter(ircds, settled.attempt?.ircd),
+    ircd,
   };
 };
 
@@ -933,15 +973,25 @@ const isClosedUntilReconnect = (standing: Standing, key: string) => {
   );
 };
 
+/**
+ * The kick that still stands against a wanted Channel, if any. The Owner wanting it again
+ * after the kick clears it, with or without a Session (LIVE-8, CONF-5).
+ * @param standing - The Network's Standing.
+ * @param wanted - The Channel, as Configuration wants it.
+ * @returns Where the kick was recorded, or `undefined` if none counts.
+ */
+export const kickStanding = (standing: Standing, { name, since }: WantedChannel) => {
+  const kick = standing.kicked.get(channelKey(name));
+
+  return kick !== undefined && (since === undefined || kick.sequence > since) ? kick : undefined;
+};
+
 // The wait runs from the ask and not from the failure, so that a Network repeating a
 // numeric cannot put a retry off for ever.
-const dueAt = (
-  standing: Standing,
-  { name, rejoinOnKick }: WantedChannel,
-  tuning: Tuning
-): number | undefined => {
+const dueAt = (standing: Standing, want: WantedChannel, tuning: Tuning): number | undefined => {
+  const { name, rejoinOnKick } = want;
   const key = channelKey(name);
-  const kickedAt = standing.kicked.get(key);
+  const kickedAt = kickStanding(standing, want)?.at;
   const asked = standing.asked.get(key);
 
   const isOut =

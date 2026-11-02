@@ -1,12 +1,12 @@
 import type { NetworkInput } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import { outbound } from "@iirc/protocol/outbound";
-import { Array as Arr, Effect, Layer, pipe } from "effect";
+import { Array as Arr, Effect, Layer, pipe, SubscriptionRef } from "effect";
 import { identity } from "effect/Function";
 
-import type { Entry, Ircd, NewEntry } from "./entry.ts";
-import { hostNetwork } from "./network.ts";
-import type { NetworkOptions, NetworkStatus } from "./network.ts";
+import type { Entry, Ircd, NetworkId, NewEntry } from "./entry.ts";
+import { constantNetwork, hostNetwork } from "./network.ts";
+import type { NetworkSettings, NetworkStatus } from "./network.ts";
 import { MemoryEntries, Recorder, RecordFailed } from "./recorder.ts";
 import { movingClockWhileClosing } from "./testing.ts";
 import type { FakeIrcd } from "./testing.ts";
@@ -24,9 +24,13 @@ export const address: Ircd = { host: "irc.test", port: 6697, tls: true };
 /** What the machine starts from under {@link options}. */
 export const input: NetworkInput = { realname: "I IRC", tuning: defaultTuning, username: "user" };
 
+/** A Network, and what a test may change about how it is hosted. */
+export type Overrides = Partial<NetworkSettings> & { readonly id?: NetworkId };
+
 /** A Network with two Channels to be in. */
-export const options: NetworkOptions = {
+export const options: NetworkSettings & { readonly id: NetworkId } = {
   channels: [{ name: "#one" }, { name: "#two" }],
+  enabled: true,
   id: "libera",
   identity: { alternates: [], nick: "iirc", realname: "I IRC", username: "user" },
   ircds: [address],
@@ -127,11 +131,14 @@ export const safe = (command: string, params: readonly string[]) => {
  * @param overrides - What differs from {@link options}.
  * @returns The host, once it has settled.
  */
-export const bareHost = (ircd: Pick<FakeIrcd, "transport">, overrides?: Partial<NetworkOptions>) =>
-  hostNetwork({ ...options, ...overrides }).pipe(
+export const bareHost = (ircd: Pick<FakeIrcd, "transport">, overrides?: Overrides) => {
+  const { id, ...settings } = { ...options, ...overrides };
+
+  return hostNetwork(constantNetwork(id, settings)).pipe(
     Effect.provideService(Transport, ircd.transport),
     Effect.tap(() => settled)
   );
+};
 
 /**
  * Starts a host that can be left running when a test ends.
@@ -139,8 +146,38 @@ export const bareHost = (ircd: Pick<FakeIrcd, "transport">, overrides?: Partial<
  * @param overrides - What differs from {@link options}.
  * @returns The host, once it has settled.
  */
-export const host = (ircd: Pick<FakeIrcd, "transport">, overrides?: Partial<NetworkOptions>) =>
+export const host = (ircd: Pick<FakeIrcd, "transport">, overrides?: Overrides) =>
   movingClockWhileClosing(bareHost(ircd, overrides));
+
+/**
+ * Starts a host whose settings a test can change while it runs, as Configuration would.
+ * @param ircd - Where it connects.
+ * @param overrides - What differs from {@link options} to begin with.
+ * @returns The host, and a way to change its settings that lets it settle after.
+ */
+export const liveHost = Effect.fnUntraced(function* (
+  ircd: Pick<FakeIrcd, "transport">,
+  overrides?: Overrides
+) {
+  const { id, ...initial } = { ...options, ...overrides };
+  const current = yield* SubscriptionRef.make<NetworkSettings>(initial);
+
+  const hosted = yield* movingClockWhileClosing(
+    hostNetwork({
+      changes: SubscriptionRef.changes(current),
+      id,
+      settings: SubscriptionRef.get(current),
+    }).pipe(
+      Effect.provideService(Transport, ircd.transport),
+      Effect.tap(() => settled)
+    )
+  );
+
+  const change = (update: (settings: NetworkSettings) => NetworkSettings) =>
+    Effect.andThen(SubscriptionRef.update(current, update), settled);
+
+  return { change, hosted };
+});
 
 /**
  * Starts a host and brings it to a Session.

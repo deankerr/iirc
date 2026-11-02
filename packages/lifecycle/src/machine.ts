@@ -120,9 +120,10 @@ export const network = setup({
   id: "network",
   initial: "idle",
   on: {
-    // Works from anywhere: a crash leaves a Connection that never recorded a close.
-    ATTEMPT: ({ context, event }) => ({
-      context: { ...context, ...noConnection, nicks: event.nicks },
+    // Works from anywhere: a crash leaves a Connection that never recorded a close. The
+    // input is the Connection's own, so nothing of the last one's carries over.
+    ATTEMPT: ({ event: { nicks, realname, tuning, username } }) => ({
+      context: { ...noConnection, nicks, realname, tuning, username },
       target: ".connection",
     }),
     CLOSED: ({ context, event }) => ({

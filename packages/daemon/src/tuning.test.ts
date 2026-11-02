@@ -1,27 +1,29 @@
 import { assert, describe, it } from "@effect/vitest";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
-import { Effect, Exit, Schema } from "effect";
+import { Exit, Schema } from "effect";
 
-import { checkTuning, InvalidTuning, TuningFromJson } from "./tuning.ts";
+import { tuningOf, TuningOverrides } from "./tuning.ts";
 
-const parse = Schema.decodeUnknownExit(TuningFromJson);
+const parse = Schema.decodeUnknownExit(TuningOverrides);
 
+// JSON, because that is what the Owner sends, and what the Log stores.
 const refusal = (json: string) => {
-  const parsed = parse(json);
+  const parsed = parse(JSON.parse(json));
 
   return Exit.isFailure(parsed) ? String(parsed.cause) : undefined;
 };
 
-describe("--tuning", () => {
+describe("a Network's Tuning overrides (CONF-3)", () => {
   it("leaves the spec's defaults alone when given nothing", () => {
-    assert.deepStrictEqual(parse("{}"), Exit.succeed(defaultTuning));
+    assert.deepStrictEqual(parse({}), Exit.succeed({}));
+    assert.deepStrictEqual(tuningOf({}), defaultTuning);
   });
 
-  it("overrides only what it is given", () => {
-    assert.deepStrictEqual(
-      parse('{"silenceMillis":5000,"lagCheckMillis":1000,"floodBurst":2}'),
-      Exit.succeed({ ...defaultTuning, floodBurst: 2, lagCheckMillis: 1000, silenceMillis: 5000 })
-    );
+  it("keeps only what it is given, over the defaults", () => {
+    const overrides = { floodBurst: 2, lagCheckMillis: 1000, silenceMillis: 5000 };
+
+    assert.deepStrictEqual(parse(overrides), Exit.succeed(overrides));
+    assert.deepStrictEqual(tuningOf(overrides), { ...defaultTuning, ...overrides });
   });
 
   it("names a key that is not a Tuning number", () => {
@@ -45,6 +47,11 @@ describe("--tuning", () => {
   it("LIVE-9: refuses a QUIT wait of 0, which would drop the QUIT", () => {
     assert.include(refusal('{"quitWaitMillis":0}'), "quitWaitMillis");
     assert.isUndefined(refusal('{"quitWaitMillis":1}'));
+  });
+
+  it("RUN-3: refuses a QUIT wait past 10 seconds, so that a stop stays prompt", () => {
+    assert.isUndefined(refusal('{"quitWaitMillis":10000}'));
+    assert.include(refusal('{"quitWaitMillis":10001}'), "quitWaitMillis");
   });
 
   it("names a key the prototype has, which is still not a Tuning number", () => {
@@ -73,8 +80,8 @@ describe("--tuning", () => {
     assert.isUndefined(refusal('{"reconnectInitialMillis":1,"reconnectMaxMillis":1}'));
   });
 
-  it("refuses what is not JSON, or not an object", () => {
-    assert.isDefined(refusal("silenceMillis=5"));
+  it("refuses what is not an object", () => {
+    assert.isDefined(refusal('"silenceMillis=5"'));
     assert.isDefined(refusal("[]"));
     assert.isDefined(refusal("5"));
   });
@@ -113,24 +120,4 @@ describe("the spec's numbers", () => {
       }
     );
   });
-});
-
-describe("a Daemon's Tuning", () => {
-  it.effect("passes every rule as it stands", () =>
-    Effect.gen(function* () {
-      assert.deepStrictEqual(yield* checkTuning(defaultTuning), defaultTuning);
-    })
-  );
-
-  it.effect("fails the same cross-field rules however it was built, not only from JSON", () =>
-    Effect.gen(function* () {
-      const failure = yield* Effect.flip(
-        checkTuning({ ...defaultTuning, lagCheckMillis: 1000, silenceMillis: 1000 })
-      );
-
-      assert.instanceOf(failure, InvalidTuning);
-      assert.include(failure.message, "silenceMillis must be above lagCheckMillis");
-      assert.isDefined(yield* Effect.flip(checkTuning({ ...defaultTuning, quitWaitMillis: 0 })));
-    })
-  );
 });

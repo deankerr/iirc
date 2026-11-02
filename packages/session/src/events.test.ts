@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 
 import type { Entry, Ircd } from "./entry.ts";
 import { toEvent } from "./events.ts";
+import { attemptInput } from "./testing.ts";
 
 const ircd: Ircd = { host: "irc.test", port: 6697, tls: true };
 const encoder = new TextEncoder();
@@ -24,11 +25,15 @@ describe(toEvent, () => {
   const connection = { ...stamp, _tag: "Connection", ircd, network: "libera" } as const;
 
   it("maps each Connection phase, taking `at` from the Entry", () => {
-    assert.deepStrictEqual(toEvent({ ...connection, nicks: [], phase: "attempt" }), {
-      at: 42,
-      nicks: [],
-      type: "ATTEMPT",
-    });
+    assert.deepStrictEqual(
+      toEvent({ ...connection, ...attemptInput, nicks: [], phase: "attempt" }),
+      {
+        ...attemptInput,
+        at: 42,
+        nicks: [],
+        type: "ATTEMPT",
+      }
+    );
     assert.deepStrictEqual(toEvent({ ...connection, connection: 1, phase: "opened" }), {
       at: 42,
       type: "OPENED",
@@ -41,8 +46,24 @@ describe(toEvent, () => {
 
   it("CONN-4: gives an `attempt` the nicks it recorded, in order", () => {
     assert.deepStrictEqual(
-      toEvent({ ...connection, nicks: ["claude", "claude_"], phase: "attempt" }),
-      { at: 42, nicks: ["claude", "claude_"], type: "ATTEMPT" }
+      toEvent({ ...connection, ...attemptInput, nicks: ["claude", "claude_"], phase: "attempt" }),
+      { ...attemptInput, at: 42, nicks: ["claude", "claude_"], type: "ATTEMPT" }
+    );
+  });
+
+  it("CONN-2, LIVE-2: gives an `attempt` the input it recorded, whatever the settings now", () => {
+    const tuning = { ...attemptInput.tuning, silenceMillis: 1234 };
+
+    assert.deepInclude(
+      toEvent({
+        ...connection,
+        nicks: ["claude"],
+        phase: "attempt",
+        realname: "Then",
+        tuning,
+        username: "then",
+      }),
+      { realname: "Then", tuning, username: "then" }
     );
   });
 

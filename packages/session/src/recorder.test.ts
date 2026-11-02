@@ -6,6 +6,7 @@ import { TestClock } from "effect/testing";
 import type { NewEntry } from "./entry.ts";
 import { MemoryEntries, Recorder } from "./recorder.ts";
 import { foldStandings, noStanding, noStandings } from "./standing.ts";
+import { attemptInput } from "./testing.ts";
 
 const deadline = (name: string): NewEntry => ({ _tag: "Deadline", name, network: "libera" });
 
@@ -22,6 +23,7 @@ const attempt = (network: string): NewEntry => ({
   ircd: { host: "irc.example", port: 6697, tls: true },
   network,
   nicks: ["alice"],
+  ...attemptInput,
   phase: "attempt",
 });
 

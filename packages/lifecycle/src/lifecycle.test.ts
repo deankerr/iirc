@@ -12,7 +12,7 @@ const input: NetworkInput = {
 
 const nicks = ["claude", "claudia", "cc"];
 
-const attempt: NetworkEvent = { at: 1000, nicks, type: "ATTEMPT" };
+const attempt: NetworkEvent = { ...input, at: 1000, nicks, type: "ATTEMPT" };
 const opened: NetworkEvent = { at: 2000, type: "OPENED" };
 const closed: NetworkEvent = { at: 9000, reason: "peer hung up", type: "CLOSED" };
 const stopping: NetworkEvent = { at: 4000, reason: "Owner stopped", type: "CLOSING" };
@@ -123,7 +123,7 @@ describe("ATTEMPT", () => {
   });
 
   it("leaves the previous Connection behind after a crash mid-registration", () => {
-    const { next } = step(inPhase("registering"), { at: 5000, nicks, type: "ATTEMPT" });
+    const { next } = step(inPhase("registering"), { ...input, at: 5000, nicks, type: "ATTEMPT" });
 
     expect(observe(next)).toStrictEqual({
       closeReason: undefined,
@@ -158,9 +158,28 @@ describe("ATTEMPT", () => {
 
   it("CONN-4: starts each Connection from the top of its own list", () => {
     const moved = step(inPhase("registering"), line("433", "*", "claude", "Taken")).next;
-    const { next } = step(moved, { at: 5000, nicks: ["other", "fallback"], type: "ATTEMPT" });
+
+    const { next } = step(moved, {
+      ...input,
+      at: 5000,
+      nicks: ["other", "fallback"],
+      type: "ATTEMPT",
+    });
 
     expect(step(next, opened).commands[0]).toStrictEqual(sendNick("other", "registration"));
+  });
+
+  it("runs each Connection on the input its ATTEMPT brought, not the last one's", () => {
+    const tuned = { ...defaultTuning, registrationTimeoutMillis: 5000 };
+    const first = fold([{ ...attempt, realname: "Old Name", tuning: tuned }, opened], input);
+    const second = { ...input, at: 20_000, nicks, realname: "New Name", type: "ATTEMPT" } as const;
+
+    expect(deadline(first)).toStrictEqual({ at: 7000, name: "registration" });
+
+    const { commands, next } = step(step(first, second).next, { at: 21_000, type: "OPENED" });
+
+    expect(deadline(next)).toStrictEqual({ at: 81_000, name: "registration" });
+    expect(commands[1]).toMatchObject({ params: ["cc", "0", "*", "New Name"] });
   });
 });
 
@@ -183,7 +202,7 @@ describe("connecting", () => {
 
   it("CONN-4: closes rather than registering with no nick to try", () => {
     const { commands, next } = step(
-      fold([{ at: 1000, nicks: [], type: "ATTEMPT" }], input),
+      fold([{ ...input, at: 1000, nicks: [], type: "ATTEMPT" }], input),
       opened
     );
 
@@ -487,10 +506,15 @@ describe("LIVE-2: silence", () => {
   const past = (at: number) => step(fold(histories.session, input), expire("silence", at));
 
   // The burst is over and the lag check is far off, so silence is what comes next.
-  const onlySilence = fold([...histories.session, line("376")], {
-    ...input,
-    tuning: { ...defaultTuning, lagCheckMillis: 1_000_000 },
-  });
+  const onlySilence = fold(
+    [
+      { ...attempt, tuning: { ...defaultTuning, lagCheckMillis: 1_000_000 } },
+      opened,
+      welcome,
+      line("376"),
+    ],
+    input
+  );
 
   it("closes a Connection nothing has been heard on, saying so", () => {
     const { commands, next } = past(silenceEnds);
@@ -535,11 +559,11 @@ describe("LIVE-2: silence", () => {
     );
   });
 
-  it("uses the tuning on the input", () => {
-    const tuned = fold(histories.session, {
-      ...input,
-      tuning: { ...defaultTuning, silenceMillis: 1000 },
-    });
+  it("uses the tuning its ATTEMPT brought, whatever the machine started with", () => {
+    const tuned = fold(
+      [{ ...attempt, tuning: { ...defaultTuning, silenceMillis: 1000 } }, opened, welcome],
+      { ...input, tuning: { ...defaultTuning, silenceMillis: 1_000_000 } }
+    );
 
     expect(step(tuned, expire("silence", 4000)).commands).toStrictEqual(
       closeWith("heard nothing for 1 seconds")
@@ -860,7 +884,7 @@ describe("a close the machine decided", () => {
     [
       "a list that ran out",
       [
-        { at: 1000, nicks: ["claude"], type: "ATTEMPT" },
+        { ...input, at: 1000, nicks: ["claude"], type: "ATTEMPT" },
         opened,
         line("433", "*", "claude", "Taken"),
       ],

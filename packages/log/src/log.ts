@@ -6,14 +6,26 @@ import { Context, Effect, FileSystem, Layer } from "effect";
 
 import { openDatabase } from "./database.ts";
 import { StorageFailed } from "./errors.ts";
-import type { DataDirectoryLocked } from "./errors.ts";
+import type { DataDirectoryLocked, ReaderBusy, ReadTimedOut } from "./errors.ts";
 import type { LoggedMessage } from "./fold.ts";
 import { holdDataDirectory } from "./lock.ts";
+import type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
+import { makeReader } from "./reader.ts";
+import type { LogReaderOptions } from "./reader.ts";
 import { makeStore } from "./store.ts";
+import type { ChangeEntry } from "./store.ts";
 
-export { DataDirectoryLocked, StorageFailed } from "./errors.ts";
+export { DataDirectoryLocked, ReaderBusy, ReadTimedOut, StorageFailed } from "./errors.ts";
 
 export type { LoggedMessage } from "./fold.ts";
+
+export type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
+
+export { longestReadMillis } from "./reader.ts";
+
+export type { LogReaderOptions } from "./reader.ts";
+
+export type { ChangeEntry } from "./store.ts";
 
 export type { Gap } from "@iirc/session/standing";
 
@@ -37,11 +49,22 @@ const open = Effect.fnUntraced(function* ({ dataDir }: LogOptions) {
 
 /**
  * The Daemon's ordered record of everything that happened. Reads see only what has
- * committed, and everything but Entries can be deleted and derived again.
+ * committed, and everything but Entries can be deleted and derived again. Its reads run
+ * on the writer's connection, where they hold up every append until they finish, so
+ * only the writer's own work and tests use them: a Frontend's go to {@link LogReader}.
  */
 export class Log extends Context.Service<
   Log,
   {
+    /**
+     * Change Entries with a sequence greater than `after`, ascending, at most `limit`. It
+     * has no time budget, because it is for when nothing else appends: the Daemon's
+     * startup, and `iirc key create`, each folding every Change into Configuration.
+     */
+    readonly changes: (query: {
+      readonly after: number;
+      readonly limit: number;
+    }) => Effect.Effect<readonly ChangeEntry[], StorageFailed>;
     /** Entries with a sequence greater than `after`, ascending, at most `limit`. */
     readonly entries: (query: {
       readonly after: number;
@@ -80,4 +103,46 @@ export class Log extends Context.Service<
         Context.make(Log, store).pipe(Context.add(Recorder, store))
       )
     ).pipe(Layer.provide(BunFileSystem.layer));
+}
+
+/**
+ * The Log's reads, from a Worker on its own read-only connection, so that no read can
+ * delay an append (LOG-11). Each has a time budget, and fails with ReadTimedOut once it
+ * is spent. Reads see only what has committed, and see a commit once it lands.
+ */
+export class LogReader extends Context.Service<
+  LogReader,
+  {
+    /**
+     * Entries with a sequence greater than `after`, ascending, at most `limit`, from every
+     * Network unless `network` names one, and of every kind unless `kinds` lists some.
+     */
+    readonly entries: (
+      query: EntryQuery
+    ) => Effect.Effect<readonly Entry[], ReaderBusy | ReadTimedOut | StorageFailed>;
+    /** Gaps by cursor, from every Network unless `network` names one. */
+    readonly gaps: (
+      query: NetworkPage
+    ) => Effect.Effect<readonly Gap[], ReaderBusy | ReadTimedOut | StorageFailed>;
+    /** Messages by cursor, from every Network unless `network` names one. */
+    readonly messages: (
+      query: NetworkPage
+    ) => Effect.Effect<readonly LoggedMessage[], ReaderBusy | ReadTimedOut | StorageFailed>;
+  }
+>()("@iirc/log/LogReader") {
+  /**
+   * Starts the reader's Worker, which lives as long as the Layer. A read still running
+   * when it closes is waited for, and its budget bounds that wait.
+   * @param options - Where the Log is, and how long a read may take.
+   * @returns A Layer that needs the Log open, so that the database is there to read.
+   */
+  static readonly layer = (options: LogReaderOptions): Layer.Layer<LogReader, StorageFailed, Log> =>
+    Layer.effect(
+      LogReader,
+      Effect.gen(function* () {
+        yield* Log;
+
+        return yield* makeReader(options);
+      })
+    );
 }

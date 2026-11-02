@@ -34,11 +34,11 @@ Arguments choose the shape, and a build flag only decides whether web assets are
 bun build web/index.html --outdir=dist --minify --splitting
 bun build --compile --minify --sourcemap --feature WEB --asset ./dist \
   --compile-exec-argv="--disallow-code-generation-from-strings=strict" \
-  --no-compile-autoload-dotenv --no-compile-autoload-bunfig \
+  --no-compile-autoload-dotenv --no-compile-autoload-bunfig --root packages/log/src \
   apps/iirc/src/main.ts packages/log/src/reader-worker.ts --outfile iirc
 ```
 
-- The Worker must be listed as a second entrypoint.
+- The Worker must be listed as a second entrypoint, under `--root packages/log/src`. In a compiled binary every module's `import.meta.url` is the binary's own `/$bunfs/root/iirc`, and an extra entrypoint is stored at its path below `--root`. With the root at the Worker's own directory, `new URL("reader-worker.ts", import.meta.url)` names the same file from source and from the binary.
 - Only a guarded `import()` removes assets. A static import stays in the binary even with the feature off.
 - `feature()` is a build error anywhere except directly in an `if` or ternary, and `bun:bundle` does not resolve under vitest. So it appears only in `apps/iirc`, which no test imports.
 - A test proves a build without `WEB` contains no web assets.
@@ -121,7 +121,8 @@ const webRoutes = (config) =>
 - Anything shared must be provided outside `HttpRouter.serve`, or it is built twice.
 - SIGINT and SIGTERM interrupt main through `BunRuntime.runMain`, so LIVE-9's `QUIT` is a finalizer, and the teardown calls that interrupt exit 0 where its default says 130.
 - Layers close in reverse, which would stop `serve` first, so a Send waiting on a stalled socket could hold up `QUIT`. `Daemon.stopsFirst` is built last for that reason: the Network goes first and answers that Send, then the `stopped` Entry, then `serve`, and the Log last.
-- `gracefulShutdownTimeout` must be set low, because the default held a shutdown for 20 seconds, and it must exceed `quitWaitMillis` plus a second. After it runs out, the serve scope interrupts whatever handlers are left.
+- `gracefulShutdownTimeout` must be set low, because the default held a shutdown for 20 seconds. Every Network has stopped by the time it starts, which answers every Send, and a stopped Daemon refuses every Change, so it only has to cover a read in flight: `frontendWaitMillis`, the read budget and its grace plus half a second. No Network's Tuning moves it. After it runs out, the serve scope interrupts whatever handlers are left.
+- A stop waits for the slowest Network's `QUIT`, so the Tuning rules cap `quitWaitMillis` at 10 seconds, well inside a service manager's stop timeout.
 
 ## The Network host
 
@@ -196,9 +197,23 @@ A machine lives for one Connection: every `attempt` resets it. What outlasts a C
   - The control lane is bounded too, and the loop waits to offer to it, so that a `PING` flood backs up into the kernel rather than into memory.
   - When the Connection ends, its queues become Dropped Entries in the same commit as `closed`.
   - The loop never waits on a write, because a stalled socket must not stop it reading.
-- **The reconciler runs from burst complete until the Connection ends.** The pure `joinPlan(standing, wanted, now, tuning)` returns what to `JOIN` now and when to look again, and the reconciler offers that to the background lane. The Daemon passes the wanted Channels as options for now, and they come from Configuration in step 3.
+- **The reconciler runs from burst complete until the Connection ends.** The pure `joinPlan(standing, wanted, now, tuning)` returns what to `JOIN` now and when to look again, and the reconciler offers that to the background lane. It reads the wanted Channels from the host's settings each time it plans, so a Join or Part through the API reaches a running Session.
 - **A host cannot stay dead.** A defect during a Connection becomes a `closed` Entry and a normal backoff, so `/health` needs no second opinion. A failed `record` backs off in the same way with no dial, which is LOG-9's recovery, and status shows the fault until a `record` succeeds.
-- **Tuning is one value.** Every timing and limit in LIVE, CONN, and SEND that an Owner might change lives in a `Tuning` record with the spec's defaults, on the machine's input and on the host's options. Until Configuration exists, `iirc daemon --tuning <json>` overrides any of it, so that tests of the real binary need not wait minutes.
+- **Tuning is one value.** Every timing and limit in LIVE, CONN, and SEND that an Owner might change lives in a `Tuning` record with the spec's defaults, on the machine's input and on the host's options. A Network's settings store only the numbers the Owner overrides, so tests of the real binary set them through the API and need not wait minutes.
+
+### Configuration
+
+Configuration is a fold over Change Entries, like `Standing` is over Connection Entries ([ADR 0004](../adr/0004-configuration-lives-in-the-log.md)).
+
+- **The fold lives in `@iirc/daemon`.** `session` stores a Change's payload as JSON it never reads, so the library knows nothing of the Daemon's Configuration. The Daemon decodes each payload with a Schema at startup and fails to start on one it cannot read.
+  - The payload Schema for a Network's settings is the one `@iirc/api` publishes, so the Log format and the API move together until the soak test freezes the format.
+  - Only the Daemon appends Changes, one at a time, so an operation checks itself against the current Configuration, records its Change, and folds the recorded Entry, all under one permit.
+- **A host reads its settings; nothing pushes them.** `hostNetwork` takes `settings`, an effect it reads whenever it decides something, and `changes`, which wakes it. A library user passes a constant.
+  - The settings carry what the fold derived from sequences: the Change that last asked for a retry (LIVE-4), and for each Channel the Join that last wanted it, which outranks an older kick (LIVE-8). The host compares them with `Standing`, so a restart decides the same.
+  - Disabled is a setting, not a missing host. A disabled host makes no `attempt`, and leaves a live Connection by choice. Removing a Network closes its host's Scope.
+- **Each configured Network has one host in a `FiberMap`,** keyed by its ID. Status, Send, Join, and Part find the host there.
+  - A host's Scope is closed on a fiber of its own. Its finalizer waits for `QUIT` in an interruptible region, and on the fiber the `FiberMap` interrupts, that region ends at once, so nothing would wait for the `QUIT`.
+- **Keys are a second fold over the same Changes:** name, scope, and SHA-256. Checking a key hashes it and compares in constant time against every stored hash.
 
 ### Effect pieces
 
@@ -212,7 +227,7 @@ A machine lives for one Connection: every `attempt` resets it. What outlasts a C
 | LOOK-4, LOOK-5 | `Semaphore.withPermit` per Network, `Deferred` for the result. A caller leaving cancels its queued Lookup |  |
 | CONN-5 timing | `Schedule.exponential` |  |
 | CRED-3 | `Redacted`, `Schema.Redacted`, `Config.Redacted` |  |
-| LOG-11 reads | `RpcClient` to `BunWorker` |  |
+| LOG-11 reads | `RpcClient.makeProtocolWorker` on our own `Worker.makePlatform` | `BunWorker.layerPlatform`, which hears only `error`, so a Worker that exits leaves its reads waiting for ever |
 | Tests | `@effect/vitest`, `TestClock`, `it.prop`, `HttpApiTest.groups` | `bun test`, because `@effect/vitest` needs vitest |
 | OBS | `Metric`, `Logger`, built-in `Otlp.layerJson`, `PrometheusMetrics.format` | `@effect/opentelemetry` |
 
@@ -221,7 +236,7 @@ A machine lives for one Connection: every `attempt` resets it. What outlasts a C
 - **Writer:** `SqlClient` on the main thread, one statement batch per socket read.
   - With `synchronous=FULL`, one Line plus FTS and a derived row took 0.97 ms at p50, 2.5 ms at p99, and 26 ms at p99.9. That answers LOG-11's deferred question for now: it stays on the main thread until real traffic says otherwise.
   - `SqlClient` costs 62 µs per transaction against 2.7 µs for raw `bun:sqlite`, which an fsync dwarfs.
-- **Reader:** a Worker with a readonly connection, reached over Effect RPC.
+- **Reader:** a Worker with a readonly connection, reached over Effect RPC. Each filter is a range over an index, and a read of several kinds is one range per kind, merged, inside one transaction so that it sees one snapshot.
 - **Time budgets:** `bun:sqlite` cannot interrupt a query, and `worker.terminate()` does not stop one. A 13 second query ended only when it finished.
   - Reads are paged, with a deadline checked between pages.
   - Search orders by recency by default, which took about 0 ms over 2 million rows, against 1.9 seconds for `ORDER BY rank`.
@@ -249,7 +264,10 @@ These cost nothing to avoid now and would each cost a debugging session later.
 - `sql.stream` is not implemented on Bun. Page by cursor.
 - `busyTimeout` blocks the event loop for up to 5 seconds by default. Lower it.
 - `PRAGMA synchronous=FULL` is stated explicitly, because the client has no option for it.
-- `BunSocket.makeTls` cannot do CONN-1: with `rejectUnauthorized: false`, `checkServerIdentity` never ran, so pinning failed. `Transport` therefore dials with `node:net` and `node:tls` itself, and reads the stream directly in pieces of at most 16 KB, so that the host can stop reading while what it has read is unrecorded (LOG-4). A write counts only once its callback fires, because before that the bytes are in a buffer that a close discards.
+- `BunSocket.makeTls` cannot do CONN-1: with `rejectUnauthorized: false`, `checkServerIdentity` never ran, so pinning failed. `Transport` therefore dials with `node:net` and `node:tls` itself, and reads the stream directly in pieces of at most 16 KB, so that the host can stop reading while what it has read is unrecorded (LOG-4).
+  - Bun's `Socket.prototype.read` resumes the socket on every call, whatever `highWaterMark` says, so a stream read through it drained a flood into the process at 120 MB a second. `Transport` reads through `Readable.prototype.read`, which asks for more only below `highWaterMark`, so the stream holds at most 64 KB and one 512 KB read of the kernel, and the rest of a flood waits there. A close takes what the stream holds and records it.
+  - A plaintext write counts once its callback fires, because before that the bytes are in a buffer that a close discards.
+  - Over TLS, Bun fires the callback once a record is sealed, with the end of it possibly still in the process when the kernel is full, and nothing in its JavaScript API shows that. It takes no later write until that has left. So a TLS write counts once the next write is taken, or once the pump has nothing to write at once. If a later write stalls, the one before it is Dropped as one that may not have reached the Ircd, even if it was already reported written.
 - WebSockets silently lose data unless `closeOnBackpressureLimit: true` is set, and that setting also gives HOST-5's disconnect.
 - Offer the `iirc.v1` subprotocol first. Bun echoes the first one offered, so offering the key first reflects it back.
 - `Stream.timeout` fires only when the server pulls, so a stalled reader trips nothing. Use `idleTimeout`, and send typed heartbeats, because `StreamSse` cannot send comment lines.
@@ -260,6 +278,7 @@ These cost nothing to avoid now and would each cost a debugging session later.
 - `HttpStaticServer` over `/$bunfs` sees mtime 0, so ETags are size-only. `index.html` is never cached.
 - A compiled binary loads `.env` from its working directory unless told not to, and `BUN_BE_BUN=1` turns it into the full Bun CLI.
 - A transition that throws must be caught by the host (HOST-1).
+- A Bun Worker that exits, or is terminated, fires `close` and no `error`, and `dispatchEvent` on it after that reaches no listener.
 - Per-Line code uses `Effect.fnUntraced`.
 
 ## Not adopting

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nickCandidates } from "./nick.ts";
+import { isNick, nickCandidates, nickLine } from "./nick.ts";
 
 const bytes = (nick: string) => new TextEncoder().encode(nick).length;
 
@@ -106,5 +106,47 @@ describe(nickCandidates, () => {
     expect(
       nickCandidates({ alternates: ["claudia", "cc"], limit: 9, nick: "claude" })
     ).toStrictEqual(list);
+  });
+});
+
+describe(isNick, () => {
+  it.each(["claude", "c[l]aude", "a_9", "x", "a-b", "_x", "[away]", "{x}", "\\o/", "`x", "^x|y"])(
+    "CONN-3: takes %j",
+    (nick) => {
+      expect(isNick(nick)).toBeTruthy();
+    }
+  );
+
+  it.each(["", "two words", ":colon", "9lives", "line\r\nbreak", "nul\0"])(
+    "CONN-4: refuses %j, which `NICK` cannot carry or no candidate list can number",
+    (nick) => {
+      expect(isNick(nick)).toBeFalsy();
+    }
+  );
+
+  it.each(["#abc", "&abc", "+abc", "!abc", "-dash", "~tilde", "%half", "@op", "$mask"])(
+    "CONF-3: refuses %j, which starts with what marks a Channel, a member, or a mask",
+    (nick) => {
+      expect(isNick(nick)).toBeFalsy();
+    }
+  );
+
+  it.each(["a,b", "a!b", "a@b", "a*", "a?"])(
+    "CONF-3: refuses %j, which holds what splits a prefix, a list, or a mask",
+    (nick) => {
+      expect(isNick(nick)).toBeFalsy();
+    }
+  );
+});
+
+describe(nickLine, () => {
+  it("CONN-4: builds `NICK` for a nick", () => {
+    const built = nickLine("claude");
+
+    expect(built._tag === "Safe" && new TextDecoder().decode(built.line.bytes)).toBe("NICK claude");
+  });
+
+  it.each(["#abc", "9lives", `x${"y".repeat(510)}`])("refuses %j", (nick) => {
+    expect(nickLine(nick)._tag).toBe("Rejected");
   });
 });

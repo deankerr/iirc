@@ -26,10 +26,11 @@ import {
   throwing,
   wire,
 } from "./network.fixture.ts";
+import type { Overrides } from "./network.fixture.ts";
 import { LaneFull, LineDropped, NotInSession } from "./network.ts";
-import type { NetworkHost, NetworkOptions } from "./network.ts";
+import type { NetworkHost } from "./network.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
-import { fakeIrcd } from "./testing.ts";
+import { attemptInput, fakeIrcd } from "./testing.ts";
 import type { FakeIrcd } from "./testing.ts";
 
 const memory = Effect.provide(Recorder.memoryReadable);
@@ -45,10 +46,7 @@ const noMotd = ":ircd 422 iirc :No MOTD\r\n";
 const afterSettle = (tuning = defaultTuning) =>
   Effect.andThen(TestClock.adjust(`${tuning.rejoinSettleMillis} millis`), settled);
 
-const burstOver = Effect.fnUntraced(function* (
-  ircd: FakeIrcd,
-  overrides?: Partial<NetworkOptions>
-) {
+const burstOver = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides?: Overrides) {
   const hosted = yield* host(ircd, { channels: [], ...overrides });
 
   yield* ircd.read(`${welcome}${noMotd}`);
@@ -96,10 +94,7 @@ const closings = (log: readonly Entry[]) =>
   connectionsOf(log, "closing").map(({ chosen, reason }) => ({ chosen, reason }));
 
 // Closes a Scope from a fiber of its own, because a close can wait on the clock.
-const stopInBackground = Effect.fnUntraced(function* (
-  ircd: FakeIrcd,
-  overrides?: Partial<NetworkOptions>
-) {
+const stopInBackground = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides?: Overrides) {
   const running = yield* Deferred.make<NetworkHost>();
   const stop = yield* Deferred.make<undefined>();
 
@@ -285,7 +280,14 @@ describe("LIVE-4: reconnecting", () => {
 
       yield* record(
         [
-          { _tag: "Connection", ircd: first, network: "libera", nicks: ["iirc"], phase: "attempt" },
+          {
+            _tag: "Connection",
+            ircd: first,
+            network: "libera",
+            nicks: ["iirc"],
+            phase: "attempt",
+            ...attemptInput,
+          },
           { _tag: "Connection", connection: 1, ircd: first, network: "libera", phase: "opened" },
         ],
         () => {}
@@ -2768,6 +2770,8 @@ describe("LOG-2, LOG-9: a Connection the Log could not close", () => {
       yield* ircd.read("NOTICE * :unrecordable\r\n");
       yield* settled;
 
+      const endedAt = yield* Clock.currentTimeMillis;
+
       // The Log never heard of the close, so it cannot say the Line was Dropped either.
       assert.deepStrictEqual(
         yield* Fiber.join(waiting),
@@ -2792,6 +2796,13 @@ describe("LOG-2, LOG-9: a Connection the Log could not close", () => {
       const standing = yield* Recorder.use(({ standing: of }) => of("libera"));
 
       assert.strictEqual(standing.gap?.reason, "the Log could not record this Connection");
+
+      // LIVE-10: recorded 5 seconds late, it says when the Connection ended, and the Gap
+      // starts there, while its place in order is still its sequence (LOG-8).
+      assert.strictEqual(closed?.endedAt, endedAt);
+      assert.isAtLeast(closed?.at ?? 0, endedAt + 5000);
+      assert.strictEqual(standing.gap?.at, endedAt);
+      assert.strictEqual(standing.gap?.sequence, closed?.sequence);
     }).pipe(Effect.provide(layer));
   });
 

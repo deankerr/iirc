@@ -9,10 +9,11 @@ import type { Standing, WantedChannel } from "./standing.ts";
 
 /** What a reconciler needs from its Connection. */
 export interface Reconciling {
-  readonly channels: readonly WantedChannel[];
+  /** The Channels wanted now, read for every plan, so a change reaches a Session (LIVE-8). */
+  readonly channels: Effect.Effect<readonly WantedChannel[]>;
   /** Queues a Line, waits for room, and says whether it was written. */
   readonly join: (line: OutboundLine) => Effect.Effect<boolean>;
-  /** Each item says that Standing moved in a way that could bring a retry forward. */
+  /** Each item says that Standing or the Channels wanted moved, which could change a plan. */
   readonly moved: Queue.Dequeue<void>;
   readonly standing: Effect.Effect<Standing, RecordFailed>;
   readonly tuning: Tuning;
@@ -38,7 +39,7 @@ export const reconcile = ({ channels, join, moved, standing, tuning }: Reconcili
 
     while (joining) {
       const now = yield* Clock.currentTimeMillis;
-      const plan = joinPlan(yield* standing, channels, now, tuning);
+      const plan = joinPlan(yield* standing, yield* channels, now, tuning);
       const [line] = joinLines(plan.channels).lines;
 
       if (line !== undefined) {

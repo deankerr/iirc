@@ -11,7 +11,9 @@ const isBusy = (cause: unknown) =>
 /**
  * Holds a data directory exclusively until the enclosing scope closes (RUN-4). The
  * lock is an open `BEGIN EXCLUSIVE` on a sidecar database, which the kernel frees
- * if the process is killed, however it dies.
+ * if the process is killed, however it dies. Its journal is in memory, so taking it
+ * writes nothing, and a full disk cannot refuse it: the Daemon can start, and wait for
+ * space like any other time the Log cannot append (LOG-9).
  * @param dataDir - The directory to hold, which must exist.
  * @returns An effect that fails at once if another holder exists.
  */
@@ -37,6 +39,8 @@ export const holdDataDirectory = (
       try: () => {
         // Any wait here would block the event loop, and a holder never lets go.
         database.run("PRAGMA busy_timeout = 0");
+        // Not a file: a rollback journal is written as the lock is taken.
+        database.run("PRAGMA journal_mode = MEMORY");
         database.run("BEGIN EXCLUSIVE");
       },
     });

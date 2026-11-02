@@ -3,7 +3,7 @@ import { RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
 import { noStanding, noStandings } from "@iirc/session/standing";
 import type { Gap, Standings } from "@iirc/session/standing";
-import { Array as Arr, Clock, Effect, pipe, Ref, Schema, Semaphore } from "effect";
+import { Array as Arr, Clock, Data, Effect, pipe, Ref, Result, Schema, Semaphore } from "effect";
 import { SqlSchema } from "effect/sql";
 import type { SqlClient } from "effect/sql";
 import { isSqlError } from "effect/sql/SqlError";
@@ -23,6 +23,43 @@ const rebuildBatchSize = 128;
 
 const toStorageFailed = (cause: unknown) => new StorageFailed({ cause });
 
+/** A Change Entry, which the Daemon folds into Configuration (CONF-1). */
+export type ChangeEntry = Extract<Entry, { readonly _tag: "Change" }>;
+
+/**
+ * An Entry whose row no longer decodes, such as a Change that is not JSON. Nothing that
+ * reads the whole Log can go past it, so it says which Entry it is.
+ */
+class UnreadableEntry extends Data.TaggedError("UnreadableEntry")<{
+  readonly reason: string;
+  readonly sequence: unknown;
+}> {
+  override readonly message = `The Entry at sequence ${String(this.sequence)} cannot be read: ${this.reason}`;
+}
+
+const decodeEntryRow = Schema.decodeUnknownResult(EntryRow);
+
+// Row by row, so that a row that will not decode is named by its sequence.
+const decodeRows = (
+  rows: readonly { readonly sequence?: unknown }[]
+): Effect.Effect<readonly Entry[], UnreadableEntry> => {
+  const entries: Entry[] = [];
+
+  for (const row of rows) {
+    const decoded = decodeEntryRow(row);
+
+    if (Result.isFailure(decoded)) {
+      return Effect.fail(
+        new UnreadableEntry({ reason: decoded.failure.message, sequence: row.sequence })
+      );
+    }
+
+    entries.push(decoded.success);
+  }
+
+  return Effect.succeed(entries);
+};
+
 /**
  * Builds what the Log does over an open database. It rebuilds first, which is the one
  * pass over Entries at startup: it makes every derived table whole, and it leaves the
@@ -36,12 +73,22 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     ([row]) => row?.head ?? 0
   );
 
-  const readEntries = SqlSchema.findAll({
-    Request: Page,
-    Result: EntryRow,
-    execute: ({ after, limit }) =>
-      sql`SELECT * FROM entries WHERE sequence > ${after} ORDER BY sequence LIMIT ${limit}`,
-  });
+  const readEntries = ({ after, limit }: Page) =>
+    sql<{ readonly sequence: number }>`
+      SELECT * FROM entries WHERE sequence > ${after} ORDER BY sequence LIMIT ${limit}
+    `.pipe(Effect.flatMap(decodeRows));
+
+  // A range over `entries_by_kind`.
+  const readChanges = ({ after, limit }: Page) =>
+    sql<{ readonly sequence: number }>`
+      SELECT * FROM entries WHERE kind = 'Change' AND sequence > ${after}
+      ORDER BY sequence LIMIT ${limit}
+    `.pipe(
+      Effect.flatMap(decodeRows),
+      Effect.map((entries) =>
+        entries.flatMap((entry): readonly ChangeEntry[] => (entry._tag === "Change" ? [entry] : []))
+      )
+    );
 
   const readMessages = SqlSchema.findAll({
     Request: Page,
@@ -185,6 +232,8 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   yield* rebuild;
 
   return {
+    changes: (query: Page): Effect.Effect<readonly ChangeEntry[], StorageFailed> =>
+      readChanges(query).pipe(Effect.mapError(toStorageFailed)),
     entries: (query: Page): Effect.Effect<readonly Entry[], StorageFailed> =>
       readEntries(query).pipe(Effect.mapError(toStorageFailed)),
     gaps: (query: GapPage): Effect.Effect<readonly Gap[], StorageFailed> =>

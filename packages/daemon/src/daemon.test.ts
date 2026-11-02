@@ -1,6 +1,5 @@
 import { Database } from "bun:sqlite";
 
-import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { assert, describe, it } from "@effect/vitest";
 import {
   DaemonApi,
@@ -9,61 +8,80 @@ import {
   LineDropped,
   LogUnavailable,
   NotInSession,
+  ReadTimedOut,
+  Stopping,
   WriteFailed,
 } from "@iirc/api";
-import type { LogEntry, Status } from "@iirc/api";
+import type { LogEntry, NetworkStatus } from "@iirc/api";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { DataDirectoryLocked, Log } from "@iirc/log";
+import {
+  DataDirectoryLocked,
+  Log,
+  LogReader,
+  ReaderBusy as ReaderQueueFull,
+  ReadTimedOut as ReaderTimedOut,
+  StorageFailed,
+} from "@iirc/log";
 import { RecordFailed, Recorder } from "@iirc/session/recorder";
-import type { WantedChannel } from "@iirc/session/standing";
 import { eventually, fakeIrcd } from "@iirc/session/testing";
 import type { FakeIrcd, FakeIrcdOptions } from "@iirc/session/testing";
 import { Transport } from "@iirc/session/transport";
-import { Context, Effect, Exit, FileSystem, Fiber, Layer, Ref, Schema, Scope } from "effect";
-import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
+import { Context, Duration, Effect, Exit, Fiber, Layer, Ref, Schema, Scope } from "effect";
+import { constVoid } from "effect/Function";
 import type { HttpClientResponse } from "effect/http";
-import { HttpApiClient, OpenApi } from "effect/http-api";
+import { OpenApi } from "effect/http-api";
 
-import { Daemon, DaemonCore, InvalidTuning } from "./daemon.ts";
+import {
+  clientWith,
+  inTempDirectory,
+  invalidRequest,
+  localKey,
+  ownerKey,
+  rawWith,
+  servingWith,
+  statusOf,
+  version,
+} from "./daemon.fixture.ts";
+import type { Client } from "./daemon.fixture.ts";
+import { Daemon, DaemonCore, UndecodableChange } from "./daemon.ts";
 import type { DaemonConfig } from "./daemon.ts";
-import { ApiRoutes } from "./routes.ts";
 
 const encoder = new TextEncoder();
-const version = "1.2.3";
 const welcome = ":ircd 001 iirc :Welcome\r\n";
+const network = "libera";
+const cause = `key:${ownerKey}`;
 
 /** What a test changes about the Network it runs on. */
 interface Scenario {
   readonly alternates?: readonly string[];
-  readonly channels?: readonly WantedChannel[];
+  readonly channels?: readonly { readonly name: string; readonly rejoinOnKick?: boolean }[];
   readonly ircd?: FakeIrcdOptions;
   readonly tuning?: Partial<Tuning>;
 }
 
-const configIn = (dataDir: string, scenario: Scenario = {}): DaemonConfig => ({
-  dataDir,
-  network: {
-    channels: scenario.channels ?? [],
-    id: "libera",
-    identity: {
-      alternates: scenario.alternates ?? [],
-      nick: "iirc",
-      realname: "I IRC",
-      username: "user",
-    },
-    ircds: [{ host: "irc.test", port: 6697, tls: false }],
-    quitReason: "going",
-    tuning: { ...defaultTuning, ...scenario.tuning },
+const configIn = (dataDir: string): DaemonConfig => ({ dataDir, version });
+
+// The Network every test here runs on. The fake Ircd answers whatever is dialled.
+const settingsFor = (scenario: Scenario = {}) => ({
+  channels: (scenario.channels ?? []).map(({ name, rejoinOnKick = false }) => ({
+    autojoin: true,
+    name,
+    rejoinOnKick,
+  })),
+  enabled: true,
+  id: network,
+  identity: {
+    alternates: scenario.alternates ?? [],
+    nick: "iirc",
+    realname: "I IRC",
+    username: "user",
   },
-  version,
+  ircds: [{ host: "irc.test", port: 6697, tls: false }] as const,
+  name: "Libera",
+  quitReason: "going",
+  tuning: scenario.tuning ?? {},
 });
-
-const makeClient = HttpClient.HttpClient.pipe(
-  Effect.flatMap((httpClient) => HttpApiClient.makeWith(DaemonApi, { httpClient }))
-);
-
-type Client = Effect.Success<typeof makeClient>;
 
 // Loose on purpose, because some of these are what the API must refuse.
 type PostBody = Readonly<Record<string, string | number>>;
@@ -75,79 +93,59 @@ interface Harness {
   readonly raw: (path: string) => Effect.Effect<HttpClientResponse.HttpClientResponse>;
   readonly post: (body: PostBody) => Effect.Effect<HttpClientResponse.HttpClientResponse>;
   readonly postText: (text: string) => Effect.Effect<HttpClientResponse.HttpClientResponse>;
+  readonly status: ReturnType<typeof statusOf>;
 }
 
-const InvalidRequestBody = Schema.TaggedStruct("InvalidRequest", {
-  issues: Schema.NonEmptyArray(
-    Schema.Struct({
-      message: Schema.String,
-      path: Schema.Array(Schema.Union([Schema.String, Schema.Int])),
-    })
-  ),
-});
-
 // What status says of the last close, which a restart must not change.
-const lastClose = ({ closeReason, consecutiveFailures, nextAttemptAt, phase }: Status) => ({
+const lastClose = ({ closeReason, consecutiveFailures, nextAttemptAt, phase }: NetworkStatus) => ({
   closeReason,
   consecutiveFailures,
   nextAttemptAt,
   phase,
 });
 
-// A bad request answers 400 with a tagged body that says where it went wrong (API-3).
-const invalidRequest = (response: HttpClientResponse.HttpClientResponse) =>
-  Effect.gen(function* () {
-    assert.strictEqual(response.status, 400);
+// Each data directory's first key, made once before its first Daemon, as `iirc key create`
+// would, and used by every Daemon that runs on it after.
+const keys = new Map<string, string>();
 
-    return yield* Schema.decodeUnknownEffect(InvalidRequestBody)(
-      yield* Effect.orDie(response.json)
-    );
+const keyFor = (dataDir: string) =>
+  Effect.gen(function* () {
+    const held = keys.get(dataDir);
+
+    if (held !== undefined) {
+      return held;
+    }
+
+    const key = yield* localKey(dataDir);
+
+    keys.set(dataDir, key);
+
+    return key;
   });
 
-// The same order as `apps/iirc`, so this is also what proves the Log is built once.
-const servingWith = <E, R>(core: Layer.Layer<Daemon, E, R>) =>
-  Daemon.stopsFirst.pipe(
-    Layer.provideMerge(
-      HttpRouter.serve(ApiRoutes, { disableListenLog: true, disableLogger: true }).pipe(
-        Layer.provideMerge(BunHttpServer.layerTest)
-      )
-    ),
-    Layer.provide(core)
-  );
+const serving = (dataDir: string, ircd: FakeIrcd) =>
+  servingWith(DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport)));
 
-const serving = (dataDir: string, ircd: FakeIrcd, scenario?: Scenario) =>
-  servingWith(DaemonCore(configIn(dataDir, scenario), Layer.succeed(Transport, ircd.transport)));
-
-const inTempDirectory = <A, E, R>(test: (dataDir: string) => Effect.Effect<A, E, R>) =>
+// Adds the Network through the API unless an earlier run on this Log already did, since
+// Configuration outlives a restart.
+const harnessOn = (ircd: FakeIrcd, key: string, scenario?: Scenario) =>
   Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
+    const client = yield* clientWith(key);
+    const raw = yield* rawWith(key);
 
-    return yield* test(
-      yield* fileSystem.makeTempDirectoryScoped({ directory: "/var/tmp", prefix: "iirc-daemon-" })
-    );
-  }).pipe(Effect.scoped, Effect.provide(BunServices.layer));
+    const configured = yield* client.networks.list();
 
-const harnessOn = (ircd: FakeIrcd) =>
-  Effect.gen(function* () {
-    const client = yield* makeClient;
-    const httpClient = yield* HttpClient.HttpClient;
+    if (!configured.some(({ settings }) => settings.id === network)) {
+      yield* client.networks.add({ payload: settingsFor(scenario) });
+    }
 
     return {
       client,
       ircd,
-      post: (body: PostBody) =>
-        HttpClientRequest.post("/api/messages").pipe(
-          HttpClientRequest.bodyJsonUnsafe(body),
-          httpClient.execute,
-          Effect.orDie
-        ),
-      postText: (text: string) =>
-        HttpClientRequest.post("/api/messages").pipe(
-          HttpClientRequest.bodyText(text, "application/json"),
-          httpClient.execute,
-          Effect.orDie
-        ),
-      raw: (path: string) => Effect.orDie(httpClient.get(path)),
+      post: (body: PostBody) => raw.post("/api/messages", { network, ...body }),
+      postText: (text: string) => raw.postText("/api/messages", text),
+      raw: raw.get,
+      status: statusOf(client, network),
     } satisfies Harness;
   });
 
@@ -157,12 +155,59 @@ const withDaemonIn = <A, E, R>(
   scenario?: Scenario
 ) =>
   Effect.gen(function* () {
+    const key = yield* keyFor(dataDir);
     const ircd = yield* fakeIrcd(scenario?.ircd);
 
-    return yield* Effect.flatMap(harnessOn(ircd), test).pipe(
-      Effect.provide(serving(dataDir, ircd, scenario))
+    return yield* Effect.flatMap(harnessOn(ircd, key, scenario), test).pipe(
+      Effect.provide(serving(dataDir, ircd))
     );
   }).pipe(Effect.scoped);
+
+// A Daemon whose reader fails every read a Frontend makes, in one way, so that its mapping
+// shows. Its own read of Configuration at startup goes through.
+const withFailingReader = <A, E, R>(
+  failure: ReaderQueueFull | ReaderTimedOut | StorageFailed,
+  test: (harness: Harness) => Effect.Effect<A, E, R>
+) =>
+  inTempDirectory((dataDir) =>
+    Effect.gen(function* () {
+      const key = yield* keyFor(dataDir);
+      const ircd = yield* fakeIrcd();
+      const failing = yield* Ref.make(false);
+
+      const unlessFailing = <A2>(
+        read: Effect.Effect<A2, ReaderQueueFull | ReaderTimedOut | StorageFailed>
+      ): Effect.Effect<A2, ReaderQueueFull | ReaderTimedOut | StorageFailed> =>
+        Effect.flatMap(Ref.get(failing), (fails) => (fails ? Effect.fail(failure) : read));
+
+      const reader = Layer.effect(
+        LogReader,
+        Effect.gen(function* () {
+          const real = yield* LogReader;
+
+          return {
+            entries: (query) => unlessFailing(real.entries(query)),
+            gaps: (query) => unlessFailing(real.gaps(query)),
+            messages: (query) => unlessFailing(real.messages(query)),
+          } satisfies LogReader["Service"];
+        })
+      ).pipe(Layer.provide(LogReader.layer({ dataDir })));
+
+      const core = Daemon.layer(configIn(dataDir)).pipe(
+        Layer.provide(reader),
+        Layer.provideMerge(Log.layer({ dataDir })),
+        Layer.provide(Layer.succeed(Transport, ircd.transport))
+      );
+
+      return yield* Effect.gen(function* () {
+        const harness = yield* harnessOn(ircd, key);
+
+        yield* Ref.set(failing, true);
+
+        return yield* test(harness);
+      }).pipe(Effect.provide(servingWith(core)));
+    }).pipe(Effect.scoped)
+  );
 
 const withDaemon = <A, E, R>(
   test: (harness: Harness) => Effect.Effect<A, E, R>,
@@ -170,8 +215,8 @@ const withDaemon = <A, E, R>(
 ) => inTempDirectory((dataDir) => withDaemonIn(dataDir, test, scenario));
 
 // Waits for the host to have recorded what the fake Ircd just said.
-const untilPhase = ({ client }: Harness, phase: string) =>
-  eventually(client.daemon.status(), (status) => status.phase === phase);
+const untilPhase = ({ status }: Harness, phase: string) =>
+  eventually(status, (current) => current.phase === phase);
 
 const inSession = (harness: Harness) =>
   Effect.gen(function* () {
@@ -210,6 +255,27 @@ const restart = (harness: Harness) =>
   });
 
 // What is at the end of a Log no Daemon has open, one word for each Entry.
+// Appends Change Entries as raw JSON text, as only a broken or older writer could.
+const appendRaw = (dataDir: string, changes: readonly string[]) =>
+  Effect.sync(() => {
+    const database = new Database(`${dataDir}/iirc.sqlite`);
+    const head = database.query<{ head: number }, []>("SELECT MAX(sequence) AS head FROM entries");
+    let sequence = head.get()?.head ?? 0;
+
+    const insert = database.query(
+      "INSERT INTO entries (sequence, at, kind, \"by\", change) VALUES (?, ?, 'Change', ?, ?)"
+    );
+
+    database.transaction(() => {
+      for (const change of changes) {
+        sequence += 1;
+        insert.run(sequence, Date.now(), ownerKey, change);
+      }
+    })();
+
+    database.close();
+  });
+
 const logTail = (dataDir: string, length: number) =>
   Effect.sync(() => {
     const database = new Database(`${dataDir}/iirc.sqlite`, { readonly: true });
@@ -271,47 +337,55 @@ describe("the Daemon", () => {
 
   describe("/status", () => {
     it.live("OBS-1: reports everything about a Session, typed", () =>
-      withDaemon(
-        (harness) =>
-          Effect.gen(function* () {
-            yield* inSession(harness);
+      withDaemon((harness) =>
+        Effect.gen(function* () {
+          yield* inSession(harness);
 
-            const entries = yield* harness.client.daemon.entries(everything);
+          const entries = yield* harness.client.daemon.entries(everything);
+          const status = yield* harness.client.daemon.status();
 
-            assert.deepStrictEqual(yield* harness.client.daemon.status(), {
-              closeReason: null,
-              consecutiveFailures: 0,
-              head: entries.at(-1)?.sequence ?? 0,
-              joinFailures: [],
-              joined: [],
-              kicked: [],
-              lagMillis: null,
-              lanes: { background: 0, control: 0, interactive: 0 },
-              logFault: null,
-              network: "libera",
-              nextAttemptAt: null,
-              phase: "session",
-              refusal: null,
-              refused: false,
-              rejectedChannels: [{ channel: "bad name", reason: "InvalidChannel" }],
-              self: "iirc",
-            });
-          }),
-        { channels: [{ key: "s3cret", name: "bad name" }] }
+          assert.deepStrictEqual(status, {
+            apiVersion: 1,
+            head: entries.at(-1)?.sequence ?? 0,
+            networks: [
+              {
+                closeReason: null,
+                consecutiveFailures: 0,
+                enabled: true,
+                id: "libera",
+                joinFailures: [],
+                joined: [],
+                kicked: [],
+                lagMillis: null,
+                lanes: { background: 0, control: 0, interactive: 0 },
+                logFault: null,
+                name: "Libera",
+                nextAttemptAt: null,
+                phase: "session",
+                refusal: null,
+                refused: false,
+                rejectedChannels: [],
+                self: "iirc",
+              },
+            ],
+            version,
+          });
+        })
       )
     );
 
-    it.live("CRED-3: never shows a rejected Channel's key", () =>
-      withDaemon(
-        (harness) =>
-          Effect.gen(function* () {
-            yield* inSession(harness);
+    it.live("API-5: reports the API's version, and the Daemon's, with no Network at all", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const key = yield* keyFor(dataDir);
+          const ircd = yield* fakeIrcd();
 
-            const response = yield* harness.raw("/api/status");
+          const status = yield* Effect.flatMap(clientWith(key), (client) =>
+            client.daemon.status()
+          ).pipe(Effect.provide(serving(dataDir, ircd)));
 
-            assert.notInclude(yield* response.text, "s3cret");
-          }),
-        { channels: [{ key: "s3cret", name: "bad name" }] }
+          assert.deepStrictEqual(status, { apiVersion: 1, head: 2, networks: [], version });
+        }).pipe(Effect.scoped)
       )
     );
 
@@ -328,7 +402,7 @@ describe("the Daemon", () => {
             yield* ircd.read(":ircd 474 iirc #out :Cannot join channel (+b)\r\n");
 
             const status = yield* eventually(
-              client.daemon.status(),
+              harness.status,
               ({ joinFailures, joined }) => joined.length === 1 && joinFailures.length === 1
             );
 
@@ -354,11 +428,13 @@ describe("the Daemon", () => {
 
             yield* inSession(harness);
             // Spends the only token, so the `JOIN` has to wait in its lane, where it shows.
-            yield* client.daemon.send({ payload: { target: "#elsewhere", text: "first" } });
+            yield* client.daemon.send({
+              payload: { network, target: "#elsewhere", text: "first" },
+            });
             yield* ircd.read(":ircd 376 iirc :End of MOTD\r\n");
 
             const { lanes } = yield* eventually(
-              client.daemon.status(),
+              harness.status,
               (status) => status.lanes.background + status.lanes.interactive > 0
             );
 
@@ -375,7 +451,7 @@ describe("the Daemon", () => {
       withDaemon(
         (harness) =>
           Effect.gen(function* () {
-            const { client, ircd } = harness;
+            const { ircd } = harness;
 
             yield* inSession(harness);
             yield* ircd.read(":ircd 422 iirc :No MOTD\r\n");
@@ -383,7 +459,7 @@ describe("the Daemon", () => {
             yield* ircd.read(":iirc!u@h JOIN #in\r\n", ":op!u@h KICK #in iirc :out\r\n");
 
             const { joined, kicked } = yield* eventually(
-              client.daemon.status(),
+              harness.status,
               (status) => status.kicked.length === 1
             );
 
@@ -398,7 +474,7 @@ describe("the Daemon", () => {
       withDaemon(
         (harness) =>
           Effect.gen(function* () {
-            const { client, ircd } = harness;
+            const { ircd } = harness;
 
             yield* inSession(harness);
 
@@ -417,7 +493,7 @@ describe("the Daemon", () => {
             yield* ircd.read(`:ircd PONG ircd :${token}\r\n`);
 
             const { lagMillis } = yield* eventually(
-              client.daemon.status(),
+              harness.status,
               (status) => status.lagMillis !== null
             );
 
@@ -438,7 +514,7 @@ describe("the Daemon", () => {
             yield* ircd.hangUp;
 
             const status = yield* eventually(
-              client.daemon.status(),
+              harness.status,
               ({ nextAttemptAt }) => nextAttemptAt !== null
             );
 
@@ -486,20 +562,25 @@ describe("the Daemon", () => {
 
           const core = Daemon.layer(configIn(dataDir)).pipe(
             Layer.provide(brittle),
+            Layer.provide(LogReader.layer({ dataDir })),
             Layer.provideMerge(Log.layer({ dataDir })),
             Layer.provide(Layer.succeed(Transport, ircd.transport))
           );
 
+          const key = yield* keyFor(dataDir);
+
           yield* Effect.gen(function* () {
-            const harness = yield* harnessOn(ircd);
+            const harness = yield* harnessOn(ircd, key);
 
             yield* inSession(harness);
             yield* harness.ircd.read(":iirc!u@h JOIN #c\r\n");
-            yield* eventually(harness.client.daemon.status(), ({ joined }) => joined.length > 0);
+            yield* eventually(harness.status, ({ joined }) => joined.length > 0);
             yield* Ref.set(failing, true);
 
             const failure = yield* Effect.flip(
-              harness.client.daemon.send({ payload: { target: "#iirc", text: "unrecorded" } })
+              harness.client.daemon.send({
+                payload: { network, target: "#iirc", text: "unrecorded" },
+              })
             );
 
             assert.instanceOf(failure, LogUnavailable);
@@ -508,13 +589,13 @@ describe("the Daemon", () => {
             assert.strictEqual((yield* harness.post({ target: "#iirc", text: "hi" })).status, 503);
 
             const status = yield* eventually(
-              harness.client.daemon.status(),
+              harness.status,
               ({ logFault, phase }) => logFault !== null && phase === "closed"
             );
 
             assert.isAtLeast(status.logFault?.failures ?? 0, 1);
             assert.isAbove(status.logFault?.retryMillis ?? 0, 0);
-            assert.isNotNull(status.head);
+            assert.isNotNull((yield* harness.client.daemon.status()).head);
 
             // The Log still holds that Session open, and none of it is current (OBS-1).
             assert.deepInclude(status, { joined: [], lagMillis: null, self: null });
@@ -543,17 +624,17 @@ describe("the Daemon", () => {
           yield* untilEntries(harness, (all) => lines(all, "inbound").length === 1);
 
           // A welcome that names nobody starts no Session, and names no Self.
-          assert.strictEqual((yield* client.daemon.status()).phase, "registering");
+          assert.strictEqual((yield* harness.status).phase, "registering");
 
           yield* ircd.read(welcome);
           yield* untilPhase(harness, "session");
           yield* ircd.read(":x 001 mallory :Welcome\r\n");
           yield* untilEntries(harness, (all) => lines(all, "inbound").length === 3);
-          yield* client.daemon.send({ payload: { target: "#iirc", text: "still me" } });
+          yield* client.daemon.send({ payload: { network, target: "#iirc", text: "still me" } });
 
           const messages = yield* client.daemon.messages(everything);
 
-          assert.strictEqual((yield* client.daemon.status()).phase, "session");
+          assert.strictEqual((yield* harness.status).phase, "session");
           assert.deepStrictEqual(
             messages.map(({ sender }) => sender),
             ["iirc"]
@@ -584,7 +665,7 @@ describe("the Daemon", () => {
 
           const after = yield* withDaemonIn(
             dataDir,
-            ({ client }) => Effect.map(client.daemon.status(), lastClose),
+            ({ status }) => status.pipe(Effect.map(lastClose)),
             waiting
           );
 
@@ -608,10 +689,10 @@ describe("the Daemon", () => {
             yield* harness.ircd.hangUp;
             yield* inSession(harness);
 
-            assert.strictEqual((yield* harness.client.daemon.status()).consecutiveFailures, 1);
+            assert.strictEqual((yield* harness.status).consecutiveFailures, 1);
 
             yield* eventually(
-              harness.client.daemon.status(),
+              harness.status,
               ({ consecutiveFailures, phase }) => phase === "session" && consecutiveFailures === 0
             );
           }),
@@ -640,10 +721,13 @@ describe("the Daemon", () => {
         Effect.gen(function* () {
           yield* untilPhase(harness, "registering");
 
-          const [first, second] = yield* harness.client.daemon.entries(everything);
+          const [key, started, added, attempt] = yield* harness.client.daemon.entries(everything);
 
-          assert.deepInclude(first, { _tag: "Daemon", phase: "started", sequence: 1, version });
-          assert.deepInclude(second, { _tag: "Connection", phase: "attempt", sequence: 2 });
+          // AUTH-4: the first key was made before any Daemon ran, by `local`.
+          assert.deepInclude(key, { _tag: "Change", by: "local", sequence: 1 });
+          assert.deepInclude(started, { _tag: "Daemon", phase: "started", sequence: 2, version });
+          assert.deepInclude(added, { _tag: "Change", by: ownerKey, network, sequence: 3 });
+          assert.deepInclude(attempt, { _tag: "Connection", phase: "attempt", sequence: 4 });
         })
       )
     );
@@ -727,6 +811,77 @@ describe("the Daemon", () => {
         })
       )
     );
+
+    it.live("LOG-11: filters by kind, repeated or comma-separated, and by Network", () =>
+      withDaemon((harness) =>
+        Effect.gen(function* () {
+          yield* inSession(harness);
+          yield* harness.ircd.read(":bob!u@h PRIVMSG #iirc :hi\r\n");
+
+          const all = yield* untilEntries(harness, (found) => lines(found, "inbound").length === 2);
+
+          const ofKinds = (...kinds: readonly LogEntry["_tag"][]) =>
+            all.filter(({ _tag }) => kinds.includes(_tag));
+
+          const daemonAndLine = yield* harness.client.daemon.entries({
+            query: { after: 0, kind: ["Daemon", "Line"], limit: 100 },
+          });
+
+          assert.deepStrictEqual(daemonAndLine, ofKinds("Daemon", "Line"));
+          assert.sameMembers(
+            [...new Set(daemonAndLine.map(({ _tag }) => _tag))],
+            ["Daemon", "Line"]
+          );
+
+          for (const query of [
+            "kind=Daemon,Line",
+            "kind=Line&kind=Daemon",
+            "kind=Daemon,Line&kind=Line",
+          ]) {
+            const response = yield* harness.raw(`/api/entries?${query}`);
+
+            assert.strictEqual(response.status, 200, query);
+            assert.lengthOf(pageLength(yield* response.json), daemonAndLine.length, query);
+          }
+
+          // The Daemon's own Entries are no Network's, and nor is the first key.
+          assert.deepStrictEqual(
+            yield* harness.client.daemon.entries({
+              query: { after: 0, limit: 100, network: "libera" },
+            }),
+            all.filter((entry) => "network" in entry && entry.network === network)
+          );
+          assert.sameMembers(
+            all.flatMap((entry) => ("network" in entry ? [] : [entry._tag])),
+            ["Change", "Daemon"]
+          );
+          assert.deepStrictEqual(
+            yield* harness.client.daemon.entries({
+              query: { after: 0, kind: ["Connection"], limit: 1, network: "libera" },
+            }),
+            ofKinds("Connection").slice(0, 1)
+          );
+          assert.deepStrictEqual(
+            yield* harness.client.daemon.entries({
+              query: { after: 0, limit: 100, network: "oftc" },
+            }),
+            []
+          );
+          assert.lengthOf(
+            yield* harness.client.daemon.messages({
+              query: { after: 0, limit: 100, network: "libera" },
+            }),
+            1
+          );
+          assert.deepStrictEqual(
+            yield* harness.client.daemon.messages({
+              query: { after: 0, limit: 100, network: "oftc" },
+            }),
+            []
+          );
+        })
+      )
+    );
   });
 
   describe("/messages", () => {
@@ -790,7 +945,7 @@ describe("the Daemon", () => {
           yield* inSession(harness);
 
           const sent = yield* harness.client.daemon.send({
-            payload: { target: "#iirc", text: "hello there" },
+            payload: { network, target: "#iirc", text: "hello there" },
           });
 
           const entries = yield* harness.client.daemon.entries(everything);
@@ -802,7 +957,7 @@ describe("the Daemon", () => {
           });
 
           assert.deepInclude(lines(entries, "outbound").at(-1), {
-            cause: "api",
+            cause,
             text: "PRIVMSG #iirc :hello there",
           });
           assert.deepStrictEqual(written.at(-1), encoder.encode("PRIVMSG #iirc :hello there\r\n"));
@@ -820,7 +975,7 @@ describe("the Daemon", () => {
           yield* inSession(harness);
 
           const refused = (target: string, text: string) =>
-            Effect.flip(harness.client.daemon.send({ payload: { target, text } }));
+            Effect.flip(harness.client.daemon.send({ payload: { network, target, text } }));
 
           assert.deepStrictEqual(
             yield* refused("#a,#b", "two Targets"),
@@ -852,7 +1007,7 @@ describe("the Daemon", () => {
           yield* untilPhase(harness, "registering");
 
           const failure = yield* Effect.flip(
-            harness.client.daemon.send({ payload: { target: "#iirc", text: "too early" } })
+            harness.client.daemon.send({ payload: { network, target: "#iirc", text: "too early" } })
           );
 
           assert.deepStrictEqual(failure, new NotInSession({ phase: "registering" }));
@@ -869,7 +1024,7 @@ describe("the Daemon", () => {
           yield* untilPhase(harness, "closed");
 
           const failure = yield* Effect.flip(
-            harness.client.daemon.send({ payload: { target: "#iirc", text: "too late" } })
+            harness.client.daemon.send({ payload: { network, target: "#iirc", text: "too late" } })
           );
 
           assert.deepStrictEqual(failure, new NotInSession({ phase: "closed" }));
@@ -884,15 +1039,15 @@ describe("the Daemon", () => {
             const { client } = harness;
 
             yield* inSession(harness);
-            yield* client.daemon.send({ payload: { target: "#iirc", text: "the token" } });
+            yield* client.daemon.send({ payload: { network, target: "#iirc", text: "the token" } });
 
             assert.deepStrictEqual(
-              yield* client.daemon.send({ payload: { target: "#iirc", text: "waiting" } }),
+              yield* client.daemon.send({ payload: { network, target: "#iirc", text: "waiting" } }),
               { status: "queued" }
             );
-            assert.strictEqual((yield* client.daemon.status()).lanes.interactive, 1);
+            assert.strictEqual((yield* harness.status).lanes.interactive, 1);
 
-            yield* eventually(client.daemon.status(), ({ lanes }) => lanes.interactive === 0);
+            yield* eventually(harness.status, ({ lanes }) => lanes.interactive === 0);
             yield* untilEntries(harness, (all) =>
               lines(all, "outbound").some(({ text }) => text.endsWith("waiting"))
             );
@@ -906,7 +1061,10 @@ describe("the Daemon", () => {
         (harness) =>
           Effect.gen(function* () {
             const { client, post } = harness;
-            const send = client.daemon.send({ payload: { target: "#iirc", text: "more" } });
+
+            const send = client.daemon.send({
+              payload: { network, target: "#iirc", text: "more" },
+            });
 
             yield* inSession(harness);
             yield* send;
@@ -917,7 +1075,7 @@ describe("the Daemon", () => {
 
             assert.deepStrictEqual(failure, new LaneFull({ lane: "interactive" }));
             assert.strictEqual((yield* post({ target: "#iirc", text: "more" })).status, 429);
-            assert.strictEqual((yield* client.daemon.status()).lanes.interactive, 2);
+            assert.strictEqual((yield* harness.status).lanes.interactive, 2);
           }),
         {
           tuning: {
@@ -935,14 +1093,17 @@ describe("the Daemon", () => {
         (harness) =>
           Effect.gen(function* () {
             const { client, ircd, raw } = harness;
-            const send = client.daemon.send({ payload: { target: "#iirc", text: "stranded" } });
+
+            const send = client.daemon.send({
+              payload: { network, target: "#iirc", text: "stranded" },
+            });
 
             yield* inSession(harness);
             yield* send;
 
             const stranded = yield* Effect.forkChild(Effect.flip(send));
 
-            yield* eventually(client.daemon.status(), ({ lanes }) => lanes.interactive === 1);
+            yield* eventually(harness.status, ({ lanes }) => lanes.interactive === 1);
             yield* ircd.hangUp;
 
             const failure = yield* Fiber.join(stranded);
@@ -955,7 +1116,7 @@ describe("the Daemon", () => {
 
             assert.deepInclude(line, {
               bytes: encoder.encode("PRIVMSG #iirc stranded"),
-              cause: "api",
+              cause,
               reason: `the Connection closed: ${closed?.phase === "closed" ? closed.reason : ""}`,
               text: "PRIVMSG #iirc stranded",
             });
@@ -982,7 +1143,7 @@ describe("the Daemon", () => {
           yield* untilPhase(harness, "closing");
 
           const failure = yield* Effect.flip(
-            harness.client.daemon.send({ payload: { target: "#iirc", text: "too late" } })
+            harness.client.daemon.send({ payload: { network, target: "#iirc", text: "too late" } })
           );
 
           assert.deepStrictEqual(failure, new NotInSession({ phase: "closing" }));
@@ -997,7 +1158,7 @@ describe("the Daemon", () => {
           yield* harness.ircd.setWrites("fail");
 
           const failure = yield* Effect.flip(
-            harness.client.daemon.send({ payload: { target: "#iirc", text: "lost" } })
+            harness.client.daemon.send({ payload: { network, target: "#iirc", text: "lost" } })
           );
 
           assert.instanceOf(failure, WriteFailed);
@@ -1121,6 +1282,27 @@ describe("the Daemon", () => {
         { alternates: ["other"] }
       )
     );
+
+    it.live(
+      "ADR 0003: an `attempt` gives everything its machine ran with, the whole Tuning too",
+      () =>
+        withDaemon(
+          (harness) =>
+            Effect.gen(function* () {
+              yield* untilPhase(harness, "registering");
+
+              const [attempt] = connections(yield* harness.client.daemon.entries(everything));
+
+              assert.deepInclude(attempt, {
+                phase: "attempt",
+                realname: "I IRC",
+                tuning: { ...defaultTuning, drainMillis: 1234 },
+                username: "user",
+              });
+            }),
+          { tuning: { drainMillis: 1234 } }
+        )
+    );
   });
 
   describe("stopping", () => {
@@ -1201,7 +1383,11 @@ describe("the Daemon", () => {
               const { status } = yield* Daemon;
 
               yield* Effect.addFinalizer(() =>
-                status.pipe(Effect.tap(({ phase }) => Effect.succeed(seen.push(phase))))
+                status.pipe(
+                  Effect.tap(({ networks }) =>
+                    Effect.succeed(seen.push(...networks.map(({ phase }) => phase)))
+                  )
+                )
               );
             })
           );
@@ -1215,9 +1401,10 @@ describe("the Daemon", () => {
             scope
           );
 
-          const { status, stop } = Context.get(context, Daemon);
+          const { addNetwork, status, stop } = Context.get(context, Daemon);
 
-          yield* eventually(status, ({ phase }) => phase === "registering");
+          yield* addNetwork(ownerKey, settingsFor());
+          yield* eventually(status, ({ networks }) => networks[0]?.phase === "registering");
           yield* stop;
           yield* stop;
           yield* Scope.close(scope, Exit.void);
@@ -1230,6 +1417,87 @@ describe("the Daemon", () => {
           );
         }).pipe(Effect.scoped)
       )
+    );
+  });
+
+  describe("once stopped", () => {
+    it.live("RUN-3: records no Change after its `stopped` Entry, and says it is stopping", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          yield* keyFor(dataDir);
+
+          const ircd = yield* fakeIrcd();
+          const scope = yield* Scope.make();
+
+          const context = yield* Layer.buildWithScope(
+            DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport)),
+            scope
+          );
+
+          const { addNetwork, stop } = Context.get(context, Daemon);
+
+          yield* stop;
+
+          assert.instanceOf(yield* Effect.flip(addNetwork(ownerKey, settingsFor())), Stopping);
+
+          yield* Scope.close(scope, Exit.void);
+
+          assert.deepStrictEqual(yield* logTail(dataDir, 1), ["Daemon stopped"]);
+        }).pipe(Effect.scoped)
+      )
+    );
+  });
+
+  describe("reading through the reader", () => {
+    for (const path of ["/api/entries", "/api/messages", "/api/gaps"]) {
+      it.live(`API-3: a read past its budget is a 503 ReadTimedOut on ${path}`, () =>
+        withFailingReader(new ReaderTimedOut({ budgetMillis: 1000 }), ({ raw }) =>
+          Effect.gen(function* () {
+            const response = yield* raw(path);
+
+            assert.strictEqual(response.status, 503);
+            assert.deepStrictEqual(yield* Effect.orDie(response.json), {
+              _tag: "ReadTimedOut",
+              budgetMillis: 1000,
+            });
+          })
+        )
+      );
+    }
+
+    for (const path of ["/api/entries", "/api/messages", "/api/gaps"]) {
+      it.live(
+        `LOG-11: a read that never left the reader's queue is a 503 ReaderBusy on ${path}`,
+        () =>
+          withFailingReader(new ReaderQueueFull({ waitedMillis: 1200 }), ({ raw }) =>
+            Effect.gen(function* () {
+              const response = yield* raw(path);
+
+              assert.strictEqual(response.status, 503);
+              assert.deepStrictEqual(yield* Effect.orDie(response.json), {
+                _tag: "ReaderBusy",
+                waitedMillis: 1200,
+              });
+            })
+          )
+      );
+    }
+
+    it.live("API-3: the typed client tells a read past its budget from one that failed", () =>
+      Effect.gen(function* () {
+        const timedOut = yield* withFailingReader(
+          new ReaderTimedOut({ budgetMillis: 5 }),
+          ({ client }) => Effect.flip(client.daemon.entries(everything))
+        );
+
+        const unavailable = yield* withFailingReader(
+          new StorageFailed({ cause: "the Worker died" }),
+          ({ client }) => Effect.flip(client.daemon.messages(everything))
+        );
+
+        assert.deepStrictEqual(timedOut, new ReadTimedOut({ budgetMillis: 5 }));
+        assert.instanceOf(unavailable, LogUnavailable);
+      })
     );
   });
 
@@ -1267,6 +1535,21 @@ describe("the Daemon", () => {
         )
       );
 
+      it.live(`API-3: refuses a Network named nothing on ${path}, with a 400`, () =>
+        withDaemon(({ raw }) =>
+          Effect.forEach(
+            ["network=", "network=a&network=b"],
+            (query) =>
+              Effect.gen(function* () {
+                const { issues } = yield* invalidRequest(yield* raw(`${path}?${query}`));
+
+                assert.deepStrictEqual(issues[0].path.slice(0, 2), ["query", "network"], query);
+              }),
+            { discard: true }
+          )
+        )
+      );
+
       it.live(`accepts the bounds themselves on ${path}`, () =>
         withDaemon(({ raw }) =>
           Effect.forEach(
@@ -1280,6 +1563,41 @@ describe("the Daemon", () => {
         )
       );
     }
+  });
+
+  describe("kind filters", () => {
+    it.live("API-3: refuses a kind that is not an Entry's tag, with a 400", () =>
+      withDaemon(({ raw }) =>
+        Effect.forEach(
+          [
+            "kind=",
+            "kind=Bogus",
+            "kind=line",
+            "kind=Line,",
+            "kind=Line,,Daemon",
+            "kind=Line&kind=Nope",
+          ],
+          (query) =>
+            Effect.gen(function* () {
+              const { issues } = yield* invalidRequest(yield* raw(`/api/entries?${query}`));
+
+              assert.deepStrictEqual(issues[0].path.slice(0, 2), ["query", "kind"], query);
+            }),
+          { discard: true }
+        )
+      )
+    );
+
+    it.live("accepts every kind there is", () =>
+      withDaemon(({ raw }) =>
+        Effect.map(
+          raw("/api/entries?kind=Change,Connection,Daemon,Deadline,Dropped,Line"),
+          ({ status }) => {
+            assert.strictEqual(status, 200);
+          }
+        )
+      )
+    );
   });
 
   describe("starting", () => {
@@ -1299,17 +1617,113 @@ describe("the Daemon", () => {
       )
     );
 
-    it.live("will not start with a Tuning that breaks a rule, however it was built", () =>
+    it.live("CONF-1: will not start on a Change it cannot read, and says which", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
-          const failure = yield* Layer.build(
-            DaemonCore(configIn(dataDir, { tuning: { lagCheckMillis: 5000, silenceMillis: 5000 } }))
-          ).pipe(Effect.scoped, Effect.flip);
+          yield* localKey(dataDir);
+          yield* Recorder.use(({ record }) =>
+            record(
+              [{ _tag: "Change", by: ownerKey, change: { _tag: "NetworkRenamed" } }],
+              constVoid
+            )
+          ).pipe(Effect.provide(Log.layer({ dataDir })), Effect.orDie);
 
-          assert.instanceOf(failure, InvalidTuning);
-          assert.include(failure.message, "silenceMillis must be above lagCheckMillis");
+          const failure = yield* Layer.build(DaemonCore(configIn(dataDir))).pipe(
+            Effect.scoped,
+            Effect.flip
+          );
+
+          assert.instanceOf(failure, UndecodableChange);
+          assert.strictEqual(failure instanceof UndecodableChange ? failure.sequence : 0, 2);
+          assert.include(failure.message, "The Change at sequence 2 cannot be read");
+          assert.deepStrictEqual(
+            yield* logTail(dataDir, 10),
+            ["Change null", "Change null"],
+            "it recorded no start"
+          );
         })
       )
+    );
+
+    it.live("CONF-1: will not start on a Change that is not JSON, and says which", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          yield* localKey(dataDir);
+          yield* appendRaw(dataDir, ["this is not JSON"]);
+
+          const failure = yield* Layer.build(DaemonCore(configIn(dataDir))).pipe(
+            Effect.scoped,
+            Effect.flip
+          );
+
+          assert.instanceOf(failure, StorageFailed);
+          assert.include(
+            String(failure instanceof StorageFailed ? failure.cause : failure),
+            "The Entry at sequence 2 cannot be read"
+          );
+        })
+      )
+    );
+
+    it.live(
+      "RUN-3: starts promptly on thousands of large Changes, reading them on the writer with no budget",
+      () =>
+        inTempDirectory((dataDir) =>
+          Effect.gen(function* () {
+            const changes = 3000;
+
+            const channels = Array.from({ length: 300 }, (_unused, index) => ({
+              autojoin: true,
+              name: `#channel-number-${index}`,
+              rejoinOnKick: false,
+            }));
+
+            yield* localKey(dataDir);
+            yield* appendRaw(
+              dataDir,
+              Array.from({ length: changes }, (_unused, index) =>
+                JSON.stringify({
+                  _tag: index === 0 ? "NetworkAdded" : "NetworkChanged",
+                  settings: {
+                    ...settingsFor({ channels }),
+                    enabled: false,
+                    quitReason: `change ${index}`,
+                  },
+                })
+              )
+            );
+
+            // A reader that can read nothing in time, so startup cannot depend on it.
+            const core = Daemon.layer(configIn(dataDir)).pipe(
+              Layer.provide(
+                LogReader.layer({ budget: Duration.millis(1), dataDir }).pipe(
+                  Layer.provideMerge(Log.layer({ dataDir }))
+                )
+              ),
+              Layer.provide(Transport.layer)
+            );
+
+            const started = Date.now();
+
+            const settings = yield* Effect.scoped(
+              Effect.gen(function* () {
+                const context = yield* Layer.build(core);
+
+                return (yield* Context.get(context, Daemon).configuration).networks;
+              })
+            );
+
+            const millis = Date.now() - started;
+
+            assert.deepStrictEqual(
+              settings.map(({ quitReason }) => quitReason),
+              [`change ${changes - 1}`]
+            );
+            assert.lengthOf(settings[0]?.channels ?? [], 300);
+            assert.isBelow(millis, 10_000, `took ${millis} ms`);
+          })
+        ),
+      { timeout: 60_000 }
     );
 
     it.live("RUN-3: carries on the same Log after a restart, recording each start", () =>
@@ -1336,7 +1750,9 @@ describe("the Daemon", () => {
                 yield* inSession(harness);
                 yield* harness.ircd.read(":bob!u@h PRIVMSG #iirc :hi\r\n");
                 yield* untilEntries(harness, (all) => lines(all, "inbound").length === 2);
-                yield* harness.client.daemon.send({ payload: { target: "#iirc", text: "hello" } });
+                yield* harness.client.daemon.send({
+                  payload: { network, target: "#iirc", text: "hello" },
+                });
 
                 return yield* harness.client.daemon.messages(everything);
               })
@@ -1386,11 +1802,31 @@ describe("the Daemon", () => {
         })
       );
 
-      assert.isAtLeast(operations.length, 6);
+      assert.isAtLeast(operations.length, 17);
       assert.deepStrictEqual(
         operations.filter(({ declares }) => !declares).map(({ operation }) => operation),
         []
       );
+    });
+
+    it("AUTH-2: declares the typed 401 and 403 on every operation but /health", () => {
+      const { paths } = OpenApi.fromApi(DaemonApi);
+      const methods = ["get", "post", "put", "patch", "delete"] as const;
+
+      const undeclared = Object.entries(paths).flatMap(([path, item]) =>
+        methods.flatMap((method) => {
+          const responses = JSON.stringify(item[method]?.responses ?? null);
+
+          return item[method] === undefined ||
+            path === "/api/health" ||
+            (responses.includes("Unauthorized") && responses.includes("Forbidden"))
+            ? []
+            : [`${method} ${path}`];
+        })
+      );
+
+      assert.deepStrictEqual(undeclared, []);
+      assert.notInclude(JSON.stringify(paths["/api/health"]), "Unauthorized");
     });
   });
 });

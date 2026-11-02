@@ -1,4 +1,4 @@
-import { outbound } from "./outbound.ts";
+import { maxLineBytes, outbound } from "./outbound.ts";
 import type { OutboundLine } from "./outbound.ts";
 
 /** A Channel to join, with its key if it has one. */
@@ -22,7 +22,21 @@ export interface JoinLines {
 // A comma would be read as a second Channel, and a space as the end of the list.
 const isListItem = (item: string) => !/[\0\r\n ,]/u.test(item);
 
-const isValidName = (name: string) => name !== "" && !name.startsWith(":") && isListItem(name);
+/**
+ * What a Channel name starts with: the `CHANTYPES` of every Ircd on the floor, together.
+ * `JOIN 0` leaves every Channel, so a name that needs no prefix could do that.
+ */
+export const channelPrefixes = ["#", "&", "+", "!"] as const;
+
+const channelName = new RegExp(`^[${channelPrefixes.join("")}][^\\0\\u0007\\r\\n ,]*$`, "u");
+
+/**
+ * Whether a name is a Channel's: it starts with one of {@link channelPrefixes}, and holds
+ * nothing that would end it early in a list, nor a BEL, which RFC 2812 forbids.
+ * @param name - The name.
+ * @returns Whether it is one.
+ */
+export const isChannelName = (name: string): boolean => channelName.test(name);
 
 const hasKey = ({ key }: JoinChannel) => key !== undefined && key !== "";
 
@@ -35,8 +49,18 @@ const joinLine = (channels: readonly JoinChannel[]) => {
   ]);
 };
 
-const rejectionOf = (channel: JoinChannel): JoinRejection | undefined => {
-  if (!isValidName(channel.name)) {
+// No UTF-16 unit takes more than 3 bytes, so a short Channel fits without building its
+// Line. Settings can list tens of thousands, and each is checked on the event loop.
+const surelyFits = ({ key = "", name }: JoinChannel) =>
+  "JOIN  :".length + 3 * (name.length + key.length) <= maxLineBytes;
+
+/**
+ * Why a Channel cannot go in any `JOIN` Line, even alone, if it cannot.
+ * @param channel - The Channel, with its key if it has one.
+ * @returns The reason, or nothing if a `JOIN` can carry it.
+ */
+export const joinRejection = (channel: JoinChannel): JoinRejection | undefined => {
+  if (!isChannelName(channel.name)) {
     return "InvalidChannel";
   }
 
@@ -44,7 +68,7 @@ const rejectionOf = (channel: JoinChannel): JoinRejection | undefined => {
     return "InvalidKey";
   }
 
-  return joinLine([channel])._tag === "Safe" ? undefined : "TooLong";
+  return surelyFits(channel) || joinLine([channel])._tag === "Safe" ? undefined : "TooLong";
 };
 
 /**
@@ -73,7 +97,7 @@ export const joinLines = (channels: readonly JoinChannel[]): JoinLines => {
   ];
 
   for (const channel of keyedFirst) {
-    const reason = rejectionOf(channel);
+    const reason = joinRejection(channel);
 
     if (reason !== undefined) {
       rejected.push({ channel, reason });

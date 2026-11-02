@@ -45,7 +45,7 @@ describe("a long chain of steps", () => {
   it("costs the same per step at the end as at the start", { timeout: 60_000 }, () => {
     let snapshot: NetworkSnapshot = fold(
       [
-        { at: startAt, nicks: ["claude"], type: "ATTEMPT" },
+        { ...input, at: startAt, nicks: ["claude"], type: "ATTEMPT" },
         { at: startAt, type: "OPENED" },
         { at: startAt, command: "001", params: ["claude", "Welcome"], type: "LINE" },
         { at: startAt, command: "376", params: ["claude", "End"], type: "LINE" },

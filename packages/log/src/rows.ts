@@ -11,7 +11,45 @@ const nullable = <S extends Schema.Top>(schema: S) =>
 
 const Numbered = { at: Schema.Int, sequence: Schema.Int };
 
-const Ircd = Schema.Struct({ host: Schema.String, port: Schema.Int, tls: Schema.Boolean });
+const Ircd = Schema.Struct({
+  host: Schema.String,
+  pin: Schema.optionalKey(Schema.String),
+  port: Schema.Int,
+  tls: Schema.Boolean,
+});
+
+// The whole Tuning an `attempt` ran with, kept as it was. Whether it was a good one was
+// decided before it ran, so nothing here judges it, and reading it back must not fail.
+const Tuning = Schema.Struct({
+  burstMillis: Schema.Int,
+  connectTimeoutMillis: Schema.Int,
+  controlLaneLimit: Schema.Int,
+  drainMillis: Schema.Int,
+  firstContactNickLimit: Schema.Int,
+  floodBurst: Schema.Int,
+  floodIntervalMillis: Schema.Int,
+  joinRetryMillis: Schema.Int,
+  kickRejoinMillis: Schema.Int,
+  lagCheckMillis: Schema.Int,
+  laneLimit: Schema.Int,
+  quitWaitMillis: Schema.Int,
+  reconnectInitialMillis: Schema.Int,
+  reconnectMaxMillis: Schema.Int,
+  refusalBackoffMillis: Schema.Int,
+  registrationTimeoutMillis: Schema.Int,
+  rejoinSettleMillis: Schema.Int,
+  sendWaitMillis: Schema.Int,
+  silenceMillis: Schema.Int,
+  stableAfterMillis: Schema.Int,
+  writeTimeoutMillis: Schema.Int,
+});
+
+const TlsDetails = Schema.Struct({
+  cipher: Schema.String,
+  pin: Schema.String,
+  protocol: Schema.String,
+  verifiedBy: Schema.Literals(["authority", "pin"]),
+});
 
 const Connected = {
   ...Numbered,
@@ -32,11 +70,15 @@ const ConnectionRow = Schema.Union([
     ...Connected,
     nicks: Schema.fromJsonString(Schema.Array(Schema.String)),
     phase: Schema.Literal("attempt"),
+    realname: Schema.String,
+    tuning: Schema.fromJsonString(Tuning),
+    username: Schema.String,
   }).pipe(Schema.encodeKeys({ _tag: "kind" })),
   Schema.TaggedStruct("Connection", {
     ...Connected,
     connection: Schema.Int,
     phase: Schema.Literal("opened"),
+    tls: nullable(Schema.fromJsonString(TlsDetails)),
   }).pipe(Schema.encodeKeys({ _tag: "kind" })),
   Schema.TaggedStruct("Connection", {
     ...Connected,
@@ -48,10 +90,11 @@ const ConnectionRow = Schema.Union([
   Schema.TaggedStruct("Connection", {
     ...Connected,
     connection: Schema.Int,
+    endedAt: nullable(Schema.Int),
     phase: Schema.Literal("closed"),
     reason: nullable(Schema.String),
     refused: nullable(RefusedFromBit),
-  }).pipe(Schema.encodeKeys({ _tag: "kind" })),
+  }).pipe(Schema.encodeKeys({ _tag: "kind", endedAt: "ended_at" })),
 ]);
 
 /** An Entry, encoded as a row of `entries` and decoded back unchanged. */
@@ -66,6 +109,14 @@ export const EntryRow = Schema.Union([
     network: Schema.String,
   }).pipe(Schema.encodeKeys({ _tag: "kind" })),
   ConnectionRow,
+  // `change` is JSON text that only its reader decodes further, so `null` is the text
+  // `null` and never a missing column.
+  Schema.TaggedStruct("Change", {
+    ...Numbered,
+    by: Schema.String,
+    change: Schema.fromJsonString(Schema.Json),
+    network: nullable(Schema.String),
+  }).pipe(Schema.encodeKeys({ _tag: "kind" })),
   Schema.TaggedStruct("Dropped", {
     ...Numbered,
     bytes: Schema.Uint8Array,

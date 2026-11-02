@@ -4,7 +4,12 @@ import type { SnapshotFrom } from "xstate";
 import { commandsOf, network } from "./machine.ts";
 import type { Tuning } from "./tuning.ts";
 
-/** What stays the same for every Connection to a Network. */
+/**
+ * What stays the same for the whole of one Connection. Each `ATTEMPT` brings its own, as
+ * its Entry recorded it, so a replay of an old Connection makes the decisions it made
+ * then, whatever the settings say now. What the machine starts with only stands until
+ * the first `ATTEMPT`, and nothing reads it before then.
+ */
 export interface NetworkInput {
   readonly realname: string;
   readonly tuning: Tuning;
@@ -13,8 +18,15 @@ export interface NetworkInput {
 
 /** Everything that can move a Network's machine. `at` is epoch milliseconds. */
 export type NetworkEvent =
-  /** A new Connection, and the nicks it will try, as recorded so replay makes the same choices. */
-  | { readonly type: "ATTEMPT"; readonly at: number; readonly nicks: readonly string[] }
+  /**
+   * A new Connection, with the nicks it will try and the input it runs with, as recorded
+   * so that replay makes the same choices.
+   */
+  | (NetworkInput & {
+      readonly type: "ATTEMPT";
+      readonly at: number;
+      readonly nicks: readonly string[];
+    })
   | { readonly type: "OPENED"; readonly at: number }
   /** An inbound Line that parsed. A `PING` arrives as `PING`, never as this. */
   | {
@@ -77,7 +89,7 @@ export type NetworkSnapshot = SnapshotFrom<typeof network>;
 
 /**
  * Starts a Network's machine.
- * @param input - What stays the same for every Connection.
+ * @param input - What it holds until the first `ATTEMPT` brings the input of its own.
  * @returns The first snapshot.
  */
 export const start: (input: NetworkInput) => NetworkSnapshot = (input) => {
@@ -106,9 +118,9 @@ export const step: (
 
 /**
  * Replays events into a snapshot, discarding Commands because their outcomes are
- * already in the events.
+ * already in the events. Each `ATTEMPT` brings the input its Connection ran with.
  * @param events - Everything that happened, in order.
- * @param input - What stays the same for every Connection.
+ * @param input - What the machine holds until the first `ATTEMPT`.
  * @returns The snapshot after the last event.
  */
 export const fold: (events: Iterable<NetworkEvent>, input: NetworkInput) => NetworkSnapshot = (

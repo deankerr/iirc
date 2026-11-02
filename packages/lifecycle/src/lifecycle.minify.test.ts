@@ -14,7 +14,7 @@ import { defaultTuning } from "./tuning.ts";
 
 const input: NetworkInput = { realname: "Claude Code", tuning: defaultTuning, username: "cc" };
 
-const attempt: NetworkEvent = { at: 1000, nicks: ["claude", "claudia"], type: "ATTEMPT" };
+const attempt: NetworkEvent = { ...input, at: 1000, nicks: ["claude", "claudia"], type: "ATTEMPT" };
 const opened: NetworkEvent = { at: 2000, type: "OPENED" };
 
 const line = (command: string, ...params: readonly string[]): NetworkEvent => ({

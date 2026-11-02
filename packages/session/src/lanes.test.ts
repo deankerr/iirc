@@ -3,8 +3,8 @@ import type { Lane } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import { Deferred, Effect, Fiber, Option } from "effect";
 
-import { makeLanes } from "./lanes.ts";
-import type { QueuedLine } from "./lanes.ts";
+import { makeLanes, mayNotHaveReached, runPump, WriteFailed, writeTimedOut } from "./lanes.ts";
+import type { PumpWire, QueuedLine } from "./lanes.ts";
 import { safe } from "./network.fixture.ts";
 
 const queuedOn = (lane: Lane, cause = "test"): QueuedLine => ({
@@ -172,5 +172,92 @@ describe("lanes", () => {
       yield* lanes.offerNow(queuedOn("control"));
       yield* Fiber.join(noTokens);
     })
+  );
+});
+
+describe("runPump over a wire that confirms a write only with the next (LOG-2)", () => {
+  // Bun's TLS reports a write done with the end of its record still in the process, so a
+  // write is only surely with the kernel once a later one has been taken.
+  const pumpOver = Effect.fnUntraced(function* (confirmsLater: boolean) {
+    const { lanes, pumpLanes } = yield* makeLanes({ ...tuning, floodBurst: 100, laneLimit: 10 });
+    const stalled = yield* Deferred.make<undefined, WriteFailed>();
+    const unwritten: { readonly cause: string; readonly reason: string }[] = [];
+    let sequence = 0;
+
+    const wire: PumpWire = {
+      confirmsLater,
+      record: () => Effect.sync(() => (sequence += 1)),
+      recordFailed: Effect.void,
+      unwritten: ({ cause }, reason) =>
+        Effect.sync(() => {
+          unwritten.push({ cause, reason });
+        }),
+      // `stall` never completes until the test says so, as with an Ircd that stopped reading.
+      write: ({ cause }) => (cause === "stall" ? Deferred.await(stalled) : Effect.void),
+      writeFailed: () => Effect.void,
+    };
+
+    yield* Effect.forkScoped(runPump(pumpLanes, tuning, wire));
+
+    return { lanes, stalled, unwritten };
+  });
+
+  it.effect("drops the write before a stalled one, as one that may not have arrived", () =>
+    Effect.gen(function* () {
+      const { lanes, stalled, unwritten } = yield* pumpOver(true);
+      const before = queuedOn("interactive", "before");
+      const stall = queuedOn("interactive", "stall");
+
+      yield* lanes.offerNow(before);
+      yield* lanes.offerNow(stall);
+      yield* Effect.yieldNow;
+
+      assert.isFalse(Deferred.isDoneUnsafe(before.outcome), "settled before the next write");
+
+      yield* Deferred.fail(stalled, new WriteFailed({ reason: writeTimedOut }));
+
+      assert.deepStrictEqual(
+        yield* Effect.flip(Deferred.await(before.outcome)),
+        new WriteFailed({ reason: mayNotHaveReached })
+      );
+      yield* Effect.exit(Deferred.await(stall.outcome));
+      assert.deepStrictEqual(unwritten, [
+        { cause: "before", reason: mayNotHaveReached },
+        { cause: "stall", reason: writeTimedOut },
+      ]);
+    }).pipe(Effect.scoped)
+  );
+
+  it.effect("confirms a write once a later one is taken, or once nothing follows it", () =>
+    Effect.gen(function* () {
+      const { lanes, unwritten } = yield* pumpOver(true);
+      const first = queuedOn("interactive", "first");
+      const second = queuedOn("interactive", "second");
+
+      yield* lanes.offerNow(first);
+      yield* lanes.offerNow(second);
+
+      assert.strictEqual(yield* Deferred.await(first.outcome), 1);
+      assert.strictEqual(yield* Deferred.await(second.outcome), 2);
+      assert.deepStrictEqual(unwritten, []);
+    }).pipe(Effect.scoped)
+  );
+
+  it.effect("keeps a plaintext write written whatever the next one does", () =>
+    Effect.gen(function* () {
+      const { lanes, stalled, unwritten } = yield* pumpOver(false);
+      const before = queuedOn("interactive", "before");
+      const stall = queuedOn("interactive", "stall");
+
+      yield* lanes.offerNow(before);
+      yield* lanes.offerNow(stall);
+
+      assert.strictEqual(yield* Deferred.await(before.outcome), 1);
+
+      yield* Deferred.fail(stalled, new WriteFailed({ reason: writeTimedOut }));
+      yield* Effect.exit(Deferred.await(stall.outcome));
+
+      assert.deepStrictEqual(unwritten, [{ cause: "stall", reason: writeTimedOut }]);
+    }).pipe(Effect.scoped)
   );
 });

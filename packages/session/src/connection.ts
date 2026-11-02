@@ -20,9 +20,9 @@ import {
 import type { Scope } from "effect";
 import { Socket } from "effect/socket";
 
-import type { Entry, Ircd, NetworkId, NewEntry } from "./entry.ts";
+import type { Entry, Ircd, NetworkId, NewEntry, TlsDetails } from "./entry.ts";
 import { toEvent } from "./events.ts";
-import { LineDropped, makeLanes, runPump, WriteFailed } from "./lanes.ts";
+import { LineDropped, makeLanes, runPump, WriteFailed, writeTimedOut } from "./lanes.ts";
 import type { Lanes, LineFailure, PumpWire, QueuedLine } from "./lanes.ts";
 import { reconcile } from "./reconcile.ts";
 import { RecordFailed } from "./recorder.ts";
@@ -31,10 +31,12 @@ import type { Standing, WantedChannel } from "./standing.ts";
 import { describeSocketError } from "./transport.ts";
 import type { Transport } from "./transport.ts";
 
-// LOG-4: how much may be read and not yet recorded, so that a flood waits in the kernel
-// and not in this process, and a close has little left to record. A read can take more
-// than this, so the bound is this plus one read, which `Transport.layer` keeps to 16 KB.
-// A flood of bare newlines makes that a Line a byte, and a commit for every 1024.
+// LOG-4: how much may be pulled and not yet recorded, so that a flood waits in the kernel
+// and not in this process, and a close has little left to record. A pull can take more
+// than this, so the bound is this plus one pull, which `Transport.layer` keeps to 16 KB.
+// What the stream has read and nobody has pulled is the Transport's own bound, and a close
+// takes it with `unread`. A flood of bare newlines makes that a Line a byte, and a commit
+// for every 1024.
 const readAheadBytes = 16 * 1024;
 
 // LOG-4: a flood of tiny Lines cannot hold the writer for longer than this many.
@@ -62,8 +64,12 @@ const encoder = new TextEncoder();
 
 /** A Connection under way, as far as anyone outside its loop may see. */
 interface HostedConnection {
+  /** Says that settings may have changed, to the loop and to the reconciler. */
+  readonly changed: Effect.Effect<void>;
   readonly lanes: Lanes;
   readonly stage: Ref.Ref<Stage>;
+  /** The Tuning it was attempted with, which holds until it ends. */
+  readonly tuning: Tuning;
   /** Has the loop look at the stage and the stop signal again. */
   readonly wake: Effect.Effect<void>;
 }
@@ -127,21 +133,23 @@ export interface Attempted {
   readonly ircd: Ircd;
 }
 
-/** What every Connection on a Network shares. */
+/** What every Connection on a Network shares, and the Tuning of this one. */
 export interface Host {
-  readonly channels: readonly WantedChannel[];
   readonly commit: Commit;
   readonly connect: Transport["Service"]["connect"];
   readonly hosted: Ref.Ref<Hosted>;
   readonly id: NetworkId;
-  readonly quitReason: string;
+  /** Whether the Connection is to be left by choice, read whenever the loop looks up. */
+  readonly leaving: Effect.Effect<boolean>;
+  /** What `QUIT` says, read as the Connection is left (LIVE-9). */
+  readonly quitReason: Effect.Effect<string>;
   readonly record: Recorder["Service"]["record"];
   readonly standing: Effect.Effect<Standing, RecordFailed>;
-  /** Whether stopping has been asked for. */
-  readonly stopping: () => boolean;
   /** Whether a stop has run out of time, so whatever is left is closed now. */
   readonly hurrying: () => boolean;
   readonly tuning: Tuning;
+  /** The Channels to be in, read each time the reconciler plans. */
+  readonly wanted: Effect.Effect<readonly WantedChannel[]>;
 }
 
 interface Stepped {
@@ -156,7 +164,13 @@ type Commit = (
 ) => Effect.Effect<Stepped & { readonly recorded: readonly Entry[] }, RecordFailed>;
 
 type InboxItem =
-  | { readonly _tag: "Opened"; readonly pull: Pull; readonly writer: Socket.Writer }
+  | {
+      readonly _tag: "Opened";
+      readonly pull: Pull;
+      readonly tls: TlsDetails | undefined;
+      readonly unread: Unread;
+      readonly writer: Socket.Writer;
+    }
   // `at` is when it was read, which says whether it arrived ahead of a deadline.
   | {
       readonly _tag: "Read";
@@ -172,6 +186,10 @@ type InboxItem =
 type LoopItem = InboxItem | { readonly _tag: "Deadline"; readonly name: string };
 
 type Pull = Effect.Effect<readonly Uint8Array[], Socket.SocketError>;
+
+type Unread = Effect.Effect<readonly Uint8Array[]>;
+
+const nothingUnread: Unread = Effect.succeed([]);
 
 interface Framing {
   readonly cutting: boolean;
@@ -284,8 +302,8 @@ export const hostConnection: (
   host: Host,
   { commands, connection, ircd }: Attempted
 ) {
-  const { channels, commit, connect, hosted, id, quitReason, record, standing, tuning } = host;
-  const { hurrying, stopping } = host;
+  const { commit, connect, hosted, id, quitReason, record, standing, tuning, wanted } = host;
+  const { hurrying, leaving } = host;
 
   // Unbounded in items, and bounded in bytes by `held`, so a wake never waits for room.
   const inbox = yield* Queue.unbounded<InboxItem>();
@@ -298,10 +316,18 @@ export const hostConnection: (
     Queue.offerUnsafe(inbox, { _tag: "Wake" });
   });
 
+  // The loop looks at whether to leave, and the reconciler plans again.
+  const changed = Effect.sync(() => {
+    Queue.offerUnsafe(moved, undefined);
+    Queue.offerUnsafe(inbox, { _tag: "Wake" });
+  });
+
   const closed = Deferred.makeUnsafe<undefined>();
   let framing: Framing = { cutting: false, pending: new Uint8Array() };
   let pump: Fiber.Fiber<unknown> | undefined;
   let reader: Fiber.Fiber<unknown> | undefined;
+  // What the stream has read and the reader has not pulled, for the close to record.
+  let unread = nothingUnread;
   let reconciling = false;
   let seen: Pick<Standing, "channels" | "kicked"> | undefined;
   let stopHandled = false;
@@ -316,7 +342,7 @@ export const hostConnection: (
 
   yield* Ref.update(hosted, (state): Hosted => ({
     ...state,
-    live: { lanes, stage, wake },
+    live: { changed, lanes, stage, tuning, wake },
     unrecorded: undefined,
   }));
 
@@ -449,7 +475,7 @@ export const hostConnection: (
   const startReconciling = Effect.gen(function* () {
     reconciling = true;
 
-    yield* reconcile({ channels, join, moved, standing, tuning }).pipe(
+    yield* reconcile({ channels: wanted, join, moved, standing, tuning }).pipe(
       Effect.catchTag("RecordFailed", () => logFailed),
       closingIfItDies,
       Effect.forkScoped
@@ -635,12 +661,18 @@ export const hostConnection: (
   // has gone before any of it, so nothing can follow `closed`. If the Log is down, the
   // rest is kept, to be recorded before anything else once it is back (LOG-9).
   const close = Effect.fnUntraced(function* (ending: string, local: boolean) {
+    const endedAt = yield* Clock.currentTimeMillis;
+
     yield* drain(ending, { limitMillis: 0, local });
     yield* Fiber.interruptAll([pump, reader].filter((fiber) => fiber !== undefined));
 
     const opening = yield* Ref.get(stage);
     const backlog = yield* Queue.clear(inbox);
-    const lines = takeLines(backlog.flatMap((item) => (item._tag === "Read" ? item.chunks : [])));
+
+    const lines = takeLines([
+      ...backlog.flatMap((item) => (item._tag === "Read" ? item.chunks : [])),
+      ...(yield* unread),
+    ]);
 
     if (framing.pending.length > 0) {
       lines.push(lineEntry(framing.pending, true));
@@ -685,9 +717,11 @@ export const hostConnection: (
     const recorded = rest.length === 0;
 
     if (!recorded) {
+      // Recorded once the Log is back, so it says when the Connection really ended, which
+      // is where the Gap starts (LIVE-10).
       const kept = rest.map((entry) =>
         entry._tag === "Connection" && entry.phase === "closed"
-          ? closedEntry(logDown, false)
+          ? { ...closedEntry(logDown, false), endedAt }
           : entry
       );
 
@@ -713,7 +747,8 @@ export const hostConnection: (
     yield* Ref.update(hosted, (state) => ({ ...state, live: undefined }));
   });
 
-  const pumpWire = (writer: Socket.Writer): PumpWire => ({
+  const pumpWire = (writer: Socket.Writer, tls: boolean): PumpWire => ({
+    confirmsLater: tls,
     record: ({ cause, line }) =>
       record(
         [
@@ -738,7 +773,7 @@ export const hostConnection: (
         Effect.mapError(toWriteFailed),
         Effect.timeoutOrElse({
           duration: Duration.millis(tuning.writeTimeoutMillis),
-          orElse: () => Effect.fail(new WriteFailed({ reason: "write timed out" })),
+          orElse: () => Effect.fail(new WriteFailed({ reason: writeTimedOut })),
         })
       ),
     writeFailed: (reason) => drain(reason, { limitMillis: tuning.drainMillis }),
@@ -813,9 +848,12 @@ export const hostConnection: (
   });
 
   // The Daemon chose to leave, which only the machine can act on, so it hears of it the
-  // way it hears of anything. The Ircd gets as long as `QUIT` does to say goodbye.
+  // way it hears of anything. The Ircd gets as long as `QUIT` does to say goodbye, and
+  // only the control lane leaves from here, so that `QUIT` is the last Line out.
   const beginStop = Effect.gen(function* () {
     stopHandled = true;
+
+    yield* lanes.quit;
 
     const current = yield* Ref.get(stage);
 
@@ -825,12 +863,13 @@ export const hostConnection: (
 
     closingRecorded = true;
 
-    return yield* onEntries([closingEntry(quitReason, true)], tuning.quitWaitMillis);
+    return yield* onEntries([closingEntry(yield* quitReason, true)], tuning.quitWaitMillis);
   });
 
-  // Whatever the loop is doing, it looks here between steps.
+  // Whatever the loop is doing, it looks here between steps. A choice to leave stands
+  // once made, whatever the settings say after.
   const attend = Effect.gen(function* () {
-    if (stopping() && !stopHandled) {
+    if (!stopHandled && (yield* leaving)) {
       yield* beginStop;
     }
 
@@ -871,11 +910,17 @@ export const hostConnection: (
     );
 
   const dial = Effect.gen(function* () {
-    const socket = yield* connect(ircd, tuning);
-    const pull = yield* Socket.readerBytes(socket);
-    const writer = yield* socket.writer;
+    const opened = yield* connect(ircd, tuning);
+    const pull = yield* Socket.readerBytes(opened.socket);
+    const writer = yield* opened.socket.writer;
 
-    yield* Queue.offer(inbox, { _tag: "Opened", pull, writer });
+    yield* Queue.offer(inbox, {
+      _tag: "Opened",
+      pull,
+      tls: opened.tls,
+      unread: opened.unread ?? nothingUnread,
+      writer,
+    });
   }).pipe(
     Effect.catchTags({
       ConnectFailed: ({ reason }) => Queue.offer(inbox, { _tag: "Ended", local: false, reason }),
@@ -889,12 +934,29 @@ export const hostConnection: (
     Effect.catchDefect(() => Queue.offer(inbox, { _tag: "Ended", local: true, reason: dialDied }))
   );
 
-  const onOpened = Effect.fnUntraced(function* (pull: Pull, writer: Socket.Writer) {
+  const onOpened = Effect.fnUntraced(function* ({
+    pull,
+    tls,
+    unread: unreadOf,
+    writer,
+  }: Extract<InboxItem, { readonly _tag: "Opened" }>) {
     yield* Ref.set(stage, { _tag: "Open" });
+    unread = unreadOf;
 
-    pump = yield* Effect.forkScoped(closingIfItDies(runPump(pumpLanes, tuning, pumpWire(writer))));
+    pump = yield* Effect.forkScoped(
+      closingIfItDies(runPump(pumpLanes, tuning, pumpWire(writer, tls !== undefined)))
+    );
 
-    yield* onEntries([{ _tag: "Connection", connection, ircd, network: id, phase: "opened" }]);
+    yield* onEntries([
+      {
+        _tag: "Connection",
+        connection,
+        ircd,
+        network: id,
+        phase: "opened",
+        ...(tls !== undefined && { tls }),
+      },
+    ]);
     reader = yield* Effect.forkScoped(feed(pull));
   });
 
@@ -937,7 +999,7 @@ export const hostConnection: (
 
       // Only ever taken while dialing: a close of a dial has no limit left to read until.
       case "Opened": {
-        yield* onOpened(item.pull, item.writer);
+        yield* onOpened(item);
         break;
       }
 

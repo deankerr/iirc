@@ -36,7 +36,7 @@ const deadlines = [
   { at: 93_000, name: "silence" },
 ] as const;
 
-const attempts = [{ at: 1000, nicks: ["claude", "claude_"] }] as const;
+const attempts = [{ ...input, at: 1000, nicks: ["claude", "claude_"] }] as const;
 
 const samples = {
   ATTEMPT: attempts,
@@ -51,7 +51,7 @@ const samples = {
 } as const;
 
 const everyEvent: readonly NetworkEvent[] = [
-  { at: 1000, nicks: ["claude", "claude_"], type: "ATTEMPT" },
+  { ...input, at: 1000, nicks: ["claude", "claude_"], type: "ATTEMPT" },
   { at: 2000, type: "OPENED" },
   { at: 9000, reason: "peer hung up", type: "CLOSED" },
   { at: 4000, reason: "Owner stopped", type: "CLOSING" },

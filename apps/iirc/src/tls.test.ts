@@ -1,5 +1,6 @@
 import { BunServices } from "@effect/platform-bun";
 import { assert, beforeAll, describe, it } from "@effect/vitest";
+import { NetworkSettings } from "@iirc/api";
 import type { LogEntry } from "@iirc/api";
 import {
   eventually,
@@ -9,10 +10,17 @@ import {
   welcoming,
 } from "@iirc/session/testing";
 import type { Certificate } from "@iirc/session/testing";
-import { Effect, Exit, FileSystem, Layer, Scope } from "effect";
+import { Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import { appRoot, freePort, healthyClient, startBinary } from "./binary.ts";
+import {
+  appRoot,
+  createKey,
+  freePort,
+  healthyClient,
+  networkStatus,
+  startBinary,
+} from "./binary.ts";
 import { buildBinary, buildTimeout } from "./testing.ts";
 
 // CONN-1 against the real thing: the minified binary, on a real socket, with nothing
@@ -50,44 +58,65 @@ const includesAll =
   (received: readonly string[]) =>
     wanted.every((line) => received.includes(line));
 
+// Quick to come back, for the tests that hang up on it.
+const reconnecting = { reconnectInitialMillis: 50, reconnectMaxMillis: 50 };
+
+const decodeSettings = Schema.decodeUnknownSync(NetworkSettings);
+
+/** How a test's Network reaches its Ircd, beyond where it is. */
+interface Reaching {
+  readonly caFile?: string;
+  readonly pin?: string;
+  readonly tls?: boolean;
+  readonly tuning?: Readonly<Record<string, number>>;
+}
+
 const startDaemon = Effect.fnUntraced(function* (
   ircd: { readonly host: string; readonly port: number },
-  options: { readonly caFile?: string; readonly flags?: readonly string[] }
+  options: Reaching
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const dataDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iirc-tls-" });
   const httpPort = yield* freePort;
+  const key = yield* createKey(binary, dataDir);
 
-  const running = yield* startBinary(
-    binary,
-    [
-      "daemon",
-      "--network",
-      network,
-      "--host",
-      ircd.host,
-      "--port",
-      String(ircd.port),
-      "--nick",
-      nick,
-      "--channel",
-      channel,
-      "--http-port",
-      String(httpPort),
-      ...(options.flags ?? []),
-    ],
-    {
-      IIRC_DATA_DIR: dataDir,
-      ...(options.caFile !== undefined && { NODE_EXTRA_CA_CERTS: options.caFile }),
-    }
-  );
+  const running = yield* startBinary(binary, ["daemon", "--http-port", String(httpPort)], {
+    IIRC_DATA_DIR: dataDir,
+    ...(options.caFile !== undefined && { NODE_EXTRA_CA_CERTS: options.caFile }),
+  });
 
-  const { daemon, health } = yield* healthyClient(httpPort);
+  const client = yield* healthyClient(httpPort, key);
 
-  return { daemon, health, running };
+  // Decoded from what the Owner would write, so that anything left out takes its default,
+  // and TLS above all (CONN-1).
+  yield* client.networks.add({
+    payload: decodeSettings({
+      channels: [{ name: channel }],
+      id: network,
+      identity: { nick },
+      ircds: [
+        {
+          host: ircd.host,
+          port: ircd.port,
+          ...(options.tls !== undefined && { tls: options.tls }),
+          ...(options.pin !== undefined && { pin: options.pin }),
+        },
+      ],
+      ...(options.tuning !== undefined && { tuning: options.tuning }),
+    }),
+  });
+
+  return {
+    daemon: client.daemon,
+    health: client.health,
+    running,
+    status: networkStatus(client, network),
+  };
 });
 
-type Daemon = Effect.Success<ReturnType<typeof startDaemon>>["daemon"];
+type Started = Effect.Success<ReturnType<typeof startDaemon>>;
+
+type Daemon = Started["daemon"];
 
 const allEntries = (daemon: Daemon) => daemon.entries({ query: { after: 0, limit: 1000 } });
 
@@ -98,13 +127,13 @@ const lineTexts = (entries: readonly LogEntry[], direction: "inbound" | "outboun
 
 // Lines cross both ways, and the Log holds both, with no `closed` to spoil it.
 const assertBothWays = Effect.fnUntraced(function* (
-  daemon: Daemon,
+  { daemon, status }: Started,
   ircd: Effect.Success<ReturnType<typeof scriptedIrcd>>
 ) {
-  yield* eventually(daemon.status(), inSession, settleLimit);
+  yield* eventually(status, inSession, settleLimit);
   yield* eventually(ircd.received, includesAll(`JOIN ${channel}`), settleLimit);
 
-  yield* daemon.send({ payload: { target: channel, text: "from the Daemon" } });
+  yield* daemon.send({ payload: { network, target: channel, text: "from the Daemon" } });
   yield* eventually(ircd.received, includesAll(`PRIVMSG ${channel} :from the Daemon`));
 
   yield* ircd.push(`:peer!u@host PRIVMSG ${channel} :from the Ircd`);
@@ -144,12 +173,12 @@ const refuses = (options: {
     const { caFile, certificate, host, listen, reason } = options;
     const ircd = yield* scriptedIrcd(welcoming(nick), { hostname: listen, tls: certificate });
 
-    const { daemon } = yield* startDaemon(
+    const { daemon, status: current } = yield* startDaemon(
       { host, port: ircd.port },
       caFile === undefined ? {} : { caFile }
     );
 
-    const status = yield* eventually(daemon.status(), isClosed, settleLimit);
+    const status = yield* eventually(current, isClosed, settleLimit);
     const entries = yield* allEntries(daemon);
 
     assert.include(status.closeReason, `could not connect to ${host}:${ircd.port}: `);
@@ -165,6 +194,23 @@ const refuses = (options: {
     assert.deepStrictEqual(yield* ircd.received, []);
     assert.lengthOf(yield* ircd.bytes, 0);
   }).pipe(Effect.scoped);
+
+// The pin as `curl --pinnedpubkey` would want it, worked out by OpenSSL alone, so that it
+// owes nothing to how the Daemon reads a certificate.
+const opensslPin = (cert: string) => {
+  const { exitCode, stdout } = Bun.spawnSync(
+    [
+      "sh",
+      "-c",
+      "openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64",
+    ],
+    { stdin: Buffer.from(cert) }
+  );
+
+  assert.strictEqual(exitCode, 0);
+
+  return `sha256/${stdout.toString().trim()}`;
+};
 
 const layers = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer);
 
@@ -183,12 +229,12 @@ describe("the compiled binary over TLS (CONN-1)", () => {
           tls: authority.issue(`DNS:${localhost}`),
         });
 
-        const { daemon } = yield* startDaemon(
+        const started = yield* startDaemon(
           { host: localhost, port: ircd.port },
           { caFile: authority.caFile }
         );
 
-        yield* assertBothWays(daemon, ircd);
+        yield* assertBothWays(started, ircd);
 
         assert.deepStrictEqual(yield* ircd.serverNames, [localhost]);
       }).pipe(Effect.scoped, Effect.provide(layers)),
@@ -206,12 +252,12 @@ describe("the compiled binary over TLS (CONN-1)", () => {
           tls: authority.issue(`IP:${ircdAddress}`),
         });
 
-        const { daemon } = yield* startDaemon(
+        const started = yield* startDaemon(
           { host: ircdAddress, port: ircd.port },
           { caFile: authority.caFile }
         );
 
-        yield* assertBothWays(daemon, ircd);
+        yield* assertBothWays(started, ircd);
 
         assert.deepStrictEqual(yield* ircd.serverNames, [undefined]);
       }).pipe(Effect.scoped, Effect.provide(layers)),
@@ -228,28 +274,30 @@ describe("the compiled binary over TLS (CONN-1)", () => {
           tls: authority.issue(`DNS:${localhost}`),
         });
 
-        const { daemon } = yield* startDaemon(
+        const started = yield* startDaemon(
           { host: localhost, port: ircd.port },
           {
             caFile: authority.caFile,
-            flags: ["--tuning", '{"reconnectInitialMillis":50,"reconnectMaxMillis":50}'],
+            tuning: reconnecting,
           }
         );
 
-        yield* assertBothWays(daemon, ircd);
+        yield* assertBothWays(started, ircd);
         yield* ircd.hangUp;
 
         yield* eventually(ircd.accepted, (accepted) => accepted === 2, settleLimit);
-        yield* eventually(daemon.status(), inSession, settleLimit);
+        yield* eventually(started.status, inSession, settleLimit);
         yield* eventually(ircd.receivedOn(1), includesAll(`JOIN ${channel}`), settleLimit);
 
-        yield* daemon.send({ payload: { target: channel, text: "after the reconnect" } });
+        yield* started.daemon.send({
+          payload: { network, target: channel, text: "after the reconnect" },
+        });
         yield* eventually(
           ircd.receivedOn(1),
           includesAll(`PRIVMSG ${channel} :after the reconnect`)
         );
 
-        const entries = yield* allEntries(daemon);
+        const entries = yield* allEntries(started.daemon);
 
         assert.deepStrictEqual(yield* ircd.serverNames, [localhost, localhost]);
         assert.deepStrictEqual(
@@ -272,26 +320,23 @@ describe("the compiled binary over TLS (CONN-1)", () => {
         const stranger = yield* testAuthority("iirc stranger CA");
         const port = yield* freePort;
 
-        const started = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+        const listening = yield* Effect.acquireRelease(Scope.make(), (scope) =>
           Scope.close(scope, Exit.void)
         );
 
         const ircd = yield* scriptedIrcd(welcoming(nick), {
           port,
           tls: authority.issue(`DNS:${localhost}`),
-        }).pipe(Scope.provide(started));
+        }).pipe(Scope.provide(listening));
 
-        const { daemon } = yield* startDaemon(
+        const { daemon, status } = yield* startDaemon(
           { host: localhost, port },
-          {
-            caFile: authority.caFile,
-            flags: ["--tuning", '{"reconnectInitialMillis":50,"reconnectMaxMillis":50}'],
-          }
+          { caFile: authority.caFile, tuning: reconnecting }
         );
 
-        yield* eventually(daemon.status(), inSession, settleLimit);
+        yield* eventually(status, inSession, settleLimit);
         yield* eventually(ircd.received, includesAll(`JOIN ${channel}`), settleLimit);
-        yield* Scope.close(started, Exit.void);
+        yield* Scope.close(listening, Exit.void);
 
         const impostor = yield* scriptedIrcd(welcoming(nick), {
           port,
@@ -395,17 +440,14 @@ describe("the compiled binary over TLS (CONN-1)", () => {
   );
 
   it.live(
-    "speaks plain IRC from the first byte with `--no-tls`",
+    "speaks plain IRC from the first byte with `tls: false`",
     () =>
       Effect.gen(function* () {
         const ircd = yield* scriptedIrcd(welcoming(nick), { hostname: ircdAddress });
 
-        const { daemon } = yield* startDaemon(
-          { host: ircdAddress, port: ircd.port },
-          { flags: ["--no-tls"] }
-        );
+        const started = yield* startDaemon({ host: ircdAddress, port: ircd.port }, { tls: false });
 
-        yield* assertBothWays(daemon, ircd);
+        yield* assertBothWays(started, ircd);
 
         const bytes = yield* ircd.bytes;
         const start = `NICK ${nick}\r\n`;
@@ -451,12 +493,17 @@ describe("the compiled binary over TLS (CONN-1)", () => {
 
         const wire = yield* testWire(ircd.port, ircdAddress);
 
-        const { daemon, health, running } = yield* startDaemon(
+        const {
+          daemon,
+          health,
+          running,
+          status: current,
+        } = yield* startDaemon(
           { host: ircdAddress, port: wire.port },
           { caFile: authority.caFile }
         );
 
-        yield* eventually(daemon.status(), inSession, settleLimit);
+        yield* eventually(current, inSession, settleLimit);
         yield* eventually(ircd.received, includesAll(`JOIN ${channel}`), settleLimit);
         yield* ircd.push("NOTICE * :before the damage");
         yield* eventually(allEntries(daemon), (entries) =>
@@ -474,7 +521,7 @@ describe("the compiled binary over TLS (CONN-1)", () => {
           ])
         );
 
-        const status = yield* eventually(daemon.status(), isClosed, settleLimit);
+        const status = yield* eventually(current, isClosed, settleLimit);
 
         assert.include(status.closeReason, "read failed: ");
         assert.isTrue(yield* running.child.isRunning);
@@ -488,6 +535,82 @@ describe("the compiled binary over TLS (CONN-1)", () => {
         assert.notInclude(running.output(), "ERROR");
 
         yield* wire.untilGone;
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    { timeout: testTimeout }
+  );
+  it.live(
+    "takes a self-signed certificate by its pin, under a name it is not for",
+    () =>
+      Effect.gen(function* () {
+        const authority = yield* testAuthority("iirc pinning");
+        const certificate = authority.selfSigned(`DNS:${unusedName}`);
+        const pin = opensslPin(certificate.cert);
+
+        const ircd = yield* scriptedIrcd(welcoming(nick), {
+          hostname: ircdAddress,
+          tls: certificate,
+        });
+
+        // No authority is trusted here, so only the pin can be what lets it through.
+        const started = yield* startDaemon({ host: ircdAddress, port: ircd.port }, { pin });
+
+        yield* assertBothWays(started, ircd);
+
+        const opened = (yield* allEntries(started.daemon)).find(
+          (entry) => entry._tag === "Connection" && entry.phase === "opened"
+        );
+
+        assert.deepInclude(opened, { phase: "opened" });
+        assert.deepInclude(
+          opened?._tag === "Connection" && opened.phase === "opened" ? opened.tls : {},
+          {
+            pin,
+            verifiedBy: "pin",
+          }
+        );
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    { timeout: testTimeout }
+  );
+
+  it.live(
+    "refuses a key that is not its pin, and says which key it was shown",
+    () =>
+      Effect.gen(function* () {
+        const authority = yield* testAuthority("iirc pinning");
+        const certificate = authority.selfSigned(`DNS:${unusedName}`);
+        const presented = opensslPin(certificate.cert);
+        const elsewhere = opensslPin(authority.selfSigned(`DNS:${unusedName}`).cert);
+
+        assert.notStrictEqual(elsewhere, presented);
+
+        const ircd = yield* scriptedIrcd(welcoming(nick), {
+          hostname: ircdAddress,
+          tls: certificate,
+        });
+
+        const { daemon, status } = yield* startDaemon(
+          { host: ircdAddress, port: ircd.port },
+          { pin: elsewhere }
+        );
+
+        const closed = yield* eventually(status, isClosed, settleLimit);
+        const entries = yield* allEntries(daemon);
+
+        // The pin the Ircd showed, so that the Owner can check it and pin it.
+        assert.include(
+          closed.closeReason,
+          `${ircdAddress}:${ircd.port} presented the key ${presented}, which is not its pin ${elsewhere}`
+        );
+        assert.isFalse(closed.refused, "a wrong pin backs off like any failure");
+        assert.deepStrictEqual(
+          entries.flatMap((entry) => (entry._tag === "Connection" ? [entry.phase] : [])),
+          ["attempt", "closed"]
+        );
+        assert.lengthOf(
+          entries.filter(({ _tag }) => _tag === "Line"),
+          0
+        );
+        assert.deepStrictEqual(yield* ircd.received, []);
       }).pipe(Effect.scoped, Effect.provide(layers)),
     { timeout: testTimeout }
   );

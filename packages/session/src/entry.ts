@@ -1,11 +1,32 @@
+import type { Tuning } from "@iirc/lifecycle/tuning";
+import type { Schema } from "effect";
+
 /** Which Network an Entry belongs to. */
 export type NetworkId = string;
+
+/** Any JSON value, which is all `session` knows of what a Change says. */
+export type Json = Schema.Json;
 
 /** Where an Ircd is reached. */
 export interface Ircd {
   readonly host: string;
+  /**
+   * `sha256/` and the base64 SHA-256 of the key's SubjectPublicKeyInfo, as
+   * `curl --pinnedpubkey` reads it. A pinned Ircd is verified by this alone (CONN-1).
+   */
+  readonly pin?: string;
   readonly port: number;
   readonly tls: boolean;
+}
+
+/** How a TLS Connection was secured, as its `opened` Entry records it (CONN-1). */
+export interface TlsDetails {
+  readonly cipher: string;
+  /** The pin of the key the Ircd presented, in the form {@link Ircd.pin} takes. */
+  readonly pin: string;
+  readonly protocol: string;
+  /** A certificate authority vouched for the Ircd's name, or its key matched the pin. */
+  readonly verifiedBy: "authority" | "pin";
 }
 
 interface ConnectionFields {
@@ -32,11 +53,18 @@ export type NewEntry =
       /** Every nick this Connection may try, in order, so replay makes the same choices. */
       readonly nicks: readonly string[];
       readonly phase: "attempt";
+      /** The rest of what the machine ran with, for the same reason as `nicks`. */
+      readonly realname: string;
+      /** The whole Tuning the Connection ran with, and not just what the Owner changed. */
+      readonly tuning: Tuning;
+      readonly username: string;
     })
   | (ConnectionFields & {
       /** The sequence of this Connection's `attempt` Entry. */
       readonly connection: number;
       readonly phase: "opened";
+      /** Absent for plaintext. */
+      readonly tls?: TlsDetails;
     })
   | (ConnectionFields & {
       /** The sequence of this Connection's `attempt` Entry. */
@@ -54,6 +82,11 @@ export type NewEntry =
       readonly reason?: string;
       /** The Network does not want us, so backoff is at least LIVE-5's. */
       readonly refused?: true;
+      /**
+       * When the Connection really ended, in epoch milliseconds, for a close recorded late
+       * because the Log could not append then (LOG-9). A Gap starts here, not at `at`.
+       */
+      readonly endedAt?: number;
     })
   | {
       readonly _tag: "Dropped";
@@ -71,6 +104,15 @@ export type NewEntry =
       readonly _tag: "Deadline";
       readonly name: string;
       readonly network: NetworkId;
+    }
+  | {
+      readonly _tag: "Change";
+      /** The name of the key that made it, or `local` for a local command (AUTH-4). */
+      readonly by: string;
+      /** What changed. Only whoever records Changes reads this, never `session`. */
+      readonly change: Json;
+      /** The Network it concerns, if any. */
+      readonly network?: NetworkId;
     }
   | {
       readonly _tag: "Daemon";

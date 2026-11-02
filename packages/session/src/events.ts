@@ -11,8 +11,12 @@ const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
   const { at } = entry;
 
   switch (entry.phase) {
+    // Everything the machine runs with comes from the Entry, and never from today's
+    // settings, so a replay of an old Connection makes the decisions it made then.
     case "attempt": {
-      return { at, nicks: entry.nicks, type: "ATTEMPT" };
+      const { nicks, realname, tuning, username } = entry;
+
+      return { at, nicks, realname, tuning, type: "ATTEMPT", username };
     }
 
     case "opened": {
@@ -82,6 +86,8 @@ export const toEvent = (entry: Entry): NetworkEvent | undefined => {
       return lineEvent(entry);
     }
 
+    // A Change is the Owner's, and only reaches a machine through what its host does.
+    case "Change":
     case "Daemon":
     case "Dropped": {
       return undefined;

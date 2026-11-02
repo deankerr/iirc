@@ -4,6 +4,7 @@ import type { Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { defaultTuning } from "@iirc/lifecycle/tuning";
 import { Deferred, Effect, Exit, Option, Queue, Schedule, Schema } from "effect";
 import type { Duration, Scope } from "effect";
 import { Socket } from "effect/socket";
@@ -14,6 +15,9 @@ import type { Transport } from "./transport.ts";
 import { ConnectFailed } from "./transport.ts";
 
 const textEncoder = new TextEncoder();
+
+/** What a hand-written `attempt` Entry runs with: the spec's Tuning and a plain Identity. */
+export const attemptInput = { realname: "I IRC", tuning: defaultTuning, username: "user" } as const;
 
 const serverName = Schema.decodeUnknownOption(Schema.NonEmptyString);
 
@@ -219,11 +223,24 @@ export interface TestAuthority {
    * @returns The certificate and its key.
    */
   readonly issue: (altName: string, commonName?: string) => Certificate;
-  /** A certificate that signed itself, which no authority stands behind. */
-  readonly selfSigned: (altName: string) => Certificate;
+  /**
+   * Makes a certificate that signed itself, which no authority stands behind.
+   * @param altName - The `subjectAltName`, such as `DNS:localhost` or `IP:127.0.0.1`.
+   * @param algorithm - The kind of key it holds, which is EC unless asked otherwise.
+   * @returns The certificate and its key.
+   */
+  readonly selfSigned: (altName: string, algorithm?: KeyAlgorithm) => Certificate;
 }
 
-const curve = ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes"];
+/** A kind of key a test certificate can hold. */
+export type KeyAlgorithm = "ec" | "rsa";
+
+const newKey: Readonly<Record<KeyAlgorithm, readonly string[]>> = {
+  ec: ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes"],
+  rsa: ["-newkey", "rsa:2048", "-nodes"],
+};
+
+const curve = newKey.ec;
 const validity = ["-days", "2"];
 
 const openssl = (...args: readonly string[]) => {
@@ -317,13 +334,13 @@ export const testAuthority = (name: string): Effect.Effect<TestAuthority, never,
 
           return readCertificate(paths);
         },
-        selfSigned: (altName) => {
+        selfSigned: (altName, algorithm = "ec") => {
           const paths = nextPaths();
 
           openssl(
             "req",
             "-x509",
-            ...curve,
+            ...newKey[algorithm],
             "-keyout",
             paths.key,
             "-out",
@@ -708,10 +725,12 @@ export const fakeIrcd = Effect.fnUntraced(function* (options?: FakeIrcdOptions) 
               cancelled += 1;
             })
           )
-        : Effect.acquireRelease(accepted(), () =>
-            Effect.sync(() => {
-              open -= 1;
-            })
+        : Effect.acquireRelease(
+            Effect.map(accepted(), (socket) => ({ socket })),
+            () =>
+              Effect.sync(() => {
+                open -= 1;
+              })
           );
     });
 

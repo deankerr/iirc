@@ -1,9 +1,12 @@
+import { readdirSync, statSync } from "node:fs";
+
 import { BunServices } from "@effect/platform-bun";
 import { assert, describe, it } from "@effect/vitest";
 import type { Entry, NewEntry } from "@iirc/session/entry";
 import { toEvent } from "@iirc/session/events";
 import { Recorder, RecordFailed } from "@iirc/session/recorder";
 import { foldStandings, noStanding, noStandings } from "@iirc/session/standing";
+import { attemptInput } from "@iirc/session/testing";
 import {
   Array as Arr,
   Cause,
@@ -21,6 +24,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { TestClock } from "effect/testing";
 
 import { openDatabase } from "./database.ts";
+import { holdDataDirectory } from "./lock.ts";
 import { DataDirectoryLocked, Log } from "./log.ts";
 import type { LoggedMessage } from "./log.ts";
 import { makeStore } from "./store.ts";
@@ -28,12 +32,14 @@ import { makeStore } from "./store.ts";
 const encoder = new TextEncoder();
 const ircd = { host: "irc.example", port: 6697, tls: true };
 const childScript = `${import.meta.dirname}/recording-child.ts`;
+const diskFullScript = `${import.meta.dirname}/disk-full.fixture.ts`;
 
 const attempt = (network = "libera", nicks: readonly string[] = ["alice", "alice_"]): NewEntry => ({
   _tag: "Connection",
   ircd,
   network,
   nicks,
+  ...attemptInput,
   phase: "attempt",
 });
 
@@ -1132,6 +1138,45 @@ describe("the durable Log", () => {
       )
     );
 
+    it.effect("LIVE-10: a close recorded late starts its Gap when the Connection ended", () =>
+      withLog(
+        Effect.gen(function* () {
+          const connection = yield* attempted();
+
+          yield* TestClock.adjust("1 minute");
+          yield* record([opened(connection), welcome()]);
+          yield* TestClock.adjust("1 minute");
+
+          // The Log was down for 6.5 seconds, and the close is recorded once it is back.
+          const endedAt = 120_000;
+
+          yield* TestClock.adjust("6500 millis");
+
+          const [late] = yield* record([
+            {
+              _tag: "Connection",
+              connection,
+              endedAt,
+              ircd,
+              network: "libera",
+              phase: "closed",
+              reason: "the Log was down",
+            },
+          ]);
+
+          assert.deepStrictEqual(
+            (yield* allEntries).at(-1),
+            late,
+            "it reads back as it was recorded"
+          );
+          assert.strictEqual(late.at, 126_500);
+          assert.deepStrictEqual(yield* allGaps, [
+            { at: endedAt, network: "libera", reason: "the Log was down", sequence: 4 },
+          ]);
+        })
+      )
+    );
+
     it.effect("LIVE-10: a Gap can begin and end in one commit", () =>
       withLog(
         Effect.gen(function* () {
@@ -1540,6 +1585,55 @@ describe("the durable Log", () => {
       )
     );
 
+    it.live("RUN-4: takes the lock without writing, so a full disk cannot refuse it", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          yield* holdDataDirectory(dataDir);
+
+          // A rollback journal beside it would be a write, which a full disk refuses.
+          assert.deepStrictEqual(readdirSync(dataDir), ["iirc.lock"]);
+          assert.strictEqual(statSync(`${dataDir}/iirc.lock`).size, 0);
+          assert.deepStrictEqual(
+            yield* Effect.flip(Effect.scoped(holdDataDirectory(dataDir))),
+            new DataDirectoryLocked({ dataDir })
+          );
+        }).pipe(Effect.scoped)
+      )
+    );
+
+    // A tmpfs of its own needs a user namespace, which some machines refuse.
+    const canMount = Bun.spawnSync(["unshare", "-rm", "true"]).exitCode === 0;
+
+    it.live.skipIf(!canMount)(
+      "RUN-4, LOG-9: on a full disk, takes the lock and says the disk is full",
+      () =>
+        inTempDirectory((dataDir) =>
+          Effect.promise(async () => {
+            const fill = [
+              'mount -t tmpfs -o size=1m tmpfs "$1"',
+              'head -c 2000000 /dev/zero > "$1/filler" 2>/dev/null',
+              'exec "$2" "$3" "$1"',
+            ].join("; ");
+
+            const child = Bun.spawn(
+              ["unshare", "-rm", "sh", "-c", fill, "sh", dataDir, process.execPath, diskFullScript],
+              { stderr: "inherit", stdout: "pipe" }
+            );
+
+            const said = await new Response(child.stdout).text();
+
+            await child.exited;
+
+            // The lock writes nothing, so what refuses is the Log, which needs room.
+            assert.deepStrictEqual(JSON.parse(said), {
+              reason: `the disk holding ${dataDir} is full`,
+              tag: "StorageFailed",
+            });
+          })
+        ),
+      { timeout: 20_000 }
+    );
+
     it.effect("RUN-4: keeps the lock through a refused open", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
@@ -1645,4 +1739,120 @@ describe("the durable Log", () => {
       { timeout: killTimeout }
     );
   });
+});
+
+const pinnedIrcd = {
+  host: "irc.example",
+  pin: "sha256/FxXjXNs8hR4SHHqcjzGZqxYuzW1CBgkCpw1biac9fO0=",
+  port: 6697,
+  tls: true,
+};
+
+const tls = {
+  cipher: "TLS_AES_128_GCM_SHA256",
+  pin: pinnedIrcd.pin,
+  protocol: "TLSv1.3",
+  verifiedBy: "pin",
+} as const;
+
+// Changes holding every kind of JSON, with and without a Network, among a Connection that
+// was pinned and secured.
+const configured: Arr.NonEmptyReadonlyArray<NewEntry> = [
+  { _tag: "Change", by: "local", change: { keys: { create: "phone" } } },
+  { _tag: "Change", by: "phone", change: null, network: "libera" },
+  {
+    _tag: "Change",
+    by: "phone",
+    change: [1, -2.5, "café", true, false, null, { nested: ["a", { deeper: {} }] }],
+    network: "libera",
+  },
+  { _tag: "Change", by: "agent", change: 'quo"te\nand a newline', network: "libera" },
+  {
+    _tag: "Connection",
+    ircd: pinnedIrcd,
+    network: "libera",
+    nicks: ["alice"],
+    phase: "attempt",
+    realname: 'caf\u00E9 "quoted"',
+    tuning: { ...attemptInput.tuning, burstMillis: 0, silenceMillis: 123_456 },
+    username: "alice",
+  },
+  { _tag: "Connection", connection: 5, ircd: pinnedIrcd, network: "libera", phase: "opened", tls },
+  { _tag: "Change", by: "phone", change: 0, network: "libera" },
+  welcome(),
+  inbound(":bob!u@h PRIVMSG #iirc :still here"),
+];
+
+describe("the durable Log and Configuration", () => {
+  it.effect(
+    "LOG-3: returns Changes, an `attempt`'s input, a pin, and TLS details as recorded",
+    () =>
+      withLog(
+        Effect.gen(function* () {
+          yield* TestClock.adjust("3 seconds");
+          yield* record(configured);
+
+          const read = yield* allEntries;
+
+          assert.deepStrictEqual(
+            read,
+            configured.map((entry, index): Entry => ({ ...entry, at: 3000, sequence: index + 1 }))
+          );
+
+          // `deepStrictEqual` would pass a `null` off as absent, but a `null` Change is JSON.
+          const changes = read.flatMap((entry) => (entry._tag === "Change" ? [entry] : []));
+
+          assert.notProperty(changes[0], "network");
+          assert.property(changes[1], "change");
+          assert.isNull(changes[1]?.change);
+        })
+      )
+  );
+
+  it.effect("LOG-2: a Change derives nothing, and Standing agrees with the fold", () =>
+    withLog(
+      Effect.gen(function* () {
+        yield* record(configured);
+
+        const entries = yield* allEntries;
+        const withoutChanges = entries.filter(({ _tag }) => _tag !== "Change");
+        const folded = foldStandings(noStandings, withoutChanges).get("libera") ?? noStanding;
+        const held = yield* standing();
+
+        assert.deepStrictEqual(yield* allSaid, ["libera PRIVMSG bob -> #iirc: still here"]);
+        assert.deepStrictEqual(held.connection?.registration, folded.connection?.registration);
+        assert.strictEqual(held.self, "alice");
+        assert.deepStrictEqual(entries.filter(({ _tag }) => _tag === "Change").map(toEvent), [
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+        ]);
+      })
+    )
+  );
+
+  it.effect("LOG-10: a rebuild and a restart leave Changes and TLS details intact", () =>
+    inTempDirectory((dataDir) =>
+      Effect.gen(function* () {
+        const before = yield* Effect.gen(function* () {
+          yield* eventful;
+          yield* record(configured);
+          yield* Log.use(({ rebuild }) => rebuild);
+
+          return { derived: yield* derived, entries: yield* allEntries };
+        }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+        yield* execute(dataDir, "DELETE FROM messages");
+
+        const after = yield* Effect.gen(function* () {
+          return { derived: yield* derived, entries: yield* allEntries };
+        }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+        assert.isAbove(before.entries.filter(({ _tag }) => _tag === "Change").length, 4);
+        assert.deepStrictEqual(after, before);
+      })
+    )
+  );
 });

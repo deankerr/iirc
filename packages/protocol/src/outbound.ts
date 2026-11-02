@@ -48,7 +48,13 @@ const concatenate = (head: Uint8Array, tail: Uint8Array) => {
   return joined;
 };
 
-const isMiddleParameter = (param: string) =>
+/**
+ * Whether a parameter can go anywhere but last, where nothing can mark where it ends but
+ * a space. Anything a Line names, such as a nick or a username, has to be one.
+ * @param param - The parameter.
+ * @returns Whether it is one.
+ */
+export const isMiddleParameter = (param: string) =>
   param !== "" && !param.includes(" ") && !param.startsWith(":") && !hasLineBreakOrNull(param);
 
 const formatLast = (param: string) =>
@@ -109,6 +115,37 @@ export const privmsg = (target: string, text: string): Outbound => {
   }
 
   return text === "" ? rejected("EmptyText") : outbound("PRIVMSG", [target, text]);
+};
+
+/**
+ * Builds a `QUIT`.
+ * @param reason - What to say on the way out.
+ * @returns The safe Line, or why it can't be built.
+ */
+export const quit = (reason: string): Outbound => outbound("QUIT", [reason]);
+
+/**
+ * Builds the `USER` that registration sends, in RFC 2812's form, with mode 0.
+ * @param username - The username, which goes in the middle of the Line.
+ * @param realname - The realname, which goes last and may hold spaces.
+ * @returns The safe Line, or why it can't be built.
+ */
+export const user = (username: string, realname: string): Outbound =>
+  outbound("USER", [username, "0", "*", realname]);
+
+/**
+ * Builds a `PART` from one Channel.
+ * @param channel - The Channel to leave.
+ * @param reason - What to say on the way out, if anything.
+ * @returns The safe Line, or why it can't be built.
+ */
+export const part = (channel: string, reason?: string): Outbound => {
+  // A comma would leave a second Channel too.
+  if (channel.includes(",") || !isMiddleParameter(channel)) {
+    return rejected("InvalidTarget");
+  }
+
+  return outbound("PART", reason === undefined ? [channel] : [channel, reason]);
 };
 
 /**

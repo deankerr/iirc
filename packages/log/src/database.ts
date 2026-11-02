@@ -1,13 +1,13 @@
 import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-bun";
-import { Duration, Effect } from "effect";
+import { Duration, Effect, Predicate } from "effect";
 import type { Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 
 import { StorageFailed } from "./errors.ts";
 
-// Long enough for a checkpoint on a future read connection, and short enough that
-// the event loop never notices, because `bun:sqlite` waits synchronously.
+// Long enough for a checkpoint on the reader's connection, and short enough that the
+// event loop never notices, because `bun:sqlite` waits synchronously.
 const busyTimeout = Duration.millis(50);
 
 const synchronousFull = 2;
@@ -20,7 +20,9 @@ const migrations = SqliteMigrator.fromRecord({
       CREATE TABLE entries (
         sequence INTEGER PRIMARY KEY,
         at INTEGER NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('Line', 'Connection', 'Deadline', 'Daemon', 'Dropped')),
+        kind TEXT NOT NULL CHECK (
+          kind IN ('Line', 'Connection', 'Change', 'Deadline', 'Daemon', 'Dropped')
+        ),
         network TEXT,
         bytes BLOB,
         cause TEXT,
@@ -30,13 +32,26 @@ const migrations = SqliteMigrator.fromRecord({
         direction TEXT,
         ircd TEXT,
         nicks TEXT,
+        username TEXT,
+        realname TEXT,
+        tuning TEXT,
         phase TEXT,
         reason TEXT,
         refused INTEGER,
+        ended_at INTEGER,
+        tls TEXT,
+        "by" TEXT,
+        change TEXT,
         name TEXT,
         version TEXT
       ) STRICT
     `;
+
+    // So that each filter the reader offers is a range over an index (LOG-11). Daemon
+    // Entries belong to no Network, and a NULL network keeps them out of a Network's.
+    yield* sql`CREATE INDEX entries_by_network ON entries (network, sequence)`;
+    yield* sql`CREATE INDEX entries_by_kind ON entries (kind, sequence)`;
+    yield* sql`CREATE INDEX entries_by_network_and_kind ON entries (network, kind, sequence)`;
   }),
 });
 
@@ -55,6 +70,8 @@ const createDerivedTables = Effect.fnUntraced(function* (sql: SqlClient.SqlClien
     ) STRICT
   `;
 
+  yield* sql`CREATE INDEX IF NOT EXISTS messages_by_network ON messages (network, sequence)`;
+
   yield* sql`
     CREATE TABLE IF NOT EXISTS gaps (
       sequence INTEGER PRIMARY KEY,
@@ -64,7 +81,24 @@ const createDerivedTables = Effect.fnUntraced(function* (sql: SqlClient.SqlClien
       ended TEXT
     ) STRICT
   `;
+
+  yield* sql`CREATE INDEX IF NOT EXISTS gaps_by_network ON gaps (network, sequence)`;
 });
+
+// SQLite's words when it could not grow a file: the database or its journal, or the WAL
+// index that even a read needs, which is what a full disk refuses first.
+const diskFullCodes: ReadonlySet<unknown> = new Set(["SQLITE_FULL", "SQLITE_IOERR_SHMSIZE"]);
+
+// Whether a failure, or anything that caused it, was SQLite finding no space.
+const isDiskFull = (cause: unknown): boolean =>
+  Predicate.hasProperty(cause, "code") && diskFullCodes.has(cause.code)
+    ? true
+    : Predicate.hasProperty(cause, "cause") && isDiskFull(cause.cause);
+
+const storageFailed = (dataDir: string, cause: unknown) =>
+  new StorageFailed({
+    cause: isDiskFull(cause) ? new Error(`the disk holding ${dataDir} is full`, { cause }) : cause,
+  });
 
 const configure = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) {
   // SQLite answers with the mode it ended up in, and may keep the old one silently.
@@ -105,6 +139,6 @@ export const openDatabase = (
   }).pipe(
     Effect.provide(Reactivity.layer),
     Effect.catchTag(["SqlError", "MigrationError"], (cause) =>
-      Effect.fail(new StorageFailed({ cause }))
+      Effect.fail(storageFailed(dataDir, cause))
     )
   );

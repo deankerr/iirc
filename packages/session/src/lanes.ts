@@ -69,6 +69,8 @@ type Gate = "open" | "quitting" | "shut";
 interface PumpLanes {
   /** Waits until there is a Line the pump may take, and leaves it there. */
   readonly awaitLine: (mayFlood: boolean) => Effect.Effect<void>;
+  /** Whether there is a Line the pump may take now. */
+  readonly hasLine: (mayFlood: boolean) => Effect.Effect<boolean>;
   /** Takes the next Line the pump may take. */
   readonly takeNext: (mayFlood: boolean) => Effect.Effect<Option.Option<QueuedLine>>;
 }
@@ -132,13 +134,13 @@ export const makeLanes = Effect.fnUntraced(function* (tuning: Tuning) {
       })
     );
 
-  const awaitLine = (mayFlood: boolean) =>
+  const hasLine = (mayFlood: boolean) =>
     Effect.tx(
       Effect.gen(function* () {
         const current = yield* TxRef.get(gate);
 
         if (current === "shut") {
-          return yield* Effect.txRetry;
+          return false;
         }
 
         const flooded =
@@ -146,9 +148,12 @@ export const makeLanes = Effect.fnUntraced(function* (tuning: Tuning) {
           current === "open" &&
           ((yield* TxQueue.isNonEmpty(interactive)) || (yield* TxQueue.isNonEmpty(background)));
 
-        return flooded || (yield* TxQueue.isNonEmpty(control)) ? undefined : yield* Effect.txRetry;
+        return flooded || (yield* TxQueue.isNonEmpty(control));
       })
     );
+
+  const awaitLine = (mayFlood: boolean) =>
+    Effect.tx(Effect.flatMap(hasLine(mayFlood), (ready) => (ready ? Effect.void : Effect.txRetry)));
 
   const takeNext = (mayFlood: boolean) =>
     Effect.tx(
@@ -198,13 +203,19 @@ export const makeLanes = Effect.fnUntraced(function* (tuning: Tuning) {
     shut: TxRef.set(gate, "shut"),
   };
 
-  const pumpLanes: PumpLanes = { awaitLine, takeNext };
+  const pumpLanes: PumpLanes = { awaitLine, hasLine, takeNext };
 
   return { lanes, pumpLanes };
 });
 
 /** What the pump needs from the Connection it serves. */
 export interface PumpWire {
+  /**
+   * Whether the kernel surely has a write's bytes only once a later write has been taken.
+   * Bun's TLS reports a write done with the end of its record still in the process, and
+   * takes no later write until that has reached the kernel. A close throws it away.
+   */
+  readonly confirmsLater: boolean;
   /** Appends a Line's Entry, and gives its sequence. It runs uninterruptibly. */
   readonly record: (queued: QueuedLine) => Effect.Effect<number, RecordFailed>;
   /** The Log took no Line, so the Connection cannot go on (LOG-9). */
@@ -216,6 +227,12 @@ export interface PumpWire {
   /** A recorded Line whose write did not complete, which the close records as Dropped. */
   readonly unwritten: (queued: QueuedLine, reason: string) => Effect.Effect<void>;
 }
+
+/** Why a write that the kernel would not take for too long failed. */
+export const writeTimedOut = "write timed out";
+
+/** Why a Line whose write was reported done is Dropped: over TLS, it may not have left. */
+export const mayNotHaveReached = "the write may not have reached the Ircd";
 
 const writeFailureOf = (cause: Cause.Cause<WriteFailed>) => {
   const [failure] = cause.reasons;
@@ -244,6 +261,33 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
   Effect.uninterruptibleMask((restore) => {
     const limit = { burst: tuning.floodBurst, intervalMillis: tuning.floodIntervalMillis };
     let bucket = fullBucket;
+    // With `confirmsLater`, the last Line written, until a later write is taken. Its
+    // outcome waits for that, or for the pump to have nothing to write at once.
+    let lastWritten: { readonly queued: QueuedLine; readonly sequence: number } | undefined;
+
+    const confirm = Effect.suspend(() =>
+      lastWritten === undefined
+        ? Effect.void
+        : Deferred.succeed(lastWritten.queued.outcome, lastWritten.sequence)
+    );
+
+    // A later write was still waiting for the kernel when it gave up, so the one before it
+    // may still be in the process, and the close that follows throws that away. Its caller
+    // may already have been told it was written, because nothing in Bun says when the rest
+    // of it leaves. A write that failed outright found the Connection broken, and then the
+    // kernel's own buffer is lost as well, over TLS or not.
+    const unconfirm = Effect.fnUntraced(function* (cause: Cause.Cause<WriteFailed>) {
+      const stalled =
+        Cause.hasInterruptsOnly(cause) || writeFailureOf(cause).reason === writeTimedOut;
+
+      if (lastWritten !== undefined && stalled) {
+        const { queued } = lastWritten;
+
+        lastWritten = undefined;
+        yield* wire.unwritten(queued, mayNotHaveReached);
+        yield* Deferred.fail(queued.outcome, new WriteFailed({ reason: mayNotHaveReached }));
+      }
+    });
 
     const transmit = Effect.fnUntraced(function* (queued: QueuedLine) {
       const recorded = yield* Effect.exit(wire.record(queued));
@@ -259,8 +303,19 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
       const written = yield* Effect.exit(restore(wire.write(queued)));
 
       if (Exit.isSuccess(written)) {
-        return yield* Deferred.succeed(queued.outcome, recorded.value);
+        if (!wire.confirmsLater) {
+          return yield* Deferred.succeed(queued.outcome, recorded.value);
+        }
+
+        // Taken, so the one before it has reached the kernel, and this one waits its turn.
+        yield* confirm;
+        lastWritten = { queued, sequence: recorded.value };
+
+        return false;
       }
+
+      yield* unconfirm(written.cause);
+      lastWritten = undefined;
 
       const failure = writeFailureOf(written.cause);
 
@@ -276,6 +331,11 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
     const cycle = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       const sendAt = nextSendAt(bucket, limit, now);
+
+      // About to wait, so no later write is coming soon to confirm the last.
+      if (sendAt > now || !(yield* pumpLanes.hasLine(true))) {
+        yield* confirm;
+      }
 
       yield* restore(
         sendAt > now
@@ -295,5 +355,6 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
       }
     });
 
-    return Effect.forever(cycle);
+    // Interrupted with no write under way, so nothing stands behind the last one.
+    return Effect.forever(cycle).pipe(Effect.ensuring(confirm));
   });

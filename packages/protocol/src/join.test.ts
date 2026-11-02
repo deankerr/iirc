@@ -109,7 +109,7 @@ describe(joinLines, () => {
     expect(joinLines([{ name: `${longest.name}x` }]).lines).toStrictEqual([]);
   });
 
-  it.each(["", "#a,#b", "#a b", "#a\r\nQUIT", "#a\0", ":#a"])(
+  it.each(["", "#a,#b", "#a b", "#a\r\nQUIT", "#a\0", ":#a", "#a\u0007"])(
     "reports %j, which would break the list, rather than sending it",
     (name) => {
       const channel = { name };
@@ -118,6 +118,25 @@ describe(joinLines, () => {
         rejected: [{ channel, reason: "InvalidChannel" }],
       });
       expect(texts([channel, { name: "#ok" }])).toStrictEqual(["JOIN #ok"]);
+    }
+  );
+
+  it.each(["#", "&local", "+modeless", "!safe"])(
+    "CONF-3: takes %j, which starts with a Channel prefix",
+    (name) => {
+      expect(joinLines([{ name }]).rejected).toStrictEqual([]);
+    }
+  );
+
+  it.each(["0", "foo", "@op", "0,#a"])(
+    "LIVE-7: refuses %j, which no Channel prefix starts, so `JOIN 0` can never leave them all",
+    (name) => {
+      const channel = { name };
+
+      expect(joinLines([channel])).toStrictEqual({
+        lines: [],
+        rejected: [{ channel, reason: "InvalidChannel" }],
+      });
     }
   );
 

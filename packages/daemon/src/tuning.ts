@@ -1,6 +1,6 @@
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { Data, Effect, Schema, SchemaGetter, Struct } from "effect";
+import { Result, Schema, SchemaGetter, Struct } from "effect";
 
 // What a timer can wait for: past this, one fires at once, so a mistyped refusal wait
 // would turn into a redial loop.
@@ -11,6 +11,11 @@ const atLeast = (minimum: number) =>
 
 // LIVE-3: a lag check bypasses flood control, so a tiny interval would flood the Ircd.
 const shortestLagCheck = 100;
+
+// Every host waits this long at most for its `QUIT` when it stops, and the Daemon stops them
+// all at once, so this bounds how long a stop takes whatever the Owner tuned (RUN-3). It is
+// well inside the 90 seconds a service manager gives a stop by default.
+const longestQuitWait = 10_000;
 
 // One entry for every key of `Tuning`, so a new number cannot go without a rule. A wait
 // that gives something time to happen can be 0, and one that paces anything cannot. A
@@ -27,7 +32,7 @@ const rules = {
   kickRejoinMillis: atLeast(0),
   lagCheckMillis: atLeast(shortestLagCheck),
   laneLimit: atLeast(1),
-  quitWaitMillis: atLeast(1),
+  quitWaitMillis: Schema.Int.check(Schema.isBetween({ maximum: longestQuitWait, minimum: 1 })),
   reconnectInitialMillis: atLeast(1),
   reconnectMaxMillis: atLeast(1),
   refusalBackoffMillis: atLeast(1),
@@ -70,29 +75,28 @@ const Tuned = Schema.Struct(rules).check(
   )
 );
 
-/** A {@link Tuning} the Daemon will not run with, and why. */
-export class InvalidTuning extends Data.TaggedError("InvalidTuning")<{
-  readonly message: string;
-}> {}
+const decodeTuned = Schema.decodeUnknownResult(Tuned);
 
 /**
- * Checks a whole {@link Tuning} against every rule, which is what the Daemon does before it
- * will start, so that no way of building one can skip them.
- * @param tuning - The Tuning to run with.
- * @returns The same Tuning, or why it cannot be used.
+ * The Tuning numbers one Network overrides, by name (CONF-3). A name that is not one, a
+ * value out of bounds, or a value that clashes with the spec's defaults or another
+ * override fails to decode, saying which.
  */
-export const checkTuning = (tuning: Tuning): Effect.Effect<Tuning, InvalidTuning> =>
-  Schema.decodeEffect(Tuned)(tuning).pipe(
-    Effect.mapError(({ message }) => new InvalidTuning({ message }))
-  );
-
-/**
- * A partial {@link Tuning} as JSON, over the spec's defaults. A key that is not one, or a
- * value out of bounds, fails to decode.
- */
-export const TuningFromJson = Schema.fromJsonString(Overrides).pipe(
-  Schema.decodeTo(Tuned, {
-    decode: SchemaGetter.transform((overrides) => ({ ...defaultTuning, ...overrides })),
-    encode: SchemaGetter.transform((tuning) => tuning),
-  })
+export const TuningOverrides = Overrides.check(
+  Schema.makeFilter((overrides) =>
+    Result.match(decodeTuned({ ...defaultTuning, ...overrides }), {
+      onFailure: ({ issue }) => issue,
+      onSuccess: () => true,
+    })
+  )
 );
+
+/**
+ * The whole Tuning a Network runs with: the spec's defaults, under what it overrides.
+ * @param overrides - What the Owner changed, which {@link TuningOverrides} has checked.
+ * @returns Every number.
+ */
+export const tuningOf = (overrides: Partial<Tuning>): Tuning => ({
+  ...defaultTuning,
+  ...overrides,
+});

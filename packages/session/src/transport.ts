@@ -1,14 +1,17 @@
+import { createHash, X509Certificate } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import type { Socket as NetSocket } from "node:net";
+import { Readable } from "node:stream";
 import { connect as connectTls } from "node:tls";
+import type { TLSSocket } from "node:tls";
 
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { Array as Arr, Context, Data, Duration, Effect, Layer } from "effect";
+import { Array as Arr, Context, Data, Duration, Effect, Layer, Option } from "effect";
 import type { Scope } from "effect";
 import { constVoid } from "effect/Function";
 import { Socket } from "effect/socket";
 
-import type { Ircd } from "./entry.ts";
+import type { Ircd, TlsDetails } from "./entry.ts";
 
 // What a WebSocket calls a close with no close frame, and Effect's sockets borrow.
 const abnormalClose = 1006;
@@ -37,28 +40,107 @@ const connectFailed = ({ host, port }: Ircd, cause: Socket.SocketError) =>
 const openFailed = (kind: Socket.SocketOpenError["kind"], cause: unknown) =>
   new Socket.SocketError({ reason: new Socket.SocketOpenError({ cause, kind }) });
 
+/** A Connection just opened, and how it was secured, if it was. */
+export interface Opened {
+  readonly socket: Socket.Socket;
+  /** Absent for plaintext. */
+  readonly tls?: TlsDetails;
+  /**
+   * Ends reading, and gives what was read from the kernel that no pull has taken, so that
+   * a close can record it (LOG-4). Absent where a pull is all there is.
+   */
+  readonly unread?: Effect.Effect<readonly Uint8Array[]>;
+}
+
+interface Dialed {
+  readonly stream: NetSocket;
+  readonly tls?: TlsDetails;
+}
+
+/**
+ * The pin of a certificate's key, as `curl --pinnedpubkey` reads it. The peer
+ * certificate's own `pubkey` is SubjectPublicKeyInfo for RSA but only the bare point for
+ * EC, so the key is read from the certificate itself. Effect's `Digest` is asynchronous,
+ * and this runs in the handshake's callback, before anything else can touch the stream.
+ * @param der - The certificate, as DER.
+ * @returns `sha256/` and the base64 SHA-256 of its SubjectPublicKeyInfo.
+ */
+const pinOf = (der: Uint8Array) => {
+  const spki = new X509Certificate(der).publicKey.export({ format: "der", type: "spki" });
+
+  return `sha256/${createHash("sha256").update(spki).digest("base64")}`;
+};
+
+// An Ircd that sent no certificate, or one whose key cannot be read, has no pin to match
+// or report. This runs in a stream's listener, where a throw would reach nothing.
+const presentedPin = Option.liftThrowable((stream: TLSSocket) =>
+  pinOf(stream.getPeerCertificate().raw)
+);
+
+// Gives the presented pin, so the Owner can check it and pin it (CONN-1).
+const unpinned = ({ host, port, pin }: Ircd, presented: string | undefined) =>
+  new ConnectFailed({
+    cause: { pinned: pin, presented },
+    reason:
+      presented === undefined
+        ? `${host}:${port} presented no key that could be read`
+        : `${host}:${port} presented the key ${presented}, which is not its pin ${pin ?? ""}`,
+  });
+
+// By here the handshake is done, and a pinned Ircd has had no other check: with
+// `rejectUnauthorized: false`, `checkServerIdentity` never runs. Nothing has been written,
+// because nothing else holds the stream yet. An authority only verifies a certificate
+// there is, so only a pinned Ircd should get here with none.
+const secured = (ircd: Ircd, stream: TLSSocket): Effect.Effect<Dialed, ConnectFailed> => {
+  const presented = presentedPin(stream);
+
+  if (Option.isNone(presented) || (ircd.pin !== undefined && presented.value !== ircd.pin)) {
+    stream.destroy();
+
+    return Effect.fail(unpinned(ircd, Option.getOrUndefined(presented)));
+  }
+
+  return Effect.succeed({
+    stream,
+    tls: {
+      cipher: stream.getCipher().name,
+      pin: presented.value,
+      protocol: stream.getProtocol() ?? "unknown",
+      verifiedBy: ircd.pin === undefined ? "authority" : "pin",
+    },
+  });
+};
+
 // SNI carries names only, and Node refuses an IP address there. Omitting it still
-// verifies, because the identity check falls back to `host`.
-const dial = (
-  { host, port, tls }: Ircd,
-  connectTimeoutMillis: number,
-  onStream: (stream: NetSocket) => void
-) =>
-  Effect.callback<NetSocket, Socket.SocketError>((resume) => {
-    const stream = tls
-      ? connectTls({
-          host,
-          port,
-          rejectUnauthorized: true,
-          ...(isIP(host) === 0 && { servername: host }),
-        })
-      : connectNet({ host, port });
+// verifies, because the identity check falls back to `host`. A pinned Ircd is verified by
+// its pin alone, so the certificate and its name go unchecked (CONN-1).
+const dial = (ircd: Ircd, connectTimeoutMillis: number, onStream: (stream: NetSocket) => void) =>
+  Effect.callback<Dialed, ConnectFailed | Socket.SocketError>((resume) => {
+    const { host, pin, port } = ircd;
+    let stream: NetSocket;
+
+    if (ircd.tls) {
+      const secure = connectTls({
+        host,
+        port,
+        rejectUnauthorized: pin === undefined,
+        ...(isIP(host) === 0 && { servername: host }),
+      });
+
+      secure.once("secureConnect", () => {
+        resume(secured(ircd, secure));
+      });
+
+      stream = secure;
+    } else {
+      stream = connectNet({ host, port });
+
+      stream.once("connect", () => {
+        resume(Effect.succeed({ stream }));
+      });
+    }
 
     onStream(stream);
-
-    stream.once(tls ? "secureConnect" : "connect", () => {
-      resume(Effect.succeed(stream));
-    });
 
     // Stays for the life of the stream, which throws an `error` nothing listens for.
     stream.on("error", (cause) => {
@@ -92,14 +174,26 @@ const release = (stream: NetSocket) =>
     }
   });
 
-// LOG-4: the most one read takes. What the stream holds beyond it has not been read, and
-// waits with the rest of a flood, so a host can bound what it has read and not recorded.
+// LOG-4: the most one read takes, so a host can bound what it has read and not recorded.
 const readAtMost = 16 * 1024;
 
+// `Readable`'s own `read`, which asks the socket for more only once its buffer is below
+// `highWaterMark`. Bun's `Socket.prototype.read` resumes the socket on every call, so a
+// stream read through it drains the kernel into itself without limit (LOG-4, HOST-1).
+const readHeld = (stream: NetSocket, size?: number): Uint8Array | undefined => {
+  const chunk: unknown = Readable.prototype.read.call(stream, size);
+
+  return chunk instanceof Uint8Array ? chunk : undefined;
+};
+
 // A Socket over the stream, reading and writing it directly. A read takes what is there,
-// up to `readAtMost`, and waits for more only when nothing is. Whatever the stream still
-// holds when it ends or resets is read first, because those are Lines the Ircd really did
-// deliver (LOG-4). A write is done once the kernel has the bytes, and races the close,
+// up to `readAtMost`, and waits for more only when nothing is. The stream reads ahead of
+// that by at most its `highWaterMark` and one read of the kernel: 64 KB and 512 KB. The
+// rest of a flood waits in the kernel.
+//
+// Whatever the stream still holds when it ends or resets is read first, because those are
+// Lines the Ircd really did deliver, and `unread` hands it over when a close cannot wait
+// for reads (LOG-4). A write is done once the kernel has the bytes, and races the close,
 // because a write that starts as the stream closes would otherwise wait for good.
 const streamSocket = (stream: NetSocket) => {
   // Why the stream can give nothing more, once it has said so.
@@ -129,9 +223,9 @@ const streamSocket = (stream: NetSocket) => {
 
       watching.onEvent = () => {
         const held = stream.readableLength;
-        const chunk: unknown = held > 0 ? stream.read(Math.min(held, readAtMost)) : null;
+        const chunk = held > 0 ? readHeld(stream, Math.min(held, readAtMost)) : undefined;
 
-        if (chunk instanceof Uint8Array) {
+        if (chunk !== undefined) {
           stop();
           resume(Effect.succeed(Arr.of(chunk)));
         } else if (ending !== undefined || stream.destroyed) {
@@ -149,6 +243,19 @@ const streamSocket = (stream: NetSocket) => {
       return Effect.sync(stop);
     }
   );
+
+  // Ends reading, and gives everything read that no read has taken.
+  const unread = Effect.sync(() => {
+    const rest: Uint8Array[] = [];
+
+    stream.pause();
+
+    for (let chunk = readHeld(stream); chunk !== undefined; chunk = readHeld(stream)) {
+      rest.push(chunk);
+    }
+
+    return rest;
+  });
 
   const closes = Effect.callback<never, Socket.SocketError>((resume) => {
     const onClose = () => {
@@ -192,13 +299,15 @@ const streamSocket = (stream: NetSocket) => {
           })
         );
 
-  return Socket.make({
+  const socket = Socket.make({
     reader: Effect.succeed({ pull, upgrade: Socket.SocketUpgradeError.unsupported }),
     writer: Effect.succeed({
       write: (chunk) => whileOpen(handedOver(chunk)),
       writeAll: (chunks) => whileOpen(Effect.forEach(chunks, handedOver, { discard: true })),
     }),
   });
+
+  return { socket, unread };
 };
 
 /**
@@ -212,10 +321,13 @@ export class Transport extends Context.Service<
     readonly connect: (
       ircd: Ircd,
       limits: Pick<Tuning, "connectTimeoutMillis">
-    ) => Effect.Effect<Socket.Socket, ConnectFailed, Scope.Scope>;
+    ) => Effect.Effect<Opened, ConnectFailed, Scope.Scope>;
   }
 >()("@iirc/session/Transport") {
-  /** TCP or TLS through Node's streams, verifying certificates and sending SNI. */
+  /**
+   * TCP or TLS through Node's streams, sending SNI, and verifying certificates, or for a
+   * pinned Ircd, its key alone (CONN-1).
+   */
   static readonly layer: Layer.Layer<Transport> = Layer.succeed(this, {
     connect: Effect.fn("Transport.connect")(function* (
       ircd: Ircd,
@@ -228,14 +340,13 @@ export class Transport extends Context.Service<
       // stream that connected just as that happened would otherwise have no owner.
       yield* Effect.addFinalizer(() => (dialing === undefined ? Effect.void : release(dialing)));
 
-      const stream = yield* Effect.mapError(
-        dial(ircd, connectTimeoutMillis, (opening) => {
-          dialing = opening;
-        }),
-        failedOn
-      );
+      const { stream, tls } = yield* dial(ircd, connectTimeoutMillis, (opening) => {
+        dialing = opening;
+      }).pipe(Effect.catchTag("SocketError", (cause) => Effect.fail(failedOn(cause))));
 
-      return streamSocket(stream);
+      const { socket, unread } = streamSocket(stream);
+
+      return tls === undefined ? { socket, unread } : { socket, tls, unread };
     }),
   });
 }

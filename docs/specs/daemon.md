@@ -26,11 +26,11 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
 - **LOG-1.** There is one Log per Daemon. Sequence numbers are global, start at 1, have no gaps, and are never reused, so one cursor can resume everything.
 - **LOG-2.** An Entry is one of:
   - **Line:** one Line in either direction, with its Network, its Connection, and a cause if outbound.
-  - **Connection:** an attempt, opening, closing, or close, with the Ircd, TLS details, and reason. An attempt names the nicks it will try.
+  - **Connection:** an attempt, opening, closing, or close, with the Ircd, TLS details, and reason. An attempt names the nicks it will try. An opening over TLS records the protocol, the cipher, the pin of the key the Ircd presented, and whether a certificate authority or a pin verified it (CONN-1).
     - Closing is recorded whenever the Daemon decides to end a Connection, with its reason and whether it chose to leave (LIVE-9). Only a chosen leave is not a failure.
     - A close says whether it was a refusal (LIVE-5). A refusal seen while a close is under way outranks the reason that started it, because a Network that bans us at accept closes the socket before we can read why.
     - A Connection the Log could not close, because appends were failing (LOG-9), gets its close once appends succeed, with that reason, so that it is never mistaken for a killed process.
-  - **Change:** something the Owner altered, such as Configuration, a Read Marker, or an ignore, with the Frontend that altered it.
+  - **Change:** something the Owner altered, such as Configuration, a Read Marker, an ignore, or an API key, with the name of the key that altered it, or `local` for `iirc key create` (AUTH-4), and the Network it concerns, if any.
   - **Daemon:** a start or stop, with its version.
   - **Dropped:** an outbound Line that was queued and never written, or whose write did not complete, with the reason. A Line counts as written once the kernel has taken it, not once a buffer in the process has.
   - **Deadline:** a timer that expired with no trace on the wire, such as the end of the login wait (CONN-6) or the burst (CONN-7). Without it, past state could not derive those phases.
@@ -43,7 +43,8 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
   - Bytes the Ircd sent that the Daemon never read are lost with the Connection. They fall inside a Gap.
   - What the Daemon has read but not yet recorded is bounded in bytes, so that the rest of a flood waits in the kernel. Everything it has read is recorded before the Connection's close, including when it is stopping.
 - **LOG-5.** An outbound Entry records its cause, so "Why did the Daemon send that?" always has an answer.
-  - A Frontend's request is recorded with its key name and request ID.
+  - A Frontend's request is recorded as `key:` and its key name, such as `key:phone`. The request ID joins it with SEND-10.
+  - A remembered Join is a Change, and the reconciler sends its `JOIN` as `rejoin`, so the Change before it, which names the key, is the answer. Nothing else can send a duplicate `JOIN`.
   - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `away-restore`, `ctcp-reply`, or `nick-regain`.
 - **LOG-6.** Credentials the Daemon holds stay out of the Log. Both layers run before an append, in both directions:
   - **Typed operations:** a Line built from a Credential is marked sensitive where it is constructed.
@@ -72,23 +73,29 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 
 - **CONF-1.** Configuration is a projection of Change Entries. There is no second source of truth, and its full history is inspectable.
 - **CONF-2.** All Configuration can be read and changed through the API while the Daemon runs. A running Session applies a change without a restart where IRC allows it, and otherwise at the next Connection.
-- **CONF-3.** A Network has a stable ID and a display name, plus an enabled flag and these settings:
+  - Applied at once: enabled, Channels, and the `QUIT` reason. A Channel taken off the list is parted if Self is in it, and a newly wanted one is joined. Turning autojoin off parts nothing, because it only stops the Daemon joining.
+  - Applied at the next Connection: Ircds, Identity, and Tuning. A change to any of them retries straight away (LIVE-4), so a Network waiting out a backoff or a refusal picks it up at once.
+- **CONF-3.** A Network has a stable ID and a display name, plus an enabled flag and these settings. The ID is up to 32 lowercase letters, digits, and `-`, starting with a letter or digit, and the Owner chooses it. Connect and disconnect set the enabled flag.
   - **Ircds:** an ordered list of host, port, TLS on or off, and an optional pinned key.
   - **Identity:** nick, alternate nicks, username, and realname.
   - **Credentials:** `PASS`, a service password, a TLS client certificate, and SASL details, each by name.
   - **Services:** which nicks are services. Defaults to `NickServ`, `ChanServ`, and the usual `*Serv` names.
   - **Connect commands:** Lines to send after registration and before joining, which refer to Credentials by name.
   - **Channels:** name, autojoin, rejoin-on-kick, key by Credential name, and notification level.
-  - **Tuning:** encoding, flood control, liveness, and CTCP replies.
+  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it.
 - **CONF-4.** The process itself needs only a data directory and a listen address, both given as flags or environment variables. Networks are added through the API, so a fresh Daemon needs no config file.
 - **CONF-5.** What the Owner does through the API is intent, and it survives a reconnect.
   - Join adds the Channel to Configuration with autojoin on, unless asked not to. Part removes it.
+  - Join and Part with no Session still record their Change, and the Channel is joined once the next Session's burst completes. A Join that is not to be remembered needs a Session (API-10).
+  - Join clears a kick (LIVE-8), even with no Session.
   - Changing nick updates the configured nick, unless marked temporary. Otherwise nick regain would undo it.
   - Setting away stores the reason, and it is reapplied after `001`.
   - A Channel entered any other way, such as through Raw or an Ircd forcing it, is not remembered.
 - **CONF-6.** TOML is a view of Configuration, never its truth ([ADR 0004](../adr/0004-configuration-lives-in-the-log.md)).
   - `iirc config export` writes Configuration as TOML, with Credentials as names only.
   - `iirc config import` applies a file as one Change. A file is only ever an input, and the Daemon never watches or rewrites one.
+  - A file is the whole Configuration, so importing it removes any Network it leaves out.
+  - API keys are not Configuration, and never appear in a file.
   - Both are Frontends of API operations (API-1).
 
 ### Credentials
@@ -107,6 +114,8 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 - **CONN-1.** TLS is the default and verifies the certificate and hostname, sending SNI.
   - Plaintext requires an explicit `tls: false` on that Ircd.
   - Skipping verification requires a pinned key, because a bare "accept anything" option does not exist.
+  - A pin is `sha256/` and the base64 SHA-256 of the key's SubjectPublicKeyInfo, as `curl --pinnedpubkey` reads it. A pinned Ircd is verified by its pin alone, so a self-signed certificate works, and the hostname is not checked.
+  - A pin that does not match closes the Connection before anything is sent, and the reason gives the pin the Ircd presented, so that the Owner can pin it after checking. A mismatch backs off like any failure and is not a refusal.
   - Connecting times out after 15 seconds, and any single write after 10.
 - **CONN-2.** Registration sends `PASS` if configured, then `NICK` and `USER`, and finishes on `001`. It times out after 60 seconds, because slow ident and DNS on old Ircds are normal.
 - **CONN-3.** The nick in `001` is the truth, and a later `NICK` from the Ircd is too. An Ircd can rename us, for example when services enforce a reserved nick.
@@ -134,7 +143,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - Delays grow from 5 seconds to 5 minutes, with jitter over the upper half of each delay, and reset after a Session has stayed up for 5 minutes.
   - Attempts rotate through the Ircds.
   - Backoff state is derived from Connection Entries, so a crash loop under a service manager cannot hammer a Network.
-  - A relevant Change, or an explicit connect, retries straight away.
+  - A relevant Change (CONF-2), or an explicit connect, retries straight away, even during a refusal's wait. The fold knows this from the Change's sequence, so a restart agrees.
 - **LIVE-5.** A refusal backs off for at least 30 minutes, and status shows the Network's own text verbatim.
   - A refusal is `463`, `464`, `465`, or any `ERROR` or `FAIL` before `001`, unless it is known to be transient, such as a ping or registration timeout.
   - `FAIL NICK` is not a refusal, because Ergo sends it after `433` for a reserved nick, and that is CONN-4's fallback.
@@ -146,7 +155,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - An unsolicited `JOIN` from the Ircd is the truth, so a Network that kept us attached is not rejoined. Ergo's always-on mode does this, and replays those `JOIN`s just after `376`, so rejoining waits 1 second after the burst for them.
   - Each Channel's failure appears in status. `471`, `473`, `474`, `477`, and `437` retry with backoff, and `475` does not.
 - **LIVE-8.** A kick wins over autojoin. The Channel is not rejoined, in this Session or the next, until the Owner joins again or the Channel has rejoin-on-kick, which waits 10 seconds. An `INVITE` is recorded and never followed automatically.
-- **LIVE-9.** Disconnecting through the API or stopping the Daemon sends `QUIT` with a configured reason through the control lane, waits up to 2 seconds for the queue, and does not reconnect.
+- **LIVE-9.** Disconnecting through the API or stopping the Daemon sends `QUIT` with a configured reason through the control lane, waits up to 2 seconds for the queue, and does not reconnect until connected again. Removing a Network does the same.
 - **LIVE-10.** Time the Daemon was away from a Network is a Gap. Gaps are visible, derived from Connection and Daemon Entries, and shown in the affected Timelines. The Daemon never implies that nothing happened.
   - On a Network that keeps us attached, a Gap means only that we were not listening. Other Users may not have seen us leave.
 - **LIVE-11.** A local close stops acting at once, and keeps recording what the Ircd already sent until it hangs up or 5 seconds pass, so that `ERROR` and whatever follows it are not lost. Sends are refused during this time, and status shows the phase once the close is recorded.
@@ -323,6 +332,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | `GET /stream` | Replay from a cursor, then live, with no gap or duplicate at the join |
 | `GET /status` | The Daemon and all Networks at a glance |
 | `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state |
+| `GET /configuration` | All Configuration at once, as `iirc config export` reads it |
 | `GET /networks/{id}/targets` | Targets, with unread counts by class |
 | `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details |
 | `GET /networks/{id}/targets/{target}/timeline` | A Timeline, paged in either direction |
@@ -342,37 +352,42 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ### Acting
 
-| Operation   | Effect                                                                |
-| ----------- | --------------------------------------------------------------------- |
-| Send        | A Message of kind `privmsg`, `notice`, or `action`, or a CTCP request |
-| Thin Send   | `POST /messages`: one `PRIVMSG` to one Target, until Send replaces it |
-| Membership  | Join with an optional key, part, invite, kick                         |
-| Channel     | Set a topic, change modes in `MODES`-sized batches                    |
-| Self        | Change nick, set or clear away, set user modes, `OPER`                |
-| Lookups     | As in [Lookups](#lookups)                                             |
-| Network     | Add, change, enable, disable, remove, connect, disconnect             |
-| Raw         | Send any Line the library can construct safely                        |
-| Marking     | Move a Read Marker, set ignores, Highlight keywords, and levels       |
-| Storage     | Set and delete a Frontend's stored values                             |
-| Credentials | Set, replace, and delete                                              |
-| Redaction   | Remove an Entry's bytes (LOG-7)                                       |
-| Keys        | Create, list, and revoke API keys                                     |
+| Operation     | Effect                                                                |
+| ------------- | --------------------------------------------------------------------- |
+| Send          | A Message of kind `privmsg`, `notice`, or `action`, or a CTCP request |
+| Thin Send     | `POST /messages`: one `PRIVMSG` to one Target, until Send replaces it |
+| Membership    | Join with an optional key, part, invite, kick                         |
+| Channel       | Set a topic, change modes in `MODES`-sized batches                    |
+| Self          | Change nick, set or clear away, set user modes, `OPER`                |
+| Lookups       | As in [Lookups](#lookups)                                             |
+| Network       | Add, change, remove, connect, disconnect                              |
+| Configuration | Replace all of it as one Change (CONF-6)                              |
+| Raw           | Send any Line the library can construct safely                        |
+| Marking       | Move a Read Marker, set ignores, Highlight keywords, and levels       |
+| Storage       | Set and delete a Frontend's stored values                             |
+| Credentials   | Set, replace, and delete                                              |
+| Redaction     | Remove an Entry's bytes (LOG-7)                                       |
+| Keys          | Create, list, and revoke API keys                                     |
 
 - **API-7.** Convenience such as `/op` or `/ban` is a Frontend's job, built on the modes operation. The API stays small.
 - **API-8.** A raw Line changes nothing directly, and derived state still follows what the Ircd says.
 - **API-9.** An operation returns once its Lines are written or refused, and gives the sequences it produced. Send times out with the Lines' status if the queue is slow.
+  - An operation that recorded a Change always succeeds with that Change's sequence, and a Line it then could not send is reported beside it as `failed`, with its typed error. A Line that would change nothing, such as `JOIN` for a Channel Self is in, is `skipped` with its reason.
 - **API-10.** Acting on a Network with no Session returns a typed error at once. Nothing is held for later (SEND-4).
 
 ### Access
 
 - **AUTH-1.** Every API call needs a key except `/health`. Loopback gets no exemption, because every action needs a named cause (LOG-5).
 - **AUTH-2.** Keys are named, stored hashed, shown once, compared in constant time, and revocable. The name appears in the cause of what they do (LOG-5), so an agent's actions can be told from the Owner's.
+  - A key is `iirc_` and 32 random bytes in base64url. Creating or revoking one is a Change that records its name, scope, and SHA-256, never the key.
+  - A missing or unknown key gets `401`, and a key without the scope gets `403`.
 - **AUTH-3.** A key has one of three scopes:
   - `read` sees the Log and derived state.
   - `chat` adds Send, membership, Channel, Self, Lookups, Marking, and Storage.
   - `admin` adds Network, Raw, Credentials, Redaction, and Keys.
   - Deferred: whether `OPER` moves to `admin`.
 - **AUTH-4.** The first key comes from a local command, `iirc key create`, since a fresh Daemon has no way to authenticate anyone.
+  - It appends to the Log itself, so it needs the Daemon stopped: the data directory's lock (RUN-4) admits one process, and the command says so rather than wait. Every later key comes from the API.
 - **AUTH-5.** The API listens on loopback by default. It does not terminate TLS, and remote access goes through a tailnet or reverse proxy. Request headers and bodies have size limits.
 - **AUTH-6.** Keys travel only in headers, never in a URL.
   - A browser cannot set `Authorization` on `EventSource` or a WebSocket. SSE from a browser therefore uses `fetch`, which can.
@@ -403,7 +418,11 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 - **PROOF-1.** Every requirement has a test that cites its ID where a test is possible. Scripted Ircds cover failure modes that a real Ircd will not produce on demand, and clocks are injected so timer behaviour is tested exactly.
 - **PROOF-2.** `testdata` conformance vectors cover the library. Protocol parsing is fuzzed with random bytes.
 - **PROOF-3.** Before a release, the Daemon passes against each real Ircd in the matrix: ngircd as the floor, and Ergo under `default.yaml`, `traditional.yaml`, and `precis` casemapping.
-  - `bun run proof:floor` covers ngircd: it starts a private one on a free loopback port and checks LIVE, CONN-4, and SEND-2 through the built binary.
+  - `bun run proof:floor` covers ngircd. It starts private ones on free loopback ports, makes the first key with `iirc key create`, and drives the built binary only through its API, signals, `iirc config`, and raw IRC clients.
+  - It checks LIVE-2 to LIVE-10, CONN-3, CONN-4, and SEND-2.
+  - It checks two Networks on two Ircds, where one going down leaves the other's Sends flowing (HOST-5, CONF-3), and Join and Part, seen live and kept across a restart (CONF-2, CONF-5).
+  - It checks export and import of Configuration, including a refused file (CONF-6), and keys by scope and after revoking (AUTH-1 to AUTH-3).
+  - It checks TLS pinning against a self-signed certificate (CONN-1). Against an ngircd built without TLS it skips that check and says so.
 - **PROOF-4.** Kill tests send `SIGKILL` during traffic, then check that no recorded Line is missing or duplicated and that projections rebuild identically. This does not test power loss, which rests on `synchronous=FULL`.
 - **PROOF-5.** Soak test: two Daemons share a Channel on the floor Ircd, one sends a counted Message each minute, and the other checks that none are missing. The first proof in the vision is 30 days of this passing on a real Network as well, with every Gap explained.
 
@@ -493,6 +512,9 @@ Milestone 1 is built in this order, each step a working Daemon:
 1. One Network, the durable Log, the machine as a fold, and a kill test.
 2. Reconnecting and refusals: LIVE, CONN-3, CONN-4, CONN-7, SEND-1 to SEND-4, and LOG-9.
 3. Configuration, multiple Networks, API keys, Channel membership, LOG-11's reader, and TLS key pinning.
+   - That is CONF-1, CONF-2, CONF-4, CONF-6, CONF-3 without Credentials, services, connect commands, or notification levels, and CONF-5's Join and Part, keyless until Credentials exist.
+   - AUTH-1 to AUTH-5, and AUTH-6's rule that keys travel in headers. Its WebSocket and AUTH-7's cookie come with the web frontend in milestone 4.
+   - Every Network flag leaves `iirc daemon`, which takes only a data directory and a listen address (CONF-4).
 4. Credentials, CONN-2's `PASS`, CONN-6, and the service unit.
 
 The soak test (PROOF-5) starts after step 4 and runs in the background. Nothing waits for it, and the Daemon runs alongside whatever IRC client the Owner uses.

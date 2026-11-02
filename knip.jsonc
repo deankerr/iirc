@@ -3,7 +3,14 @@
   // The tsconfig plugin name is served by @effect/tsgo, not its own package.
   "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
-    // Spawned by path from the kill tests, so nothing imports it.
-    "packages/log": { "entry": ["src/recording-child.ts"] },
+    // Spawned by path, from the kill tests and as Workers, so nothing imports them.
+    "packages/log": {
+      "entry": [
+        "src/recording-child.ts",
+        "src/reader-worker.ts",
+        "src/slow-reader.fixture.ts",
+        "src/disk-full.fixture.ts",
+      ],
+    },
   },
 }

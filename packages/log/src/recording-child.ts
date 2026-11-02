@@ -2,6 +2,7 @@ import { writeSync } from "node:fs";
 
 import { BunRuntime } from "@effect/platform-bun";
 import { Recorder } from "@iirc/session/recorder";
+import { attemptInput } from "@iirc/session/testing";
 import { Array as Arr, Effect } from "effect";
 
 import { Log } from "./log.ts";
@@ -30,6 +31,7 @@ const program = Effect.gen(function* () {
     ircd: { host: "irc.example", port: 6697, tls: true },
     network: "libera",
     nicks: ["alice"],
+    ...attemptInput,
     phase: "attempt",
   } as const;
 
