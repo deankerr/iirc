@@ -11,12 +11,24 @@ export interface JoinChannel {
 export type JoinRejection = "InvalidChannel" | "InvalidKey" | "TooLong";
 
 /** The Lines to send, and the Channels none of them could carry. */
-export interface JoinLines {
+export interface JoinLines<Channel extends JoinChannel = JoinChannel> {
   readonly lines: readonly OutboundLine[];
   readonly rejected: readonly {
-    readonly channel: JoinChannel;
+    readonly channel: Channel;
     readonly reason: JoinRejection;
   }[];
+}
+
+/** One `JOIN` Line, and the Channels it carries in the order it names them. */
+export interface JoinBatch<Channel extends JoinChannel = JoinChannel> {
+  readonly channels: readonly Channel[];
+  readonly line: OutboundLine;
+}
+
+/** The `JOIN` Lines to send with what each carries, and the Channels none could carry. */
+export interface JoinBatches<Channel extends JoinChannel = JoinChannel> {
+  readonly batches: readonly JoinBatch<Channel>[];
+  readonly rejected: JoinLines<Channel>["rejected"];
 }
 
 // A comma would be read as a second Channel, and a space as the end of the list.
@@ -72,22 +84,25 @@ export const joinRejection = (channel: JoinChannel): JoinRejection | undefined =
 };
 
 /**
- * Batches Channels into `JOIN` Lines by byte length (SEND-11). Keys are positional, so
- * keyed Channels go first and each Line's keys line up with its first Channels. An
- * empty key is no key.
- * @param channels - The Channels to join.
- * @returns The Lines, and any Channel that fits in none of them, with the reason.
+ * Batches Channels into `JOIN` Lines by byte length (SEND-11), saying which Channels each
+ * carries, so that a caller can tell which keys went where. Keys are positional, so keyed
+ * Channels go first and each Line's keys line up with its first Channels. An empty key is
+ * no key.
+ * @param channels - The Channels to join, with anything else a caller wants kept.
+ * @returns The Lines with their Channels, and any Channel that fits in none of them.
  */
-export const joinLines = (channels: readonly JoinChannel[]): JoinLines => {
-  const lines: OutboundLine[] = [];
-  const rejected: { channel: JoinChannel; reason: JoinRejection }[] = [];
-  let batch: JoinChannel[] = [];
+export const joinBatches = <Channel extends JoinChannel>(
+  channels: readonly Channel[]
+): JoinBatches<Channel> => {
+  const batches: JoinBatch<Channel>[] = [];
+  const rejected: { channel: Channel; reason: JoinRejection }[] = [];
+  let batch: Channel[] = [];
 
   const flush = () => {
     const built = joinLine(batch);
 
     if (batch.length > 0 && built._tag === "Safe") {
-      lines.push(built.line);
+      batches.push({ channels: batch, line: built.line });
     }
   };
 
@@ -111,5 +126,19 @@ export const joinLines = (channels: readonly JoinChannel[]): JoinLines => {
 
   flush();
 
-  return { lines, rejected };
+  return { batches, rejected };
+};
+
+/**
+ * Batches Channels into `JOIN` Lines by byte length (SEND-11), as {@link joinBatches}
+ * does, for a caller that only wants the Lines.
+ * @param channels - The Channels to join.
+ * @returns The Lines, and any Channel that fits in none of them, with the reason.
+ */
+export const joinLines = <Channel extends JoinChannel>(
+  channels: readonly Channel[]
+): JoinLines<Channel> => {
+  const { batches, rejected } = joinBatches(channels);
+
+  return { lines: batches.map(({ line }) => line), rejected };
 };

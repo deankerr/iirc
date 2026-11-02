@@ -1,10 +1,12 @@
 import { SqliteClient, SqliteMigrator } from "@effect/sql-sqlite-bun";
 import { Duration, Effect, Predicate } from "effect";
-import type { Scope } from "effect";
+import type { FileSystem, Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 
 import { StorageFailed } from "./errors.ts";
+import { prepareMigrations } from "./migrations.ts";
+import type { LogTooNew } from "./migrations.ts";
 
 // Long enough for a checkpoint on the reader's connection, and short enough that the
 // event loop never notices, because `bun:sqlite` waits synchronously.
@@ -53,7 +55,20 @@ const migrations = SqliteMigrator.fromRecord({
     yield* sql`CREATE INDEX entries_by_kind ON entries (kind, sequence)`;
     yield* sql`CREATE INDEX entries_by_network_and_kind ON entries (network, kind, sequence)`;
   }),
+  // Adds to the Log and rewrites nothing in it: a row from before reads its new columns
+  // as NULL, and `rows.ts` decodes that as what the row meant then (RUN-5).
+  "2_logins_and_redaction": Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    yield* sql`ALTER TABLE entries ADD COLUMN services TEXT`;
+    yield* sql`ALTER TABLE entries ADD COLUMN login_lines INTEGER`;
+    yield* sql`ALTER TABLE entries ADD COLUMN redacted TEXT`;
+    yield* sql`ALTER TABLE entries ADD COLUMN redacted_by INTEGER`;
+  }),
 });
+
+/** Every migration this binary knows, in order (RUN-5). A test may add to them. */
+export const logMigrations: SqliteMigrator.Loader = migrations;
 
 // A derived table is no part of the Log, so it is here and not in a migration: anyone
 // may drop it, and the next start brings it back for the rebuild to fill (LOG-10).
@@ -114,13 +129,20 @@ const configure = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) {
 });
 
 /**
- * Opens the Log's database, ready to use, until the enclosing scope closes.
+ * Opens the Log's database, ready to use, until the enclosing scope closes. A Log newer
+ * than the binary is refused, and one with migrations to run is backed up first (RUN-5).
  * @param dataDir - The directory holding `iirc.sqlite`, which must exist.
+ * @param loader - The migrations to run, which only a test changes.
  * @returns The client, on a connection set up for durable writes.
  */
 export const openDatabase = (
-  dataDir: string
-): Effect.Effect<SqlClient.SqlClient, StorageFailed, Scope.Scope> =>
+  dataDir: string,
+  loader: SqliteMigrator.Loader = logMigrations
+): Effect.Effect<
+  SqlClient.SqlClient,
+  LogTooNew | StorageFailed,
+  FileSystem.FileSystem | Scope.Scope
+> =>
   Effect.gen(function* () {
     // WAL is requested below instead, where the answer can be checked.
     const sql = yield* SqliteClient.make({
@@ -130,9 +152,8 @@ export const openDatabase = (
     });
 
     yield* configure(sql);
-    yield* SqliteMigrator.run({ loader: migrations }).pipe(
-      Effect.provideService(SqlClient.SqlClient, sql)
-    );
+    yield* prepareMigrations(sql, dataDir, loader);
+    yield* SqliteMigrator.run({ loader }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
     yield* createDerivedTables(sql);
 
     return sql;

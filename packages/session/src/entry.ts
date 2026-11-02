@@ -48,13 +48,29 @@ export type NewEntry =
       readonly cut?: boolean;
       readonly direction: "inbound" | "outbound";
       readonly network: NetworkId;
+      /**
+       * The names of the Credentials whose values were taken out of `bytes`, each leaving
+       * `<redacted>` in its place (LOG-6). One name for each `<redacted>`, in the order they
+       * stand in `bytes`, so a Credential taken out twice is named twice. Absent when
+       * nothing was.
+       */
+      readonly redacted?: readonly string[];
+      /**
+       * The sequence of the Change whose `admin` key emptied `bytes`, once one has (LOG-7).
+       * Only the Log sets it, after the Entry was recorded.
+       */
+      readonly redactedBy?: number;
     }
   | (ConnectionFields & {
+      /** How many Lines the login sequence holds, `IDENTIFY` included (CONN-6). */
+      readonly loginLines: number;
       /** Every nick this Connection may try, in order, so replay makes the same choices. */
       readonly nicks: readonly string[];
       readonly phase: "attempt";
       /** The rest of what the machine ran with, for the same reason as `nicks`. */
       readonly realname: string;
+      /** The nicks whose `NOTICE` can be a sign of login (CONN-6). */
+      readonly services: readonly string[];
       /** The whole Tuning the Connection ran with, and not just what the Owner changed. */
       readonly tuning: Tuning;
       readonly username: string;
@@ -99,6 +115,10 @@ export type NewEntry =
       readonly network: NetworkId;
       /** Why it was not sent. */
       readonly reason: string;
+      /** As a Line Entry's: the Credentials taken out of `bytes` (LOG-6). */
+      readonly redacted?: readonly string[];
+      /** As a Line Entry's: the Change that emptied `bytes` (LOG-7). */
+      readonly redactedBy?: number;
     }
   | {
       readonly _tag: "Deadline";

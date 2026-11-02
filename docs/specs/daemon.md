@@ -26,11 +26,11 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
 - **LOG-1.** There is one Log per Daemon. Sequence numbers are global, start at 1, have no gaps, and are never reused, so one cursor can resume everything.
 - **LOG-2.** An Entry is one of:
   - **Line:** one Line in either direction, with its Network, its Connection, and a cause if outbound.
-  - **Connection:** an attempt, opening, closing, or close, with the Ircd, TLS details, and reason. An attempt names the nicks it will try. An opening over TLS records the protocol, the cipher, the pin of the key the Ircd presented, and whether a certificate authority or a pin verified it (CONN-1).
+  - **Connection:** an attempt, opening, closing, or close, with the Ircd, TLS details, and reason. An attempt names the nicks it will try, how many Lines its login sequence holds, and which nicks are services (CONN-6). An opening over TLS records the protocol, the cipher, the pin of the key the Ircd presented, and whether a certificate authority or a pin verified it (CONN-1).
     - Closing is recorded whenever the Daemon decides to end a Connection, with its reason and whether it chose to leave (LIVE-9). Only a chosen leave is not a failure.
     - A close says whether it was a refusal (LIVE-5). A refusal seen while a close is under way outranks the reason that started it, because a Network that bans us at accept closes the socket before we can read why.
     - A Connection the Log could not close, because appends were failing (LOG-9), gets its close once appends succeed, with that reason, so that it is never mistaken for a killed process.
-  - **Change:** something the Owner altered, such as Configuration, a Read Marker, an ignore, or an API key, with the name of the key that altered it, or `local` for `iirc key create` (AUTH-4), and the Network it concerns, if any.
+  - **Change:** something the Owner altered, such as Configuration, a Read Marker, an ignore, or an API key, with the name of the key that altered it, `local` for `iirc key create` (AUTH-4), or `mode` for a Channel key a Network set (CRED-4), and the Network it concerns, if any.
   - **Daemon:** a start or stop, with its version.
   - **Dropped:** an outbound Line that was queued and never written, or whose write did not complete, with the reason. A Line counts as written once the kernel has taken it, not once a buffer in the process has.
   - **Deadline:** a timer that expired with no trace on the wire, such as the end of the login wait (CONN-6) or the burst (CONN-7). Without it, past state could not derive those phases.
@@ -49,10 +49,16 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
 - **LOG-6.** Credentials the Daemon holds stay out of the Log. Both layers run before an append, in both directions:
   - **Typed operations:** a Line built from a Credential is marked sensitive where it is constructed.
   - **Value scrubbing:** any stored Credential value found in any Line is replaced, whatever the command. This catches an echo, or the Owner pasting a password.
-  - A redacted Entry keeps the rest of its Line and is marked redacted.
+  - A redacted Entry keeps the rest of its Line and is marked redacted, with the names of the Credentials removed. Each removed value becomes `<redacted>`, and the names go in the order those stand in the Line, one for each and a Credential removed twice named twice, so that the nth `<redacted>` is the nth name.
+  - Scrubbing matches a value only as a whole word, bounded by the Line's start or end, a space, `:`, or `,`. A Channel key such as `pizza` would otherwise redact the word in every Message.
+  - The host acts on the Entry as recorded, never on the bytes before scrubbing, so replay agrees with what happened.
   - A secret the Daemon never held, such as a password typed to a service, is recorded like any other Line, and LOG-7 can remove it.
 - **LOG-7.** Entries are never edited or deleted by normal operation.
   - An `admin` key can redact an Entry's bytes, for the day a secret gets through. The Entry and its sequence remain, and a Change records who redacted it.
+  - Redaction empties the bytes and marks the Entry redacted. Derived rows from it are derived again, so a Message it carried disappears.
+  - Only a Line or a Dropped Entry has bytes to redact. The edit and its Change are one transaction, and the Entry names that Change.
+  - Every derived table is derived again in that transaction, as a start would, so a restart reads what it leaves (LOG-10). It holds the writer as long as a start's rebuild takes, which suits something done on a rare day.
+  - `Standing` keeps what the host knew until the next start, because a Connection under way acted on the Line as it was. A start replays a redacted Line as one with no bytes, which says nothing, so what only it told `Standing` is forgotten, such as a kick, `NICKLEN`, a `JOIN` failure, or a sign of login. What was recorded because of it still stands, such as a `closed` that was a refusal. Rows derived from later Entries follow the replay and not `Standing`, so that they are the rows a rebuild writes.
   - Deferred: pruning and retention. Nothing is pruned until we know what a year of Log costs, including large `LIST` replies.
 - **LOG-8.** Times are when the Daemon recorded the Entry. Order comes from sequence numbers, never from clocks, because clocks can jump.
   - No wait for a reconnect is ever longer than its own delay from now, so a clock set back cannot keep a Network offline.
@@ -74,7 +80,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 - **CONF-1.** Configuration is a projection of Change Entries. There is no second source of truth, and its full history is inspectable.
 - **CONF-2.** All Configuration can be read and changed through the API while the Daemon runs. A running Session applies a change without a restart where IRC allows it, and otherwise at the next Connection.
   - Applied at once: enabled, Channels, and the `QUIT` reason. A Channel taken off the list is parted if Self is in it, and a newly wanted one is joined. Turning autojoin off parts nothing, because it only stops the Daemon joining.
-  - Applied at the next Connection: Ircds, Identity, and Tuning. A change to any of them retries straight away (LIVE-4), so a Network waiting out a backoff or a refusal picks it up at once.
+  - Applied at the next Connection: Ircds, Identity, Credentials, services, connect commands, and Tuning. A change to any of them retries straight away (LIVE-4), so a Network waiting out a backoff or a refusal picks it up at once.
 - **CONF-3.** A Network has a stable ID and a display name, plus an enabled flag and these settings. The ID is up to 32 lowercase letters, digits, and `-`, starting with a letter or digit, and the Owner chooses it. Connect and disconnect set the enabled flag.
   - **Ircds:** an ordered list of host, port, TLS on or off, and an optional pinned key.
   - **Identity:** nick, alternate nicks, username, and realname.
@@ -101,10 +107,20 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 ### Credentials
 
 - **CRED-1.** Credentials live outside the Log, behind one `Credentials` service, and Configuration refers to them by name. The service uses `Bun.secrets` where a keyring is available, and otherwise a file with mode `0600` in the data directory. Status shows which.
+  - Once the keyring holds them, a marker file in the data directory says so. A start that finds the marker and no keyring refuses, rather than begin again with none.
+  - A start refuses a `credentials.json` looser than `0600`, because other users may already have read it, and says to rotate what it holds. It never loosens or tightens the mode itself.
+  - A name is up to 64 lowercase letters, digits, `.`, `_`, and `-`, starting with a letter or digit.
+  - Setting or deleting a Credential is a Change that records its name, never its value. It counts as a relevant Change (CONF-2) for every Network whose Connections use it.
+  - A Channel key only has the host build its next `JOIN` with the key as it is now. A Network sets keys itself, and would otherwise skip its own backoff by setting one each time it closed a Connection.
+  - The file is replaced atomically, so a crash leaves the old value or the new one.
+  - Configuration may refer to a name that is not set yet, so that a file can be imported first. Such a Network makes no `attempt`, and status lists the missing names.
 - **CRED-2.** They are write-only through the API. A Frontend can set, replace, or delete a Credential and can see that it exists, but can never read it.
 - **CRED-3.** In memory they stay in `Redacted` values, so they cannot reach logs, traces, errors, or API responses.
 - **CRED-4.** Channel keys are Credentials.
   - A key given to Join is stored. It is updated on an observed `MODE +k`, deleted on `-k`, and a key shown as `*` is ignored.
+  - A key is stored under the name the Channel gives it. For a Channel that gives none, the name is `key.` and the first 16 hex digits of the SHA-256 of the Network's ID, a NUL, and the Channel as it is compared, so it is the same however the Owner spells the Channel. The Channel then names it.
+  - The Credential is stored, then its Change is recorded, with `by` set to `mode` or the Join's key name, and only then does the Channel name it.
+  - A Join that is not to be remembered stores nothing, and its `JOIN` is sensitive like any other, so the Log has `<redacted>` in place of the key.
   - Once stored, a key is scrubbed like any other Credential (LOG-6). A `+k` seen for the first time is recorded as it arrived.
 
 ## Connections and Sessions
@@ -129,6 +145,9 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - A refused attempt is linked to its cause and is not shown as a failure.
   - It stops and reports on `432`, on a rename by services, or on a refusal that retrying cannot fix, such as Ergo's `force-nick-equals-account`.
 - **CONN-6.** After registration the Daemon sends connect commands, then joins.
+  - Once the burst is complete (CONN-7), it sends `PRIVMSG <service> :IDENTIFY [account] <password>` if a service password is configured, then each connect command in order, through the interactive lane.
+  - A connect command is one Line of text in which `{{name}}` stands for the Credential of that name. A Line with one is sensitive (LOG-6). The causes are `identify` and `connect-command`.
+  - The login wait's end is a Deadline Entry. A failure sign, such as `904` or a `NOTICE` from the service saying the password is wrong, also ends it, and status shows the service's words.
   - If a service password was sent, joining waits for login, ending early on a sign such as `900`, `+r` on Self, or a login `NOTICE` from the service.
   - The wait lasts at most 2 seconds, measured from when the last connect command was written. A bare Network offers no reliable signal, so this limit is the floor.
   - `PASS account:password` logs in before the nick is claimed where an Ircd supports it, such as Ergo. It avoids this race, and it is recommended where it works.
@@ -367,6 +386,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | Storage       | Set and delete a Frontend's stored values                             |
 | Credentials   | Set, replace, and delete                                              |
 | Redaction     | Remove an Entry's bytes (LOG-7)                                       |
+| Backup        | Write a copy of the Log to `backups/` (RUN-2)                         |
 | Keys          | Create, list, and revoke API keys                                     |
 
 - **API-7.** Convenience such as `/op` or `/ban` is a Frontend's job, built on the modes operation. The API stays small.
@@ -406,8 +426,10 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 ## Running it
 
 - **RUN-1.** `bun build --compile` produces one executable, `iirc`, with a systemd user service that restarts it on failure. Arguments choose the [deployment shape](architecture.md#deployment-shapes).
+  - The service is a template, `iirc@.service`, so one machine can run several Daemons, as the soak test does. Instance `x` keeps its data in `~/.local/state/iirc/x` and reads its environment, such as `IIRC_HTTP_PORT`, from `~/.config/iirc/x.env`.
   - Deferred: an RPM, once the executable is stable.
-- **RUN-2.** Backup uses `VACUUM INTO` from a read connection, so it is safe while running. Credentials held in `Bun.secrets` are not part of a backup.
+- **RUN-2.** Backup uses `VACUUM INTO` from a read connection, so it is safe while running. Credentials are not part of a backup, wherever they are held.
+  - An `admin` key asks for one through the API, and it is written to `backups/` in the data directory, never to a path a request names.
 - **RUN-3.** A restart is safe at any moment. The new process starts new Sessions, records the Gap, and resumes every Frontend from its cursor.
   - `SIGTERM` and `SIGINT` are a clean stop: the Network goes first (LIVE-9), then a Daemon `stopped` Entry, then the Log, and the process exits 0.
 - **RUN-4.** The Daemon takes an exclusive lock on its data directory, so that two processes can never hold Sessions for one Log. The lock releases itself if the process is killed.
@@ -423,6 +445,8 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - It checks two Networks on two Ircds, where one going down leaves the other's Sends flowing (HOST-5, CONF-3), and Join and Part, seen live and kept across a restart (CONF-2, CONF-5).
   - It checks export and import of Configuration, including a refused file (CONF-6), and keys by scope and after revoking (AUTH-1 to AUTH-3).
   - It checks TLS pinning against a self-signed certificate (CONN-1). Against an ngircd built without TLS it skips that check and says so.
+  - It checks `PASS` (CONN-2), a service login that waits out the login wait and a connect command (CONN-6), and a Channel key from a Join, kept across a restart and replaced by a `MODE +k` (CRED-4). It checks that a missing Credential holds every `attempt` back until it is set (CRED-1), and that a backup passes `quick_check` (RUN-2). No Credential's value is in the Log's files or the backup, but for the first `+k` (LOG-6).
+  - It checks a TLS client certificate by the fingerprint ngircd says it saw. Against an ngircd without TLS, or one that never says, it skips that check and says so.
 - **PROOF-4.** Kill tests send `SIGKILL` during traffic, then check that no recorded Line is missing or duplicated and that projections rebuild identically. This does not test power loss, which rests on `synchronous=FULL`.
 - **PROOF-5.** Soak test: two Daemons share a Channel on the floor Ircd, one sends a counted Message each minute, and the other checks that none are missing. The first proof in the vision is 30 days of this passing on a real Network as well, with every Gap explained.
 
@@ -516,6 +540,9 @@ Milestone 1 is built in this order, each step a working Daemon:
    - AUTH-1 to AUTH-5, and AUTH-6's rule that keys travel in headers. Its WebSocket and AUTH-7's cookie come with the web frontend in milestone 4.
    - Every Network flag leaves `iirc daemon`, which takes only a data directory and a listen address (CONF-4).
 4. Credentials, CONN-2's `PASS`, CONN-6, and the service unit.
+   - That is CRED-1 to CRED-4, LOG-6, LOG-7, CONF-3's Credentials, services, and connect commands, and Channel keys for Join (CONF-5).
+   - Also RUN-2 and RUN-5, because the soak test freezes the Log format, and every change after it needs a migration and a backup.
+   - SASL details wait for milestone 5. A TLS client certificate is a Credential holding the certificate and key in PEM.
 
 The soak test (PROOF-5) starts after step 4 and runs in the background. Nothing waits for it, and the Daemon runs alongside whatever IRC client the Owner uses.
 

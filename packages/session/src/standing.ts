@@ -1,14 +1,18 @@
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import type { JoinChannel } from "@iirc/protocol/join";
 import { parseFrame } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
+import { loginSign } from "@iirc/protocol/login";
+import { modeTypes, parseModes, withModeTokens } from "@iirc/protocol/mode";
+import type { ModeTokens } from "@iirc/protocol/mode";
 import { nickCandidates } from "@iirc/protocol/nick";
 import { isRefusal } from "@iirc/protocol/refusal";
 import { initialState, reduce } from "@iirc/state";
 import type { JoinFailure, SessionState } from "@iirc/state";
 import type { Array as Arr } from "effect";
 
+import { connectCommandCause, identifyCause } from "./credentials.ts";
 import type { Entry, Ircd, NetworkId } from "./entry.ts";
+import { redactedText } from "./redact.ts";
 
 /** A place in the Log. */
 export interface Moment {
@@ -47,12 +51,32 @@ export type Registration =
     }
   | { readonly _tag: "Abandoned" };
 
+/**
+ * Where a login to services stands (CONN-6). `waiting` starts with an `IDENTIFY` written,
+ * and the rest are how the wait ended, with the service's own words where it gave any.
+ */
+export interface Login {
+  readonly state: "none" | "waiting" | "succeeded" | "failed" | "timedOut";
+  readonly text?: string;
+}
+
+/** How far a Connection's login sequence has got, by the machine's own rules (CONN-6). */
+export interface LoginProgress extends Login {
+  /** How many Lines its `attempt` said the sequence holds. */
+  readonly lines: number;
+  /** How many of them have been written or Dropped. */
+  readonly seen: number;
+  /** The nicks whose `NOTICE` can be a sign, as its `attempt` named them. */
+  readonly services: readonly string[];
+}
+
 /** A Connection with no end recorded yet. It may not have reached the Ircd. */
 export interface LiveConnection {
   /** Set once the Daemon has decided to end it. */
   readonly closing: Closing | undefined;
   /** Its latest Entry, which is where it ended if the process was killed. */
   readonly last: Moment;
+  readonly login: LoginProgress;
   readonly network: NetworkId;
   /** The nicks its `attempt` named, in the order they are tried. */
   readonly nicks: readonly string[];
@@ -143,6 +167,8 @@ export interface Standing {
   readonly lagChecks: readonly LagCheck[];
   /** The round trip of the latest lag check answered on this Connection. */
   readonly lagMillis: number | undefined;
+  /** `PREFIX` and `CHANMODES` as this Session last heard them, to read a `MODE` by (KNOW-6). */
+  readonly modeTokens: ModeTokens;
   /** The Network this belongs to, which is whichever one it first heard of. */
   readonly network: NetworkId | undefined;
   /** `NICKLEN` from the last Session that gave one (CONN-4). */
@@ -167,8 +193,15 @@ export interface StandingStep {
   readonly line: Line | undefined;
 }
 
+/** A Channel to `JOIN`, with its key by Credential name (CRED-4). */
+export interface PlannedChannel {
+  /** The name of the Credential holding its key, if it has one. */
+  readonly key?: string;
+  readonly name: string;
+}
+
 /** A Channel Configuration wants Self in. */
-export interface WantedChannel extends JoinChannel {
+export interface WantedChannel extends PlannedChannel {
   /** Go back after a kick, once `kickRejoinMillis` has passed (LIVE-8). */
   readonly rejoinOnKick?: boolean;
   /**
@@ -191,8 +224,23 @@ export interface NextAttempt {
 
 /** What to `JOIN` now, and when the answer could next differ if nothing else happens. */
 export interface JoinPlan {
-  readonly channels: readonly JoinChannel[];
+  readonly channels: readonly PlannedChannel[];
   readonly lookAgainAt: number | undefined;
+}
+
+/** A Channel's key, as a `MODE` on it set it or took it away (CRED-4). */
+export interface KeyChange {
+  /** The Channel, as the `MODE` spelled it. */
+  readonly channel: string;
+  /** The `MODE` that did it, as recorded. */
+  readonly entry: Entry;
+  /** The key as recorded, or nothing for a key taken away. */
+  readonly key: string | undefined;
+  /**
+   * Which `<redacted>` of the Line the key is, and how many the Line holds, when the key
+   * was scrubbed. The Entry's `redacted` names them in that order (LOG-6).
+   */
+  readonly placeholder: { readonly of: number; readonly slot: number } | undefined;
 }
 
 type ConnectionEntry = Extract<Entry, { readonly _tag: "Connection" }>;
@@ -206,6 +254,8 @@ type DaemonEntry = Extract<Entry, { readonly _tag: "Daemon" }>;
 type LineEntry = Extract<Entry, { readonly _tag: "Line" }>;
 
 type DeadlineEntry = Extract<Entry, { readonly _tag: "Deadline" }>;
+
+type DroppedEntry = Extract<Entry, { readonly _tag: "Dropped" }>;
 
 // A Network chooses what goes in these, so each is bounded and drops its oldest. A real
 // Network stops far short of this many Channels, and past it, only that Network suffers.
@@ -234,6 +284,7 @@ export const noStanding: Standing = {
   kicked: noChannels,
   lagChecks: [],
   lagMillis: undefined,
+  modeTokens: {},
   network: undefined,
   nickLength: undefined,
   recent: [],
@@ -297,6 +348,7 @@ const withoutSession = (standing: Standing): Standing => ({
   channels: noChannels,
   lagChecks: [],
   lagMillis: undefined,
+  modeTokens: {},
   self: undefined,
 });
 
@@ -349,7 +401,7 @@ const endedWithoutClose = (standing: Standing, reason: string): Standing =>
       });
 
 const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
-  const { at, ircd, network, nicks, sequence } = entry;
+  const { at, ircd, loginLines, network, nicks, sequence, services } = entry;
 
   return {
     ...withoutSession(endedWithoutClose(standing, killed)),
@@ -357,6 +409,7 @@ const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
     connection: {
       closing: undefined,
       last: { at, sequence },
+      login: { lines: loginLines, seen: 0, services, state: "none" },
       network,
       nicks,
       registration: { _tag: "Connecting" },
@@ -454,6 +507,54 @@ const afterAsked = (standing: Standing, { at }: Entry, channels: string | undefi
   }
 
   return { ...standing, asked };
+};
+
+const withLogin = (standing: Standing, login: LoginProgress): Standing =>
+  standing.connection === undefined
+    ? standing
+    : { ...standing, connection: { ...standing.connection, login } };
+
+// Each Line of the login sequence counts once it is written or Dropped, and only an
+// `IDENTIFY` written starts a wait, as the machine has it (CONN-6).
+const afterLoginLine = (
+  standing: Standing,
+  { cause }: LineEntry | DroppedEntry,
+  written: boolean
+): Standing => {
+  const login = standing.connection?.login;
+
+  if (login === undefined || (cause !== identifyCause && cause !== connectCommandCause)) {
+    return standing;
+  }
+
+  const identified = written && cause === identifyCause && login.state === "none";
+
+  return withLogin(standing, {
+    ...login,
+    seen: login.seen + 1,
+    ...(identified && { state: "waiting" }),
+  });
+};
+
+// A sign settles a wait, and one that comes after the wait ran out still says how the
+// login went, which is what the Owner wants to see (CONN-6).
+const afterLoginSign = (standing: Standing, line: Line): Standing => {
+  const login = standing.connection?.login;
+
+  if (login?.state !== "waiting" && login?.state !== "timedOut") {
+    return standing;
+  }
+
+  const sign = loginSign(line, login.services);
+
+  if (sign === undefined) {
+    return standing;
+  }
+
+  const { lines, seen, services } = login;
+  const state = sign._tag === "LoggedIn" ? "succeeded" : "failed";
+
+  return withLogin(standing, { lines, seen, services, state, text: sign.text });
 };
 
 const afterOutbound = (standing: Standing, entry: LineEntry, line: Line): Standing => {
@@ -655,8 +756,18 @@ const kicksOf = (line: Line): readonly Line[] => {
     .filter(({ params: [channel] }) => channel !== "");
 };
 
+// A Session's `PREFIX` and `CHANMODES`, which only an `RPL_ISUPPORT` changes (KNOW-2).
+const afterTokens = (standing: Standing, line: Line): Standing =>
+  line.command === "005" && standing.connection?.registration._tag === "Welcomed"
+    ? { ...standing, modeTokens: withModeTokens(standing.modeTokens, line.params.slice(1)) }
+    : standing;
+
 const afterInbound = (standing: Standing, entry: LineEntry, line: Line): Standing => {
-  const answered = line.command === "PONG" ? afterPong(standing, entry, line) : standing;
+  const answered = afterTokens(
+    afterLoginSign(line.command === "PONG" ? afterPong(standing, entry, line) : standing, line),
+    line
+  );
+
   const step = registrationStep(answered.connection, line);
 
   switch (step._tag) {
@@ -709,12 +820,15 @@ const afterDeadline = (standing: Standing, entry: DeadlineEntry): Standing => {
   }
 
   const timedOut = entry.name === "registration" && connection.registration._tag === "Registering";
+  const loginOver = entry.name === "login" && connection.login.state === "waiting";
 
-  return withLast(
-    standing,
-    timedOut ? { ...connection, registration: { _tag: "Abandoned" } } : connection,
-    entry
-  );
+  const next: LiveConnection = {
+    ...connection,
+    ...(timedOut && { registration: { _tag: "Abandoned" } }),
+    ...(loginOver && { login: { ...connection.login, state: "timedOut" } }),
+  };
+
+  return withLast(standing, next, entry);
 };
 
 const afterLine = (standing: Standing, entry: LineEntry, line: Line | undefined): Standing => {
@@ -727,7 +841,7 @@ const afterLine = (standing: Standing, entry: LineEntry, line: Line | undefined)
 
   return entry.direction === "inbound"
     ? afterInbound(seen, entry, line)
-    : afterOutbound(seen, entry, line);
+    : afterOutbound(afterLoginLine(seen, entry, true), entry, line);
 };
 
 // An unparseable Line stays an Entry, but it says nothing. Nor does a cut one, because a
@@ -772,7 +886,9 @@ const advance = (standing: Standing, entry: Entry, line: Line | undefined): Stan
     }
 
     case "Dropped": {
-      return own.connection === undefined ? own : withLast(own, own.connection, entry);
+      return own.connection === undefined
+        ? own
+        : afterLoginLine(withLast(own, own.connection, entry), entry, false);
     }
 
     default: {
@@ -824,6 +940,31 @@ export const foldStandings = (
 
   return folded;
 };
+
+/**
+ * Where the current Connection's login to services stands (CONN-6).
+ * @param standing - The Network's Standing.
+ * @returns The state, with the service's own words if it gave any.
+ */
+export const loginOf = ({ connection }: Standing): Login => {
+  if (connection === undefined) {
+    return { state: "none" };
+  }
+
+  const { state, text } = connection.login;
+
+  return text === undefined ? { state } : { state, text };
+};
+
+/**
+ * Whether joining may go on: every Line of the login sequence is out, and no login wait
+ * is still running (CONN-6). Nothing waits with no Connection under way.
+ * @param standing - The Network's Standing.
+ * @returns Whether the login is settled.
+ */
+export const isLoginSettled = ({ connection }: Standing): boolean =>
+  connection === undefined ||
+  (connection.login.seen >= connection.login.lines && connection.login.state !== "waiting");
 
 const isStable = ({ sessionMillis }: EndedConnection, tuning: Tuning) =>
   sessionMillis !== undefined && sessionMillis >= tuning.stableAfterMillis;
@@ -1025,11 +1166,16 @@ export const joinPlan = (
   now: number,
   tuning: Tuning
 ): JoinPlan => {
-  const channels: JoinChannel[] = [];
+  const channels: PlannedChannel[] = [];
   let lookAgainAt: number | undefined;
 
-  // Sends are refused once a close has begun (LIVE-11).
-  if (sessionSince(standing) === undefined || standing.connection?.closing !== undefined) {
+  // Sends are refused once a close has begun (LIVE-11). Joining waits for the login
+  // sequence and any login wait, which say when they are over (CONN-6).
+  if (
+    sessionSince(standing) === undefined ||
+    standing.connection?.closing !== undefined ||
+    !isLoginSettled(standing)
+  ) {
     return { channels, lookAgainAt };
   }
 
@@ -1050,4 +1196,83 @@ export const joinPlan = (
   }
 
   return { channels, lookAgainAt };
+};
+
+const placeholdersIn = (text: string) => text.split(redactedText).length - 1;
+
+// The last `k` a `MODE` touches is the key it leaves. A key shown as `*` is hidden, and says
+// nothing of what the key is (CRED-4, KNOW-6). It also says which placeholder of the Line
+// the key is when it was scrubbed, counted from the end: what stands in the parameters after
+// it is read as it is, and the whole Line's count is the rest.
+const keyLeft = (
+  standing: Standing,
+  line: Line,
+  entry: Entry
+): Pick<KeyChange, "key" | "placeholder"> | undefined => {
+  const parsed = parseModes(line.params.slice(1), modeTypes(standing.modeTokens));
+  const at = parsed.changes.findLastIndex(({ letter }) => letter === "k");
+  const last = parsed.changes[at];
+
+  if (parsed._tag === "Uneven" || last === undefined) {
+    return undefined;
+  }
+
+  if (!last.adding) {
+    return { key: undefined, placeholder: undefined };
+  }
+
+  if (last.param === undefined || last.param === "*") {
+    return undefined;
+  }
+
+  if (last.param !== redactedText || entry._tag !== "Line") {
+    return { key: last.param, placeholder: undefined };
+  }
+
+  // Each change that took a parameter took the next one after the letters, so the key's
+  // is as far along as the changes before it that took one.
+  const index = 2 + parsed.changes.slice(0, at).filter(({ param }) => param !== undefined).length;
+
+  const of = placeholdersIn(new TextDecoder("latin1").decode(entry.bytes));
+  const after = placeholdersIn(line.params.slice(index + 1).join(" "));
+
+  return { key: last.param, placeholder: { of, slot: of - 1 - after } };
+};
+
+/**
+ * The Channel keys that inbound `MODE` Lines set or took away, each read with `PREFIX`
+ * and `CHANMODES` as they stood at its Entry, and only on a Channel Self was in then
+ * (CRED-4). A `MODE` whose parameters do not add up says nothing.
+ * @param standing - The Network's Standing before the first of `entries`.
+ * @param entries - Entries recorded after it, in sequence order.
+ * @returns Each change, in order.
+ */
+export const channelKeyChanges = (
+  standing: Standing,
+  entries: Iterable<Entry>
+): readonly KeyChange[] => {
+  const changes: KeyChange[] = [];
+  let current = standing;
+
+  for (const entry of entries) {
+    const line = readLine(entry);
+    const [channel] = line?.params ?? [];
+
+    const isMode =
+      line?.command === "MODE" &&
+      entry._tag === "Line" &&
+      entry.direction === "inbound" &&
+      channel !== undefined &&
+      current.channels.has(channelKey(channel));
+
+    const left = isMode ? keyLeft(current, line, entry) : undefined;
+
+    if (left !== undefined && channel !== undefined) {
+      changes.push({ channel, entry, ...left });
+    }
+
+    current = advance(current, entry, line);
+  }
+
+  return changes;
 };

@@ -6,7 +6,7 @@ import { connect as connectTls } from "node:tls";
 import type { TLSSocket } from "node:tls";
 
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { Array as Arr, Context, Data, Duration, Effect, Layer, Option } from "effect";
+import { Array as Arr, Context, Data, Duration, Effect, Layer, Option, Redacted } from "effect";
 import type { Scope } from "effect";
 import { constVoid } from "effect/Function";
 import { Socket } from "effect/socket";
@@ -56,6 +56,42 @@ interface Dialed {
   readonly stream: NetSocket;
   readonly tls?: TlsDetails;
 }
+
+/** What a dial needs to know beyond the Ircd. */
+export interface DialOptions extends Pick<Tuning, "connectTimeoutMillis"> {
+  /**
+   * A TLS client certificate and its private key, as one PEM, which is how a Credential
+   * holds them. Any further certificates in it are sent as its chain.
+   */
+  readonly clientCertificate?: Redacted.Redacted;
+}
+
+/** A client certificate and its key, each as PEM, as `node:tls` takes them. */
+interface ClientIdentity {
+  readonly cert: string;
+  readonly key: string;
+}
+
+const pemBlock = /-----BEGIN (?<label>[A-Z0-9 ]+)-----[^-]*-----END \k<label>-----/gu;
+
+// A Credential holds the certificate and key together, and each goes its own way here.
+const clientIdentity = (pem: string): ClientIdentity | undefined => {
+  const blocks = Array.from(pem.matchAll(pemBlock), (match) => ({
+    label: match.groups?.label ?? "",
+    text: match[0],
+  }));
+
+  const certs = blocks.filter(({ label }) => label === "CERTIFICATE").map(({ text }) => text);
+  const key = blocks.find(({ label }) => label.endsWith("PRIVATE KEY"))?.text;
+
+  return certs.length > 0 && key !== undefined ? { cert: certs.join("\n"), key } : undefined;
+};
+
+const noIdentity = ({ host, port }: Ircd) =>
+  new ConnectFailed({
+    cause: "client certificate",
+    reason: `the client certificate for ${host}:${port} holds no certificate and private key`,
+  });
 
 /**
  * The pin of a certificate's key, as `curl --pinnedpubkey` reads it. The peer
@@ -114,7 +150,11 @@ const secured = (ircd: Ircd, stream: TLSSocket): Effect.Effect<Dialed, ConnectFa
 // SNI carries names only, and Node refuses an IP address there. Omitting it still
 // verifies, because the identity check falls back to `host`. A pinned Ircd is verified by
 // its pin alone, so the certificate and its name go unchecked (CONN-1).
-const dial = (ircd: Ircd, connectTimeoutMillis: number, onStream: (stream: NetSocket) => void) =>
+const dial = (
+  ircd: Ircd,
+  { connectTimeoutMillis, identity }: { connectTimeoutMillis: number; identity?: ClientIdentity },
+  onStream: (stream: NetSocket) => void
+) =>
   Effect.callback<Dialed, ConnectFailed | Socket.SocketError>((resume) => {
     const { host, pin, port } = ircd;
     let stream: NetSocket;
@@ -125,6 +165,7 @@ const dial = (ircd: Ircd, connectTimeoutMillis: number, onStream: (stream: NetSo
         port,
         rejectUnauthorized: pin === undefined,
         ...(isIP(host) === 0 && { servername: host }),
+        ...identity,
       });
 
       secure.once("secureConnect", () => {
@@ -320,29 +361,44 @@ export class Transport extends Context.Service<
   {
     readonly connect: (
       ircd: Ircd,
-      limits: Pick<Tuning, "connectTimeoutMillis">
+      options: DialOptions
     ) => Effect.Effect<Opened, ConnectFailed, Scope.Scope>;
   }
 >()("@iirc/session/Transport") {
   /**
    * TCP or TLS through Node's streams, sending SNI, and verifying certificates, or for a
-   * pinned Ircd, its key alone (CONN-1).
+   * pinned Ircd, its key alone (CONN-1). Over TLS it presents a client certificate if it
+   * is given one. Plaintext has nowhere to present one.
    */
   static readonly layer: Layer.Layer<Transport> = Layer.succeed(this, {
     connect: Effect.fn("Transport.connect")(function* (
       ircd: Ircd,
-      { connectTimeoutMillis }: Pick<Tuning, "connectTimeoutMillis">
+      { clientCertificate, connectTimeoutMillis }: DialOptions
     ) {
       const failedOn = (cause: Socket.SocketError) => connectFailed(ircd, cause);
+
+      const identity =
+        clientCertificate === undefined
+          ? undefined
+          : clientIdentity(Redacted.value(clientCertificate));
+
       let dialing: NetSocket | undefined;
+
+      if (clientCertificate !== undefined && identity === undefined) {
+        return yield* noIdentity(ircd);
+      }
 
       // In place before the dial, because a close can cancel one at any moment, and a
       // stream that connected just as that happened would otherwise have no owner.
       yield* Effect.addFinalizer(() => (dialing === undefined ? Effect.void : release(dialing)));
 
-      const { stream, tls } = yield* dial(ircd, connectTimeoutMillis, (opening) => {
-        dialing = opening;
-      }).pipe(Effect.catchTag("SocketError", (cause) => Effect.fail(failedOn(cause))));
+      const { stream, tls } = yield* dial(
+        ircd,
+        { connectTimeoutMillis, ...(identity !== undefined && { identity }) },
+        (opening) => {
+          dialing = opening;
+        }
+      ).pipe(Effect.catchTag("SocketError", (cause) => Effect.fail(failedOn(cause))));
 
       const { socket, unread } = streamSocket(stream);
 

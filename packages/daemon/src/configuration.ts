@@ -1,4 +1,5 @@
 import type { KeyScope, NetworkId, NetworkSettings } from "@iirc/api";
+import { templateReferences } from "@iirc/protocol/template";
 import { channelKey } from "@iirc/session/standing";
 import { Equal } from "effect";
 
@@ -25,8 +26,20 @@ export interface Key {
   readonly scope: KeyScope;
 }
 
+/** The last Change to a Credential, which a Network that refers to it will act on. */
+interface CredentialChange {
+  readonly sequence: number;
+  /** Whether that Change set it, rather than deleted it. */
+  readonly set: boolean;
+}
+
 /** What the Owner wants, and the keys that may ask for more, as of some Change (CONF-1). */
 export interface Configuration {
+  /**
+   * For each Credential name the Log has seen, its last Change (CRED-1). Its value is
+   * never here, and whether a value is kept now is for the Credentials service to say.
+   */
+  readonly credentials: ReadonlyMap<string, CredentialChange>;
   readonly keys: ReadonlyMap<string, Key>;
   readonly networks: ReadonlyMap<NetworkId, ConfiguredNetwork>;
 }
@@ -39,7 +52,11 @@ export interface RecordedChange {
 }
 
 /** Configuration before any Change. */
-export const noConfiguration: Configuration = { keys: new Map(), networks: new Map() };
+export const noConfiguration: Configuration = {
+  credentials: new Map(),
+  keys: new Map(),
+  networks: new Map(),
+};
 
 const isWanted = ({ autojoin }: NetworkSettings["channels"][number]) => autojoin;
 
@@ -58,13 +75,52 @@ const wantedSinceFor = (
     })
   );
 
-// Ircds, Identity, and Tuning apply at the next Connection, so a change to any of them is
-// worth one now (CONF-2), and so is a Network that is new.
+// Ircds, Identity, Credentials, services, connect commands, and Tuning apply at the next
+// Connection, so a change to any of them is worth one now (CONF-2), and so is a Network
+// that is new.
 const asksForRetry = (before: NetworkSettings | undefined, after: NetworkSettings) =>
   before === undefined ||
   !Equal.equals(before.ircds, after.ircds) ||
   !Equal.equals(before.identity, after.identity) ||
+  !Equal.equals(before.credentials, after.credentials) ||
+  !Equal.equals(before.connectCommands, after.connectCommands) ||
+  !Equal.equals(before.services, after.services) ||
   !Equal.equals(before.tuning, after.tuning);
+
+// The Credentials a Network's Connections use, by name: `PASS`, the service login, the
+// client certificate, and those its connect commands refer to (CONF-3).
+const connectionCredentials = ({
+  connectCommands,
+  credentials,
+}: NetworkSettings): ReadonlySet<string> =>
+  new Set([
+    ...(credentials.password === undefined ? [] : [credentials.password]),
+    ...(credentials.service === undefined ? [] : [credentials.service.password]),
+    ...(credentials.clientCertificate === undefined ? [] : [credentials.clientCertificate]),
+    ...connectCommands.flatMap(templateReferences),
+  ]);
+
+const holdsKey = ({ channels }: NetworkSettings, name: string) =>
+  channels.some(({ key }) => key === name);
+
+// A Credential a Network's Connections use asks for a retry (CRED-1, LIVE-4). A Channel
+// key only wakes the host, so that its reconciler builds the next `JOIN` with the key as
+// it is now: a Network sets a key itself with `+k`, and would otherwise skip its own
+// backoff by setting one each time it closes a Connection.
+const credentialChanged = (
+  networks: ReadonlyMap<NetworkId, ConfiguredNetwork>,
+  name: string,
+  sequence: number
+) =>
+  new Map(
+    [...networks].map(([id, network]) => {
+      if (connectionCredentials(network.settings).has(name)) {
+        return [id, { ...network, retrySince: sequence }] as const;
+      }
+
+      return [id, holdsKey(network.settings, name) ? { ...network } : network] as const;
+    })
+  );
 
 // The same object back for settings that did not change, so that a host watching its own
 // Network is not woken by a Change to another.
@@ -113,15 +169,21 @@ const withChannels = (
 
 const joined = (
   network: ConfiguredNetwork,
-  { name, rejoinOnKick }: Extract<Change, { readonly _tag: "ChannelJoined" }>["channel"],
+  {
+    key: credential,
+    name,
+    rejoinOnKick,
+  }: Extract<Change, { readonly _tag: "ChannelJoined" }>["channel"],
   sequence: number
 ) => {
   const key = channelKey(name);
   const { channels } = network.settings;
   const existing = channels.find((channel) => channelKey(channel.name) === key);
+  const keyName = credential ?? existing?.key;
 
   const channel = {
     autojoin: true,
+    ...(keyName !== undefined && { key: keyName }),
     name,
     rejoinOnKick: rejoinOnKick ?? existing?.rejoinOnKick ?? false,
   };
@@ -134,6 +196,17 @@ const joined = (
     new Map(network.wantedSince).set(key, sequence)
   );
 };
+
+// Only the key's name changes, so the Channel is as wanted, or as kicked, as it was.
+const keyNamed = (network: ConfiguredNetwork, name: string, key: string): ConfiguredNetwork => ({
+  ...network,
+  settings: {
+    ...network.settings,
+    channels: network.settings.channels.map((channel) =>
+      channelKey(channel.name) === channelKey(name) ? { ...channel, key } : channel
+    ),
+  },
+});
 
 const parted = (network: ConfiguredNetwork, name: string) => {
   const key = channelKey(name);
@@ -216,6 +289,12 @@ export const reduceConfiguration = (
       );
     }
 
+    case "ChannelKeyNamed": {
+      return updateNetwork(configuration, change.network, (network) =>
+        keyNamed(network, change.channel, change.key)
+      );
+    }
+
     case "ConfigurationReplaced": {
       return { ...configuration, networks: replaced(configuration, change.networks, sequence) };
     }
@@ -232,6 +311,23 @@ export const reduceConfiguration = (
       remaining.delete(change.name);
 
       return { ...configuration, keys: remaining };
+    }
+
+    case "CredentialSet":
+    case "CredentialDeleted": {
+      return {
+        ...configuration,
+        credentials: new Map(configuration.credentials).set(change.name, {
+          sequence,
+          set: change._tag === "CredentialSet",
+        }),
+        networks: credentialChanged(networks, change.name, sequence),
+      };
+    }
+
+    // The Log's own bytes changed, and Configuration did not (LOG-7).
+    case "EntryRedacted": {
+      return configuration;
     }
 
     default: {

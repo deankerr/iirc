@@ -986,7 +986,9 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
 });
 
 const machineInput = {
+  loginLines: 0,
   realname: "Claude Code",
+  services: [],
   // The host writes a registration Deadline Entry only once it is due, which a timeout of
   // 0 makes true of any that follows `opened`.
   tuning: { ...defaultTuning, registrationTimeoutMillis: 0 },

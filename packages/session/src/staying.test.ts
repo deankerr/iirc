@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
-import { Clock, Deferred, Effect, Exit, Fiber, Ref, References, Scope } from "effect";
+import { Clock, Deferred, Effect, Exit, Fiber, Redacted, Ref, References, Scope } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { Entry, Ircd, NewEntry } from "./entry.ts";
@@ -1261,12 +1261,13 @@ describe("LOG-4: commits", () => {
 });
 
 describe("LIVE-7, LIVE-8: the reconciler", () => {
-  it.effect("LIVE-7: joins once the burst is over, keyed Channels first, with cause `rejoin`", () =>
+  it.effect("LIVE-7, CRED-4: joins after the burst, keyed Channels first, as `rejoin`", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
 
       yield* host(ircd, {
-        channels: [{ name: "#plain" }, { key: "sesame", name: "#keyed" }],
+        channels: [{ name: "#plain" }, { key: "key.keyed", name: "#keyed" }],
+        secrets: new Map([["key.keyed", Redacted.make("sesame")]]),
       });
       yield* ircd.read(welcome);
       yield* settled;
@@ -1282,6 +1283,8 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       const join = linesOf(yield* entries).find(({ cause }) => cause === "rejoin");
 
       assert.isDefined(join);
+      assert.strictEqual(decode(join.bytes), "JOIN #keyed,#plain <redacted>");
+      assert.deepStrictEqual(join.redacted, ["key.keyed"]);
     }).pipe(memory)
   );
 

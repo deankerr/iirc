@@ -1,4 +1,4 @@
-import { Option, Predicate, Schema, SchemaGetter } from "effect";
+import { Effect, Option, Predicate, Schema, SchemaGetter } from "effect";
 
 // NULL in a column is a field the record does not have, and so is absence in a row.
 const nullable = <S extends Schema.Top>(schema: S) =>
@@ -9,7 +9,20 @@ const nullable = <S extends Schema.Top>(schema: S) =>
     })
   );
 
+// A column that migration 2 added to rows written before it, so NULL there says what the
+// row meant then: `fallback`. The domain type has no missing value to check for.
+const nullableAs = <S extends Schema.Top>(schema: S, fallback: S["Type"]) =>
+  Schema.NullOr(schema).pipe(
+    Schema.decodeTo(Schema.toType(schema), {
+      decode: SchemaGetter.transform((value) => value ?? fallback),
+      encode: SchemaGetter.passthrough({ strict: false }),
+    })
+  );
+
 const Numbered = { at: Schema.Int, sequence: Schema.Int };
+
+// The names of the Credentials scrubbed from a Line's bytes, as JSON text (LOG-6).
+const Redacted = Schema.fromJsonString(Schema.Array(Schema.String));
 
 const Ircd = Schema.Struct({
   host: Schema.String,
@@ -32,6 +45,10 @@ const Tuning = Schema.Struct({
   kickRejoinMillis: Schema.Int,
   lagCheckMillis: Schema.Int,
   laneLimit: Schema.Int,
+  // An `attempt` from before the wait existed had no login to wait for (CONN-6), so the
+  // value it gets is moot, and it is what the default was then, kept so that the Log
+  // reads the same whatever the default becomes.
+  loginWaitMillis: Schema.Int.pipe(Schema.withDecodingDefaultKey(Effect.succeed(2000))),
   quitWaitMillis: Schema.Int,
   reconnectInitialMillis: Schema.Int,
   reconnectMaxMillis: Schema.Int,
@@ -68,12 +85,16 @@ const RefusedFromBit = Schema.Literal(1).pipe(
 const ConnectionRow = Schema.Union([
   Schema.TaggedStruct("Connection", {
     ...Connected,
+    // An `attempt` from before the Log learned of logins had no login sequence and no
+    // services, which is what replaying it as such does the same way it did (CONN-6).
+    loginLines: nullableAs(Schema.Int, 0),
     nicks: Schema.fromJsonString(Schema.Array(Schema.String)),
     phase: Schema.Literal("attempt"),
     realname: Schema.String,
+    services: nullableAs(Schema.fromJsonString(Schema.Array(Schema.String)), []),
     tuning: Schema.fromJsonString(Tuning),
     username: Schema.String,
-  }).pipe(Schema.encodeKeys({ _tag: "kind" })),
+  }).pipe(Schema.encodeKeys({ _tag: "kind", loginLines: "login_lines" })),
   Schema.TaggedStruct("Connection", {
     ...Connected,
     connection: Schema.Int,
@@ -107,7 +128,9 @@ export const EntryRow = Schema.Union([
     cut: nullable(Schema.BooleanFromBit),
     direction: Schema.Literals(["inbound", "outbound"]),
     network: Schema.String,
-  }).pipe(Schema.encodeKeys({ _tag: "kind" })),
+    redacted: nullable(Redacted),
+    redactedBy: nullable(Schema.Int),
+  }).pipe(Schema.encodeKeys({ _tag: "kind", redactedBy: "redacted_by" })),
   ConnectionRow,
   // `change` is JSON text that only its reader decodes further, so `null` is the text
   // `null` and never a missing column.
@@ -124,7 +147,9 @@ export const EntryRow = Schema.Union([
     connection: Schema.Int,
     network: Schema.String,
     reason: Schema.String,
-  }).pipe(Schema.encodeKeys({ _tag: "kind" })),
+    redacted: nullable(Redacted),
+    redactedBy: nullable(Schema.Int),
+  }).pipe(Schema.encodeKeys({ _tag: "kind", redactedBy: "redacted_by" })),
   Schema.TaggedStruct("Deadline", {
     ...Numbered,
     name: Schema.String,

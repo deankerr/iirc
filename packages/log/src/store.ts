@@ -1,14 +1,19 @@
-import type { Entry } from "@iirc/session/entry";
+import type { Entry, NewEntry } from "@iirc/session/entry";
 import { RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
-import { noStanding, noStandings } from "@iirc/session/standing";
+import { foldStandings, noStanding, noStandings } from "@iirc/session/standing";
 import type { Gap, Standings } from "@iirc/session/standing";
 import { Array as Arr, Clock, Data, Effect, pipe, Ref, Result, Schema, Semaphore } from "effect";
 import { SqlSchema } from "effect/sql";
 import type { SqlClient } from "effect/sql";
 import { isSqlError } from "effect/sql/SqlError";
 
-import { StorageFailed } from "./errors.ts";
+import {
+  EntryAlreadyRedacted,
+  EntryNotFound,
+  EntryNotRedactable,
+  StorageFailed,
+} from "./errors.ts";
 import { foldEntries } from "./fold.ts";
 import type { Folded, LoggedMessage } from "./fold.ts";
 import { EntryRow, GapPage, GapRow, MessageRow, Page } from "./rows.ts";
@@ -20,6 +25,12 @@ const replayPageSize = 1000;
 // the 999 bound parameters of the smallest limit SQLite has shipped with, so no build of
 // it can refuse one, whatever a page of Entries turns out to hold.
 const rebuildBatchSize = 128;
+
+// See `held` in `makeStore`.
+interface Held {
+  readonly host: Standings;
+  readonly projection: Standings;
+}
 
 const toStorageFailed = (cause: unknown) => new StorageFailed({ cause });
 
@@ -161,25 +172,28 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     return standings;
   });
 
-  const standings = yield* Ref.make(noStandings);
+  // What the Log holds of each Network's Standing, apart in two. `host` is what the
+  // hosts read, and a redaction leaves it as the host knew it (LOG-7). `projection` is
+  // what the derived tables are written from, and a redaction replaces it with what
+  // the rebuild it ran derived, so that a row appended after one is the row a rebuild
+  // would write (LOG-10). Until a redaction they are one and the same.
+  const held = yield* Ref.make<Held>({ host: noStandings, projection: noStandings });
 
   // One writer at a time, so that the Standings a transaction folds from are the ones
   // the last commit left. The client's own lock is no use here, because it is
-  // released before `standings` is set, and the next writer would read stale state.
+  // released before `held` is set, and the next writer would read stale state.
   const writer = yield* Semaphore.make(1);
 
   // Runs a transaction that yields new Standings, and publishes them only once they
   // are durable, so that a rollback has nothing to undo. Nothing here can be
-  // interrupted, so `standings` never misses a commit, and what `within` saw is
+  // interrupted, so `held` never misses a commit, and what `within` saw is
   // always either committed or reported as a failure.
-  const commit = <A, E>(
-    transaction: (current: Standings) => Effect.Effect<readonly [A, Standings], E>
-  ) =>
+  const commit = <A, E>(transaction: (current: Held) => Effect.Effect<readonly [A, Held], E>) =>
     Effect.gen(function* () {
-      const current = yield* Ref.get(standings);
+      const current = yield* Ref.get(held);
       const [result, next] = yield* sql.withTransaction(transaction(current));
 
-      yield* Ref.set(standings, next);
+      yield* Ref.set(held, next);
 
       return result;
     }).pipe(
@@ -192,7 +206,7 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     );
 
   const record: Recorder["Service"]["record"] = (entries, within) =>
-    commit((current) =>
+    commit(({ host, projection }) =>
       Effect.gen(function* () {
         const at = yield* Clock.currentTimeMillis;
         const head = yield* readHead;
@@ -204,30 +218,101 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
 
         yield* Effect.forEach(recorded, insertEntry, { discard: true });
 
-        const folded = foldEntries(current, recorded);
+        const folded = foldEntries(projection, recorded);
 
         yield* insertMessages(folded.messages);
         yield* writeGaps(folded.gaps);
 
         const result = yield* Effect.sync(() => within(recorded));
 
-        return [result, folded.standings] as const;
+        return [
+          result,
+          {
+            host: host === projection ? folded.standings : foldStandings(host, recorded),
+            projection: folded.standings,
+          },
+        ] as const;
       })
     ).pipe(Effect.mapError((cause) => new RecordFailed({ cause })));
 
+  // Every derived table again, from the Log as it now stands, which gives the Standings
+  // that a start would have (LOG-10).
+  const deriveTablesAgain = Effect.gen(function* () {
+    yield* sql`DELETE FROM messages`;
+    yield* sql`DELETE FROM gaps`;
+
+    return yield* replay(({ gaps, messages }) =>
+      Effect.andThen(insertMessageBatches(messages), writeGaps(gaps))
+    );
+  });
+
   // Unlike a record, a rebuild can run long, and abandoning one loses nothing.
   const rebuild = commit(() =>
-    Effect.gen(function* () {
-      yield* sql`DELETE FROM messages`;
-      yield* sql`DELETE FROM gaps`;
-
-      const rebuilt = yield* replay(({ gaps, messages }) =>
-        Effect.andThen(insertMessageBatches(messages), writeGaps(gaps))
-      );
-
-      return [undefined, rebuilt] as const;
-    }).pipe(Effect.interruptible)
+    deriveTablesAgain.pipe(
+      Effect.map((rebuilt) => [undefined, { host: rebuilt, projection: rebuilt }] as const),
+      Effect.interruptible
+    )
   ).pipe(Effect.mapError(toStorageFailed));
+
+  // What stands in the way of redacting the Entry at `sequence`, if anything (LOG-7).
+  const refusalToRedact = Effect.fnUntraced(function* (sequence: number) {
+    const [row] = yield* sql<{ readonly kind: string; readonly redacted_by: number | null }>`
+      SELECT kind, redacted_by FROM entries WHERE sequence = ${sequence}
+    `;
+
+    if (row === undefined) {
+      return new EntryNotFound({ sequence });
+    }
+
+    const { kind, redacted_by: change } = row;
+
+    if (kind === "Change" || kind === "Connection" || kind === "Daemon" || kind === "Deadline") {
+      return new EntryNotRedactable({ kind, sequence });
+    }
+
+    return change === null ? undefined : new EntryAlreadyRedacted({ change, sequence });
+  });
+
+  // Empties a Line or a Dropped Entry's bytes and records the Change that did, in one
+  // transaction, then derives every table again (LOG-7). The Standings the hosts read keep
+  // what they knew, because a Connection under way acted on the Line as it was, and the
+  // next start replays the Line as one with no bytes, which says nothing.
+  const redact = <A>(
+    sequence: number,
+    change: Extract<NewEntry, { readonly _tag: "Change" }>,
+    within: (recorded: ChangeEntry) => A
+  ) =>
+    commit(({ host }) =>
+      Effect.gen(function* () {
+        const refused = yield* refusalToRedact(sequence);
+
+        if (refused !== undefined) {
+          return yield* refused;
+        }
+
+        const at = yield* Clock.currentTimeMillis;
+        const recorded: ChangeEntry = { ...change, at, sequence: (yield* readHead) + 1 };
+
+        yield* insertEntry(recorded);
+        yield* sql`
+          UPDATE entries SET bytes = x'', redacted_by = ${recorded.sequence}
+          WHERE sequence = ${sequence}
+        `;
+
+        // The rebuild's own Standings stand for the projection, and the host's take only
+        // the Change, which is how the host comes to keep what it knew.
+        const projection = yield* deriveTablesAgain;
+        const result = yield* Effect.sync(() => within(recorded));
+
+        return [result, { host: foldStandings(host, [recorded]), projection }] as const;
+      })
+    ).pipe(
+      Effect.catchTags({
+        SchemaError: (cause) => Effect.fail(toStorageFailed(cause)),
+        SqlError: (cause) => Effect.fail(toStorageFailed(cause)),
+        UnreadableEntry: (cause) => Effect.fail(toStorageFailed(cause)),
+      })
+    );
 
   yield* rebuild;
 
@@ -243,7 +328,8 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
       readMessages(query).pipe(Effect.mapError(toStorageFailed)),
     rebuild,
     record,
+    redact,
     standing: (network: string) =>
-      Effect.map(Ref.get(standings), (held) => held.get(network) ?? noStanding),
+      Effect.map(Ref.get(held), ({ host }) => host.get(network) ?? noStanding),
   };
 });

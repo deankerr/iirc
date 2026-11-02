@@ -17,9 +17,17 @@ import { ConnectFailed } from "./transport.ts";
 const textEncoder = new TextEncoder();
 
 /** What a hand-written `attempt` Entry runs with: the spec's Tuning and a plain Identity. */
-export const attemptInput = { realname: "I IRC", tuning: defaultTuning, username: "user" } as const;
+export const attemptInput = {
+  loginLines: 0,
+  realname: "I IRC",
+  services: [],
+  tuning: defaultTuning,
+  username: "user",
+} as const;
 
 const serverName = Schema.decodeUnknownOption(Schema.NonEmptyString);
+
+const commonName = Schema.decodeUnknownOption(Schema.Struct({ CN: Schema.String }));
 
 /** A local stand-in for an Ircd that answers each Line it receives from a script. */
 export interface ScriptedIrcd {
@@ -42,6 +50,8 @@ export interface ScriptedIrcd {
   readonly receivedOn: (connection: number) => Effect.Effect<readonly string[]>;
   /** What each finished TLS handshake asked for, with nothing where it sent no SNI. */
   readonly serverNames: Effect.Effect<readonly (string | undefined)[]>;
+  /** The CN of the client certificate each TLS handshake that passed presented. */
+  readonly clientNames: Effect.Effect<readonly (string | undefined)[]>;
 }
 
 /** Where a {@link scriptedIrcd} listens, and whether it speaks TLS. */
@@ -52,6 +62,11 @@ export interface ScriptedIrcdOptions {
   /** Takes this port, for an Ircd that comes back where another was. */
   readonly port?: number;
   readonly tls?: Certificate;
+  /**
+   * Requires every Connection to present a client certificate this authority issued, as
+   * PEM, and refuses the handshake of any that does not.
+   */
+  readonly clientAuthority?: string;
 }
 
 /**
@@ -86,6 +101,7 @@ export const scriptedIrcd = (
     const receivedOn: string[][] = [];
     const bytes: Uint8Array[] = [];
     const serverNames: (string | undefined)[] = [];
+    const clientNames: (string | undefined)[] = [];
     // Each Connection's bytes that the kernel would not take yet.
     const connections = new Map<Bun.Socket, Uint8Array>();
     // Each Connection's half a Line, and when it was accepted.
@@ -129,7 +145,16 @@ export const scriptedIrcd = (
         Bun.listen({
           hostname: options?.hostname ?? "127.0.0.1",
           port: options?.port ?? 0,
-          ...(options?.tls !== undefined && { tls: options.tls }),
+          ...(options?.tls !== undefined && {
+            tls: {
+              ...options.tls,
+              ...(options.clientAuthority !== undefined && {
+                ca: options.clientAuthority,
+                rejectUnauthorized: true,
+                requestCert: true,
+              }),
+            },
+          }),
           socket: {
             close: (connection) => {
               closed += 1;
@@ -156,9 +181,19 @@ export const scriptedIrcd = (
             error: () => {
               // Closing with a Line unread resets the Connection, which is no news.
             },
-            handshake: (connection) => {
+            handshake: (connection, authorized) => {
               // Typed as a string, and in fact `false` for a client that sent no SNI.
               serverNames.push(Option.getOrUndefined(serverName(connection.getServername())));
+
+              if (authorized && options?.clientAuthority !== undefined) {
+                clientNames.push(
+                  Option.getOrUndefined(
+                    commonName(connection.getPeerCertificate().subject).pipe(
+                      Option.map(({ CN }) => CN)
+                    )
+                  )
+                );
+              }
             },
             open: (connection) => {
               ordinals.set(connection, accepted);
@@ -180,6 +215,7 @@ export const scriptedIrcd = (
       accepted: Effect.sync(() => accepted),
       acceptedAt: Effect.sync(() => [...acceptedAt]),
       bytes: Effect.sync(() => Buffer.concat(bytes)),
+      clientNames: Effect.sync(() => [...clientNames]),
       closed: Effect.sync(() => closed),
       finish: Effect.sync(() => {
         finishing = true;

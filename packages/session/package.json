@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./credentials": "./src/credentials.ts",
     "./entry": "./src/entry.ts",
     "./events": "./src/events.ts",
     "./network": "./src/network.ts",

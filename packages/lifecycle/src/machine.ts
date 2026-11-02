@@ -1,3 +1,4 @@
+import { loginSign } from "@iirc/protocol/login";
 import { isRefusal } from "@iirc/protocol/refusal";
 import { setup, types } from "xstate";
 import type { ExecutableEffectFrom } from "xstate";
@@ -8,6 +9,7 @@ const registrationDeadline = "registration";
 const burstDeadline = "burst";
 const silenceDeadline = "silence";
 const lagCheckDeadline = "lag-check";
+const loginDeadline = "login";
 
 const control = "control";
 
@@ -29,12 +31,21 @@ interface Deadline {
   readonly name: string;
 }
 
+// How far the login sequence has got (CONN-6). `identified` is an `IDENTIFY` written, and
+// `settled` a sign of login, or the wait for one running out.
+interface LoginProgress {
+  readonly identified: boolean;
+  readonly seen: number;
+  readonly settled: boolean;
+}
+
 // What belongs to one Connection, and so never outlives it.
 interface ConnectionContext {
   readonly closeReason: string | undefined;
   readonly deadlines: readonly Deadline[];
   /** The host is ending this Connection, so no welcome can start a Session (LEAVING). */
   readonly leaving: boolean;
+  readonly login: LoginProgress;
   readonly nickIndex: number;
   readonly nicks: readonly string[];
 }
@@ -43,6 +54,7 @@ const noConnection: ConnectionContext = {
   closeReason: undefined,
   deadlines: [],
   leaving: false,
+  login: { identified: false, seen: 0, settled: false },
   nickIndex: 0,
   nicks: [],
 };
@@ -74,6 +86,50 @@ const heard = (context: Context, at: number): Context => ({
   deadlines: movedTo(context.deadlines, silenceDeadline, at + context.tuning.silenceMillis),
 });
 
+// Joining waits until every Line of the login sequence is out, and then for any login
+// that an `IDENTIFY` started to show a sign or run out of time (CONN-6).
+const isLoginOpen = ({ loginLines }: Context, login: LoginProgress) =>
+  login.seen >= loginLines && (!login.identified || login.settled);
+
+// Only an `IDENTIFY` that was written starts a wait, and the wait starts from the last Line
+// of the sequence, whether that Line was written or Dropped. Past the last, nothing counts:
+// a Line whose write was in doubt is Dropped after it was recorded, and comes twice.
+const afterLoginSent = (context: Context, event: Payload<"LOGIN_SENT">): Context => {
+  if (context.login.seen >= context.loginLines) {
+    return context;
+  }
+
+  const seen = context.login.seen + 1;
+  const identified = context.login.identified || (event.identify && event.written);
+  const login = { ...context.login, identified, seen };
+  const waits = seen === context.loginLines && identified && !login.settled;
+
+  return {
+    ...context,
+    deadlines: waits
+      ? [
+          ...context.deadlines,
+          { at: event.at + context.tuning.loginWaitMillis, name: loginDeadline },
+        ]
+      : context.deadlines,
+    login,
+  };
+};
+
+// A sign counts only once an `IDENTIFY` is out, so a login some other way is no answer to
+// a wait that has not begun.
+const afterLoginSign = (context: Context, event: Payload<"LINE">): Context => {
+  const { login } = context;
+
+  return login.identified && !login.settled && loginSign(event, context.services) !== undefined
+    ? {
+        ...context,
+        deadlines: without(context.deadlines, loginDeadline),
+        login: { ...login, settled: true },
+      }
+    : context;
+};
+
 // The way out of a Connection the machine has given up on. Nothing is pending once it
 // has asked for a close, or the host would wake for it while the close is under way.
 const leaving = (context: Context) => ({
@@ -93,6 +149,9 @@ export const network = setup({
     closeConnection: (_params: Params<"closeConnection">) => {
       // Never runs: the host carries out the Command after commit.
     },
+    loginSettled: () => {
+      // Never runs: the host carries out the Command after commit.
+    },
     sendLine: (_params: Params<"sendLine">) => {
       // Never runs: the host carries out the Command after commit.
     },
@@ -110,6 +169,7 @@ export const network = setup({
       HEARD: types<Payload<"HEARD">>(),
       LEAVING: types<Payload<"LEAVING">>(),
       LINE: types<Payload<"LINE">>(),
+      LOGIN_SENT: types<Payload<"LOGIN_SENT">>(),
       OPENED: types<Payload<"OPENED">>(),
       PING: types<Payload<"PING">>(),
     },
@@ -122,8 +182,8 @@ export const network = setup({
   on: {
     // Works from anywhere: a crash leaves a Connection that never recorded a close. The
     // input is the Connection's own, so nothing of the last one's carries over.
-    ATTEMPT: ({ event: { nicks, realname, tuning, username } }) => ({
-      context: { ...noConnection, nicks, realname, tuning, username },
+    ATTEMPT: ({ event: { loginLines, nicks, realname, services, tuning, username } }) => ({
+      context: { ...noConnection, loginLines, nicks, realname, services, tuning, username },
       target: ".connection",
     }),
     CLOSED: ({ context, event }) => ({
@@ -281,6 +341,19 @@ export const network = setup({
                 };
               }
 
+              // No sign came in time, which is all a bare Network may ever say (CONN-6).
+              if (name === loginDeadline) {
+                enq(actions.loginSettled);
+
+                return {
+                  context: {
+                    ...context,
+                    deadlines: without(context.deadlines, loginDeadline),
+                    login: { ...context.login, settled: true },
+                  },
+                };
+              }
+
               if (name === lagCheckDeadline) {
                 // From the Entry's own time, so a replay gives the same token, and two
                 // checks can only share one if they share a millisecond.
@@ -320,19 +393,34 @@ export const network = setup({
               }
 
               const alive = heard(context, event.at);
+              const signed = afterLoginSign(alive, event);
 
-              if (
+              const ended =
                 endsBurst.has(event.command) &&
-                alive.deadlines.some(({ name }) => name === burstDeadline)
-              ) {
-                enq(actions.burstComplete);
+                alive.deadlines.some(({ name }) => name === burstDeadline);
 
-                return {
-                  context: { ...alive, deadlines: without(alive.deadlines, burstDeadline) },
-                };
+              if (ended) {
+                enq(actions.burstComplete);
               }
 
-              return { context: alive };
+              if (!isLoginOpen(alive, alive.login) && isLoginOpen(signed, signed.login)) {
+                enq(actions.loginSettled);
+              }
+
+              return {
+                context: ended
+                  ? { ...signed, deadlines: without(signed.deadlines, burstDeadline) }
+                  : signed,
+              };
+            },
+            LOGIN_SENT: ({ actions, context, event }, enq) => {
+              const next = afterLoginSent(context, event);
+
+              if (!isLoginOpen(context, context.login) && isLoginOpen(next, next.login)) {
+                enq(actions.loginSettled);
+              }
+
+              return { context: next };
             },
             PING: ({ actions, context, event }, enq) => {
               enq(actions.sendPong, { cause: "ping-reply", lane: control, token: event.token });
@@ -368,6 +456,10 @@ export const commandsOf = (effect: ExecutableEffectFrom<typeof network>): readon
 
   if (effect.type === "burstComplete") {
     return [{ type: "burstComplete" }];
+  }
+
+  if (effect.type === "loginSettled") {
+    return [{ type: "loginSettled" }];
   }
 
   if (effect.type === "sendLine" && hasKey<Params<"sendLine">>(params, "command")) {

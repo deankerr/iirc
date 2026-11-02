@@ -5,7 +5,9 @@ import type { NetworkEvent, NetworkInput, NetworkSnapshot } from "./lifecycle.ts
 import { defaultTuning } from "./tuning.ts";
 
 const input: NetworkInput = {
+  loginLines: 0,
   realname: "Claude Code",
+  services: [],
   tuning: defaultTuning,
   username: "cc",
 };

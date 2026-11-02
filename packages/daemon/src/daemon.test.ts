@@ -34,10 +34,12 @@ import { OpenApi } from "effect/http-api";
 
 import {
   clientWith,
+  credentialsIn,
   inTempDirectory,
   invalidRequest,
   localKey,
   ownerKey,
+  noKeyring,
   rawWith,
   servingWith,
   statusOf,
@@ -69,6 +71,8 @@ const settingsFor = (scenario: Scenario = {}) => ({
     name,
     rejoinOnKick,
   })),
+  connectCommands: [],
+  credentials: {},
   enabled: true,
   id: network,
   identity: {
@@ -80,6 +84,7 @@ const settingsFor = (scenario: Scenario = {}) => ({
   ircds: [{ host: "irc.test", port: 6697, tls: false }] as const,
   name: "Libera",
   quitReason: "going",
+  services: [],
   tuning: scenario.tuning ?? {},
 });
 
@@ -124,7 +129,7 @@ const keyFor = (dataDir: string) =>
   });
 
 const serving = (dataDir: string, ircd: FakeIrcd) =>
-  servingWith(DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport)));
+  servingWith(DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport), noKeyring));
 
 // Adds the Network through the API unless an earlier run on this Log already did, since
 // Configuration outlives a restart.
@@ -186,6 +191,7 @@ const withFailingReader = <A, E, R>(
           const real = yield* LogReader;
 
           return {
+            backup: real.backup,
             entries: (query) => unlessFailing(real.entries(query)),
             gaps: (query) => unlessFailing(real.gaps(query)),
             messages: (query) => unlessFailing(real.messages(query)),
@@ -194,7 +200,7 @@ const withFailingReader = <A, E, R>(
       ).pipe(Layer.provide(LogReader.layer({ dataDir })));
 
       const core = Daemon.layer(configIn(dataDir)).pipe(
-        Layer.provide(reader),
+        Layer.provide(Layer.merge(reader, credentialsIn(dataDir))),
         Layer.provideMerge(Log.layer({ dataDir })),
         Layer.provide(Layer.succeed(Transport, ircd.transport))
       );
@@ -346,6 +352,7 @@ describe("the Daemon", () => {
 
           assert.deepStrictEqual(status, {
             apiVersion: 1,
+            credentials: { store: "file" },
             head: entries.at(-1)?.sequence ?? 0,
             networks: [
               {
@@ -359,6 +366,8 @@ describe("the Daemon", () => {
                 lagMillis: null,
                 lanes: { background: 0, control: 0, interactive: 0 },
                 logFault: null,
+                login: { state: "none", text: null },
+                missingCredentials: [],
                 name: "Libera",
                 nextAttemptAt: null,
                 phase: "session",
@@ -384,7 +393,13 @@ describe("the Daemon", () => {
             client.daemon.status()
           ).pipe(Effect.provide(serving(dataDir, ircd)));
 
-          assert.deepStrictEqual(status, { apiVersion: 1, head: 2, networks: [], version });
+          assert.deepStrictEqual(status, {
+            apiVersion: 1,
+            credentials: { store: "file" },
+            head: 2,
+            networks: [],
+            version,
+          });
         }).pipe(Effect.scoped)
       )
     );
@@ -562,7 +577,7 @@ describe("the Daemon", () => {
 
           const core = Daemon.layer(configIn(dataDir)).pipe(
             Layer.provide(brittle),
-            Layer.provide(LogReader.layer({ dataDir })),
+            Layer.provide(Layer.merge(LogReader.layer({ dataDir }), credentialsIn(dataDir))),
             Layer.provideMerge(Log.layer({ dataDir })),
             Layer.provide(Layer.succeed(Transport, ircd.transport))
           );
@@ -1394,7 +1409,11 @@ describe("the Daemon", () => {
 
           const scope = yield* Scope.make();
 
-          const core = DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport));
+          const core = DaemonCore(
+            configIn(dataDir),
+            Layer.succeed(Transport, ircd.transport),
+            noKeyring
+          );
 
           const context = yield* Layer.buildWithScope(
             Daemon.stopsFirst.pipe(Layer.provide(frontend), Layer.provideMerge(core)),
@@ -1430,7 +1449,7 @@ describe("the Daemon", () => {
           const scope = yield* Scope.make();
 
           const context = yield* Layer.buildWithScope(
-            DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport)),
+            DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport), noKeyring),
             scope
           );
 
@@ -1696,9 +1715,10 @@ describe("the Daemon", () => {
             // A reader that can read nothing in time, so startup cannot depend on it.
             const core = Daemon.layer(configIn(dataDir)).pipe(
               Layer.provide(
-                LogReader.layer({ budget: Duration.millis(1), dataDir }).pipe(
-                  Layer.provideMerge(Log.layer({ dataDir }))
-                )
+                Layer.merge(
+                  LogReader.layer({ budget: Duration.millis(1), dataDir }),
+                  credentialsIn(dataDir)
+                ).pipe(Layer.provideMerge(Log.layer({ dataDir })))
               ),
               Layer.provide(Transport.layer)
             );

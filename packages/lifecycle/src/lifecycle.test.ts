@@ -5,7 +5,9 @@ import type { Command, NetworkEvent, NetworkInput, NetworkSnapshot, Phase } from
 import { defaultTuning } from "./tuning.ts";
 
 const input: NetworkInput = {
+  loginLines: 0,
   realname: "Claude Code",
+  services: [],
   tuning: defaultTuning,
   username: "cc",
 };
@@ -499,6 +501,132 @@ describe("CONN-7: the burst", () => {
 
     expect(commands).toStrictEqual([]);
     expect(phase(next)).toBe("session");
+  });
+});
+
+const sent = (at: number, identify: boolean, written = true): NetworkEvent => ({
+  at,
+  identify,
+  type: "LOGIN_SENT",
+  written,
+});
+
+const walk = (events: readonly NetworkEvent[]) => {
+  let next = start(input);
+  const commands: Command[][] = [];
+
+  for (const event of events) {
+    const stepped = step(next, event);
+
+    commands.push([...stepped.commands]);
+    ({ next } = stepped);
+  }
+
+  return { commands, next };
+};
+
+const settledOnce = (commands: readonly (readonly Command[])[]) =>
+  commands.flat().filter(({ type }) => type === "loginSettled");
+
+const noticeFrom = (source: string): NetworkEvent => ({
+  at: 5000,
+  command: "NOTICE",
+  params: ["claude", "You are now identified for claude."],
+  source,
+  type: "LINE",
+});
+
+describe("CONN-6: the login wait", () => {
+  // `IDENTIFY` and two connect commands, with NickServ as the only service.
+  const withLogin: NetworkEvent = { ...attempt, loginLines: 3, services: ["NickServ"] };
+  const inLogin = [withLogin, opened, welcome, line("376")];
+
+  const allSent = [...inLogin, sent(4000, true), sent(4100, false), sent(4200, false)];
+
+  it("waits from the last Line of the sequence, for `loginWaitMillis`", () => {
+    expect(deadline(fold(allSent, input))).toStrictEqual({ at: 6200, name: "login" });
+  });
+
+  it("does not start until the last Line is out", () => {
+    expect(deadline(fold(allSent.slice(0, -1), input))?.name).not.toBe("login");
+  });
+
+  it("counts a Line that was Dropped, so one never sent cannot hold joining up", () => {
+    const events = [...inLogin, sent(4000, true), sent(4100, false), sent(4500, false, false)];
+
+    expect(deadline(fold(events, input))).toStrictEqual({ at: 6500, name: "login" });
+  });
+
+  it("settles when the wait runs out, once", () => {
+    const { commands, next } = walk([...allSent, expire("login", 6200), expire("login", 6300)]);
+
+    expect(settledOnce(commands)).toHaveLength(1);
+    expect(deadline(next)?.name).not.toBe("login");
+    expect(phase(next)).toBe("session");
+  });
+
+  it.each([
+    ["900", lineAt(5000, "900", "claude", "claude!c@h", "claude", "Logged in")],
+    ["904", lineAt(5000, "904", "claude", "SASL authentication failed")],
+    ["+r", lineAt(5000, "MODE", "claude", "+r")],
+  ])("settles early on %s, and leaves nothing to expire", (_name, sign) => {
+    const { commands, next } = walk([...allSent, sign]);
+
+    expect(settledOnce(commands)).toHaveLength(1);
+    expect(deadline(next)?.name).not.toBe("login");
+  });
+
+  it("settles early on a service's `NOTICE`, and not on anyone else's", () => {
+    expect(deadline(walk([...allSent, noticeFrom("mallory!m@h")]).next)?.name).toBe("login");
+    expect(settledOnce(walk([...allSent, noticeFrom("NickServ!s@h")]).commands)).toHaveLength(1);
+  });
+
+  it("takes a sign before the rest of the sequence, and then never waits", () => {
+    const { commands, next } = walk([
+      ...inLogin,
+      sent(4000, true),
+      lineAt(4050, "900", "claude", "Logged in"),
+      sent(4100, false),
+      sent(4200, false),
+    ]);
+
+    expect(settledOnce(commands)).toHaveLength(1);
+    expect(commands.at(-1)).toStrictEqual([{ type: "loginSettled" }]);
+    expect(deadline(next)?.name).not.toBe("login");
+  });
+
+  it("does not wait when the `IDENTIFY` was Dropped, and settles with the last Line", () => {
+    const { commands, next } = walk([
+      ...inLogin,
+      sent(4000, true, false),
+      sent(4100, false),
+      sent(4200, false),
+    ]);
+
+    expect(commands.at(-1)).toStrictEqual([{ type: "loginSettled" }]);
+    expect(deadline(next)?.name).not.toBe("login");
+  });
+
+  it("takes no sign before an `IDENTIFY` is out", () => {
+    const { next } = walk([
+      ...inLogin,
+      lineAt(3500, "900", "claude", "Logged in"),
+      ...allSent.slice(4),
+    ]);
+
+    expect(deadline(next)).toStrictEqual({ at: 6200, name: "login" });
+  });
+
+  it("has nothing to wait for with no sequence, and says nothing", () => {
+    const { commands } = walk([...histories.session, line("376"), lineAt(5000, "900", "c", "x")]);
+
+    expect(settledOnce(commands)).toHaveLength(0);
+  });
+
+  it("counts nothing past the last Line, such as one Dropped after it was recorded", () => {
+    const { next } = walk([...allSent, sent(4300, false, false)]);
+
+    expect(deadline(next)).toStrictEqual({ at: 6200, name: "login" });
   });
 });
 

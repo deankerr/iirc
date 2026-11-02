@@ -30,12 +30,23 @@ describe("a Change, as the Log stores it (LOG-2)", () => {
       _tag: "NetworkAdded",
       settings: {
         channels: [],
+        connectCommands: [],
+        credentials: {},
         enabled: true,
         id: "libera",
         identity: { alternates: [], nick: "iirc", realname: "iirc", username: "iirc" },
         ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
         name: "libera",
         quitReason: "iirc",
+        services: [
+          "NickServ",
+          "ChanServ",
+          "MemoServ",
+          "OperServ",
+          "BotServ",
+          "HostServ",
+          "HelpServ",
+        ],
         tuning: {},
       },
     });
@@ -47,8 +58,36 @@ describe("a Change, as the Log stores it (LOG-2)", () => {
         _tag: "NetworkChanged",
         settings: { ...minimal, name: "Libera", tuning: { floodBurst: 2 } },
       }),
+      decoded({
+        _tag: "NetworkAdded",
+        settings: {
+          ...minimal,
+          channels: [{ key: "key.libera.iirc", name: "#iirc" }],
+          connectCommands: ["PRIVMSG Q :AUTH iirc {{libera.q}}"],
+          credentials: {
+            clientCertificate: "libera.cert",
+            password: "libera.pass",
+            service: { account: "iirc", password: "libera.nickserv" },
+          },
+          services: ["NickServ", "Q"],
+        },
+      }),
       { _tag: "ChannelJoined", channel: { name: "#iirc", rejoinOnKick: true }, network: "libera" },
+      {
+        _tag: "ChannelJoined",
+        channel: { key: "key.0123456789abcdef", name: "#keyed" },
+        network: "libera",
+      },
       { _tag: "ChannelParted", channel: "#iirc", network: "libera" },
+      {
+        _tag: "ChannelKeyNamed",
+        channel: "#keyed",
+        key: "key.0123456789abcdef",
+        network: "libera",
+      },
+      { _tag: "CredentialSet", name: "key.0123456789abcdef" },
+      { _tag: "CredentialDeleted", name: "key.0123456789abcdef" },
+      { _tag: "EntryRedacted", sequence: 42 },
       { _tag: "KeyCreated", hash: "0f".repeat(32), name: "phone", scope: "read" },
       { _tag: "ConfigurationReplaced", networks: [] },
     ];
@@ -75,6 +114,29 @@ describe("a Change, as the Log stores it (LOG-2)", () => {
     [
       "a scope that does not exist",
       { _tag: "KeyCreated", hash: "0f".repeat(32), name: "a", scope: "root" },
+    ],
+    [
+      "a Credential named as no Credential can be",
+      { _tag: "NetworkAdded", settings: { ...minimal, credentials: { password: "Libera Pass" } } },
+    ],
+    [
+      "a Channel key that is a value and not a name",
+      {
+        _tag: "ChannelJoined",
+        channel: { key: "two words", name: "#iirc" },
+        network: "libera",
+      },
+    ],
+    [
+      "a client certificate on an Ircd without TLS",
+      {
+        _tag: "NetworkAdded",
+        settings: {
+          ...minimal,
+          credentials: { clientCertificate: "libera.cert" },
+          ircds: [{ host: "h", tls: false }],
+        },
+      },
     ],
   ])("CONF-1: will not read %s", (_name, json) => {
     expect(refusal(json)).toBeDefined();

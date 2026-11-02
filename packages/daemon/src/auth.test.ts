@@ -165,12 +165,15 @@ describe("keys and access", () => {
 
         const settings = {
           channels: [],
+          connectCommands: [],
+          credentials: {},
           enabled: false,
           id: "libera",
           identity: { alternates: [], nick: "iirc", realname: "iirc", username: "iirc" },
           ircds: [{ host: "irc.test", port: 6697, tls: true }] as const,
           name: "libera",
           quitReason: "iirc",
+          services: [],
           tuning: {},
         };
 
@@ -315,7 +318,7 @@ describe("keys and access", () => {
       )
   );
 
-  it.live("AUTH-2: refuses a name taken, `local`, or one that is no name", () =>
+  it.live("AUTH-2, CRED-4: refuses a name taken, `local`, `mode`, or one that is no name", () =>
     withDaemon(({ client, raw }) =>
       Effect.gen(function* () {
         assert.deepStrictEqual(
@@ -323,7 +326,7 @@ describe("keys and access", () => {
           new KeyExists({ keyName: ownerKey })
         );
 
-        for (const name of ["local", "Phone", "-phone", "a".repeat(33), "two words", ""]) {
+        for (const name of ["local", "mode", "Phone", "-phone", "a".repeat(33), "two words", ""]) {
           const { issues } = yield* invalidRequest(
             yield* raw.post("/api/keys", { name, scope: "read" })
           );

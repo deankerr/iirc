@@ -37,3 +37,20 @@ export class ReadFailed extends Schema.TaggedError<ReadFailed, { readonly brand:
   "ReadFailed",
   { reason: Schema.String }
 ) {}
+
+/** No Entry has that sequence, so there is nothing to redact (LOG-7). */
+export class EntryNotFound extends Data.TaggedError("EntryNotFound")<{
+  readonly sequence: number;
+}> {}
+
+/** Only a Line or a Dropped Entry has bytes to redact, and this Entry is `kind` (LOG-7). */
+export class EntryNotRedactable extends Data.TaggedError("EntryNotRedactable")<{
+  readonly kind: "Change" | "Connection" | "Daemon" | "Deadline";
+  readonly sequence: number;
+}> {}
+
+/** The Entry's bytes are already gone, taken by the Change at `change` (LOG-7). */
+export class EntryAlreadyRedacted extends Data.TaggedError("EntryAlreadyRedacted")<{
+  readonly change: number;
+  readonly sequence: number;
+}> {}

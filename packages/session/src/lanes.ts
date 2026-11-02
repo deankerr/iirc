@@ -16,6 +16,7 @@ import {
 } from "effect";
 
 import { RecordFailed } from "./recorder.ts";
+import type { Sensitive } from "./redact.ts";
 
 /** The lane has no room, so the Line was refused and nothing was queued (SEND-3). */
 export class LaneFull extends Data.TaggedError("LaneFull")<{ readonly lane: Lane }> {}
@@ -36,6 +37,8 @@ export interface QueuedLine {
   readonly line: OutboundLine;
   /** Gives the sequence of the Line's Entry, once it is written. */
   readonly outcome: Deferred.Deferred<number, LineFailure>;
+  /** What the Log records in place of a Line built from Credentials (LOG-6). */
+  readonly sensitive?: Sensitive;
 }
 
 /** How many Lines wait in each lane. */

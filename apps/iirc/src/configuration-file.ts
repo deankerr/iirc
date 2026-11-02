@@ -99,14 +99,19 @@ export const parseConfigurationFile = (
   );
 
 // What a Network's table holds: everything but the ID, which names it, and Tuning only
-// when the Owner changed some, since only changes are stored (CONF-3).
+// when the Owner changed some, since only changes are stored (CONF-3). Credentials and
+// connect commands are left out when there are none, and Credentials are only ever names
+// here, as everywhere in Configuration (CRED-1).
 const toTable = (settings: NetworkSettings) => ({
   channels: settings.channels,
+  ...(settings.connectCommands.length > 0 && { connectCommands: settings.connectCommands }),
+  ...(Object.keys(settings.credentials).length > 0 && { credentials: settings.credentials }),
   enabled: settings.enabled,
   identity: settings.identity,
   ircds: settings.ircds,
   name: settings.name,
   quitReason: settings.quitReason,
+  services: settings.services,
   ...(Object.keys(settings.tuning).length > 0 && { tuning: settings.tuning }),
 });
 

@@ -1,8 +1,7 @@
 import { start } from "@iirc/lifecycle";
 import type { Phase } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { joinLines } from "@iirc/protocol/join";
-import type { JoinChannel, JoinRejection } from "@iirc/protocol/join";
+import type { JoinRejection } from "@iirc/protocol/join";
 import type { OutboundLine } from "@iirc/protocol/outbound";
 import {
   Array as Arr,
@@ -20,24 +19,35 @@ import {
 } from "effect";
 import type { Scope } from "effect";
 
-import { hostConnection, logDown, makeCommit, phaseOf } from "./connection.ts";
-import type { Host, Hosted } from "./connection.ts";
+import { hostConnection, loginLinesOf, logDown, makeCommit, phaseOf } from "./connection.ts";
+import type { ChannelKey, Host, Hosted } from "./connection.ts";
+import { keyedJoins, missingCredentials } from "./credentials.ts";
+import type { CredentialNames } from "./credentials.ts";
 import type { Ircd, NetworkId } from "./entry.ts";
 import { LaneFull } from "./lanes.ts";
 import type { LaneDepths, LineFailure, QueuedLine } from "./lanes.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
+import { scrub } from "./redact.ts";
+import type { Secrets, Sensitive } from "./redact.ts";
 import {
   candidateNicks,
   channelKey,
   consecutiveFailures,
   kickStanding,
+  loginOf,
   nextAttempt,
   noStanding,
 } from "./standing.ts";
-import type { HeldJoinFailure, Standing, WantedChannel } from "./standing.ts";
+import type { HeldJoinFailure, Login, Standing, WantedChannel } from "./standing.ts";
 import { Transport } from "./transport.ts";
 
+export type { ChannelKey } from "./connection.ts";
+
+export type { CredentialNames, ServiceLogin } from "./credentials.ts";
+
 export { LaneFull, LineDropped, WriteFailed } from "./lanes.ts";
+
+export type { Secrets, Sensitive } from "./redact.ts";
 
 // Past `quitWaitMillis`, a stop that has not finished is told to close at once, and past
 // this again, its loop is let go of. A clean stop never waits either, because the loop's
@@ -63,8 +73,15 @@ export interface Identity {
  * once (CONF-2).
  */
 export interface NetworkSettings {
-  /** The Channels to be in, each spelled as it should be sent. */
+  /** The Channels to be in, each spelled as it should be sent, with a key by name. */
   readonly channels: readonly WantedChannel[];
+  /**
+   * Lines to send after registration, once `IDENTIFY` has gone, in which `{{name}}` stands
+   * for the Credential of that name (CONN-6). They apply at the next Connection.
+   */
+  readonly connectCommands: readonly string[];
+  /** The Credentials the Network uses, by name. They apply at the next Connection. */
+  readonly credentials: CredentialNames;
   /** A disabled host makes no `attempt`, and leaves a live Connection by choice (LIVE-9). */
   readonly enabled: boolean;
   readonly identity: Identity;
@@ -74,6 +91,15 @@ export interface NetworkSettings {
   readonly quitReason: string;
   /** The sequence of the Change that last asked for a retry (LIVE-4). */
   readonly retrySince?: number;
+  /**
+   * Every Credential the Daemon holds, by name, and not only this Network's. Names are
+   * looked up here whenever one is needed, and every value is scrubbed from what this
+   * host records (LOG-6). Handing over the same Map until one changes saves building
+   * what scrubbing looks for again.
+   */
+  readonly secrets: Secrets;
+  /** The nicks that are services, whose `NOTICE` can be a sign of login (CONN-6). */
+  readonly services: readonly string[];
   readonly tuning: Tuning;
 }
 
@@ -88,6 +114,12 @@ export interface NetworkOptions {
    */
   readonly changes: Stream.Stream<unknown>;
   readonly id: NetworkId;
+  /**
+   * Told of a Channel key once an inbound `MODE` on a Channel Self is in has set it with
+   * `+k`, or taken it away with `-k`, and been recorded (CRED-4). A key shown as `*` says
+   * nothing. It runs on the host's loop, so it should be quick.
+   */
+  readonly onChannelKey?: (change: ChannelKey) => Effect.Effect<void>;
   /** What the Network should be now, read whenever the host decides something. */
   readonly settings: Effect.Effect<NetworkSettings>;
 }
@@ -124,7 +156,8 @@ export interface ChannelFailure extends HeldJoinFailure {
 
 /** A Channel no `JOIN` Line can carry, so it is never tried. */
 export interface RejectedChannel {
-  readonly channel: JoinChannel;
+  /** The Channel as wanted, with its key by name. */
+  readonly channel: WantedChannel;
   readonly reason: JoinRejection;
 }
 
@@ -160,6 +193,10 @@ export interface NetworkStatus {
   readonly lanes: LaneDepths;
   /** Set from a failed `record` until one succeeds. */
   readonly logFault: LogFault | undefined;
+  /** How the current Connection's login to services went, in the service's own words. */
+  readonly login: Login;
+  /** Credentials the settings refer to that are not set, which keep it from any `attempt`. */
+  readonly missingCredentials: readonly string[];
   /**
    * When the next `attempt` is due, in epoch milliseconds, unless a Connection is under way,
    * the host is stopping, or the Network is disabled.
@@ -181,19 +218,33 @@ export interface NetworkHost {
   /**
    * Queues a Line on the interactive lane and waits for it to be written. Never held
    * for later: with no Session it fails at once, and a full lane refuses at once. A
-   * caller who walks away leaves the Line queued.
+   * caller who walks away leaves the Line queued. A Line built from a secret comes with
+   * what the Log records in its place, written or Dropped (LOG-6).
    */
-  readonly send: (line: OutboundLine, cause: string) => Effect.Effect<Sent, SendFailure>;
+  readonly send: (
+    line: OutboundLine,
+    cause: string,
+    sensitive?: Sensitive
+  ) => Effect.Effect<Sent, SendFailure>;
   readonly status: Effect.Effect<NetworkStatus>;
 }
 
-const isKept = (channels: readonly RejectedChannel[], { name }: WantedChannel) =>
-  !channels.some(({ channel }) => channel.name === name);
+// Whether a key can go in a `JOIN` depends on its value, so it is read to say. A Channel
+// is reported as wanted, with its key by name, so no value leaves here (CRED-3).
+const rejectedOf = (
+  channels: readonly WantedChannel[],
+  secrets: Secrets
+): readonly RejectedChannel[] =>
+  keyedJoins(channels, secrets).rejected.flatMap(({ channel: { name }, reason }) => {
+    const wanted = channels.find((channel) => channel.name === name);
 
-const joinable = (channels: readonly WantedChannel[]) => {
-  const { rejected } = joinLines(channels);
+    return wanted === undefined ? [] : [{ channel: wanted, reason }];
+  });
 
-  return channels.filter((channel) => isKept(rejected, channel));
+const joinable = (channels: readonly WantedChannel[], secrets: Secrets) => {
+  const rejected = new Set(rejectedOf(channels, secrets).map(({ channel }) => channel.name));
+
+  return channels.filter(({ name }) => !rejected.has(name));
 };
 
 // A kick the Owner has since wanted the Channel back from keeps nobody out (LIVE-8).
@@ -208,10 +259,12 @@ const retryDelay = (failures: number, tuning: Tuning) =>
 
 // What the machine runs a Connection with, which its `attempt` records, so that Identity
 // and Tuning apply at the next `attempt` and a replay sees what it saw.
-const inputOf = ({ identity, tuning }: NetworkSettings) => ({
-  realname: identity.realname,
-  tuning,
-  username: identity.username,
+const inputOf = (settings: NetworkSettings) => ({
+  loginLines: loginLinesOf(settings),
+  realname: settings.identity.realname,
+  services: settings.services,
+  tuning: settings.tuning,
+  username: settings.identity.username,
 });
 
 /**
@@ -236,7 +289,7 @@ export const hostNetwork: (
   options: NetworkOptions
 ) => Effect.Effect<NetworkHost, never, Recorder | Scope.Scope | Transport> = Effect.fn(
   "hostNetwork"
-)(function* ({ changes, id, settings }: NetworkOptions) {
+)(function* ({ changes, id, onChannelKey, settings }: NetworkOptions) {
   const recorder = yield* Recorder;
   const { connect } = yield* Transport;
 
@@ -285,8 +338,14 @@ export const hostNetwork: (
       yield* Ref.update(logFault, (held) => (before === undefined ? (held ?? first) : next));
     });
 
-  const record: Host["record"] = (entries, within) =>
-    recorder.record(entries, within).pipe(
+  const secrets = settings.pipe(Effect.map((current) => current.secrets));
+
+  // Every append goes through here, so every value of every Credential is scrubbed from
+  // whatever is recorded, in either direction, and what acts on an Entry acts on it as
+  // recorded (LOG-6).
+  const record: Recorder["Service"]["record"] = (entries, within) =>
+    secrets.pipe(
+      Effect.flatMap((held) => recorder.record(scrub(held, entries), within)),
       Effect.tapError(() => noteFault),
       Effect.tap(() => Ref.set(logFault, undefined))
     );
@@ -301,10 +360,11 @@ export const hostNetwork: (
     hurrying,
     id,
     leaving: settings.pipe(Effect.map(({ enabled }) => stopping() || !enabled)),
+    onChannelKey,
     quitReason: settings.pipe(Effect.map(({ quitReason }) => quitReason)),
-    record,
+    secrets,
     standing,
-    wanted: settings.pipe(Effect.map(({ channels }) => joinable(channels))),
+    wanted: settings.pipe(Effect.map((current) => joinable(current.channels, current.secrets))),
   };
 
   // The Log has no say while it is down, so a fault adds to what `Standing` works out. No
@@ -364,7 +424,9 @@ export const hostNetwork: (
     const held = yield* standing;
     const now = yield* Clock.currentTimeMillis;
 
-    if (!current.enabled) {
+    // A Credential the settings name and nobody has set yet blocks any `attempt`, until a
+    // change sets it (CRED-1).
+    if (!current.enabled || missingCredentials(current).length > 0) {
       yield* waitForChange(undefined);
 
       return;
@@ -391,8 +453,10 @@ export const hostNetwork: (
 
     const connection = recorded[0]?.sequence ?? 0;
 
+    const plan = { connectCommands: current.connectCommands, credentials: current.credentials };
+
     yield* Effect.scoped(
-      hostConnection({ ...shared, tuning: current.tuning }, { commands, connection, ircd })
+      hostConnection({ ...shared, tuning: current.tuning }, { commands, connection, ircd, plan })
     );
   });
 
@@ -496,7 +560,11 @@ export const hostNetwork: (
 
   yield* Effect.acquireRelease(Effect.forkDetach(loop), finish);
 
-  const send = Effect.fnUntraced(function* (line: OutboundLine, cause: string) {
+  const send = Effect.fnUntraced(function* (
+    line: OutboundLine,
+    cause: string,
+    sensitive?: Sensitive
+  ) {
     const held = yield* Ref.get(hosted);
     const phase = yield* phaseOf(held);
 
@@ -510,7 +578,15 @@ export const hostNetwork: (
     }
 
     const outcome = Deferred.makeUnsafe<number, LineFailure>();
-    const queued: QueuedLine = { cause, lane: "interactive", line, outcome };
+
+    const queued: QueuedLine = {
+      cause,
+      lane: "interactive",
+      line,
+      outcome,
+      ...(sensitive !== undefined && { sensitive }),
+    };
+
     const offered = yield* held.live.lanes.offerNow(queued);
 
     if (offered === "full") {
@@ -543,7 +619,8 @@ export const hostNetwork: (
     const now = yield* Clock.currentTimeMillis;
     const lastClose = known.recent.at(-1);
     const between = live === undefined;
-    const waiting = between && !stopped && !stopping() && current.enabled;
+    const missing = missingCredentials(current);
+    const waiting = between && !stopped && !stopping() && current.enabled && missing.length === 0;
 
     const phaseBetween =
       unrecorded === undefined && !stopped && lastClose === undefined ? "idle" : "closed";
@@ -560,11 +637,13 @@ export const hostNetwork: (
       lagMillis: between ? undefined : known.lagMillis,
       lanes: between ? noLanes : yield* live.lanes.depths,
       logFault: fault,
+      login: between ? { state: "none" } : loginOf(known),
+      missingCredentials: missing,
       nextAttemptAt: waiting ? Math.max(attemptDue(known, fault, now, current).at, now) : undefined,
       phase: between ? phaseBetween : yield* phaseOf(held),
       refusal: known.refusal?.reason,
       refused: known.refusal !== undefined,
-      rejectedChannels: joinLines(current.channels).rejected,
+      rejectedChannels: rejectedOf(current.channels, current.secrets),
       self: between ? undefined : known.self,
     } satisfies NetworkStatus;
   });

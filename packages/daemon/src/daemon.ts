@@ -1,6 +1,11 @@
 import {
   apiVersion,
+  BackupFailed,
   ChannelNotFound,
+  CredentialNotFound,
+  EntryAlreadyRedacted,
+  EntryNotFound,
+  EntryNotRedactable,
   InvalidMessage,
   InvalidRequest,
   KeyExists,
@@ -8,6 +13,7 @@ import {
   LaneFull,
   LineDropped,
   LogUnavailable,
+  modeKeyName,
   NetworkExists,
   NetworkNotFound,
   NotInSession,
@@ -16,10 +22,18 @@ import {
   Stopping,
   WriteFailed,
 } from "@iirc/api";
-import type { KeyScope, NetworkSettings, NetworkStatus as NetworkState, Status } from "@iirc/api";
+import type {
+  CredentialsUnavailable,
+  KeyScope,
+  NetworkSettings,
+  NetworkStatus as NetworkState,
+  Status,
+} from "@iirc/api";
 import { Log, LogReader, longestReadMillis, StorageFailed } from "@iirc/log";
 import type {
+  Backup,
   DataDirectoryLocked,
+  LogTooNew,
   EntryQuery,
   Gap,
   LoggedMessage,
@@ -27,16 +41,19 @@ import type {
   ReaderBusy as ReaderQueueFull,
   ReadTimedOut as ReaderTimedOut,
 } from "@iirc/log";
-import { joinLines } from "@iirc/protocol/join";
 import { part as partLine, privmsg } from "@iirc/protocol/outbound";
 import type { Outbound, OutboundLine } from "@iirc/protocol/outbound";
+import { joinSensitive, keyedJoins } from "@iirc/session/credentials";
 import type { Entry, NetworkId } from "@iirc/session/entry";
 import { hostNetwork } from "@iirc/session/network";
 import type {
+  ChannelKey,
   NetworkHost,
   NetworkOptions,
   NetworkSettings as HostSettings,
   NetworkStatus,
+  Secrets,
+  Sensitive,
   Sent,
 } from "@iirc/session/network";
 import { Recorder } from "@iirc/session/recorder";
@@ -50,6 +67,8 @@ import {
   Fiber,
   FiberMap,
   Layer,
+  Predicate,
+  Queue,
   Ref,
   Result,
   Schema,
@@ -58,15 +77,19 @@ import {
   Stream,
   SubscriptionRef,
 } from "effect";
+import type { Redacted } from "effect";
 import { constVoid } from "effect/Function";
 
 import { DaemonSettings } from "./change.ts";
 import type { Change } from "./change.ts";
+import { keepingFor, keyNameFor } from "./channel-keys.ts";
 import { droppedChannels } from "./configuration.ts";
 import type { Configuration, ConfiguredNetwork } from "./configuration.ts";
+import { Credentials } from "./credentials.ts";
+import type { CredentialsUnreadable, CredentialStore, Keyring } from "./credentials.ts";
 import { issuesOf } from "./issues.ts";
 import { findKey, hashKey, newKey } from "./keys.ts";
-import { readConfiguration, recordChange } from "./recorded.ts";
+import { readConfiguration, recordChange, recordRedaction } from "./recorded.ts";
 import type { UndecodableChange } from "./recorded.ts";
 import { tuningOf } from "./tuning.ts";
 
@@ -155,8 +178,20 @@ const fromReader = <A>(read: Effect.Effect<A, ReaderQueueFull | ReaderTimedOut |
     StorageFailed: () => Effect.fail(new LogUnavailable()),
   });
 
+// What a failure says of itself, as the reason a Frontend is given.
+const reasonOf = (cause: unknown) =>
+  Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
+    ? cause.message
+    : String(cause);
+
 const toSendResult = (sent: Sent): SendResult =>
   sent._tag === "Written" ? { sequence: sent.sequence, status: "written" } : { status: "queued" };
+
+// CRED-4: who stored a key a Network set or took away with `MODE`, as a Change's `by`.
+const byMode = modeKeyName;
+
+// A Join with no key has nothing to build in.
+const noSecrets: Secrets = new Map();
 
 const byId = (configuration: Configuration) =>
   [...configuration.networks.values()].toSorted((one, other) =>
@@ -164,18 +199,35 @@ const byId = (configuration: Configuration) =>
   );
 
 // What a host runs with: the Channels wanted, which are those with autojoin on, each with
-// the Change that last wanted it, and the whole Tuning (CONF-2, LIVE-8).
-const hostSettings = ({ retrySince, settings, wantedSince }: ConfiguredNetwork): HostSettings => ({
-  channels: settings.channels.flatMap(({ autojoin, name, rejoinOnKick }) => {
+// its key by name and the Change that last wanted it, the whole Tuning, and every
+// Credential, as the same Map until one changes (CONF-2, LIVE-8, LOG-6).
+const hostSettings = (
+  { retrySince, settings, wantedSince }: ConfiguredNetwork,
+  secrets: Secrets
+): HostSettings => ({
+  channels: settings.channels.flatMap(({ autojoin, key, name, rejoinOnKick }) => {
     const since = wantedSince.get(channelKey(name));
 
-    return autojoin ? [{ name, rejoinOnKick, ...(since !== undefined && { since }) }] : [];
+    return autojoin
+      ? [
+          {
+            name,
+            rejoinOnKick,
+            ...(key !== undefined && { key }),
+            ...(since !== undefined && { since }),
+          },
+        ]
+      : [];
   }),
+  connectCommands: settings.connectCommands,
+  credentials: settings.credentials,
   enabled: settings.enabled,
   identity: settings.identity,
   ircds: settings.ircds,
   quitReason: settings.quitReason,
   retrySince,
+  secrets,
+  services: settings.services,
   tuning: tuningOf(settings.tuning),
 });
 
@@ -193,6 +245,8 @@ const toNetworkState = ({ id, name }: NetworkSettings, status: NetworkStatus): N
   lagMillis: status.lagMillis ?? null,
   lanes: status.lanes,
   logFault: status.logFault ?? null,
+  login: { state: status.login.state, text: status.login.text ?? null },
+  missingCredentials: status.missingCredentials,
   name,
   nextAttemptAt: status.nextAttemptAt ?? null,
   phase: status.phase,
@@ -217,6 +271,8 @@ const unhosted = ({ enabled, id, name }: NetworkSettings): NetworkState => ({
   lagMillis: null,
   lanes: { background: 0, control: 0, interactive: 0 },
   logFault: null,
+  login: { state: "none", text: null },
+  missingCredentials: [],
   name,
   nextAttemptAt: null,
   phase: "idle",
@@ -260,9 +316,10 @@ const requireNetwork = (current: Configuration, id: NetworkId) => {
 const sendThrough = (
   host: NetworkHost,
   line: OutboundLine,
-  by: By
+  by: By,
+  sensitive?: Sensitive
 ): Effect.Effect<SendResult, LineFailure> =>
-  host.send(line, causeOf(by)).pipe(
+  host.send(line, causeOf(by), sensitive).pipe(
     Effect.map(toSendResult),
     Effect.catchTags({
       LaneFull: ({ lane }) => Effect.fail(new LaneFull({ lane })),
@@ -291,6 +348,8 @@ export class Daemon extends Context.Service<
     readonly authorize: (
       presented: string
     ) => Effect.Effect<{ readonly name: string; readonly scope: KeyScope } | undefined>;
+    /** Backs up the Log into `backups/` in the data directory, while it runs (RUN-2). */
+    readonly backup: Effect.Effect<Backup, BackupFailed>;
     /** Replaces a Network's settings whole. Ircds, Identity, and Tuning apply next time. */
     readonly changeNetwork: (
       by: By,
@@ -304,6 +363,20 @@ export class Daemon extends Context.Service<
       by: By,
       id: NetworkId
     ) => Effect.Effect<Changed, NetworkNotFound | Recording>;
+    /** Every Credential's name and when it was set, and where they are kept (CRED-2). */
+    readonly credentials: Effect.Effect<{
+      readonly credentials: readonly { readonly name: string; readonly set: number }[];
+      readonly store: CredentialStore;
+    }>;
+    /**
+     * Deletes a Credential, and then records that it did (CRED-1). A Credential the Log
+     * says is set and the store does not hold is deleted too, which only a crash between
+     * the two writes leaves, so that asking again brings them back in line.
+     */
+    readonly deleteCredential: (
+      by: By,
+      name: string
+    ) => Effect.Effect<Changed, CredentialNotFound | CredentialsUnavailable | Recording>;
     /** Creates a key, which is returned once and never again (AUTH-2). */
     readonly createKey: (
       by: By,
@@ -332,8 +405,12 @@ export class Daemon extends Context.Service<
     readonly join: (
       by: By,
       id: NetworkId,
-      join: { readonly channel: string; readonly remember: boolean }
-    ) => Effect.Effect<Joined, NetworkNotFound | Recording | SendRefusal>;
+      join: {
+        readonly channel: string;
+        readonly key?: Redacted.Redacted;
+        readonly remember: boolean;
+      }
+    ) => Effect.Effect<Joined, CredentialsUnavailable | NetworkNotFound | Recording | SendRefusal>;
     /** The keys there are, never the keys themselves. */
     readonly keys: Effect.Effect<
       readonly { readonly created: number; readonly name: string; readonly scope: KeyScope }[]
@@ -364,6 +441,17 @@ export class Daemon extends Context.Service<
       by: By,
       id: NetworkId
     ) => Effect.Effect<Changed, NetworkNotFound | Recording>;
+    /**
+     * Empties the bytes of the Line or Dropped Entry at `sequence`, recording who did in
+     * the same transaction, and derives every table again (LOG-7).
+     */
+    readonly redact: (
+      by: By,
+      sequence: number
+    ) => Effect.Effect<
+      Changed,
+      EntryAlreadyRedacted | EntryNotFound | EntryNotRedactable | Recording
+    >;
     /** Replaces all of Configuration as one Change, as an import does (CONF-6). */
     readonly replaceConfiguration: (
       by: By,
@@ -371,6 +459,16 @@ export class Daemon extends Context.Service<
     ) => Effect.Effect<Changed, InvalidRequest | Recording>;
     /** Revokes a key, which stops working on its next request (AUTH-2). */
     readonly revokeKey: (by: By, name: string) => Effect.Effect<Changed, KeyNotFound | Recording>;
+    /**
+     * Sets or replaces a Credential, and then records that it did, by name alone (CRED-1).
+     * Kept first, because a value with no Change is harmless, and a Change that claims a
+     * value which was never kept would mislead.
+     */
+    readonly setCredential: (
+      by: By,
+      name: string,
+      value: Redacted.Redacted
+    ) => Effect.Effect<Changed, CredentialsUnavailable | Recording>;
     /** Sends one `PRIVMSG` (API-9). */
     readonly send: (
       by: By,
@@ -397,13 +495,14 @@ export class Daemon extends Context.Service<
   ): Layer.Layer<
     Daemon,
     StorageFailed | UndecodableChange,
-    Log | LogReader | Recorder | Transport
+    Credentials | Log | LogReader | Recorder | Transport
   > =>
     Layer.effect(
       Daemon,
       Effect.gen(function* () {
         const log = yield* Log;
         const reader = yield* LogReader;
+        const credentials = yield* Credentials;
         const { record } = yield* Recorder;
         const { version } = config;
 
@@ -432,11 +531,27 @@ export class Daemon extends Context.Service<
         // Daemon was built with.
         const hostContext = yield* Effect.context<Recorder | Transport>();
 
+        // CRED-4: a key a Network set or took away with `MODE` is kept by a fiber of its
+        // own, so a host's loop never waits on a write, nor on a stop that waits for it.
+        // Only the latest for each Channel waits, so a flood of `MODE`s holds no more than
+        // one key per Channel, and costs no more writes than there are Channels.
+        const seenKeys = yield* Ref.make<
+          ReadonlyMap<string, { readonly change: ChannelKey; readonly id: NetworkId }>
+        >(new Map());
+
+        const keysSeen = yield* Queue.sliding<undefined>(1);
+
+        const onChannelKey = (id: NetworkId) => (change: ChannelKey) =>
+          Ref.update(seenKeys, (held) =>
+            new Map(held).set(`${id}\0${channelKey(change.channel)}`, { change, id })
+          ).pipe(Effect.andThen(Queue.offer(keysSeen, undefined)), Effect.asVoid);
+
         // A host reads its settings whenever it decides something, and wakes only for a
-        // Change to its own Network, which the fold gives a new object.
+        // Change to its own Network, which the fold gives a new object. A Credential it
+        // refers to changing is one of those (CRED-1).
         const optionsFor = (network: ConfiguredNetwork): NetworkOptions => {
           const { id } = network.settings;
-          let last = hostSettings(network);
+          let last: HostSettings | undefined;
 
           return {
             changes: SubscriptionRef.changes(configuration).pipe(
@@ -444,13 +559,18 @@ export class Daemon extends Context.Service<
               Stream.changesWith((one, other) => one === other)
             ),
             id,
+            onChannelKey: onChannelKey(id),
             // A removed Network's host stops once Configuration has dropped it, and until it
             // has gone it finds its Network as it last was, but disabled, so it acts on
             // nothing the Owner removed.
-            settings: Effect.map(SubscriptionRef.get(configuration), ({ networks }) => {
-              const found = networks.get(id);
+            settings: Effect.gen(function* () {
+              const found = (yield* SubscriptionRef.get(configuration)).networks.get(id);
+              const secrets = yield* credentials.all;
 
-              last = found === undefined ? { ...last, enabled: false } : hostSettings(found);
+              last =
+                found === undefined
+                  ? { ...(last ?? hostSettings(network, secrets)), enabled: false, secrets }
+                  : hostSettings(found, secrets);
 
               return last;
             }),
@@ -528,8 +648,20 @@ export class Daemon extends Context.Service<
         // Recorded, folded, and published under the permit. Hosts that are gone start to
         // stop once Configuration has dropped them, and new ones start once it has them,
         // so a host always finds its own Network. The operation answers once the gone
-        // hosts have said `QUIT`, but the permit is free by then (LIVE-9).
-        const commit = <E>(by: By, decide: (current: Configuration) => Effect.Effect<Change, E>) =>
+        // hosts have said `QUIT`, but the permit is free by then (LIVE-9). `decide` may
+        // write elsewhere before it names its Change, as a Credential does, so that what
+        // it wrote and the Change that records it are in the same order as every other.
+        // `write` records the Change, which is an append unless the Change edits the Log
+        // too, as a redaction does.
+        const commitWith = <E, C extends Change, W>(
+          by: By,
+          decide: (current: Configuration) => Effect.Effect<C, E>,
+          write: (
+            before: Configuration,
+            by: By,
+            change: C
+          ) => Effect.Effect<{ readonly after: Configuration; readonly sequence: number }, W>
+        ) =>
           Effect.gen(function* () {
             const committed = yield* changing.withPermit(
               Effect.gen(function* () {
@@ -540,9 +672,7 @@ export class Daemon extends Context.Service<
                 const before = yield* SubscriptionRef.get(configuration);
                 const change = yield* decide(before);
 
-                const { after, sequence } = yield* recordChange(record, before, by, change).pipe(
-                  Effect.mapError(() => new LogUnavailable())
-                );
+                const { after, sequence } = yield* write(before, by, change);
 
                 yield* SubscriptionRef.set(configuration, after);
 
@@ -567,6 +697,78 @@ export class Daemon extends Context.Service<
 
             return committed;
           });
+
+        const appendChange = (before: Configuration, by: By, change: Change) =>
+          recordChange(record, before, by, change).pipe(
+            Effect.mapError(() => new LogUnavailable())
+          );
+
+        const commit = <E>(by: By, decide: (current: Configuration) => Effect.Effect<Change, E>) =>
+          commitWith(by, decide, appendChange);
+
+        // Stores a Credential, then records that it did, by name alone (CRED-1). Kept first,
+        // because a value with no Change is harmless, and a Change that claims a value which
+        // was never kept would mislead.
+        const storeCredential = (by: By, name: string, value: Redacted.Redacted) =>
+          commit(by, () =>
+            Effect.as(credentials.set(name, value), {
+              _tag: "CredentialSet",
+              name,
+            } satisfies Change)
+          );
+
+        // CRED-4: a key a Network set or took away is kept as `mode` did it. A Channel that
+        // named no key is given the name it was kept under, once it is kept.
+        const keepKey = Effect.fnUntraced(function* (id: NetworkId, seen: ChannelKey) {
+          const network = (yield* SubscriptionRef.get(configuration)).networks.get(id);
+
+          const keeping =
+            network === undefined
+              ? undefined
+              : keepingFor(network.settings, seen, yield* credentials.all);
+
+          if (keeping?._tag === "Delete") {
+            yield* commit(byMode, () =>
+              Effect.as(credentials.delete(keeping.name), {
+                _tag: "CredentialDeleted",
+                name: keeping.name,
+              } satisfies Change)
+            );
+          } else if (keeping !== undefined) {
+            const { channel, name, nameIt, value } = keeping;
+
+            if (value !== undefined) {
+              yield* storeCredential(byMode, name, value);
+            }
+
+            if (nameIt) {
+              yield* commit(byMode, (current) =>
+                Effect.as(requireNetwork(current, id), {
+                  _tag: "ChannelKeyNamed",
+                  channel,
+                  key: name,
+                  network: id,
+                } satisfies Change)
+              );
+            }
+          }
+        });
+
+        // A stopping Daemon records nothing more, which is no fault of the key's.
+        yield* Effect.forever(
+          Effect.gen(function* () {
+            yield* Queue.take(keysSeen);
+
+            for (const { change, id } of (yield* Ref.getAndSet(seenKeys, new Map())).values()) {
+              yield* keepKey(id, change).pipe(
+                Effect.catchTag("Stopping", () => Effect.void),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("A Channel key could not be kept", cause)
+                )
+              );
+            }
+          })
+        ).pipe(Effect.forkScoped);
 
         // A configured Network's host, which only a stopping Daemon lacks.
         const hostOf = Effect.fnUntraced(function* (id: NetworkId) {
@@ -664,6 +866,11 @@ export class Daemon extends Context.Service<
           }),
           authorize: (presented) =>
             Effect.map(SubscriptionRef.get(configuration), ({ keys }) => findKey(keys, presented)),
+          // Not a Change, so it takes no permit, and runs on a Worker of its own (RUN-2).
+          backup: Effect.mapError(
+            reader.backup,
+            ({ cause }) => new BackupFailed({ reason: reasonOf(cause) })
+          ),
           changeNetwork: Effect.fnUntraced(function* (by, id, settings) {
             if (settings.id !== id) {
               return yield* new InvalidRequest({
@@ -705,19 +912,44 @@ export class Daemon extends Context.Service<
 
             return { change: sequence, key, name, scope };
           }),
+          credentials: credentials.names.pipe(
+            Effect.map((names) => ({ credentials: names, store: credentials.store }))
+          ),
+          deleteCredential: (by, name) =>
+            commit(by, (current) =>
+              Effect.gen(function* () {
+                const deleted = yield* credentials.delete(name);
+
+                if (!deleted && current.credentials.get(name)?.set !== true) {
+                  return yield* new CredentialNotFound({ credential: name });
+                }
+
+                return { _tag: "CredentialDeleted", name } satisfies Change;
+              })
+            ).pipe(Effect.map(({ sequence }) => ({ change: sequence }))),
           disconnect: (by, id) =>
             toggled(by, id, (network) => ({ _tag: "NetworkDisconnected", id: network })),
           // Every read goes to the reader, so none can delay an append (LOG-11).
           entries: (query) => fromReader(reader.entries(query)),
           gaps: (query) => fromReader(reader.gaps(query)),
-          join: Effect.fnUntraced(function* (by, id, { channel, remember }) {
+          join: Effect.fnUntraced(function* (by, id, { channel, key, remember }) {
+            const network = yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);
+            // The name the Channel's key is kept under, or would be (CRED-4).
+            const keyName = keyNameFor(network.settings, channel);
+
             if (remember) {
+              // The key is a Credential first, recorded as one, and only then named by the
+              // Channel, so that no Change names a key that was never kept (CRED-4).
+              if (key !== undefined) {
+                yield* storeCredential(by, keyName, key);
+              }
+
               // The reconciler reads what is wanted on every plan, so it sends the `JOIN`,
               // and nothing here can send a second one.
               const { sequence } = yield* commit(by, (current) =>
                 Effect.as(requireNetwork(current, id), {
                   _tag: "ChannelJoined",
-                  channel: { name: channel },
+                  channel: { name: channel, ...(key !== undefined && { key: keyName }) },
                   network: id,
                 } satisfies Change)
               );
@@ -726,9 +958,15 @@ export class Daemon extends Context.Service<
             }
 
             const host = yield* hostOf(id);
-            const [line] = joinLines([{ name: channel }]).lines;
 
-            if (line === undefined) {
+            // A key that is not to be remembered is built in as a Credential's would be, so
+            // the Log has `<redacted>` in its place, under the name it would have (LOG-6).
+            const [batch] = keyedJoins(
+              [{ name: channel, ...(key !== undefined && { key: keyName }) }],
+              key === undefined ? noSecrets : new Map([[keyName, key]])
+            ).batches;
+
+            if (batch === undefined) {
               return yield* new InvalidMessage({ reason: "InvalidTarget" });
             }
 
@@ -737,7 +975,7 @@ export class Daemon extends Context.Service<
               return { line: { reason: "AlreadyJoined", status: "skipped" } } as const;
             }
 
-            return { line: yield* sendThrough(host, line, by) };
+            return { line: yield* sendThrough(host, batch.line, by, joinSensitive(batch)) };
           }),
           keys: Effect.map(SubscriptionRef.get(configuration), ({ keys }) =>
             [...keys]
@@ -798,6 +1036,22 @@ export class Daemon extends Context.Service<
 
             return { change: sequence, line: sent };
           }),
+          redact: (by, sequence) =>
+            commitWith(
+              by,
+              () => Effect.succeed({ _tag: "EntryRedacted", sequence } as const),
+              (before, who, change) =>
+                recordRedaction(log.redact, before, who, change).pipe(
+                  Effect.catchTags({
+                    EntryAlreadyRedacted: ({ change: taken }) =>
+                      Effect.fail(new EntryAlreadyRedacted({ change: taken, sequence })),
+                    EntryNotFound: () => Effect.fail(new EntryNotFound({ sequence })),
+                    EntryNotRedactable: ({ kind }) =>
+                      Effect.fail(new EntryNotRedactable({ kind, sequence })),
+                    StorageFailed: () => Effect.fail(new LogUnavailable()),
+                  })
+                )
+            ).pipe(Effect.map(({ sequence: change }) => ({ change }))),
           removeNetwork: (by, id) =>
             commit(by, (current) =>
               Effect.as(requireNetwork(current, id), {
@@ -837,6 +1091,10 @@ export class Daemon extends Context.Service<
 
             return yield* sendThrough(host, yield* built(privmsg(target, text)), by);
           }),
+          setCredential: (by, name, value) =>
+            storeCredential(by, name, value).pipe(
+              Effect.map(({ sequence }) => ({ change: sequence }))
+            ),
           // It is how a Frontend hears of a fault in the Log, so a fault must not stop it.
           // `head` stays on the writer, where it costs one lookup in the primary key.
           status: Effect.gen(function* () {
@@ -846,6 +1104,7 @@ export class Daemon extends Context.Service<
 
             return {
               apiVersion,
+              credentials: { store: credentials.store },
               head,
               networks: networks.map(({ status }) => status),
               version,
@@ -877,18 +1136,25 @@ export class Daemon extends Context.Service<
  * itself out.
  * @param config - Where the Log lives, and the Daemon's version.
  * @param transport - How to reach an Ircd, which a test can replace.
+ * @param keyring - The system keyring to try for Credentials, which a test can replace.
  * @returns The Daemon, holding the data directory for as long as it lives.
  */
 export const DaemonCore = (
   config: DaemonConfig,
-  transport: Layer.Layer<Transport> = Transport.layer
-): Layer.Layer<Daemon, DataDirectoryLocked | StorageFailed | UndecodableChange> =>
+  transport: Layer.Layer<Transport> = Transport.layer,
+  keyring: Keyring = Bun.secrets
+): Layer.Layer<
+  Daemon,
+  CredentialsUnreadable | DataDirectoryLocked | LogTooNew | StorageFailed | UndecodableChange
+> =>
   Daemon.layer(config).pipe(
-    // The reader starts once the Log is open, and stops before it closes.
+    // The reader and Credentials start once the Log holds the data directory, and stop
+    // before it lets go.
     Layer.provide(
-      LogReader.layer({ dataDir: config.dataDir }).pipe(
-        Layer.provideMerge(Log.layer({ dataDir: config.dataDir }))
-      )
+      Layer.mergeAll(
+        LogReader.layer({ dataDir: config.dataDir }),
+        Credentials.layer({ dataDir: config.dataDir, keyring })
+      ).pipe(Layer.provideMerge(Log.layer({ dataDir: config.dataDir })))
     ),
     Layer.provide(transport)
   );

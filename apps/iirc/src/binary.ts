@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 
-import { DaemonApi } from "@iirc/api";
+import { DaemonApi, defaultServices } from "@iirc/api";
 import type { NetworkSettings, NetworkStatus } from "@iirc/api";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { Effect, Fiber, Schedule, Stream } from "effect";
@@ -28,12 +28,14 @@ export const freePort = Effect.acquireUseRelease(
  * @param binary - The binary to run.
  * @param flags - Its arguments.
  * @param environment - All of its environment, but for `PATH`.
+ * @param stdin - What to give it on stdin, which it then reads to its end, if anything.
  * @returns The child, and what it has printed so far.
  */
 export const startBinary = Effect.fnUntraced(function* (
   binary: string,
   flags: readonly string[],
-  environment: Readonly<Record<string, string>>
+  environment: Readonly<Record<string, string>>,
+  stdin?: string
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const output: string[] = [];
@@ -44,6 +46,7 @@ export const startBinary = Effect.fnUntraced(function* (
     ChildProcess.make(binary, flags, {
       env: { PATH: process.env.PATH, ...environment },
       extendEnv: false,
+      ...(stdin !== undefined && { stdin: Stream.make(new TextEncoder().encode(stdin)) }),
     })
   );
 
@@ -134,6 +137,8 @@ export const createKey = (binary: string, dataDir: string) =>
 export interface TestNetwork {
   readonly alternates?: readonly string[];
   readonly channels?: readonly string[];
+  readonly connectCommands?: readonly string[];
+  readonly credentials?: NetworkSettings["credentials"];
   readonly host: string;
   readonly id: string;
   readonly nick: string;
@@ -154,6 +159,8 @@ export interface TestNetwork {
  */
 export const settingsFor = (network: TestNetwork): NetworkSettings => ({
   channels: (network.channels ?? []).map((name) => ({ autojoin: true, name, rejoinOnKick: false })),
+  connectCommands: network.connectCommands ?? [],
+  credentials: network.credentials ?? {},
   enabled: true,
   id: network.id,
   identity: {
@@ -172,6 +179,7 @@ export const settingsFor = (network: TestNetwork): NetworkSettings => ({
   ],
   name: network.id,
   quitReason: network.quitReason ?? "iirc",
+  services: [...defaultServices],
   tuning: network.tuning ?? {},
 });
 

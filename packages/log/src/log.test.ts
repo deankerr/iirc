@@ -235,6 +235,24 @@ const mixedSaid = [
   "oftc PRIVMSG ally -> #other: still ally",
 ];
 
+// LOG-7: the Change an `admin` key's redaction records.
+const redaction = (sequence: number): Extract<NewEntry, { readonly _tag: "Change" }> => ({
+  _tag: "Change",
+  by: "owner",
+  change: { _tag: "EntryRedacted", sequence },
+});
+
+const redact = (sequence: number) =>
+  Log.use(({ redact: emptied }) => emptied(sequence, redaction(sequence), (change) => change));
+
+// The sequence of the Line or Dropped Entry whose bytes are this text.
+const sequenceOf = (entries: readonly Entry[], text: string) =>
+  entries.find(
+    (entry) =>
+      (entry._tag === "Line" || entry._tag === "Dropped") &&
+      new TextDecoder().decode(entry.bytes) === text
+  )?.sequence ?? 0;
+
 const opening = (dataDir: string) => Effect.scoped(Layer.build(Log.layer({ dataDir })));
 
 const attempted = (network = "libera") =>
@@ -1770,10 +1788,12 @@ const configured: Arr.NonEmptyReadonlyArray<NewEntry> = [
   {
     _tag: "Connection",
     ircd: pinnedIrcd,
+    loginLines: 2,
     network: "libera",
     nicks: ["alice"],
     phase: "attempt",
     realname: 'caf\u00E9 "quoted"',
+    services: ["NickServ", "Q"],
     tuning: { ...attemptInput.tuning, burstMillis: 0, silenceMillis: 123_456 },
     username: "alice",
   },
@@ -1809,6 +1829,45 @@ describe("the durable Log and Configuration", () => {
       )
   );
 
+  it.effect("LOG-6: a Line and a Dropped Entry keep the names of the Credentials taken out", () =>
+    withLog(
+      Effect.gen(function* () {
+        const redacted: Arr.NonEmptyReadonlyArray<NewEntry> = [
+          {
+            _tag: "Line",
+            bytes: encoder.encode("PASS <redacted>"),
+            cause: "registration",
+            connection: 1,
+            direction: "outbound",
+            network: "libera",
+            redacted: ["pass"],
+          },
+          {
+            _tag: "Dropped",
+            bytes: encoder.encode("JOIN #a,#b <redacted>,<redacted>"),
+            cause: "rejoin",
+            connection: 1,
+            network: "libera",
+            reason: "the Connection closed",
+            redacted: ["key.a", "key.b"],
+          },
+          inbound(":bob!u@h PRIVMSG #iirc :nothing secret"),
+        ];
+
+        yield* TestClock.adjust("3 seconds");
+        yield* record(redacted);
+
+        const read = yield* allEntries;
+
+        assert.deepStrictEqual(
+          read,
+          redacted.map((entry, index): Entry => ({ ...entry, at: 3000, sequence: index + 1 }))
+        );
+        assert.notProperty(read[2], "redacted");
+      })
+    )
+  );
+
   it.effect("LOG-2: a Change derives nothing, and Standing agrees with the fold", () =>
     withLog(
       Effect.gen(function* () {
@@ -1832,6 +1891,173 @@ describe("the durable Log and Configuration", () => {
       })
     )
   );
+
+  describe("redaction (LOG-7)", () => {
+    it.effect(
+      "LOG-7: empties a Line's and a Dropped Entry's bytes, marks each with its Change, and derives the tables again",
+      () =>
+        withLog(
+          Effect.gen(function* () {
+            const connection = yield* attempted();
+
+            yield* record([
+              opened(connection),
+              welcome(),
+              inbound(":bob!u@h PRIVMSG alice :my password is hunter2"),
+              inbound(":bob!u@h PRIVMSG alice :oops"),
+              dropped("PRIVMSG bob :hunter2 again"),
+            ]);
+
+            const before = yield* allEntries;
+            const line = sequenceOf(before, ":bob!u@h PRIVMSG alice :my password is hunter2");
+            const unsent = sequenceOf(before, "PRIVMSG bob :hunter2 again");
+            const first = yield* redact(line);
+            const second = yield* redact(unsent);
+            const after = yield* allEntries;
+
+            assert.deepInclude(
+              after.find(({ sequence }) => sequence === line),
+              { bytes: new Uint8Array(), redactedBy: first.sequence }
+            );
+            assert.deepInclude(
+              after.find(({ sequence }) => sequence === unsent),
+              { bytes: new Uint8Array(), redactedBy: second.sequence }
+            );
+            assert.deepStrictEqual(first, { ...redaction(line), at: first.at, sequence: line + 3 });
+            assert.deepStrictEqual(after.at(-1), second);
+            assert.deepStrictEqual(yield* allSaid, ["libera PRIVMSG bob -> alice: oops"]);
+
+            // What it derived again is what a rebuild derives.
+            const derivedNow = yield* derived;
+
+            yield* Log.use(({ rebuild }) => rebuild);
+
+            assert.deepStrictEqual(yield* derived, derivedNow);
+          })
+        )
+    );
+
+    it.effect(
+      "LOG-7: refuses an unknown sequence, any other kind, and a second redaction, recording nothing",
+      () =>
+        withLog(
+          Effect.gen(function* () {
+            const connection = yield* attempted();
+
+            yield* record([opened(connection), inbound(":bob!u@h PRIVMSG alice :hi")]);
+
+            const line = sequenceOf(yield* allEntries, ":bob!u@h PRIVMSG alice :hi");
+            const { sequence: change } = yield* redact(line);
+            const head = yield* Log.use(({ head: newest }) => newest);
+
+            assert.deepInclude(yield* Effect.flip(redact(head + 5)), {
+              _tag: "EntryNotFound",
+              sequence: head + 5,
+            });
+            assert.deepInclude(yield* Effect.flip(redact(connection)), {
+              _tag: "EntryNotRedactable",
+              kind: "Connection",
+            });
+            assert.deepInclude(yield* Effect.flip(redact(change)), {
+              _tag: "EntryNotRedactable",
+              kind: "Change",
+            });
+            assert.deepInclude(yield* Effect.flip(redact(line)), {
+              _tag: "EntryAlreadyRedacted",
+              change,
+            });
+            assert.strictEqual(yield* Log.use(({ head: newest }) => newest), head);
+          })
+        )
+    );
+
+    it.effect(
+      "LOG-10: rows appended after a redaction are the rows a rebuild derives, though the host keeps what it knew",
+      () =>
+        withLog(
+          Effect.gen(function* () {
+            const connection = yield* attempted();
+
+            yield* record([
+              opened(connection),
+              welcome(),
+              inbound(":alice!u@h NICK :alicia"),
+              outbound("PRIVMSG #iirc :before the redaction"),
+            ]);
+
+            yield* redact(sequenceOf(yield* allEntries, ":alice!u@h NICK :alicia"));
+            yield* record([
+              outbound("PRIVMSG #iirc :after the redaction"),
+              inbound(":bob!u@h PRIVMSG #iirc :and an inbound one"),
+            ]);
+
+            const live = { gaps: yield* allGaps, messages: yield* allMessages };
+
+            // Without its NICK Self is still alice, as a start would have it.
+            assert.deepStrictEqual(
+              live.messages.map(({ sender, text }) => `${sender}: ${text}`),
+              [
+                "alice: before the redaction",
+                "alice: after the redaction",
+                "bob: and an inbound one",
+              ]
+            );
+            // The host knows Self by the nick the Ircd gave it.
+            assert.strictEqual((yield* standing()).self, "alicia");
+
+            yield* Log.use(({ rebuild }) => rebuild);
+
+            assert.deepStrictEqual({ gaps: yield* allGaps, messages: yield* allMessages }, live);
+          })
+        )
+    );
+
+    it.effect(
+      "LOG-7: Standing keeps what the live host knew, and a restart replays a redacted Line as one that says nothing",
+      () =>
+        inTempDirectory((dataDir) =>
+          Effect.gen(function* () {
+            const live = yield* Effect.gen(function* () {
+              const connection = yield* attempted();
+
+              yield* record([
+                opened(connection),
+                welcome(),
+                inbound(":alice!u@h JOIN #rust"),
+                inbound(":mod!u@h KICK #rust alice :your key is hunter2"),
+              ]);
+
+              const kick = sequenceOf(
+                yield* allEntries,
+                ":mod!u@h KICK #rust alice :your key is hunter2"
+              );
+
+              yield* redact(kick);
+
+              return {
+                gaps: yield* allGaps,
+                kicked: [...(yield* standing()).kicked.keys()],
+                messages: yield* allMessages,
+              };
+            }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+            const restarted = yield* Effect.gen(function* () {
+              return {
+                gaps: yield* allGaps,
+                kicked: [...(yield* standing()).kicked.keys()],
+                messages: yield* allMessages,
+              };
+            }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+            // The kick held Self out until the restart, and is forgotten after it.
+            assert.deepStrictEqual(live.kicked, ["#rust"]);
+            assert.deepStrictEqual(restarted.kicked, []);
+            assert.deepStrictEqual(restarted.messages, live.messages);
+            assert.deepStrictEqual(restarted.gaps, live.gaps);
+          })
+        )
+    );
+  });
 
   it.effect("LOG-10: a rebuild and a restart leave Changes and TLS details intact", () =>
     inTempDirectory((dataDir) =>

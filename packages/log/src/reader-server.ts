@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect";
 import { constVoid } from "effect/Function";
 import { RpcServer, RpcWorker } from "effect/rpc";
 
+import { vacuumInto } from "./backup.ts";
 import { allowBudgets } from "./budget.ts";
 import { ReaderBusy, ReadFailed } from "./errors.ts";
 import { ReaderRpcs, ReaderStart } from "./reader-protocol.ts";
@@ -57,6 +58,11 @@ const handlers = (prepare: (database: Database) => void) =>
         };
 
       return ReaderRpcs.of({
+        backup: ({ into }) =>
+          Effect.try({
+            catch: (cause) => new ReadFailed({ reason: String(cause) }),
+            try: () => vacuumInto(database, into),
+          }),
         entries: fresh(reads.entries),
         gaps: fresh(reads.gaps),
         messages: fresh(reads.messages),

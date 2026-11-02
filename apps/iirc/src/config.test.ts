@@ -1,7 +1,7 @@
 import { BunServices } from "@effect/platform-bun";
 import { assert, beforeAll, describe, it } from "@effect/vitest";
 import type { NetworkSettings } from "@iirc/api";
-import { Effect, Fiber, FileSystem, Layer } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/http";
 
 import { appRoot, createKey, freePort, healthyClient, settingsFor, startBinary } from "./binary.ts";
@@ -21,25 +21,47 @@ const nowhere = { host: "127.77.2.1", port: 1 };
 
 const pin = `sha256/${"A".repeat(43)}=`;
 
+// A value no export may hold, though `libera.pass` holds it (CRED-1, CONF-6).
+const passValue = "the-libera-server-password";
+
 const libera: NetworkSettings = {
   ...settingsFor({
     ...nowhere,
     alternates: ["owner_"],
-    channels: ["#iirc", "#effect"],
+    connectCommands: ["MODE owner +i", "PRIVMSG Q :AUTH owner {{libera.q}}"],
+    credentials: {
+      password: "libera.pass",
+      service: { account: "owner", nick: "NickServ", password: "libera.nickserv" },
+    },
     id: "libera",
     nick: "owner",
     quitReason: "back soon",
     tuning: { drainMillis: 300, reconnectInitialMillis: 1000 },
   }),
+  channels: [
+    { autojoin: true, name: "#iirc", rejoinOnKick: false },
+    { autojoin: true, key: "key.libera.effect", name: "#effect", rejoinOnKick: false },
+  ],
   enabled: false,
   ircds: [
     { host: "irc.libera.test", pin, port: 6697, tls: true },
     { host: "irc2.libera.test", port: 6667, tls: false },
   ],
   name: "Libera Chat",
+  services: ["NickServ", "ChanServ", "Q"],
 };
 
-const oftc = { ...settingsFor({ ...nowhere, id: "oftc", nick: "owner" }), enabled: false };
+// A client certificate needs TLS on every Ircd.
+const oftc = {
+  ...settingsFor({
+    ...nowhere,
+    credentials: { clientCertificate: "oftc.cert" },
+    id: "oftc",
+    nick: "owner",
+    tls: true,
+  }),
+  enabled: false,
+};
 
 const layers = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer);
 
@@ -56,6 +78,10 @@ const daemonWithNetworks = Effect.gen(function* () {
 
   const client = yield* healthyClient(httpPort, key);
 
+  yield* client.credentials.set({
+    params: { name: "libera.pass" },
+    payload: { value: Redacted.make(passValue) },
+  });
   yield* client.networks.add({ payload: libera });
   yield* client.networks.add({ payload: oftc });
 
@@ -106,7 +132,7 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
   );
 
   it.live(
-    "exports TOML that imports back as the same Configuration, adding only the Change",
+    "CONF-6, CRED-1: exports TOML that imports back as the same Configuration, adding only the Change, with Credentials by name",
     () =>
       Effect.gen(function* () {
         const { apiUrl, client, dataDir, key } = yield* daemonWithNetworks;
@@ -124,6 +150,14 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
         ]) {
           assert.include(exported.output, table);
         }
+
+        // CRED-1: Credentials go by name, and never by value, though one is set.
+        assert.include(exported.output, 'password = "libera.pass"');
+        assert.include(exported.output, 'clientCertificate = "oftc.cert"');
+        assert.include(exported.output, 'key = "key.libera.effect"');
+        assert.include(exported.output, "{{libera.q}}");
+        assert.include(exported.output, '"Q"');
+        assert.notInclude(exported.output, passValue);
 
         // Only what the Owner changed, so a Network that changed nothing has no Tuning.
         assert.notInclude(exported.output, "[networks.oftc.tuning]");

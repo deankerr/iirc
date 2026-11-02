@@ -68,6 +68,16 @@ export class ReaderRpcs extends RpcGroup.make(
     error,
     payload: QueuedNetworkPage,
     success: Schema.Array(Schema.toType(GapRow)),
+  }),
+  /**
+   * Copies the Log into `into` and answers with the last sequence the copy holds (RUN-2).
+   * It has no budget, because a copy takes as long as the Log is big, so only a Worker
+   * started for it alone is asked, and the reads never queue behind it.
+   */
+  Rpc.make("backup", {
+    error: ReadFailed,
+    payload: Schema.Struct({ into: Schema.String }),
+    success: Schema.Int,
   })
 ) {}
 

@@ -10,7 +10,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { defaultTuning as specTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { privmsg } from "@iirc/protocol/outbound";
-import { Deferred, Effect, Exit, Fiber, Layer, Ref, References } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Ref, References } from "effect";
 import { Socket } from "effect/socket";
 import { TestClock } from "effect/testing";
 
@@ -38,10 +38,14 @@ const defaultTuning = { ...specTuning, rejoinSettleMillis: 0 };
 const options = (port: number, host: string, tls = false, overrides?: Partial<NetworkSettings>) =>
   constantNetwork("local", {
     channels: [{ name: "#one" }],
+    connectCommands: [],
+    credentials: {},
     enabled: true,
     identity: { alternates: [], nick: "iirc", realname: "I IRC", username: "user" },
     ircds: [{ host, port, tls }],
     quitReason: "leaving",
+    secrets: new Map(),
+    services: [],
     tuning: defaultTuning,
     ...overrides,
   });
@@ -1141,10 +1145,14 @@ describe("Transport.layer and pinned keys (CONN-1)", () => {
       const secure = yield* hostNetwork(
         constantNetwork("pinned", {
           channels: [],
+          connectCommands: [],
+          credentials: {},
           enabled: true,
           identity: { alternates: [], nick: "iirc", realname: "I IRC", username: "user" },
           ircds: [pinned(ircd.port, pin)],
           quitReason: "leaving",
+          secrets: new Map(),
+          services: [],
           tuning: defaultTuning,
         })
       );
@@ -1174,10 +1182,14 @@ describe("Transport.layer and pinned keys (CONN-1)", () => {
       const hosted = yield* hostNetwork(
         constantNetwork("pinned", {
           channels: [],
+          connectCommands: [],
+          credentials: {},
           enabled: true,
           identity: { alternates: [], nick: "iirc", realname: "I IRC", username: "user" },
           ircds: [pinned(ircd.port, wrong)],
           quitReason: "leaving",
+          secrets: new Map(),
+          services: [],
           tuning: defaultTuning,
         })
       );
@@ -1195,5 +1207,80 @@ describe("Transport.layer and pinned keys (CONN-1)", () => {
       assert.isDefined(status.nextAttemptAt);
       assert.lengthOf(yield* ircd.bytes, 0);
     }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
+  );
+});
+
+// An Ircd that only lets in a client its own authority issued a certificate to, pinned so
+// that its own certificate needs no trust.
+const askingIrcd = Effect.gen(function* () {
+  const authority = yield* testAuthority("iirc clients");
+  const certificate = authority.selfSigned("DNS:elsewhere.test");
+
+  const ircd = yield* scriptedIrcd(welcoming("iirc"), {
+    clientAuthority: authority.ca,
+    hostname: quietAddress,
+    tls: certificate,
+  });
+
+  return { authority, ircd, pin: opensslPin(certificate.cert) };
+});
+
+describe("Transport.layer and client certificates (CONN-1, CRED-1)", () => {
+  it.live("CRED-1: presents a client certificate from a Credential, which the Ircd accepts", () =>
+    Effect.gen(function* () {
+      const { authority, ircd, pin } = yield* askingIrcd;
+      const client = authority.issue("DNS:client.test", "iirc client");
+
+      const hosted = yield* hostNetwork(
+        options(ircd.port, quietAddress, true, {
+          channels: [],
+          credentials: { clientCertificate: "cert.libera" },
+          ircds: [pinned(ircd.port, pin)],
+          secrets: new Map([["cert.libera", Redacted.make(`${client.cert}${client.key}`)]]),
+        })
+      );
+
+      yield* eventually(hosted.status, ({ phase }) => phase === "session");
+
+      assert.deepStrictEqual(yield* ircd.clientNames, ["iirc client"]);
+      assert.include(yield* ircd.received, "NICK iirc");
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
+  );
+
+  it.live("CONN-1: the same Ircd lets nothing through from a Connection with no certificate", () =>
+    Effect.gen(function* () {
+      const { ircd, pin } = yield* askingIrcd;
+
+      const hosted = yield* hostNetwork(
+        options(ircd.port, quietAddress, true, { channels: [], ircds: [pinned(ircd.port, pin)] })
+      );
+
+      const status = yield* eventually(hosted.status, ({ phase }) => phase === "closed");
+
+      assert.isDefined(status.closeReason);
+      assert.deepStrictEqual(yield* ircd.clientNames, []);
+      assert.deepStrictEqual(yield* ircd.received, []);
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
+  );
+
+  it.live("CRED-1: refuses to dial with a Credential that holds no private key", () =>
+    Effect.gen(function* () {
+      const { authority, ircd, pin } = yield* askingIrcd;
+      const client = authority.issue("DNS:client.test", "iirc client");
+
+      const failure = yield* Effect.flip(
+        Effect.scoped(
+          Transport.use(({ connect }) =>
+            connect(pinned(ircd.port, pin), {
+              ...defaultTuning,
+              clientCertificate: Redacted.make(client.cert),
+            })
+          )
+        )
+      );
+
+      assert.include(failure.reason, "holds no certificate and private key");
+      assert.strictEqual(yield* ircd.accepted, 0);
+    }).pipe(Effect.provide(Transport.layer))
   );
 });

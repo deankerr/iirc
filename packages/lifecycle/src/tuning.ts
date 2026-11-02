@@ -26,6 +26,11 @@ export interface Tuning {
   readonly lagCheckMillis: number;
   /** SEND-3: how many Lines the interactive and background lanes each hold. */
   readonly laneLimit: number;
+  /**
+   * CONN-6: how long joining waits for a sign of login, from when the last Line of the
+   * login sequence was written.
+   */
+  readonly loginWaitMillis: number;
   /** LIVE-9: how long `QUIT` may wait for the queue. */
   readonly quitWaitMillis: number;
   /** LIVE-4: the first delay after a failed Connection. */
@@ -61,6 +66,7 @@ export const defaultTuning: Tuning = {
   kickRejoinMillis: 10_000,
   lagCheckMillis: 60_000,
   laneLimit: 1000,
+  loginWaitMillis: 2000,
   quitWaitMillis: 2000,
   reconnectInitialMillis: 5000,
   reconnectMaxMillis: 300_000,

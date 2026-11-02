@@ -871,7 +871,7 @@ describe("the compiled binary", () => {
           entries
             .filter((entry) => "network" in entry && entry.network === network)
             .flatMap((entry) => toEvent(entry) ?? []),
-          { realname, tuning: finalTuning, username }
+          { loginLines: 0, realname, services: [], tuning: finalTuning, username }
         );
 
         const standing = foldStandings(noStandings, entries).get(network) ?? noStanding;

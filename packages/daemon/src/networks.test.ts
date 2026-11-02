@@ -1,5 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ChannelNotFound, LaneFull, NetworkExists, NetworkNotFound, NotInSession } from "@iirc/api";
+import {
+  ChannelNotFound,
+  defaultServices,
+  LaneFull,
+  NetworkExists,
+  NetworkNotFound,
+  NotInSession,
+} from "@iirc/api";
 import type { LogEntry, NetworkSettings } from "@iirc/api";
 import { eventually, scriptedIrcd } from "@iirc/session/testing";
 import type { ScriptedIrcd } from "@iirc/session/testing";
@@ -72,12 +79,15 @@ const settingsFor = (
   overrides: Partial<NetworkSettings> = {}
 ): NetworkSettings => ({
   channels: [],
+  connectCommands: [],
+  credentials: {},
   enabled: true,
   id,
   identity: { alternates: [], nick, realname: "iirc", username: "iirc" },
   ircds: [{ host: ircdAddress, port: ircd.port, tls: false }],
   name: id,
   quitReason,
+  services: [],
   tuning: brisk,
   ...overrides,
 });
@@ -179,12 +189,15 @@ describe("Networks through the API", () => {
         assert.deepStrictEqual((yield* client.configuration.get()).networks, [
           {
             channels: [],
+            connectCommands: [],
+            credentials: {},
             enabled: false,
             id: "oftc",
             identity: { alternates: [], nick, realname: "iirc", username: "iirc" },
             ircds: [{ host: "irc.oftc.net", port: 6697, tls: true }],
             name: "oftc",
             quitReason: "iirc",
+            services: [...defaultServices],
             tuning: {},
           },
         ]);

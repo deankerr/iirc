@@ -1,8 +1,9 @@
 import { channelPrefixes, joinRejection } from "@iirc/protocol/join";
 import { nickLine } from "@iirc/protocol/nick";
-import { quit, user } from "@iirc/protocol/outbound";
+import { privmsg, quit, user } from "@iirc/protocol/outbound";
 import type { Outbound } from "@iirc/protocol/outbound";
-import { Context, Effect, Option, Schema, SchemaGetter } from "effect";
+import { buildTemplate, parseTemplate, templateReferences } from "@iirc/protocol/template";
+import { Context, Effect, Option, Redacted, Schema, SchemaGetter } from "effect";
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -67,6 +68,7 @@ const Tuning = Schema.Struct({
   kickRejoinMillis: Schema.Int,
   lagCheckMillis: Schema.Int,
   laneLimit: Schema.Int,
+  loginWaitMillis: Schema.Int,
   quitWaitMillis: Schema.Int,
   reconnectInitialMillis: Schema.Int,
   reconnectMaxMillis: Schema.Int,
@@ -100,7 +102,10 @@ const Lane = Schema.Literals(["control", "interactive", "background"]);
  * while the Network is disabled, or while the Daemon is stopping. A rejected Channel is
  * one no `JOIN` can carry, so it is never tried. Between Connections, and while the Log
  * is at fault, `self`, `joined`, and `lagMillis` are empty, because no Session is current.
- * `logFault.retryMillis` is the wait that `retryAt` stands for.
+ * `logFault.retryMillis` is the wait that `retryAt` stands for. `login` is how the current
+ * Connection's login to services went, with the service's own words in `text` where it
+ * gave any (CONN-6). `missingCredentials` names each Credential the settings refer to that
+ * is not set, which keeps the Network from making any `attempt` (CRED-1).
  */
 export const NetworkStatus = Schema.Struct({
   closeReason: Schema.NullOr(Schema.String),
@@ -127,6 +132,11 @@ export const NetworkStatus = Schema.Struct({
   logFault: Schema.NullOr(
     Schema.Struct({ failures: Schema.Int, retryAt: Schema.Int, retryMillis: Schema.Int })
   ),
+  login: Schema.Struct({
+    state: Schema.Literals(["none", "waiting", "succeeded", "failed", "timedOut"]),
+    text: Schema.NullOr(Schema.String),
+  }),
+  missingCredentials: Schema.Array(Schema.String),
   name: Schema.String,
   nextAttemptAt: Schema.NullOr(Schema.Int),
   phase: Phase,
@@ -144,12 +154,17 @@ export const NetworkStatus = Schema.Struct({
 /** The decoded form of {@link NetworkStatus}. */
 export type NetworkStatus = typeof NetworkStatus.Type;
 
+/** Where Credentials are kept: the system keyring, or a file in the data directory (CRED-1). */
+const CredentialStore = Schema.Literals(["keyring", "file"]);
+
 /**
  * The Daemon and every configured Network at a glance, ordered by ID. `head` is the Log's
- * newest sequence, which is `null` when the Log cannot be read.
+ * newest sequence, which is `null` when the Log cannot be read. `credentials.store` says
+ * where Credentials are kept (CRED-1).
  */
 const Status = Schema.Struct({
   apiVersion: Schema.Literal(apiVersion),
+  credentials: Schema.Struct({ store: CredentialStore }),
   head: Schema.NullOr(Schema.Int),
   networks: Schema.Array(NetworkStatus),
   version: Schema.String,
@@ -162,8 +177,13 @@ export type Status = typeof Status.Type;
  * One Entry in the Log. `at` is epoch milliseconds. A Line carries its bytes as base64,
  * because hostile bytes must survive JSON (API-4), beside `text`, their decoded form,
  * and `reason` says why they could not be parsed, if they could not (HOST-1). A Dropped
- * Entry carries the Line that never left in the same way, and its `reason` says why. A
- * Change says who made it, by key name or `local`, and what it changed, as JSON.
+ * Entry carries the Line that never left in the same way, and its `reason` says why.
+ * Either has `redacted`, the names of the Credentials taken out of its bytes, each leaving
+ * `<redacted>` in its place, when any were (LOG-6), one name for each `<redacted>` in the
+ * order they stand, and `redactedBy`, the sequence of the
+ * Change whose `admin` key emptied its bytes, once one has (LOG-7). An `attempt` says how many Lines its
+ * login sequence holds and which nicks are services (CONN-6). A Change says who made it,
+ * by key name or `local`, and what it changed, as JSON.
  */
 export const LogEntry = Schema.Union([
   Schema.TaggedStruct("Line", {
@@ -175,13 +195,17 @@ export const LogEntry = Schema.Union([
     direction: Schema.Literals(["inbound", "outbound"]),
     network: Schema.String,
     reason: Schema.optionalKey(Schema.Literals(["Empty", "NoCommand"])),
+    redacted: Schema.optionalKey(Schema.Array(Schema.String)),
+    redactedBy: Schema.optionalKey(Schema.Int),
     text: Schema.String,
   }),
   Schema.TaggedStruct("Connection", {
     ...Connected,
+    loginLines: Schema.Int,
     nicks: Schema.Array(Schema.String),
     phase: Schema.Literal("attempt"),
     realname: Schema.String,
+    services: Schema.Array(Schema.String),
     tuning: Tuning,
     username: Schema.String,
   }),
@@ -216,6 +240,8 @@ export const LogEntry = Schema.Union([
     connection: Schema.Int,
     network: Schema.String,
     reason: Schema.String,
+    redacted: Schema.optionalKey(Schema.Array(Schema.String)),
+    redactedBy: Schema.optionalKey(Schema.Int),
     text: Schema.String,
   }),
   Schema.TaggedStruct("Deadline", {
@@ -386,18 +412,108 @@ const orDefault =
       })
     );
 
+const credentialNamePattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
+
+/**
+ * A Credential's name, which Configuration refers to it by (CRED-1): up to 64 lowercase
+ * letters, digits, `.`, `_`, and `-`, starting with a letter or digit.
+ */
+export const CredentialName = Schema.String.check(Schema.isPattern(credentialNamePattern));
+
 /**
  * A Channel in Configuration (CONF-3). Autojoin on means it is wanted, and joined after
- * every burst (LIVE-7). Rejoin-on-kick goes back after a kick (LIVE-8).
+ * every burst (LIVE-7). Rejoin-on-kick goes back after a kick (LIVE-8). `key` names the
+ * Credential holding its key, and one that is not set is joined without a key (CRED-4).
  */
 const ChannelSettings = Schema.Struct({
   autojoin: Schema.Boolean.pipe(orDefault(true)),
+  key: Schema.optionalKey(CredentialName),
   name: ChannelName,
   rejoinOnKick: Schema.Boolean.pipe(orDefault(false)),
 });
 
+/** The nicks that are services unless the Owner says otherwise (CONF-3). */
+export const defaultServices = [
+  "NickServ",
+  "ChanServ",
+  "MemoServ",
+  "OperServ",
+  "BotServ",
+  "HostServ",
+  "HelpServ",
+] as const;
+
+// A service is someone a `PRIVMSG` can go to, which rules out a list, a space, and a
+// leading colon.
+const ServiceNick = Schema.String.check(
+  Schema.makeFilter(
+    (nick) => builds(privmsg(nick, "IDENTIFY")) || "is not a nick a `PRIVMSG` can be sent to"
+  )
+);
+
+// The account goes before the password in `IDENTIFY`, so a space in it would move the
+// password along by a word.
+const ServiceAccount = Schema.String.check(
+  Schema.makeFilter((account) => /^[^\s\p{Cc}:][^\s\p{Cc}]*$/u.test(account) || "must be one word")
+);
+
+/**
+ * How Self logs in to services after the burst (CONN-6): `IDENTIFY [account] <password>`
+ * to `nick`, which is `NickServ` unless given, with the password by Credential name.
+ */
+const ServiceLogin = Schema.Struct({
+  account: Schema.optionalKey(ServiceAccount),
+  nick: ServiceNick.pipe(orDefault("NickServ")),
+  password: CredentialName,
+});
+
+/**
+ * The Credentials a Network uses, each by name (CONF-3, CRED-1): `PASS` (CONN-2), a
+ * service login (CONN-6), and a TLS client certificate, which is one PEM holding the
+ * certificate and its key.
+ */
+const CredentialSettings = Schema.Struct({
+  clientCertificate: Schema.optionalKey(CredentialName),
+  password: Schema.optionalKey(CredentialName),
+  service: Schema.optionalKey(ServiceLogin),
+});
+
+const isCredentialName = (name: string) => credentialNamePattern.test(name);
+
+/**
+ * One connect command (CONN-6): a Line of text in which `{{name}}` stands for the
+ * Credential of that name. Each name must be one a Credential can have, and the Line
+ * must build with every reference filled in, though the values themselves are only
+ * known as it is sent.
+ */
+const ConnectCommand = Schema.String.check(
+  Schema.makeFilter((text) => {
+    const unnamed = templateReferences(text).find((name) => !isCredentialName(name));
+
+    if (unnamed !== undefined) {
+      return `refers to {{${unnamed}}}, which is not a Credential name`;
+    }
+
+    const parsed = parseTemplate(text);
+
+    if (parsed._tag === "Rejected") {
+      return parsed.reason === "HasPrefix"
+        ? "must not start with tags or a source"
+        : "is not a Line";
+    }
+
+    const built = buildTemplate(parsed.template, () => "<redacted>");
+
+    return built._tag === "Safe" || `cannot be sent as a Line (${built.reason})`;
+  })
+);
+
 const settingsFields = {
   channels: Schema.Array(ChannelSettings).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  connectCommands: Schema.Array(ConnectCommand).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([]))
+  ),
+  credentials: CredentialSettings.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
   id: NetworkId,
   identity: IdentitySettings,
@@ -407,6 +523,10 @@ const settingsFields = {
       (reason) => builds(quit(reason)) || "must fit in a `QUIT` Line, with no line break or NUL"
     )
   ).pipe(Schema.withDecodingDefaultKey(Effect.succeed("iirc"))),
+  /** The nicks that are services, whose `NOTICE` can be a sign of login (CONN-6). */
+  services: Schema.Array(ServiceNick).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([...defaultServices]))
+  ),
   /**
    * Only the Tuning numbers the Owner changed, by name, so that a new default reaches every
    * Network that never changed it (CONF-3). The Daemon refuses a name that is not a Tuning
@@ -421,23 +541,48 @@ const DisplayName = Schema.NonEmptyString.check(
   Schema.makeFilter((name) => !/[\0\r\n]/u.test(name) || "must not hold a line break or NUL")
 );
 
+// A client certificate is presented in the TLS handshake, so an Ircd without TLS would be
+// dialed without it, as someone else.
+const certificateNeedsTls = Schema.makeFilter(
+  ({
+    credentials,
+    ircds,
+  }: {
+    readonly credentials: { readonly clientCertificate?: string };
+    readonly ircds: readonly { readonly tls: boolean }[];
+  }) => {
+    const plain = ircds.findIndex(({ tls }) => !tls);
+
+    return (
+      credentials.clientCertificate === undefined ||
+      plain === -1 || {
+        issue: "must be on, because the Network presents a client certificate",
+        path: ["ircds", plain, "tls"],
+      }
+    );
+  }
+);
+
 /**
  * Everything the Owner wants of one Network (CONF-3), which the Log stores whole with each
  * Change to it. Anything left out takes its default, and the display name is the ID unless
- * given. Credentials, services, and connect commands come later.
+ * given. Credentials appear by name only, here and wherever settings go (CRED-1).
  */
 export const NetworkSettings = Schema.toEncoded(
   Schema.Struct({ ...settingsFields, name: Schema.optionalKey(DisplayName) })
 ).pipe(
   // Checked once, on the way in. Its shape alone is checked before the name is filled in,
   // because checking every Channel twice made a long history slow to start (CONF-1).
-  Schema.decodeTo(Schema.Struct({ ...settingsFields, name: DisplayName }), {
-    decode: SchemaGetter.transform((settings) => ({
-      ...settings,
-      name: settings.name ?? settings.id,
-    })),
-    encode: SchemaGetter.transform((settings) => settings),
-  })
+  Schema.decodeTo(
+    Schema.Struct({ ...settingsFields, name: DisplayName }).check(certificateNeedsTls),
+    {
+      decode: SchemaGetter.transform((settings) => ({
+        ...settings,
+        name: settings.name ?? settings.id,
+      })),
+      encode: SchemaGetter.transform((settings) => settings),
+    }
+  )
 );
 
 /** The decoded form of {@link NetworkSettings}. */
@@ -464,7 +609,7 @@ const NetworkView = Schema.Struct({ settings: NetworkSettings, status: NetworkSt
 
 /**
  * What a key may do (AUTH-3). `read` sees the Log and derived state. `chat` adds sending,
- * joining, and parting. `admin` adds Networks, Configuration, and keys.
+ * joining, and parting. `admin` adds Networks, Configuration, Credentials, backups, and keys.
  */
 export const KeyScope = Schema.Literals(["read", "chat", "admin"]);
 
@@ -475,6 +620,12 @@ export type KeyScope = typeof KeyScope.Type;
 export const localKeyName = "local";
 
 /**
+ * What a Change records when the Daemon kept a Channel key that a Network set or took away
+ * with `MODE`, rather than a key asking it to (CRED-4).
+ */
+export const modeKeyName = "mode";
+
+/**
  * A key's name, which the cause of everything it does carries (LOG-5). `local` stands for
  * `iirc key create`, so no key may take it.
  */
@@ -482,11 +633,47 @@ export const KeyName = Schema.String.check(
   Schema.isPattern(/^[a-z0-9][a-z0-9_-]{0,31}$/u),
   Schema.makeFilter(
     (name) => name !== localKeyName || "`local` is reserved for what `iirc key create` does"
+  ),
+  Schema.makeFilter(
+    (name) =>
+      name !== modeKeyName || "`mode` is reserved for keys a Network set on a Channel (CRED-4)"
   )
 );
 
 /** A key as anyone may see it, which is never the key itself (AUTH-2). */
 const KeyView = Schema.Struct({ created: Schema.Int, name: Schema.String, scope: KeyScope });
+
+/** The most a Credential's value may hold, in UTF-8 bytes: enough for a PEM certificate and key. */
+export const maxCredentialBytes = 16 * 1024;
+
+const utf8 = new TextEncoder();
+
+/**
+ * A Credential's value, which is `Redacted` from the moment it is decoded (CRED-3). Neither
+ * check says what the value was, so a refusal cannot carry it back.
+ */
+export const CredentialValue = Schema.RedactedFromValue(
+  Schema.String.check(
+    Schema.makeFilter((value) => value !== "" || "must not be empty"),
+    Schema.makeFilter(
+      (value) =>
+        utf8.encode(value).byteLength <= maxCredentialBytes ||
+        `must be at most ${maxCredentialBytes} bytes`
+    )
+  )
+);
+
+/**
+ * Every Credential there is, by name, with when each was last set in epoch milliseconds,
+ * and where they are kept. A value is never shown (CRED-2).
+ */
+const Credentials = Schema.Struct({
+  credentials: Schema.Array(Schema.Struct({ name: Schema.String, set: Schema.Int })),
+  store: CredentialStore,
+});
+
+/** A backup of the Log (RUN-2): where it is, how big, and the last sequence it holds. */
+const Backup = Schema.Struct({ bytes: Schema.Int, head: Schema.Int, path: Schema.String });
 
 /**
  * What became of a Line the Daemon took (API-9). `written` left, under that sequence.
@@ -639,6 +826,24 @@ const Parted = Schema.Union([
   Schema.Struct({ line: Sent }),
 ]);
 
+/** No Entry has that sequence (LOG-7). */
+export class EntryNotFound extends Schema.TaggedError<
+  EntryNotFound,
+  { readonly brand: unique symbol }
+>()("EntryNotFound", { sequence: Schema.Int }, { httpApiStatus: 404 }) {}
+
+/** Only a Line or a Dropped Entry has bytes to redact, and this Entry is `kind` (LOG-7). */
+export class EntryNotRedactable extends Schema.TaggedError<
+  EntryNotRedactable,
+  { readonly brand: unique symbol }
+>()("EntryNotRedactable", { kind: EntryKind, sequence: Schema.Int }, { httpApiStatus: 409 }) {}
+
+/** The Entry's bytes are already gone, and `change` is the Change that took them (LOG-7). */
+export class EntryAlreadyRedacted extends Schema.TaggedError<
+  EntryAlreadyRedacted,
+  { readonly brand: unique symbol }
+>()("EntryAlreadyRedacted", { change: Schema.Int, sequence: Schema.Int }, { httpApiStatus: 409 }) {}
+
 /** No Network has that ID. */
 export class NetworkNotFound extends Schema.TaggedError<
   NetworkNotFound,
@@ -673,6 +878,27 @@ export class KeyNotFound extends Schema.TaggedError<
   KeyNotFound,
   { readonly brand: unique symbol }
 >()("KeyNotFound", { keyName: Schema.String }, { httpApiStatus: 404 }) {}
+
+/** No Credential has that name. */
+export class CredentialNotFound extends Schema.TaggedError<
+  CredentialNotFound,
+  { readonly brand: unique symbol }
+>()("CredentialNotFound", { credential: Schema.String }, { httpApiStatus: 404 }) {}
+
+/**
+ * Credentials could not be written where they are kept, so nothing changed and no Change
+ * was recorded (CRED-1). `reason` says why, and never holds a value.
+ */
+export class CredentialsUnavailable extends Schema.TaggedError<
+  CredentialsUnavailable,
+  { readonly brand: unique symbol }
+>()("CredentialsUnavailable", { reason: Schema.String }, { httpApiStatus: 503 }) {}
+
+/** The Log could not be backed up, and `reason` says why (RUN-2). */
+export class BackupFailed extends Schema.TaggedError<
+  BackupFailed,
+  { readonly brand: unique symbol }
+>()("BackupFailed", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
 /**
  * The Daemon is stopping, so it records nothing more, and Configuration stays as it was
@@ -724,6 +950,31 @@ export class Authorization extends HttpApiMiddleware.Service<Authorization, { pr
   }
 ) {}
 
+/**
+ * A Channel key, which is `Redacted` from the moment it is decoded (CRED-3). It is one
+ * item of a `JOIN`'s key list, so it holds no space, comma, line break, or NUL.
+ */
+const ChannelKeyValue = Schema.RedactedFromValue(
+  Schema.String.check(
+    Schema.makeFilter(
+      (key) =>
+        (key !== "" && joinRejection({ key, name: "#" }) !== "InvalidKey") ||
+        "must be one word, with no comma, line break, or NUL"
+    )
+  )
+);
+
+// A Channel and its key together must fit in one `JOIN`. What is wrong is said without
+// the key, so a refusal cannot carry it back.
+const joinFits = Schema.makeFilter(
+  ({ channel, key }: { readonly channel: string; readonly key?: Redacted.Redacted }) =>
+    key === undefined ||
+    joinRejection({ key: Redacted.value(key), name: channel }) === undefined || {
+      issue: "is too long for a `JOIN` Line with this Channel",
+      path: ["key"],
+    }
+);
+
 // What every Change an operation records can fail with besides its own refusals.
 const recording = [LogUnavailable, Stopping];
 
@@ -732,6 +983,8 @@ const reading = [LogUnavailable, ReaderBusy, ReadTimedOut];
 const sending = [InvalidMessage, LaneFull, LineDropped, LogUnavailable, NotInSession, WriteFailed];
 
 const NetworkPath = { id: NetworkId };
+
+const CredentialPath = { name: CredentialName };
 
 /** The contract every Frontend drives the Daemon through. */
 export class DaemonApi extends HttpApi.make("iirc")
@@ -772,7 +1025,20 @@ export class DaemonApi extends HttpApi.make("iirc")
             text: Schema.String,
           }),
           success: Sent,
-        }).annotate(RequiredScope, "chat")
+        }).annotate(RequiredScope, "chat"),
+        // Empties a Line or a Dropped Entry's bytes, for the day a secret gets through, and
+        // records who did as a Change in the same transaction (LOG-7).
+        HttpApiEndpoint.post("redact", "/entries/:sequence/redact", {
+          error: [...recording, EntryNotFound, EntryNotRedactable, EntryAlreadyRedacted],
+          params: { sequence: IntFromString.check(Schema.isGreaterThanOrEqualTo(1)) },
+          success: Changed,
+        }).annotate(RequiredScope, "admin"),
+        // Written by a Worker of its own, into `backups/` in the data directory and nowhere
+        // a request could name (RUN-2).
+        HttpApiEndpoint.post("backup", "/backup", {
+          error: BackupFailed,
+          success: Backup,
+        }).annotate(RequiredScope, "admin")
       )
       .middleware(Authorization)
   )
@@ -829,12 +1095,13 @@ export class DaemonApi extends HttpApi.make("iirc")
           success: Changed,
         }).annotate(RequiredScope, "admin"),
         HttpApiEndpoint.post("join", "/networks/:id/join", {
-          error: [...recording, ...sending, NetworkNotFound],
+          error: [...recording, ...sending, CredentialsUnavailable, NetworkNotFound],
           params: NetworkPath,
           payload: Schema.Struct({
             channel: ChannelName,
+            key: Schema.optionalKey(ChannelKeyValue),
             remember: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
-          }),
+          }).check(joinFits),
           success: Joined,
         }).annotate(RequiredScope, "chat"),
         HttpApiEndpoint.post("part", "/networks/:id/part", {
@@ -869,6 +1136,28 @@ export class DaemonApi extends HttpApi.make("iirc")
         HttpApiEndpoint.delete("revoke", "/keys/:name", {
           error: [...recording, KeyNotFound],
           params: { name: Schema.String },
+          success: Changed,
+        }).annotate(RequiredScope, "admin")
+      )
+      .middleware(Authorization)
+  )
+  .add(
+    // Write-only: a value goes in, and only its name and when it was set come out (CRED-2).
+    HttpApiGroup.make("credentials")
+      .add(
+        HttpApiEndpoint.get("list", "/credentials", { success: Credentials }).annotate(
+          RequiredScope,
+          "admin"
+        ),
+        HttpApiEndpoint.put("set", "/credentials/:name", {
+          error: [...recording, CredentialsUnavailable],
+          params: CredentialPath,
+          payload: Schema.Struct({ value: CredentialValue }),
+          success: Changed,
+        }).annotate(RequiredScope, "admin"),
+        HttpApiEndpoint.delete("delete", "/credentials/:name", {
+          error: [...recording, CredentialsUnavailable, CredentialNotFound],
+          params: CredentialPath,
           success: Changed,
         }).annotate(RequiredScope, "admin")
       )

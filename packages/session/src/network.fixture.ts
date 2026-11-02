@@ -22,7 +22,13 @@ export type ConnectionEntry = Extract<Entry, { readonly _tag: "Connection" }>;
 export const address: Ircd = { host: "irc.test", port: 6697, tls: true };
 
 /** What the machine starts from under {@link options}. */
-export const input: NetworkInput = { realname: "I IRC", tuning: defaultTuning, username: "user" };
+export const input: NetworkInput = {
+  loginLines: 0,
+  realname: "I IRC",
+  services: [],
+  tuning: defaultTuning,
+  username: "user",
+};
 
 /** A Network, and what a test may change about how it is hosted. */
 export type Overrides = Partial<NetworkSettings> & { readonly id?: NetworkId };
@@ -30,11 +36,15 @@ export type Overrides = Partial<NetworkSettings> & { readonly id?: NetworkId };
 /** A Network with two Channels to be in. */
 export const options: NetworkSettings & { readonly id: NetworkId } = {
   channels: [{ name: "#one" }, { name: "#two" }],
+  connectCommands: [],
+  credentials: {},
   enabled: true,
   id: "libera",
   identity: { alternates: [], nick: "iirc", realname: "I IRC", username: "user" },
   ircds: [address],
   quitReason: "leaving",
+  secrets: new Map(),
+  services: [],
   tuning: defaultTuning,
 };
 

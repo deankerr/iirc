@@ -107,10 +107,12 @@ const daemon = HttpApiBuilder.group(
   DaemonApi,
   "daemon",
   Effect.fn(function* (handlers) {
-    const { entries, gaps, messages, send, status } = yield* Daemon;
+    const { backup, entries, gaps, messages, redact, send, status } = yield* Daemon;
 
     return handlers
       .handle("status", () => status)
+      .handle("backup", () => backup)
+      .handle("redact", ({ params }) => Caller.use(({ name }) => redact(name, params.sequence)))
       .handle("entries", ({ query: { kind, ...page } }) =>
         Effect.map(entries(kind === undefined ? page : { ...page, kinds: kind }), (found) =>
           found.map(toLogEntry)
@@ -182,9 +184,28 @@ const keys = HttpApiBuilder.group(
   })
 );
 
+// A value arrives `Redacted` and goes straight to the Daemon, and nothing comes back but
+// names, times, and sequences (CRED-2, CRED-3).
+const credentials = HttpApiBuilder.group(
+  DaemonApi,
+  "credentials",
+  Effect.fn(function* (handlers) {
+    const { credentials: held, deleteCredential, setCredential } = yield* Daemon;
+
+    return handlers
+      .handle("list", () => held)
+      .handle("set", ({ params, payload }) =>
+        Caller.use(({ name }) => setCredential(name, params.name, payload.value))
+      )
+      .handle("delete", ({ params }) =>
+        Caller.use(({ name }) => deleteCredential(name, params.name))
+      );
+  })
+);
+
 /** The API, as routes on the enclosing `HttpRouter`. Needs a running {@link Daemon}. */
 export const ApiRoutes = HttpApiBuilder.layer(DaemonApi).pipe(
-  Layer.provide(Layer.mergeAll(health, daemon, configuration, networks, keys)),
+  Layer.provide(Layer.mergeAll(health, daemon, configuration, networks, keys, credentials)),
   Layer.provide(Layer.mergeAll(requestValidation, authorization)),
   Layer.merge(bodyLimit)
 );

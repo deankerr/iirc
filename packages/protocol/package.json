@@ -8,9 +8,12 @@
     "./frame": "./src/frame.ts",
     "./join": "./src/join.ts",
     "./line": "./src/line.ts",
+    "./login": "./src/login.ts",
+    "./mode": "./src/mode.ts",
     "./nick": "./src/nick.ts",
     "./outbound": "./src/outbound.ts",
-    "./refusal": "./src/refusal.ts"
+    "./refusal": "./src/refusal.ts",
+    "./template": "./src/template.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

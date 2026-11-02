@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { connect } from "node:net";
 import type { Socket } from "node:net";
 import { homedir } from "node:os";
@@ -19,6 +22,8 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Option,
+  Redacted,
   Ref,
   Result,
   Schedule,
@@ -46,7 +51,7 @@ import {
   parseConfigurationFile,
 } from "./configuration-file.ts";
 
-// Proves step 3 on a real Ircd: private ngircds started here, each on a loopback port of
+// Proves steps 3 and 4 on a real Ircd: private ngircds started here, each on a loopback port of
 // its own, driven only through the built binary, its API, signals, and raw IRC clients. It
 // never touches the ngircd anyone else is using. Every process is started by exact PID, in
 // a Scope that takes it down again on success, failure, or interrupt, and every temporary
@@ -313,8 +318,12 @@ const rawClient = Effect.fnUntraced(function* (port: number) {
   };
 });
 
-const registeredClient = Effect.fnUntraced(function* (port: number, nick: string) {
+const registeredClient = Effect.fnUntraced(function* (port: number, nick: string, pass?: string) {
   const client = yield* rawClient(port);
+
+  if (pass !== undefined) {
+    yield* client.send(`PASS ${pass}`);
+  }
 
   yield* client.send(`NICK ${nick}`);
   yield* client.send("USER raw 0 * :raw client");
@@ -324,8 +333,13 @@ const registeredClient = Effect.fnUntraced(function* (port: number, nick: string
 });
 
 /** A registered raw client in a Channel, which sees whatever happens there. */
-const watcherIn = Effect.fnUntraced(function* (port: number, nick: string, channel: string) {
-  const client = yield* registeredClient(port, nick);
+const watcherIn = Effect.fnUntraced(function* (
+  port: number,
+  nick: string,
+  channel: string,
+  pass?: string
+) {
+  const client = yield* registeredClient(port, nick, pass);
 
   yield* client.send(`JOIN ${channel}`);
   yield* client.until(`${nick} in ${channel}`, (text) => text.includes(` 366 ${nick} ${channel}`));
@@ -1899,6 +1913,499 @@ const pinning = toCheck(
   })
 );
 
+// Every byte of the Log's files: the database, and its WAL, where a fresh commit sits until
+// a checkpoint. A page can be in the WAL more than once, so a check counts what it finds
+// against what may hold it, rather than expecting each to be there once.
+const logFiles = (dataDir: string) =>
+  Effect.sync(() =>
+    ["iirc.sqlite", "iirc.sqlite-wal"]
+      .map((file) => {
+        try {
+          return readFileSync(path.join(dataDir, file)).toString("latin1");
+        } catch {
+          return "";
+        }
+      })
+      .join("")
+  );
+
+const occurrences = (text: string, part: string) => text.split(part).length - 1;
+
+// LOG-6: what a Credential's value may never be found in.
+const ensureNotInLog = Effect.fnUntraced(function* (dataDir: string, value: string, what: string) {
+  const found = occurrences(yield* logFiles(dataDir), value);
+
+  yield* ensure(found === 0, `${what} is in the Log's files ${found} times`);
+});
+
+// CRED-2: a value goes in on stdin, never in argv, and only its Change comes back.
+const setCredential = Effect.fnUntraced(function* (running: Running, name: string, value: string) {
+  const ran = yield* startBinary(
+    binary,
+    ["credential", "set", name, "--api-url", running.apiUrl],
+    { IIRC_KEY: running.home.key },
+    value
+  );
+
+  const code = Number(yield* ran.child.exitCode);
+
+  yield* Fiber.join(ran.reader);
+
+  const output = ran.output();
+
+  yield* ensure(code === 0, `iirc credential set exited with ${code}: ${output}`);
+  yield* ensure(!output.includes(value), "iirc credential set printed the value");
+
+  return Number(/Change (?<change>\d+)/u.exec(output)?.groups?.change ?? 0);
+}, Effect.scoped);
+
+// What kind of Change a Change Entry holds, which the API gives as JSON.
+const decodeKind = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }));
+
+const tagOf = (change: Schema.Json) =>
+  Option.match(decodeKind(change), { onNone: () => "", onSome: ({ _tag }) => _tag });
+
+const changeAt = (entries: readonly LogEntry[], sequence: number) =>
+  changeEntries(entries).find((entry) => entry.sequence === sequence);
+
+// CRED-1, CONN-2, LOG-6
+const serverPassword = toCheck(
+  Effect.gen(function* () {
+    const secret = `pass-${randomUUID()}`;
+    const nick = "floorp";
+    const ircd = yield* floorIrcd({ password: secret });
+    const watcher = yield* watcherIn(ircd.port, "floorwp", floor, secret);
+    const running = yield* runDaemon(yield* newHome);
+
+    yield* addNetwork(running, {
+      ...floorNetwork({ channels: [floor], id: network, nick, port: ircd.port }),
+      credentials: { password: "floor.pass" },
+    });
+
+    const waiting = yield* waitFor(
+      "status to name the missing Credential",
+      running.statusOf(network),
+      ({ missingCredentials }) => missingCredentials.length > 0
+    );
+
+    // Long enough for any `attempt` to have been made, which would also reach ngircd.
+    yield* Effect.sleep("1 second");
+
+    const reachedBefore = (yield* ircd.accepted) - 1;
+    const before = yield* running.entriesOf(network);
+
+    yield* ensure(
+      waiting.missingCredentials.join(",") === "floor.pass" && waiting.nextAttemptAt === null,
+      `status said ${JSON.stringify(waiting)}`
+    );
+    yield* ensure(
+      attempts(before).length === 0,
+      "an `attempt` was made with the Credential missing"
+    );
+    yield* ensure(reachedBefore === 0, `ngircd saw ${reachedBefore} Connections from the Daemon`);
+
+    const change = yield* setCredential(running, "floor.pass", secret);
+    const joined = yield* untilJoined(running.statusOf(network), floor);
+
+    // A Credential's value is scrubbed from any Line, whatever the command (LOG-6).
+    yield* watcher.send(`PRIVMSG ${floor} :the password is ${secret}`);
+    yield* waitFor("the pasted password to be recorded", running.entriesOf(network), (all) =>
+      lineEntries(all).some(({ text }) => text.includes("the password is"))
+    );
+
+    const entries = yield* running.entriesOf(network);
+    const all = yield* allEntries(running.client);
+    const set = changeAt(all, change);
+    const [attempt] = attempts(entries);
+    const pass = lineEntries(entries).find(({ text }) => text.startsWith("PASS"));
+    const pasted = lineEntries(entries).find(({ text }) => text.includes("the password is"));
+    const dialedMillis = (attempt?.at ?? 0) - (set?.at ?? 0);
+
+    yield* ensure(
+      set !== undefined && (attempt?.sequence ?? 0) > change && dialedMillis <= slackMillis,
+      `the Credential was set at ${set?.at} and the attempt made at ${attempt?.at}`
+    );
+    yield* ensure(
+      pass?.text === "PASS <redacted>" && pass.redacted?.join(",") === "floor.pass",
+      `PASS was recorded as ${JSON.stringify(pass)}`
+    );
+    yield* ensure(
+      pasted?.text.endsWith(":the password is <redacted>") === true,
+      `the pasted password was recorded as ${pasted?.text}`
+    );
+    yield* ensureNotInLog(running.home.dataDir, secret, "the server password");
+
+    const stopped = yield* stopDaemon(running);
+
+    yield* ensure(stopped.code === 0, `SIGTERM gave exit ${stopped.code}`);
+    yield* ensureNotInLog(running.home.dataDir, secret, "after the stop, the server password");
+
+    return (
+      `status named ${waiting.missingCredentials.join(",")} and ngircd saw no Connection for 1 s; ` +
+      `\`iirc credential set\` recorded Change ${change}, the attempt followed ${dialedMillis} ms ` +
+      `later, and "${pass?.text}" reached a Session in ${joined.joined.join(",")}; a pasted ` +
+      `copy was recorded as "...${pasted?.text.slice(-24)}", and the password is in neither ` +
+      "iirc.sqlite nor its WAL"
+    );
+  })
+);
+
+// CONN-6, LOG-6
+const loginWait = toCheck(
+  Effect.gen(function* () {
+    const loginWaitMillis = 1500;
+    const secret = `nickserv-${randomUUID()}`;
+    const nick = "floorl";
+    const ircd = yield* floorIrcd();
+    const watcher = yield* watcherIn(ircd.port, "floorwl", floor);
+    const running = yield* runDaemon(yield* newHome);
+
+    yield* setCredential(running, "floor.nickserv", secret);
+    yield* addNetwork(running, {
+      ...floorNetwork({
+        channels: [floor],
+        id: network,
+        nick,
+        port: ircd.port,
+        tuning: { loginWaitMillis },
+      }),
+      credentials: { service: { nick: "NickServ", password: "floor.nickserv" } },
+    });
+
+    yield* watcher.until(`${nick} to join ${floor}`, isFrom(nick, "JOIN", floor));
+
+    const status = yield* waitFor(
+      "the login wait to end",
+      running.statusOf(network),
+      ({ login }) => login.state !== "none" && login.state !== "waiting"
+    );
+
+    const entries = yield* running.entriesOf(network);
+    const lines = lineEntries(entries);
+    const identify = lines.find(({ cause }) => cause === "identify");
+
+    const join = lines.find(
+      ({ direction, text }) => direction === "outbound" && text.startsWith("JOIN")
+    );
+
+    const noService = lines.find(({ text }) => / 401 \S+ NickServ /u.test(text));
+
+    const deadline = entries.find((entry) => entry._tag === "Deadline" && entry.name === "login");
+
+    const waited = (deadline?.at ?? 0) - (identify?.at ?? 0);
+
+    yield* ensure(
+      identify?.text === "PRIVMSG NickServ :IDENTIFY <redacted>" &&
+        identify.redacted?.join(",") === "floor.nickserv",
+      `IDENTIFY was recorded as ${JSON.stringify(identify)}`
+    );
+    yield* ensure(noService !== undefined, "ngircd did not say it has no NickServ");
+    yield* ensure(
+      deadline !== undefined &&
+        waited >= loginWaitMillis &&
+        waited <= loginWaitMillis + slackMillis,
+      `the login Deadline came ${waited} ms after IDENTIFY, not ${loginWaitMillis}`
+    );
+    yield* ensure(
+      (join?.sequence ?? 0) > (deadline?.sequence ?? Infinity),
+      `JOIN ${join?.sequence} went before the login Deadline ${deadline?.sequence}`
+    );
+    yield* ensure(status.login.state === "timedOut", `login is ${status.login.state}`);
+    yield* ensureNotInLog(running.home.dataDir, secret, "the service password");
+
+    return (
+      `"${identify?.text}" went out, ngircd answered "${noService?.text}", the login Deadline ` +
+      `came ${waited} ms later, then "${join?.text}", and status shows the login ${status.login.state}`
+    );
+  })
+);
+
+// CONN-6, LOG-6
+const connectCommand = toCheck(
+  Effect.gen(function* () {
+    const secret = `token-${randomUUID()}`;
+    const nick = "floorc";
+    const target = "floorwc";
+    const ircd = yield* floorIrcd();
+    const watcher = yield* watcherIn(ircd.port, target, floor);
+    const running = yield* runDaemon(yield* newHome);
+
+    yield* setCredential(running, "floor.token", secret);
+    yield* addNetwork(running, {
+      ...floorNetwork({ channels: [floor], id: network, nick, port: ircd.port }),
+      connectCommands: [`PRIVMSG ${target} :token {{floor.token}}`],
+    });
+
+    const heard = yield* watcher.until(
+      "the connect command",
+      isFrom(nick, "PRIVMSG", `${target} :token ${secret}`)
+    );
+
+    yield* watcher.until(`${nick} to join ${floor}`, isFrom(nick, "JOIN", floor));
+
+    const lines = lineEntries(yield* running.entriesOf(network));
+    const burst = lines.find(({ text }) => / (?:376|422) /u.test(text));
+    const command = lines.find(({ cause }) => cause === "connect-command");
+
+    const join = lines.find(
+      ({ direction, text }) => direction === "outbound" && text.startsWith("JOIN")
+    );
+
+    yield* ensure(
+      command?.text === `PRIVMSG ${target} :token <redacted>` &&
+        command.redacted?.join(",") === "floor.token",
+      `the connect command was recorded as ${JSON.stringify(command)}`
+    );
+    yield* ensure(
+      (burst?.sequence ?? Infinity) < (command?.sequence ?? 0) &&
+        (command?.sequence ?? Infinity) < (join?.sequence ?? 0),
+      `burst ${burst?.sequence}, connect command ${command?.sequence}, JOIN ${join?.sequence}`
+    );
+    yield* ensureNotInLog(running.home.dataDir, secret, "the connect command's Credential");
+
+    return (
+      `a raw client heard "${heard.text.replace(secret, "<its value>")}" after the burst ` +
+      `ended at "${burst?.text}" and before "${join?.text}", and the Log has "${command?.text}"`
+    );
+  })
+);
+
+// CRED-4, CONF-5, LOG-6
+const channelKey = toCheck(
+  Effect.gen(function* () {
+    const keyed = "#keyed";
+    const nick = "floork";
+    const keeper = "floorwk";
+    const firstKey = `first-${randomUUID()}`;
+    const secondKey = `second-${randomUUID()}`;
+    const ircd = yield* floorIrcd();
+    const owner = yield* watcherIn(ircd.port, keeper, keyed);
+
+    yield* owner.send(`MODE ${keyed} +k ${firstKey}`);
+    yield* owner.until("the first key", isFrom(keeper, "MODE", firstKey));
+
+    const home = yield* newHome;
+    const first = yield* runDaemon(home);
+
+    yield* addNetwork(first, floorNetwork({ id: network, nick, port: ircd.port }));
+    yield* waitFor("a Session", first.statusOf(network), ({ phase }) => phase === "session");
+    yield* first.client.networks.join({
+      params: { id: network },
+      payload: { channel: keyed, key: Redacted.make(firstKey), remember: true },
+    });
+    yield* untilJoined(first.statusOf(network), keyed);
+    yield* stopDaemon(first);
+
+    // A restart rejoins with the key it stored.
+    const restarted = owner.mark();
+    const second = yield* runDaemon(home);
+    const startedAt = (yield* second.client.daemon.status()).head ?? 0;
+
+    yield* untilJoined(second.statusOf(network), keyed);
+    yield* owner.until(`${nick} to rejoin`, isFrom(nick, "JOIN", keyed), restarted);
+
+    const [rejoin] = joinsOf(yield* second.entriesOf(network), startedAt);
+
+    // ngircd replaces a key, and an Ircd that wants the old one taken away first says
+    // `467`, so this does that then.
+    const replacing = owner.mark();
+
+    yield* owner.send(`MODE ${keyed} +k ${secondKey}`);
+
+    const replaced = yield* owner.until(
+      "the second key",
+      (text) => isFrom(keeper, "MODE", secondKey)(text) || / 467 /u.test(text),
+      replacing
+    );
+
+    if (/ 467 /u.test(replaced.text)) {
+      yield* owner.send(`MODE ${keyed} -k ${firstKey}`);
+      yield* owner.send(`MODE ${keyed} +k ${secondKey}`);
+      yield* owner.until("the second key", isFrom(keeper, "MODE", secondKey), replacing);
+    }
+
+    const kept = yield* waitFor("the second key to be kept", allEntries(second.client), (all) =>
+      changeEntries(all).some(({ by, sequence }) => by === "mode" && sequence > startedAt)
+    );
+
+    const byMode = changeEntries(kept).filter(({ by }) => by === "mode");
+
+    yield* stopDaemon(second);
+
+    const again = owner.mark();
+    const third = yield* runDaemon(home);
+    const thirdAt = (yield* third.client.daemon.status()).head ?? 0;
+
+    yield* untilJoined(third.statusOf(network), keyed);
+    yield* owner.until(`${nick} to rejoin with the second key`, isFrom(nick, "JOIN", keyed), again);
+
+    const [lastRejoin] = joinsOf(yield* third.entriesOf(network), thirdAt);
+    const { settings } = yield* third.client.networks.get({ params: { id: network } });
+    const named = settings.channels.find(({ name }) => name === keyed)?.key;
+
+    yield* stopDaemon(third);
+
+    const files = yield* logFiles(home.dataDir);
+
+    yield* ensure(
+      rejoin?.text === `JOIN ${keyed} <redacted>` &&
+        lastRejoin?.text === `JOIN ${keyed} <redacted>`,
+      `the rejoins were recorded as "${rejoin?.text}" and "${lastRejoin?.text}"`
+    );
+    yield* ensure(
+      named !== undefined &&
+        byMode.some(
+          ({ change }) =>
+            JSON.stringify(change) === JSON.stringify({ _tag: "CredentialSet", name: named })
+        ),
+      `the Changes by mode were ${JSON.stringify(byMode.map(({ change }) => change))}`
+    );
+    yield* ensure(occurrences(files, firstKey) === 0, "the Join's key is in the Log's files");
+    yield* ensure(
+      occurrences(files, secondKey) === occurrences(files, `+k ${secondKey}`),
+      "the second key is in the Log's files outside the `MODE` that first set it"
+    );
+
+    return (
+      `a Join with the key got into ${keyed}, a restart rejoined with "${rejoin?.text}", ` +
+      `the raw client's \`MODE +k\` was kept as ${named} by ${byMode
+        .map(({ change }) => tagOf(change))
+        .join(", ")}, and the next restart rejoined with it; neither key is in the Log's ` +
+      "files but for that first `+k`"
+    );
+  })
+);
+
+const quickCheck = (file: string) => {
+  const database = new Database(file, { readonly: true });
+
+  try {
+    return database
+      .query<{ readonly quick_check: string }, []>("PRAGMA quick_check")
+      .all()
+      .map(({ quick_check: result }) => result)
+      .join(",");
+  } finally {
+    database.close();
+  }
+};
+
+// RUN-2, CRED-1
+const backup = toCheck(
+  Effect.gen(function* () {
+    const secret = `backup-${randomUUID()}`;
+    const nick = "floorb";
+    const ircd = yield* floorIrcd();
+    const watcher = yield* watcherIn(ircd.port, "floorwb", floor);
+    const running = yield* runDaemon(yield* newHome);
+
+    // The value goes over the wire, so a backup that kept what was sent would hold it.
+    yield* setCredential(running, "floor.backup", secret);
+    yield* addNetwork(running, {
+      ...floorNetwork({ channels: [floor], id: network, nick, port: ircd.port }),
+      connectCommands: ["PRIVMSG floorwb :{{floor.backup}}"],
+    });
+    yield* watcher.until(
+      "the Credential on the wire",
+      isFrom(nick, "PRIVMSG", `floorwb :${secret}`)
+    );
+    yield* untilJoined(running.statusOf(network), floor);
+
+    const ran = yield* runToEnd(["backup", "--api-url", running.apiUrl], {
+      IIRC_KEY: running.home.key,
+    });
+
+    const file = /in (?<file>\S+) \(/u.exec(ran.output)?.groups?.file ?? "";
+
+    yield* ensure(
+      ran.code === 0 && file !== "",
+      `iirc backup exited with ${ran.code}: ${ran.output}`
+    );
+
+    const checked = quickCheck(file);
+    const bytes = readFileSync(file).toString("latin1");
+
+    yield* ensure(checked === "ok", `quick_check said ${checked}`);
+    yield* ensure(!bytes.includes(secret), "the backup holds the Credential's value");
+    yield* ensure(bytes.includes("floor.backup"), "the backup does not hold the Credential's name");
+
+    return `\`iirc backup\` wrote ${path.basename(file)} (${bytes.length} bytes), quick_check said "${checked}", and it names floor.backup and holds no value`;
+  })
+);
+
+// The SHA-256 and SHA-1 of a certificate, in hex, worked out by OpenSSL alone.
+const fingerprints = (cert: string) =>
+  ["sha256", "sha1"].map((digest) =>
+    Bun.spawnSync(["openssl", "x509", "-noout", "-fingerprint", `-${digest}`], {
+      stdin: Buffer.from(cert),
+    })
+      .stdout.toString()
+      .replace(/^.*=/u, "")
+      .replaceAll(":", "")
+      .trim()
+      .toLowerCase()
+  );
+
+// CRED-1, CONN-1
+const clientCertificate = toCheck(
+  Effect.gen(function* () {
+    const { speaks, version } = yield* ngircdSpeaksTls;
+
+    if (!speaks) {
+      return new Skipped({ reason: `this ngircd has no TLS: ${version}` });
+    }
+
+    const authority = yield* testAuthority("iirc floor proof client");
+    const certificate = authority.selfSigned(`DNS:${serverName}`);
+    const pin = yield* opensslPin(certificate.cert);
+    const client = authority.selfSigned("DNS:floor.client.test");
+    const ircd = yield* floorIrcd({ tls: certificate });
+    const running = yield* runDaemon(yield* newHome);
+    const nick = "floorcert";
+
+    yield* setCredential(running, "floor.cert", `${client.cert}${client.key}`);
+    yield* addNetwork(running, {
+      ...floorNetwork({ id: network, nick, pin, port: ircd.tlsPort ?? 0, tls: true }),
+      credentials: { clientCertificate: "floor.cert" },
+    });
+    yield* waitFor("a Session", running.statusOf(network), ({ phase }) => phase === "session");
+
+    // ngircd tells a client the fingerprint of the certificate it presented, if it asked.
+    const told = yield* waitFor("the burst", running.entriesOf(network), (all) =>
+      lineEntries(all).some(({ text }) => / (?:376|422) /u.test(text))
+    ).pipe(
+      Effect.map((all) =>
+        lineEntries(all).find(({ text }) => text.includes("client certificate fingerprint"))
+      )
+    );
+
+    const keyBody = client.key.split("\n")[1] ?? client.key;
+
+    yield* ensureNotInLog(running.home.dataDir, keyBody, "the client certificate's key");
+
+    if (told === undefined) {
+      return new Skipped({
+        reason: `the Daemon reached a Session over TLS presenting a client certificate, and this ngircd (${version}) never said whether it saw one`,
+      });
+    }
+
+    const said = told.text
+      .replace(/^.*: */u, "")
+      .replaceAll(":", "")
+      .trim()
+      .toLowerCase();
+
+    const [sha256 = "", sha1 = ""] = fingerprints(client.cert);
+
+    yield* ensure(
+      said === sha256 || said === sha1,
+      `ngircd saw ${said}, and the certificate is ${sha256} (SHA-256) or ${sha1} (SHA-1)`
+    );
+
+    return `ngircd said "${told.text.replace(/^:\S+ /u, "")}", which is the ${said === sha256 ? "SHA-256" : "SHA-1"} fingerprint of the certificate in floor.cert, and its key is not in the Log`;
+  })
+);
+
 const checks: readonly (readonly [string, Check])[] = [
   ["Reconnect (LIVE-4, LIVE-6, LIVE-7, LIVE-10)", reconnect],
   ["Silence (LIVE-2)", silence],
@@ -1915,6 +2422,12 @@ const checks: readonly (readonly [string, Check])[] = [
   ["Configuration as a file (CONF-6)", configurationFile],
   ["Keys (AUTH-1, AUTH-2, AUTH-3)", keys],
   ["TLS pinning (CONN-1)", pinning],
+  ["Server password, set while missing (CRED-1, CONN-2, LOG-6)", serverPassword],
+  ["Login wait (CONN-6, LOG-6)", loginWait],
+  ["Connect command (CONN-6, LOG-6)", connectCommand],
+  ["Channel key (CRED-4, CONF-5, LOG-6)", channelKey],
+  ["Backup (RUN-2, CRED-1)", backup],
+  ["TLS client certificate (CRED-1, CONN-1)", clientCertificate],
 ];
 
 type Outcome = "failed" | "passed" | "skipped";

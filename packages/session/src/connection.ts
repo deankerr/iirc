@@ -1,5 +1,5 @@
 import { deadline, phase, step } from "@iirc/lifecycle";
-import type { Command, NetworkSnapshot, Phase } from "@iirc/lifecycle";
+import type { Command, Lane, NetworkSnapshot, Phase } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { takeFrames } from "@iirc/protocol/frame";
 import { encodeLine, outbound, pong } from "@iirc/protocol/outbound";
@@ -14,12 +14,23 @@ import {
   Fiber,
   Option,
   Queue,
+  Redacted,
   Ref,
+  Semaphore,
   TxRef,
 } from "effect";
 import type { Scope } from "effect";
 import { Socket } from "effect/socket";
 
+import {
+  connectCommandCause,
+  connectCommandLine,
+  identifyCause,
+  identifyLine,
+  loginCauses,
+  passLine,
+} from "./credentials.ts";
+import type { Built, CredentialNames } from "./credentials.ts";
 import type { Entry, Ircd, NetworkId, NewEntry, TlsDetails } from "./entry.ts";
 import { toEvent } from "./events.ts";
 import { LineDropped, makeLanes, runPump, WriteFailed, writeTimedOut } from "./lanes.ts";
@@ -27,8 +38,10 @@ import type { Lanes, LineFailure, PumpWire, QueuedLine } from "./lanes.ts";
 import { reconcile } from "./reconcile.ts";
 import { RecordFailed } from "./recorder.ts";
 import type { Recorder } from "./recorder.ts";
-import type { Standing, WantedChannel } from "./standing.ts";
-import { describeSocketError } from "./transport.ts";
+import type { Secrets, Sensitive } from "./redact.ts";
+import { channelKeyChanges } from "./standing.ts";
+import type { KeyChange, Standing, WantedChannel } from "./standing.ts";
+import { ConnectFailed, describeSocketError } from "./transport.ts";
 import type { Transport } from "./transport.ts";
 
 // LOG-4: how much may be pulled and not yet recorded, so that a flood waits in the kernel
@@ -126,11 +139,27 @@ export const phaseOf = ({ live, snapshot, stopped, unrecorded }: Hosted): Effect
     return leaving || (folded === "session" && !(yield* live.lanes.isOpen)) ? "closing" : folded;
   });
 
+/**
+ * What a Connection sends on the Owner's behalf, as the settings said at its `attempt`, so
+ * that it agrees with the `attempt` Entry's count of the login sequence (CONN-6).
+ */
+export interface ConnectionPlan {
+  readonly connectCommands: readonly string[];
+  readonly credentials: CredentialNames;
+}
+
 /** An `attempt`, recorded, with what the machine asked for when it stepped. */
 export interface Attempted {
   readonly commands: readonly Command[];
   readonly connection: number;
   readonly ircd: Ircd;
+  readonly plan: ConnectionPlan;
+}
+
+/** A Channel's key as an inbound `MODE` set it, or took it away (CRED-4). */
+export interface ChannelKey {
+  readonly channel: string;
+  readonly key: Redacted.Redacted | undefined;
 }
 
 /** What every Connection on a Network shares, and the Tuning of this one. */
@@ -143,7 +172,10 @@ export interface Host {
   readonly leaving: Effect.Effect<boolean>;
   /** What `QUIT` says, read as the Connection is left (LIVE-9). */
   readonly quitReason: Effect.Effect<string>;
-  readonly record: Recorder["Service"]["record"];
+  /** Told of a Channel key once the `MODE` that set or took it away is recorded (CRED-4). */
+  readonly onChannelKey: ((change: ChannelKey) => Effect.Effect<void>) | undefined;
+  /** Every Credential there is, read each time one is needed. */
+  readonly secrets: Effect.Effect<Secrets>;
   readonly standing: Effect.Effect<Standing, RecordFailed>;
   /** Whether a stop has run out of time, so whatever is left is closed now. */
   readonly hurrying: () => boolean;
@@ -158,6 +190,21 @@ interface Stepped {
   readonly commands: readonly Command[];
   readonly next: NetworkSnapshot;
 }
+
+/**
+ * What the host runs after a commit: the machine's Commands, and Lines the host builds
+ * itself from Credentials, which the machine never sees (LOG-6). `waits` says whether to
+ * wait for room in the lane, or to give up on the Line at once.
+ */
+type Order =
+  | Command
+  | {
+      readonly type: "sendBuilt";
+      readonly built: Built;
+      readonly cause: string;
+      readonly lane: Lane;
+      readonly waits: boolean;
+    };
 
 type Commit = (
   entries: Arr.NonEmptyReadonlyArray<NewEntry>
@@ -180,6 +227,8 @@ type InboxItem =
     }
   // `local` says that the Daemon is what ended it, as with a reader that died.
   | { readonly _tag: "Ended"; readonly local: boolean; readonly reason: string }
+  // The pump stepped the machine with a Line it recorded, and these are what it asked for.
+  | { readonly _tag: "Stepped"; readonly commands: readonly Command[] }
   // Says nothing itself: the loop looks again at what could have changed.
   | { readonly _tag: "Wake" };
 
@@ -238,9 +287,12 @@ const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepp
 };
 
 /**
- * Makes the one way a host steps its machine. Only the loop's fiber calls this. A step
- * that a failed commit rolls back never reaches `hosted`, because `within` only works out
- * the next snapshot.
+ * Makes the one way a host steps its machine. The loop calls it, and so does the pump for
+ * each Line it records, because the login sequence's Lines are what start the login wait
+ * (CONN-6). One commit at a time, from reading the snapshot to keeping the next, so that
+ * the machine steps in sequence order and neither loses the other's step. A step that a
+ * failed commit rolls back never reaches `hosted`, because `within` only works out the
+ * next snapshot.
  * @param hosted - The host's state.
  * @param record - Appends Entries.
  * @returns The commit.
@@ -248,19 +300,25 @@ const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepp
 export const makeCommit = (
   hosted: Ref.Ref<Hosted>,
   record: Recorder["Service"]["record"]
-): Commit =>
-  Effect.fnUntraced(function* (entries: Arr.NonEmptyReadonlyArray<NewEntry>) {
-    const { snapshot } = yield* Ref.get(hosted);
+): Commit => {
+  const stepping = Semaphore.makeUnsafe(1);
 
-    const stepped = yield* record(entries, (recorded) => ({
-      ...stepEntries(snapshot, recorded),
-      recorded,
-    }));
+  return (entries) =>
+    stepping.withPermits(1)(
+      Effect.gen(function* () {
+        const { snapshot } = yield* Ref.get(hosted);
 
-    yield* Ref.update(hosted, (held) => ({ ...held, snapshot: stepped.next }));
+        const stepped = yield* record(entries, (recorded) => ({
+          ...stepEntries(snapshot, recorded),
+          recorded,
+        }));
 
-    return stepped;
-  });
+        yield* Ref.update(hosted, (held) => ({ ...held, snapshot: stepped.next }));
+
+        return stepped;
+      })
+    );
+};
 
 const toEnding = (error: Socket.SocketError) =>
   error.reason._tag === "SocketCloseError"
@@ -278,6 +336,41 @@ const toWriteFailed = (error: Socket.SocketError) =>
 // As much of a `PONG` as there is: the token stays bytes, whatever its encoding.
 const pongBytes = (token: Uint8Array | undefined) =>
   Buffer.concat([encoder.encode("PONG "), token ?? new Uint8Array()]);
+
+const isInboundLine = (entry: NewEntry) => entry._tag === "Line" && entry.direction === "inbound";
+
+// The host acts on a `MODE` as recorded. A key that was already a Credential's value was
+// scrubbed out of it, so it is that Credential's value again, as long as the Entry names
+// the Credential for that very `<redacted>` (LOG-6). The names go in the order their
+// placeholders stand, so another scrubbed in the same Line does not hide which it was.
+const keyOf = (
+  { entry, key, placeholder }: KeyChange,
+  secrets: Secrets
+): Option.Option<Redacted.Redacted | undefined> => {
+  if (key === undefined) {
+    return Option.some(undefined);
+  }
+
+  const names = entry._tag === "Line" ? (entry.redacted ?? []) : [];
+
+  if (placeholder === undefined || names.length === 0) {
+    return Option.some(Redacted.make(key));
+  }
+
+  // A `<redacted>` the Ircd sent itself would put every later name out of step.
+  const name = names.length === placeholder.of ? names[placeholder.slot] : undefined;
+
+  return name === undefined ? Option.none() : Option.fromUndefinedOr(secrets.get(name));
+};
+
+/**
+ * How many Lines a Connection's login sequence holds: `IDENTIFY` if a service password is
+ * configured, then each connect command (CONN-6).
+ * @param plan - What the Connection sends on the Owner's behalf.
+ * @returns The count its `attempt` records.
+ */
+export const loginLinesOf = ({ connectCommands, credentials }: ConnectionPlan): number =>
+  (credentials.service === undefined ? 0 : 1) + connectCommands.length;
 
 /**
  * Runs one Connection from its `attempt` until its `closed` Entry, or as near to that as
@@ -300,10 +393,10 @@ export const hostConnection: (
   attempted: Attempted
 ) => Effect.Effect<void, never, Scope.Scope> = Effect.fn("hostConnection")(function* (
   host: Host,
-  { commands, connection, ircd }: Attempted
+  { commands, connection, ircd, plan }: Attempted
 ) {
-  const { commit, connect, hosted, id, quitReason, record, standing, tuning, wanted } = host;
-  const { hurrying, leaving } = host;
+  const { commit, connect, hosted, id, quitReason, standing, tuning, wanted } = host;
+  const { hurrying, leaving, onChannelKey, secrets } = host;
 
   // Unbounded in items, and bounded in bytes by `held`, so a wake never waits for room.
   const inbox = yield* Queue.unbounded<InboxItem>();
@@ -355,14 +448,24 @@ export const hostConnection: (
     ...(cut && { cut }),
   });
 
-  const droppedEntry = (bytes: Uint8Array, cause: string, reason: string): NewEntry => ({
+  const droppedEntry = (
+    bytes: Uint8Array,
+    cause: string,
+    reason: string,
+    redacted: readonly string[] = []
+  ): NewEntry => ({
     _tag: "Dropped",
     bytes,
     cause,
     connection,
     network: id,
     reason,
+    ...(redacted.length > 0 && { redacted }),
   });
+
+  // A Line built from Credentials is recorded in its sensitive form, written or not.
+  const droppedOf = ({ cause, line, sensitive }: QueuedLine, reason: string) =>
+    droppedEntry(sensitive?.bytes ?? line.bytes, cause, reason, sensitive?.names);
 
   const closingEntry = (reason: string, chosen: boolean): NewEntry => ({
     _tag: "Connection",
@@ -459,7 +562,10 @@ export const hostConnection: (
     }
   });
 
-  const join = Effect.fnUntraced(function* (line: QueuedLine["line"]) {
+  const join = Effect.fnUntraced(function* (
+    line: QueuedLine["line"],
+    sensitive: Sensitive | undefined
+  ) {
     const outcome = Deferred.makeUnsafe<number, LineFailure>();
 
     const offered = yield* lanes.offerWaiting({
@@ -467,6 +573,7 @@ export const hostConnection: (
       lane: "background",
       line,
       outcome,
+      ...(sensitive !== undefined && { sensitive }),
     });
 
     return offered && Exit.isSuccess(yield* Effect.exit(Deferred.await(outcome)));
@@ -475,7 +582,7 @@ export const hostConnection: (
   const startReconciling = Effect.gen(function* () {
     reconciling = true;
 
-    yield* reconcile({ channels: wanted, join, moved, standing, tuning }).pipe(
+    yield* reconcile({ channels: wanted, join, moved, secrets, standing, tuning }).pipe(
       Effect.catchTag("RecordFailed", () => logFailed),
       closingIfItDies,
       Effect.forkScoped
@@ -484,9 +591,64 @@ export const hostConnection: (
 
   // An Ircd's own bytes or a bad Configuration can make a Line that cannot be built, and
   // neither can close a Session (HOST-1). The Log says what became of it (OBS-1).
-  const unsend = (bytes: Uint8Array, cause: string, reason: string) => {
-    unsent.push(droppedEntry(bytes, cause, reason));
+  const unsend = (
+    bytes: Uint8Array,
+    cause: string,
+    reason: string,
+    redacted?: readonly string[]
+  ) => {
+    unsent.push(droppedEntry(bytes, cause, reason, redacted));
   };
+
+  const offerWaiting = (queued: QueuedLine) =>
+    Effect.map(lanes.offerWaiting(queued), (offered) => (offered ? "queued" : "shut"));
+
+  // Lines the host builds itself, which may be refused for want of a Credential, or of
+  // room in a lane they cannot wait for, and are recorded as Dropped then (OBS-1).
+  const offerOwn = Effect.fnUntraced(function* (order: Extract<Order, { type: "sendBuilt" }>) {
+    const { built, cause, lane, waits } = order;
+
+    if (built._tag === "Unsendable") {
+      unsend(built.recorded.bytes, cause, built.reason, built.recorded.names);
+
+      return;
+    }
+
+    const queued: QueuedLine = {
+      cause,
+      lane,
+      line: built.line,
+      outcome: Deferred.makeUnsafe(),
+      ...(built.sensitive !== undefined && { sensitive: built.sensitive }),
+    };
+
+    const offered = waits ? yield* offerWaiting(queued) : yield* lanes.offerNow(queued);
+
+    if (offered !== "queued") {
+      unsent.push(droppedOf(queued, offered === "full" ? `the ${lane} lane is full` : closingDown));
+    }
+  });
+
+  // Once the burst is over, `IDENTIFY` and the connect commands go out in order, through
+  // the interactive lane, each built from the Credentials as they are now (CONN-6).
+  const sendLoginSequence = Effect.gen(function* () {
+    const held = yield* secrets;
+    const { service } = plan.credentials;
+
+    const built = [
+      ...(service === undefined
+        ? []
+        : [{ built: identifyLine(service, held), cause: identifyCause }]),
+      ...plan.connectCommands.map((template) => ({
+        built: connectCommandLine(template, held),
+        cause: connectCommandCause,
+      })),
+    ];
+
+    for (const { built: line, cause } of built) {
+      yield* offerOwn({ built: line, cause, lane: "interactive", type: "sendBuilt", waits: false });
+    }
+  });
 
   const offerBuilt = Effect.fnUntraced(function* (
     built: Outbound,
@@ -509,8 +671,15 @@ export const hostConnection: (
     }
   });
 
-  const unsendCommand = (command: Command) => {
-    if (command.type === "sendLine") {
+  const unsendCommand = (command: Order) => {
+    if (command.type === "sendBuilt") {
+      const recorded =
+        command.built._tag === "Safe"
+          ? (command.built.sensitive ?? { bytes: command.built.line.bytes, names: [] })
+          : command.built.recorded;
+
+      unsend(recorded.bytes, command.cause, closingDown, recorded.names);
+    } else if (command.type === "sendLine") {
       unsend(
         encoder.encode([command.command, ...command.params].join(" ")),
         command.cause,
@@ -521,10 +690,21 @@ export const hostConnection: (
     }
   };
 
-  const runCommand = Effect.fnUntraced(function* (command: Command, drainMillis: number) {
+  const runCommand = Effect.fnUntraced(function* (command: Order, drainMillis: number) {
     switch (command.type) {
       case "burstComplete": {
+        yield* sendLoginSequence;
+
         return yield* startReconciling;
+      }
+
+      // The reconciler looks again, since what held joining up is over (CONN-6).
+      case "loginSettled": {
+        return yield* Queue.offer(moved, undefined);
+      }
+
+      case "sendBuilt": {
+        return yield* offerOwn(command);
       }
 
       case "closeConnection": {
@@ -563,7 +743,7 @@ export const hostConnection: (
 
   // Nothing acts on a Line once the Connection has started to close: what would have been
   // sent is Dropped instead, and only a refusal still counts, for the reason it gives.
-  const runCommands = Effect.fnUntraced(function* (toRun: readonly Command[], drainMillis: number) {
+  const runCommands = Effect.fnUntraced(function* (toRun: readonly Order[], drainMillis: number) {
     for (const command of toRun) {
       if ((yield* Ref.get(stage))._tag !== "Draining") {
         yield* runCommand(command, drainMillis);
@@ -593,10 +773,40 @@ export const hostConnection: (
     }
   });
 
+  // A key that is a Credential's own value is scrubbed like any other (LOG-6), so the first
+  // `+k` the Daemon sees is the one that is recorded as it arrived (CRED-4). A hook that
+  // dies is the Daemon's fault, and costs the Connection nothing.
+  const announceKeys = Effect.fnUntraced(function* (before: Standing, recorded: readonly Entry[]) {
+    const changes = channelKeyChanges(before, recorded);
+
+    if (onChannelKey === undefined || changes.length === 0) {
+      return;
+    }
+
+    const held = yield* secrets;
+
+    for (const change of changes) {
+      const key = keyOf(change, held);
+
+      if (Option.isSome(key)) {
+        yield* onChannelKey({ channel: change.channel, key: key.value }).pipe(
+          Effect.catchDefect((defect) => Effect.logError("A Channel key could not be kept", defect))
+        );
+      }
+    }
+  });
+
   const onEntries = Effect.fnUntraced(function* (
     entries: Arr.NonEmptyReadonlyArray<NewEntry>,
-    drainMillis: number = tuning.drainMillis
+    drainMillis: number = tuning.drainMillis,
+    leading: readonly Order[] = []
   ) {
+    // Read only when a `MODE` could be among them, so that each is read as it stood then.
+    const before =
+      onChannelKey !== undefined && entries.some(isInboundLine)
+        ? yield* Effect.option(standing)
+        : Option.none<Standing>();
+
     const committed = yield* commit(entries).pipe(
       Effect.asSome,
       Effect.catchTag("RecordFailed", () => Effect.succeedNone)
@@ -607,7 +817,12 @@ export const hostConnection: (
       unrecorded = [...unrecorded, ...entries.filter(({ _tag }) => _tag === "Line")];
       yield* logFailed;
     } else {
-      yield* runCommands(committed.value.commands, drainMillis);
+      yield* runCommands([...leading, ...committed.value.commands], drainMillis);
+
+      if (Option.isSome(before)) {
+        yield* announceKeys(before.value, committed.value.recorded);
+      }
+
       yield* flushUnsent.pipe(Effect.catchTag("RecordFailed", () => logFailed));
 
       if (reconciling && committed.value.channelsMoved) {
@@ -699,10 +914,8 @@ export const hostConnection: (
 
     const dropped = [
       ...unsent,
-      ...unwritten.map(({ queued: { cause, line }, reason: why }) =>
-        droppedEntry(line.bytes, cause, why)
-      ),
-      ...queued.map(({ cause, line }) => droppedEntry(line.bytes, cause, dropReason)),
+      ...unwritten.map(({ queued: line, reason: why }) => droppedOf(line, why)),
+      ...queued.map((line) => droppedOf(line, dropReason)),
     ];
 
     unsent = [];
@@ -749,19 +962,29 @@ export const hostConnection: (
 
   const pumpWire = (writer: Socket.Writer, tls: boolean): PumpWire => ({
     confirmsLater: tls,
-    record: ({ cause, line }) =>
-      record(
-        [
-          {
-            _tag: "Line",
-            bytes: line.bytes,
-            cause,
-            connection,
-            direction: "outbound",
-            network: id,
-          },
-        ],
-        ([{ sequence }]) => sequence
+    // A Line built from Credentials is recorded as built with each value `<redacted>`,
+    // and written as it is (LOG-6). A Line of the login sequence moves the machine, and
+    // the loop is told, because only it can carry out what the machine asks for and it
+    // may be waiting on a later deadline than the login wait's (CONN-6).
+    record: ({ cause, line, sensitive }) =>
+      commit([
+        {
+          _tag: "Line",
+          bytes: sensitive?.bytes ?? line.bytes,
+          cause,
+          connection,
+          direction: "outbound",
+          network: id,
+          ...(sensitive !== undefined &&
+            sensitive.names.length > 0 && { redacted: sensitive.names }),
+        },
+      ]).pipe(
+        Effect.tap(({ commands }) =>
+          commands.length > 0 || loginCauses.has(cause)
+            ? Queue.offer(inbox, { _tag: "Stepped", commands })
+            : Effect.void
+        ),
+        Effect.map(({ recorded }) => recorded[0]?.sequence ?? 0)
       ),
     recordFailed: logFailed,
     unwritten: (queued, reason) =>
@@ -909,8 +1132,27 @@ export const hostConnection: (
       )
     );
 
+  // A client certificate that has gone since the `attempt` fails the dial, and the next
+  // `attempt` waits for it to be set again (CRED-1).
+  const clientCertificate = Effect.gen(function* () {
+    const name = plan.credentials.clientCertificate;
+    const certificate = name === undefined ? undefined : (yield* secrets).get(name);
+
+    if (name !== undefined && certificate === undefined) {
+      return yield* new ConnectFailed({ cause: name, reason: `the Credential ${name} is not set` });
+    }
+
+    return certificate;
+  });
+
   const dial = Effect.gen(function* () {
-    const opened = yield* connect(ircd, tuning);
+    const certificate = yield* clientCertificate;
+
+    const opened = yield* connect(ircd, {
+      ...tuning,
+      ...(certificate !== undefined && { clientCertificate: certificate }),
+    });
+
     const pull = yield* Socket.readerBytes(opened.socket);
     const writer = yield* opened.socket.writer;
 
@@ -947,16 +1189,35 @@ export const hostConnection: (
       closingIfItDies(runPump(pumpLanes, tuning, pumpWire(writer, tls !== undefined)))
     );
 
-    yield* onEntries([
-      {
-        _tag: "Connection",
-        connection,
-        ircd,
-        network: id,
-        phase: "opened",
-        ...(tls !== undefined && { tls }),
-      },
-    ]);
+    // `PASS` goes before the machine's `NICK` and `USER`, on the same lane (CONN-2). The
+    // machine never sees a Credential, so the host builds it.
+    const pass: readonly Order[] =
+      plan.credentials.password === undefined
+        ? []
+        : [
+            {
+              built: passLine(plan.credentials.password, yield* secrets),
+              cause: "registration",
+              lane: "control",
+              type: "sendBuilt",
+              waits: true,
+            },
+          ];
+
+    yield* onEntries(
+      [
+        {
+          _tag: "Connection",
+          connection,
+          ircd,
+          network: id,
+          phase: "opened",
+          ...(tls !== undefined && { tls }),
+        },
+      ],
+      tuning.drainMillis,
+      pass
+    );
     reader = yield* Effect.forkScoped(feed(pull));
   });
 
@@ -1005,6 +1266,12 @@ export const hostConnection: (
 
       case "Read": {
         yield* onRead(item.chunks, item.bytes);
+        break;
+      }
+
+      case "Stepped": {
+        yield* runCommands(item.commands, tuning.drainMillis);
+        yield* flushUnsent.pipe(Effect.catchTag("RecordFailed", () => logFailed));
         break;
       }
 

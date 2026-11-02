@@ -62,6 +62,17 @@ export const readConfiguration = (
     return configuration;
   });
 
+const changeEntry = (by: string, change: Change) => {
+  const network = networkOf(change);
+
+  return {
+    _tag: "Change",
+    by,
+    change: encodeChange(change),
+    ...(network !== undefined && { network }),
+  } satisfies NewEntry;
+};
+
 /**
  * Records one Change and folds it, in the same transaction, so what is returned is
  * Configuration exactly as of that Entry.
@@ -76,18 +87,28 @@ export const recordChange = (
   current: Configuration,
   by: string,
   change: Change
-) => {
-  const network = networkOf(change);
-
-  const entry: NewEntry = {
-    _tag: "Change",
-    by,
-    change: encodeChange(change),
-    ...(network !== undefined && { network }),
-  };
-
-  return record([entry], ([{ at, sequence }]) => ({
+) =>
+  record([changeEntry(by, change)], ([{ at, sequence }]) => ({
     after: reduceConfiguration(current, { at, change, sequence }),
     sequence,
   }));
-};
+
+/**
+ * Empties an Entry's bytes and records the Change that did, in one transaction, and folds
+ * the Change, as {@link recordChange} does (LOG-7).
+ * @param redact - The Log's `redact`.
+ * @param current - Configuration before the Change.
+ * @param by - The key that asked.
+ * @param change - The Change, which names the Entry.
+ * @returns Its sequence, and Configuration after it.
+ */
+export const recordRedaction = (
+  redact: Log["Service"]["redact"],
+  current: Configuration,
+  by: string,
+  change: Extract<Change, { readonly _tag: "EntryRedacted" }>
+) =>
+  redact(change.sequence, changeEntry(by, change), ({ at, sequence }) => ({
+    after: reduceConfiguration(current, { at, change, sequence }),
+    sequence,
+  }));

@@ -1,21 +1,43 @@
 import { BunFileSystem } from "@effect/platform-bun";
-import type { Entry } from "@iirc/session/entry";
+import type { SqliteMigrator } from "@effect/sql-sqlite-bun";
+import type { Entry, NewEntry } from "@iirc/session/entry";
 import { Recorder } from "@iirc/session/recorder";
 import type { Gap } from "@iirc/session/standing";
 import { Context, Effect, FileSystem, Layer } from "effect";
 
+import type { Backup } from "./backup.ts";
 import { openDatabase } from "./database.ts";
 import { StorageFailed } from "./errors.ts";
-import type { DataDirectoryLocked, ReaderBusy, ReadTimedOut } from "./errors.ts";
+import type {
+  DataDirectoryLocked,
+  EntryAlreadyRedacted,
+  EntryNotFound,
+  EntryNotRedactable,
+  ReaderBusy,
+  ReadTimedOut,
+} from "./errors.ts";
 import type { LoggedMessage } from "./fold.ts";
 import { holdDataDirectory } from "./lock.ts";
+import type { LogTooNew } from "./migrations.ts";
 import type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
 import { makeReader } from "./reader.ts";
 import type { LogReaderOptions } from "./reader.ts";
 import { makeStore } from "./store.ts";
 import type { ChangeEntry } from "./store.ts";
 
-export { DataDirectoryLocked, ReaderBusy, ReadTimedOut, StorageFailed } from "./errors.ts";
+export type { Backup } from "./backup.ts";
+
+export {
+  DataDirectoryLocked,
+  EntryAlreadyRedacted,
+  EntryNotFound,
+  EntryNotRedactable,
+  ReaderBusy,
+  ReadTimedOut,
+  StorageFailed,
+} from "./errors.ts";
+
+export { LogTooNew } from "./migrations.ts";
 
 export type { LoggedMessage } from "./fold.ts";
 
@@ -32,9 +54,11 @@ export type { Gap } from "@iirc/session/standing";
 /** Where the Log keeps its files. */
 export interface LogOptions {
   readonly dataDir: string;
+  /** The migrations to run, which only a test changes (RUN-5). */
+  readonly migrations?: SqliteMigrator.Loader;
 }
 
-const open = Effect.fnUntraced(function* ({ dataDir }: LogOptions) {
+const open = Effect.fnUntraced(function* ({ dataDir, migrations }: LogOptions) {
   const fileSystem = yield* FileSystem.FileSystem;
 
   yield* fileSystem
@@ -44,7 +68,7 @@ const open = Effect.fnUntraced(function* ({ dataDir }: LogOptions) {
   // The lock comes first, so that a second Daemon never touches a live database.
   yield* holdDataDirectory(dataDir);
 
-  return yield* Effect.flatMap(openDatabase(dataDir), makeStore);
+  return yield* Effect.flatMap(openDatabase(dataDir, migrations), makeStore);
 });
 
 /**
@@ -88,16 +112,32 @@ export class Log extends Context.Service<
     readonly head: Effect.Effect<number, StorageFailed>;
     /** Deletes every derived row and derives them again from Entries (LOG-10). */
     readonly rebuild: Effect.Effect<void, StorageFailed>;
+    /**
+     * Empties the bytes of the Line or Dropped Entry at `sequence`, marks it redacted by
+     * `change`, records `change`, and derives every table again, all in one transaction
+     * (LOG-7). `within` runs inside it with `change` as recorded, as `record`'s does. The
+     * Standings hosts read are left as they were, apart from `change` itself: a Connection
+     * under way acted on the Line as it was, and a start replays it as saying nothing.
+     */
+    readonly redact: <A>(
+      sequence: number,
+      change: Extract<NewEntry, { readonly _tag: "Change" }>,
+      within: (recorded: ChangeEntry) => A
+    ) => Effect.Effect<
+      A,
+      EntryAlreadyRedacted | EntryNotFound | EntryNotRedactable | StorageFailed
+    >;
   }
 >()("@iirc/log/Log") {
   /**
-   * The durable Log, also serving as the Recorder.
+   * The durable Log, also serving as the Recorder. A Log newer than the binary is refused,
+   * and one with migrations to run is backed up before they do (RUN-5).
    * @param options - Where to keep it.
    * @returns A Layer that holds the data directory for as long as it lives.
    */
   static readonly layer = (
     options: LogOptions
-  ): Layer.Layer<Log | Recorder, DataDirectoryLocked | StorageFailed> =>
+  ): Layer.Layer<Log | Recorder, DataDirectoryLocked | LogTooNew | StorageFailed> =>
     Layer.effectContext(
       Effect.map(open(options), (store) =>
         Context.make(Log, store).pipe(Context.add(Recorder, store))
@@ -113,6 +153,12 @@ export class Log extends Context.Service<
 export class LogReader extends Context.Service<
   LogReader,
   {
+    /**
+     * Copies the Log into `backups/` in the data directory with `VACUUM INTO`, on a Worker
+     * and a read connection of its own, so that it holds up no append and no read, and
+     * has no budget to run out of however big the Log (RUN-2). One runs at a time.
+     */
+    readonly backup: Effect.Effect<Backup, StorageFailed>;
     /**
      * Entries with a sequence greater than `after`, ascending, at most `limit`, from every
      * Network unless `network` names one, and of every kind unless `kinds` lists some.
@@ -144,5 +190,5 @@ export class LogReader extends Context.Service<
 
         return yield* makeReader(options);
       })
-    );
+    ).pipe(Layer.provide(BunFileSystem.layer));
 }

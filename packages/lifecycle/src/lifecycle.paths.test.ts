@@ -10,7 +10,9 @@ import { defaultTuning } from "./tuning.ts";
 // the machine can go, then checks each place through the public API alone.
 
 const input: NetworkInput = {
+  loginLines: 0,
   realname: "Claude Code",
+  services: [],
   tuning: defaultTuning,
   username: "cc",
 };
@@ -25,6 +27,7 @@ const lines = [
   { at: 3000, command: "ERROR", params: ["Ping timeout: 2m0s"] },
   { at: 3000, command: "FAIL", params: ["*", "ACCOUNT_REQUIRED", "No"] },
   { at: 3000, command: "NOTICE", params: ["*", "hello"] },
+  { at: 3000, command: "900", params: ["claude", "claude!c@host", "claude", "Logged in"] },
 ] as const;
 
 const deadlines = [
@@ -34,9 +37,18 @@ const deadlines = [
   { at: 62_000, name: "lag-check" },
   { at: 92_500, name: "silence" },
   { at: 93_000, name: "silence" },
+  { at: 6000, name: "login" },
 ] as const;
 
-const attempts = [{ ...input, at: 1000, nicks: ["claude", "claude_"] }] as const;
+const attempts = [
+  { ...input, at: 1000, nicks: ["claude", "claude_"] },
+  { ...input, at: 1000, loginLines: 1, nicks: ["claude"], services: ["NickServ"] },
+] as const;
+
+const loginSent = [
+  { at: 3000, identify: true, written: true },
+  { at: 3000, identify: false, written: false },
+] as const;
 
 const samples = {
   ATTEMPT: attempts,
@@ -46,6 +58,7 @@ const samples = {
   HEARD: [{ at: 3500 }],
   LEAVING: [{ at: 2500 }],
   LINE: lines,
+  LOGIN_SENT: loginSent,
   OPENED: [{ at: 2000 }],
   PING: [{ at: 3000, token: new TextEncoder().encode("token") }],
 } as const;
@@ -60,6 +73,7 @@ const everyEvent: readonly NetworkEvent[] = [
   { at: 3000, token: new TextEncoder().encode("token"), type: "PING" },
   ...lines.map((line) => ({ ...line, type: "LINE" as const })),
   ...deadlines.map((deadline) => ({ ...deadline, type: "DEADLINE" as const })),
+  ...loginSent.map((sent) => ({ ...sent, type: "LOGIN_SENT" as const })),
 ];
 
 const withoutConnection: ReadonlySet<Phase> = new Set(["closed", "idle"]);
@@ -69,6 +83,7 @@ const waiting: ReadonlySet<Phase> = new Set(["registering", "session"]);
 const everyCommand: Record<Command["type"], true> = {
   burstComplete: true,
   closeConnection: true,
+  loginSettled: true,
   sendLine: true,
   sendPong: true,
 };

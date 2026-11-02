@@ -12,7 +12,13 @@ import { defaultTuning } from "./tuning.ts";
 // minification took one, the Command would vanish with nothing failing until it was
 // needed, so this runs the bundle the way the release build makes it.
 
-const input: NetworkInput = { realname: "Claude Code", tuning: defaultTuning, username: "cc" };
+const input: NetworkInput = {
+  loginLines: 0,
+  realname: "Claude Code",
+  services: [],
+  tuning: defaultTuning,
+  username: "cc",
+};
 
 const attempt: NetworkEvent = { ...input, at: 1000, nicks: ["claude", "claudia"], type: "ATTEMPT" };
 const opened: NetworkEvent = { at: 2000, type: "OPENED" };

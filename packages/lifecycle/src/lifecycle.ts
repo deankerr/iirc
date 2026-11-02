@@ -11,7 +11,15 @@ import type { Tuning } from "./tuning.ts";
  * the first `ATTEMPT`, and nothing reads it before then.
  */
 export interface NetworkInput {
+  /**
+   * How many Lines the login sequence holds: `IDENTIFY`, if a service password is
+   * configured, and then each connect command (CONN-6). The login wait starts once the
+   * last of them is written or Dropped.
+   */
+  readonly loginLines: number;
   readonly realname: string;
+  /** The nicks whose `NOTICE` can be a sign of login (CONN-6). */
+  readonly services: readonly string[];
   readonly tuning: Tuning;
   readonly username: string;
 }
@@ -34,6 +42,17 @@ export type NetworkEvent =
       readonly at: number;
       readonly command: string;
       readonly params: readonly string[];
+      readonly source?: string;
+    }
+  /**
+   * A Line of the login sequence left, or was Dropped, so it never will (CONN-6).
+   * `identify` says it is the `IDENTIFY`, which is what a login wait waits on.
+   */
+  | {
+      readonly type: "LOGIN_SENT";
+      readonly at: number;
+      readonly identify: boolean;
+      readonly written: boolean;
     }
   /** An inbound `PING`, with its first parameter exactly as it arrived. */
   | { readonly type: "PING"; readonly at: number; readonly token: Uint8Array | undefined }
@@ -76,7 +95,9 @@ export type Command =
   /** `refused` is copied to the `closed` Entry, where backoff reads it (LIVE-5). */
   | { readonly type: "closeConnection"; readonly reason: string; readonly refused?: true }
   /** The burst is over, once per Session, so what waits on it can start (CONN-7). */
-  | { readonly type: "burstComplete" };
+  | { readonly type: "burstComplete" }
+  /** The login sequence is out and any login wait is over, so joining can go on (CONN-6). */
+  | { readonly type: "loginSettled" };
 
 /**
  * The coarse state of a Network, as the machine's host sees it. `closing` is any close

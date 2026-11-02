@@ -32,6 +32,7 @@ const rules = {
   kickRejoinMillis: atLeast(0),
   lagCheckMillis: atLeast(shortestLagCheck),
   laneLimit: atLeast(1),
+  loginWaitMillis: atLeast(0),
   quitWaitMillis: Schema.Int.check(Schema.isBetween({ maximum: longestQuitWait, minimum: 1 })),
   reconnectInitialMillis: atLeast(1),
   reconnectMaxMillis: atLeast(1),

@@ -57,9 +57,11 @@ describe(toEvent, () => {
     assert.deepInclude(
       toEvent({
         ...connection,
+        loginLines: 0,
         nicks: ["claude"],
         phase: "attempt",
         realname: "Then",
+        services: [],
         tuning,
         username: "then",
       }),
@@ -113,6 +115,7 @@ describe(toEvent, () => {
       at: 42,
       command: "001",
       params: ["claude", "Hi"],
+      source: "irc.test",
       type: "LINE",
     });
   });

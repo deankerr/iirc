@@ -1,7 +1,7 @@
 import { KeyExists, localKeyName } from "@iirc/api";
 import type { KeyScope } from "@iirc/api";
 import { Log, StorageFailed } from "@iirc/log";
-import type { DataDirectoryLocked } from "@iirc/log";
+import type { DataDirectoryLocked, LogTooNew } from "@iirc/log";
 import { Recorder } from "@iirc/session/recorder";
 import { Effect } from "effect";
 
@@ -30,7 +30,7 @@ export const createLocalKey = ({
   scope,
 }: LocalKeyOptions): Effect.Effect<
   string,
-  DataDirectoryLocked | KeyExists | StorageFailed | UndecodableChange
+  DataDirectoryLocked | KeyExists | LogTooNew | StorageFailed | UndecodableChange
 > =>
   Effect.gen(function* () {
     const { record } = yield* Recorder;

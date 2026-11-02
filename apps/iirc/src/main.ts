@@ -10,6 +10,7 @@ import { HttpRouter } from "effect/http";
 import { version } from "../package.json";
 import { described, failed, reportedOnStderr } from "./command-failed.ts";
 import { config } from "./config-command.ts";
+import { backup, credential } from "./credential-command.ts";
 
 // AUTH-5: the API listens on loopback, and remote access goes through a proxy.
 const apiHost = "127.0.0.1";
@@ -62,6 +63,8 @@ const daemon = Command.make(
             );
           }
 
+          case "CredentialsUnreadable":
+          case "LogTooNew":
           case "UndecodableChange": {
             return failed(described(error));
           }
@@ -115,6 +118,10 @@ const keyCreate = Command.make(
             );
           }
 
+          case "LogTooNew": {
+            return failed(`${error.message} No key was made.`);
+          }
+
           case "StorageFailed": {
             return failed(
               `The Log in ${directory} could not be read or written, so no key was made: ${described(error.cause)}`
@@ -149,7 +156,7 @@ const key = Command.make("key").pipe(
 
 const iirc = Command.make("iirc").pipe(
   Command.withDescription("An always-on IRC client"),
-  Command.withSubcommands([config, daemon, key])
+  Command.withSubcommands([backup, config, credential, daemon, key])
 );
 
 // `runMain` interrupts main on SIGINT and SIGTERM, which is how a Daemon is asked to stop,

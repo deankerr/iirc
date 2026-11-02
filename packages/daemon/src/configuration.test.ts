@@ -15,12 +15,15 @@ const libera: NetworkSettings = {
     { autojoin: true, name: "#iirc", rejoinOnKick: false },
     { autojoin: false, name: "#quiet", rejoinOnKick: false },
   ],
+  connectCommands: [],
+  credentials: {},
   enabled: true,
   id: "libera",
   identity: { alternates: [], nick: "iirc", realname: "iirc", username: "iirc" },
   ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
   name: "Libera",
   quitReason: "iirc",
+  services: [],
   tuning: {},
 };
 
@@ -53,6 +56,16 @@ const joined = (name: string, rejoinOnKick?: boolean): Change => ({
   network: "libera",
 });
 
+const set = (name: string): Change => ({ _tag: "CredentialSet", name });
+
+const deleted = (name: string): Change => ({ _tag: "CredentialDeleted", name });
+
+// The Channel a fold of these Changes leaves `#keyed` as, however it is spelt.
+const keyedAfter = (...changes: readonly Change[]) =>
+  networkIn(fold(added(), ...changes)).settings.channels.find(({ name }) =>
+    name.toLowerCase().startsWith("#keyed")
+  );
+
 describe("the Configuration fold", () => {
   it("CONF-1: starts with no Networks and no keys", () => {
     expect(fold()).toStrictEqual(noConfiguration);
@@ -73,6 +86,9 @@ describe("the Configuration fold", () => {
     ["Ircds", { ircds: [{ host: "irc.eu.libera.chat", port: 6697, tls: true }] }],
     ["Identity", { identity: { ...libera.identity, nick: "other" } }],
     ["Tuning", { tuning: { reconnectInitialMillis: 1000 } }],
+    ["Credentials", { credentials: { password: "libera.pass" } }],
+    ["connect commands", { connectCommands: ["MODE iirc +i"] }],
+    ["services", { services: ["NickServ", "Q"] }],
   ] as const)("CONF-2: a change to its %s retries at once", (_name, change) => {
     expect(networkIn(fold(added(), changed({ ...libera, ...change }))).retrySince).toBe(2);
   });
@@ -218,6 +234,103 @@ describe("the Configuration fold", () => {
           sequence: 2,
         })
       ).toBe(configuration);
+    });
+  });
+
+  describe("Credentials (CRED-1, CRED-4)", () => {
+    const referring: NetworkSettings = {
+      ...libera,
+      channels: [{ autojoin: true, key: "libera.key", name: "#iirc", rejoinOnKick: false }],
+      connectCommands: ["PRIVMSG Q :AUTH iirc {{libera.q}}"],
+      credentials: {
+        clientCertificate: "libera.cert",
+        password: "libera.pass",
+        service: { nick: "NickServ", password: "libera.nickserv" },
+      },
+    };
+
+    it.each(["libera.pass", "libera.nickserv", "libera.cert", "libera.q"])(
+      "LIVE-4: setting or deleting %s, which its Connections use, retries the Network that refers to it",
+      (name) => {
+        const after = fold(added(referring), added(oftc), set(name), deleted(name));
+
+        expect(networkIn(after).retrySince).toBe(4);
+        expect(networkIn(after, "oftc").retrySince).toBe(2);
+      }
+    );
+
+    it("wakes, and does not retry, a Network whose Channel key it is, since a Network sets keys itself", () => {
+      const before = fold(added(referring));
+
+      const after = reduceConfiguration(before, {
+        at: 2000,
+        change: set("libera.key"),
+        sequence: 2,
+      });
+
+      expect(networkIn(after)).not.toBe(networkIn(before));
+      expect(networkIn(after)).toStrictEqual(networkIn(before));
+    });
+
+    it("leaves the very same Network for a Credential it does not refer to, so no host wakes", () => {
+      const before = fold(added(referring));
+      const after = reduceConfiguration(before, { at: 2000, change: set("other"), sequence: 2 });
+
+      expect(networkIn(after)).toBe(networkIn(before));
+      expect(after.credentials.get("other")).toStrictEqual({ sequence: 2, set: true });
+    });
+
+    it("CRED-4: a Join with a key names it, and a later Join without one keeps it", () => {
+      const keyed: Change = {
+        _tag: "ChannelJoined",
+        channel: { key: "key.0123456789abcdef", name: "#Keyed" },
+        network: "libera",
+      };
+
+      expect(keyedAfter(keyed)).toStrictEqual({
+        autojoin: true,
+        key: "key.0123456789abcdef",
+        name: "#Keyed",
+        rejoinOnKick: false,
+      });
+      expect(keyedAfter(keyed, joined("#keyed"))?.key).toBe("key.0123456789abcdef");
+    });
+
+    it("CRED-4: naming a key changes nothing else, not even when the Channel was wanted", () => {
+      const before = networkIn(
+        fold(added(), { _tag: "ChannelKeyNamed", channel: "#none", key: "k", network: "libera" })
+      );
+
+      const after = networkIn(
+        fold(added(), {
+          _tag: "ChannelKeyNamed",
+          channel: "#IIRC",
+          key: "key.0123456789abcdef",
+          network: "libera",
+        })
+      );
+
+      expect(before.settings).toStrictEqual(libera);
+      expect(after.settings.channels[0]).toStrictEqual({
+        autojoin: true,
+        key: "key.0123456789abcdef",
+        name: "#iirc",
+        rejoinOnKick: false,
+      });
+      expect(after.wantedSince).toStrictEqual(new Map([["#iirc", 1]]));
+      expect(after.retrySince).toBe(1);
+    });
+
+    it("LOG-7: a redaction leaves Configuration as it was", () => {
+      const before = fold(added());
+
+      expect(
+        reduceConfiguration(before, {
+          at: 2000,
+          change: { _tag: "EntryRedacted", sequence: 1 },
+          sequence: 2,
+        })
+      ).toBe(before);
     });
   });
 

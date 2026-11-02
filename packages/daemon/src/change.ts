@@ -1,4 +1,11 @@
-import { ChannelName, KeyName, KeyScope, NetworkId, NetworkSettings } from "@iirc/api";
+import {
+  ChannelName,
+  CredentialName,
+  KeyName,
+  KeyScope,
+  NetworkId,
+  NetworkSettings,
+} from "@iirc/api";
 import type { NetworkSettings as Settings } from "@iirc/api";
 import type { Json } from "@iirc/session/entry";
 import { channelKey } from "@iirc/session/standing";
@@ -52,8 +59,8 @@ const KeyHash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u));
 /**
  * What the Owner altered, as a Change Entry stores it (CONF-1, LOG-2). Each Network's
  * settings are whole, so that a Change can be read alone. A key is stored only as its
- * SHA-256 (AUTH-2). This is the Log's format, and the Daemon will not start on a Change it
- * cannot read.
+ * SHA-256 (AUTH-2), and a Credential only by name (CRED-1). This is the Log's format, and
+ * the Daemon will not start on a Change it cannot read.
  */
 export const Change = Schema.Union([
   Schema.TaggedStruct("NetworkAdded", { settings: DaemonSettings }),
@@ -63,19 +70,39 @@ export const Change = Schema.Union([
   Schema.TaggedStruct("NetworkConnected", { id: NetworkId }),
   /** Enabled off (LIVE-9). */
   Schema.TaggedStruct("NetworkDisconnected", { id: NetworkId }),
-  /** Wanted, with autojoin on, as of this Change, which outranks an older kick (LIVE-8). */
+  /**
+   * Wanted, with autojoin on, as of this Change, which outranks an older kick (LIVE-8).
+   * `key` names the Credential holding its key, which a Join given one stored first
+   * (CRED-4). Without one, a key the Channel already had stays.
+   */
   Schema.TaggedStruct("ChannelJoined", {
     channel: Schema.Struct({
+      key: Schema.optionalKey(CredentialName),
       name: ChannelName,
       rejoinOnKick: Schema.optionalKey(Schema.Boolean),
     }),
     network: NetworkId,
   }),
   Schema.TaggedStruct("ChannelParted", { channel: ChannelName, network: NetworkId }),
+  /**
+   * A configured Channel's key is now held under `key`, because the Daemon stored one it
+   * saw set with `+k` (CRED-4). It changes nothing else about the Channel: not autojoin,
+   * not a kick, and not when it was last wanted.
+   */
+  Schema.TaggedStruct("ChannelKeyNamed", {
+    channel: ChannelName,
+    key: CredentialName,
+    network: NetworkId,
+  }),
   /** The whole of Configuration at once, as an import is (CONF-6). */
   Schema.TaggedStruct("ConfigurationReplaced", { networks: ConfigurationNetworks }),
   Schema.TaggedStruct("KeyCreated", { hash: KeyHash, name: KeyName, scope: KeyScope }),
   Schema.TaggedStruct("KeyRevoked", { hash: KeyHash, name: KeyName, scope: KeyScope }),
+  /** Set or replaced, once it was kept. Its value never comes near the Log (CRED-1). */
+  Schema.TaggedStruct("CredentialSet", { name: CredentialName }),
+  Schema.TaggedStruct("CredentialDeleted", { name: CredentialName }),
+  /** The bytes of the Line or Dropped Entry at `sequence` were emptied (LOG-7). */
+  Schema.TaggedStruct("EntryRedacted", { sequence: Schema.Int }),
 ]);
 
 /** The decoded form of {@link Change}. */
@@ -109,11 +136,17 @@ export const networkOf = (change: Change): string | undefined => {
     }
 
     case "ChannelJoined":
+    case "ChannelKeyNamed":
     case "ChannelParted": {
       return change.network;
     }
 
+    // A Credential belongs to no one Network: any number may refer to it. A redaction
+    // names only the Entry, whose own Network is on it.
     case "ConfigurationReplaced":
+    case "CredentialDeleted":
+    case "CredentialSet":
+    case "EntryRedacted":
     case "KeyCreated":
     case "KeyRevoked": {
       return undefined;

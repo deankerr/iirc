@@ -6,6 +6,8 @@ import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 
+import { Credentials } from "./credentials.ts";
+import type { Keyring } from "./credentials.ts";
 import { createLocalKey, Daemon } from "./daemon.ts";
 import { ApiRoutes } from "./routes.ts";
 
@@ -14,6 +16,26 @@ export const ownerKey = "owner";
 
 /** The Daemon's version under test. */
 export const version = "1.2.3";
+
+/**
+ * A keyring that is never there, as on fserv, so that a test keeps Credentials in the file
+ * on whatever machine it runs, and never touches the Owner's own keyring.
+ */
+export const noKeyring: Keyring = {
+  get: async () => await Promise.reject(new Error("no keyring here")),
+  set: async () => {
+    await Promise.reject(new Error("no keyring here"));
+  },
+};
+
+/**
+ * Credentials in a data directory's file, for a test that builds the Daemon's Layers
+ * itself.
+ * @param dataDir - The data directory.
+ * @returns The Layer, which needs the Log.
+ */
+export const credentialsIn = (dataDir: string) =>
+  Credentials.layer({ dataDir, keyring: noKeyring });
 
 /**
  * Creates a key straight into a Log no Daemon holds, as `iirc key create` does (AUTH-4).

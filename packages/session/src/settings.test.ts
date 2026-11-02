@@ -399,7 +399,7 @@ describe("LIVE-7, LIVE-8: the Channels wanted", () => {
 const replay = (log: readonly Entry[], tuning = defaultTuning) =>
   fold(
     log.flatMap((entry) => toEvent(entry) ?? []),
-    { realname: "Today", tuning, username: "today" }
+    { loginLines: 0, realname: "Today", services: [], tuning, username: "today" }
   );
 
 describe("ADR 0003: a replay makes the decisions the Connection made", () => {

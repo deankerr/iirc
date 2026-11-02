@@ -1,11 +1,24 @@
 import type { NetworkEvent } from "@iirc/lifecycle";
 import { parseFrame, pingToken } from "@iirc/protocol/line";
 
+import { loginCauses } from "./credentials.ts";
 import type { Entry } from "./entry.ts";
 
 type ConnectionEntry = Extract<Entry, { readonly _tag: "Connection" }>;
 
 type LineEntry = Extract<Entry, { readonly _tag: "Line" }>;
+
+type DroppedEntry = Extract<Entry, { readonly _tag: "Dropped" }>;
+
+// A Line of the login sequence counts whether it left or not, so that one never sent
+// cannot hold joining up for good (CONN-6).
+const loginSent = (
+  { at, cause }: LineEntry | DroppedEntry,
+  written: boolean
+): NetworkEvent | undefined =>
+  cause !== undefined && loginCauses.has(cause)
+    ? { at, identify: cause === "identify", type: "LOGIN_SENT", written }
+    : undefined;
 
 const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
   const { at } = entry;
@@ -14,9 +27,9 @@ const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
     // Everything the machine runs with comes from the Entry, and never from today's
     // settings, so a replay of an old Connection makes the decisions it made then.
     case "attempt": {
-      const { nicks, realname, tuning, username } = entry;
+      const { loginLines, nicks, realname, services, tuning, username } = entry;
 
-      return { at, nicks, realname, tuning, type: "ATTEMPT", username };
+      return { at, loginLines, nicks, realname, services, tuning, type: "ATTEMPT", username };
     }
 
     case "opened": {
@@ -45,12 +58,15 @@ const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
   }
 };
 
-// Our own Lines say nothing to the machine, or an outbound `PING` would answer itself.
-// Anything inbound proves the Connection is alive, but a cut Line is a fragment whose
-// first word is not a command worth obeying, so it says that and nothing more.
-const lineEvent = ({ at, bytes, cut, direction }: LineEntry): NetworkEvent | undefined => {
+// Our own Lines say nothing to the machine, or an outbound `PING` would answer itself, but
+// for the login sequence, whose last Line starts the login wait. Anything inbound proves
+// the Connection is alive, but a cut Line is a fragment whose first word is not a command
+// worth obeying, so it says that and nothing more.
+const lineEvent = (entry: LineEntry): NetworkEvent | undefined => {
+  const { at, bytes, cut, direction } = entry;
+
   if (direction === "outbound") {
-    return undefined;
+    return loginSent(entry, true);
   }
 
   const parsed = parseFrame(bytes);
@@ -59,11 +75,15 @@ const lineEvent = ({ at, bytes, cut, direction }: LineEntry): NetworkEvent | und
     return { at, type: "HEARD" };
   }
 
-  const { command, params } = parsed.line;
+  const { command, params, source } = parsed.line;
 
-  return command === "PING"
-    ? { at, token: pingToken(bytes), type: "PING" }
-    : { at, command, params, type: "LINE" };
+  if (command === "PING") {
+    return { at, token: pingToken(bytes), type: "PING" };
+  }
+
+  return source === undefined
+    ? { at, command, params, type: "LINE" }
+    : { at, command, params, source, type: "LINE" };
 };
 
 /**
@@ -86,10 +106,13 @@ export const toEvent = (entry: Entry): NetworkEvent | undefined => {
       return lineEvent(entry);
     }
 
+    case "Dropped": {
+      return loginSent(entry, false);
+    }
+
     // A Change is the Owner's, and only reaches a machine through what its host does.
     case "Change":
-    case "Daemon":
-    case "Dropped": {
+    case "Daemon": {
       return undefined;
     }
 

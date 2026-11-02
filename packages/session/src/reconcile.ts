@@ -1,9 +1,10 @@
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { joinLines } from "@iirc/protocol/join";
 import type { OutboundLine } from "@iirc/protocol/outbound";
 import { Clock, Duration, Effect, Queue } from "effect";
 
+import { joinSensitive, keyedJoins } from "./credentials.ts";
 import type { RecordFailed } from "./recorder.ts";
+import type { Secrets, Sensitive } from "./redact.ts";
 import { joinPlan } from "./standing.ts";
 import type { Standing, WantedChannel } from "./standing.ts";
 
@@ -11,10 +12,15 @@ import type { Standing, WantedChannel } from "./standing.ts";
 export interface Reconciling {
   /** The Channels wanted now, read for every plan, so a change reaches a Session (LIVE-8). */
   readonly channels: Effect.Effect<readonly WantedChannel[]>;
-  /** Queues a Line, waits for room, and says whether it was written. */
-  readonly join: (line: OutboundLine) => Effect.Effect<boolean>;
+  /**
+   * Queues a Line, waits for room, and says whether it was written. A `JOIN` that carries
+   * keys comes with what the Log records in its place (LOG-6).
+   */
+  readonly join: (line: OutboundLine, sensitive: Sensitive | undefined) => Effect.Effect<boolean>;
   /** Each item says that Standing or the Channels wanted moved, which could change a plan. */
   readonly moved: Queue.Dequeue<void>;
+  /** Every Credential there is, read for every `JOIN`, so a key set since is used (CRED-4). */
+  readonly secrets: Effect.Effect<Secrets>;
   readonly standing: Effect.Effect<Standing, RecordFailed>;
   readonly tuning: Tuning;
 }
@@ -24,12 +30,13 @@ export interface Reconciling {
  * LIVE-8). It holds no plan: it asks for one, sends one `JOIN` Line of it, waits for the
  * outcome, and asks again. A `JOIN` only counts as asked once recorded, so a plan kept
  * while its Lines wait in the lane would be sent again, and a Channel the Ircd puts us
- * in meanwhile would be asked for needlessly.
+ * in meanwhile would be asked for needlessly. Each key is read from its Credential as the
+ * Line is built, and a Channel whose key is not set is joined without one (CRED-4).
  * @param reconciling - The Channels wanted, and how to reach the Connection.
  * @returns An effect that ends when a Line could not be written, as happens when the
  * Connection closes, and fails if Standing cannot be read.
  */
-export const reconcile = ({ channels, join, moved, standing, tuning }: Reconciling) =>
+export const reconcile = ({ channels, join, moved, secrets, standing, tuning }: Reconciling) =>
   Effect.gen(function* () {
     let joining = true;
 
@@ -40,10 +47,10 @@ export const reconcile = ({ channels, join, moved, standing, tuning }: Reconcili
     while (joining) {
       const now = yield* Clock.currentTimeMillis;
       const plan = joinPlan(yield* standing, yield* channels, now, tuning);
-      const [line] = joinLines(plan.channels).lines;
+      const [batch] = keyedJoins(plan.channels, yield* secrets).batches;
 
-      if (line !== undefined) {
-        joining = yield* join(line);
+      if (batch !== undefined) {
+        joining = yield* join(batch.line, joinSensitive(batch));
       } else if (plan.lookAgainAt === undefined) {
         yield* Queue.take(moved);
       } else {
