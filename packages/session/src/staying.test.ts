@@ -21,7 +21,7 @@ import {
   options,
   probed,
   safe,
-  settled,
+  manyTurns,
   texts,
   throwing,
   wire,
@@ -44,13 +44,13 @@ const noMotd = ":ircd 422 iirc :No MOTD\r\n";
 
 // A Session with its burst over, and nothing to join unless a test asks.
 const afterSettle = (tuning = defaultTuning) =>
-  Effect.andThen(TestClock.adjust(`${tuning.rejoinSettleMillis} millis`), settled);
+  Effect.andThen(TestClock.adjust(`${tuning.rejoinSettleMillis} millis`), manyTurns);
 
 const burstOver = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides?: Overrides) {
   const hosted = yield* host(ircd, { channels: [], ...overrides });
 
   yield* ircd.read(`${welcome}${noMotd}`);
-  yield* settled;
+  yield* manyTurns;
 
   // Rejoining waits this long after the burst, for `JOIN`s a Network replays (LIVE-7).
   if ((overrides?.channels ?? []).length > 0) {
@@ -103,7 +103,7 @@ const stopInBackground = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides?
       const hosted = yield* bareHost(ircd, { channels: [], ...overrides });
 
       yield* ircd.read(`${welcome}${noMotd}`);
-      yield* settled;
+      yield* manyTurns;
       yield* Deferred.succeed(running, hosted);
       yield* Deferred.await(stop);
     })
@@ -128,12 +128,12 @@ const waitOutBackoff = Effect.fnUntraced(function* (hosted: NetworkHost, ircd: F
   const delay = (nextAttemptAt ?? 0) - started;
 
   yield* TestClock.adjust(`${delay - 1} millis`);
-  yield* settled;
+  yield* manyTurns;
 
   assert.lengthOf(yield* ircd.dials, dials);
 
   yield* TestClock.adjust("1 millis");
-  yield* settled;
+  yield* manyTurns;
 
   assert.lengthOf(yield* ircd.dials, dials + 1);
 
@@ -163,7 +163,7 @@ describe("LIVE-4: reconnecting", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closed");
       assert.isDefined((yield* hosted.status).nextAttemptAt);
@@ -179,7 +179,7 @@ describe("LIVE-4: reconnecting", () => {
       ]);
 
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.lengthOf(connectionsOf(yield* entries, "attempt"), 2);
@@ -225,7 +225,7 @@ describe("LIVE-4: reconnecting", () => {
       assert.strictEqual(consecutiveFailures, 1);
 
       yield* TestClock.adjust(`${(nextAttemptAt ?? 0) - (yield* now)} millis`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 2);
       assert.strictEqual((yield* hosted.status).consecutiveFailures, 2);
@@ -247,11 +247,11 @@ describe("LIVE-4: reconnecting", () => {
         for (let minute = 0; minute < 5; minute += 1) {
           yield* TestClock.adjust("1 minute");
           yield* ircd.read("NOTICE * :still here\r\n");
-          yield* settled;
+          yield* manyTurns;
         }
 
         yield* ircd.hangUp;
-        yield* settled;
+        yield* manyTurns;
 
         const delay = yield* waitOutBackoff(hosted, ircd);
 
@@ -266,7 +266,7 @@ describe("LIVE-4: reconnecting", () => {
       const ircd = yield* fakeIrcd();
 
       yield* Effect.scoped(
-        Effect.andThen(bareHost(ircd), Effect.andThen(ircd.read(welcome), settled))
+        Effect.andThen(bareHost(ircd), Effect.andThen(ircd.read(welcome), manyTurns))
       );
       yield* host(ircd);
 
@@ -303,7 +303,7 @@ describe("LIVE-4: reconnecting", () => {
       assert.lengthOf(yield* ircd.dials, 0);
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
     }).pipe(memory)
@@ -317,12 +317,12 @@ describe("LIVE-5: refusals", () => {
       const hosted = yield* host(ircd);
 
       yield* ircd.read("ERROR :You are banned, and that is that\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closing");
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const status = yield* hosted.status;
       const [closed] = connectionsOf(yield* entries, "closed");
@@ -345,13 +345,13 @@ describe("LIVE-5: refusals", () => {
 
       yield* ircd.read(":ircd 465 * :Banned\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
       yield* waitOutBackoff(hosted, ircd);
 
       assert.strictEqual((yield* hosted.status).refusal, "Banned");
 
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       assert.isFalse((yield* hosted.status).refused);
       assert.isUndefined((yield* hosted.status).refusal);
@@ -368,9 +368,9 @@ describe("CONN-4: nicks", () => {
         identity: { ...options.identity, alternates: ["other"] },
       });
       yield* ircd.read(":ircd 433 * iirc :In use\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.read(":ircd 433 * other :In use\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const [attempt] = connectionsOf(yield* entries, "attempt");
 
@@ -392,9 +392,9 @@ describe("CONN-4: nicks", () => {
 
       yield* ircd.read(":ircd 001 averyverylongnick :Welcome\r\n");
       yield* ircd.read(":ircd 005 averyverylongnick NICKLEN=12 :are supported\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
       yield* waitOutBackoff(hosted, ircd);
 
       const [firstTry, secondTry] = connectionsOf(yield* entries, "attempt");
@@ -403,7 +403,7 @@ describe("CONN-4: nicks", () => {
       assert.strictEqual(secondTry?.nicks[1], "averyverylon");
 
       yield* ircd.read(`:ircd 433 * ${nick} :In use\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* textsOn(ircd, 1)).at(-1), "NICK averyverylon\r\n");
     }).pipe(memory)
@@ -415,7 +415,7 @@ describe("CONN-4: nicks", () => {
       const hosted = yield* host(ircd, { tuning: { ...defaultTuning, firstContactNickLimit: 5 } });
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const status = yield* hosted.status;
       const [attempt] = connectionsOf(yield* entries, "attempt");
@@ -443,12 +443,12 @@ describe("LIVE-2: liveness", () => {
 
       yield* ircd.read("half a li");
       yield* TestClock.adjust("89999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const [closed] = connectionsOf(log, "closed");
@@ -469,7 +469,7 @@ describe("LIVE-2: liveness", () => {
       const hosted = yield* burstOver(ircd);
 
       yield* TestClock.adjust("90 seconds");
-      yield* settled;
+      yield* manyTurns;
       yield* waitOutBackoff(hosted, ircd);
     }).pipe(memory)
   );
@@ -482,7 +482,7 @@ describe("LIVE-2: liveness", () => {
       for (let tick = 0; tick < 60; tick += 1) {
         yield* TestClock.adjust("89 seconds");
         yield* ircd.read(":a!b@c PRIVMSG #one :still talking\r\n");
-        yield* settled;
+        yield* manyTurns;
       }
 
       assert.strictEqual((yield* hosted.status).phase, "session");
@@ -498,9 +498,9 @@ describe("LIVE-2: liveness", () => {
 
       yield* TestClock.adjust("89 seconds");
       yield* ircd.read("\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("89 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
     }).pipe(memory)
@@ -523,7 +523,7 @@ describe("LIVE-2: liveness", () => {
         ],
         { concurrency: "unbounded" }
       );
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(deadlinesNamed(yield* entries, "silence"), 0);
       assert.strictEqual((yield* hosted.status).phase, "session");
@@ -548,12 +548,12 @@ describe("LIVE-2: liveness", () => {
         const hosted = yield* burstOver(ircd);
 
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("10 minutes");
         yield* ircd.read("NOTICE * :late\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* Deferred.succeed(held, undefined);
-        yield* settled;
+        yield* manyTurns;
 
         assert.lengthOf(deadlinesNamed(yield* entries, "silence"), 0);
         assert.strictEqual((yield* hosted.status).phase, "session");
@@ -567,7 +567,7 @@ describe("LIVE-2: liveness", () => {
       const hosted = yield* burstOver(ircd, { tuning: noLagChecks });
 
       yield* TestClock.adjust("90 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(deadlinesNamed(yield* entries, "silence"), 1);
       assert.strictEqual((yield* hosted.status).closeReason, "heard nothing for 90 seconds");
@@ -598,12 +598,12 @@ describe("deadlines and what was read", () => {
         const hosted = yield* host(ircd);
 
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("60 seconds");
         yield* ircd.read(welcome);
-        yield* settled;
+        yield* manyTurns;
         yield* release;
-        yield* settled;
+        yield* manyTurns;
 
         assert.lengthOf(deadlinesNamed(yield* entries, "registration"), 1);
         assert.strictEqual((yield* hosted.status).phase, "closing");
@@ -620,13 +620,13 @@ describe("deadlines and what was read", () => {
         const hosted = yield* host(ircd);
 
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("61 seconds");
         yield* ircd.read("NOTICE * :late\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.setTime(1000);
         yield* release;
-        yield* settled;
+        yield* manyTurns;
 
         const log = yield* entries;
 
@@ -645,7 +645,7 @@ describe("LIVE-3: lag", () => {
       const hosted = yield* burstOver(ircd);
 
       yield* TestClock.adjust("60 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       const check = (yield* wire(ircd)).at(-1) ?? "";
 
@@ -653,7 +653,7 @@ describe("LIVE-3: lag", () => {
 
       yield* TestClock.adjust("250 millis");
       yield* ircd.read(`:ircd PONG ircd :${check.slice(5, -2)}\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).lagMillis, 250);
     }).pipe(memory)
@@ -672,7 +672,7 @@ describe("LIVE-3: lag", () => {
       yield* Effect.forEach(Array.from({ length: 80 }), () => ircd.read("flood\r\n"), {
         discard: true,
       });
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const [fired] = deadlinesNamed(log, "lag-check");
@@ -699,23 +699,23 @@ describe("SEND-1 to SEND-3: lanes", () => {
         yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", `${index}`]), "test"));
       }
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf((yield* wire(ircd)).slice(before), 5);
       assert.strictEqual((yield* hosted.status).lanes.interactive, 2);
 
       yield* TestClock.adjust("1999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf((yield* wire(ircd)).slice(before), 5);
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf((yield* wire(ircd)).slice(before), 6);
 
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(
         (yield* wire(ircd)).slice(before),
@@ -732,11 +732,11 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
       yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "takes the token"]), "test"));
       yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "waits"]), "test"));
-      yield* settled;
+      yield* manyTurns;
 
       // No time passes here, so the bucket has nothing to give.
       yield* ircd.read("PING :first\r\nPING :second\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual((yield* wire(ircd)).slice(before), [
         "PRIVMSG #one :takes the token\r\n",
@@ -745,7 +745,7 @@ describe("SEND-1 to SEND-3: lanes", () => {
       ]);
 
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "PRIVMSG #one waits\r\n");
     }).pipe(memory)
@@ -761,19 +761,19 @@ describe("SEND-1 to SEND-3: lanes", () => {
       });
 
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       const before = (yield* wire(ircd)).length;
 
       yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "one"]), "test"));
       yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "two"]), "test"));
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.read(noMotd);
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual((yield* wire(ircd)).slice(before), [
         "PRIVMSG #one one\r\n",
@@ -791,10 +791,10 @@ describe("SEND-1 to SEND-3: lanes", () => {
       yield* ircd.setWrites("hang");
 
       yield* Effect.forkChild(hosted.send(line, "in the write"));
-      yield* settled;
+      yield* manyTurns;
       yield* Effect.forkChild(hosted.send(line, "queued"));
       yield* Effect.forkChild(hosted.send(line, "queued"));
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).lanes.interactive, 2);
       assert.deepStrictEqual(
@@ -817,9 +817,9 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
       const waiting = yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "late"]), "t"));
 
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("9999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.isUndefined(waiting.pollUnsafe());
 
@@ -829,7 +829,7 @@ describe("SEND-1 to SEND-3: lanes", () => {
       assert.strictEqual((yield* hosted.status).lanes.interactive, 1);
 
       yield* TestClock.adjust("50 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).lanes.interactive, 0);
       assert.include(yield* wire(ircd), "PRIVMSG #one late\r\n");
@@ -845,10 +845,10 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
       const gone = yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "kept"]), "t"));
 
-      yield* settled;
+      yield* manyTurns;
       yield* Fiber.interrupt(gone);
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "PRIVMSG #one kept\r\n");
 
@@ -875,7 +875,7 @@ describe("SEND-1 to SEND-3: lanes", () => {
       yield* ircd.setDials("accept");
       yield* waitOutBackoff(hosted, ircd);
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       assert.notInclude((yield* wire(ircd)).join(""), "PRIVMSG");
     }).pipe(memory)
@@ -900,9 +900,9 @@ describe("SEND-1 to SEND-3: lanes", () => {
         Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "waiting"]), "key:one"))
       );
 
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const closing = commits.find((recording) => recording.some(isClosed));
       const reason = "the Connection closed: the Ircd closed the Connection";
@@ -923,7 +923,7 @@ describe("SEND-1 to SEND-3: lanes", () => {
       yield* waitOutBackoff(hosted, ircd);
       yield* ircd.read(`${welcome}${noMotd}`);
       yield* TestClock.adjust("1 minute");
-      yield* settled;
+      yield* manyTurns;
 
       assert.notInclude((yield* wire(ircd)).join(""), "PRIVMSG #one waiting");
     }).pipe(Effect.provide(layer));
@@ -936,11 +936,11 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
       yield* hosted.send(line, "spends the token");
       yield* Effect.forkChild(Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "stay"]), "t")));
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.read("ERROR :Closing Link\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("3 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.notInclude((yield* wire(ircd)).join(""), "stay");
     }).pipe(memory)
@@ -963,21 +963,21 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
         yield* burstOver(ircd);
         yield* ircd.read("ERROR :Closing Link\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         for (let index = 0; index < flood; index += 1) {
           yield* ircd.read(`NOTICE * :${index}\r\n`);
         }
 
-        yield* settled;
+        yield* manyTurns;
 
         // The loop is held in a commit, the inbox is full, and the reader waits with one
         // more in its hand when the limit passes.
         yield* TestClock.adjust("5 seconds");
         yield* Deferred.succeed(release, undefined);
-        yield* settled;
+        yield* manyTurns;
 
         const recorded = texts(yield* entries, "inbound").filter((text) =>
           /^NOTICE \* :\d+$/u.test(text)
@@ -1002,12 +1002,12 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
       yield* burstOver(ircd);
       yield* ircd.read("ERROR :Closing Link\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       yield* Effect.forEach(Array.from({ length: flood }), () => ircd.read("flood\r\n"), {
         discard: true,
       });
-      yield* settled;
+      yield* manyTurns;
 
       const recorded = texts(yield* entries, "inbound").filter((text) => text === "flood");
 
@@ -1023,9 +1023,9 @@ describe("SEND-1 to SEND-3: lanes", () => {
 
       yield* ircd.setWrites("hang");
       yield* Effect.forkChild(Effect.exit(hosted.send(line, "stalled")));
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const closed = connectionsOf(log, "closed");
@@ -1050,7 +1050,7 @@ describe("the control lane and a stalled socket", () => {
         yield* ircd.read(ping);
       }
 
-      yield* settled;
+      yield* manyTurns;
 
       // The pump holds one, the lane two, and the loop waits with the next. A handful more
       // sit in the inbox and the reader's hand, and the rest are still in the kernel.
@@ -1059,14 +1059,14 @@ describe("the control lane and a stalled socket", () => {
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* TestClock.adjust("10 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       // The loop is free, and reads what is left, drops what it cannot send, and closes.
       assert.strictEqual((yield* hosted.status).phase, "closing");
       assert.strictEqual(yield* ircd.unread, 0);
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const [closed] = connectionsOf(log, "closed");
@@ -1104,14 +1104,14 @@ describe("the control lane and a stalled socket", () => {
         yield* ircd.read(ping);
       }
 
-      yield* settled;
+      yield* manyTurns;
 
       const parked = yield* ircd.unread;
 
       assert.isAbove(parked, 15);
 
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
 
       assert.isBelow(yield* ircd.unread, parked);
       assert.strictEqual((yield* hosted.status).phase, "closing");
@@ -1139,9 +1139,9 @@ describe("the control lane and a stalled socket", () => {
         yield* ircd.read(ping);
       }
 
-      yield* settled;
+      yield* manyTurns;
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).lanes.control, 3);
 
@@ -1174,7 +1174,7 @@ describe("LOG-4: commits", () => {
       commits.length = 0;
 
       yield* ircd.read(`${lines.join("\r\n")}\r\nPING :after\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       const inbound = commits.filter((recording) => recording.every(({ _tag }) => _tag === "Line"));
 
@@ -1204,13 +1204,13 @@ describe("LOG-4: commits", () => {
 
       yield* burstOver(ircd);
       yield* ircd.read("ERROR :bye\r\n");
-      yield* settled;
+      yield* manyTurns;
       commits.length = 0;
 
       yield* ircd.read(`${Array.from({ length: 2000 }, () => "NOTICE * :x").join("\r\n")}\r\n`);
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       for (const recording of commits) {
         assert.isAtMost(recording.length, 1024);
@@ -1270,12 +1270,12 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
         secrets: new Map([["key.keyed", Redacted.make("sesame")]]),
       });
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* wire(ircd), 2);
 
       yield* ircd.read(noMotd);
-      yield* settled;
+      yield* manyTurns;
       yield* afterSettle();
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "JOIN #keyed,#plain sesame\r\n");
@@ -1294,14 +1294,14 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* host(ircd, { channels: wanted("#one") });
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("9999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* wire(ircd), 2);
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
       yield* afterSettle();
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "JOIN #one\r\n");
@@ -1316,7 +1316,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       yield* ircd.read(welcome);
       yield* ircd.read(joined("#kept"));
       yield* ircd.read(noMotd);
-      yield* settled;
+      yield* manyTurns;
       yield* afterSettle();
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "JOIN #new\r\n");
@@ -1335,14 +1335,14 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
           yield* host(ircd, { channels: wanted("#kept", "#also") });
           yield* ircd.read(welcome);
           yield* ircd.read(":ircd 376 iirc :End of MOTD\r\n");
-          yield* settled;
+          yield* manyTurns;
           yield* TestClock.adjust(`${replayMillis} millis`);
           yield* ircd.read(joined("#kept"));
-          yield* settled;
+          yield* manyTurns;
           yield* ircd.read(joined("#also"));
-          yield* settled;
+          yield* manyTurns;
           yield* TestClock.adjust("1 second");
-          yield* settled;
+          yield* manyTurns;
 
           assert.notInclude((yield* wire(ircd)).join(""), "JOIN");
         }).pipe(memory)
@@ -1356,14 +1356,14 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* host(ircd, { channels: wanted("#kept"), tuning });
       yield* ircd.read(`${welcome}${noMotd}`);
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("299 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.notInclude((yield* wire(ircd)).join(""), "JOIN");
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "JOIN #kept\r\n");
     }).pipe(memory)
@@ -1383,7 +1383,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       );
 
       yield* ircd.read(":ircd 471 iirc #full :Cannot join channel (+l)\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 1);
       assert.deepStrictEqual(
@@ -1397,29 +1397,29 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* TestClock.adjust("59999 millis");
       yield* ircd.read("NOTICE * :keeps it alive\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 1);
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 2);
 
       yield* ircd.read(":ircd 471 iirc #full :Cannot join channel (+l)\r\n");
       yield* TestClock.adjust("89 seconds");
       yield* ircd.read("NOTICE * :keeps it alive\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 2);
 
       yield* TestClock.adjust("31 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 3);
 
       yield* ircd.read(joined("#full"));
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf((yield* hosted.status).joinFailures, 0);
     }).pipe(memory)
@@ -1431,22 +1431,22 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       const hosted = yield* burstOver(ircd, { channels: wanted("#locked") });
 
       yield* ircd.read(":ircd 475 iirc #locked :Cannot join channel (+k)\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       for (let tick = 0; tick < 10; tick += 1) {
         yield* TestClock.adjust("80 seconds");
         yield* ircd.read("NOTICE * :keeps it alive\r\n");
-        yield* settled;
+        yield* manyTurns;
       }
 
       assert.strictEqual((yield* wire(ircd)).filter((text) => text.startsWith("JOIN")).length, 1);
       assert.strictEqual((yield* hosted.status).joinFailures[0]?.numeric, "475");
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
       yield* waitOutBackoff(hosted, ircd);
       yield* ircd.read(`${welcome}${noMotd}`);
-      yield* settled;
+      yield* manyTurns;
       yield* afterSettle();
 
       assert.strictEqual((yield* textsOn(ircd, 1)).at(-1), "JOIN #locked\r\n");
@@ -1459,9 +1459,9 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       const hosted = yield* burstOver(ircd, { channels: wanted("#gone") });
 
       yield* ircd.read(":ircd 403 iirc #gone :No such channel\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("80 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).joinFailures[0]?.numeric, "403");
       assert.strictEqual((yield* wire(ircd)).filter((text) => text.startsWith("JOIN")).length, 1);
@@ -1476,7 +1476,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
         channels: [{ name: "#fine" }, { name: "#bad\r\nQUIT" }, { name: "#a b" }],
       });
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "JOIN #fine\r\n");
       assert.deepStrictEqual(
@@ -1503,17 +1503,17 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       });
 
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
       yield* hosted.send(line, "spends the token");
       yield* ircd.read(noMotd);
-      yield* settled;
+      yield* manyTurns;
 
       // Self moved while the `JOIN` waits for a token, which has the reconciler look again.
       yield* ircd.read(":iirc!~u@host JOIN #other\r\n");
       yield* ircd.read(":iirc!~u@host PART #other\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(
         (yield* wire(ircd)).filter((text) => text.startsWith("JOIN")),
@@ -1540,13 +1540,13 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       yield* ircd.read(joined("#one"));
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const before = reads;
 
       // Self is out of the Channel, so a plan is due, and the lanes will take nothing.
       yield* ircd.read(":iirc!~u@host PART #one\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.isAtMost(reads - before, 3);
     }).pipe(Effect.provide(layer));
@@ -1573,7 +1573,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       for (let tick = 0; tick < 5; tick += 1) {
         yield* TestClock.adjust("80 seconds");
         yield* ircd.read("NOTICE * :keeps it alive\r\n");
-        yield* settled;
+        yield* manyTurns;
       }
 
       assert.strictEqual(reads, before);
@@ -1599,15 +1599,18 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       const hosted = yield* host(ircd, { channels: wanted("#one") });
 
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       dies = true;
 
       yield* ircd.read(noMotd);
-      yield* settled;
+      yield* manyTurns;
       yield* afterSettle();
 
-      assert.strictEqual((yield* hosted.status).closeReason, "the host failed");
+      assert.strictEqual(
+        (yield* hosted.status).closeReason,
+        "the host failed: Error: the store broke"
+      );
 
       yield* waitOutBackoff(hosted, ircd);
     }).pipe(Effect.provide(layer));
@@ -1628,7 +1631,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       for (let tick = 0; tick < 30; tick += 1) {
         yield* TestClock.adjust("2 seconds");
-        yield* settled;
+        yield* manyTurns;
       }
 
       const sent = (yield* wire(ircd)).join("");
@@ -1655,7 +1658,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* burstOver(ircd, { channels: wanted("#one") });
       yield* ircd.read(joined("#one"));
-      yield* settled;
+      yield* manyTurns;
 
       const before = reads;
 
@@ -1664,7 +1667,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
         yield* ircd.read(`:a!b@c JOIN #one\r\n`);
       }
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(reads - before, 200);
     }).pipe(Effect.provide(layer));
@@ -1683,7 +1686,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* ircd.read(joined("#one"));
       yield* ircd.read(":op!u@h KICK #one iirc :out\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(
         (yield* hosted.status).kicked.map(({ channel }) => channel),
@@ -1691,19 +1694,45 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       );
 
       yield* TestClock.adjust("80 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins(0), 1);
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
       yield* waitOutBackoff(hosted, ircd);
       yield* ircd.read(`${welcome}${noMotd}`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins(1), 0);
       assert.lengthOf((yield* hosted.status).kicked, 1);
     }).pipe(memory)
+  );
+
+  it.effect(
+    "KNOW-3: a `CASEMAPPING` that splits a Channel from the one wanted wakes autojoin",
+    () =>
+      Effect.gen(function* () {
+        const ircd = yield* fakeIrcd();
+
+        const joins = Effect.map(textsOn(ircd, 0), (written) =>
+          written.filter((text) => text === "JOIN #x{1}\r\n")
+        );
+
+        yield* burstOver(ircd, { channels: wanted("#x{1}") });
+        yield* ircd.read(joined("#x[1]"));
+        yield* manyTurns;
+        yield* TestClock.adjust("80 seconds");
+        yield* manyTurns;
+
+        // Under `rfc1459`, the default, the Ircd's spelling is the Channel wanted.
+        assert.lengthOf(yield* joins, 1);
+
+        yield* ircd.read(":ircd 005 iirc CASEMAPPING=ascii :are supported\r\n");
+        yield* manyTurns;
+
+        assert.lengthOf(yield* joins, 2);
+      }).pipe(memory)
   );
 
   it.effect("LIVE-8: rejoin-on-kick waits 10 seconds, whenever the kick lands", () =>
@@ -1712,11 +1741,11 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* burstOver(ircd, { channels: [{ name: "#one", rejoinOnKick: true }] });
       yield* ircd.read(joined("#one"));
-      yield* settled;
+      yield* manyTurns;
 
       // The plan had nothing left, so this is what brings the reconciler back.
       yield* ircd.read(":op!u@h KICK #one iirc :out\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const joins = Effect.map(
         wire(ircd),
@@ -1724,12 +1753,12 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       );
 
       yield* TestClock.adjust("9999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 1);
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* joins, 2);
     }).pipe(memory)
@@ -1741,7 +1770,7 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* burstOver(ircd);
       yield* ircd.read(":op!u@h INVITE iirc #somewhere\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.include(texts(yield* entries, "inbound"), ":op!u@h INVITE iirc #somewhere");
       assert.notInclude((yield* wire(ircd)).join(""), "JOIN");
@@ -1754,12 +1783,12 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
 
       yield* burstOver(ircd, { channels: wanted("#one") });
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const before = (yield* entries).length;
 
       yield* TestClock.adjust("2 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* entries, before);
     }).pipe(memory)
@@ -1794,7 +1823,7 @@ describe("LIVE-9, LIVE-11: stopping", () => {
       assert.isUndefined(status.nextAttemptAt);
 
       yield* TestClock.adjust("1 hour");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
     }).pipe(memory)
@@ -1812,7 +1841,7 @@ describe("LIVE-9, LIVE-11: stopping", () => {
 
       const waiting = yield* Effect.forkChild(Effect.exit(hosted.send(line, "key:later")));
 
-      yield* settled;
+      yield* manyTurns;
       yield* stop;
       yield* Fiber.join(fiber);
 
@@ -1837,7 +1866,7 @@ describe("LIVE-9, LIVE-11: stopping", () => {
 
       yield* ircd.setWrites("hang");
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
 
       const exit = yield* Effect.exit(hosted.send(line, "too late"));
 
@@ -1853,13 +1882,13 @@ describe("LIVE-9, LIVE-11: stopping", () => {
       const stopAt = yield* now;
 
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "QUIT leaving\r\n");
 
       yield* ircd.read("ERROR :Closing Link\r\n");
       yield* TestClock.adjust("1999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.isUndefined(fiber.pollUnsafe());
       assert.include(texts(yield* entries, "inbound"), "ERROR :Closing Link");
@@ -1882,12 +1911,12 @@ describe("LIVE-9, LIVE-11: stopping", () => {
       const stopAt = yield* now;
 
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
 
       assert.isUndefined(fiber.pollUnsafe());
 
       yield* TestClock.adjust("1999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.isUndefined(fiber.pollUnsafe());
 
@@ -1939,13 +1968,13 @@ describe("LIVE-9, LIVE-11: stopping", () => {
       stuck = true;
 
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
 
       assert.isUndefined(fiber.pollUnsafe());
 
       yield* TestClock.adjust("3 seconds");
       yield* Fiber.join(fiber);
-      yield* settled;
+      yield* manyTurns;
 
       // The loop has been let go of, so the socket goes with it.
       assert.strictEqual((yield* hosted.status).phase, "closed");
@@ -2016,9 +2045,9 @@ describe("LIVE-9, LIVE-11: stopping", () => {
       const { fiber, hosted, stop } = yield* stopInBackground(ircd);
 
       yield* ircd.read("ERROR :bye\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* stop;
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("2 seconds");
       yield* Fiber.join(fiber);
 
@@ -2049,7 +2078,7 @@ describe("status", () => {
       yield* ircd.read(":ircd 473 iirc #out :Invite only\r\n");
       yield* ircd.read(":iirc!~u@host JOIN #kicked\r\n");
       yield* ircd.read(":op!u@h KICK #kicked iirc :out\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const status = yield* hosted.status;
 
@@ -2093,9 +2122,9 @@ describe("status", () => {
         const { fiber, hosted, stop } = yield* stopInBackground(ircd);
 
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* stop;
-        yield* settled;
+        yield* manyTurns;
 
         assert.strictEqual((yield* hosted.status).phase, "closing");
 
@@ -2121,14 +2150,14 @@ describe("status", () => {
         const hosted = yield* burstOver(ircd);
 
         yield* Effect.forkChild(Effect.exit(hosted.send(line, "held")));
-        yield* settled;
+        yield* manyTurns;
         yield* ircd.hangUp;
-        yield* settled;
+        yield* manyTurns;
 
         assert.strictEqual((yield* hosted.status).phase, "closing");
 
         yield* Deferred.succeed(release, undefined);
-        yield* settled;
+        yield* manyTurns;
 
         assert.strictEqual((yield* hosted.status).phase, "closed");
       }).pipe(Effect.provide(layer));
@@ -2142,7 +2171,7 @@ describe("status", () => {
 
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closing");
     }).pipe(memory)
@@ -2175,12 +2204,12 @@ describe("LOG-9: the Log failing", () => {
       assert.strictEqual((yield* hosted.status).logFault?.failures, 1);
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).logFault?.failures, 2);
 
       yield* TestClock.adjust("10 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).logFault?.failures, 3);
       assert.lengthOf(yield* ircd.dials, 0);
@@ -2189,7 +2218,7 @@ describe("LOG-9: the Log failing", () => {
       down = false;
 
       yield* TestClock.adjust("20 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
       assert.isUndefined((yield* hosted.status).logFault);
@@ -2212,7 +2241,7 @@ describe("LOG-9: the Log failing", () => {
       down = false;
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
       assert.isUndefined((yield* hosted.status).logFault);
@@ -2231,7 +2260,7 @@ describe("LOG-9: the Log failing", () => {
       down = true;
 
       yield* ircd.read("NOTICE * :unrecordable\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.isTrue(yield* ircd.released);
       assert.strictEqual((yield* hosted.status).phase, "closed");
@@ -2240,7 +2269,7 @@ describe("LOG-9: the Log failing", () => {
       const closedConnections = (yield* ircd.dials).length;
 
       yield* TestClock.adjust("2 minutes");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, closedConnections);
 
@@ -2253,7 +2282,7 @@ describe("LOG-9: the Log failing", () => {
       down = false;
 
       yield* TestClock.adjust("45 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, closedConnections + 1);
       assert.isUndefined((yield* hosted.status).logFault);
@@ -2274,7 +2303,7 @@ describe("LOG-9: the Log failing", () => {
       assert.isTrue(Exit.isFailure(exit));
       assert.notInclude((yield* wire(ircd)).join(""), "PRIVMSG");
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(
         (yield* hosted.status).closeReason,
@@ -2298,14 +2327,14 @@ describe("LOG-9: the Log failing", () => {
       const ircd = yield* fakeIrcd();
       const hosted = yield* host(ircd);
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(records, 1);
       assert.isDefined((yield* hosted.status).logFault);
       assert.strictEqual((yield* hosted.status).phase, "closed");
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(records, 2);
       assert.lengthOf(yield* ircd.dials, 0);
@@ -2320,9 +2349,9 @@ describe("HOST-1: a host cannot stay dead", () => {
       const hosted = yield* host(ircd, { tuning: throwing });
 
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const [closed] = connectionsOf(yield* entries, "closed");
 
@@ -2353,10 +2382,10 @@ describe("HOST-1: a host cannot stay dead", () => {
     Effect.gen(function* () {
       const hosted = yield* host({ transport: { connect: () => Effect.die("it broke") } });
 
-      assert.strictEqual((yield* hosted.status).closeReason, "the dial died");
+      assert.strictEqual((yield* hosted.status).closeReason, "the dial died: it broke");
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "attempt"), 2);
     }).pipe(memory)
@@ -2380,7 +2409,7 @@ describe("HOST-1: a host cannot stay dead", () => {
       ];
 
       yield* Effect.forEach(hostile, (text) => ircd.read(text), { discard: true });
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.strictEqual((yield* wire(ircd)).at(-1), "PONG\r\n");
@@ -2393,7 +2422,7 @@ describe("HOST-1: a host cannot stay dead", () => {
 
       yield* burstOver(ircd);
       yield* ircd.read("PING\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const [reply] = linesOf(yield* entries).slice(-1);
 
@@ -2411,7 +2440,7 @@ describe("HOST-1: a host cannot stay dead", () => {
         yield* ircd.read(`PING :${"p".repeat(600)}\r\n`);
       }
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(droppedIn(yield* entries), 50);
       assert.strictEqual((yield* hosted.status).phase, "session");
@@ -2426,10 +2455,10 @@ describe("the fake Ircd", () => {
       const hosted = yield* burstOver(ircd);
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
       yield* waitOutBackoff(hosted, ircd);
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.lengthOf(yield* ircd.writtenOn(0), 2);
@@ -2456,19 +2485,19 @@ describe("LOG-4, LIVE-11: a stop under a flood", () => {
 
         yield* burstOver(ircd);
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         for (let index = 0; index < reads; index += 1) {
           yield* ircd.read(`NOTICE * :${index} ${"x".repeat(4000)}\r\n`);
         }
 
-        yield* settled;
+        yield* manyTurns;
 
         // 16 KB, and the read that crossed it: five of these, and the rest in the kernel.
         assert.strictEqual(reads - (yield* ircd.unread), 5);
 
         yield* Deferred.succeed(release, undefined);
-        yield* settled;
+        yield* manyTurns;
 
         assert.strictEqual(yield* ircd.unread, 0);
       }).pipe(Effect.provide(layer));
@@ -2488,7 +2517,7 @@ describe("LOG-4, LIVE-11: a stop under a flood", () => {
         }
 
         yield* stop;
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("2 seconds");
         yield* Fiber.join(fiber);
 
@@ -2528,10 +2557,10 @@ describe("LOG-4, LIVE-11: a stop under a flood", () => {
 
         // One read, of five batches, and the stop comes while the first is committing.
         yield* ircd.read([0, 1, 2, 3, 4].map((part) => pingRead(part * 1024)).join(""));
-        yield* settled;
+        yield* manyTurns;
         yield* stop;
         yield* Deferred.succeed(release, undefined);
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("2 seconds");
         yield* Fiber.join(fiber);
 
@@ -2564,11 +2593,11 @@ describe("LOG-4, LIVE-11: a stop under a flood", () => {
 
         yield* ircd.setWrites("hang");
         yield* ircd.read(pingRead(0));
-        yield* settled;
+        yield* manyTurns;
         commits.length = 0;
 
         yield* stop;
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("2 seconds");
         yield* Fiber.join(fiber);
 
@@ -2609,7 +2638,7 @@ describe("LOG-4, LIVE-11: a stop under a flood", () => {
       // Each commit costs 200 ms here, so the stop's own limit passes long before the
       // reads run out, and only being hurried ends it.
       for (let tick = 0; tick < 40 && fiber.pollUnsafe() === undefined; tick += 1) {
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("100 millis");
       }
 
@@ -2635,7 +2664,7 @@ describe("LOG-2: closing and refusals", () => {
 
       yield* ircd.read("ERROR :You are banned from this server (test)\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const status = yield* hosted.status;
       const [closed] = connectionsOf(yield* entries, "closed");
@@ -2645,7 +2674,7 @@ describe("LOG-2: closing and refusals", () => {
       assert.strictEqual(status.refusal, "You are banned from this server (test)");
 
       yield* TestClock.adjust("29 minutes");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
     }).pipe(memory)
@@ -2668,17 +2697,17 @@ describe("LOG-2: closing and refusals", () => {
 
         yield* ircd.setWrites("fail");
         yield* ircd.read("PING :1\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* ircd.read("NOTICE * :held\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* ircd.read("ERROR :You are banned\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         // The drain's limit passes while the loop is held, so the `ERROR` is one of the
         // Lines the close itself records.
         yield* TestClock.adjust("5 seconds");
         yield* Deferred.succeed(release, undefined);
-        yield* settled;
+        yield* manyTurns;
 
         const [closed] = connectionsOf(yield* entries, "closed");
 
@@ -2697,7 +2726,7 @@ describe("LOG-2: closing and refusals", () => {
         yield* burstOver(ircd);
         yield* ircd.setWrites("fail");
         yield* ircd.read("PING :1\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         assert.deepStrictEqual(closings(yield* entries), [
           { chosen: false, reason: "write failed: broken pipe" },
@@ -2711,7 +2740,7 @@ describe("LOG-2: closing and refusals", () => {
 
       yield* burstOver(silent);
       yield* TestClock.adjust("90 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(closings(yield* entries), [
         { chosen: false, reason: "heard nothing for 90 seconds" },
@@ -2725,7 +2754,7 @@ describe("LOG-2: closing and refusals", () => {
 
       yield* burstOver(ircd);
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(closings(yield* entries), []);
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
@@ -2739,9 +2768,9 @@ describe("LOG-2: closing and refusals", () => {
 
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).consecutiveFailures, 1);
 
@@ -2766,12 +2795,12 @@ describe("LOG-2, LOG-9: a Connection the Log could not close", () => {
 
       const waiting = yield* Effect.forkChild(Effect.exit(hosted.send(line, "key:later")));
 
-      yield* settled;
+      yield* manyTurns;
 
       down = true;
 
       yield* ircd.read("NOTICE * :unrecordable\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const endedAt = yield* Clock.currentTimeMillis;
 
@@ -2785,7 +2814,7 @@ describe("LOG-2, LOG-9: a Connection the Log could not close", () => {
       down = false;
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const [closed] = connectionsOf(log, "closed");
@@ -2821,9 +2850,9 @@ describe("LOG-2, LOG-9: a Connection the Log could not close", () => {
       down = true;
 
       yield* ircd.read("NOTICE * :one\r\nPING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.read("NOTICE * :two\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).logFault?.failures, 1);
     }).pipe(Effect.provide(layer));
@@ -2846,7 +2875,7 @@ describe("LOG-8: a clock set back", () => {
       assert.isAtMost(((yield* hosted.status).nextAttemptAt ?? Infinity) - (yield* now), 100);
 
       yield* TestClock.adjust("100 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 2);
     }).pipe(memory)
@@ -2863,7 +2892,7 @@ describe("LOG-8: a clock set back", () => {
           yield* bareHost(ircd);
           yield* ircd.read(":ircd 465 * :Banned\r\n");
           yield* ircd.hangUp;
-          yield* settled;
+          yield* manyTurns;
         })
       );
       yield* TestClock.setTime(0);

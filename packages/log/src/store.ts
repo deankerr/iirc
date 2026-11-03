@@ -1,5 +1,5 @@
 import type { Entry, NewEntry } from "@iirc/session/entry";
-import { RecordFailed } from "@iirc/session/recorder";
+import { makeWatchers, RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
 import { foldStandings, noStanding, noStandings } from "@iirc/session/standing";
 import type { Gap, Standings } from "@iirc/session/standing";
@@ -179,21 +179,29 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   // would write (LOG-10). Until a redaction they are one and the same.
   const held = yield* Ref.make<Held>({ host: noStandings, projection: noStandings });
 
+  const watchers = makeWatchers();
+
   // One writer at a time, so that the Standings a transaction folds from are the ones
   // the last commit left. The client's own lock is no use here, because it is
   // released before `held` is set, and the next writer would read stale state.
   const writer = yield* Semaphore.make(1);
 
-  // Runs a transaction that yields new Standings, and publishes them only once they
-  // are durable, so that a rollback has nothing to undo. Nothing here can be
-  // interrupted, so `held` never misses a commit, and what `within` saw is
-  // always either committed or reported as a failure.
-  const commit = <A, E>(transaction: (current: Held) => Effect.Effect<readonly [A, Held], E>) =>
+  // Runs a transaction that yields new Standings and the Entries it recorded, and
+  // publishes both only once they are durable, so that a rollback has nothing to undo.
+  // Nothing here can be interrupted, so `held` never misses a commit, and what `within`
+  // saw is always either committed or reported as a failure. Watchers are told under the
+  // writer's permit, so they hear of commits in sequence order.
+  const commit = <A, E>(
+    transaction: (current: Held) => Effect.Effect<readonly [A, Held, readonly Entry[]], E>
+  ) =>
     Effect.gen(function* () {
       const current = yield* Ref.get(held);
-      const [result, next] = yield* sql.withTransaction(transaction(current));
+      const [result, next, recorded] = yield* sql.withTransaction(transaction(current));
 
       yield* Ref.set(held, next);
+      yield* Effect.sync(() => {
+        watchers.publish(recorded);
+      });
 
       return result;
     }).pipe(
@@ -231,6 +239,7 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
             host: host === projection ? folded.standings : foldStandings(host, recorded),
             projection: folded.standings,
           },
+          recorded,
         ] as const;
       })
     ).pipe(Effect.mapError((cause) => new RecordFailed({ cause })));
@@ -249,14 +258,18 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   // Unlike a record, a rebuild can run long, and abandoning one loses nothing.
   const rebuild = commit(() =>
     deriveTablesAgain.pipe(
-      Effect.map((rebuilt) => [undefined, { host: rebuilt, projection: rebuilt }] as const),
+      Effect.map((rebuilt) => [undefined, { host: rebuilt, projection: rebuilt }, []] as const),
       Effect.interruptible
     )
   ).pipe(Effect.mapError(toStorageFailed));
 
   // What stands in the way of redacting the Entry at `sequence`, if anything (LOG-7).
   const refusalToRedact = Effect.fnUntraced(function* (sequence: number) {
-    const [row] = yield* sql<{ readonly kind: string; readonly redacted_by: number | null }>`
+    // `kind` is only ever written from an Entry's tag.
+    const [row] = yield* sql<{
+      readonly kind: Entry["_tag"];
+      readonly redacted_by: number | null;
+    }>`
       SELECT kind, redacted_by FROM entries WHERE sequence = ${sequence}
     `;
 
@@ -266,7 +279,8 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
 
     const { kind, redacted_by: change } = row;
 
-    if (kind === "Change" || kind === "Connection" || kind === "Daemon" || kind === "Deadline") {
+    // Only these carry bytes, so any other kind, a new one included, is refused.
+    if (kind !== "Dropped" && kind !== "Line") {
       return new EntryNotRedactable({ kind, sequence });
     }
 
@@ -304,7 +318,7 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
         const projection = yield* deriveTablesAgain;
         const result = yield* Effect.sync(() => within(recorded));
 
-        return [result, { host: foldStandings(host, [recorded]), projection }] as const;
+        return [result, { host: foldStandings(host, [recorded]), projection }, [recorded]] as const;
       })
     ).pipe(
       Effect.catchTags({
@@ -331,5 +345,6 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     redact,
     standing: (network: string) =>
       Effect.map(Ref.get(held), ({ host }) => host.get(network) ?? noStanding),
+    watch: watchers.watch,
   };
 });

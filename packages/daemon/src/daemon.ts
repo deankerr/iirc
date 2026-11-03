@@ -70,24 +70,20 @@ import {
   Predicate,
   Queue,
   Ref,
-  Result,
-  Schema,
   Scope,
   Semaphore,
   Stream,
   SubscriptionRef,
 } from "effect";
-import type { Redacted } from "effect";
+import type { Duration, Redacted } from "effect";
 import { constVoid } from "effect/Function";
 
-import { DaemonSettings } from "./change.ts";
 import type { Change } from "./change.ts";
 import { keepingFor, keyNameFor } from "./channel-keys.ts";
 import { droppedChannels } from "./configuration.ts";
 import type { Configuration, ConfiguredNetwork } from "./configuration.ts";
 import { Credentials } from "./credentials.ts";
 import type { CredentialsUnreadable, CredentialStore, Keyring } from "./credentials.ts";
-import { issuesOf } from "./issues.ts";
 import { findKey, hashKey, newKey } from "./keys.ts";
 import { readConfiguration, recordChange, recordRedaction } from "./recorded.ts";
 import type { UndecodableChange } from "./recorded.ts";
@@ -289,21 +285,6 @@ const without = <A>(held: ReadonlyMap<NetworkId, A>, id: NetworkId) => {
 
   return remaining;
 };
-
-const decodeSettings = Schema.decodeUnknownResult(Schema.toType(DaemonSettings));
-
-/**
- * Holds settings to the Daemon's own rules, beyond what the published Schema checks, and
- * says where in the request they broke.
- * @param settings - Settings as the API decoded them.
- * @param root - Where they sit in the request.
- * @returns The same settings, or what was wrong with them.
- */
-const checkSettings = (settings: NetworkSettings, root: readonly (string | number)[]) =>
-  Result.match(decodeSettings(settings), {
-    onFailure: ({ issue }) => Effect.fail(new InvalidRequest({ issues: issuesOf(issue, root) })),
-    onSuccess: Effect.succeed,
-  });
 
 const requireNetwork = (current: Configuration, id: NetworkId) => {
   const network = current.networks.get(id);
@@ -653,6 +634,12 @@ export class Daemon extends Context.Service<
         // it wrote and the Change that records it are in the same order as every other.
         // `write` records the Change, which is an append unless the Change edits the Log
         // too, as a redaction does.
+        //
+        // From `decide` to the last host started, nothing can interrupt it. A Change that
+        // was recorded and never published would leave Configuration behind the Log, and
+        // a Credential that was kept and never recorded would leave a value no Change
+        // names. Only waiting for the permit can be cancelled, and every wait inside is
+        // bounded: a Credential's write, and an old host's `QUIT`.
         const commitWith = <E, C extends Change, W>(
           by: By,
           decide: (current: Configuration) => Effect.Effect<C, E>,
@@ -664,33 +651,35 @@ export class Daemon extends Context.Service<
         ) =>
           Effect.gen(function* () {
             const committed = yield* changing.withPermit(
-              Effect.gen(function* () {
-                if (yield* Ref.get(stopping)) {
-                  return yield* new Stopping();
-                }
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  if (yield* Ref.get(stopping)) {
+                    return yield* new Stopping();
+                  }
 
-                const before = yield* SubscriptionRef.get(configuration);
-                const change = yield* decide(before);
+                  const before = yield* SubscriptionRef.get(configuration);
+                  const change = yield* decide(before);
 
-                const { after, sequence } = yield* write(before, by, change);
+                  const { after, sequence } = yield* write(before, by, change);
 
-                yield* SubscriptionRef.set(configuration, after);
+                  yield* SubscriptionRef.set(configuration, after);
 
-                const gone = yield* Effect.forEach(
-                  [...before.networks.keys()].filter((id) => !after.networks.has(id)),
-                  stopHost
-                );
+                  const gone = yield* Effect.forEach(
+                    [...before.networks.keys()].filter((id) => !after.networks.has(id)),
+                    stopHost
+                  );
 
-                yield* Effect.forEach(
-                  [...after.networks.values()].filter(
-                    ({ settings }) => !before.networks.has(settings.id)
-                  ),
-                  (network) => Effect.andThen(untilLeft(network.settings.id), startHost(network)),
-                  { discard: true }
-                );
+                  yield* Effect.forEach(
+                    [...after.networks.values()].filter(
+                      ({ settings }) => !before.networks.has(settings.id)
+                    ),
+                    (network) => Effect.andThen(untilLeft(network.settings.id), startHost(network)),
+                    { discard: true }
+                  );
 
-                return { after, before, gone, sequence };
-              })
+                  return { after, before, gone, sequence };
+                })
+              )
             );
 
             yield* Effect.forEach(committed.gone, Deferred.await, { discard: true });
@@ -708,7 +697,8 @@ export class Daemon extends Context.Service<
 
         // Stores a Credential, then records that it did, by name alone (CRED-1). Kept first,
         // because a value with no Change is harmless, and a Change that claims a value which
-        // was never kept would mislead.
+        // was never kept would mislead. A store that did not answer in time has failed, so
+        // nothing is recorded, and its late answer is undone by the Credentials service.
         const storeCredential = (by: By, name: string, value: Redacted.Redacted) =>
           commit(by, () =>
             Effect.as(credentials.set(name, value), {
@@ -854,12 +844,10 @@ export class Daemon extends Context.Service<
 
         return {
           addNetwork: Effect.fnUntraced(function* (by, settings) {
-            const checked = yield* checkSettings(settings, ["payload"]);
-
             const { sequence } = yield* commit(by, (current) =>
-              current.networks.has(checked.id)
-                ? Effect.fail(new NetworkExists({ network: checked.id }))
-                : Effect.succeed<Change>({ _tag: "NetworkAdded", settings: checked })
+              current.networks.has(settings.id)
+                ? Effect.fail(new NetworkExists({ network: settings.id }))
+                : Effect.succeed<Change>({ _tag: "NetworkAdded", settings })
             );
 
             return { change: sequence };
@@ -883,12 +871,10 @@ export class Daemon extends Context.Service<
               });
             }
 
-            const checked = yield* checkSettings(settings, ["payload"]);
-
             const { after, before, sequence } = yield* commit(by, (current) =>
               Effect.as(requireNetwork(current, id), {
                 _tag: "NetworkChanged",
-                settings: checked,
+                settings,
               } satisfies Change)
             );
 
@@ -1060,12 +1046,8 @@ export class Daemon extends Context.Service<
               } satisfies Change)
             ).pipe(Effect.map(({ sequence }) => ({ change: sequence }))),
           replaceConfiguration: Effect.fnUntraced(function* (by, networks) {
-            const checked = yield* Effect.forEach(networks.entries(), ([index, settings]) =>
-              checkSettings(settings, ["payload", "networks", index])
-            );
-
             const { after, before, sequence } = yield* commit(by, () =>
-              Effect.succeed<Change>({ _tag: "ConfigurationReplaced", networks: checked })
+              Effect.succeed<Change>({ _tag: "ConfigurationReplaced", networks })
             );
 
             yield* partDropped(by, before, after);
@@ -1137,12 +1119,14 @@ export class Daemon extends Context.Service<
  * @param config - Where the Log lives, and the Daemon's version.
  * @param transport - How to reach an Ircd, which a test can replace.
  * @param keyring - The system keyring to try for Credentials, which a test can replace.
+ * @param writeTimeout - How long a Credential's write is waited for, which a test can shorten.
  * @returns The Daemon, holding the data directory for as long as it lives.
  */
 export const DaemonCore = (
   config: DaemonConfig,
   transport: Layer.Layer<Transport> = Transport.layer,
-  keyring: Keyring = Bun.secrets
+  keyring: Keyring = Bun.secrets,
+  writeTimeout?: Duration.Input
 ): Layer.Layer<
   Daemon,
   CredentialsUnreadable | DataDirectoryLocked | LogTooNew | StorageFailed | UndecodableChange
@@ -1153,7 +1137,11 @@ export const DaemonCore = (
     Layer.provide(
       Layer.mergeAll(
         LogReader.layer({ dataDir: config.dataDir }),
-        Credentials.layer({ dataDir: config.dataDir, keyring })
+        Credentials.layer({
+          dataDir: config.dataDir,
+          keyring,
+          ...(writeTimeout !== undefined && { writeTimeout }),
+        })
       ).pipe(Layer.provideMerge(Log.layer({ dataDir: config.dataDir })))
     ),
     Layer.provide(transport)

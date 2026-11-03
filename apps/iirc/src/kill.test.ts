@@ -37,7 +37,9 @@ import { assertBackoff, buildBinary, buildTimeout } from "./testing.ts";
 const binary = `${appRoot}/dist/iirc`;
 const seedVariable = "IIRC_KILL_SEED";
 
-const testTimeout = 90_000;
+// Twenty-odd seconds alone, for the rounds it kills and restarts, and several times that on
+// a busy machine, so this is far past it.
+const testTimeout = 300_000;
 
 const network = "kill";
 const channel = "#kill";
@@ -50,16 +52,30 @@ const realname = "Kill Test";
 // Connection ends, which needs a wait far longer than any read, and by then the doubling
 // has reached the 2 seconds that gives. Tuning is Configuration, so one value serves every
 // run: changing it between runs would itself ask for a retry (CONF-2).
-const killTuning = { reconnectInitialMillis: 40, reconnectMaxMillis: 2000 };
+//
+// The Ircd hangs up the moment it has said `ERROR`, as Ircds do, so a Line the Daemon
+// writes as that happens reaches a kernel and never the Ircd, which LOG-2 counts as
+// written. The clean run has to end where the Daemon has nothing of its own left to send,
+// so the lag check, which would send a `PING` whenever it fell due, waits longer than any
+// run takes, and the silence it guards waits longer still (LIVE-3).
+const killTuning = {
+  lagCheckMillis: 3_600_000,
+  reconnectInitialMillis: 40,
+  reconnectMaxMillis: 2000,
+  silenceMillis: 7_200_000,
+};
 
 const tuned = (overrides: Partial<Tuning>) => ({ ...defaultTuning, ...overrides });
 
 const finalTuning = tuned(killTuning);
 
 // How long a healthy run may take to do each thing, all far past what it needs.
-const startLimit = "10 seconds";
-const closeLimit = "5 seconds";
-const shutdownLimit = 2000;
+const startLimit = "30 seconds";
+const closeLimit = "30 seconds";
+
+// A stop that hung on a Frontend would not end at all, so this only has to be past a stop
+// on a busy machine, which alone takes well under a second.
+const shutdownLimit = 8000;
 
 // Each cycle is one `PING`, with up to this many `PRIVMSG`s around it. It is the only
 // thing that limits the flood: nothing more goes out until the `PONG` comes back, so a
@@ -118,6 +134,8 @@ interface Wire {
 /** What the Ircd is waiting to see from the Daemon it was told to expect. */
 interface Expected {
   readonly holdRegistration: boolean;
+  // The Daemon has rejoined, which is the last thing it sends of its own accord.
+  readonly joined: Deferred.Deferred<void>;
   readonly registered: Deferred.Deferred<void>;
   readonly traffic: Deferred.Deferred<void>;
 }
@@ -261,6 +279,10 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
 
     if (line.startsWith("JOIN ")) {
       send(socket, [encoder.encode(`:${nick}!~u@host ${line}`)]);
+
+      if (expected !== undefined) {
+        Deferred.doneUnsafe(expected.joined, Exit.void);
+      }
     }
 
     if (line.startsWith("PONG ")) {
@@ -329,6 +351,7 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
     expect: (options: { readonly holdRegistration: boolean }) => {
       const next: Expected = {
         ...options,
+        joined: Deferred.makeUnsafe(),
         registered: Deferred.makeUnsafe(),
         traffic: Deferred.makeUnsafe(),
       };
@@ -499,11 +522,16 @@ const refusedSecondProcess = (ircd: Ircd, dataDir: string) =>
     assertConnections(ircd.wires, connections, "a refused process must never reach the Ircd");
   }).pipe(Effect.scoped);
 
+// Everything from the cursor on, a page at a time, after `already` if a read was begun.
 const pagedFrom = <A extends { readonly sequence: number }, E>(
-  read: (page: { readonly after: number; readonly limit: number }) => Effect.Effect<readonly A[], E>
+  read: (page: {
+    readonly after: number;
+    readonly limit: number;
+  }) => Effect.Effect<readonly A[], E>,
+  already: readonly A[] = []
 ) =>
   Effect.gen(function* () {
-    const all: A[] = [];
+    const all: A[] = [...already];
     let page: readonly A[] = [];
 
     do {
@@ -533,19 +561,36 @@ const finalRun = (ircd: Ircd, runs: number, dataDir: string, key: string) =>
       payload: { network, target: channel, text: "sent through the API" },
     });
 
+    // Nearly all of the Log is read while the Session is up. The Daemon dials again soon
+    // after it ends, 1 to 2 seconds after, and a read of this size can take longer than
+    // that on a busy machine, so only what the end of the Session added is read after it,
+    // which is a few pages.
+    const readEntries = (query: { readonly after: number; readonly limit: number }) =>
+      client.daemon.entries({ query });
+
+    const readMessages = (query: { readonly after: number; readonly limit: number }) =>
+      client.daemon.messages({ query });
+
+    const entriesBefore = yield* pagedFrom(readEntries);
+    const messagesBefore = yield* pagedFrom(readMessages);
+
+    // The rejoin waits a second after the burst, so it can still be to come, and a `JOIN`
+    // written as the Ircd hangs up would be recorded and never received.
+    yield* awaitDaemon(running, "rejoining", progress.joined);
+
     ircd.finish();
 
     yield* lastWireClosed(ircd);
 
     const status = yield* networkStatus(client, network).pipe(
-      Effect.repeat({ schedule: Schedule.spaced("10 millis"), times: 200, until: isClosed })
+      Effect.repeat({ schedule: Schedule.spaced("10 millis"), until: isClosed })
     );
 
     const { head } = yield* client.daemon.status();
 
-    const entries = yield* pagedFrom((query) => client.daemon.entries({ query }));
+    const entries = yield* pagedFrom(readEntries, entriesBefore);
     const gaps = yield* pagedFrom((query) => client.daemon.gaps({ query }));
-    const messages = yield* pagedFrom((query) => client.daemon.messages({ query }));
+    const messages = yield* pagedFrom(readMessages, messagesBefore);
 
     // So that the restarts below, which only read, never dial the Ircd and add to them.
     yield* client.networks.disconnect({ params: { id: network } });

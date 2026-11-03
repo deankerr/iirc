@@ -11,6 +11,7 @@ import type { LogEntry, NetworkSettings } from "@iirc/api";
 import { eventually, scriptedIrcd } from "@iirc/session/testing";
 import type { ScriptedIrcd } from "@iirc/session/testing";
 import { Effect, Fiber } from "effect";
+import type { Schema } from "effect";
 
 import {
   clientWith,
@@ -42,7 +43,8 @@ const brisk = {
   rejoinSettleMillis: 0,
 };
 
-const limit = "5 seconds";
+// Only a signal that never comes reaches it, so it is far above anything a busy machine takes.
+const limit = "30 seconds";
 
 // An Ircd that welcomes `nick`, ends the burst at once, and answers each `JOIN` and `PART`
 // as Self, one Channel to a Line, the way an Ircd does, unless `respond` says otherwise.
@@ -247,18 +249,23 @@ describe("Networks through the API", () => {
         const refused = [
           [
             { ...base, tuning: { silenceMilis: 5000 } },
-            ["payload", "tuning"],
-            "not a Tuning key: silenceMilis",
+            ["payload", "tuning", "silenceMilis"],
+            "excess",
           ],
           [
             { ...base, tuning: { silenceMillis: 1000 } },
-            ["payload", "tuning"],
-            "silenceMillis must be above lagCheckMillis",
+            ["payload", "tuning", "silenceMillis"],
+            "must be above lagCheckMillis, which is 60000",
+          ],
+          [
+            { ...base, tuning: { reconnectMaxMillis: 1000 } },
+            ["payload", "tuning", "reconnectMaxMillis"],
+            "must not be below reconnectInitialMillis, which is 5000",
           ],
           [
             { ...base, tuning: { quitWaitMillis: 60_000 } },
             ["payload", "tuning", "quitWaitMillis"],
-            "",
+            "Expected a value between 1 and 10000",
           ],
           [{ ...base, tuning: "soon" }, ["payload", "tuning"], ""],
           [{ ...base, channels: [{ name: "bad name" }] }, ["payload", "channels", 0, "name"], ""],
@@ -333,6 +340,54 @@ describe("Networks through the API", () => {
         }
 
         assert.deepStrictEqual(yield* client.networks.list(), []);
+      })
+    )
+  );
+
+  it.live("API-3, CONF-6: holds a change and a replacement to the same rules, saying where", () =>
+    withDaemon(({ client, raw }) =>
+      Effect.gen(function* () {
+        const base = settingsFor("libera", { port: 1 }, { enabled: false });
+
+        yield* client.networks.add({ payload: base });
+
+        const before = yield* client.configuration.get();
+
+        const changedIssues = (settings: { readonly [key: string]: Schema.Json }) =>
+          Effect.map(
+            Effect.flatMap(
+              raw.put("/api/networks/libera", { ...base, ...settings }),
+              invalidRequest
+            ),
+            ({ issues }) => issues
+          );
+
+        const replaced = yield* invalidRequest(
+          yield* raw.put("/api/configuration", {
+            networks: [base, { ...base, id: "oftc", tuning: { floodBurst: 0 } }, base],
+          })
+        );
+
+        assert.deepStrictEqual(
+          yield* changedIssues({ channels: [{ name: "#a" }, { name: "#A" }] }),
+          [{ message: "is the same Channel as another", path: ["payload", "channels", 1, "name"] }]
+        );
+        assert.deepStrictEqual(yield* changedIssues({ tuning: { lagCheckMillis: 90_000 } }), [
+          {
+            message: "must be below silenceMillis, which is 90000",
+            path: ["payload", "tuning", "lagCheckMillis"],
+          },
+        ]);
+        assert.deepStrictEqual(
+          replaced.issues.map(({ path }) => path),
+          [["payload", "networks", 1, "tuning", "floodBurst"]]
+        );
+        assert.deepStrictEqual(
+          (yield* invalidRequest(yield* raw.put("/api/configuration", { networks: [base, base] })))
+            .issues,
+          [{ message: "is another Network's ID", path: ["payload", "networks", 1, "id"] }]
+        );
+        assert.deepStrictEqual(yield* client.configuration.get(), before);
       })
     )
   );
@@ -437,29 +492,28 @@ describe("Networks through the API", () => {
       Effect.gen(function* () {
         const ircd = yield* welcomingIrcd();
         const params = { params: { id: "libera" } };
-        // An Ircd that never hangs up keeps the host for its whole `QUIT` wait.
-        const lingering = { ...brisk, drainMillis: 1500, quitWaitMillis: 1500 };
+        // An Ircd that never hangs up keeps the host in its `QUIT` wait for as long as the
+        // test likes, and the wait is as long as the Tuning allows, ten seconds.
+        const lingering = { ...brisk, drainMillis: 10_000, quitWaitMillis: 10_000 };
 
         yield* client.networks.add({ payload: settingsFor("libera", ircd, { tuning: lingering }) });
         yield* untilPhase(client, "libera", "session");
 
-        const removeStarted = Date.now();
         const removing = yield* Effect.forkChild(client.networks.remove(params));
 
-        yield* Effect.sleep(100);
-
-        const keyStarted = Date.now();
+        // The `QUIT` is on the wire, so the removal is in its wait.
+        yield* untilReceived(ircd, `QUIT :${quitReason}`);
 
         yield* client.keys.create({ payload: { name: "meanwhile", scope: "read" } });
 
-        const keyMillis = Date.now() - keyStarted;
+        assert.isUndefined(
+          removing.pollUnsafe(),
+          "the removal answered before its host had gone, or another Change waited for it"
+        );
 
+        yield* ircd.finish;
         yield* Fiber.join(removing);
 
-        const removeMillis = Date.now() - removeStarted;
-
-        assert.isBelow(keyMillis, 500, "another Change waited for the `QUIT`");
-        assert.isAtLeast(removeMillis, 1000, "the removal answered before its host had gone");
         assert.include(yield* ircd.received, `QUIT :${quitReason}`);
       })
     )
@@ -470,7 +524,7 @@ describe("Networks through the API", () => {
       Effect.gen(function* () {
         const ircd = yield* welcomingIrcd();
         const params = { params: { id: "libera" } };
-        const lingering = { ...brisk, drainMillis: 1000, quitWaitMillis: 1000 };
+        const lingering = { ...brisk, drainMillis: 500, quitWaitMillis: 500 };
         const settings = settingsFor("libera", ircd, { tuning: lingering });
 
         yield* client.networks.add({ payload: settings });
@@ -478,11 +532,15 @@ describe("Networks through the API", () => {
 
         const removing = yield* Effect.forkChild(client.networks.remove(params));
 
-        yield* Effect.sleep(100);
+        // The `QUIT` is on the wire, so the old host is leaving.
+        yield* untilReceived(ircd, `QUIT :${quitReason}`);
         yield* client.networks.add({ payload: settings });
 
         assert.isDefined(yield* Fiber.join(removing));
-        assert.strictEqual(yield* ircd.closed, 1, "the old Connection had not gone");
+
+        // The fake Ircd counts a close when its own socket hears of it, which can come a
+        // moment after the Daemon has let go of it.
+        yield* eventually(ircd.closed, (closed) => closed === 1, limit);
 
         yield* untilPhase(client, "libera", "session");
 

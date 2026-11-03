@@ -132,7 +132,55 @@ const namesInOrder = (held: readonly string[], bytes: Uint8Array, found: readonl
     .map(({ name }) => name);
 };
 
-const scrubbed = (needles: readonly Needle[], entry: NewEntry): NewEntry => {
+const decoder = new TextDecoder();
+
+// A reason is the Daemon's own words, but it can quote a defect or an Ircd, and whatever
+// they said is scrubbed too. It names nothing: only a Line's bytes have a `redacted`.
+const scrubbedText = (needles: readonly Needle[], text: string) => {
+  const bytes = encoder.encode(text);
+  const matches = findMatches(bytes, needles);
+
+  return matches.length === 0 ? text : decoder.decode(replaced(bytes, matches));
+};
+
+// Long enough for an Ircd's whole `ERROR` and any defect worth reading, and short enough
+// for a `closing`, `closed` or Dropped Entry.
+const longestReason = 1024;
+
+// A reason is bounded only once it has been scrubbed, so a cut cannot leave part of a
+// value that scrubbing would no longer recognise (LOG-6). It is cut by UTF-16 unit, and a
+// high surrogate left alone at the cut goes too, so no pair is split.
+const boundedText = (text: string) => {
+  if (text.length <= longestReason) {
+    return text;
+  }
+
+  const cut = text.slice(0, longestReason - 1);
+  const last = cut.codePointAt(cut.length - 1) ?? 0;
+
+  return `${last >= 0xd8_00 && last <= 0xdb_ff ? cut.slice(0, -1) : cut}…`;
+};
+
+const withReason = (entry: NewEntry, fit: (reason: string) => string): NewEntry => {
+  if (entry._tag === "Connection" && entry.phase === "closing") {
+    return { ...entry, reason: fit(entry.reason) };
+  }
+
+  if (entry._tag === "Connection" && entry.phase === "closed" && entry.reason !== undefined) {
+    return { ...entry, reason: fit(entry.reason) };
+  }
+
+  return entry._tag === "Dropped" ? { ...entry, reason: fit(entry.reason) } : entry;
+};
+
+const scrubbedReason = (needles: readonly Needle[], entry: NewEntry): NewEntry =>
+  withReason(entry, (reason) => boundedText(scrubbedText(needles, reason)));
+
+const boundedReason = (entry: NewEntry): NewEntry => withReason(entry, boundedText);
+
+const scrubbed = (needles: readonly Needle[], given: NewEntry): NewEntry => {
+  const entry = scrubbedReason(needles, given);
+
   if (entry._tag !== "Line" && entry._tag !== "Dropped") {
     return entry;
   }
@@ -151,20 +199,22 @@ const scrubbed = (needles: readonly Needle[], entry: NewEntry): NewEntry => {
 /**
  * Replaces every value of `secrets` found as a whole word in a Line or Dropped Entry,
  * in either direction and whatever the command, with {@link redactedText}, and adds the
- * Credentials' names to the Entry's `redacted` (LOG-6). The names go in the order the
+ * Credentials' names to the Entry's `redacted` (LOG-6). The reason a close or a Dropped
+ * Entry gives is scrubbed the same way, with no names, since it can quote a defect, and
+ * only then bounded, so no cut can hide part of a value from scrubbing. The names go in the order the
  * placeholders stand in the Line, one for each and a repeated Credential repeated, so that
  * the nth `<redacted>` is the nth name. A word is bounded by the Line's start or end, a
- * space, `:`, or `,`. Every other Entry passes through as it is.
+ * space, `:`, or `,`. Every other field, and every other Entry, passes through as it is.
  * @param secrets - Every Credential the Daemon holds.
  * @param entries - What is about to be recorded.
- * @returns The same Entries, scrubbed, and the very same array when there are no secrets.
+ * @returns The same Entries, scrubbed, with every reason bounded.
  */
 export const scrub = (
   secrets: Secrets,
   entries: Arr.NonEmptyReadonlyArray<NewEntry>
 ): Arr.NonEmptyReadonlyArray<NewEntry> => {
   if (secrets.size === 0) {
-    return entries;
+    return pipe(entries, Arr.map(boundedReason));
   }
 
   const needles = needlesOf(secrets);

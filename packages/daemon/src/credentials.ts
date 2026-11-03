@@ -7,8 +7,10 @@ import {
   Clock,
   Context,
   Data,
+  Deferred,
   Duration,
   Effect,
+  Exit,
   FileSystem,
   Layer,
   Option,
@@ -78,6 +80,11 @@ const ownerOnly = 0o100;
 // How long the keyring may take to answer the probe at startup. A keyring that would
 // prompt for an unlock is no use to a Daemon nobody is watching.
 const probeTimeout = Duration.seconds(2);
+
+// How long a caller waits for one write to a store. A keyring that answered the probe can
+// still stop answering, as one does when it locks, and a write that never ends must not
+// hold up every Change and the Daemon's stop behind it.
+const defaultWriteTimeout = Duration.seconds(10);
 
 const keyringService = "iirc";
 
@@ -309,6 +316,19 @@ export interface CredentialsOptions {
   readonly dataDir: string;
   /** `Bun.secrets` unless a test stands in for it. */
   readonly keyring: Keyring;
+  /** How long a caller waits for a write, 10 seconds unless a test shortens it. */
+  readonly writeTimeout?: Duration.Input;
+}
+
+/**
+ * One write that a caller waits for. The caller may stop waiting, by a timeout or by being
+ * cancelled, and the write goes on. Whichever of the caller and the write gets to `state`
+ * first decides what the write came to: kept, or undone.
+ */
+interface Write {
+  /** Whether the write has been kept, or its caller left first, so it is to be undone. */
+  state: "abandoned" | "settled" | "waiting";
+  readonly done: Deferred.Deferred<boolean, CredentialsUnavailable>;
 }
 
 const valuesOf = (holding: Holding): ReadonlyMap<string, Redacted.Redacted> =>
@@ -330,6 +350,18 @@ const heldOf = (holding: Holding): Held => ({ holding, values: valuesOf(holding)
  * The secrets the Daemon uses on the Owner's behalf, kept outside the Log (CRED-1). Values
  * stay `Redacted` from the moment they arrive (CRED-3), and only `all` hands them out,
  * for the Daemon to use and never to show.
+ *
+ * A write to a store is never cancelled once it has begun, and never overlapped by the
+ * next, because a store that is slow to answer may still apply it, and a late write of the
+ * whole document would replace what a later one kept. So a write is owned by the service,
+ * not by its caller. A caller waits for it at most the write timeout, and is then told
+ * `CredentialsUnavailable`, and from then on that write has failed, whatever the store
+ * does. If it does end well, the service writes back the document that it holds, which is
+ * what it held before the write, and only then lets the next write begin. So what a
+ * restart reads is what the Daemon holds, and no Change is ever recorded for a write that
+ * its caller was told failed. Until the write and its undoing end, every later write
+ * fails at once. If the undoing fails, the store is unavailable until the Daemon restarts,
+ * and what the service holds can still be read.
  */
 export class Credentials extends Context.Service<
   Credentials,
@@ -375,39 +407,163 @@ export class Credentials extends Context.Service<
 
         const held = yield* SubscriptionRef.make(heldOf(holding));
         const current = Effect.map(SubscriptionRef.get(held), (now) => now.holding);
+        const writeTimeout = options.writeTimeout ?? defaultWriteTimeout;
+        const writeMillis = Duration.toMillis(Duration.fromInputUnsafe(writeTimeout));
 
         // One write at a time, each from what the last left, so none is lost.
         const writing = yield* Semaphore.make(1);
 
-        // From the store to the state, none of it can be cancelled. A keyring's write does
-        // not stop when its caller does, so a cancelled one would let the next write go
-        // while it was still on its way, and it would land last and replace the whole
-        // document with what the next had not seen. The state follows the store, so what
-        // the Daemon holds is what a restart reads.
-        const replace = (next: Holding) =>
-          Effect.uninterruptible(
-            Effect.andThen(slot.write(documentOf(next)), SubscriptionRef.set(held, heldOf(next)))
-          );
+        // When the write that holds the permit began, if one does, and until its undoing has
+        // ended too. Whether it is overdue is worked out from this and the clock, so it
+        // cannot be left saying so after it ends.
+        let began: number | undefined;
+
+        // The store could not be put back, so what it holds is not what the service holds.
+        // Nothing is written again until a restart reads it.
+        let adrift = false;
+
+        // Runs the write that `plan` works out on a fiber of its own, holding the permit
+        // until it and its undoing end, and waits for it only so long. A write queued behind
+        // another that nobody waits for is dropped when its turn comes. The state follows
+        // the store, so a write that is kept is held in the same step, and a write whose
+        // caller has left is undone by writing back what the service holds, before the next
+        // write may begin.
+        const owned = (plan: Effect.Effect<Holding | undefined>) =>
+          Effect.gen(function* () {
+            if (adrift) {
+              return yield* unavailable(
+                "an earlier write could not be undone, so Credentials cannot be written until the Daemon restarts"
+              );
+            }
+
+            if (began !== undefined && (yield* Clock.currentTimeMillis) - began >= writeMillis) {
+              return yield* unavailable("an earlier write to the store has not finished");
+            }
+
+            const write: Write = {
+              done: yield* Deferred.make<boolean, CredentialsUnavailable>(),
+              state: "waiting",
+            };
+
+            yield* writing
+              .withPermit(
+                Effect.uninterruptible(
+                  Effect.gen(function* () {
+                    if (write.state === "abandoned") {
+                      return;
+                    }
+
+                    // A write queued before an earlier one failed to be undone must not
+                    // run once that earlier one lets go of the permit.
+                    if (adrift) {
+                      Deferred.doneUnsafe(
+                        write.done,
+                        Exit.fail(
+                          unavailable(
+                            "an earlier write could not be undone, so Credentials cannot be written until the Daemon restarts"
+                          )
+                        )
+                      );
+
+                      return;
+                    }
+
+                    began = yield* Clock.currentTimeMillis;
+
+                    const before = yield* current;
+                    const next = yield* plan;
+
+                    if (next === undefined) {
+                      began = undefined;
+                      Deferred.doneUnsafe(write.done, Exit.succeed(false));
+
+                      return;
+                    }
+
+                    const stored = yield* Effect.exit(slot.write(documentOf(next)));
+
+                    if (Exit.isFailure(stored)) {
+                      began = undefined;
+                      Deferred.doneUnsafe(write.done, stored.pipe(Exit.map(() => false)));
+
+                      return;
+                    }
+
+                    // In one step, so that either the caller is told or the write is undone.
+                    const kept = yield* Effect.sync(() => {
+                      if (write.state !== "waiting") {
+                        return false;
+                      }
+
+                      write.state = "settled";
+
+                      return true;
+                    });
+
+                    if (kept) {
+                      yield* SubscriptionRef.set(held, heldOf(next));
+                      began = undefined;
+                      Deferred.doneUnsafe(write.done, Exit.succeed(true));
+
+                      return;
+                    }
+
+                    const undone = yield* Effect.exit(slot.write(documentOf(before)));
+
+                    adrift = Exit.isFailure(undone);
+                    began = undefined;
+                  })
+                )
+              )
+              .pipe(Effect.forkDetach);
+
+            // Whether the write had ended by the time the caller left. If it had, its
+            // outcome stands. If not, the caller is told it failed, whatever comes of it.
+            const leave = Effect.sync(() => {
+              if (Deferred.isDoneUnsafe(write.done) || write.state === "settled") {
+                return true;
+              }
+
+              write.state = "abandoned";
+
+              return false;
+            });
+
+            return yield* Deferred.await(write.done).pipe(
+              Effect.timeoutOption(writeTimeout),
+              Effect.onInterrupt(() => leave),
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    leave.pipe(
+                      Effect.flatMap((ended) =>
+                        ended
+                          ? Deferred.await(write.done)
+                          : Effect.fail(
+                              unavailable(
+                                "the store did not answer in time, so the write is treated as failed"
+                              )
+                            )
+                      )
+                    ),
+                  onSome: Effect.succeed,
+                })
+              )
+            );
+          });
 
         return {
           all: Effect.map(SubscriptionRef.get(held), ({ values }) => values),
           changes: Stream.map(SubscriptionRef.changes(held), ({ values }) => values),
           delete: (name) =>
-            writing.withPermit(
-              Effect.gen(function* () {
-                const before = yield* current;
-
-                if (!before.has(name)) {
-                  return false;
-                }
-
-                const next = new Map(before);
-
-                next.delete(name);
-                yield* replace(next);
-
-                return true;
-              })
+            owned(
+              current.pipe(
+                Effect.map((before) =>
+                  before.has(name)
+                    ? new Map([...before].filter(([held]) => held !== name))
+                    : undefined
+                )
+              )
             ),
           names: current.pipe(
             Effect.map((now) =>
@@ -417,12 +573,14 @@ export class Credentials extends Context.Service<
             )
           ),
           set: (name, value) =>
-            writing.withPermit(
-              Effect.gen(function* () {
-                const set = yield* Clock.currentTimeMillis;
+            Effect.asVoid(
+              owned(
+                Effect.gen(function* () {
+                  const set = yield* Clock.currentTimeMillis;
 
-                yield* replace(new Map(yield* current).set(name, { set, value }));
-              })
+                  return new Map(yield* current).set(name, { set, value });
+                })
+              )
             ),
           store: slot.store,
         };

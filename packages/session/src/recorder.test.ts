@@ -149,9 +149,9 @@ describe("Recorder.memory", () => {
       const libera = yield* standing("libera");
       const oftc = yield* standing("oftc");
 
-      assert.strictEqual(libera.self, "alice");
+      assert.strictEqual(libera.irc.self, "alice");
       assert.strictEqual(libera.attempt?.sequence, 1);
-      assert.isUndefined(oftc.self);
+      assert.isUndefined(oftc.irc.self);
       assert.strictEqual(oftc.attempt?.sequence, 4);
     }).pipe(Effect.provide(Recorder.memory))
   );
@@ -188,7 +188,7 @@ describe("Recorder.memory", () => {
 
       yield* record([welcome("libera")]);
 
-      assert.strictEqual((yield* standing("libera")).self, "alice");
+      assert.strictEqual((yield* standing("libera")).irc.self, "alice");
     }).pipe(Effect.provide(Recorder.memory))
   );
 

@@ -111,10 +111,13 @@ export const wire = (ircd: FakeIrcd) =>
   ircd.written.pipe(Effect.map((written) => written.map((bytes) => decode(bytes))));
 
 /**
- * Every fake socket and the memory Recorder finish within a few scheduler turns, so this
- * runs the host until it has nothing left to do without moving the clock.
+ * Runs a thousand scheduler turns without moving the clock. Every fake socket and the
+ * memory Recorder answer within a few of them, so this is far more than they need, and
+ * nothing real is awaited in them, so how busy the machine is cannot make it too few.
+ * It does not know that the host has nothing left to do, however: a test that needs a
+ * particular outcome awaits that outcome, an Entry or a status, and does not rely on this.
  */
-export const settled = Effect.repeat(Effect.yieldNow, { times: 1000 });
+export const manyTurns = Effect.repeat(Effect.yieldNow, { times: 1000 });
 
 /** Runs a few scheduler turns, to hold something up without moving the clock. */
 export const held = Effect.repeat(Effect.yieldNow, { times: 20 });
@@ -139,14 +142,14 @@ export const safe = (command: string, params: readonly string[]) => {
  * Starts a host whose Scope the test closes itself, moving the clock as it needs to.
  * @param ircd - Where it connects.
  * @param overrides - What differs from {@link options}.
- * @returns The host, once it has settled.
+ * @returns The host, after {@link manyTurns}.
  */
 export const bareHost = (ircd: Pick<FakeIrcd, "transport">, overrides?: Overrides) => {
   const { id, ...settings } = { ...options, ...overrides };
 
   return hostNetwork(constantNetwork(id, settings)).pipe(
     Effect.provideService(Transport, ircd.transport),
-    Effect.tap(() => settled)
+    Effect.tap(() => manyTurns)
   );
 };
 
@@ -154,7 +157,7 @@ export const bareHost = (ircd: Pick<FakeIrcd, "transport">, overrides?: Override
  * Starts a host that can be left running when a test ends.
  * @param ircd - Where it connects.
  * @param overrides - What differs from {@link options}.
- * @returns The host, once it has settled.
+ * @returns The host, after {@link manyTurns}.
  */
 export const host = (ircd: Pick<FakeIrcd, "transport">, overrides?: Overrides) =>
   movingClockWhileClosing(bareHost(ircd, overrides));
@@ -179,12 +182,12 @@ export const liveHost = Effect.fnUntraced(function* (
       settings: SubscriptionRef.get(current),
     }).pipe(
       Effect.provideService(Transport, ircd.transport),
-      Effect.tap(() => settled)
+      Effect.tap(() => manyTurns)
     )
   );
 
   const change = (update: (settings: NetworkSettings) => NetworkSettings) =>
-    Effect.andThen(SubscriptionRef.update(current, update), settled);
+    Effect.andThen(SubscriptionRef.update(current, update), manyTurns);
 
   return { change, hosted };
 });
@@ -198,7 +201,7 @@ export const inSession = Effect.fnUntraced(function* (ircd: FakeIrcd) {
   const hosted = yield* host(ircd);
 
   yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
-  yield* settled;
+  yield* manyTurns;
 
   return hosted;
 });

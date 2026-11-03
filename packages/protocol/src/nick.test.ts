@@ -143,7 +143,9 @@ describe(nickLine, () => {
   it("CONN-4: builds `NICK` for a nick", () => {
     const built = nickLine("claude");
 
-    expect(built._tag === "Safe" && new TextDecoder().decode(built.line.bytes)).toBe("NICK claude");
+    expect(built._tag === "Safe" && new TextDecoder().decode(built.line.toBytes())).toBe(
+      "NICK claude"
+    );
   });
 
   it.each(["#abc", "9lives", `x${"y".repeat(510)}`])("refuses %j", (nick) => {

@@ -1,16 +1,12 @@
-const safe: unique symbol = Symbol("OutboundLine");
-
 /** The most bytes a Line may hold before its line ending. */
 export const maxLineBytes = 510;
 
 /**
  * A Line that is safe to send, as the bytes it will be on the wire. The only ways to
- * get one are {@link outbound} and {@link pong}.
+ * get one are {@link outbound} and {@link pong}. Its bytes cannot be changed once it
+ * exists: it owns them, and hands out copies.
  */
-export interface OutboundLine {
-  readonly [safe]: true;
-  readonly bytes: Uint8Array;
-}
+export type OutboundLine = Line;
 
 /** Why a Line cannot be sent. */
 export type OutboundRejection =
@@ -34,11 +30,6 @@ const forbiddenBytes: ReadonlySet<number> = new Set([0x00, 0x0a, 0x0d]);
 const rejected = (reason: OutboundRejection): Outbound => ({ _tag: "Rejected", reason });
 const hasLineBreakOrNull = (text: string) => /[\0\r\n]/u.test(text);
 
-const safeLine = (bytes: Uint8Array): Outbound =>
-  bytes.length > maxLineBytes
-    ? rejected("TooLong")
-    : { _tag: "Safe", line: { bytes, [safe]: true } };
-
 const concatenate = (head: Uint8Array, tail: Uint8Array) => {
   const joined = new Uint8Array(head.length + tail.length);
 
@@ -47,6 +38,37 @@ const concatenate = (head: Uint8Array, tail: Uint8Array) => {
 
   return joined;
 };
+
+class Line {
+  // Private, so that nothing but this module can reach the bytes that were checked. A
+  // `Uint8Array` can be written to by whoever holds it, so what leaves is a copy.
+  readonly #bytes: Uint8Array;
+
+  constructor(bytes: Uint8Array) {
+    this.#bytes = bytes;
+  }
+
+  /**
+   * The Line as it goes on the wire, with its line ending.
+   * @param line - The Line.
+   * @returns New bytes, which are the caller's to change.
+   */
+  static encode(line: Line) {
+    return concatenate(line.#bytes, lineEnding);
+  }
+
+  /**
+   * The Line's bytes, as they were checked, without the line ending.
+   * @returns A copy, which the caller may change without changing the Line.
+   */
+  toBytes() {
+    return new Uint8Array(this.#bytes);
+  }
+}
+
+// Takes `bytes` over: every caller has just made them, and keeps no other reference.
+const safeLine = (bytes: Uint8Array): Outbound =>
+  bytes.length > maxLineBytes ? rejected("TooLong") : { _tag: "Safe", line: new Line(bytes) };
 
 /**
  * Whether a parameter can go anywhere but last, where nothing can mark where it ends but
@@ -151,6 +173,6 @@ export const part = (channel: string, reason?: string): Outbound => {
 /**
  * Encodes a Line for the wire.
  * @param line - The Line to encode.
- * @returns The bytes to write, with the line ending.
+ * @returns New bytes to write, with the line ending.
  */
-export const encodeLine = (line: OutboundLine) => concatenate(line.bytes, lineEnding);
+export const encodeLine = (line: OutboundLine) => Line.encode(line);

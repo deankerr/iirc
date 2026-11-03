@@ -7,6 +7,7 @@ import {
   fillReferences,
   parseTemplate,
   templateReferences,
+  templateSubstitutions,
 } from "@iirc/protocol/template";
 import { Redacted } from "effect";
 
@@ -58,6 +59,11 @@ const encoder = new TextEncoder();
 export const credentialReferences = (template: string): readonly string[] =>
   templateReferences(template);
 
+// The name at each `{{name}}`, in order, and so as often as it is written: the Log's
+// `redacted` has one name for each `<redacted>` in the bytes (LOG-6).
+const credentialSubstitutions = (template: string): readonly string[] =>
+  templateSubstitutions(template);
+
 const namedIn = ({
   connectCommands,
   credentials,
@@ -100,7 +106,7 @@ const recordedAs = (text: string, names: readonly string[]): Sensitive => ({
 // What the Log keeps is the Line built with each value as `<redacted>`, which a builder
 // can refuse for its length alone, so it falls back to the text it was built from.
 const recordedFrom = (built: Outbound, text: string, names: readonly string[]): Sensitive =>
-  built._tag === "Safe" ? { bytes: built.line.bytes, names } : recordedAs(text, names);
+  built._tag === "Safe" ? { bytes: built.line.toBytes(), names } : recordedAs(text, names);
 
 const notSet = (name: string) => `the Credential ${name} is not set`;
 
@@ -154,7 +160,8 @@ export const identifyLine = (service: ServiceLogin, secrets: Secrets): Built => 
  * @returns The Line, or why it cannot be sent.
  */
 export const connectCommandLine = (template: string, secrets: Secrets): Built => {
-  const names = credentialReferences(template);
+  const references = credentialReferences(template);
+  const names = credentialSubstitutions(template);
   const parsed = parseTemplate(template);
   const shownText = fillReferences(template, () => redactedText);
 
@@ -168,7 +175,7 @@ export const connectCommandLine = (template: string, secrets: Secrets): Built =>
     names
   );
 
-  const absent = names.find((name) => !secrets.has(name));
+  const absent = references.find((name) => !secrets.has(name));
 
   if (absent !== undefined) {
     return { _tag: "Unsendable", reason: notSet(absent), recorded };
@@ -176,7 +183,7 @@ export const connectCommandLine = (template: string, secrets: Secrets): Built =>
 
   const built = buildTemplate(parsed.template, (name) => valueOf(secrets, name) ?? "");
 
-  if (names.length > 0) {
+  if (references.length > 0) {
     return fromBuilt(built, recorded);
   }
 
@@ -233,7 +240,5 @@ export const joinSensitive = ({ channels }: JoinBatch<KeyedChannel>): Sensitive 
 
   const shown = names.map(() => redactedText).join(",");
 
-  return recordedAs(`JOIN ${channels.map(({ name }) => name).join(",")} ${shown}`, [
-    ...new Set(names),
-  ]);
+  return recordedAs(`JOIN ${channels.map(({ name }) => name).join(",")} ${shown}`, names);
 };

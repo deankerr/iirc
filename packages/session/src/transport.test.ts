@@ -82,7 +82,10 @@ const realMillis = (millis: number) =>
     await Bun.sleep(millis);
   });
 
-const untilReally = <A>(check: Effect.Effect<A>, done: (value: A) => boolean) =>
+const untilReally = <A, R = never>(
+  check: Effect.Effect<A, never, R>,
+  done: (value: A) => boolean
+) =>
   Effect.gen(function* () {
     let value = yield* check;
 
@@ -251,10 +254,13 @@ const holdingCommitOf = (text: string, hold: Effect.Effect<void>) =>
 
 const allEntries = MemoryEntries.use(({ entries }) => entries);
 
-// Under the drain's 5 seconds, so a close that waited it out would fail. Bursts here are
-// megabytes, read 16 KB at a time, which a machine running other suites takes a while over.
+// The drain's 5 seconds are on the `TestClock`, which these tests do not move, so a close
+// that waited them out would never come and the test would hang. That is how "closes fast"
+// is asserted, and it holds on a machine of any speed. Bursts here are megabytes, read
+// 16 KB at a time, which a busy machine takes a while over, so this waits on the real
+// clock with no limit of its own.
 const until = (hosted: Effect.Success<ReturnType<typeof hostOn>>) =>
-  eventually(allEntries, (entries) => closedReason(entries).length > 0, "4 seconds").pipe(
+  untilReally(allEntries, (entries) => closedReason(entries).length > 0).pipe(
     Effect.tap(() => hosted.status)
   );
 
@@ -265,12 +271,12 @@ const burstLines = Array.from(
 );
 
 describe("Transport.layer when a Connection dies under a burst", () => {
-  it.live("records all of it, and closes fast, when the `PONG` finds the socket closed", () =>
+  it.effect("records all of it, and closes fast, when the `PONG` finds the socket closed", () =>
     Effect.gen(function* () {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
       yield* ircd.push(burstLines.join("\r\n"));
       yield* ircd.push("PING :last");
       yield* ircd.finish;
@@ -288,16 +294,16 @@ describe("Transport.layer when a Connection dies under a burst", () => {
       assert.deepStrictEqual(closedReason(entries), ["the Ircd closed the Connection"]);
     }).pipe(
       // Long enough for the Ircd's close to arrive, so the `PONG` is written after it.
-      Effect.provide([holdingCommitOf("PING :last", Effect.sleep("200 millis")), Transport.layer])
+      Effect.provide([holdingCommitOf("PING :last", realMillis(200)), Transport.layer])
     )
   );
 
-  it.live("reads to the end of a real socket after a write fails halfway through", () =>
+  it.effect("reads to the end of a real socket after a write fails halfway through", () =>
     Effect.gen(function* () {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
       yield* ircd.push("PING :first");
       yield* ircd.push(burstLines.join("\r\n"));
       yield* ircd.finish;
@@ -315,7 +321,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
     }).pipe(Effect.provide([Recorder.memoryReadable, writesFailOn("PONG first")]))
   );
 
-  it.live("keeps what the socket already held when the Ircd resets it", () =>
+  it.effect("keeps what the socket already held when the Ircd resets it", () =>
     Effect.gen(function* () {
       const release = yield* Deferred.make<undefined>();
       const lines = Array.from({ length: 40 }, (_, index) => `NOTICE * :${index}`);
@@ -324,16 +330,14 @@ describe("Transport.layer when a Connection dies under a burst", () => {
         const ircd = yield* scriptedIrcd(welcoming("iirc"));
         const hosted = yield* hostOn(ircd.port);
 
-        yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+        yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
 
         // One at a time, so they are separate reads, and the inbox fills behind the hold.
-        yield* Effect.forEach(
-          lines,
-          (line) => Effect.andThen(ircd.push(line), Effect.sleep("5 millis")),
-          { discard: true }
-        );
+        yield* Effect.forEach(lines, (line) => Effect.andThen(ircd.push(line), realMillis(5)), {
+          discard: true,
+        });
         yield* ircd.hangUp;
-        yield* Effect.sleep("50 millis");
+        yield* realMillis(50);
         yield* Deferred.succeed(release, undefined);
 
         const entries = yield* until(hosted);
@@ -351,12 +355,12 @@ describe("Transport.layer when a Connection dies under a burst", () => {
 });
 
 describe("Transport.layer when a close starts locally", () => {
-  it.live("records all of a burst that follows `ERROR`, up to the Ircd hanging up", () =>
+  it.effect("records all of a burst that follows `ERROR`, up to the Ircd hanging up", () =>
     Effect.gen(function* () {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
       yield* ircd.push("ERROR :Closing Link");
       yield* ircd.push(burstLines.join("\r\n"));
       yield* ircd.finish;
@@ -374,31 +378,31 @@ describe("Transport.layer when a close starts locally", () => {
     }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
   );
 
-  it.live(
-    "hangs up 5 seconds after `ERROR` on an Ircd that does not",
-    () =>
-      Effect.gen(function* () {
-        const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
+  it.effect("hangs up 5 seconds after `ERROR` on an Ircd that does not", () =>
+    Effect.gen(function* () {
+      const ircd = yield* scriptedIrcd(welcoming("iirc"), { hostname: quietAddress });
 
-        const hosted = yield* hostNetwork(options(ircd.port, quietAddress));
+      const hosted = yield* movingClockWhileClosing(hostNetwork(options(ircd.port, quietAddress)));
 
-        yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
-        yield* ircd.push("ERROR :Closing Link");
+      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* ircd.push("ERROR :Closing Link");
 
-        const started = Date.now();
+      // The wait is on from the moment the host has read `ERROR`.
+      yield* untilReally(hosted.status, ({ phase }) => phase === "closing");
+      yield* TestClock.adjust("4999 millis");
+      yield* realMillis(100);
 
-        yield* eventually(ircd.closed, (closed) => closed === 1, "8 seconds");
+      assert.strictEqual(yield* ircd.closed, 0, "it hung up before the five seconds");
 
-        const waited = Date.now() - started;
+      yield* TestClock.adjust("1 millis");
+      yield* untilReally(ircd.closed, (closed) => closed === 1);
+      yield* untilReally(hosted.status, ({ phase }) => phase === "closed");
 
-        assert.isAtLeast(waited, 4900);
-        assert.isBelow(waited, 7000);
-        assert.deepStrictEqual(brief(yield* hosted.status), {
-          closeReason: "Closing Link",
-          phase: "closed",
-        });
-      }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer])),
-    { timeout: 10_000 }
+      assert.deepStrictEqual(brief(yield* hosted.status), {
+        closeReason: "Closing Link",
+        phase: "closed",
+      });
+    }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
   );
 });
 
@@ -479,10 +483,21 @@ describe("Transport.layer against a stream that is going", () => {
           Effect.forkChild
         );
 
+      // The stream has stopped taking Lines once neither the count of Lines taken nor the
+      // bytes the wire has received move for several looks in a row. There is no event
+      // for a full kernel buffer, so it is a stretch of stillness, and a busy machine
+      // is given more of it than a quiet one needs.
       let settled = -1;
+      let still = 0;
+      let heard = -1;
 
-      while (settled !== (yield* Ref.get(sent))) {
-        settled = yield* Ref.get(sent);
+      while (still < 3) {
+        const taken = yield* Ref.get(sent);
+        const received = yield* wire.delivered;
+
+        still = taken === settled && received === heard ? still + 1 : 0;
+        settled = taken;
+        heard = received;
         yield* realMillis(200);
       }
 
@@ -703,10 +718,18 @@ describe("Transport.layer under a flood (LOG-4, HOST-1)", () => {
   }
 });
 
+// How the Lines are supplied: fifty senders that each send again once answered, so a later
+// write is always waiting, or batches of fifty with a pause between, so that the pump is
+// sometimes idle at the moment the kernel fills, and the Line it confirms then is the one
+// that nothing follows.
+const supplies = ["continuous", "batched"] as const;
+
 describe("Transport.layer and what counts as written", () => {
-  for (const tls of [false, true]) {
+  for (const [tls, supply] of [false, true].flatMap((secure) =>
+    supplies.map((each) => [secure, each] as const)
+  )) {
     it.live(
-      `LOG-2: a Line is written once the kernel has it, and one that never got there is Dropped (tls: ${tls})`,
+      `LOG-2: a Line is written once the kernel has it, and one that never got there is Dropped (tls: ${tls}, ${supply})`,
       () =>
         Effect.gen(function* () {
           const { ircd, wire } = tls
@@ -737,24 +760,41 @@ describe("Transport.layer and what counts as written", () => {
 
           const written = new Set<number>();
 
-          // Until the kernels on both sides are full and a write times out.
-          for (let first = 0; (yield* hosted.status).phase === "session"; first += 50) {
-            const batch = Array.from({ length: 50 }, (_unused, index) => first + index);
+          const sendNumbered = Effect.fnUntraced(function* (number: number) {
+            const sent = yield* Effect.exit(
+              hosted.send(outboundLine(`${number} ${"x".repeat(380)}`), "test")
+            );
 
-            yield* Effect.forEach(
-              batch,
-              (number) =>
-                hosted.send(outboundLine(`${number} ${"x".repeat(380)}`), "test").pipe(
-                  Effect.tap((sent) =>
-                    Effect.sync(() => {
-                      if (sent._tag === "Written") {
-                        written.add(number);
-                      }
-                    })
-                  ),
-                  Effect.ignore
-                ),
-              { concurrency: "unbounded" }
+            if (Exit.isSuccess(sent) && sent.value._tag === "Written") {
+              written.add(number);
+            }
+          });
+
+          // Until the kernels on both sides are full and a write times out.
+          if (supply === "batched") {
+            for (let first = 0; (yield* hosted.status).phase === "session"; first += 50) {
+              const batch = Array.from({ length: 50 }, (_unused, index) => first + index);
+
+              yield* Effect.forEach(batch, sendNumbered, {
+                concurrency: "unbounded",
+                discard: true,
+              });
+            }
+          } else {
+            let next = 0;
+
+            const sender = Effect.gen(function* () {
+              while ((yield* hosted.status).phase === "session") {
+                const number = next;
+
+                next += 1;
+                yield* sendNumbered(number);
+              }
+            });
+
+            yield* Effect.all(
+              Array.from({ length: 50 }, () => sender),
+              { concurrency: "unbounded", discard: true }
             );
           }
 

@@ -328,7 +328,7 @@ describe("migrations (RUN-5)", () => {
           upgraded.messages.map(({ sender, text }) => `${sender}: ${text}`),
           ["alice: said before the upgrade", "bob: my password is hunter2"]
         );
-        assert.strictEqual(upgraded.standing.self, "alice");
+        assert.strictEqual(upgraded.standing.irc.self, "alice");
 
         // The Entries are as they were, and the new ones are whole.
         assert.strictEqual(upgraded.entries.length, 6);

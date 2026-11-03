@@ -26,7 +26,7 @@ import {
   options,
   probed,
   safe,
-  settled,
+  manyTurns,
   texts,
   throwing,
   wire,
@@ -103,13 +103,13 @@ describe("hostNetwork registering", () => {
       assert.strictEqual((yield* hosted.status).phase, "registering");
 
       yield* ircd.read(":ircd 001 iirc :Welcome\r\n:ircd 422 iirc :No MOTD\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.lengthOf(yield* wire(ircd), 2);
 
       yield* TestClock.adjust("1 second");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual((yield* wire(ircd)).slice(2), ["JOIN #one,#two\r\n"]);
 
@@ -168,7 +168,7 @@ describe("hostNetwork recording before acting", () => {
 
       yield* inSession(ircd);
       yield* ircd.read("PING :token one\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const lines = linesOf(yield* entries);
       const ping = lines.find(({ bytes }) => decode(bytes) === "PING :token one");
@@ -187,7 +187,7 @@ describe("hostNetwork recording before acting", () => {
 
       yield* host(ircd);
       yield* ircd.read("PING :early\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "PONG early\r\n");
     }).pipe(Effect.provide(Recorder.memoryReadable))
@@ -231,7 +231,7 @@ describe("hostNetwork recording before acting", () => {
       events.length = 0;
 
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       // The `PING`'s commit, then the `PONG`'s, then the `PONG` on the wire.
       assert.deepStrictEqual(events, ["within", "committed", "within", "committed", "written"]);
@@ -249,7 +249,7 @@ describe("hostNetwork recording before acting", () => {
       const before = yield* wire(ircd);
 
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* wire(ircd), before);
       assert.deepStrictEqual(brief(yield* hosted.status), {
@@ -275,12 +275,12 @@ describe("hostNetwork recording before acting", () => {
       const hosted = yield* host(ircd);
 
       yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "registering");
 
       yield* TestClock.adjust("1 second");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closed");
     }).pipe(Effect.provide(layer));
@@ -296,7 +296,7 @@ describe("hostNetwork recording before acting", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.notInclude(yield* wire(ircd), "PONG 1\r\n");
       assert.strictEqual((yield* hosted.status).phase, "closed");
@@ -319,7 +319,7 @@ describe("hostNetwork recording before acting", () => {
       records.length = 0;
 
       yield* ircd.read("PING :1\r\nPI", "NG :2\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const inbound = records.filter((recording) =>
         recording.some((entry) => entry._tag === "Line" && entry.direction === "inbound")
@@ -348,7 +348,7 @@ describe("hostNetwork recording before acting", () => {
       const before = records;
 
       yield* ircd.read("PING :no line ending yet");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(records, before);
     }).pipe(Effect.provide(layer));
@@ -362,15 +362,15 @@ describe("hostNetwork deadlines", () => {
       const hosted = yield* host(ircd);
 
       yield* TestClock.adjust("59999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(deadlinesNamed(yield* entries, "registration"), 0);
       assert.strictEqual((yield* hosted.status).phase, "registering");
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const fired = log.find(({ _tag }) => _tag === "Deadline");
@@ -398,7 +398,7 @@ describe("hostNetwork deadlines", () => {
       const hosted = yield* inSession(ircd);
 
       yield* TestClock.adjust("80 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.lengthOf(deadlinesNamed(yield* entries, "registration"), 0);
@@ -417,9 +417,9 @@ describe("hostNetwork deadlines", () => {
 
       yield* host(ircd);
       yield* ircd.read("NOTICE * :slow\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const fired = log.find(({ _tag }) => _tag === "Deadline");
@@ -455,7 +455,7 @@ describe("hostNetwork under a flood while registering", () => {
       yield* Effect.forEach(Array.from({ length: 200 }), () => ircd.read(floodLine), {
         discard: true,
       });
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const fired = log.find(({ _tag }) => _tag === "Deadline");
@@ -483,11 +483,11 @@ describe("hostNetwork under a flood while registering", () => {
       const hosted = yield* host(ircd);
 
       yield* TestClock.adjust("59 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       yield* ircd.read("NOTICE * :slow\r\n");
       yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(deadlinesNamed(yield* entries, "registration"), 0);
       assert.strictEqual((yield* hosted.status).phase, "session");
@@ -502,13 +502,13 @@ describe("hostNetwork as a fold", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.read("PING :1\r\n:a!b@c PRIVMSG #one :hello\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(brief(yield* hosted.status), statusFolded(yield* entries));
 
       yield* ircd.read("ERROR :Closing Link\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const status = brief(yield* hosted.status);
 
@@ -553,7 +553,7 @@ describe("hostNetwork as a fold", () => {
       assert.strictEqual((yield* hosted.status).consecutiveFailures, 0);
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const attempts = connectionsOf(log, "attempt");
@@ -574,7 +574,7 @@ describe("hostNetwork closing", () => {
 
       yield* ircd.read("ERROR :first\r\nERROR :second\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const closed = connectionsOf(yield* entries, "closed");
 
@@ -594,7 +594,7 @@ describe("hostNetwork closing", () => {
 
       yield* ircd.read("ERROR :gone\r\nPING :1\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
 
@@ -615,7 +615,7 @@ describe("hostNetwork closing", () => {
         [ircd.hangUp, Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"))],
         { concurrency: "unbounded" }
       );
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
       assert.strictEqual((yield* hosted.status).phase, "closed");
@@ -629,9 +629,9 @@ describe("hostNetwork closing", () => {
 
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const closed = connectionsOf(yield* entries, "closed");
 
@@ -647,7 +647,7 @@ describe("hostNetwork closing", () => {
       const endedHost = yield* inSession(ended);
 
       yield* ended.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(brief(yield* endedHost.status), {
         closeReason: "the Ircd closed the Connection",
@@ -659,10 +659,10 @@ describe("hostNetwork closing", () => {
       const brokenHost = yield* host(broken, { id: "another" });
 
       yield* broken.read(":ircd 001 iirc :Welcome\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       yield* broken.breakRead;
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(brief(yield* brokenHost.status), {
         closeReason: "read failed: reset",
@@ -678,24 +678,24 @@ describe("hostNetwork closing", () => {
 
       yield* ircd.setWrites("hang");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("9999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       // The loop never waits on a write, so it is still reading.
       yield* ircd.read("NOTICE * :read while stalled\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.include(texts(yield* entries, "inbound"), "NOTICE * :read while stalled");
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closing");
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const [closed] = connectionsOf(yield* entries, "closed");
 
@@ -717,17 +717,17 @@ describe("hostNetwork closing", () => {
       });
 
       yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.setWrites("hang");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("2999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closing");
     }).pipe(Effect.provide(Recorder.memoryReadable))
@@ -742,7 +742,7 @@ describe("hostNetwork closing", () => {
 
       const exit = yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(
         exit,
@@ -750,7 +750,7 @@ describe("hostNetwork closing", () => {
       );
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "closed");
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
@@ -825,7 +825,7 @@ describe("hostNetwork closing", () => {
       const ircd = yield* fakeIrcd();
       const hosted = yield* Effect.scoped(inSession(ircd));
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(brief(yield* hosted.status), {
         closeReason: "leaving",
@@ -871,7 +871,7 @@ describe("hostNetwork draining a close", () => {
         const hosted = yield* setup(ircd);
 
         yield* provoke(ircd);
-        yield* settled;
+        yield* manyTurns;
 
         const before = (yield* wire(ircd)).length;
 
@@ -882,15 +882,15 @@ describe("hostNetwork draining a close", () => {
         );
 
         yield* ircd.read("PING :after\r\n", ":a!b@c PRIVMSG #one :after\r\n");
-        yield* settled;
+        yield* manyTurns;
         yield* TestClock.adjust("4999 millis");
-        yield* settled;
+        yield* manyTurns;
 
         assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
 
         yield* ircd.read("half a li");
         yield* ircd.hangUp;
-        yield* settled;
+        yield* manyTurns;
 
         const log = yield* entries;
         const [closed] = connectionsOf(log, "closed");
@@ -915,18 +915,18 @@ describe("hostNetwork draining a close", () => {
 
         yield* setup(ircd);
         yield* provoke(ircd);
-        yield* settled;
+        yield* manyTurns;
 
         const provoked = yield* Clock.currentTimeMillis;
 
         yield* TestClock.adjust("4999 millis");
-        yield* settled;
+        yield* manyTurns;
 
         assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
         assert.isFalse(yield* ircd.released);
 
         yield* TestClock.adjust("1 millis");
-        yield* settled;
+        yield* manyTurns;
 
         const [closed] = connectionsOf(yield* entries, "closed");
 
@@ -948,11 +948,11 @@ describe("hostNetwork draining a close", () => {
 
       yield* inSession(ircd);
       yield* ircd.read("ERROR :Closing Link\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* Effect.forEach(Array.from({ length: 100 }), () => ircd.read("flood\r\n"), {
         discard: true,
       });
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
       assert.isTrue(yield* ircd.released);
@@ -970,9 +970,9 @@ describe("hostNetwork draining a close", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.read("ERROR :Closing Link\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.read("NOTICE * :unrecordable\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
       assert.strictEqual((yield* hosted.status).closeReason, "Closing Link");
@@ -989,7 +989,7 @@ describe("hostNetwork after a failed write", () => {
 
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       // Writes work again, so only the host's own decision can keep these off the wire.
       yield* ircd.setWrites("accept");
@@ -997,13 +997,13 @@ describe("hostNetwork after a failed write", () => {
       const before = (yield* wire(ircd)).length;
 
       yield* ircd.read("PING :2\r\n:a!b@c PRIVMSG #one :after\r\nERROR :a later reason\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
 
       yield* ircd.read("half a li");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
 
@@ -1030,7 +1030,7 @@ describe("hostNetwork after a failed write", () => {
 
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       // The Log heard nothing of this, so only the fold still reads as a Session.
       assert.strictEqual(statusFolded(yield* entries).phase, "session");
@@ -1049,14 +1049,14 @@ describe("hostNetwork after a failed write", () => {
 
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("4999 millis");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       const [closed] = connectionsOf(yield* entries, "closed");
 
@@ -1080,12 +1080,12 @@ describe("hostNetwork after a failed write", () => {
       yield* inSession(ircd);
       yield* ircd.setWrites("fail");
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       yield* Effect.forEach(Array.from({ length: 100 }), () => ircd.read("flood\r\n"), {
         discard: true,
       });
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
       assert.isTrue(yield* ircd.released);
@@ -1100,9 +1100,9 @@ describe("hostNetwork after a failed write", () => {
 
       yield* ircd.setWrites("fail");
       yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
-      yield* settled;
+      yield* manyTurns;
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       const [closed] = connectionsOf(yield* entries, "closed");
 
@@ -1122,7 +1122,7 @@ describe("hostNetwork after a failed write", () => {
       const hosted = yield* inSession(ircd);
 
       yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
       assert.isTrue(yield* ircd.released);
@@ -1145,7 +1145,7 @@ describe("hostNetwork under a flood", () => {
       yield* Effect.forEach(Array.from({ length: flood }), () => ircd.read(slowLine), {
         discard: true,
       });
-      yield* settled;
+      yield* manyTurns;
 
       // One in the commit, what fits under the bound on what is read and not recorded, and
       // one in the reader's hand. Nothing else (LOG-4).
@@ -1153,7 +1153,7 @@ describe("hostNetwork under a flood", () => {
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* TestClock.adjust(`${flood} seconds`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(yield* ircd.unread, 0);
       assert.lengthOf(
@@ -1189,7 +1189,7 @@ describe("hostNetwork `send`", () => {
       });
 
       yield* ircd.read(":ircd 001 iirc :Welcome\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const before = (yield* wire(ircd)).length;
 
@@ -1206,7 +1206,7 @@ describe("hostNetwork `send`", () => {
         ],
         { concurrency: "unbounded" }
       );
-      yield* settled;
+      yield* manyTurns;
 
       const written = (yield* wire(ircd)).slice(before).map((text) => text.slice(0, -2));
       const recorded = texts(yield* entries, "outbound").slice(before);
@@ -1230,7 +1230,7 @@ describe("hostNetwork `send`", () => {
       assert.lengthOf(yield* entries, before);
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(
         yield* Effect.exit(hosted.send(line, "test")),
@@ -1251,7 +1251,7 @@ describe("hostNetwork `send`", () => {
 
       const exit = yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
 
-      yield* settled;
+      yield* manyTurns;
 
       assert.isTrue(Exit.isFailure(exit));
       assert.deepStrictEqual(yield* wire(ircd), before);
@@ -1281,7 +1281,7 @@ describe("hostNetwork `send`", () => {
         ],
         { concurrency: "unbounded" }
       );
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
 
@@ -1307,7 +1307,7 @@ describe("hostNetwork with hostile input", () => {
       stream.set(encode("\r\n"), random.length + nuls.length);
 
       yield* ircd.read(stream);
-      yield* settled;
+      yield* manyTurns;
 
       const { frames, rest } = framesOf(stream);
       const recorded = linesOf((yield* entries).slice(before));
@@ -1320,7 +1320,7 @@ describe("hostNetwork with hostile input", () => {
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* ircd.read("PING :still here\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* wire(ircd)).at(-1), "PONG :still here\r\n");
     }).pipe(Effect.provide(Recorder.memoryReadable))
@@ -1334,7 +1334,7 @@ describe("hostNetwork with hostile input", () => {
       const line = "x".repeat(maxFrameBytes * 2 + 5);
 
       yield* ircd.read(`${line}\r\nPING :next\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       const recorded = linesOf((yield* entries).slice(before));
 
@@ -1368,7 +1368,7 @@ describe("hostNetwork with hostile input", () => {
       yield* ircd.read("y".repeat(maxFrameBytes + 3));
       yield* ircd.read("tail\r\n");
       yield* ircd.read("whole\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const recorded = linesOf((yield* entries).slice(before));
 
@@ -1392,7 +1392,7 @@ describe("hostNetwork with hostile input", () => {
       const before = (yield* entries).length;
 
       yield* ircd.read(`${"z".repeat(maxFrameBytes)}\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       const recorded = linesOf((yield* entries).slice(before));
 
@@ -1413,7 +1413,7 @@ describe("hostNetwork with hostile input", () => {
 
       yield* ircd.read(`${"z".repeat(maxFrameBytes)}\r`);
       yield* ircd.read("\n");
-      yield* settled;
+      yield* manyTurns;
 
       const recorded = linesOf((yield* entries).slice(before));
 
@@ -1430,7 +1430,7 @@ describe("hostNetwork with hostile input", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.read(`${"x".repeat(maxFrameBytes)}ERROR :gotcha\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
     }).pipe(Effect.provide(Recorder.memoryReadable))
@@ -1443,7 +1443,7 @@ describe("hostNetwork with hostile input", () => {
       const before = (yield* wire(ircd)).length;
 
       yield* ircd.read(`PING :${"p".repeat(600)}\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.lengthOf(yield* wire(ircd), before);
@@ -1462,12 +1462,12 @@ describe("hostNetwork with hostile input", () => {
 
       yield* inSession(ircd);
       yield* ircd.read("PING :1\r\nPRIVMSG #one :half a li");
-      yield* settled;
+      yield* manyTurns;
 
       const before = (yield* wire(ircd)).length;
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const [partial] = linesOf(log).slice(-1);
@@ -1490,7 +1490,7 @@ describe("hostNetwork with hostile input", () => {
       yield* ircd.setWrites("fail");
       yield* Effect.exit(hosted.send(safe("PRIVMSG", ["#one", "hi"]), "test"));
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       const [partial] = linesOf(yield* entries).slice(-1);
 
@@ -1515,7 +1515,7 @@ describe("hostNetwork with hostile input", () => {
       yield* ircd.read("ERROR :gone\r\n");
       yield* ircd.read("PING :1\r\n", "half a li");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
 
@@ -1533,7 +1533,7 @@ describe("hostNetwork with hostile input", () => {
       const before = (yield* entries).length;
 
       yield* ircd.read(new Uint8Array(), "\r\n\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(texts((yield* entries).slice(before), "inbound"), ["", ""]);
       assert.strictEqual((yield* hosted.status).phase, "session");
@@ -1549,7 +1549,7 @@ describe("hostNetwork when something inside it fails", () => {
 
       yield* ircd.read("NOTICE * :before\r\n:ircd 001 iirc :Welcome\r\nNOTICE * :after\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const log = yield* entries;
       const [closed] = connectionsOf(log, "closed");
@@ -1560,7 +1560,11 @@ describe("hostNetwork when something inside it fails", () => {
         ":ircd 001 iirc :Welcome",
         "NOTICE * :after",
       ]);
-      assert.strictEqual(closed?.reason, `the machine threw on Entry ${welcome?.sequence}`);
+      // What was thrown is kept, so the Log says why (HOST-1).
+      assert.strictEqual(
+        closed?.reason,
+        `the machine threw on Entry ${welcome?.sequence}: Error: the transition threw`
+      );
       assert.deepStrictEqual(brief(yield* hosted.status), {
         closeReason: closed?.reason,
         phase: "closed",
@@ -1574,10 +1578,10 @@ describe("hostNetwork when something inside it fails", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.dieOnRead;
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(brief(yield* hosted.status), {
-        closeReason: "the reader died",
+        closeReason: "the reader died: the reader broke",
         phase: "closed",
       });
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 1);
@@ -1595,16 +1599,16 @@ describe("hostNetwork when something inside it fails", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.read("PING :1\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(brief(yield* hosted.status), {
-        closeReason: "the host failed",
+        closeReason: "the host failed: the store broke",
         phase: "closed",
       });
       assert.isTrue(yield* ircd.released);
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 2);
       assert.strictEqual((yield* hosted.status).phase, "registering");
@@ -1629,7 +1633,7 @@ describe("hostNetwork when something inside it fails", () => {
       const hosted = yield* inSession(ircd);
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.strictEqual(closes, 1);
       assert.lengthOf(connectionsOf(yield* entries, "closed"), 0);

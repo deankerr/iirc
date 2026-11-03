@@ -1,4 +1,16 @@
+import type {
+  Entry,
+  IfFieldsOfEntry,
+  Ircd as IrcdOf,
+  TlsDetails as TlsDetailsOf,
+} from "@iirc/session/entry";
 import { Effect, Option, Predicate, Schema, SchemaGetter } from "effect";
+
+// One Schema for every field of `T`, and none for any other, which an object literal of
+// them can be checked against.
+type FieldsOf<T> = { readonly [Key in keyof T]-?: Schema.Top };
+
+type TuningOf = Extract<Entry, { readonly phase: "attempt" }>["tuning"];
 
 // NULL in a column is a field the record does not have, and so is absence in a row.
 const nullable = <S extends Schema.Top>(schema: S) =>
@@ -29,10 +41,12 @@ const Ircd = Schema.Struct({
   pin: Schema.optionalKey(Schema.String),
   port: Schema.Int,
   tls: Schema.Boolean,
-});
+} satisfies FieldsOf<IrcdOf>);
 
 // The whole Tuning an `attempt` ran with, kept as it was. Whether it was a good one was
 // decided before it ran, so nothing here judges it, and reading it back must not fail.
+// Every number is listed, and checked against lifecycle's, because one of them carries a
+// default for rows written before it existed.
 const Tuning = Schema.Struct({
   burstMillis: Schema.Int,
   connectTimeoutMillis: Schema.Int,
@@ -59,14 +73,14 @@ const Tuning = Schema.Struct({
   silenceMillis: Schema.Int,
   stableAfterMillis: Schema.Int,
   writeTimeoutMillis: Schema.Int,
-});
+} satisfies FieldsOf<TuningOf>);
 
 const TlsDetails = Schema.Struct({
   cipher: Schema.String,
   pin: Schema.String,
   protocol: Schema.String,
   verifiedBy: Schema.Literals(["authority", "pin"]),
-});
+} satisfies FieldsOf<TlsDetailsOf>);
 
 const Connected = {
   ...Numbered,
@@ -118,8 +132,7 @@ const ConnectionRow = Schema.Union([
   }).pipe(Schema.encodeKeys({ _tag: "kind", endedAt: "ended_at" })),
 ]);
 
-/** An Entry, encoded as a row of `entries` and decoded back unchanged. */
-export const EntryRow = Schema.Union([
+const entryRow = Schema.Union([
   Schema.TaggedStruct("Line", {
     ...Numbered,
     bytes: Schema.Uint8Array,
@@ -161,6 +174,12 @@ export const EntryRow = Schema.Union([
     version: Schema.String,
   }).pipe(Schema.encodeKeys({ _tag: "kind" })),
 ]);
+
+/**
+ * An Entry, encoded as a row of `entries` and decoded back unchanged. Its kinds and their
+ * fields are checked against Entry's, so a new one fails to compile until it has a column.
+ */
+export const EntryRow: IfFieldsOfEntry<typeof entryRow.Type, typeof entryRow> = entryRow;
 
 /** A Message, as a row of `messages`. */
 export const MessageRow = Schema.Struct({

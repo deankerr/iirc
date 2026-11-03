@@ -1,4 +1,4 @@
-import { Configuration } from "@iirc/api";
+import { Configuration, requestParseOptions } from "@iirc/api";
 import type { NetworkSettings } from "@iirc/api";
 import { Effect, Predicate, Result, Schema, SchemaIssue } from "effect";
 import { Toml } from "effect/encoding";
@@ -25,16 +25,17 @@ const issuesOf = ({ issue }: { readonly issue: SchemaIssue.Issue }): readonly Fi
     }),
   }));
 
-// Only the shape here, so that each Network is then decoded by the published Schema. An
-// unknown key anywhere is an error rather than nothing, because a file is written by hand
-// and a misspelt setting would otherwise be dropped without a word.
+// Only the shape here, so that each Network is then decoded by the published Schema, which
+// holds every rule the Daemon does, so a file it passes is one the Daemon accepts. An
+// unknown key anywhere is an error rather than nothing, as it is in a request, because a
+// file is written by hand and a misspelt setting would otherwise be dropped without a word.
 const Tables = Schema.Struct({
   networks: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown)).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed({}))
   ),
 });
 
-const strictly = { errors: "all", onExcessProperty: "error" } as const;
+const strictly = { ...requestParseOptions, errors: "all" } as const;
 
 const decodeTables = Schema.decodeUnknownResult(Tables, strictly);
 

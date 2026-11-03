@@ -1,9 +1,20 @@
-import { channelPrefixes, joinRejection } from "@iirc/protocol/join";
+import { defaultTuning } from "@iirc/lifecycle/tuning";
+import type { Tuning as TuningNumbers } from "@iirc/lifecycle/tuning";
+import { channelKey, channelPrefixes, joinRejection } from "@iirc/protocol/join";
 import { nickLine } from "@iirc/protocol/nick";
 import { privmsg, quit, user } from "@iirc/protocol/outbound";
 import type { Outbound } from "@iirc/protocol/outbound";
 import { buildTemplate, parseTemplate, templateReferences } from "@iirc/protocol/template";
-import { Context, Effect, Option, Redacted, Schema, SchemaGetter } from "effect";
+import {
+  Context,
+  Effect,
+  Option,
+  pipe,
+  Record as Records,
+  Redacted,
+  Schema,
+  SchemaGetter,
+} from "effect";
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -19,6 +30,13 @@ const start = "0";
 
 /** The version of this contract, which `/status` reports (API-5). */
 export const apiVersion = 1;
+
+/**
+ * How the API parses a body, and how a Frontend should decode a request with this
+ * contract's Schemas to get the same answer: a key nothing reads, such as a misspelt Tuning
+ * number, is an issue at its path, never a setting silently left out.
+ */
+export const requestParseOptions = { onExcessProperty: "error" } as const;
 
 const Phase = Schema.Literals([
   "idle",
@@ -54,32 +72,14 @@ const Ircd = Schema.Struct({
 
 /**
  * Every timing and limit a Connection ran with, in milliseconds where it is a time, as its
- * `attempt` recorded them.
+ * `attempt` recorded them. One for each of lifecycle's numbers, so a new one is here too.
  */
-const Tuning = Schema.Struct({
-  burstMillis: Schema.Int,
-  connectTimeoutMillis: Schema.Int,
-  controlLaneLimit: Schema.Int,
-  drainMillis: Schema.Int,
-  firstContactNickLimit: Schema.Int,
-  floodBurst: Schema.Int,
-  floodIntervalMillis: Schema.Int,
-  joinRetryMillis: Schema.Int,
-  kickRejoinMillis: Schema.Int,
-  lagCheckMillis: Schema.Int,
-  laneLimit: Schema.Int,
-  loginWaitMillis: Schema.Int,
-  quitWaitMillis: Schema.Int,
-  reconnectInitialMillis: Schema.Int,
-  reconnectMaxMillis: Schema.Int,
-  refusalBackoffMillis: Schema.Int,
-  registrationTimeoutMillis: Schema.Int,
-  rejoinSettleMillis: Schema.Int,
-  sendWaitMillis: Schema.Int,
-  silenceMillis: Schema.Int,
-  stableAfterMillis: Schema.Int,
-  writeTimeoutMillis: Schema.Int,
-});
+const Tuning = Schema.Struct(
+  pipe(
+    defaultTuning,
+    Records.map(() => Schema.Int)
+  )
+);
 
 /** How a TLS Connection was secured, and the pin of the key the Ircd presented (CONN-1). */
 const TlsDetails = Schema.Struct({
@@ -508,6 +508,108 @@ const ConnectCommand = Schema.String.check(
   })
 );
 
+// What a timer can wait for: past this, one fires at once, so a mistyped refusal wait
+// would turn into a redial loop.
+const longestWait = 2_147_483_647;
+
+// LIVE-3: a lag check bypasses flood control, so a tiny interval would flood the Ircd.
+const shortestLagCheck = 100;
+
+// Every host waits this long at most for its `QUIT` when it stops, and the Daemon stops them
+// all at once, so this bounds how long a stop takes whatever the Owner tuned (RUN-3). It is
+// well inside the 90 seconds a service manager gives a stop by default.
+const longestQuitWait = 10_000;
+
+interface Bounds {
+  readonly maximum?: number;
+  readonly minimum: number;
+}
+
+// One entry for every key of lifecycle's `Tuning` and no other, so a new number cannot go
+// without a rule. A wait that gives something time to happen can be 0, and one that paces
+// anything cannot. A `QUIT` wait of 0 drops the `QUIT` itself (LIVE-9).
+const tuningBounds = {
+  burstMillis: { minimum: 0 },
+  connectTimeoutMillis: { minimum: 1 },
+  controlLaneLimit: { minimum: 1 },
+  drainMillis: { minimum: 0 },
+  firstContactNickLimit: { minimum: 1 },
+  floodBurst: { minimum: 1 },
+  floodIntervalMillis: { minimum: 1 },
+  joinRetryMillis: { minimum: 1 },
+  kickRejoinMillis: { minimum: 0 },
+  lagCheckMillis: { minimum: shortestLagCheck },
+  laneLimit: { minimum: 1 },
+  loginWaitMillis: { minimum: 0 },
+  quitWaitMillis: { maximum: longestQuitWait, minimum: 1 },
+  reconnectInitialMillis: { minimum: 1 },
+  reconnectMaxMillis: { minimum: 1 },
+  refusalBackoffMillis: { minimum: 1 },
+  registrationTimeoutMillis: { minimum: 1 },
+  rejoinSettleMillis: { minimum: 0 },
+  sendWaitMillis: { minimum: 0 },
+  silenceMillis: { minimum: 1 },
+  stableAfterMillis: { minimum: 0 },
+  writeTimeoutMillis: { minimum: 1 },
+} as const satisfies Readonly<Record<keyof TuningNumbers, Bounds>>;
+
+// Each number may be left out, and then runs at the spec's default, which its Schema
+// carries for a Frontend to show.
+const tuningFields = Records.mapEntries(
+  tuningBounds,
+  ({ maximum = longestWait, minimum }: Bounds, key) => [
+    key,
+    Schema.optionalKey(
+      Schema.Int.check(Schema.isBetween({ maximum, minimum })).annotate({
+        default: defaultTuning[key],
+      })
+    ),
+  ]
+);
+
+type TuningKey = keyof TuningNumbers;
+
+// `low` must not be above `high`, or, when `strictly`, must be below it. Said of the one
+// the Owner set, `high` if both, so that the path is where the fix goes, and against the
+// default of the other when it was left out.
+const ordered = (low: TuningKey, high: TuningKey, strictly: boolean) =>
+  Schema.makeFilter((overrides: Partial<TuningNumbers>) => {
+    const tuning = { ...defaultTuning, ...overrides };
+
+    if (strictly ? tuning[low] < tuning[high] : tuning[low] <= tuning[high]) {
+      return true;
+    }
+
+    const must = strictly ? "must be" : "must not be";
+
+    return overrides[high] === undefined
+      ? {
+          issue: `${must} ${strictly ? "below" : "above"} ${high}, which is ${tuning[high]}`,
+          path: [low],
+        }
+      : {
+          issue: `${must} ${strictly ? "above" : "below"} ${low}, which is ${tuning[low]}`,
+          path: [high],
+        };
+  });
+
+/**
+ * The Tuning numbers one Network overrides, by name (CONF-3). Only those the Owner changed
+ * are stored, so that a new default reaches every Network that never changed it. Each is a
+ * whole number within its bounds, and its default is its `default` annotation. Some numbers
+ * are fine alone and wrong beside another, counting the defaults of those left out: a
+ * silence no longer than the lag check kills a quiet Ircd every Session, because the check
+ * is what makes it speak (LIVE-2), and the first reconnect delay cannot be above the
+ * longest (LIVE-4).
+ */
+export const TuningSettings = Schema.Struct(tuningFields).check(
+  ordered("lagCheckMillis", "silenceMillis", true),
+  ordered("reconnectInitialMillis", "reconnectMaxMillis", false)
+);
+
+/** The decoded form of {@link TuningSettings}. */
+export type TuningSettings = typeof TuningSettings.Type;
+
 const settingsFields = {
   channels: Schema.Array(ChannelSettings).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   connectCommands: Schema.Array(ConnectCommand).pipe(
@@ -527,14 +629,7 @@ const settingsFields = {
   services: Schema.Array(ServiceNick).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([...defaultServices]))
   ),
-  /**
-   * Only the Tuning numbers the Owner changed, by name, so that a new default reaches every
-   * Network that never changed it (CONF-3). The Daemon refuses a name that is not a Tuning
-   * number, and any value outside its rules.
-   */
-  tuning: Schema.Record(Schema.String, Schema.Int).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed({}))
-  ),
+  tuning: TuningSettings.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
 };
 
 const DisplayName = Schema.NonEmptyString.check(
@@ -563,10 +658,34 @@ const certificateNeedsTls = Schema.makeFilter(
   }
 );
 
+// Where a key first repeats one before it, or -1. A Set keeps it linear, because a body
+// can list tens of thousands of Channels, and this runs on the event loop (HOST-5).
+const firstRepeat = (keys: readonly string[]) => {
+  const seen = new Set<string>();
+
+  return keys.findIndex((key) => seen.size === seen.add(key).size);
+};
+
+// Channels are told apart as a host tells them apart, so that no two are one (CONF-3).
+const channelsDistinct = Schema.makeFilter(
+  ({ channels }: { readonly channels: readonly { readonly name: string }[] }) => {
+    const repeated = firstRepeat(channels.map(({ name }) => channelKey(name)));
+
+    return (
+      repeated === -1 || {
+        issue: "is the same Channel as another",
+        path: ["channels", repeated, "name"],
+      }
+    );
+  }
+);
+
 /**
  * Everything the Owner wants of one Network (CONF-3), which the Log stores whole with each
  * Change to it. Anything left out takes its default, and the display name is the ID unless
- * given. Credentials appear by name only, here and wherever settings go (CRED-1).
+ * given. Credentials appear by name only, here and wherever settings go (CRED-1). It holds
+ * every rule the Daemon accepts a Network by, so settings it decodes, with
+ * {@link requestParseOptions}, are settings the Daemon will take (CONF-1).
  */
 export const NetworkSettings = Schema.toEncoded(
   Schema.Struct({ ...settingsFields, name: Schema.optionalKey(DisplayName) })
@@ -574,7 +693,10 @@ export const NetworkSettings = Schema.toEncoded(
   // Checked once, on the way in. Its shape alone is checked before the name is filled in,
   // because checking every Channel twice made a long history slow to start (CONF-1).
   Schema.decodeTo(
-    Schema.Struct({ ...settingsFields, name: DisplayName }).check(certificateNeedsTls),
+    Schema.Struct({ ...settingsFields, name: DisplayName }).check(
+      certificateNeedsTls,
+      channelsDistinct
+    ),
     {
       decode: SchemaGetter.transform((settings) => ({
         ...settings,
@@ -592,11 +714,9 @@ export type NetworkSettings = typeof NetworkSettings.Type;
 export const Configuration = Schema.Struct({
   networks: Schema.Array(NetworkSettings).check(
     Schema.makeFilter((networks) => {
-      // A Set that does not grow when an ID is added already held it.
-      const seen = new Set<string>();
-      const repeated = networks.find(({ id }) => seen.size === seen.add(id).size)?.id;
+      const repeated = firstRepeat(networks.map(({ id }) => id));
 
-      return repeated === undefined || `the Network ${repeated} appears more than once`;
+      return repeated === -1 || { issue: "is another Network's ID", path: [repeated, "id"] };
     })
   ),
 });
@@ -1164,8 +1284,6 @@ export class DaemonApi extends HttpApi.make("iirc")
       .middleware(Authorization)
   )
   .middleware(RequestValidation)
-  // A body is parsed, not trusted: a key nothing reads, such as a misspelt `tls`, is a bad
-  // request with its path, as it is in a file, and not a setting silently left out.
-  .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
+  .annotate(HttpApi.PayloadParseOptions, requestParseOptions)
   .prefix("/api")
   .annotateMerge(OpenApi.annotations({ title: "iirc daemon" })) {}

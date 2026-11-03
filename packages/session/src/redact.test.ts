@@ -12,6 +12,7 @@ import {
   passLine,
 } from "./credentials.ts";
 import type { Built } from "./credentials.ts";
+import { describeDefect } from "./diagnostic.ts";
 import type { NewEntry } from "./entry.ts";
 import { scrub } from "./redact.ts";
 import type { Secrets } from "./redact.ts";
@@ -118,13 +119,83 @@ describe("LOG-6: value scrubbing", () => {
     ]);
   });
 
-  it("passes every other Entry through, and the very same array with no secrets", () => {
+  it("passes every other Entry through as it is, with or without secrets", () => {
     const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
       { _tag: "Deadline", name: "hunter2", network: "libera" },
     ];
 
     assert.deepStrictEqual(scrub(secrets, entries), entries);
-    assert.strictEqual(scrub(new Map(), entries), entries);
+    assert.deepStrictEqual(scrub(new Map(), entries), entries);
+  });
+
+  it("scrubs the reason a close or a Dropped Entry gives, which can quote a defect", () => {
+    const ircd = { host: "irc.example", port: 6697, tls: true };
+    const reason = "the host failed: Error: bad password hunter2";
+
+    const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
+      {
+        _tag: "Connection",
+        chosen: false,
+        connection: 1,
+        ircd,
+        network: "libera",
+        phase: "closing",
+        reason,
+      },
+      { _tag: "Connection", connection: 1, ircd, network: "libera", phase: "closed", reason },
+      {
+        _tag: "Dropped",
+        bytes: encoder.encode("PRIVMSG #a :hi"),
+        cause: "api",
+        connection: 1,
+        network: "libera",
+        reason,
+      },
+    ];
+
+    assert.deepStrictEqual(
+      scrub(secrets, entries).map((entry) => ("reason" in entry ? entry.reason : undefined)),
+      Array.from({ length: 3 }, () => "the host failed: Error: bad password <redacted>")
+    );
+  });
+
+  it("bounds a reason only after scrubbing it, so no cut leaves part of a value", () => {
+    const ircd = { host: "irc.example", port: 6697, tls: true };
+    const value = "s".repeat(400);
+    const held: Secrets = new Map([["long", Redacted.make(value)]]);
+    const reason = `the host failed: ${describeDefect(new Error(`bad ${value} and ${"x ".repeat(600)}`))}`;
+
+    const [entry] = scrub(held, [
+      {
+        _tag: "Connection",
+        chosen: false,
+        connection: 1,
+        ircd,
+        network: "libera",
+        phase: "closing",
+        reason,
+      },
+    ]);
+
+    const recordedReason = "reason" in entry ? entry.reason : "";
+
+    assert.isAtMost(recordedReason.length, 1024);
+    assert.notInclude(recordedReason, "s".repeat(8));
+  });
+
+  it("bounds reasons when there are no Credentials too", () => {
+    const [entry] = scrub(new Map(), [
+      {
+        _tag: "Dropped",
+        bytes: encoder.encode("PRIVMSG #a :hi"),
+        cause: "api",
+        connection: 1,
+        network: "libera",
+        reason: "y".repeat(5000),
+      },
+    ]);
+
+    assert.strictEqual("reason" in entry ? entry.reason.length : 0, 1024);
   });
 });
 
@@ -132,8 +203,8 @@ const recorded = (built: Built) =>
   built._tag === "Safe"
     ? {
         names: built.sensitive?.names,
-        recorded: decoder.decode(built.sensitive?.bytes ?? built.line.bytes),
-        sent: decoder.decode(built.line.bytes),
+        recorded: decoder.decode(built.sensitive?.bytes ?? built.line.toBytes()),
+        sent: decoder.decode(built.line.toBytes()),
       }
     : {
         names: built.recorded.names,
@@ -169,6 +240,17 @@ describe("LOG-6: Lines built from Credentials are sensitive where they are built
     });
   });
 
+  it("CONN-6: a connect command names a Credential once for each place it is put in", () => {
+    assert.deepStrictEqual(
+      recorded(connectCommandLine("OPER {{pass}} {{pass}} {{key.pizza}}", secrets)),
+      {
+        names: ["pass", "pass", "key.pizza"],
+        recorded: "OPER <redacted> <redacted> <redacted>",
+        sent: "OPER hunter2 hunter2 pizza",
+      }
+    );
+  });
+
   it("CONN-6: a connect command with no Credential in it is not sensitive", () => {
     assert.deepStrictEqual(recorded(connectCommandLine("mode iirc +x", secrets)), {
       names: undefined,
@@ -200,12 +282,30 @@ describe("LOG-6: Lines built from Credentials are sensitive where they are built
     ).batches;
 
     assert.isDefined(batch);
-    assert.strictEqual(decoder.decode(batch.line.bytes), "JOIN #food,#plain,#lost pizza");
+    assert.strictEqual(decoder.decode(batch.line.toBytes()), "JOIN #food,#plain,#lost pizza");
 
     const sensitive = joinSensitive(batch);
 
     assert.deepStrictEqual(sensitive?.names, ["key.pizza"]);
     assert.strictEqual(decoder.decode(sensitive?.bytes), "JOIN #food,#plain,#lost <redacted>");
+  });
+
+  it("CRED-4: a `JOIN` of Channels that share a key names it once for each `<redacted>`", () => {
+    const [batch] = keyedJoins(
+      [
+        { key: "key.pizza", name: "#food" },
+        { key: "key.pizza", name: "#pies" },
+      ],
+      secrets
+    ).batches;
+
+    assert.isDefined(batch);
+    assert.strictEqual(decoder.decode(batch.line.toBytes()), "JOIN #food,#pies pizza,pizza");
+
+    const sensitive = joinSensitive(batch);
+
+    assert.deepStrictEqual(sensitive?.names, ["key.pizza", "key.pizza"]);
+    assert.strictEqual(decoder.decode(sensitive?.bytes), "JOIN #food,#pies <redacted>,<redacted>");
   });
 
   it("CRED-4: a `JOIN` with no key is not sensitive", () => {

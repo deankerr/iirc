@@ -8,8 +8,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { appRoot } from "./binary.ts";
 
-/** How long a build takes, far past what it needs. */
-export const buildTimeout = 30_000;
+/**
+ * How long a build may take, far past what it needs: it compiles the whole app, and
+ * every test file builds a binary of its own, at once, on a machine that may be busy.
+ */
+export const buildTimeout = 180_000;
 
 /**
  * Builds the binary the way a release does. Always rebuilt, and gone first, so no stale

@@ -29,7 +29,9 @@ import { buildBinary, buildTimeout } from "./testing.ts";
 
 const binary = `${appRoot}/dist/iirc-tls`;
 
-const testTimeout = 20_000;
+// Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
+// several times what it does alone.
+const testTimeout = 60_000;
 
 const network = "tls";
 const channel = "#tls";
@@ -43,7 +45,7 @@ const otherAddress = "127.77.0.2";
 const unusedName = "irc.elsewhere.test";
 
 // A Connection refused, or a Session reached, is far quicker than this.
-const settleLimit = "10 seconds";
+const settleLimit = "30 seconds";
 
 const tlsHandshakeRecord = 0x16;
 const applicationDataRecord = 0x17;

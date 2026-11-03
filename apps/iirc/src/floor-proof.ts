@@ -1674,7 +1674,9 @@ const configurationFile = toCheck(
     );
     yield* ensure(badTuning.code !== 0, `bad Tuning was imported: ${badTuning.output}`);
     yield* ensure(
-      badTuning.output.includes("networks.floor.tuning"),
+      badTuning.output.includes(
+        "networks.floor.tuning.quitWaitMillis: Expected a value between 1 and 10000"
+      ),
       `bad Tuning gave: ${badTuning.output}`
     );
 

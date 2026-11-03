@@ -13,7 +13,9 @@ import { buildBinary, buildTimeout } from "./testing.ts";
 
 const binary = `${appRoot}/dist/iirc-config`;
 
-const testTimeout = 20_000;
+// Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
+// several times what it does alone.
+const testTimeout = 60_000;
 
 // Nothing listens here, and the Networks are disabled, so no Connection adds an Entry
 // while a test compares the Log before and after.
@@ -206,7 +208,7 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
   );
 
   it.live(
-    "refuses a bad file with its paths, before sending it or after, and changes nothing",
+    "refuses a bad file with its paths, before sending anything, and changes nothing",
     () =>
       Effect.gen(function* () {
         const { apiUrl, client, dataDir, key } = yield* daemonWithNetworks;
@@ -214,7 +216,7 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
         const before = yield* client.configuration.get();
         const sequence = yield* head(client);
 
-        // The published Schema finds these, so nothing is sent.
+        // The published Schema finds all of these, so nothing is sent.
         const badPin = yield* writeFile(
           dataDir,
           "pin.toml",
@@ -227,7 +229,7 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
           exported.output.replace('quitReason = "back soon"', 'quitreason = "back soon"')
         );
 
-        // Only the Daemon knows its Tuning rules, so this one comes back as a 400.
+        // The published Schema holds Tuning to the Daemon's rules too.
         const badTuning = yield* writeFile(
           dataDir,
           "tuning.toml",
@@ -249,9 +251,11 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
         assert.include(pinned, "nothing was sent");
         assert.include(pinned, "networks.libera.ircds[0].pin: ");
         assert.include(spelt, "networks.libera.quitreason: ");
-        assert.include(tuned, "(400)");
-        assert.include(tuned, "networks.libera.tuning");
-        assert.include(tuned, "drainMillis");
+        assert.include(tuned, "nothing was sent");
+        assert.include(
+          tuned,
+          "networks.libera.tuning.drainMillis: Expected a value between 0 and 2147483647"
+        );
         assert.include(broken, "line 1");
 
         assert.strictEqual(yield* head(client), sequence, "something was recorded");

@@ -228,6 +228,30 @@ describe("runPump over a wire that confirms a write only with the next (LOG-2)",
     }).pipe(Effect.scoped)
   );
 
+  it.effect("drops the write before one that failed outright, and tells its caller", () =>
+    Effect.gen(function* () {
+      const { lanes, stalled, unwritten } = yield* pumpOver(true);
+      const before = queuedOn("interactive", "before");
+      const stall = queuedOn("interactive", "stall");
+
+      yield* lanes.offerNow(before);
+      yield* lanes.offerNow(stall);
+      yield* Effect.yieldNow;
+
+      yield* Deferred.fail(stalled, new WriteFailed({ reason: "the socket was reset" }));
+
+      assert.deepStrictEqual(
+        yield* Effect.flip(Deferred.await(before.outcome)),
+        new WriteFailed({ reason: mayNotHaveReached })
+      );
+      yield* Effect.exit(Deferred.await(stall.outcome));
+      assert.deepStrictEqual(unwritten, [
+        { cause: "before", reason: mayNotHaveReached },
+        { cause: "stall", reason: "the socket was reset" },
+      ]);
+    }).pipe(Effect.scoped)
+  );
+
   it.effect("confirms a write once a later one is taken, or once nothing follows it", () =>
     Effect.gen(function* () {
       const { lanes, unwritten } = yield* pumpOver(true);
@@ -240,6 +264,27 @@ describe("runPump over a wire that confirms a write only with the next (LOG-2)",
       assert.strictEqual(yield* Deferred.await(first.outcome), 1);
       assert.strictEqual(yield* Deferred.await(second.outcome), 2);
       assert.deepStrictEqual(unwritten, []);
+    }).pipe(Effect.scoped)
+  );
+
+  // The batched supply in `transport.test.ts` found this: its caller told it was written,
+  // and the Log then held it as Dropped, two answers for one Line.
+  it.effect("keeps a write confirmed while the pump was idle written, whatever comes next", () =>
+    Effect.gen(function* () {
+      const { lanes, stalled, unwritten } = yield* pumpOver(true);
+      const idle = queuedOn("interactive", "idle");
+      const stall = queuedOn("interactive", "stall");
+
+      yield* lanes.offerNow(idle);
+
+      assert.strictEqual(yield* Deferred.await(idle.outcome), 1, "nothing followed it");
+
+      yield* lanes.offerNow(stall);
+      yield* Effect.yieldNow;
+      yield* Deferred.fail(stalled, new WriteFailed({ reason: writeTimedOut }));
+      yield* Effect.exit(Deferred.await(stall.outcome));
+
+      assert.deepStrictEqual(unwritten, [{ cause: "stall", reason: writeTimedOut }]);
     }).pipe(Effect.scoped)
   );
 

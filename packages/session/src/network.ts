@@ -1,5 +1,5 @@
 import { start } from "@iirc/lifecycle";
-import type { Phase } from "@iirc/lifecycle";
+import type { Login, Phase } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import type { JoinRejection } from "@iirc/protocol/join";
 import type { OutboundLine } from "@iirc/protocol/outbound";
@@ -31,14 +31,13 @@ import { scrub } from "./redact.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
 import {
   candidateNicks,
-  channelKey,
   consecutiveFailures,
-  kickStanding,
+  kicksInForce,
   loginOf,
   nextAttempt,
   noStanding,
 } from "./standing.ts";
-import type { HeldJoinFailure, Login, Standing, WantedChannel } from "./standing.ts";
+import type { HeldJoinFailure, Standing, WantedChannel } from "./standing.ts";
 import { Transport } from "./transport.ts";
 
 export type { ChannelKey } from "./connection.ts";
@@ -247,13 +246,6 @@ const joinable = (channels: readonly WantedChannel[], secrets: Secrets) => {
   return channels.filter(({ name }) => !rejected.has(name));
 };
 
-// A kick the Owner has since wanted the Channel back from keeps nobody out (LIVE-8).
-const isStillKicked = (standing: Standing, wanted: readonly WantedChannel[], key: string) => {
-  const want = wanted.find(({ name }) => channelKey(name) === key);
-
-  return want === undefined || kickStanding(standing, want) !== undefined;
-};
-
 const retryDelay = (failures: number, tuning: Tuning) =>
   Math.min(tuning.reconnectInitialMillis * 2 ** (failures - 1), tuning.reconnectMaxMillis);
 
@@ -388,11 +380,13 @@ export const hostNetwork: (
   const recordUnclosed = Effect.gen(function* () {
     const { unclosed } = yield* Ref.get(hosted);
 
+    // Each batch leaves the list in the unit that records it, or a cancelled stop would
+    // record it again.
     for (const batch of Arr.chunksOf(unclosed, 1024)) {
-      yield* commit(batch);
+      yield* commit(batch, () =>
+        Ref.update(hosted, (state) => ({ ...state, unclosed: state.unclosed.slice(batch.length) }))
+      );
     }
-
-    yield* Ref.update(hosted, (state) => ({ ...state, unclosed: [] }));
   });
 
   const untilStopped = Deferred.await(stop);
@@ -630,10 +624,8 @@ export const hostNetwork: (
       consecutiveFailures: consecutiveFailures(known, current.tuning, now),
       enabled: current.enabled,
       joinFailures: [...known.joinFailures].map(([channel, failure]) => ({ ...failure, channel })),
-      joined: between ? [] : [...known.channels.values()],
-      kicked: [...known.kicked].flatMap(([channel, { at }]) =>
-        isStillKicked(known, current.channels, channel) ? [{ at, channel }] : []
-      ),
+      joined: between ? [] : [...known.irc.channels.values()].map(({ name }) => name),
+      kicked: kicksInForce(known, current.channels),
       lagMillis: between ? undefined : known.lagMillis,
       lanes: between ? noLanes : yield* live.lanes.depths,
       logFault: fault,
@@ -644,7 +636,7 @@ export const hostNetwork: (
       refusal: known.refusal?.reason,
       refused: known.refusal !== undefined,
       rejectedChannels: rejectedOf(current.channels, current.secrets),
-      self: between ? undefined : known.self,
+      self: between ? undefined : known.irc.self,
     } satisfies NetworkStatus;
   });
 

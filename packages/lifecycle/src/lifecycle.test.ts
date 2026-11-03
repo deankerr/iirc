@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { closeReason, deadline, fold, phase, start, step } from "./lifecycle.ts";
+import { closeReason, deadline, fold, inspect, phase, start, step } from "./lifecycle.ts";
 import type { Command, NetworkEvent, NetworkInput, NetworkSnapshot, Phase } from "./lifecycle.ts";
 import { defaultTuning } from "./tuning.ts";
 
@@ -1308,5 +1308,82 @@ describe("the clock", () => {
 
     expect(late).toStrictEqual(early);
     expect(late.end.deadline).toStrictEqual({ at: 62_000, name: "registration" });
+  });
+});
+
+const view = (events: readonly NetworkEvent[]) => inspect(fold(events, input));
+
+describe(inspect, () => {
+  const withLogin: NetworkEvent = { ...attempt, loginLines: 1, services: ["NickServ"] };
+  const identified = [withLogin, opened, welcome, line("376"), sent(4000, true)];
+
+  it("says there is no Connection before an ATTEMPT, and after a close", () => {
+    expect(view([]).registration).toStrictEqual({ _tag: "None" });
+    expect(view(histories.closed).registration).toStrictEqual({ _tag: "None" });
+  });
+
+  it("CONN-4: names the nick being offered while registering", () => {
+    expect(view([attempt]).registration).toStrictEqual({ _tag: "Connecting" });
+    expect(view([attempt, opened]).registration).toStrictEqual({
+      _tag: "Registering",
+      nick: "claude",
+    });
+    expect(view([attempt, opened, line("433", "*", "claude", "Taken")]).registration).toStrictEqual(
+      { _tag: "Registering", nick: "claudia" }
+    );
+  });
+
+  it("CONN-3: keeps when the Session began, through the close the Daemon chose", () => {
+    const welcomed = { _tag: "Welcomed", at: 3000, nick: "claude" };
+
+    expect(view(histories.session).registration).toStrictEqual(welcomed);
+    expect(view(histories.closing).registration).toStrictEqual(welcomed);
+  });
+
+  it("calls a Connection given up on before any welcome abandoned", () => {
+    expect(view([attempt, opened, expire("registration", 62_000)]).registration).toStrictEqual({
+      _tag: "Abandoned",
+    });
+  });
+
+  it("CONN-6: joins only in a Session, once the login is settled", () => {
+    expect(view(histories.registering).joinable).toBeFalsy();
+    expect(view(histories.session).joinable).toBeTruthy();
+    expect(view(identified).joinable).toBeFalsy();
+    expect(view([...identified, expire("login", 6000)]).joinable).toBeTruthy();
+  });
+
+  it("LIVE-11: joins nothing once the Session is being left, whoever decided it", () => {
+    expect(view([...histories.session, { at: 5000, type: "LEAVING" }]).joinable).toBeFalsy();
+    expect(view(histories.closing).joinable).toBeFalsy();
+  });
+
+  it("CONN-6: reads how the login went, in the service's words", () => {
+    expect(view(histories.session).login).toStrictEqual({ state: "none" });
+    expect(view(identified).login).toStrictEqual({ state: "waiting" });
+    expect(view([...identified, expire("login", 6000)]).login).toStrictEqual({
+      state: "timedOut",
+    });
+    expect(view([...identified, noticeFrom("NickServ!s@h")]).login).toStrictEqual({
+      state: "succeeded",
+      text: "You are now identified for claude.",
+    });
+  });
+
+  it("CONN-6: takes a late sign as the answer, and asks the host for nothing", () => {
+    const timedOut = fold([...identified, expire("login", 6000)], input);
+    const { commands, next } = step(timedOut, { ...noticeFrom("NickServ!s@h"), at: 7000 });
+
+    expect(commands).toStrictEqual([]);
+    expect(inspect(next).login.state).toBe("succeeded");
+  });
+
+  it("CONN-6: still takes a sign once closing, and asks the host for nothing", () => {
+    const leaving = fold([...identified, { at: 4500, reason: "bye", type: "CLOSING" }], input);
+    const { commands, next } = step(leaving, noticeFrom("NickServ!s@h"));
+
+    expect(commands).toStrictEqual([]);
+    expect(deadline(next)).toBeUndefined();
+    expect(inspect(next).login.state).toBe("succeeded");
   });
 });

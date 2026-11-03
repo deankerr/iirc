@@ -9,7 +9,6 @@
     "./join": "./src/join.ts",
     "./line": "./src/line.ts",
     "./login": "./src/login.ts",
-    "./mode": "./src/mode.ts",
     "./nick": "./src/nick.ts",
     "./outbound": "./src/outbound.ts",
     "./refusal": "./src/refusal.ts",

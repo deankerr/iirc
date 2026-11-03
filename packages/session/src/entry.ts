@@ -145,3 +145,57 @@ export type Entry = NewEntry & {
   readonly at: number;
   readonly sequence: number;
 };
+
+// A kind of Entry by name: its `_tag`, with a Connection's `phase` after it.
+type KindOf<E> = E extends {
+  readonly _tag: "Connection";
+  readonly phase: infer Phase extends string;
+}
+  ? `Connection.${Phase}`
+  : E extends { readonly _tag: infer Tag extends string }
+    ? Tag
+    : never;
+
+// The names of the fields of each kind of Entry in `E`.
+type FieldsByKind<E> = { readonly [Kind in E as KindOf<Kind>]: keyof Kind };
+
+type OfEntry = FieldsByKind<Entry>;
+
+// What each kind of Entry has that the codec's lacks. A kind it lacks lacks every field.
+type MissingByKind<Codec> = {
+  readonly [Kind in keyof OfEntry]: Kind extends keyof FieldsByKind<Codec>
+    ? Exclude<OfEntry[Kind], FieldsByKind<Codec>[Kind]>
+    : OfEntry[Kind];
+};
+
+// What each kind of the codec's has that an Entry lacks, apart from what it adds.
+type UnknownByKind<Codec, Added extends PropertyKey> = {
+  readonly [Kind in keyof FieldsByKind<Codec>]: Exclude<
+    FieldsByKind<Codec>[Kind],
+    (Kind extends keyof OfEntry ? OfEntry[Kind] : never) | Added
+  >;
+};
+
+// Only the kinds that name some field. A conditional, so that a message spells it out
+// rather than naming this alias.
+type Named<T> = T extends unknown
+  ? { readonly [Kind in keyof T as [T[Kind]] extends [never] ? never : Kind]: T[Kind] }
+  : never;
+
+/**
+ * `Checked` when the Entries another package encodes or decodes, `Codec`, have the kinds
+ * of {@link Entry} and the fields of each, by name, and no others but those it adds of
+ * its own, `Added`. Anything else is a type that says what is missing and what is
+ * unknown, by kind, so that a value of `Checked` given that type fails to compile and the
+ * message says why. A codec annotates something it must have with it, so that a kind or
+ * a field added to Entry, or taken away, is an error there until the codec has caught up.
+ * Field types are left to the codec, which knows how it differs, such as base64.
+ */
+export type IfFieldsOfEntry<Codec, Checked, Added extends PropertyKey = never> = [
+  keyof Named<MissingByKind<Codec>> | keyof Named<UnknownByKind<Codec, Added>>,
+] extends [never]
+  ? Checked
+  : {
+      readonly missing: Named<MissingByKind<Codec>>;
+      readonly unknown: Named<UnknownByKind<Codec, Added>>;
+    };

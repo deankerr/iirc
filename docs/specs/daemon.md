@@ -78,6 +78,9 @@ The Log lives in SQLite through `bun:sqlite` in WAL mode, with derived tables up
 Configuration is what the Owner wants, and the Log's Change Entries record it. Derived state is what is true right now. They stay separate: "autojoin `#foo`" is Configuration, and "we are in `#foo`" is derived.
 
 - **CONF-1.** Configuration is a projection of Change Entries. There is no second source of truth, and its full history is inspectable.
+  - Accepting a change and reading a recorded one are separate questions. The Schemas in `@iirc/api` hold every rule a request must meet, so a Frontend can check one before sending it, and a request they pass needs no other check by the Daemon. A bad request is refused with the path of each thing wrong (API-3).
+  - A recorded Change is read for what it meant when it was recorded, never against today's rules. A field added since then takes the value that its absence meant, a Tuning number that no longer exists is dropped, and anything else that a rule made since would refuse is folded as it was. So tightening a rule cannot keep the Daemon from starting on a Log it once accepted. Deferred: a version per Change, until a change of meaning needs more than a default.
+  - The Daemon will not start on a Change it cannot read at all: one of no kind it knows, such as a newer iirc wrote, or one without the shape its kind always had. It says the Change's sequence and why, because Configuration without that Change would not be what the Owner asked for.
 - **CONF-2.** All Configuration can be read and changed through the API while the Daemon runs. A running Session applies a change without a restart where IRC allows it, and otherwise at the next Connection.
   - Applied at once: enabled, Channels, and the `QUIT` reason. A Channel taken off the list is parted if Self is in it, and a newly wanted one is joined. Turning autojoin off parts nothing, because it only stops the Daemon joining.
   - Applied at the next Connection: Ircds, Identity, Credentials, services, connect commands, and Tuning. A change to any of them retries straight away (LIVE-4), so a Network waiting out a backoff or a refusal picks it up at once.
@@ -88,7 +91,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - **Services:** which nicks are services. Defaults to `NickServ`, `ChanServ`, and the usual `*Serv` names.
   - **Connect commands:** Lines to send after registration and before joining, which refer to Credentials by name.
   - **Channels:** name, autojoin, rejoin-on-kick, key by Credential name, and notification level.
-  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it.
+  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it. Each number has bounds and a default, which the API's Schema publishes, and a number left out is checked against the others at its default.
 - **CONF-4.** The process itself needs only a data directory and a listen address, both given as flags or environment variables. Networks are added through the API, so a fresh Daemon needs no config file.
 - **CONF-5.** What the Owner does through the API is intent, and it survives a reconnect.
   - Join adds the Channel to Configuration with autojoin on, unless asked not to. Part removes it.
@@ -113,6 +116,8 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - Setting or deleting a Credential is a Change that records its name, never its value. It counts as a relevant Change (CONF-2) for every Network whose Connections use it.
   - A Channel key only has the host build its next `JOIN` with the key as it is now. A Network sets keys itself, and would otherwise skip its own backoff by setting one each time it closed a Connection.
   - The file is replaced atomically, so a crash leaves the old value or the new one.
+  - A write is waited for at most 10 seconds, because a keyring that answered the start can stop answering later, as a locked one does. The caller is then told `CredentialsUnavailable`, and from then on that write has failed, whatever the keyring does. No Change is recorded for it, and a Channel key that was being kept is neither stored nor named, so a later `MODE +k` tries again. The write itself is not cancelled, and nothing else is written until it and its undoing end, since a late write of the whole document would replace what a later one kept. Until then, every other Credential write fails at once with `CredentialsUnavailable`, and every other kind of Change goes on.
+  - If a write that failed this way lands late, the service writes back the document it holds, which is what it held before that write, before it lets another begin. So the keyring, the live Credentials, and the Log agree, and so does a restart. If the write itself fails, there is nothing to undo. If the undoing fails, Credentials cannot be written until the Daemon restarts, and every write gives `CredentialsUnavailable`, while reads still serve what is held.
   - Configuration may refer to a name that is not set yet, so that a file can be imported first. Such a Network makes no `attempt`, and status lists the missing names.
 - **CRED-2.** They are write-only through the API. A Frontend can set, replace, or delete a Credential and can see that it exists, but can never read it.
 - **CRED-3.** In memory they stay in `Redacted` values, so they cannot reach logs, traces, errors, or API responses.
@@ -329,6 +334,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 - **HOST-3.** Nothing a participant sends can make the Daemon do something beyond what this spec names. A CTCP flood is rate limited, and a Message is never interpreted as an instruction.
 - **HOST-4.** The API marks all participant-supplied text as untrusted. Agents must treat it as data, because anyone on a Network can write text that an agent will read.
 - **HOST-5.** One Network cannot starve another, and no Frontend can stall a Session (LOG-11). A slow reader is disconnected, and resumes from its cursor or gets `resync` (API-6).
+  - The same holds in the process. Anything that watches Entries as they commit cannot hold up a commit. A watcher that falls behind is told which run of sequences it missed, and is never left to miss them silently.
 
 ## API
 
@@ -432,6 +438,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - An `admin` key asks for one through the API, and it is written to `backups/` in the data directory, never to a path a request names.
 - **RUN-3.** A restart is safe at any moment. The new process starts new Sessions, records the Gap, and resumes every Frontend from its cursor.
   - `SIGTERM` and `SIGINT` are a clean stop: the Network goes first (LIVE-9), then a Daemon `stopped` Entry, then the Log, and the process exits 0.
+  - A stop waits for a Change under way, which is at most 10 seconds when that Change is waiting on a keyring that has stopped answering (CRED-1). It then closes the Networks as usual.
 - **RUN-4.** The Daemon takes an exclusive lock on its data directory, so that two processes can never hold Sessions for one Log. The lock releases itself if the process is killed.
 - **RUN-5.** Migrations run at startup, after an automatic backup, and never rewrite stored Line bytes. A Log newer than the binary is refused.
 

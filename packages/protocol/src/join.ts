@@ -50,6 +50,17 @@ const channelName = new RegExp(`^[${channelPrefixes.join("")}][^\\0\\u0007\\r\\n
  */
 export const isChannelName = (name: string): boolean => channelName.test(name);
 
+/**
+ * The form Channel names are compared in where no Session gives a mapping, as in
+ * Configuration and what Standing keeps across Sessions. ASCII lower-casing, which can only
+ * split names and never merge them. Within a Session, `@iirc/state` compares them under the
+ * Ircd's own `CASEMAPPING` (KNOW-3).
+ * @param name - A Channel name, as spelled anywhere.
+ * @returns What every spelling of it shares.
+ */
+export const channelKey = (name: string): string =>
+  name.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+
 const hasKey = ({ key }: JoinChannel) => key !== undefined && key !== "";
 
 const joinLine = (channels: readonly JoinChannel[]) => {

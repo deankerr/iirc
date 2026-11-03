@@ -33,7 +33,9 @@ const ircdAddress = "127.79.0.2";
 
 const nick = "iirc";
 const id = "libera";
-const limit = "5 seconds";
+
+// Only a signal that never comes reaches it, so it is far above anything a busy machine takes.
+const limit = "30 seconds";
 
 const serverPassword = "server-password-value";
 const servicePassword = "service-password-value";

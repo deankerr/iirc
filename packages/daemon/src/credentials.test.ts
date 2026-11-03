@@ -10,9 +10,14 @@ import {
 import { inspect } from "node:util";
 
 import { assert, describe, it } from "@effect/vitest";
+import { CredentialsUnavailable } from "@iirc/api";
 import { Log } from "@iirc/log";
-import { Deferred, Effect, Fiber, Layer, Logger, Redacted, Schema, Stream } from "effect";
+import { eventually } from "@iirc/session/testing";
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Schema, Stream } from "effect";
+import type { Duration } from "effect";
+import { TestClock } from "effect/testing";
 
+import { finishes, untilTrue, withinClock } from "./clock.fixture.ts";
 import { Credentials, credentialsFile, CredentialsUnreadable } from "./credentials.ts";
 import type { Keyring } from "./credentials.ts";
 import { inTempDirectory, noKeyring } from "./daemon.fixture.ts";
@@ -26,11 +31,16 @@ const secret = "hunter2-correct-horse";
 const withCredentials = <A, E, R>(
   dataDir: string,
   keyring: Keyring,
-  test: (credentials: Credentials["Service"]) => Effect.Effect<A, E, R>
+  test: (credentials: Credentials["Service"]) => Effect.Effect<A, E, R>,
+  writeTimeout?: Duration.Input
 ) =>
   Credentials.use(test).pipe(
     Effect.provide(
-      Credentials.layer({ dataDir, keyring }).pipe(Layer.provide(Log.layer({ dataDir })))
+      Credentials.layer({
+        dataDir,
+        keyring,
+        ...(writeTimeout !== undefined && { writeTimeout }),
+      }).pipe(Layer.provide(Log.layer({ dataDir })))
     ),
     Effect.scoped
   );
@@ -67,12 +77,28 @@ const memoryKeyring = () => {
   return { entries, keyring };
 };
 
-// A keyring that never answers, as one waiting on an unlock prompt nobody sees.
-const silentKeyring: Keyring = {
-  get: async () => await Effect.runPromise(Effect.never),
-  set: async () => {
-    await Effect.runPromise(Effect.never);
-  },
+// A keyring that never answers, as one waiting on an unlock prompt nobody sees. `asked` is
+// done once it has been asked anything.
+const silentKeyring = () => {
+  const asked = Deferred.makeUnsafe<undefined>();
+
+  const keyring: Keyring = {
+    get: async () => {
+      Deferred.doneUnsafe(asked, Effect.undefined);
+
+      return await Effect.runPromise(Effect.never);
+    },
+    set: async () => {
+      await Effect.runPromise(Effect.never);
+    },
+  };
+
+  return { asked, keyring };
+};
+
+// A write that never answers.
+const stalled = async () => {
+  await Effect.runPromise(Effect.never);
 };
 
 // Waits outside any Effect, as a keyring's own promise does.
@@ -83,6 +109,59 @@ const untilDone = async (deferred: Deferred.Deferred<undefined>) => {
 const decodeDocument = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown));
 
 const modeOf = (path: string) => statSync(path).mode % 0o1000;
+
+// A keyring whose second write waits for `release`, as one that is locked does, and then
+// goes as `ending` says. The first write goes through, so there is something to undo to.
+const lockedOnSecondWrite = (
+  dataDir: string,
+  ending: "fails" | "keeps" | "keeps, but cannot be undone"
+) => {
+  const { entries, keyring: inner } = memoryKeyring();
+  const entry = `iirc/credentials ${realpathSync(dataDir)}`;
+  const release = Deferred.makeUnsafe<undefined>();
+  let writes = 0;
+
+  const keyring: Keyring = {
+    get: inner.get,
+    set: async (options) => {
+      writes += 1;
+
+      if (writes === 2) {
+        await untilDone(release);
+
+        if (ending === "fails") {
+          throw new Error("the keyring is locked");
+        }
+      }
+
+      if (writes === 3 && ending === "keeps, but cannot be undone") {
+        throw new Error("the keyring is locked");
+      }
+
+      await inner.set(options);
+    },
+  };
+
+  const persisted = Effect.sync(() => {
+    const text = entries.get(entry);
+
+    return text === undefined ? [] : Object.keys(decodeDocument(JSON.parse(text))).toSorted();
+  });
+
+  return {
+    keyring,
+    persisted,
+    release: Effect.sync(() => {
+      Deferred.doneUnsafe(release, Effect.undefined);
+    }),
+    // Waits for the third write, which is the undoing, to have landed.
+    undone: eventually(
+      persisted.pipe(Effect.map((names) => ({ names, writes }))),
+      (now) => now.writes === 3 && now.names.join(",") === "base"
+    ),
+    writes: () => writes,
+  };
+};
 
 describe("Credentials (CRED-1, CRED-3)", () => {
   it.live(
@@ -243,7 +322,7 @@ describe("Credentials (CRED-1, CRED-3)", () => {
       )
   );
 
-  it.live(
+  it.effect(
     "CRED-1: a keyring that refuses the probe, or does not answer it in time, leaves them in the file",
     () =>
       inTempDirectory((dataDir) =>
@@ -252,18 +331,22 @@ describe("Credentials (CRED-1, CRED-3)", () => {
             Effect.succeed(store)
           );
 
-          const started = Date.now();
+          const { asked, keyring } = silentKeyring();
 
-          const silent = yield* withCredentials(dataDir, silentKeyring, ({ store }) =>
-            Effect.succeed(store)
+          const silent = yield* Effect.forkChild(
+            withCredentials(dataDir, keyring, ({ store }) => Effect.succeed(store))
           );
 
+          yield* Deferred.await(asked);
+
+          // It gives up on the keyring, however long the keyring takes.
           assert.strictEqual(refusing, "file");
-          assert.strictEqual(silent, "file");
-          assert.isBelow(Date.now() - started, 5000, "it gave up on the keyring");
+          assert.strictEqual(
+            yield* withinClock("5 seconds", "giving up on the keyring", Fiber.join(silent)),
+            "file"
+          );
         })
-      ),
-    { timeout: 10_000 }
+      )
   );
 
   it.live("CRED-1: the real keyring's probe decides as the platform answers", () =>
@@ -380,7 +463,9 @@ describe("Credentials (CRED-1, CRED-3)", () => {
               const cancelling = yield* Effect.forkChild(Fiber.interrupt(first));
               const second = yield* Effect.forkChild(credentials.set("b", Redacted.make("two")));
 
-              yield* Effect.sleep("50 millis");
+              // Nothing real is awaited before the second set reaches the Change permit
+              // behind the first, so a few scheduler turns are all it takes.
+              yield* Effect.repeat(Effect.yieldNow, { times: 100 });
               Deferred.doneUnsafe(release, Effect.undefined);
               yield* Fiber.join(cancelling);
               yield* Fiber.join(second);
@@ -401,6 +486,293 @@ describe("Credentials (CRED-1, CRED-3)", () => {
           );
         })
       )
+  );
+
+  it.effect(
+    "CRED-1: a write that never ends costs its caller the bound, fails later ones at once, and never overlaps them",
+    () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const { keyring: inner } = memoryKeyring();
+          const entered = Deferred.makeUnsafe<undefined>();
+          let asked = 0;
+
+          // Answers the probe, and then never answers a write.
+          const keyring: Keyring = {
+            get: inner.get,
+            set: async () => {
+              asked += 1;
+              Deferred.doneUnsafe(entered, Effect.undefined);
+              await stalled();
+            },
+          };
+
+          yield* withCredentials(
+            dataDir,
+            keyring,
+            (credentials) =>
+              Effect.gen(function* () {
+                const writing = yield* Effect.forkChild(
+                  Effect.flip(credentials.set("a", Redacted.make("one")))
+                );
+
+                yield* Deferred.await(entered);
+
+                // The caller waits the whole bound, and not a moment less.
+                yield* TestClock.adjust("199 millis");
+                assert.isUndefined(writing.pollUnsafe(), "the caller was told before the bound");
+                yield* TestClock.adjust("1 milli");
+                assert.instanceOf(
+                  yield* finishes(writing, "the first set"),
+                  CredentialsUnavailable
+                );
+
+                // The clock stands still from here, so a write that was to wait a bound of
+                // its own would never finish, and `finishes` calls that hung.
+                const second = yield* Effect.forkChild(
+                  Effect.flip(credentials.set("b", Redacted.make("two")))
+                );
+
+                const third = yield* Effect.forkChild(Effect.flip(credentials.delete("a")));
+
+                assert.instanceOf(yield* finishes(second, "a later set"), CredentialsUnavailable);
+                assert.instanceOf(yield* finishes(third, "a later delete"), CredentialsUnavailable);
+                assert.strictEqual(asked, 1, "the keyring was never asked for a second write");
+                assert.deepStrictEqual(
+                  yield* credentials.names,
+                  [],
+                  "live holds only what was kept"
+                );
+              }),
+            "200 millis"
+          );
+        })
+      )
+  );
+
+  it.live(
+    "CRED-1: a write that ends after its caller was told it failed is undone, so the store is what live is, now and after a restart",
+    () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const locked = lockedOnSecondWrite(dataDir, "keeps");
+
+          yield* withCredentials(
+            dataDir,
+            locked.keyring,
+            (credentials) =>
+              Effect.gen(function* () {
+                yield* credentials.set("base", Redacted.make("one"));
+
+                const failure = yield* Effect.flip(credentials.set("a", Redacted.make("two")));
+
+                assert.instanceOf(failure, CredentialsUnavailable);
+
+                yield* locked.release;
+
+                // The keyring keeps "a" for a moment, and then has it taken back.
+                yield* locked.undone;
+                assert.strictEqual(locked.writes(), 3);
+                assert.deepStrictEqual(
+                  (yield* credentials.names).map(({ name }) => name),
+                  ["base"]
+                );
+
+                // The permit is free again, once the undoing has ended.
+                yield* credentials.set("b", Redacted.make("three"));
+                assert.deepStrictEqual(yield* locked.persisted, ["b", "base"]);
+              }),
+            "200 millis"
+          );
+
+          const after = yield* withCredentials(dataDir, locked.keyring, heldBy);
+
+          assert.deepStrictEqual(
+            after.map(({ name }) => name),
+            ["b", "base"]
+          );
+        })
+      )
+  );
+
+  it.live("CRED-1: a store that undoes a write leaves what a restart reads equal to live", () =>
+    inTempDirectory((dataDir) =>
+      Effect.gen(function* () {
+        const locked = lockedOnSecondWrite(dataDir, "keeps");
+
+        const live = yield* withCredentials(
+          dataDir,
+          locked.keyring,
+          (credentials) =>
+            Effect.gen(function* () {
+              yield* credentials.set("base", Redacted.make("one"));
+              yield* Effect.flip(credentials.set("a", Redacted.make("two")));
+              yield* locked.release;
+              yield* locked.undone;
+
+              return yield* heldBy(credentials);
+            }),
+          "200 millis"
+        );
+
+        assert.deepStrictEqual(yield* withCredentials(dataDir, locked.keyring, heldBy), live);
+      })
+    )
+  );
+
+  it.live("CRED-1: a write that itself fails after the caller was told needs no undoing", () =>
+    inTempDirectory((dataDir) =>
+      Effect.gen(function* () {
+        const locked = lockedOnSecondWrite(dataDir, "fails");
+
+        yield* withCredentials(
+          dataDir,
+          locked.keyring,
+          (credentials) =>
+            Effect.gen(function* () {
+              yield* credentials.set("base", Redacted.make("one"));
+              yield* Effect.flip(credentials.set("a", Redacted.make("two")));
+              yield* locked.release;
+              yield* Effect.sleep("100 millis");
+
+              assert.strictEqual(locked.writes(), 2, "nothing was written to undo it");
+              assert.deepStrictEqual(yield* locked.persisted, ["base"]);
+
+              yield* credentials.set("b", Redacted.make("three"));
+              assert.deepStrictEqual(yield* locked.persisted, ["b", "base"]);
+            }),
+          "200 millis"
+        );
+      })
+    )
+  );
+
+  it.live(
+    "CRED-1: a store that cannot be put back is unavailable for writes until a restart, and still read",
+    () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const locked = lockedOnSecondWrite(dataDir, "keeps, but cannot be undone");
+
+          yield* withCredentials(
+            dataDir,
+            locked.keyring,
+            (credentials) =>
+              Effect.gen(function* () {
+                yield* credentials.set("base", Redacted.make("one"));
+                yield* Effect.flip(credentials.set("a", Redacted.make("two")));
+                yield* locked.release;
+                yield* eventually(Effect.sync(locked.writes), (writes) => writes === 3);
+
+                // A write now either finds the store given up on, or waits for the permit
+                // the failed undoing still holds and then finds it so.
+                const set = yield* Effect.flip(credentials.set("b", Redacted.make("three")));
+                const deleted = yield* Effect.flip(credentials.delete("base"));
+
+                assert.instanceOf(set, CredentialsUnavailable);
+                assert.instanceOf(deleted, CredentialsUnavailable);
+                assert.strictEqual(locked.writes(), 3, "nothing else was written");
+                assert.deepStrictEqual(
+                  (yield* credentials.names).map(({ name }) => name),
+                  ["base"]
+                );
+                assert.strictEqual(
+                  Redacted.value((yield* credentials.all).get("base") ?? Redacted.make("")),
+                  "one"
+                );
+              }),
+            "200 millis"
+          );
+        })
+      )
+  );
+
+  it.effect("CRED-1: a write already queued when an undoing fails is refused, not written", () =>
+    inTempDirectory((dataDir) =>
+      Effect.gen(function* () {
+        const locked = lockedOnSecondWrite(dataDir, "keeps, but cannot be undone");
+
+        yield* withCredentials(
+          dataDir,
+          locked.keyring,
+          (credentials) =>
+            Effect.gen(function* () {
+              yield* credentials.set("base", Redacted.make("one"));
+
+              const first = yield* Effect.forkChild(
+                Effect.flip(credentials.set("a", Redacted.make("two")))
+              );
+
+              yield* untilTrue(Effect.sync(locked.writes), (writes) => writes === 2);
+
+              // Queued behind the first before it is overdue, so it waits for the permit
+              // and is still waiting when the first's undoing fails.
+              yield* TestClock.adjust("150 millis");
+
+              const queued = yield* Effect.forkChild(
+                Effect.exit(credentials.set("b", Redacted.make("three")))
+              );
+
+              // Nothing real is awaited before it reaches the permit, so a few scheduler
+              // turns are all it takes.
+              yield* Effect.repeat(Effect.yieldNow, { times: 100 });
+              yield* TestClock.adjust("50 millis");
+
+              assert.instanceOf(yield* finishes(first, "the first set"), CredentialsUnavailable);
+              yield* locked.release;
+
+              const outcome = yield* finishes(queued, "the queued set");
+
+              assert.isTrue(Exit.isFailure(outcome), "the queued write was refused");
+              assert.strictEqual(locked.writes(), 3, "nothing was written after the undoing");
+              assert.deepStrictEqual(
+                (yield* credentials.names).map(({ name }) => name),
+                ["base"]
+              );
+            }),
+          "200 millis"
+        );
+      })
+    )
+  );
+
+  it.effect("CRED-1: closing the service does not wait for a write that never ends", () =>
+    inTempDirectory((dataDir) =>
+      Effect.gen(function* () {
+        const entered = Deferred.makeUnsafe<undefined>();
+
+        const keyring: Keyring = {
+          get: async () => await Promise.resolve(null),
+          set: async () => {
+            Deferred.doneUnsafe(entered, Effect.undefined);
+            await stalled();
+          },
+        };
+
+        const running = yield* Effect.forkChild(
+          withCredentials(
+            dataDir,
+            keyring,
+            (credentials) =>
+              Effect.gen(function* () {
+                const writing = yield* Effect.forkChild(
+                  Effect.flip(credentials.set("a", Redacted.make("one")))
+                );
+
+                yield* Deferred.await(entered);
+                yield* TestClock.adjust("100 millis");
+
+                return yield* finishes(writing, "the write's caller");
+              }),
+            "100 millis"
+          )
+        );
+
+        // The caller has been told, and the write goes on. Closing moves no clock, so a
+        // close that waited for the write would never end.
+        assert.instanceOf(yield* finishes(running, "the service, closed"), CredentialsUnavailable);
+      })
+    )
   );
 
   it.live("CRED-1: a file already there wins over a keyring that appears later", () =>

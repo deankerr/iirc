@@ -1,3 +1,4 @@
+import type { Entry } from "@iirc/session/entry";
 import { Data, Schema } from "effect";
 
 /** Another process holds this data directory, so two Daemons would share one Log. */
@@ -45,7 +46,7 @@ export class EntryNotFound extends Data.TaggedError("EntryNotFound")<{
 
 /** Only a Line or a Dropped Entry has bytes to redact, and this Entry is `kind` (LOG-7). */
 export class EntryNotRedactable extends Data.TaggedError("EntryNotRedactable")<{
-  readonly kind: "Change" | "Connection" | "Daemon" | "Deadline";
+  readonly kind: Exclude<Entry["_tag"], "Dropped" | "Line">;
   readonly sequence: number;
 }> {}
 

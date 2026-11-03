@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+
 import { Effect } from "effect";
 
 import { checkDeadline, inBudget } from "./budget.ts";
@@ -10,9 +12,19 @@ import { serveReader } from "./reader-server.ts";
 // What each row a statement looks at costs, which `reader.test.ts` counts on.
 const rowMillis = 5;
 
+// A file the test names, created when the first row is costed, so that the test knows a
+// read is running and is not left to guess from the time it was sent.
+const reading = process.env.IIRC_READING_MARKER;
+let announced = false;
+
 Effect.runFork(
   serveReader((database) => {
     database.function(inBudget, (deadline: number) => {
+      if (!announced && reading !== undefined) {
+        announced = true;
+        writeFileSync(reading, "reading");
+      }
+
       Bun.sleepSync(rowMillis);
 
       return checkDeadline(deadline);

@@ -513,7 +513,9 @@ export const testWire = (
   });
 
 /**
- * Re-runs an effect until its value satisfies a predicate.
+ * Re-runs an effect until its value satisfies a predicate. It waits for a signal and not
+ * for a speed, so the limit is there only to end a signal that never comes, and it is
+ * long enough that a busy machine cannot reach it.
  * @param check - The effect to re-run.
  * @param done - Whether a value is the one being waited for.
  * @param limit - How long to keep trying.
@@ -522,7 +524,7 @@ export const testWire = (
 export const eventually = <A, E, R>(
   check: Effect.Effect<A, E, R>,
   done: (value: A) => boolean,
-  limit: Duration.Input = "2 seconds"
+  limit: Duration.Input = "30 seconds"
 ) =>
   check.pipe(
     Effect.repeat({ schedule: Schedule.spaced("5 millis"), until: done }),

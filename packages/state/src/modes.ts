@@ -15,70 +15,6 @@ export interface ModeTypes {
   readonly flags: string;
 }
 
-/** The two tokens as a Session last heard them, where `undefined` is never sent. */
-export interface ModeTokens {
-  readonly chanmodes?: string | undefined;
-  readonly prefix?: string | undefined;
-}
-
-// KNOW-2's defaults, for a Network that never sends a token.
-const defaultPrefix = "(ov)@+";
-const defaultChanmodes = "beI,k,l";
-
-const prefixModes = /^\((?<modes>[^)]*)\)/u;
-
-// `PREFIX=` means no prefixes at all, which differs from no token (KNOW-2). A value that
-// is neither has no letters to offer, so the default stands in for it.
-const prefixLetters = (prefix: string) => {
-  if (prefix === "") {
-    return "";
-  }
-
-  return (
-    prefixModes.exec(prefix)?.groups?.modes ?? prefixModes.exec(defaultPrefix)?.groups?.modes ?? ""
-  );
-};
-
-/**
- * Reads which letters take parameters from `PREFIX` and `CHANMODES`, with KNOW-2's
- * defaults, `PREFIX=(ov)@+` and `CHANMODES=beI,k,l`, for a token never sent.
- * @param tokens - The values a Session last heard, if any.
- * @returns The letters of each kind.
- */
-export const modeTypes = ({ chanmodes, prefix }: ModeTokens): ModeTypes => {
-  const [list = "", always = "", whenSet = "", flags = ""] = (chanmodes ?? defaultChanmodes).split(
-    ","
-  );
-
-  return { always, flags, list, prefix: prefixLetters(prefix ?? defaultPrefix), whenSet };
-};
-
-const tokenName = /^(?<removed>-?)(?<name>PREFIX|CHANMODES)(?:=(?<value>.*))?$/u;
-
-/**
- * Applies the `PREFIX` and `CHANMODES` tokens of one `RPL_ISUPPORT` (KNOW-2). A token
- * with no value has an empty one, and `-TOKEN` removes it, so its default applies again.
- * @param current - The tokens so far in this Session.
- * @param params - The `005`'s parameters after its own Target, prose and all.
- * @returns The tokens after it.
- */
-export const withModeTokens = (current: ModeTokens, params: readonly string[]): ModeTokens => {
-  let { chanmodes, prefix } = current;
-
-  for (const param of params) {
-    const groups = tokenName.exec(param)?.groups;
-    const value = groups?.removed === "-" ? undefined : (groups?.value ?? "");
-
-    if (groups?.name === "PREFIX") {
-      prefix = value;
-    } else if (groups?.name === "CHANMODES") {
-      chanmodes = value;
-    }
-  }
-
-  return { chanmodes, prefix };
-};
-
 /** One letter of a `MODE`, set or unset, with the parameter it took if it took one. */
 export interface ModeChange {
   readonly adding: boolean;
@@ -111,7 +47,7 @@ const mayGoWithout = (types: ModeTypes, letter: string, adding: boolean) =>
  * `+ok nick key` gives the nick to `o` and the key to `k` (KNOW-6). A letter the Network
  * never advertised takes no parameter.
  * @param params - The `MODE`'s parameters after its Target: the letters, then the rest.
- * @param types - Which letters take parameters, from {@link modeTypes}.
+ * @param types - Which letters take parameters, as a Session's `isupport.modes` holds them.
  * @returns Each change, and whether the parameters added up.
  */
 export const parseModes = (params: readonly string[], types: ModeTypes): ParsedModes => {

@@ -1,17 +1,16 @@
+import { inspect, start } from "@iirc/lifecycle";
+import type { ConnectionView, Login, NetworkSnapshot } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
+import { channelKey } from "@iirc/protocol/join";
 import { parseFrame } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
-import { loginSign } from "@iirc/protocol/login";
-import { modeTypes, parseModes, withModeTokens } from "@iirc/protocol/mode";
-import type { ModeTokens } from "@iirc/protocol/mode";
 import { nickCandidates } from "@iirc/protocol/nick";
-import { isRefusal } from "@iirc/protocol/refusal";
-import { initialState, reduce } from "@iirc/state";
-import type { JoinFailure, SessionState } from "@iirc/state";
+import { casefold, channelOf, initialState, stepState } from "@iirc/state";
+import type { IrcState, JoinFailure, StateChange } from "@iirc/state";
 import type { Array as Arr } from "effect";
 
-import { connectCommandCause, identifyCause } from "./credentials.ts";
 import type { Entry, Ircd, NetworkId } from "./entry.ts";
+import { stepEntry } from "./events.ts";
 import { redactedText } from "./redact.ts";
 
 /** A place in the Log. */
@@ -33,54 +32,19 @@ export interface Closing {
 }
 
 /**
- * How far a Connection got towards a Session, by the machine's own rules, so that the two
- * folds agree on when a Session began. `Abandoned` is a Connection the machine gave up on
- * before its welcome, which no later `001` can turn into a Session.
+ * A Connection with no end recorded yet. It may not have reached the Ircd. How far it got,
+ * and how its login went, are its machine's to say, folded over its own Entries as the
+ * host stepped it, and read through {@link connectionView}. What is kept here beside the
+ * machine is what only the Log knows: who decided to end it, and where it last was.
  */
-export type Registration =
-  | { readonly _tag: "Connecting" }
-  | {
-      readonly _tag: "Registering";
-      /** Which of the `attempt`'s nicks is being tried (CONN-4). */
-      readonly nickIndex: number;
-    }
-  | {
-      readonly _tag: "Welcomed";
-      /** When its `001` arrived, which is when its Session began. */
-      readonly at: number;
-    }
-  | { readonly _tag: "Abandoned" };
-
-/**
- * Where a login to services stands (CONN-6). `waiting` starts with an `IDENTIFY` written,
- * and the rest are how the wait ended, with the service's own words where it gave any.
- */
-export interface Login {
-  readonly state: "none" | "waiting" | "succeeded" | "failed" | "timedOut";
-  readonly text?: string;
-}
-
-/** How far a Connection's login sequence has got, by the machine's own rules (CONN-6). */
-export interface LoginProgress extends Login {
-  /** How many Lines its `attempt` said the sequence holds. */
-  readonly lines: number;
-  /** How many of them have been written or Dropped. */
-  readonly seen: number;
-  /** The nicks whose `NOTICE` can be a sign, as its `attempt` named them. */
-  readonly services: readonly string[];
-}
-
-/** A Connection with no end recorded yet. It may not have reached the Ircd. */
 export interface LiveConnection {
   /** Set once the Daemon has decided to end it. */
   readonly closing: Closing | undefined;
   /** Its latest Entry, which is where it ended if the process was killed. */
   readonly last: Moment;
-  readonly login: LoginProgress;
+  /** Its machine, which only {@link connectionView} reads. */
+  readonly machine: NetworkSnapshot;
   readonly network: NetworkId;
-  /** The nicks its `attempt` named, in the order they are tried. */
-  readonly nicks: readonly string[];
-  readonly registration: Registration;
   /** The sequence of its `attempt` Entry. */
   readonly sequence: number;
 }
@@ -150,12 +114,16 @@ export interface Standing {
   readonly asked: ReadonlyMap<string, JoinAsked>;
   /** The last `attempt`, which outlives its Connection. */
   readonly attempt: Attempted | undefined;
-  /** Channels Self is in now, with the spelling the Ircd used. */
-  readonly channels: ReadonlyMap<string, string>;
   /** The Connection under way, if any. */
   readonly connection: LiveConnection | undefined;
   /** The Network's latest Gap, which is open while it has no `ended`. */
   readonly gap: Gap | undefined;
+  /**
+   * What the current Session's Ircd has said of Self, its Channels, and `RPL_ISUPPORT`,
+   * as `@iirc/state` folds it. Only the welcome the machine took begins a Session, and it
+   * starts again from nothing with every `attempt` and every end (LIVE-6).
+   */
+  readonly irc: IrcState;
   /** Each Channel's last `JOIN` failure, until Self gets in. These outlive Connections. */
   readonly joinFailures: ReadonlyMap<string, HeldJoinFailure>;
   /**
@@ -167,8 +135,6 @@ export interface Standing {
   readonly lagChecks: readonly LagCheck[];
   /** The round trip of the latest lag check answered on this Connection. */
   readonly lagMillis: number | undefined;
-  /** `PREFIX` and `CHANMODES` as this Session last heard them, to read a `MODE` by (KNOW-6). */
-  readonly modeTokens: ModeTokens;
   /** The Network this belongs to, which is whichever one it first heard of. */
   readonly network: NetworkId | undefined;
   /** `NICKLEN` from the last Session that gave one (CONN-4). */
@@ -177,8 +143,6 @@ export interface Standing {
   readonly recent: readonly EndedConnection[];
   /** The refusal in force, until a Session is reached. */
   readonly refusal: Refusal | undefined;
-  /** Self's nick in the current Session. */
-  readonly self: string | undefined;
 }
 
 /** Each Network's {@link Standing}. */
@@ -188,6 +152,8 @@ export type Standings = ReadonlyMap<NetworkId, Standing>;
 export interface StandingStep {
   readonly after: Standing;
   readonly before: Standing;
+  /** What the Line did to the Session's state, as `@iirc/state` named it. */
+  readonly changes: readonly StateChange[];
   readonly entry: Entry;
   /** What a Line Entry says, once parsed, or nothing if it says nothing. */
   readonly line: Line | undefined;
@@ -253,12 +219,9 @@ type DaemonEntry = Extract<Entry, { readonly _tag: "Daemon" }>;
 
 type LineEntry = Extract<Entry, { readonly _tag: "Line" }>;
 
-type DeadlineEntry = Extract<Entry, { readonly _tag: "Deadline" }>;
-
-type DroppedEntry = Extract<Entry, { readonly _tag: "Dropped" }>;
-
-// A Network chooses what goes in these, so each is bounded and drops its oldest. A real
-// Network stops far short of this many Channels, and past it, only that Network suffers.
+// A Network chooses what goes in these, so each is bounded and drops its oldest, as
+// `@iirc/state` bounds the Channels Self is in. A real Network stops far short of this many
+// Channels, and past it, only that Network suffers.
 const heldChannels = 1024;
 
 // Enough for any doubling to reach its cap, so a count that stops here delays the same.
@@ -277,33 +240,25 @@ const noChannels = new Map<string, never>();
 export const noStanding: Standing = {
   asked: noChannels,
   attempt: undefined,
-  channels: noChannels,
   connection: undefined,
   gap: undefined,
+  irc: initialState,
   joinFailures: noChannels,
   kicked: noChannels,
   lagChecks: [],
   lagMillis: undefined,
-  modeTokens: {},
   network: undefined,
   nickLength: undefined,
   recent: [],
   refusal: undefined,
-  self: undefined,
 };
 
 /** No Networks at all. */
 export const noStandings: Standings = new Map();
 
-/**
- * The form Channel names are compared in. ASCII lower-casing for now, which can only
- * split names and never merge them. Casefolding proper arrives with KNOW-3 in
- * milestone 2.
- * @param name - A Channel name, as spelled anywhere.
- * @returns What every spelling of it shares.
- */
-export const channelKey = (name: string): string =>
-  name.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+// Channel names are compared the way the protocol package says, and hosts that read
+// Standing get the same comparison from here.
+export { channelKey } from "@iirc/protocol/join";
 
 const withHeld = <Value>(
   held: ReadonlyMap<string, Value>,
@@ -325,32 +280,114 @@ const withHeld = <Value>(
   return next;
 };
 
-const withoutHeld = <Value>(
+// What outlives a Session is keyed by `channelKey`, which splits whatever any mapping a
+// Session can have splits, as each of them lower-cases `A` to `Z` first. So a key is
+// compared by folding it again under the mapping in force when it is read (KNOW-3), and a
+// `CASEMAPPING` mid-Session, or a new Session with another, leaves nothing to rekey. Two
+// keys that one mapping makes the same Channel are aliases, and the newest stands for both.
+// Beyond `ascii`, only names holding one of these can have an alias.
+const aliasable = /[[\]\\~{}|^]/u;
+
+const keysFor = <Value>(
   held: ReadonlyMap<string, Value>,
-  key: string
+  irc: IrcState,
+  name: string
+): readonly string[] => {
+  const key = channelKey(name);
+  const { casemapping } = irc.isupport;
+
+  if (casemapping === "ascii" || !aliasable.test(key)) {
+    return held.has(key) ? [key] : [];
+  }
+
+  const folded = casefold(casemapping, key);
+
+  return [...held.keys()].filter((other) => casefold(casemapping, other) === folded);
+};
+
+// What is held for the Channel by that name under the mapping in force, the newest of
+// any aliases.
+const heldFor = <Value>(held: ReadonlyMap<string, Value>, irc: IrcState, name: string) => {
+  const key = keysFor(held, irc, name).at(-1);
+
+  return key === undefined ? undefined : held.get(key);
+};
+
+// Everything held, by the name the mapping in force makes of its key. A key that comes
+// later replaces an alias before it, so what stands is the newest, as `heldFor` finds it.
+// A host that looks up many names builds this once, where `heldFor` scans for each.
+const foldedHeld = <Value>(
+  held: ReadonlyMap<string, Value>,
+  irc: IrcState
 ): ReadonlyMap<string, Value> => {
-  if (!held.has(key)) {
+  const { casemapping } = irc.isupport;
+  const folded = new Map<string, Value>();
+
+  for (const [key, value] of held) {
+    folded.set(casefold(casemapping, key), value);
+  }
+
+  return folded;
+};
+
+const foldedFor = <Value>(folded: ReadonlyMap<string, Value>, irc: IrcState, name: string) =>
+  folded.get(casefold(irc.isupport.casemapping, name));
+
+const withoutChannel = <Value>(
+  held: ReadonlyMap<string, Value>,
+  irc: IrcState,
+  name: string
+): ReadonlyMap<string, Value> => {
+  const keys = keysFor(held, irc, name);
+
+  if (keys.length === 0) {
     return held;
   }
 
   const next = new Map(held);
 
-  next.delete(key);
+  for (const key of keys) {
+    next.delete(key);
+  }
 
   return next;
 };
 
-// What belongs to one Session and is never carried over (LIVE-6). `NICKLEN` is the only
-// `RPL_ISUPPORT` token held, and it stays, because CONN-4 wants the last one given.
+// Held under the name as it was spelled now, in place of any alias, as the newest.
+const withChannel = <Value>(
+  held: ReadonlyMap<string, Value>,
+  irc: IrcState,
+  name: string,
+  value: Value
+): ReadonlyMap<string, Value> => withHeld(withoutChannel(held, irc, name), channelKey(name), value);
+
+// What belongs to one Session and is never carried over (LIVE-6). `nickLength` stays,
+// because CONN-4 wants the last `NICKLEN` given.
 const withoutSession = (standing: Standing): Standing => ({
   ...standing,
   asked: noChannels,
-  channels: noChannels,
+  irc: initialState,
   lagChecks: [],
   lagMillis: undefined,
-  modeTokens: {},
-  self: undefined,
 });
+
+/**
+ * What the current Connection's machine says of it, with nothing under way.
+ * @param standing - The Network's Standing.
+ * @returns How far it got, how its login stands, and whether joining may go on, or
+ * `undefined` with no Connection under way.
+ */
+export const connectionView = ({ connection }: Standing): ConnectionView | undefined =>
+  connection === undefined ? undefined : inspect(connection.machine);
+
+// A Session's welcome outlives the decision to close it, so a Session the Daemon left is
+// still measured from its `001`, and only the `closed` Entry ends it.
+const welcomedAt = (connection: LiveConnection | undefined) => {
+  const registration =
+    connection === undefined ? undefined : inspect(connection.machine).registration;
+
+  return registration?._tag === "Welcomed" ? registration.at : undefined;
+};
 
 /**
  * When the current Session began, if there is one.
@@ -358,7 +395,7 @@ const withoutSession = (standing: Standing): Standing => ({
  * @returns The time of its `001`, or `undefined` with no Session under way.
  */
 export const sessionSince = ({ connection }: Standing): number | undefined =>
-  connection?.registration._tag === "Welcomed" ? connection.registration.at : undefined;
+  welcomedAt(connection);
 
 const ended = (
   standing: Standing,
@@ -400,8 +437,10 @@ const endedWithoutClose = (standing: Standing, reason: string): Standing =>
         reason: standing.connection.closing?.reason ?? reason,
       });
 
+// The machine runs on what the `attempt` recorded, as it did when the host stepped it.
 const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
-  const { at, ircd, loginLines, network, nicks, sequence, services } = entry;
+  const { at, ircd, loginLines, network, realname, sequence, services, tuning, username } = entry;
+  const machine = stepEntry(start({ loginLines, realname, services, tuning, username }), entry);
 
   return {
     ...withoutSession(endedWithoutClose(standing, killed)),
@@ -409,34 +448,25 @@ const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
     connection: {
       closing: undefined,
       last: { at, sequence },
-      login: { lines: loginLines, seen: 0, services, state: "none" },
+      machine: machine.next,
       network,
-      nicks,
-      registration: { _tag: "Connecting" },
       sequence,
     },
   };
 };
 
-const withLast = (
-  standing: Standing,
-  connection: LiveConnection,
-  { at, sequence }: Moment
-): Standing => ({
-  ...standing,
-  connection: { ...connection, last: { at, sequence } },
+// Every Entry of a Connection under way moves its machine, as it moved the host's, and is
+// where the Connection last was.
+const withEntry = (connection: LiveConnection, entry: Entry): LiveConnection => ({
+  ...connection,
+  last: { at: entry.at, sequence: entry.sequence },
+  machine: stepEntry(connection.machine, entry).next,
 });
 
-// The machine registers once the transport is up, unless the `attempt` named no nick.
-const afterOpened = (connection: LiveConnection): Registration => {
-  if (connection.registration._tag !== "Connecting") {
-    return connection.registration;
-  }
-
-  return connection.nicks.length > 0
-    ? { _tag: "Registering", nickIndex: 0 }
-    : { _tag: "Abandoned" };
-};
+const withConnection = (standing: Standing, entry: Entry): Standing =>
+  standing.connection === undefined
+    ? standing
+    : { ...standing, connection: withEntry(standing.connection, entry) };
 
 // The first decision to close says why, and a chosen one stays chosen. Once any is made,
 // no welcome can start a Session, which is what the machine hears as LEAVING or CLOSING.
@@ -459,11 +489,13 @@ const afterConnection = (standing: Standing, entry: ConnectionEntry): Standing =
 
   switch (entry.phase) {
     case "opened": {
-      return withLast(standing, { ...connection, registration: afterOpened(connection) }, entry);
+      return { ...standing, connection: withEntry(connection, entry) };
     }
 
     case "closing": {
-      return withLast(standing, { ...connection, closing: afterClosing(connection, entry) }, entry);
+      const closing = afterClosing(connection, entry);
+
+      return { ...standing, connection: { ...withEntry(connection, entry), closing } };
     }
 
     case "closed": {
@@ -501,60 +533,12 @@ const afterAsked = (standing: Standing, { at }: Entry, channels: string | undefi
   let { asked } = standing;
 
   for (const name of channels?.split(",") ?? []) {
-    const key = channelKey(name);
+    const count = (heldFor(asked, standing.irc, name)?.count ?? 0) + 1;
 
-    asked = withHeld(asked, key, { at, count: (asked.get(key)?.count ?? 0) + 1 });
+    asked = withChannel(asked, standing.irc, name, { at, count });
   }
 
   return { ...standing, asked };
-};
-
-const withLogin = (standing: Standing, login: LoginProgress): Standing =>
-  standing.connection === undefined
-    ? standing
-    : { ...standing, connection: { ...standing.connection, login } };
-
-// Each Line of the login sequence counts once it is written or Dropped, and only an
-// `IDENTIFY` written starts a wait, as the machine has it (CONN-6).
-const afterLoginLine = (
-  standing: Standing,
-  { cause }: LineEntry | DroppedEntry,
-  written: boolean
-): Standing => {
-  const login = standing.connection?.login;
-
-  if (login === undefined || (cause !== identifyCause && cause !== connectCommandCause)) {
-    return standing;
-  }
-
-  const identified = written && cause === identifyCause && login.state === "none";
-
-  return withLogin(standing, {
-    ...login,
-    seen: login.seen + 1,
-    ...(identified && { state: "waiting" }),
-  });
-};
-
-// A sign settles a wait, and one that comes after the wait ran out still says how the
-// login went, which is what the Owner wants to see (CONN-6).
-const afterLoginSign = (standing: Standing, line: Line): Standing => {
-  const login = standing.connection?.login;
-
-  if (login?.state !== "waiting" && login?.state !== "timedOut") {
-    return standing;
-  }
-
-  const sign = loginSign(line, login.services);
-
-  if (sign === undefined) {
-    return standing;
-  }
-
-  const { lines, seen, services } = login;
-  const state = sign._tag === "LoggedIn" ? "succeeded" : "failed";
-
-  return withLogin(standing, { lines, seen, services, state, text: sign.text });
 };
 
 const afterOutbound = (standing: Standing, entry: LineEntry, line: Line): Standing => {
@@ -587,64 +571,16 @@ const afterPong = (standing: Standing, { at }: Entry, line: Line): Standing => {
       };
 };
 
+// A Session began, which ends the Gap before it and any refusal (LIVE-5, LIVE-10).
 const afterWelcome = (standing: Standing, { at, sequence }: Moment): Standing => {
-  const { connection, gap } = standing;
+  const { gap } = standing;
 
-  return connection === undefined
-    ? standing
-    : {
-        ...standing,
-        connection: { ...connection, registration: { _tag: "Welcomed", at } },
-        gap:
-          gap === undefined || gap.ended !== undefined ? gap : { ...gap, ended: { at, sequence } },
-        refusal: undefined,
-      };
+  return {
+    ...standing,
+    gap: gap === undefined || gap.ended !== undefined ? gap : { ...gap, ended: { at, sequence } },
+    refusal: undefined,
+  };
 };
-
-// `437` also applies to Channels, so it is a nick's only when it names the one being tried.
-const rejectsNick: ReadonlySet<string> = new Set(["432", "433", "436"]);
-
-/** What an inbound Line does to a Connection that is registering, by the machine's rules. */
-type RegistrationStep =
-  | { readonly _tag: "Abandon" }
-  | { readonly _tag: "NextNick"; readonly nickIndex: number }
-  | { readonly _tag: "Welcome" }
-  | { readonly _tag: "Nothing" };
-
-const nothing: RegistrationStep = { _tag: "Nothing" };
-
-// In the machine's order: a nick refused, a refusal, any other `ERROR`, then a welcome that
-// names Self. A welcome after the Daemon decided to close starts no Session (LIVE-11).
-const registrationStep = (connection: LiveConnection | undefined, line: Line): RegistrationStep => {
-  if (connection?.registration._tag !== "Registering") {
-    return nothing;
-  }
-
-  const { nickIndex } = connection.registration;
-  const { command, params } = line;
-
-  if (
-    rejectsNick.has(command) ||
-    (command === "437" && params[1] === connection.nicks[nickIndex])
-  ) {
-    return nickIndex + 1 < connection.nicks.length
-      ? { _tag: "NextNick", nickIndex: nickIndex + 1 }
-      : { _tag: "Abandon" };
-  }
-
-  if (command === "ERROR" || isRefusal(command, params)) {
-    return { _tag: "Abandon" };
-  }
-
-  return command === "001" && params.length > 0 && connection.closing === undefined
-    ? { _tag: "Welcome" }
-    : nothing;
-};
-
-const withRegistration = (standing: Standing, registration: Registration): Standing =>
-  standing.connection === undefined
-    ? standing
-    : { ...standing, connection: { ...standing.connection, registration } };
 
 // Only a Channel we asked for has a failure worth holding. That leaves a Network nothing
 // to flood this with, and `437` also names nicks, which were never asked for.
@@ -653,195 +589,126 @@ const afterJoinFailure = (
   { at }: Entry,
   channel: string,
   failure: JoinFailure
-): Standing => {
-  const key = channelKey(channel);
-
-  return standing.asked.has(key)
-    ? {
+): Standing =>
+  heldFor(standing.asked, standing.irc, channel) === undefined
+    ? standing
+    : {
         ...standing,
-        joinFailures: withHeld(standing.joinFailures, key, {
+        joinFailures: withChannel(standing.joinFailures, standing.irc, channel, {
           ...failure,
           at,
           connection: standing.attempt?.sequence,
         }),
-      }
-    : standing;
-};
+      };
 
-const afterJoined = (standing: Standing, channel: string): Standing => {
-  const key = channelKey(channel);
+// Self is in, so nothing asked, refused, or kicked stands against the Channel any more.
+const afterJoined = (standing: Standing, channel: string): Standing => ({
+  ...standing,
+  asked: withoutChannel(standing.asked, standing.irc, channel),
+  joinFailures: withoutChannel(standing.joinFailures, standing.irc, channel),
+  kicked: withoutChannel(standing.kicked, standing.irc, channel),
+});
 
-  return {
-    ...standing,
-    asked: withoutHeld(standing.asked, key),
-    channels: withHeld(standing.channels, key, channel),
-    joinFailures: withoutHeld(standing.joinFailures, key),
-    kicked: withoutHeld(standing.kicked, key),
-  };
-};
+// What outlives the Session, or needs the Entry's place in the Log. The rest of what a
+// change says is already in the state it came with.
+const afterChange = (standing: Standing, entry: Entry, change: StateChange): Standing => {
+  switch (change._tag) {
+    case "Joined": {
+      return afterJoined(standing, change.channel);
+    }
 
-// A kick from a Channel Self is not in removes nothing, and would otherwise block it until
-// the Owner joins again.
-const afterKicked = (standing: Standing, { at, sequence }: Entry, channel: string): Standing => {
-  const key = channelKey(channel);
+    case "Kicked": {
+      const { at, sequence } = entry;
 
-  return standing.channels.has(key)
-    ? {
+      return {
         ...standing,
-        channels: withoutHeld(standing.channels, key),
-        kicked: withHeld(standing.kicked, key, { at, sequence }),
-      }
-    : standing;
-};
-
-const afterParted = (standing: Standing, channel: string | undefined): Standing =>
-  channel === undefined
-    ? standing
-    : { ...standing, channels: withoutHeld(standing.channels, channelKey(channel)) };
-
-// One Line does at most one of these, because each comes from a different command.
-const afterSelf = (
-  standing: Standing,
-  entry: LineEntry,
-  line: Line,
-  session: SessionState
-): Standing => {
-  const current = {
-    ...standing,
-    nickLength: session.nickLength ?? standing.nickLength,
-    self: session.self,
-  };
-
-  const [failure] = session.joinFailures;
-  const [joined] = session.channels;
-  const [kickedFrom] = session.kicked;
-
-  if (failure !== undefined) {
-    return afterJoinFailure(current, entry, ...failure);
-  }
-
-  if (kickedFrom !== undefined) {
-    return afterKicked(current, entry, kickedFrom);
-  }
-
-  if (joined !== undefined) {
-    return afterJoined(current, joined);
-  }
-
-  return line.command === "PART" ? afterParted(current, line.params[0]) : current;
-};
-
-// `reduce` decides what a Line did to Self. It starts from a blank Session every time and
-// the results land in maps here, because what it holds has no times, no folded names, and
-// no bound, and because a flood costs one small object instead of a copy of everything.
-const afterSaid = (standing: Standing, entry: LineEntry, line: Line): Standing => {
-  const blank: SessionState = { ...initialState, self: standing.self };
-  const session = reduce(blank, line);
-
-  return session === blank ? standing : afterSelf(standing, entry, line, session);
-};
-
-// A `KICK` may name several Channels and Users, which pair up in order, or one Channel and
-// several Users. Each pair is a kick of its own.
-const kicksOf = (line: Line): readonly Line[] => {
-  const [channels = "", users = "", ...rest] = line.params;
-  const named = channels.split(",");
-
-  return users
-    .split(",")
-    .map((user, index) => ({
-      ...line,
-      params: [named.length === 1 ? channels : (named[index] ?? ""), user, ...rest],
-    }))
-    .filter(({ params: [channel] }) => channel !== "");
-};
-
-// A Session's `PREFIX` and `CHANMODES`, which only an `RPL_ISUPPORT` changes (KNOW-2).
-const afterTokens = (standing: Standing, line: Line): Standing =>
-  line.command === "005" && standing.connection?.registration._tag === "Welcomed"
-    ? { ...standing, modeTokens: withModeTokens(standing.modeTokens, line.params.slice(1)) }
-    : standing;
-
-const afterInbound = (standing: Standing, entry: LineEntry, line: Line): Standing => {
-  const answered = afterTokens(
-    afterLoginSign(line.command === "PONG" ? afterPong(standing, entry, line) : standing, line),
-    line
-  );
-
-  const step = registrationStep(answered.connection, line);
-
-  switch (step._tag) {
-    case "Abandon": {
-      return withRegistration(answered, { _tag: "Abandoned" });
+        kicked: withChannel(standing.kicked, standing.irc, change.channel, { at, sequence }),
+      };
     }
 
-    case "NextNick": {
-      return withRegistration(answered, { _tag: "Registering", nickIndex: step.nickIndex });
+    case "JoinRefused": {
+      const { channel, numeric, text } = change;
+
+      return afterJoinFailure(standing, entry, channel, { numeric, text });
     }
 
-    case "Welcome": {
-      return afterSaid(afterWelcome(answered, entry), entry, line);
+    case "IsupportChanged": {
+      return { ...standing, nickLength: change.isupport.nickLength ?? standing.nickLength };
     }
 
-    case "Nothing": {
-      break;
+    // Self, the Channels Self is in, and their keys live in the state, and keys reach
+    // `onChannelKey` through `channelKeyChanges`.
+    case "KeyCleared":
+    case "KeySet":
+    case "NickChanged":
+    case "Parted":
+    case "Welcomed": {
+      return standing;
     }
 
     default: {
-      return step satisfies never;
+      return change satisfies never;
     }
   }
-
-  // Only a welcome names Self, so a `001` that starts no Session says nothing.
-  if (line.command === "001") {
-    return answered;
-  }
-
-  if (line.command !== "KICK") {
-    return afterSaid(answered, entry, line);
-  }
-
-  let kicked = answered;
-
-  for (const kick of kicksOf(line)) {
-    kicked = afterSaid(kicked, entry, kick);
-  }
-
-  return kicked;
 };
 
-// A registration Deadline Entry is written only once the deadline has passed, and then the
-// machine gives up on registering.
-const afterDeadline = (standing: Standing, entry: DeadlineEntry): Standing => {
-  const { connection } = standing;
+/** One Network's Standing after one Entry, and what it did to the Session's state. */
+interface Stepped {
+  readonly changes: readonly StateChange[];
+  readonly standing: Standing;
+}
 
-  if (connection === undefined) {
-    return standing;
+const noChanges: readonly StateChange[] = [];
+
+// An Entry that changed nothing in the Session's state, whatever it did to Standing.
+const saidNothing = (standing: Standing): Stepped => ({ changes: noChanges, standing });
+
+// `@iirc/state` says what a Line did, and this keeps what outlasts the Session.
+const afterHeard = (standing: Standing, entry: Entry, line: Line): Stepped => {
+  const { changes, next } = stepState(standing.irc, line);
+
+  if (next === standing.irc && changes.length === 0) {
+    return saidNothing(standing);
   }
 
-  const timedOut = entry.name === "registration" && connection.registration._tag === "Registering";
-  const loginOver = entry.name === "login" && connection.login.state === "waiting";
+  let after = next === standing.irc ? standing : { ...standing, irc: next };
 
-  const next: LiveConnection = {
-    ...connection,
-    ...(timedOut && { registration: { _tag: "Abandoned" } }),
-    ...(loginOver && { login: { ...connection.login, state: "timedOut" } }),
-  };
+  for (const change of changes) {
+    after = afterChange(after, entry, change);
+  }
 
-  return withLast(standing, next, entry);
+  return { changes, standing: after };
 };
 
-const afterLine = (standing: Standing, entry: LineEntry, line: Line | undefined): Standing => {
-  const { connection } = standing;
-  const seen = connection === undefined ? standing : withLast(standing, connection, entry);
+// Whether a Session began is the machine's to say, and the Line it began on has already
+// moved it, so `before` is the Connection as it was without that Line.
+const afterInbound = (
+  before: LiveConnection | undefined,
+  standing: Standing,
+  entry: LineEntry,
+  line: Line
+): Stepped => {
+  const answered = line.command === "PONG" ? afterPong(standing, entry, line) : standing;
+  const welcomed = welcomedAt(before) === undefined && sessionSince(answered) !== undefined;
+
+  // Only the welcome the machine took begins a Session, so one it refused names nobody.
+  if (line.command === "001" && !welcomed) {
+    return saidNothing(answered);
+  }
+
+  return afterHeard(welcomed ? afterWelcome(answered, entry) : answered, entry, line);
+};
+
+const afterLine = (standing: Standing, entry: LineEntry, line: Line | undefined): Stepped => {
+  const seen = withConnection(standing, entry);
 
   if (line === undefined) {
-    return seen;
+    return saidNothing(seen);
   }
 
   return entry.direction === "inbound"
-    ? afterInbound(seen, entry, line)
-    : afterOutbound(afterLoginLine(seen, entry, true), entry, line);
+    ? afterInbound(standing.connection, seen, entry, line)
+    : saidNothing(afterOutbound(seen, entry, line));
 };
 
 // An unparseable Line stays an Entry, but it says nothing. Nor does a cut one, because a
@@ -856,39 +723,35 @@ const readLine = (entry: Entry): Line | undefined => {
   return parsed._tag === "Line" ? parsed.line : undefined;
 };
 
-const advance = (standing: Standing, entry: Entry, line: Line | undefined): Standing => {
+const advance = (standing: Standing, entry: Entry, line: Line | undefined): Stepped => {
   if (entry._tag === "Daemon") {
-    return afterDaemon(standing, entry);
+    return saidNothing(afterDaemon(standing, entry));
   }
 
   // What the Owner wants is not what happened, and whoever reads Changes compares the two.
   if (entry._tag === "Change") {
-    return standing;
+    return saidNothing(standing);
   }
 
   if (standing.network !== undefined && standing.network !== entry.network) {
-    return standing;
+    return saidNothing(standing);
   }
 
   const own = standing.network === undefined ? { ...standing, network: entry.network } : standing;
 
   switch (entry._tag) {
     case "Connection": {
-      return afterConnection(own, entry);
+      return saidNothing(afterConnection(own, entry));
     }
 
     case "Line": {
       return afterLine(own, entry, line);
     }
 
-    case "Deadline": {
-      return afterDeadline(own, entry);
-    }
-
+    // What these do to a Connection is its machine's to say (CONN-2, CONN-6).
+    case "Deadline":
     case "Dropped": {
-      return own.connection === undefined
-        ? own
-        : afterLoginLine(withLast(own, own.connection, entry), entry, false);
+      return saidNothing(withConnection(own, entry));
     }
 
     default: {
@@ -905,7 +768,7 @@ const advance = (standing: Standing, entry: Entry, line: Line | undefined): Stan
  * @returns The Standing after that Entry.
  */
 export const reduceStanding = (standing: Standing, entry: Entry): Standing =>
-  advance(standing, entry, readLine(entry));
+  advance(standing, entry, readLine(entry)).standing;
 
 /**
  * Advances every Network's {@link Standing} by a run of Entries, parsing each Line once.
@@ -922,10 +785,10 @@ export const foldStandings = (
   const folded = new Map(standings);
 
   const advanced = (network: NetworkId, before: Standing, entry: Entry, line: Line | undefined) => {
-    const after = advance(before, entry, line);
+    const { changes, standing: after } = advance(before, entry, line);
 
     folded.set(network, after);
-    onStep?.({ after, before, entry, line });
+    onStep?.({ after, before, changes, entry, line });
   };
 
   for (const entry of entries) {
@@ -946,25 +809,8 @@ export const foldStandings = (
  * @param standing - The Network's Standing.
  * @returns The state, with the service's own words if it gave any.
  */
-export const loginOf = ({ connection }: Standing): Login => {
-  if (connection === undefined) {
-    return { state: "none" };
-  }
-
-  const { state, text } = connection.login;
-
-  return text === undefined ? { state } : { state, text };
-};
-
-/**
- * Whether joining may go on: every Line of the login sequence is out, and no login wait
- * is still running (CONN-6). Nothing waits with no Connection under way.
- * @param standing - The Network's Standing.
- * @returns Whether the login is settled.
- */
-export const isLoginSettled = ({ connection }: Standing): boolean =>
-  connection === undefined ||
-  (connection.login.seen >= connection.login.lines && connection.login.state !== "waiting");
+export const loginOf = (standing: Standing): Login =>
+  connectionView(standing)?.login ?? { state: "none" };
 
 const isStable = ({ sessionMillis }: EndedConnection, tuning: Tuning) =>
   sessionMillis !== undefined && sessionMillis >= tuning.stableAfterMillis;
@@ -1104,40 +950,122 @@ const joinRetryDelay = (asks: number, tuning: Tuning) =>
 // it waits for a later Connection (LIVE-7).
 const retriedJoinFailures: ReadonlySet<string> = new Set(["437", "471", "473", "474", "477"]);
 
-const isClosedUntilReconnect = (standing: Standing, key: string) => {
-  const failure = standing.joinFailures.get(key);
+const isClosedUntilReconnect = (standing: Standing, failure: HeldJoinFailure | undefined) =>
+  failure !== undefined &&
+  !retriedJoinFailures.has(failure.numeric) &&
+  failure.connection === standing.attempt?.sequence;
 
-  return (
-    failure !== undefined &&
-    !retriedJoinFailures.has(failure.numeric) &&
-    failure.connection === standing.attempt?.sequence
-  );
-};
+// A kick stands against a Channel unless the Owner has wanted it since (LIVE-8, CONF-5).
+// Every reader of kicks asks this, so they cannot disagree.
+const kicksAgainst = (kick: Moment | undefined, { since }: WantedChannel) =>
+  kick !== undefined && (since === undefined || kick.sequence > since) ? kick : undefined;
 
 /**
- * The kick that still stands against a wanted Channel, if any. The Owner wanting it again
- * after the kick clears it, with or without a Session (LIVE-8, CONF-5).
+ * The kick that still stands against a wanted Channel, if any, under any spelling the
+ * mapping in force allows, which is `rfc1459` with no Session (KNOW-3). The Owner wanting it
+ * again after the kick clears it, with or without a Session (LIVE-8, CONF-5).
  * @param standing - The Network's Standing.
  * @param wanted - The Channel, as Configuration wants it.
  * @returns Where the kick was recorded, or `undefined` if none counts.
  */
-export const kickStanding = (standing: Standing, { name, since }: WantedChannel) => {
-  const kick = standing.kicked.get(channelKey(name));
+export const kickStanding = (standing: Standing, wanted: WantedChannel) =>
+  kicksAgainst(heldFor(standing.kicked, standing.irc, wanted.name), wanted);
 
-  return kick !== undefined && (since === undefined || kick.sequence > since) ? kick : undefined;
+type Casemapping = IrcState["isupport"]["casemapping"];
+
+// Several wanted Channels can be one Channel under the mapping in force, such as `#x[1]` and
+// `#x{1}` under rfc1459. The Owner's latest wanting of any of them speaks for all, so that
+// status and planning read one intent for the one Channel (LIVE-8, KNOW-3).
+const latestIntents = (
+  casemapping: Casemapping,
+  wanted: readonly WantedChannel[]
+): ReadonlyMap<string, number | undefined> => {
+  const intents = new Map<string, number | undefined>();
+
+  for (const { name, since } of wanted) {
+    const folded = casefold(casemapping, name);
+    const held = intents.get(folded);
+
+    if (held === undefined || since === undefined) {
+      intents.set(folded, held ?? since);
+    } else {
+      intents.set(folded, Math.max(held, since));
+    }
+  }
+
+  return intents;
 };
+
+const withIntent = (
+  want: WantedChannel,
+  intents: ReadonlyMap<string, number | undefined>,
+  casemapping: Casemapping
+): WantedChannel => {
+  const { since: _since, ...rest } = want;
+  const since = intents.get(casefold(casemapping, want.name));
+
+  return since === undefined ? rest : { ...rest, since };
+};
+
+/**
+ * Every kick recorded that still counts, one for each spelling recorded, in the order
+ * recorded. A kick is dropped if a wanted Channel of the same name under the mapping in
+ * force was wanted since it, as {@link kickStanding} says; when several wanted Channels are
+ * that one name, the latest wanting of any of them speaks for it, as it does in planning.
+ * @param standing - The Network's Standing.
+ * @param wanted - The Channels Configuration wants.
+ * @returns Each kick still in force, and the Channel as it was recorded.
+ */
+export const kicksInForce = (
+  standing: Standing,
+  wanted: readonly WantedChannel[]
+): readonly { readonly at: number; readonly channel: string }[] => {
+  const { casemapping } = standing.irc.isupport;
+  const intents = latestIntents(casemapping, wanted);
+
+  return [...standing.kicked].flatMap(([channel, kick]) => {
+    const folded = casefold(casemapping, channel);
+
+    if (!intents.has(folded)) {
+      return [{ at: kick.at, channel }];
+    }
+
+    const since = intents.get(folded);
+
+    return since === undefined || kick.sequence > since ? [{ at: kick.at, channel }] : [];
+  });
+};
+
+// What a plan reads of a Standing, each folded once, so that planning many Channels does not
+// scan for every one of them.
+interface FoldedStanding {
+  readonly asked: ReadonlyMap<string, JoinAsked>;
+  readonly joinFailures: ReadonlyMap<string, HeldJoinFailure>;
+  readonly kicked: ReadonlyMap<string, Moment>;
+}
+
+const foldedStanding = (standing: Standing): FoldedStanding => ({
+  asked: foldedHeld(standing.asked, standing.irc),
+  joinFailures: foldedHeld(standing.joinFailures, standing.irc),
+  kicked: foldedHeld(standing.kicked, standing.irc),
+});
 
 // The wait runs from the ask and not from the failure, so that a Network repeating a
 // numeric cannot put a retry off for ever.
-const dueAt = (standing: Standing, want: WantedChannel, tuning: Tuning): number | undefined => {
+const dueAt = (
+  standing: Standing,
+  folded: FoldedStanding,
+  want: WantedChannel,
+  tuning: Tuning
+): number | undefined => {
   const { name, rejoinOnKick } = want;
-  const key = channelKey(name);
-  const kickedAt = kickStanding(standing, want)?.at;
-  const asked = standing.asked.get(key);
+  const { irc } = standing;
+  const kickedAt = kicksAgainst(foldedFor(folded.kicked, irc, name), want)?.at;
+  const asked = foldedFor(folded.asked, irc, name);
 
   const isOut =
-    standing.channels.has(key) ||
-    isClosedUntilReconnect(standing, key) ||
+    channelOf(irc, name) !== undefined ||
+    isClosedUntilReconnect(standing, foldedFor(folded.joinFailures, irc, name)) ||
     (kickedAt !== undefined && rejoinOnKick !== true);
 
   return isOut
@@ -1147,6 +1075,22 @@ const dueAt = (standing: Standing, want: WantedChannel, tuning: Tuning): number 
         kickedAt === undefined ? 0 : kickedAt + tuning.kickRejoinMillis
       );
 };
+
+/**
+ * Whether anything {@link joinPlan} reads of a Standing moved between two of them, so
+ * that a plan made from the first could differ from one made from the second.
+ * @param before - The Standing a plan was last made from, or looked at for one.
+ * @param after - The Standing now.
+ * @returns Whether to plan again.
+ */
+export const joinPlanMoved = (before: Standing, after: Standing): boolean =>
+  before.irc.channels !== after.irc.channels ||
+  before.irc.isupport.casemapping !== after.irc.isupport.casemapping ||
+  before.asked !== after.asked ||
+  before.kicked !== after.kicked ||
+  before.joinFailures !== after.joinFailures ||
+  before.attempt?.sequence !== after.attempt?.sequence ||
+  connectionView(before)?.joinable !== connectionView(after)?.joinable;
 
 /**
  * Works out which wanted Channels to `JOIN` (LIVE-7, LIVE-8): those wanted, less those
@@ -1169,19 +1113,19 @@ export const joinPlan = (
   const channels: PlannedChannel[] = [];
   let lookAgainAt: number | undefined;
 
-  // Sends are refused once a close has begun (LIVE-11). Joining waits for the login
-  // sequence and any login wait, which say when they are over (CONN-6).
-  if (
-    sessionSince(standing) === undefined ||
-    standing.connection?.closing !== undefined ||
-    !isLoginSettled(standing)
-  ) {
+  // The machine says when joining may go on: in a Session nobody has begun to close
+  // (LIVE-11), once the login sequence and any login wait are over (CONN-6).
+  if (connectionView(standing)?.joinable !== true) {
     return { channels, lookAgainAt };
   }
 
+  const folded = foldedStanding(standing);
+  const { casemapping } = standing.irc.isupport;
+  const intents = latestIntents(casemapping, wanted);
+
   for (const want of wanted) {
     const { key, name } = want;
-    const due = dueAt(standing, want, tuning);
+    const due = dueAt(standing, folded, withIntent(want, intents, casemapping), tuning);
     const isDue = due !== undefined && due <= now;
 
     if (isDue) {
@@ -1189,7 +1133,7 @@ export const joinPlan = (
     }
 
     // What goes out now is looked at again as if it were already recorded as asked.
-    const asks = (standing.asked.get(channelKey(name))?.count ?? 0) + 1;
+    const asks = (foldedFor(folded.asked, standing.irc, name)?.count ?? 0) + 1;
     const next = isDue ? now + joinRetryDelay(asks, tuning) : due;
 
     lookAgainAt = next === undefined ? lookAgainAt : Math.min(next, lookAgainAt ?? next);
@@ -1200,49 +1144,44 @@ export const joinPlan = (
 
 const placeholdersIn = (text: string) => text.split(redactedText).length - 1;
 
-// The last `k` a `MODE` touches is the key it leaves. A key shown as `*` is hidden, and says
-// nothing of what the key is (CRED-4, KNOW-6). It also says which placeholder of the Line
-// the key is when it was scrubbed, counted from the end: what stands in the parameters after
-// it is read as it is, and the whole Line's count is the rest.
-const keyLeft = (
-  standing: Standing,
-  line: Line,
-  entry: Entry
-): Pick<KeyChange, "key" | "placeholder"> | undefined => {
-  const parsed = parseModes(line.params.slice(1), modeTypes(standing.modeTokens));
-  const at = parsed.changes.findLastIndex(({ letter }) => letter === "k");
-  const last = parsed.changes[at];
-
-  if (parsed._tag === "Uneven" || last === undefined) {
-    return undefined;
-  }
-
-  if (!last.adding) {
-    return { key: undefined, placeholder: undefined };
-  }
-
-  if (last.param === undefined || last.param === "*") {
-    return undefined;
-  }
-
-  if (last.param !== redactedText || entry._tag !== "Line") {
-    return { key: last.param, placeholder: undefined };
-  }
-
-  // Each change that took a parameter took the next one after the letters, so the key's
-  // is as far along as the changes before it that took one.
-  const index = 2 + parsed.changes.slice(0, at).filter(({ param }) => param !== undefined).length;
-
+// Which placeholder of the Line a scrubbed key is, counted from the end: what stands in the
+// parameters after it is read as it is, and the whole Line's count is the rest (LOG-6).
+const placeholderOf = (entry: LineEntry, line: Line, param: number) => {
   const of = placeholdersIn(new TextDecoder("latin1").decode(entry.bytes));
-  const after = placeholdersIn(line.params.slice(index + 1).join(" "));
 
-  return { key: last.param, placeholder: { of, slot: of - 1 - after } };
+  const after = placeholdersIn(line.params.slice(param + 1).join(" "));
+
+  return { of, slot: of - 1 - after };
+};
+
+const keyChangeOf = (
+  entry: Entry,
+  line: Line | undefined,
+  change: StateChange
+): KeyChange | undefined => {
+  if (change._tag === "KeyCleared") {
+    return { channel: change.channel, entry, key: undefined, placeholder: undefined };
+  }
+
+  if (change._tag !== "KeySet" || line === undefined) {
+    return undefined;
+  }
+
+  const { channel, key, param } = change;
+
+  return {
+    channel,
+    entry,
+    key,
+    placeholder:
+      key === redactedText && entry._tag === "Line" ? placeholderOf(entry, line, param) : undefined,
+  };
 };
 
 /**
- * The Channel keys that inbound `MODE` Lines set or took away, each read with `PREFIX`
- * and `CHANMODES` as they stood at its Entry, and only on a Channel Self was in then
- * (CRED-4). A `MODE` whose parameters do not add up says nothing.
+ * The Channel keys that inbound `MODE` Lines set or took away, as `@iirc/state` read each
+ * with `PREFIX` and `CHANMODES` as they stood at its Entry, and only on a Channel Self was
+ * in then (CRED-4). A `MODE` whose parameters do not add up says nothing.
  * @param standing - The Network's Standing before the first of `entries`.
  * @param entries - Entries recorded after it, in sequence order.
  * @returns Each change, in order.
@@ -1251,28 +1190,23 @@ export const channelKeyChanges = (
   standing: Standing,
   entries: Iterable<Entry>
 ): readonly KeyChange[] => {
-  const changes: KeyChange[] = [];
+  const keys: KeyChange[] = [];
   let current = standing;
 
   for (const entry of entries) {
     const line = readLine(entry);
-    const [channel] = line?.params ?? [];
+    const { changes, standing: after } = advance(current, entry, line);
 
-    const isMode =
-      line?.command === "MODE" &&
-      entry._tag === "Line" &&
-      entry.direction === "inbound" &&
-      channel !== undefined &&
-      current.channels.has(channelKey(channel));
+    for (const change of changes) {
+      const key = keyChangeOf(entry, line, change);
 
-    const left = isMode ? keyLeft(current, line, entry) : undefined;
-
-    if (left !== undefined && channel !== undefined) {
-      changes.push({ channel, entry, ...left });
+      if (key !== undefined) {
+        keys.push(key);
+      }
     }
 
-    current = advance(current, entry, line);
+    current = after;
   }
 
-  return changes;
+  return keys;
 };

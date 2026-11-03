@@ -10,7 +10,7 @@ import {
 } from "@iirc/api";
 import type { LogEntry } from "@iirc/api";
 import { parseFrame } from "@iirc/protocol/line";
-import type { Entry } from "@iirc/session/entry";
+import type { Entry, IfFieldsOfEntry } from "@iirc/session/entry";
 import { ByteSize, Context, Effect, Layer, Redacted } from "effect";
 import { HttpIncomingMessage, HttpRouter } from "effect/http";
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
@@ -26,8 +26,10 @@ import { reaches } from "./keys.ts";
 export const maxBodySize = ByteSize.mebibytes(1);
 
 // A Frontend never has to parse IRC, or even guess at an encoding (API-2), and input
-// that cannot be parsed comes with its reason (HOST-1).
-const toLogEntry = (entry: Entry): LogEntry => {
+// that cannot be parsed comes with its reason (HOST-1). Those are all a LogEntry adds:
+// otherwise its kinds and their fields are Entry's, which the return type checks, so a
+// kind or a field the contract has not caught up with fails to compile here.
+const toLogEntry = (entry: Entry): IfFieldsOfEntry<LogEntry, LogEntry, "reason" | "text"> => {
   switch (entry._tag) {
     case "Dropped": {
       return { ...entry, text: parseFrame(entry.bytes).text };

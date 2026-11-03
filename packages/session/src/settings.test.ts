@@ -13,7 +13,7 @@ import {
   entries,
   liveHost,
   options,
-  settled,
+  manyTurns,
   wire,
 } from "./network.fixture.ts";
 import type { NetworkHost } from "./network.ts";
@@ -43,9 +43,9 @@ const recordChange = (change: Json) =>
 const burstOver = (ircd: FakeIrcd) =>
   Effect.gen(function* () {
     yield* ircd.read(`${welcome}${noMotd}`);
-    yield* settled;
+    yield* manyTurns;
     yield* TestClock.adjust(`${defaultTuning.rejoinSettleMillis} millis`);
-    yield* settled;
+    yield* manyTurns;
   });
 
 const joinsOn = (ircd: FakeIrcd, connection: number) =>
@@ -59,7 +59,7 @@ const untilDue = Effect.fnUntraced(function* (hosted: NetworkHost) {
   const { nextAttemptAt } = yield* hosted.status;
 
   yield* TestClock.adjust(`${(nextAttemptAt ?? 0) - (yield* now)} millis`);
-  yield* settled;
+  yield* manyTurns;
 });
 
 describe("CONF-2, LIVE-9: enabled", () => {
@@ -88,7 +88,7 @@ describe("CONF-2, LIVE-9: enabled", () => {
       assert.isUndefined(disabled.nextAttemptAt);
 
       yield* TestClock.adjust("1 hour");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
 
@@ -107,7 +107,7 @@ describe("CONF-2, LIVE-9: enabled", () => {
       const { change, hosted } = yield* liveHost(ircd, { enabled: false });
 
       yield* TestClock.adjust("1 hour");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 0);
       assert.lengthOf(yield* entries, 0);
@@ -131,7 +131,7 @@ describe("CONF-2, LIVE-9: enabled", () => {
 
       yield* change((settings) => ({ ...settings, enabled: false }));
       yield* TestClock.adjust(`${due - (yield* now) + 60_000} millis`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 1);
 
@@ -215,7 +215,7 @@ describe("LIVE-4: a retry the Owner asked for", () => {
 
       yield* ircd.read("ERROR :You are banned\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.isTrue((yield* hosted.status).refused);
       assert.strictEqual(
@@ -280,7 +280,7 @@ describe("CONF-2: what applies at the next Connection", () => {
       assert.strictEqual((yield* hosted.status).phase, "session");
 
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       const delay = ((yield* hosted.status).nextAttemptAt ?? 0) - (yield* now);
 
@@ -313,7 +313,7 @@ describe("LIVE-7, LIVE-8: the Channels wanted", () => {
 
       yield* burstOver(ircd);
       yield* ircd.read(joined("#one"));
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* joinsOn(ircd, 0), ["JOIN #one\r\n"]);
 
@@ -357,7 +357,7 @@ describe("LIVE-7, LIVE-8: the Channels wanted", () => {
       yield* ircd.read(joined("#one"));
       yield* ircd.read(":op!u@h KICK #one iirc :out\r\n");
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf((yield* hosted.status).kicked, 1);
 
@@ -374,6 +374,29 @@ describe("LIVE-7, LIVE-8: the Channels wanted", () => {
     }).pipe(memory)
   );
 
+  it.effect(
+    "LIVE-8, KNOW-3: status stops listing a kick once the Owner joins again under another spelling",
+    () =>
+      Effect.gen(function* () {
+        const ircd = yield* fakeIrcd();
+        const { change, hosted } = yield* liveHost(ircd, { channels: [{ name: "#X{1}" }] });
+
+        yield* burstOver(ircd);
+        yield* ircd.read(joined("#x[1]"));
+        yield* ircd.read(":op!u@h KICK #x[1] iirc :out\r\n");
+        yield* ircd.hangUp;
+        yield* manyTurns;
+
+        assert.lengthOf((yield* hosted.status).kicked, 1);
+
+        const since = yield* recordChange({ join: "#X{1}" });
+
+        yield* change((settings) => ({ ...settings, channels: [{ name: "#X{1}", since }] }));
+
+        assert.lengthOf((yield* hosted.status).kicked, 0);
+      }).pipe(memory)
+  );
+
   it.effect("LIVE-8: without the Owner joining again, the kick still wins", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
@@ -382,12 +405,12 @@ describe("LIVE-7, LIVE-8: the Channels wanted", () => {
       yield* burstOver(ircd);
       yield* ircd.read(joined("#one"));
       yield* ircd.read(":op!u@h KICK #one iirc :out\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       // A Change that came before the kick does not outrank it.
       yield* change((settings) => ({ ...settings, channels: [{ name: "#one", since: 1 }] }));
       yield* TestClock.adjust("1 hour");
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf((yield* hosted.status).kicked, 1);
       assert.deepStrictEqual(yield* joinsOn(ircd, 0), ["JOIN #one\r\n"]);
@@ -412,7 +435,7 @@ describe("ADR 0003: a replay makes the decisions the Connection made", () => {
       const [opened] = connectionsOf(yield* entries, "opened");
 
       yield* TestClock.adjust("5 seconds");
-      yield* settled;
+      yield* manyTurns;
 
       // Every later Connection runs on the new numbers, and this one never did.
       const long = { ...defaultTuning, registrationTimeoutMillis: 600_000 };

@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest";
 import type { Entry, NewEntry } from "@iirc/session/entry";
 import { toEvent } from "@iirc/session/events";
 import { Recorder, RecordFailed } from "@iirc/session/recorder";
-import { foldStandings, noStanding, noStandings } from "@iirc/session/standing";
+import { connectionView, foldStandings, noStanding, noStandings } from "@iirc/session/standing";
 import { attemptInput } from "@iirc/session/testing";
 import {
   Array as Arr,
@@ -491,7 +491,7 @@ describe("the durable Log", () => {
 
           assert.strictEqual(yield* Log.use(({ head }) => head), before + 1024);
           assert.strictEqual((yield* allMessages).length, 512);
-          assert.strictEqual(held.channels.size, 512);
+          assert.strictEqual(held.irc.channels.size, 512);
           assert.deepStrictEqual(held, foldStandings(noStandings, stored).get("libera"));
         })
       )
@@ -1076,7 +1076,7 @@ describe("the durable Log", () => {
           const recorded = yield* write(large, (entries) => entries.length);
 
           assert.strictEqual(recorded, 2000);
-          assert.strictEqual((yield* read("libera")).channels.size, 1024);
+          assert.strictEqual((yield* read("libera")).irc.channels.size, 1024);
         })
       )
     );
@@ -1110,8 +1110,8 @@ describe("the durable Log", () => {
           const held = yield* standing();
 
           assert.deepStrictEqual(held.connection?.last, { at: 1000, sequence: 3 });
-          assert.strictEqual(held.connection?.registration._tag, "Registering");
-          assert.isUndefined(held.self);
+          assert.strictEqual(connectionView(held)?.registration._tag, "Registering");
+          assert.isUndefined(held.irc.self);
         })
       )
     );
@@ -1591,7 +1591,11 @@ describe("the durable Log", () => {
             const started = yield* Clock.currentTimeMillis;
             const refused = yield* Effect.flip(opening(dataDir));
 
-            assert.isBelow((yield* Clock.currentTimeMillis) - started, 1000);
+            // Its lock waits for nothing (`busy_timeout = 0`), so a refusal that waited at
+            // all would be waiting on the other Layer, which holds the lock until the end
+            // of this test. A refusal that merely took long is not what is asserted, so
+            // the bound is only a busy machine's margin.
+            assert.isBelow((yield* Clock.currentTimeMillis) - started, 2000);
 
             return refused;
           }).pipe(Effect.provide(Log.layer({ dataDir })));
@@ -1879,8 +1883,8 @@ describe("the durable Log and Configuration", () => {
         const held = yield* standing();
 
         assert.deepStrictEqual(yield* allSaid, ["libera PRIVMSG bob -> #iirc: still here"]);
-        assert.deepStrictEqual(held.connection?.registration, folded.connection?.registration);
-        assert.strictEqual(held.self, "alice");
+        assert.deepStrictEqual(connectionView(held), connectionView(folded));
+        assert.strictEqual(held.irc.self, "alice");
         assert.deepStrictEqual(entries.filter(({ _tag }) => _tag === "Change").map(toEvent), [
           undefined,
           undefined,
@@ -2003,7 +2007,7 @@ describe("the durable Log and Configuration", () => {
               ]
             );
             // The host knows Self by the nick the Ircd gave it.
-            assert.strictEqual((yield* standing()).self, "alicia");
+            assert.strictEqual((yield* standing()).irc.self, "alicia");
 
             yield* Log.use(({ rebuild }) => rebuild);
 

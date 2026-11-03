@@ -268,28 +268,39 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
     // outcome waits for that, or for the pump to have nothing to write at once.
     let lastWritten: { readonly queued: QueuedLine; readonly sequence: number } | undefined;
 
-    const confirm = Effect.suspend(() =>
-      lastWritten === undefined
-        ? Effect.void
-        : Deferred.succeed(lastWritten.queued.outcome, lastWritten.sequence)
-    );
-
-    // A later write was still waiting for the kernel when it gave up, so the one before it
-    // may still be in the process, and the close that follows throws that away. Its caller
-    // may already have been told it was written, because nothing in Bun says when the rest
-    // of it leaves. A write that failed outright found the Connection broken, and then the
-    // kernel's own buffer is lost as well, over TLS or not.
-    const unconfirm = Effect.fnUntraced(function* (cause: Cause.Cause<WriteFailed>) {
-      const stalled =
-        Cause.hasInterruptsOnly(cause) || writeFailureOf(cause).reason === writeTimedOut;
-
-      if (lastWritten !== undefined && stalled) {
-        const { queued } = lastWritten;
-
-        lastWritten = undefined;
-        yield* wire.unwritten(queued, mayNotHaveReached);
-        yield* Deferred.fail(queued.outcome, new WriteFailed({ reason: mayNotHaveReached }));
+    // Once confirmed, a Line is written for good, and nothing later can take that back: its
+    // caller has been told, and the Log must not say otherwise.
+    const confirm = Effect.suspend(() => {
+      if (lastWritten === undefined) {
+        return Effect.void;
       }
+
+      const { queued, sequence } = lastWritten;
+
+      lastWritten = undefined;
+
+      return Deferred.succeed(queued.outcome, sequence);
+    });
+
+    // A later write failed, so the one before it may not have left the machine: a write that
+    // stalled was still waiting for the kernel, and one that failed outright found the
+    // Connection broken, which loses the kernel's own buffer as well, over TLS or not.
+    // Either way the close throws it away, so it is Dropped and its caller told so. Only a
+    // Line not yet confirmed is still held here, because one the pump confirmed when it
+    // went idle has been told it was written.
+    const unconfirm = Effect.suspend(() => {
+      if (lastWritten === undefined) {
+        return Effect.void;
+      }
+
+      const { queued } = lastWritten;
+
+      lastWritten = undefined;
+
+      return Effect.andThen(
+        wire.unwritten(queued, mayNotHaveReached),
+        Deferred.fail(queued.outcome, new WriteFailed({ reason: mayNotHaveReached }))
+      );
     });
 
     const transmit = Effect.fnUntraced(function* (queued: QueuedLine) {
@@ -317,8 +328,7 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
         return false;
       }
 
-      yield* unconfirm(written.cause);
-      lastWritten = undefined;
+      yield* unconfirm;
 
       const failure = writeFailureOf(written.cause);
 

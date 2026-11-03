@@ -16,6 +16,49 @@ const wire = (built: Outbound) => {
   return encodeLine(built.line);
 };
 
+const safe = (built: Outbound) => {
+  if (built._tag === "Rejected") {
+    throw new Error(built.reason);
+  }
+
+  return built.line;
+};
+
+describe("an OutboundLine owns its bytes", () => {
+  it("keeps what it encodes whatever is done to the bytes it hands out", () => {
+    const line = safe(privmsg("#a", "hi"));
+
+    line.toBytes().set(encoder.encode("QUIT"));
+
+    expect(decoder.decode(encodeLine(line))).toBe("PRIVMSG #a hi\r\n");
+  });
+
+  it("keeps what it encodes whatever is done to the bytes it encoded before", () => {
+    const line = safe(privmsg("#a", "hi"));
+
+    encodeLine(line).fill(0x51);
+
+    expect(decoder.decode(encodeLine(line))).toBe("PRIVMSG #a hi\r\n");
+    expect(decoder.decode(line.toBytes())).toBe("PRIVMSG #a hi");
+  });
+
+  it("is not changed by the token it was built from", () => {
+    const token = encoder.encode("1234");
+    const line = safe(pong(token));
+
+    token.fill(0x51);
+
+    expect(decoder.decode(encodeLine(line))).toBe("PONG 1234\r\n");
+  });
+
+  it("gives a copy each time, so no two holders share bytes", () => {
+    const line = safe(quit("bye"));
+
+    expect(line.toBytes()).not.toBe(line.toBytes());
+    expect(line.toBytes()).toStrictEqual(line.toBytes());
+  });
+});
+
 describe(outbound, () => {
   it("formats a last parameter that needs a colon", () => {
     expect(decoder.decode(wire(outbound("USER", ["claude", "0", "*", "Claude Code"])))).toBe(

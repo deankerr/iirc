@@ -101,7 +101,7 @@ const everyPhase: Record<Phase, true> = {
 // a shortest path alone never takes an edge that lands back on a known state. Each
 // path opens with XState's own `xstate.init` step, which is not an event of ours.
 // `limit` makes context that grows without bound fail here rather than never end.
-const walks = getShortestPaths(network, { events: samples, input, limit: 2000 }).flatMap((path) => {
+const walks = getShortestPaths(network, { events: samples, input, limit: 4000 }).flatMap((path) => {
   const reached = path.steps.slice(1).map(({ event }) => event);
 
   return everyEvent.map((event) => [...reached, event]);

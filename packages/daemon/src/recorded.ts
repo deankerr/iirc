@@ -3,7 +3,7 @@ import type { NewEntry } from "@iirc/session/entry";
 import type { Recorder } from "@iirc/session/recorder";
 import { Data, Effect, Result } from "effect";
 
-import { decodeChange, encodeChange, networkOf } from "./change.ts";
+import { decodeStoredChange, encodeChange, networkOf } from "./change.ts";
 import type { Change } from "./change.ts";
 import { noConfiguration, reduceConfiguration } from "./configuration.ts";
 import type { Configuration } from "./configuration.ts";
@@ -13,8 +13,10 @@ import type { Configuration } from "./configuration.ts";
 const pageSize = 100;
 
 /**
- * A Change in the Log that this Daemon cannot read, which it will not start past, because
- * Configuration without it would not be what the Owner asked for (CONF-1).
+ * A Change in the Log that this Daemon cannot read at all: of no kind it knows, such as one
+ * a newer iirc wrote, or without the shape its kind always had. It will not start past one,
+ * because Configuration without it would not be what the Owner asked for (CONF-1). A Change
+ * that merely breaks a rule made since it was recorded is read, and folded as it was.
  */
 export class UndecodableChange extends Data.TaggedError("UndecodableChange")<{
   readonly reason: string;
@@ -42,7 +44,7 @@ export const readConfiguration = (
       const entries = yield* log.changes({ after, limit: pageSize });
 
       for (const { at, change, sequence } of entries) {
-        const decoded = decodeChange(change);
+        const decoded = decodeStoredChange(change);
 
         if (Result.isFailure(decoded)) {
           return yield* new UndecodableChange({ reason: decoded.failure.message, sequence });

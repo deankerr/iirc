@@ -1,5 +1,3 @@
-import { phase, start, step } from "@iirc/lifecycle";
-import type { NetworkSnapshot } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { nickCandidates } from "@iirc/protocol/nick";
@@ -11,9 +9,14 @@ import { toEvent } from "./events.ts";
 import {
   candidateNicks,
   channelKey,
+  connectionView,
   consecutiveFailures,
   foldStandings,
   joinPlan,
+  joinPlanMoved,
+  kickStanding,
+  kicksInForce,
+  loginOf,
   nextAttempt,
   noStanding,
   noStandings,
@@ -37,6 +40,7 @@ const initial = defaultTuning.reconnectInitialMillis;
 const maximum = defaultTuning.reconnectMaxMillis;
 const stable = defaultTuning.stableAfterMillis;
 const joinRetry = defaultTuning.joinRetryMillis;
+const registrationTimeout = defaultTuning.registrationTimeoutMillis;
 
 const foldOne = (entries: readonly Entry[]) => {
   let standing = noStanding;
@@ -722,11 +726,11 @@ describe("LIVE-6: a new Session starts clean", () => {
     const { standing } = busy().attempt();
 
     expect(busy().standing.lagMillis).toBe(0);
-    expect({ lagMillis: standing.lagMillis, self: standing.self }).toStrictEqual({
+    expect({ lagMillis: standing.lagMillis, self: standing.irc.self }).toStrictEqual({
       lagMillis: undefined,
       self: undefined,
     });
-    expect([...standing.channels.keys()]).toStrictEqual([]);
+    expect([...standing.irc.channels.keys()]).toStrictEqual([]);
     expect(standing.nickLength).toBe(30);
     expect([...standing.kicked.keys()]).toStrictEqual(["#rust"]);
   });
@@ -734,23 +738,23 @@ describe("LIVE-6: a new Session starts clean", () => {
   it("LIVE-6: a close clears them as well, since nobody is on the Network", () => {
     const { standing } = busy().closed("gone");
 
-    expect(standing.self).toBeUndefined();
-    expect(standing.channels.size).toBe(0);
+    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.channels.size).toBe(0);
     expect(standing.kicked.size).toBe(1);
   });
 
   it("LIVE-6: `attempt` clears what was left by Lines no Connection owned", () => {
     const { standing } = new Script().welcome().in(":alice!u@h JOIN #iirc").attempt();
 
-    expect(standing.self).toBeUndefined();
-    expect(standing.channels.size).toBe(0);
+    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.channels.size).toBe(0);
   });
 
   it("LIVE-6: a kill clears them", () => {
     const { standing } = busy().daemon("started");
 
-    expect(standing.self).toBeUndefined();
-    expect(standing.channels.size).toBe(0);
+    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.channels.size).toBe(0);
   });
 
   it("LIVE-6: lag is cleared on close, and old checks are forgotten", () => {
@@ -822,17 +826,17 @@ describe("CONN-3: Self", () => {
   it("CONN-3: the nick in 001 is the truth, then later NICKs", () => {
     const script = new Script().attempt().opened().welcome("alice_");
 
-    expect(script.standing.self).toBe("alice_");
+    expect(script.standing.irc.self).toBe("alice_");
 
     script.in(":alice_!u@h NICK :alicia");
 
-    expect(script.standing.self).toBe("alicia");
+    expect(script.standing.irc.self).toBe("alicia");
   });
 
   it("CONN-3: a second 001 changes nothing, nor when the Session began", () => {
     const script = new Script().attempt().opened().welcome().wait(1000).welcome("mallory");
 
-    expect(script.standing.self).toBe("alice");
+    expect(script.standing.irc.self).toBe("alice");
     expect(sessionSince(script.standing)).toBe(started);
   });
 
@@ -848,13 +852,13 @@ describe("LIVE-4: a Connection under way", () => {
     const script = new Script().attempt();
 
     expect(script.standing.attempt).toStrictEqual({ at: started, ircd: first, sequence: 1 });
-    expect(script.standing.connection?.registration).toStrictEqual({ _tag: "Connecting" });
+    expect(connectionView(script.standing)?.registration).toStrictEqual({ _tag: "Connecting" });
 
     script.wait(5).opened();
 
-    expect(script.standing.connection?.registration).toStrictEqual({
+    expect(connectionView(script.standing)?.registration).toStrictEqual({
       _tag: "Registering",
-      nickIndex: 0,
+      nick: "alice",
     });
 
     script.closed("gone");
@@ -885,7 +889,7 @@ const refusedAfterSession = () =>
 const sessionOf = ({ standing }: Script) => ({
   gapEnded: standing.gap?.ended,
   refusal: standing.refusal?.reason,
-  self: standing.self,
+  self: standing.irc.self,
   since: sessionSince(standing),
 });
 
@@ -896,20 +900,30 @@ const noSession = {
   since: undefined,
 };
 
-const nickLists: Arr.NonEmptyReadonlyArray<readonly string[]> = [
-  [],
-  ["alice"],
-  ["alice", "alice_"],
-];
-
 const joinedBoth = () => new Script().session().in(":alice!u@h JOIN #a").in(":alice!u@h JOIN #b");
 
 describe("LIVE-11: a welcome starts a Session only while registering", () => {
   it("LIVE-11: not after the registration deadline, inside the drain", () => {
-    const script = refusedAfterSession().attempt().opened().deadline("registration").welcome();
+    const script = refusedAfterSession().attempt().opened().wait(registrationTimeout);
+
+    script.deadline("registration").welcome();
 
     expect(sessionOf(script)).toStrictEqual(noSession);
     expect(script.closed("registration timed out").standing.gap?.reason).toBe("gone");
+  });
+
+  // The host writes one only once it is due, but a clock set back can stamp it earlier, and
+  // the host's own machine passed over it then, and went on to its welcome (LOG-8).
+  it("LOG-8: a registration Deadline Entry stamped before the deadline changes nothing", () => {
+    const script = new Script()
+      .attempt()
+      .opened()
+      .wait(registrationTimeout - 1);
+
+    script.deadline("registration").welcome();
+
+    expect(sessionSince(script.standing)).toBe(started + registrationTimeout - 1);
+    expect(script.standing.irc.self).toBe("alice");
   });
 
   it("LIVE-5: not after a refusal in the same read", () => {
@@ -963,7 +977,7 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
 
     script.in(":x 433 * alice :In use").welcome("alice_");
 
-    expect(script.standing.self).toBe("alice_");
+    expect(script.standing.irc.self).toBe("alice_");
   });
 
   it("CONN-4: a 437 for a Channel is not one for the nick", () => {
@@ -977,105 +991,11 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
 
     script.in("FAIL NICK NICKNAME_RESERVED alice :Reserved").welcome();
 
-    expect(script.standing.self).toBe("alice");
+    expect(script.standing.irc.self).toBe("alice");
   });
 
   it("CONN-2: a welcome from no Connection names nobody", () => {
-    expect(new Script().welcome().standing.self).toBeUndefined();
-  });
-});
-
-const machineInput = {
-  loginLines: 0,
-  realname: "Claude Code",
-  services: [],
-  // The host writes a registration Deadline Entry only once it is due, which a timeout of
-  // 0 makes true of any that follows `opened`.
-  tuning: { ...defaultTuning, registrationTimeoutMillis: 0 },
-  username: "cc",
-};
-
-describe("LIVE-11: Standing and the machine agree on when a Session began", () => {
-  const vocabulary = [
-    ":x 001 alice :Welcome",
-    ":x 001 alice_ :Welcome",
-    ":x 001",
-    ":x 433 * alice :In use",
-    ":x 437 * alice :Held",
-    ":x 437 * #chan :Held",
-    ":x 432 * alice :Erroneous",
-    ":x 464 * :Bad password",
-    ":x 465 * :Banned",
-    "ERROR :Closing Link",
-    "ERROR :Ping timeout: 2m0s",
-    "FAIL NICK NICKNAME_RESERVED alice :Reserved",
-    "FAIL * ACCOUNT_REQUIRED :No",
-    ":x NOTICE * :hello",
-    ":x 376 alice :End",
-    "PING :1",
-    "",
-  ] as const;
-
-  const histories = Array.from({ length: 300 }, (_unused, seed) => {
-    const random = generator(seed + 1);
-    const script = new Script();
-
-    for (let index = 0; index < 40; index += 1) {
-      script.wait(random.pick([0, 1, 10]));
-
-      const move = random.below(14);
-
-      if (move === 0) {
-        script.attempt(first, random.pick(nickLists));
-      } else if (move === 1) {
-        script.opened();
-      } else if (move === 2) {
-        script.closing("leaving", random.pick([true, false] as const));
-      } else if (move === 3) {
-        script.closed(random.pick(["gone", undefined]));
-      } else if (move === 4) {
-        script.deadline(random.pick(["registration", "burst", "silence"]));
-      } else if (move === 5) {
-        script.in(random.pick(vocabulary), true);
-      } else if (move === 6) {
-        script.out("NICK alice_");
-      } else {
-        script.in(random.pick(vocabulary));
-      }
-    }
-
-    return script.entries;
-  });
-
-  it("LIVE-11: at every Entry, Standing has a Session exactly when the machine reached one", () => {
-    const disagreements: string[] = [];
-
-    for (const [index, entries] of histories.entries()) {
-      let machine: NetworkSnapshot = start(machineInput);
-      let reached = false;
-      let standing = noStanding;
-
-      for (const entry of entries) {
-        const event = toEvent(entry);
-
-        if (event !== undefined) {
-          machine = step(machine, event).next;
-          reached =
-            event.type !== "ATTEMPT" &&
-            event.type !== "CLOSED" &&
-            (reached || phase(machine) === "session");
-        }
-
-        standing = reduceStanding(standing, entry);
-
-        if ((sessionSince(standing) !== undefined) !== reached) {
-          disagreements.push(`history ${index} at Entry ${entry.sequence}`);
-        }
-      }
-    }
-
-    expect(disagreements).toStrictEqual([]);
-    expect(histories.some((entries) => sessionSince(foldOne(entries)) !== undefined)).toBeTruthy();
+    expect(new Script().welcome().standing.irc.self).toBeUndefined();
   });
 });
 
@@ -1146,7 +1066,7 @@ describe("LIVE-8: which kicks count", () => {
       .in(":m!u@h KICK #a bob,alice :out");
 
     expect([...script.standing.kicked.keys()]).toStrictEqual(["#a"]);
-    expect(script.standing.channels.size).toBe(0);
+    expect(script.standing.irc.channels.size).toBe(0);
   });
 });
 
@@ -1267,11 +1187,11 @@ describe("LIVE-7: which Channels to join", () => {
 
     const left = session().in(":alice!u@h JOIN #iirc").in(":alice!u@h PART #IIRC");
 
-    expect(left.standing.channels.size).toBe(0);
+    expect(left.standing.irc.channels.size).toBe(0);
 
     const removed = session().in(":alice!u@h JOIN #iirc").in(":mod!u@h KICK #IIRC alice");
 
-    expect(removed.standing.channels.size).toBe(0);
+    expect(removed.standing.irc.channels.size).toBe(0);
     expect(planned(removed, [{ name: "#iIrC" }])).toStrictEqual([]);
   });
 
@@ -1283,7 +1203,7 @@ describe("LIVE-7: which Channels to join", () => {
   it("LIVE-7: keeps the spelling the Ircd last used", () => {
     const { standing } = session().in(":alice!u@h JOIN #IIRC");
 
-    expect(standing.channels.get("#iirc")).toBe("#IIRC");
+    expect(standing.irc.channels.get("#iirc")?.name).toBe("#IIRC");
   });
 
   it("LIVE-7: an unsolicited JOIN is simply joined, so it is not asked for", () => {
@@ -1469,7 +1389,7 @@ describe("LIVE-7: which Channels to join", () => {
   it("KNOW-1: a Part takes the Channel away from what Self is in", () => {
     const script = session().in(":alice!u@h JOIN #iirc").in(":alice!u@h PART #iirc :bye");
 
-    expect(script.standing.channels.size).toBe(0);
+    expect(script.standing.irc.channels.size).toBe(0);
   });
 });
 
@@ -1479,7 +1399,7 @@ describe("LIVE-8: kicks", () => {
   it("LIVE-8: a kick wins over autojoin in this Session", () => {
     const script = kicked();
 
-    expect(script.standing.channels.size).toBe(0);
+    expect(script.standing.irc.channels.size).toBe(0);
     expect(plan(script, wantedIirc)).toStrictEqual({ channels: [], lookAgainAt: undefined });
     expect(planned(script.wait(maximum * 100), wantedIirc)).toStrictEqual([]);
   });
@@ -1536,14 +1456,14 @@ describe("LIVE-8: kicks", () => {
     expect(planned(script, wantedIirc)).toStrictEqual([]);
     expect(planned(script, [{ name: "#elsewhere" }])).toStrictEqual(["#elsewhere"]);
     expect(script.standing.kicked).toStrictEqual(before.kicked);
-    expect(script.standing.channels).toStrictEqual(before.channels);
+    expect(script.standing.irc.channels).toStrictEqual(before.irc.channels);
   });
 
   it("LIVE-8: a kick of someone else is no kick of Self", () => {
     const script = new Script().session().in(":alice!u@h JOIN #iirc").in(":a!u@h KICK #iirc bob");
 
     expect(script.standing.kicked.size).toBe(0);
-    expect(script.standing.channels.size).toBe(1);
+    expect(script.standing.irc.channels.size).toBe(1);
   });
 
   it("LIVE-8: after a rename, a kick of the new nick is a kick of Self", () => {
@@ -1602,15 +1522,15 @@ describe("LOG-2: Entries that move nothing", () => {
       .in(":ircd.example 001 mallory :Welcome", true)
       .in(":mallory!u@h JOIN #fake", true);
 
-    expect(standing.self).toBeUndefined();
-    expect(standing.channels.size).toBe(0);
+    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.channels.size).toBe(0);
     expect(sessionSince(standing)).toBeUndefined();
   });
 
   it("HOST-1: an unparseable Line is not obeyed", () => {
     const { standing } = new Script().attempt().in("").in("   ").in(":only-a-source");
 
-    expect(standing.self).toBeUndefined();
+    expect(standing.irc.self).toBeUndefined();
   });
 
   it("MSG-1: our own outbound Lines never move Channels or Self", () => {
@@ -1620,8 +1540,8 @@ describe("LOG-2: Entries that move nothing", () => {
       .out(":alice!u@h JOIN #fake")
       .out("KICK #iirc alice");
 
-    expect(standing.self).toBe("alice");
-    expect(standing.channels.size).toBe(0);
+    expect(standing.irc.self).toBe("alice");
+    expect(standing.irc.channels.size).toBe(0);
     expect(standing.kicked.size).toBe(0);
   });
 });
@@ -1812,7 +1732,9 @@ describe("HOST-1: nothing a Network sends grows a Standing", () => {
   };
 
   it("HOST-1: endless JOINs of made-up Channels are bounded", () => {
-    const { channels } = flooded((index) => `:alice!u@h JOIN #made-up-${index}`);
+    const {
+      irc: { channels },
+    } = flooded((index) => `:alice!u@h JOIN #made-up-${index}`);
 
     expect(channels.size).toBe(1024);
     expect(channels.has(`#made-up-${flood - 1}`)).toBeTruthy();
@@ -1825,7 +1747,10 @@ describe("HOST-1: nothing a Network sends grows a Standing", () => {
   });
 
   it("HOST-1: endless JOIN and KICK pairs are bounded", () => {
-    const { channels, kicked } = flooded((index) =>
+    const {
+      irc: { channels },
+      kicked,
+    } = flooded((index) =>
       index % 2 === 0
         ? `:alice!u@h JOIN #made-up-${index}`
         : `:mod!u@h KICK #made-up-${index - 1} alice`
@@ -2082,8 +2007,8 @@ describe("properties over random Entries", () => {
     for (const { script } of generated) {
       const { standing } = script.attempt();
 
-      expect(standing.self).toBeUndefined();
-      expect(standing.channels.size).toBe(0);
+      expect(standing.irc.self).toBeUndefined();
+      expect(standing.irc.channels.size).toBe(0);
       expect(standing.asked.size).toBe(0);
       expect(standing.lagChecks).toHaveLength(0);
     }
@@ -2099,7 +2024,7 @@ describe("properties over random Entries", () => {
         const key = channelKey(name);
         const failure = standing.joinFailures.get(key);
 
-        expect(standing.channels.has(key)).toBeFalsy();
+        expect(standing.irc.channels.has(key)).toBeFalsy();
         expect(standing.kicked.has(key)).toBeFalsy();
         expect(
           failure !== undefined &&
@@ -2233,15 +2158,338 @@ const withChanges = () =>
 
 const withoutChanges = (script: Script) => script.entries.filter(({ _tag }) => _tag !== "Change");
 
+// A Log already written replays as it did (LOG-10), except where Standing was wrong about
+// IRC before `@iirc/state` owned it. Each of these replays differently on purpose, and the
+// Logs in replay.jsonl hold none of them.
+const joined = ({ standing }: Script) =>
+  [...standing.irc.channels.values()].map(({ name }) => name);
+
+describe("LOG-10: what a Log already written replays differently, on purpose", () => {
+  it("KNOW-5: a JOIN naming several Channels puts Self in each, not in one named for the list", () => {
+    const script = new Script().session().out("JOIN #a,#b", "rejoin").in(":alice!u@h JOIN #a,#b");
+
+    expect(joined(script)).toStrictEqual(["#a", "#b"]);
+    expect(script.standing.asked.size).toBe(0);
+    expect(planned(script, [{ name: "#a" }, { name: "#b" }])).toStrictEqual([]);
+  });
+
+  it("KNOW-5: a PART naming several Channels leaves each, where before it left none", () => {
+    const script = new Script()
+      .session()
+      .in(":alice!u@h JOIN #a")
+      .in(":alice!u@h JOIN #b")
+      .in(":alice!u@h PART #a,#b :bye");
+
+    expect(joined(script)).toStrictEqual([]);
+  });
+
+  it("KNOW-5: an empty name is no Channel, where before `JOIN :` put Self in one called ``", () => {
+    expect(joined(new Script().session().in(":alice!u@h JOIN :"))).toStrictEqual([]);
+  });
+
+  it("KNOW-3: under rfc1459, the default, a kick spelled `{}` counts for a Channel spelled `[]`", () => {
+    const script = new Script()
+      .session()
+      .in(":alice!u@h JOIN #x[1]")
+      .in(":op!u@h KICK #X{1} alice");
+
+    // Before, Self stayed in `#x[1]` and the kick held nothing, so nothing kept Self out.
+    expect(joined(script)).toStrictEqual([]);
+    expect([...script.standing.kicked.keys()]).toStrictEqual(["#x[1]"]);
+    expect(planned(script, [{ name: "#x[1]" }])).toStrictEqual([]);
+  });
+
+  it("KNOW-3: under ascii, those are two Channels, as they always were", () => {
+    const script = new Script()
+      .session()
+      .in(":ircd.example 005 alice CASEMAPPING=ascii :are supported")
+      .in(":alice!u@h JOIN #x[1]")
+      .in(":op!u@h KICK #X{1} alice");
+
+    expect(joined(script)).toStrictEqual(["#x[1]"]);
+    expect(script.standing.kicked.size).toBe(0);
+  });
+
+  it("KNOW-3: Self is Self however the Ircd cases the nick, where before only the exact spelling was", () => {
+    const script = new Script().session().in(":ALICE!u@h JOIN #b").in(":op!u@h KICK #b Alice");
+
+    expect([...script.standing.kicked.keys()]).toStrictEqual(["#b"]);
+  });
+
+  // Before, every spelling was its own record, so these held under one and were missed
+  // under the other.
+  it("KNOW-3: a kick under the Ircd's spelling stands against the Channel wanted under another", () => {
+    const script = new Script()
+      .session()
+      .out("JOIN #X{1}", "rejoin")
+      .in(":alice!u@h JOIN #x[1]")
+      .wait(10)
+      .in(":op!u@h KICK #x[1] alice :out");
+
+    const wanted = { name: "#X{1}", rejoinOnKick: false };
+
+    expect(kickStanding(script.standing, wanted)).toStrictEqual({
+      at: script.at,
+      sequence: script.head,
+    });
+    expect(planned(script.wait(60_000), [wanted])).toStrictEqual([]);
+  });
+
+  it("KNOW-3: a refusal under another spelling counts for the Channel asked for", () => {
+    const script = new Script()
+      .session()
+      .out("JOIN #X{1}", "rejoin")
+      .in(":ircd.example 475 alice #x[1] :Cannot join channel (+k)");
+
+    expect([...script.standing.joinFailures.keys()]).toStrictEqual(["#x[1]"]);
+    expect(planned(script.wait(600_000), [{ name: "#X{1}" }])).toStrictEqual([]);
+  });
+
+  it("KNOW-3: a JOIN under another spelling clears what was asked, refused, and kicked", () => {
+    const script = new Script()
+      .session()
+      .in(":alice!u@h JOIN #x[1]")
+      .in(":op!u@h KICK #x[1] alice :out")
+      .out("JOIN #X{1}", "api")
+      .in(":ircd.example 474 alice #X{1} :Banned")
+      .in(":alice!u@h JOIN #X{1}");
+
+    const { asked, joinFailures, kicked } = script.standing;
+
+    expect([asked.size, joinFailures.size, kicked.size]).toStrictEqual([0, 0, 0]);
+  });
+});
+
+const kickedFromBrackets = (casemapping?: string) => {
+  const script = new Script().session();
+
+  if (casemapping !== undefined) {
+    script.in(`:ircd.example 005 alice CASEMAPPING=${casemapping} :are supported`);
+  }
+
+  return script.in(":alice!u@h JOIN #x[1]").in(":op!u@h KICK #x[1] alice :out");
+};
+
+const standsAgainst = ({ standing }: Script, name: string) =>
+  kickStanding(standing, { name }) !== undefined;
+
+describe("KNOW-3: what outlives a Session follows the mapping in force", () => {
+  it("compares under a `CASEMAPPING` that arrives after the kick", () => {
+    const script = kickedFromBrackets().in(":ircd.example 005 alice CASEMAPPING=ascii :ok");
+
+    expect(standsAgainst(script, "#X[1]")).toBeTruthy();
+    expect(standsAgainst(script, "#x{1}")).toBeFalsy();
+  });
+
+  it("compares under the next Session's mapping, which is rfc1459 until it says", () => {
+    const script = kickedFromBrackets("ascii");
+
+    expect(standsAgainst(script, "#x{1}")).toBeFalsy();
+
+    script.closed("gone");
+
+    expect(standsAgainst(script, "#x{1}")).toBeTruthy();
+
+    script.session().in(":ircd.example 005 alice CASEMAPPING=ascii :ok");
+
+    expect(standsAgainst(script, "#x{1}")).toBeFalsy();
+    expect(standsAgainst(script, "#x[1]")).toBeTruthy();
+  });
+
+  it("keeps the newest of two records one mapping makes the same", () => {
+    const script = kickedFromBrackets("ascii")
+      .wait(10)
+      .in(":alice!u@h JOIN #x{1}")
+      .in(":op!u@h KICK #x{1} alice :again")
+      .in(":ircd.example 005 alice CASEMAPPING=rfc1459 :ok");
+
+    expect(kickStanding(script.standing, { name: "#X[1]" })?.sequence).toBe(script.head - 1);
+  });
+});
+
+// Under ascii `#x[1]` and `#x{1}` were two Channels, and each was kicked from. A
+// later Session with no `CASEMAPPING` makes them one.
+const kickedUnderBoth = () =>
+  new Script()
+    .session()
+    .in(":ircd.example 005 alice CASEMAPPING=ascii :are supported")
+    .in(":alice!u@h JOIN #x[1]")
+    .in(":op!u@h KICK #x[1] alice :out")
+    .wait(10)
+    .in(":alice!u@h JOIN #x{1}")
+    .in(":op!u@h KICK #x{1} alice :out")
+    .closed("gone")
+    .session();
+
+const cpuMillis = (work: () => void) => {
+  const before = process.cpuUsage();
+
+  work();
+
+  const { system, user } = process.cpuUsage(before);
+
+  return (system + user) / 1000;
+};
+
+describe("KNOW-3: a kick that was recorded under spellings the mapping in force joins", () => {
+  it("lists each spelling while nobody wants the Channel since", () => {
+    const script = kickedUnderBoth();
+
+    expect(kicksInForce(script.standing, []).map(({ channel }) => channel)).toStrictEqual([
+      "#x[1]",
+      "#x{1}",
+    ]);
+    expect(
+      kicksInForce(script.standing, [{ name: "#X{1}", since: 1 }]).map(({ channel }) => channel)
+    ).toStrictEqual(["#x[1]", "#x{1}"]);
+  });
+
+  it("lists neither once the Channel is wanted since both, as the plan says", () => {
+    const script = kickedUnderBoth();
+    const wanted = { name: "#x{1}", since: script.head + 1 };
+
+    expect(kickStanding(script.standing, wanted)).toBeUndefined();
+    expect(kicksInForce(script.standing, [wanted])).toStrictEqual([]);
+    expect(planned(script.wait(60_000), [wanted])).toStrictEqual(["#x{1}"]);
+  });
+
+  it("lists the spelling kicked since the Channel was wanted, and no other", () => {
+    const script = kickedUnderBoth();
+    const [older, newer] = [...script.standing.kicked.values()];
+    const wanted = { name: "#x[1]", since: older?.sequence ?? 0 };
+
+    expect(kicksInForce(script.standing, [wanted])).toStrictEqual([
+      { at: newer?.at, channel: "#x{1}" },
+    ]);
+    expect(kickStanding(script.standing, wanted)).toStrictEqual(newer);
+  });
+});
+
+const kickedFromAlias = () =>
+  new Script().session().in(":alice!u@h JOIN #x[1]").in(":op!u@h KICK #x[1] alice :out");
+
+describe("KNOW-3, LIVE-8: wanted Channels that are one Channel share the latest intent", () => {
+  it("clears the kick in status and in the plan alike, when one spelling is wanted since it", () => {
+    const script = kickedFromAlias();
+
+    const wanted = [
+      { name: "#x[1]", since: 1 },
+      { name: "#x{1}", since: script.head + 1 },
+    ];
+
+    expect(kicksInForce(script.standing, wanted)).toStrictEqual([]);
+    expect(planned(script.wait(60_000), wanted)).toStrictEqual(["#x[1]", "#x{1}"]);
+  });
+
+  it("keeps the kick in status and in the plan alike, when no spelling is wanted since it", () => {
+    const script = kickedFromAlias();
+
+    const wanted = [
+      { name: "#x[1]", since: 1 },
+      { name: "#x{1}", since: 2 },
+    ];
+
+    expect(kicksInForce(script.standing, wanted).map(({ channel }) => channel)).toStrictEqual([
+      "#x[1]",
+    ]);
+    expect(planned(script.wait(60_000), wanted)).toStrictEqual([]);
+  });
+});
+
+// Every call above scans nothing it need not: a Network can hold 1024 of each, and a plan
+// or a status was once cubic in them.
+describe("KNOW-3: the cost of many aliasable Channels", () => {
+  const count = 1024;
+  const names = Array.from({ length: count }, (_, index) => `#x{${index}}`);
+
+  const crowded = () => {
+    const base = new Script().session().standing;
+
+    return {
+      ...base,
+      asked: new Map(names.map((name, index) => [name, { at: started, count: (index % 3) + 1 }])),
+      joinFailures: new Map(
+        names.map((name) => [
+          name,
+          { at: started, connection: undefined, numeric: "474", text: "" },
+        ])
+      ),
+      kicked: new Map(
+        names.map((name, index) => [
+          name.replace("{", "[").replace("}", "]"),
+          { at: started, sequence: index + 1 },
+        ])
+      ),
+    };
+  };
+
+  it("lists the kicks of 1024 wanted Channels without scanning for each", () => {
+    const standing = crowded();
+    const wanted = names.map((name, index) => ({ name, since: index % 2 === 0 ? 0 : 5000 }));
+    let listed: ReturnType<typeof kicksInForce> = [];
+
+    const cpu = cpuMillis(() => {
+      listed = kicksInForce(standing, wanted);
+    });
+
+    expect(listed).toHaveLength(count / 2);
+    // Cubic, it took seconds. A scan per kick would still take a few hundred milliseconds.
+    expect(cpu).toBeLessThan(50);
+  });
+
+  it("plans 1024 wanted Channels without scanning for each", () => {
+    const standing = crowded();
+    let planThis: ReturnType<typeof joinPlan> | undefined;
+
+    const cpu = cpuMillis(() => {
+      planThis = joinPlan(
+        standing,
+        names.map((name) => ({ name, rejoinOnKick: true })),
+        started + 1_000_000,
+        defaultTuning
+      );
+    });
+
+    expect(planThis?.channels).toHaveLength(count);
+    expect(cpu).toBeLessThan(50);
+  });
+});
+
+describe(joinPlanMoved, () => {
+  it("KNOW-3: sees a `CASEMAPPING` that changes which Channels match", () => {
+    const script = new Script().session().in(":alice!u@h JOIN #x[1]");
+    const before = script.standing;
+
+    script.in(":ircd.example 005 alice CASEMAPPING=ascii :ok");
+
+    expect(joinPlanMoved(before, script.standing)).toBeTruthy();
+    expect(planned(script, [{ name: "#x{1}" }])).toStrictEqual(["#x{1}"]);
+  });
+
+  it("sees nothing in a Line that moves no input of a plan", () => {
+    const script = new Script().session().in(":alice!u@h JOIN #a");
+    const before = script.standing;
+    const seen = script.head;
+
+    script.in(":bob!u@h PRIVMSG #a :hi").in(":ircd.example 005 alice NICKLEN=30 :ok");
+
+    let after = before;
+
+    for (const entry of script.entries.slice(seen)) {
+      after = reduceStanding(after, entry);
+    }
+
+    expect(joinPlanMoved(before, after)).toBeFalsy();
+  });
+});
+
 describe("LOG-2: a Change says nothing to Standing", () => {
   it("LOG-2: a fold with Changes in it is the fold without them", () => {
     const script = withChanges();
     const without = foldOne(withoutChanges(script));
 
-    expect(script.standing.channels).toStrictEqual(without.channels);
-    expect(script.standing.connection?.registration).toStrictEqual(
-      without.connection?.registration
-    );
+    expect(script.standing.irc.channels).toStrictEqual(without.irc.channels);
+    expect(connectionView(script.standing)).toStrictEqual(connectionView(without));
     expect(sessionSince(script.standing)).toBe(sessionSince(without));
   });
 
@@ -2257,5 +2505,112 @@ describe("LOG-2: a Change says nothing to Standing", () => {
     const entry: Entry = { _tag: "Change", at: 1, by: "phone", change: {}, sequence: 1 };
 
     expect(foldStandings(noStandings, [entry]).size).toBe(0);
+  });
+});
+
+// A Connection whose login sequence is one `IDENTIFY` to NickServ, past its burst.
+const identifying = () => {
+  const script = new Script();
+
+  script.append({
+    _tag: "Connection",
+    ircd: first,
+    network: script.network,
+    nicks: ["alice"],
+    ...attemptInput,
+    loginLines: 1,
+    phase: "attempt",
+    services: ["NickServ"],
+  });
+
+  script.connection = script.head;
+
+  return script
+    .opened()
+    .welcome()
+    .in(":ircd.example 422 alice :No MOTD")
+    .out("PRIVMSG NickServ :IDENTIFY <redacted>", "identify");
+};
+
+const loginWait = defaultTuning.loginWaitMillis;
+const acceptedText = "Password accepted - you are now recognized.";
+const accepted = `:NickServ!s@h NOTICE alice :${acceptedText}`;
+
+describe("CONN-6: the login, as Standing reads it from the machine", () => {
+  it("CONN-6: waits once `IDENTIFY` is out, and holds joining up", () => {
+    const script = identifying();
+
+    expect(loginOf(script.standing)).toStrictEqual({ state: "waiting" });
+    expect(planned(script, wantedIirc)).toStrictEqual([]);
+  });
+
+  it("CONN-6: a sign answers it, in the service's words, and joining goes on", () => {
+    const script = identifying().wait(10).in(accepted);
+
+    expect(loginOf(script.standing)).toStrictEqual({ state: "succeeded", text: acceptedText });
+    expect(planned(script, wantedIirc)).toStrictEqual(["#iirc"]);
+  });
+
+  it("CONN-6: the wait running out lets joining go on", () => {
+    const script = identifying().wait(loginWait).deadline("login");
+
+    expect(loginOf(script.standing)).toStrictEqual({ state: "timedOut" });
+    expect(planned(script, wantedIirc)).toStrictEqual(["#iirc"]);
+  });
+
+  // On purpose: how the login went is what the Owner wants to see, however late it says.
+  it("CONN-6: a sign after the wait ran out still says how the login went", () => {
+    const script = identifying().wait(loginWait).deadline("login").wait(500);
+
+    script.in(":NickServ!s@h NOTICE alice :Invalid password for alice.");
+
+    expect(loginOf(script.standing)).toStrictEqual({
+      state: "failed",
+      text: "Invalid password for alice.",
+    });
+  });
+
+  // On purpose, as well: the Daemon leaving does not make the service's answer less true.
+  it("CONN-6: a sign during a close the Daemon chose still says how the login went", () => {
+    const script = identifying().wait(10).closing("leaving").in(accepted);
+
+    expect(loginOf(script.standing).state).toBe("succeeded");
+    expect(planned(script, wantedIirc)).toStrictEqual([]);
+  });
+
+  it("CONN-6: a Deadline Entry stamped before the wait is over changes nothing (LOG-8)", () => {
+    const script = identifying()
+      .wait(loginWait - 1)
+      .deadline("login");
+
+    expect(loginOf(script.standing)).toStrictEqual({ state: "waiting" });
+  });
+
+  it("CONN-6: nothing is left of it once the Connection has closed", () => {
+    expect(loginOf(identifying().wait(10).in(accepted).closed("gone").standing)).toStrictEqual({
+      state: "none",
+    });
+  });
+});
+
+describe("LIVE-11: nothing is joined once the machine has given up", () => {
+  // On purpose: Standing used to go on planning until the `closing` Entry was recorded, and
+  // the lanes the close had shut refused what it planned.
+  it.each(["ERROR :Closing Link", "ERROR :Ping timeout: 2m0s"])(
+    "LIVE-11: after %s, before any `closing` is recorded",
+    (error) => {
+      const script = session();
+
+      expect(planned(script, wantedIirc)).toStrictEqual(["#iirc"]);
+      expect(planned(script.in(error), wantedIirc)).toStrictEqual([]);
+      expect(sessionSince(script.standing)).toBe(started);
+    }
+  );
+
+  it("LIVE-2: after silence, though the Session is still measured from its 001", () => {
+    const script = session().wait(defaultTuning.silenceMillis).deadline("silence");
+
+    expect(planned(script, wantedIirc)).toStrictEqual([]);
+    expect(sessionSince(script.standing)).toBe(started);
   });
 });

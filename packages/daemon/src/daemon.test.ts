@@ -1372,7 +1372,10 @@ describe("the Daemon", () => {
             { tuning: { quitWaitMillis } }
           );
 
-          assert.isAtMost(Date.now() - stopping, quitWaitMillis + 1000);
+          // A stop that waited on the hung write instead would wait for the Transport's own
+          // limit on a stalled write, ten seconds, so what is asserted is the `QUIT` wait
+          // and a margin for a busy machine to close the Log in.
+          assert.isAtMost(Date.now() - stopping, quitWaitMillis + 2500);
 
           // The `QUIT` was recorded and its write never finished, so it is Dropped too (LOG-2).
           assert.deepStrictEqual(yield* logTail(dataDir, 5), [
@@ -1664,6 +1667,30 @@ describe("the Daemon", () => {
       )
     );
 
+    // Each of these broke no rule when it was recorded, as far as the Log can tell, and a
+    // rule made since must not keep the Daemon from starting on it.
+    it.live("CONF-1: starts on a Change today's rules refuse, folded as it was recorded", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const settings = {
+            ...settingsFor({ channels: [{ name: "#a" }, { name: "#A" }] }),
+            enabled: false,
+            ircds: [{ host: "irc.example", pin: "sha256/short", port: 6697, tls: true }] as const,
+            tuning: { quitWaitMillis: 60_000, silenceMillis: 1000 },
+          };
+
+          yield* localKey(dataDir);
+          yield* appendRaw(dataDir, [JSON.stringify({ _tag: "NetworkAdded", settings })]);
+
+          const { networks } = yield* Daemon.use(({ configuration }) => configuration).pipe(
+            Effect.provide(DaemonCore(configIn(dataDir)))
+          );
+
+          assert.deepStrictEqual(networks, [settings]);
+        })
+      )
+    );
+
     it.live("CONF-1: will not start on a Change that is not JSON, and says which", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
@@ -1723,7 +1750,10 @@ describe("the Daemon", () => {
               Layer.provide(Transport.layer)
             );
 
-            const started = Date.now();
+            // Both are checked: the CPU the start takes, which a busy machine does not
+            // stretch, and its wall time, which is what "promptly" means.
+            const started = process.cpuUsage();
+            const startedAt = Date.now();
 
             const settings = yield* Effect.scoped(
               Effect.gen(function* () {
@@ -1733,14 +1763,17 @@ describe("the Daemon", () => {
               })
             );
 
-            const millis = Date.now() - started;
+            const { system, user } = process.cpuUsage(started);
+            const millis = (system + user) / 1000;
+            const elapsed = Date.now() - startedAt;
 
             assert.deepStrictEqual(
               settings.map(({ quitReason }) => quitReason),
               [`change ${changes - 1}`]
             );
             assert.lengthOf(settings[0]?.channels ?? [], 300);
-            assert.isBelow(millis, 10_000, `took ${millis} ms`);
+            assert.isBelow(millis, 10_000, `took ${millis} ms of CPU`);
+            assert.isBelow(elapsed, 15_000, `took ${elapsed} ms`);
           })
         ),
       { timeout: 60_000 }

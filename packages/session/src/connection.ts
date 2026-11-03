@@ -1,9 +1,9 @@
-import { deadline, phase, step } from "@iirc/lifecycle";
+import { deadline, phase } from "@iirc/lifecycle";
 import type { Command, Lane, NetworkSnapshot, Phase } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { takeFrames } from "@iirc/protocol/frame";
 import { encodeLine, outbound, pong } from "@iirc/protocol/outbound";
 import type { Outbound } from "@iirc/protocol/outbound";
+import { readsCommand } from "@iirc/state";
 import {
   Array as Arr,
   Clock,
@@ -20,7 +20,7 @@ import {
   TxRef,
 } from "effect";
 import type { Scope } from "effect";
-import { Socket } from "effect/socket";
+import type { Socket } from "effect/socket";
 
 import {
   connectCommandCause,
@@ -31,17 +31,20 @@ import {
   passLine,
 } from "./credentials.ts";
 import type { Built, CredentialNames } from "./credentials.ts";
+import { describeDefect } from "./diagnostic.ts";
 import type { Entry, Ircd, NetworkId, NewEntry, TlsDetails } from "./entry.ts";
-import { toEvent } from "./events.ts";
+import { stepEntry } from "./events.ts";
 import { LineDropped, makeLanes, runPump, WriteFailed, writeTimedOut } from "./lanes.ts";
 import type { Lanes, LineFailure, PumpWire, QueuedLine } from "./lanes.ts";
+import { makePending } from "./pending.ts";
+import { makeReceiver } from "./receive.ts";
 import { reconcile } from "./reconcile.ts";
 import { RecordFailed } from "./recorder.ts";
 import type { Recorder } from "./recorder.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
-import { channelKeyChanges } from "./standing.ts";
+import { channelKeyChanges, joinPlanMoved } from "./standing.ts";
 import type { KeyChange, Standing, WantedChannel } from "./standing.ts";
-import { ConnectFailed, describeSocketError } from "./transport.ts";
+import { attach, ConnectFailed, describeSocketError } from "./transport.ts";
 import type { Transport } from "./transport.ts";
 
 // LOG-4: how much may be pulled and not yet recorded, so that a flood waits in the kernel
@@ -185,8 +188,8 @@ export interface Host {
 }
 
 interface Stepped {
-  /** Whether what was stepped could have changed the Channels Self is in. */
-  readonly channelsMoved: boolean;
+  /** Whether what was stepped holds a Line that `@iirc/state` reads, which alone moves a plan. */
+  readonly stateMayMove: boolean;
   readonly commands: readonly Command[];
   readonly next: NetworkSnapshot;
 }
@@ -206,9 +209,12 @@ type Order =
       readonly waits: boolean;
     };
 
+type Committed = Stepped & { readonly recorded: readonly Entry[] };
+
 type Commit = (
-  entries: Arr.NonEmptyReadonlyArray<NewEntry>
-) => Effect.Effect<Stepped & { readonly recorded: readonly Entry[] }, RecordFailed>;
+  entries: Arr.NonEmptyReadonlyArray<NewEntry>,
+  after?: (committed: Committed) => Effect.Effect<void>
+) => Effect.Effect<Committed, RecordFailed>;
 
 type InboxItem =
   | {
@@ -240,50 +246,40 @@ type Unread = Effect.Effect<readonly Uint8Array[]>;
 
 const nothingUnread: Unread = Effect.succeed([]);
 
-interface Framing {
-  readonly cutting: boolean;
-  readonly pending: Uint8Array;
-}
+// A transition that throws leaves the machine where it was and closes the Connection,
+// saying what was thrown (HOST-1).
+const stepRecorded = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
+  const stepped = stepEntry(snapshot, entry);
 
-const changesChannels: ReadonlySet<string> = new Set(["JOIN", "KICK", "PART"]);
-
-// A transition that throws leaves the machine where it was and closes the Connection
-// (HOST-1).
-const stepEntry = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
-  try {
-    const event = toEvent(entry);
-
-    return event === undefined
-      ? { channelsMoved: false, commands: [], next: snapshot }
-      : {
-          ...step(snapshot, event),
-          channelsMoved: event.type === "LINE" && changesChannels.has(event.command),
-        };
-  } catch {
-    const reason = `the machine threw on Entry ${entry.sequence}`;
+  if (stepped._tag === "Threw") {
+    const reason = `the machine threw on Entry ${entry.sequence}: ${stepped.defect}`;
 
     return {
-      channelsMoved: false,
       commands: [{ reason, type: "closeConnection" }],
       next: snapshot,
+      stateMayMove: false,
     };
   }
+
+  const { commands, event, next } = stepped;
+
+  return { commands, next, stateMayMove: event?.type === "LINE" && readsCommand(event.command) };
 };
 
 const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepped => {
   const commands: Command[] = [];
-  let channelsMoved = false;
+  let stateMayMove = false;
   let next = snapshot;
 
   for (const entry of entries) {
-    const stepped = stepEntry(next, entry);
+    const stepped = stepRecorded(next, entry);
 
-    channelsMoved ||= stepped.channelsMoved;
+    stateMayMove ||= stepped.stateMayMove;
     commands.push(...stepped.commands);
     ({ next } = stepped);
   }
 
-  return { channelsMoved, commands, next };
+  return { commands, next, stateMayMove };
 };
 
 /**
@@ -293,6 +289,15 @@ const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepp
  * the machine steps in sequence order and neither loses the other's step. A step that a
  * failed commit rolls back never reaches `hosted`, because `within` only works out the
  * next snapshot.
+ *
+ * From the read of the snapshot to the end of `after`, it is one unit that a cancelled
+ * caller cannot cut short, because the Log would otherwise hold Entries that the machine
+ * never stepped over, and every later step would start from a snapshot that is behind.
+ * The unit runs on a fiber of its own, and a caller only waits for it, so cancelling a
+ * caller that waits for its turn drops its commit, and cancelling one whose commit has
+ * begun lets the commit finish. That is also what lets a stop let go of a Recorder that
+ * never returns. `after` is how a caller publishes what the commit decided in that same
+ * unit, and it must not wait on anything for long.
  * @param hosted - The host's state.
  * @param record - Appends Entries.
  * @returns The commit.
@@ -303,21 +308,38 @@ export const makeCommit = (
 ): Commit => {
   const stepping = Semaphore.makeUnsafe(1);
 
-  return (entries) =>
-    stepping.withPermits(1)(
-      Effect.gen(function* () {
-        const { snapshot } = yield* Ref.get(hosted);
+  return (entries, after) =>
+    Effect.gen(function* () {
+      const unit = yield* stepping
+        .withPermit(
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const { snapshot } = yield* Ref.get(hosted);
 
-        const stepped = yield* record(entries, (recorded) => ({
-          ...stepEntries(snapshot, recorded),
-          recorded,
-        }));
+              const stepped = yield* record(entries, (recorded) => ({
+                ...stepEntries(snapshot, recorded),
+                recorded,
+              }));
 
-        yield* Ref.update(hosted, (held) => ({ ...held, snapshot: stepped.next }));
+              yield* Ref.update(hosted, (held) => ({ ...held, snapshot: stepped.next }));
+              yield* after?.(stepped) ?? Effect.void;
 
-        return stepped;
-      })
-    );
+              return stepped;
+            })
+          )
+        )
+        .pipe(Effect.forkDetach({ startImmediately: true }));
+
+      // A unit still waiting for its turn is dropped with its caller, and one that has begun
+      // finishes first, because the interrupt only takes effect where it can.
+      return yield* Fiber.join(unit).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            unit.interruptUnsafe();
+          })
+        )
+      );
+    });
 };
 
 const toEnding = (error: Socket.SocketError) =>
@@ -416,22 +438,19 @@ export const hostConnection: (
   });
 
   const closed = Deferred.makeUnsafe<undefined>();
-  let framing: Framing = { cutting: false, pending: new Uint8Array() };
+  const receiver = makeReceiver();
+  // Dropped Entries waiting for a commit, what the Log would not take, and Lines recorded
+  // as outbound whose write did not complete (LOG-2, LOG-4, LOG-9).
+  const pending = makePending();
   let pump: Fiber.Fiber<unknown> | undefined;
   let reader: Fiber.Fiber<unknown> | undefined;
   // What the stream has read and the reader has not pulled, for the close to record.
   let unread = nothingUnread;
   let reconciling = false;
-  let seen: Pick<Standing, "channels" | "kicked"> | undefined;
+  // The Standing the reconciler was last woken for.
+  let seen: Standing | undefined;
   let stopHandled = false;
   let closingRecorded = false;
-  // Dropped Entries waiting for a commit: one per batch while the lanes are open, and
-  // the close's own once they are not, so that a flood cannot cost a commit for each.
-  let unsent: NewEntry[] = [];
-  // What the Log would not take, kept for when it will (LOG-4, LOG-9).
-  let unrecorded: NewEntry[] = [];
-  // Lines recorded as outbound whose write did not complete (LOG-2).
-  const unwritten: { readonly queued: QueuedLine; readonly reason: string }[] = [];
 
   yield* Ref.update(hosted, (state): Hosted => ({
     ...state,
@@ -465,7 +484,7 @@ export const hostConnection: (
 
   // A Line built from Credentials is recorded in its sensitive form, written or not.
   const droppedOf = ({ cause, line, sensitive }: QueuedLine, reason: string) =>
-    droppedEntry(sensitive?.bytes ?? line.bytes, cause, reason, sensitive?.names);
+    droppedEntry(sensitive?.bytes ?? line.toBytes(), cause, reason, sensitive?.names);
 
   const closingEntry = (reason: string, chosen: boolean): NewEntry => ({
     _tag: "Connection",
@@ -487,21 +506,8 @@ export const hostConnection: (
     ...(refused && { refused: true }),
   });
 
-  const takeLines = (chunks: readonly Uint8Array[]) => {
-    const entries: NewEntry[] = [];
-
-    for (const chunk of chunks) {
-      const { cut, cutting, frames, pending } = takeFrames(framing.pending, chunk, framing.cutting);
-
-      for (const [index, frame] of frames.entries()) {
-        entries.push(lineEntry(frame, cut.has(index)));
-      }
-
-      framing = { cutting, pending };
-    }
-
-    return entries;
-  };
+  const takeLines = (chunks: readonly Uint8Array[]) =>
+    receiver.take(chunks).map(({ bytes, cut }) => lineEntry(bytes, cut));
 
   // How a close starts, from any fiber. The first reason counts, and a later close can
   // only shorten the wait, unless it is a refusal: a Network that bans us at accept
@@ -550,14 +556,20 @@ export const hostConnection: (
   const closingIfItDies = <A, E, R>(fiber: Effect.Effect<A, E, R>) =>
     fiber.pipe(
       Effect.tapDefect((defect) => Effect.logError("A Connection's fiber died", defect)),
-      Effect.catchDefect(() => drain(hostFailed, { limitMillis: 0 }))
+      Effect.catchDefect((defect) =>
+        drain(`${hostFailed}: ${describeDefect(defect)}`, { limitMillis: 0 })
+      )
     );
 
+  // Whatever a commit moved that a plan reads wakes the reconciler, whichever Line moved
+  // it. Only a Line `@iirc/state` reads can: the reconciler's own `JOIN`s are planned for
+  // already, the burst and the end of the login wait wake it through their own Commands, and
+  // a close ends it.
   const noticeChannels = Effect.gen(function* () {
-    const { channels: joined, kicked } = yield* standing;
+    const current = yield* standing;
 
-    if (joined !== seen?.channels || kicked !== seen.kicked) {
-      seen = { channels: joined, kicked };
+    if (seen === undefined || joinPlanMoved(seen, current)) {
+      seen = current;
       Queue.offerUnsafe(moved, undefined);
     }
   });
@@ -597,7 +609,7 @@ export const hostConnection: (
     reason: string,
     redacted?: readonly string[]
   ) => {
-    unsent.push(droppedEntry(bytes, cause, reason, redacted));
+    pending.dropped(droppedEntry(bytes, cause, reason, redacted));
   };
 
   const offerWaiting = (queued: QueuedLine) =>
@@ -625,7 +637,9 @@ export const hostConnection: (
     const offered = waits ? yield* offerWaiting(queued) : yield* lanes.offerNow(queued);
 
     if (offered !== "queued") {
-      unsent.push(droppedOf(queued, offered === "full" ? `the ${lane} lane is full` : closingDown));
+      pending.dropped(
+        droppedOf(queued, offered === "full" ? `the ${lane} lane is full` : closingDown)
+      );
     }
   });
 
@@ -666,7 +680,7 @@ export const hostConnection: (
       };
 
       if (!(yield* isQuit ? lanes.offerQuit(queued) : lanes.offerWaiting(queued))) {
-        unsend(built.line.bytes, cause, closingDown);
+        unsend(built.line.toBytes(), cause, closingDown);
       }
     }
   });
@@ -675,7 +689,7 @@ export const hostConnection: (
     if (command.type === "sendBuilt") {
       const recorded =
         command.built._tag === "Safe"
-          ? (command.built.sensitive ?? { bytes: command.built.line.bytes, names: [] })
+          ? (command.built.sensitive ?? { bytes: command.built.line.toBytes(), names: [] })
           : command.built.recorded;
 
       unsend(recorded.bytes, command.cause, closingDown, recorded.names);
@@ -759,17 +773,8 @@ export const hostConnection: (
   const flushUnsent = Effect.gen(function* () {
     const open = (yield* Ref.get(stage))._tag !== "Draining" && (yield* lanes.isOpen);
 
-    if (open && Arr.isReadonlyArrayNonEmpty(unsent)) {
-      const batch = unsent;
-
-      unsent = [];
-      yield* commit(batch).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            unsent = [...batch, ...unsent];
-          })
-        )
-      );
+    if (open) {
+      yield* pending.flush((batch) => commit(batch));
     }
   });
 
@@ -814,7 +819,7 @@ export const hostConnection: (
 
     if (Option.isNone(committed)) {
       // Only the Line Entries: a Deadline or a `closing` that did not land never happened.
-      unrecorded = [...unrecorded, ...entries.filter(({ _tag }) => _tag === "Line")];
+      pending.unrecorded(entries.filter(({ _tag }) => _tag === "Line"));
       yield* logFailed;
     } else {
       yield* runCommands([...leading, ...committed.value.commands], drainMillis);
@@ -825,7 +830,7 @@ export const hostConnection: (
 
       yield* flushUnsent.pipe(Effect.catchTag("RecordFailed", () => logFailed));
 
-      if (reconciling && committed.value.channelsMoved) {
+      if (reconciling && committed.value.stateMayMove) {
         yield* noticeChannels.pipe(Effect.catchTag("RecordFailed", () => logFailed));
       }
     }
@@ -884,14 +889,13 @@ export const hostConnection: (
     const opening = yield* Ref.get(stage);
     const backlog = yield* Queue.clear(inbox);
 
-    const lines = takeLines([
-      ...backlog.flatMap((item) => (item._tag === "Read" ? item.chunks : [])),
-      ...(yield* unread),
-    ]);
-
-    if (framing.pending.length > 0) {
-      lines.push(lineEntry(framing.pending, true));
-    }
+    const lines = [
+      ...takeLines([
+        ...backlog.flatMap((item) => (item._tag === "Read" ? item.chunks : [])),
+        ...(yield* unread),
+      ]),
+      ...Arr.fromNullishOr(receiver.rest()).map(({ bytes }) => lineEntry(bytes, true)),
+    ];
 
     const head =
       opening._tag === "Draining" && opening.local && !closingRecorded
@@ -902,25 +906,22 @@ export const hostConnection: (
 
     // A stop out of time has one commit left to make, and the cap on a transaction only
     // ever kept a flood from holding the writer, which nothing else needs now.
-    const read = [...unrecorded, ...head, ...lines];
+    const read = [...pending.takeUnrecorded(), ...head, ...lines];
     const left = hurrying() ? read : yield* commitInOrder(Arr.chunksOf(read, linesPerCommit));
-
-    unrecorded = [];
     const queued = yield* lanes.empty;
     const current = yield* Ref.get(stage);
     const reason = current._tag === "Draining" ? current.reason : ending;
     const refused = current._tag === "Draining" && current.refused;
     const dropReason = `the Connection closed: ${reason}`;
 
-    const dropped = [
-      ...unsent,
-      ...unwritten.map(({ queued: line, reason: why }) => droppedOf(line, why)),
+    const owed = pending.takeAll();
+
+    const end = [
+      ...owed.unrecorded,
+      ...owed.dropped,
       ...queued.map((line) => droppedOf(line, dropReason)),
+      closedEntry(reason, refused),
     ];
-
-    unsent = [];
-
-    const end = [...dropped, closedEntry(reason, refused)];
 
     const rest =
       left.length > 0 && !hurrying()
@@ -967,29 +968,28 @@ export const hostConnection: (
     // the loop is told, because only it can carry out what the machine asks for and it
     // may be waiting on a later deadline than the login wait's (CONN-6).
     record: ({ cause, line, sensitive }) =>
-      commit([
-        {
-          _tag: "Line",
-          bytes: sensitive?.bytes ?? line.bytes,
-          cause,
-          connection,
-          direction: "outbound",
-          network: id,
-          ...(sensitive !== undefined &&
-            sensitive.names.length > 0 && { redacted: sensitive.names }),
-        },
-      ]).pipe(
-        Effect.tap(({ commands }) =>
+      commit(
+        [
+          {
+            _tag: "Line",
+            bytes: sensitive?.bytes ?? line.toBytes(),
+            cause,
+            connection,
+            direction: "outbound",
+            network: id,
+            ...(sensitive !== undefined &&
+              sensitive.names.length > 0 && { redacted: sensitive.names }),
+          },
+        ],
+        ({ commands }) =>
           commands.length > 0 || loginCauses.has(cause)
-            ? Queue.offer(inbox, { _tag: "Stepped", commands })
+            ? Effect.asVoid(Queue.offer(inbox, { _tag: "Stepped", commands }))
             : Effect.void
-        ),
-        Effect.map(({ recorded }) => recorded[0]?.sequence ?? 0)
-      ),
+      ).pipe(Effect.map(({ recorded }) => recorded[0]?.sequence ?? 0)),
     recordFailed: logFailed,
     unwritten: (queued, reason) =>
       Effect.sync(() => {
-        unwritten.push({ queued, reason });
+        pending.unwritten(droppedOf(queued, reason));
       }),
     write: ({ line }) =>
       writer.write(encodeLine(line)).pipe(
@@ -1127,8 +1127,12 @@ export const hostConnection: (
       Effect.catch((error) =>
         Queue.offer(inbox, { _tag: "Ended", local: false, reason: toEnding(error) })
       ),
-      Effect.catchDefect(() =>
-        Queue.offer(inbox, { _tag: "Ended", local: true, reason: readerDied })
+      Effect.catchDefect((defect) =>
+        Queue.offer(inbox, {
+          _tag: "Ended",
+          local: true,
+          reason: `${readerDied}: ${describeDefect(defect)}`,
+        })
       )
     );
 
@@ -1153,8 +1157,7 @@ export const hostConnection: (
       ...(certificate !== undefined && { clientCertificate: certificate }),
     });
 
-    const pull = yield* Socket.readerBytes(opened.socket);
-    const writer = yield* opened.socket.writer;
+    const { pull, writer } = yield* attach(opened);
 
     yield* Queue.offer(inbox, {
       _tag: "Opened",
@@ -1164,16 +1167,16 @@ export const hostConnection: (
       writer,
     });
   }).pipe(
-    Effect.catchTags({
-      ConnectFailed: ({ reason }) => Queue.offer(inbox, { _tag: "Ended", local: false, reason }),
-      SocketError: (error) =>
-        Queue.offer(inbox, {
-          _tag: "Ended",
-          local: false,
-          reason: `could not read: ${describeSocketError(error)}`,
-        }),
-    }),
-    Effect.catchDefect(() => Queue.offer(inbox, { _tag: "Ended", local: true, reason: dialDied }))
+    Effect.catchTag("ConnectFailed", ({ reason }) =>
+      Queue.offer(inbox, { _tag: "Ended", local: false, reason })
+    ),
+    Effect.catchDefect((defect) =>
+      Queue.offer(inbox, {
+        _tag: "Ended",
+        local: true,
+        reason: `${dialDied}: ${describeDefect(defect)}`,
+      })
+    )
   );
 
   const onOpened = Effect.fnUntraced(function* ({
@@ -1231,7 +1234,7 @@ export const hostConnection: (
 
       // Out of time, so the close records the rest with everything else, in one commit.
       if (hurrying()) {
-        unrecorded = [...unrecorded, ...batches.slice(index).flat()];
+        pending.unrecorded(batches.slice(index).flat());
         break;
       }
 
@@ -1303,7 +1306,10 @@ export const hostConnection: (
   // way any other does, so that the next one is only a backoff away.
   yield* serve.pipe(
     Effect.catchDefect((defect) =>
-      Effect.andThen(Effect.logError("A Connection failed", defect), close(hostFailed, true))
+      Effect.andThen(
+        Effect.logError("A Connection failed", defect),
+        close(`${hostFailed}: ${describeDefect(defect)}`, true)
+      )
     )
   );
 });

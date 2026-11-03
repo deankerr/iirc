@@ -1,7 +1,8 @@
 import { initialTransition, transition } from "xstate";
 import type { SnapshotFrom } from "xstate";
 
-import { commandsOf, network } from "./machine.ts";
+import { commandsOf, isLoginOpen, network } from "./machine.ts";
+import type { Context, LoginAnswer } from "./machine.ts";
 import type { Tuning } from "./tuning.ts";
 
 /**
@@ -109,6 +110,50 @@ export type Phase = "idle" | "connecting" | "registering" | "session" | "closing
 export type NetworkSnapshot = SnapshotFrom<typeof network>;
 
 /**
+ * How far a Connection got towards a Session. `Welcomed` stays once the Session begins to
+ * close, because when it began is still what its length is measured from. `Abandoned` is
+ * a Connection the machine gave up on before any welcome, which no `001` can turn into a
+ * Session now.
+ */
+export type Registration =
+  /** No Connection is under way. */
+  | { readonly _tag: "None" }
+  | { readonly _tag: "Connecting" }
+  | {
+      readonly _tag: "Registering";
+      /** The nick being offered (CONN-4). */
+      readonly nick: string;
+    }
+  | {
+      readonly _tag: "Welcomed";
+      /** When the `001` arrived, which is when the Session began. */
+      readonly at: number;
+      /** The nick registration ended on. Self is whatever the `001` names. */
+      readonly nick: string;
+    }
+  | { readonly _tag: "Abandoned" };
+
+/**
+ * Where a login to services stands (CONN-6). `waiting` starts with an `IDENTIFY` written,
+ * and the rest are how the wait ended, with the service's own words where it gave any.
+ */
+export interface Login {
+  readonly state: "none" | "waiting" | "succeeded" | "failed" | "timedOut";
+  readonly text?: string;
+}
+
+/** What a host may know of a Connection from its machine, which never shows its context. */
+export interface ConnectionView {
+  /**
+   * Whether `JOIN`s may go out: a Session the machine has not begun to leave, with the
+   * login sequence out and no login wait running (CONN-6, LIVE-11).
+   */
+  readonly joinable: boolean;
+  readonly login: Login;
+  readonly registration: Registration;
+}
+
+/**
  * Starts a Network's machine.
  * @param input - What it holds until the first `ATTEMPT` brings the input of its own.
  * @returns The first snapshot.
@@ -174,6 +219,83 @@ export const deadline: (
  */
 export const phase: (snapshot: NetworkSnapshot) => Phase = ({ value }) =>
   value === "idle" || value === "closed" || value === "closing" ? value : value.connection;
+
+const loginOf = (answer: LoginAnswer): Login => {
+  switch (answer._tag) {
+    case "Unasked": {
+      return { state: "none" };
+    }
+
+    case "Waiting": {
+      return { state: "waiting" };
+    }
+
+    case "TimedOut": {
+      return { state: "timedOut" };
+    }
+
+    case "Answered": {
+      const { _tag, text } = answer.sign;
+
+      return { state: _tag === "LoggedIn" ? "succeeded" : "failed", text };
+    }
+
+    default: {
+      return answer satisfies never;
+    }
+  }
+};
+
+const registrationOf = (snapshot: NetworkSnapshot, context: Context): Registration => {
+  const at = phase(snapshot);
+  const nick = context.nicks[context.nickIndex] ?? "";
+
+  if (context.welcomedAt !== undefined && (at === "session" || at === "closing")) {
+    return { _tag: "Welcomed", at: context.welcomedAt, nick };
+  }
+
+  switch (at) {
+    case "idle":
+    case "closed": {
+      return { _tag: "None" };
+    }
+
+    case "connecting": {
+      return { _tag: "Connecting" };
+    }
+
+    case "registering": {
+      return { _tag: "Registering", nick };
+    }
+
+    // A Session always has its welcome, so only a close is left.
+    case "session":
+    case "closing": {
+      return { _tag: "Abandoned" };
+    }
+
+    default: {
+      return at satisfies never;
+    }
+  }
+};
+
+/**
+ * Reads what a snapshot says of its Connection, which is all anyone outside this package
+ * may know of the machine's context.
+ * @param snapshot - The machine so far.
+ * @returns How far registration got, how the login stands, and whether joining may go on.
+ */
+export const inspect = (snapshot: NetworkSnapshot): ConnectionView => {
+  const { context } = snapshot;
+
+  return {
+    joinable:
+      phase(snapshot) === "session" && !context.leaving && isLoginOpen(context, context.login),
+    login: loginOf(context.login.answer),
+    registration: registrationOf(snapshot, context),
+  };
+};
 
 /**
  * Reads why the last Connection closed.

@@ -64,10 +64,10 @@ Dependencies point down only, and each package stands alone for whoever wants it
 
 | Package | Job | Runtime dependencies |
 | --- | --- | --- |
-| `@iirc/protocol` | Frames, Lines, safe outbound construction, `RPL_ISUPPORT`, casefolding, mode parsing, formatting, CTCP, splitting, nick candidates, token bucket, Lookup tables, refusal classifier | None |
-| `@iirc/state` | Folds Lines into Channels, members, modes, and Self. Moves out of `protocol` | `protocol` |
+| `@iirc/protocol` | Frames, Lines, safe outbound construction, formatting, CTCP, splitting, nick candidates, token bucket, Lookup tables, refusal classifier, and `channelKey`, the ASCII fold Configuration compares names by | None |
+| `@iirc/state` | What an Ircd's Lines mean: `RPL_ISUPPORT`, casemapping, mode parsing, Self, the Channels Self is in, and their keys, as one fold, `stepState` | `protocol` |
 | `@iirc/lifecycle` | The Network machine, `step`, `fold`, `Tuning`, and its command type | `xstate`, `protocol` |
-| `@iirc/session` | Hosts one Network: Transport, lanes, `Standing`, Lookup queue, reconnect | `lifecycle`, `state`, `protocol`, `effect`, `@effect/platform-bun` |
+| `@iirc/session` | Hosts one Network: Transport, lanes, `Standing`, Lookup queue, reconnect, and `Entry` and `Committed`, which every Recorder offers | `lifecycle`, `state`, `protocol`, `effect`, `@effect/platform-bun` |
 | `@iirc/log` | SQLite, the writer, the Worker reader, migrations, derived tables, Entry schemas | `session`, `state`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | `@iirc/api` | `DaemonApi`, Schemas, typed errors | `effect` |
 | `@iirc/client` | `HttpApiClient` plus cursor tracking, reconnect, and `resync` handling | `api`, `effect` |
@@ -78,6 +78,7 @@ Dependencies point down only, and each package stands alone for whoever wants it
 - **Seams worth keeping:**
   - **`Transport`:** `(ircd) => Effect<Socket>`, so tests run Sessions on `TestClock` with no real port.
   - **`Recorder`:** what `session` calls to record before acting. In memory for library users, and durable in `log`. This keeps `session` ignorant of SQLite and is what makes it usable alone.
+  - **`Committed`:** how anyone in the process watches Entries as they commit, without crossing into a Recorder. Both Recorders offer it, so a bot needs only `hostNetwork`, `Recorder.memory`, and a watch.
   - **`Log` and `LogReader`:** moving the writer to a Worker later becomes a Layer swap.
   - **`Credentials`:** one interface over `Bun.secrets` and a plain file (CRED-1), chosen at startup.
   - **`Keys`:** API keys, which both `HttpApi` middleware and the WebSocket route call.
@@ -181,10 +182,18 @@ const waited = yield * Queue.peek(inbox).pipe(Effect.timeoutOption(Duration.mill
 
 A machine lives for one Connection: every `attempt` resets it. What outlasts a Connection is `Standing`, a pure fold over Entries.
 
-- **`Standing` is everything a host needs from a Network's past.** That is the recent Connections and how many failed in a row, any refusal, the `NICKLEN` of the last Session, lag, Channels joined, Channels kicked from, and each Channel's last `JOIN` failure.
+- **`@iirc/state` is the one interpretation of what an Ircd says.** `stepState(state, line)` gives `{ next, changes }`: the Session's state after the Line, and each observable transition it made, such as joined, parted, kicked, nick changed, key set or cleared, a `JOIN` refused, or `RPL_ISUPPORT` changed.
+  - The state is Self's nick, `RPL_ISUPPORT` already read (`CASEMAPPING`, `PREFIX` and `CHANMODES` as mode types, `NICKLEN`), and the Channels Self is in, keyed by name casefolded under the mapping in force, spelled as the Ircd last spelled them, with their keys. It holds at most 1024 Channels and drops the oldest, and nothing else it holds grows with what a Network sends.
+  - A `JOIN`, `PART`, or `KICK` naming several Channels is several changes. A `JOIN` failure is a change and is not held, because only someone who asked knows whether it names a Channel.
+  - It is pure and knows nothing of Entries, Changes, or Effect, so a library user folding Lines gets what the Daemon gets.
+- **`Standing` is everything a host needs from a Network's past.** That is the recent Connections and how many failed in a row, any refusal, the `NICKLEN` of the last Session, lag, the current Session's `@iirc/state`, Channels kicked from, and each Channel's last `JOIN` failure.
   - It lives in `session`, and `@iirc/session` gains a dependency on `@iirc/state`. Both Recorders keep one per Network and update it in the same transaction as the Entries, and `Recorder.standing(network)` reads it.
   - It replaces the Log's own `Sessions`, so there is one fold. It rebuilds in the existing pass at startup, which is why a crash loop cannot outrun its own backoff.
   - The host holds no copy, and reads `standing` when it needs to decide something.
+- **The machine is the only owner of a Connection's progress.** Registration, nick fallback, giving up, and the login wait are decided in `lifecycle` and nowhere else.
+  - `Standing` folds the current Connection's own machine over its Entries with `stepEntry`, the same step the host takes as it records, and reads it only through `inspect(snapshot)`, a `ConnectionView` of how far registration got, when the welcome came, the nick offered, how the login stands, and whether joining may go on. Nothing outside `lifecycle` reads the machine's context.
+  - It steps the Session's `@iirc/state` with every inbound Line, but for a welcome the machine refused, and reads Self, Channels, and keys from there. Only the changes become anything of its own, with the Entry's time and sequence: a kick, a `JOIN` failure for a Channel it asked for, and the last `NICKLEN`. `channelKeyChanges` is the key changes of the same fold, for `onChannelKey` (CRED-4).
+  - Beside the machine and the state, `Standing` keeps only what outlives a Connection or concerns the Log's provenance: who decided to close it and where it last was, the recent Connections, the refusal, `JOIN`s asked for, kicks, `JOIN` failures, and Gaps. Those it keys by `channelKey`, the comparison Configuration has with no Session to give it a mapping.
 - **The next attempt is a pure function of `Standing`:** `nextAttempt(standing, { ircds, tuning })` gives a time and the Ircd.
   - The delay doubles from 5 seconds up to 5 minutes for each failure in a row, and `jitter` moves it within the upper half of that delay, seeded by the sequence of the last `attempt`, so a restart computes the same time.
   - `Standing` keeps the last 64 Connection outcomes and `Tuning` decides at read time what counts as stable, so that a tuned value applies to the past too.
@@ -200,6 +209,17 @@ A machine lives for one Connection: every `attempt` resets it. What outlasts a C
 - **The reconciler runs from burst complete until the Connection ends.** The pure `joinPlan(standing, wanted, now, tuning)` returns what to `JOIN` now and when to look again, and the reconciler offers that to the background lane. It reads the wanted Channels from the host's settings each time it plans, so a Join or Part through the API reaches a running Session.
 - **A host cannot stay dead.** A defect during a Connection becomes a `closed` Entry and a normal backoff, so `/health` needs no second opinion. A failed `record` backs off in the same way with no dial, which is LOG-9's recovery, and status shows the fault until a `record` succeeds.
 - **Tuning is one value.** Every timing and limit in LIVE, CONN, and SEND that an Owner might change lives in a `Tuning` record with the spec's defaults, on the machine's input and on the host's options. A Network's settings store only the numbers the Owner overrides, so tests of the real binary set them through the API and need not wait minutes.
+
+### Watching what commits
+
+`Committed.watch` gives a Stream of `Entry | Overflowed`. It is the library's way to act on traffic, and the store offers the same, which a Daemon in-process reader or a future `/stream` may build on.
+
+- **Ordering:** Entries come in sequence order, each only once its commit has landed. A Recorder publishes each commit as it lands, one at a time: the memory Recorder in the same synchronous step, and the store under its writer permit, after `COMMIT` and after its Standings are set. A rolled-back `record` publishes nothing.
+- **Timing:** a watch gives everything committed after `watch` returns, and nothing from before. It subscribes then, in the caller's Scope, not when the Stream first runs, so a caller can subscribe before it starts a host and miss nothing. Its Stream ends once that Scope closes, after what it holds.
+- **No replay:** a watch never looks back. The memory Recorder could replay cheaply, but the store would have to read SQLite on the writer's connection, and replay from a cursor is `/stream`'s durable contract (API-6), with its own `resync`. A caller who needs the past subscribes first and then reads by cursor, from `MemoryEntries` or the Log. That leaves no gap, and a sequence it already has is a duplicate to skip.
+- **Overflow:** no watcher can hold up a commit. Each watcher has its own queue of at most `capacity` Entries, 4096 by default, and a `capacity` that is not a whole number from 1 to 1,000,000 fails the watch with `InvalidWatchCapacity`, because it would bound nothing. Once that is full it misses Entries until it has taken all it holds. Then it gets one `Overflowed { missedFrom, missedTo }`, inclusive, where they would have stood, and Entries again after that. It is never told less than what it missed, and other watchers are not affected.
+  - This is not a `PubSub`. A bounded one would stall the writer, and a dropping or sliding one would lose Entries silently, and for every subscriber at once.
+  - The miss stands in the queue as one element that grows until it is taken, so a watcher holds at most `capacity` Entries and one miss.
 
 ### Configuration
 
@@ -224,6 +244,7 @@ Configuration is a fold over Change Entries, like `Standing` is over Connection 
 | SEND-4 dropping | `TxQueue.clear` returns the items |  |
 | SEND-2 flood control | Pure token bucket driven by `Clock` | `RateLimiter`, whose delay would break strict priority |
 | `/stream` fan-out | `PubSub.sliding({ capacity: 1, replay: 1 })` of the head sequence, published from `sql.afterCommit`. Each subscriber pages from its own cursor | A payload `PubSub`, which stalls the writer or loses data |
+| `Committed` watchers | One unbounded `Queue` per watcher, kept to `capacity` Entries by the publisher, with a single `Overflowed` element for a miss | `PubSub`, whose strategies stall the writer or drop silently for everyone |
 | LOOK-4, LOOK-5 | `Semaphore.withPermit` per Network, `Deferred` for the result. A caller leaving cancels its queued Lookup |  |
 | CONN-5 timing | `Schedule.exponential` |  |
 | CRED-3 | `Redacted`, `Schema.Redacted`, `Config.Redacted` |  |
@@ -245,6 +266,21 @@ Configuration is a fold over Change Entries, like `Standing` is over Connection 
 - **Lock:** a held `BEGIN EXCLUSIVE` on a sidecar SQLite file. A second process got `SQLITE_BUSY`, and `SIGKILL` released it.
 - **Credentials:** `Bun.secrets` where a keyring exists, and Effect has no equivalent. It is experimental, and fserv has no keyring, so the plain file comes first in practice.
 - **Migrations:** `Migrator.fromRecord`, since a compiled binary has no migration files to read. Refusing a newer Log is our own check.
+
+## Field vocabulary
+
+Each list of fields has one owner, and every other list is derived from it or checked against it at compile time. Adding a field or a kind then fails to compile wherever it must be handled.
+
+| Vocabulary | Owner | Derived | Checked |
+| --- | --- | --- | --- |
+| Tuning numbers | `Tuning` and `defaultTuning` in `lifecycle` | `TuningSettings` and the `LogEntry` Tuning Schema in `api` | `tuningBounds` in `api`, and the row codec in `log`, against the `attempt` Entry's `tuning` |
+| Entry kinds and their fields | `Entry` in `session` | The `kind` filters in `api` and the reader protocol, and `EntryNotRedactable`'s kinds | `EntryRow` in `log`, and `LogEntry` in `toLogEntry` in `daemon`, with `IfFieldsOfEntry` |
+| `Ircd` and `TlsDetails` | `session` |  | The row codec in `log` |
+
+- **`IfFieldsOfEntry<Codec, Checked, Added>`** compares each kind's field names: a kind is its `_tag`, or `Connection.<phase>`. It is `Checked` when they match. Otherwise it is a type naming what is missing and what is unknown, by kind, so whatever is annotated with it fails to compile with a message that says why. `Added` is what an adapter adds of its own: `text` and `reason` in `LogEntry`.
+- **Adapter differences stay in the adapters.** NULL columns, the defaults that old rows take, base64, and the decoded `text` live in `rows.ts` and `toLogEntry`. Field types are checked by the codecs themselves: the store writes an Entry and reads one back, and `toLogEntry` returns one as a `LogEntry`.
+- `api` cannot depend on `session`, so `LogEntry` is checked where both are known, in the Daemon's adapter. `api`'s `Ircd` and `TlsDetails` are not checked for the same reason.
+- The row codec keeps its own list of Tuning numbers, because `loginWaitMillis` carries a default for rows written before it existed, and `log` does not depend on `lifecycle` directly.
 
 ## API and Frontend
 

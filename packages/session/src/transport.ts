@@ -351,6 +351,33 @@ const streamSocket = (stream: NetSocket) => {
   return { socket, unread };
 };
 
+/** An opened Connection's two ends, ready to read and write. */
+export interface Attached {
+  readonly pull: Effect.Effect<readonly Uint8Array[], Socket.SocketError>;
+  readonly writer: Socket.Writer;
+}
+
+/**
+ * Takes hold of an opened Connection's reader and writer. A socket that connected and
+ * cannot be read or written is a Connection that could not be opened, which is an
+ * expected failure and not a defect.
+ * @param opened - What `connect` opened.
+ * @returns Its reader and writer, for as long as the Scope lasts.
+ */
+export const attach = ({ socket }: Opened): Effect.Effect<Attached, ConnectFailed, Scope.Scope> =>
+  Effect.gen(function* () {
+    const pull = yield* Socket.readerBytes(socket);
+    const writer = yield* socket.writer;
+
+    return { pull, writer };
+  }).pipe(
+    Effect.catchTag("SocketError", (cause) =>
+      Effect.fail(
+        new ConnectFailed({ cause, reason: `could not read: ${describeSocketError(cause)}` })
+      )
+    )
+  );
+
 /**
  * Opens Connections to Ircds. It dials here, where a failure can be a `ConnectFailed`,
  * and keeps hold of the stream, because a Socket says nothing about whether its stream

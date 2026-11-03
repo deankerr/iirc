@@ -41,8 +41,12 @@
       "name": "@iirc/api",
       "version": "0.0.0",
       "dependencies": {
+        "@iirc/lifecycle": "workspace:*",
         "@iirc/protocol": "workspace:*",
         "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
       },
     },
     "packages/daemon": {

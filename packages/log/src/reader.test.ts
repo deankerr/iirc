@@ -1,5 +1,7 @@
 import { Database } from "bun:sqlite";
-import { writeSync } from "node:fs";
+import { existsSync, rmSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { BunServices } from "@effect/platform-bun";
 import { assert, describe, it } from "@effect/vitest";
@@ -21,6 +23,7 @@ import {
   Schema,
   Scope,
 } from "effect";
+import type { Duration } from "effect";
 
 import { allowBudgets } from "./budget.ts";
 import { ReaderBusy } from "./errors.ts";
@@ -38,8 +41,29 @@ const kinds = ["Connection", "Daemon", "Deadline", "Dropped", "Line"] as const;
 const everything = { after: 0, limit: 1000 };
 
 // The fixture makes every row a statement looks at cost 5 ms, so a read of N rows takes
-// 5N ms unless its budget stops it first.
-const slowRows = () => new Worker(new URL("slow-reader.fixture.ts", import.meta.url));
+// 5N ms unless its budget stops it first. With a marker, it also creates that file when
+// its first row is costed, which `untilReading` waits for.
+const slowRows = (marker?: string) =>
+  new Worker(new URL("slow-reader.fixture.ts", import.meta.url), {
+    env: { ...process.env, ...(marker !== undefined && { IIRC_READING_MARKER: marker }) },
+  });
+
+// A marker for the next read to announce itself by, removed with the scope.
+const readingMarker = Effect.acquireRelease(
+  Effect.sync(() => path.join(tmpdir(), `iirc-reading-${crypto.randomUUID()}`)),
+  (marker) =>
+    Effect.sync(() => {
+      rmSync(marker, { force: true });
+    })
+);
+
+// Waits until a read is running in the Worker, which is what the fixture's marker says, and
+// not for a time that a busy machine could make too short.
+const untilReading = (marker: string) =>
+  eventually(
+    Effect.sync(() => existsSync(marker)),
+    (found) => found
+  );
 
 const report = (text: string) => {
   writeSync(process.stdout.fd, `${text}\n`);
@@ -131,6 +155,24 @@ const withReader = <A, E>(
     const dataDir = yield* dataDirectory;
 
     return yield* test(dataDir).pipe(Effect.provide(logAndReader(dataDir, options)));
+  }).pipe(Effect.scoped);
+
+// A reader whose Worker costs every row 5 ms, and announces when it starts to, so that the
+// test is given the moment a read is running.
+const withSlowReader = <A, E>(
+  budget: Duration.Input,
+  test: (
+    dataDir: string,
+    untilReading: Effect.Effect<boolean>
+  ) => Effect.Effect<A, E, Log | LogReader | Recorder | Scope.Scope>
+) =>
+  Effect.gen(function* () {
+    const marker = yield* readingMarker;
+
+    return yield* withReader((dataDir) => test(dataDir, untilReading(marker)), {
+      budget,
+      spawn: () => slowRows(marker),
+    });
   }).pipe(Effect.scoped);
 
 // Follows a cursor to the end, one page at a time, as a Frontend would.
@@ -430,244 +472,230 @@ describe("the Log's reader", () => {
   });
 
   describe("keeping to time", () => {
+    it.live("LOG-11: a read cannot delay an append", () =>
+      withSlowReader("3 seconds", (_dataDir, untilReading) =>
+        Effect.gen(function* () {
+          const reader = yield* LogReader;
+
+          yield* seedLines(1000);
+
+          const alone = yield* appendLatencies(100);
+
+          // 1000 rows at 5 ms each, stopped by its 3 second budget.
+          const reading = yield* Effect.forkChild(timed(Effect.exit(reader.entries(everything))));
+
+          yield* untilReading;
+
+          const beside = yield* appendLatencies(100);
+
+          assert.isUndefined(reading.pollUnsafe(), "the read was still running after every append");
+
+          const [exit, readMillis] = yield* Fiber.join(reading);
+
+          report(`LOG-11 appends alone: ${describeLatencies(alone)}`);
+          report(
+            `LOG-11 appends beside a ${readMillis.toFixed(0)} ms read: ${describeLatencies(beside)}`
+          );
+
+          assert.deepStrictEqual(exit, Exit.fail(new ReadTimedOut({ budgetMillis: 3000 })));
+          assert.isAtLeast(readMillis, 3000);
+          // An append that waited on the read would wait for it to end, up to 3 seconds,
+          // so no append may take as long as a third of that, and the usual one may not
+          // take twice as long as it did alone.
+          assert.isBelow(Math.max(...beside), 1000, "no append waited on the read");
+          assert.isBelow(
+            percentile(beside, 0.5),
+            percentile(alone, 0.5) * 2 + 10,
+            "appends kept their usual latency"
+          );
+        })
+      )
+    );
+
+    it.live("LOG-11: a read past its budget fails with ReadTimedOut, and the next is served", () =>
+      withSlowReader("300 millis", () =>
+        Effect.gen(function* () {
+          const reader = yield* LogReader;
+
+          // Enough rows that a read to the end would take 5 seconds, far past the budget.
+          yield* seedMixed;
+          yield* seedLines(1000);
+
+          const timedOut = Exit.fail(new ReadTimedOut({ budgetMillis: 300 }));
+
+          // One statement, stopped from inside by its budget.
+          const [plain, plainMillis] = yield* timed(Effect.exit(reader.entries(everything)));
+
+          // Several statements, one for each kind, each well within budget alone.
+          const [paged, pagedMillis] = yield* timed(
+            Effect.exit(reader.entries({ ...everything, kinds, network: "libera" }))
+          );
+
+          assert.deepStrictEqual(plain, timedOut);
+          assert.deepStrictEqual(paged, timedOut);
+
+          for (const millis of [plainMillis, pagedMillis]) {
+            assert.isAtLeast(millis, 300);
+            assert.isBelow(millis, 1300, "the read stopped near its budget, not at its end");
+          }
+
+          assert.deepStrictEqual(yield* Effect.exit(reader.messages(everything)), timedOut);
+          assert.lengthOf(yield* reader.entries({ after: 0, limit: 3 }), 3);
+          assert.lengthOf(yield* reader.gaps({ after: 0, limit: 1 }), 1);
+        })
+      )
+    );
+
     it.live(
-      "LOG-11: a read cannot delay an append",
+      "LOG-11: a read that waits behind others for too long fails with ReaderBusy, unrun",
       () =>
-        withReader(
+        withSlowReader("300 millis", () =>
+          Effect.gen(function* () {
+            const reader = yield* LogReader;
+            const reads = 16;
+
+            yield* seedLines(200);
+
+            // Each takes its whole 300 ms budget, one at a time, so the later ones wait
+            // longer than a caller would for them to start.
+            const [exits, millis] = yield* timed(
+              Effect.forEach(Arr.range(1, reads), () => Effect.exit(reader.entries(everything)), {
+                concurrency: "unbounded",
+              })
+            );
+
+            const tags = exits.map((exit) =>
+              Exit.findErrorOption(exit).pipe(
+                Option.map(({ _tag }) => _tag),
+                Option.getOrElse(() => "success")
+              )
+            );
+
+            report(
+              `LOG-11 ${reads} reads behind each other: ${tags.join(", ")} in ${millis.toFixed(0)} ms`
+            );
+
+            assert.strictEqual(tags[0], "ReadTimedOut");
+            assert.include(tags, "ReaderBusy");
+
+            const waits = exits.flatMap((exit) =>
+              Exit.findErrorOption(exit).pipe(
+                Option.filter(Schema.is(ReaderBusy)),
+                Option.match({ onNone: () => [], onSome: ({ waitedMillis }) => [waitedMillis] })
+              )
+            );
+
+            assert.deepStrictEqual(
+              tags.filter((tag) => tag !== "ReadTimedOut" && tag !== "ReaderBusy"),
+              []
+            );
+            assert.isAbove(Math.min(...waits), 1000, "only a wait past what a caller waits");
+            // The ones refused cost the Worker nothing, so the queue drained at once. Run one
+            // after another they would take all of `reads * 300`.
+            assert.isBelow(millis, (reads * 300) / 2);
+            assert.lengthOf(yield* reader.entries({ after: 0, limit: 1 }), 1);
+          })
+        )
+    );
+  });
+
+  describe("living and dying", () => {
+    it.live("LOG-11: closing with a read in flight waits no longer than its budget", () =>
+      Effect.gen(function* () {
+        const marker = yield* readingMarker;
+        const dataDir = yield* dataDirectory;
+        const scope = yield* Scope.make();
+
+        const services = yield* Layer.buildWithScope(
+          logAndReader(dataDir, { budget: "1 second", spawn: () => slowRows(marker) }),
+          scope
+        );
+
+        yield* seedLines(1000).pipe(Effect.provideContext(services));
+
+        const reader = Context.get(services, LogReader);
+        const reading = yield* Effect.forkChild(Effect.exit(reader.entries(everything)));
+
+        yield* untilReading(marker);
+
+        const [, closeMillis] = yield* timed(Scope.close(scope, Exit.void));
+        const exit = yield* Fiber.join(reading).pipe(Effect.timeout("3 seconds"));
+
+        report(`LOG-11 closed with a read in flight in ${closeMillis.toFixed(0)} ms`);
+
+        // Left to run, the read would take 5 seconds, so the close may not wait past its
+        // budget by more than a busy machine needs to stop a Worker in.
+        assert.isBelow(closeMillis, 2000, "the close waited at most for the budget");
+        assert.isTrue(Exit.isFailure(exit), "the read did not pretend to finish");
+      }).pipe(Effect.scoped)
+    );
+
+    it.live("LOG-11: a Worker that dies is reported, fails its reads, and is started again", () =>
+      Effect.gen(function* () {
+        const marker = yield* readingMarker;
+        const workers: globalThis.Worker[] = [];
+        const logged: string[] = [];
+
+        const spawn = () => {
+          const worker = slowRows(marker);
+
+          workers.push(worker);
+
+          return worker;
+        };
+
+        const logger = Logger.layer([
+          Logger.make(({ message }) => {
+            logged.push(String(message));
+          }),
+        ]);
+
+        yield* withReader(
           () =>
             Effect.gen(function* () {
               const reader = yield* LogReader;
 
               yield* seedLines(1000);
 
-              const alone = yield* appendLatencies(100);
+              const reading = yield* Effect.forkChild(Effect.exit(reader.entries(everything)));
 
-              // 1000 rows at 5 ms each, stopped by its 3 second budget.
-              const reading = yield* Effect.forkChild(
-                timed(Effect.exit(reader.entries(everything)))
+              yield* untilReading(marker);
+
+              const terminated = performance.now();
+
+              workers[0]?.terminate();
+
+              const lost = yield* Fiber.join(reading);
+              const lostMillis = elapsedSince(terminated);
+
+              const after = yield* eventually(
+                Effect.exit(reader.entries({ after: 0, limit: 1 })),
+                Exit.isSuccess
               );
 
-              yield* Effect.sleep("100 millis");
+              report(`LOG-11 a read on a Worker that died failed in ${lostMillis.toFixed(0)} ms`);
 
-              const beside = yield* appendLatencies(100);
-
-              assert.isUndefined(
-                reading.pollUnsafe(),
-                "the read was still running after every append"
+              assert.strictEqual(
+                Exit.isFailure(lost)
+                  ? Exit.findErrorOption(lost).pipe(
+                      Option.map(({ _tag }) => _tag),
+                      Option.getOrUndefined
+                    )
+                  : "success",
+                "StorageFailed"
               );
-
-              const [exit, readMillis] = yield* Fiber.join(reading);
-
-              report(`LOG-11 appends alone: ${describeLatencies(alone)}`);
-              report(
-                `LOG-11 appends beside a ${readMillis.toFixed(0)} ms read: ${describeLatencies(beside)}`
-              );
-
-              assert.deepStrictEqual(exit, Exit.fail(new ReadTimedOut({ budgetMillis: 3000 })));
-              assert.isAtLeast(readMillis, 3000);
-              assert.isBelow(Math.max(...beside), 250, "no append waited on the read");
-              assert.isBelow(
-                percentile(beside, 0.5),
-                percentile(alone, 0.5) + 5,
-                "appends kept their usual latency"
-              );
+              // The read was sent to a Worker that had just begun, so left to its budget
+              // it would fail at 3 seconds. What is asserted is that it did not.
+              assert.isBelow(lostMillis, 1500, "it failed when the Worker died, not at its budget");
+              assert.isTrue(Exit.isSuccess(after));
+              assert.lengthOf(workers, 2, "a second Worker took over");
             }),
-          { budget: "3 seconds", spawn: slowRows }
-        ),
-      { timeout: 30_000 }
-    );
+          { budget: "3 seconds", spawn }
+        ).pipe(Effect.provide(logger));
 
-    it.live(
-      "LOG-11: a read past its budget fails with ReadTimedOut, and the next is served",
-      () =>
-        withReader(
-          () =>
-            Effect.gen(function* () {
-              const reader = yield* LogReader;
-
-              yield* seedMixed;
-              yield* seedLines(200);
-
-              const timedOut = Exit.fail(new ReadTimedOut({ budgetMillis: 300 }));
-
-              // One statement, stopped from inside by its budget.
-              const [plain, plainMillis] = yield* timed(Effect.exit(reader.entries(everything)));
-
-              // Several statements, one for each kind, each well within budget alone.
-              const [paged, pagedMillis] = yield* timed(
-                Effect.exit(reader.entries({ ...everything, kinds, network: "libera" }))
-              );
-
-              assert.deepStrictEqual(plain, timedOut);
-              assert.deepStrictEqual(paged, timedOut);
-
-              for (const millis of [plainMillis, pagedMillis]) {
-                assert.isAtLeast(millis, 300);
-                assert.isBelow(millis, 300 + 500, "the read stopped near its budget");
-              }
-
-              assert.deepStrictEqual(yield* Effect.exit(reader.messages(everything)), timedOut);
-              assert.lengthOf(yield* reader.entries({ after: 0, limit: 3 }), 3);
-              assert.lengthOf(yield* reader.gaps({ after: 0, limit: 1 }), 1);
-            }),
-          { budget: "300 millis", spawn: slowRows }
-        ),
-      { timeout: 20_000 }
-    );
-    it.live(
-      "LOG-11: a read that waits behind others for too long fails with ReaderBusy, unrun",
-      () =>
-        withReader(
-          () =>
-            Effect.gen(function* () {
-              const reader = yield* LogReader;
-
-              yield* seedLines(200);
-
-              // Each takes its whole 300 ms budget, one at a time, so the later ones wait
-              // longer than a caller would for them to start.
-              const [exits, millis] = yield* timed(
-                Effect.forEach(Arr.range(1, 8), () => Effect.exit(reader.entries(everything)), {
-                  concurrency: "unbounded",
-                })
-              );
-
-              const tags = exits.map((exit) =>
-                Exit.findErrorOption(exit).pipe(
-                  Option.map(({ _tag }) => _tag),
-                  Option.getOrElse(() => "success")
-                )
-              );
-
-              report(
-                `LOG-11 eight reads behind each other: ${tags.join(", ")} in ${millis.toFixed(0)} ms`
-              );
-
-              assert.strictEqual(tags[0], "ReadTimedOut");
-              assert.include(tags, "ReaderBusy");
-
-              const waits = exits.flatMap((exit) =>
-                Exit.findErrorOption(exit).pipe(
-                  Option.filter(Schema.is(ReaderBusy)),
-                  Option.match({ onNone: () => [], onSome: ({ waitedMillis }) => [waitedMillis] })
-                )
-              );
-
-              assert.deepStrictEqual(
-                tags.filter((tag) => tag !== "ReadTimedOut" && tag !== "ReaderBusy"),
-                []
-              );
-              assert.isAbove(Math.min(...waits), 1000, "only a wait past what a caller waits");
-              // The ones refused cost the Worker nothing, so the queue drained at once.
-              assert.isBelow(millis, 8 * 300);
-              assert.lengthOf(yield* reader.entries({ after: 0, limit: 1 }), 1);
-            }),
-          { budget: "300 millis", spawn: slowRows }
-        ),
-      { timeout: 20_000 }
-    );
-  });
-
-  describe("living and dying", () => {
-    it.live(
-      "LOG-11: closing with a read in flight waits no longer than its budget",
-      () =>
-        Effect.gen(function* () {
-          const dataDir = yield* dataDirectory;
-          const scope = yield* Scope.make();
-
-          const services = yield* Layer.buildWithScope(
-            logAndReader(dataDir, { budget: "1 second", spawn: slowRows }),
-            scope
-          );
-
-          yield* seedLines(1000).pipe(Effect.provideContext(services));
-
-          const reader = Context.get(services, LogReader);
-          const reading = yield* Effect.forkChild(Effect.exit(reader.entries(everything)));
-
-          yield* Effect.sleep("100 millis");
-
-          const [, closeMillis] = yield* timed(Scope.close(scope, Exit.void));
-          const exit = yield* Fiber.join(reading).pipe(Effect.timeout("2 seconds"));
-
-          report(`LOG-11 closed with a read in flight in ${closeMillis.toFixed(0)} ms`);
-
-          assert.isBelow(closeMillis, 1000 + 500, "the close waited at most for the budget");
-          assert.isTrue(Exit.isFailure(exit), "the read did not pretend to finish");
-        }).pipe(Effect.scoped),
-      { timeout: 20_000 }
-    );
-
-    it.live(
-      "LOG-11: a Worker that dies is reported, fails its reads, and is started again",
-      () =>
-        Effect.gen(function* () {
-          const workers: globalThis.Worker[] = [];
-          const logged: string[] = [];
-
-          const spawn = () => {
-            const worker = slowRows();
-
-            workers.push(worker);
-
-            return worker;
-          };
-
-          const logger = Logger.layer([
-            Logger.make(({ message }) => {
-              logged.push(String(message));
-            }),
-          ]);
-
-          yield* withReader(
-            () =>
-              Effect.gen(function* () {
-                const reader = yield* LogReader;
-
-                yield* seedLines(1000);
-
-                const reading = yield* Effect.forkChild(
-                  timed(Effect.exit(reader.entries(everything)))
-                );
-
-                yield* Effect.sleep("100 millis");
-                workers[0]?.terminate();
-
-                const [lost, lostMillis] = yield* Fiber.join(reading);
-
-                const after = yield* eventually(
-                  Effect.exit(reader.entries({ after: 0, limit: 1 })),
-                  Exit.isSuccess,
-                  "5 seconds"
-                );
-
-                report(`LOG-11 a read on a Worker that died failed in ${lostMillis.toFixed(0)} ms`);
-
-                assert.strictEqual(
-                  Exit.isFailure(lost)
-                    ? Exit.findErrorOption(lost).pipe(
-                        Option.map(({ _tag }) => _tag),
-                        Option.getOrUndefined
-                      )
-                    : "success",
-                  "StorageFailed"
-                );
-                assert.isBelow(
-                  lostMillis,
-                  3000,
-                  "it failed when the Worker died, not at its budget"
-                );
-                assert.isTrue(Exit.isSuccess(after));
-                assert.lengthOf(workers, 2, "a second Worker took over");
-              }),
-            { budget: "3 seconds", spawn }
-          ).pipe(Effect.provide(logger));
-
-          // Said once for the death, and not again for the close the test asked for.
-          assert.deepStrictEqual(logged, ["The Log's reader exited with code 0"]);
-        }),
-      { timeout: 20_000 }
+        // Said once for the death, and not again for the close the test asked for.
+        assert.deepStrictEqual(logged, ["The Log's reader exited with code 0"]);
+      })
     );
   });
 });

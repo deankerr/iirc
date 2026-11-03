@@ -1,7 +1,9 @@
-import type { NetworkEvent } from "@iirc/lifecycle";
+import { step } from "@iirc/lifecycle";
+import type { Command, NetworkEvent, NetworkSnapshot } from "@iirc/lifecycle";
 import { parseFrame, pingToken } from "@iirc/protocol/line";
 
 import { loginCauses } from "./credentials.ts";
+import { describeDefect } from "./diagnostic.ts";
 import type { Entry } from "./entry.ts";
 
 type ConnectionEntry = Extract<Entry, { readonly _tag: "Connection" }>;
@@ -119,5 +121,37 @@ export const toEvent = (entry: Entry): NetworkEvent | undefined => {
     default: {
       return entry satisfies never;
     }
+  }
+};
+
+/** What one Entry did to a machine. Either way, `next` is where the machine is now. */
+export type EntryStep =
+  | {
+      readonly _tag: "Stepped";
+      readonly commands: readonly Command[];
+      /** The event it stood for, or nothing for an Entry the machine has no use for. */
+      readonly event: NetworkEvent | undefined;
+      readonly next: NetworkSnapshot;
+    }
+  /** The transition threw, which leaves the machine where it was (HOST-1). */
+  | { readonly _tag: "Threw"; readonly defect: string; readonly next: NetworkSnapshot };
+
+/**
+ * Steps a machine by one recorded Entry. The host steps its machine this way as it records,
+ * and Standing folds each Connection's machine this way from the Log, so the two cannot
+ * come to differ. Never throws.
+ * @param snapshot - The machine so far.
+ * @param entry - The Entry, as the Log holds it.
+ * @returns The machine after it, with the Commands it asked for.
+ */
+export const stepEntry = (snapshot: NetworkSnapshot, entry: Entry): EntryStep => {
+  try {
+    const event = toEvent(entry);
+
+    return event === undefined
+      ? { _tag: "Stepped", commands: [], event, next: snapshot }
+      : { _tag: "Stepped", ...step(snapshot, event), event };
+  } catch (error) {
+    return { _tag: "Threw", defect: describeDefect(error), next: snapshot };
   }
 };

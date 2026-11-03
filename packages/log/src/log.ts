@@ -1,7 +1,7 @@
 import { BunFileSystem } from "@effect/platform-bun";
 import type { SqliteMigrator } from "@effect/sql-sqlite-bun";
 import type { Entry, NewEntry } from "@iirc/session/entry";
-import { Recorder } from "@iirc/session/recorder";
+import { Committed, Recorder } from "@iirc/session/recorder";
 import type { Gap } from "@iirc/session/standing";
 import { Context, Effect, FileSystem, Layer } from "effect";
 
@@ -130,17 +130,18 @@ export class Log extends Context.Service<
   }
 >()("@iirc/log/Log") {
   /**
-   * The durable Log, also serving as the Recorder. A Log newer than the binary is refused,
-   * and one with migrations to run is backed up before they do (RUN-5).
+   * The durable Log, also serving as the Recorder, and as {@link Committed} to watch what it
+   * records once each commit is durable, a redaction's Change included. A Log newer than the
+   * binary is refused, and one with migrations to run is backed up before they do (RUN-5).
    * @param options - Where to keep it.
    * @returns A Layer that holds the data directory for as long as it lives.
    */
   static readonly layer = (
     options: LogOptions
-  ): Layer.Layer<Log | Recorder, DataDirectoryLocked | LogTooNew | StorageFailed> =>
+  ): Layer.Layer<Committed | Log | Recorder, DataDirectoryLocked | LogTooNew | StorageFailed> =>
     Layer.effectContext(
       Effect.map(open(options), (store) =>
-        Context.make(Log, store).pipe(Context.add(Recorder, store))
+        Context.make(Log, store).pipe(Context.add(Recorder, store), Context.add(Committed, store))
       )
     ).pipe(Layer.provide(BunFileSystem.layer));
 }

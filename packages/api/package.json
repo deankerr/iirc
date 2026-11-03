@@ -6,8 +6,15 @@
   "exports": {
     ".": "./src/api.ts"
   },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
   "dependencies": {
+    "@iirc/lifecycle": "workspace:*",
     "@iirc/protocol": "workspace:*",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
   }
 }

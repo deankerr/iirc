@@ -18,7 +18,7 @@ import {
   liveHost,
   options,
   safe,
-  settled,
+  manyTurns,
   texts,
   wire,
 } from "./network.fixture.ts";
@@ -63,9 +63,9 @@ const pastBurst = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides: Overri
   const hosted = yield* host(ircd, overrides);
 
   yield* ircd.read(`${welcome}${noMotd}`);
-  yield* settled;
+  yield* manyTurns;
   yield* TestClock.adjust(`${defaultTuning.rejoinSettleMillis} millis`);
-  yield* settled;
+  yield* manyTurns;
 
   return hosted;
 });
@@ -103,12 +103,12 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
 
       yield* host(ircd, loggingIn);
       yield* ircd.read(welcome);
-      yield* settled;
+      yield* manyTurns;
 
       assert.lengthOf(yield* wire(ircd), 2);
 
       yield* ircd.read(noMotd);
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual((yield* wire(ircd)).slice(2), [
         "PRIVMSG NickServ :IDENTIFY s3cret\r\n",
@@ -145,13 +145,13 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
       const left = lastWritten + defaultTuning.loginWaitMillis - (yield* Clock.currentTimeMillis);
 
       yield* TestClock.adjust(`${left - 1} millis`);
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* joins(ircd), []);
       assert.lengthOf(deadlinesNamed(yield* entries, "login"), 0);
 
       yield* TestClock.adjust("1 millis");
-      yield* settled;
+      yield* manyTurns;
 
       const [expired] = deadlinesNamed(yield* entries, "login");
 
@@ -172,7 +172,7 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
 
         // One token, and the rest a Line every two seconds.
         yield* TestClock.adjust("4 seconds");
-        yield* settled;
+        yield* manyTurns;
 
         const sent = outbound(yield* entries).filter(({ cause }) => cause !== "registration");
         const last = sent.at(-1)?.at ?? 0;
@@ -184,7 +184,7 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
         assert.strictEqual(last - (sent[0]?.at ?? 0), 4000);
 
         yield* TestClock.adjust(`${defaultTuning.loginWaitMillis} millis`);
-        yield* settled;
+        yield* manyTurns;
 
         assert.strictEqual(
           deadlinesNamed(yield* entries, "login")[0]?.at,
@@ -212,13 +212,13 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
         const hosted = yield* pastBurst(ircd);
 
         yield* ircd.read(`${sign}\r\n`);
-        yield* settled;
+        yield* manyTurns;
 
         assert.deepStrictEqual((yield* hosted.status).login, { state: "succeeded", text });
         assert.deepStrictEqual(yield* joins(ircd), ["JOIN #one\r\n"]);
 
         yield* TestClock.adjust("1 minute");
-        yield* settled;
+        yield* manyTurns;
 
         assert.lengthOf(deadlinesNamed(yield* entries, "login"), 0);
       }).pipe(memory)
@@ -231,7 +231,7 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
       const hosted = yield* pastBurst(ircd);
 
       yield* ircd.read(":ircd 904 iirc :SASL authentication failed\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual((yield* hosted.status).login, {
         state: "failed",
@@ -247,7 +247,7 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
       const hosted = yield* pastBurst(ircd);
 
       yield* ircd.read(":NickServ!s@services. NOTICE iirc :Invalid password for iirc.\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual((yield* hosted.status).login, {
         state: "failed",
@@ -281,7 +281,7 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
         const hosted = yield* pastBurst(ircd, { ...loggingIn, id: `n${String(sign?.length)}` });
 
         yield* sign === undefined ? TestClock.adjust("1 minute") : ircd.read(`${sign}\r\n`);
-        yield* settled;
+        yield* manyTurns;
 
         const status = yield* hosted.status;
 
@@ -312,7 +312,7 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
 
       yield* pastBurst(ircd);
       yield* TestClock.adjust("1 minute");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(replayedLogin(yield* entries), { state: "timedOut" });
     }).pipe(memory)
@@ -326,7 +326,7 @@ describe("LOG-6: value scrubbing on a live Connection", () => {
 
       yield* pastBurst(ircd, { ...loggingIn, connectCommands: [], credentials: {} });
       yield* ircd.read(":bob!u@h PRIVMSG #one :you said hunter2, and s3cret:\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const said = linesOf(yield* entries).at(-1);
 
@@ -345,7 +345,7 @@ describe("LOG-6: value scrubbing on a live Connection", () => {
 
       yield* pastBurst(ircd, { ...loggingIn, connectCommands: [], credentials: {} });
       yield* ircd.read(`${text}\r\n`);
-      yield* settled;
+      yield* manyTurns;
 
       const said = linesOf(yield* entries).at(-1);
 
@@ -369,9 +369,9 @@ describe("LOG-6: value scrubbing on a live Connection", () => {
         hosted.send(safe("PRIVMSG", ["#one", "really hunter2"]), "key:phone")
       );
 
-      yield* settled;
+      yield* manyTurns;
       yield* ircd.hangUp;
-      yield* settled;
+      yield* manyTurns;
       yield* Fiber.join(first).pipe(Effect.ignore);
       yield* Fiber.join(second).pipe(Effect.ignore);
 
@@ -454,7 +454,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
     );
 
     yield* ircd.read(`${welcome}${noMotd}${inOne}`);
-    yield* settled;
+    yield* manyTurns;
 
     const keys = Effect.map(Ref.get(seen), (held) =>
       held.map(({ channel, key }) => ({
@@ -472,7 +472,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
       const { keys } = yield* watching(ircd);
 
       yield* ircd.read(":op!u@h MODE #one +k sesame\r\n:op!u@h MODE #one -k sesame\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* keys, [
         { channel: "#one", key: "sesame" },
@@ -487,7 +487,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
       const { keys } = yield* watching(ircd);
 
       yield* ircd.read(":op!u@h MODE #one +k *\r\n:op!u@h MODE #one -k\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* keys, [{ channel: "#one", key: undefined }]);
     }).pipe(memory)
@@ -501,7 +501,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
       yield* ircd.read(":op!u@h MODE #one +ok bob sesame\r\n");
       yield* ircd.read(":ircd 005 iirc PREFIX=(qaohv)~&@%+ :are supported\r\n");
       yield* ircd.read(":op!u@h MODE #one +qk bob other\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* keys, [
         { channel: "#one", key: "sesame" },
@@ -516,7 +516,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
       const { keys } = yield* watching(ircd);
 
       yield* ircd.read(":op!u@h MODE #two +k sesame\r\n:op!u@h MODE #one +ok bob\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* keys, []);
     }).pipe(memory)
@@ -530,7 +530,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
         const { keys } = yield* watching(ircd);
 
         yield* ircd.read(":op!u@h MODE #one +k sesame\r\n:iirc!~u@host PART #one\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         assert.deepStrictEqual(yield* keys, [{ channel: "#one", key: "sesame" }]);
       }).pipe(memory)
@@ -542,7 +542,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
       const { keys } = yield* watching(ircd);
 
       yield* ircd.read(":op!u@h MODE #one +k pizza\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       const mode = linesOf(yield* entries).at(-1);
 
@@ -563,7 +563,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
         const { keys } = yield* watching(ircd);
 
         yield* ircd.read(":op!u@h MODE #one +ok pizza hunter2\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         const first = linesOf(yield* entries).at(-1);
 
@@ -575,7 +575,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
 
         yield* ircd.read(":op!u@h MODE #one +ko hunter2 pizza\r\n");
         yield* ircd.read(":op!u@h MODE #one +ok hunter2 pizza\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         assert.deepStrictEqual(yield* keys, [
           { channel: "#one", key: "hunter2" },
@@ -594,7 +594,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
 
         yield* ircd.read(":op!u@h MODE #one +ok hunter2 sesame\r\n");
         yield* ircd.read(":op!u@h MODE #one +ko sesame hunter2\r\n");
-        yield* settled;
+        yield* manyTurns;
 
         const mode = linesOf(yield* entries).at(-1);
 
@@ -616,7 +616,7 @@ describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
       const { keys } = yield* watching(ircd);
 
       yield* ircd.read(":op!u@h MODE #one +ok <redacted> pizza\r\n");
-      yield* settled;
+      yield* manyTurns;
 
       assert.deepStrictEqual(yield* keys, []);
     }).pipe(memory)

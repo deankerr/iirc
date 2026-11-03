@@ -1,62 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { modeTypes, parseModes, withModeTokens } from "./mode.ts";
+import { parseModes } from "./modes.ts";
+import type { ModeTypes } from "./modes.ts";
 
-const defaults = modeTypes({});
-
-describe(modeTypes, () => {
-  it("KNOW-2: a Network that sends neither token gets `PREFIX=(ov)@+` and `CHANMODES=beI,k,l`", () => {
-    expect(defaults).toStrictEqual({
-      always: "k",
-      flags: "",
-      list: "beI",
-      prefix: "ov",
-      whenSet: "l",
-    });
-  });
-
-  it("KNOW-2: `PREFIX=` means no prefixes, which differs from no token", () => {
-    expect(modeTypes({ prefix: "" }).prefix).toBe("");
-  });
-
-  it("KNOW-2: reads every group of `CHANMODES` and the letters of `PREFIX`", () => {
-    expect(
-      modeTypes({ chanmodes: "beIq,k,flj,CFLMPQcgimnprstz", prefix: "(qaohv)~&@%+" })
-    ).toStrictEqual({
-      always: "k",
-      flags: "CFLMPQcgimnprstz",
-      list: "beIq",
-      prefix: "qaohv",
-      whenSet: "flj",
-    });
-  });
-
-  it("KNOW-2: a `CHANMODES` short of groups has none of the missing kinds", () => {
-    expect(modeTypes({ chanmodes: "b" })).toMatchObject({ always: "", flags: "", whenSet: "" });
-  });
-});
-
-describe(withModeTokens, () => {
-  it("KNOW-2: takes `PREFIX` and `CHANMODES` from an `RPL_ISUPPORT`, prose and all", () => {
-    expect(
-      withModeTokens({}, ["CHANMODES=b,k,l,imnt", "PREFIX=(ohv)@%+", "NICKLEN=30", "are supported"])
-    ).toStrictEqual({ chanmodes: "b,k,l,imnt", prefix: "(ohv)@%+" });
-  });
-
-  it("KNOW-2: a token with no value has an empty one, and `-TOKEN` brings back the default", () => {
-    const empty = withModeTokens({ prefix: "(ov)@+" }, ["PREFIX"]);
-
-    expect(empty).toStrictEqual({ chanmodes: undefined, prefix: "" });
-    expect(withModeTokens(empty, ["-PREFIX"]).prefix).toBeUndefined();
-  });
-
-  it("KNOW-2: leaves what an `RPL_ISUPPORT` does not mention as it was", () => {
-    expect(withModeTokens({ chanmodes: "b,k,l," }, ["PREFIXES=x"])).toStrictEqual({
-      chanmodes: "b,k,l,",
-      prefix: undefined,
-    });
-  });
-});
+// KNOW-2's defaults, `PREFIX=(ov)@+` and `CHANMODES=beI,k,l`.
+const defaults: ModeTypes = { always: "k", flags: "", list: "beI", prefix: "ov", whenSet: "l" };
 
 describe(parseModes, () => {
   it("KNOW-6: `+ok nick key` gives the nick to `o` and the key to `k`", () => {
@@ -111,7 +59,7 @@ describe(parseModes, () => {
   });
 
   it("KNOW-6: reads prefixes from the Network's own `PREFIX`", () => {
-    const types = modeTypes({ prefix: "(qaohv)~&@%+" });
+    const types = { ...defaults, prefix: "qaohv" };
 
     expect(parseModes(["+qk", "owner", "key"], types).changes).toStrictEqual([
       { adding: true, letter: "q", param: "owner" },
@@ -120,14 +68,14 @@ describe(parseModes, () => {
   });
 
   it("KNOW-6: with `PREFIX=`, `o` is a letter nobody advertised, so the key moves up", () => {
-    expect(parseModes(["+ok", "key"], modeTypes({ prefix: "" })).changes).toStrictEqual([
+    expect(parseModes(["+ok", "key"], { ...defaults, prefix: "" }).changes).toStrictEqual([
       { adding: true, letter: "o" },
       { adding: true, letter: "k", param: "key" },
     ]);
   });
 
   it("KNOW-6: a `k` the Network lists as a flag takes nothing", () => {
-    expect(parseModes(["+k"], modeTypes({ chanmodes: "b,,l,k" }))).toStrictEqual({
+    expect(parseModes(["+k"], { ...defaults, always: "", flags: "k", list: "b" })).toStrictEqual({
       _tag: "Parsed",
       changes: [{ adding: true, letter: "k" }],
     });

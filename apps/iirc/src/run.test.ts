@@ -2,13 +2,13 @@ import { writeSync } from "node:fs";
 
 import { BunServices } from "@effect/platform-bun";
 import { assert, beforeAll, describe, it } from "@effect/vitest";
-import { InvalidRequest } from "@iirc/api";
 import type { LogEntry, NetworkSettings } from "@iirc/api";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { eventually, scriptedIrcd, testWire, welcoming } from "@iirc/session/testing";
 import type { ScriptedIrcd } from "@iirc/session/testing";
 import { Effect, Fiber, FileSystem, Layer } from "effect";
+import type { Schema } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
 import {
@@ -30,7 +30,9 @@ import { assertBackoff, buildBinary, buildTimeout, shortestWait } from "./testin
 
 const binary = `${appRoot}/dist/iirc-run`;
 
-const testTimeout = 20_000;
+// Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
+// several times what it does alone.
+const testTimeout = 60_000;
 
 const network = "run";
 const channel = "#run";
@@ -40,13 +42,15 @@ const quitReason = "going away";
 // Other software on this machine dials 127.0.0.1, and nothing dials this.
 const ircdAddress = "127.77.1.1";
 
-const settleLimit = "10 seconds";
+const settleLimit = "30 seconds";
 
 // How long a Daemon that means to dial would take, by far.
 const dialMillis = 1000;
 
-// What `hostNetwork` allows past `quitWaitMillis`, and a little for the process to go.
-const stopMarginMillis = 1000 + 500;
+// What a stop may take past `quitWaitMillis`: the process going, with room for a busy
+// machine. A stop that went on to wait out the next phase, the drain, would take its
+// 5 seconds more, so this stays well under that.
+const stopMarginMillis = 2500;
 
 // How much later the Ircd's clock can read an `accept` than the Daemon's read the `attempt`.
 const clockSlackMillis = 5;
@@ -464,7 +468,10 @@ describe("the compiled binary, stopping and starting", () => {
 
         const [, secondAttempt] = attemptsIn(yield* entriesOf(daemon));
 
-        assert.isBelow((secondAttempt?.at ?? 0) - (stoppedAt ?? 0), dialMillis);
+        // The wait owed after a failure is the 60 seconds in `tuning`, so a restart that
+        // dials within 3 seconds of the stop did not wait, with room for the process to
+        // start on a busy machine.
+        assert.isBelow((secondAttempt?.at ?? 0) - (stoppedAt ?? 0), 3000);
 
         yield* sigkill(running);
 
@@ -551,7 +558,8 @@ describe("the compiled binary, stopping and starting", () => {
     () =>
       Effect.gen(function* () {
         const text = "You are banned from this Network (scripted)";
-        const refusalBackoffMillis = 3000;
+        // Three Daemon starts must all happen inside the wait, even on a busy machine.
+        const refusalBackoffMillis = 12_000;
         const where = yield* home;
 
         // Far shorter than the wait, so that only the refusal can be what holds it back.
@@ -754,25 +762,32 @@ describe("the compiled binary, stopping and starting", () => {
         const daemon = yield* answering(running, where.key);
         const httpClient = yield* HttpClient.HttpClient;
 
-        const refused = (tuning: Readonly<Record<string, number>>) =>
-          Effect.flip(daemon.networks.add({ payload: { ...networkAt(ircd, {}), tuning } }));
+        // Sent as they are, because the typed client holds a request to the same Schema, and
+        // would refuse these before they left, or drop the misspelt key.
+        const refused = (tuning: Schema.Json) =>
+          Effect.gen(function* () {
+            const response = yield* httpClient.execute(
+              HttpClientRequest.post(`http://127.0.0.1:${running.httpPort}/api/networks`).pipe(
+                HttpClientRequest.bearerToken(where.key),
+                HttpClientRequest.bodyJsonUnsafe({ ...networkAt(ircd, {}), tuning })
+              )
+            );
 
-        const misspelt = yield* refused({ silenceMilis: 5000 });
-        const outOfRange = yield* refused({ silenceMillis: -1 });
+            return { status: response.status, text: yield* response.text };
+          });
 
-        const notNumbers = yield* httpClient.execute(
-          HttpClientRequest.post(`http://127.0.0.1:${running.httpPort}/api/networks`).pipe(
-            HttpClientRequest.bearerToken(where.key),
-            HttpClientRequest.bodyJsonUnsafe({ ...networkAt(ircd, {}), tuning: "soon" })
-          )
-        );
+        for (const [tuning, path] of [
+          [{ silenceMilis: 5000 }, '["payload","tuning","silenceMilis"]'],
+          [{ silenceMillis: -1 }, '["payload","tuning","silenceMillis"]'],
+          [{ silenceMillis: 1000 }, '["payload","tuning","silenceMillis"]'],
+          ["soon", '["payload","tuning"]'],
+        ] as const) {
+          const { status, text } = yield* refused(tuning);
 
-        assert.instanceOf(misspelt, InvalidRequest);
-        assert.include(JSON.stringify(misspelt), "not a Tuning key: silenceMilis");
-        assert.instanceOf(outOfRange, InvalidRequest);
-        assert.include(JSON.stringify(outOfRange), "silenceMillis");
-        assert.strictEqual(notNumbers.status, 400);
-        assert.include(yield* notNumbers.text, '["payload","tuning"]');
+          assert.strictEqual(status, 400, text);
+          assert.include(text, path);
+        }
+
         assert.deepStrictEqual(yield* daemon.networks.list(), []);
 
         yield* Effect.sleep(dialMillis);

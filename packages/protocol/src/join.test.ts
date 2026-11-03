@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { joinLines } from "./join.ts";
+import { channelKey, joinLines } from "./join.ts";
 import type { JoinChannel } from "./join.ts";
 import { maxLineBytes } from "./outbound.ts";
 
 const decoder = new TextDecoder();
 
 const texts = (channels: readonly JoinChannel[]) =>
-  joinLines(channels).lines.map(({ bytes }) => decoder.decode(bytes));
+  joinLines(channels).lines.map((line) => decoder.decode(line.toBytes()));
 
 const numbered = (count: number, name: (index: number) => string) =>
   Array.from({ length: count }, (_unused, index) => ({ name: name(index) }));
@@ -58,7 +58,7 @@ describe(joinLines, () => {
     const { lines } = joinLines(channels);
 
     expect(lines.length).toBeGreaterThan(1);
-    expect(lines.every(({ bytes }) => bytes.length <= maxLineBytes)).toBeTruthy();
+    expect(lines.every((line) => line.toBytes().length <= maxLineBytes)).toBeTruthy();
   });
 
   it("SEND-11: keeps keys aligned on every Line of a long keyed list", () => {
@@ -92,7 +92,7 @@ describe(joinLines, () => {
     const giant = { name: `#${"x".repeat(maxLineBytes)}` };
     const { lines, rejected } = joinLines([{ name: "#a" }, giant, { name: "#b" }]);
 
-    expect(lines.map(({ bytes }) => decoder.decode(bytes))).toStrictEqual(["JOIN #a,#b"]);
+    expect(lines.map((line) => decoder.decode(line.toBytes()))).toStrictEqual(["JOIN #a,#b"]);
     expect(rejected).toStrictEqual([{ channel: giant, reason: "TooLong" }]);
   });
 
@@ -148,5 +148,12 @@ describe(joinLines, () => {
 
   it("SEND-11: a key that starts with a colon stays safe", () => {
     expect(texts([{ key: ":key", name: "#a" }])).toStrictEqual(["JOIN #a ::key"]);
+  });
+});
+
+describe(channelKey, () => {
+  it("lower-cases ASCII alone, so that it can split names but never merge them", () => {
+    expect(channelKey("#IIRC-Dev")).toBe("#iirc-dev");
+    expect(channelKey("#[Ä]")).toBe("#[Ä]");
   });
 });

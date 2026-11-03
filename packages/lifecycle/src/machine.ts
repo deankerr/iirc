@@ -1,4 +1,5 @@
 import { loginSign } from "@iirc/protocol/login";
+import type { LoginSign } from "@iirc/protocol/login";
 import { isRefusal } from "@iirc/protocol/refusal";
 import { setup, types } from "xstate";
 import type { ExecutableEffectFrom } from "xstate";
@@ -31,12 +32,22 @@ interface Deadline {
   readonly name: string;
 }
 
-// How far the login sequence has got (CONN-6). `identified` is an `IDENTIFY` written, and
-// `settled` a sign of login, or the wait for one running out.
-interface LoginProgress {
-  readonly identified: boolean;
+/**
+ * What came of an `IDENTIFY` (CONN-6). Only one that was written is `Waiting`, and the wait
+ * ends `Answered` by a sign, or `TimedOut`. A sign after the wait ran out still says how the
+ * login went, so `TimedOut` can become `Answered`, though nothing waits on it by then.
+ */
+export type LoginAnswer =
+  | { readonly _tag: "Unasked" }
+  | { readonly _tag: "Waiting" }
+  | { readonly _tag: "TimedOut" }
+  | { readonly _tag: "Answered"; readonly sign: LoginSign };
+
+/** How far the login sequence has got (CONN-6). */
+export interface LoginProgress {
+  readonly answer: LoginAnswer;
+  /** How many of its Lines were written or Dropped, which stops at the last. */
   readonly seen: number;
-  readonly settled: boolean;
 }
 
 // What belongs to one Connection, and so never outlives it.
@@ -48,18 +59,22 @@ interface ConnectionContext {
   readonly login: LoginProgress;
   readonly nickIndex: number;
   readonly nicks: readonly string[];
+  /** When the `001` that started this Connection's Session arrived. It outlives the Session's close. */
+  readonly welcomedAt: number | undefined;
 }
 
 const noConnection: ConnectionContext = {
   closeReason: undefined,
   deadlines: [],
   leaving: false,
-  login: { identified: false, seen: 0, settled: false },
+  login: { answer: { _tag: "Unasked" }, seen: 0 },
   nickIndex: 0,
   nicks: [],
+  welcomedAt: undefined,
 };
 
-type Context = NetworkInput & ConnectionContext;
+/** What the machine holds. Package-private: everything else reads it through `inspect`. */
+export type Context = NetworkInput & ConnectionContext;
 
 // The Ircd's own words are its last parameter. A Line can arrive with none.
 const textOf = ({ command, params }: Payload<"LINE">) => params.at(-1) ?? command;
@@ -86,48 +101,67 @@ const heard = (context: Context, at: number): Context => ({
   deadlines: movedTo(context.deadlines, silenceDeadline, at + context.tuning.silenceMillis),
 });
 
-// Joining waits until every Line of the login sequence is out, and then for any login
-// that an `IDENTIFY` started to show a sign or run out of time (CONN-6).
-const isLoginOpen = ({ loginLines }: Context, login: LoginProgress) =>
-  login.seen >= loginLines && (!login.identified || login.settled);
+/**
+ * Joining waits until every Line of the login sequence is out, and then for any login that
+ * an `IDENTIFY` started to show a sign or run out of time (CONN-6).
+ * @param context - What the machine holds.
+ * @param login - The login progress to judge, which may be one not yet in `context`.
+ * @returns Whether the login no longer holds joining up.
+ */
+export const isLoginOpen = ({ loginLines }: Context, login: LoginProgress): boolean =>
+  login.seen >= loginLines && login.answer._tag !== "Waiting";
 
-// Only an `IDENTIFY` that was written starts a wait, and the wait starts from the last Line
-// of the sequence, whether that Line was written or Dropped. Past the last, nothing counts:
-// a Line whose write was in doubt is Dropped after it was recorded, and comes twice.
-const afterLoginSent = (context: Context, event: Payload<"LOGIN_SENT">): Context => {
-  if (context.login.seen >= context.loginLines) {
-    return context;
+// Only an `IDENTIFY` that was written asks for a login. Past the last Line of the sequence,
+// nothing counts: a Line whose write was in doubt is Dropped after it was recorded, and
+// comes twice.
+const countedLoginLine = (
+  { login, loginLines }: Context,
+  event: Payload<"LOGIN_SENT">
+): LoginProgress => {
+  if (login.seen >= loginLines) {
+    return login;
   }
 
-  const seen = context.login.seen + 1;
-  const identified = context.login.identified || (event.identify && event.written);
-  const login = { ...context.login, identified, seen };
-  const waits = seen === context.loginLines && identified && !login.settled;
+  const asked = login.answer._tag === "Unasked" && event.identify && event.written;
+
+  return { answer: asked ? { _tag: "Waiting" } : login.answer, seen: login.seen + 1 };
+};
+
+// The wait starts from the last Line of the sequence, whether that Line was written or
+// Dropped (CONN-6).
+const afterLoginSent = (context: Context, event: Payload<"LOGIN_SENT">): Context => {
+  const login = countedLoginLine(context, event);
+  const waits = login !== context.login && login.seen === context.loginLines;
 
   return {
     ...context,
-    deadlines: waits
-      ? [
-          ...context.deadlines,
-          { at: event.at + context.tuning.loginWaitMillis, name: loginDeadline },
-        ]
-      : context.deadlines,
+    deadlines:
+      waits && login.answer._tag === "Waiting"
+        ? [
+            ...context.deadlines,
+            { at: event.at + context.tuning.loginWaitMillis, name: loginDeadline },
+          ]
+        : context.deadlines,
     login,
   };
 };
 
 // A sign counts only once an `IDENTIFY` is out, so a login some other way is no answer to
-// a wait that has not begun.
+// a wait that has not begun. The first sign is the answer, and one that comes after the wait
+// ran out is still taken, because how the login went is what the Owner wants to see. It
+// settles nothing then, because the wait running out already did (CONN-6).
 const afterLoginSign = (context: Context, event: Payload<"LINE">): Context => {
-  const { login } = context;
+  const { answer } = context.login;
+  const open = answer._tag === "Waiting" || answer._tag === "TimedOut";
+  const sign = open ? loginSign(event, context.services) : undefined;
 
-  return login.identified && !login.settled && loginSign(event, context.services) !== undefined
-    ? {
+  return sign === undefined
+    ? context
+    : {
         ...context,
         deadlines: without(context.deadlines, loginDeadline),
-        login: { ...login, settled: true },
-      }
-    : context;
+        login: { ...context.login, answer: { _tag: "Answered", sign } },
+      };
 };
 
 // The way out of a Connection the machine has given up on. Nothing is pending once it
@@ -196,7 +230,18 @@ export const network = setup({
     // Whoever started the close, the machine has finished with this Connection. A
     // `PING` goes unanswered here, because a `PONG` could only leave behind the `QUIT`
     // or the close already asked for, and neither leaves the Ircd waiting on one.
-    closing: {},
+    //
+    // How its login went is still worth knowing until it has closed, so a sign that comes
+    // now is taken, and so is a Line of the sequence that was on its way out. Nothing is
+    // asked of the host and no wait starts, because nothing here waits any more (CONN-6).
+    closing: {
+      on: {
+        LINE: ({ context, event }) => ({ context: afterLoginSign(context, event) }),
+        LOGIN_SENT: ({ context, event }) => ({
+          context: { ...context, login: countedLoginLine(context, event) },
+        }),
+      },
+    },
     connection: {
       initial: "connecting",
       on: {
@@ -321,6 +366,7 @@ export const network = setup({
                         { at: event.at + context.tuning.lagCheckMillis, name: lagCheckDeadline },
                         { at: event.at + context.tuning.silenceMillis, name: silenceDeadline },
                       ],
+                      welcomedAt: event.at,
                     },
                     target: "session",
                   }
@@ -349,7 +395,7 @@ export const network = setup({
                   context: {
                     ...context,
                     deadlines: without(context.deadlines, loginDeadline),
-                    login: { ...context.login, settled: true },
+                    login: { ...context.login, answer: { _tag: "TimedOut" } },
                   },
                 };
               }

@@ -20,12 +20,21 @@ export type TemplateRejection = "NotALine" | "HasPrefix";
 const reference = /\{\{(?<name>[^{}]*)\}\}/gu;
 
 /**
+ * The name at each reference in a template, in the order they stand, so a name written
+ * twice is here twice. That is one name for each value that {@link fillReferences} puts in.
+ * @param template - The template's text.
+ * @returns The names, as written between the braces.
+ */
+export const templateSubstitutions = (template: string): readonly string[] =>
+  Array.from(template.matchAll(reference), (match) => match.groups?.name ?? "");
+
+/**
  * The names a template refers to, each once, in order.
  * @param template - The template's text.
  * @returns The names, as written between the braces.
  */
 export const templateReferences = (template: string): readonly string[] => [
-  ...new Set(Array.from(template.matchAll(reference), (match) => match.groups?.name ?? "")),
+  ...new Set(templateSubstitutions(template)),
 ];
 
 /**
