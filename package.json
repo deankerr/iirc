@@ -17,7 +17,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "bun run --filter @iirc/app build",
+    "build": "bun run --filter @iirc/app --filter @iirc/soak build",
     "check": "ultracite check",
     "fix": "ultracite fix",
     "knip": "knip",

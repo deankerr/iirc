@@ -74,6 +74,7 @@ Dependencies point down only, and each package stands alone for whoever wants it
 | `@iirc/daemon` | Network supervision, operations, Configuration, Credentials, Keys, handlers. Exports `DaemonCore` and `ApiRoutes` | `log`, `api`, `session`, `lifecycle`, `protocol`, `effect` |
 | `@iirc/web` | The web frontend | `client` |
 | `apps/iirc` | The only place that reads argv or touches `bun:bundle` | everything above |
+| `apps/soak` | `iirc-soak`, the soak test's Frontend (PROOF-5): `send` and `check` over the API | `api` |
 
 - **Seams worth keeping:**
   - **`Transport`:** `(ircd) => Effect<Socket>`, so tests run Sessions on `TestClock` with no real port.

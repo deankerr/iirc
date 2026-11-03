@@ -31,15 +31,15 @@ const line = (each: Uint8Array): NewEntry => ({
 });
 
 // What a Log that has run the binary's own migrations has applied.
-const logMigrationNames = ["1_initial", "2_logins_and_redaction"];
+const logMigrationNames = ["1_initial"];
 
-// A next migration, as the next format change would be: it adds to the Log and
+// The next migration, as the first format change after the freeze will be: it adds to the Log and
 // rewrites nothing in it.
 const withNote: SqliteMigrator.Loader = logMigrations.pipe(
   Effect.map((known) => [
     ...known,
     [
-      3,
+      2,
       "test_note",
       Effect.succeed(
         Effect.gen(function* () {
@@ -51,77 +51,6 @@ const withNote: SqliteMigrator.Loader = logMigrations.pipe(
     ],
   ])
 );
-
-// The Log as a9f657d wrote it, before migration 2: its `1_initial` DDL as it was, and the
-// rows its Daemon recorded, written by hand because nothing writes that format any more.
-const olderLog = (filename: string) => {
-  const database = new Database(filename);
-  const ircd = JSON.stringify({ host: "irc.example", port: 6697, tls: true });
-  const { loginWaitMillis: _, ...tuning } = attemptInput.tuning;
-
-  const lineAt = (sequence: number, direction: string, text: string) =>
-    database.run(
-      "INSERT INTO entries (sequence, at, kind, network, bytes, connection, direction) VALUES (?, 1000, 'Line', 'libera', ?, 2, ?)",
-      [sequence, new TextEncoder().encode(text), direction]
-    );
-
-  database.run(`
-    CREATE TABLE entries (
-      sequence INTEGER PRIMARY KEY,
-      at INTEGER NOT NULL,
-      kind TEXT NOT NULL CHECK (
-        kind IN ('Line', 'Connection', 'Change', 'Deadline', 'Daemon', 'Dropped')
-      ),
-      network TEXT,
-      bytes BLOB,
-      cause TEXT,
-      chosen INTEGER,
-      connection INTEGER,
-      cut INTEGER,
-      direction TEXT,
-      ircd TEXT,
-      nicks TEXT,
-      username TEXT,
-      realname TEXT,
-      tuning TEXT,
-      phase TEXT,
-      reason TEXT,
-      refused INTEGER,
-      ended_at INTEGER,
-      tls TEXT,
-      "by" TEXT,
-      change TEXT,
-      name TEXT,
-      version TEXT
-    ) STRICT
-  `);
-  database.run("CREATE INDEX entries_by_network ON entries (network, sequence)");
-  database.run("CREATE INDEX entries_by_kind ON entries (kind, sequence)");
-  database.run("CREATE INDEX entries_by_network_and_kind ON entries (network, kind, sequence)");
-  database.run(`
-    CREATE TABLE effect_sql_migrations (
-      migration_id INTEGER PRIMARY KEY NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      name VARCHAR(255) NOT NULL
-    )
-  `);
-  database.run("INSERT INTO effect_sql_migrations (migration_id, name) VALUES (1, 'initial')");
-  database.run(
-    "INSERT INTO entries (sequence, at, kind, version, phase) VALUES (1, 1000, 'Daemon', '0.0.0', 'started')"
-  );
-  database.run(
-    "INSERT INTO entries (sequence, at, kind, network, phase, ircd, nicks, username, realname, tuning) VALUES (2, 1000, 'Connection', 'libera', 'attempt', ?, ?, 'user', 'I IRC', ?)",
-    [ircd, JSON.stringify(["alice"]), JSON.stringify(tuning)]
-  );
-  database.run(
-    "INSERT INTO entries (sequence, at, kind, network, phase, ircd, connection) VALUES (3, 1000, 'Connection', 'libera', 'opened', ?, 2)",
-    [ircd]
-  );
-  lineAt(4, "inbound", ":ircd 001 alice :Welcome");
-  lineAt(5, "outbound", "PRIVMSG #iirc :said before the upgrade");
-  lineAt(6, "inbound", ":bob!u@h PRIVMSG #iirc :my password is hunter2");
-  database.close();
-};
 
 const dataDirectory = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -212,7 +141,7 @@ describe("migrations (RUN-5)", () => {
 
         // The Log has the migration, and every Line's bytes as they were.
         assert.include(columns(live), "test_note");
-        assert.deepStrictEqual(applied(live), [...logMigrationNames, "3_test_note"]);
+        assert.deepStrictEqual(applied(live), [...logMigrationNames, "2_test_note"]);
         assert.deepStrictEqual(lineBytes(live), before);
         assert.deepStrictEqual(
           entries.flatMap((entry) => (entry._tag === "Line" ? [entry.bytes] : [])),
@@ -233,12 +162,12 @@ describe("migrations (RUN-5)", () => {
       const refused = yield* Effect.flip(opened(dataDir, recordLines));
 
       assert.instanceOf(refused, LogTooNew);
-      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], ["3_test_note"]);
+      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], ["2_test_note"]);
       assert.include(refused.message, "newer iirc");
-      assert.include(refused.message, "3_test_note");
+      assert.include(refused.message, "2_test_note");
       // It touched nothing: no Entry was appended, and no backup was taken.
       assert.deepStrictEqual(lineBytes(live), before);
-      assert.deepStrictEqual(applied(live), [...logMigrationNames, "3_test_note"]);
+      assert.deepStrictEqual(applied(live), [...logMigrationNames, "2_test_note"]);
       assert.isFalse(existsSync(`${dataDir}/backups`));
     }).pipe(Effect.scoped)
   );
@@ -255,30 +184,22 @@ describe("migrations (RUN-5)", () => {
   );
 
   it.live(
-    "RUN-5: upgrades a Log a9f657d wrote, backed up, replaying as it did and taking new writes and a redaction",
+    "RUN-5: a Log a later migration upgraded keeps its Entries, and takes new writes and a redaction",
     () =>
       Effect.gen(function* () {
         const dataDir = yield* dataDirectory;
-        const live = `${dataDir}/iirc.sqlite`;
 
-        olderLog(live);
-
-        assert.notInclude(columns(live), "login_lines");
+        yield* opened(dataDir, recordLines);
 
         const upgraded = yield* opened(
           dataDir,
           Effect.gen(function* () {
             const log = yield* Log;
             const recorder = yield* Recorder;
+            const before = yield* log.entries({ after: 0, limit: 100 });
 
-            const before = {
-              entries: yield* log.entries({ after: 0, limit: 100 }),
-              messages: yield* log.messages({ after: 0, limit: 100 }),
-              standing: yield* recorder.standing("libera"),
-            };
-
-            // New writes: an attempt with the new fields, a Line, and a redaction of an old
-            // Line, whose Change is recorded beside it.
+            // An attempt with its login fields, a Line, and a redaction of the first Line,
+            // whose Change is recorded beside it.
             yield* recorder.record(
               [
                 {
@@ -297,72 +218,27 @@ describe("migrations (RUN-5)", () => {
             );
 
             const change = yield* log.redact(
-              6,
-              { _tag: "Change", by: "owner", change: { _tag: "EntryRedacted", sequence: 6 } },
+              1,
+              { _tag: "Change", by: "owner", change: { _tag: "EntryRedacted", sequence: 1 } },
               (recorded) => recorded
             );
 
             return {
-              ...before,
-              after: yield* log.entries({ after: 6, limit: 100 }),
+              after: yield* log.entries({ after: before.length, limit: 100 }),
+              before,
               change,
-              redacted: (yield* log.entries({ after: 5, limit: 1 }))[0],
+              redacted: (yield* log.entries({ after: 0, limit: 1 }))[0],
             };
-          })
+          }),
+          withNote
         );
 
-        // The old attempt reads as it ran: no login sequence and no services.
-        const [, attempt] = upgraded.entries;
-
-        assert.deepInclude(attempt, {
-          _tag: "Connection",
-          loginLines: 0,
-          phase: "attempt",
-          services: [],
-        });
-        assert.deepInclude(
-          attempt?._tag === "Connection" && attempt.phase === "attempt" ? attempt.tuning : {},
-          { loginWaitMillis: 2000 }
-        );
-        assert.deepStrictEqual(
-          upgraded.messages.map(({ sender, text }) => `${sender}: ${text}`),
-          ["alice: said before the upgrade", "bob: my password is hunter2"]
-        );
-        assert.strictEqual(upgraded.standing.irc.self, "alice");
-
-        // The Entries are as they were, and the new ones are whole.
-        assert.strictEqual(upgraded.entries.length, 6);
+        assert.lengthOf(upgraded.before, 2);
+        assert.deepInclude(upgraded.after[0], { loginLines: 2, services: ["NickServ"] });
         assert.deepInclude(upgraded.redacted, {
           bytes: new Uint8Array(),
           redactedBy: upgraded.change.sequence,
         });
-        assert.deepInclude(upgraded.after[0], { loginLines: 2, services: ["NickServ"] });
-
-        // A backup was taken first, with the Log as it was.
-        const [backup, ...others] = readdirSync(`${dataDir}/backups`);
-
-        assert.lengthOf(others, 0);
-        assert.match(backup ?? "", /^pre-migration-6-\d{8}T\d{9}Z\.sqlite$/u);
-        assert.notInclude(columns(`${dataDir}/backups/${backup}`), "login_lines");
-        assert.deepStrictEqual(applied(`${dataDir}/backups/${backup}`), ["1_initial"]);
-        assert.deepStrictEqual(applied(live), logMigrationNames);
-
-        // The next start reads the Log it left, with nothing left to migrate.
-        const restarted = yield* opened(
-          dataDir,
-          Log.use(({ entries, messages }) =>
-            Effect.all({
-              entries: entries({ after: 0, limit: 100 }),
-              messages: messages({ after: 0, limit: 100 }),
-            })
-          )
-        );
-
-        assert.lengthOf(restarted.entries, 9);
-        assert.deepStrictEqual(
-          restarted.messages.map(({ sender, text }) => `${sender}: ${text}`),
-          ["alice: said before the upgrade", "bob: hello again"]
-        );
         assert.lengthOf(readdirSync(`${dataDir}/backups`), 1);
       }).pipe(Effect.scoped)
   );

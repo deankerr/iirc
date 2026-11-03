@@ -14,10 +14,16 @@ const busyTimeout = Duration.millis(50);
 
 const synchronousFull = 2;
 
+// The Log's format froze when the soak test began (PROOF-5), and every Log written
+// before that has been thrown away. So `1_initial` is the whole of what a Log is, and
+// any change to it from here on is a new migration, never an edit to one already here,
+// because a Log in the wild has run that one already (RUN-5).
 const migrations = SqliteMigrator.fromRecord({
   "1_initial": Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
+    // One table for every kind of Entry, so a column is NULL for a kind it does not
+    // describe, and `rows.ts` decodes each kind from the columns it has.
     yield* sql`
       CREATE TABLE entries (
         sequence INTEGER PRIMARY KEY,
@@ -45,7 +51,15 @@ const migrations = SqliteMigrator.fromRecord({
         "by" TEXT,
         change TEXT,
         name TEXT,
-        version TEXT
+        version TEXT,
+        -- The services an attempt logs in to, as JSON text, and how many of its Lines are
+        -- the login sequence (CONN-6).
+        services TEXT,
+        login_lines INTEGER,
+        -- The names of the Credentials scrubbed from a Line's bytes (LOG-6), as JSON text,
+        -- and the sequence of the Change that emptied them (LOG-7).
+        redacted TEXT,
+        redacted_by INTEGER
       ) STRICT
     `;
 
@@ -55,19 +69,13 @@ const migrations = SqliteMigrator.fromRecord({
     yield* sql`CREATE INDEX entries_by_kind ON entries (kind, sequence)`;
     yield* sql`CREATE INDEX entries_by_network_and_kind ON entries (network, kind, sequence)`;
   }),
-  // Adds to the Log and rewrites nothing in it: a row from before reads its new columns
-  // as NULL, and `rows.ts` decodes that as what the row meant then (RUN-5).
-  "2_logins_and_redaction": Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-
-    yield* sql`ALTER TABLE entries ADD COLUMN services TEXT`;
-    yield* sql`ALTER TABLE entries ADD COLUMN login_lines INTEGER`;
-    yield* sql`ALTER TABLE entries ADD COLUMN redacted TEXT`;
-    yield* sql`ALTER TABLE entries ADD COLUMN redacted_by INTEGER`;
-  }),
 });
 
-/** Every migration this binary knows, in order (RUN-5). A test may add to them. */
+/**
+ * Every migration this binary knows, in order (RUN-5). The format is frozen: any change to
+ * the Log is a new migration appended here, as `2_<name>`, and never an edit to `1_initial`.
+ * A test may add to them.
+ */
 export const logMigrations: SqliteMigrator.Loader = migrations;
 
 // A derived table is no part of the Log, so it is here and not in a migration: anyone

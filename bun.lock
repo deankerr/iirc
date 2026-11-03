@@ -37,6 +37,26 @@
         "vitest": "catalog:",
       },
     },
+    "apps/soak": {
+      "name": "@iirc/soak",
+      "version": "0.0.0",
+      "bin": {
+        "iirc-soak": "./src/main.ts",
+      },
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/api": "workspace:*",
+        "@iirc/protocol": "workspace:*",
+        "@iirc/state": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@iirc/daemon": "workspace:*",
+        "@iirc/session": "workspace:*",
+        "vitest": "catalog:",
+      },
+    },
     "packages/api": {
       "name": "@iirc/api",
       "version": "0.0.0",
@@ -225,6 +245,8 @@
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 
     "@iirc/session": ["@iirc/session@workspace:packages/session"],
+
+    "@iirc/soak": ["@iirc/soak@workspace:apps/soak"],
 
     "@iirc/state": ["@iirc/state@workspace:packages/state"],
 

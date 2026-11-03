@@ -99,7 +99,12 @@ const joinFailureNumerics: ReadonlySet<string> = new Set([
 const failedChannel = ({ command, params }: Line) =>
   command === "476" && params.length === 2 ? params[0] : params[1];
 
-const nickOf = (source: string | undefined) => source?.split(/[!@]/u, 1)[0];
+/**
+ * The nick in a Line's source, which is `nick!user@host`, or `nick@host`, or a bare nick.
+ * @param source - A Line's source, if it has one.
+ * @returns The nick, or `undefined` for a Line with no source.
+ */
+export const nickOf = (source: string | undefined) => source?.split(/[!@]/u, 1)[0];
 
 const unchanged = (state: IrcState): SteppedState => ({ changes: [], next: state });
 

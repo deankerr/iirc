@@ -456,6 +456,9 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - It checks a TLS client certificate by the fingerprint ngircd says it saw. Against an ngircd without TLS, or one that never says, it skips that check and says so.
 - **PROOF-4.** Kill tests send `SIGKILL` during traffic, then check that no recorded Line is missing or duplicated and that projections rebuild identically. This does not test power loss, which rests on `synchronous=FULL`.
 - **PROOF-5.** Soak test: two Daemons share a Channel on the floor Ircd, one sends a counted Message each minute, and the other checks that none are missing. The first proof in the vision is 30 days of this passing on a real Network as well, with every Gap explained.
+  - `iirc-soak` (`apps/soak`) is a Frontend of both Daemons that uses only the API, and [`soak.md`](../soak.md) says how it runs. `iirc-soak send` sends `soak <minute> <millis>` each minute, where `<millis>` is the epoch millisecond of the run and `<minute>` is its Unix minute, so that each Message has an identity of its own, and `iirc-soak check` reads both Logs in full each hour and keeps no state.
+  - A Message that is sent and not received is judged by its own identity, and is explained if the sender's Log shows that Message Dropped, or if a Gap on either Daemon's Network covers the time it was sent. A Gap's window runs from the last inbound Line the Daemon recorded before it began, to the echo of the Daemon's own `JOIN` of the Target after it ended. Nothing pads it, and a window whose end is not yet in the Log is open.
+  - Names are compared by the `CASEMAPPING` the Connection was told (KNOW-3). A Message sent or received more than once, a Message received that was never sent, and any stretch of more than 10 minutes in which the sender did not run all fail the check. The last is derived from the minutes, so it is never forgotten. Each Log is read from one moment, up to the newest sequence read first, so that a Gap recorded during the read is left for the next run.
 
 ## IRCv3 enhancements
 
@@ -553,4 +556,4 @@ Milestone 1 is built in this order, each step a working Daemon:
 
 The soak test (PROOF-5) starts after step 4 and runs in the background. Nothing waits for it, and the Daemon runs alongside whatever IRC client the Owner uses.
 
-The Log format is free to change, with no migrations, until the soak test starts. A tagged build runs the soak test, so day-to-day work does not interrupt it.
+The Log format was free to change, with no migrations, until the soak test. Its migrations were folded into `1_initial` then, so every change to the Log from here on is a new migration. A tagged build runs the soak test, so day-to-day work does not interrupt it.

@@ -4,7 +4,7 @@ import type {
   Ircd as IrcdOf,
   TlsDetails as TlsDetailsOf,
 } from "@iirc/session/entry";
-import { Effect, Option, Predicate, Schema, SchemaGetter } from "effect";
+import { Option, Predicate, Schema, SchemaGetter } from "effect";
 
 // One Schema for every field of `T`, and none for any other, which an object literal of
 // them can be checked against.
@@ -17,16 +17,6 @@ const nullable = <S extends Schema.Top>(schema: S) =>
   Schema.optionalKey(Schema.NullOr(schema)).pipe(
     Schema.decodeTo(Schema.optionalKey(Schema.toType(schema)), {
       decode: SchemaGetter.transformOptional(Option.filter(Predicate.isNotNull)),
-      encode: SchemaGetter.passthrough({ strict: false }),
-    })
-  );
-
-// A column that migration 2 added to rows written before it, so NULL there says what the
-// row meant then: `fallback`. The domain type has no missing value to check for.
-const nullableAs = <S extends Schema.Top>(schema: S, fallback: S["Type"]) =>
-  Schema.NullOr(schema).pipe(
-    Schema.decodeTo(Schema.toType(schema), {
-      decode: SchemaGetter.transform((value) => value ?? fallback),
       encode: SchemaGetter.passthrough({ strict: false }),
     })
   );
@@ -45,8 +35,7 @@ const Ircd = Schema.Struct({
 
 // The whole Tuning an `attempt` ran with, kept as it was. Whether it was a good one was
 // decided before it ran, so nothing here judges it, and reading it back must not fail.
-// Every number is listed, and checked against lifecycle's, because one of them carries a
-// default for rows written before it existed.
+// Every number is listed, and checked against lifecycle's.
 const Tuning = Schema.Struct({
   burstMillis: Schema.Int,
   connectTimeoutMillis: Schema.Int,
@@ -59,10 +48,7 @@ const Tuning = Schema.Struct({
   kickRejoinMillis: Schema.Int,
   lagCheckMillis: Schema.Int,
   laneLimit: Schema.Int,
-  // An `attempt` from before the wait existed had no login to wait for (CONN-6), so the
-  // value it gets is moot, and it is what the default was then, kept so that the Log
-  // reads the same whatever the default becomes.
-  loginWaitMillis: Schema.Int.pipe(Schema.withDecodingDefaultKey(Effect.succeed(2000))),
+  loginWaitMillis: Schema.Int,
   quitWaitMillis: Schema.Int,
   reconnectInitialMillis: Schema.Int,
   reconnectMaxMillis: Schema.Int,
@@ -99,13 +85,11 @@ const RefusedFromBit = Schema.Literal(1).pipe(
 const ConnectionRow = Schema.Union([
   Schema.TaggedStruct("Connection", {
     ...Connected,
-    // An `attempt` from before the Log learned of logins had no login sequence and no
-    // services, which is what replaying it as such does the same way it did (CONN-6).
-    loginLines: nullableAs(Schema.Int, 0),
+    loginLines: Schema.Int,
     nicks: Schema.fromJsonString(Schema.Array(Schema.String)),
     phase: Schema.Literal("attempt"),
     realname: Schema.String,
-    services: nullableAs(Schema.fromJsonString(Schema.Array(Schema.String)), []),
+    services: Schema.fromJsonString(Schema.Array(Schema.String)),
     tuning: Schema.fromJsonString(Tuning),
     username: Schema.String,
   }).pipe(Schema.encodeKeys({ _tag: "kind", loginLines: "login_lines" })),

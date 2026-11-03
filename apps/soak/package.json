@@ -1,0 +1,26 @@
+{
+  "name": "@iirc/soak",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "iirc-soak": "./src/main.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun build --compile --minify --sourcemap --no-compile-autoload-dotenv --no-compile-autoload-bunfig --compile-exec-argv=\"--disallow-code-generation-from-strings=strict\" src/main.ts --outfile dist/iirc-soak",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@iirc/api": "workspace:*",
+    "@iirc/protocol": "workspace:*",
+    "@iirc/state": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@iirc/daemon": "workspace:*",
+    "@iirc/session": "workspace:*",
+    "vitest": "catalog:"
+  }
+}
