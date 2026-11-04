@@ -1,73 +1,146 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "@effect/vitest";
+import { Effect } from "effect";
+import { SecureRandom } from "effect/crypto";
+import type { Digest } from "effect/crypto";
 
 import type { Key } from "./configuration.ts";
-import { findKey, hashKey, newKey, reaches } from "./keys.ts";
+import { findKey, hashKey, keyCrypto, newKey, reaches } from "./keys.ts";
 
-const keyOf = (key: string, scope: Key["scope"] = "admin"): Key => ({
-  created: 0,
-  hash: hashKey(key),
-  scope,
-});
+const keyOf = (key: string, scope: Key["scope"] = "admin") =>
+  Effect.map(hashKey(key), (hash): Key => ({ created: 0, hash, scope }));
 
-describe(newKey, () => {
-  it("AUTH-2: is `iirc_` and 32 random bytes in base64url, never the same twice", () => {
-    const keys = Array.from({ length: 50 }, newKey);
+describe("a new key", () => {
+  it.effect("AUTH-2: is `iirc_` and 32 random bytes in base64url, never the same twice", () =>
+    Effect.gen(function* () {
+      const keys = yield* Effect.replicateEffect(newKey, 50);
 
-    for (const key of keys) {
-      expect(key).toMatch(/^iirc_[A-Za-z0-9_-]{43}$/u);
-      expect(Buffer.from(key.slice("iirc_".length), "base64url")).toHaveLength(32);
-    }
+      for (const key of keys) {
+        assert.match(key, /^iirc_[A-Za-z0-9_-]{43}$/u);
+        assert.lengthOf(Buffer.from(key.slice("iirc_".length), "base64url"), 32);
+      }
 
-    expect(new Set(keys).size).toBe(keys.length);
-  });
+      assert.strictEqual(new Set(keys).size, keys.length);
+    }).pipe(Effect.provide(keyCrypto))
+  );
+
+  it.effect("AUTH-2: is drawn from SecureRandom, and nothing else", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* newKey, `iirc_${"A".repeat(43)}`);
+    }).pipe(
+      Effect.provideService(
+        SecureRandom.SecureRandom,
+        SecureRandom.make((size) => new Uint8Array(size))
+      )
+    )
+  );
 });
 
 describe(hashKey, () => {
-  it("AUTH-2: is the key's SHA-256, in hex", () => {
-    // What `printf iirc_test | sha256sum` says.
-    expect(hashKey("iirc_test")).toBe(
-      "5fc91a6706c6d679b4228723bcee429bea1916e837344032a054bf76d384d175"
-    );
-  });
+  // These are what Logs already hold, including a running Daemon's, so they must never
+  // change.
+  it.effect("AUTH-2: is the SHA-256 of the key's UTF-8, in lowercase hex", () =>
+    Effect.gen(function* () {
+      // What `printf iirc_test | sha256sum` says.
+      assert.strictEqual(
+        yield* hashKey("iirc_test"),
+        "5fc91a6706c6d679b4228723bcee429bea1916e837344032a054bf76d384d175"
+      );
+      // What `printf 'iirc_\xc3\xa9' | sha256sum` says.
+      assert.strictEqual(
+        yield* hashKey("iirc_é"),
+        "8fa66da4c468ce883802e61779ebb360fd160416eb4003f05699d277b3b0460d"
+      );
+    }).pipe(Effect.provide(keyCrypto))
+  );
 });
 
+const withKeys = <A>(
+  test: (
+    keys: ReadonlyMap<string, Key>,
+    phone: string,
+    owner: string
+  ) => Effect.Effect<A, never, Digest.Digest>
+) =>
+  Effect.gen(function* () {
+    const phone = yield* newKey;
+    const owner = yield* newKey;
+
+    const keys = new Map([
+      ["owner", yield* keyOf(owner)],
+      ["phone", yield* keyOf(phone, "chat")],
+    ]);
+
+    return yield* test(keys, phone, owner);
+  }).pipe(Effect.provide(keyCrypto));
+
 describe(findKey, () => {
-  const phone = newKey();
-  const owner = newKey();
+  it.effect("AUTH-2: finds whose key it is, with its scope", () =>
+    withKeys((keys, phone, owner) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* findKey(keys, phone), { name: "phone", scope: "chat" });
+        assert.deepStrictEqual(yield* findKey(keys, owner), { name: "owner", scope: "admin" });
+      })
+    )
+  );
 
-  const keys = new Map([
-    ["owner", keyOf(owner)],
-    ["phone", keyOf(phone, "chat")],
-  ]);
+  it.effect("AUTH-2: finds a key by a hash a Log already holds", () =>
+    Effect.gen(function* () {
+      const keys = new Map<string, Key>([
+        [
+          "owner",
+          {
+            created: 0,
+            hash: "5fc91a6706c6d679b4228723bcee429bea1916e837344032a054bf76d384d175",
+            scope: "admin",
+          },
+        ],
+      ]);
 
-  it("AUTH-2: finds whose key it is, with its scope", () => {
-    expect(findKey(keys, phone)).toStrictEqual({ name: "phone", scope: "chat" });
-    expect(findKey(keys, owner)).toStrictEqual({ name: "owner", scope: "admin" });
-  });
+      assert.deepStrictEqual(yield* findKey(keys, "iirc_test"), {
+        name: "owner",
+        scope: "admin",
+      });
+    }).pipe(Effect.provide(keyCrypto))
+  );
 
-  it("AUTH-2: finds nobody for a key one character off, or of another length, or empty", () => {
-    const last = phone.at(-1) === "A" ? "B" : "A";
+  it.effect(
+    "AUTH-2: finds nobody for a key one character off, or of another length, or empty",
+    () =>
+      withKeys((keys, phone) =>
+        Effect.gen(function* () {
+          const last = phone.at(-1) === "A" ? "B" : "A";
+          const hash = yield* hashKey(phone);
 
-    expect(findKey(keys, `${phone.slice(0, -1)}${last}`)).toBeUndefined();
-    expect(findKey(keys, `${phone}A`)).toBeUndefined();
-    expect(findKey(keys, phone.slice(0, -1))).toBeUndefined();
-    expect(findKey(keys, "")).toBeUndefined();
-    expect(findKey(keys, hashKey(phone))).toBeUndefined();
-  });
+          for (const wrong of [
+            `${phone.slice(0, -1)}${last}`,
+            `${phone}A`,
+            phone.slice(0, -1),
+            "",
+            hash,
+          ]) {
+            assert.isUndefined(yield* findKey(keys, wrong));
+          }
+        })
+      )
+  );
 
-  it("finds nobody when there are no keys", () => {
-    expect(findKey(new Map(), phone)).toBeUndefined();
-  });
+  it.effect("finds nobody when there are no keys, or by a stored hash that is not hex", () =>
+    Effect.gen(function* () {
+      assert.isUndefined(yield* findKey(new Map(), "iirc_test"));
+      assert.isUndefined(
+        yield* findKey(new Map([["bad", { created: 0, hash: "not hex", scope: "admin" }]]), "")
+      );
+    }).pipe(Effect.provide(keyCrypto))
+  );
 });
 
 describe(reaches, () => {
   it("AUTH-3: gives each scope everything the one below it has", () => {
     const scopes = ["read", "chat", "admin"] as const;
 
-    expect(scopes.map((scope) => scopes.filter((needed) => reaches(scope, needed)))).toStrictEqual([
-      ["read"],
-      ["read", "chat"],
-      ["read", "chat", "admin"],
-    ]);
+    assert.deepStrictEqual(
+      scopes.map((scope) => scopes.filter((needed) => reaches(scope, needed))),
+      [["read"], ["read", "chat"], ["read", "chat", "admin"]]
+    );
   });
 });

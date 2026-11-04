@@ -37,6 +37,13 @@ describe(channelKeyName, () => {
     );
   });
 
+  // Logs already name kept keys this way, including a running Daemon's, so it must never
+  // change.
+  it("CRED-4: names the same key it always has", () => {
+    // What `printf 'libera\0#plain' | sha256sum | cut -c1-16` says.
+    expect(channelKeyName("libera", "#Plain")).toBe("key.9d288b84fca9e37c");
+  });
+
   it("CRED-4: is the same however the Channel is spelt, and differs by Network", () => {
     expect(channelKeyName("libera", "#PLAIN")).toBe(channelKeyName("libera", "#plain"));
     expect(channelKeyName("oftc", "#plain")).not.toBe(channelKeyName("libera", "#plain"));

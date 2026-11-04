@@ -1,3 +1,6 @@
+// Not Effect's `Digest`: its SHA-256 runs on `crypto.subtle`, so it is asynchronous, and
+// this name is derived in the pure decisions below (`keyNameFor`, `keepingFor`), which
+// would all become Effects for a hash. Effect offers no synchronous SHA-256.
 import { createHash } from "node:crypto";
 
 import type { NetworkSettings } from "@iirc/api";

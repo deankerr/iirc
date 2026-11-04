@@ -11,6 +11,8 @@ import { defaultTuning as specTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { privmsg } from "@iirc/protocol/outbound";
 import { Deferred, Effect, Exit, Fiber, Layer, Redacted, Ref, References } from "effect";
+import type { Duration } from "effect";
+import { Digest } from "effect/crypto";
 import { Socket } from "effect/socket";
 import { TestClock } from "effect/testing";
 
@@ -1263,6 +1265,68 @@ const askingIrcd = Effect.gen(function* () {
   });
 
   return { authority, ircd, pin: opensslPin(certificate.cert) };
+});
+
+// A real SHA-256 that answers only after `delay`.
+const slowDigest = (delay: Duration.Input) =>
+  Layer.effect(
+    Digest.Digest,
+    Effect.gen(function* () {
+      const real = yield* Digest.Digest;
+
+      return Digest.Digest.of({
+        digest: (algorithm, data) => Effect.delay(real.digest(algorithm, data), delay),
+        digestHex: (algorithm, data) => Effect.delay(real.digestHex(algorithm, data), delay),
+      });
+    })
+  ).pipe(Layer.provide(Digest.layerWebCrypto));
+
+// WebCrypto rejecting every hash, which `Digest` makes a defect, as this does.
+const rejection = new Error("crypto.subtle rejected the hash");
+
+const rejectingDigest = Layer.succeed(
+  Digest.Digest,
+  Digest.Digest.of({
+    digest: () => Effect.die(rejection),
+    digestHex: () => Effect.die(rejection),
+  })
+);
+
+describe("Transport.layer hashing a pin (CONN-1)", () => {
+  it.live("fails to open, not dies, when the Ircd closes while its key is hashed", () =>
+    Effect.gen(function* () {
+      const authority = yield* testAuthority("iirc pinning");
+      const certificate = authority.selfSigned("DNS:elsewhere.test");
+
+      // Hangs up the moment the handshake is done, so the close lands during the hash.
+      const server = createServer(certificate, (stream) => {
+        stream.destroy();
+      });
+
+      const port = yield* listenOn(server, quietAddress);
+
+      const failure = yield* Effect.flip(
+        Effect.scoped(open(pinned(port, opensslPin(certificate.cert))))
+      );
+
+      assert.instanceOf(failure, ConnectFailed);
+      assert.include(failure.reason, "closed");
+    }).pipe(
+      Effect.provide(Transport.layerWithoutDigest.pipe(Layer.provide(slowDigest("200 millis"))))
+    )
+  );
+
+  it.live("fails to open, not dies, when the key cannot be hashed, and keeps why", () =>
+    Effect.gen(function* () {
+      const { ircd, pin } = yield* selfSignedIrcd();
+      const failure = yield* Effect.flip(Effect.scoped(open(pinned(ircd.port, pin))));
+
+      assert.instanceOf(failure, ConnectFailed);
+      assert.strictEqual(failure.cause, rejection);
+      assert.include(failure.reason, "could not be hashed");
+      assert.lengthOf(yield* ircd.bytes, 0);
+    }).pipe(Effect.provide(Transport.layerWithoutDigest.pipe(Layer.provide(rejectingDigest))))
+  );
 });
 
 describe("Transport.layer and client certificates (CONN-1, CRED-1)", () => {

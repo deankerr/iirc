@@ -1,4 +1,5 @@
-import { createHash, X509Certificate } from "node:crypto";
+// Effect has nothing that parses a certificate, so its key is read with Node's.
+import { X509Certificate } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import type { Socket as NetSocket } from "node:net";
 import { Readable } from "node:stream";
@@ -8,6 +9,8 @@ import type { TLSSocket } from "node:tls";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { Array as Arr, Context, Data, Duration, Effect, Layer, Option, Redacted } from "effect";
 import type { Scope } from "effect";
+import { Digest } from "effect/crypto";
+import { Base64 } from "effect/encoding";
 import { constVoid } from "effect/Function";
 import { Socket } from "effect/socket";
 
@@ -94,24 +97,39 @@ const noIdentity = ({ host, port }: Ircd) =>
   });
 
 /**
- * The pin of a certificate's key, as `curl --pinnedpubkey` reads it. The peer
- * certificate's own `pubkey` is SubjectPublicKeyInfo for RSA but only the bare point for
- * EC, so the key is read from the certificate itself. Effect's `Digest` is asynchronous,
- * and this runs in the handshake's callback, before anything else can touch the stream.
- * @param der - The certificate, as DER.
- * @returns `sha256/` and the base64 SHA-256 of its SubjectPublicKeyInfo.
+ * The SubjectPublicKeyInfo of the certificate an Ircd presented. The peer certificate's
+ * own `pubkey` is SubjectPublicKeyInfo for RSA but only the bare point for EC, so the key
+ * is read from the certificate itself. An Ircd that sent no certificate, or one whose key
+ * cannot be read, has none. This runs in a stream's listener, where a throw would reach
+ * nothing.
  */
-const pinOf = (der: Uint8Array) => {
-  const spki = new X509Certificate(der).publicKey.export({ format: "der", type: "spki" });
-
-  return `sha256/${createHash("sha256").update(spki).digest("base64")}`;
-};
-
-// An Ircd that sent no certificate, or one whose key cannot be read, has no pin to match
-// or report. This runs in a stream's listener, where a throw would reach nothing.
-const presentedPin = Option.liftThrowable((stream: TLSSocket) =>
-  pinOf(stream.getPeerCertificate().raw)
+const presentedKey = Option.liftThrowable((stream: TLSSocket): Uint8Array =>
+  new X509Certificate(stream.getPeerCertificate().raw).publicKey.export({
+    format: "der",
+    type: "spki",
+  })
 );
+
+/**
+ * The pin of a key, as `curl --pinnedpubkey` reads it. WebCrypto rejecting the hash is a
+ * defect in `Digest`, and here it fails only this Connection.
+ * @param digest - What hashes it.
+ * @param ircd - Who presented the key.
+ * @param spki - The key, as DER SubjectPublicKeyInfo.
+ * @returns `sha256/` and the base64 SHA-256 of the key.
+ */
+const pinOf = (digest: Digest.Digest["Service"], { host, port }: Ircd, spki: Uint8Array) =>
+  digest.digest(Digest.sha256, spki).pipe(
+    Effect.map((hash) => `sha256/${Base64.encode(hash)}`),
+    Effect.catchDefect((cause) =>
+      Effect.fail(
+        new ConnectFailed({
+          cause,
+          reason: `the key ${host}:${port} presented could not be hashed`,
+        })
+      )
+    )
+  );
 
 // Gives the presented pin, so the Owner can check it and pin it (CONN-1).
 const unpinned = ({ host, port, pin }: Ircd, presented: string | undefined) =>
@@ -126,33 +144,59 @@ const unpinned = ({ host, port, pin }: Ircd, presented: string | undefined) =>
 // By here the handshake is done, and a pinned Ircd has had no other check: with
 // `rejectUnauthorized: false`, `checkServerIdentity` never runs. Nothing has been written,
 // because nothing else holds the stream yet. An authority only verifies a certificate
-// there is, so only a pinned Ircd should get here with none.
-const secured = (ircd: Ircd, stream: TLSSocket): Effect.Effect<Dialed, ConnectFailed> => {
-  const presented = presentedPin(stream);
+// there is, so only a pinned Ircd should get here with none. Nothing reads the stream
+// until the dial has resumed, so it waits, unread, while the key is hashed. What the
+// handshake settled is read before then, because a stream the Ircd closes meanwhile
+// forgets it.
+const secured = (
+  digest: Digest.Digest["Service"],
+  ircd: Ircd,
+  stream: TLSSocket
+): Effect.Effect<Dialed, ConnectFailed> =>
+  Effect.gen(function* (): Effect.fn.Return<Dialed, ConnectFailed> {
+    const cipher = stream.getCipher().name;
+    const protocol = stream.getProtocol() ?? "unknown";
 
-  if (Option.isNone(presented) || (ircd.pin !== undefined && presented.value !== ircd.pin)) {
-    stream.destroy();
+    const presented = yield* Effect.transposeOption(
+      Option.map(presentedKey(stream), (spki) => pinOf(digest, ircd, spki))
+    );
 
-    return Effect.fail(unpinned(ircd, Option.getOrUndefined(presented)));
-  }
+    if (Option.isNone(presented) || (ircd.pin !== undefined && presented.value !== ircd.pin)) {
+      return yield* unpinned(ircd, Option.getOrUndefined(presented));
+    }
 
-  return Effect.succeed({
-    stream,
-    tls: {
-      cipher: stream.getCipher().name,
-      pin: presented.value,
-      protocol: stream.getProtocol() ?? "unknown",
-      verifiedBy: ircd.pin === undefined ? "authority" : "pin",
-    },
-  });
-};
+    if (stream.destroyed) {
+      return yield* new ConnectFailed({
+        cause: "closed",
+        reason: `${ircd.host}:${ircd.port} closed the Connection as it opened`,
+      });
+    }
+
+    return {
+      stream,
+      tls: {
+        cipher,
+        pin: presented.value,
+        protocol,
+        verifiedBy: ircd.pin === undefined ? "authority" : "pin",
+      },
+    };
+  }).pipe(Effect.tapError(() => Effect.sync(() => stream.destroy())));
 
 // SNI carries names only, and Node refuses an IP address there. Omitting it still
 // verifies, because the identity check falls back to `host`. A pinned Ircd is verified by
 // its pin alone, so the certificate and its name go unchecked (CONN-1).
 const dial = (
   ircd: Ircd,
-  { connectTimeoutMillis, identity }: { connectTimeoutMillis: number; identity?: ClientIdentity },
+  {
+    connectTimeoutMillis,
+    digest,
+    identity,
+  }: {
+    connectTimeoutMillis: number;
+    digest: Digest.Digest["Service"];
+    identity?: ClientIdentity;
+  },
   onStream: (stream: NetSocket) => void
 ) =>
   Effect.callback<Dialed, ConnectFailed | Socket.SocketError>((resume) => {
@@ -169,7 +213,7 @@ const dial = (
       });
 
       secure.once("secureConnect", () => {
-        resume(secured(ircd, secure));
+        resume(secured(digest, ircd, secure));
       });
 
       stream = secure;
@@ -395,41 +439,56 @@ export class Transport extends Context.Service<
   /**
    * TCP or TLS through Node's streams, sending SNI, and verifying certificates, or for a
    * pinned Ircd, its key alone (CONN-1). Over TLS it presents a client certificate if it
-   * is given one. Plaintext has nowhere to present one.
+   * is given one. Plaintext has nowhere to present one. It hashes pins with the `Digest`
+   * it is given, which a test can replace.
    */
-  static readonly layer: Layer.Layer<Transport> = Layer.succeed(this, {
-    connect: Effect.fn("Transport.connect")(function* (
-      ircd: Ircd,
-      { clientCertificate, connectTimeoutMillis }: DialOptions
-    ) {
-      const failedOn = (cause: Socket.SocketError) => connectFailed(ircd, cause);
+  static readonly layerWithoutDigest: Layer.Layer<Transport, never, Digest.Digest> = Layer.effect(
+    this,
+    Effect.gen(function* () {
+      const digest = yield* Digest.Digest;
 
-      const identity =
-        clientCertificate === undefined
-          ? undefined
-          : clientIdentity(Redacted.value(clientCertificate));
+      return {
+        connect: Effect.fn("Transport.connect")(function* (
+          ircd: Ircd,
+          { clientCertificate, connectTimeoutMillis }: DialOptions
+        ) {
+          const failedOn = (cause: Socket.SocketError) => connectFailed(ircd, cause);
 
-      let dialing: NetSocket | undefined;
+          const identity =
+            clientCertificate === undefined
+              ? undefined
+              : clientIdentity(Redacted.value(clientCertificate));
 
-      if (clientCertificate !== undefined && identity === undefined) {
-        return yield* noIdentity(ircd);
-      }
+          let dialing: NetSocket | undefined;
 
-      // In place before the dial, because a close can cancel one at any moment, and a
-      // stream that connected just as that happened would otherwise have no owner.
-      yield* Effect.addFinalizer(() => (dialing === undefined ? Effect.void : release(dialing)));
+          if (clientCertificate !== undefined && identity === undefined) {
+            return yield* noIdentity(ircd);
+          }
 
-      const { stream, tls } = yield* dial(
-        ircd,
-        { connectTimeoutMillis, ...(identity !== undefined && { identity }) },
-        (opening) => {
-          dialing = opening;
-        }
-      ).pipe(Effect.catchTag("SocketError", (cause) => Effect.fail(failedOn(cause))));
+          // In place before the dial, because a close can cancel one at any moment, and a
+          // stream that connected just as that happened would otherwise have no owner.
+          yield* Effect.addFinalizer(() =>
+            dialing === undefined ? Effect.void : release(dialing)
+          );
 
-      const { socket, unread } = streamSocket(stream);
+          const { stream, tls } = yield* dial(
+            ircd,
+            { connectTimeoutMillis, digest, ...(identity !== undefined && { identity }) },
+            (opening) => {
+              dialing = opening;
+            }
+          ).pipe(Effect.catchTag("SocketError", (cause) => Effect.fail(failedOn(cause))));
 
-      return tls === undefined ? { socket, unread } : { socket, tls, unread };
-    }),
-  });
+          const { socket, unread } = streamSocket(stream);
+
+          return tls === undefined ? { socket, unread } : { socket, tls, unread };
+        }),
+      };
+    })
+  );
+
+  /** `layerWithoutDigest`, hashing pins with WebCrypto. */
+  static readonly layer: Layer.Layer<Transport> = this.layerWithoutDigest.pipe(
+    Layer.provide(Digest.layerWebCrypto)
+  );
 }

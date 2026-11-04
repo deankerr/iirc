@@ -5,7 +5,7 @@ import type { DataDirectoryLocked, LogTooNew } from "@iirc/log";
 import { Recorder } from "@iirc/session/recorder";
 import { Effect } from "effect";
 
-import { hashKey, newKey } from "./keys.ts";
+import { hashKey, keyCrypto, newKey } from "./keys.ts";
 import { readConfiguration, recordChange } from "./recorded.ts";
 import type { UndecodableChange } from "./recorded.ts";
 
@@ -40,14 +40,14 @@ export const createLocalKey = ({
       return yield* new KeyExists({ keyName: name });
     }
 
-    const key = newKey();
+    const key = yield* newKey;
 
     yield* recordChange(record, configuration, localKeyName, {
       _tag: "KeyCreated",
-      hash: hashKey(key),
+      hash: yield* hashKey(key),
       name,
       scope,
     }).pipe(Effect.mapError(({ cause }) => new StorageFailed({ cause })));
 
     return key;
-  }).pipe(Effect.provide(Log.layer({ dataDir })));
+  }).pipe(Effect.provide([Log.layer({ dataDir }), keyCrypto]));

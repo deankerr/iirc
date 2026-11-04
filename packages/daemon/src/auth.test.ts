@@ -17,8 +17,10 @@ import {
 } from "./daemon.fixture.ts";
 import type { Client, RawRequests } from "./daemon.fixture.ts";
 import { DaemonCore } from "./daemon.ts";
-import { hashKey } from "./keys.ts";
+import { hashKey, keyCrypto } from "./keys.ts";
 import { maxBodySize } from "./routes.ts";
+
+const hashOf = (key: string) => Effect.provide(hashKey(key), keyCrypto);
 
 interface Harness {
   readonly anonymous: RawRequests;
@@ -143,7 +145,9 @@ describe("keys and access", () => {
   it.live("AUTH-2: refuses a key one character off, or one that was never made", () =>
     withDaemon(({ key }) =>
       Effect.gen(function* () {
-        for (const wrong of [nearMiss(key), `${key}A`, key.slice(0, -1), "iirc_", hashKey(key)]) {
+        const hash = yield* hashOf(key);
+
+        for (const wrong of [nearMiss(key), `${key}A`, key.slice(0, -1), "iirc_", hash]) {
           const client = yield* clientWith(wrong);
 
           assert.deepStrictEqual(yield* Effect.flip(client.daemon.status()), new Unauthorized());
@@ -264,7 +268,7 @@ describe("keys and access", () => {
             -1
           ),
           {
-            change: { _tag: "KeyRevoked", hash: hashKey(key), name: "phone", scope: "read" },
+            change: { _tag: "KeyRevoked", hash: yield* hashOf(key), name: "phone", scope: "read" },
             sequence: change,
           }
         );
@@ -301,14 +305,16 @@ describe("keys and access", () => {
           );
           assert.isAbove(listed[1]?.created ?? 0, 0);
           assert.notInclude(listing, created.key);
-          assert.notInclude(listing, hashKey(created.key));
+          const hash = yield* hashOf(created.key);
+
+          assert.notInclude(listing, hash);
           assert.notInclude(log, created.key);
           assert.deepInclude(change, {
             _tag: "Change",
             by: ownerKey,
             change: {
               _tag: "KeyCreated",
-              hash: hashKey(created.key),
+              hash,
               name: "phone",
               scope: "chat",
             },

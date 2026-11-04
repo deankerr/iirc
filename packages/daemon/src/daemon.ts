@@ -76,6 +76,7 @@ import {
   SubscriptionRef,
 } from "effect";
 import type { Duration, Redacted } from "effect";
+import type { Digest, SecureRandom } from "effect/crypto";
 import { constVoid } from "effect/Function";
 
 import type { Change } from "./change.ts";
@@ -84,7 +85,7 @@ import { droppedChannels } from "./configuration.ts";
 import type { Configuration, ConfiguredNetwork } from "./configuration.ts";
 import { Credentials } from "./credentials.ts";
 import type { CredentialsUnreadable, CredentialStore, Keyring } from "./credentials.ts";
-import { findKey, hashKey, newKey } from "./keys.ts";
+import { findKey, hashKey, keyCrypto, newKey } from "./keys.ts";
 import { readConfiguration, recordChange, recordRedaction } from "./recorded.ts";
 import type { UndecodableChange } from "./recorded.ts";
 import { tuningOf } from "./tuning.ts";
@@ -476,7 +477,7 @@ export class Daemon extends Context.Service<
   ): Layer.Layer<
     Daemon,
     StorageFailed | UndecodableChange,
-    Credentials | Log | LogReader | Recorder | Transport
+    Credentials | Digest.Digest | Log | LogReader | Recorder | SecureRandom.SecureRandom | Transport
   > =>
     Layer.effect(
       Daemon,
@@ -511,6 +512,7 @@ export class Daemon extends Context.Service<
         // A host is started by whichever operation added its Network, and runs on what the
         // Daemon was built with.
         const hostContext = yield* Effect.context<Recorder | Transport>();
+        const keyContext = yield* Effect.context<Digest.Digest | SecureRandom.SecureRandom>();
 
         // CRED-4: a key a Network set or took away with `MODE` is kept by a fiber of its
         // own, so a host's loop never waits on a write, nor on a stop that waits for it.
@@ -853,7 +855,10 @@ export class Daemon extends Context.Service<
             return { change: sequence };
           }),
           authorize: (presented) =>
-            Effect.map(SubscriptionRef.get(configuration), ({ keys }) => findKey(keys, presented)),
+            SubscriptionRef.get(configuration).pipe(
+              Effect.flatMap(({ keys }) => findKey(keys, presented)),
+              Effect.provideContext(keyContext)
+            ),
           // Not a Change, so it takes no permit, and runs on a Worker of its own (RUN-2).
           backup: Effect.mapError(
             reader.backup,
@@ -888,12 +893,13 @@ export class Daemon extends Context.Service<
           connect: (by, id) =>
             toggled(by, id, (network) => ({ _tag: "NetworkConnected", id: network })),
           createKey: Effect.fnUntraced(function* (by, { name, scope }) {
-            const key = newKey();
+            const key = yield* Effect.provideContext(newKey, keyContext);
+            const hash = yield* Effect.provideContext(hashKey(key), keyContext);
 
             const { sequence } = yield* commit(by, (current) =>
               current.keys.has(name)
                 ? Effect.fail(new KeyExists({ keyName: name }))
-                : Effect.succeed<Change>({ _tag: "KeyCreated", hash: hashKey(key), name, scope })
+                : Effect.succeed<Change>({ _tag: "KeyCreated", hash, name, scope })
             );
 
             return { change: sequence, key, name, scope };
@@ -1144,5 +1150,6 @@ export const DaemonCore = (
         })
       ).pipe(Layer.provideMerge(Log.layer({ dataDir: config.dataDir })))
     ),
-    Layer.provide(transport)
+    Layer.provide(transport),
+    Layer.provide(keyCrypto)
   );

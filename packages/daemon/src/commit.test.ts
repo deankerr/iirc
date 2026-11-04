@@ -8,6 +8,7 @@ import { Deferred, Effect, Fiber, Layer, Ref } from "effect";
 
 import { credentialsIn, inTempDirectory, version } from "./daemon.fixture.ts";
 import { Daemon } from "./daemon.ts";
+import { keyCrypto } from "./keys.ts";
 
 // A Change is recorded, folded into Configuration, and has its hosts started or stopped as
 // one unit. A caller cancelled once the Log holds the Change must not leave Configuration
@@ -66,7 +67,8 @@ const withSlowRecorder = <A, E, R>(
         Layer.provide(slow),
         Layer.provide(Layer.merge(LogReader.layer({ dataDir }), credentialsIn(dataDir))),
         Layer.provideMerge(Log.layer({ dataDir })),
-        Layer.provide(Layer.succeed(Transport, ircd.transport))
+        Layer.provide(Layer.succeed(Transport, ircd.transport)),
+        Layer.provide(keyCrypto)
       );
 
       return yield* Effect.gen(function* () {

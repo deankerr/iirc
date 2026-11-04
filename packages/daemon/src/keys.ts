@@ -1,6 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-
 import type { KeyScope } from "@iirc/api";
+import { Effect, Layer, Result } from "effect";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
+import { Base64Url, Hex } from "effect/encoding";
 
 import type { Key } from "./configuration.ts";
 
@@ -8,18 +9,36 @@ import type { Key } from "./configuration.ts";
 // never holds it (AUTH-2).
 const keyBytes = 32;
 
+/** What keys are made and checked with: WebCrypto's random bytes and SHA-256. */
+export const keyCrypto: Layer.Layer<Digest.Digest | SecureRandom.SecureRandom> = Layer.mergeAll(
+  Digest.layerWebCrypto,
+  SecureRandom.layerWebCrypto
+);
+
+const encoder = new TextEncoder();
+
+const digestOf = (key: string) =>
+  Digest.Digest.use((digest) => digest.digest(Digest.sha256, encoder.encode(key)));
+
 /**
  * Makes a new API key: `iirc_` and 32 random bytes in base64url (AUTH-2).
  * @returns The key, which is shown once and never stored.
  */
-export const newKey = (): string => `iirc_${randomBytes(keyBytes).toString("base64url")}`;
+export const newKey: Effect.Effect<string, never, SecureRandom.SecureRandom> =
+  SecureRandom.SecureRandom.use((random) => random.randomBytes(keyBytes)).pipe(
+    Effect.map((bytes) => `iirc_${Base64Url.encode(bytes)}`)
+  );
 
 /**
- * The SHA-256 of a key, which is all the Log keeps of it (AUTH-2).
+ * The SHA-256 of a key's UTF-8, which is all the Log keeps of it (AUTH-2).
  * @param key - The key.
  * @returns Its hash, in lowercase hex.
  */
-export const hashKey = (key: string): string => createHash("sha256").update(key).digest("hex");
+export const hashKey = (key: string): Effect.Effect<string, never, Digest.Digest> =>
+  Effect.map(digestOf(key), Hex.encode);
+
+// A stored hash that is not hex matches nothing: no hash has length 0.
+const noHash = new Uint8Array(0);
 
 /**
  * Finds whose key was presented (AUTH-2). Hashing first gives every comparison the same
@@ -32,18 +51,26 @@ export const hashKey = (key: string): string => createHash("sha256").update(key)
 export const findKey = (
   keys: ReadonlyMap<string, Key>,
   presented: string
-): { readonly name: string; readonly scope: KeyScope } | undefined => {
-  const hash = Buffer.from(hashKey(presented), "hex");
-  let found: { readonly name: string; readonly scope: KeyScope } | undefined;
+): Effect.Effect<
+  { readonly name: string; readonly scope: KeyScope } | undefined,
+  never,
+  Digest.Digest
+> =>
+  Effect.map(digestOf(presented), (hash) => {
+    let found: { readonly name: string; readonly scope: KeyScope } | undefined;
 
-  for (const [name, key] of keys) {
-    const matches = timingSafeEqual(hash, Buffer.from(key.hash, "hex"));
+    for (const [name, key] of keys) {
+      const stored = Result.getOrElse(Hex.decode(key.hash), () => noHash);
+      // An XOR over every byte, with no early exit. Node's is native, but what is compared
+      // here is the SHA-256 of what was presented, which a guesser cannot steer byte by
+      // byte, so this needs no more.
+      const matches = Mac.timingSafeEqual(hash, stored);
 
-    found = matches && found === undefined ? { name, scope: key.scope } : found;
-  }
+      found = matches && found === undefined ? { name, scope: key.scope } : found;
+    }
 
-  return found;
-};
+    return found;
+  });
 
 const reach: Readonly<Record<KeyScope, number>> = { admin: 2, chat: 1, read: 0 };
 

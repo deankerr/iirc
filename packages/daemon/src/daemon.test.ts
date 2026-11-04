@@ -48,6 +48,7 @@ import {
 import type { Client } from "./daemon.fixture.ts";
 import { Daemon, DaemonCore, UndecodableChange } from "./daemon.ts";
 import type { DaemonConfig } from "./daemon.ts";
+import { keyCrypto } from "./keys.ts";
 
 const encoder = new TextEncoder();
 const welcome = ":ircd 001 iirc :Welcome\r\n";
@@ -202,7 +203,8 @@ const withFailingReader = <A, E, R>(
       const core = Daemon.layer(configIn(dataDir)).pipe(
         Layer.provide(Layer.merge(reader, credentialsIn(dataDir))),
         Layer.provideMerge(Log.layer({ dataDir })),
-        Layer.provide(Layer.succeed(Transport, ircd.transport))
+        Layer.provide(Layer.succeed(Transport, ircd.transport)),
+        Layer.provide(keyCrypto)
       );
 
       return yield* Effect.gen(function* () {
@@ -579,7 +581,8 @@ describe("the Daemon", () => {
             Layer.provide(brittle),
             Layer.provide(Layer.merge(LogReader.layer({ dataDir }), credentialsIn(dataDir))),
             Layer.provideMerge(Log.layer({ dataDir })),
-            Layer.provide(Layer.succeed(Transport, ircd.transport))
+            Layer.provide(Layer.succeed(Transport, ircd.transport)),
+            Layer.provide(keyCrypto)
           );
 
           const key = yield* keyFor(dataDir);
@@ -1747,7 +1750,8 @@ describe("the Daemon", () => {
                   credentialsIn(dataDir)
                 ).pipe(Layer.provideMerge(Log.layer({ dataDir })))
               ),
-              Layer.provide(Transport.layer)
+              Layer.provide(Transport.layer),
+              Layer.provide(keyCrypto)
             );
 
             // Both are checked: the CPU the start takes, which a busy machine does not
