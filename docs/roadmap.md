@@ -1,0 +1,108 @@
+# Roadmap
+
+Where iirc is going, and what stands in the way. [`requirements.md`](requirements.md) holds every requirement and its status. [`VISION.md`](../VISION.md) holds the goals.
+
+## Milestones
+
+Each milestone is a working Daemon. Order is by what makes the next one possible.
+
+| # | Name | Delivers | Done when | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Stays on | LOG, CONF, CRED, CONN except CONN-5, LIVE, SEND lanes and flood control, a thin Send, `/entries`, Channel membership, RUN, multiple Networks, AUTH | It survives kills, drops, and refusals on fserv and loses nothing | Built. The soak test is running |
+| 2 | Knows the Network | KNOW, MSG, HOST, PROT, Activity | Derived state matches `NAMES` and `MODE` after a netsplit and a reconnect | Next |
+| 3 | Full control | CONN-5, the rest of SEND, Lookups, Acting | Everything a person does in irssi can be done through the API | Planned |
+| 4 | Ready for Frontends | `/bootstrap`, `/stream`, VIEW, STORE, OBS | The web frontend can start without asking for a Daemon change | Planned |
+| 5 | Better with IRCv3 | [IRCv3 enhancements](#ircv3-enhancements) | Ergo gives more, ngircd still passes | Planned |
+
+### How milestone 1 was built
+
+Each step was a working Daemon.
+
+1. One Network, the durable Log, the machine as a fold, and a kill test.
+2. Reconnecting and refusals: LIVE, CONN-3, CONN-4, CONN-7, SEND-1 to SEND-4, and LOG-9.
+3. Configuration, multiple Networks, API keys, Channel membership, LOG-11's reader, and TLS key pinning.
+   - That is CONF-1, CONF-2, CONF-4, CONF-6, CONF-3 without Credentials, services, connect commands, or notification levels, and CONF-5's Join and Part, keyless until Credentials existed.
+   - AUTH-1 to AUTH-5, and AUTH-6's rule that keys travel in headers. Its WebSocket and AUTH-7's cookie come with the web frontend in milestone 4.
+   - Every Network flag left `iirc daemon`, which takes only a data directory and a listen address (CONF-4).
+4. Credentials, CONN-2's `PASS`, CONN-6, and the service unit.
+   - That is CRED-1 to CRED-4, LOG-6, LOG-7, CONF-3's Credentials, services, and connect commands, and Channel keys for Join (CONF-5).
+   - Also RUN-2 and RUN-5, because the soak test freezes the Log format, and every change after it needs a migration and a backup.
+   - SASL details wait for milestone 5. A TLS client certificate is a Credential holding the certificate and key in PEM.
+
+Groundwork for milestone 2 came early, because milestone 1 needed it: `@iirc/state` folds Self, the Channels Self is in, their keys, and part of `RPL_ISUPPORT`, and the Log derives Messages and Gaps.
+
+## The soak test
+
+PROOF-5: two Daemons share a Channel, one sends a counted Message every minute, and the other's Log is checked for losses. [The soak guide](guides/soak.md) says how it runs.
+
+- **Status:** running since 2026-11-04, from the tag `soak-1`, on the floor Ircd and a real TLS Network. It passes after 30 days with every Gap explained, so 2026-12-04 at the earliest.
+- **Pinned:** the soak runs a pinned copy of a tagged build, so day-to-day work cannot disturb it. Upgrading it on purpose is in the guide.
+- **The Log format is frozen.** Its migrations were folded into `1_initial` when the soak began. Every change to the Log from here on is a new migration (RUN-5), and a build that needs one is a reason to start the soak again.
+- **It runs in the background.** Nothing waits for it, and the Daemon runs alongside whatever IRC client the Owner uses.
+- An unexplained loss starts the 30 days again once it is understood.
+
+## IRCv3 enhancements
+
+Milestone 5. Each is detected, never assumed, and nothing depends on it ([ADR 0001](adr/0001-bare-irc-is-the-floor.md)). The requirements are CAP, DEDUP, and FILL in [`requirements.md`](requirements.md#ircv3-enhancements).
+
+### Capabilities
+
+| Capability | Improves | Without it |
+| --- | --- | --- |
+| `sasl` | Authentication before joining | `PASS` and service `IDENTIFY` (CONN-6) |
+| `server-time` | True Message times, kept beside `at` | Time of receipt |
+| `echo-message` with `labeled-response` | Confirmed sends, enabled only as a pair | Own outbound Lines (MSG-1) |
+| `labeled-response` | Exact Lookup and send correlation | The table (LOOK-3), best-effort errors (SEND-9) |
+| `message-tags` | Carries `msgid` for deduplication | Each Line stands alone |
+| `batch` | Grouped netsplits | Each Line stands alone |
+| `draft/chathistory`, `draft/event-playback` | [Filling Gaps](requirements.md#filling-gaps) | The Gap remains visible |
+| `away-notify`, `account-notify`, `extended-join`, `chghost`, `setname`, `userhost-in-names`, `multi-prefix` | Fresher User state | `WHO` and `NAMES` when needed |
+| `standard-replies`, `invite-notify` | Better-typed errors and Activity | Numerics |
+| `draft/multiline` | One Message across Lines | Splitting (SEND-5) |
+| `sts` | Persisted upgrade to TLS | Configured TLS (CONN-1) |
+| `draft/read-marker` | Read Markers shared with other IRC clients | Shared among Frontends only |
+
+### Other mechanisms
+
+These are not capabilities, so they are detected differently.
+
+| Mechanism | Detected by | Improves | Without it |
+| --- | --- | --- | --- |
+| `MONITOR` | `RPL_ISUPPORT` | Instant nick regain, presence | `ISON` (CONN-5) |
+| `WHOX` | `RPL_ISUPPORT` | Richer User state | `WHO` |
+| `BOT` | `RPL_ISUPPORT` | Agents can mark Self as a bot | No marking |
+| `reply`, `react`, `typing` | Client tags over `message-tags` | Richer conversation | Not shown |
+
+## Beyond the first proof
+
+Wanted, but not needed for the first proof:
+
+- Pushing notifications to a phone through Web Push or a webhook.
+  - It must not key on "no Frontend connected", because an always-on agent would suppress it forever.
+  - It waits a few seconds and skips anything already read, sends a dismissal when a Read Marker moves, prunes dead subscriptions, and blocks internal addresses.
+- Automatic away when no Frontend is connected.
+- Importing logs from WeeChat, ZNC, or The Lounge.
+- An MCP adapter and an `iirc` command-line Frontend.
+- Link previews fetched by the Daemon, so that a Frontend's address is not exposed.
+- A watch list of Users, built on `MONITOR` and `ISON`.
+
+## Open questions
+
+- Should the API, the web frontend, and an MCP adapter be projected from one capability definition, as rat-stack does? It would help once MCP is real, and is not needed before then.
+
+## Risks
+
+- **Effect stability:** only Effect's core is stable. `http`, `http-api`, `rpc`, `sql`, `socket`, `cli`, `workers`, `crypto`, and every package outside `effect`, including `platform-bun` and `vitest`, can break in a minor release.
+  - The catalog pins exact versions, and these APIs stay behind deep services.
+- **XState alpha:** v6 is in alpha, with renames and no aliases between alphas. Its use stays behind `step` and `fold` in `@iirc/lifecycle`.
+  - Tests of the machine do not depend on XState, so a hand-written reducer could replace it.
+  - A step soak (`lifecycle.soak.test.ts`) and a minified build test gate every alpha bump.
+  - `@iirc/lifecycle` cannot be published until v6 is stable. The other library packages can.
+- **Reference repos lag:** `~/code/ref/xstate` is v5, `effect-solutions` is a v4 beta, and rat-stack uses Node. Installed source is the authority.
+
+## Unproven
+
+- The web frontend, and every deployment shape but the stand-alone Daemon ([ADR 0007](adr/0007-one-binary-shapes-by-argument.md)).
+- Commit latency under real traffic. It was measured on synthetic data, and the soak is the first real load.
+- arm64, musl, macOS, and Windows builds. FTS5 on macOS.
+- Ergo has not been run. Its behaviour here, such as replaying always-on `JOIN`s after `376`, comes from reading its source.

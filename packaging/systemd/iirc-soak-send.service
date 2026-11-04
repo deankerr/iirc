@@ -1,6 +1,6 @@
 # The sending half of the soak test (PROOF-5): one counted Message to each pair, from a
 # timer every minute. It reads the Daemon's URL, key, and pairs from ~/.config/iirc/soak.env,
-# which is never committed. docs/soak.md says how to set it up.
+# which is never committed. docs/guides/soak.md says how to set it up.
 #
 # The binary is a pinned copy, so that a day-to-day build never replaces it under the soak.
 

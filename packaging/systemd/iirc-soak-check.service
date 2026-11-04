@@ -1,7 +1,7 @@
 # The checking half of the soak test (PROOF-5). It keeps no state: each run reads both
 # Daemons' Logs in full and judges them again, prints a line for each pair to the journal,
 # and adds a line of JSON to the report. It exits non-zero on anything unexplained, so the
-# unit shows as failed. docs/soak.md says how to read it.
+# unit shows as failed. docs/guides/soak.md says how to read it.
 #
 # Its URLs, keys, and pairs come from ~/.config/iirc/soak.env, which is never committed.
 

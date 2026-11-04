@@ -1,6 +1,6 @@
 # Running the soak test
 
-PROOF-5 in [`specs/daemon.md`](specs/daemon.md): two Daemons share a Channel, one sends a counted Message every minute, and the other's Log is checked for gaps in the count. It runs for 30 days on the floor Ircd and on a real TLS Network, and every Gap in that time must be explained.
+PROOF-5 in [the requirements](../requirements.md#proof): two Daemons share a Channel, one sends a counted Message every minute, and the other's Log is checked for gaps in the count. It runs for 30 days on the floor Ircd and on a real TLS Network, and every Gap in that time must be explained.
 
 The harness is a Frontend, `iirc-soak` in `apps/soak`. It reaches both Daemons only through their HTTP API, with keys. Two instances of [`iirc@.service`](running.md) do the work, `soak-a` as the sender and `soak-b` as the receiver, each configured with the same two Networks. Two timers run `iirc-soak`: `send` every minute, and `check` every hour. Every placeholder in `<angle brackets>` below is yours to fill in, and none of it is committed.
 

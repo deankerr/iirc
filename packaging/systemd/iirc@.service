@@ -1,7 +1,7 @@
 # The iirc Daemon as a systemd user service (RUN-1). It is a template, so one machine can
 # run several Daemons: instance `x` keeps its Log in ~/.local/state/iirc/x and reads its
-# environment, such as IIRC_HTTP_PORT, from ~/.config/iirc/x.env. docs/running.md says how
-# to install it.
+# environment, such as IIRC_HTTP_PORT, from ~/.config/iirc/x.env.
+# docs/guides/running.md says how to install it.
 
 [Unit]
 Description=iirc Daemon (%i)

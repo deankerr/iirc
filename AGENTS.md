@@ -1,5 +1,7 @@
 # bun/effect/xstate template
 
+@GLOSSARY.md @VISION.md
+
 # Bun
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.

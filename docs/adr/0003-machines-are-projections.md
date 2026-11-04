@@ -4,4 +4,4 @@ A Network's lifecycle machine is a pure fold over Entries, run with XState's `tr
 
 ## Consequences
 
-Deadlines are absolute times in context, and the host waits on them. A deadline that expires with no trace on the wire becomes a Deadline Entry, so the Log gains an Entry kind that exists only for this. `@xstate/effect`, `after`, and `enq.emit` are not used, and the host is ours to maintain. XState stays behind `step` and `fold`, and tests do not depend on it, so a plain reducer could replace it.
+Deadlines are absolute times in context, and the host waits on them. A deadline that expires with no trace on the wire becomes a Deadline Entry, so the Log gains an Entry kind that exists only for this. `@xstate/effect` is not used, because it cannot record a timer before it applies, which LOG-4 needs, so the host is ours to maintain. Nor are `after` and `enq.emit`, whose cost per step grew from about 150 µs to over 1 ms within thousands of steps. Nothing is spawned per Channel or Lookup, because those are small tables that an actor would only add replay state to. XState stays behind `step` and `fold`, and tests do not depend on it, so a plain reducer could replace it.

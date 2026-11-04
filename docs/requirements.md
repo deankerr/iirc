@@ -1,27 +1,45 @@
-# Daemon specification
+# Requirements
 
-This document says what the Daemon must do. [`VISION.md`](../../VISION.md) says why, and [`GLOSSARY.md`](../../GLOSSARY.md) defines the words. The floor in [ADR 0001](../adr/0001-bare-irc-is-the-floor.md) applies throughout: every requirement here works on a Network with no IRCv3, unless it appears in [IRCv3 enhancements](#ircv3-enhancements).
+This is what the Daemon must do, in one place. [`VISION.md`](../VISION.md) says why, [`GLOSSARY.md`](../GLOSSARY.md) defines the words, and [`architecture.md`](architecture.md) says where the work lives. [`roadmap.md`](roadmap.md) holds the milestones and plans.
 
-The first slice was a spike and binds nothing here. This spec draws on the protocol documents and on what Ergo, soju, and WeeChat show about real Networks. [`architecture.md`](architecture.md) sketches how it is built.
+The floor in [ADR 0001](adr/0001-bare-irc-is-the-floor.md) applies throughout: every requirement here works on a Network with no IRCv3, unless it appears in [IRCv3 enhancements](#ircv3-enhancements).
 
 Reading this document:
 
-- Requirements have stable IDs so that tests and commits can cite them.
+- Requirements have stable IDs so that tests and commits can cite them. A test names the ID it proves (PROOF-1).
 - Numbers are defaults that the Owner can change per Network.
-- A ❓ bullet is an open question that needs an answer from the Owner.
 - A "Deferred" bullet is a minor decision that will be easier once the foundation exists.
+- **Status** is given per area, and on an ID where it differs. "Done" means built and tested in milestone 1. "M2" to "M5" name the [milestone](roadmap.md#milestones) it is planned for. "Partial" says what exists and what waits.
 
-Anything another project would want, such as parsing `RPL_ISUPPORT`, casefolding, mode tracking, Message splitting, flood control, or the reconnect policy, belongs in the library. The Daemon adds only durability, Configuration, and the API.
+## Status at a glance
 
-## Model
+| Area | IDs | Status |
+| --- | --- | --- |
+| [The Log](#the-log) | LOG-1 to LOG-11 | Done. Causes for later behaviours, and the reads behind later surfaces, arrive with them |
+| [Configuration](#configuration) | CONF-1 to CONF-6 | Done, except SASL (M5), notification levels (M4), nick and away (M3), and encoding and CTCP Tuning (M2) |
+| [Credentials](#credentials) | CRED-1 to CRED-4 | Done |
+| [Connecting](#connecting) | CONN-1 to CONN-7 | Done, except CONN-5 (M3) |
+| [Staying connected](#staying-connected) | LIVE-1 to LIVE-11 | Done. Gaps in Timelines wait for Timelines (M4) |
+| [Sending](#sending) | SEND-1 to SEND-11 | SEND-1 to SEND-4 and `JOIN` splitting done. The rest M3 |
+| [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` already holds Self, the Channels Self is in, part of `RPL_ISUPPORT`, casefolding, and mode parsing |
+| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1 is done in part |
+| [Timelines and attention](#timelines-and-attention) | VIEW-1 to VIEW-10 | M4 |
+| [Frontend storage](#frontend-storage) | STORE-1 to STORE-5 | M4 |
+| [Lookups](#lookups) | LOOK-1 to LOOK-7 | M3 |
+| [Protocol behaviour](#protocol-behaviour) | PROT-1 to PROT-6 | M2 |
+| [Hostile input](#hostile-input) | HOST-1 to HOST-5 | HOST-1 and HOST-2 done, HOST-5 in part. HOST-3 and HOST-4 M2 |
+| [API](#api) | API-1 to API-10 | Done for the surfaces that exist. `/stream` and `/bootstrap` M4, Acting M3 |
+| [Access](#access) | AUTH-1 to AUTH-7 | AUTH-1 to AUTH-5 done, AUTH-6 in part. AUTH-7 M4 |
+| [Observability](#observability) | OBS-1 to OBS-4 | OBS-4 done, OBS-1 in part. OBS-2 and OBS-3 M4 |
+| [Running it](#running-it) | RUN-1 to RUN-5 | Done. One deployment shape so far |
+| [Proof](#proof) | PROOF-1 to PROOF-5 | PROOF-1 and PROOF-4 done, PROOF-2 and PROOF-3 in part. PROOF-5 running |
+| [IRCv3 enhancements](#ircv3-enhancements) | CAP-1 to CAP-4, DEDUP-1 to DEDUP-2, FILL-1 to FILL-5 | M5 |
 
-The Daemon runs one Log and any number of Networks. Everything durable is an Entry in the Log. Everything else is derived from it.
+## The Log
 
-```text
-Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontends
-                           ^                                    |
-                           +---------- operations --------------+
-```
+**Status:** Done.
+
+The Daemon runs one Log and any number of Networks. Everything durable is an Entry in the Log. Everything else is derived from it ([ADR 0002](adr/0002-the-log-holds-bytes.md)).
 
 - **LOG-1.** There is one Log per Daemon. Sequence numbers are global, start at 1, have no gaps, and are never reused, so one cursor can resume everything.
 - **LOG-2.** An Entry is one of:
@@ -43,9 +61,9 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
   - Bytes the Ircd sent that the Daemon never read are lost with the Connection. They fall inside a Gap.
   - What the Daemon has read but not yet recorded is bounded in bytes, so that the rest of a flood waits in the kernel. Everything it has read is recorded before the Connection's close, including when it is stopping.
 - **LOG-5.** An outbound Entry records its cause, so "Why did the Daemon send that?" always has an answer.
-  - A Frontend's request is recorded as `key:` and its key name, such as `key:phone`. The request ID joins it with SEND-10.
+  - A Frontend's request is recorded as `key:` and its key name, such as `key:phone`. The request ID joins it with SEND-10 _(M3)_.
   - A remembered Join is a Change, and the reconciler sends its `JOIN` as `rejoin`, so the Change before it, which names the key, is the answer. Nothing else can send a duplicate `JOIN`.
-  - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `away-restore`, `ctcp-reply`, or `nick-regain`.
+  - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `away-restore`, `ctcp-reply`, or `nick-regain`. Each name arrives with its behaviour: `away-restore`, `ctcp-reply`, and `nick-regain` do not exist yet.
 - **LOG-6.** Credentials the Daemon holds stay out of the Log. Both layers run before an append, in both directions:
   - **Typed operations:** a Line built from a Credential is marked sensitive where it is constructed.
   - **Value scrubbing:** any stored Credential value found in any Line is replaced, whatever the command. This catches an echo, or the Owner pasting a password.
@@ -66,14 +84,14 @@ Ircd <-> Connection <-> Session ---> Log ---> projections ---> API ---> Frontend
 - **LOG-9.** If the Log cannot be appended to, the Daemon closes its Connections and reports the fault. It never carries on unrecorded, and it resumes on its own once appends succeed.
 - **LOG-10.** Projections are disposable. Deleting every derived table and restarting gives identical API results.
   - A fold depends only on Entries and the code. Time-sensitive rules, such as casefolding and Highlights, use what was in force at that Entry.
-- **LOG-11.** No read can delay an append. `bun:sqlite` is synchronous, so `/search`, `/state`, and Timeline replay run in a Worker on their own read connection.
-  - Reads are paged and check a deadline between pages, because a running `bun:sqlite` query cannot be interrupted, even by terminating its Worker.
+- **LOG-11.** No read can delay an append. Reads of the Log, such as `/entries`, and later `/search`, `/state`, and Timeline replay, run in a Worker on their own read connection.
+  - Reads are paged and have a deadline, because a running query cannot be interrupted, even by terminating its Worker.
   - Search orders by recency by default. Deferred: ranked search, which needs a subprocess if it is to have a hard limit.
-  - The writer stays on the main thread, because commits measured 1 ms at p50 and 26 ms at p99.9. Deferred: measuring this again under real traffic.
-
-The Log lives in SQLite through `bun:sqlite` in WAL mode, with derived tables updated in the same transaction as the Entry and FTS5 for search.
+  - Deferred: whether the writer should leave the main thread, measured again under real traffic. [`@iirc/log`](../packages/log/README.md#storage-measurements) has the numbers so far.
 
 ## Configuration
+
+**Status:** Done, except where an ID says otherwise.
 
 Configuration is what the Owner wants, and the Log's Change Entries record it. Derived state is what is true right now. They stay separate: "autojoin `#foo`" is Configuration, and "we are in `#foo`" is derived.
 
@@ -87,20 +105,20 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 - **CONF-3.** A Network has a stable ID and a display name, plus an enabled flag and these settings. The ID is up to 32 lowercase letters, digits, and `-`, starting with a letter or digit, and the Owner chooses it. Connect and disconnect set the enabled flag.
   - **Ircds:** an ordered list of host, port, TLS on or off, and an optional pinned key.
   - **Identity:** nick, alternate nicks, username, and realname.
-  - **Credentials:** `PASS`, a service password, a TLS client certificate, and SASL details, each by name.
+  - **Credentials:** `PASS`, a service password, a TLS client certificate, and SASL details, each by name. _(SASL details M5.)_
   - **Services:** which nicks are services. Defaults to `NickServ`, `ChanServ`, and the usual `*Serv` names.
   - **Connect commands:** Lines to send after registration and before joining, which refer to Credentials by name.
-  - **Channels:** name, autojoin, rejoin-on-kick, key by Credential name, and notification level.
-  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it. Each number has bounds and a default, which the API's Schema publishes, and a number left out is checked against the others at its default.
+  - **Channels:** name, autojoin, rejoin-on-kick, key by Credential name, and notification level. _(Notification level M4, with VIEW-8.)_
+  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it. Each number has bounds and a default, which the API's Schema publishes, and a number left out is checked against the others at its default. _(Encoding and CTCP replies M2, with MSG-4, SEND-8, and PROT-3.)_
 - **CONF-4.** The process itself needs only a data directory and a listen address, both given as flags or environment variables. Networks are added through the API, so a fresh Daemon needs no config file.
-- **CONF-5.** What the Owner does through the API is intent, and it survives a reconnect.
+- **CONF-5.** What the Owner does through the API is intent, and it survives a reconnect. _(Partial: Join and Part are done. Nick and away come with the Self operations in M3.)_
   - Join adds the Channel to Configuration with autojoin on, unless asked not to. Part removes it.
   - Join and Part with no Session still record their Change, and the Channel is joined once the next Session's burst completes. A Join that is not to be remembered needs a Session (API-10).
   - Join clears a kick (LIVE-8), even with no Session.
   - Changing nick updates the configured nick, unless marked temporary. Otherwise nick regain would undo it.
   - Setting away stores the reason, and it is reapplied after `001`.
   - A Channel entered any other way, such as through Raw or an Ircd forcing it, is not remembered.
-- **CONF-6.** TOML is a view of Configuration, never its truth ([ADR 0004](../adr/0004-configuration-lives-in-the-log.md)).
+- **CONF-6.** TOML is a view of Configuration, never its truth ([ADR 0004](adr/0004-configuration-lives-in-the-log.md)).
   - `iirc config export` writes Configuration as TOML, with Credentials as names only.
   - `iirc config import` applies a file as one Change. A file is only ever an input, and the Daemon never watches or rewrites one.
   - A file is the whole Configuration, so importing it removes any Network it leaves out.
@@ -109,7 +127,9 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 
 ### Credentials
 
-- **CRED-1.** Credentials live outside the Log, behind one `Credentials` service, and Configuration refers to them by name. The service uses `Bun.secrets` where a keyring is available, and otherwise a file with mode `0600` in the data directory. Status shows which.
+**Status:** Done.
+
+- **CRED-1.** Credentials live outside the Log, behind one `Credentials` service, and Configuration refers to them by name. The service uses the system keyring (`Bun.secrets`) where one is available, and otherwise a file with mode `0600` in the data directory. Status shows which.
   - Once the keyring holds them, a marker file in the data directory says so. A start that finds the marker and no keyring refuses, rather than begin again with none.
   - A start refuses a `credentials.json` looser than `0600`, because other users may already have read it, and says to rotate what it holds. It never loosens or tightens the mode itself.
   - A name is up to 64 lowercase letters, digits, `.`, `_`, and `-`, starting with a letter or digit.
@@ -128,9 +148,9 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - A Join that is not to be remembered stores nothing, and its `JOIN` is sensitive like any other, so the Log has `<redacted>` in place of the key.
   - Once stored, a key is scrubbed like any other Credential (LOG-6). A `+k` seen for the first time is recorded as it arrived.
 
-## Connections and Sessions
+## Connecting
 
-### Connecting
+**Status:** Done, except CONN-5 (M3).
 
 - **CONN-1.** TLS is the default and verifies the certificate and hostname, sending SNI.
   - Plaintext requires an explicit `tls: false` on that Ircd.
@@ -145,7 +165,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - The limit is `NICKLEN` from the Network's last Session, read from the Log. On first contact it is 9, because `NICKLEN` arrives only after `001`, and ngircd refuses an over-long nick with `432`.
   - `432`, `433`, `436`, and `437` each move to the next candidate. `437` counts only when its parameter is our nick, because it also applies to Channels.
   - When the list runs out, the attempt closes and backs off like any failed Connection, and status says why.
-- **CONN-5.** Once the burst is complete (CONN-7), the Daemon tries to regain its configured nick.
+- **CONN-5.** _(M3.)_ Once the burst is complete (CONN-7), the Daemon tries to regain its configured nick.
   - It watches `NICK` and `QUIT`. If it shares no Channel with the holder, it probes with `ISON`, backing off from 15 seconds to 10 minutes.
   - A refused attempt is linked to its cause and is not shown as a failure.
   - It stops and reports on `432`, on a rename by services, or on a refusal that retrying cannot fix, such as Ergo's `force-nick-equals-account`.
@@ -158,7 +178,9 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - `PASS account:password` logs in before the nick is claimed where an Ircd supports it, such as Ergo. It avoids this race, and it is recommended where it works.
 - **CONN-7.** The burst is complete on `376`, `422`, or 10 seconds after `001`. Anything that depends on knowing the Network, such as nick regain, background reads, and Lookups, waits for it.
 
-### Staying connected
+## Staying connected
+
+**Status:** Done. Gaps appear in Timelines once Timelines exist (M4).
 
 - **LIVE-1.** `PING` always gets a `PONG`, in every phase until the Connection starts to close, through the control lane (SEND-1). The `PONG` echoes the token's bytes exactly, whatever their encoding. A closing Connection answers nothing, because a `PONG` could only follow the `QUIT`.
 - **LIVE-2.** Silence decides whether a Connection is dead. Any inbound Line proves it is alive. With no inbound Line for 90 seconds, the Daemon declares it dead, so a silently dropped TCP connection is noticed within that time.
@@ -180,12 +202,14 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - Each Channel's failure appears in status. `471`, `473`, `474`, `477`, and `437` retry with backoff, and `475` does not.
 - **LIVE-8.** A kick wins over autojoin. The Channel is not rejoined, in this Session or the next, until the Owner joins again or the Channel has rejoin-on-kick, which waits 10 seconds. An `INVITE` is recorded and never followed automatically.
 - **LIVE-9.** Disconnecting through the API or stopping the Daemon sends `QUIT` with a configured reason through the control lane, waits up to 2 seconds for the queue, and does not reconnect until connected again. Removing a Network does the same.
-- **LIVE-10.** Time the Daemon was away from a Network is a Gap. Gaps are visible, derived from Connection and Daemon Entries, and shown in the affected Timelines. The Daemon never implies that nothing happened.
+- **LIVE-10.** Time the Daemon was away from a Network is a Gap. Gaps are visible, derived from Connection and Daemon Entries, and shown in the affected Timelines. The Daemon never implies that nothing happened. _(Gaps are derived and served by `/gaps`. Timelines are M4.)_
   - On a Network that keeps us attached, a Gap means only that we were not listening. Other Users may not have seen us leave.
 - **LIVE-11.** A local close stops acting at once, and keeps recording what the Ircd already sent until it hangs up or 5 seconds pass, so that `ERROR` and whatever follows it are not lost. Sends are refused during this time, and status shows the phase once the close is recorded.
   - A stop keeps recording for at most the `QUIT` wait (LIVE-9). A silent Connection and a Log that cannot append do not wait, because there is nothing to read or nowhere to record it.
 
-### Sending
+## Sending
+
+**Status:** SEND-1 to SEND-4 done, and SEND-11 for `JOIN`. The rest M3.
 
 - **SEND-1.** Outbound Lines leave through three lanes in strict priority, and in order within a lane.
   - **Control:** `PONG`, lag `PING`, registration, and `QUIT`. These skip flood control.
@@ -195,22 +219,22 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - `PENALTY` and similar `RPL_ISUPPORT` hints may tune this later, but nothing depends on them.
 - **SEND-3.** The interactive and background lanes each hold at most 1000 Lines. A send beyond that is refused, rather than dropped later.
 - **SEND-4.** Nothing outlives its Connection. When a Connection ends, queued Lines become Dropped Entries, and a Message is not sent hours later into a conversation that has moved on. If a Frontend wants to retry, it decides that with full knowledge.
-- **SEND-5.** A Message that does not fit is split into several Lines, measured in bytes after encoding.
+- **SEND-5.** _(M3.)_ A Message that does not fit is split into several Lines, measured in bytes after encoding.
   - The limit is `LINELEN` if advertised and otherwise 512, less the line ending, the command and Target, and the prefix the Ircd will add.
   - That prefix is reckoned from Self's nick plus the worst case for `USERLEN` and `HOSTLEN`, defaulting to 20 and 64. A hidden host can change without notice, and a few spare bytes cost less than silently cut text. Ergo refuses an over-long Message whole by default.
   - If no usable payload remains, the send is refused.
-- **SEND-6.** Splits prefer word boundaries and always fall on grapheme boundaries.
+- **SEND-6.** _(M3.)_ Splits prefer word boundaries and always fall on grapheme boundaries.
   - A newline in the text starts a new Line, and empty lines are dropped, because a blank Line is an error on an Ircd.
   - An `action` keeps its CTCP wrapper on every Line.
   - All Lines from one send share a group ID.
-- **SEND-7.** One send may produce at most 20 Lines, and more than that is refused. The Frontend decides what to do with a large paste.
-- **SEND-8.** Text is sent as UTF-8 unless the Network sets another encoding. `UTF8ONLY` overrides that setting. Text containing NUL or a bare CR is refused, because an Ircd may disconnect us for it.
-- **SEND-9.** An error that follows a send is linked to it and shown on it.
+- **SEND-7.** _(M3.)_ One send may produce at most 20 Lines, and more than that is refused. The Frontend decides what to do with a large paste.
+- **SEND-8.** _(M3.)_ Text is sent as UTF-8 unless the Network sets another encoding. `UTF8ONLY` overrides that setting. Text containing NUL or a bare CR is refused, because an Ircd may disconnect us for it.
+- **SEND-9.** _(M3.)_ An error that follows a send is linked to it and shown on it.
   - `401`, `403`, and `404` link by Target. `417` has no Target, so it links to the newest send.
   - On a bare Network this link is a best effort, and the API says so.
   - It can report a refusal but never prove delivery, and a `NOTICE` may be refused silently.
-- **SEND-10.** A send may carry a request ID. It is stored in the cause and echoed on results, and a repeat with the same ID returns the original result, so a Frontend can retry safely.
-- **SEND-11.** Commands that take lists are split like text. `JOIN` splits on commas with keyed Channels first and keys aligned to them, and `ISON` splits on spaces.
+- **SEND-10.** _(M3.)_ A send may carry a request ID. It is stored in the cause and echoed on results, and a repeat with the same ID returns the original result, so a Frontend can retry safely.
+- **SEND-11.** Commands that take lists are split like text. `JOIN` splits on commas with keyed Channels first and keys aligned to them, and `ISON` splits on spaces. _(`JOIN` done. `ISON` comes with CONN-5 in M3.)_
 
 ## What the Daemon knows
 
@@ -218,13 +242,15 @@ Each item here is derived from the Log.
 
 ### Network state
 
+**Status:** M2. Self's nick, the phase, and lag are in status already, and `@iirc/state` reads `CASEMAPPING`, `PREFIX`, `CHANMODES`, and `NICKLEN`.
+
 - **KNOW-1.** The Network's phase, burst state, the Ircd and TLS details, lag, Self's nick, `user@host`, and modes, and away state.
   - Self's mask follows `396`, `900`, `901`, and Self's own `JOIN`.
 - **KNOW-2.** Every `RPL_ISUPPORT` token for the current Session, including removals (`-TOKEN`).
   - Where a token was never sent, these defaults apply: `CASEMAPPING=rfc1459`, `CHANTYPES=#&`, `PREFIX=(ov)@+`, `CHANMODES=beI,k,l`, and `MODES=3`.
   - An empty value differs from an absent token. `PREFIX=` means no prefixes, and `MODES` with no value means no limit.
   - Value escapes such as `\x20` are decoded.
-- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry.
+- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(`ascii`, `rfc1459`, and `rfc1459-strict` are done. The rest is M2.)_
   - The fold comes from `CASEMAPPING` and `UTF8MAPPING` together, covering `ascii`, `rfc1459`, `rfc1459-strict`, the variant spelling `strict-rfc1459`, and `rfc8265`. Ergo's `precis` mode advertises `CASEMAPPING=ascii` with `UTF8MAPPING=rfc8265`.
   - Anything unrecognised falls back to `ascii`, which splits names rather than merging them, and is reported in status.
   - An Owner can override the mapping, because Ergo's `permissive` mode looks the same as `ascii` on the wire.
@@ -232,6 +258,8 @@ Each item here is derived from the Log.
   - Deferred: what happens to existing Targets when a Network's mapping changes. Until then, a Target keeps the identity it was given.
 
 ### Channels and Users
+
+**Status:** M2. The Channels Self is in, their keys, and `JOIN` failures are folded already.
 
 - **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`.
 - **KNOW-5.** Membership and topic come from what `JOIN` already returns.
@@ -246,7 +274,9 @@ Each item here is derived from the Log.
 - **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline.
 - **KNOW-9.** A `470` forward puts us in a different Channel from the one requested. It is reported against the configured name, so autojoin does not look like it failed.
 
-### Messages and Activity
+## Messages and Activity
+
+**Status:** M2. A `messages` table already derives `PRIVMSG` and `NOTICE` Messages, Self's from outbound Lines, for `/messages`.
 
 - **MSG-1.** `PRIVMSG` and `NOTICE` become Messages of kind `privmsg`, `notice`, or `action`. Self's Messages come from outbound Lines, because the floor has no `echo-message`.
 - **MSG-2.** Each inbound Line belongs to one place, decided in this order:
@@ -263,9 +293,11 @@ Each item here is derived from the Log.
 - **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests.
 - **MSG-6.** Lines with no Channel or User to belong to, such as the MOTD, `WALLOPS`, and most numerics, go to the Network's Timeline.
 
-### Timelines and attention
+## Timelines and attention
 
-- **VIEW-1.** A Timeline is the ordered Messages and Activity of one Channel, one Direct Message partner, or one Network, paged in either direction. Its order is a derived position, and it matches sequence order until history is filled in (see [`chathistory`](#filling-gaps)).
+**Status:** M4.
+
+- **VIEW-1.** A Timeline is the ordered Messages and Activity of one Channel, one Direct Message partner, or one Network, paged in either direction. Its order is a derived position, and it matches sequence order until history is filled in (see [Filling Gaps](#filling-gaps)).
 - **VIEW-2.** Each Network lists its Targets: Channels joined or once joined and Users exchanged Direct Messages with.
   - Each has a stable ID, its latest Entry, and unread counts by class (VIEW-9). API routes use the ID, because a raw `#` in a path is awkward and names can change.
   - A Direct Message's partner is the other participant, as compared under KNOW-3.
@@ -289,7 +321,9 @@ Each item here is derived from the Log.
 - **VIEW-9.** Every Message and Activity has a derived class: `low`, `message`, `direct`, or `highlight`. Activity is always `low` and never counts as unread.
 - **VIEW-10.** Hiding join and part noise is a Frontend's policy, and the Daemon supplies the facts. Each join, part, and quit carries the sequence of that User's last Message in the Channel. No filter state is stored, because a mutable flag would break LOG-10 and VIEW-7.
 
-### Frontend storage
+## Frontend storage
+
+**Status:** M4.
 
 Frontends can keep small values in the Daemon, so that a theme or layout follows the Owner across devices.
 
@@ -302,6 +336,8 @@ Frontends can keep small values in the Daemon, so that a theme or layout follows
 - **STORE-5.** Storage is not for secrets. Any `read` key can see it.
 
 ## Lookups
+
+**Status:** M3.
 
 A Lookup asks the Network something and collects a reply spanning several Lines. Without `labeled-response`, nothing ties a reply to its request, so a table describes each kind.
 
@@ -320,6 +356,8 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ## Protocol behaviour
 
+**Status:** M2. Every Line is already recorded, whatever its command.
+
 - **PROT-1.** The Daemon handles `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `TOPIC`, `MODE`, `INVITE`, `AWAY`, `ERROR`, `PING`, `PONG`, and all numerics in the Modern client protocol. Any other command is still recorded, and appears in the Network's Timeline as an unknown Line.
 - **PROT-2.** CTCP `ACTION` is a Message. Other CTCP requests are Activity.
 - **PROT-3.** The Daemon answers CTCP `VERSION` with `iirc` and echoes the sender's argument to CTCP `PING`, and answers nothing else by default. `TIME` reveals a timezone, so it is opt-in.
@@ -329,14 +367,18 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ### Hostile input
 
+**Status:** HOST-1 and HOST-2 done. HOST-5 done for Networks and in-process watchers, and for Frontends with `/stream` (M4). HOST-3 and HOST-4 M2.
+
 - **HOST-1.** No sequence of bytes from an Ircd can close a Session, stop the Daemon, or lose a Line. Unparseable input is recorded with its reason.
 - **HOST-2.** Frames longer than 8704 bytes are cut and marked, not buffered without limit.
-- **HOST-3.** Nothing a participant sends can make the Daemon do something beyond what this spec names. A CTCP flood is rate limited, and a Message is never interpreted as an instruction.
+- **HOST-3.** Nothing a participant sends can make the Daemon do something beyond what this document names. A CTCP flood is rate limited, and a Message is never interpreted as an instruction.
 - **HOST-4.** The API marks all participant-supplied text as untrusted. Agents must treat it as data, because anyone on a Network can write text that an agent will read.
 - **HOST-5.** One Network cannot starve another, and no Frontend can stall a Session (LOG-11). A slow reader is disconnected, and resumes from its cursor or gets `resync` (API-6).
   - The same holds in the process. Anything that watches Entries as they commit cannot hold up a commit. A watcher that falls behind is told which run of sequences it missed, and is never left to miss them silently.
 
 ## API
+
+**Status:** Done for the surfaces that exist, which the tables below mark. API-6 M4. API-7 and API-8 M3.
 
 `HttpApi` in `@iirc/api` defines the contract, and implementations follow it. SSE and WebSocket are adapters over that contract, and SSE comes first. All of it is in the published OpenAPI document, except the WebSocket route, which shares `/stream`'s event Schema. All paths below sit under `/api`.
 
@@ -344,28 +386,28 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 - **API-2.** A Frontend never has to parse IRC. Every derived item carries the sequence of the Entry behind it, so that it can always be traced to bytes.
 - **API-3.** Errors are typed and tagged. Operations distinguish a bad request, no Session, a full queue, a Line lost to its Connection, a failed write, a Log that is down, and a Network refusal.
 - **API-4.** Line bytes, in a Line or a Dropped Entry, are returned as base64 beside the decoded text, because hostile bytes must survive JSON.
-- **API-5.** `/status` reports the API version, and responses are compressed when asked.
+- **API-5.** `/status` reports the API version, and responses are compressed when asked. _(The version is done. Compression M4.)_
 
 ### Reading
 
-| Surface | Purpose |
-| --- | --- |
-| `GET /bootstrap` | Every Target, the latest items, and members, with one `at` |
-| `GET /entries` | The Log, by cursor, with filters by Network and kind |
-| `GET /messages` | Messages, by cursor, each with the sequence of its Line |
-| `GET /gaps` | Gaps, by cursor, optionally for one Network |
-| `GET /stream` | Replay from a cursor, then live, with no gap or duplicate at the join |
-| `GET /status` | The Daemon and all Networks at a glance |
-| `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state |
-| `GET /configuration` | All Configuration at once, as `iirc config export` reads it |
-| `GET /networks/{id}/targets` | Targets, with unread counts by class |
-| `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details |
-| `GET /networks/{id}/targets/{target}/timeline` | A Timeline, paged in either direction |
-| `GET /search` | Full-text search |
-| `GET /storage/{namespace}` | A Frontend's stored values |
-| `GET /state?at={sequence}` | Derived state as it was at that Entry |
-| `GET /health` | Unauthenticated liveness for service managers |
-| `GET /metrics` | Metrics for scraping |
+| Surface | Purpose | Status |
+| --- | --- | --- |
+| `GET /bootstrap` | Every Target, the latest items, and members, with one `at` | M4 |
+| `GET /entries` | The Log, by cursor, with filters by Network and kind | Done |
+| `GET /messages` | Messages, by cursor, each with the sequence of its Line | Done |
+| `GET /gaps` | Gaps, by cursor, optionally for one Network | Done |
+| `GET /stream` | Replay from a cursor, then live, with no gap or duplicate at the join | M4 |
+| `GET /status` | The Daemon and all Networks at a glance | Done |
+| `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state | Done |
+| `GET /configuration` | All Configuration at once, as `iirc config export` reads it | Done |
+| `GET /networks/{id}/targets` | Targets, with unread counts by class | M4 |
+| `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details | M4 |
+| `GET /networks/{id}/targets/{target}/timeline` | A Timeline, paged in either direction | M4 |
+| `GET /search` | Full-text search | M4 |
+| `GET /storage/{namespace}` | A Frontend's stored values | M4 |
+| `GET /state?at={sequence}` | Derived state as it was at that Entry | M4 |
+| `GET /health` | Unauthenticated liveness for service managers | Done |
+| `GET /metrics` | Metrics for scraping | M4 |
 
 - **API-6.** `/stream` is the only thing a Frontend needs to stay current.
   - It carries Entries, the Messages and Activity derived from them, and typed changes to derived state, such as members, topic, modes, counts, Read Markers, phase, lag, Configuration, and stored values, all under the Entry's sequence as the Server-Sent Event ID.
@@ -377,31 +419,33 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ### Acting
 
-| Operation     | Effect                                                                |
-| ------------- | --------------------------------------------------------------------- |
-| Send          | A Message of kind `privmsg`, `notice`, or `action`, or a CTCP request |
-| Thin Send     | `POST /messages`: one `PRIVMSG` to one Target, until Send replaces it |
-| Membership    | Join with an optional key, part, invite, kick                         |
-| Channel       | Set a topic, change modes in `MODES`-sized batches                    |
-| Self          | Change nick, set or clear away, set user modes, `OPER`                |
-| Lookups       | As in [Lookups](#lookups)                                             |
-| Network       | Add, change, remove, connect, disconnect                              |
-| Configuration | Replace all of it as one Change (CONF-6)                              |
-| Raw           | Send any Line the library can construct safely                        |
-| Marking       | Move a Read Marker, set ignores, Highlight keywords, and levels       |
-| Storage       | Set and delete a Frontend's stored values                             |
-| Credentials   | Set, replace, and delete                                              |
-| Redaction     | Remove an Entry's bytes (LOG-7)                                       |
-| Backup        | Write a copy of the Log to `backups/` (RUN-2)                         |
-| Keys          | Create, list, and revoke API keys                                     |
+| Operation | Effect | Status |
+| --- | --- | --- |
+| Send | A Message of kind `privmsg`, `notice`, or `action`, or a CTCP request | M3 |
+| Thin Send | `POST /messages`: one `PRIVMSG` to one Target, until Send replaces it | Done |
+| Membership | Join with an optional key, part, invite, kick | Join and part done. Invite and kick M3 |
+| Channel | Set a topic, change modes in `MODES`-sized batches | M3 |
+| Self | Change nick, set or clear away, set user modes, `OPER` | M3 |
+| Lookups | As in [Lookups](#lookups) | M3 |
+| Network | Add, change, remove, connect, disconnect | Done |
+| Configuration | Replace all of it as one Change (CONF-6) | Done |
+| Raw | Send any Line the library can construct safely | M3 |
+| Marking | Move a Read Marker, set ignores, Highlight keywords, and levels | M4 |
+| Storage | Set and delete a Frontend's stored values | M4 |
+| Credentials | Set, replace, and delete | Done |
+| Redaction | Remove an Entry's bytes (LOG-7) | Done |
+| Backup | Write a copy of the Log to `backups/` (RUN-2) | Done |
+| Keys | Create, list, and revoke API keys | Done |
 
-- **API-7.** Convenience such as `/op` or `/ban` is a Frontend's job, built on the modes operation. The API stays small.
-- **API-8.** A raw Line changes nothing directly, and derived state still follows what the Ircd says.
+- **API-7.** _(M3.)_ Convenience such as `/op` or `/ban` is a Frontend's job, built on the modes operation. The API stays small.
+- **API-8.** _(M3.)_ A raw Line changes nothing directly, and derived state still follows what the Ircd says.
 - **API-9.** An operation returns once its Lines are written or refused, and gives the sequences it produced. Send times out with the Lines' status if the queue is slow.
   - An operation that recorded a Change always succeeds with that Change's sequence, and a Line it then could not send is reported beside it as `failed`, with its typed error. A Line that would change nothing, such as `JOIN` for a Channel Self is in, is `skipped` with its reason.
 - **API-10.** Acting on a Network with no Session returns a typed error at once. Nothing is held for later (SEND-4).
 
 ### Access
+
+**Status:** AUTH-1 to AUTH-5 done. AUTH-6's rule that keys travel in headers is done, and its WebSocket part is M4. AUTH-7 M4. [ADR 0006](adr/0006-proportionate-security.md) says how far security goes.
 
 - **AUTH-1.** Every API call needs a key except `/health`. Loopback gets no exemption, because every action needs a named cause (LOG-5).
 - **AUTH-2.** Keys are named, stored hashed, shown once, compared in constant time, and revocable. The name appears in the cause of what they do (LOG-5), so an agent's actions can be told from the Owner's.
@@ -419,19 +463,23 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - A browser cannot set `Authorization` on `EventSource` or a WebSocket. SSE from a browser therefore uses `fetch`, which can.
   - The WebSocket adapter uses the `Sec-WebSocket-Protocol` bearer pattern, offering `iirc.v1` first so that the key is never echoed back.
 - **AUTH-7.** A browser never holds a key in script. Networks deliver hostile text to the page, so a key in `localStorage` would be exposed to any rendering bug.
-  - The web frontend is always served from the same origin as the API, in every [deployment shape](architecture.md#deployment-shapes).
+  - The web frontend is always served from the same origin as the API, in every deployment shape ([ADR 0007](adr/0007-one-binary-shapes-by-argument.md)).
   - A key is exchanged once for an `HttpOnly`, `SameSite=Strict` cookie, and state-changing requests also check `Origin`.
 
 ## Observability
 
-- **OBS-1.** Everything in this spec that the Daemon decides is explainable from the API: why it reconnected, why it picked that nick, why a Line was dropped. No knowledge exists only in a process log.
+**Status:** OBS-4 done. OBS-1 in part: status says why a Network closed, when it next tries, and how its login went, and Dropped Entries say why. OBS-2 and OBS-3 M4.
+
+- **OBS-1.** Everything in this document that the Daemon decides is explainable from the API: why it reconnected, why it picked that nick, why a Line was dropped. No knowledge exists only in a process log.
 - **OBS-2.** Spans, logs, and metrics are emitted through Effect and can be exported over OpenTelemetry. No Credential or Message text appears in them.
 - **OBS-3.** Metrics include Lines in and out, depth of each lane, Dropped Lines, lag, reconnects, Log append latency, and Log size.
 - **OBS-4.** The lifecycle machine's state for each Network is part of status.
 
 ## Running it
 
-- **RUN-1.** `bun build --compile` produces one executable, `iirc`, with a systemd user service that restarts it on failure. Arguments choose the [deployment shape](architecture.md#deployment-shapes).
+**Status:** Done. Only the stand-alone Daemon shape exists so far.
+
+- **RUN-1.** `bun build --compile` produces one executable, `iirc`, with a systemd user service that restarts it on failure. Arguments choose the deployment shape ([ADR 0007](adr/0007-one-binary-shapes-by-argument.md)).
   - The service is a template, `iirc@.service`, so one machine can run several Daemons, as the soak test does. Instance `x` keeps its data in `~/.local/state/iirc/x` and reads its environment, such as `IIRC_HTTP_PORT`, from `~/.config/iirc/x.env`.
   - Deferred: an RPM, once the executable is stable.
 - **RUN-2.** Backup uses `VACUUM INTO` from a read connection, so it is safe while running. Credentials are not part of a backup, wherever they are held.
@@ -443,6 +491,8 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 - **RUN-5.** Migrations run at startup, after an automatic backup, and never rewrite stored Line bytes. A Log newer than the binary is refused.
 
 ## Proof
+
+**Status:** PROOF-1 and PROOF-4 done. PROOF-2 in part: conformance vectors cover parsing, and fuzzing is not built. PROOF-3 in part: ngircd passes, and Ergo has not run. PROOF-5 running since 2026-11-04 ([roadmap](roadmap.md#the-soak-test)).
 
 - **PROOF-1.** Every requirement has a test that cites its ID where a test is possible. Scripted Ircds cover failure modes that a real Ircd will not produce on demand, and clocks are injected so timer behaviour is tested exactly.
 - **PROOF-2.** `testdata` conformance vectors cover the library. Protocol parsing is fuzzed with random bytes.
@@ -456,11 +506,13 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - It checks a TLS client certificate by the fingerprint ngircd says it saw. Against an ngircd without TLS, or one that never says, it skips that check and says so.
 - **PROOF-4.** Kill tests send `SIGKILL` during traffic, then check that no recorded Line is missing or duplicated and that projections rebuild identically. This does not test power loss, which rests on `synchronous=FULL`.
 - **PROOF-5.** Soak test: two Daemons share a Channel on the floor Ircd, one sends a counted Message each minute, and the other checks that none are missing. The first proof in the vision is 30 days of this passing on a real Network as well, with every Gap explained.
-  - `iirc-soak` (`apps/soak`) is a Frontend of both Daemons that uses only the API, and [`soak.md`](../soak.md) says how it runs. `iirc-soak send` sends `soak <minute> <millis>` each minute, where `<millis>` is the epoch millisecond of the run and `<minute>` is its Unix minute, so that each Message has an identity of its own, and `iirc-soak check` reads both Logs in full each hour and keeps no state.
+  - `iirc-soak` ([`apps/soak`](../apps/soak/README.md)) is a Frontend of both Daemons that uses only the API, and [the soak guide](guides/soak.md) says how it runs. `iirc-soak send` sends `soak <minute> <millis>` each minute, where `<millis>` is the epoch millisecond of the run and `<minute>` is its Unix minute, so that each Message has an identity of its own, and `iirc-soak check` reads both Logs in full each hour and keeps no state.
   - A Message that is sent and not received is judged by its own identity, and is explained if the sender's Log shows that Message Dropped, or if a Gap on either Daemon's Network covers the time it was sent. A Gap's window runs from the last inbound Line the Daemon recorded before it began, to the echo of the Daemon's own `JOIN` of the Target after it ended. Nothing pads it, and a window whose end is not yet in the Log is open.
   - Names are compared by the `CASEMAPPING` the Connection was told (KNOW-3). A Message sent or received more than once, a Message received that was never sent, and any stretch of more than 10 minutes in which the sender did not run all fail the check. The last is derived from the minutes, so it is never forgotten. Each Log is read from one moment, up to the newest sequence read first, so that a Gap recorded during the read is left for the next run.
 
 ## IRCv3 enhancements
+
+**Status:** M5. [`roadmap.md`](roadmap.md#ircv3-enhancements) lists the capabilities and mechanisms each improves on.
 
 Each of these is detected, never assumed. A Network setting turns them all off, and the floor test matrix runs with it off.
 
@@ -470,34 +522,6 @@ Each of these is detected, never assumed. A Network setting turns them all off, 
 - **CAP-2.** Registration holds until `CAP END`, so negotiation has its own short timer.
 - **CAP-3.** Only an exact allowlist is requested. One unknown name refuses a whole `REQ`, and Ergo disconnects anyone who requests its trap capability, so "request everything" is not an option.
 - **CAP-4.** Multi-line `LS` replies are collected, `NAK` retries each capability on its own, and `CAP NEW` and `CAP DEL` update live state.
-
-### Capabilities
-
-| Capability | Improves | Without it |
-| --- | --- | --- |
-| `sasl` | Authentication before joining | `PASS` and service `IDENTIFY` (CONN-6) |
-| `server-time` | True Message times, kept beside `at` | Time of receipt |
-| `echo-message` with `labeled-response` | Confirmed sends, enabled only as a pair | Own outbound Lines (MSG-1) |
-| `labeled-response` | Exact Lookup and send correlation | The table (LOOK-3), best-effort errors (SEND-9) |
-| `message-tags` | Carries `msgid` for deduplication | Each Line stands alone |
-| `batch` | Grouped netsplits | Each Line stands alone |
-| `draft/chathistory`, `draft/event-playback` | [Filling Gaps](#filling-gaps) | The Gap remains visible |
-| `away-notify`, `account-notify`, `extended-join`, `chghost`, `setname`, `userhost-in-names`, `multi-prefix` | Fresher User state | `WHO` and `NAMES` when needed |
-| `standard-replies`, `invite-notify` | Better-typed errors and Activity | Numerics |
-| `draft/multiline` | One Message across Lines | Splitting (SEND-5) |
-| `sts` | Persisted upgrade to TLS | Configured TLS (CONN-1) |
-| `draft/read-marker` | Read Markers shared with other IRC clients | Shared among Frontends only |
-
-### Other mechanisms
-
-These are not capabilities, so they are detected differently:
-
-| Mechanism | Detected by | Improves | Without it |
-| --- | --- | --- | --- |
-| `MONITOR` | `RPL_ISUPPORT` | Instant nick regain, presence | `ISON` (CONN-5) |
-| `WHOX` | `RPL_ISUPPORT` | Richer User state | `WHO` |
-| `BOT` | `RPL_ISUPPORT` | Agents can mark Self as a bot | No marking |
-| `reply`, `react`, `typing` | Client tags over `message-tags` | Richer conversation | Not shown |
 
 ### Deduplication
 
@@ -515,45 +539,3 @@ A filled Entry always has a later sequence than the live Lines around it, so Tim
 - **FILL-3.** Synthetic Lines are not Messages, such as Ergo's `HistServ` Lines, whose `msgid` starts with `_`. `draft/event-playback` avoids most of them.
 - **FILL-4.** Filling runs after `JOIN` completes, with a slight time overlap, and pages until `draft/chathistory-end` or a short page.
 - **FILL-5.** A Gap closes only if the fill overlaps something already logged, otherwise the remainder stays visible. An empty reply proves nothing, because history is limited on Ergo and a stale `msgid` returns nothing without an error.
-
-## Beyond the first proof
-
-These are wanted but not needed for the first proof:
-
-- Pushing notifications to a phone through Web Push or a webhook.
-  - It must not key on "no Frontend connected", because an always-on agent would suppress it forever.
-  - It waits a few seconds and skips anything already read, sends a dismissal when a Read Marker moves, prunes dead subscriptions, and blocks internal addresses.
-- Automatic away when no Frontend is connected.
-- Importing logs from WeeChat, ZNC, or The Lounge.
-- An MCP adapter and an `iirc` command-line Frontend.
-- Link previews fetched by the Daemon, so that a Frontend's address is not exposed.
-- A watch list of Users, built on `MONITOR` and `ISON`.
-
-## Milestones
-
-Each milestone is a working Daemon. Order is by what makes the next one possible.
-
-| # | Name | Delivers | Done when |
-| --- | --- | --- | --- |
-| 1 | Stays on | LOG, CONF, CRED, CONN except CONN-5, LIVE, SEND lanes and flood control, a thin Send, `/entries`, Channel membership, RUN, multiple Networks, AUTH | It survives kills, drops, and refusals on fserv and loses nothing |
-| 2 | Knows the Network | KNOW, MSG, HOST, PROT, Activity | Derived state matches `NAMES` and `MODE` after a netsplit and a reconnect |
-| 3 | Full control | CONN-5, the rest of SEND, Lookups, Acting | Everything a person does in irssi can be done through the API |
-| 4 | Ready for Frontends | `/bootstrap`, `/stream`, VIEW, STORE, OBS | The web frontend can start without asking for a Daemon change |
-| 5 | Better with IRCv3 | [Enhancements](#ircv3-enhancements) | Ergo gives more, ngircd still passes |
-
-Milestone 1 is built in this order, each step a working Daemon:
-
-1. One Network, the durable Log, the machine as a fold, and a kill test.
-2. Reconnecting and refusals: LIVE, CONN-3, CONN-4, CONN-7, SEND-1 to SEND-4, and LOG-9.
-3. Configuration, multiple Networks, API keys, Channel membership, LOG-11's reader, and TLS key pinning.
-   - That is CONF-1, CONF-2, CONF-4, CONF-6, CONF-3 without Credentials, services, connect commands, or notification levels, and CONF-5's Join and Part, keyless until Credentials exist.
-   - AUTH-1 to AUTH-5, and AUTH-6's rule that keys travel in headers. Its WebSocket and AUTH-7's cookie come with the web frontend in milestone 4.
-   - Every Network flag leaves `iirc daemon`, which takes only a data directory and a listen address (CONF-4).
-4. Credentials, CONN-2's `PASS`, CONN-6, and the service unit.
-   - That is CRED-1 to CRED-4, LOG-6, LOG-7, CONF-3's Credentials, services, and connect commands, and Channel keys for Join (CONF-5).
-   - Also RUN-2 and RUN-5, because the soak test freezes the Log format, and every change after it needs a migration and a backup.
-   - SASL details wait for milestone 5. A TLS client certificate is a Credential holding the certificate and key in PEM.
-
-The soak test (PROOF-5) starts after step 4 and runs in the background. Nothing waits for it, and the Daemon runs alongside whatever IRC client the Owner uses.
-
-The Log format was free to change, with no migrations, until the soak test. Its migrations were folded into `1_initial` then, so every change to the Log from here on is a new migration. A tagged build runs the soak test, so day-to-day work does not interrupt it.

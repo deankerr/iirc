@@ -4,4 +4,4 @@ A Line Entry stores the bytes that crossed the Connection, and everything else, 
 
 ## Consequences
 
-Every read of history pays for a fold or a derived table, so derived tables are part of the design and not an optimisation. Redaction is the only exception to keeping bytes exactly. Line order and durability must be settled before anything acts on a Line, so an append comes first, always.
+Every read of history pays for a fold or a derived table, so derived tables are part of the design and not an optimisation. Redaction is the only exception to keeping bytes exactly. Line order and durability must be settled before anything acts on a Line, so an append comes first, always. Effect's `EventLog` is not used, because it can give neither one gapless sequence for the whole Log (LOG-1) nor the bytes themselves (LOG-3).
