@@ -23,7 +23,8 @@ const nullable = <S extends Schema.Top>(schema: S) =>
 
 const Numbered = { at: Schema.Int, sequence: Schema.Int };
 
-// The names of the Credentials scrubbed from a Line's bytes, as JSON text (LOG-6).
+// The names of the Credentials whose values a Line's bytes hold as `<redacted>`, as JSON
+// text (LOG-6).
 const Redacted = Schema.fromJsonString(Schema.Array(Schema.String));
 
 const Ircd = Schema.Struct({

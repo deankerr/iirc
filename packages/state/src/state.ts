@@ -60,14 +60,6 @@ export type StateChange =
    * name a nick, and only someone who asked for a Channel knows which it was.
    */
   | ({ readonly _tag: "JoinRefused"; readonly channel: string } & JoinFailure)
-  /** `param` is where in the `MODE`'s parameters the key stood. */
-  | {
-      readonly _tag: "KeySet";
-      readonly channel: string;
-      readonly key: string;
-      readonly param: number;
-    }
-  | { readonly _tag: "KeyCleared"; readonly channel: string }
   | { readonly _tag: "IsupportChanged"; readonly isupport: Isupport };
 
 /** A state and what changed to reach it. */
@@ -224,7 +216,8 @@ const afterKick = (state: IrcState, line: Line): SteppedState => {
 };
 
 // The last `k` a `MODE` touches is the key it leaves. One that does not add up says
-// nothing, and nor does a key shown as `*`, which is hidden (KNOW-6).
+// nothing, and nor does a key shown as `*`, which is hidden (KNOW-6). A key seen here is
+// what the Network says, never a Credential (CRED-4).
 const afterMode = (state: IrcState, line: Line): SteppedState => {
   const [channel = "", ...rest] = line.params;
   const folded = fold(state, channel);
@@ -234,33 +227,19 @@ const afterMode = (state: IrcState, line: Line): SteppedState => {
   }
 
   const parsed = parseModes(rest, state.isupport.modes);
-  const at = parsed.changes.findLastIndex(({ letter }) => letter === "k");
-  const last = parsed.changes[at];
+  const last = parsed.changes.findLast(({ letter }) => letter === "k");
 
   if (parsed._tag === "Uneven" || last === undefined) {
     return unchanged(state);
   }
 
-  if (!last.adding) {
-    return {
-      changes: [{ _tag: "KeyCleared", channel }],
-      next: { ...state, channels: withKey(state.channels, folded, undefined) },
-    };
-  }
+  const key = last.adding ? last.param : undefined;
 
-  if (last.param === undefined || last.param === "*") {
+  if (last.adding && (key === undefined || key === "*")) {
     return unchanged(state);
   }
 
-  // Each change that took a parameter took the next one after the letters, so the key's
-  // is as far along as the changes before it that took one.
-  const param =
-    2 + parsed.changes.slice(0, at).filter((change) => change.param !== undefined).length;
-
-  return {
-    changes: [{ _tag: "KeySet", channel, key: last.param, param }],
-    next: { ...state, channels: withKey(state.channels, folded, last.param) },
-  };
+  return { changes: [], next: { ...state, channels: withKey(state.channels, folded, key) } };
 };
 
 const afterJoinFailure = (state: IrcState, line: Line, channel: string): SteppedState => ({

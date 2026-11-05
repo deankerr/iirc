@@ -54,7 +54,7 @@ BunRuntime.runMain(Layer.launch(app)); // SIGINT and SIGTERM stop it cleanly (RU
 - **One host per Network,** in a `FiberMap` keyed by Network ID. Each host reads its settings from a `SubscriptionRef` of Configuration plus Credentials, and is woken by its changes. Removing a Network closes its host's Scope, which says `QUIT`.
 - **Keys are a second fold over the same Changes:** name, scope, and SHA-256. `findKey` hashes what was presented and compares it in constant time against every stored hash ([ADR 0006](../../docs/adr/0006-proportionate-security.md)).
 - **Credentials** are one service over the keyring (`Bun.secrets`) or `credentials.json`, chosen at startup. A write is owned by the service, never cancelled, and waited for at most 10 seconds (CRED-1).
-- **Channel keys** are Credentials. One a Network sets with `MODE +k` is kept under `key.` and 16 hex digits of a SHA-256, unless the Channel names one (CRED-4).
+- **Channel keys** the Owner gives are Credentials, kept under `key.` and 16 hex digits of a SHA-256 unless the Channel names one. A key a Network sets with `MODE +k` is never kept (CRED-4).
 - **Causes name keys.** A Frontend's Line is recorded with the cause `key:<name>` (LOG-5).
 
 ## Composition

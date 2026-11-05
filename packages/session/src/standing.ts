@@ -11,7 +11,6 @@ import type { Array as Arr } from "effect";
 
 import type { Entry, Ircd, NetworkId } from "./entry.ts";
 import { stepEntry } from "./events.ts";
-import { redactedText } from "./redact.ts";
 
 /** A place in the Log. */
 export interface Moment {
@@ -192,21 +191,6 @@ export interface NextAttempt {
 export interface JoinPlan {
   readonly channels: readonly PlannedChannel[];
   readonly lookAgainAt: number | undefined;
-}
-
-/** A Channel's key, as a `MODE` on it set it or took it away (CRED-4). */
-export interface KeyChange {
-  /** The Channel, as the `MODE` spelled it. */
-  readonly channel: string;
-  /** The `MODE` that did it, as recorded. */
-  readonly entry: Entry;
-  /** The key as recorded, or nothing for a key taken away. */
-  readonly key: string | undefined;
-  /**
-   * Which `<redacted>` of the Line the key is, and how many the Line holds, when the key
-   * was scrubbed. The Entry's `redacted` names them in that order (LOG-6).
-   */
-  readonly placeholder: { readonly of: number; readonly slot: number } | undefined;
 }
 
 type ConnectionEntry = Extract<Entry, { readonly _tag: "Connection" }>;
@@ -636,10 +620,7 @@ const afterChange = (standing: Standing, entry: Entry, change: StateChange): Sta
       return { ...standing, nickLength: change.isupport.nickLength ?? standing.nickLength };
     }
 
-    // Self, the Channels Self is in, and their keys live in the state, and keys reach
-    // `onChannelKey` through `channelKeyChanges`.
-    case "KeyCleared":
-    case "KeySet":
+    // Self and the Channels Self is in live in the state.
     case "NickChanged":
     case "Parted":
     case "Welcomed": {
@@ -1140,73 +1121,4 @@ export const joinPlan = (
   }
 
   return { channels, lookAgainAt };
-};
-
-const placeholdersIn = (text: string) => text.split(redactedText).length - 1;
-
-// Which placeholder of the Line a scrubbed key is, counted from the end: what stands in the
-// parameters after it is read as it is, and the whole Line's count is the rest (LOG-6).
-const placeholderOf = (entry: LineEntry, line: Line, param: number) => {
-  const of = placeholdersIn(new TextDecoder("latin1").decode(entry.bytes));
-
-  const after = placeholdersIn(line.params.slice(param + 1).join(" "));
-
-  return { of, slot: of - 1 - after };
-};
-
-const keyChangeOf = (
-  entry: Entry,
-  line: Line | undefined,
-  change: StateChange
-): KeyChange | undefined => {
-  if (change._tag === "KeyCleared") {
-    return { channel: change.channel, entry, key: undefined, placeholder: undefined };
-  }
-
-  if (change._tag !== "KeySet" || line === undefined) {
-    return undefined;
-  }
-
-  const { channel, key, param } = change;
-
-  return {
-    channel,
-    entry,
-    key,
-    placeholder:
-      key === redactedText && entry._tag === "Line" ? placeholderOf(entry, line, param) : undefined,
-  };
-};
-
-/**
- * The Channel keys that inbound `MODE` Lines set or took away, as `@iirc/state` read each
- * with `PREFIX` and `CHANMODES` as they stood at its Entry, and only on a Channel Self was
- * in then (CRED-4). A `MODE` whose parameters do not add up says nothing.
- * @param standing - The Network's Standing before the first of `entries`.
- * @param entries - Entries recorded after it, in sequence order.
- * @returns Each change, in order.
- */
-export const channelKeyChanges = (
-  standing: Standing,
-  entries: Iterable<Entry>
-): readonly KeyChange[] => {
-  const keys: KeyChange[] = [];
-  let current = standing;
-
-  for (const entry of entries) {
-    const line = readLine(entry);
-    const { changes, standing: after } = advance(current, entry, line);
-
-    for (const change of changes) {
-      const key = keyChangeOf(entry, line, change);
-
-      if (key !== undefined) {
-        keys.push(key);
-      }
-    }
-
-    current = after;
-  }
-
-  return keys;
 };

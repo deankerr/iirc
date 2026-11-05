@@ -740,8 +740,9 @@ export type KeyScope = typeof KeyScope.Type;
 export const localKeyName = "local";
 
 /**
- * What a Change records when the Daemon kept a Channel key that a Network set or took away
- * with `MODE`, rather than a key asking it to (CRED-4).
+ * What a Change recorded when an earlier Daemon kept a Channel key that a Network set with
+ * `MODE`. No Daemon does now (CRED-4), but a Log can still hold such Changes, so no key may
+ * take the name.
  */
 export const modeKeyName = "mode";
 
@@ -756,7 +757,8 @@ export const KeyName = Schema.String.check(
   ),
   Schema.makeFilter(
     (name) =>
-      name !== modeKeyName || "`mode` is reserved for keys a Network set on a Channel (CRED-4)"
+      name !== modeKeyName ||
+      "`mode` is reserved for Changes an earlier Daemon made for a Network's `MODE` (CRED-4)"
   )
 );
 

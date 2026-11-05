@@ -48,7 +48,7 @@ The Daemon runs one Log and any number of Networks. Everything durable is an Ent
     - Closing is recorded whenever the Daemon decides to end a Connection, with its reason and whether it chose to leave (LIVE-9). Only a chosen leave is not a failure.
     - A close says whether it was a refusal (LIVE-5). A refusal seen while a close is under way outranks the reason that started it, because a Network that bans us at accept closes the socket before we can read why.
     - A Connection the Log could not close, because appends were failing (LOG-9), gets its close once appends succeed, with that reason, so that it is never mistaken for a killed process.
-  - **Change:** something the Owner altered, such as Configuration, a Read Marker, an ignore, or an API key, with the name of the key that altered it, `local` for `iirc key create` (AUTH-4), or `mode` for a Channel key a Network set (CRED-4), and the Network it concerns, if any.
+  - **Change:** something the Owner altered, such as Configuration, a Read Marker, an ignore, or an API key, with the name of the key that altered it, or `local` for `iirc key create` (AUTH-4), and the Network it concerns, if any.
   - **Daemon:** a start or stop, with its version.
   - **Dropped:** an outbound Line that was queued and never written, or whose write did not complete, with the reason. A Line counts as written once the kernel has taken it, not once a buffer in the process has.
   - **Deadline:** a timer that expired with no trace on the wire, such as the end of the login wait (CONN-6) or the burst (CONN-7). Without it, past state could not derive those phases.
@@ -64,13 +64,12 @@ The Daemon runs one Log and any number of Networks. Everything durable is an Ent
   - A Frontend's request is recorded as `key:` and its key name, such as `key:phone`. The request ID joins it with SEND-10 _(M3)_.
   - A remembered Join is a Change, and the reconciler sends its `JOIN` as `rejoin`, so the Change before it, which names the key, is the answer. Nothing else can send a duplicate `JOIN`.
   - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `away-restore`, `ctcp-reply`, or `nick-regain`. Each name arrives with its behaviour: `away-restore`, `ctcp-reply`, and `nick-regain` do not exist yet.
-- **LOG-6.** Credentials the Daemon holds stay out of the Log. Both layers run before an append, in both directions:
-  - **Typed operations:** a Line built from a Credential is marked sensitive where it is constructed.
-  - **Value scrubbing:** any stored Credential value found in any Line is replaced, whatever the command. This catches an echo, or the Owner pasting a password.
-  - A redacted Entry keeps the rest of its Line and is marked redacted, with the names of the Credentials removed. Each removed value becomes `<redacted>`, and the names go in the order those stand in the Line, one for each and a Credential removed twice named twice, so that the nth `<redacted>` is the nth name.
-  - Scrubbing matches a value only as a whole word, bounded by the Line's start or end, a space, `:`, or `,`. A Channel key such as `pizza` would otherwise redact the word in every Message.
-  - The host acts on the Entry as recorded, never on the bytes before scrubbing, so replay agrees with what happened.
-  - A secret the Daemon never held, such as a password typed to a service, is recorded like any other Line, and LOG-7 can remove it.
+- **LOG-6.** Credentials the Daemon holds stay out of the Log, because the Daemon never writes them down ([ADR 0008](adr/0008-credentials-are-held-not-hunted.md)).
+  - A Line built from a Credential is sensitive, and is marked so where it is built. Only that code knows where the value went.
+  - A sensitive Line is recorded with each value replaced by `<redacted>`, and its Entry is marked redacted with the names of those Credentials, in the order they stand. The names say what was redacted. The text does not, so a Line that holds `<redacted>` for any other reason redacts nothing.
+  - The Daemon does not search Lines, reasons, or anything else for the values it holds.
+  - The host acts on the Entry as recorded, so replay agrees with what happened.
+  - A secret that reaches a Line any other way is recorded like any other Line, and LOG-7 can remove it. Examples are a password typed to a service, pasted into a Message, or sent as a raw Line.
 - **LOG-7.** Entries are never edited or deleted by normal operation.
   - An `admin` key can redact an Entry's bytes, for the day a secret gets through. The Entry and its sequence remain, and a Change records who redacted it.
   - Redaction empties the bytes and marks the Entry redacted. Derived rows from it are derived again, so a Message it carried disappears.
@@ -134,19 +133,19 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - A start refuses a `credentials.json` looser than `0600`, because other users may already have read it, and says to rotate what it holds. It never loosens or tightens the mode itself.
   - A name is up to 64 lowercase letters, digits, `.`, `_`, and `-`, starting with a letter or digit.
   - Setting or deleting a Credential is a Change that records its name, never its value. It counts as a relevant Change (CONF-2) for every Network whose Connections use it.
-  - A Channel key only has the host build its next `JOIN` with the key as it is now. A Network sets keys itself, and would otherwise skip its own backoff by setting one each time it closed a Connection.
+  - A Channel key only has the host build its next `JOIN` with the key as it is now.
   - The file is replaced atomically, so a crash leaves the old value or the new one.
-  - A write is waited for at most 10 seconds, because a keyring that answered the start can stop answering later, as a locked one does. The caller is then told `CredentialsUnavailable`, and from then on that write has failed, whatever the keyring does. No Change is recorded for it, and a Channel key that was being kept is neither stored nor named, so a later `MODE +k` tries again. The write itself is not cancelled, and nothing else is written until it and its undoing end, since a late write of the whole document would replace what a later one kept. Until then, every other Credential write fails at once with `CredentialsUnavailable`, and every other kind of Change goes on.
+  - A write is waited for at most 10 seconds, because a keyring that answered the start can stop answering later, as a locked one does. The caller is then told `CredentialsUnavailable`, and from then on that write has failed, whatever the keyring does. No Change is recorded for it. The write itself is not cancelled, and nothing else is written until it and its undoing end, since a late write of the whole document would replace what a later one kept. Until then, every other Credential write fails at once with `CredentialsUnavailable`, and every other kind of Change goes on.
   - If a write that failed this way lands late, the service writes back the document it holds, which is what it held before that write, before it lets another begin. So the keyring, the live Credentials, and the Log agree, and so does a restart. If the write itself fails, there is nothing to undo. If the undoing fails, Credentials cannot be written until the Daemon restarts, and every write gives `CredentialsUnavailable`, while reads still serve what is held.
   - Configuration may refer to a name that is not set yet, so that a file can be imported first. Such a Network makes no `attempt`, and status lists the missing names.
 - **CRED-2.** They are write-only through the API. A Frontend can set, replace, or delete a Credential and can see that it exists, but can never read it.
 - **CRED-3.** In memory they stay in `Redacted` values, so they cannot reach logs, traces, errors, or API responses.
-- **CRED-4.** Channel keys are Credentials.
-  - A key given to Join is stored. It is updated on an observed `MODE +k`, deleted on `-k`, and a key shown as `*` is ignored.
+- **CRED-4.** A Channel key the Owner gives is a Credential. A key seen on the Network is not ([ADR 0008](adr/0008-credentials-are-held-not-hunted.md)).
+  - A key given to Join is stored. The Owner replaces or deletes it. Nothing the Network sends changes it.
   - A key is stored under the name the Channel gives it. For a Channel that gives none, the name is `key.` and the first 16 hex digits of the SHA-256 of the Network's ID, a NUL, and the Channel as it is compared, so it is the same however the Owner spells the Channel. The Channel then names it.
-  - The Credential is stored, then its Change is recorded, with `by` set to `mode` or the Join's key name, and only then does the Channel name it.
-  - A Join that is not to be remembered stores nothing, and its `JOIN` is sensitive like any other, so the Log has `<redacted>` in place of the key.
-  - Once stored, a key is scrubbed like any other Credential (LOG-6). A `+k` seen for the first time is recorded as it arrived.
+  - The Credential is stored, then its Change is recorded, with `by` set to the Join's key name, and only then does the Channel name it.
+  - A Join that is not to be remembered stores nothing. Its `JOIN` is sensitive like any other, so the Log has `<redacted>` in place of the key.
+  - A `MODE +k` or `-k` is recorded as it arrived, like any other Line. A `JOIN` refused with `475` is a join failure like any other, and the Owner supplies the new key.
 
 ## Connecting
 
@@ -502,7 +501,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
   - It checks two Networks on two Ircds, where one going down leaves the other's Sends flowing (HOST-5, CONF-3), and Join and Part, seen live and kept across a restart (CONF-2, CONF-5).
   - It checks export and import of Configuration, including a refused file (CONF-6), and keys by scope and after revoking (AUTH-1 to AUTH-3).
   - It checks TLS pinning against a self-signed certificate (CONN-1). Against an ngircd built without TLS it skips that check and says so.
-  - It checks `PASS` (CONN-2), a service login that waits out the login wait and a connect command (CONN-6), and a Channel key from a Join, kept across a restart and replaced by a `MODE +k` (CRED-4). It checks that a missing Credential holds every `attempt` back until it is set (CRED-1), and that a backup passes `quick_check` (RUN-2). No Credential's value is in the Log's files or the backup, but for the first `+k` (LOG-6).
+  - It checks `PASS` (CONN-2), a service login that waits out the login wait and a connect command (CONN-6), and a Channel key from a Join, kept across a restart and unchanged by a `MODE +k` (CRED-4). It checks that a missing Credential holds every `attempt` back until it is set (CRED-1), and that a backup passes `quick_check` (RUN-2). No Credential's value is in the Log's files or the backup, except in a Line in which someone else said it, which is recorded as they said it (LOG-6).
   - It checks a TLS client certificate by the fingerprint ngircd says it saw. Against an ngircd without TLS, or one that never says, it skips that check and says so.
 - **PROOF-4.** Kill tests send `SIGKILL` during traffic, then check that no recorded Line is missing or duplicated and that projections rebuild identically. This does not test power loss, which rests on `synchronous=FULL`.
 - **PROOF-5.** Soak test: two Daemons share a Channel on the floor Ircd, one sends a counted Message each minute, and the other checks that none are missing. The first proof in the vision is 30 days of this passing on a real Network as well, with every Gap explained.

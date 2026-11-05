@@ -45,9 +45,8 @@ const worded = (parts: readonly (string | undefined)[]): string => {
 /**
  * Words for a defect, fit for an Entry: its tag or name, and its message, on one line,
  * with any certificate or key in PEM cut out. An `Error`'s name is read from its
- * prototype. It is not bounded here: a reason is scrubbed of Credential values and only
- * then bounded, as it is recorded (LOG-6), so that no cut can leave part of a value that
- * scrubbing would no longer recognise. It parses whatever it is given, and never throws.
+ * prototype. It is not bounded here: a reason is bounded as it is recorded. It parses
+ * whatever it is given, and never throws.
  * @param defect - Whatever was thrown or died with.
  * @returns The diagnostic, which is never empty.
  */

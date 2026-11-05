@@ -20,14 +20,14 @@ import {
 import type { Scope } from "effect";
 
 import { hostConnection, loginLinesOf, logDown, makeCommit, phaseOf } from "./connection.ts";
-import type { ChannelKey, Host, Hosted } from "./connection.ts";
+import type { Host, Hosted } from "./connection.ts";
 import { keyedJoins, missingCredentials } from "./credentials.ts";
 import type { CredentialNames } from "./credentials.ts";
 import type { Ircd, NetworkId } from "./entry.ts";
 import { LaneFull } from "./lanes.ts";
 import type { LaneDepths, LineFailure, QueuedLine } from "./lanes.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
-import { scrub } from "./redact.ts";
+import { boundReasons } from "./redact.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
 import {
   candidateNicks,
@@ -39,8 +39,6 @@ import {
 } from "./standing.ts";
 import type { HeldJoinFailure, Standing, WantedChannel } from "./standing.ts";
 import { Transport } from "./transport.ts";
-
-export type { ChannelKey } from "./connection.ts";
 
 export type { CredentialNames, ServiceLogin } from "./credentials.ts";
 
@@ -92,9 +90,7 @@ export interface NetworkSettings {
   readonly retrySince?: number;
   /**
    * Every Credential the Daemon holds, by name, and not only this Network's. Names are
-   * looked up here whenever one is needed, and every value is scrubbed from what this
-   * host records (LOG-6). Handing over the same Map until one changes saves building
-   * what scrubbing looks for again.
+   * looked up here whenever one is needed.
    */
   readonly secrets: Secrets;
   /** The nicks that are services, whose `NOTICE` can be a sign of login (CONN-6). */
@@ -113,12 +109,6 @@ export interface NetworkOptions {
    */
   readonly changes: Stream.Stream<unknown>;
   readonly id: NetworkId;
-  /**
-   * Told of a Channel key once an inbound `MODE` on a Channel Self is in has set it with
-   * `+k`, or taken it away with `-k`, and been recorded (CRED-4). A key shown as `*` says
-   * nothing. It runs on the host's loop, so it should be quick.
-   */
-  readonly onChannelKey?: (change: ChannelKey) => Effect.Effect<void>;
   /** What the Network should be now, read whenever the host decides something. */
   readonly settings: Effect.Effect<NetworkSettings>;
 }
@@ -281,7 +271,7 @@ export const hostNetwork: (
   options: NetworkOptions
 ) => Effect.Effect<NetworkHost, never, Recorder | Scope.Scope | Transport> = Effect.fn(
   "hostNetwork"
-)(function* ({ changes, id, onChannelKey, settings }: NetworkOptions) {
+)(function* ({ changes, id, settings }: NetworkOptions) {
   const recorder = yield* Recorder;
   const { connect } = yield* Transport;
 
@@ -332,12 +322,10 @@ export const hostNetwork: (
 
   const secrets = settings.pipe(Effect.map((current) => current.secrets));
 
-  // Every append goes through here, so every value of every Credential is scrubbed from
-  // whatever is recorded, in either direction, and what acts on an Entry acts on it as
-  // recorded (LOG-6).
+  // Every append goes through here. A Line built from Credentials arrives already as the
+  // Log records it, so nothing here looks for their values (LOG-6).
   const record: Recorder["Service"]["record"] = (entries, within) =>
-    secrets.pipe(
-      Effect.flatMap((held) => recorder.record(scrub(held, entries), within)),
+    recorder.record(boundReasons(entries), within).pipe(
       Effect.tapError(() => noteFault),
       Effect.tap(() => Ref.set(logFault, undefined))
     );
@@ -352,7 +340,6 @@ export const hostNetwork: (
     hurrying,
     id,
     leaving: settings.pipe(Effect.map(({ enabled }) => stopping() || !enabled)),
-    onChannelKey,
     quitReason: settings.pipe(Effect.map(({ quitReason }) => quitReason)),
     secrets,
     standing,

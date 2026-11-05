@@ -1,10 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import { deadline, fold } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
-import { Clock, Effect, Fiber, Redacted, Ref } from "effect";
+import { Clock, Effect, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 
-import type { ChannelKey } from "./connection.ts";
 import type { Entry } from "./entry.ts";
 import { toEvent } from "./events.ts";
 import {
@@ -17,24 +16,20 @@ import {
   linesOf,
   liveHost,
   options,
-  safe,
   manyTurns,
   texts,
   wire,
 } from "./network.fixture.ts";
 import type { Overrides } from "./network.fixture.ts";
-import { constantNetwork, hostNetwork } from "./network.ts";
 import { Recorder } from "./recorder.ts";
 import { foldStandings, loginOf, noStanding, noStandings } from "./standing.ts";
-import { fakeIrcd, movingClockWhileClosing } from "./testing.ts";
+import { fakeIrcd } from "./testing.ts";
 import type { FakeIrcd } from "./testing.ts";
-import { Transport } from "./transport.ts";
 
 const memory = Effect.provide(Recorder.memoryReadable);
 
 const welcome = ":ircd 001 iirc :Welcome\r\n";
 const noMotd = ":ircd 422 iirc :No MOTD\r\n";
-const inOne = ":iirc!~u@host JOIN #one\r\n";
 
 const secrets = new Map([
   ["pass", Redacted.make("hunter2")],
@@ -319,75 +314,66 @@ describe("CONN-6: `IDENTIFY`, connect commands, and the login wait", () => {
   );
 });
 
-describe("LOG-6: value scrubbing on a live Connection", () => {
-  it.effect("LOG-6: an Ircd echoing a password back is recorded `<redacted>`", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
+describe("LOG-6: no Line is searched for a Credential's value", () => {
+  it.effect(
+    "LOG-6: a login Line that is Dropped keeps its values `<redacted>`, and names them",
+    () =>
+      Effect.gen(function* () {
+        const ircd = yield* fakeIrcd();
 
-      yield* pastBurst(ircd, { ...loggingIn, connectCommands: [], credentials: {} });
-      yield* ircd.read(":bob!u@h PRIVMSG #one :you said hunter2, and s3cret:\r\n");
-      yield* manyTurns;
+        yield* host(ircd, loggingIn);
+        yield* ircd.setWrites("hang");
+        yield* ircd.read(`${welcome}${noMotd}`);
+        yield* manyTurns;
+        yield* ircd.hangUp;
+        yield* manyTurns;
 
-      const said = linesOf(yield* entries).at(-1);
+        const log = yield* entries;
 
-      assert.strictEqual(
-        decode(said?.bytes ?? new Uint8Array()),
-        ":bob!u@h PRIVMSG #one :you said <redacted>, and <redacted>:"
-      );
-      assert.deepStrictEqual(said?.redacted, ["pass", "nickserv"]);
-    }).pipe(memory)
+        const dropped = droppedIn(log)
+          .filter(({ cause }) => cause === "identify" || cause === "connect-command")
+          .map(({ bytes, cause, redacted }) => ({ cause, redacted, text: decode(bytes) }));
+
+        assert.deepStrictEqual(dropped, [
+          {
+            cause: "identify",
+            redacted: ["nickserv"],
+            text: "PRIVMSG NickServ :IDENTIFY <redacted>",
+          },
+          { cause: "connect-command", redacted: undefined, text: "MODE iirc +x" },
+          { cause: "connect-command", redacted: ["oper"], text: "OPER iirc <redacted>" },
+        ]);
+
+        const recorded = log.map((entry) => JSON.stringify(entry)).join(",");
+
+        assert.notInclude(recorded, "s3cret");
+        assert.notInclude(recorded, "operpw");
+      }).pipe(memory)
   );
 
-  it.effect("LOG-6: a value inside another word is left as it is", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const text = ":bob!u@h PRIVMSG #one :pizzas, xpizza, hunter22 and pizza!";
+  it.effect(
+    "LOG-6, CRED-4: an Ircd's Lines are recorded as they arrived, whatever words they hold",
+    () =>
+      Effect.gen(function* () {
+        const ircd = yield* fakeIrcd();
 
-      yield* pastBurst(ircd, { ...loggingIn, connectCommands: [], credentials: {} });
-      yield* ircd.read(`${text}\r\n`);
-      yield* manyTurns;
+        const text = [
+          ":bob!u@h PRIVMSG #one :you said hunter2, and s3cret:",
+          ":op!u@h MODE #one +k pizza",
+          ":bob!u@h PRIVMSG #one :I like pizza, violets are <redacted>",
+        ];
 
-      const said = linesOf(yield* entries).at(-1);
+        yield* pastBurst(ircd, { ...loggingIn, connectCommands: [], credentials: {} });
+        yield* ircd.read(text.map((line) => `${line}\r\n`).join(""));
+        yield* manyTurns;
 
-      assert.strictEqual(decode(said?.bytes ?? new Uint8Array()), text);
-      assert.isUndefined(said?.redacted);
-    }).pipe(memory)
-  );
+        const said = linesOf(yield* entries).slice(-3);
 
-  it.effect("LOG-6: a Frontend's Line holding a password is scrubbed, written or Dropped", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const hosted = yield* pastBurst(ircd, { ...loggingIn, connectCommands: [], credentials: {} });
-
-      yield* ircd.setWrites("hang");
-
-      const first = yield* Effect.forkChild(
-        hosted.send(safe("PRIVMSG", ["#one", "it is hunter2"]), "key:phone")
-      );
-
-      const second = yield* Effect.forkChild(
-        hosted.send(safe("PRIVMSG", ["#one", "really hunter2"]), "key:phone")
-      );
-
-      yield* manyTurns;
-      yield* ircd.hangUp;
-      yield* manyTurns;
-      yield* Fiber.join(first).pipe(Effect.ignore);
-      yield* Fiber.join(second).pipe(Effect.ignore);
-
-      const log = yield* entries;
-      const dropped = droppedIn(log).filter(({ cause }) => cause === "key:phone");
-
-      assert.lengthOf(dropped, 2);
-      assert.deepStrictEqual(
-        dropped.map(({ bytes, redacted }) => ({ redacted, text: decode(bytes) })),
-        [
-          { redacted: ["pass"], text: "PRIVMSG #one :it is <redacted>" },
-          { redacted: ["pass"], text: "PRIVMSG #one :really <redacted>" },
-        ]
-      );
-      assert.notInclude(log.map((entry) => JSON.stringify(entry)).join(","), "hunter2");
-    }).pipe(memory)
+        assert.deepStrictEqual(
+          said.map(({ bytes, redacted }) => ({ redacted, text: decode(bytes) })),
+          text.map((line) => ({ redacted: undefined, text: line }))
+        );
+      }).pipe(memory)
   );
 });
 
@@ -438,187 +424,5 @@ describe("CRED-1: a Credential that is not set", () => {
         assert.deepStrictEqual((yield* hosted.status).missingCredentials, []);
         assert.deepStrictEqual(yield* joins(ircd), ["JOIN #one\r\n"]);
       }).pipe(memory)
-  );
-});
-
-describe("CRED-4: Channel keys an inbound `MODE` sets", () => {
-  const watching = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides?: Overrides) {
-    const seen = yield* Ref.make<readonly ChannelKey[]>([]);
-    const { id, ...settings } = { ...options, channels: [], secrets, ...overrides };
-
-    yield* movingClockWhileClosing(
-      hostNetwork({
-        ...constantNetwork(id, settings),
-        onChannelKey: (change) => Ref.update(seen, (held) => [...held, change]),
-      }).pipe(Effect.provideService(Transport, ircd.transport))
-    );
-
-    yield* ircd.read(`${welcome}${noMotd}${inOne}`);
-    yield* manyTurns;
-
-    const keys = Effect.map(Ref.get(seen), (held) =>
-      held.map(({ channel, key }) => ({
-        channel,
-        key: key === undefined ? undefined : Redacted.value(key),
-      }))
-    );
-
-    return { keys };
-  });
-
-  it.effect("CRED-4: tells of a `+k`, and of a `-k`, once each is recorded", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { keys } = yield* watching(ircd);
-
-      yield* ircd.read(":op!u@h MODE #one +k sesame\r\n:op!u@h MODE #one -k sesame\r\n");
-      yield* manyTurns;
-
-      assert.deepStrictEqual(yield* keys, [
-        { channel: "#one", key: "sesame" },
-        { channel: "#one", key: undefined },
-      ]);
-    }).pipe(memory)
-  );
-
-  it.effect("CRED-4: a key shown as `*` says nothing, and a bare `-k` takes it away", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { keys } = yield* watching(ircd);
-
-      yield* ircd.read(":op!u@h MODE #one +k *\r\n:op!u@h MODE #one -k\r\n");
-      yield* manyTurns;
-
-      assert.deepStrictEqual(yield* keys, [{ channel: "#one", key: undefined }]);
-    }).pipe(memory)
-  );
-
-  it.effect("CRED-4, KNOW-6: reads `+ok nick key` by the Session's `PREFIX`", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { keys } = yield* watching(ircd);
-
-      yield* ircd.read(":op!u@h MODE #one +ok bob sesame\r\n");
-      yield* ircd.read(":ircd 005 iirc PREFIX=(qaohv)~&@%+ :are supported\r\n");
-      yield* ircd.read(":op!u@h MODE #one +qk bob other\r\n");
-      yield* manyTurns;
-
-      assert.deepStrictEqual(yield* keys, [
-        { channel: "#one", key: "sesame" },
-        { channel: "#one", key: "other" },
-      ]);
-    }).pipe(memory)
-  );
-
-  it.effect("CRED-4: says nothing of a Channel Self is not in, or of a `MODE` that is uneven", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { keys } = yield* watching(ircd);
-
-      yield* ircd.read(":op!u@h MODE #two +k sesame\r\n:op!u@h MODE #one +ok bob\r\n");
-      yield* manyTurns;
-
-      assert.deepStrictEqual(yield* keys, []);
-    }).pipe(memory)
-  );
-
-  it.effect(
-    "CRED-4: reads a `MODE` as it stood at its Entry, though Self parts in the same read",
-    () =>
-      Effect.gen(function* () {
-        const ircd = yield* fakeIrcd();
-        const { keys } = yield* watching(ircd);
-
-        yield* ircd.read(":op!u@h MODE #one +k sesame\r\n:iirc!~u@host PART #one\r\n");
-        yield* manyTurns;
-
-        assert.deepStrictEqual(yield* keys, [{ channel: "#one", key: "sesame" }]);
-      }).pipe(memory)
-  );
-
-  it.effect("CRED-4, LOG-6: a key already held is scrubbed, and still told by its value", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { keys } = yield* watching(ircd);
-
-      yield* ircd.read(":op!u@h MODE #one +k pizza\r\n");
-      yield* manyTurns;
-
-      const mode = linesOf(yield* entries).at(-1);
-
-      assert.strictEqual(
-        decode(mode?.bytes ?? new Uint8Array()),
-        ":op!u@h MODE #one +k <redacted>"
-      );
-      assert.deepStrictEqual(mode?.redacted, ["key.one"]);
-      assert.deepStrictEqual(yield* keys, [{ channel: "#one", key: "pizza" }]);
-    }).pipe(memory)
-  );
-
-  it.effect(
-    "CRED-4, LOG-6: two Credentials scrubbed from one `MODE` leave the key whichever place it stands",
-    () =>
-      Effect.gen(function* () {
-        const ircd = yield* fakeIrcd();
-        const { keys } = yield* watching(ircd);
-
-        yield* ircd.read(":op!u@h MODE #one +ok pizza hunter2\r\n");
-        yield* manyTurns;
-
-        const first = linesOf(yield* entries).at(-1);
-
-        assert.strictEqual(
-          decode(first?.bytes ?? new Uint8Array()),
-          ":op!u@h MODE #one +ok <redacted> <redacted>"
-        );
-        assert.deepStrictEqual(first?.redacted, ["key.one", "pass"]);
-
-        yield* ircd.read(":op!u@h MODE #one +ko hunter2 pizza\r\n");
-        yield* ircd.read(":op!u@h MODE #one +ok hunter2 pizza\r\n");
-        yield* manyTurns;
-
-        assert.deepStrictEqual(yield* keys, [
-          { channel: "#one", key: "hunter2" },
-          { channel: "#one", key: "hunter2" },
-          { channel: "#one", key: "pizza" },
-        ]);
-      }).pipe(memory)
-  );
-
-  it.effect(
-    "CRED-4, LOG-6: a key that is no Credential is told as it came, beside one that was scrubbed",
-    () =>
-      Effect.gen(function* () {
-        const ircd = yield* fakeIrcd();
-        const { keys } = yield* watching(ircd);
-
-        yield* ircd.read(":op!u@h MODE #one +ok hunter2 sesame\r\n");
-        yield* ircd.read(":op!u@h MODE #one +ko sesame hunter2\r\n");
-        yield* manyTurns;
-
-        const mode = linesOf(yield* entries).at(-1);
-
-        assert.strictEqual(
-          decode(mode?.bytes ?? new Uint8Array()),
-          ":op!u@h MODE #one +ko sesame <redacted>"
-        );
-        assert.deepStrictEqual(mode?.redacted, ["pass"]);
-        assert.deepStrictEqual(yield* keys, [
-          { channel: "#one", key: "sesame" },
-          { channel: "#one", key: "sesame" },
-        ]);
-      }).pipe(memory)
-  );
-
-  it.effect("CRED-4: a `<redacted>` the Ircd sent itself leaves the key unknown", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { keys } = yield* watching(ircd);
-
-      yield* ircd.read(":op!u@h MODE #one +ok <redacted> pizza\r\n");
-      yield* manyTurns;
-
-      assert.deepStrictEqual(yield* keys, []);
-    }).pipe(memory)
   );
 });

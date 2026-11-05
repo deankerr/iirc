@@ -12,7 +12,7 @@ The one interpretation of what an Ircd says. `stepState` folds a Session's inbou
 | --- | --- |
 | `initialState`, `IrcState` | A Session's state: `self`, `isupport`, and `channels` |
 | `stepState(state, line)` | The state after one inbound Line, and its `StateChange`s. Never throws. Returns the same object when nothing changed |
-| `StateChange` | `Welcomed`, `NickChanged`, `Joined`, `Parted`, `Kicked`, `JoinRefused`, `KeySet`, `KeyCleared`, `IsupportChanged` |
+| `StateChange` | `Welcomed`, `NickChanged`, `Joined`, `Parted`, `Kicked`, `JoinRefused`, `IsupportChanged`. A Channel's key is state, and changes nothing else |
 | `channelOf(state, name)` | The Channel Self is in by that name, however it is spelled |
 | `casefold(casemapping, name)` | The form names are compared in under `ascii`, `rfc1459`, or `rfc1459-strict` (KNOW-3) |
 | `messageOf(line, sender?)` | The Message a `PRIVMSG` or `NOTICE` carries, if any |
@@ -37,7 +37,7 @@ for (const text of [
   if (parsed._tag === "Line") {
     const { changes, next } = stepState(state, parsed.line);
     state = next;
-    console.log(changes.map(({ _tag }) => _tag)); // ["Welcomed"], ["Joined"], ["KeySet"]
+    console.log(changes.map(({ _tag }) => _tag)); // ["Welcomed"], ["Joined"], []
   }
 }
 

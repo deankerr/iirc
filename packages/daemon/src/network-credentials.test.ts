@@ -174,7 +174,8 @@ describe("Credentials reach the hosts (CRED-1)", () => {
           yield* untilReceived(ircd, `PASS ${serverPassword}`);
           yield* eventually(statusOf(client, id), ({ phase }) => phase === "session", limit);
 
-          // An echo of the value is scrubbed too, whatever the command (LOG-6).
+          // An Ircd that says the value back is recorded as it said it: nothing searches for
+          // a Credential, and LOG-7 is for the day one gets through (LOG-6).
           yield* ircd.push(`:ircd NOTICE ${nick} :your password was ${serverPassword}`);
 
           const entries = yield* eventually(
@@ -193,10 +194,19 @@ describe("Credentials reach the hosts (CRED-1)", () => {
           assert.strictEqual(pass?.text, "PASS <redacted>");
           assert.deepStrictEqual(pass?.redacted, ["libera.pass"]);
           assert.isAbove(attempt?.sequence ?? 0, change);
-          assert.deepInclude(echo, { redacted: ["libera.pass"] });
-          assert.include(echo?._tag === "Line" ? echo.text : "", "your password was <redacted>");
+          assert.isUndefined(echo?._tag === "Line" ? echo.redacted : "not a Line");
+          assert.include(
+            echo?._tag === "Line" ? echo.text : "",
+            `your password was ${serverPassword}`
+          );
           assert.deepStrictEqual((yield* statusOf(client, id)).missingCredentials, []);
-          assert.notInclude(logBytes(dataDir), serverPassword);
+
+          const bytes = logBytes(dataDir);
+
+          assert.strictEqual(
+            occurrences(bytes, serverPassword),
+            occurrences(bytes, `your password was ${serverPassword}`)
+          );
         })
       )
   );
@@ -344,99 +354,64 @@ describe("Channel keys (CONF-5, CRED-4)", () => {
   );
 
   it.live(
-    "CRED-4: `+k` on a wanted Channel is stored and named as `mode`, a rejoin uses it, and `-k` deletes it",
+    "CRED-4, LOG-6: a `MODE +k` stores nothing, leaves the Owner's key as it was, and is recorded as it arrived",
     () =>
       withDaemon(({ client, dataDir }) =>
         Effect.gen(function* () {
           const ircd = yield* welcomingIrcd();
           const keyName = channelKeyName(id, "#kept");
 
-          yield* client.networks.add({
-            payload: settingsFor(ircd, {
-              channels: [{ autojoin: true, name: "#kept", rejoinOnKick: false }],
-            }),
+          yield* client.networks.add({ payload: settingsFor(ircd) });
+          yield* eventually(statusOf(client, id), ({ phase }) => phase === "session", limit);
+          yield* client.networks.join({
+            params: { id },
+            payload: { channel: "#kept", key: Redacted.make("pizza"), remember: true },
           });
           yield* untilJoined(client, "#kept");
 
+          const before = changes(yield* client.daemon.entries(everything)).length;
+
           yield* ircd.push(":op!o@host MODE #kept +k first-key");
+          yield* ircd.push(":op!o@host MODE #kept -k first-key");
+          yield* ircd.push(":op!o@host MODE #kept +k pizza");
+          yield* ircd.push(":bob!b@host PRIVMSG #kept :I like pizza");
 
-          yield* eventually(
-            client.credentials.list(),
-            ({ credentials }) => credentials.some(({ name }) => name === keyName),
-            limit
-          );
-
-          const named = yield* eventually(
-            client.networks.get({ params: { id } }),
-            ({ settings }) => settings.channels[0]?.key === keyName,
-            limit
-          );
-
-          // A Network saying the same again writes nothing; a new key replaces it.
-          yield* ircd.push(":op!o@host MODE #kept +k first-key");
-          yield* ircd.push(":op!o@host MODE #kept +k second-key");
-
-          yield* eventually(
+          const entries = yield* eventually(
             client.daemon.entries(everything),
             (all) =>
-              changes(all).filter(({ change }) => JSON.stringify(change).includes("CredentialSet"))
-                .length === 2,
+              all.some((entry) => entry._tag === "Line" && entry.text.endsWith("I like pizza")),
             limit
           );
 
-          // The next Connection's rejoin uses the stored key.
+          // The next Connection's rejoin still uses the Owner's key.
           yield* ircd.hangUp;
-          yield* untilReceived(ircd, "JOIN #kept second-key");
+          yield* untilReceived(ircd, "JOIN #kept pizza");
 
-          yield* untilJoined(client, "#kept");
-          yield* ircd.push(":op!o@host MODE #kept -k second-key");
-
-          yield* eventually(
-            client.credentials.list(),
-            ({ credentials }) => credentials.length === 0,
-            limit
+          const inbound = entries.flatMap((entry) =>
+            entry._tag === "Line" && /^:(?:op|bob)!/u.test(entry.text)
+              ? [{ redacted: entry.redacted, text: entry.text }]
+              : []
           );
 
-          const entries = yield* client.daemon.entries(everything);
-
+          assert.lengthOf(changes(entries), before);
           assert.deepStrictEqual(
-            changes(entries)
-              .filter(({ by }) => by === "mode")
-              .map(({ change }) => change),
-            [
-              { _tag: "CredentialSet", name: keyName },
-              { _tag: "ChannelKeyNamed", channel: "#kept", key: keyName, network: id },
-              { _tag: "CredentialSet", name: keyName },
-              { _tag: "CredentialDeleted", name: keyName },
-            ]
+            (yield* client.credentials.list()).credentials.map(({ name }) => name),
+            [keyName]
           );
-          assert.deepStrictEqual(named.settings.channels[0]?.autojoin, true);
-
-          // The first `+k` of each is recorded as it arrived (CRED-4), and nothing after.
-          const modes = entries.flatMap((entry) =>
-            entry._tag === "Line" && entry.text.includes(" MODE ") ? [entry.text] : []
-          );
-
-          assert.deepStrictEqual(modes, [
-            ":op!o@host MODE #kept +k first-key",
-            ":op!o@host MODE #kept +k <redacted>",
-            ":op!o@host MODE #kept +k second-key",
-            ":op!o@host MODE #kept -k <redacted>",
+          assert.deepStrictEqual(inbound, [
+            { redacted: undefined, text: ":op!o@host MODE #kept +k first-key" },
+            { redacted: undefined, text: ":op!o@host MODE #kept -k first-key" },
+            { redacted: undefined, text: ":op!o@host MODE #kept +k pizza" },
+            { redacted: undefined, text: ":bob!b@host PRIVMSG #kept :I like pizza" },
           ]);
-          assert.notInclude(
-            outbound(entries)
-              .map(({ text }) => text)
-              .join("\n"),
-            "second-key"
-          );
 
           // A page of the Log can be in its files more than once, so what counts is that the
-          // key is nowhere but in the `MODE` that first set it.
+          // key is nowhere but in the `MODE`s that carried it.
           const bytes = logBytes(dataDir);
 
           assert.strictEqual(
-            occurrences(bytes, "second-key"),
-            occurrences(bytes, "MODE #kept +k second-key")
+            occurrences(bytes, "first-key"),
+            occurrences(bytes, "+k first-key") + occurrences(bytes, "-k first-key")
           );
         })
       )

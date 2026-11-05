@@ -83,9 +83,9 @@ iirc credential list
 - `credentials.password` is sent as `PASS`, `credentials.service` as `IDENTIFY` to `NickServ` after the burst, and `credentials.clientCertificate` is a PEM with the certificate and its key, which needs TLS on every Ircd.
 - A connect command refers to a Credential as `{{name}}`.
 - A Network that names a Credential nobody has set makes no Connection, and `/api/status` lists the name under `missingCredentials`. Setting it connects at once.
-- A Channel key given to Join is stored as a Credential, and so is one the Daemon sees set with `MODE +k`.
+- A Channel key given to Join is stored as a Credential. Only the Owner changes it: a `MODE +k` on the Network changes nothing, so if an operator changes the key, the next rejoin is refused with `475` until you Join with the new one.
 
-Values live in the system keyring where there is one, and otherwise in `credentials.json` in the data directory with mode `0600`. `/api/status` says which. A file any looser stops the Daemon from starting. No value ever reaches the Log, and an `admin` key can remove one that got through anyway with `POST /api/entries/{sequence}/redact` (LOG-7).
+Values live in the system keyring where there is one, and otherwise in `credentials.json` in the data directory with mode `0600`. `/api/status` says which. A file any looser stops the Daemon from starting. A Line the Daemon builds from a Credential is recorded with the value as `<redacted>`. The Daemon never searches other Lines for values, so one that reaches the Log another way, such as a password pasted into a Channel or said back by an Ircd, is recorded as it was said. An `admin` key can remove it with `POST /api/entries/{sequence}/redact` (LOG-7).
 
 ## Backup
 

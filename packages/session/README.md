@@ -13,7 +13,7 @@ Hosts one Network with Effect: dials Ircds, records every Line before acting on 
 | `./network` | `hostNetwork`, `constantNetwork`, `NetworkSettings`, `NetworkHost`, `NetworkStatus`, `NotInSession`, `LaneFull`, `LineDropped`, `WriteFailed` | Stays on a Network for as long as a Scope lasts, with `send` and `status` |
 | `./recorder` | `Recorder`, `Committed`, `MemoryEntries`, `Watched`, `Overflowed`, `RecordFailed`, `makeWatchers` | Records Entries before anything acts on them, and watches them as they commit |
 | `./entry` | `Entry`, `NewEntry`, `Ircd`, `TlsDetails`, `IfFieldsOfEntry` | The Entry kinds, which this package owns |
-| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `candidateNicks`, `channelKeyChanges`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
+| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `candidateNicks`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
 | `./events` | `toEvent`, `stepEntry` | The one mapping from an Entry to a machine event |
 | `./transport` | `Transport`, `ConnectFailed` | Dials TCP or TLS, verifies or pins, and reads with backpressure |
 | `./credentials` | `passLine`, `identifyLine`, `connectCommandLine`, `keyedJoins`, `missingCredentials` | Lines built from Credentials, marked sensitive where they are built |
@@ -74,7 +74,7 @@ Closing the Scope says `QUIT` and waits up to `quitWaitMillis`.
 - **Decisions are pure functions of `Standing`.** `nextAttempt` gives backoff, jitter seeded by sequence, and Ircd rotation (LIVE-4, LIVE-5). `joinPlan` gives what to `JOIN` now and when to look again (LIVE-7, LIVE-8).
 - **A host reads its settings; nothing pushes them.** `settings` is read whenever the host decides something, and `changes` wakes it. Ircds, Identity, and Tuning apply at the next `attempt`, and the rest at once (CONF-2).
 - **One Connection, three lanes, one pump.** Control, interactive, and background, in strict priority (SEND-1). The pump records each Line as it leaves, then writes it. When the Connection ends, what is queued becomes Dropped Entries in the same commit as `closed` (SEND-4).
-- **Scrubbing runs before every append,** in both directions: sensitive Lines are marked where they are built, and every Credential value is replaced as a whole word (LOG-6). The host acts on the Entry as recorded.
+- **Sensitive Lines are marked where they are built** (LOG-6): a Line built from Credentials arrives at the Recorder already as the Log holds it, with its values `<redacted>` and their names. Nothing searches Lines for a Credential's value ([ADR 0008](../../docs/adr/0008-credentials-are-held-not-hunted.md)). The host acts on the Entry as recorded.
 
 ## Watching what commits
 

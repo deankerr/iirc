@@ -1,12 +1,10 @@
 // Not Effect's `Digest`: its SHA-256 runs on `crypto.subtle`, so it is asynchronous, and
-// this name is derived in the pure decisions below (`keyNameFor`, `keepingFor`), which
-// would all become Effects for a hash. Effect offers no synchronous SHA-256.
+// this name is derived in pure decisions such as `keyNameFor`, which would all become
+// Effects for a hash. Effect offers no synchronous SHA-256.
 import { createHash } from "node:crypto";
 
 import type { NetworkSettings } from "@iirc/api";
-import type { ChannelKey, Secrets } from "@iirc/session/network";
 import { channelKey } from "@iirc/session/standing";
-import { Redacted } from "effect";
 
 // CRED-4: the hex digits of the hash that a key's name keeps, which is far more than one
 // Daemon's Channels need to stay apart, and keeps the name well inside 64 characters.
@@ -37,59 +35,3 @@ export const channelKeyName = (network: string, channel: string): string =>
 export const keyNameFor = (settings: NetworkSettings, channel: string): string =>
   settings.channels.find(({ name }) => channelKey(name) === channelKey(channel))?.key ??
   channelKeyName(settings.id, channel);
-
-/** What to keep of a key seen set or taken away on a wanted Channel (CRED-4). */
-export type KeyKeeping =
-  /**
-   * Store `value` under `name`, unless it is held there already, and have `channel`, as
-   * Configuration spells it, name it if it named none.
-   */
-  | {
-      readonly _tag: "Store";
-      readonly channel: string;
-      readonly name: string;
-      readonly nameIt: boolean;
-      readonly value: Redacted.Redacted | undefined;
-    }
-  /** Delete what is held under `name`. */
-  | { readonly _tag: "Delete"; readonly name: string };
-
-/**
- * Decides what a `+k` or `-k` seen on a Channel asks of the Credentials (CRED-4). Only a
- * wanted Channel's key is kept. A key already held under its name writes nothing, so a
- * Network repeating its own `MODE` costs no writes, and a `-k` deletes only a key the
- * Channel names.
- * @param settings - The Network's settings now.
- * @param seen - The Channel, and the key the `MODE` left it with.
- * @param secrets - Every Credential there is.
- * @returns What to do, or nothing.
- */
-export const keepingFor = (
-  settings: NetworkSettings,
-  { channel, key }: ChannelKey,
-  secrets: Secrets
-): KeyKeeping | undefined => {
-  const wanted = settings.channels.find(
-    ({ autojoin, name }) => autojoin && channelKey(name) === channelKey(channel)
-  );
-
-  if (wanted === undefined) {
-    return undefined;
-  }
-
-  const name = wanted.key ?? channelKeyName(settings.id, wanted.name);
-  const held = secrets.get(name);
-
-  if (key === undefined) {
-    return wanted.key !== undefined && held !== undefined ? { _tag: "Delete", name } : undefined;
-  }
-
-  const value =
-    held !== undefined && Redacted.value(held) === Redacted.value(key) ? undefined : key;
-
-  const nameIt = wanted.key === undefined;
-
-  return value === undefined && !nameIt
-    ? undefined
-    : { _tag: "Store", channel: wanted.name, name, nameIt, value };
-};

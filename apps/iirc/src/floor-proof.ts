@@ -22,7 +22,6 @@ import {
   Fiber,
   FileSystem,
   Layer,
-  Option,
   Redacted,
   Ref,
   Result,
@@ -1940,6 +1939,20 @@ const ensureNotInLog = Effect.fnUntraced(function* (dataDir: string, value: stri
   yield* ensure(found === 0, `${what} is in the Log's files ${found} times`);
 });
 
+// LOG-6: a value someone else said is in the Log only in the Line that says it. A page can
+// be in the files more than once, so what counts is that every copy is that Line's.
+const ensureOnlyWhereSaid = Effect.fnUntraced(function* (
+  dataDir: string,
+  value: string,
+  what: string
+) {
+  const files = yield* logFiles(dataDir);
+  const found = occurrences(files, value);
+  const said = occurrences(files, `the password is ${value}`);
+
+  yield* ensure(found === said, `${what} is in the Log's files ${found - said} times besides`);
+});
+
 // CRED-2: a value goes in on stdin, never in argv, and only its Change comes back.
 const setCredential = Effect.fnUntraced(function* (running: Running, name: string, value: string) {
   const ran = yield* startBinary(
@@ -1960,12 +1973,6 @@ const setCredential = Effect.fnUntraced(function* (running: Running, name: strin
 
   return Number(/Change (?<change>\d+)/u.exec(output)?.groups?.change ?? 0);
 }, Effect.scoped);
-
-// What kind of Change a Change Entry holds, which the API gives as JSON.
-const decodeKind = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }));
-
-const tagOf = (change: Schema.Json) =>
-  Option.match(decodeKind(change), { onNone: () => "", onSome: ({ _tag }) => _tag });
 
 const changeAt = (entries: readonly LogEntry[], sequence: number) =>
   changeEntries(entries).find((entry) => entry.sequence === sequence);
@@ -2009,7 +2016,8 @@ const serverPassword = toCheck(
     const change = yield* setCredential(running, "floor.pass", secret);
     const joined = yield* untilJoined(running.statusOf(network), floor);
 
-    // A Credential's value is scrubbed from any Line, whatever the command (LOG-6).
+    // Someone else saying a Credential's value is recorded as they said it: nothing
+    // searches Lines for one (LOG-6).
     yield* watcher.send(`PRIVMSG ${floor} :the password is ${secret}`);
     yield* waitFor("the pasted password to be recorded", running.entriesOf(network), (all) =>
       lineEntries(all).some(({ text }) => text.includes("the password is"))
@@ -2032,22 +2040,22 @@ const serverPassword = toCheck(
       `PASS was recorded as ${JSON.stringify(pass)}`
     );
     yield* ensure(
-      pasted?.text.endsWith(":the password is <redacted>") === true,
-      `the pasted password was recorded as ${pasted?.text}`
+      pasted?.text.endsWith(`:the password is ${secret}`) === true && pasted.redacted === undefined,
+      `the pasted password was recorded as ${JSON.stringify(pasted)}`
     );
-    yield* ensureNotInLog(running.home.dataDir, secret, "the server password");
+    yield* ensureOnlyWhereSaid(running.home.dataDir, secret, "the server password");
 
     const stopped = yield* stopDaemon(running);
 
     yield* ensure(stopped.code === 0, `SIGTERM gave exit ${stopped.code}`);
-    yield* ensureNotInLog(running.home.dataDir, secret, "after the stop, the server password");
+    yield* ensureOnlyWhereSaid(running.home.dataDir, secret, "after the stop, the server password");
 
     return (
       `status named ${waiting.missingCredentials.join(",")} and ngircd saw no Connection for 1 s; ` +
       `\`iirc credential set\` recorded Change ${change}, the attempt followed ${dialedMillis} ms ` +
-      `later, and "${pass?.text}" reached a Session in ${joined.joined.join(",")}; a pasted ` +
-      `copy was recorded as "...${pasted?.text.slice(-24)}", and the password is in neither ` +
-      "iirc.sqlite nor its WAL"
+      `later, and "${pass?.text}" reached a Session in ${joined.joined.join(",")}; a copy ` +
+      "someone pasted was recorded as they said it, and the password is nowhere else in " +
+      "iirc.sqlite or its WAL"
     );
   })
 );
@@ -2226,20 +2234,26 @@ const channelKey = toCheck(
       yield* owner.until("the second key", isFrom(keeper, "MODE", secondKey), replacing);
     }
 
-    const kept = yield* waitFor("the second key to be kept", allEntries(second.client), (all) =>
-      changeEntries(all).some(({ by, sequence }) => by === "mode" && sequence > startedAt)
+    // The Network's own key is recorded as it arrived, and nothing is kept of it (CRED-4).
+    const seen = yield* waitFor("the second key's `MODE`", second.entriesOf(network), (all) =>
+      lineEntries(all).some(({ text }) => text.endsWith(`+k ${secondKey}`))
     );
 
-    const byMode = changeEntries(kept).filter(({ by }) => by === "mode");
+    const byMode = changeEntries(yield* allEntries(second.client)).filter(
+      ({ by, sequence }) => by === "mode" || sequence > startedAt
+    );
+
+    const { credentials } = yield* second.client.credentials.list();
 
     yield* stopDaemon(second);
 
-    const again = owner.mark();
+    // So the next restart rejoins with the Owner's key, and the Ircd refuses it.
     const third = yield* runDaemon(home);
     const thirdAt = (yield* third.client.daemon.status()).head ?? 0;
 
-    yield* untilJoined(third.statusOf(network), keyed);
-    yield* owner.until(`${nick} to rejoin with the second key`, isFrom(nick, "JOIN", keyed), again);
+    const refused = yield* waitFor("the rejoin to be refused", third.statusOf(network), (status) =>
+      status.joinFailures.some(({ channel, numeric }) => channel === keyed && numeric === "475")
+    );
 
     const [lastRejoin] = joinsOf(yield* third.entriesOf(network), thirdAt);
     const { settings } = yield* third.client.networks.get({ params: { id: network } });
@@ -2248,32 +2262,34 @@ const channelKey = toCheck(
     yield* stopDaemon(third);
 
     const files = yield* logFiles(home.dataDir);
+    const mode = lineEntries(seen).find(({ text }) => text.endsWith(`+k ${secondKey}`));
 
     yield* ensure(
       rejoin?.text === `JOIN ${keyed} <redacted>` &&
-        lastRejoin?.text === `JOIN ${keyed} <redacted>`,
-      `the rejoins were recorded as "${rejoin?.text}" and "${lastRejoin?.text}"`
+        lastRejoin?.text === `JOIN ${keyed} <redacted>` &&
+        lastRejoin.redacted?.join(",") === named,
+      `the rejoins were recorded as ${JSON.stringify(rejoin)} and ${JSON.stringify(lastRejoin)}`
     );
     yield* ensure(
-      named !== undefined &&
-        byMode.some(
-          ({ change }) =>
-            JSON.stringify(change) === JSON.stringify({ _tag: "CredentialSet", name: named })
-        ),
-      `the Changes by mode were ${JSON.stringify(byMode.map(({ change }) => change))}`
+      byMode.length === 0 && credentials.length === 1 && credentials[0]?.name === named,
+      `after the \`MODE\` the Changes were ${JSON.stringify(byMode.map(({ change }) => change))} ` +
+        `and the Credentials ${JSON.stringify(credentials)}`
+    );
+    yield* ensure(
+      mode !== undefined && mode.redacted === undefined,
+      `the second key's \`MODE\` was recorded as ${JSON.stringify(mode)}`
     );
     yield* ensure(occurrences(files, firstKey) === 0, "the Join's key is in the Log's files");
     yield* ensure(
       occurrences(files, secondKey) === occurrences(files, `+k ${secondKey}`),
-      "the second key is in the Log's files outside the `MODE` that first set it"
+      "the second key is in the Log's files outside the `MODE` that set it"
     );
 
     return (
       `a Join with the key got into ${keyed}, a restart rejoined with "${rejoin?.text}", ` +
-      `the raw client's \`MODE +k\` was kept as ${named} by ${byMode
-        .map(({ change }) => tagOf(change))
-        .join(", ")}, and the next restart rejoined with it; neither key is in the Log's ` +
-      "files but for that first `+k`"
+      `the raw client's \`MODE +k\` was recorded as "${mode?.text}" and changed no Change or ` +
+      `Credential, and the next restart's rejoin with the Owner's key was refused with ` +
+      `${refused.joinFailures.find(({ channel }) => channel === keyed)?.numeric}`
     );
   })
 );

@@ -65,7 +65,7 @@ Dependencies point down only. Each library package stands alone for whoever want
 | [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, outbound construction, nick candidates, `JOIN` batches, the token bucket, the refusal classifier | None |
 | [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in, `RPL_ISUPPORT`, casefolding, modes | `protocol` |
 | [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol`, `xstate` |
-| [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, scrubbing, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
+| [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
 | [`@iirc/log`](../packages/log/README.md) | The durable Log in SQLite: the writer, the reader Worker, derived tables, migrations, backup, the lock | `session`, `state`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | [`@iirc/api`](../packages/api/README.md) | The contract: `DaemonApi`, Schemas, typed errors, scopes | `protocol`, `lifecycle`, `effect` |
 | [`@iirc/daemon`](../packages/daemon/README.md) | Configuration, Credentials, keys, Network supervision, operations, and the API's handlers | `log`, `api`, `session`, `lifecycle`, `protocol`, `effect`, `@effect/platform-bun` |
@@ -90,7 +90,7 @@ sequenceDiagram
   participant F as Frontend via API
   Ircd->>T: bytes
   T->>H: read, at most 16 KB
-  H->>H: frame, cut over 8704 bytes, scrub Credentials
+  H->>H: frame, cut over 8704 bytes
   H->>R: record(Entries, within)
   activate R
   Note over R,M: one SQLite transaction

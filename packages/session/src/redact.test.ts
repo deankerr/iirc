@@ -14,7 +14,7 @@ import {
 import type { Built } from "./credentials.ts";
 import { describeDefect } from "./diagnostic.ts";
 import type { NewEntry } from "./entry.ts";
-import { scrub } from "./redact.ts";
+import { boundReasons } from "./redact.ts";
 import type { Secrets } from "./redact.ts";
 
 const encoder = new TextEncoder();
@@ -35,102 +35,29 @@ const inbound = (text: string): Extract<NewEntry, { readonly _tag: "Line" }> => 
   network: "libera",
 });
 
-const scrubbedText = (text: string) => {
-  const [entry] = scrub(secrets, [inbound(text)]);
-
-  return entry._tag === "Line"
-    ? { redacted: entry.redacted, text: decoder.decode(entry.bytes) }
-    : undefined;
-};
-
-describe("LOG-6: value scrubbing", () => {
-  it("replaces a value found as a whole word, and names its Credential", () => {
-    assert.deepStrictEqual(scrubbedText(":bob!u@h PRIVMSG #iirc :my password is hunter2"), {
-      redacted: ["pass"],
-      text: ":bob!u@h PRIVMSG #iirc :my password is <redacted>",
-    });
-  });
-
-  it("takes `:` and `,` as the edge of a word, as well as a space and either end", () => {
-    assert.deepStrictEqual(scrubbedText("hunter2:pizza,hunter2"), {
-      redacted: ["pass", "key.pizza", "pass"],
-      text: "<redacted>:<redacted>,<redacted>",
-    });
-  });
-
-  it("leaves a value alone inside another word, so a Channel key cannot mangle chat", () => {
-    const text = ":bob!u@h PRIVMSG #iirc :pizzas and xpizza and pizza. hunter2s";
-
-    assert.deepStrictEqual(scrubbedText(text), { redacted: undefined, text });
-  });
-
-  it("takes the longer of two values that overlap, whole", () => {
-    assert.deepStrictEqual(scrubbedText("PRIVMSG x :hunter2 extra"), {
-      redacted: ["long"],
-      text: "PRIVMSG x :<redacted>",
-    });
-  });
-
-  it("never matches an empty value", () => {
-    assert.deepStrictEqual(scrubbedText("a b"), { redacted: undefined, text: "a b" });
-  });
-
-  it("scrubs a Dropped Entry, and adds to the names a Line built from Credentials gave", () => {
-    const [entry] = scrub(secrets, [
-      {
-        _tag: "Dropped",
-        bytes: encoder.encode("PRIVMSG #iirc :pizza <redacted>"),
-        cause: "key:phone",
-        connection: 1,
-        network: "libera",
-        reason: "the Connection closed",
-        redacted: ["pass"],
-      },
-    ]);
-
-    assert.deepInclude(entry, { redacted: ["key.pizza", "pass"] });
-    assert.strictEqual(
-      entry._tag === "Dropped" ? decoder.decode(entry.bytes) : "",
-      "PRIVMSG #iirc :<redacted> <redacted>"
-    );
-  });
-
-  it("names Credentials in the order their placeholders stand, so the nth is the nth name", () => {
-    assert.deepStrictEqual(scrubbedText(":op!u@h MODE #one +ok pizza hunter2"), {
-      redacted: ["key.pizza", "pass"],
-      text: ":op!u@h MODE #one +ok <redacted> <redacted>",
-    });
-    assert.deepStrictEqual(scrubbedText(":op!u@h MODE #one +ok hunter2 pizza"), {
-      redacted: ["pass", "key.pizza"],
-      text: ":op!u@h MODE #one +ok <redacted> <redacted>",
-    });
-  });
-
-  it("works on bytes, so a value inside text that is not UTF-8 is still found", () => {
-    const bytes = Uint8Array.of(0xff, 0x20, ...encoder.encode("hunter2"), 0x20, 0xfe);
-    const [entry] = scrub(secrets, [{ ...inbound(""), bytes }]);
-
-    assert.deepStrictEqual(entry._tag === "Line" ? [...entry.bytes] : [], [
-      0xff,
-      0x20,
-      ...encoder.encode("<redacted>"),
-      0x20,
-      0xfe,
-    ]);
-  });
-
-  it("passes every other Entry through as it is, with or without secrets", () => {
+describe("LOG-6: the Log holds what was said, and searches it for no Credential", () => {
+  it("records a Line that holds a word some Credential is, as it arrived", () => {
     const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
-      { _tag: "Deadline", name: "hunter2", network: "libera" },
+      inbound(":op!u@h MODE #iirc +k pizza"),
+      inbound(":bob!u@h PRIVMSG #iirc :I like pizza today"),
     ];
 
-    assert.deepStrictEqual(scrub(secrets, entries), entries);
-    assert.deepStrictEqual(scrub(new Map(), entries), entries);
+    assert.deepStrictEqual(boundReasons(entries), entries);
   });
 
-  it("scrubs the reason a close or a Dropped Entry gives, which can quote a defect", () => {
+  it("names nothing for a `<redacted>` that a User sent", () => {
+    const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
+      inbound(":bob!u@h PRIVMSG #iirc :violets are <redacted>"),
+    ];
+
+    const [entry] = boundReasons(entries);
+
+    assert.strictEqual(entry._tag === "Line" ? entry.redacted : "not a Line", undefined);
+  });
+
+  it("bounds the reason a close or a Dropped Entry gives", () => {
     const ircd = { host: "irc.example", port: 6697, tls: true };
-    const reason = "the host failed: Error: bad password hunter2";
+    const reason = `the host failed: ${describeDefect(new Error("x ".repeat(3000)))}`;
 
     const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
       {
@@ -149,53 +76,39 @@ describe("LOG-6: value scrubbing", () => {
         cause: "api",
         connection: 1,
         network: "libera",
-        reason,
+        reason: "y".repeat(5000),
       },
     ];
 
     assert.deepStrictEqual(
-      scrub(secrets, entries).map((entry) => ("reason" in entry ? entry.reason : undefined)),
-      Array.from({ length: 3 }, () => "the host failed: Error: bad password <redacted>")
+      boundReasons(entries).map((entry) => ("reason" in entry ? entry.reason?.length : 0)),
+      [1024, 1024, 1024]
     );
   });
 
-  it("bounds a reason only after scrubbing it, so no cut leaves part of a value", () => {
-    const ircd = { host: "irc.example", port: 6697, tls: true };
-    const value = "s".repeat(400);
-    const held: Secrets = new Map([["long", Redacted.make(value)]]);
-    const reason = `the host failed: ${describeDefect(new Error(`bad ${value} and ${"x ".repeat(600)}`))}`;
-
-    const [entry] = scrub(held, [
-      {
-        _tag: "Connection",
-        chosen: false,
-        connection: 1,
-        ircd,
-        network: "libera",
-        phase: "closing",
-        reason,
-      },
-    ]);
-
-    const recordedReason = "reason" in entry ? entry.reason : "";
-
-    assert.isAtMost(recordedReason.length, 1024);
-    assert.notInclude(recordedReason, "s".repeat(8));
-  });
-
-  it("bounds reasons when there are no Credentials too", () => {
-    const [entry] = scrub(new Map(), [
+  it("does not split a surrogate pair where it cuts", () => {
+    const [entry] = boundReasons([
       {
         _tag: "Dropped",
         bytes: encoder.encode("PRIVMSG #a :hi"),
         cause: "api",
         connection: 1,
         network: "libera",
-        reason: "y".repeat(5000),
+        reason: `${"y".repeat(1022)}😀${"y".repeat(10)}`,
       },
     ]);
 
-    assert.strictEqual("reason" in entry ? entry.reason.length : 0, 1024);
+    const reason = "reason" in entry ? entry.reason : "";
+
+    assert.strictEqual(reason, `${"y".repeat(1022)}…`);
+  });
+
+  it("passes every other Entry through as it is", () => {
+    const entries: Arr.NonEmptyReadonlyArray<NewEntry> = [
+      { _tag: "Deadline", name: "hunter2", network: "libera" },
+    ];
+
+    assert.deepStrictEqual(boundReasons(entries), entries);
   });
 });
 

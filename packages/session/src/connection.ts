@@ -14,7 +14,6 @@ import {
   Fiber,
   Option,
   Queue,
-  Redacted,
   Ref,
   Semaphore,
   TxRef,
@@ -42,8 +41,8 @@ import { reconcile } from "./reconcile.ts";
 import { RecordFailed } from "./recorder.ts";
 import type { Recorder } from "./recorder.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
-import { channelKeyChanges, joinPlanMoved } from "./standing.ts";
-import type { KeyChange, Standing, WantedChannel } from "./standing.ts";
+import { joinPlanMoved } from "./standing.ts";
+import type { Standing, WantedChannel } from "./standing.ts";
 import { attach, ConnectFailed, describeSocketError } from "./transport.ts";
 import type { Transport } from "./transport.ts";
 
@@ -159,12 +158,6 @@ export interface Attempted {
   readonly plan: ConnectionPlan;
 }
 
-/** A Channel's key as an inbound `MODE` set it, or took it away (CRED-4). */
-export interface ChannelKey {
-  readonly channel: string;
-  readonly key: Redacted.Redacted | undefined;
-}
-
 /** What every Connection on a Network shares, and the Tuning of this one. */
 export interface Host {
   readonly commit: Commit;
@@ -175,8 +168,6 @@ export interface Host {
   readonly leaving: Effect.Effect<boolean>;
   /** What `QUIT` says, read as the Connection is left (LIVE-9). */
   readonly quitReason: Effect.Effect<string>;
-  /** Told of a Channel key once the `MODE` that set or took it away is recorded (CRED-4). */
-  readonly onChannelKey: ((change: ChannelKey) => Effect.Effect<void>) | undefined;
   /** Every Credential there is, read each time one is needed. */
   readonly secrets: Effect.Effect<Secrets>;
   readonly standing: Effect.Effect<Standing, RecordFailed>;
@@ -359,32 +350,6 @@ const toWriteFailed = (error: Socket.SocketError) =>
 const pongBytes = (token: Uint8Array | undefined) =>
   Buffer.concat([encoder.encode("PONG "), token ?? new Uint8Array()]);
 
-const isInboundLine = (entry: NewEntry) => entry._tag === "Line" && entry.direction === "inbound";
-
-// The host acts on a `MODE` as recorded. A key that was already a Credential's value was
-// scrubbed out of it, so it is that Credential's value again, as long as the Entry names
-// the Credential for that very `<redacted>` (LOG-6). The names go in the order their
-// placeholders stand, so another scrubbed in the same Line does not hide which it was.
-const keyOf = (
-  { entry, key, placeholder }: KeyChange,
-  secrets: Secrets
-): Option.Option<Redacted.Redacted | undefined> => {
-  if (key === undefined) {
-    return Option.some(undefined);
-  }
-
-  const names = entry._tag === "Line" ? (entry.redacted ?? []) : [];
-
-  if (placeholder === undefined || names.length === 0) {
-    return Option.some(Redacted.make(key));
-  }
-
-  // A `<redacted>` the Ircd sent itself would put every later name out of step.
-  const name = names.length === placeholder.of ? names[placeholder.slot] : undefined;
-
-  return name === undefined ? Option.none() : Option.fromUndefinedOr(secrets.get(name));
-};
-
 /**
  * How many Lines a Connection's login sequence holds: `IDENTIFY` if a service password is
  * configured, then each connect command (CONN-6).
@@ -418,7 +383,7 @@ export const hostConnection: (
   { commands, connection, ircd, plan }: Attempted
 ) {
   const { commit, connect, hosted, id, quitReason, standing, tuning, wanted } = host;
-  const { hurrying, leaving, onChannelKey, secrets } = host;
+  const { hurrying, leaving, secrets } = host;
 
   // Unbounded in items, and bounded in bytes by `held`, so a wake never waits for room.
   const inbox = yield* Queue.unbounded<InboxItem>();
@@ -778,40 +743,11 @@ export const hostConnection: (
     }
   });
 
-  // A key that is a Credential's own value is scrubbed like any other (LOG-6), so the first
-  // `+k` the Daemon sees is the one that is recorded as it arrived (CRED-4). A hook that
-  // dies is the Daemon's fault, and costs the Connection nothing.
-  const announceKeys = Effect.fnUntraced(function* (before: Standing, recorded: readonly Entry[]) {
-    const changes = channelKeyChanges(before, recorded);
-
-    if (onChannelKey === undefined || changes.length === 0) {
-      return;
-    }
-
-    const held = yield* secrets;
-
-    for (const change of changes) {
-      const key = keyOf(change, held);
-
-      if (Option.isSome(key)) {
-        yield* onChannelKey({ channel: change.channel, key: key.value }).pipe(
-          Effect.catchDefect((defect) => Effect.logError("A Channel key could not be kept", defect))
-        );
-      }
-    }
-  });
-
   const onEntries = Effect.fnUntraced(function* (
     entries: Arr.NonEmptyReadonlyArray<NewEntry>,
     drainMillis: number = tuning.drainMillis,
     leading: readonly Order[] = []
   ) {
-    // Read only when a `MODE` could be among them, so that each is read as it stood then.
-    const before =
-      onChannelKey !== undefined && entries.some(isInboundLine)
-        ? yield* Effect.option(standing)
-        : Option.none<Standing>();
-
     const committed = yield* commit(entries).pipe(
       Effect.asSome,
       Effect.catchTag("RecordFailed", () => Effect.succeedNone)
@@ -823,11 +759,6 @@ export const hostConnection: (
       yield* logFailed;
     } else {
       yield* runCommands([...leading, ...committed.value.commands], drainMillis);
-
-      if (Option.isSome(before)) {
-        yield* announceKeys(before.value, committed.value.recorded);
-      }
-
       yield* flushUnsent.pipe(Effect.catchTag("RecordFailed", () => logFailed));
 
       if (reconciling && committed.value.stateMayMove) {

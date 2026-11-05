@@ -140,9 +140,6 @@ const credentialChanges = (daemon: Daemon["Service"]) =>
       )
     );
 
-const channelKeys = (daemon: Daemon["Service"]) =>
-  daemon.network("libera").pipe(Effect.map(({ settings: { channels } }) => channels));
-
 describe("a keyring that stops answering", () => {
   it.effect(
     "CRED-1: tells the caller after the bound, and fails later writes at once without running them",
@@ -245,32 +242,6 @@ describe("a keyring that stops answering", () => {
           assert.deepStrictEqual(yield* persisted, ["b"]);
           assert.deepStrictEqual(yield* names(daemon), ["b"]);
           assert.lengthOf(yield* credentialChanges(daemon), 1);
-        })
-      )
-  );
-
-  it.effect(
-    "CRED-4: a key seen with `MODE +k` whose write ends late is not kept, and the Channel is left as it was",
-    () =>
-      withLockedKeyring(({ daemon, entered, ircd, persisted, release }) =>
-        Effect.gen(function* () {
-          yield* ircd.read(":iirc!u@h JOIN #c\r\n");
-          yield* untilTrue(daemon.network("libera"), ({ status }) => status.joined.length > 0);
-          yield* ircd.read(":op!u@h MODE #c +k hunter2-channel-key\r\n");
-
-          // The write gives up after the bound, and so does the key's attempt to be kept.
-          yield* entered;
-          yield* TestClock.adjust(bound);
-          yield* Deferred.succeed(release, undefined);
-          yield* untilTrue(persisted, (held) => held !== undefined && held.length === 0);
-          yield* TestClock.withLive(Effect.sleep("100 millis"));
-
-          assert.deepStrictEqual(yield* persisted, []);
-          assert.deepStrictEqual(yield* names(daemon), []);
-          assert.deepStrictEqual(yield* credentialChanges(daemon), []);
-          assert.deepStrictEqual(yield* channelKeys(daemon), [
-            { autojoin: true, name: "#c", rejoinOnKick: false },
-          ]);
         })
       )
   );

@@ -18,7 +18,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
 
-**Credential**: A secret the Daemon uses on the Owner's behalf, which it can use but never reveal. _Avoid_: Password, secret
+**Credential**: A secret the Owner gives the Daemon to use on their behalf, which it can use but never reveal. Nothing a Network sends is a Credential. _Avoid_: Password, secret
 
 ## The IRC side
 

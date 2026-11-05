@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 
 import type { Entry } from "./entry.ts";
 import {
-  channelKeyChanges,
   consecutiveFailures,
   foldStandings,
   joinPlan,
@@ -128,10 +127,9 @@ const recorded = readFileSync(fixture, "utf-8")
   .map((line) => Schema.decodeSync(RecordedLog)(line));
 
 // Everything the Daemon reads of a Standing, as plain data: what the hosts decide by, what
-// status shows, what the derived tables are written from, and the keys `onChannelKey` is
-// told of. Channels are read as status reads them, by name in order, because how Standing
-// holds them is its own business.
-const readsOf = (standing: Standing, now: number, before: Standing, entry: Entry) => {
+// status shows, and what the derived tables are written from. Channels are read as status
+// reads them, by name in order, because how Standing holds them is its own business.
+const readsOf = (standing: Standing, now: number) => {
   const { attempt, connection } = standing;
   const joined = [...standing.irc.channels.values()].map(({ name }) => name);
 
@@ -161,11 +159,6 @@ const readsOf = (standing: Standing, now: number, before: Standing, entry: Entry
     failures: consecutiveFailures(standing, defaultTuning, now),
     gap: standing.gap,
     joinFailures: [...standing.joinFailures],
-    keys: channelKeyChanges(before, [entry]).map(({ channel, key, placeholder }) => ({
-      channel,
-      key,
-      placeholder,
-    })),
     kicked: [...standing.kicked],
     lagChecks: standing.lagChecks,
     lagMillis: standing.lagMillis,
@@ -203,7 +196,7 @@ const replay = (entries: readonly Entry[]) => {
   const givenUp = new Set<number>();
 
   foldStandings(noStandings, entries, ({ after, before, entry }) => {
-    reads.push([entry.sequence, readsOf(after, entry.at, before, entry)]);
+    reads.push([entry.sequence, readsOf(after, entry.at)]);
 
     if (hasGivenUp(after)) {
       givenUp.add(entry.sequence);

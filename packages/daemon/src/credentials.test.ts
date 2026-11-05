@@ -820,33 +820,31 @@ describe("Credentials (CRED-1, CRED-3)", () => {
     )
   );
 
-  it.live(
-    "LOG-6: gives the very same Map until a Credential changes, so scrubbing builds its search once",
-    () =>
-      inTempDirectory((dataDir) =>
-        withCredentials(dataDir, noKeyring, (credentials) =>
-          Effect.gen(function* () {
-            yield* credentials.set("a", Redacted.make("one"));
+  it.live("CRED-1: gives the very same Map until a Credential changes", () =>
+    inTempDirectory((dataDir) =>
+      withCredentials(dataDir, noKeyring, (credentials) =>
+        Effect.gen(function* () {
+          yield* credentials.set("a", Redacted.make("one"));
 
-            const first = yield* credentials.all;
-            const again = yield* credentials.all;
+          const first = yield* credentials.all;
+          const again = yield* credentials.all;
 
-            // Deleting what is not there writes nothing, so nothing changes.
-            yield* credentials.delete("missing");
+          // Deleting what is not there writes nothing, so nothing changes.
+          yield* credentials.delete("missing");
 
-            const unchanged = yield* credentials.all;
+          const unchanged = yield* credentials.all;
 
-            yield* credentials.set("a", Redacted.make("two"));
+          yield* credentials.set("a", Redacted.make("two"));
 
-            const changed = yield* credentials.all;
+          const changed = yield* credentials.all;
 
-            assert.strictEqual(again, first);
-            assert.strictEqual(unchanged, first);
-            assert.notStrictEqual(changed, first);
-            assert.strictEqual(Redacted.value(changed.get("a") ?? Redacted.make("")), "two");
-          })
-        )
+          assert.strictEqual(again, first);
+          assert.strictEqual(unchanged, first);
+          assert.notStrictEqual(changed, first);
+          assert.strictEqual(Redacted.value(changed.get("a") ?? Redacted.make("")), "two");
+        })
       )
+    )
   );
 
   it.live("CRED-3: a value never shows when what the service holds is printed or logged", () =>

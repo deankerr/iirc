@@ -336,8 +336,7 @@ const valuesOf = (holding: Holding): ReadonlyMap<string, Redacted.Redacted> =>
 
 /**
  * What the service holds: every Credential, and their values by name, made once for each
- * change. A host is handed the very same values until one changes, which is what keeps
- * scrubbing from building its search again for every append (LOG-6).
+ * change, so a host is handed the very same values until one changes.
  */
 interface Held {
   readonly holding: Holding;

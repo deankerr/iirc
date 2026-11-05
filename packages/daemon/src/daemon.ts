@@ -13,7 +13,6 @@ import {
   LaneFull,
   LineDropped,
   LogUnavailable,
-  modeKeyName,
   NetworkExists,
   NetworkNotFound,
   NotInSession,
@@ -47,7 +46,6 @@ import { joinSensitive, keyedJoins } from "@iirc/session/credentials";
 import type { Entry, NetworkId } from "@iirc/session/entry";
 import { hostNetwork } from "@iirc/session/network";
 import type {
-  ChannelKey,
   NetworkHost,
   NetworkOptions,
   NetworkSettings as HostSettings,
@@ -68,7 +66,6 @@ import {
   FiberMap,
   Layer,
   Predicate,
-  Queue,
   Ref,
   Scope,
   Semaphore,
@@ -80,7 +77,7 @@ import type { Digest, SecureRandom } from "effect/crypto";
 import { constVoid } from "effect/Function";
 
 import type { Change } from "./change.ts";
-import { keepingFor, keyNameFor } from "./channel-keys.ts";
+import { keyNameFor } from "./channel-keys.ts";
 import { droppedChannels } from "./configuration.ts";
 import type { Configuration, ConfiguredNetwork } from "./configuration.ts";
 import { Credentials } from "./credentials.ts";
@@ -183,9 +180,6 @@ const reasonOf = (cause: unknown) =>
 
 const toSendResult = (sent: Sent): SendResult =>
   sent._tag === "Written" ? { sequence: sent.sequence, status: "written" } : { status: "queued" };
-
-// CRED-4: who stored a key a Network set or took away with `MODE`, as a Change's `by`.
-const byMode = modeKeyName;
 
 // A Join with no key has nothing to build in.
 const noSecrets: Secrets = new Map();
@@ -514,21 +508,6 @@ export class Daemon extends Context.Service<
         const hostContext = yield* Effect.context<Recorder | Transport>();
         const keyContext = yield* Effect.context<Digest.Digest | SecureRandom.SecureRandom>();
 
-        // CRED-4: a key a Network set or took away with `MODE` is kept by a fiber of its
-        // own, so a host's loop never waits on a write, nor on a stop that waits for it.
-        // Only the latest for each Channel waits, so a flood of `MODE`s holds no more than
-        // one key per Channel, and costs no more writes than there are Channels.
-        const seenKeys = yield* Ref.make<
-          ReadonlyMap<string, { readonly change: ChannelKey; readonly id: NetworkId }>
-        >(new Map());
-
-        const keysSeen = yield* Queue.sliding<undefined>(1);
-
-        const onChannelKey = (id: NetworkId) => (change: ChannelKey) =>
-          Ref.update(seenKeys, (held) =>
-            new Map(held).set(`${id}\0${channelKey(change.channel)}`, { change, id })
-          ).pipe(Effect.andThen(Queue.offer(keysSeen, undefined)), Effect.asVoid);
-
         // A host reads its settings whenever it decides something, and wakes only for a
         // Change to its own Network, which the fold gives a new object. A Credential it
         // refers to changing is one of those (CRED-1).
@@ -542,7 +521,6 @@ export class Daemon extends Context.Service<
               Stream.changesWith((one, other) => one === other)
             ),
             id,
-            onChannelKey: onChannelKey(id),
             // A removed Network's host stops once Configuration has dropped it, and until it
             // has gone it finds its Network as it last was, but disabled, so it acts on
             // nothing the Owner removed.
@@ -708,59 +686,6 @@ export class Daemon extends Context.Service<
               name,
             } satisfies Change)
           );
-
-        // CRED-4: a key a Network set or took away is kept as `mode` did it. A Channel that
-        // named no key is given the name it was kept under, once it is kept.
-        const keepKey = Effect.fnUntraced(function* (id: NetworkId, seen: ChannelKey) {
-          const network = (yield* SubscriptionRef.get(configuration)).networks.get(id);
-
-          const keeping =
-            network === undefined
-              ? undefined
-              : keepingFor(network.settings, seen, yield* credentials.all);
-
-          if (keeping?._tag === "Delete") {
-            yield* commit(byMode, () =>
-              Effect.as(credentials.delete(keeping.name), {
-                _tag: "CredentialDeleted",
-                name: keeping.name,
-              } satisfies Change)
-            );
-          } else if (keeping !== undefined) {
-            const { channel, name, nameIt, value } = keeping;
-
-            if (value !== undefined) {
-              yield* storeCredential(byMode, name, value);
-            }
-
-            if (nameIt) {
-              yield* commit(byMode, (current) =>
-                Effect.as(requireNetwork(current, id), {
-                  _tag: "ChannelKeyNamed",
-                  channel,
-                  key: name,
-                  network: id,
-                } satisfies Change)
-              );
-            }
-          }
-        });
-
-        // A stopping Daemon records nothing more, which is no fault of the key's.
-        yield* Effect.forever(
-          Effect.gen(function* () {
-            yield* Queue.take(keysSeen);
-
-            for (const { change, id } of (yield* Ref.getAndSet(seenKeys, new Map())).values()) {
-              yield* keepKey(id, change).pipe(
-                Effect.catchTag("Stopping", () => Effect.void),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("A Channel key could not be kept", cause)
-                )
-              );
-            }
-          })
-        ).pipe(Effect.forkScoped);
 
         // A configured Network's host, which only a stopping Daemon lacks.
         const hostOf = Effect.fnUntraced(function* (id: NetworkId) {

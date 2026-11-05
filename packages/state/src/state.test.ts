@@ -396,38 +396,44 @@ describe("KNOW-6: Channel keys", () => {
   const joined = [session, ":claude!u@h JOIN #a"];
 
   it("follows the last `k` of a `MODE` on a Channel Self is in", () => {
-    const { changes, state } = run(...joined, ":op MODE #A +ok bob sesame");
+    const { state } = run(...joined, ":op MODE #A +ok bob sesame");
 
-    expect(changes.at(-1)).toStrictEqual({
-      _tag: "KeySet",
-      channel: "#A",
-      key: "sesame",
-      param: 3,
-    });
     expect(channelOf(state, "#a")?.key).toBe("sesame");
   });
 
   it("clears it with `-k`, whether or not the key comes with it", () => {
     for (const mode of ["-k", "-k sesame"]) {
-      const { changes, state } = run(...joined, ":op MODE #a +k sesame", `:op MODE #a ${mode}`);
+      const { state } = run(...joined, ":op MODE #a +k sesame", `:op MODE #a ${mode}`);
 
-      expect(changes.at(-1)).toStrictEqual({ _tag: "KeyCleared", channel: "#a" });
       expect(channelOf(state, "#a")?.key).toBeUndefined();
     }
   });
 
   it("stores no key shown as `*`, which is hidden", () => {
-    expect(changesOf(...joined, ":op MODE #a +k *")).toHaveLength(2);
+    expect(
+      channelOf(run(...joined, ":op MODE #a +k sesame", ":op MODE #a +k *").state, "#a")?.key
+    ).toBe("sesame");
   });
 
   it("reads a `MODE` by the Network's own `PREFIX`", () => {
-    expect(
-      changesOf(...joined, ":x 005 claude PREFIX=(qo)~@ :ok", ":op MODE #a +qk bob other").at(-1)
-    ).toStrictEqual({ _tag: "KeySet", channel: "#a", key: "other", param: 3 });
+    const { state } = run(
+      ...joined,
+      ":x 005 claude PREFIX=(qo)~@ :ok",
+      ":op MODE #a +qk bob other"
+    );
+
+    expect(channelOf(state, "#a")?.key).toBe("other");
+  });
+
+  it("reports no change: a key the Network shows is its own, never a Credential (CRED-4)", () => {
+    expect(changesOf(...joined, ":op MODE #a +k sesame", ":op MODE #a -k")).toHaveLength(2);
   });
 
   it("says nothing for a `MODE` that does not add up, or on a Channel Self is not in", () => {
-    expect(changesOf(...joined, ":op MODE #a +ok sesame", ":op MODE #b +k sesame")).toHaveLength(2);
+    const { state } = run(...joined, ":op MODE #a +ok sesame", ":op MODE #b +k sesame");
+
+    expect(channelOf(state, "#a")?.key).toBeUndefined();
+    expect(channelOf(state, "#b")).toBeUndefined();
   });
 });
 
