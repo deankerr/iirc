@@ -94,11 +94,7 @@ Wanted, but not needed for the first proof:
 
 - **Effect stability:** only Effect's core is stable. `http`, `http-api`, `rpc`, `sql`, `socket`, `cli`, `workers`, `crypto`, and every package outside `effect`, including `platform-bun` and `vitest`, can break in a minor release.
   - The catalog pins exact versions, and these APIs stay behind deep services.
-- **XState alpha:** v6 is in alpha, with renames and no aliases between alphas. Its use stays behind `step` and `fold` in `@iirc/lifecycle`.
-  - Tests of the machine do not depend on XState, so a hand-written reducer could replace it.
-  - A step soak (`lifecycle.soak.test.ts`) and a minified build test gate every alpha bump.
-  - `@iirc/lifecycle` cannot be published until v6 is stable. The other library packages can.
-- **Reference repos lag:** `~/code/ref/xstate` is v5, `effect-solutions` is a v4 beta, and rat-stack uses Node. Installed source is the authority.
+- **Reference repos lag:** `effect-solutions` is a v4 beta, and rat-stack uses Node. Installed source is the authority.
 
 ## Unproven
 

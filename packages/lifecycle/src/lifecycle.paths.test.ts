@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { getShortestPaths } from "xstate/graph";
 
 import { closeReason, deadline, phase, start, step } from "./lifecycle.ts";
-import type { Command, NetworkEvent, NetworkInput, Phase } from "./lifecycle.ts";
-import { network } from "./machine.ts";
+import type { Command, NetworkEvent, NetworkInput, NetworkSnapshot, Phase } from "./lifecycle.ts";
 import { defaultTuning } from "./tuning.ts";
 
-// The one test allowed to know about XState. It asks the machine's graph where
-// the machine can go, then checks each place through the public API alone.
+// Walks everywhere the machine can go from the sample events below, then checks each
+// place through the public API alone.
 
 const input: NetworkInput = {
   loginLines: 0,
@@ -50,21 +48,8 @@ const loginSent = [
   { at: 3000, identify: false, written: false },
 ] as const;
 
-const samples = {
-  ATTEMPT: attempts,
-  CLOSED: [{ at: 9000, reason: "peer hung up" }],
-  CLOSING: [{ at: 4000, reason: "Owner stopped" }],
-  DEADLINE: deadlines,
-  HEARD: [{ at: 3500 }],
-  LEAVING: [{ at: 2500 }],
-  LINE: lines,
-  LOGIN_SENT: loginSent,
-  OPENED: [{ at: 2000 }],
-  PING: [{ at: 3000, token: new TextEncoder().encode("token") }],
-} as const;
-
 const everyEvent: readonly NetworkEvent[] = [
-  { ...input, at: 1000, nicks: ["claude", "claude_"], type: "ATTEMPT" },
+  ...attempts.map((attempt) => ({ ...attempt, type: "ATTEMPT" as const })),
   { at: 2000, type: "OPENED" },
   { at: 9000, reason: "peer hung up", type: "CLOSED" },
   { at: 4000, reason: "Owner stopped", type: "CLOSING" },
@@ -97,15 +82,48 @@ const everyPhase: Record<Phase, true> = {
   session: true,
 };
 
-// Every place the machine can reach, extended by every event from there, because
-// a shortest path alone never takes an edge that lands back on a known state. Each
-// path opens with XState's own `xstate.init` step, which is not an event of ours.
-// `limit` makes context that grows without bound fail here rather than never end.
-const walks = getShortestPaths(network, { events: samples, input, limit: 4000 }).flatMap((path) => {
-  const reached = path.steps.slice(1).map(({ event }) => event);
+// Every place the machine can reach, by the shortest path to it, found breadth first.
+// Places are told apart by everything a snapshot holds. `limit` makes context that grows
+// without bound fail here rather than never end.
+const limit = 4000;
 
-  return everyEvent.map((event) => [...reached, event]);
-});
+const keyOf = (snapshot: NetworkSnapshot) => JSON.stringify(snapshot);
+
+const shortestPaths = (): readonly (readonly NetworkEvent[])[] => {
+  const first = start(input);
+  const paths = new Map<string, readonly NetworkEvent[]>([[keyOf(first), []]]);
+  let frontier: readonly (readonly [NetworkSnapshot, readonly NetworkEvent[]])[] = [[first, []]];
+
+  while (frontier.length > 0) {
+    const next: (readonly [NetworkSnapshot, readonly NetworkEvent[]])[] = [];
+
+    for (const [snapshot, path] of frontier) {
+      for (const event of everyEvent) {
+        const reached = step(snapshot, event).next;
+        const key = keyOf(reached);
+
+        if (!paths.has(key)) {
+          const longer = [...path, event];
+
+          paths.set(key, longer);
+          next.push([reached, longer]);
+        }
+      }
+    }
+
+    if (paths.size > limit) {
+      throw new Error(`the machine reached more than ${limit} places`);
+    }
+
+    frontier = next;
+  }
+
+  return [...paths.values()];
+};
+
+// Each place, extended by every event from there, because a shortest path alone never
+// takes an edge that lands back on a known place.
+const walks = shortestPaths().flatMap((path) => everyEvent.map((event) => [...path, event]));
 
 const walked = walks.map((walk) => {
   let snapshot = start(input);

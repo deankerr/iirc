@@ -2,7 +2,7 @@
 
 A high-level map of the codebase: the packages, how a Line moves through them, and where the seams are. [`requirements.md`](requirements.md) says what the Daemon must do. Each package's README has the detail and the traps.
 
-Versions: Bun 1.4.4, Effect 4.1.1, XState 6.0.0-alpha.71, pinned in the root `package.json` catalog.
+Versions: Bun 1.4.4 and Effect 4.1.1, pinned in the root `package.json` catalog.
 
 ## The idea
 
@@ -13,8 +13,7 @@ Versions: Bun 1.4.4, Effect 4.1.1, XState 6.0.0-alpha.71, pinned in the root `pa
 
 | Owner | Owns | Examples |
 | --- | --- | --- |
-| Pure code | Anything that can be computed | Parsing, folds, `Standing`, `nextAttempt`, `joinPlan`, the token bucket |
-| XState | Phases that gate behaviour, as a pure fold | The Network machine in `@iirc/lifecycle` |
+| Pure code | Anything that can be computed, including phases that gate behaviour | Parsing, folds, the Network machine, `Standing`, `nextAttempt`, `joinPlan`, the token bucket |
 | Effect | Anything that waits, fails, or holds a resource | Hosts, lanes, the Log, the reader Worker, the API, the CLI |
 | Bun | The runtime and build; what Effect does not offer ([ADR 0005](adr/0005-effect-wins-where-it-overlaps-bun.md)) | The executable, SQLite, the keyring, the HTTP engine |
 
@@ -64,7 +63,7 @@ Dependencies point down only. Each library package stands alone for whoever want
 | --- | --- | --- |
 | [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, outbound construction, nick candidates, `JOIN` batches, the token bucket, the refusal classifier | None |
 | [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in, `RPL_ISUPPORT`, casefolding, modes | `protocol` |
-| [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol`, `xstate` |
+| [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol` |
 | [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
 | [`@iirc/log`](../packages/log/README.md) | The durable Log in SQLite: the writer, the reader Worker, derived tables, migrations, backup, the lock | `session`, `state`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | [`@iirc/api`](../packages/api/README.md) | The contract: `DaemonApi`, Schemas, typed errors, scopes | `protocol`, `lifecycle`, `effect` |
@@ -177,7 +176,6 @@ Requirements: [Configuration](requirements.md#configuration), [Credentials](requ
 | `Recorder` | `session`, `log` | How Entries are stored, and `Standing` | `Recorder.memory` |
 | `Committed` | `session`, `log` | Watching Entries as they commit | Any Stream consumer, such as a bot |
 | `NetworkOptions` | `session` | Where a host's settings come from | `constantNetwork(id, settings)` |
-| `step`, `fold` | `lifecycle` | XState | A hand-written reducer, if XState ever goes |
 | `Log`, `LogReader` | `log` | SQLite, the writer, the reader Worker | A temporary data directory |
 | `Credentials` | `daemon` | Keyring or file | A stand-in `Keyring` |
 | `DaemonCore` | `daemon` | The whole Daemon, with no HTTP and no argv | A `Transport` and a `Keyring` |

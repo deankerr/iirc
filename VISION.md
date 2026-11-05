@@ -20,7 +20,7 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 
 ## How we build
 
-- **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun ([ADR 0005](docs/adr/0005-effect-wins-where-it-overlaps-bun.md)). XState owns finite lifecycles, as pure folds ([ADR 0003](docs/adr/0003-machines-are-projections.md)).
+- **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun ([ADR 0005](docs/adr/0005-effect-wins-where-it-overlaps-bun.md)). Finite lifecycles are pure folds over the Log ([ADR 0003](docs/adr/0003-machines-are-projections.md)).
 - **Parse, don't validate.** Bytes from the network and input from frontends become precise types at the boundary. A value that exists is a value that is valid, and that goes for outbound lines too: an IRC line that cannot be sent safely cannot be constructed.
 - **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt ([ADR 0002](docs/adr/0002-the-log-holds-bytes.md), [ADR 0004](docs/adr/0004-configuration-lives-in-the-log.md)).
 - **Deep modules, compositional packages.** Small interfaces hide real work. One package has one job, and packages combine without knowing about each other.
@@ -32,7 +32,7 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 
 ## Core stack
 
-Bun, TypeScript, Effect, and XState, with Ultracite as the fence. The local protocol documents in [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) are our reference for IRC. The language we use is defined in [`GLOSSARY.md`](GLOSSARY.md). We choose everything else when we reach it, and we are free to try more than one option. The frontend framework is an open experiment.
+Bun, TypeScript, and Effect, with Ultracite as the fence. The local protocol documents in [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) are our reference for IRC. The language we use is defined in [`GLOSSARY.md`](GLOSSARY.md). We choose everything else when we reach it, and we are free to try more than one option. The frontend framework is an open experiment.
 
 ## Where we are going
 

@@ -11,8 +11,7 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@iirc/protocol": "workspace:*",
-    "xstate": "catalog:"
+    "@iirc/protocol": "workspace:*"
   },
   "devDependencies": {
     "vitest": "catalog:"

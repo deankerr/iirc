@@ -1,8 +1,5 @@
-import { initialTransition, transition } from "xstate";
-import type { SnapshotFrom } from "xstate";
-
-import { commandsOf, isLoginOpen, network } from "./machine.ts";
-import type { Context, LoginAnswer } from "./machine.ts";
+import { initial, isLoginOpen, transition } from "./machine.ts";
+import type { Context, LoginAnswer, Machine } from "./machine.ts";
 import type { Tuning } from "./tuning.ts";
 
 /**
@@ -106,8 +103,8 @@ export type Command =
  */
 export type Phase = "idle" | "connecting" | "registering" | "session" | "closing" | "closed";
 
-/** A Network's machine at one point in its fold. */
-export type NetworkSnapshot = SnapshotFrom<typeof network>;
+/** A Network's machine at one point in its fold. Only this package looks inside. */
+export type NetworkSnapshot = Machine;
 
 /**
  * How far a Connection got towards a Session. `Welcomed` stays once the Session begins to
@@ -158,14 +155,11 @@ export interface ConnectionView {
  * @param input - What it holds until the first `ATTEMPT` brings the input of its own.
  * @returns The first snapshot.
  */
-export const start: (input: NetworkInput) => NetworkSnapshot = (input) => {
-  const [snapshot] = initialTransition(network, input);
-
-  return snapshot;
-};
+export const start: (input: NetworkInput) => NetworkSnapshot = initial;
 
 /**
- * Advances the machine by one event.
+ * Advances the machine by one event. An event that means nothing where the machine is
+ * gives back the same snapshot.
  * @param snapshot - The machine so far.
  * @param event - What happened.
  * @returns The next snapshot, and the Commands for the host to run after commit.
@@ -173,14 +167,7 @@ export const start: (input: NetworkInput) => NetworkSnapshot = (input) => {
 export const step: (
   snapshot: NetworkSnapshot,
   event: NetworkEvent
-) => { readonly commands: readonly Command[]; readonly next: NetworkSnapshot } = (
-  snapshot,
-  event
-) => {
-  const [next, effects] = transition(network, snapshot, event);
-
-  return { commands: effects.flatMap(commandsOf), next };
-};
+) => { readonly commands: readonly Command[]; readonly next: NetworkSnapshot } = transition;
 
 /**
  * Replays events into a snapshot, discarding Commands because their outcomes are
@@ -217,8 +204,7 @@ export const deadline: (
  * @param snapshot - The machine so far.
  * @returns The Phase.
  */
-export const phase: (snapshot: NetworkSnapshot) => Phase = ({ value }) =>
-  value === "idle" || value === "closed" || value === "closing" ? value : value.connection;
+export const phase: (snapshot: NetworkSnapshot) => Phase = (snapshot) => snapshot.phase;
 
 const loginOf = (answer: LoginAnswer): Login => {
   switch (answer._tag) {

@@ -1,10 +1,8 @@
 import { loginSign } from "@iirc/protocol/login";
 import type { LoginSign } from "@iirc/protocol/login";
 import { isRefusal } from "@iirc/protocol/refusal";
-import { setup, types } from "xstate";
-import type { ExecutableEffectFrom } from "xstate";
 
-import type { Command, NetworkEvent, NetworkInput } from "./lifecycle.ts";
+import type { Command, NetworkEvent, NetworkInput, Phase } from "./lifecycle.ts";
 
 const registrationDeadline = "registration";
 const burstDeadline = "burst";
@@ -24,8 +22,6 @@ type Payload<Type extends NetworkEvent["type"]> = Omit<
   Extract<NetworkEvent, { readonly type: Type }>,
   "type"
 >;
-
-type Params<Type extends Command["type"]> = Omit<Extract<Command, { readonly type: Type }>, "type">;
 
 interface Deadline {
   readonly at: number;
@@ -75,6 +71,18 @@ const noConnection: ConnectionContext = {
 
 /** What the machine holds. Package-private: everything else reads it through `inspect`. */
 export type Context = NetworkInput & ConnectionContext;
+
+/** A Network's machine at one point in its fold: which Phase it is in, and what it holds. */
+export interface Machine {
+  readonly context: Context;
+  readonly phase: Phase;
+}
+
+/** One step of the machine: where it went, and what it asks the host to do after commit. */
+export interface Stepped {
+  readonly commands: readonly Command[];
+  readonly next: Machine;
+}
 
 // The Ircd's own words are its last parameter. A Line can arrive with none.
 const textOf = ({ command, params }: Payload<"LINE">) => params.at(-1) ?? command;
@@ -164,361 +172,366 @@ const afterLoginSign = (context: Context, event: Payload<"LINE">): Context => {
       };
 };
 
+// What a step returns when an event means nothing where the machine is: the same machine,
+// so a host can tell that nothing moved.
+const stay = (machine: Machine): Stepped => ({ commands: [], next: machine });
+
+const moved = (context: Context, phase: Phase, commands: readonly Command[] = []): Stepped => ({
+  commands,
+  next: { context, phase },
+});
+
 // The way out of a Connection the machine has given up on. Nothing is pending once it
 // has asked for a close, or the host would wake for it while the close is under way.
-const leaving = (context: Context) => ({
-  context: { ...context, deadlines: [] },
-  target: "#network.closing",
+const leaving = (context: Context, commands: readonly Command[]): Stepped =>
+  moved({ ...context, deadlines: [] }, "closing", commands);
+
+const close = (reason: string, refused?: true): Command =>
+  refused === undefined
+    ? { reason, type: "closeConnection" }
+    : { reason, refused, type: "closeConnection" };
+
+const send = (cause: string, command: string, params: readonly string[]): Command => ({
+  cause,
+  command,
+  lane: control,
+  params,
+  type: "sendLine",
 });
 
-/** The Network machine. Package-private: everything else goes through `step` and `fold`. */
-export const network = setup({
-  // These only name Commands. `enq` drops an action with no body, and an effect's
-  // `.type` is its function's `name`, so each must stay an inline function under
-  // its own key: only then does the name outlive minification.
-  actions: {
-    burstComplete: () => {
-      // Never runs: the host carries out the Command after commit.
-    },
-    closeConnection: (_params: Params<"closeConnection">) => {
-      // Never runs: the host carries out the Command after commit.
-    },
-    loginSettled: () => {
-      // Never runs: the host carries out the Command after commit.
-    },
-    sendLine: (_params: Params<"sendLine">) => {
-      // Never runs: the host carries out the Command after commit.
-    },
-    sendPong: (_params: Params<"sendPong">) => {
-      // Never runs: the host carries out the Command after commit.
-    },
-  },
-  schemas: {
-    context: types<Context>(),
-    events: {
-      ATTEMPT: types<Payload<"ATTEMPT">>(),
-      CLOSED: types<Payload<"CLOSED">>(),
-      CLOSING: types<Payload<"CLOSING">>(),
-      DEADLINE: types<Payload<"DEADLINE">>(),
-      HEARD: types<Payload<"HEARD">>(),
-      LEAVING: types<Payload<"LEAVING">>(),
-      LINE: types<Payload<"LINE">>(),
-      LOGIN_SENT: types<Payload<"LOGIN_SENT">>(),
-      OPENED: types<Payload<"OPENED">>(),
-      PING: types<Payload<"PING">>(),
-    },
-    input: types<NetworkInput>(),
-  },
-}).createMachine({
-  context: ({ input }) => ({ ...input, ...noConnection }),
-  id: "network",
-  initial: "idle",
-  on: {
-    // Works from anywhere: a crash leaves a Connection that never recorded a close. The
-    // input is the Connection's own, so nothing of the last one's carries over.
-    ATTEMPT: ({ event: { loginLines, nicks, realname, services, tuning, username } }) => ({
-      context: { ...noConnection, loginLines, nicks, realname, services, tuning, username },
-      target: ".connection",
-    }),
-    CLOSED: ({ context, event }) => ({
-      context: { ...context, ...noConnection, closeReason: event.reason },
-      target: ".closed",
-    }),
-  },
-  states: {
-    closed: {},
-    // Whoever started the close, the machine has finished with this Connection. A
-    // `PING` goes unanswered here, because a `PONG` could only leave behind the `QUIT`
-    // or the close already asked for, and neither leaves the Ircd waiting on one.
-    //
-    // How its login went is still worth knowing until it has closed, so a sign that comes
-    // now is taken, and so is a Line of the sequence that was on its way out. Nothing is
-    // asked of the host and no wait starts, because nothing here waits any more (CONN-6).
-    closing: {
-      on: {
-        LINE: ({ context, event }) => ({ context: afterLoginSign(context, event) }),
-        LOGIN_SENT: ({ context, event }) => ({
-          context: { ...context, login: countedLoginLine(context, event) },
-        }),
-      },
-    },
-    connection: {
-      initial: "connecting",
-      on: {
-        CLOSING: ({ actions, context, event }, enq) => {
-          enq(actions.sendLine, {
-            cause: "quit",
-            command: "QUIT",
-            lane: control,
-            params: [event.reason],
-          });
-          enq(actions.closeConnection, { reason: event.reason });
-
-          return leaving(context);
-        },
-        LEAVING: ({ context }) => ({ context: { ...context, leaving: true } }),
-        PING: ({ actions, event }, enq) => {
-          enq(actions.sendPong, { cause: "ping-reply", lane: control, token: event.token });
-        },
-      },
-      states: {
-        connecting: {
-          on: {
-            // Nothing is connected yet, so there is nobody to send `QUIT` to.
-            CLOSING: ({ actions, context, event }, enq) => {
-              enq(actions.closeConnection, { reason: event.reason });
-
-              return leaving(context);
-            },
-            OPENED: ({ actions, context, event }, enq) => {
-              const [nick] = context.nicks;
-
-              if (nick === undefined) {
-                enq(actions.closeConnection, { reason: "no nicks to try" });
-
-                return leaving(context);
-              }
-
-              enq(actions.sendLine, {
-                cause: "registration",
-                command: "NICK",
-                lane: control,
-                params: [nick],
-              });
-              enq(actions.sendLine, {
-                cause: "registration",
-                command: "USER",
-                lane: control,
-                params: [context.username, "0", "*", context.realname],
-              });
-
-              return {
-                context: {
-                  ...context,
-                  deadlines: [
-                    {
-                      at: event.at + context.tuning.registrationTimeoutMillis,
-                      name: registrationDeadline,
-                    },
-                  ],
-                },
-                target: "registering",
-              };
-            },
-          },
-        },
-        registering: {
-          on: {
-            DEADLINE: ({ actions, context, event }, enq) => {
-              const due = event.name === registrationDeadline && isDue(context.deadlines, event);
-
-              if (due) {
-                enq(actions.closeConnection, { reason: "registration timed out" });
-              }
-
-              return due ? leaving(context) : undefined;
-            },
-            LINE: ({ actions, context, event }, enq) => {
-              if (isNickRejection(event, context.nicks[context.nickIndex])) {
-                const nickIndex = context.nickIndex + 1;
-                const nick = context.nicks[nickIndex];
-
-                if (nick === undefined) {
-                  enq(actions.closeConnection, {
-                    reason: `ran out of nicks after ${context.nicks.length}: ${textOf(event)}`,
-                  });
-
-                  return leaving(context);
-                }
-
-                enq(actions.sendLine, {
-                  cause: "nick-fallback",
-                  command: "NICK",
-                  lane: control,
-                  params: [nick],
-                });
-
-                return { context: { ...context, nickIndex } };
-              }
-
-              if (isRefusal(event.command, event.params)) {
-                enq(actions.closeConnection, { reason: textOf(event), refused: true });
-
-                return leaving(context);
-              }
-
-              // Only a known transient `ERROR` gets here, and the Ircd is still leaving.
-              if (event.command === "ERROR") {
-                enq(actions.closeConnection, { reason: textOf(event) });
-
-                return leaving(context);
-              }
-
-              // A welcome that names nobody leaves no Self for a Session to be, so
-              // it agrees with `@iirc/state` and the deadline keeps running. Nor does one
-              // that arrives once the host is leaving.
-              return event.command === "001" && event.params.length > 0 && !context.leaving
-                ? {
-                    context: {
-                      ...context,
-                      deadlines: [
-                        { at: event.at + context.tuning.burstMillis, name: burstDeadline },
-                        { at: event.at + context.tuning.lagCheckMillis, name: lagCheckDeadline },
-                        { at: event.at + context.tuning.silenceMillis, name: silenceDeadline },
-                      ],
-                      welcomedAt: event.at,
-                    },
-                    target: "session",
-                  }
-                : undefined;
-            },
-          },
-        },
-        session: {
-          on: {
-            DEADLINE: ({ actions, context, event }, enq) => {
-              const name = isDue(context.deadlines, event) ? event.name : undefined;
-
-              if (name === burstDeadline) {
-                enq(actions.burstComplete);
-
-                return {
-                  context: { ...context, deadlines: without(context.deadlines, burstDeadline) },
-                };
-              }
-
-              // No sign came in time, which is all a bare Network may ever say (CONN-6).
-              if (name === loginDeadline) {
-                enq(actions.loginSettled);
-
-                return {
-                  context: {
-                    ...context,
-                    deadlines: without(context.deadlines, loginDeadline),
-                    login: { ...context.login, answer: { _tag: "TimedOut" } },
-                  },
-                };
-              }
-
-              if (name === lagCheckDeadline) {
-                // From the Entry's own time, so a replay gives the same token, and two
-                // checks can only share one if they share a millisecond.
-                enq(actions.sendLine, {
-                  cause: "lag-check",
-                  command: "PING",
-                  lane: control,
-                  params: [`lag-${event.at}`],
-                });
-
-                return {
-                  context: {
-                    ...context,
-                    deadlines: movedTo(
-                      context.deadlines,
-                      lagCheckDeadline,
-                      event.at + context.tuning.lagCheckMillis
-                    ),
-                  },
-                };
-              }
-
-              if (name === silenceDeadline) {
-                enq(actions.closeConnection, {
-                  reason: `heard nothing for ${context.tuning.silenceMillis / 1000} seconds`,
-                });
-              }
-
-              return name === silenceDeadline ? leaving(context) : undefined;
-            },
-            HEARD: ({ context, event }) => ({ context: heard(context, event.at) }),
-            LINE: ({ actions, context, event }, enq) => {
-              if (event.command === "ERROR") {
-                enq(actions.closeConnection, { reason: textOf(event) });
-
-                return leaving(context);
-              }
-
-              const alive = heard(context, event.at);
-              const signed = afterLoginSign(alive, event);
-
-              const ended =
-                endsBurst.has(event.command) &&
-                alive.deadlines.some(({ name }) => name === burstDeadline);
-
-              if (ended) {
-                enq(actions.burstComplete);
-              }
-
-              if (!isLoginOpen(alive, alive.login) && isLoginOpen(signed, signed.login)) {
-                enq(actions.loginSettled);
-              }
-
-              return {
-                context: ended
-                  ? { ...signed, deadlines: without(signed.deadlines, burstDeadline) }
-                  : signed,
-              };
-            },
-            LOGIN_SENT: ({ actions, context, event }, enq) => {
-              const next = afterLoginSent(context, event);
-
-              if (!isLoginOpen(context, context.login) && isLoginOpen(next, next.login)) {
-                enq(actions.loginSettled);
-              }
-
-              return { context: next };
-            },
-            PING: ({ actions, context, event }, enq) => {
-              enq(actions.sendPong, { cause: "ping-reply", lane: control, token: event.token });
-
-              return { context: heard(context, event.at) };
-            },
-          },
-        },
-      },
-    },
-    idle: {},
-  },
+const pong = (token: Uint8Array | undefined): Command => ({
+  cause: "ping-reply",
+  lane: control,
+  token,
+  type: "sendPong",
 });
 
-// `.args` is `unknown[]` whichever action this is, so a Command is parsed back out.
-const hasKey = <Params extends object>(value: unknown, key: keyof Params): value is Params =>
-  typeof value === "object" && value !== null && key in value;
+const burstComplete: Command = { type: "burstComplete" };
+const loginSettled: Command = { type: "loginSettled" };
+
+// Nothing is connected yet, so there is nobody to send `QUIT` to.
+const fromConnecting = (machine: Machine, event: NetworkEvent): Stepped | undefined => {
+  const { context } = machine;
+
+  if (event.type === "CLOSING") {
+    return leaving(context, [close(event.reason)]);
+  }
+
+  if (event.type !== "OPENED") {
+    return undefined;
+  }
+
+  const [nick] = context.nicks;
+
+  if (nick === undefined) {
+    return leaving(context, [close("no nicks to try")]);
+  }
+
+  return moved(
+    {
+      ...context,
+      deadlines: [
+        { at: event.at + context.tuning.registrationTimeoutMillis, name: registrationDeadline },
+      ],
+    },
+    "registering",
+    [
+      send("registration", "NICK", [nick]),
+      send("registration", "USER", [context.username, "0", "*", context.realname]),
+    ]
+  );
+};
+
+const lineWhileRegistering = (machine: Machine, event: Payload<"LINE">): Stepped => {
+  const { context } = machine;
+
+  if (isNickRejection(event, context.nicks[context.nickIndex])) {
+    const nickIndex = context.nickIndex + 1;
+    const nick = context.nicks[nickIndex];
+
+    return nick === undefined
+      ? leaving(context, [
+          close(`ran out of nicks after ${context.nicks.length}: ${textOf(event)}`),
+        ])
+      : moved({ ...context, nickIndex }, "registering", [send("nick-fallback", "NICK", [nick])]);
+  }
+
+  if (isRefusal(event.command, event.params)) {
+    return leaving(context, [close(textOf(event), true)]);
+  }
+
+  // Only a known transient `ERROR` gets here, and the Ircd is still leaving.
+  if (event.command === "ERROR") {
+    return leaving(context, [close(textOf(event))]);
+  }
+
+  // A welcome that names nobody leaves no Self for a Session to be, so it agrees with
+  // `@iirc/state` and the deadline keeps running. Nor does one that arrives once the host
+  // is leaving.
+  return event.command === "001" && event.params.length > 0 && !context.leaving
+    ? moved(
+        {
+          ...context,
+          deadlines: [
+            { at: event.at + context.tuning.burstMillis, name: burstDeadline },
+            { at: event.at + context.tuning.lagCheckMillis, name: lagCheckDeadline },
+            { at: event.at + context.tuning.silenceMillis, name: silenceDeadline },
+          ],
+          welcomedAt: event.at,
+        },
+        "session"
+      )
+    : stay(machine);
+};
+
+const fromRegistering = (machine: Machine, event: NetworkEvent): Stepped | undefined => {
+  if (event.type === "LINE") {
+    return lineWhileRegistering(machine, event);
+  }
+
+  if (event.type !== "DEADLINE") {
+    return undefined;
+  }
+
+  return event.name === registrationDeadline && isDue(machine.context.deadlines, event)
+    ? leaving(machine.context, [close("registration timed out")])
+    : stay(machine);
+};
+
+const deadlineInSession = (machine: Machine, event: Payload<"DEADLINE">): Stepped => {
+  const { context } = machine;
+
+  if (!isDue(context.deadlines, event)) {
+    return stay(machine);
+  }
+
+  switch (event.name) {
+    case burstDeadline: {
+      return moved(
+        { ...context, deadlines: without(context.deadlines, burstDeadline) },
+        "session",
+        [burstComplete]
+      );
+    }
+
+    // No sign came in time, which is all a bare Network may ever say (CONN-6).
+    case loginDeadline: {
+      return moved(
+        {
+          ...context,
+          deadlines: without(context.deadlines, loginDeadline),
+          login: { ...context.login, answer: { _tag: "TimedOut" } },
+        },
+        "session",
+        [loginSettled]
+      );
+    }
+
+    // From the Entry's own time, so a replay gives the same token, and two checks can only
+    // share one if they share a millisecond.
+    case lagCheckDeadline: {
+      return moved(
+        {
+          ...context,
+          deadlines: movedTo(
+            context.deadlines,
+            lagCheckDeadline,
+            event.at + context.tuning.lagCheckMillis
+          ),
+        },
+        "session",
+        [send("lag-check", "PING", [`lag-${event.at}`])]
+      );
+    }
+
+    case silenceDeadline: {
+      return leaving(context, [
+        close(`heard nothing for ${context.tuning.silenceMillis / 1000} seconds`),
+      ]);
+    }
+
+    default: {
+      return stay(machine);
+    }
+  }
+};
+
+const lineInSession = ({ context }: Machine, event: Payload<"LINE">): Stepped => {
+  if (event.command === "ERROR") {
+    return leaving(context, [close(textOf(event))]);
+  }
+
+  const alive = heard(context, event.at);
+  const signed = afterLoginSign(alive, event);
+
+  const ended =
+    endsBurst.has(event.command) && alive.deadlines.some(({ name }) => name === burstDeadline);
+
+  const settles = !isLoginOpen(alive, alive.login) && isLoginOpen(signed, signed.login);
+
+  return moved(
+    ended ? { ...signed, deadlines: without(signed.deadlines, burstDeadline) } : signed,
+    "session",
+    [...(ended ? [burstComplete] : []), ...(settles ? [loginSettled] : [])]
+  );
+};
+
+const fromSession = (machine: Machine, event: NetworkEvent): Stepped | undefined => {
+  const { context } = machine;
+
+  switch (event.type) {
+    case "DEADLINE": {
+      return deadlineInSession(machine, event);
+    }
+
+    case "HEARD": {
+      return moved(heard(context, event.at), "session");
+    }
+
+    case "LINE": {
+      return lineInSession(machine, event);
+    }
+
+    case "LOGIN_SENT": {
+      const next = afterLoginSent(context, event);
+      const settles = !isLoginOpen(context, context.login) && isLoginOpen(next, next.login);
+
+      return moved(next, "session", settles ? [loginSettled] : []);
+    }
+
+    case "PING": {
+      return moved(heard(context, event.at), "session", [pong(event.token)]);
+    }
+
+    case "ATTEMPT":
+    case "CLOSED":
+    case "CLOSING":
+    case "LEAVING":
+    case "OPENED": {
+      return undefined;
+    }
+
+    // An event of a kind it has never heard of, from a Log a later Daemon wrote.
+    default: {
+      return undefined;
+    }
+  }
+};
+
+// What holds for any Phase of a Connection under way, unless that Phase says otherwise.
+const fromConnection = (machine: Machine, event: NetworkEvent): Stepped => {
+  const { context } = machine;
+
+  switch (event.type) {
+    case "CLOSING": {
+      return leaving(context, [send("quit", "QUIT", [event.reason]), close(event.reason)]);
+    }
+
+    case "LEAVING": {
+      return moved({ ...context, leaving: true }, machine.phase);
+    }
+
+    case "PING": {
+      return { commands: [pong(event.token)], next: machine };
+    }
+
+    case "ATTEMPT":
+    case "CLOSED":
+    case "DEADLINE":
+    case "HEARD":
+    case "LINE":
+    case "LOGIN_SENT":
+    case "OPENED": {
+      return stay(machine);
+    }
+
+    // An event of a kind it has never heard of, from a Log a later Daemon wrote.
+    default: {
+      return stay(machine);
+    }
+  }
+};
+
+// Whoever started the close, the machine has finished with this Connection. A `PING` goes
+// unanswered here, because a `PONG` could only leave behind the `QUIT` or the close already
+// asked for, and neither leaves the Ircd waiting on one.
+//
+// How its login went is still worth knowing until it has closed, so a sign that comes now
+// is taken, and so is a Line of the sequence that was on its way out. Nothing is asked of
+// the host and no wait starts, because nothing here waits any more (CONN-6).
+const fromClosing = (machine: Machine, event: NetworkEvent): Stepped => {
+  const { context } = machine;
+
+  if (event.type === "LINE") {
+    return moved(afterLoginSign(context, event), "closing");
+  }
+
+  return event.type === "LOGIN_SENT"
+    ? moved({ ...context, login: countedLoginLine(context, event) }, "closing")
+    : stay(machine);
+};
+
+const fromPhase = (machine: Machine, event: NetworkEvent): Stepped => {
+  switch (machine.phase) {
+    case "connecting": {
+      return fromConnecting(machine, event) ?? fromConnection(machine, event);
+    }
+
+    case "registering": {
+      return fromRegistering(machine, event) ?? fromConnection(machine, event);
+    }
+
+    case "session": {
+      return fromSession(machine, event) ?? fromConnection(machine, event);
+    }
+
+    case "closing": {
+      return fromClosing(machine, event);
+    }
+
+    case "idle":
+    case "closed": {
+      return stay(machine);
+    }
+
+    default: {
+      return machine.phase satisfies never;
+    }
+  }
+};
 
 /**
- * Reads the Commands out of one effect of a transition. `.params` is no use here:
- * for an enqueued action it holds XState's own record, and `.args` holds the params.
- * Every action is a Command, so one that cannot be read throws rather than vanishing,
- * which is what a name lost to minification would otherwise do.
- * @param effect - An effect returned by `transition`.
- * @returns The Command it stands for, or nothing for any other kind of effect.
+ * The machine's first state, holding `input` until the first `ATTEMPT` brings its own.
+ * @param input - What it holds until then.
+ * @returns The machine, idle.
  */
-export const commandsOf = (effect: ExecutableEffectFrom<typeof network>): readonly Command[] => {
-  if (effect.kind !== "action") {
-    return [];
+export const initial = (input: NetworkInput): Machine => ({
+  context: { ...input, ...noConnection },
+  phase: "idle",
+});
+
+/**
+ * The Network machine as a pure step: one event in, the next machine and its Commands out.
+ * An event that means nothing where the machine is gives back the same machine.
+ * @param machine - The machine so far.
+ * @param event - What happened.
+ * @returns Where it went, and what the host is to do after commit.
+ */
+export const transition = (machine: Machine, event: NetworkEvent): Stepped => {
+  // Works from anywhere: a crash leaves a Connection that never recorded a close. The
+  // input is the Connection's own, so nothing of the last one's carries over.
+  if (event.type === "ATTEMPT") {
+    const { loginLines, nicks, realname, services, tuning, username } = event;
+
+    return moved(
+      { ...noConnection, loginLines, nicks, realname, services, tuning, username },
+      "connecting"
+    );
   }
 
-  const [params] = effect.args;
-
-  if (effect.type === "burstComplete") {
-    return [{ type: "burstComplete" }];
+  if (event.type === "CLOSED") {
+    return moved({ ...machine.context, ...noConnection, closeReason: event.reason }, "closed");
   }
 
-  if (effect.type === "loginSettled") {
-    return [{ type: "loginSettled" }];
-  }
-
-  if (effect.type === "sendLine" && hasKey<Params<"sendLine">>(params, "command")) {
-    return [{ ...params, type: "sendLine" }];
-  }
-
-  if (effect.type === "sendPong" && hasKey<Params<"sendPong">>(params, "token")) {
-    return [{ ...params, type: "sendPong" }];
-  }
-
-  if (effect.type === "closeConnection" && hasKey<Params<"closeConnection">>(params, "reason")) {
-    return [{ ...params, type: "closeConnection" }];
-  }
-
-  throw new Error(`The machine asked for an unknown Command: ${effect.type}`);
+  return fromPhase(machine, event);
 };

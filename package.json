@@ -11,8 +11,7 @@
       "@effect/sql-sqlite-bun": "4.1.1",
       "@effect/vitest": "4.1.1",
       "effect": "4.1.1",
-      "vitest": "5.0.5",
-      "xstate": "6.0.0-alpha.71"
+      "vitest": "5.0.5"
     }
   },
   "type": "module",

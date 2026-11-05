@@ -2,7 +2,7 @@
 
 The Network machine: one Connection's progress from dial to close, as a pure fold over events. It holds no timers and does no I/O. Its Commands are data for a host to carry out.
 
-- **Depends on:** `@iirc/protocol`, `xstate` (v6 alpha).
+- **Depends on:** `@iirc/protocol`.
 - **Used by:** `@iirc/session` (the host steps it inside each commit), `@iirc/api` (`Tuning` for its Schema), `@iirc/daemon`.
 - [ADR 0003](../../docs/adr/0003-machines-are-projections.md) says why it is a fold and not an actor.
 
@@ -79,11 +79,8 @@ inspect(snapshot).registration; // { _tag: "Welcomed", at: 30, nick: "iirc_" }
 
 ## Traps
 
-- **Action names must survive minification.** An effect's `.type` is its function's `name`, so each action is an inline function under its own key in `setup`. `commandsOf` throws on an action it cannot read rather than lose it. `lifecycle.minify.test.ts` builds a minified bundle to prove it.
-- **`after` and `enq.emit` are not used.** Cost per step grew from about 150 µs to over 1 ms within thousands of steps.
-- **`createEffectActor` cannot step inside a transaction,** because its `send` only queues. `transition` is synchronous, so it can.
-- **XState v6 is alpha.** `lifecycle.soak.test.ts` steps the machine 220,000 times and fails if the cost per step grows. Run it, and the minify test, on every alpha bump.
-- This package cannot be published until XState v6 is stable.
+- **A Phase's own handling comes first.** `connecting`, `registering`, and `session` each fall back to what holds for any Connection under way (`CLOSING`, `LEAVING`, `PING`), so a Phase that handles one of those replaces it, as `connecting` does for `CLOSING`. `ATTEMPT` and `CLOSED` work from every Phase.
+- **Context must not grow with every Line.** `lifecycle.soak.test.ts` steps the machine 220,000 times and fails if the cost per step grows.
 
 ## Requirements
 

@@ -30,8 +30,8 @@ import {
 } from "./binary.ts";
 import { assertBackoff, buildBinary, buildTimeout } from "./testing.ts";
 
-// PROOF-4 against the real thing: the minified binary, because XState Commands can
-// vanish under minification with no error, on a real socket, killed for real. Set
+// PROOF-4 against the real thing: the minified binary the release build makes, on a real
+// socket, killed for real. Set
 // IIRC_KILL_SEED to the seed a failure logged, and the same plan runs again.
 
 const binary = `${appRoot}/dist/iirc`;
