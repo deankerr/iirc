@@ -89,10 +89,10 @@ describe(toEvent, () => {
     );
   });
 
-  it("LIVE-5: carries a refusal through a `closed` Entry", () => {
+  it("LIVE-5: reads nothing into the refusal mark an earlier Daemon wrote", () => {
     assert.deepStrictEqual(
       toEvent({ ...connection, connection: 1, phase: "closed", reason: "banned", refused: true }),
-      { at: 42, reason: "banned", refused: true, type: "CLOSED" }
+      { at: 42, reason: "banned", type: "CLOSED" }
     );
   });
 

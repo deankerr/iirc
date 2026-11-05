@@ -344,8 +344,8 @@ describe("LIVE-4: reconnecting", () => {
   );
 });
 
-describe("LIVE-5: refusals", () => {
-  it.effect("LIVE-5: backs off for 30 minutes, then retries, showing the Network's words", () =>
+describe("LIVE-5: a Network that turns us away", () => {
+  it.effect("LIVE-5: its ERROR is why it closed, and it backs off like any failure", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
       const hosted = yield* host(ircd);
@@ -358,37 +358,30 @@ describe("LIVE-5: refusals", () => {
       yield* ircd.hangUp;
       yield* manyTurns;
 
-      const status = yield* hosted.status;
       const [closed] = connectionsOf(yield* entries, "closed");
 
-      assert.isTrue(closed?.refused);
-      assert.isTrue(status.refused);
-      assert.strictEqual(status.refusal, "You are banned, and that is that");
-      assert.strictEqual(status.closeReason, "You are banned, and that is that");
-
-      const delay = yield* waitOutBackoff(hosted, ircd);
-
-      assert.strictEqual(delay, 30 * 60 * 1000);
+      assert.isUndefined(closed?.refused);
+      assert.strictEqual(closed?.reason, "You are banned, and that is that");
+      assert.strictEqual((yield* hosted.status).closeReason, "You are banned, and that is that");
+      assert.isAtMost(yield* waitOutBackoff(hosted, ircd), defaultTuning.reconnectInitialMillis);
     }).pipe(memory)
   );
 
-  it.effect("LIVE-5: the refusal stays in status until a Session is reached", () =>
+  it.effect("LIVE-5: a numeric alone closes nothing, and the Ircd's close is the reason", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
       const hosted = yield* host(ircd);
 
       yield* ircd.read(":ircd 465 * :Banned\r\n");
+      yield* manyTurns;
+
+      assert.strictEqual((yield* hosted.status).phase, "registering");
+
       yield* ircd.hangUp;
       yield* manyTurns;
-      yield* waitOutBackoff(hosted, ircd);
 
-      assert.strictEqual((yield* hosted.status).refusal, "Banned");
-
-      yield* ircd.read(welcome);
-      yield* manyTurns;
-
-      assert.isFalse((yield* hosted.status).refused);
-      assert.isUndefined((yield* hosted.status).refusal);
+      assert.strictEqual((yield* hosted.status).closeReason, "the Ircd closed the Connection");
+      assert.isAtMost(yield* waitOutBackoff(hosted, ircd), defaultTuning.reconnectInitialMillis);
     }).pipe(memory)
   );
 });
@@ -459,7 +452,6 @@ describe("CONN-4: nicks", () => {
         `ran out of nicks after ${attempt?.nicks.length}: Nickname in use`
       );
       assert.strictEqual(status.consecutiveFailures, 1);
-      assert.isFalse(status.refused);
 
       yield* waitOutBackoff(hosted, ircd);
     }).pipe(memory)
@@ -2108,7 +2100,6 @@ describe("status", () => {
       assert.deepStrictEqual(status.lanes, { background: 0, control: 0, interactive: 0 });
       assert.isUndefined(status.logFault);
       assert.isUndefined(status.nextAttemptAt);
-      assert.isFalse(status.refused);
       assert.strictEqual(status.consecutiveFailures, 0);
     }).pipe(memory)
   );
@@ -2648,8 +2639,82 @@ describe("LOG-4, LIVE-11: a stop under a flood", () => {
   });
 });
 
-describe("LOG-2: closing and refusals", () => {
-  it.effect("LOG-2: a ban at accept is a refusal, though a failed write started the close", () =>
+describe("LOG-2: closing, and the Ircd's own words", () => {
+  it.effect("LIVE-5: an ERROR after the registration deadline gives its words", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* host(ircd);
+
+      yield* TestClock.adjust("60 seconds");
+      yield* manyTurns;
+
+      assert.strictEqual((yield* hosted.status).phase, "closing");
+
+      yield* ircd.read("ERROR :Closing Link: registration timed out, says the Ircd\r\n");
+      yield* ircd.hangUp;
+      yield* manyTurns;
+
+      const [closed] = connectionsOf(yield* entries, "closed");
+
+      assert.strictEqual(closed?.reason, "Closing Link: registration timed out, says the Ircd");
+    }).pipe(memory)
+  );
+
+  it.effect("LIVE-5: a stop during a close it did not choose still takes the Ircd's words", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const running = yield* Deferred.make<NetworkHost>();
+      const stop = yield* Deferred.make<undefined>();
+
+      const fiber = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(running, yield* bareHost(ircd));
+          yield* Deferred.await(stop);
+        })
+      ).pipe(Effect.forkChild);
+
+      const hosted = yield* Deferred.await(running);
+
+      yield* TestClock.adjust("60 seconds");
+      yield* manyTurns;
+
+      assert.strictEqual((yield* hosted.status).phase, "closing");
+
+      yield* Deferred.succeed(stop, undefined);
+      yield* manyTurns;
+      yield* ircd.read("ERROR :the real Ircd reason\r\n");
+      yield* ircd.hangUp;
+      yield* Fiber.join(fiber);
+
+      const log = yield* entries;
+      const [closing] = connectionsOf(log, "closing");
+      const [closed] = connectionsOf(log, "closed");
+
+      assert.isFalse(closing?.chosen);
+      assert.strictEqual(closed?.reason, "the real Ircd reason");
+    }).pipe(memory)
+  );
+
+  it.effect("LIVE-9: a leave the Daemon chose keeps its reason, though the Ircd answers it", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd({
+        respond: (line) => (line.startsWith("QUIT") ? ["ERROR :Closing Link: (Quit: off)"] : []),
+      });
+
+      const { fiber, stop } = yield* stopInBackground(ircd, { quitReason: "off to bed" });
+
+      yield* stop;
+      yield* Fiber.join(fiber);
+
+      const log = yield* entries;
+      const [closed] = connectionsOf(log, "closed");
+
+      assert.include(texts(log, "inbound"), "ERROR :Closing Link: (Quit: off)");
+      assert.strictEqual(closed?.reason, "off to bed");
+    }).pipe(memory)
+  );
+
+  it.effect("LOG-2: a ban at accept gives its words, though a failed write started the close", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
 
@@ -2661,21 +2726,18 @@ describe("LOG-2: closing and refusals", () => {
       yield* ircd.hangUp;
       yield* manyTurns;
 
-      const status = yield* hosted.status;
       const [closed] = connectionsOf(yield* entries, "closed");
 
-      assert.isTrue(closed?.refused);
       assert.strictEqual(closed?.reason, "You are banned from this server (test)");
-      assert.strictEqual(status.refusal, "You are banned from this server (test)");
-
-      yield* TestClock.adjust("29 minutes");
-      yield* manyTurns;
-
-      assert.lengthOf(yield* ircd.dials, 1);
+      assert.strictEqual(
+        (yield* hosted.status).closeReason,
+        "You are banned from this server (test)"
+      );
+      assert.isAtMost(yield* waitOutBackoff(hosted, ircd), defaultTuning.reconnectInitialMillis);
     }).pipe(memory)
   );
 
-  it.effect("LOG-2: a refusal among the Lines a close records still outranks its reason", () =>
+  it.effect("LOG-2: an ERROR among the Lines a close records still outranks its reason", () =>
     Effect.gen(function* () {
       const release = yield* Deferred.make<undefined>();
 
@@ -2706,8 +2768,8 @@ describe("LOG-2: closing and refusals", () => {
 
         const [closed] = connectionsOf(yield* entries, "closed");
 
-        assert.isTrue(closed?.refused);
-        assert.strictEqual((yield* hosted.status).refusal, "You are banned");
+        assert.strictEqual(closed?.reason, "You are banned");
+        assert.strictEqual((yield* hosted.status).closeReason, "You are banned");
       }).pipe(Effect.provide(layer));
     })
   );
@@ -2873,28 +2935,6 @@ describe("LOG-8: a clock set back", () => {
       yield* manyTurns;
 
       assert.lengthOf(yield* ircd.dials, 2);
-    }).pipe(memory)
-  );
-
-  it.effect("LOG-8: and a refusal waits no more than its own 30 minutes", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-
-      yield* TestClock.setTime(3 * 86_400_000);
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* bareHost(ircd);
-          yield* ircd.read(":ircd 465 * :Banned\r\n");
-          yield* ircd.hangUp;
-          yield* manyTurns;
-        })
-      );
-      yield* TestClock.setTime(0);
-
-      const hosted = yield* host(ircd);
-
-      assert.strictEqual(((yield* hosted.status).nextAttemptAt ?? 0) - (yield* now), 1_800_000);
     }).pipe(memory)
   );
 });

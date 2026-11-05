@@ -931,7 +931,6 @@ describe("the compiled binary", () => {
             tuning: finalTuning,
           }).at,
           phase: phase(folded),
-          refused: false,
           self: null,
         });
         assert.strictEqual(status.phase, "closed");

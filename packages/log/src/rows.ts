@@ -53,7 +53,6 @@ const Tuning = Schema.Struct({
   quitWaitMillis: Schema.Int,
   reconnectInitialMillis: Schema.Int,
   reconnectMaxMillis: Schema.Int,
-  refusalBackoffMillis: Schema.Int,
   registrationTimeoutMillis: Schema.Int,
   rejoinSettleMillis: Schema.Int,
   sendWaitMillis: Schema.Int,
@@ -75,7 +74,8 @@ const Connected = {
   network: Schema.String,
 };
 
-// `refused` is `true` or absent, so the column is 1 or NULL.
+// `refused` is `true` or absent, so the column is 1 or NULL. Only earlier Daemons wrote it,
+// for a close they took as a refusal (LIVE-5).
 const RefusedFromBit = Schema.Literal(1).pipe(
   Schema.decodeTo(Schema.Literal(true), {
     decode: SchemaGetter.transform(() => true as const),

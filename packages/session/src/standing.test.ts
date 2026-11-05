@@ -434,10 +434,8 @@ describe("LIVE-4: when to reconnect", () => {
 
   it("LOG-8: says what wait `at` stands for, so a clock set back cannot stretch it", () => {
     const failed = new Script().failure();
-    const refused = new Script().attempt().opened().refused("banned");
 
     expect(failed.next().delayMillis).toBe(failed.delay());
-    expect(refused.next().delayMillis).toBe(defaultTuning.refusalBackoffMillis);
     expect(nextAttempt(noStanding, { ircds: oneIrcd, tuning: defaultTuning }).delayMillis).toBe(0);
   });
 
@@ -643,81 +641,32 @@ describe("LIVE-4: rotating Ircds", () => {
   });
 });
 
-describe("LIVE-5: refusals", () => {
-  const refusal = defaultTuning.refusalBackoffMillis;
+describe("LIVE-5: a Network that turns us away", () => {
+  it("LIVE-5: backs off like any failure, whatever it said", () => {
+    const banned = new Script()
+      .attempt()
+      .opened()
+      .in("ERROR :You are banned")
+      .closed("You are banned");
 
-  it("LIVE-5: waits at least the refusal from its close, keeping its words", () => {
-    const script = new Script().attempt().opened().refused("You are banned (K-Line)");
-
-    expect(script.standing.refusal).toStrictEqual({
-      at: started,
-      reason: "You are banned (K-Line)",
-    });
-    expect(script.next().at).toBe(started + refusal);
+    expect(banned.next()).toStrictEqual(new Script().attempt().opened().closed("gone").next());
   });
 
-  it("LIVE-5: survives a restart", () => {
-    const script = new Script().attempt().refused("banned").wait(1000).daemon("started");
+  it("LIVE-5: a close an earlier Daemon marked refused waits no longer than any other", () => {
+    const marked = new Script().attempt().opened().refused("banned");
 
-    expect(script.next().at).toBe(started + refusal);
-    expect(script.standing.refusal?.reason).toBe("banned");
+    expect(marked.next()).toStrictEqual(new Script().attempt().opened().closed("banned").next());
   });
 
-  it("LIVE-5: stays in force after a later failure, and normal backoff still applies", () => {
-    const script = new Script().attempt().refused("banned").wait(refusal).failure("timed out");
-
-    expect(script.standing.refusal?.reason).toBe("banned");
-    expect(script.failures()).toBe(2);
-    expectUpperHalf(script.delay(), initial * 2);
-  });
-
-  it("LIVE-5: an early attempt that fails still leaves the refusal's wait to run", () => {
-    const script = new Script().attempt().refused("banned").wait(60_000).failure("timed out");
-
-    expect(script.next().at).toBe(started + refusal);
-  });
-
-  it("LIVE-5: the delay is the later of backoff and the refusal", () => {
-    const shortRefusal = { ...defaultTuning, refusalBackoffMillis: 1000 };
+  it("LIVE-5: one that keeps turning us away reaches the longest backoff, and no further", () => {
     const script = new Script();
 
-    for (let failures = 0; failures < 8; failures += 1) {
-      script.failure();
+    for (let failures = 0; failures < 12; failures += 1) {
+      script.attempt().opened().closed("You are banned");
     }
 
-    script.attempt().refused("banned");
-
-    expect(script.failures()).toBe(9);
-    expectUpperHalf(script.next(oneIrcd, shortRefusal).at - script.at, maximum);
-  });
-
-  it("LIVE-5: applies even after a close the Daemon chose", () => {
-    const script = new Script().attempt().refused("banned").wait(1000);
-
-    script.attempt().closing().closed("leaving");
-
-    expect(script.next().at).toBe(started + refusal);
-  });
-
-  it("LIVE-5: a newer refusal replaces the old one", () => {
-    const script = new Script().attempt().refused("first").wait(5000).attempt().refused("second");
-
-    expect(script.standing.refusal).toStrictEqual({ at: started + 5000, reason: "second" });
-    expect(script.next().at).toBe(started + 5000 + refusal);
-  });
-
-  it("LIVE-5: a Session clears it", () => {
-    const script = new Script().attempt().refused("banned").wait(refusal).session();
-
-    expect(script.standing.refusal).toBeUndefined();
-
-    script.wait(1000).closing().closed("leaving");
-
-    expect(script.next().at).toBe(script.at);
-  });
-
-  it("LIVE-5: a close with no refusal mark is not one, whatever it says", () => {
-    expect(new Script().attempt().closed("You are banned").standing.refusal).toBeUndefined();
+    expect(script.failures()).toBe(12);
+    expectUpperHalf(script.delay(), maximum);
   });
 });
 
@@ -874,28 +823,26 @@ describe("LIVE-4: a Connection under way", () => {
   });
 });
 
-// A Network that had a Session, closed it, and then refused us: a Gap is open, and the
-// refusal is in force, so a wrong welcome would end the one and clear the other.
-const refusedAfterSession = () =>
+// A Network that had a Session, closed it, and then turned us away: a Gap is open, so a
+// wrong welcome would end it.
+const turnedAwayAfterSession = () =>
   new Script()
     .session()
     .closed("gone")
     .attempt()
     .opened()
     .in("ERROR :You are banned")
-    .refused("You are banned");
+    .closed("You are banned");
 
 // What a welcome that starts no Session must leave as it was.
 const sessionOf = ({ standing }: Script) => ({
   gapEnded: standing.gap?.ended,
-  refusal: standing.refusal?.reason,
   self: standing.irc.self,
   since: sessionSince(standing),
 });
 
 const noSession = {
   gapEnded: undefined,
-  refusal: "You are banned",
   self: undefined,
   since: undefined,
 };
@@ -904,7 +851,7 @@ const joinedBoth = () => new Script().session().in(":alice!u@h JOIN #a").in(":al
 
 describe("LIVE-11: a welcome starts a Session only while registering", () => {
   it("LIVE-11: not after the registration deadline, inside the drain", () => {
-    const script = refusedAfterSession().attempt().opened().wait(registrationTimeout);
+    const script = turnedAwayAfterSession().attempt().opened().wait(registrationTimeout);
 
     script.deadline("registration").welcome();
 
@@ -926,32 +873,34 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
     expect(script.standing.irc.self).toBe("alice");
   });
 
-  it("LIVE-5: not after a refusal in the same read", () => {
+  it("LIVE-5: not after an `ERROR` in the same read", () => {
     expect(
-      sessionOf(refusedAfterSession().attempt().opened().in(":x 464 * :Bad password").welcome())
+      sessionOf(turnedAwayAfterSession().attempt().opened().in("ERROR :Bad password").welcome())
     ).toStrictEqual(noSession);
   });
 
   it("LIVE-11: not after the host decided to close", () => {
     expect(
-      sessionOf(refusedAfterSession().attempt().opened().closing("write failed", false).welcome())
+      sessionOf(
+        turnedAwayAfterSession().attempt().opened().closing("write failed", false).welcome()
+      )
     ).toStrictEqual(noSession);
   });
 
   it("LIVE-9: not after the Daemon chose to leave", () => {
     expect(
-      sessionOf(refusedAfterSession().attempt().opened().closing("leaving").welcome())
+      sessionOf(turnedAwayAfterSession().attempt().opened().closing("leaving").welcome())
     ).toStrictEqual(noSession);
   });
 
   it("CONN-2: not before the transport is up", () => {
-    expect(sessionOf(refusedAfterSession().attempt().welcome())).toStrictEqual(noSession);
+    expect(sessionOf(turnedAwayAfterSession().attempt().welcome())).toStrictEqual(noSession);
   });
 
   it("CONN-4: not once the nicks have run out", () => {
     expect(
       sessionOf(
-        refusedAfterSession()
+        turnedAwayAfterSession()
           .attempt(first, ["alice"])
           .opened()
           .in(":x 433 * alice :In use")
@@ -961,14 +910,16 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
   });
 
   it("CONN-4: not when the attempt named no nick", () => {
-    expect(sessionOf(refusedAfterSession().attempt(first, []).opened().welcome())).toStrictEqual(
+    expect(sessionOf(turnedAwayAfterSession().attempt(first, []).opened().welcome())).toStrictEqual(
       noSession
     );
   });
 
   it("LIVE-5: not after any ERROR, transient or not", () => {
     expect(
-      sessionOf(refusedAfterSession().attempt().opened().in("ERROR :Ping timeout: 2m0s").welcome())
+      sessionOf(
+        turnedAwayAfterSession().attempt().opened().in("ERROR :Ping timeout: 2m0s").welcome()
+      )
     ).toStrictEqual(noSession);
   });
 
@@ -1997,9 +1948,7 @@ describe("properties over random Entries", () => {
       const end = standing.connection?.last.at ?? standing.recent.at(-1)?.at ?? started;
 
       expect(Number.isInteger(at)).toBeTruthy();
-      expect(at).toBeLessThanOrEqual(
-        Math.max(end + maximum, (standing.refusal?.at ?? 0) + defaultTuning.refusalBackoffMillis)
-      );
+      expect(at).toBeLessThanOrEqual(end + maximum);
     }
   });
 
@@ -2053,8 +2002,6 @@ describe("properties over random Entries", () => {
 });
 
 describe("LIVE-4: a retry the Owner asked for", () => {
-  const refusal = defaultTuning.refusalBackoffMillis;
-
   it("LIVE-4: a Change no attempt has answered retries now, whatever the backoff", () => {
     const script = new Script().failure().failure().failure().change();
 
@@ -2064,13 +2011,6 @@ describe("LIVE-4: a retry the Owner asked for", () => {
       delayMillis: 0,
       ircd: first,
     });
-  });
-
-  it("LIVE-4, LIVE-5: and whatever is left of a refusal's wait", () => {
-    const script = new Script().attempt().refused("banned").wait(1000).change();
-
-    expect(script.next().at).toBe(started + refusal);
-    expect(script.next(oneIrcd, defaultTuning, script.head).at).toBe(0);
   });
 
   it("LIVE-4: an attempt after the Change answers it, and backoff resumes", () => {

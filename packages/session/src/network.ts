@@ -191,9 +191,6 @@ export interface NetworkStatus {
   readonly nextAttemptAt: number | undefined;
   /** Only `session` while a Line can be sent. */
   readonly phase: Phase;
-  /** The Network's own words, verbatim, while its refusal stands (LIVE-5). */
-  readonly refusal: string | undefined;
-  readonly refused: boolean;
   /** Wanted Channels no `JOIN` can carry, from the settings as they are now. */
   readonly rejectedChannels: readonly RejectedChannel[];
   /** Self's nick in the current Session. */
@@ -616,8 +613,6 @@ export const hostNetwork: (
       missingCredentials: missing,
       nextAttemptAt: waiting ? Math.max(attemptDue(known, fault, now, current).at, now) : undefined,
       phase: between ? phaseBetween : yield* phaseOf(held, known),
-      refusal: known.refusal?.reason,
-      refused: known.refusal !== undefined,
       rejectedChannels: rejectedOf(current.channels, current.secrets),
       self: between ? undefined : known.irc.self,
     } satisfies NetworkStatus;

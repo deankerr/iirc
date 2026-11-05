@@ -61,7 +61,7 @@ Dependencies point down only. Each library package stands alone for whoever want
 
 | Package | Job | Runtime dependencies |
 | --- | --- | --- |
-| [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, outbound construction, nick candidates, `JOIN` batches, the token bucket, the refusal classifier | None |
+| [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, outbound construction, nick candidates, `JOIN` batches, the token bucket | None |
 | [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in, `RPL_ISUPPORT`, casefolding, modes | `protocol` |
 | [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol` |
 | [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
@@ -140,18 +140,18 @@ stateDiagram-v2
   state connection {
     [*] --> connecting
     connecting --> registering: OPENED, send NICK and USER
-    registering --> registering: nick refused, next candidate
+    registering --> registering: nick taken, next candidate
     registering --> session: 001
     session --> session: burst, login wait, lag check, PING
   }
-  connection --> closing: CLOSING, refusal, timeout, silence, ERROR
+  connection --> closing: CLOSING, timeout, silence, ERROR
   closing --> closed: CLOSED
   connection --> closed: CLOSED
   closed --> connection: ATTEMPT
 ```
 
-- **The machine owns a Connection's progress:** registration, nick fallback, giving up, refusals, the burst, and the login wait (CONN-2 to CONN-7, LIVE-1 to LIVE-3, LIVE-5).
-- **`Standing` owns what outlasts a Connection:** recent outcomes, any refusal, kicks, `JOIN` failures, the last `NICKLEN`, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction.
+- **The machine owns a Connection's progress:** registration, nick fallback, giving up, the burst, and the login wait (CONN-2 to CONN-7, LIVE-1 to LIVE-3, LIVE-5).
+- **`Standing` owns what outlasts a Connection:** recent outcomes, kicks, `JOIN` failures, the last `NICKLEN`, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction.
 - **Pure functions of `Standing` decide:** `nextAttempt` gives backoff and Ircd rotation (LIVE-4), and `joinPlan` gives what to rejoin (LIVE-7, LIVE-8).
 - **A host cannot stay dead.** A defect or a failed `record` ends the Connection and backs off like any failure (LOG-9).
 

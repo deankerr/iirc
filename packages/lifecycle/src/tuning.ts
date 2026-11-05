@@ -39,8 +39,6 @@ export interface Tuning {
   readonly reconnectMaxMillis: number;
   /** LIVE-7: how long rejoining waits after the burst, for `JOIN`s a Network replays. */
   readonly rejoinSettleMillis: number;
-  /** LIVE-5: the shortest wait after a refusal. */
-  readonly refusalBackoffMillis: number;
   /** CONN-2: how long registration may take. */
   readonly registrationTimeoutMillis: number;
   /** API-9: how long a send waits on its Line before reporting it still queued. */
@@ -70,7 +68,6 @@ export const defaultTuning: Tuning = {
   quitWaitMillis: 2000,
   reconnectInitialMillis: 5000,
   reconnectMaxMillis: 300_000,
-  refusalBackoffMillis: 1_800_000,
   registrationTimeoutMillis: 60_000,
   rejoinSettleMillis: 1000,
   sendWaitMillis: 10_000,

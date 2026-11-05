@@ -103,7 +103,13 @@ type Stage =
       readonly local: boolean;
       readonly reason: string;
       readonly readsUntil: number;
-      readonly refused: boolean;
+      /** `reason` is the Ircd's own words, from its `ERROR` (LIVE-5). */
+      readonly ircdSaid: boolean;
+      /**
+       * The Daemon chose to leave, so its reason stands, whatever the Ircd says (LIVE-9).
+       * Only the drain that starts the close decides this.
+       */
+      readonly chosen: boolean;
     };
 
 /** What a host holds that no fold of the Log can give it. */
@@ -475,53 +481,58 @@ export const hostConnection: (
     reason,
   });
 
-  const closedEntry = (reason: string, refused: boolean): NewEntry => ({
+  const closedEntry = (reason: string): NewEntry => ({
     _tag: "Connection",
     connection,
     ircd,
     network: id,
     phase: "closed",
     reason,
-    ...(refused && { refused: true }),
   });
 
   const takeLines = (chunks: readonly Uint8Array[]) =>
     receiver.take(chunks).map(({ bytes, cut }) => lineEntry(bytes, cut));
 
   // How a close starts, from any fiber. The first reason counts, and a later close can
-  // only shorten the wait, unless it is a refusal: a Network that bans us at accept
-  // closes the socket before we can read why, so its words come second (LOG-2).
+  // only shorten the wait, unless it gives the Ircd's own words where the first did not: a
+  // Network that turns us away often closes the socket before we have read why, so its
+  // `ERROR` comes second (LIVE-5, LOG-2). A leave the Daemon chose keeps its own reason,
+  // since an `ERROR` then only answers our `QUIT` (LIVE-9).
   const drain = Effect.fnUntraced(function* (
     reason: string,
     options: {
       readonly limitMillis: number;
       readonly local?: boolean;
       readonly quitting?: boolean;
-      readonly refused?: true;
+      readonly ircdSaid?: true;
     }
   ) {
     const now = yield* Clock.currentTimeMillis;
-    const refused = options.refused === true;
+    const ircdSaid = options.ircdSaid === true;
+    const quitting = options.quitting === true;
 
     yield* Ref.update(stage, (current): Stage => {
       if (current._tag === "Draining") {
         const readsUntil = Math.min(current.readsUntil, now + options.limitMillis);
 
-        return refused && !current.refused
-          ? { ...current, readsUntil, reason, refused }
+        // Whether the close was chosen is the first decision's to say: a stop that comes
+        // during a close already under way only hurries it, and sends no `QUIT`.
+        return ircdSaid && !current.ircdSaid && !current.chosen
+          ? { ...current, ircdSaid, readsUntil, reason }
           : { ...current, readsUntil };
       }
 
       return {
         _tag: "Draining",
+        chosen: quitting,
+        ircdSaid,
         local: options.local !== false,
         readsUntil: now + (current._tag === "Dialing" ? 0 : options.limitMillis),
         reason,
-        refused,
       };
     });
 
-    if (options.quitting !== true) {
+    if (!quitting) {
       yield* lanes.shut;
     }
 
@@ -703,7 +714,7 @@ export const hostConnection: (
         return yield* drain(command.reason, {
           limitMillis: drainMillis,
           quitting: stopHandled,
-          ...(command.refused && { refused: command.refused }),
+          ...(command.ircdSaid && { ircdSaid: command.ircdSaid }),
         });
       }
 
@@ -734,13 +745,13 @@ export const hostConnection: (
   });
 
   // Nothing acts on a Line once the Connection has started to close: what would have been
-  // sent is Dropped instead, and only a refusal still counts, for the reason it gives.
+  // sent is Dropped instead, and only the Ircd's own words still count, as the reason.
   const runCommands = Effect.fnUntraced(function* (toRun: readonly Order[], drainMillis: number) {
     for (const command of toRun) {
       if ((yield* Ref.get(stage))._tag !== "Draining") {
         yield* runCommand(command, drainMillis);
-      } else if (command.type === "closeConnection" && command.refused === true) {
-        yield* drain(command.reason, { limitMillis: drainMillis, refused: true });
+      } else if (command.type === "closeConnection" && command.ircdSaid === true) {
+        yield* drain(command.reason, { ircdSaid: true, limitMillis: drainMillis });
       } else {
         unsendCommand(command);
       }
@@ -796,7 +807,8 @@ export const hostConnection: (
     );
   });
 
-  // Commits what is left in order, and any refusal among it outranks the reason so far.
+  // Commits what is left in order, and the Ircd's own words among it outrank the reason so
+  // far.
   const commitInOrder = Effect.fnUntraced(function* (batches: readonly (readonly NewEntry[])[]) {
     for (const [index, batch] of batches.entries()) {
       if (Arr.isReadonlyArrayNonEmpty(batch)) {
@@ -810,8 +822,8 @@ export const hostConnection: (
         }
 
         for (const command of committed.value.commands) {
-          if (command.type === "closeConnection" && command.refused === true) {
-            yield* drain(command.reason, { limitMillis: 0, refused: true });
+          if (command.type === "closeConnection" && command.ircdSaid === true) {
+            yield* drain(command.reason, { ircdSaid: true, limitMillis: 0 });
           }
         }
       }
@@ -855,7 +867,6 @@ export const hostConnection: (
     const queued = yield* lanes.empty;
     const current = yield* Ref.get(stage);
     const reason = current._tag === "Draining" ? current.reason : ending;
-    const refused = current._tag === "Draining" && current.refused;
     const dropReason = `the Connection closed: ${reason}`;
 
     const owed = pending.takeAll();
@@ -864,7 +875,7 @@ export const hostConnection: (
       ...owed.unrecorded,
       ...owed.dropped,
       ...queued.map((line) => droppedOf(line, dropReason)),
-      closedEntry(reason, refused),
+      closedEntry(reason),
     ];
 
     const rest =
@@ -879,7 +890,7 @@ export const hostConnection: (
       // is where the Gap starts (LIVE-10).
       const kept = rest.map((entry) =>
         entry._tag === "Connection" && entry.phase === "closed"
-          ? { ...closedEntry(logDown, false), endedAt }
+          ? { ...closedEntry(logDown), endedAt }
           : entry
       );
 

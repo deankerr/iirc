@@ -69,6 +69,11 @@ const migrations = SqliteMigrator.fromRecord({
     yield* sql`CREATE INDEX entries_by_kind ON entries (kind, sequence)`;
     yield* sql`CREATE INDEX entries_by_network_and_kind ON entries (network, kind, sequence)`;
   }),
+  // Changes no table. An `attempt` Entry's Tuning no longer holds `refusalBackoffMillis`,
+  // and no `closed` is marked refused, which a binary that ran only `1_initial` cannot
+  // decode. Recording this migration is what has it refuse the Log, and what has a start
+  // back the Log up before it writes the new form (RUN-5, LIVE-5).
+  "2_tuning_without_refusals": Effect.void,
 });
 
 /**

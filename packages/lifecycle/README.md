@@ -70,7 +70,7 @@ inspect(snapshot).registration; // { _tag: "Welcomed", at: 30, nick: "iirc_" }
 | --- | --- |
 | Registration, `NICK` and `USER` (CONN-2) | Yes |
 | Nick fallback through the candidates (CONN-4) | Yes, by index into the `ATTEMPT`'s list |
-| Refusals (LIVE-5) | Yes, through `isRefusal`, recorded on `closeConnection` |
+| An `ERROR` (LIVE-5) | Yes: it closes, and `closeConnection` gives its words as `ircdSaid` |
 | `PONG` (LIVE-1), lag `PING` (LIVE-3), silence (LIVE-2) | Yes |
 | The burst (CONN-7) and the login wait (CONN-6) | Yes |
 | `QUIT` on a chosen close (LIVE-9) | Yes |

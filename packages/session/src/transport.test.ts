@@ -1244,7 +1244,6 @@ describe("Transport.layer and pinned keys (CONN-1)", () => {
         ["attempt", "closed"]
       );
       assert.include(status.closeReason, pin);
-      assert.isFalse(status.refused);
       assert.strictEqual(status.consecutiveFailures, 1);
       assert.isDefined(status.nextAttemptAt);
       assert.lengthOf(yield* ircd.bytes, 0);

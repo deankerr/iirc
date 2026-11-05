@@ -535,7 +535,9 @@ const joinsOf = (entries: readonly LogEntry[], after: number) =>
 
 const isOut = ({ phase }: Status) => phase !== "session";
 
-const isRefused = ({ nextAttemptAt, refused }: Status) => refused && nextAttemptAt !== null;
+// Closed in the Ircd's own words, and waiting to try again.
+const isTurnedAway = ({ closeReason, nextAttemptAt }: Status) =>
+  closeReason !== null && nextAttemptAt !== null;
 
 // The first Connection, then this many failed redials while the Ircd is down.
 const hasRedialed = (times: number) => (entries: readonly LogEntry[]) =>
@@ -700,97 +702,72 @@ const silence = toCheck(
 );
 
 // LIVE-5
-const refusal = toCheck(
+const turnedAway = toCheck(
   Effect.gen(function* () {
-    const refusalBackoffMillis = 6000;
+    const reconnectInitialMillis = 1000;
+    const reconnectMaxMillis = 2000;
     const nick = "floorr";
     const ircd = yield* floorIrcd({ password });
 
-    const refusedAs = Effect.fnUntraced(function* (lines: readonly string[]) {
+    const turnedAwayAs = Effect.fnUntraced(function* (lines: readonly string[]) {
       const client = yield* rawClient(ircd.port);
 
       yield* Effect.forEach(lines, client.send, { discard: true });
 
       return yield* Effect.map(
-        client.until("a refusal", (text) => text.startsWith("ERROR ")),
+        client.until("an ERROR", (text) => text.startsWith("ERROR ")),
         ({ text }) => text
       );
     });
 
     const register = [`NICK ${nick}`, "USER iirc 0 * :iirc"];
-    const withoutPass = yield* refusedAs(register);
-    const withWrongPass = yield* refusedAs(["PASS not-the-password", ...register]);
+    const withoutPass = yield* turnedAwayAs(register);
+    const withWrongPass = yield* turnedAwayAs(["PASS not-the-password", ...register]);
 
     yield* ensure(withoutPass === withWrongPass, `ngircd answered: ${withWrongPass}`);
 
     const verbatim = withoutPass.replace(/^ERROR :/u, "");
-    const home = yield* newHome;
 
-    const identity = {
+    const running = yield* startDaemon({
       channels: [floor],
-      home,
+      home: yield* newHome,
       nick,
       port: ircd.port,
-      tuning: { refusalBackoffMillis },
-    };
+      tuning: { reconnectInitialMillis, reconnectMaxMillis },
+    });
 
-    const first = yield* startDaemon(identity);
-    const status = yield* waitFor("the refusal", first.status, isRefused);
-    const entries = yield* first.entries;
-    const [closed] = closes(entries);
+    const status = yield* waitFor("the ERROR", running.status, isTurnedAway);
 
-    yield* ensure(status.refusal === verbatim, `status says: ${status.refusal}`);
-    yield* ensure(closed?.phase === "closed" && closed.refused === true, "`closed` is no refusal");
+    // It keeps trying, each wait ordinary backoff, and none longer than the longest.
+    const tried = yield* waitFor(
+      "three tries",
+      running.entries,
+      (all) => attempts(all).length >= 4
+    );
+
+    yield* stopDaemon(running);
+
+    const ended = closes(tried);
+    const dialed = attempts(tried);
+
+    const waits = ended
+      .slice(0, 3)
+      .map((closed, index) => (dialed[index + 1]?.at ?? 0) - (closed.at ?? 0));
+
+    yield* ensure(status.closeReason === verbatim, `status says: ${status.closeReason}`);
     yield* ensure(
-      status.nextAttemptAt === (closed?.at ?? 0) + refusalBackoffMillis,
-      `next attempt ${status.nextAttemptAt}, closed at ${closed?.at}`
+      ended.every((closed) => closed.reason === verbatim && closed.refused === undefined),
+      `the closes were ${JSON.stringify(ended.map(({ reason, refused }) => ({ reason, refused })))}`
     );
-
-    const stopped = yield* stopDaemon(first);
-
-    yield* ensure(stopped.code === 0, `SIGTERM during the wait gave exit ${stopped.code}`);
-
-    const reached = yield* ircd.accepted;
-
-    yield* ensure(reached === 3, `ngircd's log shows ${reached} Connections, not 3`);
-
-    // Restarts with the wait still running, one after a clean stop and one after a kill.
-    const second = yield* startDaemon(identity);
-    const secondStatus = yield* waitFor("the refusal again", second.status, isRefused);
-
-    yield* stopDaemon(second, "SIGKILL");
-
-    const third = yield* startDaemon(identity);
-    const thirdStatus = yield* waitFor("the refusal again", third.status, isRefused);
-
-    yield* ensure(secondStatus.refusal === verbatim, `after a stop: ${secondStatus.refusal}`);
-    yield* ensure(thirdStatus.refusal === verbatim, `after a kill: ${thirdStatus.refusal}`);
     yield* ensure(
-      secondStatus.nextAttemptAt === status.nextAttemptAt &&
-        thirdStatus.nextAttemptAt === status.nextAttemptAt,
-      "a restart moved the wait"
+      waits.length === 3 && waits.every((wait) => wait <= reconnectMaxMillis + slackMillis),
+      `it waited ${waits.join(", ")} ms between tries`
     );
 
-    const waited = (status.nextAttemptAt ?? 0) - Date.now();
-
-    yield* ensure(waited > 0, "this check took too long to prove anything");
-    yield* Effect.sleep(Duration.millis(Math.max(waited - slackMillis, 0)));
-
-    const during = yield* ircd.accepted;
-
-    yield* ensure(during === reached, `ngircd saw ${during - reached} dials during the wait`);
-
-    const after = yield* waitFor(
-      "the wait to end",
-      third.entries,
-      (all) => attempts(all).length > 1
+    return (
+      `ngircd said ${JSON.stringify(withoutPass)}, status showed it verbatim, and the Daemon ` +
+      `tried again after ${waits.join(", ")} ms, as for any failure`
     );
-
-    const redial = attempts(after).at(-1)?.at ?? 0;
-
-    yield* ensure(redial >= (status.nextAttemptAt ?? 0), "it dialed before the wait was over");
-
-    return `ngircd said ${JSON.stringify(withoutPass)}, status showed it verbatim, and two restarts dialed nothing for the ${refusalBackoffMillis} ms wait`;
   })
 );
 
@@ -1492,17 +1469,26 @@ const disconnectAndConnect = toCheck(
 
     yield* ensure(returnedIn <= slackMillis, `the redial came ${returnedIn} ms after connect`);
 
-    // A refusal waits 30 minutes, which is its default here, and connect overrides it.
-    yield* addNetwork(running, floorNetwork({ id: "locked", nick: "floorpw", port: locked.port }));
+    // A Network turned away waits out its backoff, here a long one, and connect overrides it.
+    const longWait = 10 * 60 * 1000;
 
-    const refused = yield* waitFor("the refusal", running.statusOf("locked"), isRefused);
+    yield* addNetwork(
+      running,
+      floorNetwork({
+        id: "locked",
+        nick: "floorpw",
+        port: locked.port,
+        tuning: { reconnectInitialMillis: longWait, reconnectMaxMillis: longWait },
+      })
+    );
+
+    const waiting = yield* waitFor("the ERROR", running.statusOf("locked"), isTurnedAway);
     const lockedEntries = yield* running.entriesOf("locked");
     const closedAt = closes(lockedEntries).at(-1)?.at ?? 0;
-    const thirtyMinutes = 30 * 60 * 1000;
 
     yield* ensure(
-      refused.nextAttemptAt === closedAt + thirtyMinutes,
-      `next attempt ${refused.nextAttemptAt}, closed at ${closedAt}`
+      (waiting.nextAttemptAt ?? 0) - closedAt >= longWait / 2,
+      `next attempt ${waiting.nextAttemptAt}, closed at ${closedAt}`
     );
 
     const dialed = yield* locked.accepted;
@@ -1522,13 +1508,13 @@ const disconnectAndConnect = toCheck(
     const dial = attempts(retriedEntries).find(({ sequence }) => sequence > retried);
     const dialedIn = (dial?.at ?? 0) - (retriedAt ?? 0);
 
-    yield* ensure(dialedIn <= 1000, `connect dialed ${dialedIn} ms into the refusal's wait`);
+    yield* ensure(dialedIn <= 1000, `connect dialed ${dialedIn} ms into the backoff`);
     yield* waitFor("ngircd to see it", locked.accepted, (count) => count > dialed);
 
     return (
       `a raw client saw "${quit.text}", then nothing dialed for ${quietMillis} ms; connect ` +
       `dialed ${returnedIn} ms after its Change, and ${dialedIn} ms after it during a ` +
-      `refusal's ${thirtyMinutes / 60_000} minute wait`
+      `${longWait / 60_000} minute backoff`
     );
   })
 );
@@ -1905,7 +1891,6 @@ const pinning = toCheck(
       `closed: ${refused.closeReason}`
     );
     yield* ensure(lineEntries(mispinned).length === 0, "a Line crossed the wrong pin");
-    yield* ensure(!refused.refused, "a wrong pin counted as a refusal");
 
     return (
       `a self-signed certificate reached a Session by its pin over ${tls?.protocol} ` +
@@ -2427,7 +2412,7 @@ const clientCertificate = toCheck(
 const checks: readonly (readonly [string, Check])[] = [
   ["Reconnect (LIVE-4, LIVE-6, LIVE-7, LIVE-10)", reconnect],
   ["Silence (LIVE-2)", silence],
-  ["Refusal (LIVE-5)", refusal],
+  ["Turned away (LIVE-5)", turnedAway],
   ["Nick fallback (CONN-4)", nickFallback],
   ["Kick (LIVE-8)", kick],
   ["Lag (LIVE-3)", lag],

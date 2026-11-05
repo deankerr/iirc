@@ -603,7 +603,6 @@ describe("the compiled binary over TLS (CONN-1)", () => {
           closed.closeReason,
           `${ircdAddress}:${ircd.port} presented the key ${presented}, which is not its pin ${elsewhere}`
         );
-        assert.isFalse(closed.refused, "a wrong pin backs off like any failure");
         assert.deepStrictEqual(
           entries.flatMap((entry) => (entry._tag === "Connection" ? [entry.phase] : [])),
           ["attempt", "closed"]

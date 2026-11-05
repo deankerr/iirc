@@ -22,7 +22,9 @@ import type { Standing } from "./standing.ts";
 // at every Entry as the code of the time gave it. The last two were written to cover
 // Channels, kicks, keys, and `RPL_ISUPPORT`, with their reads as the code gave them before
 // `@iirc/state` owned those. A Log already written is replayed by whatever code reads it
-// later, so the reads must not move. One Log to a line, and bytes in base64.
+// later, so the reads must not move. One Log to a line, and bytes in base64. The two Logs
+// that end refused were moved once, on purpose: refusals went, so their last read has no
+// `refusal`, and its next attempt is ordinary backoff (LIVE-5).
 const fixture = new URL("testdata/replay.jsonl", import.meta.url);
 
 const Moment = { at: Schema.Finite, sequence: Schema.Finite };
@@ -171,7 +173,6 @@ const readsOf = (standing: Standing, now: number) => {
     nickLength: standing.nickLength,
     plan: joinPlan(standing, wanted, now, defaultTuning),
     recent: standing.recent,
-    refusal: standing.refusal,
     self: standing.irc.self,
     since: sessionSince(standing),
   };

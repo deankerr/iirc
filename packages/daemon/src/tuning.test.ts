@@ -25,7 +25,6 @@ describe("the spec's numbers", () => {
         laneLimit: defaultTuning.laneLimit,
         reconnectInitialMillis: defaultTuning.reconnectInitialMillis,
         reconnectMaxMillis: defaultTuning.reconnectMaxMillis,
-        refusalBackoffMillis: defaultTuning.refusalBackoffMillis,
         silenceMillis: defaultTuning.silenceMillis,
         stableAfterMillis: defaultTuning.stableAfterMillis,
       },
@@ -40,8 +39,6 @@ describe("the spec's numbers", () => {
         // LIVE-4: from 5 seconds to 5 minutes, reset after 5 minutes
         reconnectInitialMillis: 5000,
         reconnectMaxMillis: 300_000,
-        // LIVE-5
-        refusalBackoffMillis: 1_800_000,
         // LIVE-2
         silenceMillis: 90_000,
         stableAfterMillis: 300_000,

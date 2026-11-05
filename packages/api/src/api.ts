@@ -97,8 +97,8 @@ const Lane = Schema.Literals(["control", "interactive", "background"]);
 
 /**
  * Where one Network stands and why (OBS-1, OBS-4). Times are epoch milliseconds. `self`
- * and `joined` describe the current Session, and `refusal` is the Network's own words
- * while its refusal stands. `nextAttemptAt` is `null` while a Connection is under way,
+ * and `joined` describe the current Session, and `closeReason` is in the Ircd's own words
+ * when its `ERROR` said why (LIVE-5). `nextAttemptAt` is `null` while a Connection is under way,
  * while the Network is disabled, or while the Daemon is stopping. A rejected Channel is
  * one no `JOIN` can carry, so it is never tried. Between Connections, and while the Log
  * is at fault, `self`, `joined`, and `lagMillis` are empty, because no Session is current.
@@ -140,8 +140,6 @@ export const NetworkStatus = Schema.Struct({
   name: Schema.String,
   nextAttemptAt: Schema.NullOr(Schema.Int),
   phase: Phase,
-  refusal: Schema.NullOr(Schema.String),
-  refused: Schema.Boolean,
   rejectedChannels: Schema.Array(
     Schema.Struct({
       channel: Schema.String,
@@ -225,6 +223,7 @@ export const LogEntry = Schema.Union([
     endedAt: Schema.optionalKey(Schema.Int),
     phase: Schema.Literal("closed"),
     reason: Schema.optionalKey(Schema.String),
+    /** Only on a close an earlier Daemon took as a refusal. Nothing writes it now (LIVE-5). */
     refused: Schema.optionalKey(Schema.Literal(true)),
   }),
   Schema.TaggedStruct("Change", {
@@ -508,8 +507,8 @@ const ConnectCommand = Schema.String.check(
   })
 );
 
-// What a timer can wait for: past this, one fires at once, so a mistyped refusal wait
-// would turn into a redial loop.
+// What a timer can wait for: past this, one fires at once, so a mistyped wait would turn
+// into a redial loop.
 const longestWait = 2_147_483_647;
 
 // LIVE-3: a lag check bypasses flood control, so a tiny interval would flood the Ircd.
@@ -544,7 +543,6 @@ const tuningBounds = {
   quitWaitMillis: { maximum: longestQuitWait, minimum: 1 },
   reconnectInitialMillis: { minimum: 1 },
   reconnectMaxMillis: { minimum: 1 },
-  refusalBackoffMillis: { minimum: 1 },
   registrationTimeoutMillis: { minimum: 1 },
   rejoinSettleMillis: { minimum: 0 },
   sendWaitMillis: { minimum: 0 },

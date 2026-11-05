@@ -1,6 +1,5 @@
 import { loginSign } from "@iirc/protocol/login";
 import type { LoginSign } from "@iirc/protocol/login";
-import { isRefusal } from "@iirc/protocol/refusal";
 
 import type { Command, NetworkEvent, NetworkInput, Phase } from "./lifecycle.ts";
 
@@ -186,10 +185,14 @@ const moved = (context: Context, phase: Phase, commands: readonly Command[] = []
 const leaving = (context: Context, commands: readonly Command[]): Stepped =>
   moved({ ...context, deadlines: [] }, "closing", commands);
 
-const close = (reason: string, refused?: true): Command =>
-  refused === undefined
-    ? { reason, type: "closeConnection" }
-    : { reason, refused, type: "closeConnection" };
+const close = (reason: string): Command => ({ reason, type: "closeConnection" });
+
+// An Ircd's `ERROR` says why it is closing, in words of its own that nothing here reads.
+const closeAsSaid = (event: Payload<"LINE">): Command => ({
+  ircdSaid: true,
+  reason: textOf(event),
+  type: "closeConnection",
+});
 
 const send = (cause: string, command: string, params: readonly string[]): Command => ({
   cause,
@@ -256,13 +259,8 @@ const lineWhileRegistering = (machine: Machine, event: Payload<"LINE">): Stepped
       : moved({ ...context, nickIndex }, "registering", [send("nick-fallback", "NICK", [nick])]);
   }
 
-  if (isRefusal(event.command, event.params)) {
-    return leaving(context, [close(textOf(event), true)]);
-  }
-
-  // Only a known transient `ERROR` gets here, and the Ircd is still leaving.
   if (event.command === "ERROR") {
-    return leaving(context, [close(textOf(event))]);
+    return leaving(context, [closeAsSaid(event)]);
   }
 
   // A welcome that names nobody leaves no Self for a Session to be, so it agrees with
@@ -358,7 +356,7 @@ const deadlineInSession = (machine: Machine, event: Payload<"DEADLINE">): Steppe
 
 const lineInSession = ({ context }: Machine, event: Payload<"LINE">): Stepped => {
   if (event.command === "ERROR") {
-    return leaving(context, [close(textOf(event))]);
+    return leaving(context, [closeAsSaid(event)]);
   }
 
   const alive = heard(context, event.at);
@@ -452,8 +450,8 @@ const fromConnection = (machine: Machine, event: NetworkEvent): Stepped => {
   }
 };
 
-// Whoever started the close, the machine has finished with this Connection. A `PING` goes
-// unanswered here, because a `PONG` could only leave behind the `QUIT` or the close already
+// Whoever started the close, the machine has finished with this Connection, and asks for
+// nothing but the Ircd's words for it. A `PING` goes unanswered here, because a `PONG` could only leave behind the `QUIT` or the close already
 // asked for, and neither leaves the Ircd waiting on one.
 //
 // How its login went is still worth knowing until it has closed, so a sign that comes now
@@ -461,6 +459,12 @@ const fromConnection = (machine: Machine, event: NetworkEvent): Stepped => {
 // the host and no wait starts, because nothing here waits any more (CONN-6).
 const fromClosing = (machine: Machine, event: NetworkEvent): Stepped => {
   const { context } = machine;
+
+  // The close is already asked for, and the Ircd's `ERROR` only says why in its own words,
+  // which the host takes over a reason of its own (LIVE-5).
+  if (event.type === "LINE" && event.command === "ERROR") {
+    return moved(context, "closing", [closeAsSaid(event)]);
+  }
 
   if (event.type === "LINE") {
     return moved(afterLoginSign(context, event), "closing");

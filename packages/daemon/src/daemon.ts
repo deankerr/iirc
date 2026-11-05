@@ -241,8 +241,6 @@ const toNetworkState = ({ id, name }: NetworkSettings, status: NetworkStatus): N
   name,
   nextAttemptAt: status.nextAttemptAt ?? null,
   phase: status.phase,
-  refusal: status.refusal ?? null,
-  refused: status.refused,
   rejectedChannels: status.rejectedChannels.map(({ channel, reason }) => ({
     channel: channel.name,
     reason,
@@ -267,8 +265,6 @@ const unhosted = ({ enabled, id, name }: NetworkSettings): NetworkState => ({
   name,
   nextAttemptAt: null,
   phase: "idle",
-  refusal: null,
-  refused: false,
   rejectedChannels: [],
   self: null,
 });

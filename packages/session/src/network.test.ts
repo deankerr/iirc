@@ -851,8 +851,8 @@ describe("hostNetwork draining a close", () => {
       setup: host,
     },
     {
-      name: "a refusal while registering",
-      provoke: (ircd: FakeIrcd) => ircd.read(":ircd 465 * :You are banned\r\n"),
+      name: "an `ERROR` while registering",
+      provoke: (ircd: FakeIrcd) => ircd.read("ERROR :You are banned\r\n"),
       reason: "You are banned",
       setup: host,
     },
@@ -982,7 +982,7 @@ describe("hostNetwork draining a close", () => {
 });
 
 describe("hostNetwork after a failed write", () => {
-  it.effect("records every read that follows, acts on none, and keeps the first reason", () =>
+  it.effect("records every read that follows, acts on none, and takes the Ircd's words", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
       const hosted = yield* inSession(ircd);
@@ -1015,7 +1015,8 @@ describe("hostNetwork after a failed write", () => {
       ]);
       assert.notInclude(texts(log, "outbound"), "PONG 2");
       assert.lengthOf(yield* wire(ircd), before);
-      assert.strictEqual(connectionsOf(log, "closed")[0]?.reason, "write failed: broken pipe");
+      // The host's reason stood until the Ircd said why, in words of its own (LIVE-5).
+      assert.strictEqual(connectionsOf(log, "closed")[0]?.reason, "a later reason");
       assert.strictEqual(log.at(-1)?._tag, "Connection");
       assert.deepStrictEqual(brief(yield* hosted.status), statusFolded(log));
       assert.isTrue(yield* ircd.released);

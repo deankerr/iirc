@@ -18,7 +18,6 @@ Each module is its own export path, such as `@iirc/protocol/line`. There is no r
 | `./nick` | `nickCandidates`, `isNick`, `nickLine` | The fixed, finite list of nicks to try (CONN-4) |
 | `./join` | `joinBatches`, `joinLines`, `channelKey`, `isChannelName`, `joinRejection` | `JOIN` Lines by byte length, keyed Channels first (SEND-11), and the ASCII fold Configuration compares Channels by |
 | `./flood` | `fullBucket`, `nextSendAt`, `takeToken` | A token bucket held as the time it is next full (SEND-2) |
-| `./refusal` | `isRefusal` | Whether a Line before `001` means the Network does not want us (LIVE-5) |
 | `./login` | `loginSign` | Whether a Line is a sign that a login to services worked or failed (CONN-6) |
 | `./template` | `parseTemplate`, `buildTemplate`, `templateReferences`, `fillReferences` | Connect commands with `{{name}}` references, parsed before anything is filled in (CONN-6) |
 

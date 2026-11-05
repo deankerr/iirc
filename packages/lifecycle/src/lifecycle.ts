@@ -63,12 +63,7 @@ export type NetworkEvent =
    * welcome starts a Session after this, and a refusal that follows is still read (LOG-2).
    */
   | { readonly type: "LEAVING"; readonly at: number }
-  | {
-      readonly type: "CLOSED";
-      readonly at: number;
-      readonly reason: string;
-      readonly refused?: true;
-    }
+  | { readonly type: "CLOSED"; readonly at: number; readonly reason: string }
   | { readonly type: "DEADLINE"; readonly at: number; readonly name: string };
 
 /** Which queue an outbound Line waits in (SEND-1). */
@@ -90,8 +85,11 @@ export type Command =
       readonly cause: string;
       readonly lane: Lane;
     }
-  /** `refused` is copied to the `closed` Entry, where backoff reads it (LIVE-5). */
-  | { readonly type: "closeConnection"; readonly reason: string; readonly refused?: true }
+  /**
+   * `ircdSaid` says the reason is the Ircd's own words, from its `ERROR`, which outrank
+   * any reason the host gave for the same close (LIVE-5).
+   */
+  | { readonly type: "closeConnection"; readonly reason: string; readonly ircdSaid?: true }
   /** The burst is over, once per Session, so what waits on it can start (CONN-7). */
   | { readonly type: "burstComplete" }
   /** The login sequence is out and any login wait is over, so joining can go on (CONN-6). */

@@ -96,7 +96,10 @@ export type NewEntry =
       readonly connection: number;
       readonly phase: "closed";
       readonly reason?: string;
-      /** The Network does not want us, so backoff is at least LIVE-5's. */
+      /**
+       * Written by earlier Daemons for a close they took as a refusal. Nothing reads it now:
+       * every close backs off the same way (LIVE-4, LIVE-5).
+       */
       readonly refused?: true;
       /**
        * When the Connection really ended, in epoch milliseconds, for a close recorded late

@@ -75,7 +75,7 @@ describe("a Network's Tuning overrides (CONF-3)", () => {
     [{ silenceMillis: 0 }, "silenceMillis"],
     [{ silenceMillis: 1.5 }, "silenceMillis"],
     [{ silenceMillis: "soon" }, "silenceMillis"],
-    [{ refusalBackoffMillis: 2_147_483_648 }, "refusalBackoffMillis"],
+    [{ reconnectMaxMillis: 2_147_483_648 }, "reconnectMaxMillis"],
     [{ floodIntervalMillis: 0 }, "floodIntervalMillis"],
     [{ reconnectInitialMillis: 0 }, "reconnectInitialMillis"],
     // LIVE-9: a `QUIT` wait of 0 would drop the `QUIT`.

@@ -46,12 +46,7 @@ const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
     }
 
     case "closed": {
-      return {
-        at,
-        reason: entry.reason ?? "the Connection closed",
-        type: "CLOSED",
-        ...(entry.refused && { refused: true }),
-      };
+      return { at, reason: entry.reason ?? "the Connection closed", type: "CLOSED" };
     }
 
     default: {

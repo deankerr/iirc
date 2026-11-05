@@ -373,8 +373,6 @@ describe("the Daemon", () => {
                 name: "Libera",
                 nextAttemptAt: null,
                 phase: "session",
-                refusal: null,
-                refused: false,
                 rejectedChannels: [],
                 self: "iirc",
               },
@@ -520,37 +518,34 @@ describe("the Daemon", () => {
       )
     );
 
-    it.live("LIVE-5: reports a refusal in the Network's words, and when it will try again", () =>
-      withDaemon(
-        (harness) =>
-          Effect.gen(function* () {
-            const { client, ircd } = harness;
+    it.live("LIVE-5: reports an ERROR in the Ircd's words, and backs off as for any failure", () =>
+      withDaemon((harness) =>
+        Effect.gen(function* () {
+          const { client, ircd } = harness;
 
-            yield* untilPhase(harness, "registering");
-            yield* ircd.read(":ircd 465 * :You are banned: go away\r\n");
-            yield* ircd.hangUp;
+          yield* untilPhase(harness, "registering");
+          yield* ircd.read("ERROR :You are banned: go away\r\n");
+          yield* ircd.hangUp;
 
-            const status = yield* eventually(
-              harness.status,
-              ({ nextAttemptAt }) => nextAttemptAt !== null
-            );
+          const status = yield* eventually(
+            harness.status,
+            ({ nextAttemptAt }) => nextAttemptAt !== null
+          );
 
-            const closed = connections(yield* client.daemon.entries(everything)).at(-1);
+          const closed = connections(yield* client.daemon.entries(everything)).at(-1);
 
-            assert.deepInclude(closed, {
-              phase: "closed",
-              reason: "You are banned: go away",
-              refused: true,
-            });
-            assert.deepInclude(status, {
-              consecutiveFailures: 1,
-              phase: "closed",
-              refusal: "You are banned: go away",
-              refused: true,
-            });
-            assert.strictEqual(status.nextAttemptAt, (closed?.at ?? 0) + 60_000);
-          }),
-        { tuning: { refusalBackoffMillis: 60_000 } }
+          assert.deepInclude(closed, { phase: "closed", reason: "You are banned: go away" });
+          assert.notProperty(closed, "refused");
+          assert.deepInclude(status, {
+            closeReason: "You are banned: go away",
+            consecutiveFailures: 1,
+            phase: "closed",
+          });
+          assert.isAtMost(
+            (status.nextAttemptAt ?? 0) - (closed?.at ?? 0),
+            defaultTuning.reconnectInitialMillis
+          );
+        })
       )
     );
 

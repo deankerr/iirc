@@ -70,8 +70,8 @@ const silenceEnds = 93_000;
 
 const closeWith = (reason: string): readonly Command[] => [{ reason, type: "closeConnection" }];
 
-const refusedWith = (reason: string): readonly Command[] => [
-  { reason, refused: true, type: "closeConnection" },
+const saidWith = (reason: string): readonly Command[] => [
+  { ircdSaid: true, reason, type: "closeConnection" },
 ];
 
 const sendNick = (nick: string, cause: string): Command => ({
@@ -135,12 +135,9 @@ describe("ATTEMPT", () => {
   });
 
   it("forgets why the last Connection closed", () => {
-    const refused = fold(
-      [attempt, { at: 9000, reason: "banned", refused: true, type: "CLOSED" }],
-      input
-    );
+    const closedOnce = fold([attempt, { at: 9000, reason: "banned", type: "CLOSED" }], input);
 
-    const { next } = step(refused, attempt);
+    const { next } = step(closedOnce, attempt);
 
     expect(closeReason(next)).toBeUndefined();
   });
@@ -311,7 +308,7 @@ describe("CONN-4: nick fallback", () => {
     ]);
   });
 
-  it("closes when the list runs out, says so, and is not a refusal", () => {
+  it("closes when the list runs out, and says so", () => {
     const snapshot = fold([...histories.registering, taken, taken], input);
     const { commands, next } = step(snapshot, taken);
 
@@ -346,60 +343,47 @@ describe("CONN-4: nick fallback", () => {
   });
 });
 
-describe("LIVE-5: refusals", () => {
-  it.each(["463", "464", "465"])("%s closes with the Ircd's text, marked refused", (numeric) => {
-    const { commands, next } = step(inPhase("registering"), line(numeric, "*", "Not today"));
+describe("LIVE-5: what an Ircd says while turning us away", () => {
+  it("an ERROR closes with its text, verbatim, as the Ircd's own words", () => {
+    const text = "  You are BANNED: see https://example.test/ban?id=1 ";
+    const { commands, next } = step(inPhase("registering"), line("ERROR", text));
 
-    expect(commands).toStrictEqual(refusedWith("Not today"));
+    expect(commands).toStrictEqual(saidWith(text));
     expect(phase(next)).toBe("closing");
     expect(deadline(next)).toBeUndefined();
   });
 
-  it("keeps the Network's text verbatim", () => {
-    const text = "  You are BANNED: see https://example.test/ban?id=1 ";
-
-    expect(step(inPhase("registering"), line("ERROR", text)).commands).toStrictEqual(
-      refusedWith(text)
-    );
+  it("a bare ERROR still has a reason", () => {
+    expect(step(inPhase("registering"), line("ERROR")).commands).toStrictEqual(saidWith("ERROR"));
   });
 
-  it("still has a reason when a refusal carries no text", () => {
-    expect(step(inPhase("registering"), line("465")).commands).toStrictEqual(refusedWith("465"));
+  it("reads no wording: a timeout and a ban close the same way", () => {
+    expect(
+      step(inPhase("registering"), line("ERROR", "Registration timeout: 1m0s")).commands
+    ).toStrictEqual(saidWith("Registration timeout: 1m0s"));
   });
 
-  it("a bare ERROR before 001 is a refusal", () => {
-    expect(step(inPhase("registering"), line("ERROR")).commands).toStrictEqual(
-      refusedWith("ERROR")
-    );
-  });
+  it.each(["463", "464", "465"])(
+    "%s closes nothing, and the Ircd's close or the deadline ends it",
+    (numeric) => {
+      const { commands, next } = step(inPhase("registering"), line(numeric, "*", "Not today"));
 
-  it("a FAIL before 001 is a refusal", () => {
-    const { commands } = step(
+      expect(commands).toStrictEqual([]);
+      expect(phase(next)).toBe("registering");
+    }
+  );
+
+  it("a FAIL closes nothing", () => {
+    const { commands, next } = step(
       inPhase("registering"),
       line("FAIL", "*", "ACCOUNT_REQUIRED", "An account is required")
     );
-
-    expect(commands).toStrictEqual(refusedWith("An account is required"));
-  });
-
-  it("an ERROR for a known transient cause closes, unmarked", () => {
-    const { commands, next } = step(
-      inPhase("registering"),
-      line("ERROR", "Registration timeout: 1m0s")
-    );
-
-    expect(commands).toStrictEqual(closeWith("Registration timeout: 1m0s"));
-    expect(phase(next)).toBe("closing");
-  });
-
-  it("a FAIL for a known transient cause keeps registering", () => {
-    const { commands, next } = step(inPhase("registering"), line("FAIL", "*", "T", "Ping timeout"));
 
     expect(commands).toStrictEqual([]);
     expect(phase(next)).toBe("registering");
   });
 
-  it("CONN-4: Ergo's FAIL NICK after a 433 neither refuses nor skips a candidate", () => {
+  it("CONN-4: Ergo's FAIL NICK after a 433 does not skip a candidate", () => {
     const { commands } = run([
       ...histories.registering,
       line("433", "*", "claude", "Nickname is reserved"),
@@ -410,14 +394,7 @@ describe("LIVE-5: refusals", () => {
     expect(commands.slice(2)).toStrictEqual([[sendNick("claudia", "nick-fallback")], [], []]);
   });
 
-  it("an ERROR after 001 is not a refusal", () => {
-    const { commands, next } = step(inPhase("session"), line("ERROR", "Closing Link: banned"));
-
-    expect(commands).toStrictEqual(closeWith("Closing Link: banned"));
-    expect(phase(next)).toBe("closing");
-  });
-
-  it.each(["463", "464", "465"])("%s after 001 is not a refusal", (numeric) => {
+  it.each(["463", "464", "465"])("%s after 001 closes nothing", (numeric) => {
     expect(step(inPhase("session"), line(numeric, "claude", "You are not")).commands).toStrictEqual(
       []
     );
@@ -906,16 +883,24 @@ describe("ERROR", () => {
   it("closes a Session with its text", () => {
     const { commands, next } = step(inPhase("session"), line("ERROR", "Closing Link: banned"));
 
-    expect(commands).toStrictEqual(closeWith("Closing Link: banned"));
+    expect(commands).toStrictEqual(saidWith("Closing Link: banned"));
     expect(observe(next)).toMatchObject({ deadline: undefined, phase: "closing" });
   });
 
   it("still has a reason when it carries no text", () => {
-    expect(step(inPhase("session"), line("ERROR")).commands).toStrictEqual(closeWith("ERROR"));
+    expect(step(inPhase("session"), line("ERROR")).commands).toStrictEqual(saidWith("ERROR"));
   });
 
-  it.each(["idle", "closing", "closed"] as const)("is ignored in %s", (from) => {
+  it.each(["idle", "closed"] as const)("is ignored in %s", (from) => {
     expect(step(inPhase(from), line("ERROR", "gone")).commands).toStrictEqual([]);
+  });
+
+  it("LIVE-5: while closing, gives only its words for the close already asked for", () => {
+    const snapshot = inPhase("closing");
+    const { commands, next } = step(snapshot, line("ERROR", "gone"));
+
+    expect(commands).toStrictEqual(saidWith("gone"));
+    expect(observe(next)).toStrictEqual(observe(snapshot));
   });
 });
 
@@ -970,11 +955,10 @@ describe("LIVE-9: closing", () => {
 
   it.each([
     ["a Line", lineAt(5000, "PRIVMSG", "#a", "hello")],
-    ["an ERROR", lineAt(5000, "ERROR", "Closing Link")],
     ["a 001", lineAt(5000, "001", "claude")],
     ["a 376", lineAt(5000, "376", "claude")],
-    ["a nick refusal", lineAt(5000, "433", "*", "claude", "Taken")],
-    ["a refusal", lineAt(5000, "465", "*", "Banned")],
+    ["a nick rejection", lineAt(5000, "433", "*", "claude", "Taken")],
+    ["a 465", lineAt(5000, "465", "*", "Banned")],
     ["a fragment", { at: 5000, type: "HEARD" } as const],
     ["an expired deadline", expire("silence", 500_000)],
     ["an expired lag check", expire("lag-check", 500_000)],
@@ -1008,7 +992,7 @@ describe("a close the machine decided", () => {
     ["silence", [...histories.session, expire("silence", silenceEnds)]],
     ["an ERROR in a Session", [...histories.session, line("ERROR", "gone")]],
     ["a registration timeout", [...histories.registering, expire("registration", 62_000)]],
-    ["a refusal", [...histories.registering, line("465", "*", "Banned")]],
+    ["an ERROR while registering", [...histories.registering, line("ERROR", "Banned")]],
     [
       "a list that ran out",
       [
@@ -1025,7 +1009,7 @@ describe("a close the machine decided", () => {
     expect(phase(snapshot)).toBe("closing");
     expect(deadline(snapshot)).toBeUndefined();
     expect(step(snapshot, ping).commands).toStrictEqual([]);
-    expect(step(snapshot, line("ERROR", "again")).commands).toStrictEqual([]);
+    expect(step(snapshot, line("ERROR", "again")).commands).toStrictEqual(saidWith("again"));
     expect(step(snapshot, stopping).commands).toStrictEqual([]);
   });
 });
@@ -1051,17 +1035,6 @@ describe("CLOSED", () => {
   it("has no reason while the Connection is up", () => {
     expect(closeReason(inPhase("session"))).toBeUndefined();
   });
-
-  it("LIVE-5: says why a refused Connection closed", () => {
-    const { next } = step(inPhase("closing"), {
-      at: 9000,
-      reason: "banned",
-      refused: true,
-      type: "CLOSED",
-    });
-
-    expect(closeReason(next)).toBe("banned");
-  });
 });
 
 describe("LEAVING", () => {
@@ -1080,12 +1053,12 @@ describe("LEAVING", () => {
     );
   });
 
-  it("LOG-2: a refusal after it is still read as one", () => {
-    const refusal: NetworkEvent = { at: 3500, command: "465", params: ["banned"], type: "LINE" };
+  it("LOG-2: an ERROR after it still gives the Ircd's words", () => {
+    const error: NetworkEvent = { at: 3500, command: "ERROR", params: ["banned"], type: "LINE" };
 
-    expect(step(step(inPhase("registering"), leaving).next, refusal).commands).toStrictEqual([
-      { reason: "banned", refused: true, type: "closeConnection" },
-    ]);
+    expect(step(step(inPhase("registering"), leaving).next, error).commands).toStrictEqual(
+      saidWith("banned")
+    );
   });
 
   it("LOG-2: asks for nothing, and leaves a Session as it is", () => {

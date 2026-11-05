@@ -15,6 +15,11 @@ import { Log, LogTooNew } from "./log.ts";
 
 // RUN-5 with a migration only these tests know, after the Log's own.
 
+// What a binary from before the Log's second migration knew.
+const firstOnly: SqliteMigrator.Loader = logMigrations.pipe(
+  Effect.map((known) => known.filter(([id]) => id === 1))
+);
+
 // What no Frontend can read as text, so a migration that decoded and wrote back a Line
 // would change it.
 const bytes = [
@@ -31,7 +36,7 @@ const line = (each: Uint8Array): NewEntry => ({
 });
 
 // What a Log that has run the binary's own migrations has applied.
-const logMigrationNames = ["1_initial"];
+const logMigrationNames = ["1_initial", "2_tuning_without_refusals"];
 
 // The next migration, as the first format change after the freeze will be: it adds to the Log and
 // rewrites nothing in it.
@@ -39,7 +44,7 @@ const withNote: SqliteMigrator.Loader = logMigrations.pipe(
   Effect.map((known) => [
     ...known,
     [
-      2,
+      3,
       "test_note",
       Effect.succeed(
         Effect.gen(function* () {
@@ -73,6 +78,31 @@ const opened = <A, E>(
       (context) => Effect.provideContext(use, context)
     )
   );
+
+// An `attempt` and its `closed`, as every Log has.
+const recordAttemptAndClose = Recorder.use(({ record }) =>
+  record(
+    [
+      {
+        _tag: "Connection",
+        ircd: { host: "irc.test", port: 6697, tls: true },
+        network: "libera",
+        nicks: ["iirc"],
+        ...attemptInput,
+        phase: "attempt",
+      },
+      {
+        _tag: "Connection",
+        connection: 1,
+        ircd: { host: "irc.test", port: 6697, tls: true },
+        network: "libera",
+        phase: "closed",
+        reason: "You are banned",
+      },
+    ],
+    (recorded) => recorded.length
+  )
+);
 
 const recordLines = Recorder.use(({ record }) =>
   record(
@@ -141,7 +171,7 @@ describe("migrations (RUN-5)", () => {
 
         // The Log has the migration, and every Line's bytes as they were.
         assert.include(columns(live), "test_note");
-        assert.deepStrictEqual(applied(live), [...logMigrationNames, "2_test_note"]);
+        assert.deepStrictEqual(applied(live), [...logMigrationNames, "3_test_note"]);
         assert.deepStrictEqual(lineBytes(live), before);
         assert.deepStrictEqual(
           entries.flatMap((entry) => (entry._tag === "Line" ? [entry.bytes] : [])),
@@ -162,14 +192,71 @@ describe("migrations (RUN-5)", () => {
       const refused = yield* Effect.flip(opened(dataDir, recordLines));
 
       assert.instanceOf(refused, LogTooNew);
-      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], ["2_test_note"]);
+      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], ["3_test_note"]);
       assert.include(refused.message, "newer iirc");
-      assert.include(refused.message, "2_test_note");
+      assert.include(refused.message, "3_test_note");
       // It touched nothing: no Entry was appended, and no backup was taken.
       assert.deepStrictEqual(lineBytes(live), before);
-      assert.deepStrictEqual(applied(live), [...logMigrationNames, "2_test_note"]);
+      assert.deepStrictEqual(applied(live), [...logMigrationNames, "3_test_note"]);
       assert.isFalse(existsSync(`${dataDir}/backups`));
     }).pipe(Effect.scoped)
+  );
+
+  it.live("RUN-5, LIVE-5: an iirc from before refusals went refuses a Log this one wrote", () =>
+    Effect.gen(function* () {
+      const dataDir = yield* dataDirectory;
+
+      yield* opened(dataDir, recordLines);
+
+      const refused = yield* Effect.flip(opened(dataDir, recordLines, firstOnly));
+
+      assert.instanceOf(refused, LogTooNew);
+      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], [
+        "2_tuning_without_refusals",
+      ]);
+    }).pipe(Effect.scoped)
+  );
+
+  it.live(
+    "RUN-5, LIVE-5: a Log from before is backed up, and its refusal Tuning and marks still read",
+    () =>
+      Effect.gen(function* () {
+        const dataDir = yield* dataDirectory;
+        const live = `${dataDir}/iirc.sqlite`;
+
+        yield* opened(dataDir, recordAttemptAndClose, firstOnly);
+
+        // What that binary wrote: its Tuning had the wait, and its close the mark.
+        const database = new Database(live);
+
+        try {
+          database.run(
+            "UPDATE entries SET tuning = json_set(tuning, '$.refusalBackoffMillis', 1800000) WHERE phase = 'attempt'"
+          );
+          database.run("UPDATE entries SET refused = 1 WHERE phase = 'closed'");
+        } finally {
+          database.close();
+        }
+
+        const read = yield* opened(
+          dataDir,
+          Log.use(({ entries: all }) => all({ after: 0, limit: 10 }))
+        );
+
+        const phases = read.flatMap((entry) => (entry._tag === "Connection" ? [entry] : []));
+
+        assert.lengthOf(readdirSync(`${dataDir}/backups`), 1);
+        assert.deepStrictEqual(applied(live), logMigrationNames);
+        assert.deepStrictEqual(
+          phases.map((entry) => entry.phase),
+          ["attempt", "closed"]
+        );
+        assert.notProperty(
+          phases[0]?.phase === "attempt" ? phases[0].tuning : {},
+          "refusalBackoffMillis"
+        );
+        assert.isTrue(phases[1]?.phase === "closed" && phases[1].refused === true);
+      }).pipe(Effect.scoped)
   );
 
   it.live("RUN-5: takes no backup of a new Log, or of one with nothing to migrate", () =>

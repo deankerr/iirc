@@ -1428,7 +1428,6 @@ describe("the durable Log", () => {
 
           // A fixture that derives nothing would pass everything below.
           assert.lengthOf(live.gaps, 4);
-          assert.strictEqual(live.libera.refusal, undefined);
           assert.deepStrictEqual([...live.libera.kicked.keys()], ["#rust"]);
           assert.isUndefined(live.libera.lagMillis);
           assert.deepStrictEqual(
@@ -1456,7 +1455,7 @@ describe("the durable Log", () => {
       )
     );
 
-    it.effect("LOG-10: a refusal in force rebuilds, with the time it allows", () =>
+    it.effect("LOG-10: a close an earlier Daemon marked refused rebuilds as any close", () =>
       inTempDirectory((dataDir) =>
         Effect.gen(function* () {
           const connection = yield* attempted();
@@ -1471,7 +1470,7 @@ describe("the durable Log", () => {
           const rebuilt = yield* standing();
 
           assert.deepStrictEqual(rebuilt, live);
-          assert.deepStrictEqual(rebuilt.refusal, { at: 1000, reason: "You are banned" });
+          assert.strictEqual(rebuilt.recent.at(-1)?.reason, "You are banned");
         }).pipe(Effect.provide(Log.layer({ dataDir })))
       )
     );

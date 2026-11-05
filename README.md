@@ -4,7 +4,7 @@ iirc is an always-on IRC client you can build on. A headless Daemon stays on you
 
 ## Status
 
-- **Milestone 1, "Stays on", is built:** the durable Log, Configuration, Credentials, reconnecting and refusals, flood control, multiple Networks, API keys, and a systemd service.
+- **Milestone 1, "Stays on", is built:** the durable Log, Configuration, Credentials, reconnecting with backoff, flood control, multiple Networks, API keys, and a systemd service.
 - **The 30-day soak test (PROOF-5) is running** since 2026-11-04.
 - **Next:** milestone 2, "Knows the Network". There is no web frontend yet.
 

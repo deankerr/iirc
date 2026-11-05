@@ -62,13 +62,6 @@ export interface EndedConnection {
   readonly sessionMillis: number | undefined;
 }
 
-/** The Network's own words for why it will not have us (LIVE-5). */
-export interface Refusal {
-  /** When the Connection it ended closed. */
-  readonly at: number;
-  readonly reason: string | undefined;
-}
-
 /** A Channel's latest `JOIN` failure, and when and on which Connection it came. */
 export interface HeldJoinFailure extends JoinFailure {
   readonly at: number;
@@ -143,8 +136,6 @@ export interface Standing {
   readonly nickLength: number | undefined;
   /** How the latest Connections ended, oldest first. */
   readonly recent: readonly EndedConnection[];
-  /** The refusal in force, until a Session is reached. */
-  readonly refusal: Refusal | undefined;
 }
 
 /** Each Network's {@link Standing}. */
@@ -237,7 +228,6 @@ export const noStanding: Standing = {
   network: undefined,
   nickLength: undefined,
   recent: [],
-  refusal: undefined,
 };
 
 /** No Networks at all. */
@@ -486,17 +476,15 @@ const afterConnection = (standing: Standing, entry: ConnectionEntry): Standing =
     }
 
     case "closed": {
-      const { at, endedAt, reason, refused } = entry;
+      const { endedAt, reason } = entry;
 
       // A close recorded late says when the Connection really ended, which is where the
       // time away began. Its place in order is still its sequence (LOG-8).
-      const closed = ended(standing, entry, {
+      return ended(standing, entry, {
         deliberate: connection.closing?.chosen === true,
         reason: reason ?? connection.closing?.reason ?? "the Connection closed",
         ...(endedAt !== undefined && { endedAt }),
       });
-
-      return refused === true ? { ...closed, refusal: { at, reason } } : closed;
     }
 
     default: {
@@ -558,14 +546,13 @@ const afterPong = (standing: Standing, { at }: Entry, line: Line): Standing => {
       };
 };
 
-// A Session began, which ends the Gap before it and any refusal (LIVE-5, LIVE-10).
+// A Session began, which ends the Gap before it (LIVE-10).
 const afterWelcome = (standing: Standing, { at, sequence }: Moment): Standing => {
   const { gap } = standing;
 
   return {
     ...standing,
     gap: gap === undefined || gap.ended !== undefined ? gap : { ...gap, ended: { at, sequence } },
-    refusal: undefined,
   };
 };
 
@@ -887,22 +874,15 @@ export const nextAttempt = (
   const settled = endedWithoutClose(standing, killed);
   const ircd = ircdAfter(ircds, settled.attempt?.ircd);
 
-  // A retry no `attempt` has answered yet outranks backoff and a refusal alike.
+  // A retry no `attempt` has answered yet outranks backoff.
   if (retrySince !== undefined && (settled.attempt?.sequence ?? 0) < retrySince) {
     return { at: 0, delayMillis: 0, ircd };
   }
 
   const endedAt = settled.recent.at(-1)?.at;
-  const { refusal } = settled;
   const delay = endedAt === undefined ? 0 : reconnectDelay(settled, tuning);
-  const afterFailure = endedAt === undefined ? 0 : endedAt + delay;
-  const afterRefusal = refusal === undefined ? 0 : refusal.at + tuning.refusalBackoffMillis;
 
-  return {
-    at: Math.max(afterFailure, afterRefusal),
-    delayMillis: afterRefusal > afterFailure ? tuning.refusalBackoffMillis : delay,
-    ircd,
-  };
+  return { at: endedAt === undefined ? 0 : endedAt + delay, delayMillis: delay, ircd };
 };
 
 /**

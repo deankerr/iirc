@@ -555,18 +555,22 @@ describe("Networks through the API", () => {
         const libera = yield* welcomingIrcd();
 
         const oftc = yield* welcomingIrcd((line) =>
-          line.startsWith("USER ") ? [":ircd 465 * :Banned here"] : undefined
+          line.startsWith("USER ") ? ["ERROR :Banned here"] : undefined
         );
 
         // Added out of order, because status is ordered by ID.
         yield* client.networks.add({
           payload: settingsFor("oftc", oftc, {
-            tuning: { ...brisk, refusalBackoffMillis: 60_000 },
+            tuning: { ...brisk, reconnectInitialMillis: 60_000, reconnectMaxMillis: 60_000 },
           }),
         });
         yield* client.networks.add({ payload: settingsFor("libera", libera) });
         yield* untilPhase(client, "libera", "session");
-        yield* eventually(statusOf(client, "oftc"), ({ refused }) => refused, limit);
+        yield* eventually(
+          statusOf(client, "oftc"),
+          ({ closeReason }) => closeReason === "Banned here",
+          limit
+        );
 
         const sent = yield* client.daemon.send({
           payload: { network: "libera", target: "#iirc", text: "only here" },
@@ -581,10 +585,10 @@ describe("Networks through the API", () => {
         assert.strictEqual(sent.status, "written");
         assert.instanceOf(refused, NotInSession);
         assert.deepStrictEqual(
-          networks.map(({ id, phase, refused: isRefused }) => ({ id, isRefused, phase })),
+          networks.map(({ closeReason, id, phase }) => ({ closeReason, id, phase })),
           [
-            { id: "libera", isRefused: false, phase: "session" },
-            { id: "oftc", isRefused: true, phase: "closed" },
+            { closeReason: null, id: "libera", phase: "session" },
+            { closeReason: "Banned here", id: "oftc", phase: "closed" },
           ]
         );
         assert.include(yield* libera.received, "PRIVMSG #iirc :only here");
@@ -593,26 +597,27 @@ describe("Networks through the API", () => {
     )
   );
 
-  it.live("CONF-2: a change to the Ircds retries at once, even during a refusal's wait", () =>
+  it.live("CONF-2: a change to the Ircds retries at once, even during a long backoff", () =>
     withDaemon(({ client }) =>
       Effect.gen(function* () {
         const banning = yield* welcomingIrcd((line) =>
-          line.startsWith("USER ") ? [":ircd 465 * :You are banned"] : undefined
+          line.startsWith("USER ") ? ["ERROR :You are banned"] : undefined
         );
 
         const welcoming = yield* welcomingIrcd();
-        const tuning = { ...brisk, refusalBackoffMillis: 600_000 };
+        const tuning = { ...brisk, reconnectInitialMillis: 600_000, reconnectMaxMillis: 600_000 };
         const settings = settingsFor("libera", banning, { tuning });
 
         yield* client.networks.add({ payload: settings });
 
-        const refused = yield* eventually(
+        const waiting = yield* eventually(
           statusOf(client, "libera"),
-          ({ nextAttemptAt, refused: isRefused }) => isRefused && nextAttemptAt !== null,
+          ({ closeReason, nextAttemptAt }) =>
+            closeReason === "You are banned" && nextAttemptAt !== null,
           limit
         );
 
-        assert.isAbove(refused.nextAttemptAt ?? 0, Date.now() + 60_000);
+        assert.isAbove(waiting.nextAttemptAt ?? 0, Date.now() + 60_000);
 
         yield* client.networks.change({
           params: { id: "libera" },

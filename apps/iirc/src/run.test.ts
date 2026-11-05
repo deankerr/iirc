@@ -554,34 +554,32 @@ describe("the compiled binary, stopping and starting", () => {
   );
 
   it.live(
-    "LIVE-5: a refusal outlives restarts, none of which dial during the wait",
+    "LIVE-4, LIVE-5: a Network's ERROR backs off across restarts, none of which dial during the wait",
     () =>
       Effect.gen(function* () {
         const text = "You are banned from this Network (scripted)";
-        // Three Daemon starts must all happen inside the wait, even on a busy machine.
-        const refusalBackoffMillis = 12_000;
         const where = yield* home;
 
-        // Far shorter than the wait, so that only the refusal can be what holds it back.
+        // Three Daemon starts must all happen inside the wait, even on a busy machine. The
+        // first backoff is at least half of this.
         const tuning = {
           drainMillis: 20,
           quitWaitMillis: 50,
-          reconnectInitialMillis: 50,
-          reconnectMaxMillis: 50,
-          refusalBackoffMillis,
+          reconnectInitialMillis: 24_000,
+          reconnectMaxMillis: 24_000,
         };
 
         const ircd = yield* scriptedIrcd(
-          (line) => (line.startsWith("USER ") ? [`:ircd 465 ${nick} :${text}`] : []),
+          (line) => (line.startsWith("USER ") ? [`ERROR :${text}`] : []),
           { hostname: ircdAddress }
         );
 
-        const refused = Effect.gen(function* () {
+        const turnedAway = Effect.gen(function* () {
           const { daemon, running } = yield* startDaemon(where, ircd, tuning);
 
           const status = yield* eventually(
             statusOf(daemon),
-            ({ nextAttemptAt, refused: isRefused }) => isRefused && nextAttemptAt !== null,
+            ({ closeReason, nextAttemptAt }) => closeReason === text && nextAttemptAt !== null,
             settleLimit
           );
 
@@ -590,7 +588,7 @@ describe("the compiled binary, stopping and starting", () => {
 
         const first = yield* Effect.scoped(
           Effect.gen(function* () {
-            const { running, status } = yield* refused;
+            const { running, status } = yield* turnedAway;
             const { code } = yield* signal(running, "SIGTERM");
 
             assert.strictEqual(code, 0, running.output());
@@ -601,13 +599,12 @@ describe("the compiled binary, stopping and starting", () => {
 
         const dueAt = first.nextAttemptAt ?? 0;
 
-        assert.strictEqual(first.refusal, text);
         assert.strictEqual(first.closeReason, text);
         assert.strictEqual(first.consecutiveFailures, 1);
 
         const second = yield* Effect.scoped(
           Effect.gen(function* () {
-            const { running, status } = yield* refused;
+            const { running, status } = yield* turnedAway;
 
             yield* sigkill(running);
 
@@ -615,10 +612,10 @@ describe("the compiled binary, stopping and starting", () => {
           })
         );
 
-        const { daemon, status: third } = yield* refused;
+        const { daemon, status: third } = yield* turnedAway;
 
-        assert.strictEqual(second.refusal, text);
-        assert.strictEqual(third.refusal, text);
+        assert.strictEqual(second.closeReason, text);
+        assert.strictEqual(third.closeReason, text);
         assert.strictEqual(second.nextAttemptAt, dueAt, "a restart must not move the wait");
         assert.strictEqual(third.nextAttemptAt, dueAt, "nor must a kill");
         assert.isBelow(Date.now(), dueAt, "this test took too long to prove anything");

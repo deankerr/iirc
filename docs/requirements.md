@@ -46,7 +46,8 @@ The Daemon runs one Log and any number of Networks. Everything durable is an Ent
   - **Line:** one Line in either direction, with its Network, its Connection, and a cause if outbound.
   - **Connection:** an attempt, opening, closing, or close, with the Ircd, TLS details, and reason. An attempt names the nicks it will try, how many Lines its login sequence holds, and which nicks are services (CONN-6). An opening over TLS records the protocol, the cipher, the pin of the key the Ircd presented, and whether a certificate authority or a pin verified it (CONN-1).
     - Closing is recorded whenever the Daemon decides to end a Connection, with its reason and whether it chose to leave (LIVE-9). Only a chosen leave is not a failure.
-    - A close says whether it was a refusal (LIVE-5). A refusal seen while a close is under way outranks the reason that started it, because a Network that bans us at accept closes the socket before we can read why.
+    - A close's reason is the first one given, unless the Ircd's own words, from its `ERROR`, come while the close is under way. They outrank it, because a Network that turns us away often closes the socket before its `ERROR` is read (LIVE-5). A leave the Daemon chose keeps its own reason, because an `ERROR` then only answers its `QUIT`.
+    - Earlier Daemons marked some closes `refused`, and recorded a `refusalBackoffMillis` in each `attempt`'s Tuning. A Log keeps both, and nothing reads them. Migration `2_tuning_without_refusals` marks the change, so a binary from before refuses a Log written since (RUN-5).
     - A Connection the Log could not close, because appends were failing (LOG-9), gets its close once appends succeed, with that reason, so that it is never mistaken for a killed process.
   - **Change:** something the Owner altered, such as Configuration, a Read Marker, an ignore, or an API key, with the name of the key that altered it, or `local` for `iirc key create` (AUTH-4), and the Network it concerns, if any.
   - **Daemon:** a start or stop, with its version.
@@ -75,7 +76,7 @@ The Daemon runs one Log and any number of Networks. Everything durable is an Ent
   - Redaction empties the bytes and marks the Entry redacted. Derived rows from it are derived again, so a Message it carried disappears.
   - Only a Line or a Dropped Entry has bytes to redact. The edit and its Change are one transaction, and the Entry names that Change.
   - Every derived table is derived again in that transaction, as a start would, so a restart reads what it leaves (LOG-10). It holds the writer as long as a start's rebuild takes, which suits something done on a rare day.
-  - `Standing` keeps what the host knew until the next start, because a Connection under way acted on the Line as it was. A start replays a redacted Line as one with no bytes, which says nothing, so what only it told `Standing` is forgotten, such as a kick, `NICKLEN`, a `JOIN` failure, or a sign of login. What was recorded because of it still stands, such as a `closed` that was a refusal. Rows derived from later Entries follow the replay and not `Standing`, so that they are the rows a rebuild writes.
+  - `Standing` keeps what the host knew until the next start, because a Connection under way acted on the Line as it was. A start replays a redacted Line as one with no bytes, which says nothing, so what only it told `Standing` is forgotten, such as a kick, `NICKLEN`, a `JOIN` failure, or a sign of login. What was recorded because of it still stands, such as a `closed` that its `ERROR` gave the reason for. Rows derived from later Entries follow the replay and not `Standing`, so that they are the rows a rebuild writes.
   - Deferred: pruning and retention. Nothing is pruned until we know what a year of Log costs, including large `LIST` replies.
 - **LOG-8.** Times are when the Daemon recorded the Entry. Order comes from sequence numbers, never from clocks, because clocks can jump.
   - No wait for a reconnect is ever longer than its own delay from now, so a clock set back cannot keep a Network offline.
@@ -100,7 +101,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - The Daemon will not start on a Change it cannot read at all: one of no kind it knows, such as a newer iirc wrote, or one without the shape its kind always had. It says the Change's sequence and why, because Configuration without that Change would not be what the Owner asked for.
 - **CONF-2.** All Configuration can be read and changed through the API while the Daemon runs. A running Session applies a change without a restart where IRC allows it, and otherwise at the next Connection.
   - Applied at once: enabled, Channels, and the `QUIT` reason. A Channel taken off the list is parted if Self is in it, and a newly wanted one is joined. Turning autojoin off parts nothing, because it only stops the Daemon joining.
-  - Applied at the next Connection: Ircds, Identity, Credentials, services, connect commands, and Tuning. A change to any of them retries straight away (LIVE-4), so a Network waiting out a backoff or a refusal picks it up at once.
+  - Applied at the next Connection: Ircds, Identity, Credentials, services, connect commands, and Tuning. A change to any of them retries straight away (LIVE-4), so a Network waiting out a backoff picks it up at once.
 - **CONF-3.** A Network has a stable ID and a display name, plus an enabled flag and these settings. The ID is up to 32 lowercase letters, digits, and `-`, starting with a letter or digit, and the Owner chooses it. Connect and disconnect set the enabled flag.
   - **Ircds:** an ordered list of host, port, TLS on or off, and an optional pinned key.
   - **Identity:** nick, alternate nicks, username, and realname.
@@ -155,7 +156,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - Plaintext requires an explicit `tls: false` on that Ircd.
   - Skipping verification requires a pinned key, because a bare "accept anything" option does not exist.
   - A pin is `sha256/` and the base64 SHA-256 of the key's SubjectPublicKeyInfo, as `curl --pinnedpubkey` reads it. A pinned Ircd is verified by its pin alone, so a self-signed certificate works, and the hostname is not checked.
-  - A pin that does not match closes the Connection before anything is sent, and the reason gives the pin the Ircd presented, so that the Owner can pin it after checking. A mismatch backs off like any failure and is not a refusal.
+  - A pin that does not match closes the Connection before anything is sent, and the reason gives the pin the Ircd presented, so that the Owner can pin it after checking. A mismatch backs off like any failure.
   - Connecting times out after 15 seconds, and any single write after 10.
 - **CONN-2.** Registration sends `PASS` if configured, then `NICK` and `USER`, and finishes on `001`. It times out after 60 seconds, because slow ident and DNS on old Ircds are normal.
 - **CONN-3.** The nick in `001` is the truth, and a later `NICK` from the Ircd is too. An Ircd can rename us, for example when services enforce a reserved nick.
@@ -188,12 +189,11 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - Delays grow from 5 seconds to 5 minutes, with jitter over the upper half of each delay, and reset after a Session has stayed up for 5 minutes.
   - Attempts rotate through the Ircds.
   - Backoff state is derived from Connection Entries, so a crash loop under a service manager cannot hammer a Network.
-  - A relevant Change (CONF-2), or an explicit connect, retries straight away, even during a refusal's wait. The fold knows this from the Change's sequence, so a restart agrees.
-- **LIVE-5.** A refusal backs off for at least 30 minutes, and status shows the Network's own text verbatim.
-  - A refusal is `463`, `464`, `465`, or any `ERROR` or `FAIL` before `001`, unless it is known to be transient, such as a ping or registration timeout.
-  - `FAIL NICK` is not a refusal, because Ergo sends it after `433` for a reserved nick, and that is CONN-4's fallback.
-  - Wording is at most a hint, never the rule. Ergo never sends `465`, and bans with a bare `ERROR`.
-  - Known transient wordings are limits and restarts, such as ngircd's `Server going down`, `Connection limit reached`, and `too many connections from your IP address`, and Ergo's connection throttle, `Too many clients from your network`, and temporary restrictions. They back off like any failure, which already reaches 5 minutes. Bans and `Access denied` are refusals.
+  - A relevant Change (CONF-2), or an explicit connect, retries straight away, whatever is left of the backoff. The fold knows this from the Change's sequence, so a restart agrees.
+- **LIVE-5.** A Network that turns us away backs off like any other failure (LIVE-4), and status shows its own words verbatim. Nothing reads what a Network says to decide how long to wait.
+  - An `ERROR` closes the Connection, before `001` or after, and its text is the reason.
+  - A numeric such as `463`, `464`, or `465`, or a `FAIL`, closes nothing by itself. The Ircd's own close, its `ERROR`, or the registration deadline ends the Connection.
+  - So a Network that bans us is tried again at most every 5 minutes, LIVE-4's longest wait.
 - **LIVE-6.** A reconnect is a new Session. Derived Channel state, lag, and every `RPL_ISUPPORT` token are cleared on close, then rebuilt from what the Ircd says, never carried over.
 - **LIVE-7.** After the burst, the Daemon rejoins Channels with autojoin on.
   - It batches `JOIN`s by line length, with keyed Channels first (SEND-11).

@@ -174,13 +174,19 @@ describe("every path through the machine", () => {
     ).toStrictEqual([]);
   });
 
-  it("LIVE-9: does nothing at all once a close is under way", () => {
+  it("LIVE-9: once a close is under way, asks for nothing but the Ircd's words for it", () => {
     expect(
-      outcomes.filter(({ commands, from }) => from === "closing" && commands.length > 0)
+      outcomes.filter(
+        ({ commands, from }) =>
+          from === "closing" &&
+          !commands.every(
+            (command) => command.type === "closeConnection" && command.ircdSaid === true
+          )
+      )
     ).toStrictEqual([]);
   });
 
-  it("moves to closing with every close it asks for, so it asks only once", () => {
+  it("moves to closing with every close it asks for, so it decides only once", () => {
     expect(
       outcomes.filter(
         ({ commands, to }) =>
@@ -217,13 +223,13 @@ describe("every path through the machine", () => {
     ).toStrictEqual([]);
   });
 
-  it("LIVE-5: only ever marks a close refused before a Session", () => {
+  it("LIVE-5: gives a close as the Ircd's words only for its ERROR", () => {
     expect(
       outcomes.filter(
-        ({ commands, from }) =>
+        ({ commands, event }) =>
           commands.some(
-            (command) => command.type === "closeConnection" && command.refused === true
-          ) && from !== "registering"
+            (command) => command.type === "closeConnection" && command.ircdSaid === true
+          ) && !(event.type === "LINE" && event.command === "ERROR")
       )
     ).toStrictEqual([]);
   });

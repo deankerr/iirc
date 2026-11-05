@@ -208,29 +208,6 @@ describe("LIVE-4: a retry the Owner asked for", () => {
     }).pipe(memory)
   );
 
-  it.effect("LIVE-4, LIVE-5: and during a refusal's wait", () =>
-    Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const { change, hosted } = yield* liveHost(ircd);
-
-      yield* ircd.read("ERROR :You are banned\r\n");
-      yield* ircd.hangUp;
-      yield* manyTurns;
-
-      assert.isTrue((yield* hosted.status).refused);
-      assert.strictEqual(
-        ((yield* hosted.status).nextAttemptAt ?? 0) - (yield* now),
-        defaultTuning.refusalBackoffMillis
-      );
-
-      const retrySince = yield* recordChange({ ircds: "changed" });
-
-      yield* change((settings) => ({ ...settings, retrySince }));
-
-      assert.lengthOf(yield* ircd.dials, 2);
-    }).pipe(memory)
-  );
-
   it.effect("LIVE-4: a new host on the same Log and settings decides as the last one did", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd({ refuses: true });
