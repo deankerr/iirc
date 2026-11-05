@@ -32,8 +32,8 @@ export interface Closing {
 
 /**
  * A Connection with no end recorded yet. It may not have reached the Ircd. How far it got,
- * and how its login went, are its machine's to say, folded over its own Entries as the
- * host stepped it, and read through {@link connectionView}. What is kept here beside the
+ * and how its login went, are its machine's to say, folded over its own Entries, and read
+ * through {@link connectionView}. What is kept here beside the
  * machine is what only the Log knows: who decided to end it, and where it last was.
  */
 export interface LiveConnection {
@@ -41,7 +41,10 @@ export interface LiveConnection {
   readonly closing: Closing | undefined;
   /** Its latest Entry, which is where it ended if the process was killed. */
   readonly last: Moment;
-  /** Its machine, which only {@link connectionView} reads. */
+  /**
+   * Its machine, which {@link connectionView} reads, and which the host steps on from and
+   * waits on the deadline of. The host keeps no machine of its own.
+   */
   readonly machine: NetworkSnapshot;
   readonly network: NetworkId;
   /** The sequence of its `attempt` Entry. */
@@ -439,8 +442,8 @@ const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
   };
 };
 
-// Every Entry of a Connection under way moves its machine, as it moved the host's, and is
-// where the Connection last was.
+// Every Entry of a Connection under way moves its machine, as the host's commit stepped it,
+// and is where the Connection last was.
 const withEntry = (connection: LiveConnection, entry: Entry): LiveConnection => ({
   ...connection,
   last: { at: entry.at, sequence: entry.sequence },

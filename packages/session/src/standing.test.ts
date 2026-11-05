@@ -913,7 +913,7 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
   });
 
   // The host writes one only once it is due, but a clock set back can stamp it earlier, and
-  // the host's own machine passed over it then, and went on to its welcome (LOG-8).
+  // the machine the host stepped passed over it then, and went on to its welcome (LOG-8).
   it("LOG-8: a registration Deadline Entry stamped before the deadline changes nothing", () => {
     const script = new Script()
       .attempt()

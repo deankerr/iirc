@@ -94,8 +94,8 @@ sequenceDiagram
   activate R
   Note over R,M: one SQLite transaction
   R->>R: append Entries, at most 1024 Lines
-  R->>M: within: step the machine over each Entry
-  M-->>R: next snapshot and Commands
+  R->>M: within: step Standing's machine over each Entry
+  M-->>R: Commands
   R->>R: fold Standing, Messages, Gaps
   R->>R: COMMIT with synchronous=FULL
   R->>W: publish the Entries

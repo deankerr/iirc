@@ -30,6 +30,7 @@ import type { Overrides } from "./network.fixture.ts";
 import { LaneFull, LineDropped, NotInSession } from "./network.ts";
 import type { NetworkHost } from "./network.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
+import type { WantedChannel } from "./standing.ts";
 import { attemptInput, fakeIrcd } from "./testing.ts";
 import type { FakeIrcd } from "./testing.ts";
 
@@ -74,6 +75,39 @@ const pings = (from: number, count: number) =>
 
 const wanted = (...names: readonly string[]) => names.map((name) => ({ name }));
 const joined = (name: string) => `:iirc!~u@host JOIN ${name}\r\n`;
+
+// A commit and the loop read Standing too, so what a plan costs is told against the same
+// Session wanting nothing at all.
+const readsWhileQuiet = (channels: readonly WantedChannel[]) => {
+  let reads = 0;
+
+  const layer = probed({
+    onStanding: () => {
+      reads += 1;
+    },
+  });
+
+  return Effect.gen(function* () {
+    const ircd = yield* fakeIrcd();
+
+    yield* burstOver(ircd, { channels });
+
+    // `burstOver` only waits out the settle for a Session that wants a Channel.
+    if (channels.length === 0) {
+      yield* afterSettle();
+    }
+
+    const before = reads;
+
+    for (let tick = 0; tick < 5; tick += 1) {
+      yield* TestClock.adjust("80 seconds");
+      yield* ircd.read("NOTICE * :keeps it alive\r\n");
+      yield* manyTurns;
+    }
+
+    return reads - before;
+  }).pipe(Effect.provide(layer), Effect.scoped);
+};
 
 // Makes a real transition throw on an `attempt`, without changing what is recorded.
 const poisoned = (entry: Entry) =>
@@ -1528,8 +1562,6 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
     const layer = probed({
       onStanding: () => {
         reads += 1;
-
-        return false;
       },
     });
 
@@ -1552,33 +1584,14 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
     }).pipe(Effect.provide(layer));
   });
 
-  it.effect("LIVE-7: a Channel no Line can carry costs no plans at all", () => {
-    let reads = 0;
-
-    const layer = probed({
-      onStanding: () => {
-        reads += 1;
-
-        return false;
-      },
-    });
-
-    return Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-
-      yield* burstOver(ircd, { channels: [{ name: "#bad name" }] });
-
-      const before = reads;
-
-      for (let tick = 0; tick < 5; tick += 1) {
-        yield* TestClock.adjust("80 seconds");
-        yield* ircd.read("NOTICE * :keeps it alive\r\n");
-        yield* manyTurns;
-      }
-
-      assert.strictEqual(reads, before);
-    }).pipe(Effect.provide(layer));
-  });
+  it.effect("LIVE-7: a Channel no Line can carry costs no plans at all", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(
+        yield* readsWhileQuiet([{ name: "#bad name" }]),
+        yield* readsWhileQuiet([])
+      );
+    })
+  );
 
   it.effect("HOST-1: a reconciler that dies closes the Connection, and is retried", () => {
     let dies = false;
@@ -1589,8 +1602,6 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
           dies = false;
           throw new Error("the store broke");
         }
-
-        return false;
       },
     });
 
@@ -1598,13 +1609,13 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       const ircd = yield* fakeIrcd();
       const hosted = yield* host(ircd, { channels: wanted("#one") });
 
-      yield* ircd.read(welcome);
+      yield* ircd.read(`${welcome}${noMotd}`);
       yield* manyTurns;
 
+      // Armed once the burst is recorded, so the first to read Standing is the reconciler,
+      // waking from its settle.
       dies = true;
 
-      yield* ircd.read(noMotd);
-      yield* manyTurns;
       yield* afterSettle();
 
       assert.strictEqual(
@@ -1642,16 +1653,28 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
     }).pipe(memory)
   );
 
+  // A `PRIVMSG` moves nothing a plan reads, and someone else's `JOIN` does, so the second
+  // flood costs one plan a Line more than the first and nothing else does.
   it.effect("LIVE-7: does not plan again for every Line of a flood", () => {
     let reads = 0;
 
     const layer = probed({
       onStanding: () => {
         reads += 1;
-
-        return false;
       },
     });
+
+    const flood = (ircd: FakeIrcd, line: (index: number) => string) =>
+      Effect.gen(function* () {
+        const before = reads;
+
+        for (let index = 0; index < 200; index += 1) {
+          yield* ircd.read(line(index));
+          yield* manyTurns;
+        }
+
+        return reads - before;
+      });
 
     return Effect.gen(function* () {
       const ircd = yield* fakeIrcd();
@@ -1660,16 +1683,10 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       yield* ircd.read(joined("#one"));
       yield* manyTurns;
 
-      const before = reads;
+      const said = yield* flood(ircd, (index) => `:a!b@c PRIVMSG #one :${index}\r\n`);
+      const joining = yield* flood(ircd, () => ":a!b@c JOIN #one\r\n");
 
-      for (let index = 0; index < 200; index += 1) {
-        yield* ircd.read(`:a!b@c PRIVMSG #one :${index}\r\n`);
-        yield* ircd.read(`:a!b@c JOIN #one\r\n`);
-      }
-
-      yield* manyTurns;
-
-      assert.strictEqual(reads - before, 200);
+      assert.strictEqual(joining - said, 200);
     }).pipe(Effect.provide(layer));
   });
 
@@ -2223,28 +2240,6 @@ describe("LOG-9: the Log failing", () => {
       assert.lengthOf(yield* ircd.dials, 1);
       assert.isUndefined((yield* hosted.status).logFault);
       assert.strictEqual((yield* hosted.status).phase, "registering");
-    }).pipe(Effect.provide(layer));
-  });
-
-  it.effect("LOG-9: a failed `standing` backs off the same way, with no `attempt`", () => {
-    let down = true;
-
-    const layer = probed({ onStanding: () => down });
-
-    return Effect.gen(function* () {
-      const ircd = yield* fakeIrcd();
-      const hosted = yield* host(ircd);
-
-      assert.lengthOf(yield* entries, 0);
-      assert.strictEqual((yield* hosted.status).logFault?.failures, 1);
-
-      down = false;
-
-      yield* TestClock.adjust("5 seconds");
-      yield* manyTurns;
-
-      assert.lengthOf(yield* ircd.dials, 1);
-      assert.isUndefined((yield* hosted.status).logFault);
     }).pipe(Effect.provide(layer));
   });
 

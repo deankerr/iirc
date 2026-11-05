@@ -1,4 +1,4 @@
-# bun/effect/xstate template
+# iirc
 
 @GLOSSARY.md @VISION.md
 
@@ -22,4 +22,4 @@ Additional examples/patterns:
 
 - Effect Solutions `~/code/ref/effect-solutions`
 - Rat Stack `~/code/ref/rat-stack`
-- XState v6 `~/code/ref/xstate`
+- IRC clients to compare approaches with: WeeChat `~/code/ref/weechat` (C), Halloy `~/code/ref/halloy` (Rust)

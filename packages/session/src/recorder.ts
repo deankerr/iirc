@@ -173,7 +173,8 @@ export const makeWatchers = () => {
  *
  * `standing` reads a Network's {@link Standing} as of the last commit. It updates in the
  * same transaction as the Entries and is published only after commit, so a rollback
- * leaves nothing behind, and a host holds no copy of its own.
+ * leaves nothing behind, and a host holds no copy of its own, not even of its machine.
+ * It is held in memory, so reading it cannot fail.
  */
 export class Recorder extends Context.Service<
   Recorder,
@@ -182,7 +183,7 @@ export class Recorder extends Context.Service<
       entries: Arr.NonEmptyReadonlyArray<NewEntry>,
       within: (recorded: Arr.NonEmptyReadonlyArray<Entry>) => A
     ) => Effect.Effect<A, RecordFailed>;
-    readonly standing: (network: NetworkId) => Effect.Effect<Standing, RecordFailed>;
+    readonly standing: (network: NetworkId) => Effect.Effect<Standing>;
   }
 >()("@iirc/session/Recorder") {
   /** {@link Recorder.memory}, plus {@link MemoryEntries} to read what it kept. */

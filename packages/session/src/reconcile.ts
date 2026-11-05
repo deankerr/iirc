@@ -3,7 +3,6 @@ import type { OutboundLine } from "@iirc/protocol/outbound";
 import { Clock, Duration, Effect, Queue } from "effect";
 
 import { joinSensitive, keyedJoins } from "./credentials.ts";
-import type { RecordFailed } from "./recorder.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
 import { joinPlan } from "./standing.ts";
 import type { Standing, WantedChannel } from "./standing.ts";
@@ -21,7 +20,7 @@ export interface Reconciling {
   readonly moved: Queue.Dequeue<void>;
   /** Every Credential there is, read for every `JOIN`, so a key set since is used (CRED-4). */
   readonly secrets: Effect.Effect<Secrets>;
-  readonly standing: Effect.Effect<Standing, RecordFailed>;
+  readonly standing: Effect.Effect<Standing>;
   readonly tuning: Tuning;
 }
 
@@ -34,7 +33,7 @@ export interface Reconciling {
  * Line is built, and a Channel whose key is not set is joined without one (CRED-4).
  * @param reconciling - The Channels wanted, and how to reach the Connection.
  * @returns An effect that ends when a Line could not be written, as happens when the
- * Connection closes, and fails if Standing cannot be read.
+ * Connection closes.
  */
 export const reconcile = ({ channels, join, moved, secrets, standing, tuning }: Reconciling) =>
   Effect.gen(function* () {

@@ -1,4 +1,3 @@
-import { start } from "@iirc/lifecycle";
 import type { Login, Phase } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import type { JoinRejection } from "@iirc/protocol/join";
@@ -35,7 +34,6 @@ import {
   kicksInForce,
   loginOf,
   nextAttempt,
-  noStanding,
 } from "./standing.ts";
 import type { HeldJoinFailure, Standing, WantedChannel } from "./standing.ts";
 import { Transport } from "./transport.ts";
@@ -275,10 +273,8 @@ export const hostNetwork: (
   const recorder = yield* Recorder;
   const { connect } = yield* Transport;
 
-  // Only an `attempt` gives the machine anything to act on, and it brings its own input.
   const hosted = yield* Ref.make<Hosted>({
     live: undefined,
-    snapshot: start(inputOf(yield* settings)),
     stopped: false,
     unclosed: [],
     unrecorded: undefined,
@@ -330,8 +326,8 @@ export const hostNetwork: (
       Effect.tap(() => Ref.set(logFault, undefined))
     );
 
-  const standing = Effect.tapError(recorder.standing(id), () => noteFault);
-  const commit = makeCommit(hosted, record);
+  const standing = recorder.standing(id);
+  const commit = makeCommit(standing, record);
 
   const shared: Omit<Host, "tuning"> = {
     commit,
@@ -547,7 +543,7 @@ export const hostNetwork: (
     sensitive?: Sensitive
   ) {
     const held = yield* Ref.get(hosted);
-    const phase = yield* phaseOf(held);
+    const phase = yield* phaseOf(held, yield* standing);
 
     // The fault is why there is no Session, and nothing can be recorded to send one.
     if (phase !== "session" && (yield* Ref.get(logFault)) !== undefined) {
@@ -596,7 +592,7 @@ export const hostNetwork: (
     const fault = yield* Ref.get(logFault);
     const current = yield* settings;
     const { live, stopped, unrecorded } = held;
-    const known = yield* Effect.orElseSucceed(recorder.standing(id), () => noStanding);
+    const known = yield* standing;
     const now = yield* Clock.currentTimeMillis;
     const lastClose = known.recent.at(-1);
     const between = live === undefined;
@@ -619,7 +615,7 @@ export const hostNetwork: (
       login: between ? { state: "none" } : loginOf(known),
       missingCredentials: missing,
       nextAttemptAt: waiting ? Math.max(attemptDue(known, fault, now, current).at, now) : undefined,
-      phase: between ? phaseBetween : yield* phaseOf(held),
+      phase: between ? phaseBetween : yield* phaseOf(held, known),
       refusal: known.refusal?.reason,
       refused: known.refusal !== undefined,
       rejectedChannels: rejectedOf(current.channels, current.secrets),

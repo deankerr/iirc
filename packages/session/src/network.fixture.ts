@@ -215,8 +215,8 @@ export interface RecorderProbe {
   readonly before?: (entries: readonly NewEntry[]) => void;
   readonly failsAfterWithin?: (entries: readonly NewEntry[]) => boolean;
   readonly duringRecord?: (entries: readonly NewEntry[]) => Effect.Effect<void>;
-  /** Watches `standing`. Returning `true` fails it, and throwing kills it. */
-  readonly onStanding?: () => boolean;
+  /** Watches `standing`. Throwing kills it. */
+  readonly onStanding?: () => void;
   /** Changes what `within` is shown, without changing what is recorded. */
   readonly rewrite?: (entry: Entry) => Entry;
 }
@@ -264,11 +264,11 @@ export const probed = (probe: RecorderProbe) =>
               return result;
             }),
           standing: (network) =>
-            Effect.suspend(() =>
-              probe.onStanding?.() === true
-                ? Effect.fail(new RecordFailed({ cause: "read failed" }))
-                : recorder.standing(network)
-            ),
+            Effect.suspend(() => {
+              probe.onStanding?.();
+
+              return recorder.standing(network);
+            }),
         })
       )
     )

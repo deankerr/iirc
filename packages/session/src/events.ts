@@ -137,9 +137,9 @@ export type EntryStep =
   | { readonly _tag: "Threw"; readonly defect: string; readonly next: NetworkSnapshot };
 
 /**
- * Steps a machine by one recorded Entry. The host steps its machine this way as it records,
- * and Standing folds each Connection's machine this way from the Log, so the two cannot
- * come to differ. Never throws.
+ * Steps a machine by one recorded Entry. Standing folds each Connection's machine this way
+ * from the Log, and a host steps the machine Standing holds this way as it records, for
+ * the Commands. Never throws.
  * @param snapshot - The machine so far.
  * @param entry - The Entry, as the Log holds it.
  * @returns The machine after it, with the Commands it asked for.

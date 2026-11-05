@@ -1,5 +1,6 @@
-import { deadline, phase } from "@iirc/lifecycle";
+import { deadline, phase, start } from "@iirc/lifecycle";
 import type { Command, Lane, NetworkSnapshot, Phase } from "@iirc/lifecycle";
+import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { encodeLine, outbound, pong } from "@iirc/protocol/outbound";
 import type { Outbound } from "@iirc/protocol/outbound";
@@ -108,7 +109,6 @@ type Stage =
 /** What a host holds that no fold of the Log can give it. */
 export interface Hosted {
   readonly live: HostedConnection | undefined;
-  readonly snapshot: NetworkSnapshot;
   /** The loop has ended, so nothing more will happen on this Network. */
   readonly stopped: boolean;
   /**
@@ -126,16 +126,20 @@ export interface Hosted {
  * Connection whose write has failed still reads as a Session to it, and one whose end
  * could not be recorded reads as whatever it last was.
  * @param hosted - The host's state.
+ * @param standing - The Network's Standing, which holds the machine of the Connection under way.
  * @returns The Phase, which is only `session` while a Line can be sent.
  */
-export const phaseOf = ({ live, snapshot, stopped, unrecorded }: Hosted): Effect.Effect<Phase> =>
+export const phaseOf = (
+  { live, stopped, unrecorded }: Hosted,
+  standing: Standing
+): Effect.Effect<Phase> =>
   Effect.gen(function* () {
-    const folded = phase(snapshot);
-
     if (unrecorded !== undefined || stopped || live === undefined) {
-      return folded === "idle" && unrecorded === undefined ? "idle" : "closed";
+      return standing.attempt === undefined && unrecorded === undefined ? "idle" : "closed";
     }
 
+    const { connection } = standing;
+    const folded = connection === undefined ? "closed" : phase(connection.machine);
     const leaving = (yield* Ref.get(live.stage))._tag === "Draining";
 
     return leaving || (folded === "session" && !(yield* live.lanes.isOpen)) ? "closing" : folded;
@@ -170,7 +174,7 @@ export interface Host {
   readonly quitReason: Effect.Effect<string>;
   /** Every Credential there is, read each time one is needed. */
   readonly secrets: Effect.Effect<Secrets>;
-  readonly standing: Effect.Effect<Standing, RecordFailed>;
+  readonly standing: Effect.Effect<Standing>;
   /** Whether a stop has run out of time, so whatever is left is closed now. */
   readonly hurrying: () => boolean;
   readonly tuning: Tuning;
@@ -273,28 +277,39 @@ const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepp
   return { commands, next, stateMayMove };
 };
 
+// What a commit steps when no Connection is under way. Only an `attempt` gives the machine
+// anything to act on, and it brings its own input.
+const noConnection = start({
+  loginLines: 0,
+  realname: "",
+  services: [],
+  tuning: defaultTuning,
+  username: "",
+});
+
+const machineOf = (standing: Standing): NetworkSnapshot =>
+  standing.connection?.machine ?? noConnection;
+
 /**
  * Makes the one way a host steps its machine. The loop calls it, and so does the pump for
  * each Line it records, because the login sequence's Lines are what start the login wait
- * (CONN-6). One commit at a time, from reading the snapshot to keeping the next, so that
- * the machine steps in sequence order and neither loses the other's step. A step that a
- * failed commit rolls back never reaches `hosted`, because `within` only works out the
- * next snapshot.
+ * (CONN-6). The machine is the one Standing folds, as the last commit left it, so the host
+ * keeps no copy of its own. One commit at a time, from reading it to the end of `after`,
+ * so that the machine steps in sequence order and neither caller loses the other's step.
  *
- * From the read of the snapshot to the end of `after`, it is one unit that a cancelled
- * caller cannot cut short, because the Log would otherwise hold Entries that the machine
- * never stepped over, and every later step would start from a snapshot that is behind.
- * The unit runs on a fiber of its own, and a caller only waits for it, so cancelling a
- * caller that waits for its turn drops its commit, and cancelling one whose commit has
- * begun lets the commit finish. That is also what lets a stop let go of a Recorder that
- * never returns. `after` is how a caller publishes what the commit decided in that same
- * unit, and it must not wait on anything for long.
- * @param hosted - The host's state.
+ * That is one unit that a cancelled caller cannot cut short, because the Log would
+ * otherwise hold Entries whose Commands nobody ran. The unit runs on a fiber of its own,
+ * and a caller only waits for it, so cancelling a caller that waits for its turn drops its
+ * commit, and cancelling one whose commit has begun lets the commit finish. That is also
+ * what lets a stop let go of a Recorder that never returns. `after` is how a caller
+ * publishes what the commit decided in that same unit, and it must not wait on anything
+ * for long.
+ * @param standing - Reads the Network's Standing as of the last commit.
  * @param record - Appends Entries.
  * @returns The commit.
  */
 export const makeCommit = (
-  hosted: Ref.Ref<Hosted>,
+  standing: Effect.Effect<Standing>,
   record: Recorder["Service"]["record"]
 ): Commit => {
   const stepping = Semaphore.makeUnsafe(1);
@@ -305,14 +320,13 @@ export const makeCommit = (
         .withPermit(
           Effect.uninterruptible(
             Effect.gen(function* () {
-              const { snapshot } = yield* Ref.get(hosted);
+              const machine = machineOf(yield* standing);
 
               const stepped = yield* record(entries, (recorded) => ({
-                ...stepEntries(snapshot, recorded),
+                ...stepEntries(machine, recorded),
                 recorded,
               }));
 
-              yield* Ref.update(hosted, (held) => ({ ...held, snapshot: stepped.next }));
               yield* after?.(stepped) ?? Effect.void;
 
               return stepped;
@@ -560,7 +574,6 @@ export const hostConnection: (
     reconciling = true;
 
     yield* reconcile({ channels: wanted, join, moved, secrets, standing, tuning }).pipe(
-      Effect.catchTag("RecordFailed", () => logFailed),
       closingIfItDies,
       Effect.forkScoped
     );
@@ -762,7 +775,7 @@ export const hostConnection: (
       yield* flushUnsent.pipe(Effect.catchTag("RecordFailed", () => logFailed));
 
       if (reconciling && committed.value.stateMayMove) {
-        yield* noticeChannels.pipe(Effect.catchTag("RecordFailed", () => logFailed));
+        yield* noticeChannels;
       }
     }
   });
@@ -970,8 +983,8 @@ export const hostConnection: (
         : ended;
     }
 
-    const { snapshot } = yield* Ref.get(hosted);
-    const due = deadline(snapshot);
+    const { connection } = yield* standing;
+    const due = connection === undefined ? undefined : deadline(connection.machine);
 
     if (due === undefined) {
       return yield* Queue.take(inbox);

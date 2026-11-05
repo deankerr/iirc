@@ -1,17 +1,15 @@
 import { assert, describe, it } from "@effect/vitest";
-import { phase, start } from "@iirc/lifecycle";
 import { Deferred, Effect, Fiber, Ref } from "effect";
 import { TestClock } from "effect/testing";
 
 import { makeCommit } from "./connection.ts";
-import type { Hosted } from "./connection.ts";
 import type { NewEntry } from "./entry.ts";
 import { MemoryEntries, Recorder } from "./recorder.ts";
 import { attemptInput } from "./testing.ts";
 
-// The host's one way to step its machine. Recording protects its own transaction, but the
-// snapshot that follows is the host's to keep, and a caller cancelled in between must not
-// leave the Log ahead of the machine.
+// The host's one way to step its machine. Recording protects its own transaction, but what
+// the machine asks for is the host's to run, and a caller cancelled in between must not
+// leave the Log ahead of what was run.
 
 const attempt: NewEntry = {
   _tag: "Connection",
@@ -38,19 +36,13 @@ const slowToAnswer = (committed: Deferred.Deferred<undefined>) =>
     } satisfies Recorder["Service"];
   });
 
-const idle = {
-  live: undefined,
-  snapshot: start({
-    loginLines: 0,
-    realname: "I IRC",
-    services: [],
-    tuning: attemptInput.tuning,
-    username: "user",
-  }),
-  stopped: false,
-  unclosed: [],
-  unrecorded: undefined,
-} satisfies Hosted;
+const opened: NewEntry = {
+  _tag: "Connection",
+  connection: 1,
+  ircd: { host: "irc.example", port: 6697, tls: true },
+  network: "libera",
+  phase: "opened",
+};
 
 // Cancels `commit` once the Log holds its Entries, and lets the Recorder answer.
 const cancelledAfterRecording = (
@@ -67,29 +59,36 @@ const cancelledAfterRecording = (
   });
 
 describe(makeCommit, () => {
-  it.effect("keeps the snapshot the Log's Entries led to, though its caller is cancelled", () =>
+  it.effect("steps on from where the Log is, though the last caller was cancelled", () =>
     Effect.gen(function* () {
       const committed = yield* Deferred.make<undefined>();
-      const hosted = yield* Ref.make<Hosted>(idle);
-      const { record } = yield* slowToAnswer(committed);
-      const commit = makeCommit(hosted, record);
+      const { record, standing } = yield* slowToAnswer(committed);
+      const commit = makeCommit(standing("libera"), record);
 
       const caller = yield* Effect.forkChild(commit([attempt]));
 
       yield* cancelledAfterRecording(committed, caller);
 
-      assert.lengthOf(yield* MemoryEntries.use(({ entries }) => entries), 1);
-      assert.strictEqual(phase((yield* Ref.get(hosted)).snapshot), "connecting");
+      const next = yield* Effect.forkChild(commit([opened]));
+
+      yield* TestClock.adjust("1 second");
+
+      const { commands } = yield* Fiber.join(next);
+
+      assert.lengthOf(yield* MemoryEntries.use(({ entries }) => entries), 2);
+      assert.deepStrictEqual(
+        commands.map((command) => (command.type === "sendLine" ? command.command : command.type)),
+        ["NICK", "USER"]
+      );
     }).pipe(Effect.provide(Recorder.memoryReadable))
   );
 
   it.effect("runs `after` in the same unit, though its caller is cancelled", () =>
     Effect.gen(function* () {
       const committed = yield* Deferred.make<undefined>();
-      const hosted = yield* Ref.make<Hosted>(idle);
       const published = yield* Ref.make(false);
-      const { record } = yield* slowToAnswer(committed);
-      const commit = makeCommit(hosted, record);
+      const { record, standing } = yield* slowToAnswer(committed);
+      const commit = makeCommit(standing("libera"), record);
 
       const caller = yield* Effect.forkChild(commit([attempt], () => Ref.set(published, true)));
 
@@ -102,9 +101,8 @@ describe(makeCommit, () => {
   it.effect("still lets a caller waiting for its turn be cancelled", () =>
     Effect.gen(function* () {
       const committed = yield* Deferred.make<undefined>();
-      const hosted = yield* Ref.make<Hosted>(idle);
-      const { record } = yield* slowToAnswer(committed);
-      const commit = makeCommit(hosted, record);
+      const { record, standing } = yield* slowToAnswer(committed);
+      const commit = makeCommit(standing("libera"), record);
 
       const first = yield* Effect.forkChild(commit([attempt]));
 
