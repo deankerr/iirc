@@ -13,7 +13,7 @@ Hosts one Network with Effect: dials Ircds, records every Line before acting on 
 | `./network` | `hostNetwork`, `constantNetwork`, `NetworkSettings`, `NetworkHost`, `NetworkStatus`, `NotInSession`, `LaneFull`, `LineDropped`, `WriteFailed` | Stays on a Network for as long as a Scope lasts, with `send` and `status` |
 | `./recorder` | `Recorder`, `Committed`, `MemoryEntries`, `Watched`, `Overflowed`, `RecordFailed`, `makeWatchers` | Records Entries before anything acts on them, and watches them as they commit |
 | `./entry` | `Entry`, `NewEntry`, `Ircd`, `TlsDetails`, `IfFieldsOfEntry` | The Entry kinds, which this package owns |
-| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `candidateNicks`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
+| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
 | `./events` | `toEvent`, `stepEntry` | The one mapping from an Entry to a machine event |
 | `./transport` | `Transport`, `ConnectFailed` | Dials TCP or TLS, verifies or pins, and reads with backpressure |
 | `./credentials` | `passLine`, `identifyLine`, `connectCommandLine`, `keyedJoins`, `missingCredentials` | Lines built from Credentials, marked sensitive where they are built |

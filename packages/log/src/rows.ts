@@ -42,7 +42,6 @@ const Tuning = Schema.Struct({
   connectTimeoutMillis: Schema.Int,
   controlLaneLimit: Schema.Int,
   drainMillis: Schema.Int,
-  firstContactNickLimit: Schema.Int,
   floodBurst: Schema.Int,
   floodIntervalMillis: Schema.Int,
   joinRetryMillis: Schema.Int,

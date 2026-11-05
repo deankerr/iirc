@@ -51,7 +51,7 @@ if (reply._tag === "Safe") {
 ## Invariants
 
 - A Line from `outbound` holds no CR, LF, or NUL, has at most one trailing parameter, and fits in 510 bytes.
-- `nickCandidates` never repeats a nick, and every candidate but the first fits the limit.
+- `nickCandidates` never repeats a nick, and sends each one as configured.
 - `joinBatches` keeps each Channel's key aligned with it, and reports any Channel no `JOIN` can carry.
 
 ## Tests

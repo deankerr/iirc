@@ -76,7 +76,7 @@ The Daemon runs one Log and any number of Networks. Everything durable is an Ent
   - Redaction empties the bytes and marks the Entry redacted. Derived rows from it are derived again, so a Message it carried disappears.
   - Only a Line or a Dropped Entry has bytes to redact. The edit and its Change are one transaction, and the Entry names that Change.
   - Every derived table is derived again in that transaction, as a start would, so a restart reads what it leaves (LOG-10). It holds the writer as long as a start's rebuild takes, which suits something done on a rare day.
-  - `Standing` keeps what the host knew until the next start, because a Connection under way acted on the Line as it was. A start replays a redacted Line as one with no bytes, which says nothing, so what only it told `Standing` is forgotten, such as a kick, `NICKLEN`, a `JOIN` failure, or a sign of login. What was recorded because of it still stands, such as a `closed` that its `ERROR` gave the reason for. Rows derived from later Entries follow the replay and not `Standing`, so that they are the rows a rebuild writes.
+  - `Standing` keeps what the host knew until the next start, because a Connection under way acted on the Line as it was. A start replays a redacted Line as one with no bytes, which says nothing, so what only it told `Standing` is forgotten, such as a kick, a `JOIN` failure, or a sign of login. What was recorded because of it still stands, such as a `closed` that its `ERROR` gave the reason for. Rows derived from later Entries follow the replay and not `Standing`, so that they are the rows a rebuild writes.
   - Deferred: pruning and retention. Nothing is pruned until we know what a year of Log costs, including large `LIST` replies.
 - **LOG-8.** Times are when the Daemon recorded the Entry. Order comes from sequence numbers, never from clocks, because clocks can jump.
   - No wait for a reconnect is ever longer than its own delay from now, so a clock set back cannot keep a Network offline.
@@ -161,9 +161,8 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
 - **CONN-2.** Registration sends `PASS` if configured, then `NICK` and `USER`, and finishes on `001`. It times out after 60 seconds, because slow ident and DNS on old Ircds are normal.
 - **CONN-3.** The nick in `001` is the truth, and a later `NICK` from the Ircd is too. An Ircd can rename us, for example when services enforce a reserved nick.
 - **CONN-4.** A taken or refused nick during registration works through a fixed, finite list.
-  - The list is the configured nick, the alternates, the nick padded with `_` up to the limit, then the tail overwritten with numbers from 1 to 99.
-  - The limit is `NICKLEN` from the Network's last Session, read from the Log. On first contact it is 9, because `NICKLEN` arrives only after `001`, and ngircd refuses an over-long nick with `432`.
-  - `432`, `433`, `436`, and `437` each move to the next candidate. `437` counts only when its parameter is our nick, because it also applies to Channels.
+  - The list is the configured nick, the alternates, then the nick with one, two, and three `_` added. Each is sent as configured, whatever its length, and an Ircd that cannot take one says so.
+  - `432`, `433`, `436`, and `437` each move to the next candidate. Before the welcome no `JOIN` has gone out, so a `437` can only be about the nick.
   - When the list runs out, the attempt closes and backs off like any failed Connection, and status says why.
 - **CONN-5.** _(M3.)_ Once the burst is complete (CONN-7), the Daemon tries to regain its configured nick.
   - It watches `NICK` and `QUIT`. If it shares no Channel with the holder, it probes with `ISON`, backing off from 15 seconds to 10 minutes.

@@ -266,37 +266,17 @@ describe("registering", () => {
 describe("CONN-4: nick fallback", () => {
   const taken = line("433", "*", "claude", "Nickname is already in use");
 
-  it.each(["432", "433", "436"])("%s moves to the next candidate", (numeric) => {
+  it.each(["432", "433", "436", "437"])("%s moves to the next candidate", (numeric) => {
     const { commands, next } = step(inPhase("registering"), line(numeric, "*", "claude", "No"));
 
     expect(commands).toStrictEqual([sendNick("claudia", "nick-fallback")]);
     expect(phase(next)).toBe("registering");
   });
 
-  it("437 moves on when its parameter is the nick we are trying", () => {
-    const { commands } = step(inPhase("registering"), line("437", "*", "claude", "Unavailable"));
-
-    expect(commands).toStrictEqual([sendNick("claudia", "nick-fallback")]);
-  });
-
-  it("437 follows the list, comparing against the current candidate", () => {
-    const snapshot = step(inPhase("registering"), taken).next;
-
-    expect(step(snapshot, line("437", "*", "claudia", "Unavailable")).commands).toStrictEqual([
-      sendNick("cc", "nick-fallback"),
+  it("reads no parameter, as before the welcome nothing but the nick can be refused", () => {
+    expect(step(inPhase("registering"), line("437")).commands).toStrictEqual([
+      sendNick("claudia", "nick-fallback"),
     ]);
-    expect(step(snapshot, line("437", "*", "claude", "Unavailable")).commands).toStrictEqual([]);
-  });
-
-  it("437 about a Channel says nothing about our nick", () => {
-    const { commands, next } = step(inPhase("registering"), line("437", "*", "#chan", "Held"));
-
-    expect(commands).toStrictEqual([]);
-    expect(phase(next)).toBe("registering");
-  });
-
-  it("437 with no parameter names nothing", () => {
-    expect(step(inPhase("registering"), line("437")).commands).toStrictEqual([]);
   });
 
   it("walks the list in order, once each", () => {

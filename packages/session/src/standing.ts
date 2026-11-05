@@ -4,7 +4,6 @@ import type { Tuning } from "@iirc/lifecycle/tuning";
 import { channelKey } from "@iirc/protocol/join";
 import { parseFrame } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
-import { nickCandidates } from "@iirc/protocol/nick";
 import { casefold, channelOf, initialState, stepState } from "@iirc/state";
 import type { IrcState, JoinFailure, StateChange } from "@iirc/state";
 import type { Array as Arr } from "effect";
@@ -132,8 +131,6 @@ export interface Standing {
   readonly lagMillis: number | undefined;
   /** The Network this belongs to, which is whichever one it first heard of. */
   readonly network: NetworkId | undefined;
-  /** `NICKLEN` from the last Session that gave one (CONN-4). */
-  readonly nickLength: number | undefined;
   /** How the latest Connections ended, oldest first. */
   readonly recent: readonly EndedConnection[];
 }
@@ -226,7 +223,6 @@ export const noStanding: Standing = {
   lagChecks: [],
   lagMillis: undefined,
   network: undefined,
-  nickLength: undefined,
   recent: [],
 };
 
@@ -338,8 +334,7 @@ const withChannel = <Value>(
   value: Value
 ): ReadonlyMap<string, Value> => withHeld(withoutChannel(held, irc, name), channelKey(name), value);
 
-// What belongs to one Session and is never carried over (LIVE-6). `nickLength` stays,
-// because CONN-4 wants the last `NICKLEN` given.
+// What belongs to one Session and is never carried over (LIVE-6).
 const withoutSession = (standing: Standing): Standing => ({
   ...standing,
   asked: noChannels,
@@ -606,11 +601,8 @@ const afterChange = (standing: Standing, entry: Entry, change: StateChange): Sta
       return afterJoinFailure(standing, entry, channel, { numeric, text });
     }
 
-    case "IsupportChanged": {
-      return { ...standing, nickLength: change.isupport.nickLength ?? standing.nickLength };
-    }
-
-    // Self and the Channels Self is in live in the state.
+    // Self, the Channels Self is in, and what the Ircd supports live in the state.
+    case "IsupportChanged":
     case "NickChanged":
     case "Parted":
     case "Welcomed": {
@@ -884,25 +876,6 @@ export const nextAttempt = (
 
   return { at: endedAt === undefined ? 0 : endedAt + delay, delayMillis: delay, ircd };
 };
-
-/**
- * The nicks an `attempt` will try (CONN-4), limited by `NICKLEN` from the last Session
- * that gave one, or by `firstContactNickLimit` if none has.
- * @param standing - The Network's Standing.
- * @param identity - The configured nick and alternates.
- * @param tuning - The Network's Tuning.
- * @returns The candidates, in the order to try them.
- */
-export const candidateNicks = (
-  standing: Standing,
-  { alternates, nick }: { readonly alternates: readonly string[]; readonly nick: string },
-  tuning: Tuning
-): readonly string[] =>
-  nickCandidates({
-    alternates,
-    limit: standing.nickLength ?? tuning.firstContactNickLimit,
-    nick,
-  });
 
 // Doubles for every `JOIN` already sent. Capped by the longest reconnect delay, because
 // `Tuning` has no number of its own for this, and a Channel is no more urgent than that.

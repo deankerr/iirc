@@ -532,7 +532,6 @@ const tuningBounds = {
   connectTimeoutMillis: { minimum: 1 },
   controlLaneLimit: { minimum: 1 },
   drainMillis: { minimum: 0 },
-  firstContactNickLimit: { minimum: 1 },
   floodBurst: { minimum: 1 },
   floodIntervalMillis: { minimum: 1 },
   joinRetryMillis: { minimum: 1 },

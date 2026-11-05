@@ -63,7 +63,6 @@ const ngircd = process.env.IIRC_NGIRCD ?? path.join(homedir(), ".local/opt/ngirc
 
 const serverName = "floor.proof.test";
 const password = "opensesame";
-const nickLength = 16;
 const loopback = "127.0.0.1";
 
 const floor = "#floor";
@@ -171,7 +170,7 @@ const floorIrcd = Effect.fnUntraced(function* (
       'MotdPhrase = "floor proof"',
       "[Limits]",
       "MaxConnectionsIP = 0",
-      `MaxNickLength = ${nickLength}`,
+      "MaxNickLength = 16",
       "[Options]",
       "DNS = no",
       "Ident = no",
@@ -776,8 +775,7 @@ const nickFallback = toCheck(
   Effect.gen(function* () {
     const taken = "floorn";
     const alternate = "floorn2";
-    const fallback = "floorn3";
-    const padded = "floorfull";
+    const fallback = "floorn-alternate";
     const ircd = yield* floorIrcd();
 
     const holder = yield* startDaemon({
@@ -818,50 +816,29 @@ const nickFallback = toCheck(
       `tried ${tried.map(({ text }) => text).join(",")}`
     );
 
-    // NICKLEN: learned in one Session, and spent on a nick the first could not have tried.
-    const home = yield* newHome;
-    const identity = { channels: [], home, nick: padded, port: ircd.port };
-    const learner = yield* startDaemon(identity);
+    // With no alternates, the nick padded with `_`.
+    const padder = yield* startDaemon({
+      channels: [],
+      home: yield* newHome,
+      nick: taken,
+      port: ircd.port,
+    });
 
-    yield* waitFor("the learner", learner.status, ({ self }) => self === padded);
-    yield* waitFor("its burst", learner.entries, (all) =>
-      lineEntries(all).some(({ text }) => text.includes(`NICKLEN=${nickLength}`))
-    );
-
-    const firstNicks = attempts(yield* learner.entries).at(0)?.nicks ?? [];
-    const firstContact = 9;
-
-    yield* ensure(
-      firstNicks.every((nick) => nick.length <= firstContact),
-      `first contact tried past 9: ${firstNicks.join(",")}`
-    );
-
-    yield* stopDaemon(learner);
-    yield* registeredClient(ircd.port, padded);
-
-    const returning = yield* startDaemon(identity);
-
-    const back = yield* waitFor(
-      "a longer nick",
-      returning.status,
+    const padded = yield* waitFor(
+      "a padded nick",
+      padder.status,
       ({ phase }) => phase === "session"
     );
 
-    const secondNicks = attempts(yield* returning.entries).at(-1)?.nicks ?? [];
-
-    yield* ensure(
-      secondNicks.some((nick) => nick.length === nickLength),
-      "NICKLEN was not used"
-    );
-    yield* ensure((back.self?.length ?? 0) > firstContact, `came back as ${back.self}`);
+    yield* ensure(padded.self === `${taken}_`, `the padder ended up as ${padded.self}`);
 
     const welcome = lineEntries(entries).find(({ text }) => text.includes(" 001 "));
     const registeredAfter = (welcome?.at ?? 0) - (tried[0]?.at ?? 0);
 
     return (
-      `${status.self} after two real 433s (${rejections[0]?.text}), welcomed ${registeredAfter} ms ` +
-      `after the first NICK, and with NICKLEN=${nickLength} remembered, ${back.self} ` +
-      `(${back.self?.length} bytes, past the first-contact 9)`
+      `${status.self} (${fallback.length} bytes, sent as configured) after two real 433s ` +
+      `(${rejections[0]?.text}), welcomed ${registeredAfter} ms after the first NICK, ` +
+      `and ${padded.self} with no alternates`
     );
   })
 );

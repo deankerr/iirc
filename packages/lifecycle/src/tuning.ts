@@ -12,8 +12,6 @@ export interface Tuning {
   readonly controlLaneLimit: number;
   /** LIVE-11: how long a close keeps recording what the Ircd already sent. */
   readonly drainMillis: number;
-  /** CONN-4: the nick limit on first contact, before any `NICKLEN` is known. */
-  readonly firstContactNickLimit: number;
   /** SEND-2: how many Lines may leave at once. */
   readonly floodBurst: number;
   /** SEND-2: how often a Line may leave once the burst is spent. */
@@ -57,7 +55,6 @@ export const defaultTuning: Tuning = {
   connectTimeoutMillis: 15_000,
   controlLaneLimit: 64,
   drainMillis: 5000,
-  firstContactNickLimit: 9,
   floodBurst: 5,
   floodIntervalMillis: 2000,
   joinRetryMillis: 60_000,

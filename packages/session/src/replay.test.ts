@@ -170,7 +170,6 @@ const readsOf = (standing: Standing, now: number) => {
       attempt === undefined
         ? undefined
         : nextAttempt(standing, { ircds: [attempt.ircd], tuning: defaultTuning }),
-    nickLength: standing.nickLength,
     plan: joinPlan(standing, wanted, now, defaultTuning),
     recent: standing.recent,
     self: standing.irc.self,

@@ -74,6 +74,9 @@ const migrations = SqliteMigrator.fromRecord({
   // decode. Recording this migration is what has it refuse the Log, and what has a start
   // back the Log up before it writes the new form (RUN-5, LIVE-5).
   "2_tuning_without_refusals": Effect.void,
+  // Changes no table. An `attempt` Entry's Tuning no longer holds `firstContactNickLimit`,
+  // which a binary before this cannot decode, so it must refuse the Log (RUN-5, CONN-4).
+  "3_tuning_without_nick_limit": Effect.void,
 });
 
 /**

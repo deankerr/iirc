@@ -20,6 +20,11 @@ const firstOnly: SqliteMigrator.Loader = logMigrations.pipe(
   Effect.map((known) => known.filter(([id]) => id === 1))
 );
 
+// What a binary from before the Log's third migration knew.
+const beforeNickLimit: SqliteMigrator.Loader = logMigrations.pipe(
+  Effect.map((known) => known.filter(([id]) => id <= 2))
+);
+
 // What no Frontend can read as text, so a migration that decoded and wrote back a Line
 // would change it.
 const bytes = [
@@ -36,7 +41,7 @@ const line = (each: Uint8Array): NewEntry => ({
 });
 
 // What a Log that has run the binary's own migrations has applied.
-const logMigrationNames = ["1_initial", "2_tuning_without_refusals"];
+const logMigrationNames = ["1_initial", "2_tuning_without_refusals", "3_tuning_without_nick_limit"];
 
 // The next migration, as the first format change after the freeze will be: it adds to the Log and
 // rewrites nothing in it.
@@ -44,7 +49,7 @@ const withNote: SqliteMigrator.Loader = logMigrations.pipe(
   Effect.map((known) => [
     ...known,
     [
-      3,
+      4,
       "test_note",
       Effect.succeed(
         Effect.gen(function* () {
@@ -171,7 +176,7 @@ describe("migrations (RUN-5)", () => {
 
         // The Log has the migration, and every Line's bytes as they were.
         assert.include(columns(live), "test_note");
-        assert.deepStrictEqual(applied(live), [...logMigrationNames, "3_test_note"]);
+        assert.deepStrictEqual(applied(live), [...logMigrationNames, "4_test_note"]);
         assert.deepStrictEqual(lineBytes(live), before);
         assert.deepStrictEqual(
           entries.flatMap((entry) => (entry._tag === "Line" ? [entry.bytes] : [])),
@@ -192,12 +197,12 @@ describe("migrations (RUN-5)", () => {
       const refused = yield* Effect.flip(opened(dataDir, recordLines));
 
       assert.instanceOf(refused, LogTooNew);
-      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], ["3_test_note"]);
+      assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], ["4_test_note"]);
       assert.include(refused.message, "newer iirc");
-      assert.include(refused.message, "3_test_note");
+      assert.include(refused.message, "4_test_note");
       // It touched nothing: no Entry was appended, and no backup was taken.
       assert.deepStrictEqual(lineBytes(live), before);
-      assert.deepStrictEqual(applied(live), [...logMigrationNames, "3_test_note"]);
+      assert.deepStrictEqual(applied(live), [...logMigrationNames, "4_test_note"]);
       assert.isFalse(existsSync(`${dataDir}/backups`));
     }).pipe(Effect.scoped)
   );
@@ -213,12 +218,30 @@ describe("migrations (RUN-5)", () => {
       assert.instanceOf(refused, LogTooNew);
       assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], [
         "2_tuning_without_refusals",
+        "3_tuning_without_nick_limit",
       ]);
     }).pipe(Effect.scoped)
   );
 
   it.live(
-    "RUN-5, LIVE-5: a Log from before is backed up, and its refusal Tuning and marks still read",
+    "RUN-5, CONN-4: an iirc from before the nick limit went refuses a Log this one wrote",
+    () =>
+      Effect.gen(function* () {
+        const dataDir = yield* dataDirectory;
+
+        yield* opened(dataDir, recordLines);
+
+        const refused = yield* Effect.flip(opened(dataDir, recordLines, beforeNickLimit));
+
+        assert.instanceOf(refused, LogTooNew);
+        assert.deepStrictEqual(refused instanceof LogTooNew ? refused.unknown : [], [
+          "3_tuning_without_nick_limit",
+        ]);
+      }).pipe(Effect.scoped)
+  );
+
+  it.live(
+    "RUN-5, LIVE-5, CONN-4: a Log from before is backed up, and its old Tuning and marks still read",
     () =>
       Effect.gen(function* () {
         const dataDir = yield* dataDirectory;
@@ -231,7 +254,7 @@ describe("migrations (RUN-5)", () => {
 
         try {
           database.run(
-            "UPDATE entries SET tuning = json_set(tuning, '$.refusalBackoffMillis', 1800000) WHERE phase = 'attempt'"
+            "UPDATE entries SET tuning = json_set(tuning, '$.refusalBackoffMillis', 1800000, '$.firstContactNickLimit', 9) WHERE phase = 'attempt'"
           );
           database.run("UPDATE entries SET refused = 1 WHERE phase = 'closed'");
         } finally {
@@ -254,6 +277,10 @@ describe("migrations (RUN-5)", () => {
         assert.notProperty(
           phases[0]?.phase === "attempt" ? phases[0].tuning : {},
           "refusalBackoffMillis"
+        );
+        assert.notProperty(
+          phases[0]?.phase === "attempt" ? phases[0].tuning : {},
+          "firstContactNickLimit"
         );
         assert.isTrue(phases[1]?.phase === "closed" && phases[1].refused === true);
       }).pipe(Effect.scoped)

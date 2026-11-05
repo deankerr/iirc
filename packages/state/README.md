@@ -65,4 +65,4 @@ channelOf(state, "#FOO{X}"); // { name: "#Foo[x]", key: "pizza" } under rfc1459
 
 ## Requirements
 
-Milestone 2's [Network state](../../docs/requirements.md#network-state) and [Channels and Users](../../docs/requirements.md#channels-and-users) build here. Today it covers Self's nick, `CASEMAPPING`, `PREFIX`, `CHANMODES`, and `NICKLEN` (KNOW-2), three casemappings (KNOW-3), and mode parsing (KNOW-6). It also serves CONN-3, CONN-4's `NICKLEN`, LIVE-7, LIVE-8, and CRED-4.
+Milestone 2's [Network state](../../docs/requirements.md#network-state) and [Channels and Users](../../docs/requirements.md#channels-and-users) build here. Today it covers Self's nick, `CASEMAPPING`, `PREFIX`, `CHANMODES`, and `NICKLEN` (KNOW-2), three casemappings (KNOW-3), and mode parsing (KNOW-6). It also serves CONN-3, LIVE-7, LIVE-8, and CRED-4.

@@ -1,6 +1,7 @@
 import type { Login, Phase } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import type { JoinRejection } from "@iirc/protocol/join";
+import { nickCandidates } from "@iirc/protocol/nick";
 import type { OutboundLine } from "@iirc/protocol/outbound";
 import {
   Array as Arr,
@@ -28,13 +29,7 @@ import type { LaneDepths, LineFailure, QueuedLine } from "./lanes.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
 import { boundReasons } from "./redact.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
-import {
-  candidateNicks,
-  consecutiveFailures,
-  kicksInForce,
-  loginOf,
-  nextAttempt,
-} from "./standing.ts";
+import { consecutiveFailures, kicksInForce, loginOf, nextAttempt } from "./standing.ts";
 import type { HeldJoinFailure, Standing, WantedChannel } from "./standing.ts";
 import { Transport } from "./transport.ts";
 
@@ -419,7 +414,7 @@ export const hostNetwork: (
         _tag: "Connection",
         ircd,
         network: id,
-        nicks: candidateNicks(held, current.identity, current.tuning),
+        nicks: nickCandidates(current.identity),
         phase: "attempt",
         ...inputOf(current),
       },

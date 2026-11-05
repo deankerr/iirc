@@ -410,36 +410,24 @@ describe("CONN-4: nicks", () => {
     }).pipe(memory)
   );
 
-  it.effect("CONN-4: the limit comes from the last Session's `NICKLEN`", () =>
+  it.effect("CONN-4: sends an alternate as configured, however long", () =>
     Effect.gen(function* () {
-      const nick = "averyverylongnick";
-      const identity = { ...options.identity, nick };
       const ircd = yield* fakeIrcd();
-      const hosted = yield* host(ircd, { identity });
 
-      yield* ircd.read(":ircd 001 averyverylongnick :Welcome\r\n");
-      yield* ircd.read(":ircd 005 averyverylongnick NICKLEN=12 :are supported\r\n");
-      yield* manyTurns;
-      yield* ircd.hangUp;
-      yield* manyTurns;
-      yield* waitOutBackoff(hosted, ircd);
-
-      const [firstTry, secondTry] = connectionsOf(yield* entries, "attempt");
-
-      assert.strictEqual(firstTry?.nicks[1], "averyvery");
-      assert.strictEqual(secondTry?.nicks[1], "averyverylon");
-
-      yield* ircd.read(`:ircd 433 * ${nick} :In use\r\n`);
+      yield* host(ircd, {
+        identity: { ...options.identity, alternates: ["averyverylongalternate"] },
+      });
+      yield* ircd.read(":ircd 433 * iirc :In use\r\n");
       yield* manyTurns;
 
-      assert.strictEqual((yield* textsOn(ircd, 1)).at(-1), "NICK averyverylon\r\n");
+      assert.strictEqual((yield* textsOn(ircd, 0)).at(-1), "NICK averyverylongalternate\r\n");
     }).pipe(memory)
   );
 
   it.effect("CONN-4: a list that runs out closes, says why, and backs off", () =>
     Effect.gen(function* () {
       const ircd = yield* fakeIrcd({ respond: taken });
-      const hosted = yield* host(ircd, { tuning: { ...defaultTuning, firstContactNickLimit: 5 } });
+      const hosted = yield* host(ircd);
 
       yield* ircd.hangUp;
       yield* manyTurns;

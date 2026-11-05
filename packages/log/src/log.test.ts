@@ -1434,7 +1434,6 @@ describe("the durable Log", () => {
             live.libera.recent.map(({ reason }) => reason),
             ["the Daemon was killed", "You are banned", "iirc stopping"]
           );
-          assert.strictEqual(live.libera.nickLength, 16);
           assert.strictEqual(live.libera.recent.length, 3);
           assert.strictEqual(live.libera.joinFailures.get("#iirc")?.numeric, "475");
           assert.lengthOf(live.messages, 2);

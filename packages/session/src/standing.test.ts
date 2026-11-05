@@ -1,13 +1,11 @@
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
-import { nickCandidates } from "@iirc/protocol/nick";
 import type { Array as Arr } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { Entry, Ircd, Json, NetworkId, NewEntry } from "./entry.ts";
 import { toEvent } from "./events.ts";
 import {
-  candidateNicks,
   channelKey,
   connectionView,
   consecutiveFailures,
@@ -671,7 +669,7 @@ describe("LIVE-5: a Network that turns us away", () => {
 });
 
 describe("LIVE-6: a new Session starts clean", () => {
-  it("LIVE-6: `attempt` clears Channels, Self, and lag, and keeps NICKLEN and kicks", () => {
+  it("LIVE-6: `attempt` clears Channels, Self, and lag, and keeps kicks", () => {
     const { standing } = busy().attempt();
 
     expect(busy().standing.lagMillis).toBe(0);
@@ -680,7 +678,6 @@ describe("LIVE-6: a new Session starts clean", () => {
       self: undefined,
     });
     expect([...standing.irc.channels.keys()]).toStrictEqual([]);
-    expect(standing.nickLength).toBe(30);
     expect([...standing.kicked.keys()]).toStrictEqual(["#rust"]);
   });
 
@@ -718,56 +715,6 @@ describe("LIVE-6: a new Session starts clean", () => {
     script.wait(40).in(":ircd.example PONG ircd.example :lag-2");
 
     expect(script.standing.lagMillis).toBeUndefined();
-  });
-});
-
-describe("CONN-4: which nicks to try", () => {
-  const identity = { alternates: ["ally"], nick: "alice" };
-
-  it("CONN-4: first contact uses the first-contact limit", () => {
-    expect(candidateNicks(noStanding, identity, defaultTuning)).toStrictEqual(
-      nickCandidates({ ...identity, limit: defaultTuning.firstContactNickLimit })
-    );
-  });
-
-  it("CONN-4: then NICKLEN from the last Session, through a reconnect and a restart", () => {
-    const script = new Script()
-      .session()
-      .in(":ircd.example 005 alice NICKLEN=12 :are supported")
-      .closed("gone")
-      .daemon("started");
-
-    expect(candidateNicks(script.standing, identity, defaultTuning)).toStrictEqual(
-      nickCandidates({ ...identity, limit: 12 })
-    );
-  });
-
-  it("CONN-4: a Session that does not say keeps the last one that did", () => {
-    const script = new Script()
-      .session()
-      .in(":ircd.example 005 alice NICKLEN=12 :are supported")
-      .closed("gone")
-      .session()
-      .in(":ircd.example 005 alice CHANTYPES=# :are supported");
-
-    expect(script.standing.nickLength).toBe(12);
-  });
-
-  it("CONN-4: a newer Session that says otherwise wins", () => {
-    const script = new Script()
-      .session()
-      .in(":ircd.example 005 alice NICKLEN=12 :are supported")
-      .closed("gone")
-      .session()
-      .in(":ircd.example 005 alice NICKLEN=20 :are supported");
-
-    expect(script.standing.nickLength).toBe(20);
-  });
-
-  it("CONN-4: a Network's absurd NICKLEN still gives a short list", () => {
-    const script = new Script().session().in(":x 005 alice NICKLEN=4294967295 :are supported");
-
-    expect(candidateNicks(script.standing, identity, defaultTuning).length).toBeLessThan(200);
   });
 });
 
@@ -931,10 +878,16 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
     expect(script.standing.irc.self).toBe("alice_");
   });
 
-  it("CONN-4: a 437 for a Channel is not one for the nick", () => {
-    const script = new Script().attempt().opened().in(":x 437 * #chan :Held").welcome();
-
-    expect(sessionSince(script.standing)).toBe(started);
+  it("CONN-4: a 437 before the welcome uses up a nick", () => {
+    expect(
+      sessionOf(
+        turnedAwayAfterSession()
+          .attempt(first, ["alice"])
+          .opened()
+          .in(":x 437 * alice :Held")
+          .welcome()
+      )
+    ).toStrictEqual(noSession);
   });
 
   it("LIVE-5: FAIL NICK and other deadlines refuse nothing", () => {
@@ -1894,8 +1847,6 @@ describe("properties over random Entries", () => {
         joinPlan(standing, [{ name: "#a" }, { name: "#B", rejoinOnKick: true }], 0, defaultTuning);
         consecutiveFailures(standing, defaultTuning, 0);
       }
-
-      candidateNicks(standing, { alternates: [], nick: "alice" }, defaultTuning);
     }
 
     expect(reads).toBeGreaterThan(0);

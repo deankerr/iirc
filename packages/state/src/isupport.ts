@@ -11,7 +11,7 @@ export interface Isupport {
   readonly casemapping: Casemapping;
   /** Which Channel mode letters take parameters, from `PREFIX` and `CHANMODES`. */
   readonly modes: ModeTypes;
-  /** `NICKLEN`, the longest nick the Ircd accepts, if it said (CONN-4). */
+  /** `NICKLEN`, the longest nick the Ircd accepts, if it said (KNOW-2). */
   readonly nickLength: number | undefined;
 }
 

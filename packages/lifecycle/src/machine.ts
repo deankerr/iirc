@@ -11,8 +11,9 @@ const loginDeadline = "login";
 
 const control = "control";
 
-// `437` also applies to Channels, so it needs a look at its parameter (CONN-4).
-const rejectsNick: ReadonlySet<string> = new Set(["432", "433", "436"]);
+// Each says the nick offered cannot be had, so the next is tried (CONN-4). `437` names
+// Channels as well, but before the welcome no `JOIN` has gone out, so here it is the nick.
+const rejectsNick: ReadonlySet<string> = new Set(["432", "433", "436", "437"]);
 
 // How an MOTD ends, or how an Ircd says there isn't one (CONN-7).
 const endsBurst: ReadonlySet<string> = new Set(["376", "422"]);
@@ -85,9 +86,6 @@ export interface Stepped {
 
 // The Ircd's own words are its last parameter. A Line can arrive with none.
 const textOf = ({ command, params }: Payload<"LINE">) => params.at(-1) ?? command;
-
-const isNickRejection = ({ command, params }: Payload<"LINE">, tried: string | undefined) =>
-  rejectsNick.has(command) || (command === "437" && params[1] === tried);
 
 // A Deadline Entry is stamped after its deadline passes, and a Line moves the deadline
 // to its own stamp plus the limit. So an Entry stamped before the live deadline was
@@ -248,7 +246,7 @@ const fromConnecting = (machine: Machine, event: NetworkEvent): Stepped | undefi
 const lineWhileRegistering = (machine: Machine, event: Payload<"LINE">): Stepped => {
   const { context } = machine;
 
-  if (isNickRejection(event, context.nicks[context.nickIndex])) {
+  if (rejectsNick.has(event.command)) {
     const nickIndex = context.nickIndex + 1;
     const nick = context.nicks[nickIndex];
 

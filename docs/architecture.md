@@ -151,7 +151,7 @@ stateDiagram-v2
 ```
 
 - **The machine owns a Connection's progress:** registration, nick fallback, giving up, the burst, and the login wait (CONN-2 to CONN-7, LIVE-1 to LIVE-3, LIVE-5).
-- **`Standing` owns what outlasts a Connection:** recent outcomes, kicks, `JOIN` failures, the last `NICKLEN`, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction.
+- **`Standing` owns what outlasts a Connection:** recent outcomes, kicks, `JOIN` failures, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction.
 - **Pure functions of `Standing` decide:** `nextAttempt` gives backoff and Ircd rotation (LIVE-4), and `joinPlan` gives what to rejoin (LIVE-7, LIVE-8).
 - **A host cannot stay dead.** A defect or a failed `record` ends the Connection and backs off like any failure (LOG-9).
 

@@ -319,7 +319,7 @@ describe("KNOW-2: RPL_ISUPPORT", () => {
   });
 });
 
-describe("CONN-4: NICKLEN", () => {
+describe("KNOW-2: NICKLEN", () => {
   it("is unknown until the Ircd says", () => {
     expect(nickLengthOf()).toBeUndefined();
   });
