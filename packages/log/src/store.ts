@@ -2,7 +2,7 @@ import type { Entry, NewEntry } from "@iirc/session/entry";
 import { makeWatchers, RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
 import { foldStandings, noStanding } from "@iirc/session/standing";
-import type { Gap, Standings } from "@iirc/session/standing";
+import type { Gap, Standing, Standings } from "@iirc/session/standing";
 import { Array as Arr, Clock, Data, Effect, pipe, Ref, Result, Schema, Semaphore } from "effect";
 import { SqlSchema } from "effect/sql";
 import type { SqlClient } from "effect/sql";
@@ -42,8 +42,19 @@ const activityBatchSize = 64;
 
 // See `held` in `makeStore`.
 interface Held {
+  /** The sequence of the last Entry committed, which every Standing here reflects. */
+  readonly head: number;
   readonly host: Standings;
   readonly projection: Projection;
+}
+
+/**
+ * A Network's Standing as of a commit, and that commit's last sequence, read together from
+ * one snapshot, so that what the Standing says is true as of `at` (API-6).
+ */
+export interface StandingAt {
+  readonly at: number;
+  readonly standing: Standing;
 }
 
 const toStorageFailed = (cause: unknown) => new StorageFailed({ cause });
@@ -216,7 +227,11 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   // what the derived tables are written from, and a redaction replaces it with what
   // the rebuild it ran derived, so that a row appended after one is the row a rebuild
   // would write (LOG-10). Until a redaction they are one and the same.
-  const held = yield* Ref.make<Held>({ host: noProjection.standings, projection: noProjection });
+  const held = yield* Ref.make<Held>({
+    head: 0,
+    host: noProjection.standings,
+    projection: noProjection,
+  });
 
   const watchers = makeWatchers();
 
@@ -277,6 +292,7 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
         return [
           result,
           {
+            head: Arr.lastNonEmpty(recorded).sequence,
             host: host === projection.standings ? standings : foldStandings(host, recorded),
             projection: folded.projection,
           },
@@ -301,9 +317,10 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
 
   // Unlike a record, a rebuild can run long, and abandoning one loses nothing.
   const rebuild = commit(() =>
-    deriveTablesAgain.pipe(
+    Effect.all([deriveTablesAgain, readHead]).pipe(
       Effect.map(
-        (rebuilt) => [undefined, { host: rebuilt.standings, projection: rebuilt }, []] as const
+        ([rebuilt, head]) =>
+          [undefined, { head, host: rebuilt.standings, projection: rebuilt }, []] as const
       ),
       Effect.interruptible
     )
@@ -364,7 +381,11 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
         const projection = yield* deriveTablesAgain;
         const result = yield* Effect.sync(() => within(recorded));
 
-        return [result, { host: foldStandings(host, [recorded]), projection }, [recorded]] as const;
+        return [
+          result,
+          { head: recorded.sequence, host: foldStandings(host, [recorded]), projection },
+          [recorded],
+        ] as const;
       })
     ).pipe(
       Effect.catchTags({
@@ -393,6 +414,13 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
     redact,
     standing: (network: string) =>
       Effect.map(Ref.get(held), ({ host }) => host.get(network) ?? noStanding),
+    // One read of `held`, which a commit sets whole once it is durable, so the Standing and
+    // its sequence are always from the same commit, and no commit waits for it.
+    standingAt: (network: string): Effect.Effect<StandingAt> =>
+      Effect.map(Ref.get(held), ({ head, host }) => ({
+        at: head,
+        standing: host.get(network) ?? noStanding,
+      })),
     watch: watchers.watch,
   };
 });

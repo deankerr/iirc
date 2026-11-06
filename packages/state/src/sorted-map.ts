@@ -272,6 +272,33 @@ const walk = function* walk<Value>(node: Node<Value>): Generator<Entry<Value>> {
   yield* node.entries;
 };
 
+// Every entry above `key`, in key order. Only the path to `key` is searched: a child before
+// the one that would hold it holds only lower keys, and a child after it only higher ones.
+const walkAfter = function* walkAfter<Value>(
+  node: Node<Value>,
+  key: string
+): Generator<Entry<Value>> {
+  if (isBranch(node)) {
+    const start = childFor(node.keys, key);
+    const first = node.children[start];
+
+    if (first !== undefined) {
+      yield* walkAfter(first, key);
+    }
+
+    for (const child of node.children.slice(start + 1)) {
+      yield* walk(child);
+    }
+
+    return;
+  }
+
+  const { entries } = node;
+  const from = entryIndex(entries, key);
+
+  yield* entries.slice(keyAt(entries, from) === key ? from + 1 : from);
+};
+
 const leafFor = <Value>(root: Node<Value>, key: string): Leaf<Value> | undefined => {
   let node = root;
 
@@ -426,6 +453,18 @@ export class SortedMap<Value> implements ReadonlyMap<string, Value> {
   *entries(): MapIterator<[string, Value]> {
     for (const [key, value] of walk(this.#root)) {
       yield [key, value];
+    }
+  }
+
+  /**
+   * Every entry whose key is above `key`, in key order, which costs the path to `key` and
+   * then each entry taken, so a page of a large map costs what the page holds.
+   * @param key - Where to start, which need not be held.
+   * @returns An iterator over them.
+   */
+  *entriesAfter(key: string): MapIterator<[string, Value]> {
+    for (const [held, value] of walkAfter(this.#root, key)) {
+      yield [held, value];
     }
   }
 

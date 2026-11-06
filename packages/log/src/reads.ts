@@ -1,17 +1,20 @@
 import { Database } from "bun:sqlite";
 
+import { casefold } from "@iirc/state";
 import { Array as Arr, Effect, Schema } from "effect";
 import { flow } from "effect/Function";
 
 import { allowBudgets, inBudget, withinBudget } from "./budget.ts";
 import { ReadFailed } from "./errors.ts";
+import { formatActivity, formatMessage } from "./formatted.ts";
+import type { FormattedRow } from "./formatted.ts";
 import type {
   ActivityQuery,
   ConnectionEncoding,
   EntryQuery,
   NetworkPage,
 } from "./reader-protocol.ts";
-import { ActivityRow, afterCursor, EntryRow, GapRow, MessageRow } from "./rows.ts";
+import { ActivityRow, afterCursor, casemappings, EntryRow, GapRow, MessageRow } from "./rows.ts";
 
 const within = `${inBudget}(?)`;
 
@@ -28,10 +31,11 @@ export const statements = {
     SELECT * FROM activity WHERE network = ? AND (sequence, ordinal) > (?, ?) AND ${within}
     ORDER BY sequence, ordinal LIMIT ?
   `,
+  // One mapping's rows of a place, a range over `activity_by_place`.
   activityOfPlace: `
     SELECT * FROM activity
-    WHERE network = ? AND place_kind = ? AND place_key = ? AND (sequence, ordinal) > (?, ?)
-      AND ${within}
+    WHERE network = ? AND place_kind = ? AND casemapping = ? AND place_key = ?
+      AND (sequence, ordinal) > (?, ?) AND ${within}
     ORDER BY sequence, ordinal LIMIT ?
   `,
   // A Connection's `attempt` is its own sequence, so this is one row by the primary key.
@@ -76,11 +80,6 @@ const parseGaps = flow(
   Effect.mapError(toReadFailed)
 );
 
-const parseActivity = flow(
-  Schema.decodeUnknownEffect(Schema.Array(ActivityRow)),
-  Effect.mapError(toReadFailed)
-);
-
 // Only the label of an `attempt`'s Tuning, as it was recorded (MSG-4).
 const AttemptEncoding = Schema.Struct({
   tuning: Schema.fromJsonString(Schema.Struct({ encoding: Schema.optionalKey(Schema.String) })),
@@ -88,10 +87,16 @@ const AttemptEncoding = Schema.Struct({
 
 const parseEncoding = Schema.decodeUnknownSync(AttemptEncoding);
 
-const parseMessages = flow(
-  Schema.decodeUnknownEffect(Schema.Array(MessageRow)),
-  Effect.mapError(toReadFailed)
-);
+// How a page's rows are read: decoded, then formatted. A row that does not decode throws,
+// and its read fails with ReadFailed.
+interface Reading<Logged, Row> {
+  readonly format: (logged: Logged) => FormattedRow<Row>;
+  readonly schema: Schema.Decoder<Logged>;
+}
+
+const readMessage = { format: formatMessage, schema: MessageRow };
+
+const readActivity = { format: formatActivity, schema: ActivityRow };
 
 /**
  * LOG-11: about the most a page holds, in the bytes and text of its rows. A page of a
@@ -100,6 +105,14 @@ const parseMessages = flow(
  * holds at least one row, and a cursor carries on from its last.
  */
 export const pageBytes = 256 * 1024;
+
+/**
+ * LOG-11: what each span a page's text was parsed into counts toward {@link pageBytes},
+ * beside the text it holds, because the main thread decodes and encodes each one as an
+ * object. A Network can put a code before every character, which makes one Line about
+ * 4,300 spans, so a page of such Lines holds one of them rather than thirty (MSG-3).
+ */
+export const spanBytes = 128;
 
 // What a row costs to carry, which is its bytes and its text, and where it falls. Numbers
 // are too small to count. Every table read here is keyed by `sequence`.
@@ -117,16 +130,16 @@ const carried = Schema.decodeUnknownSync(Carried);
 const sizeOf = ({ bytes, change, details, text }: typeof Carried.Type) =>
   (bytes?.byteLength ?? 0) + (change?.length ?? 0) + (details?.length ?? 0) + (text?.length ?? 0);
 
-interface Sized {
+interface Sized<Row = unknown> {
   readonly ordinal: number;
-  readonly row: unknown;
+  readonly row: Row;
   readonly sequence: number;
   readonly size: number;
 }
 
 // Takes rows until they reach `pageBytes`, and says whether it stopped short of the end.
-const upToPageBytes = (rows: Iterable<Sized>) => {
-  const page: Sized[] = [];
+const upToPageBytes = <Row>(rows: Iterable<Sized<Row>>) => {
+  const page: Sized<Row>[] = [];
   let total = 0;
 
   for (const row of rows) {
@@ -155,23 +168,50 @@ const sizing = function* sizing(rows: Iterable<unknown>): Generator<Sized> {
   }
 };
 
-const rowsOf = (page: readonly Sized[]) => page.map(({ row }) => row);
+// Reads, formats, and sizes each row as the statement steps to it, counting its spans, so
+// a page stops reading where what the main thread will carry is full (MSG-3, LOG-11).
+const formattedSizing = function* formattedSizing<Logged, Row>(
+  rows: Iterable<unknown>,
+  { format, schema }: Reading<Logged, Row>
+): Generator<Sized<Row>> {
+  const decode = Schema.decodeUnknownSync(schema);
 
-// Pages of several kinds, merged. A kind cut short by bytes has rows past its last that
-// another kind's page could jump, so the merge stops at the earliest such last sequence.
-const mergePages = (pages: readonly { readonly cut: boolean; readonly page: Sized[] }[]) => {
-  const bound = Math.min(
-    ...pages.flatMap(({ cut, page }) => {
+  for (const raw of rows) {
+    const carrying = carried(raw);
+    const { row, spans } = format(decode(raw));
+
+    yield {
+      ordinal: carrying.ordinal ?? 0,
+      row,
+      sequence: carrying.sequence,
+      size: sizeOf(carrying) + spans * spanBytes,
+    };
+  }
+};
+
+const rowsOf = <Row>(page: readonly Sized<Row>[]) => page.map(({ row }) => row);
+
+const inOrder = (left: Sized, right: Sized) =>
+  left.sequence - right.sequence || left.ordinal - right.ordinal;
+
+// Pages of several ranges, merged. A range cut short by bytes has rows past its last that
+// another range's page could jump, so the merge stops at the earliest such last row.
+const mergePages = <Row>(
+  pages: readonly { readonly cut: boolean; readonly page: Sized<Row>[] }[]
+) => {
+  const bound = pages
+    .flatMap(({ cut, page }) => {
       const last = page.at(-1);
 
-      return cut && last !== undefined ? [last.sequence] : [];
+      return cut && last !== undefined ? [last] : [];
     })
-  );
+    .toSorted(inOrder)
+    .at(0);
 
   return pages
     .flatMap(({ page }) => page)
-    .filter(({ sequence }) => sequence <= bound)
-    .toSorted((left, right) => left.sequence - right.sequence);
+    .filter((row) => bound === undefined || inOrder(row, bound) <= 0)
+    .toSorted(inOrder);
 };
 
 // A reader never waits on the writer in WAL mode, but SQLite can still answer busy while
@@ -270,32 +310,51 @@ export const makeReads = (database: Database, budgetMillis: number) => {
 
   // A page of Activity, by bytes and `limit` as other reads are. One Entry can be many rows,
   // such as a `QUIT` in a thousand Channels, so a page can end inside one, and its last row's
-  // `(sequence, ordinal)` is where the next resumes.
+  // `(sequence, ordinal)` is where the next resumes. A place is one range for each mapping,
+  // its name casefolded under it, so rows keyed under an earlier mapping are found too
+  // (KNOW-3), and the ranges are merged.
   const activityPage = (query: ActivityQuery) =>
-    withinBudget(budgetMillis, ({ deadline }) => {
+    withinBudget(budgetMillis, ({ check, deadline }) => {
       const { limit } = query;
       const [sequence, ordinal] = afterCursor(query.after);
 
-      const ofNetwork = () =>
-        query.network === undefined
-          ? activity.iterate(sequence, ordinal, deadline, limit)
-          : activityOfNetwork.iterate(query.network, sequence, ordinal, deadline, limit);
+      if (!("place" in query)) {
+        const rows =
+          query.network === undefined
+            ? activity.iterate(sequence, ordinal, deadline, limit)
+            : activityOfNetwork.iterate(query.network, sequence, ordinal, deadline, limit);
 
-      const rows =
-        "place" in query
-          ? activityOfPlace.iterate(
-              query.network,
-              query.place._tag,
-              "key" in query.place ? query.place.key : "",
-              sequence,
-              ordinal,
-              deadline,
-              limit
+        return rowsOf(upToPageBytes(formattedSizing(rows, readActivity)).page);
+      }
+
+      const { network, place } = query;
+
+      const pages = inSnapshot(() =>
+        casemappings.map((casemapping) => {
+          check();
+
+          const key = place._tag === "Network" ? "" : casefold(casemapping, place.name);
+
+          return upToPageBytes(
+            formattedSizing(
+              activityOfPlace.iterate(
+                network,
+                place._tag,
+                casemapping,
+                key,
+                sequence,
+                ordinal,
+                deadline,
+                limit
+              ),
+              readActivity
             )
-          : ofNetwork();
+          );
+        })
+      );
 
-      return rowsOf(upToPageBytes(sizing(rows)).page);
-    }).pipe(Effect.flatMap(parseActivity));
+      return rowsOf(upToPageBytes(Arr.take(mergePages(pages), limit)).page);
+    });
 
   return {
     activity: activityPage,
@@ -327,13 +386,14 @@ export const makeReads = (database: Database, budgetMillis: number) => {
       withinBudget(budgetMillis, ({ deadline }) =>
         rowsOf(
           upToPageBytes(
-            sizing(
+            formattedSizing(
               network === undefined
                 ? messages.iterate(after, deadline, limit)
-                : messagesOfNetwork.iterate(network, after, deadline, limit)
+                : messagesOfNetwork.iterate(network, after, deadline, limit),
+              readMessage
             )
           ).page
         )
-      ).pipe(Effect.flatMap(parseMessages)),
+      ),
   };
 };

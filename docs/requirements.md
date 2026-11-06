@@ -21,13 +21,13 @@ Reading this document:
 | [Connecting](#connecting) | CONN-1 to CONN-7 | Done, except CONN-5 (M3) |
 | [Staying connected](#staying-connected) | LIVE-1 to LIVE-11 | Done. Gaps in Timelines wait for Timelines (M4) |
 | [Sending](#sending) | SEND-1 to SEND-11 | SEND-1 to SEND-4 and `JOIN` splitting done. The rest M3 |
-| [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` holds Self, Channels with topics, modes, and ranked members, Users seen, every `RPL_ISUPPORT` token, and every casemapping |
-| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1, MSG-2, MSG-5, and MSG-6 are derived in the Log, MSG-4's decoding is done, and the Activity read is step 6 |
+| [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` holds Self, Channels with topics, modes, and ranked members, Users seen, every `RPL_ISUPPORT` token, and every casemapping. A Channel is read through `GET /networks/{id}/targets/{target}` |
+| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | Done. Messages and Activity are derived in the Log and read through `/messages` and `/activity`, with spans (MSG-3) |
 | [Timelines and attention](#timelines-and-attention) | VIEW-1 to VIEW-10 | M4 |
 | [Frontend storage](#frontend-storage) | STORE-1 to STORE-5 | M4 |
 | [Lookups](#lookups) | LOOK-1 to LOOK-7 | M3 |
 | [Protocol behaviour](#protocol-behaviour) | PROT-1 to PROT-6 | Done. PROT-1, PROT-2, PROT-5, and PROT-6 are derived in the Log, and CTCP replies are decided in `Standing` |
-| [Hostile input](#hostile-input) | HOST-1 to HOST-5 | HOST-1 to HOST-3 done, HOST-5 in part. HOST-4 M2 |
+| [Hostile input](#hostile-input) | HOST-1 to HOST-5 | HOST-1 to HOST-4 done, HOST-5 in part |
 | [API](#api) | API-1 to API-10 | Done for the surfaces that exist. `/stream` and `/bootstrap` M4, Acting M3 |
 | [Access](#access) | AUTH-1 to AUTH-7 | AUTH-1 to AUTH-5 done, AUTH-6 in part. AUTH-7 M4 |
 | [Observability](#observability) | OBS-1 to OBS-4 | OBS-4 done, OBS-1 in part. OBS-2 and OBS-3 M4 |
@@ -240,15 +240,15 @@ Each item here is derived from the Log.
 
 ### Network state
 
-**Status:** M2. Self's nick, the phase, lag, and the casemapping in force are in status already. `@iirc/state` folds the rest of KNOW-1 to KNOW-3, which reads expose in step 6.
+**Status:** M2. Self's nick, the phase, lag, and the casemapping in force are in status. `GET /networks/{id}` gives the rest of KNOW-1 and KNOW-2 as `known`, from `Standing` with its `at`.
 
-- **KNOW-1.** The Network's phase, burst state, the Ircd and TLS details, lag, Self's nick, `user@host`, and modes, and away state. _(Self's mask, modes, and away state are done in `@iirc/state`. Exposed in step 6.)_
+- **KNOW-1.** The Network's phase, burst state, the Ircd and TLS details, lag, Self's nick, `user@host`, and modes, and away state. _(Done. Self's `user@host`, modes, and away state are folded in `@iirc/state` and read as `known.self` in `GET /networks/{id}`, beside Self's nick and the phase in `status`, with `at` from the same snapshot. The Ircd and TLS details are in each Connection's Entries.)_
   - Self's mask follows `396`, `900`, `901`, and Self's own `JOIN`.
-- **KNOW-2.** Every `RPL_ISUPPORT` token for the current Session, including removals (`-TOKEN`). _(Done in `@iirc/state`, up to 256 tokens, beyond which it says some were dropped. Exposed in step 6.)_
+- **KNOW-2.** Every `RPL_ISUPPORT` token for the current Session, including removals (`-TOKEN`). _(Done in `@iirc/state`, up to 256 tokens, beyond which it says some were dropped. Read as `known.isupport` in `GET /networks/{id}`: every token held by name, with `""` for one sent with no value and absence for one never sent or taken back, and `tokensDropped`.)_
   - Where a token was never sent, these defaults apply: `CASEMAPPING=rfc1459`, `CHANTYPES=#&`, `PREFIX=(ov)@+`, `CHANMODES=beI,k,l`, and `MODES=3`.
   - An empty value differs from an absent token. `PREFIX=` means no prefixes, and `MODES` with no value means no limit.
   - Value escapes such as `\x20` are decoded.
-- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(Done. Every mapping and the fallback are in `@iirc/state`, and the Owner's override is Tuning's `casemapping`, which each Connection's `attempt` records and each Session starts from. Status gives the mapping in force, whether the Owner forced it, and the token the Ircd sent that fell back to `ascii`.)_
+- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(Done. Every mapping and the fallback are in `@iirc/state`, and the Owner's override is Tuning's `casemapping`, which each Connection's `attempt` records and each Session starts from. Status gives the mapping in force, whether the Owner forced it, and the token the Ircd sent that fell back to `ascii`. Each Activity row records the mapping its place was keyed under, so `/activity`'s place filter finds a place's rows across a change of mapping, and a members cursor names its mapping and is refused under another.)_
   - The fold comes from `CASEMAPPING` and `UTF8MAPPING` together, covering `ascii`, `rfc1459`, `rfc1459-strict`, the variant spelling `strict-rfc1459`, and `rfc8265`. Ergo's `precis` mode advertises `CASEMAPPING=ascii` with `UTF8MAPPING=rfc8265`.
   - Anything unrecognised falls back to `ascii`, which splits names rather than merging them, and is reported in status.
   - An Owner can override the mapping, because Ergo's `permissive` mode looks the same as `ascii` on the wire.
@@ -257,10 +257,10 @@ Each item here is derived from the Log.
 
 ### Channels and Users
 
-**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Log attributes KNOW-8. The Daemon asks for KNOW-5 and KNOW-6 through `readPlan` in `@iirc/session`. Reads are step 6.
+**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Log attributes KNOW-8. The Daemon asks for KNOW-5 and KNOW-6 through `readPlan` in `@iirc/session`. A Channel is read through `GET /networks/{id}/targets/{target}`, and a partner in M4.
 
-- **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`. _(Done in `@iirc/state`, which holds only what `NAMES` and `MODE` show, so without `multi-prefix` a member can be short of a prefix. Exposed in step 6.)_
-- **KNOW-5.** Membership and topic come from what `JOIN` already returns. _(Done. The atomic replacement, the rule for Channels Self is not in, and a change for each removed prefix are in `@iirc/state`, and the asking is `readPlan` in `@iirc/session`. Exposed in step 6.)_
+- **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`. _(Done in `@iirc/state`, which holds only what `NAMES` and `MODE` show, so without `multi-prefix` a member can be short of a prefix. Read through `GET /networks/{id}/targets/{target}`, from `Standing` with `at` from the same snapshot, with members in pages of at most 1000 by cursor, each member's prefix letters ranked and their symbols, and the key shown as set and never with its value (CRED-4).)_
+- **KNOW-5.** Membership and topic come from what `JOIN` already returns. _(Done. The atomic replacement, the rule for Channels Self is not in, and a change for each removed prefix are in `@iirc/state`, and the asking is `readPlan` in `@iirc/session`. The Channel read says whether members or modes are uncertain.)_
   - The Daemon sends only `MODE`, and `WHO` for `user@host`, through the background lane. A large Channel can delay these, and they never delay a Message.
   - One read waits for a reply at a time on each Network. A read with no reply is asked again after 60 seconds, doubling, three times in all in a Session, and an error naming the Channel answers it at once. A Channel of more than 1000 members gets no `WHO`, because each member costs a Line.
   - `353` up to `366` is an atomic replacement of the member list.
@@ -269,13 +269,13 @@ Each item here is derived from the Log.
 - **KNOW-6.** `MODE` Lines are parsed using `PREFIX` first and then `CHANMODES`, so that list, parameterised, and flag modes are told apart. _(Done. `@iirc/state` marks a Channel uncertain, and `readPlan` reads its modes with `MODE` and its members with `NAMES` until a `324` and a `366` settle them.)_
   - A letter the Network never advertised takes no argument. If the arguments then fail to add up, the `MODE` is kept raw, the Channel is marked uncertain, and its modes and members are read again.
   - A key shown as `*` is hidden and is not stored.
-- **KNOW-7.** A User's nick, `user@host`, and realname are remembered as seen, and away state where known. _(Folded in `@iirc/state` from `JOIN`, `PRIVMSG`, and `NOTICE` sources, `301`, `311`, and `352`, within a bound that forgets the longest unseen. Asking with `WHO` is step 4, and reads step 6.)_
-- **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline. _(Done in the Log's `activity` table: a row in each Channel `@iirc/state` names as shared, those in a `NAMES` reply under way included, and in each partner's Timeline, where a partner is anyone with a Direct Message place in the Log, this Session or earlier, held in two bounded generations. A partner's new nick has no Timeline until something is placed there. A `QUIT` or `NICK` that concerns neither is on the Network's Timeline. Read through the API in step 6.)_
+- **KNOW-7.** A User's nick, `user@host`, and realname are remembered as seen, and away state where known. _(Folded in `@iirc/state` from `JOIN`, `PRIVMSG`, and `NOTICE` sources, `301`, `311`, and `352`, within a bound that forgets the longest unseen. Asked for with `WHO`. A Channel's members carry what was seen of them in the Channel read. A partner's details are M4.)_
+- **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline. _(Done in the Log's `activity` table: a row in each Channel `@iirc/state` names as shared, those in a `NAMES` reply under way included, and in each partner's Timeline, where a partner is anyone with a Direct Message place in the Log, this Session or earlier, held in two bounded generations. A partner's new nick has no Timeline until something is placed there. A `QUIT` or `NICK` that concerns neither is on the Network's Timeline. Read through `/activity`.)_
 - **KNOW-9.** A `470` forward puts us in a different Channel from the one requested. It is reported against the configured name, so autojoin does not look like it failed. _(`@iirc/state` names both Channels in a change. Reporting is a later step.)_
 
 ## Messages and Activity
 
-**Status:** M2. The Log derives Messages into `messages` and Activity into `activity`, each with its place, and `/messages` serves the first. MSG-4's decoding is done. MSG-3's spans are parsed in `@iirc/protocol` and not yet offered by the API, and the Activity read is step 6.
+**Status:** Done. The Log derives Messages into `messages` and Activity into `activity`, each with its place, and `/messages` and `/activity` serve them, with participant text both raw and as spans.
 
 - **MSG-1.** `PRIVMSG` and `NOTICE` become Messages of kind `PRIVMSG`, `NOTICE`, or `ACTION`, and the text of an `ACTION` is the action itself. Self's Messages come from outbound Lines, because the floor has no `echo-message`. _(Done, in `/messages` from API version 2.)_
 - **MSG-2.** Each inbound Line belongs to one place, decided in this order:
@@ -288,10 +288,11 @@ Each item here is derived from the Log.
 - **MSG-3.** Text keeps its IRC formatting codes.
   - The API offers both the raw text and a parsed form with those codes as spans, so that a Frontend never has to interpret them. Both are data and never markup.
   - Highlights and search run on text with the codes stripped.
+  - _(Done. A Message has `spans` beside `text`, and Activity's topics, reasons, CTCP and DCC arguments, and standard replies' descriptions, and a Channel's topic, are `{ text, spans }`, from `parseFormatting`. A span holds only the styles that are on. The Log's reader parses them on its Worker and counts each span toward its page bound (LOG-11). Highlights and search are M4.)_
 - **MSG-4.** Inbound bytes decode as UTF-8, then through the Network's configured fallback encoding, then Latin-1. Decoding never fails.
   - The fallback is any WHATWG `TextDecoder` label.
   - _(Done. Latin-1 is ISO-8859-1, one character per byte, and not WHATWG's `latin1`, which is windows-1252. A Connection decodes with the fallback its `attempt` recorded, in `Standing`, the machine, the derived tables, and `/entries` alike, so a rebuild gives the same text as live did after the Owner changes the encoding. A label refused by the API's Schema never reaches a Connection, and one recorded that a later runtime cannot read gives no fallback.)_
-- **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests. _(Done in the Log's `activity` table, derived from `@iirc/state`'s changes, with DCC offers, standard replies, and unknown Lines as kinds of their own. Its reads are in `LogReader`, by a cursor of sequence and the row's place among its Entry's, and its route is step 6.)_
+- **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests. _(Done in the Log's `activity` table, derived from `@iirc/state`'s changes, with DCC offers, standard replies, and unknown Lines as kinds of their own. Read through `GET /activity`, by one opaque cursor such as `123` or `123.4`, with `network` and `place` filters, each row with its sequence and typed details, and each page with the cursor after it.)_
 - **MSG-6.** Lines with no Channel or User to belong to, such as the MOTD, `WALLOPS`, and most numerics, go to the Network's Timeline. _(Done: every inbound Line that is no Message and no other Activity is a `line`, or an `unknown` for a command not handled, on the Network's Timeline, one row per Line. Every numeric is one. `PING` and `PONG`, and Lines that do not parse or were cut, are in `/entries` only.)_
 
 ## Timelines and attention
@@ -368,12 +369,12 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ### Hostile input
 
-**Status:** HOST-1 to HOST-3 done. HOST-5 done for Networks and in-process watchers, and for Frontends with `/stream` (M4). HOST-4 M2.
+**Status:** HOST-1 to HOST-4 done. HOST-5 done for Networks and in-process watchers, and for Frontends with `/stream` (M4).
 
 - **HOST-1.** No sequence of bytes from an Ircd can close a Session, stop the Daemon, or lose a Line. Unparseable input is recorded with its reason.
 - **HOST-2.** Frames longer than 8704 bytes are cut and marked, not buffered without limit.
 - **HOST-3.** Nothing a participant sends can make the Daemon do something beyond what this document names. A CTCP flood is rate limited, and a Message is never interpreted as an instruction. _(Done for what exists. What a participant can draw from the Daemon is a CTCP reply, within PROT-4's limits, and a read of a Channel, within KNOW-5's. DCC is never acted on (PROT-5).)_
-- **HOST-4.** The API marks all participant-supplied text as untrusted. Agents must treat it as data, because anyone on a Network can write text that an agent will read.
+- **HOST-4.** The API marks all participant-supplied text as untrusted. Agents must treat it as data, because anyone on a Network can write text that an agent will read. _(Done. Every such field is `UntrustedText` in `@iirc/api`, one OpenAPI component that says it is data and never instructions, and carries `x-iirc-untrusted: true` in `openApiDocument()`: Messages, Activity, topics, nicks, Channel names, `user@host`, realnames, `RPL_ISUPPORT` values, an Ircd's words in `/status`, Gaps' and Dropped Entries' reasons, and the decoded text in `/entries`. It is a plain string at runtime. A test walks the document for a list of known participant fields.)_
 - **HOST-5.** One Network cannot starve another, and no Frontend can stall a Session (LOG-11). A slow reader is disconnected, and resumes from its cursor or gets `resync` (API-6).
   - The same holds in the process. Anything that watches Entries as they commit cannot hold up a commit. A watcher that falls behind is told which run of sequences it missed, and is never left to miss them silently.
 
@@ -396,13 +397,14 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | `GET /bootstrap` | Every Target, the latest items, and members, with one `at` | M4 |
 | `GET /entries` | The Log, by cursor, with filters by Network and kind | Done |
 | `GET /messages` | Messages, by cursor, each with the sequence of its Line | Done |
+| `GET /activity` | Activity, by cursor, with filters by Network and place | Done |
 | `GET /gaps` | Gaps, by cursor, optionally for one Network | Done |
 | `GET /stream` | Replay from a cursor, then live, with no gap or duplicate at the join | M4 |
 | `GET /status` | The Daemon and all Networks at a glance | Done |
 | `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state | Done |
 | `GET /configuration` | All Configuration at once, as `iirc config export` reads it | Done |
 | `GET /networks/{id}/targets` | Targets, with unread counts by class | M4 |
-| `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details | M2 for a Channel, M4 for a partner |
+| `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details | Done for a Channel. M4 for a partner |
 | `GET /networks/{id}/targets/{target}/timeline` | A Timeline, paged in either direction | M4 |
 | `GET /search` | Full-text search | M4 |
 | `GET /storage/{namespace}` | A Frontend's stored values | M4 |

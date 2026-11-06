@@ -114,21 +114,31 @@ const daemon = HttpApiBuilder.group(
   DaemonApi,
   "daemon",
   Effect.fn(function* (handlers) {
-    const { backup, entries, gaps, messages, redact, send, status } = yield* Daemon;
+    const { activity, backup, entries, gaps, messages, redact, send, status } = yield* Daemon;
 
-    return handlers
-      .handle("status", () => status)
-      .handle("backup", () => backup)
-      .handle("redact", ({ params }) => Caller.use(({ name }) => redact(name, params.sequence)))
-      .handle("entries", ({ query: { kind, ...page } }) =>
-        Effect.map(
-          entries(kind === undefined ? page : { ...page, kinds: kind }),
-          ({ entries: found, fallbacks }) => found.map((entry) => toLogEntry(entry, fallbacks))
+    return (
+      handlers
+        .handle("status", () => status)
+        .handle("backup", () => backup)
+        .handle("redact", ({ params }) => Caller.use(({ name }) => redact(name, params.sequence)))
+        .handle("entries", ({ query: { kind, ...page } }) =>
+          Effect.map(
+            entries(kind === undefined ? page : { ...page, kinds: kind }),
+            ({ entries: found, fallbacks }) => found.map((entry) => toLogEntry(entry, fallbacks))
+          )
         )
-      )
-      .handle("messages", ({ query }) => messages(query))
-      .handle("gaps", ({ query }) => gaps(query))
-      .handle("send", ({ payload }) => Caller.use(({ name }) => send(name, payload)));
+        .handle("messages", ({ query }) => messages(query))
+        .handle("gaps", ({ query }) => gaps(query))
+        // The Schema refuses a place with no Network, so one here always has one.
+        .handle("activity", ({ query: { after, limit, network, place } }) =>
+          activity(
+            network === undefined
+              ? { after, limit }
+              : { after, limit, network, ...(place !== undefined && { place }) }
+          )
+        )
+        .handle("send", ({ payload }) => Caller.use(({ name }) => send(name, payload)))
+    );
   })
 );
 
@@ -155,6 +165,7 @@ const networks = HttpApiBuilder.group(
     return handlers
       .handle("list", () => operations.networks)
       .handle("get", ({ params }) => operations.network(params.id))
+      .handle("target", ({ params, query }) => operations.target(params.id, params.target, query))
       .handle("add", ({ payload }) =>
         Caller.use(({ name }) => operations.addNetwork(name, payload))
       )

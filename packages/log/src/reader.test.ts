@@ -27,15 +27,18 @@ import type { Duration } from "effect";
 
 import { allowBudgets } from "./budget.ts";
 import { ReaderBusy } from "./errors.ts";
+import { formatActivity, formatMessage } from "./formatted.ts";
 import { Log, LogReader, ReadTimedOut } from "./log.ts";
 import type {
   ActivityCursor,
   ActivityQuery,
   EntryQuery,
   LoggedActivity,
+  LoggedMessage,
   LogReaderOptions,
+  ReadActivity,
 } from "./log.ts";
-import { pageBytes, statements } from "./reads.ts";
+import { pageBytes, spanBytes, statements } from "./reads.ts";
 import { inProcessReader } from "./testing.ts";
 
 // LOG-11 from the outside: a Worker with its own connection serves every read, keeps to
@@ -215,17 +218,26 @@ const pageThrough = <A extends { readonly sequence: number }, E>(
     return all;
   });
 
-// What an Activity row costs a page to carry, about as the reader counts it.
-const sizeOfRow = ({ details }: LoggedActivity) => JSON.stringify(details).length;
+// What an Activity row costs a page to carry, about as the reader counts it: its details
+// as the Log holds them, and each span its text makes (MSG-3).
+const sizeOfRow = (row: LoggedActivity) =>
+  JSON.stringify(row.details).length + formatActivity(row).spans * spanBytes;
+
+// What a read gives for what the writer holds: the same rows, formatted on the Worker.
+const formattedActivity = (rows: readonly LoggedActivity[]) =>
+  rows.map((row) => formatActivity(row).row);
+
+const formattedMessages = (rows: readonly LoggedMessage[]) =>
+  rows.map((row) => formatMessage(row).row);
 
 // Follows Activity's cursor to the end, one page at a time, passing back the last row's
 // `sequence` and `ordinal` as a Frontend would, and checking each page keeps to `limit`.
 const pageActivity = <E>(
-  read: (after: ActivityCursor) => Effect.Effect<readonly LoggedActivity[], E>,
+  read: (after: ActivityCursor) => Effect.Effect<readonly ReadActivity[], E>,
   limit: number
 ) =>
   Effect.gen(function* () {
-    const all: LoggedActivity[] = [];
+    const all: ReadActivity[] = [];
     let page = yield* read({ sequence: 0 });
 
     while (page.length > 0) {
@@ -373,7 +385,7 @@ describe("the Log's reader", () => {
                 );
                 assert.deepStrictEqual(
                   yield* reader.messages(everything),
-                  yield* log.messages(everything)
+                  formattedMessages(yield* log.messages(everything))
                 );
                 assert.deepStrictEqual(yield* reader.gaps(everything), yield* log.gaps(everything));
                 assert.lengthOf(yield* reader.gaps(everything), 9);
@@ -440,7 +452,9 @@ describe("the Log's reader", () => {
 
             assert.deepStrictEqual(
               yield* pageThrough((after) => reader.messages({ ...filter, after, limit }), limit),
-              messages.filter((message) => network === undefined || message.network === network)
+              formattedMessages(
+                messages.filter((message) => network === undefined || message.network === network)
+              )
             );
             assert.deepStrictEqual(
               yield* pageThrough((after) => reader.gaps({ ...filter, after, limit }), limit),
@@ -461,7 +475,7 @@ describe("the Log's reader", () => {
 
               const log = yield* Log;
               const reader = yield* LogReader;
-              const all = yield* log.activity(allActivity);
+              const all = formattedActivity(yield* log.activity(allActivity));
 
               // Each QUIT is a row in each Channel it leaves, so Entries span pages.
               assert.isAbove(all.length, 40);
@@ -479,10 +493,10 @@ describe("the Log's reader", () => {
                   after: start,
                   limit: 2,
                   network: "libera",
-                  place: { _tag: "Channel", key: "#a" },
+                  place: { _tag: "Channel", name: "#A" },
                 },
-                { after: start, limit: 2, network: "oftc", place: { _tag: "Channel", key: "#a" } },
-                { after: start, limit: 1, network: "libera", place: { _tag: "User", key: "bob" } },
+                { after: start, limit: 2, network: "oftc", place: { _tag: "Channel", name: "#a" } },
+                { after: start, limit: 1, network: "libera", place: { _tag: "User", name: "Bob" } },
               ];
 
               for (const query of queries) {
@@ -492,7 +506,7 @@ describe("the Log's reader", () => {
                     (!("place" in query) ||
                       (place._tag === query.place._tag &&
                         ("key" in place ? place.key : "") ===
-                          ("key" in query.place ? query.place.key : "")))
+                          ("name" in query.place ? query.place.name.toLowerCase() : "")))
                 );
 
                 const paged = yield* pageActivity(
@@ -590,12 +604,12 @@ describe("the Log's reader", () => {
 
             assert.isBelow(first.length, 1024, "the page ended inside the Entry");
             assert.isAtMost(
-              first.slice(0, -1).reduce((total, row) => total + sizeOfRow(row), 0),
+              rows.slice(0, first.length - 1).reduce((total, row) => total + sizeOfRow(row), 0),
               pageBytes
             );
             assert.deepStrictEqual(
               yield* pageActivity((after) => reader.activity({ after, limit: 100_000 }), 100_000),
-              yield* log.activity({ after: { sequence: 0 }, limit: 100_000 })
+              formattedActivity(yield* log.activity({ after: { sequence: 0 }, limit: 100_000 }))
             );
 
             // A page of one row is one row, however many its Entry has.
@@ -672,7 +686,7 @@ describe("the Log's reader", () => {
             assert.isBelow((yield* reader.messages(everything)).length, 100);
             assert.deepStrictEqual(
               yield* pageThrough((after) => reader.messages({ after, limit: 1000 }), 1000),
-              messages
+              formattedMessages(messages)
             );
           })
         )
@@ -701,7 +715,7 @@ describe("the Log's reader", () => {
               "SEARCH activity USING INDEX activity_by_network (network=? AND (sequence,ordinal)>(?,?))",
             ],
             activityOfPlace: [
-              "SEARCH activity USING INDEX activity_by_place (network=? AND place_kind=? AND place_key=? AND (sequence,ordinal)>(?,?))",
+              "SEARCH activity USING INDEX activity_by_place (network=? AND place_kind=? AND casemapping=? AND place_key=? AND (sequence,ordinal)>(?,?))",
             ],
             attemptTuning: ["SEARCH entries USING INTEGER PRIMARY KEY (rowid=?)"],
             entries: ["SEARCH entries USING INTEGER PRIMARY KEY (rowid>?)"],

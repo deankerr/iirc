@@ -44,6 +44,7 @@ flowchart TD
   daemon --> log
   daemon --> api
   daemon --> session
+  daemon --> state
   daemon --> lifecycle
   daemon --> protocol
   log --> session
@@ -68,7 +69,7 @@ Dependencies point down only. Each library package stands alone for whoever want
 | [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
 | [`@iirc/log`](../packages/log/README.md) | The durable Log in SQLite: the writer, the reader Worker, derived tables of Messages, Activity, and Gaps, migrations, backup, the lock | `session`, `state`, `protocol`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | [`@iirc/api`](../packages/api/README.md) | The contract: `DaemonApi`, Schemas, typed errors, scopes | `protocol`, `lifecycle`, `effect` |
-| [`@iirc/daemon`](../packages/daemon/README.md) | Configuration, Credentials, keys, Network supervision, operations, and the API's handlers | `log`, `api`, `session`, `lifecycle`, `protocol`, `effect`, `@effect/platform-bun` |
+| [`@iirc/daemon`](../packages/daemon/README.md) | Configuration, Credentials, keys, Network supervision, operations, and the API's handlers | `log`, `api`, `session`, `state`, `lifecycle`, `protocol`, `effect`, `@effect/platform-bun` |
 | [`apps/iirc`](../apps/iirc/README.md) | The executable: argv, the HTTP server, and the CLI Frontends | `daemon`, `api`, `effect`, `@effect/platform-bun` |
 | [`apps/soak`](../apps/soak/README.md) | `iirc-soak`, the soak test's Frontend (PROOF-5) | `api`, `state`, `protocol`, `effect`, `@effect/platform-bun` |
 
@@ -111,7 +112,8 @@ sequenceDiagram
 - **A Connection's bytes decode as its `attempt` says.** The `attempt` records the whole Tuning, its fallback encoding included, so `Standing`, the machine, the derived tables, and `/entries` all decode a Line with UTF-8, then that fallback, then Latin-1 (MSG-4). A rebuild reads each Connection as live did, whatever the Owner changed since.
 - **Each Line is placed as it is folded.** `@iirc/state/place` gives it the Network's Timeline, a Channel's, or a Direct Message partner's (MSG-2), and the fold writes it as a Message, as Activity, or as a `line` or `unknown` on the Network's Timeline, so nothing a Network sends is invisible (MSG-5, MSG-6, PROT-1). A `QUIT` or `NICK` is a row in each Channel it shared and each partner's Timeline (KNOW-8). The partners are carried beside the Standings, and a startup rebuilds both in the same pass.
 - **Watchers never hold up a commit.** One that falls behind gets an `Overflowed` naming what it missed (HOST-5).
-- **Reads never hold up an append.** Frontend reads run in a Worker on a read-only connection (LOG-11).
+- **Reads never hold up an append.** Frontend reads of the Log, `/entries`, `/messages`, `/activity`, and `/gaps`, run in a Worker on a read-only connection (LOG-11). A read of what the Network knows now, `GET /networks/{id}/targets/{target}`, reads `Standing` in memory instead, with `at`, the sequence of the commit it reflects, from the same snapshot (API-6), and takes no permit, so it waits for no commit either.
+- **Participant text is marked in the contract.** Every field whose text a Network chose is `UntrustedText`, which the OpenAPI document marks `x-iirc-untrusted` and describes as data, never instructions (HOST-4). Formatting codes come parsed as spans beside the raw text, made on the reader's Worker and counted toward its page bound, so hostile formatting cannot make a page costly for the main thread (MSG-3, LOG-11).
 
 Requirements: [The Log](requirements.md#the-log), [Hostile input](requirements.md#hostile-input).
 

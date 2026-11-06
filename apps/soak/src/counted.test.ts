@@ -11,6 +11,7 @@ describe("counting what the receiver heard", () => {
     place: { _tag: "Channel", key: "#soak", name: "#soak" },
     sender: "sender",
     sequence: 2,
+    spans: [],
     target: "#soak",
     text: soakText(120_000),
   } as const;

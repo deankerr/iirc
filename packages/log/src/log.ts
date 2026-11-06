@@ -17,6 +17,7 @@ import type {
   ReadTimedOut,
 } from "./errors.ts";
 import type { LoggedActivity, LoggedMessage } from "./fold.ts";
+import type { ReadActivity, ReadMessage } from "./formatted.ts";
 import { holdDataDirectory } from "./lock.ts";
 import type { LogTooNew } from "./migrations.ts";
 import type {
@@ -29,7 +30,7 @@ import { makeReader } from "./reader.ts";
 import type { LogReaderOptions } from "./reader.ts";
 import type { ActivityPage } from "./rows.ts";
 import { makeStore } from "./store.ts";
-import type { ChangeEntry } from "./store.ts";
+import type { ChangeEntry, StandingAt } from "./store.ts";
 
 export type { Backup } from "./backup.ts";
 
@@ -52,16 +53,20 @@ export type {
   ConnectionEncoding,
   EntryQuery,
   NetworkPage,
-  PlaceKey,
+  PlaceName,
 } from "./reader-protocol.ts";
+
+export type { FormattedDetails, ReadActivity, ReadMessage } from "./formatted.ts";
 
 export type { ActivityCursor, ActivityPage } from "./rows.ts";
 
 export { longestReadMillis } from "./reader.ts";
 
+export { pageBytes, spanBytes } from "./reads.ts";
+
 export type { LogReaderOptions } from "./reader.ts";
 
-export type { ChangeEntry } from "./store.ts";
+export type { ChangeEntry, StandingAt } from "./store.ts";
 
 export type { Gap } from "@iirc/session/standing";
 
@@ -133,6 +138,13 @@ export class Log extends Context.Service<
     }) => Effect.Effect<readonly LoggedMessage[], StorageFailed>;
     /** The newest Entry's sequence, or 0 for an empty Log. */
     readonly head: Effect.Effect<number, StorageFailed>;
+    /**
+     * A Network's Standing as hosts read it, and the sequence of the last commit it
+     * reflects, from one snapshot, so that the two always agree (API-6). It is held in
+     * memory and set whole after each commit, so it waits for no commit and none waits
+     * for it.
+     */
+    readonly standingAt: (network: string) => Effect.Effect<StandingAt>;
     /** Deletes every derived row and derives them again from Entries (LOG-10). */
     readonly rebuild: Effect.Effect<void, StorageFailed>;
     /**
@@ -179,13 +191,15 @@ export class LogReader extends Context.Service<
   {
     /**
      * Activity after the cursor `after`, from every Network unless `network` names one, and
-     * from every place on it unless `place` names one. A page stops at `limit` rows or about
-     * `pageBytes`, whichever comes first, inside an Entry if it must, so pass back the last
-     * row's `sequence` and `ordinal` to resume.
+     * from every place on it unless `place` names one, by any spelling under the mapping each
+     * row was keyed under (KNOW-3). A page stops at `limit` rows or about `pageBytes`,
+     * counting each span its text makes, whichever comes first, inside an Entry if it must,
+     * so pass back the last row's `sequence` and `ordinal` to resume. Participant text comes
+     * with its spans, parsed on the Worker (MSG-3).
      */
     readonly activity: (
       query: ActivityQuery
-    ) => Effect.Effect<readonly LoggedActivity[], ReaderBusy | ReadTimedOut | StorageFailed>;
+    ) => Effect.Effect<readonly ReadActivity[], ReaderBusy | ReadTimedOut | StorageFailed>;
     /**
      * Copies the Log into `backups/` in the data directory with `VACUUM INTO`, on a Worker
      * and a read connection of its own, so that it holds up no append and no read, and
@@ -211,10 +225,13 @@ export class LogReader extends Context.Service<
     readonly gaps: (
       query: NetworkPage
     ) => Effect.Effect<readonly Gap[], ReaderBusy | ReadTimedOut | StorageFailed>;
-    /** Messages by cursor, from every Network unless `network` names one. */
+    /**
+     * Messages by cursor, from every Network unless `network` names one, each with its
+     * spans, parsed on the Worker, and each span counted toward `pageBytes` (MSG-3).
+     */
     readonly messages: (
       query: NetworkPage
-    ) => Effect.Effect<readonly LoggedMessage[], ReaderBusy | ReadTimedOut | StorageFailed>;
+    ) => Effect.Effect<readonly ReadMessage[], ReaderBusy | ReadTimedOut | StorageFailed>;
   }
 >()("@iirc/log/LogReader") {
   /**

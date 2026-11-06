@@ -4,6 +4,7 @@ import type {
   Ircd as IrcdOf,
   TlsDetails as TlsDetailsOf,
 } from "@iirc/session/entry";
+import type { Casemapping } from "@iirc/state";
 import { Option, Predicate, Schema, SchemaGetter } from "effect";
 
 // One Schema for every field of `T`, and none for any other, which an object literal of
@@ -53,11 +54,22 @@ const orDefault =
 // encoding, the casemapping, and CTCP replies were Tuning has none of them, and reads as
 // no fallback, the Ircd's mapping, and the CTCP defaults (MSG-4, KNOW-3, PROT-3, PROT-4).
 // The label is kept as recorded, and whoever decodes with it parses it.
+// Each mapping `@iirc/state` folds under, which a new one fails to compile without.
+const everyMapping = {
+  ascii: "ascii",
+  rfc1459: "rfc1459",
+  "rfc1459-strict": "rfc1459-strict",
+  rfc8265: "rfc8265",
+} as const satisfies { readonly [Key in Casemapping]: Key };
+
+/** Every mapping `@iirc/state` folds under (KNOW-3). */
+export const casemappings: readonly Casemapping[] = Object.values(everyMapping);
+
+const CasemappingColumn = Schema.Literals(Object.values(everyMapping));
+
 const Tuning = Schema.Struct({
   burstMillis: Schema.Int,
-  casemapping: Schema.optionalKey(
-    Schema.Literals(["ascii", "rfc1459", "rfc1459-strict", "rfc8265"])
-  ),
+  casemapping: Schema.optionalKey(CasemappingColumn),
   connectTimeoutMillis: Schema.Int,
   controlLaneLimit: Schema.Int,
   ctcpNetworkLimit: Schema.Int.pipe(orDefault(5)),
@@ -358,6 +370,7 @@ const activityKinds = {
 
 const activityFields = {
   ...Numbered,
+  casemapping: CasemappingColumn,
   network: Schema.String,
   ordinal: Schema.Int,
 };

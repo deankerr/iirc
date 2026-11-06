@@ -17,7 +17,7 @@ The one interpretation of what an Ircd says. `stepState` folds a Session's inbou
 | `channelOf`, `memberOf`, `userOf` | A Channel Self is in, a member of one, or a User seen, however each is spelled |
 | `casemappingOf(state)` | The mapping in force: forced, or else the Ircd's |
 | `casefold(casemapping, name)`, `mayFoldFurther` | The form names are compared in under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265` (KNOW-3), and whether a name folded under `ascii` could fold further |
-| `SortedMap` | The persistent map members and Users are held in. A `ReadonlyMap` |
+| `SortedMap` | The persistent map members and Users are held in. A `ReadonlyMap`, with `entriesAfter(key)` for a page that starts past a key |
 | `messageOf(line, sender?)` | The Message a `PRIVMSG` or `NOTICE` carries, if any |
 | `nickOf(source)` | The nick in `nick!user@host`, `nick@host`, or a bare nick |
 | `readsCommand(command)` | Whether `stepState` reads Lines of a command at all, so a host can skip the rest |

@@ -272,6 +272,89 @@ describe("the compiled binary, stopping and starting", () => {
     { timeout: testTimeout }
   );
 
+  it.live(
+    "KNOW-4, MSG-5, MSG-3: serves a Channel's state and Activity, from the binary",
+    () =>
+      Effect.gen(function* () {
+        const where = yield* home;
+
+        // A Channel worth reading: a topic, members with prefixes, and modes with a key.
+        const ircd = yield* scriptedIrcd(
+          (line) => {
+            if (line === `JOIN ${channel}`) {
+              return [
+                `:${nick}!~u@host JOIN ${channel}`,
+                `:ircd 332 ${nick} ${channel} :\u0002Run\u0002 here`,
+                `:ircd 353 ${nick} = ${channel} :${nick} @op +voiced`,
+                `:ircd 366 ${nick} ${channel} :End of /NAMES list.`,
+              ];
+            }
+
+            return line === `MODE ${channel}`
+              ? [
+                  `:ircd 324 ${nick} ${channel} +ntk hunter2`,
+                  `:ircd 329 ${nick} ${channel} 1600000000`,
+                ]
+              : welcoming(nick)(line);
+          },
+          { hostname: ircdAddress }
+        );
+
+        const { daemon, running } = yield* startDaemon(where, ircd, {});
+
+        const read = daemon.networks.target({
+          params: { id: network, target: channel },
+          query: { limit: 1000 },
+        });
+
+        const first = yield* eventually(
+          Effect.option(read),
+          (found) => found._tag === "Some" && found.value.createdAt !== null,
+          settleLimit
+        );
+
+        assert.strictEqual(first._tag, "Some");
+
+        const before = first._tag === "Some" ? first.value : undefined;
+
+        assert.deepInclude(before?.topic, { text: "\u0002Run\u0002 here" });
+        assert.deepStrictEqual(before?.modes, [{ letter: "k" }, { letter: "n" }, { letter: "t" }]);
+        assert.deepStrictEqual(
+          before?.members.items.map(({ nick: name, symbols }) => `${symbols}${name}`),
+          [nick, "@op", "+voiced"]
+        );
+
+        yield* ircd.push(`:op!o@h MODE ${channel} -o op\r\n:voiced!v@h QUIT :\u0002gone\r\n`);
+
+        const after = yield* eventually(read, ({ members }) => members.count === 2, settleLimit);
+
+        assert.isAbove(after.at, before?.at ?? 0);
+        assert.deepStrictEqual(
+          after.members.items.map(({ nick: name, symbols }) => `${symbols}${name}`),
+          [nick, "op"]
+        );
+
+        const { activity } = yield* daemon.daemon.activity({
+          query: {
+            after: { sequence: 0 },
+            limit: 1000,
+            network,
+            place: { _tag: "Channel", name: channel },
+          },
+        });
+
+        assert.deepStrictEqual(activity.find(({ details }) => details.kind === "quit")?.details, {
+          kind: "quit",
+          reason: { spans: [{ bold: true, text: "gone" }], text: "\u0002gone" },
+        });
+
+        const { code } = yield* signal(running, "SIGTERM");
+
+        assert.strictEqual(code, 0, running.output());
+      }).pipe(Effect.scoped, Effect.provide(layers)),
+    { timeout: testTimeout }
+  );
+
   for (const name of ["SIGTERM", "SIGINT"] as const) {
     it.live(
       `LIVE-9: on ${name}, says QUIT, exits 0, and the Log ends in \`closed\` then \`stopped\``,

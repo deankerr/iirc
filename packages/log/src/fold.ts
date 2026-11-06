@@ -1,6 +1,7 @@
 import type { Entry, NetworkId } from "@iirc/session/entry";
 import { foldStandings, noStandings } from "@iirc/session/standing";
 import type { Gap, Standings } from "@iirc/session/standing";
+import type { Casemapping } from "@iirc/state";
 import type { Place } from "@iirc/state/place";
 
 import { derivedFrom } from "./derive.ts";
@@ -36,6 +37,11 @@ export interface LoggedActivity {
   /** Who did it: a nick, or an Ircd's name. Absent for a Line with no source. */
   readonly actor?: string;
   readonly at: number;
+  /**
+   * The mapping in force before its Line, which its place's key was casefolded under, so
+   * a place asked for by name finds it whatever mapping is in force now (KNOW-3).
+   */
+  readonly casemapping: Casemapping;
   readonly details: ActivityDetails;
   readonly network: NetworkId;
   /** From 0, in the order the Line gave rise to them. */

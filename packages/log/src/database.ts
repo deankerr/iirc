@@ -161,6 +161,7 @@ const derivedTables: readonly DerivedTable[] = [
       "place_kind",
       "place_key",
       "place_name",
+      "casemapping",
       "kind",
       "actor",
       "details",
@@ -176,6 +177,7 @@ const derivedTables: readonly DerivedTable[] = [
             place_kind TEXT NOT NULL,
             place_key TEXT NOT NULL,
             place_name TEXT NOT NULL,
+            casemapping TEXT NOT NULL,
             kind TEXT NOT NULL,
             actor TEXT,
             details TEXT NOT NULL,
@@ -187,7 +189,7 @@ const derivedTables: readonly DerivedTable[] = [
         `,
         sql`
           CREATE INDEX IF NOT EXISTS activity_by_place
-          ON activity (network, place_kind, place_key, sequence, ordinal)
+          ON activity (network, place_kind, casemapping, place_key, sequence, ordinal)
         `,
       ]),
     name: "activity",

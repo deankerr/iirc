@@ -4,7 +4,7 @@ import { parseStandardReply } from "@iirc/protocol/replies";
 import type { Entry } from "@iirc/session/entry";
 import type { StandingStep } from "@iirc/session/standing";
 import { casemappingOf, messageOf, nickOf } from "@iirc/state";
-import type { IrcState, StateChange } from "@iirc/state";
+import type { Casemapping, IrcState, StateChange } from "@iirc/state";
 import { channelPlace, networkPlace, placeOf, placeOfSent, userPlace } from "@iirc/state/place";
 import type { Place } from "@iirc/state/place";
 
@@ -50,13 +50,15 @@ const numeric = /^\d{3}$/u;
 const heartbeat: ReadonlySet<string> = new Set(["PING", "PONG"]);
 
 // The Activity of one Entry, numbered in the order they are added.
-const activityOf = ({ at, network, sequence }: LineEntry) => {
+// Every place is keyed under `casemapping`, the mapping in force before the Line.
+const activityOf = ({ at, network, sequence }: LineEntry, casemapping: Casemapping) => {
   const rows: LoggedActivity[] = [];
 
   const add = (place: Place, details: ActivityDetails, actor: string | undefined) => {
     rows.push({
       ...(actor !== undefined && { actor }),
       at,
+      casemapping,
       details,
       network,
       ordinal: rows.length,
@@ -477,7 +479,7 @@ export const derivedFrom = (
     return { activity: [], message: undefined, partners };
   }
 
-  const { add, rows } = activityOf(entry);
+  const { add, rows } = activityOf(entry, casemappingOf(irc));
   const told = heard(entry, irc, line, add);
   const message = told === "unsaid" ? undefined : told;
 

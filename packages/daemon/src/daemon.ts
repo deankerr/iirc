@@ -3,6 +3,7 @@ import {
   BackupFailed,
   ChannelNotFound,
   CredentialNotFound,
+  CursorStale,
   EntryAlreadyRedacted,
   EntryNotFound,
   EntryNotRedactable,
@@ -15,18 +16,25 @@ import {
   LogUnavailable,
   NetworkExists,
   NetworkNotFound,
+  NotAChannel,
   NotInSession,
   ReaderBusy,
   ReadTimedOut,
   Stopping,
+  TargetNotFound,
   WriteFailed,
 } from "@iirc/api";
 import type {
+  ActivityCursor,
+  ChannelDetails,
   CredentialsUnavailable,
+  LoggedActivity,
+  NetworkKnowledge,
   KeyScope,
   LoggedMessage,
   NetworkSettings,
   NetworkStatus as NetworkState,
+  PlaceFilter,
   Status,
 } from "@iirc/api";
 import { Log, LogReader, longestReadMillis, StorageFailed } from "@iirc/log";
@@ -88,6 +96,8 @@ import { findKey, hashKey, keyCrypto, newKey } from "./keys.ts";
 import { readConfiguration, recordChange, recordRedaction } from "./recorded.ts";
 import type { UndecodableChange } from "./recorded.ts";
 import { tuningOf } from "./tuning.ts";
+import { activityPage, knownOf, targetRead } from "./views.ts";
+import type { MembersPage } from "./views.ts";
 
 export { createLocalKey } from "./local-key.ts";
 
@@ -109,6 +119,21 @@ export interface DaemonConfig {
   readonly dataDir: string;
   readonly version: string;
 }
+
+/**
+ * Which Activity to read (MSG-5): after `after`, from every Network unless `network` names
+ * one, and from every place on it unless `place` names one, which only a Network can hold.
+ */
+export type ActivityRead =
+  | {
+      readonly after: ActivityCursor;
+      readonly limit: number;
+      readonly network: NetworkId;
+      readonly place: PlaceFilter;
+    }
+  | { readonly after: ActivityCursor; readonly limit: number; readonly network?: NetworkId };
+
+type Reading = LogUnavailable | ReaderBusy | ReadTimedOut;
 
 /** What a Line a Frontend asked for came to, in the API's words (API-9). */
 type SendResult =
@@ -344,6 +369,17 @@ const built = (outbound: Outbound) =>
 export class Daemon extends Context.Service<
   Daemon,
   {
+    /**
+     * Activity by cursor (MSG-5), with the cursor that resumes after the page. A place's
+     * name finds each row it names under the mapping that row was keyed under (KNOW-3).
+     */
+    readonly activity: (query: ActivityRead) => Effect.Effect<
+      {
+        readonly activity: readonly LoggedActivity[];
+        readonly next: ActivityCursor;
+      },
+      Reading
+    >;
     /** Adds a Network, which is hosted at once (CONF-3). */
     readonly addNetwork: (
       by: By,
@@ -428,8 +464,13 @@ export class Daemon extends Context.Service<
     readonly messages: (
       query: NetworkPage
     ) => Effect.Effect<readonly LoggedMessage[], LogUnavailable | ReaderBusy | ReadTimedOut>;
-    /** One Network's Configuration and status. */
-    readonly network: (id: NetworkId) => Effect.Effect<NetworkView, NetworkNotFound>;
+    /**
+     * One Network's Configuration and status, and what its Session knows of Self and of
+     * its Ircd, from its Standing with the sequence it reflects (KNOW-1, KNOW-2, API-6).
+     */
+    readonly network: (
+      id: NetworkId
+    ) => Effect.Effect<NetworkView & { readonly known: NetworkKnowledge }, NetworkNotFound>;
     /** Every Network's Configuration and status, ordered by ID. */
     readonly networks: Effect.Effect<readonly NetworkView[]>;
     /**
@@ -484,6 +525,19 @@ export class Daemon extends Context.Service<
       message: { readonly network: NetworkId; readonly target: string; readonly text: string }
     ) => Effect.Effect<SendResult, NetworkNotFound | SendRefusal>;
     readonly status: Effect.Effect<Status>;
+    /**
+     * A Channel Self is in, with a page of its members, from the Network's Standing as of
+     * its last commit, and `at`, that commit's sequence, from the same snapshot (KNOW-4,
+     * API-6). It reads memory, not the Log, so it waits for no commit and holds none up.
+     */
+    readonly target: (
+      id: NetworkId,
+      target: string,
+      page: MembersPage
+    ) => Effect.Effect<
+      ChannelDetails,
+      CursorStale | NetworkNotFound | NotAChannel | TargetNotFound
+    >;
     /**
      * Leaves every Network at once and records that the Daemon stopped (LIVE-9, RUN-3).
      * Each waits as long as its `quitWaitMillis` allows, and only the first call does
@@ -803,6 +857,11 @@ export class Daemon extends Context.Service<
         yield* Effect.addFinalizer(() => stop);
 
         return {
+          // A place is found by name under each row's own mapping, on the Worker (KNOW-3).
+          activity: (query) =>
+            fromReader(
+              Effect.map(reader.activity(query), (rows) => activityPage(rows, query.after))
+            ),
           addNetwork: Effect.fnUntraced(function* (by, settings) {
             const { sequence } = yield* commit(by, (current) =>
               current.networks.has(settings.id)
@@ -943,11 +1002,14 @@ export class Daemon extends Context.Service<
               .map(([name, { created, scope }]) => ({ created, name, scope }))
               .toSorted((one, other) => (one.name < other.name ? -1 : 1))
           ),
+          // Spans come from the Worker, which counts them toward its page bound (MSG-3).
           messages: (query) => fromReader(reader.messages(query)),
           network: Effect.fnUntraced(function* (id) {
-            return yield* viewOf(
+            const view = yield* viewOf(
               yield* requireNetwork(yield* SubscriptionRef.get(configuration), id)
             );
+
+            return { ...view, known: knownOf(yield* log.standingAt(id)) };
           }),
           networks: Effect.flatMap(SubscriptionRef.get(configuration), (current) =>
             Effect.forEach(byId(current), viewOf)
@@ -1068,6 +1130,35 @@ export class Daemon extends Context.Service<
             };
           }),
           stop,
+          target: Effect.fnUntraced(function* (id, target, page) {
+            yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);
+
+            const read = targetRead(yield* log.standingAt(id), id, target, page);
+
+            switch (read._tag) {
+              case "Channel": {
+                return read.details;
+              }
+
+              case "CursorStale": {
+                const { casemapping, inForce } = read;
+
+                return yield* new CursorStale({ casemapping, inForce });
+              }
+
+              case "NotAChannel": {
+                return yield* new NotAChannel({ network: id, target });
+              }
+
+              case "NotHeld": {
+                return yield* new TargetNotFound({ network: id, target });
+              }
+
+              default: {
+                return read satisfies never;
+              }
+            }
+          }),
         };
       })
     );

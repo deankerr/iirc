@@ -1,5 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DaemonApi, Forbidden, KeyExists, KeyNotFound, Unauthorized } from "@iirc/api";
+import {
+  DaemonApi,
+  Forbidden,
+  KeyExists,
+  KeyNotFound,
+  TargetNotFound,
+  Unauthorized,
+} from "@iirc/api";
 import { Effect, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
@@ -191,6 +198,16 @@ describe("keys and access", () => {
         assert.isNotEmpty(yield* reader.daemon.entries({ query: { after: 0, limit: 10 } }));
         assert.lengthOf(yield* reader.networks.list(), 1);
         assert.lengthOf((yield* reader.configuration.get()).networks, 1);
+        assert.deepInclude(
+          yield* reader.daemon.activity({ query: { after: { sequence: 0 }, limit: 10 } }),
+          { activity: [] }
+        );
+        assert.deepStrictEqual(
+          yield* Effect.flip(
+            reader.networks.target({ params: { id: "libera", target: "#a" }, query: { limit: 10 } })
+          ),
+          new TargetNotFound({ network: "libera", target: "#a" })
+        );
         assert.deepStrictEqual(
           yield* Effect.flip(
             reader.daemon.send({ payload: { network: "libera", target: "#a", text: "hi" } })

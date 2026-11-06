@@ -18,6 +18,7 @@
     "@iirc/log": "workspace:*",
     "@iirc/protocol": "workspace:*",
     "@iirc/session": "workspace:*",
+    "@iirc/state": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

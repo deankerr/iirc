@@ -147,6 +147,7 @@ const allMessages = Log.use(({ messages }) => messages(everything));
 const allActivity = Log.use(({ activity }) => activity({ after: { sequence: 0 }, limit: 100_000 }));
 const allGaps = Log.use(({ gaps }) => gaps(everything));
 const standing = (network = "libera") => Recorder.use(({ standing }) => standing(network));
+const standingAt = (network = "libera") => Log.use(({ standingAt: read }) => read(network));
 const sequences = allEntries.pipe(Effect.map((entries) => entries.map(({ sequence }) => sequence)));
 
 // A place, as a test reads it.
@@ -966,6 +967,55 @@ describe("the durable Log", () => {
           assert.deepStrictEqual(yield* standing(), folded.get("libera"));
           assert.deepStrictEqual(yield* standing("oftc"), folded.get("oftc"));
           assert.strictEqual(yield* standing("never heard of"), noStanding);
+        })
+      )
+    );
+
+    it.effect("API-6: gives each Standing with the sequence it reflects, from one snapshot", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          yield* Effect.gen(function* () {
+            assert.deepStrictEqual(yield* standingAt(), { at: 0, standing: noStanding });
+
+            const connection = yield* attempted();
+            const recorded = yield* record([opened(connection), welcome()]);
+            const after = yield* standingAt();
+
+            assert.strictEqual(after.at, recorded.at(-1)?.sequence);
+            assert.strictEqual(after.standing, yield* standing());
+
+            // Another Network's commit moves `at`, and leaves this Standing as it was.
+            const [other] = yield* record([attempt("oftc")]);
+            const moved = yield* standingAt();
+
+            assert.strictEqual(moved.at, other.sequence);
+            assert.strictEqual(moved.standing, after.standing);
+
+            // A rollback moves neither.
+            yield* Effect.exit(
+              Recorder.use(({ record: write }) =>
+                write([inbound(":bob!u@h PRIVMSG #a :hi")], () => {
+                  throw new Error("machine threw");
+                })
+              )
+            );
+            assert.deepStrictEqual(yield* standingAt(), moved);
+
+            const change = yield* redact(recorded[1]?.sequence ?? 0);
+
+            assert.strictEqual((yield* standingAt()).at, change.sequence);
+          }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+          // A restart begins from the Log's head.
+          yield* Effect.gen(function* () {
+            const head = yield* Log.use(({ head: read }) => read);
+
+            assert.strictEqual((yield* standingAt()).at, head);
+            assert.deepStrictEqual(
+              (yield* standingAt()).standing,
+              foldStandings(noStandings, yield* allEntries).get("libera")
+            );
+          }).pipe(Effect.provide(Log.layer({ dataDir })));
         })
       )
     );

@@ -2,7 +2,7 @@
 
 The Daemon, with no HTTP server and no argv: Configuration as a fold over Changes, Credentials, API keys, one host per Network, the operations a Frontend can ask for, and the API's handlers.
 
-- **Depends on:** `@iirc/log`, `@iirc/api`, `@iirc/session`, `@iirc/lifecycle`, `@iirc/protocol`, `effect`, `@effect/platform-bun`.
+- **Depends on:** `@iirc/log`, `@iirc/api`, `@iirc/session`, `@iirc/state`, `@iirc/lifecycle`, `@iirc/protocol`, `effect`, `@effect/platform-bun`.
 - **Used by:** `apps/iirc`. Tests of `apps/soak` run a real one.
 
 ## Public surface
@@ -56,6 +56,16 @@ BunRuntime.runMain(Layer.launch(app)); // SIGINT and SIGTERM stop it cleanly (RU
 - **Credentials** are one service over the keyring (`Bun.secrets`) or `credentials.json`, chosen at startup. A write is owned by the service, never cancelled, and waited for at most 10 seconds (CRED-1).
 - **Channel keys** the Owner gives are Credentials, kept under `key.` and 16 hex digits of a SHA-256 unless the Channel names one. A key a Network sets with `MODE +k` is never kept (CRED-4).
 - **Causes name keys.** A Frontend's Line is recorded with the cause `key:<name>` (LOG-5).
+
+## Reads of what the Network knows
+
+- **A Channel read, and `known` in `GET /networks/{id}`, come from `Standing`, in memory, not from the Log.** The reader Worker has only the Log, and folding a Channel from it would mean replaying the Session. `Standing` already holds it, folded in the same transaction as each append. `Log.standingAt` reads the Network's Standing and the sequence of the commit it reflects with one `Ref.get` of what each commit sets whole once it is durable, so members, topic, modes, Self, the `RPL_ISUPPORT` tokens, and `at` always come from one snapshot. It takes no permit, so it waits for no commit and holds none up (LOG-11). `at` is the Log's head as of that commit, the sequence `/stream` will start from with no gap (API-6).
+- **`views.ts` turns what the reader and `Standing` give into the contract's shapes,** as pure functions: Activity without its ordinal and its row's mapping, and the page's `next` cursor (MSG-5), a Channel with a page of members (KNOW-4, KNOW-7), and what a Session knows of Self and its Ircd (KNOW-1, KNOW-2). Spans come formatted from the reader's Worker, and only a Channel's topic, one string, is parsed here.
+- **A Target is a Channel when `CHANTYPES` says so,** and is looked up with `channelOf`, which casefolds under the mapping in force (KNOW-3). A User Target is `NotAChannel` until milestone 4, and a Channel the current Session is not in is `TargetNotFound`. Between Sessions, Self is in none.
+- **A members page is a range of the `SortedMap`,** `entriesAfter` the last casefolded nick, so a page of a 65,536 member Channel costs what the page holds. Each member's `user@host` and realname are one lookup in the Users seen.
+- **An Activity `place` is a name the Worker casefolds under each mapping,** one index range per mapping, matched against the mapping each row recorded, so a place keeps its history across a new `CASEMAPPING` and a reconnect (KNOW-3). `/messages` takes no place filter, so it needs nothing of the kind.
+- **A members cursor carries its mapping.** A cursor folded under a mapping no longer in force is refused with `CursorStale`, because the order it is a place in has changed (KNOW-3).
+- **Spans are the Worker's to make, and count toward its page bound** (MSG-3, LOG-11). The main thread still decodes and encodes each span, so `spanBytes`, 128, counts toward `pageBytes` for each. Measured on fserv with Bun 1.4.4 by the LOG-11 test in `reads.test.ts`: a page of the densest text a Network can send, one 8.6 KB Line of 4,301 spans, blocked the event loop 8.3 to 8.6 ms median and 14.5 ms at most. Without the span cost the same page held 30 such Lines and blocked it 248 ms.
 
 ## Composition
 

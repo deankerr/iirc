@@ -3,7 +3,8 @@ import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
 
 import { ReaderBusy, ReadFailed, ReadTimedOut } from "./errors.ts";
-import { ActivityCursor, ActivityRow, EntryRow, GapRow, MessageRow, Page } from "./rows.ts";
+import { ReadActivity, ReadMessage } from "./formatted.ts";
+import { ActivityCursor, EntryRow, GapRow, Page } from "./rows.ts";
 
 // Keyed by every tag an Entry can have, so a new kind of Entry cannot compile until it
 // is filterable here too.
@@ -42,17 +43,19 @@ export const NetworkPage = Schema.Struct({
 export type NetworkPage = typeof NetworkPage.Type;
 
 /**
- * A Timeline's place, by its key: the Network's own, or a Channel's or a User's name as
- * casefolded under the mapping in force when its rows were written (KNOW-3).
+ * A Timeline's place, by name: the Network's own, or a Channel's or a User's, spelled any
+ * way. Each row is found if the name, casefolded under the mapping its row was keyed
+ * under, is its key, so a place keeps its history across a change of mapping (KNOW-3).
+ * The key a row gives is a name that finds it too.
  */
-export const PlaceKey = Schema.Union([
+export const PlaceName = Schema.Union([
   Schema.TaggedStruct("Network", {}),
-  Schema.TaggedStruct("Channel", { key: Schema.String }),
-  Schema.TaggedStruct("User", { key: Schema.String }),
+  Schema.TaggedStruct("Channel", { name: Schema.String }),
+  Schema.TaggedStruct("User", { name: Schema.String }),
 ]);
 
-/** The decoded form of {@link PlaceKey}. */
-export type PlaceKey = typeof PlaceKey.Type;
+/** The decoded form of {@link PlaceName}. */
+export type PlaceName = typeof PlaceName.Type;
 
 const activityPage = { after: ActivityCursor, limit: Schema.Int };
 
@@ -62,7 +65,7 @@ const activityPage = { after: ActivityCursor, limit: Schema.Int };
  * comes first, because a page with a place is also a page with a Network.
  */
 export const ActivityQuery = Schema.Union([
-  Schema.Struct({ ...activityPage, network: Schema.String, place: PlaceKey }),
+  Schema.Struct({ ...activityPage, network: Schema.String, place: PlaceName }),
   Schema.Struct({ ...activityPage, network: Schema.optionalKey(Schema.String) }),
 ]);
 
@@ -92,7 +95,7 @@ const QueuedNetworkPage = Schema.Struct({ ...NetworkPage.fields, ...queued });
 
 /** What crosses to the Worker for a read of Activity. */
 const QueuedActivityQuery = Schema.Union([
-  Schema.Struct({ ...activityPage, network: Schema.String, place: PlaceKey, ...queued }),
+  Schema.Struct({ ...activityPage, network: Schema.String, place: PlaceName, ...queued }),
   Schema.Struct({ ...activityPage, network: Schema.optionalKey(Schema.String), ...queued }),
 ]);
 
@@ -106,7 +109,7 @@ export class ReaderRpcs extends RpcGroup.make(
     payload: QueuedEntryQuery,
     success: Schema.Array(Schema.toType(EntryRow)),
   }),
-  Rpc.make("messages", { error, payload: QueuedNetworkPage, success: Schema.Array(MessageRow) }),
+  Rpc.make("messages", { error, payload: QueuedNetworkPage, success: Schema.Array(ReadMessage) }),
   Rpc.make("encodings", {
     error,
     payload: Schema.Struct({ connections: Schema.Array(Schema.Int), ...queued }),
@@ -115,7 +118,7 @@ export class ReaderRpcs extends RpcGroup.make(
   Rpc.make("activity", {
     error,
     payload: QueuedActivityQuery,
-    success: Schema.Array(ActivityRow),
+    success: Schema.Array(ReadActivity),
   }),
   Rpc.make("gaps", {
     error,
