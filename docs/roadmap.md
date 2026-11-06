@@ -9,7 +9,7 @@ Each milestone is a working Daemon. Order is by what makes the next one possible
 | # | Name | Delivers | Done when | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Stays on | LOG, CONF, CRED, CONN except CONN-5, LIVE, SEND lanes and flood control, a thin Send, `/entries`, Channel membership, RUN, multiple Networks, AUTH | It survives kills, drops, and refusals on fserv and loses nothing | Built. The soak test is running |
-| 2 | Knows the Network | KNOW, MSG, HOST, PROT, Activity, a Channel read, an Activity read | Derived state matches `NAMES` and `MODE` after a netsplit and a reconnect | In progress |
+| 2 | Knows the Network | KNOW, MSG, HOST, PROT, Activity, a Channel read, an Activity read | Derived state matches `NAMES` and `MODE` after a netsplit and a reconnect | Built. `proof:floor` shows it on two linked ngircds |
 | 3 | Full control | CONN-5, the rest of SEND, Lookups, Acting | Everything a person does in irssi can be done through the API | Planned |
 | 4 | Ready for Frontends | `/bootstrap`, `/stream`, VIEW, STORE, OBS | The web frontend can start without asking for a Daemon change | Planned |
 | 5 | Better with IRCv3 | [IRCv3 enhancements](#ircv3-enhancements) | Ergo gives more, ngircd still passes | Planned |
@@ -40,6 +40,9 @@ Each step is a working Daemon. Derived state lives in `Standing` and in derived 
 4. The Daemon asks: a pure planner over `Standing`, like `joinPlan`, for `MODE` on join, `WHO` for `user@host`, a debounced `NAMES` after a prefix mode is removed, and a re-read of an uncertain Channel, all through the background lane (KNOW-5). Debounces are absolute deadlines in `Standing`.
 5. CTCP replies and floods: `VERSION` and `PING` by default, `TIME` opt-in and in UTC (PROT-3), only ever to a parsed User nick, and the encoding, casemapping, and CTCP Tuning (CONF-3). The limits are a window in `Standing` folded from the Log (PROT-4, HOST-3): a reply counts from when it is decided, and keeps counting while it is pending, until it is recorded as sent, when it counts from then, or as Dropped. One not written within the Network's window of being decided is Dropped as it reaches the head of the lane, so no more than the limit leave in any window. Any other CTCP `NOTICE` Self sends counts once recorded.
 6. Reads and proof: a Channel's topic, modes, members, and `at` from `GET /networks/{id}/targets/{target}`, and Activity by cursor, both with participant text marked untrusted (HOST-4). `proof:floor` links two ngircds, splits and rejoins them, reconnects, and compares derived members and modes with a raw IRC client's `NAMES` and `MODE`.
+   - The split is an IRC operator's `DISCONNECT`, and the rejoin its `CONNECT`, so the far side's Users live through it and come back in the link's burst. Killing the far ngircd would take them with it, and ngircd's own redial, at least 5 seconds after the last, would race the checks made during the split.
+   - The comparison waits for the Daemon to settle by the API alone: a Message sent after what the raw client saw is recorded, nothing is uncertain, every read is answered, and `at` holds still.
+   - ngircd's burst gives a member with `@+` as `MODE #chan +ov nick`, one parameter for two prefix modes. The Daemon finds it uneven, marks the Channel uncertain, and reads `MODE` and `NAMES` again, which is what KNOW-6 asks.
 
 Decided at the start:
 
@@ -120,3 +123,4 @@ Wanted, but not needed for the first proof:
 - Commit latency under real traffic. It was measured on synthetic data, and the soak is the first real load.
 - arm64, musl, macOS, and Windows builds. FTS5 on macOS.
 - Ergo has not been run. Its behaviour here, such as replaying always-on `JOIN`s after `376`, comes from reading its source.
+- The netsplit proof covers ngircd alone, linked with itself, with no `multi-prefix`, so a member's lower prefixes are compared only as `NAMES` shows them, which is the highest. It does not cover a split between different Ircds, a split seen from the far side, a `QUIT` storm of many Users, a split while a read is in flight, Channel modes that differ across the split and merge in the burst, or a nick collision at the rejoin.

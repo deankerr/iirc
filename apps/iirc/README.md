@@ -27,6 +27,7 @@ bun run --filter @iirc/app test
 ```
 
 - `src/floor-proof.ts` drives the built binary only through its API, signals, `iirc config`, and raw IRC clients. [`requirements.md`](../../docs/requirements.md#proof) lists what it checks.
+- `src/floor.ts` is what the floor proof's checks share: private ngircds, linked or not, raw IRC clients, and the Daemon. `src/netsplit.ts` is the netsplit and reconnect check, on two linked ngircds.
 - `src/kill.test.ts` sends `SIGKILL` to the minified binary during traffic and checks that nothing recorded is lost or duplicated (PROOF-4).
 - `src/run.test.ts` and `src/tls.test.ts` test stopping, starting, keys, and TLS against the compiled binary.
 

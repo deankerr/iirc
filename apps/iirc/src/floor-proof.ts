@@ -1,21 +1,16 @@
 #!/usr/bin/env bun
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { connect } from "node:net";
-import type { Socket } from "node:net";
-import { homedir } from "node:os";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import type { Configuration, LogEntry, NetworkSettings, NetworkStatus as Status } from "@iirc/api";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { testAuthority } from "@iirc/session/testing";
-import type { Certificate } from "@iirc/session/testing";
 import {
   Cause,
   Console,
-  Data,
   Duration,
   Effect,
   Exit,
@@ -25,30 +20,51 @@ import {
   Redacted,
   Ref,
   Result,
-  Schedule,
   Schema,
-  Stream,
 } from "effect";
-import type { Scope } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import {
-  appRoot,
-  createKey,
-  freePort,
-  healthyClient,
-  logTail,
-  networkStatus,
-  settingsFor,
-  startBinary,
-} from "./binary.ts";
-import type { Client, TestNetwork } from "./binary.ts";
+import { logTail, startBinary } from "./binary.ts";
 import {
   configurationToToml,
   describeIssue,
   parseConfigurationFile,
 } from "./configuration-file.ts";
+import {
+  addNetwork,
+  allEntries,
+  binary,
+  brisk,
+  checkLimit,
+  ensure,
+  floorIrcd,
+  floorNetwork,
+  isFrom,
+  isQuit,
+  lineEntries,
+  loopback,
+  network,
+  newHome,
+  ngircd,
+  pageSize,
+  password,
+  ProofFailed,
+  quitReason,
+  rawClient,
+  registeredClient,
+  runDaemon,
+  serverName,
+  signalPid,
+  Skipped,
+  slackMillis,
+  toCheck,
+  untilJoined,
+  waitFor,
+  watcherIn,
+} from "./floor.ts";
+import type { Check, Heard, Home, Running } from "./floor.ts";
+import { netsplit } from "./netsplit.ts";
 
 // Proves steps 3 and 4 on a real Ircd: private ngircds started here, each on a loopback port of
 // its own, driven only through the built binary, its API, signals, and raw IRC clients. It
@@ -56,402 +72,9 @@ import {
 // a Scope that takes it down again on success, failure, or interrupt, and every temporary
 // file goes with the Scope too.
 
-const binary = `${appRoot}/dist/iirc`;
-
-// Where this machine keeps ngircd. Set `IIRC_NGIRCD` to use another.
-const ngircd = process.env.IIRC_NGIRCD ?? path.join(homedir(), ".local/opt/ngircd/ngircd");
-
-const serverName = "floor.proof.test";
-const password = "opensesame";
-const loopback = "127.0.0.1";
-
 const floor = "#floor";
 const kicked = "#kick";
 const flood = "#flood";
-
-const network = "floor";
-const quitReason = "floor proof says goodbye";
-
-// Past `registrationTimeoutMillis`, because a Connection may come up inside an outage.
-const settleLimit = "30 seconds";
-const checkLimit = "120 seconds";
-const pollEvery = "20 millis";
-
-// How far a time on the wire or in the Log may stray from what was asked for: one turn of
-// a busy event loop on a machine doing other things.
-const slackMillis = 400;
-
-// Quick to react, so the proof is mostly about what ngircd does, and not about waiting.
-const brisk: Partial<Tuning> = {
-  drainMillis: 300,
-  quitWaitMillis: 1000,
-  reconnectInitialMillis: 300,
-  reconnectMaxMillis: 1500,
-};
-
-class ProofFailed extends Data.TaggedError("ProofFailed")<{ readonly reason: string }> {
-  // So that a failure the runtime logs says what it was.
-  override get message() {
-    return this.reason;
-  }
-}
-
-/** A check that could not run here, and says why rather than pass for one that did. */
-class Skipped extends Data.TaggedClass("Skipped")<{ readonly reason: string }> {}
-
-type FloorServices =
-  | ChildProcessSpawner.ChildProcessSpawner
-  | FileSystem.FileSystem
-  | HttpClient.HttpClient
-  | Scope.Scope;
-
-/** One check: what it observed, if all was as it should be. */
-type Check = Effect.Effect<string | Skipped, ProofFailed, FloorServices>;
-
-// Anything else going wrong fails the check the same way, and says what it was.
-const toCheck = <E>(proof: Effect.Effect<string | Skipped, E, FloorServices>): Check =>
-  Effect.mapError(proof, (error) =>
-    error instanceof ProofFailed ? error : new ProofFailed({ reason: String(error) })
-  );
-
-const ensure = (condition: boolean, reason: string) =>
-  condition ? Effect.void : Effect.fail(new ProofFailed({ reason }));
-
-const waitFor = <A, E, R>(
-  what: string,
-  check: Effect.Effect<A, E, R>,
-  done: (value: A) => boolean,
-  limit: Duration.Input = settleLimit
-) =>
-  check.pipe(
-    Effect.repeat({ schedule: Schedule.spaced(pollEvery), until: done }),
-    Effect.timeoutOrElse({
-      duration: limit,
-      orElse: () => Effect.fail(new ProofFailed({ reason: `timed out waiting for ${what}` })),
-    })
-  );
-
-const signalPid = (pid: number, signal: NodeJS.Signals) =>
-  Effect.sync(() => {
-    process.kill(pid, signal);
-  });
-
-/** One private ngircd, restartable on the same port, which speaks TLS too if given a key. */
-const floorIrcd = Effect.fnUntraced(function* (
-  options: { readonly password?: string; readonly tls?: Certificate } = {}
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iirc-floor-ircd-" });
-  const port = yield* freePort;
-  const tlsPort = options.tls === undefined ? undefined : yield* freePort;
-  const config = path.join(directory, "ngircd.conf");
-  const certFile = path.join(directory, "cert.pem");
-  const keyFile = path.join(directory, "key.pem");
-  const logged = yield* Ref.make("");
-
-  if (options.tls !== undefined) {
-    yield* fileSystem.writeFileString(certFile, options.tls.cert);
-    yield* fileSystem.writeFileString(keyFile, options.tls.key);
-  }
-
-  yield* fileSystem.writeFileString(
-    config,
-    [
-      "[Global]",
-      `Name = ${serverName}`,
-      "Info = iirc floor proof",
-      `Listen = ${loopback}`,
-      `Ports = ${port}`,
-      ...(options.password === undefined ? [] : [`Password = ${options.password}`]),
-      "AdminInfo1 = iirc floor proof",
-      "AdminInfo2 = loopback only",
-      "AdminEMail = nobody@floor.proof.test",
-      'MotdPhrase = "floor proof"',
-      "[Limits]",
-      "MaxConnectionsIP = 0",
-      "MaxNickLength = 16",
-      "[Options]",
-      "DNS = no",
-      "Ident = no",
-      "PAM = no",
-      ...(tlsPort === undefined
-        ? []
-        : ["[SSL]", `CertFile = ${certFile}`, `KeyFile = ${keyFile}`, `Ports = ${tlsPort}`]),
-      "",
-    ].join("\n")
-  );
-
-  const configCode = yield* spawner.exitCode(
-    ChildProcess.make(ngircd, ["--configtest", "--config", config], {
-      cwd: directory,
-      stdin: "ignore",
-    })
-  );
-
-  yield* ensure(Number(configCode) === 0, `ngircd refused its configuration: exit ${configCode}`);
-
-  const start = Effect.gen(function* () {
-    const child = yield* spawner.spawn(
-      ChildProcess.make(ngircd, ["--nodaemon", "--config", config], {
-        cwd: directory,
-        // Takes a stopped process too, which SIGTERM would leave waiting for ever.
-        killSignal: "SIGKILL",
-        stdin: "ignore",
-      })
-    );
-
-    const before = (yield* Ref.get(logged)).length;
-
-    yield* child.all.pipe(
-      Stream.decodeText(),
-      Stream.runForEach((text) => Ref.update(logged, (held) => `${held}${text}`)),
-      Effect.ignore,
-      Effect.forkScoped
-    );
-
-    yield* waitFor("ngircd to listen", Ref.get(logged), (text) =>
-      text.slice(before).includes(`Server "${serverName}"`)
-    );
-
-    return child;
-  });
-
-  const started = yield* Ref.make(yield* start);
-
-  const accepted = Effect.map(
-    Ref.get(logged),
-    (text) => text.match(/Accepted connection/gu)?.length ?? 0
-  );
-
-  return {
-    /** How many Connections ngircd itself says reached it, in its own log. */
-    accepted,
-    kill: Effect.gen(function* () {
-      const child = yield* Ref.get(started);
-
-      yield* signalPid(child.pid, "SIGKILL");
-      yield* Effect.ignore(child.exitCode);
-    }),
-    /** What ngircd has written to its log so far. */
-    logged: Ref.get(logged),
-    pause: Effect.flatMap(Ref.get(started), ({ pid }) => signalPid(pid, "SIGSTOP")),
-    port,
-    restart: start.pipe(Effect.flatMap((child) => Ref.set(started, child))),
-    resume: Effect.flatMap(Ref.get(started), ({ pid }) => signalPid(pid, "SIGCONT")),
-    tlsPort,
-  };
-});
-
-interface Heard {
-  readonly at: number;
-  readonly text: string;
-}
-
-/** A plain IRC client, for what the API cannot do yet. Answers `PING`, and does no more. */
-const rawClient = Effect.fnUntraced(function* (port: number) {
-  const heard: Heard[] = [];
-
-  const socket = yield* Effect.acquireRelease(
-    Effect.callback<Socket, ProofFailed>((resume) => {
-      const opening = connect({ host: loopback, port });
-
-      opening.once("connect", () => {
-        resume(Effect.succeed(opening));
-      });
-      opening.once("error", (cause) => {
-        resume(Effect.fail(new ProofFailed({ reason: `raw client: ${cause.message}` })));
-      });
-    }),
-    (open) =>
-      Effect.sync(() => {
-        open.destroy();
-      })
-  );
-
-  let pending = "";
-
-  const send = (line: string) =>
-    Effect.sync(() => {
-      socket.write(`${line}\r\n`);
-    });
-
-  socket.on("error", () => {
-    // Going is fine, and is what a killed ngircd does.
-  });
-
-  socket.on("data", (data) => {
-    const lines = `${pending}${data.toString("latin1")}`.split("\r\n");
-
-    pending = lines.pop() ?? "";
-
-    for (const text of lines) {
-      heard.push({ at: Date.now(), text });
-
-      if (text.startsWith("PING ")) {
-        socket.write(`PONG ${text.slice("PING ".length)}\r\n`);
-      }
-    }
-  });
-
-  // Only what arrived after `from`, which `mark` gave, so that an old Line cannot answer
-  // for a new one.
-  const until = (what: string, match: (text: string) => boolean, from = 0) =>
-    waitFor(
-      what,
-      Effect.sync(() => heard.slice(from).find(({ text }) => match(text))),
-      (found) => found !== undefined
-    ).pipe(
-      Effect.filterOrFail(
-        (found) => found !== undefined,
-        () => new ProofFailed({ reason: `nothing heard for ${what}` })
-      )
-    );
-
-  return {
-    heard: () => [...heard],
-    mark: () => heard.length,
-    send,
-    until,
-  };
-});
-
-const registeredClient = Effect.fnUntraced(function* (port: number, nick: string, pass?: string) {
-  const client = yield* rawClient(port);
-
-  if (pass !== undefined) {
-    yield* client.send(`PASS ${pass}`);
-  }
-
-  yield* client.send(`NICK ${nick}`);
-  yield* client.send("USER raw 0 * :raw client");
-  yield* client.until(`${nick} to register`, (text) => text.includes(` 001 ${nick} `));
-
-  return client;
-});
-
-/** A registered raw client in a Channel, which sees whatever happens there. */
-const watcherIn = Effect.fnUntraced(function* (
-  port: number,
-  nick: string,
-  channel: string,
-  pass?: string
-) {
-  const client = yield* registeredClient(port, nick, pass);
-
-  yield* client.send(`JOIN ${channel}`);
-  yield* client.until(`${nick} in ${channel}`, (text) => text.includes(` 366 ${nick} ${channel}`));
-
-  return client;
-});
-
-// What a raw client sees a nick do, as ngircd relays it: a command from that nick, then
-// its parameters, the last of them after a colon.
-const isFrom = (nick: string, command: string, rest: string) => (text: string) =>
-  text.startsWith(`:${nick}!`) && text.includes(` ${command} `) && text.endsWith(rest);
-
-// ngircd puts a `QUIT` reason in quotes of its own.
-const isQuit = (nick: string) => isFrom(nick, "QUIT", `:"${quitReason}"`);
-
-/** A data directory, and the key `iirc key create` made there before any Daemon ran. */
-interface Home {
-  readonly dataDir: string;
-  readonly key: string;
-}
-
-// On real disk, because `/tmp` is tmpfs on fserv, where fsync means nothing.
-const dataDirs = path.join(appRoot, "../../.cache/floor-proof");
-
-const newDataDir = FileSystem.FileSystem.pipe(
-  Effect.tap((fileSystem) => fileSystem.makeDirectory(dataDirs, { recursive: true })),
-  Effect.flatMap((fileSystem) =>
-    fileSystem.makeTempDirectoryScoped({ directory: dataDirs, prefix: "iirc-floor-" })
-  )
-);
-
-// AUTH-4: the first key needs the data directory to itself, so it comes before the Daemon.
-const newHome = Effect.gen(function* () {
-  const dataDir = yield* newDataDir;
-
-  return { dataDir, key: yield* createKey(binary, dataDir) } satisfies Home;
-});
-
-const pageSize = 1000;
-
-const allEntries = (client: Client, id?: string) =>
-  Effect.gen(function* () {
-    const all: LogEntry[] = [];
-    let page: readonly LogEntry[] = [];
-
-    do {
-      page = yield* client.daemon.entries({
-        query: {
-          after: all.at(-1)?.sequence ?? 0,
-          limit: pageSize,
-          ...(id !== undefined && { network: id }),
-        },
-      });
-      all.push(...page);
-    } while (page.length === pageSize);
-
-    return all;
-  });
-
-/**
- * Runs `iirc daemon` on a home, which takes only a data directory and a listen address
- * (CONF-4), and waits for its API. Whatever Networks the Log already holds come back.
- * @param home - Where the Log is, and the key made there.
- * @returns The Daemon, and ways to ask it about one Network.
- */
-const runDaemon = Effect.fnUntraced(function* (home: Home) {
-  const httpPort = yield* freePort;
-
-  const running = yield* startBinary(
-    binary,
-    ["daemon", "--data-dir", home.dataDir, "--http-port", String(httpPort)],
-    {}
-  );
-
-  // A binary that cannot start says why, rather than leave this waiting for its API.
-  const client = yield* Effect.raceFirst(
-    healthyClient(httpPort, home.key),
-    running.child.exitCode.pipe(
-      Effect.flatMap((code) =>
-        Effect.fail(
-          new ProofFailed({ reason: `the Daemon exited with ${code}:\n${running.output()}` })
-        )
-      )
-    )
-  );
-
-  return {
-    apiUrl: `http://${loopback}:${httpPort}`,
-    client,
-    entriesOf: (id: string) => allEntries(client, id),
-    home,
-    pid: running.child.pid,
-    running,
-    sayOn: (id: string, target: string, text: string) =>
-      client.daemon.send({ payload: { network: id, target, text } }),
-    statusOf: (id: string) => networkStatus(client, id),
-  };
-});
-
-type Running = Effect.Success<ReturnType<typeof runDaemon>>;
-
-// One Network on a private ngircd, with the proof's quit reason and brisk Tuning.
-const floorNetwork = (
-  options: Omit<TestNetwork, "host" | "quitReason"> & { readonly host?: string }
-): NetworkSettings =>
-  settingsFor({
-    host: loopback,
-    quitReason,
-    ...options,
-    tuning: { ...brisk, ...options.tuning },
-  });
-
-const addNetwork = (running: Running, settings: NetworkSettings) =>
-  running.client.networks.add({ payload: settings });
 
 /** What step 2's flags said, which the checks that came from it still say. */
 interface Identity {
@@ -495,13 +118,6 @@ const stopDaemon = (running: Running, signal: NodeJS.Signals = "SIGTERM") =>
     return { code: Exit.isSuccess(code) ? Number(code.value) : -1, millis: Date.now() - stopping };
   });
 
-const untilJoined = <E, R>(status: Effect.Effect<Status, E, R>, channel: string) =>
-  waitFor(`${channel} to be joined`, status, ({ joined, phase }) => {
-    const isIn = joined.includes(channel);
-
-    return phase === "session" && isIn;
-  });
-
 const untilInChannel = (running: Daemon, channel: string) => untilJoined(running.status, channel);
 
 const untilHeard = (running: Daemon, sender: string, text: string) =>
@@ -513,9 +129,6 @@ const untilHeard = (running: Daemon, sender: string, text: string) =>
 
 const connectionEntries = (entries: readonly LogEntry[]) =>
   entries.flatMap((entry) => (entry._tag === "Connection" ? [entry] : []));
-
-const lineEntries = (entries: readonly LogEntry[]) =>
-  entries.flatMap((entry) => (entry._tag === "Line" ? [entry] : []));
 
 const changeEntries = (entries: readonly LogEntry[]) =>
   entries.flatMap((entry) => (entry._tag === "Change" ? [entry] : []));
@@ -937,6 +550,11 @@ const kick = toCheck(
   })
 );
 
+const pongsIn = (entries: readonly LogEntry[]) =>
+  lineEntries(entries).filter(
+    ({ direction, text }) => direction === "inbound" && text.includes(" PONG ")
+  );
+
 // LIVE-3
 const lag = toCheck(
   Effect.gen(function* () {
@@ -960,11 +578,6 @@ const lag = toCheck(
       running.status,
       ({ lagMillis }) => lagMillis !== null && lagMillis < idleMillis
     );
-
-    const pongsIn = (entries: readonly LogEntry[]) =>
-      lineEntries(entries).filter(
-        ({ direction, text }) => direction === "inbound" && text.includes(" PONG ")
-      );
 
     const answered = pongsIn(yield* running.entries).length;
 
@@ -1025,7 +638,18 @@ const floodControl = toCheck(
 
     yield* untilInChannel(running, flood);
 
-    // The `JOIN` spent a token, and this gives it back.
+    // The reads after a join, `MODE` then `WHO`, cost a penalty in ngircd, which holds back
+    // what follows and lets it out at once. So the burst waits for the `WHO` to be answered,
+    // then for a Message to pass straight through.
+    yield* waitFor("the reads after the join", running.entries, (all) =>
+      lineEntries(all).some(
+        ({ direction, text }) => direction === "inbound" && text.includes(` 315 floorf ${flood} `)
+      )
+    );
+    yield* running.say(flood, "warming up");
+    yield* listener.until("the warm-up", (text) => text.endsWith(`${flood} :warming up`));
+
+    // Every Line since the `JOIN` spent a token, and this gives the burst back.
     yield* Effect.sleep(Duration.millis(floodBurst * floodIntervalMillis));
 
     const texts = Array.from({ length: burstSize }, (_unused, index) => `burst ${index}`);
@@ -1372,7 +996,11 @@ const kickThenJoin = toCheck(
     const change = "change" in joinedAgain ? joinedAgain.change : 0;
 
     yield* ensure(change > 0, "the Owner's Join recorded no Change");
-    yield* operator.until(`${nick} back in ${kicked}`, isFrom(nick, "JOIN", kicked), kickedAt);
+    // ngircd may still hold the old nick, if the `QUIT` waited behind the penalty for the
+    // reads after a join, so this is by whatever nick the new Session has.
+    const as = reconnected.self ?? nick;
+
+    yield* operator.until(`${as} back in ${kicked}`, isFrom(as, "JOIN", kicked), kickedAt);
 
     const back = yield* untilJoined(running.statusOf(network), kicked);
     const sent = joinsOf(yield* running.entriesOf(network), change).at(0);
@@ -1894,6 +1522,188 @@ const logFiles = (dataDir: string) =>
 
 const occurrences = (text: string, part: string) => text.split(part).length - 1;
 
+// Every file the Log keeps on disk, as bytes: the database, its WAL and shared memory, and
+// any backup.
+const storedFiles = (dataDir: string) => {
+  const backups = path.join(dataDir, "backups");
+
+  return [
+    ...["iirc.sqlite", "iirc.sqlite-wal", "iirc.sqlite-shm"].map((file) =>
+      path.join(dataDir, file)
+    ),
+    ...(existsSync(backups) ? readdirSync(backups).map((file) => path.join(backups, file)) : []),
+  ].flatMap((file) => (existsSync(file) ? [{ bytes: readFileSync(file), file }] : []));
+};
+
+const offsetsOf = (bytes: Buffer, part: Buffer) => {
+  const found: number[] = [];
+
+  for (let at = bytes.indexOf(part); at !== -1; at = bytes.indexOf(part, at + 1)) {
+    found.push(at);
+  }
+
+  return found;
+};
+
+/** A value as SQLite gives one back: an integer, a real, text, a blob, or `NULL`. */
+type SqliteValue = bigint | number | string | Uint8Array | null;
+
+// Text as SQLite stores it, in UTF-8, and a number as its digits, which no key is.
+const asBytes = (value: SqliteValue) =>
+  value instanceof Uint8Array ? Buffer.from(value) : Buffer.from(String(value ?? ""), "utf-8");
+
+/** Where a value with a key in it is stored: a table, the row's sequence, and a column. */
+interface Stored {
+  readonly column: string;
+  readonly sequence: SqliteValue | undefined;
+  readonly table: string;
+  readonly value: Buffer;
+}
+
+// Every value SQLite reads back from a Log, in every table, column, and row.
+const storedValues = (database: Database) =>
+  database
+    .query<{ readonly name: string }, []>("SELECT name FROM sqlite_schema WHERE type = 'table'")
+    .all()
+    .flatMap(({ name: table }) =>
+      database
+        .query<Readonly<Record<string, SqliteValue>>, []>(`SELECT * FROM "${table}"`)
+        .all()
+        .flatMap((row) =>
+          Object.entries(row).map(([column, raw]): Stored => ({
+            column,
+            sequence: row.sequence,
+            table,
+            value: asBytes(raw),
+          }))
+        )
+    );
+
+/**
+ * LOG-6, CRED-4, ADR 0008: a Channel key, the Owner's or one seen on the Network, is in
+ * the Log's files only where the Network said it. `isSaid` names the inbound Lines that
+ * may say it. Anything derived from such a Line, in a table other than `entries` and
+ * under the same sequence, may hold it too, and nothing else may.
+ *
+ * Three things are checked, after the last Daemon on the data directory has stopped.
+ *
+ * - Through SQLite, every value of every row is searched, and each one holding the key
+ *   must be one of those allowances, by table, column, and sequence.
+ * - A `VACUUM INTO` copy holds the live records alone, with no WAL, no free pages, and no
+ *   free space inside a page. In its bytes every occurrence must sit inside a
+ *   byte-for-byte copy of an allowed value, and every allowed value must be there, so
+ *   what SQLite reads back and what is on its pages agree.
+ * - In the raw files, the database, the WAL, and any backup, every occurrence must sit
+ *   inside a byte-for-byte copy of an allowed value too. A stale copy of an allowed value
+ *   is still that value, and a leak in a Dropped Entry, another column, or a page left
+ *   over from anything else is not.
+ *
+ * No count can be exact, even in the copy. `activity` is `WITHOUT ROWID`, so it is an index
+ * b-tree whose key is the whole row, and an interior page holds a full copy of each row it
+ * divides on. A WAL holds a page once for each commit that changed it, and the derived
+ * tables are rebuilt at every start, which leaves earlier copies of their rows in freed
+ * pages. So each occurrence is located instead.
+ * @param dataDir - The data directory, which no Daemon holds.
+ * @param key - The key.
+ * @param isSaid - Whether an inbound Line, as text, is one that may say it.
+ * @returns How many allowed values hold it, and where, or a failure naming each leak.
+ */
+const keyStoredOnlyWhereSaid = Effect.fnUntraced(function* (
+  dataDir: string,
+  key: string,
+  isSaid: (text: string) => boolean
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const part = Buffer.from(key, "utf-8");
+
+  // Read before SQLite opens anything, so that nothing it does on opening moves a byte.
+  const files = storedFiles(dataDir);
+  const copyDirectory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iirc-floor-copy-" });
+  const copy = path.join(copyDirectory, "copy.sqlite");
+  const database = new Database(path.join(dataDir, "iirc.sqlite"), { readonly: true });
+
+  const { holding, saidAt } = (() => {
+    try {
+      const values = storedValues(database).filter(({ value }) => value.includes(part));
+
+      const said = new Set(
+        values.flatMap(({ sequence, table, value }) => {
+          const row =
+            table === "entries"
+              ? database
+                  .query<{ readonly direction: string | null; readonly kind: string }, [number]>(
+                    "SELECT kind, direction FROM entries WHERE sequence = ?"
+                  )
+                  .get(Number(sequence))
+              : undefined;
+
+          return row?.kind === "Line" &&
+            row.direction === "inbound" &&
+            isSaid(value.toString("latin1"))
+            ? [sequence]
+            : [];
+        })
+      );
+
+      database.run("VACUUM INTO ?", [copy]);
+
+      return { holding: values, saidAt: said };
+    } finally {
+      database.close();
+    }
+  })();
+
+  const allowed = holding.filter(
+    ({ column, sequence, table }) =>
+      saidAt.has(sequence) && (table === "entries" ? column === "bytes" : true)
+  );
+
+  const leaks = holding.filter((stored) => !allowed.includes(stored));
+
+  yield* ensure(
+    leaks.length === 0,
+    `the key is in ${leaks.map(({ column, sequence, table }) => `${table}.${column} at ${String(sequence)}`).join(", ")}`
+  );
+
+  // Whether an occurrence at `at` sits inside a byte-for-byte copy of an allowed value.
+  const isInAllowed = (bytes: Buffer, at: number) =>
+    allowed.some(({ value }) =>
+      offsetsOf(value, part).some((within) =>
+        bytes.subarray(at - within, at - within + value.length).equals(value)
+      )
+    );
+
+  const copied = readFileSync(copy);
+  const strays = offsetsOf(copied, part).filter((at) => !isInAllowed(copied, at));
+  const missing = allowed.filter(({ value }) => !copied.includes(value));
+
+  yield* ensure(
+    strays.length === 0 && missing.length === 0,
+    `a VACUUM INTO copy holds the key outside the allowed rows at bytes ${strays.join(", ")}, ` +
+      `or lacks ${missing.map(({ sequence, table }) => `${table} at ${String(sequence)}`).join(", ")}`
+  );
+
+  const unexplained = files.flatMap(({ bytes, file }) =>
+    offsetsOf(bytes, part).flatMap((at) =>
+      isInAllowed(bytes, at) ? [] : [`${path.basename(file)} at byte ${at}`]
+    )
+  );
+
+  yield* ensure(
+    unexplained.length === 0,
+    `the key is in ${unexplained.join(", ")}, outside any copy of a row it may be in`
+  );
+
+  const found = files.reduce((sum, { bytes }) => sum + offsetsOf(bytes, part).length, 0);
+
+  return {
+    copied: offsetsOf(copied, part).length,
+    found,
+    places: [...new Set(allowed.map(({ column, table }) => `${table}.${column}`))].toSorted(),
+    said: saidAt.size,
+  };
+});
+
 // LOG-6: what a Credential's value may never be found in.
 const ensureNotInLog = Effect.fnUntraced(function* (dataDir: string, value: string, what: string) {
   const found = occurrences(yield* logFiles(dataDir), value);
@@ -2142,6 +1952,18 @@ const connectCommand = toCheck(
   })
 );
 
+// The Network says a key of `#keyed` in a `MODE` that sets or unsets it, and in the `324`
+// that answers the Daemon's own `MODE` read, and those, and rows derived from them, are the
+// only places on disk it may be (LOG-6).
+const isSaid = (key: string) => (text: string) => {
+  const before = text.slice(0, -key.length - 1);
+
+  return (
+    text.endsWith(` ${key}`) &&
+    (/ MODE #keyed [+-]k$/u.test(before) || / 324 \S+ #keyed \+k$/u.test(before))
+  );
+};
+
 // CRED-4, CONF-5, LOG-6
 const channelKey = toCheck(
   Effect.gen(function* () {
@@ -2173,8 +1995,15 @@ const channelKey = toCheck(
     const second = yield* runDaemon(home);
     const startedAt = (yield* second.client.daemon.status()).head ?? 0;
 
-    yield* untilJoined(second.statusOf(network), keyed);
-    yield* owner.until(`${nick} to rejoin`, isFrom(nick, "JOIN", keyed), restarted);
+    // ngircd may still hold the nick the stopped Daemon had, if its `QUIT` waited behind
+    // the penalty for the reads after a join, so the rejoin is by whatever nick it has.
+    const { self: rejoinedAs } = yield* untilJoined(second.statusOf(network), keyed);
+
+    yield* owner.until(
+      `${rejoinedAs} to rejoin`,
+      isFrom(rejoinedAs ?? nick, "JOIN", keyed),
+      restarted
+    );
 
     const [rejoin] = joinsOf(yield* second.entriesOf(network), startedAt);
 
@@ -2220,10 +2049,21 @@ const channelKey = toCheck(
     const [lastRejoin] = joinsOf(yield* third.entriesOf(network), thirdAt);
     const { settings } = yield* third.client.networks.get({ params: { id: network } });
     const named = settings.channels.find(({ name }) => name === keyed)?.key;
+    const everything = yield* allEntries(third.client);
 
     yield* stopDaemon(third);
 
-    const files = yield* logFiles(home.dataDir);
+    // The Daemon never writes a key down, in a Line it sends, one it Dropped, or a Change
+    // (ADR 0008).
+    const wroteDown = (key: string) =>
+      everything.some(
+        (entry) =>
+          (entry._tag === "Line" && entry.direction === "outbound" && entry.text.includes(key)) ||
+          (entry._tag === "Dropped" &&
+            (entry.text.includes(key) || Buffer.from(entry.bytes).includes(key))) ||
+          (entry._tag === "Change" && JSON.stringify(entry).includes(key))
+      );
+
     const mode = lineEntries(seen).find(({ text }) => text.endsWith(`+k ${secondKey}`));
 
     yield* ensure(
@@ -2241,16 +2081,23 @@ const channelKey = toCheck(
       mode !== undefined && mode.redacted === undefined,
       `the second key's \`MODE\` was recorded as ${JSON.stringify(mode)}`
     );
-    yield* ensure(occurrences(files, firstKey) === 0, "the Join's key is in the Log's files");
-    yield* ensure(
-      occurrences(files, secondKey) === occurrences(files, `+k ${secondKey}`),
-      "the second key is in the Log's files outside the `MODE` that set it"
-    );
+    yield* ensure(!wroteDown(firstKey), "the Daemon wrote down the Join's key");
+    yield* ensure(!wroteDown(secondKey), "the Daemon wrote down the key it saw set");
+
+    const ownersKey = yield* keyStoredOnlyWhereSaid(home.dataDir, firstKey, isSaid(firstKey));
+    const seenKey = yield* keyStoredOnlyWhereSaid(home.dataDir, secondKey, isSaid(secondKey));
+
+    const describe = ({ copied, found, places, said }: typeof ownersKey) => {
+      const where = places.join(" or ");
+
+      return `${found} times on disk and ${copied} in a VACUUM INTO copy, each inside a copy of ${where} for one of ${said} Lines that said it`;
+    };
 
     return (
       `a Join with the key got into ${keyed}, a restart rejoined with "${rejoin?.text}", ` +
       `the raw client's \`MODE +k\` was recorded as "${mode?.text}" and changed no Change or ` +
-      `Credential, and the next restart's rejoin with the Owner's key was refused with ` +
+      `Credential, the Owner's key was ${describe(ownersKey)}, the seen key ` +
+      `${describe(seenKey)}, and the next restart's rejoin with the Owner's key was refused with ` +
       `${refused.joinFailures.find(({ channel }) => channel === keyed)?.numeric}`
     );
   })
@@ -2408,6 +2255,7 @@ const checks: readonly (readonly [string, Check])[] = [
   ["Channel key (CRED-4, CONF-5, LOG-6)", channelKey],
   ["Backup (RUN-2, CRED-1)", backup],
   ["TLS client certificate (CRED-1, CONN-1)", clientCertificate],
+  ["Netsplit and reconnect (KNOW-4 to KNOW-6, KNOW-8, MSG-5, LIVE-6, CRED-4)", netsplit],
 ];
 
 type Outcome = "failed" | "passed" | "skipped";
