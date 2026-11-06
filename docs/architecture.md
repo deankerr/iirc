@@ -61,7 +61,7 @@ Dependencies point down only. Each library package stands alone for whoever want
 
 | Package | Job | Runtime dependencies |
 | --- | --- | --- |
-| [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, outbound construction, nick candidates, `JOIN` batches, the token bucket | None |
+| [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, decoding, formatting, CTCP, standard replies, outbound construction, nick candidates, `JOIN` batches, the token bucket | None |
 | [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in, `RPL_ISUPPORT`, casefolding, modes | `protocol` |
 | [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol` |
 | [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |

@@ -140,6 +140,21 @@ export const privmsg = (target: string, text: string): Outbound => {
 };
 
 /**
+ * Builds a `NOTICE` to one Target, which is how an automatic reply goes out, because
+ * nothing may reply to a `NOTICE` in turn.
+ * @param target - The Channel or User to address.
+ * @param text - What to say.
+ * @returns The safe Line, or why it can't be built.
+ */
+export const notice = (target: string, text: string): Outbound => {
+  if (target.includes(",") || !isMiddleParameter(target)) {
+    return rejected("InvalidTarget");
+  }
+
+  return text === "" ? rejected("EmptyText") : outbound("NOTICE", [target, text]);
+};
+
+/**
  * Builds a `QUIT`.
  * @param reason - What to say on the way out.
  * @returns The safe Line, or why it can't be built.

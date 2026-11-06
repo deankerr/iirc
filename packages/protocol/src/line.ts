@@ -73,8 +73,13 @@ const untilInvalid = (text: string) => {
   return end === -1 ? text : text.slice(0, end);
 };
 
-// `toUpperCase` is locale-free but maps non-ASCII, and commands are ASCII.
-const upperCaseAscii = (text: string) =>
+/**
+ * Upper-cases ASCII letters only. `toUpperCase` is locale-free but maps non-ASCII, and
+ * commands, like CTCP commands, are ASCII.
+ * @param text - The text to change.
+ * @returns The text with `a` to `z` made `A` to `Z`, and nothing else touched.
+ */
+export const upperCaseAscii = (text: string) =>
   text.replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
 
 // Reads space-separated tokens from text, treating runs of spaces as one.

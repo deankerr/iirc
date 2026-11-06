@@ -1,3 +1,4 @@
+import { stripFormatting } from "./format.ts";
 import { isChannelName } from "./join.ts";
 
 /** What a Line says about a login to services, in the service's own words (CONN-6). */
@@ -21,30 +22,6 @@ const loggedInText =
   /\byou are now identified\b|\bpassword accepted\b|\byou(?: are|'re) now logged in\b/iu;
 
 const failedText = /\binvalid password\b|\bpassword incorrect\b|\bis(?:n't| not) registered\b/iu;
-
-// Services put nicks and accounts in bold and colour, which would split the words. A
-// colour code is followed by up to two digits, and a comma and two more for its ground.
-const formattingCodes: ReadonlySet<number> = new Set([0x02, 0x0f, 0x11, 0x16, 0x1d, 0x1e, 0x1f]);
-const colourCode = 0x03;
-const colourDigits = /^\d{1,2}(?:,\d{1,2})?/u;
-
-const withoutFormatting = (text: string) => {
-  let plain = "";
-  let index = 0;
-
-  while (index < text.length) {
-    const code = text.codePointAt(index) ?? 0;
-
-    if (code === colourCode) {
-      index += 1 + (colourDigits.exec(text.slice(index + 1))?.[0].length ?? 0);
-    } else {
-      plain += formattingCodes.has(code) ? "" : text.charAt(index);
-      index += 1;
-    }
-  }
-
-  return plain;
-};
 
 const asciiLower = (text: string) => text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
 
@@ -72,7 +49,7 @@ const fromService = (line: SignLine, services: readonly string[]) => {
 };
 
 const noticeSign = (text: string): LoginSign | undefined => {
-  const plain = withoutFormatting(text);
+  const plain = stripFormatting(text);
 
   if (failedText.test(plain)) {
     return { _tag: "LoginFailed", text };
