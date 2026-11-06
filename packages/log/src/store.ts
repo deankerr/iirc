@@ -1,7 +1,7 @@
 import type { Entry, NewEntry } from "@iirc/session/entry";
 import { makeWatchers, RecordFailed } from "@iirc/session/recorder";
 import type { Recorder } from "@iirc/session/recorder";
-import { foldStandings, noStanding, noStandings } from "@iirc/session/standing";
+import { foldStandings, noStanding } from "@iirc/session/standing";
 import type { Gap, Standings } from "@iirc/session/standing";
 import { Array as Arr, Clock, Data, Effect, pipe, Ref, Result, Schema, Semaphore } from "effect";
 import { SqlSchema } from "effect/sql";
@@ -14,22 +14,36 @@ import {
   EntryNotRedactable,
   StorageFailed,
 } from "./errors.ts";
-import { foldEntries } from "./fold.ts";
-import type { Folded, LoggedMessage } from "./fold.ts";
-import { EntryRow, GapPage, GapRow, MessageRow, Page } from "./rows.ts";
+import { foldEntries, noProjection } from "./fold.ts";
+import type { Folded, LoggedActivity, LoggedMessage, Projection } from "./fold.ts";
+import {
+  ActivityPage,
+  ActivityRow,
+  afterCursor,
+  EntryRow,
+  GapPage,
+  GapRow,
+  MessageRow,
+  Page,
+} from "./rows.ts";
 
 // How many Entries a replay holds in memory at once.
 const replayPageSize = 1000;
 
-// How many Messages a rebuild inserts with one statement. At seven columns that is under
+// How many Messages a rebuild inserts with one statement. At eleven columns that is under
 // the 999 bound parameters of the smallest limit SQLite has shipped with, so no build of
 // it can refuse one, whatever a page of Entries turns out to hold.
-const rebuildBatchSize = 128;
+const rebuildBatchSize = 64;
+
+// How many Activity rows go in one statement, live or rebuilding, at ten columns each, for
+// the same reason. A `QUIT` in many Channels is many rows, and one statement for them all
+// costs about what one row does.
+const activityBatchSize = 64;
 
 // See `held` in `makeStore`.
 interface Held {
   readonly host: Standings;
-  readonly projection: Standings;
+  readonly projection: Projection;
 }
 
 const toStorageFailed = (cause: unknown) => new StorageFailed({ cause });
@@ -108,6 +122,21 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
       sql`SELECT * FROM messages WHERE sequence > ${after} ORDER BY sequence LIMIT ${limit}`,
   });
 
+  // The writer's own read, for startup and tests, so it takes no filter. It pages by the
+  // same cursor as the reader's.
+  const readActivity = SqlSchema.findAll({
+    Request: ActivityPage,
+    Result: ActivityRow,
+    execute: ({ after, limit }) => {
+      const [sequence, ordinal] = afterCursor(after);
+
+      return sql`
+        SELECT * FROM activity WHERE (sequence, ordinal) > (${sequence}, ${ordinal})
+        ORDER BY sequence, ordinal LIMIT ${limit}
+      `;
+    },
+  });
+
   // `network` is NULL to ask for every Network, which the table is small enough to scan.
   const readGaps = SqlSchema.findAll({
     Request: GapPage,
@@ -134,6 +163,16 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   const insertMessages = (messages: readonly LoggedMessage[]) =>
     Effect.forEach(messages, insertMessage, { discard: true });
 
+  const insertActivityBatch = SqlSchema.void({
+    Request: Schema.NonEmptyArray(ActivityRow),
+    execute: (rows) => sql`INSERT INTO activity ${sql.insert(rows)}`,
+  });
+
+  const insertActivity = (activity: readonly LoggedActivity[]) =>
+    Effect.forEach(Arr.chunksOf(activity, activityBatchSize), insertActivityBatch, {
+      discard: true,
+    });
+
   // Keyed by where a Gap began, so a Gap's end replaces its own row.
   const writeGap = SqlSchema.void({
     Request: GapRow,
@@ -154,22 +193,22 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   const replay = Effect.fnUntraced(function* <E>(
     onPage: (folded: Folded) => Effect.Effect<void, E>
   ) {
-    let standings = noStandings;
+    let projection = noProjection;
     let after = 0;
     let page: readonly Entry[] = [];
 
     do {
       page = yield* readEntries({ after, limit: replayPageSize });
 
-      const folded = foldEntries(standings, page);
+      const folded = foldEntries(projection, page);
 
       yield* onPage(folded);
 
-      ({ standings } = folded);
+      ({ projection } = folded);
       after = page.at(-1)?.sequence ?? after;
     } while (page.length === replayPageSize);
 
-    return standings;
+    return projection;
   });
 
   // What the Log holds of each Network's Standing, apart in two. `host` is what the
@@ -177,7 +216,7 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   // what the derived tables are written from, and a redaction replaces it with what
   // the rebuild it ran derived, so that a row appended after one is the row a rebuild
   // would write (LOG-10). Until a redaction they are one and the same.
-  const held = yield* Ref.make<Held>({ host: noStandings, projection: noStandings });
+  const held = yield* Ref.make<Held>({ host: noProjection.standings, projection: noProjection });
 
   const watchers = makeWatchers();
 
@@ -229,15 +268,17 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
         const folded = foldEntries(projection, recorded);
 
         yield* insertMessages(folded.messages);
+        yield* insertActivity(folded.activity);
         yield* writeGaps(folded.gaps);
 
         const result = yield* Effect.sync(() => within(recorded));
+        const { standings } = folded.projection;
 
         return [
           result,
           {
-            host: host === projection ? folded.standings : foldStandings(host, recorded),
-            projection: folded.standings,
+            host: host === projection.standings ? standings : foldStandings(host, recorded),
+            projection: folded.projection,
           },
           recorded,
         ] as const;
@@ -248,17 +289,22 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   // that a start would have (LOG-10).
   const deriveTablesAgain = Effect.gen(function* () {
     yield* sql`DELETE FROM messages`;
+    yield* sql`DELETE FROM activity`;
     yield* sql`DELETE FROM gaps`;
 
-    return yield* replay(({ gaps, messages }) =>
-      Effect.andThen(insertMessageBatches(messages), writeGaps(gaps))
+    return yield* replay(({ activity, gaps, messages }) =>
+      Effect.all([insertMessageBatches(messages), insertActivity(activity), writeGaps(gaps)], {
+        discard: true,
+      })
     );
   });
 
   // Unlike a record, a rebuild can run long, and abandoning one loses nothing.
   const rebuild = commit(() =>
     deriveTablesAgain.pipe(
-      Effect.map((rebuilt) => [undefined, { host: rebuilt, projection: rebuilt }, []] as const),
+      Effect.map(
+        (rebuilt) => [undefined, { host: rebuilt.standings, projection: rebuilt }, []] as const
+      ),
       Effect.interruptible
     )
   ).pipe(Effect.mapError(toStorageFailed));
@@ -331,6 +377,8 @@ export const makeStore = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) 
   yield* rebuild;
 
   return {
+    activity: (query: ActivityPage): Effect.Effect<readonly LoggedActivity[], StorageFailed> =>
+      readActivity(query).pipe(Effect.mapError(toStorageFailed)),
     changes: (query: Page): Effect.Effect<readonly ChangeEntry[], StorageFailed> =>
       readChanges(query).pipe(Effect.mapError(toStorageFailed)),
     entries: (query: Page): Effect.Effect<readonly Entry[], StorageFailed> =>

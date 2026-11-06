@@ -2,7 +2,14 @@ import { defaultTuning } from "@iirc/lifecycle/tuning";
 import { Predicate, Result, Schema, SchemaIssue } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { Configuration, NetworkSettings, requestParseOptions, TuningSettings } from "./api.ts";
+import {
+  apiVersion,
+  Configuration,
+  LoggedMessage,
+  NetworkSettings,
+  requestParseOptions,
+  TuningSettings,
+} from "./api.ts";
 
 const formatIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
@@ -173,5 +180,32 @@ describe("all of Configuration (CONF-6)", () => {
         path: ["networks", 1, "tuning", "laneLimit"],
       },
     ]);
+  });
+});
+
+describe("a Message (MSG-1, API-5)", () => {
+  const message = {
+    at: 1,
+    kind: "ACTION",
+    network: "libera",
+    place: { _tag: "Channel", key: "#iirc", name: "#IIRC" },
+    sender: "bob",
+    sequence: 2,
+    target: "#IIRC",
+    text: "waves",
+  };
+
+  it("MSG-1, API-5: version 2 names an ACTION as a kind of its own, with its own text", () => {
+    expect(apiVersion).toBe(2);
+    expect(Schema.decodeUnknownSync(LoggedMessage)(message)).toStrictEqual(message);
+    expect(
+      Schema.decodeUnknownSync(LoggedMessage)({ ...message, statusmsg: "@", target: "@#IIRC" })
+    ).toMatchObject({ statusmsg: "@" });
+  });
+
+  it("MSG-1: no other kind is a Message", () => {
+    expect(
+      Result.isFailure(Schema.decodeUnknownResult(LoggedMessage)({ ...message, kind: "CTCP" }))
+    ).toBeTruthy();
   });
 });

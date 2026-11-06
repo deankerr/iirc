@@ -33,6 +33,7 @@ const handlers = (prepare: (database: Database) => void) =>
         };
 
       return ReaderRpcs.of({
+        activity: fresh(reads.activity),
         backup: ({ into }) =>
           Effect.try({
             catch: (cause) => new ReadFailed({ reason: String(cause) }),

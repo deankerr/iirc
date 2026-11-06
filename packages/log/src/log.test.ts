@@ -26,7 +26,7 @@ import { TestClock } from "effect/testing";
 import { openDatabase } from "./database.ts";
 import { holdDataDirectory } from "./lock.ts";
 import { DataDirectoryLocked, Log } from "./log.ts";
-import type { LoggedMessage } from "./log.ts";
+import type { LoggedMessage, Place } from "./log.ts";
 import { makeStore } from "./store.ts";
 
 const encoder = new TextEncoder();
@@ -144,13 +144,18 @@ const everything = { after: 0, limit: 100_000 };
 
 const allEntries = Log.use(({ entries }) => entries(everything));
 const allMessages = Log.use(({ messages }) => messages(everything));
+const allActivity = Log.use(({ activity }) => activity({ after: { sequence: 0 }, limit: 100_000 }));
 const allGaps = Log.use(({ gaps }) => gaps(everything));
 const standing = (network = "libera") => Recorder.use(({ standing }) => standing(network));
 const sequences = allEntries.pipe(Effect.map((entries) => entries.map(({ sequence }) => sequence)));
 
+// A place, as a test reads it.
+const placed = (place: Place) =>
+  place._tag === "Network" ? "network" : `${place._tag} ${place.key}`;
+
 // Reads a Message down to the fields a fold decides, for comparing with what's expected.
-const said = ({ kind, network, sender, target, text }: LoggedMessage) =>
-  `${network} ${kind} ${sender} -> ${target}: ${text}`;
+const said = ({ kind, network, place, sender, target, text }: LoggedMessage) =>
+  `${network} ${kind} ${sender} -> ${target} in ${placed(place)}: ${text}`;
 
 const allSaid = allMessages.pipe(Effect.map((messages) => messages.map(said)));
 
@@ -224,15 +229,15 @@ const mixed: Arr.NonEmptyReadonlyArray<NewEntry> = [
 ];
 
 const mixedSaid = [
-  "libera NOTICE ircd -> *: Looking up your hostname",
-  "libera PRIVMSG alice -> #iirc: hello",
-  "libera PRIVMSG bob -> #iirc: hi alice",
-  "libera NOTICE bob -> alice: psst",
-  "libera PRIVMSG alice -> #iirc: the Ircd has not agreed yet",
-  "libera NOTICE alicia -> bob: renamed",
-  "oftc PRIVMSG ally -> #other: on another Network",
-  "libera PRIVMSG alice_ -> #iirc: back",
-  "oftc PRIVMSG ally -> #other: still ally",
+  "libera NOTICE ircd -> * in network: Looking up your hostname",
+  "libera PRIVMSG alice -> #iirc in Channel #iirc: hello",
+  "libera PRIVMSG bob -> #iirc in Channel #iirc: hi alice",
+  "libera NOTICE bob -> alice in User bob: psst",
+  "libera PRIVMSG alice -> #iirc in Channel #iirc: the Ircd has not agreed yet",
+  "libera NOTICE alicia -> bob in User bob: renamed",
+  "oftc PRIVMSG ally -> #other in Channel #other: on another Network",
+  "libera PRIVMSG alice_ -> #iirc in Channel #iirc: back",
+  "oftc PRIVMSG ally -> #other in Channel #other: still ally",
 ];
 
 // LOG-7: the Change an `admin` key's redaction records.
@@ -312,6 +317,7 @@ const eventful = Effect.gen(function* () {
 // Everything a rebuild must reproduce, in one value to compare.
 const derived = Effect.gen(function* () {
   return {
+    activity: yield* allActivity,
     gaps: yield* allGaps,
     libera: yield* standing("libera"),
     messages: yield* allMessages,
@@ -814,6 +820,7 @@ describe("the durable Log", () => {
               at: 3000,
               kind: "NOTICE",
               network: "libera",
+              place: { _tag: "Network" },
               sender: "bob",
               sequence: 1,
               target: "#iirc",
@@ -1290,7 +1297,12 @@ describe("the durable Log", () => {
   });
 
   describe("restarting", () => {
-    for (const vandalism of ["DELETE FROM gaps", "DROP TABLE gaps"]) {
+    for (const vandalism of [
+      "DELETE FROM gaps",
+      "DROP TABLE gaps",
+      "DELETE FROM activity",
+      "DROP TABLE activity",
+    ]) {
       it.effect(`LOG-10: a restart after \`${vandalism}\` gives identical results`, () =>
         inTempDirectory((dataDir) =>
           Effect.gen(function* () {
@@ -1357,7 +1369,8 @@ describe("the durable Log", () => {
 
           yield* execute(
             dataDir,
-            "INSERT INTO messages VALUES (9999, 0, 'PRIVMSG', 'libera', 'x', '#x', 'forged')"
+            "INSERT INTO messages VALUES (9999, 0, 'PRIVMSG', 'libera', 'x', '#x', 'forged', " +
+              "'Channel', '#x', '#x', NULL)"
           );
 
           const after = yield* allMessages.pipe(Effect.provide(Log.layer({ dataDir })));
@@ -1445,6 +1458,7 @@ describe("the durable Log", () => {
           // A rebuild that kept the old rows would pass the check above.
           yield* execute(dataDir, "DELETE FROM gaps");
           yield* execute(dataDir, "DELETE FROM messages");
+          yield* execute(dataDir, "DELETE FROM activity");
           assert.deepStrictEqual(yield* allGaps, []);
 
           yield* Log.use(({ rebuild }) => rebuild);
@@ -1736,12 +1750,16 @@ describe("the durable Log", () => {
               assert.isAtLeast(reopened, reported.at(-1) ?? Infinity);
               assert.deepStrictEqual(yield* sequences, numbers(reopened));
 
-              // Three Entries to start, then whole batches of three, each saying three things.
-              const batches = (reopened - 3) / 3;
+              // Four Entries to start, then whole batches of four, each saying three things
+              // and joining once.
+              const batches = (reopened - 4) / 4;
               const before = yield* allMessages;
+              const activityBefore = yield* allActivity;
 
               assert.isTrue(Number.isInteger(batches));
               assert.strictEqual(before.length, batches * 3);
+              // The welcome and Self's join, then each batch's.
+              assert.strictEqual(activityBefore.length, 2 + batches);
 
               // The next record continues the sequence and knows who Self is.
               assert.strictEqual(yield* currentSelf(), "alice");
@@ -1753,6 +1771,7 @@ describe("the durable Log", () => {
 
               assert.deepStrictEqual(after.slice(0, -1), before);
               assert.deepStrictEqual(yield* allMessages, after);
+              assert.deepStrictEqual(yield* allActivity, activityBefore);
             }).pipe(Effect.provide(Log.layer({ dataDir })));
           })
         ),
@@ -1880,7 +1899,9 @@ describe("the durable Log and Configuration", () => {
         const folded = foldStandings(noStandings, withoutChanges).get("libera") ?? noStanding;
         const held = yield* standing();
 
-        assert.deepStrictEqual(yield* allSaid, ["libera PRIVMSG bob -> #iirc: still here"]);
+        assert.deepStrictEqual(yield* allSaid, [
+          "libera PRIVMSG bob -> #iirc in Channel #iirc: still here",
+        ]);
         assert.deepStrictEqual(connectionView(held), connectionView(folded));
         assert.strictEqual(held.irc.self?.nick, "alice");
         assert.deepStrictEqual(entries.filter(({ _tag }) => _tag === "Change").map(toEvent), [
@@ -1927,7 +1948,9 @@ describe("the durable Log and Configuration", () => {
             );
             assert.deepStrictEqual(first, { ...redaction(line), at: first.at, sequence: line + 3 });
             assert.deepStrictEqual(after.at(-1), second);
-            assert.deepStrictEqual(yield* allSaid, ["libera PRIVMSG bob -> alice: oops"]);
+            assert.deepStrictEqual(yield* allSaid, [
+              "libera PRIVMSG bob -> alice in User bob: oops",
+            ]);
 
             // What it derived again is what a rebuild derives.
             const derivedNow = yield* derived;

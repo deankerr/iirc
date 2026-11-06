@@ -5,8 +5,8 @@ import { flow } from "effect/Function";
 
 import { allowBudgets, inBudget, withinBudget } from "./budget.ts";
 import { ReadFailed } from "./errors.ts";
-import type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
-import { EntryRow, GapRow, MessageRow } from "./rows.ts";
+import type { ActivityQuery, EntryQuery, NetworkPage } from "./reader-protocol.ts";
+import { ActivityRow, afterCursor, EntryRow, GapRow, MessageRow } from "./rows.ts";
 
 const within = `${inBudget}(?)`;
 
@@ -15,6 +15,20 @@ const within = `${inBudget}(?)`;
  * so a filter never makes it look at rows it will not return (LOG-11).
  */
 export const statements = {
+  activity: `
+    SELECT * FROM activity WHERE (sequence, ordinal) > (?, ?) AND ${within}
+    ORDER BY sequence, ordinal LIMIT ?
+  `,
+  activityOfNetwork: `
+    SELECT * FROM activity WHERE network = ? AND (sequence, ordinal) > (?, ?) AND ${within}
+    ORDER BY sequence, ordinal LIMIT ?
+  `,
+  activityOfPlace: `
+    SELECT * FROM activity
+    WHERE network = ? AND place_kind = ? AND place_key = ? AND (sequence, ordinal) > (?, ?)
+      AND ${within}
+    ORDER BY sequence, ordinal LIMIT ?
+  `,
   entries: `SELECT * FROM entries WHERE sequence > ? AND ${within} ORDER BY sequence LIMIT ?`,
   entriesOfKind: `
     SELECT * FROM entries WHERE kind = ? AND sequence > ? AND ${within}
@@ -52,6 +66,11 @@ const parseGaps = flow(
   Effect.mapError(toReadFailed)
 );
 
+const parseActivity = flow(
+  Schema.decodeUnknownEffect(Schema.Array(ActivityRow)),
+  Effect.mapError(toReadFailed)
+);
+
 const parseMessages = flow(
   Schema.decodeUnknownEffect(Schema.Array(MessageRow)),
   Effect.mapError(toReadFailed)
@@ -70,16 +89,19 @@ export const pageBytes = 256 * 1024;
 const Carried = Schema.Struct({
   bytes: Schema.optionalKey(Schema.NullOr(Schema.Uint8Array)),
   change: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  details: Schema.optionalKey(Schema.String),
+  ordinal: Schema.optionalKey(Schema.Int),
   sequence: Schema.Int,
   text: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
 const carried = Schema.decodeUnknownSync(Carried);
 
-const sizeOf = ({ bytes, change, text }: typeof Carried.Type) =>
-  (bytes?.byteLength ?? 0) + (change?.length ?? 0) + (text?.length ?? 0);
+const sizeOf = ({ bytes, change, details, text }: typeof Carried.Type) =>
+  (bytes?.byteLength ?? 0) + (change?.length ?? 0) + (details?.length ?? 0) + (text?.length ?? 0);
 
 interface Sized {
+  readonly ordinal: number;
   readonly row: unknown;
   readonly sequence: number;
   readonly size: number;
@@ -107,7 +129,12 @@ const sizing = function* sizing(rows: Iterable<unknown>): Generator<Sized> {
   for (const row of rows) {
     const carrying = carried(row);
 
-    yield { row, sequence: carrying.sequence, size: sizeOf(carrying) };
+    yield {
+      ordinal: carrying.ordinal ?? 0,
+      row,
+      sequence: carrying.sequence,
+      size: sizeOf(carrying),
+    };
   }
 };
 
@@ -176,6 +203,10 @@ export const makeReads = (database: Database, budgetMillis: number) => {
   const gaps = prepare(statements.gaps);
   const gapsOfNetwork = prepare(statements.gapsOfNetwork);
   const messages = prepare(statements.messages);
+  const activity = prepare(statements.activity);
+  const activityOfNetwork = prepare(statements.activityOfNetwork);
+  const activityOfPlace = prepare(statements.activityOfPlace);
+
   const messagesOfNetwork = prepare(statements.messagesOfNetwork);
 
   // A read of several statements sees one snapshot, or a commit landing between two of
@@ -205,7 +236,37 @@ export const makeReads = (database: Database, budgetMillis: number) => {
       Effect.flatMap(parseEntries)
     );
 
+  // A page of Activity, by bytes and `limit` as other reads are. One Entry can be many rows,
+  // such as a `QUIT` in a thousand Channels, so a page can end inside one, and its last row's
+  // `(sequence, ordinal)` is where the next resumes.
+  const activityPage = (query: ActivityQuery) =>
+    withinBudget(budgetMillis, ({ deadline }) => {
+      const { limit } = query;
+      const [sequence, ordinal] = afterCursor(query.after);
+
+      const ofNetwork = () =>
+        query.network === undefined
+          ? activity.iterate(sequence, ordinal, deadline, limit)
+          : activityOfNetwork.iterate(query.network, sequence, ordinal, deadline, limit);
+
+      const rows =
+        "place" in query
+          ? activityOfPlace.iterate(
+              query.network,
+              query.place._tag,
+              "key" in query.place ? query.place.key : "",
+              sequence,
+              ordinal,
+              deadline,
+              limit
+            )
+          : ofNetwork();
+
+      return rowsOf(upToPageBytes(sizing(rows)).page);
+    }).pipe(Effect.flatMap(parseActivity));
+
   return {
+    activity: activityPage,
     entries: (query: EntryQuery) => {
       const { after, kinds, limit, network } = query;
 

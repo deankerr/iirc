@@ -3,6 +3,7 @@ import { Duration, Effect, Predicate } from "effect";
 import type { FileSystem, Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
+import type { SqlError } from "effect/sql/SqlError";
 
 import { StorageFailed } from "./errors.ts";
 import { prepareMigrations } from "./migrations.ts";
@@ -87,33 +88,124 @@ const migrations = SqliteMigrator.fromRecord({
 export const logMigrations: SqliteMigrator.Loader = migrations;
 
 // A derived table is no part of the Log, so it is here and not in a migration: anyone
-// may drop it, and the next start brings it back for the rebuild to fill (LOG-10).
+// may drop it, and the next start brings it back for the rebuild to fill (LOG-10). Its
+// shape is this binary's to choose, so one left by a binary that shaped it otherwise is
+// dropped first, and the rebuild fills it again like any other.
+interface DerivedTable {
+  readonly columns: readonly string[];
+  readonly create: (sql: SqlClient.SqlClient) => Effect.Effect<unknown, SqlError>;
+  readonly name: string;
+}
+
+const derivedTables: readonly DerivedTable[] = [
+  {
+    columns: [
+      "sequence",
+      "at",
+      "kind",
+      "network",
+      "sender",
+      "target",
+      "text",
+      "place_kind",
+      "place_key",
+      "place_name",
+      "statusmsg",
+    ],
+    create: (sql) =>
+      Effect.andThen(
+        sql`
+          CREATE TABLE IF NOT EXISTS messages (
+            sequence INTEGER PRIMARY KEY,
+            at INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            network TEXT NOT NULL,
+            sender TEXT NOT NULL,
+            target TEXT NOT NULL,
+            text TEXT NOT NULL,
+            place_kind TEXT NOT NULL,
+            place_key TEXT NOT NULL,
+            place_name TEXT NOT NULL,
+            statusmsg TEXT
+          ) STRICT
+        `,
+        sql`CREATE INDEX IF NOT EXISTS messages_by_network ON messages (network, sequence)`
+      ),
+    name: "messages",
+  },
+  {
+    columns: ["sequence", "at", "network", "reason", "ended"],
+    create: (sql) =>
+      Effect.andThen(
+        sql`
+          CREATE TABLE IF NOT EXISTS gaps (
+            sequence INTEGER PRIMARY KEY,
+            at INTEGER NOT NULL,
+            network TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            ended TEXT
+          ) STRICT
+        `,
+        sql`CREATE INDEX IF NOT EXISTS gaps_by_network ON gaps (network, sequence)`
+      ),
+    name: "gaps",
+  },
+  {
+    // One Entry can be many rows, such as a `QUIT` in each Channel it leaves, so a row is
+    // its Entry's sequence and its place among that Entry's rows.
+    columns: [
+      "sequence",
+      "ordinal",
+      "at",
+      "network",
+      "place_kind",
+      "place_key",
+      "place_name",
+      "kind",
+      "actor",
+      "details",
+    ],
+    create: (sql) =>
+      Effect.all([
+        sql`
+          CREATE TABLE IF NOT EXISTS activity (
+            sequence INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            at INTEGER NOT NULL,
+            network TEXT NOT NULL,
+            place_kind TEXT NOT NULL,
+            place_key TEXT NOT NULL,
+            place_name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            actor TEXT,
+            details TEXT NOT NULL,
+            PRIMARY KEY (sequence, ordinal)
+          ) STRICT, WITHOUT ROWID
+        `,
+        sql`
+          CREATE INDEX IF NOT EXISTS activity_by_network ON activity (network, sequence, ordinal)
+        `,
+        sql`
+          CREATE INDEX IF NOT EXISTS activity_by_place
+          ON activity (network, place_kind, place_key, sequence, ordinal)
+        `,
+      ]),
+    name: "activity",
+  },
+];
+
 const createDerivedTables = Effect.fnUntraced(function* (sql: SqlClient.SqlClient) {
-  yield* sql`
-    CREATE TABLE IF NOT EXISTS messages (
-      sequence INTEGER PRIMARY KEY,
-      at INTEGER NOT NULL,
-      kind TEXT NOT NULL,
-      network TEXT NOT NULL,
-      sender TEXT NOT NULL,
-      target TEXT NOT NULL,
-      text TEXT NOT NULL
-    ) STRICT
-  `;
+  for (const { columns, create, name } of derivedTables) {
+    const held = yield* sql<{ readonly name: string }>`
+      SELECT name FROM pragma_table_info(${name}) ORDER BY cid
+    `;
 
-  yield* sql`CREATE INDEX IF NOT EXISTS messages_by_network ON messages (network, sequence)`;
+    if (held.length > 0 && held.map((column) => column.name).join(",") !== columns.join(",")) {
+      yield* sql`DROP TABLE ${sql(name)}`;
+    }
 
-  yield* sql`
-    CREATE TABLE IF NOT EXISTS gaps (
-      sequence INTEGER PRIMARY KEY,
-      at INTEGER NOT NULL,
-      network TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      ended TEXT
-    ) STRICT
-  `;
-
-  yield* sql`CREATE INDEX IF NOT EXISTS gaps_by_network ON gaps (network, sequence)`;
+    yield* create(sql);
+  }
 });
 
 // SQLite's words when it could not grow a file: the database or its journal, or the WAL

@@ -755,7 +755,9 @@ const assertLog = (entries: readonly LogEntry[], wires: readonly Wire[], runs: n
   }
 };
 
-const derivedTables = ["messages", "gaps"];
+// `activity` has no read through the API until step 6, but vandalising it still proves a
+// start makes it again, and that nothing served depends on what it held.
+const derivedTables = ["messages", "gaps", "activity"];
 
 // Damages the derived tables with no Daemon running, and reports what is left of them.
 const vandalise = (dataDir: string, damage: (table: string) => string) =>
@@ -940,10 +942,12 @@ describe("the compiled binary", () => {
         assert.deepStrictEqual(yield* vandalise(dataDir, (table) => `DELETE FROM ${table}`), [
           { rows: 0, tables: 1 },
           { rows: 0, tables: 1 },
+          { rows: 0, tables: 1 },
         ]);
         assert.deepStrictEqual(yield* derivedAfterRestart(dataDir, key), { gaps, messages });
 
         assert.deepStrictEqual(yield* vandalise(dataDir, (table) => `DROP TABLE ${table}`), [
+          { rows: 0, tables: 0 },
           { rows: 0, tables: 0 },
           { rows: 0, tables: 0 },
         ]);

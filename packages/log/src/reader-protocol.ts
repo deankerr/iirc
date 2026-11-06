@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
 
 import { ReaderBusy, ReadFailed, ReadTimedOut } from "./errors.ts";
-import { EntryRow, GapRow, MessageRow, Page } from "./rows.ts";
+import { ActivityCursor, ActivityRow, EntryRow, GapRow, MessageRow, Page } from "./rows.ts";
 
 // Keyed by every tag an Entry can have, so a new kind of Entry cannot compile until it
 // is filterable here too.
@@ -41,6 +41,34 @@ export const NetworkPage = Schema.Struct({
 /** The decoded form of {@link NetworkPage}. */
 export type NetworkPage = typeof NetworkPage.Type;
 
+/**
+ * A Timeline's place, by its key: the Network's own, or a Channel's or a User's name as
+ * casefolded under the mapping in force when its rows were written (KNOW-3).
+ */
+export const PlaceKey = Schema.Union([
+  Schema.TaggedStruct("Network", {}),
+  Schema.TaggedStruct("Channel", { key: Schema.String }),
+  Schema.TaggedStruct("User", { key: Schema.String }),
+]);
+
+/** The decoded form of {@link PlaceKey}. */
+export type PlaceKey = typeof PlaceKey.Type;
+
+const activityPage = { after: ActivityCursor, limit: Schema.Int };
+
+/**
+ * Which Activity to read, by {@link ActivityCursor}: from every Network, from one, or from
+ * one place on one, since a place's key means something only on its own Network. The place
+ * comes first, because a page with a place is also a page with a Network.
+ */
+export const ActivityQuery = Schema.Union([
+  Schema.Struct({ ...activityPage, network: Schema.String, place: PlaceKey }),
+  Schema.Struct({ ...activityPage, network: Schema.optionalKey(Schema.String) }),
+]);
+
+/** The decoded form of {@link ActivityQuery}. */
+export type ActivityQuery = typeof ActivityQuery.Type;
+
 const error = Schema.Union([ReaderBusy, ReadFailed, ReadTimedOut]);
 
 // When the read was sent, in epoch milliseconds, which both threads share, so the Worker
@@ -53,6 +81,12 @@ const QueuedEntryQuery = Schema.Struct({ ...EntryQuery.fields, ...queued });
 /** What crosses to the Worker for a read of Messages or Gaps. */
 const QueuedNetworkPage = Schema.Struct({ ...NetworkPage.fields, ...queued });
 
+/** What crosses to the Worker for a read of Activity. */
+const QueuedActivityQuery = Schema.Union([
+  Schema.Struct({ ...activityPage, network: Schema.String, place: PlaceKey, ...queued }),
+  Schema.Struct({ ...activityPage, network: Schema.optionalKey(Schema.String), ...queued }),
+]);
+
 /**
  * What the reader's Worker answers. It parses rows where it reads them, so what crosses
  * is what a row decodes to.
@@ -64,6 +98,11 @@ export class ReaderRpcs extends RpcGroup.make(
     success: Schema.Array(Schema.toType(EntryRow)),
   }),
   Rpc.make("messages", { error, payload: QueuedNetworkPage, success: Schema.Array(MessageRow) }),
+  Rpc.make("activity", {
+    error,
+    payload: QueuedActivityQuery,
+    success: Schema.Array(ActivityRow),
+  }),
   Rpc.make("gaps", {
     error,
     payload: QueuedNetworkPage,

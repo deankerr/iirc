@@ -10,6 +10,7 @@
     // Spawned by path, from the kill tests and as Workers, so nothing imports them.
     "packages/log": {
       "entry": [
+        "bench/*.ts",
         "src/recording-child.ts",
         "src/reader-worker.ts",
         "src/slow-reader.fixture.ts",

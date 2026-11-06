@@ -28,7 +28,13 @@ import type { Duration } from "effect";
 import { allowBudgets } from "./budget.ts";
 import { ReaderBusy } from "./errors.ts";
 import { Log, LogReader, ReadTimedOut } from "./log.ts";
-import type { EntryQuery, LogReaderOptions } from "./log.ts";
+import type {
+  ActivityCursor,
+  ActivityQuery,
+  EntryQuery,
+  LoggedActivity,
+  LogReaderOptions,
+} from "./log.ts";
 import { pageBytes, statements } from "./reads.ts";
 import { inProcessReader } from "./testing.ts";
 
@@ -40,6 +46,7 @@ const ircd = { host: "irc.example", port: 6697, tls: true };
 const networks = ["libera", "oftc", "ergo"] as const;
 const kinds = ["Connection", "Daemon", "Deadline", "Dropped", "Line"] as const;
 const everything = { after: 0, limit: 1000 };
+const allActivity = { after: { sequence: 0 }, limit: 1000 };
 
 // The fixture makes every row a statement looks at cost 5 ms, so a read of N rows takes
 // 5N ms unless its budget stops it first. With a marker, it also creates that file when
@@ -207,6 +214,62 @@ const pageThrough = <A extends { readonly sequence: number }, E>(
 
     return all;
   });
+
+// What an Activity row costs a page to carry, about as the reader counts it.
+const sizeOfRow = ({ details }: LoggedActivity) => JSON.stringify(details).length;
+
+// Follows Activity's cursor to the end, one page at a time, passing back the last row's
+// `sequence` and `ordinal` as a Frontend would, and checking each page keeps to `limit`.
+const pageActivity = <E>(
+  read: (after: ActivityCursor) => Effect.Effect<readonly LoggedActivity[], E>,
+  limit: number
+) =>
+  Effect.gen(function* () {
+    const all: LoggedActivity[] = [];
+    let page = yield* read({ sequence: 0 });
+
+    while (page.length > 0) {
+      assert.isAtMost(page.length, limit);
+      all.push(...page);
+
+      const { ordinal, sequence } = page.at(-1) ?? { ordinal: 0, sequence: 0 };
+
+      page = yield* read({ ordinal, sequence });
+    }
+
+    return all;
+  });
+
+// Activity on two Networks: joins, a QUIT in three Channels at once, and a Direct Message
+// partner's NICK.
+const seedActivity = Effect.forEach(
+  ["libera", "oftc"] as const,
+  Effect.fnUntraced(function* (network) {
+    const [{ sequence: connection }] = yield* record([
+      { _tag: "Connection", ircd, network, nicks: ["alice"], phase: "attempt", ...attemptInput },
+    ]);
+
+    const heard = (text: string) => line(text, network, "inbound", connection);
+
+    yield* record([
+      { _tag: "Connection", connection, ircd, network, phase: "opened" },
+      heard(":ircd 001 alice :Welcome"),
+      ...["#a", "#b", "#c"].flatMap((channel) => [
+        heard(`:alice!a@h JOIN ${channel}`),
+        heard(`:ircd 353 alice = ${channel} :alice bob carol dave`),
+        heard(`:ircd 366 alice ${channel} :End of /NAMES list.`),
+      ]),
+      heard(":bob!b@h PRIVMSG alice :hi"),
+    ]);
+
+    for (const nick of ["carol", "dave"]) {
+      yield* record([heard(`:${nick}!u@h QUIT :split`)]);
+    }
+
+    yield* record([heard(":bob!b@h NICK robert")]);
+  }),
+  { discard: true }
+);
 
 const sizeOf = (entry: Entry) => ("bytes" in entry ? entry.bytes.length : 0);
 
@@ -388,6 +451,159 @@ describe("the Log's reader", () => {
       )
     );
 
+    for (const [where, readerLayer] of readers) {
+      it.live(`MSG-5, LOG-11: reads Activity by Network and place, by its cursor, ${where}`, () =>
+        withReader(
+          () =>
+            Effect.gen(function* () {
+              yield* seedMixed;
+              yield* seedActivity;
+
+              const log = yield* Log;
+              const reader = yield* LogReader;
+              const all = yield* log.activity(allActivity);
+
+              // Each QUIT is a row in each Channel it leaves, so Entries span pages.
+              assert.isAbove(all.length, 40);
+              assert.deepStrictEqual(yield* reader.activity(allActivity), all);
+
+              const start = { sequence: 0 };
+
+              const queries: readonly ActivityQuery[] = [
+                { after: start, limit: 1 },
+                { after: start, limit: 3 },
+                { after: start, limit: 3, network: "libera" },
+                { after: start, limit: 3, network: "nowhere" },
+                { after: start, limit: 2, network: "libera", place: { _tag: "Network" } },
+                {
+                  after: start,
+                  limit: 2,
+                  network: "libera",
+                  place: { _tag: "Channel", key: "#a" },
+                },
+                { after: start, limit: 2, network: "oftc", place: { _tag: "Channel", key: "#a" } },
+                { after: start, limit: 1, network: "libera", place: { _tag: "User", key: "bob" } },
+              ];
+
+              for (const query of queries) {
+                const expected = all.filter(
+                  ({ network, place }) =>
+                    (query.network === undefined || network === query.network) &&
+                    (!("place" in query) ||
+                      (place._tag === query.place._tag &&
+                        ("key" in place ? place.key : "") ===
+                          ("key" in query.place ? query.place.key : "")))
+                );
+
+                const paged = yield* pageActivity(
+                  (after) => reader.activity({ ...query, after }),
+                  query.limit
+                );
+
+                assert.deepStrictEqual(paged, expected, JSON.stringify(query));
+              }
+
+              // A page can end inside an Entry, and the next resumes inside it.
+              const storm = all.filter(({ details }) => details.kind === "quit");
+              const [first] = storm;
+
+              assert.lengthOf(
+                storm.filter(({ sequence }) => sequence === first?.sequence),
+                3,
+                "a QUIT in three Channels"
+              );
+
+              const page = yield* reader.activity({
+                after: { sequence: (first?.sequence ?? 1) - 1 },
+                limit: 2,
+              });
+
+              assert.deepStrictEqual(page, storm.slice(0, 2));
+              assert.deepStrictEqual(
+                yield* reader.activity({
+                  after: { ordinal: 1, sequence: first?.sequence ?? 0 },
+                  limit: 1,
+                }),
+                storm.slice(2, 3)
+              );
+              // With only a sequence, the cursor is after the whole of that Entry.
+              assert.deepStrictEqual(
+                (yield* reader.activity({
+                  after: { sequence: first?.sequence ?? 0 },
+                  limit: 1,
+                })).map(({ sequence }) => sequence),
+                [storm[3]?.sequence]
+              );
+            }),
+          {},
+          readerLayer
+        )
+      );
+    }
+
+    it.live(
+      "LOG-11, KNOW-8: a page of Activity stops at about `pageBytes` inside an Entry, and resumes",
+      () =>
+        withReader(() =>
+          Effect.gen(function* () {
+            const channels = Arr.range(1, 1024).map((index) => `#c${index}`);
+
+            const [{ sequence: connection }] = yield* record([
+              {
+                _tag: "Connection",
+                ircd,
+                network: "libera",
+                nicks: ["alice"],
+                phase: "attempt",
+                ...attemptInput,
+              },
+            ]);
+
+            const heard = (text: string) => line(text, "libera", "inbound", connection);
+
+            yield* record([
+              { _tag: "Connection", connection, ircd, network: "libera", phase: "opened" },
+              heard(":ircd 001 alice :Welcome"),
+            ]);
+
+            const joins = channels.flatMap((channel) => [
+              heard(`:alice!a@h JOIN ${channel}`),
+              heard(`:ircd 353 alice = ${channel} :alice big`),
+              heard(`:ircd 366 alice ${channel} :End of /NAMES list.`),
+            ]);
+
+            yield* Effect.forEach(Arr.chunksOf(joins, 768), record, { discard: true });
+
+            // One Line, a row in each of 1,024 Channels, each holding its 8,000 character reason.
+            const [quit] = yield* record([heard(`:big!b@h QUIT :${"q".repeat(8000)}`)]);
+            const log = yield* Log;
+            const reader = yield* LogReader;
+
+            const rows = (yield* log.activity({ after: { sequence: 0 }, limit: 100_000 })).filter(
+              ({ sequence }) => sequence === quit.sequence
+            );
+
+            assert.lengthOf(rows, 1024);
+
+            const before = { sequence: quit.sequence - 1 };
+            const first = yield* reader.activity({ after: before, limit: 100_000 });
+
+            assert.isBelow(first.length, 1024, "the page ended inside the Entry");
+            assert.isAtMost(
+              first.slice(0, -1).reduce((total, row) => total + sizeOfRow(row), 0),
+              pageBytes
+            );
+            assert.deepStrictEqual(
+              yield* pageActivity((after) => reader.activity({ after, limit: 100_000 }), 100_000),
+              yield* log.activity({ after: { sequence: 0 }, limit: 100_000 })
+            );
+
+            // A page of one row is one row, however many its Entry has.
+            assert.lengthOf(yield* reader.activity({ after: before, limit: 1 }), 1);
+          })
+        )
+    );
+
     it.live(
       "LOG-11: a page stops at about `pageBytes`, and a cursor still reaches everything",
       () =>
@@ -480,6 +696,13 @@ describe("the Log's reader", () => {
           database.close();
 
           assert.deepStrictEqual(Object.fromEntries(plans), {
+            activity: ["SEARCH activity USING PRIMARY KEY ((sequence,ordinal)>(?,?))"],
+            activityOfNetwork: [
+              "SEARCH activity USING INDEX activity_by_network (network=? AND (sequence,ordinal)>(?,?))",
+            ],
+            activityOfPlace: [
+              "SEARCH activity USING INDEX activity_by_place (network=? AND place_kind=? AND place_key=? AND (sequence,ordinal)>(?,?))",
+            ],
             entries: ["SEARCH entries USING INTEGER PRIMARY KEY (rowid>?)"],
             entriesOfKind: ["SEARCH entries USING INDEX entries_by_kind (kind=? AND sequence>?)"],
             entriesOfNetwork: [
@@ -549,6 +772,12 @@ describe("the Log's reader", () => {
           // Enough rows that a read to the end would take 5 seconds, far past the budget.
           yield* seedMixed;
           yield* seedLines(1000);
+          // And Activity, an unknown Line each, which would take one.
+          yield* record(
+            Arr.map(Arr.range(1, 200), (index) =>
+              line(`:ircd WALLOPS :${index}`, "libera", "inbound")
+            )
+          );
 
           const timedOut = Exit.fail(new ReadTimedOut({ budgetMillis: 300 }));
 
@@ -569,6 +798,11 @@ describe("the Log's reader", () => {
           }
 
           assert.deepStrictEqual(yield* Effect.exit(reader.messages(everything)), timedOut);
+          assert.deepStrictEqual(yield* Effect.exit(reader.activity(allActivity)), timedOut);
+          assert.deepStrictEqual(
+            yield* Effect.exit(reader.activity({ ...allActivity, network: "libera" })),
+            timedOut
+          );
           assert.lengthOf(yield* reader.entries({ after: 0, limit: 3 }), 3);
           assert.lengthOf(yield* reader.gaps({ after: 0, limit: 1 }), 1);
         })

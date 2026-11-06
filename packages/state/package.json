@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/state.ts",
-    "./modes": "./src/modes.ts"
+    "./modes": "./src/modes.ts",
+    "./place": "./src/place.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

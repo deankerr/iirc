@@ -14,7 +14,7 @@ The contract every Frontend drives the Daemon through: `DaemonApi`, an Effect `H
 | `RequestValidation`, `requestParseOptions` | Bad requests are refused with each issue at its path. An unknown key is an issue, never silently dropped |
 | `NetworkSettings`, `Configuration`, `TuningSettings` | What the Owner wants, which the Log also stores in Change Entries |
 | `NetworkId`, `ChannelName`, `CredentialName`, `KeyName`, `KeyScope`, `CredentialValue` | Names, parsed at the boundary |
-| `Status`, `NetworkStatus`, `LogEntry`, `Gap` | What the Daemon reports |
+| `Status`, `NetworkStatus`, `LogEntry`, `LoggedMessage`, `Place`, `Gap` | What the Daemon reports. A Message has its place (MSG-2), its `STATUSMSG` prefix, and `kind` `PRIVMSG`, `NOTICE`, or `ACTION` (MSG-1, PROT-2) |
 | Errors | `NotInSession`, `LaneFull`, `LineDropped`, `WriteFailed`, `LogUnavailable`, `InvalidMessage`, `InvalidRequest`, `NetworkNotFound`, `CredentialsUnavailable`, `Unauthorized`, `Forbidden`, and the rest, each tagged (API-3) |
 | `apiVersion` | The contract's version, which `/status` reports (API-5) |
 
@@ -57,6 +57,13 @@ const program = Effect.gen(function* () {
 
 BunRuntime.runMain(program);
 ```
+
+## Versions
+
+`apiVersion`, which `/status` reports (API-5), changes whenever what a response means changes, and every Frontend in this repository moves with it.
+
+- **2:** `/messages` names a Message's `kind` as `PRIVMSG`, `NOTICE`, or `ACTION`, and an `ACTION`'s `text` is the action itself, not the CTCP that carried it. Any other CTCP is no Message: it is Activity. Each Message has its `place` (MSG-2), and a `STATUSMSG` Target its `statusmsg`. A decoder for version 1 refuses `ACTION`.
+- **1:** the first contract.
 
 ## Key ideas
 

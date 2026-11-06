@@ -8,7 +8,7 @@ import type { Backup } from "./backup.ts";
 import { ReaderBusy, StorageFailed } from "./errors.ts";
 import type { ReadFailed, ReadTimedOut } from "./errors.ts";
 import { ReaderRpcs, ReaderStart } from "./reader-protocol.ts";
-import type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
+import type { ActivityQuery, EntryQuery, NetworkPage } from "./reader-protocol.ts";
 
 /** Where the reader reads, and how long each read may take. */
 export interface LogReaderOptions {
@@ -243,6 +243,7 @@ export const makeReader = Effect.fnUntraced(function* ({
     .pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
 
   return {
+    activity: (query: ActivityQuery) => call(Effect.suspend(() => client.activity(stamped(query)))),
     backup,
     entries: (query: EntryQuery) => call(Effect.suspend(() => client.entries(stamped(query)))),
     gaps: (query: NetworkPage) => call(Effect.suspend(() => client.gaps(stamped(query)))),

@@ -3,7 +3,7 @@
 The one interpretation of what an Ircd says. `stepState` folds a Session's inbound Lines into Self, the Channels Self is in with their topics, modes, and members, the Users seen, and every `RPL_ISUPPORT` token, and names each change it made. Pure.
 
 - **Depends on:** `@iirc/protocol`.
-- **Used by:** `@iirc/session` (inside `Standing`), `@iirc/log` (Messages), `apps/soak` (casefolding in the checker).
+- **Used by:** `@iirc/session` (inside `Standing`), `@iirc/log` (Messages, Activity, and places), `apps/soak` (casefolding in the checker).
 - **Lineage:** ircstates.
 
 ## Public surface
@@ -24,6 +24,8 @@ The one interpretation of what an Ircd says. `stepState` folds a Session's inbou
 | `movesChannels(command)` | Whether Lines of a command can change which Channels Self is in, the mapping, or say a `JOIN` failed or Self was kicked, so a planner of joins can skip the rest, Messages included |
 | Bounds | `heldChannels`, `membersPerChannel`, `heldMembers`, `usersPerGeneration`, `modesPerChannel`, `longestField`, `heldTokens` |
 | `./modes`: `parseModes` | A Channel `MODE`'s letters against its parameters, by `PREFIX` and `CHANMODES` (KNOW-6) |
+| `./place`: `placeOf`, `placeOfSent`, `Place`, `Placed` | The one place an inbound Line belongs, by MSG-2's rules in order, and the place of a Line Self sent, by its Target. Each from the state before the Line |
+| `./place`: `channelPlace`, `userPlace`, `networkPlace`, `isUserMask` | A Channel's or a User's place, keyed by its name casefolded under the mapping in force and keeping its spelling (KNOW-3), the Network's own, and whether a source is a full `nick!user@host` |
 
 ## Usage
 
@@ -65,6 +67,7 @@ channelOf(state, "#foo[x]")?.members.get("op"); // { nick: "op", prefixes: "o" }
 - **`RPL_ISUPPORT` is a map of tokens,** and every field beside it is read from that map, so `-TOKEN` brings back a default by removing the token, and nothing can disagree with it.
 - **`353` to `366` is one replacement.** `353`s gather in the Channel's `pending`, and the `366` swaps them in. A `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, or prefix mode between them applies to both, so the swap loses nothing (KNOW-5).
 - **Uncertain, not wrong.** A `MODE` that does not add up is kept raw in the Log and marks the Channel `modesUncertain` and `membersUncertain`. A `324` settles the first, and a `366` that nothing cut settles the second (KNOW-6). The member and mode bounds mark the same way. Each field that becomes uncertain is its own `ChannelUncertain`, naming `members` or `modes`, since each is read again by its own command.
+- **A Line has one place, from the state before it (MSG-2).** `placeOf` reads only shape: Self, the welcome, `CHANTYPES`, `STATUSMSG`, the mapping, and the Line's source and first parameter, which is the Target of a `PRIVMSG`, `NOTICE`, or `INVITE`. Before the welcome, Target `*` or `AUTH`, or a source that is not `nick!user@host` is the Network's; then a Channel Target, its `STATUSMSG` prefix kept apart; then a `$` mask, the Network's; then a Line from Self, placed by its Target; then a Direct Message from its sender. A Line that names no Target, such as a `QUIT`, is placed through its changes, which name Channels, and that is the Log's to do.
 - **Prefixes are ranked by the `PREFIX` in force,** and ranked again, published and pending alike, when it changes or is taken back. A letter `PREFIX` no longer names goes after the rest. A prefix mode on a nick that is not a member changes nothing.
 
 ## Data structure
@@ -124,4 +127,4 @@ A `PRIVMSG` from someone seen as they are gives back the very same state, which 
 
 ## Requirements
 
-[Network state](../../docs/requirements.md#network-state) and [Channels and Users](../../docs/requirements.md#channels-and-users) build here: KNOW-1's Self, KNOW-2, KNOW-3, KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. It also serves CONN-3, LIVE-6, LIVE-7, LIVE-8, CRED-4, and HOST-1. `src/testdata/state.yaml` holds the conformance vectors.
+[Network state](../../docs/requirements.md#network-state) and [Channels and Users](../../docs/requirements.md#channels-and-users) build here: KNOW-1's Self, KNOW-2, KNOW-3, KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. So does MSG-2's placement, in `./place`. It also serves CONN-3, LIVE-6, LIVE-7, LIVE-8, CRED-4, and HOST-1. `src/testdata/state.yaml` holds the conformance vectors.

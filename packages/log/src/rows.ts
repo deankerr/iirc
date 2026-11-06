@@ -165,15 +165,215 @@ const entryRow = Schema.Union([
  */
 export const EntryRow: IfFieldsOfEntry<typeof entryRow.Type, typeof entryRow> = entryRow;
 
-/** A Message, as a row of `messages`. */
-export const MessageRow = Schema.Struct({
+/** Where a Message or an Activity belongs (MSG-2), as `@iirc/state/place` gives it. */
+export const Place = Schema.Union([
+  Schema.TaggedStruct("Network", {}),
+  Schema.TaggedStruct("Channel", { key: Schema.String, name: Schema.String }),
+  Schema.TaggedStruct("User", { key: Schema.String, name: Schema.String }),
+]);
+
+/** The decoded form of {@link Place}, which is `@iirc/state/place`'s. */
+export type Place = typeof Place.Type;
+
+// A place is three columns, so that a Timeline is a range over an index. The Network's has
+// no key or name, which are `''` rather than NULL, so the index compares them like others.
+const PlaceColumns = {
+  place_key: Schema.String,
+  place_kind: Schema.Literals(["Network", "Channel", "User"]),
+  place_name: Schema.String,
+};
+
+interface PlaceColumns {
+  readonly place_key: string;
+  readonly place_kind: "Network" | "Channel" | "User";
+  readonly place_name: string;
+}
+
+const placeOfColumns = ({ place_key, place_kind, place_name }: PlaceColumns): Place =>
+  place_kind === "Network"
+    ? { _tag: "Network" }
+    : { _tag: place_kind, key: place_key, name: place_name };
+
+const columnsOfPlace = (place: Place): PlaceColumns =>
+  place._tag === "Network"
+    ? { place_key: "", place_kind: "Network", place_name: "" }
+    : { place_key: place.key, place_kind: place._tag, place_name: place.name };
+
+// A column that is NULL for a field the row does not have. Unlike `nullable`, it encodes
+// to NULL rather than leaving the key out, because a batch insert takes its columns from
+// its first row, and a later row must not lose one.
+const orNull = <A>(value: A | undefined): A | null => value ?? null;
+
+/** What a Message's text was, as MSG-1 and PROT-2 tell them apart. */
+const MessageKind = Schema.Literals(["PRIVMSG", "NOTICE", "ACTION"]);
+
+const messageFields = {
   ...Numbered,
-  kind: Schema.Literals(["PRIVMSG", "NOTICE"]),
+  kind: MessageKind,
   network: Schema.String,
   sender: Schema.String,
   target: Schema.String,
   text: Schema.String,
-});
+};
+
+/** A Message, as a row of `messages`. Its place is three columns of its own. */
+export const MessageRow = Schema.Struct({
+  ...messageFields,
+  ...PlaceColumns,
+  statusmsg: Schema.NullOr(Schema.String),
+}).pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      ...messageFields,
+      place: Place,
+      statusmsg: Schema.optionalKey(Schema.String),
+    }),
+    {
+      decode: SchemaGetter.transform(
+        ({ place_key, place_kind, place_name, statusmsg, ...message }) => ({
+          ...message,
+          place: placeOfColumns({ place_key, place_kind, place_name }),
+          ...(statusmsg !== null && { statusmsg }),
+        })
+      ),
+      encode: SchemaGetter.transform(({ place, statusmsg, ...message }) => ({
+        ...message,
+        ...columnsOfPlace(place),
+        statusmsg: orNull(statusmsg),
+      })),
+    }
+  )
+);
+
+const Params = Schema.Array(Schema.String);
+
+const optionalString = Schema.optionalKey(Schema.String);
+
+/**
+ * What an Activity says, by its kind (MSG-5, PROT-1, PROT-2, PROT-5, PROT-6). Each holds
+ * what the Line said, as data: nothing in it is ever acted on.
+ */
+export const ActivityDetails = Schema.Union([
+  Schema.Struct({ host: optionalString, kind: Schema.Literal("join"), user: optionalString }),
+  Schema.Struct({ kind: Schema.Literal("part"), reason: optionalString }),
+  Schema.Struct({ kind: Schema.Literal("quit"), reason: optionalString }),
+  /** `nick` was kicked, by the Activity's actor. */
+  Schema.Struct({ kind: Schema.Literal("kick"), nick: Schema.String, reason: optionalString }),
+  Schema.Struct({ from: Schema.String, kind: Schema.Literal("nick"), to: Schema.String }),
+  /** `""` cleared it. */
+  Schema.Struct({ kind: Schema.Literal("topic"), topic: Schema.String }),
+  /**
+   * The letters and parameters after the Target, and, for a Channel's `MODE` that added up
+   * under `PREFIX` and `CHANMODES`, each change they made (KNOW-6).
+   */
+  Schema.Struct({
+    changes: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          adding: Schema.Boolean,
+          letter: Schema.String,
+          param: optionalString,
+        })
+      )
+    ),
+    kind: Schema.Literal("mode"),
+    params: Params,
+  }),
+  /** `nick` was invited to `channel`, which is recorded and never followed (LIVE-8). */
+  Schema.Struct({ channel: Schema.String, kind: Schema.Literal("invite"), nick: Schema.String }),
+  /**
+   * A CTCP other than `ACTION` and `DCC`. A `NOTICE` carries a reply, and a `PRIVMSG` a
+   * request, which is never answered here (PROT-2, PROT-3).
+   */
+  Schema.Struct({
+    args: Schema.String,
+    command: Schema.String,
+    kind: Schema.Literal("ctcp"),
+    reply: Schema.Boolean,
+  }),
+  /** A DCC offer, recorded and never acted on (PROT-5). */
+  Schema.Struct({ args: Schema.String, kind: Schema.Literal("dcc"), subcommand: Schema.String }),
+  /** A `FAIL`, `WARN`, or `NOTE` (PROT-6). */
+  Schema.Struct({
+    code: Schema.String,
+    command: Schema.String,
+    context: Params,
+    description: Schema.String,
+    kind: Schema.Literal("reply"),
+    reply: Schema.Literals(["FAIL", "WARN", "NOTE"]),
+  }),
+  /** A Line the Daemon handles that has no Activity of its own, such as a numeric (MSG-6). */
+  Schema.Struct({ command: Schema.String, kind: Schema.Literal("line"), params: Params }),
+  /** A Line of a command the Daemon does not handle (PROT-1). */
+  Schema.Struct({ command: Schema.String, kind: Schema.Literal("unknown"), params: Params }),
+]);
+
+/** The decoded form of {@link ActivityDetails}. */
+export type ActivityDetails = typeof ActivityDetails.Type;
+
+/** Every kind of Activity. */
+export type ActivityKind = ActivityDetails["kind"];
+
+const activityKinds = {
+  ctcp: "ctcp",
+  dcc: "dcc",
+  invite: "invite",
+  join: "join",
+  kick: "kick",
+  line: "line",
+  mode: "mode",
+  nick: "nick",
+  part: "part",
+  quit: "quit",
+  reply: "reply",
+  topic: "topic",
+  unknown: "unknown",
+} as const satisfies { readonly [Kind in ActivityKind]: Kind };
+
+const activityFields = {
+  ...Numbered,
+  network: Schema.String,
+  ordinal: Schema.Int,
+};
+
+/**
+ * An Activity, as a row of `activity`. Its place is three columns, and its kind is a column
+ * of its own beside the JSON of its details, so that it can be filtered on, though only the
+ * details are read back.
+ */
+export const ActivityRow = Schema.Struct({
+  ...activityFields,
+  ...PlaceColumns,
+  actor: Schema.NullOr(Schema.String),
+  details: Schema.fromJsonString(ActivityDetails),
+  kind: Schema.Literals(Object.values(activityKinds)),
+}).pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      ...activityFields,
+      actor: optionalString,
+      details: ActivityDetails,
+      place: Place,
+    }),
+    {
+      decode: SchemaGetter.transform(
+        ({ actor, details, kind: _kind, place_key, place_kind, place_name, ...activity }) => ({
+          ...activity,
+          ...(actor !== null && { actor }),
+          details,
+          place: placeOfColumns({ place_key, place_kind, place_name }),
+        })
+      ),
+      encode: SchemaGetter.transform(({ actor, details, place, ...activity }) => ({
+        ...activity,
+        ...columnsOfPlace(place),
+        actor: orNull(actor),
+        details,
+        kind: details.kind,
+      })),
+    }
+  )
+);
 
 /** A Gap, as a row of `gaps`. Both ends of its `ended` go in one column, so neither can be lost. */
 export const GapRow = Schema.Struct({
@@ -197,3 +397,33 @@ export const GapPage = Schema.Struct({
 
 /** The decoded form of {@link GapPage}. */
 export type GapPage = typeof GapPage.Type;
+
+/**
+ * Where a read of Activity resumes. With only `sequence`, after the whole of that Entry, as
+ * every other read's `after` and `/stream`'s sequence mean. With `ordinal` too, after that
+ * one row of it, which is where a page cut inside an Entry ends. A row's own `sequence` and
+ * `ordinal` are the cursor that resumes after it, so a reader passes back the last row's.
+ */
+export const ActivityCursor = Schema.Struct({
+  ordinal: Schema.optionalKey(Schema.Int),
+  sequence: Schema.Int,
+});
+
+/** The decoded form of {@link ActivityCursor}. */
+export type ActivityCursor = typeof ActivityCursor.Type;
+
+/** Which Activity to read, by cursor, as the writer reads it. */
+export const ActivityPage = Schema.Struct({ after: ActivityCursor, limit: Schema.Int });
+
+/** The decoded form of {@link ActivityPage}. */
+export type ActivityPage = typeof ActivityPage.Type;
+
+/**
+ * The bound parameters of an {@link ActivityCursor}, for `(sequence, ordinal) > (?, ?)`. A
+ * whole Entry is behind the cursor when no ordinal could follow it, and SQLite's integers
+ * are 64 bits, so no row has an ordinal past the largest safe one.
+ * @param cursor - The cursor.
+ * @returns The sequence and the ordinal to read after.
+ */
+export const afterCursor = ({ ordinal, sequence }: ActivityCursor) =>
+  [sequence, ordinal ?? Number.MAX_SAFE_INTEGER] as const;

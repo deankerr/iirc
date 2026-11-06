@@ -44,13 +44,23 @@ const program = Effect.gen(function* () {
     phase: "opened",
   } as const;
 
-  yield* record([attempt, opened, line(":ircd 001 alice :Welcome", "inbound")], Array.isArray);
+  yield* record(
+    [
+      attempt,
+      opened,
+      line(":ircd 001 alice :Welcome", "inbound"),
+      line(":alice!a@h JOIN #iirc", "inbound"),
+    ],
+    Array.isArray
+  );
 
-  // Three Lines from one socket read, which must survive whole or not at all.
+  // Four Lines from one socket read, which must survive whole or not at all: three
+  // Messages and an Activity.
   const batch = [
     line(":bob!u@h PRIVMSG #iirc :one", "inbound"),
     line(":bob!u@h PRIVMSG #iirc :two", "inbound"),
     line("PRIVMSG #iirc :three", "outbound"),
+    line(":carol!c@h JOIN #iirc", "inbound"),
   ] as const;
 
   // Only `record` returning means committed, because `within` runs before that.

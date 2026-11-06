@@ -53,6 +53,7 @@ export const inProcessReader = ({
         });
 
       return {
+        activity: (query) => asStorageFailed(reads.activity(query)),
         backup: backups
           .withPermit(keepBackup(dataDir, "iirc", copy))
           .pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),

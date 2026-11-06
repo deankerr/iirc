@@ -24,6 +24,7 @@ import {
 import type {
   CredentialsUnavailable,
   KeyScope,
+  LoggedMessage,
   NetworkSettings,
   NetworkStatus as NetworkState,
   Status,
@@ -35,7 +36,6 @@ import type {
   LogTooNew,
   EntryQuery,
   Gap,
-  LoggedMessage,
   NetworkPage,
   ReaderBusy as ReaderQueueFull,
   ReadTimedOut as ReaderTimedOut,

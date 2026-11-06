@@ -48,6 +48,7 @@ flowchart TD
   daemon --> protocol
   log --> session
   log --> state
+  log --> protocol
   api --> lifecycle
   api --> protocol
   session --> lifecycle
@@ -62,10 +63,10 @@ Dependencies point down only. Each library package stands alone for whoever want
 | Package | Job | Runtime dependencies |
 | --- | --- | --- |
 | [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, decoding, formatting, CTCP, standard replies, outbound construction, nick candidates, `JOIN` batches, the token bucket | None |
-| [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in with their topics, modes, and members, the Users seen, `RPL_ISUPPORT`, casefolding | `protocol` |
+| [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in with their topics, modes, and members, the Users seen, `RPL_ISUPPORT`, casefolding, and where each Line belongs | `protocol` |
 | [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol` |
 | [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
-| [`@iirc/log`](../packages/log/README.md) | The durable Log in SQLite: the writer, the reader Worker, derived tables, migrations, backup, the lock | `session`, `state`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
+| [`@iirc/log`](../packages/log/README.md) | The durable Log in SQLite: the writer, the reader Worker, derived tables of Messages, Activity, and Gaps, migrations, backup, the lock | `session`, `state`, `protocol`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |
 | [`@iirc/api`](../packages/api/README.md) | The contract: `DaemonApi`, Schemas, typed errors, scopes | `protocol`, `lifecycle`, `effect` |
 | [`@iirc/daemon`](../packages/daemon/README.md) | Configuration, Credentials, keys, Network supervision, operations, and the API's handlers | `log`, `api`, `session`, `lifecycle`, `protocol`, `effect`, `@effect/platform-bun` |
 | [`apps/iirc`](../apps/iirc/README.md) | The executable: argv, the HTTP server, and the CLI Frontends | `daemon`, `api`, `effect`, `@effect/platform-bun` |
@@ -96,7 +97,7 @@ sequenceDiagram
   R->>R: append Entries, at most 1024 Lines
   R->>M: within: step Standing's machine over each Entry
   M-->>R: Commands
-  R->>R: fold Standing, Messages, Gaps
+  R->>R: fold Standing, partners, Messages, Activity, Gaps
   R->>R: COMMIT with synchronous=FULL
   R->>W: publish the Entries
   R-->>H: Commands
@@ -107,6 +108,7 @@ sequenceDiagram
 
 - **Append first.** A crash can leave a Line recorded but unsent, never sent but unrecorded (LOG-4).
 - **Commands are data.** Replay discards them, because their outcomes are already Entries.
+- **Each Line is placed as it is folded.** `@iirc/state/place` gives it the Network's Timeline, a Channel's, or a Direct Message partner's (MSG-2), and the fold writes it as a Message, as Activity, or as a `line` or `unknown` on the Network's Timeline, so nothing a Network sends is invisible (MSG-5, MSG-6, PROT-1). A `QUIT` or `NICK` is a row in each Channel it shared and each partner's Timeline (KNOW-8). The partners are carried beside the Standings, and a startup rebuilds both in the same pass.
 - **Watchers never hold up a commit.** One that falls behind gets an `Overflowed` naming what it missed (HOST-5).
 - **Reads never hold up an append.** Frontend reads run in a Worker on a read-only connection (LOG-11).
 

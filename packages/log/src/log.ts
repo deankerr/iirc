@@ -16,12 +16,13 @@ import type {
   ReaderBusy,
   ReadTimedOut,
 } from "./errors.ts";
-import type { LoggedMessage } from "./fold.ts";
+import type { LoggedActivity, LoggedMessage } from "./fold.ts";
 import { holdDataDirectory } from "./lock.ts";
 import type { LogTooNew } from "./migrations.ts";
-import type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
+import type { ActivityQuery, EntryQuery, NetworkPage } from "./reader-protocol.ts";
 import { makeReader } from "./reader.ts";
 import type { LogReaderOptions } from "./reader.ts";
+import type { ActivityPage } from "./rows.ts";
 import { makeStore } from "./store.ts";
 import type { ChangeEntry } from "./store.ts";
 
@@ -39,9 +40,11 @@ export {
 
 export { LogTooNew } from "./migrations.ts";
 
-export type { LoggedMessage } from "./fold.ts";
+export type { ActivityDetails, ActivityKind, LoggedActivity, LoggedMessage } from "./fold.ts";
 
-export type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
+export type { ActivityQuery, EntryQuery, NetworkPage, PlaceKey } from "./reader-protocol.ts";
+
+export type { ActivityCursor, ActivityPage } from "./rows.ts";
 
 export { longestReadMillis } from "./reader.ts";
 
@@ -50,6 +53,8 @@ export type { LogReaderOptions } from "./reader.ts";
 export type { ChangeEntry } from "./store.ts";
 
 export type { Gap } from "@iirc/session/standing";
+
+export type { Place } from "@iirc/state/place";
 
 /** Where the Log keeps its files. */
 export interface LogOptions {
@@ -80,6 +85,13 @@ const open = Effect.fnUntraced(function* ({ dataDir, migrations }: LogOptions) {
 export class Log extends Context.Service<
   Log,
   {
+    /**
+     * Activity after the cursor `after`, ascending by sequence and then by `ordinal`, at most
+     * `limit` rows. Pass back the last row's `sequence` and `ordinal` to resume.
+     */
+    readonly activity: (
+      query: ActivityPage
+    ) => Effect.Effect<readonly LoggedActivity[], StorageFailed>;
     /**
      * Change Entries with a sequence greater than `after`, ascending, at most `limit`. It
      * has no time budget, because it is for when nothing else appends: the Daemon's
@@ -154,6 +166,15 @@ export class Log extends Context.Service<
 export class LogReader extends Context.Service<
   LogReader,
   {
+    /**
+     * Activity after the cursor `after`, from every Network unless `network` names one, and
+     * from every place on it unless `place` names one. A page stops at `limit` rows or about
+     * `pageBytes`, whichever comes first, inside an Entry if it must, so pass back the last
+     * row's `sequence` and `ordinal` to resume.
+     */
+    readonly activity: (
+      query: ActivityQuery
+    ) => Effect.Effect<readonly LoggedActivity[], ReaderBusy | ReadTimedOut | StorageFailed>;
     /**
      * Copies the Log into `backups/` in the data directory with `VACUUM INTO`, on a Worker
      * and a read connection of its own, so that it holds up no append and no read, and

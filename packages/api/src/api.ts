@@ -28,8 +28,12 @@ const maxPageSize = 1000;
 const defaultPageSize = "100";
 const start = "0";
 
-/** The version of this contract, which `/status` reports (API-5). */
-export const apiVersion = 1;
+/**
+ * The version of this contract, which `/status` reports (API-5). Version 2 changed what
+ * `/messages` serves: `kind` can be `ACTION`, whose `text` is the action itself, a CTCP
+ * other than `ACTION` is no Message, and each Message has its `place` (MSG-1, MSG-2).
+ */
+export const apiVersion = 2;
 
 /**
  * How the API parses a body, and how a Frontend should decode a request with this
@@ -290,15 +294,39 @@ const KindFilter = {
   ),
 };
 
-/** Something a participant said, with the sequence of the Line that carried it. */
-const LoggedMessage = Schema.Struct({
+/**
+ * Where a Message belongs (MSG-2): the Network's Timeline, a Channel's, or a Direct Message
+ * partner's. A Channel or User is identified by `key`, its name casefolded under the mapping
+ * in force when it was said (KNOW-3), and `name` is its spelling, for display.
+ */
+export const Place = Schema.Union([
+  Schema.TaggedStruct("Network", {}),
+  Schema.TaggedStruct("Channel", { key: Schema.String, name: Schema.String }),
+  Schema.TaggedStruct("User", { key: Schema.String, name: Schema.String }),
+]);
+
+/** The decoded form of {@link Place}. */
+export type Place = typeof Place.Type;
+
+/**
+ * Something a participant said, with the sequence of the Line that carried it (MSG-1).
+ * `kind` is `ACTION` for a CTCP `ACTION`, whose `text` is the action's own (PROT-2). Any other
+ * CTCP is no Message. `text` keeps its formatting codes (MSG-3), and `target` is as the
+ * Line gave it, so a `STATUSMSG` Target such as `@#chan` has `statusmsg` `@`.
+ */
+export const LoggedMessage = Schema.Struct({
   ...Numbered,
-  kind: Schema.Literals(["PRIVMSG", "NOTICE"]),
+  kind: Schema.Literals(["PRIVMSG", "NOTICE", "ACTION"]),
   network: Schema.String,
+  place: Place,
   sender: Schema.String,
+  statusmsg: Schema.optionalKey(Schema.String),
   target: Schema.String,
   text: Schema.String,
 });
+
+/** The decoded form of {@link LoggedMessage}. */
+export type LoggedMessage = typeof LoggedMessage.Type;
 
 /**
  * Time the Daemon was not on a Network, from the `sequence` where it began. An open Gap

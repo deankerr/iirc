@@ -199,6 +199,7 @@ const withFailingReader = <A, E, R>(
           const real = yield* LogReader;
 
           return {
+            activity: (query) => unlessFailing(real.activity(query)),
             backup: real.backup,
             entries: (query) => unlessFailing(real.entries(query)),
             gaps: (query) => unlessFailing(real.gaps(query)),
@@ -360,7 +361,7 @@ describe("the Daemon", () => {
           const status = yield* harness.client.daemon.status();
 
           assert.deepStrictEqual(status, {
-            apiVersion: 1,
+            apiVersion: 2,
             credentials: { store: "file" },
             head: entries.at(-1)?.sequence ?? 0,
             networks: [
@@ -401,7 +402,7 @@ describe("the Daemon", () => {
           ).pipe(Effect.provide(serving(dataDir, ircd)));
 
           assert.deepStrictEqual(status, {
-            apiVersion: 1,
+            apiVersion: 2,
             credentials: { store: "file" },
             head: 2,
             networks: [],
@@ -954,6 +955,48 @@ describe("the Daemon", () => {
           assert.deepStrictEqual(
             after.map(({ text }) => text),
             ["psst"]
+          );
+        })
+      )
+    );
+
+    it.live("MSG-1, MSG-2, PROT-2: says each Message's place, an ACTION, and no other CTCP", () =>
+      withDaemon((harness) =>
+        Effect.gen(function* () {
+          yield* inSession(harness);
+          yield* harness.ircd.read(
+            ":ircd 005 iirc STATUSMSG=@ :are supported\r\n",
+            ":bob!u@h PRIVMSG #IIRC :\u0001ACTION waves\u0001\r\n",
+            ":bob!u@h PRIVMSG iirc :\u0001VERSION\u0001\r\n",
+            ":Bob!u@h NOTICE @#iirc :ops only\r\n"
+          );
+          yield* untilEntries(harness, (all) => lines(all, "inbound").length === 5);
+          yield* harness.client.daemon.send({ payload: { network, target: "Bob", text: "hi" } });
+
+          const messages = yield* harness.client.daemon.messages(everything);
+
+          assert.deepStrictEqual(
+            messages.map(({ kind, place, statusmsg, text }) => ({ kind, place, statusmsg, text })),
+            [
+              {
+                kind: "ACTION",
+                place: { _tag: "Channel", key: "#iirc", name: "#IIRC" },
+                statusmsg: undefined,
+                text: "waves",
+              },
+              {
+                kind: "NOTICE",
+                place: { _tag: "Channel", key: "#iirc", name: "#iirc" },
+                statusmsg: "@",
+                text: "ops only",
+              },
+              {
+                kind: "PRIVMSG",
+                place: { _tag: "User", key: "bob", name: "Bob" },
+                statusmsg: undefined,
+                text: "hi",
+              },
+            ]
           );
         })
       )

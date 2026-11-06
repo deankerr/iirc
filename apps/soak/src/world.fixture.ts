@@ -1,6 +1,6 @@
 import { BunHttpServer } from "@effect/platform-bun";
 import { DaemonApi, defaultServices } from "@iirc/api";
-import type { KeyScope, NetworkSettings } from "@iirc/api";
+import type { KeyScope, LoggedMessage, NetworkSettings } from "@iirc/api";
 import { createLocalKey, Daemon, DaemonCore } from "@iirc/daemon";
 import { ApiRoutes } from "@iirc/daemon/routes";
 import { eventually } from "@iirc/session/testing";
@@ -238,6 +238,15 @@ export const checkOnce = (
   );
 
 /**
+ * Whether a Message is one of the sender's counted ones: a `PRIVMSG`, never an `ACTION`
+ * that happens to read like one (MSG-1).
+ * @param message - A Message from `/messages`.
+ * @returns Whether it counts.
+ */
+export const isCounted = ({ kind, text }: LoggedMessage) =>
+  kind === "PRIVMSG" && text.startsWith("soak ");
+
+/**
  * Waits for the receiver's Log to hold this many counted Messages from the sender.
  * @param receiver - The receiver.
  * @param count - How many.
@@ -247,7 +256,7 @@ export const heardCount = (receiver: Pick<World, "client">, count: number) =>
   eventually(
     Effect.map(
       receiver.client.daemon.messages({ query: { after: 0, limit: 1000, network } }),
-      (messages) => messages.filter(({ text }) => text.startsWith("soak ")).length
+      (messages) => messages.filter(isCounted).length
     ),
     (heard) => heard >= count,
     limit

@@ -12,6 +12,7 @@ import {
   checkOnce,
   currentMinute,
   heardCount,
+  isCounted,
   network,
   sendInMinute,
   sendOnce,
@@ -91,7 +92,7 @@ describe.concurrent("PROOF-5: the soak harness against two Daemons", () => {
         });
 
         assert.deepStrictEqual(
-          heard.filter(({ text }) => text.startsWith("soak ")).map(({ text }) => text),
+          heard.filter(isCounted).map(({ text }) => text),
           [...[4, 3, 2, 1].map((earlier) => soakText((minute - earlier) * 60_000)), said?.text]
         );
 

@@ -405,13 +405,18 @@ describe("Channel keys (CONF-5, CRED-4)", () => {
           ]);
 
           // A page of the Log can be in its files more than once, so what counts is that the
-          // key is nowhere but in the `MODE`s that carried it.
+          // key is nowhere but in the `MODE`s that carried it, and the Activity derived from
+          // them, which holds a `MODE`'s parameters and its changes (MSG-5, KNOW-6).
           const bytes = logBytes(dataDir);
 
           assert.strictEqual(
             occurrences(bytes, "first-key"),
-            occurrences(bytes, "+k first-key") + occurrences(bytes, "-k first-key")
+            occurrences(bytes, "+k first-key") +
+              occurrences(bytes, "-k first-key") +
+              occurrences(bytes, '"param":"first-key"') +
+              occurrences(bytes, '"first-key"]')
           );
+          assert.isAbove(occurrences(bytes, '"param":"first-key"'), 0);
         })
       )
   );

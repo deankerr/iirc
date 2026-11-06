@@ -22,11 +22,11 @@ Reading this document:
 | [Staying connected](#staying-connected) | LIVE-1 to LIVE-11 | Done. Gaps in Timelines wait for Timelines (M4) |
 | [Sending](#sending) | SEND-1 to SEND-11 | SEND-1 to SEND-4 and `JOIN` splitting done. The rest M3 |
 | [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` holds Self, Channels with topics, modes, and ranked members, Users seen, every `RPL_ISUPPORT` token, and every casemapping |
-| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1 is done in part |
+| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1, MSG-2, MSG-5, and MSG-6 are derived in the Log, and its Activity read is step 6 |
 | [Timelines and attention](#timelines-and-attention) | VIEW-1 to VIEW-10 | M4 |
 | [Frontend storage](#frontend-storage) | STORE-1 to STORE-5 | M4 |
 | [Lookups](#lookups) | LOOK-1 to LOOK-7 | M3 |
-| [Protocol behaviour](#protocol-behaviour) | PROT-1 to PROT-6 | M2 |
+| [Protocol behaviour](#protocol-behaviour) | PROT-1 to PROT-6 | M2. PROT-1, PROT-2, PROT-5, and PROT-6 are derived in the Log. CTCP replies are step 5 |
 | [Hostile input](#hostile-input) | HOST-1 to HOST-5 | HOST-1 and HOST-2 done, HOST-5 in part. HOST-3 and HOST-4 M2 |
 | [API](#api) | API-1 to API-10 | Done for the surfaces that exist. `/stream` and `/bootstrap` M4, Acting M3 |
 | [Access](#access) | AUTH-1 to AUTH-7 | AUTH-1 to AUTH-5 done, AUTH-6 in part. AUTH-7 M4 |
@@ -257,7 +257,7 @@ Each item here is derived from the Log.
 
 ### Channels and Users
 
-**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Daemon's asking is step 4, attribution step 3, and reads step 6.
+**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Log attributes KNOW-8. The Daemon's asking is step 4, and reads step 6.
 
 - **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`. _(Done in `@iirc/state`, which holds only what `NAMES` and `MODE` show, so without `multi-prefix` a member can be short of a prefix. Exposed in step 6.)_
 - **KNOW-5.** Membership and topic come from what `JOIN` already returns. _(The atomic replacement, the rule for Channels Self is not in, and a change for each removed prefix are done in `@iirc/state`. Sending is step 4.)_
@@ -269,27 +269,28 @@ Each item here is derived from the Log.
   - A letter the Network never advertised takes no argument. If the arguments then fail to add up, the `MODE` is kept raw, the Channel is marked uncertain, and its modes and members are read again.
   - A key shown as `*` is hidden and is not stored.
 - **KNOW-7.** A User's nick, `user@host`, and realname are remembered as seen, and away state where known. _(Folded in `@iirc/state` from `JOIN`, `PRIVMSG`, and `NOTICE` sources, `301`, `311`, and `352`, within a bound that forgets the longest unseen. Asking with `WHO` is step 4, and reads step 6.)_
-- **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline. _(`@iirc/state` names the shared Channels in each change, those in a `NAMES` reply under way included. Attribution to Channels is step 3. Direct Message partners are not attributed yet.)_
+- **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline. _(Done in the Log's `activity` table: a row in each Channel `@iirc/state` names as shared, those in a `NAMES` reply under way included, and in each partner's Timeline, where a partner is anyone with a Direct Message place in the Log, this Session or earlier, held in two bounded generations. A partner's new nick has no Timeline until something is placed there. A `QUIT` or `NICK` that concerns neither is on the Network's Timeline. Read through the API in step 6.)_
 - **KNOW-9.** A `470` forward puts us in a different Channel from the one requested. It is reported against the configured name, so autojoin does not look like it failed. _(`@iirc/state` names both Channels in a change. Reporting is a later step.)_
 
 ## Messages and Activity
 
-**Status:** M2. A `messages` table already derives `PRIVMSG` and `NOTICE` Messages, Self's from outbound Lines, for `/messages`.
+**Status:** M2. The Log derives Messages into `messages` and Activity into `activity`, each with its place, and `/messages` serves the first. MSG-3's spans and MSG-4's decoding are later steps, and the Activity read is step 6.
 
-- **MSG-1.** `PRIVMSG` and `NOTICE` become Messages of kind `privmsg`, `notice`, or `action`. Self's Messages come from outbound Lines, because the floor has no `echo-message`.
+- **MSG-1.** `PRIVMSG` and `NOTICE` become Messages of kind `PRIVMSG`, `NOTICE`, or `ACTION`, and the text of an `ACTION` is the action itself. Self's Messages come from outbound Lines, because the floor has no `echo-message`. _(Done, in `/messages` from API version 2.)_
 - **MSG-2.** Each inbound Line belongs to one place, decided in this order:
   - Anything before `001`, with Target `*` or `AUTH`, or with no source or a source that is not `nick!user@host`, goes to the Network's Timeline. This keeps Ircd notices from becoming Direct Messages and Highlights.
   - A Channel Target goes to that Channel. A `STATUSMSG` prefix such as `@#chan` belongs to `#chan`, and stays as an attribute.
   - A `$` mask goes to the Network's Timeline.
   - An inbound Line sourced from Self is a Self Message.
   - Any other Target is a Direct Message from its sender, even if the Target does not match Self.
+  - _(Done in `@iirc/state/place` for every Line with a Target, from the state before it, and Self's outbound Messages are placed by their Target. A place is keyed by its casefolded name and keeps its spelling. `/messages` gives each Message's place and `STATUSMSG` prefix.)_
 - **MSG-3.** Text keeps its IRC formatting codes.
   - The API offers both the raw text and a parsed form with those codes as spans, so that a Frontend never has to interpret them. Both are data and never markup.
   - Highlights and search run on text with the codes stripped.
 - **MSG-4.** Inbound bytes decode as UTF-8, then through the Network's configured fallback encoding, then Latin-1. Decoding never fails.
   - The fallback is any WHATWG `TextDecoder` label.
-- **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests.
-- **MSG-6.** Lines with no Channel or User to belong to, such as the MOTD, `WALLOPS`, and most numerics, go to the Network's Timeline.
+- **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests. _(Done in the Log's `activity` table, derived from `@iirc/state`'s changes, with DCC offers, standard replies, and unknown Lines as kinds of their own. Its reads are in `LogReader`, by a cursor of sequence and the row's place among its Entry's, and its route is step 6.)_
+- **MSG-6.** Lines with no Channel or User to belong to, such as the MOTD, `WALLOPS`, and most numerics, go to the Network's Timeline. _(Done: every inbound Line that is no Message and no other Activity is a `line`, or an `unknown` for a command not handled, on the Network's Timeline, one row per Line. Every numeric is one. `PING` and `PONG`, and Lines that do not parse or were cut, are in `/entries` only.)_
 
 ## Timelines and attention
 
@@ -354,14 +355,14 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ## Protocol behaviour
 
-**Status:** M2. Every Line is already recorded, whatever its command.
+**Status:** M2. Every Line is recorded, whatever its command. PROT-1, PROT-2, PROT-5, and PROT-6 are derived as Activity in the Log. PROT-3 and PROT-4 are step 5.
 
-- **PROT-1.** The Daemon handles `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `TOPIC`, `MODE`, `INVITE`, `AWAY`, `ERROR`, `PING`, `PONG`, and all numerics in the Modern client protocol. Any other command is still recorded, and appears in the Network's Timeline as an unknown Line.
-- **PROT-2.** CTCP `ACTION` is a Message. Other CTCP requests are Activity.
+- **PROT-1.** The Daemon handles `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `TOPIC`, `MODE`, `INVITE`, `AWAY`, `ERROR`, `PING`, `PONG`, and all numerics in the Modern client protocol. Any other command is still recorded, and appears in the Network's Timeline as an unknown Line. _(Done in the Log's `activity` table, as kind `unknown`.)_
+- **PROT-2.** CTCP `ACTION` is a Message. Other CTCP requests are Activity. _(Done. A CTCP in a `NOTICE` is Activity too, marked a reply. Self's own CTCP requests are no Message and no Activity, and stay in `/entries`.)_
 - **PROT-3.** The Daemon answers CTCP `VERSION` with `iirc` and echoes the sender's argument to CTCP `PING`, and answers nothing else by default. `TIME` reveals a timezone, so it is opt-in.
 - **PROT-4.** CTCP replies go out as `NOTICE`, at most one per User per 10 seconds and 5 per minute per Network. No automatic reply is ever sent in response to a `NOTICE`.
-- **PROT-5.** DCC requests are recorded and never acted on.
-- **PROT-6.** `FAIL`, `WARN`, and `NOTE` are parsed on every Network, whatever was negotiated. Ergo sends them unconditionally.
+- **PROT-5.** DCC requests are recorded and never acted on. _(Done: a `dcc` Activity with its subcommand and raw arguments, and nothing reads it to act.)_
+- **PROT-6.** `FAIL`, `WARN`, and `NOTE` are parsed on every Network, whatever was negotiated. Ergo sends them unconditionally. _(Done: a `reply` Activity on the Network's Timeline, by shape alone. One that does not parse is a `line`.)_
 
 ### Hostile input
 
