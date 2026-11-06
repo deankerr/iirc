@@ -287,7 +287,7 @@ Each item here is derived from the Log.
   - The API offers both the raw text and a parsed form with those codes as spans, so that a Frontend never has to interpret them. Both are data and never markup.
   - Highlights and search run on text with the codes stripped.
 - **MSG-4.** Inbound bytes decode as UTF-8, then through the Network's configured fallback encoding, then Latin-1. Decoding never fails.
-  - Deferred: which encodings beyond Latin-1. We add whichever the first real Network needs.
+  - The fallback is any WHATWG `TextDecoder` label.
 - **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests.
 - **MSG-6.** Lines with no Channel or User to belong to, such as the MOTD, `WALLOPS`, and most numerics, go to the Network's Timeline.
 
@@ -399,7 +399,7 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 | `GET /networks`, `GET /networks/{id}` | Configuration, with Credentials as names only, and derived state | Done |
 | `GET /configuration` | All Configuration at once, as `iirc config export` reads it | Done |
 | `GET /networks/{id}/targets` | Targets, with unread counts by class | M4 |
-| `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details | M4 |
+| `GET /networks/{id}/targets/{target}` | Topic, modes, and members of a Channel, or a partner's details | M2 for a Channel, M4 for a partner |
 | `GET /networks/{id}/targets/{target}/timeline` | A Timeline, paged in either direction | M4 |
 | `GET /search` | Full-text search | M4 |
 | `GET /storage/{namespace}` | A Frontend's stored values | M4 |

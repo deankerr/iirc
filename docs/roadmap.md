@@ -9,7 +9,7 @@ Each milestone is a working Daemon. Order is by what makes the next one possible
 | # | Name | Delivers | Done when | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Stays on | LOG, CONF, CRED, CONN except CONN-5, LIVE, SEND lanes and flood control, a thin Send, `/entries`, Channel membership, RUN, multiple Networks, AUTH | It survives kills, drops, and refusals on fserv and loses nothing | Built. The soak test is running |
-| 2 | Knows the Network | KNOW, MSG, HOST, PROT, Activity | Derived state matches `NAMES` and `MODE` after a netsplit and a reconnect | Next |
+| 2 | Knows the Network | KNOW, MSG, HOST, PROT, Activity, a Channel read, an Activity read | Derived state matches `NAMES` and `MODE` after a netsplit and a reconnect | In progress |
 | 3 | Full control | CONN-5, the rest of SEND, Lookups, Acting | Everything a person does in irssi can be done through the API | Planned |
 | 4 | Ready for Frontends | `/bootstrap`, `/stream`, VIEW, STORE, OBS | The web frontend can start without asking for a Daemon change | Planned |
 | 5 | Better with IRCv3 | [IRCv3 enhancements](#ircv3-enhancements) | Ergo gives more, ngircd still passes | Planned |
@@ -28,6 +28,24 @@ Each step was a working Daemon.
    - That is CRED-1 to CRED-4, LOG-6, LOG-7, CONF-3's Credentials, services, and connect commands, and Channel keys for Join (CONF-5).
    - Also RUN-2 and RUN-5, because the soak test freezes the Log format, and every change after it needs a migration and a backup.
    - SASL details wait for milestone 5. A TLS client certificate is a Credential holding the certificate and key in PEM.
+
+### How milestone 2 is built
+
+Each step is a working Daemon. Derived state lives in `Standing` and in derived tables, which are created at startup, so none of it changes the frozen Log format. New Tuning travels whole in each `attempt` Entry, so decoding and CTCP replies stay folds over the Log, and older `attempt` Entries take the defaults.
+
+1. Pure protocol pieces in `@iirc/protocol`: formatting spans and stripping (MSG-3), CTCP parsing with `ACTION` as a Message and DCC parsed but never acted on (PROT-2, PROT-5), `FAIL`, `WARN`, and `NOTE` (PROT-6), and decoding through UTF-8, a fallback, then Latin-1 (MSG-4). Each with conformance vectors.
+2. Knowing the Network in `@iirc/state`: every `RPL_ISUPPORT` token (KNOW-2), `UTF8MAPPING`, `rfc8265`, and an override (KNOW-3), Self's mask, modes, and away state (KNOW-1), Channels' topic, modes, and ranked members, with `353` to `366` as one replacement (KNOW-4, KNOW-6), Users as seen (KNOW-7), and `470` (KNOW-9).
+   - Fold cost and bounds are measured first: a large `NAMES` burst and a netsplit's `QUIT` storm decide the data structure, and members and Users get bounds of their own.
+3. Placement and Activity in the Log's fold: where each Line belongs (MSG-2, MSG-6), Activity as a derived `activity` table (MSG-5), `QUIT` and `NICK` attributed to shared Channels (KNOW-8), and unknown Lines (PROT-1). A rebuilt table equals a live one.
+4. The Daemon asks: a pure planner over `Standing`, like `joinPlan`, for `MODE` on join, `WHO` for `user@host`, a debounced `NAMES` after a prefix mode is removed, and a re-read of an uncertain Channel, all through the background lane (KNOW-5). Debounces are absolute deadlines in `Standing`.
+5. CTCP replies and floods: `VERSION` and `PING` by default, `TIME` opt-in (PROT-3), limits derived from recorded outbound `NOTICE` Lines (PROT-4, HOST-3), and the encoding and CTCP Tuning (CONF-3).
+6. Reads and proof: a Channel's topic, modes, members, and `at` from `GET /networks/{id}/targets/{target}`, and Activity by cursor, both with participant text marked untrusted (HOST-4). `proof:floor` links two ngircds, splits and rejoins them, reconnects, and compares derived members and modes with a raw IRC client's `NAMES` and `MODE`.
+
+Decided at the start:
+
+- The Channel read and the Activity read come forward from milestone 4, because "done when" needs them. Unread counts and Timelines stay in milestone 4.
+- The fallback encoding is any WHATWG `TextDecoder` label, which Bun ships, so no encoding is added one at a time.
+- The netsplit runs inside `proof:floor`, on two linked ngircds on loopback.
 
 Groundwork for milestone 2 came early, because milestone 1 needed it: `@iirc/state` folds Self, the Channels Self is in, their keys, and part of `RPL_ISUPPORT`, and the Log derives Messages and Gaps.
 
