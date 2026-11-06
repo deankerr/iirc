@@ -22,7 +22,7 @@
     "knip": "knip",
     "prepare": "effect-tsgo patch --oxlint && if git rev-parse --git-dir >/dev/null 2>&1; then lefthook install; fi",
     "proof:floor": "bun run build && bun apps/iirc/src/floor-proof.ts",
-    "test": "bun run --filter '*' test"
+    "test": "bun run --parallel --filter '*' test"
   },
   "devDependencies": {
     "@effect/tsgo": "0.63.0",
