@@ -1,17 +1,49 @@
 /**
- * Every number in LIVE, CONN, and SEND, in one value, so that an Owner can change any
- * of them per Network and tests need not wait minutes. Times are in milliseconds. The
- * machine reads what it needs from its input, and the host reads the rest.
+ * The mappings an Owner can force on a Network, whatever its Ircd says (KNOW-3), as
+ * `@iirc/state` names them.
+ */
+export const casemappings = ["ascii", "rfc1459", "rfc1459-strict", "rfc8265"] as const;
+
+/** One of {@link casemappings}. */
+export type TuningCasemapping = (typeof casemappings)[number];
+
+/**
+ * Every number in LIVE, CONN, and SEND, the fallback encoding, a forced casemapping, and
+ * CTCP replies, in one value, so that an Owner can change any of them per Network and
+ * tests need not wait minutes. Times are in milliseconds. The machine reads what it needs
+ * from its input, and the host reads the rest. A Connection's `attempt` records it whole.
  */
 export interface Tuning {
   /** CONN-7: how long after `001` the burst is taken to be over. */
   readonly burstMillis: number;
+  /**
+   * KNOW-3: the mapping names are compared under, whatever the Ircd advertises, because
+   * Ergo's `permissive` mode looks the same as `ascii` on the wire. Absent, the Ircd's.
+   */
+  readonly casemapping?: TuningCasemapping;
   /** CONN-1: how long connecting may take. */
   readonly connectTimeoutMillis: number;
+  /** PROT-4: how many CTCP replies may go out on the Network within `ctcpNetworkWindowMillis`. */
+  readonly ctcpNetworkLimit: number;
+  /** PROT-4: the window `ctcpNetworkLimit` counts over. */
+  readonly ctcpNetworkWindowMillis: number;
+  /** PROT-3: answer CTCP `PING` by echoing its argument. */
+  readonly ctcpPing: boolean;
+  /** PROT-3: answer CTCP `TIME` with the local time, which reveals a timezone. */
+  readonly ctcpTime: boolean;
+  /** PROT-4: the least time between two CTCP replies to one User. */
+  readonly ctcpUserIntervalMillis: number;
+  /** PROT-3: answer CTCP `VERSION` with `iirc`. */
+  readonly ctcpVersion: boolean;
   /** SEND-1: how many Lines the control lane holds, past which a reader waits to offer. */
   readonly controlLaneLimit: number;
   /** LIVE-11: how long a close keeps recording what the Ircd already sent. */
   readonly drainMillis: number;
+  /**
+   * MSG-4: the WHATWG `TextDecoder` label inbound bytes that are not UTF-8 are tried in
+   * before Latin-1, such as `windows-1251`. Absent, none.
+   */
+  readonly encoding?: string;
   /** SEND-2: how many Lines may leave at once. */
   readonly floodBurst: number;
   /** SEND-2: how often a Line may leave once the burst is spent. */
@@ -49,11 +81,24 @@ export interface Tuning {
   readonly writeTimeoutMillis: number;
 }
 
-/** The spec's defaults. */
-export const defaultTuning: Tuning = {
+/** The keys of {@link Tuning} whose values are numbers. */
+export type TuningNumberKey = {
+  readonly [Key in keyof Tuning]-?: Tuning[Key] extends number ? Key : never;
+}[keyof Tuning];
+
+/** The keys of {@link Tuning} whose values are switches. */
+export type TuningSwitchKey = {
+  readonly [Key in keyof Tuning]-?: Tuning[Key] extends boolean ? Key : never;
+}[keyof Tuning];
+
+/** The spec's numbers, each a default. */
+export const defaultTuningNumbers: Readonly<Record<TuningNumberKey, number>> = {
   burstMillis: 10_000,
   connectTimeoutMillis: 15_000,
   controlLaneLimit: 64,
+  ctcpNetworkLimit: 5,
+  ctcpNetworkWindowMillis: 60_000,
+  ctcpUserIntervalMillis: 10_000,
   drainMillis: 5000,
   floodBurst: 5,
   floodIntervalMillis: 2000,
@@ -71,4 +116,15 @@ export const defaultTuning: Tuning = {
   silenceMillis: 90_000,
   stableAfterMillis: 300_000,
   writeTimeoutMillis: 10_000,
+};
+
+/**
+ * The spec's defaults: its numbers, `VERSION` and `PING` answered and `TIME` not (PROT-3),
+ * no fallback encoding (MSG-4), and no casemapping forced (KNOW-3).
+ */
+export const defaultTuning: Tuning = {
+  ...defaultTuningNumbers,
+  ctcpPing: true,
+  ctcpTime: false,
+  ctcpVersion: true,
 };

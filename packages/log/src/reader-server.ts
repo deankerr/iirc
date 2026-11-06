@@ -39,6 +39,7 @@ const handlers = (prepare: (database: Database) => void) =>
             catch: (cause) => new ReadFailed({ reason: String(cause) }),
             try: () => vacuumInto(database, into),
           }),
+        encodings: fresh(reads.encodings),
         entries: fresh(reads.entries),
         gaps: fresh(reads.gaps),
         messages: fresh(reads.messages),

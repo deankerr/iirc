@@ -245,6 +245,8 @@ export const makeReader = Effect.fnUntraced(function* ({
   return {
     activity: (query: ActivityQuery) => call(Effect.suspend(() => client.activity(stamped(query)))),
     backup,
+    encodings: (connections: readonly number[]) =>
+      call(Effect.suspend(() => client.encodings(stamped({ connections })))),
     entries: (query: EntryQuery) => call(Effect.suspend(() => client.entries(stamped(query)))),
     gaps: (query: NetworkPage) => call(Effect.suspend(() => client.gaps(stamped(query)))),
     messages: (query: NetworkPage) => call(Effect.suspend(() => client.messages(stamped(query)))),

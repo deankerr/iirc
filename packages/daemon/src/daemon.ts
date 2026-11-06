@@ -40,6 +40,8 @@ import type {
   ReaderBusy as ReaderQueueFull,
   ReadTimedOut as ReaderTimedOut,
 } from "@iirc/log";
+import { parseFallbackEncoding } from "@iirc/protocol/decode";
+import type { FallbackEncoding } from "@iirc/protocol/decode";
 import { part as partLine, privmsg } from "@iirc/protocol/outbound";
 import type { Outbound, OutboundLine } from "@iirc/protocol/outbound";
 import { joinSensitive, keyedJoins } from "@iirc/session/credentials";
@@ -172,6 +174,32 @@ const fromReader = <A>(read: Effect.Effect<A, ReaderQueueFull | ReaderTimedOut |
     StorageFailed: () => Effect.fail(new LogUnavailable()),
   });
 
+/** A page of Entries, and how to decode each Connection's bytes among them (MSG-4). */
+export interface EntryPage {
+  readonly entries: readonly Entry[];
+  /** By the sequence of a Connection's `attempt`. A Connection not here has no fallback. */
+  readonly fallbacks: ReadonlyMap<number, FallbackEncoding>;
+}
+
+// The Connections whose bytes a page holds.
+const connectionsIn = (entries: readonly Entry[]) =>
+  entries.flatMap((entry) =>
+    entry._tag === "Line" || entry._tag === "Dropped" ? [entry.connection] : []
+  );
+
+// Each label as this runtime decodes with it. One it cannot, which only a Log written by
+// another runtime could hold, gives no fallback, as it gave Standing none.
+const fallbacksOf = (
+  encodings: readonly { readonly connection: number; readonly encoding: string }[]
+) =>
+  new Map(
+    encodings.flatMap(({ connection, encoding }) => {
+      const fallback = parseFallbackEncoding(encoding);
+
+      return fallback === undefined ? [] : [[connection, fallback] as const];
+    })
+  );
+
 // What a failure says of itself, as the reason a Frontend is given.
 const reasonOf = (cause: unknown) =>
   Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
@@ -223,6 +251,10 @@ const hostSettings = (
 });
 
 const toNetworkState = ({ id, name }: NetworkSettings, status: NetworkStatus): NetworkState => ({
+  casemapping:
+    status.casemapping === undefined
+      ? null
+      : { ...status.casemapping, unrecognised: status.casemapping.unrecognised ?? null },
   closeReason: status.closeReason ?? null,
   consecutiveFailures: status.consecutiveFailures,
   enabled: status.enabled,
@@ -250,6 +282,7 @@ const toNetworkState = ({ id, name }: NetworkSettings, status: NetworkStatus): N
 
 // A Network whose host has not started yet, which only a read that races its Change sees.
 const unhosted = ({ enabled, id, name }: NetworkSettings): NetworkState => ({
+  casemapping: null,
   closeReason: null,
   consecutiveFailures: 0,
   enabled,
@@ -362,10 +395,14 @@ export class Daemon extends Context.Service<
       by: By,
       id: NetworkId
     ) => Effect.Effect<Changed, NetworkNotFound | Recording>;
-    /** Entries by cursor, from every Network and of every kind unless the query narrows it. */
+    /**
+     * Entries by cursor, from every Network and of every kind unless the query narrows it,
+     * with the fallback encoding of each Connection among them that recorded one, which is
+     * what its bytes decode with (MSG-4).
+     */
     readonly entries: (
       query: EntryQuery
-    ) => Effect.Effect<readonly Entry[], LogUnavailable | ReaderBusy | ReadTimedOut>;
+    ) => Effect.Effect<EntryPage, LogUnavailable | ReaderBusy | ReadTimedOut>;
     /** Gaps by cursor, from every Network unless `network` names one (LIVE-10). */
     readonly gaps: (
       query: NetworkPage
@@ -843,7 +880,18 @@ export class Daemon extends Context.Service<
           disconnect: (by, id) =>
             toggled(by, id, (network) => ({ _tag: "NetworkDisconnected", id: network })),
           // Every read goes to the reader, so none can delay an append (LOG-11).
-          entries: (query) => fromReader(reader.entries(query)),
+          entries: (query) =>
+            fromReader(
+              Effect.gen(function* () {
+                const entries = yield* reader.entries(query);
+                const connections = connectionsIn(entries);
+
+                const encodings =
+                  connections.length === 0 ? [] : yield* reader.encodings(connections);
+
+                return { entries, fallbacks: fallbacksOf(encodings) } satisfies EntryPage;
+              })
+            ),
           gaps: (query) => fromReader(reader.gaps(query)),
           join: Effect.fnUntraced(function* (by, id, { channel, key, remember }) {
             const network = yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);

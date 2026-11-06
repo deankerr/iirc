@@ -703,6 +703,7 @@ describe("the Log's reader", () => {
             activityOfPlace: [
               "SEARCH activity USING INDEX activity_by_place (network=? AND place_kind=? AND place_key=? AND (sequence,ordinal)>(?,?))",
             ],
+            attemptTuning: ["SEARCH entries USING INTEGER PRIMARY KEY (rowid=?)"],
             entries: ["SEARCH entries USING INTEGER PRIMARY KEY (rowid>?)"],
             entriesOfKind: ["SEARCH entries USING INDEX entries_by_kind (kind=? AND sequence>?)"],
             entriesOfNetwork: [

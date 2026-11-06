@@ -69,7 +69,8 @@ BunRuntime.runMain(program);
 
 - **The Schemas hold every rule.** A request they pass needs no other check by the Daemon, so a Frontend can check one before sending it (CONF-1).
 - **These Schemas judge requests, not history.** They hold a request to today's rules. A recorded Change is read by `@iirc/daemon`'s own Schemas, which hold only shapes and the defaults that absent fields meant then, so tightening a rule here cannot stop the Daemon starting on an old Log (CONF-1).
-- **Tuning is derived, not repeated.** `TuningSettings` is built from `Tuning` and `defaultTuning` in `@iirc/lifecycle`, with bounds that relate numbers to each other. Only what the Owner changed is stored.
+- **Tuning is derived, not repeated.** `TuningSettings` is built from `Tuning` and `defaultTuning` in `@iirc/lifecycle`, with bounds that relate numbers to each other. Only what the Owner changed is stored. Each number and switch publishes its `default`. `encoding` must be a label this runtime's `TextDecoder` reads, checked with `parseFallbackEncoding`, so one it cannot use is refused at `tuning.encoding` rather than ignored later (MSG-4, API-3). `casemapping` is one of `@iirc/state`'s four (KNOW-3). `ctcpNetworkLimit` is at most 100, which is how many reply times `Standing` holds (PROT-4).
+- **Status says how names compare.** `NetworkStatus.casemapping` is the mapping in force for the current Session, whether the Owner forced it, and the `CASEMAPPING` or `UTF8MAPPING` token the Ircd sent that fell back to `ascii`, or `null` with no Session (KNOW-3). It is additive, so the API's version stays 2.
 - **Bytes survive JSON.** A `LogEntry` carries a Line's bytes as base64 beside its decoded `text`, and an unparseable Line's `reason` (API-4, HOST-1).
 - **Keys only in headers.** `Authorization` reads `Authorization: Bearer` and nothing else (AUTH-6).
 

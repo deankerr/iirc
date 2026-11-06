@@ -9,6 +9,7 @@ import {
   Unauthorized,
 } from "@iirc/api";
 import type { LogEntry } from "@iirc/api";
+import type { FallbackEncoding } from "@iirc/protocol/decode";
 import { parseFrame } from "@iirc/protocol/line";
 import type { Entry, IfFieldsOfEntry } from "@iirc/session/entry";
 import { ByteSize, Context, Effect, Layer, Redacted } from "effect";
@@ -28,15 +29,19 @@ export const maxBodySize = ByteSize.mebibytes(1);
 // A Frontend never has to parse IRC, or even guess at an encoding (API-2), and input
 // that cannot be parsed comes with its reason (HOST-1). Those are all a LogEntry adds:
 // otherwise its kinds and their fields are Entry's, which the return type checks, so a
-// kind or a field the contract has not caught up with fails to compile here.
-const toLogEntry = (entry: Entry): IfFieldsOfEntry<LogEntry, LogEntry, "reason" | "text"> => {
+// kind or a field the contract has not caught up with fails to compile here. Bytes decode
+// with their Connection's fallback, as Standing decoded them (MSG-4).
+const toLogEntry = (
+  entry: Entry,
+  fallbacks: ReadonlyMap<number, FallbackEncoding>
+): IfFieldsOfEntry<LogEntry, LogEntry, "reason" | "text"> => {
   switch (entry._tag) {
     case "Dropped": {
-      return { ...entry, text: parseFrame(entry.bytes).text };
+      return { ...entry, text: parseFrame(entry.bytes, fallbacks.get(entry.connection)).text };
     }
 
     case "Line": {
-      const parsed = parseFrame(entry.bytes);
+      const parsed = parseFrame(entry.bytes, fallbacks.get(entry.connection));
 
       return {
         ...entry,
@@ -116,8 +121,9 @@ const daemon = HttpApiBuilder.group(
       .handle("backup", () => backup)
       .handle("redact", ({ params }) => Caller.use(({ name }) => redact(name, params.sequence)))
       .handle("entries", ({ query: { kind, ...page } }) =>
-        Effect.map(entries(kind === undefined ? page : { ...page, kinds: kind }), (found) =>
-          found.map(toLogEntry)
+        Effect.map(
+          entries(kind === undefined ? page : { ...page, kinds: kind }),
+          ({ entries: found, fallbacks }) => found.map((entry) => toLogEntry(entry, fallbacks))
         )
       )
       .handle("messages", ({ query }) => messages(query))

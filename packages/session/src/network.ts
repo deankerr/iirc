@@ -3,6 +3,8 @@ import type { Tuning } from "@iirc/lifecycle/tuning";
 import type { JoinRejection } from "@iirc/protocol/join";
 import { nickCandidates } from "@iirc/protocol/nick";
 import type { OutboundLine } from "@iirc/protocol/outbound";
+import { casemappingOf } from "@iirc/state";
+import type { Casemapping, IrcState } from "@iirc/state";
 import {
   Array as Arr,
   Cause,
@@ -159,8 +161,22 @@ export interface KickedChannel {
   readonly channel: string;
 }
 
+/**
+ * How the current Session compares names (KNOW-3): the mapping in force, whether the Owner
+ * forced it, and what the Ircd advertised that is not understood, which falls back to
+ * `ascii`, if it did.
+ */
+export interface CasemappingStatus {
+  readonly forced: boolean;
+  readonly inForce: Casemapping;
+  /** Such as `CASEMAPPING=unknown-mapping`. */
+  readonly unrecognised: string | undefined;
+}
+
 /** What a Frontend needs to know about a Network, derived each time it is asked for. */
 export interface NetworkStatus {
+  /** How the current Session compares names, while there is one (KNOW-3). */
+  readonly casemapping: CasemappingStatus | undefined;
   /** Why the last Connection closed, while nothing has replaced it. */
   readonly closeReason: string | undefined;
   readonly consecutiveFailures: number;
@@ -225,6 +241,16 @@ const joinable = (channels: readonly WantedChannel[], secrets: Secrets) => {
 
   return channels.filter(({ name }) => !rejected.has(name));
 };
+
+// Only a Session has a mapping in force, which its welcome begins.
+const casemappingStatus = (irc: IrcState): CasemappingStatus | undefined =>
+  irc.self === undefined
+    ? undefined
+    : {
+        forced: irc.forcedCasemapping !== undefined,
+        inForce: casemappingOf(irc),
+        unrecognised: irc.isupport.unknownCasemapping,
+      };
 
 const retryDelay = (failures: number, tuning: Tuning) =>
   Math.min(tuning.reconnectInitialMillis * 2 ** (failures - 1), tuning.reconnectMaxMillis);
@@ -595,6 +621,7 @@ export const hostNetwork: (
       unrecorded === undefined && !stopped && lastClose === undefined ? "idle" : "closed";
 
     return {
+      casemapping: between ? undefined : casemappingStatus(known.irc),
       closeReason: unrecorded ?? (between ? lastClose?.reason : undefined),
       consecutiveFailures: consecutiveFailures(known, current.tuning, now),
       enabled: current.enabled,

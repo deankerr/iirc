@@ -57,6 +57,7 @@ export const inProcessReader = ({
         backup: backups
           .withPermit(keepBackup(dataDir, "iirc", copy))
           .pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),
+        encodings: (connections) => asStorageFailed(reads.encodings({ connections })),
         entries: (query) => asStorageFailed(reads.entries(query)),
         gaps: (query) => asStorageFailed(reads.gaps(query)),
         messages: (query) => asStorageFailed(reads.messages(query)),

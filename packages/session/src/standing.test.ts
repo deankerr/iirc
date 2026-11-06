@@ -747,7 +747,13 @@ describe("LIVE-4: a Connection under way", () => {
   it("says whether one is under way, and keeps its `attempt` after it ends", () => {
     const script = new Script().attempt();
 
-    expect(script.standing.attempt).toStrictEqual({ at: started, ircd: first, sequence: 1 });
+    expect(script.standing.attempt).toStrictEqual({
+      at: started,
+      fallback: undefined,
+      ircd: first,
+      sequence: 1,
+      tuning: defaultTuning,
+    });
     expect(connectionView(script.standing)?.registration).toStrictEqual({ _tag: "Connecting" });
 
     script.wait(5).opened();
@@ -2388,7 +2394,7 @@ describe("LOG-2: a Change says nothing to Standing", () => {
     expect(
       withChanges()
         .entries.filter(({ _tag }) => _tag === "Change")
-        .map(toEvent)
+        .map((entry) => toEvent(entry))
     ).toStrictEqual([undefined, undefined, undefined]);
   });
 
@@ -2503,5 +2509,124 @@ describe("LIVE-11: nothing is joined once the machine has given up", () => {
 
     expect(planned(script, wantedIirc)).toStrictEqual([]);
     expect(sessionSince(script.standing)).toBe(started);
+  });
+});
+
+// An `attempt` with Tuning of its own, as one recorded after the Owner changed it.
+const tunedAttempt = (script: Script, tuning: Tuning) => {
+  script.connection = script.entries.length + 1;
+
+  return script.append({
+    _tag: "Connection",
+    ircd: first,
+    network: script.network,
+    nicks: ["alice"],
+    ...attemptInput,
+    phase: "attempt",
+    tuning,
+  });
+};
+
+// "Привет" in windows-1251, which is not UTF-8.
+const cp1251 = [0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2];
+
+const inBytes = (script: Script, bytes: readonly number[]) =>
+  script.append({
+    _tag: "Line",
+    bytes: Uint8Array.of(...encoder.encode(":bob!u@h PRIVMSG #iirc :"), ...bytes),
+    connection: script.connection,
+    direction: "inbound",
+    network: script.network,
+  });
+
+// The text each inbound PRIVMSG folded to, as the Log's derived tables are given it.
+const saidIn = (entries: readonly Entry[]) => {
+  const said: string[] = [];
+
+  foldStandings(noStandings, entries, ({ line }) => {
+    if (line?.command === "PRIVMSG") {
+      said.push(line.params[1] ?? "");
+    }
+  });
+
+  return said;
+};
+
+describe("MSG-4: a Connection's Lines decode with the fallback its attempt recorded", () => {
+  it("MSG-4: tries the fallback before Latin-1, and each Connection uses its own", () => {
+    const script = new Script();
+
+    tunedAttempt(script, { ...defaultTuning, encoding: "windows-1251" })
+      .opened()
+      .welcome();
+    inBytes(script, cp1251).closed("gone");
+    tunedAttempt(script, defaultTuning).opened().welcome();
+    inBytes(script, cp1251);
+
+    expect(saidIn(script.entries)).toStrictEqual(["Привет", "Ïðèâåò"]);
+    expect(script.standing.attempt?.fallback).toBeUndefined();
+  });
+
+  it("MSG-4: reads UTF-8 as UTF-8 whatever the fallback", () => {
+    const script = new Script();
+
+    tunedAttempt(script, { ...defaultTuning, encoding: "windows-1251" })
+      .opened()
+      .welcome();
+    inBytes(script, [...encoder.encode("Привет")]);
+
+    expect(saidIn(script.entries)).toStrictEqual(["Привет"]);
+  });
+
+  it("MSG-4, CONF-1: a label this runtime cannot decode with reads as no fallback", () => {
+    const script = new Script();
+
+    tunedAttempt(script, { ...defaultTuning, encoding: "klingon" })
+      .opened()
+      .welcome();
+    inBytes(script, cp1251);
+
+    expect(script.standing.attempt?.fallback).toBeUndefined();
+    expect(saidIn(script.entries)).toStrictEqual(["Ïðèâåò"]);
+  });
+
+  it("MSG-4: names the fallback by its canonical name", () => {
+    const script = new Script();
+
+    tunedAttempt(script, { ...defaultTuning, encoding: " Shift_JIS " });
+
+    expect(script.standing.attempt?.fallback?.name).toBe("shift_jis");
+  });
+});
+
+describe("KNOW-3: a casemapping the Owner forces", () => {
+  it("KNOW-3: compares names under the forced mapping, whatever the Ircd says", () => {
+    const script = new Script();
+
+    tunedAttempt(script, { ...defaultTuning, casemapping: "ascii" })
+      .opened()
+      .welcome();
+    script.in(":ircd.example 005 alice CASEMAPPING=rfc1459 :are supported");
+    script.in(":alice!u@h JOIN #a[1]").in(":alice!u@h JOIN #a{1}");
+
+    expect(script.standing.irc.forcedCasemapping).toBe("ascii");
+    expect(script.standing.irc.channels.size).toBe(2);
+  });
+
+  it("KNOW-3: keeps it between Sessions, and drops it once an attempt forces none", () => {
+    const script = new Script();
+
+    tunedAttempt(script, { ...defaultTuning, casemapping: "rfc8265" })
+      .opened()
+      .welcome();
+    script.closed("gone");
+
+    expect(script.standing.irc.forcedCasemapping).toBe("rfc8265");
+
+    tunedAttempt(script, defaultTuning).opened().welcome();
+    script.in(":alice!u@h JOIN #a[1]").in(":alice!u@h JOIN #a{1}");
+
+    expect(script.standing.irc.forcedCasemapping).toBeUndefined();
+    expect(script.standing.irc.channels.size).toBe(1);
   });
 });

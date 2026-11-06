@@ -13,7 +13,7 @@ Versions: Bun 1.4.4 and Effect 4.1.1, pinned in the root `package.json` catalog.
 
 | Owner | Owns | Examples |
 | --- | --- | --- |
-| Pure code | Anything that can be computed, including phases that gate behaviour | Parsing, folds, the Network machine, `Standing`, `nextAttempt`, `joinPlan`, `readPlan`, the token bucket |
+| Pure code | Anything that can be computed, including phases that gate behaviour | Parsing, decoding, folds, the Network machine, `Standing`, `nextAttempt`, `joinPlan`, `readPlan`, `ctcpAnswer`, the token bucket |
 | Effect | Anything that waits, fails, or holds a resource | Hosts, lanes, the Log, the reader Worker, the API, the CLI |
 | Bun | The runtime and build; what Effect does not offer ([ADR 0005](adr/0005-effect-wins-where-it-overlaps-bun.md)) | The executable, SQLite, the keyring, the HTTP engine |
 
@@ -102,12 +102,13 @@ sequenceDiagram
   R->>W: publish the Entries
   R-->>H: Commands
   deactivate R
-  H->>T: run Commands, such as PONG through the control lane
+  H->>T: run Commands, such as PONG through the control lane, and CTCP replies through the background lane
   F->>R: GET /api/entries?after=n, served by the reader Worker
 ```
 
 - **Append first.** A crash can leave a Line recorded but unsent, never sent but unrecorded (LOG-4).
 - **Commands are data.** Replay discards them, because their outcomes are already Entries.
+- **A Connection's bytes decode as its `attempt` says.** The `attempt` records the whole Tuning, its fallback encoding included, so `Standing`, the machine, the derived tables, and `/entries` all decode a Line with UTF-8, then that fallback, then Latin-1 (MSG-4). A rebuild reads each Connection as live did, whatever the Owner changed since.
 - **Each Line is placed as it is folded.** `@iirc/state/place` gives it the Network's Timeline, a Channel's, or a Direct Message partner's (MSG-2), and the fold writes it as a Message, as Activity, or as a `line` or `unknown` on the Network's Timeline, so nothing a Network sends is invisible (MSG-5, MSG-6, PROT-1). A `QUIT` or `NICK` is a row in each Channel it shared and each partner's Timeline (KNOW-8). The partners are carried beside the Standings, and a startup rebuilds both in the same pass.
 - **Watchers never hold up a commit.** One that falls behind gets an `Overflowed` naming what it missed (HOST-5).
 - **Reads never hold up an append.** Frontend reads run in a Worker on a read-only connection (LOG-11).
@@ -154,8 +155,10 @@ stateDiagram-v2
 
 - **The machine owns a Connection's progress:** registration, nick fallback, giving up, the burst, and the login wait (CONN-2 to CONN-7, LIVE-1 to LIVE-3, LIVE-5).
 - **`Standing` owns what outlasts a Connection, and what Self asked:** recent outcomes, kicks, `JOIN` failures, the `JOIN`s and reads asked on this Session and their replies, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction. What Self asked is folded from Self's own outbound Lines, apart from `@iirc/state`, which only an Ircd moves (CONN-3).
-- **Pure functions of `Standing` decide:** `nextAttempt` gives backoff and Ircd rotation (LIVE-4), `joinPlan` gives what to rejoin (LIVE-7, LIVE-8), and `readPlan` gives which `MODE`, `NAMES`, and `WHO` to send (KNOW-5, KNOW-6). A plan's waits, such as a debounced `NAMES`, are absolute times derived from Standing, and the Line sent when one passes is its record, so they need no Deadline Entry of their own.
+- **Pure functions of `Standing` decide:** `nextAttempt` gives backoff and Ircd rotation (LIVE-4), `joinPlan` gives what to rejoin (LIVE-7, LIVE-8), `readPlan` gives which `MODE`, `NAMES`, and `WHO` to send (KNOW-5, KNOW-6), and `ctcpAnswer` gives whether to answer a CTCP request and with what (PROT-3, PROT-4). A plan's waits, such as a debounced `NAMES`, are absolute times derived from Standing, and the Line sent when one passes is its record, so they need no Deadline Entry of their own.
 - **One reconciler carries out both plans,** joins first, one Line at a time through the background lane, so a read never delays a Message or a `PONG` (SEND-1). It holds no plan, and a commit wakes it only when `joinPlanMoved` or `readPlanMoved` says its inputs moved.
+- **CTCP replies are decided in the fold and sent after the commit.** `Standing` counts each reply from when it decides it, and while it is pending, then from when it is recorded as sent, or not at all once Dropped, with any other CTCP `NOTICE` Self sends once recorded, in a window that outlasts every Connection, so neither a flood faster than the lane nor a restart gets past a limit (HOST-3). The commit reads what was decided in the same unit, and the host offers it to the background lane without waiting, so a reply never delays a Message. One still queued a window after it was decided is Dropped at the head of the lane, so a held-up lane cannot release a burst. A reply goes only to a sender's nick parsed as a User, never a Channel or a mask.
+- **The Owner can force a casemapping.** An `attempt` that records one starts each Session's `IrcState` from `sessionState({ casemapping })`, and placement, partners, and planning all compare under `casemappingOf` (KNOW-3).
 - **A host cannot stay dead.** A defect or a failed `record` ends the Connection and backs off like any failure (LOG-9).
 
 Requirements: [Connecting](requirements.md#connecting), [Staying connected](requirements.md#staying-connected), [Sending](requirements.md#sending).

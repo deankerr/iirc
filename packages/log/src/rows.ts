@@ -34,14 +34,40 @@ const Ircd = Schema.Struct({
   tls: Schema.Boolean,
 } satisfies FieldsOf<IrcdOf>);
 
+// What a field an `attempt` from before it existed left out is read as: the default it
+// had when it arrived, written out here so that a new default cannot rewrite history
+// (CONF-1). It needs no Effect, because every `attempt` is read at every start.
+const orDefault =
+  <S extends Schema.Top>(value: S["Type"]) =>
+  (self: S) =>
+    Schema.optionalKey(Schema.toEncoded(self)).pipe(
+      Schema.decodeTo(self, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => value)),
+        encode: SchemaGetter.passthrough(),
+      })
+    );
+
 // The whole Tuning an `attempt` ran with, kept as it was. Whether it was a good one was
 // decided before it ran, so nothing here judges it, and reading it back must not fail.
-// Every number is listed, and checked against lifecycle's.
+// Every field is listed, and checked against lifecycle's. An `attempt` recorded before the
+// encoding, the casemapping, and CTCP replies were Tuning has none of them, and reads as
+// no fallback, the Ircd's mapping, and the CTCP defaults (MSG-4, KNOW-3, PROT-3, PROT-4).
+// The label is kept as recorded, and whoever decodes with it parses it.
 const Tuning = Schema.Struct({
   burstMillis: Schema.Int,
+  casemapping: Schema.optionalKey(
+    Schema.Literals(["ascii", "rfc1459", "rfc1459-strict", "rfc8265"])
+  ),
   connectTimeoutMillis: Schema.Int,
   controlLaneLimit: Schema.Int,
+  ctcpNetworkLimit: Schema.Int.pipe(orDefault(5)),
+  ctcpNetworkWindowMillis: Schema.Int.pipe(orDefault(60_000)),
+  ctcpPing: Schema.Boolean.pipe(orDefault(true)),
+  ctcpTime: Schema.Boolean.pipe(orDefault(false)),
+  ctcpUserIntervalMillis: Schema.Int.pipe(orDefault(10_000)),
+  ctcpVersion: Schema.Boolean.pipe(orDefault(true)),
   drainMillis: Schema.Int,
+  encoding: Schema.optionalKey(Schema.String),
   floodBurst: Schema.Int,
   floodIntervalMillis: Schema.Int,
   joinRetryMillis: Schema.Int,

@@ -128,13 +128,19 @@ interface Wire {
   pings: number;
   // Whether to hang up once `pending` is gone, as an Ircd does after `ERROR`.
   ending: boolean;
+  // Whether the Daemon's own reads of the Channel have been answered (KNOW-5).
+  modesRead: boolean;
+  whoRead: boolean;
 }
 
 /** What the Ircd is waiting to see from the Daemon it was told to expect. */
 interface Expected {
   readonly holdRegistration: boolean;
-  // The Daemon has rejoined, which is the last thing it sends of its own accord.
+  // The Daemon has rejoined.
   readonly joined: Deferred.Deferred<void>;
+  // The Daemon has rejoined and had its `MODE` and `WHO` of the Channel answered, which
+  // are the last things it sends of its own accord (KNOW-5).
+  readonly settled: Deferred.Deferred<void>;
   readonly registered: Deferred.Deferred<void>;
   readonly traffic: Deferred.Deferred<void>;
 }
@@ -210,6 +216,11 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
     return wire.counter % hostileEvery === 0 ? concat([text, hostileBytes]) : text;
   };
 
+  const names = [
+    encoder.encode(`:ircd 353 ${nick} = ${channel} :${nick}`),
+    encoder.encode(`:ircd 366 ${nick} ${channel} :End of /NAMES list`),
+  ];
+
   const ping = (wire: Wire) => {
     wire.pings += 1;
 
@@ -276,12 +287,38 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
       }
     }
 
+    // As an Ircd answers a `JOIN`: the echo, then `NAMES`, after which the Daemon asks for
+    // the Channel's modes and its members' `user@host`, one read at a time (KNOW-5).
     if (line.startsWith("JOIN ")) {
-      send(socket, [encoder.encode(`:${nick}!~u@host ${line}`)]);
+      send(socket, [encoder.encode(`:${nick}!~u@host ${line}`), ...names]);
 
       if (expected !== undefined) {
         Deferred.doneUnsafe(expected.joined, Exit.void);
       }
+    }
+
+    if (line === `MODE ${channel}`) {
+      socket.data.modesRead = true;
+      send(socket, [
+        encoder.encode(`:ircd 324 ${nick} ${channel} +nt`),
+        encoder.encode(`:ircd 329 ${nick} ${channel} 1700000000`),
+      ]);
+    }
+
+    if (line === `WHO ${channel}`) {
+      socket.data.whoRead = true;
+      send(socket, [
+        encoder.encode(`:ircd 352 ${nick} ${channel} ~u host ircd ${nick} H :0 ${realname}`),
+        encoder.encode(`:ircd 315 ${nick} ${channel} :End of /WHO list`),
+      ]);
+    }
+
+    if (line === `NAMES ${channel}`) {
+      send(socket, names);
+    }
+
+    if (socket.data.modesRead && socket.data.whoRead && expected !== undefined) {
+      Deferred.doneUnsafe(expected.settled, Exit.void);
     }
 
     if (line.startsWith("PONG ")) {
@@ -320,6 +357,7 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
               cycles: 0,
               ending: false,
               id: wires.length + 1,
+              modesRead: false,
               openedAt: Date.now(),
               partial: "",
               pending: new Uint8Array(),
@@ -328,6 +366,7 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
               received: [],
               remoteAddress: socket.remoteAddress,
               sent: [],
+              whoRead: false,
             };
 
             wires.push(socket.data);
@@ -352,6 +391,7 @@ const scriptedIrcd = Effect.fnUntraced(function* (host: string, lengths: readonl
         ...options,
         joined: Deferred.makeUnsafe(),
         registered: Deferred.makeUnsafe(),
+        settled: Deferred.makeUnsafe(),
         traffic: Deferred.makeUnsafe(),
       };
 
@@ -573,9 +613,12 @@ const finalRun = (ircd: Ircd, runs: number, dataDir: string, key: string) =>
     const entriesBefore = yield* pagedFrom(readEntries);
     const messagesBefore = yield* pagedFrom(readMessages);
 
-    // The rejoin waits a second after the burst, so it can still be to come, and a `JOIN`
-    // written as the Ircd hangs up would be recorded and never received.
+    // The rejoin waits a second after the burst, so it can still be to come, and the reads
+    // of the Channel follow it, one at a time. Any of them written as the Ircd hangs up
+    // would be recorded and never received, so the run is only settled once each read has
+    // been answered, and the Daemon has nothing of its own left to send (KNOW-5).
     yield* awaitDaemon(running, "rejoining", progress.joined);
+    yield* awaitDaemon(running, "its reads of the Channel", progress.settled);
 
     ircd.finish();
 

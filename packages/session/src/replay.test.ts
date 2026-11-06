@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { phase } from "@iirc/lifecycle";
-import { defaultTuning } from "@iirc/lifecycle/tuning";
+import { defaultTuning, defaultTuningNumbers } from "@iirc/lifecycle/tuning";
 import { pipe, Record, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -36,10 +36,12 @@ const Ircd = Schema.Struct({
   tls: Schema.Boolean,
 });
 
+// These Logs were written before Tuning held CTCP replies and an encoding, so an `attempt`
+// has only numbers, and what it lacks reads as the default, as the Log reads it (CONF-1).
 const Tuning = Schema.Struct(
   pipe(
-    defaultTuning,
-    Record.map(() => Schema.Finite)
+    defaultTuningNumbers,
+    Record.map(() => Schema.optionalKey(Schema.Finite))
   )
 );
 
@@ -123,10 +125,18 @@ const RecordedLog = Schema.fromJsonString(
   })
 );
 
+type RecordedEntry = typeof RecordedEntry.Type;
+
+const asEntry = (entry: RecordedEntry): Entry =>
+  entry._tag === "Connection" && entry.phase === "attempt"
+    ? { ...entry, tuning: { ...defaultTuning, ...entry.tuning } }
+    : entry;
+
 const recorded = readFileSync(fixture, "utf-8")
   .split("\n")
   .filter((line) => line.length > 0)
-  .map((line) => Schema.decodeSync(RecordedLog)(line));
+  .map((line) => Schema.decodeSync(RecordedLog)(line))
+  .map((log) => ({ ...log, entries: log.entries.map(asEntry) }));
 
 // Everything the Daemon reads of a Standing, as plain data: what the hosts decide by, what
 // status shows, and what the derived tables are written from. Channels are read as status
@@ -147,7 +157,10 @@ const readsOf = (standing: Standing, now: number) => {
 
   return {
     asked: [...standing.asked],
-    attempt,
+    attempt:
+      attempt === undefined
+        ? undefined
+        : { at: attempt.at, ircd: attempt.ircd, sequence: attempt.sequence },
     channels: joined,
     connection:
       connection === undefined

@@ -922,11 +922,14 @@ describe("the durable Log", () => {
           const stored = yield* allEntries;
 
           assert.deepStrictEqual(stored.slice(0, recorded.length), [...recorded]);
-          assert.deepStrictEqual(recorded.slice(-fragments.length).map(toEvent), [
-            { at: 0, type: "HEARD" },
-            { at: 0, type: "HEARD" },
-            { at: 0, type: "HEARD" },
-          ]);
+          assert.deepStrictEqual(
+            recorded.slice(-fragments.length).map((entry) => toEvent(entry)),
+            [
+              { at: 0, type: "HEARD" },
+              { at: 0, type: "HEARD" },
+              { at: 0, type: "HEARD" },
+            ]
+          );
 
           yield* Log.use(({ rebuild }) => rebuild);
 
@@ -1904,13 +1907,10 @@ describe("the durable Log and Configuration", () => {
         ]);
         assert.deepStrictEqual(connectionView(held), connectionView(folded));
         assert.strictEqual(held.irc.self?.nick, "alice");
-        assert.deepStrictEqual(entries.filter(({ _tag }) => _tag === "Change").map(toEvent), [
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-        ]);
+        assert.deepStrictEqual(
+          entries.filter(({ _tag }) => _tag === "Change").map((entry) => toEvent(entry)),
+          [undefined, undefined, undefined, undefined, undefined]
+        );
       })
     )
   );

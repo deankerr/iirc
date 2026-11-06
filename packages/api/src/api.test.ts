@@ -41,7 +41,7 @@ const tuningIssues = (tuning: Schema.Json) => settingsIssues({ ...base, tuning }
 const PublishedTuning = Schema.Struct({
   properties: Schema.Record(
     Schema.String,
-    Schema.Struct({ default: Schema.optionalKey(Schema.Finite) })
+    Schema.Struct({ default: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Boolean])) })
   ),
 });
 
@@ -56,13 +56,20 @@ describe("a Network's Tuning overrides (CONF-3)", () => {
     expect(Schema.decodeSync(TuningSettings)(overrides)).toStrictEqual(overrides);
   });
 
-  it("has a field for every number lifecycle's Tuning has, carrying its default", () => {
+  it("has a field for everything lifecycle's Tuning has, each number and switch with its default", () => {
     const { properties } = Schema.decodeUnknownSync(PublishedTuning)(
       Schema.toJsonSchemaDocument(TuningSettings).schema
     );
 
+    expect(Object.keys(properties).toSorted()).toStrictEqual(
+      [...Object.keys(defaultTuning), "casemapping", "encoding"].toSorted()
+    );
     expect(
-      Object.fromEntries(Object.entries(properties).map(([key, field]) => [key, field.default]))
+      Object.fromEntries(
+        Object.entries(properties).flatMap(([key, field]) =>
+          field.default === undefined ? [] : [[key, field.default]]
+        )
+      )
     ).toStrictEqual(defaultTuning);
   });
 
@@ -143,6 +150,95 @@ describe("a Network's Tuning overrides (CONF-3)", () => {
         { message: "Expected object", path: ["tuning"] },
       ]);
     }
+  });
+});
+
+describe("the encoding, the casemapping, and CTCP replies in Tuning (CONF-3)", () => {
+  it("MSG-4, KNOW-3, PROT-3, PROT-4: keeps each when given, as given", () => {
+    const tuning = {
+      casemapping: "ascii",
+      ctcpNetworkLimit: 2,
+      ctcpNetworkWindowMillis: 30_000,
+      ctcpPing: false,
+      ctcpTime: true,
+      ctcpUserIntervalMillis: 0,
+      ctcpVersion: false,
+      encoding: "Windows-1251",
+    };
+
+    expect(tuningIssues(tuning)).toStrictEqual([]);
+    expect(Schema.decodeUnknownSync(TuningSettings)(tuning)).toStrictEqual(tuning);
+  });
+
+  it("PROT-3: publishes VERSION and PING on and TIME off, and no encoding or mapping", () => {
+    expect({
+      ctcpPing: defaultTuning.ctcpPing,
+      ctcpTime: defaultTuning.ctcpTime,
+      ctcpVersion: defaultTuning.ctcpVersion,
+      encoding: defaultTuning.encoding,
+      forced: defaultTuning.casemapping,
+    }).toStrictEqual({
+      ctcpPing: true,
+      ctcpTime: false,
+      ctcpVersion: true,
+      encoding: undefined,
+      forced: undefined,
+    });
+  });
+
+  it("PROT-4: publishes one reply per User per 10 seconds and 5 a minute per Network", () => {
+    expect([
+      defaultTuning.ctcpUserIntervalMillis,
+      defaultTuning.ctcpNetworkLimit,
+      defaultTuning.ctcpNetworkWindowMillis,
+    ]).toStrictEqual([10_000, 5, 60_000]);
+  });
+
+  it.each(["utf-8", "shift_jis", "ISO-8859-2", " koi8-r ", "latin1"])(
+    "MSG-4: takes %j, a label this runtime decodes with",
+    (encoding) => {
+      expect(tuningIssues({ encoding })).toStrictEqual([]);
+    }
+  );
+
+  it.each(["", "klingon", "x-user-defined", "utf-7"])(
+    "MSG-4, API-3: refuses %j, which no decoder here reads, at its path",
+    (encoding) => {
+      expect(tuningIssues({ encoding })).toStrictEqual([
+        {
+          message:
+            "is not an encoding label this Daemon can decode, such as windows-1251 or shift_jis",
+          path: ["tuning", "encoding"],
+        },
+      ]);
+    }
+  );
+
+  it("KNOW-3: takes each mapping @iirc/state knows, and refuses any other at its path", () => {
+    for (const casemapping of ["ascii", "rfc1459", "rfc1459-strict", "rfc8265"]) {
+      expect(tuningIssues({ casemapping })).toStrictEqual([]);
+    }
+
+    expect(tuningIssues({ casemapping: "strict-rfc1459" })).toHaveLength(1);
+    expect(tuningIssues({ casemapping: "permissive" })[0]?.path).toStrictEqual([
+      "tuning",
+      "casemapping",
+    ]);
+  });
+
+  it.each([
+    [{ ctcpNetworkLimit: 0 }, "ctcpNetworkLimit"],
+    // Standing holds 100 reply times, so a larger limit could not be counted.
+    [{ ctcpNetworkLimit: 101 }, "ctcpNetworkLimit"],
+    [{ ctcpNetworkWindowMillis: 0 }, "ctcpNetworkWindowMillis"],
+    [{ ctcpUserIntervalMillis: -1 }, "ctcpUserIntervalMillis"],
+    [{ ctcpVersion: "yes" }, "ctcpVersion"],
+    [{ ctcpTime: 1 }, "ctcpTime"],
+  ])("PROT-4, API-3: refuses %j at its path", (tuning, key) => {
+    const issues = tuningIssues(tuning);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toStrictEqual(["tuning", key]);
   });
 });
 

@@ -1,5 +1,10 @@
-import { defaultTuning } from "@iirc/lifecycle/tuning";
-import type { Tuning as TuningNumbers } from "@iirc/lifecycle/tuning";
+import { casemappings, defaultTuning } from "@iirc/lifecycle/tuning";
+import type {
+  Tuning as FullTuning,
+  TuningNumberKey,
+  TuningSwitchKey,
+} from "@iirc/lifecycle/tuning";
+import { parseFallbackEncoding } from "@iirc/protocol/decode";
 import { channelKey, channelPrefixes, joinRejection } from "@iirc/protocol/join";
 import { nickLine } from "@iirc/protocol/nick";
 import { privmsg, quit, user } from "@iirc/protocol/outbound";
@@ -74,16 +79,76 @@ const Ircd = Schema.Struct({
   tls: Schema.Boolean,
 });
 
+// What a timer can wait for: past this, one fires at once, so a mistyped wait would turn
+// into a redial loop.
+const longestWait = 2_147_483_647;
+
+// LIVE-3: a lag check bypasses flood control, so a tiny interval would flood the Ircd.
+const shortestLagCheck = 100;
+
+// Every host waits this long at most for its `QUIT` when it stops, and the Daemon stops them
+// all at once, so this bounds how long a stop takes whatever the Owner tuned (RUN-3). It is
+// well inside the 90 seconds a service manager gives a stop by default.
+const longestQuitWait = 10_000;
+
+interface Bounds {
+  readonly maximum?: number;
+  readonly minimum: number;
+}
+
+// The most CTCP replies a Network may be allowed in its window. `Standing` holds this many
+// reply times, so a limit up to it is counted exactly (PROT-4).
+const mostCtcpReplies = 100;
+
+// One entry for every number in lifecycle's `Tuning` and no other, so a new number cannot
+// go without a rule. A wait that gives something time to happen can be 0, and one that
+// paces anything cannot. A `QUIT` wait of 0 drops the `QUIT` itself (LIVE-9). A CTCP
+// interval of 0 lets a User be answered as often as the Network's limit allows (PROT-4).
+const tuningBounds = {
+  burstMillis: { minimum: 0 },
+  connectTimeoutMillis: { minimum: 1 },
+  controlLaneLimit: { minimum: 1 },
+  ctcpNetworkLimit: { maximum: mostCtcpReplies, minimum: 1 },
+  ctcpNetworkWindowMillis: { minimum: 1 },
+  ctcpUserIntervalMillis: { minimum: 0 },
+  drainMillis: { minimum: 0 },
+  floodBurst: { minimum: 1 },
+  floodIntervalMillis: { minimum: 1 },
+  joinRetryMillis: { minimum: 1 },
+  kickRejoinMillis: { minimum: 0 },
+  lagCheckMillis: { minimum: shortestLagCheck },
+  laneLimit: { minimum: 1 },
+  loginWaitMillis: { minimum: 0 },
+  quitWaitMillis: { maximum: longestQuitWait, minimum: 1 },
+  reconnectInitialMillis: { minimum: 1 },
+  reconnectMaxMillis: { minimum: 1 },
+  registrationTimeoutMillis: { minimum: 1 },
+  rejoinSettleMillis: { minimum: 0 },
+  sendWaitMillis: { minimum: 0 },
+  silenceMillis: { minimum: 1 },
+  stableAfterMillis: { minimum: 0 },
+  writeTimeoutMillis: { minimum: 1 },
+} as const satisfies Readonly<Record<TuningNumberKey, Bounds>>;
+
+/** A mapping an Owner can force on a Network (KNOW-3). */
+const Casemapping = Schema.Literals(casemappings);
+
 /**
- * Every timing and limit a Connection ran with, in milliseconds where it is a time, as its
- * `attempt` recorded them. One for each of lifecycle's numbers, so a new one is here too.
+ * Every timing, limit, and switch a Connection ran with, in milliseconds where it is a
+ * time, and its fallback encoding and forced casemapping if it had them, as its `attempt`
+ * recorded them. An `attempt` from before a field existed reads as its default (CONF-1).
  */
-const Tuning = Schema.Struct(
-  pipe(
-    defaultTuning,
+const Tuning = Schema.Struct({
+  ...pipe(
+    tuningBounds,
     Records.map(() => Schema.Int)
-  )
-);
+  ),
+  casemapping: Schema.optionalKey(Casemapping),
+  ctcpPing: Schema.Boolean,
+  ctcpTime: Schema.Boolean,
+  ctcpVersion: Schema.Boolean,
+  encoding: Schema.optionalKey(Schema.String),
+} satisfies { readonly [Key in keyof FullTuning]-?: Schema.Top });
 
 /** How a TLS Connection was secured, and the pin of the key the Ircd presented (CONN-1). */
 const TlsDetails = Schema.Struct({
@@ -109,9 +174,20 @@ const Lane = Schema.Literals(["control", "interactive", "background"]);
  * `logFault.retryMillis` is the wait that `retryAt` stands for. `login` is how the current
  * Connection's login to services went, with the service's own words in `text` where it
  * gave any (CONN-6). `missingCredentials` names each Credential the settings refer to that
- * is not set, which keeps the Network from making any `attempt` (CRED-1).
+ * is not set, which keeps the Network from making any `attempt` (CRED-1). `casemapping` is
+ * how the current Session compares nicks and Channel names, `null` without one: the mapping
+ * in force, whether the Owner forced it with Tuning, and the token the Ircd sent that is
+ * not understood, as `CASEMAPPING=...` or `UTF8MAPPING=...`, when it fell back to `ascii`
+ * (KNOW-3).
  */
 export const NetworkStatus = Schema.Struct({
+  casemapping: Schema.NullOr(
+    Schema.Struct({
+      forced: Schema.Boolean,
+      inForce: Casemapping,
+      unrecognised: Schema.NullOr(Schema.String),
+    })
+  ),
   closeReason: Schema.NullOr(Schema.String),
   consecutiveFailures: Schema.Int,
   enabled: Schema.Boolean,
@@ -535,52 +611,9 @@ const ConnectCommand = Schema.String.check(
   })
 );
 
-// What a timer can wait for: past this, one fires at once, so a mistyped wait would turn
-// into a redial loop.
-const longestWait = 2_147_483_647;
-
-// LIVE-3: a lag check bypasses flood control, so a tiny interval would flood the Ircd.
-const shortestLagCheck = 100;
-
-// Every host waits this long at most for its `QUIT` when it stops, and the Daemon stops them
-// all at once, so this bounds how long a stop takes whatever the Owner tuned (RUN-3). It is
-// well inside the 90 seconds a service manager gives a stop by default.
-const longestQuitWait = 10_000;
-
-interface Bounds {
-  readonly maximum?: number;
-  readonly minimum: number;
-}
-
-// One entry for every key of lifecycle's `Tuning` and no other, so a new number cannot go
-// without a rule. A wait that gives something time to happen can be 0, and one that paces
-// anything cannot. A `QUIT` wait of 0 drops the `QUIT` itself (LIVE-9).
-const tuningBounds = {
-  burstMillis: { minimum: 0 },
-  connectTimeoutMillis: { minimum: 1 },
-  controlLaneLimit: { minimum: 1 },
-  drainMillis: { minimum: 0 },
-  floodBurst: { minimum: 1 },
-  floodIntervalMillis: { minimum: 1 },
-  joinRetryMillis: { minimum: 1 },
-  kickRejoinMillis: { minimum: 0 },
-  lagCheckMillis: { minimum: shortestLagCheck },
-  laneLimit: { minimum: 1 },
-  loginWaitMillis: { minimum: 0 },
-  quitWaitMillis: { maximum: longestQuitWait, minimum: 1 },
-  reconnectInitialMillis: { minimum: 1 },
-  reconnectMaxMillis: { minimum: 1 },
-  registrationTimeoutMillis: { minimum: 1 },
-  rejoinSettleMillis: { minimum: 0 },
-  sendWaitMillis: { minimum: 0 },
-  silenceMillis: { minimum: 1 },
-  stableAfterMillis: { minimum: 0 },
-  writeTimeoutMillis: { minimum: 1 },
-} as const satisfies Readonly<Record<keyof TuningNumbers, Bounds>>;
-
 // Each number may be left out, and then runs at the spec's default, which its Schema
 // carries for a Frontend to show.
-const tuningFields = Records.mapEntries(
+const tuningNumbers = Records.mapEntries(
   tuningBounds,
   ({ maximum = longestWait, minimum }: Bounds, key) => [
     key,
@@ -592,13 +625,37 @@ const tuningFields = Records.mapEntries(
   ]
 );
 
-type TuningKey = keyof TuningNumbers;
+const tuningSwitch = (key: TuningSwitchKey) =>
+  Schema.optionalKey(Schema.Boolean.annotate({ default: defaultTuning[key] }));
+
+// MSG-4: any WHATWG label this runtime can decode with, in any case, which is what the
+// Daemon will decode with, so one it cannot use is refused here rather than ignored later.
+const EncodingLabel = Schema.String.check(
+  Schema.makeFilter(
+    (label) =>
+      parseFallbackEncoding(label) !== undefined ||
+      "is not an encoding label this Daemon can decode, such as windows-1251 or shift_jis"
+  )
+);
+
+// Fields with no default, whose absence is the default: no fallback, and the Ircd's own
+// mapping. A switch or a number left out runs at its `default`.
+const tuningFields = {
+  ...tuningNumbers,
+  casemapping: Schema.optionalKey(Casemapping),
+  ctcpPing: tuningSwitch("ctcpPing"),
+  ctcpTime: tuningSwitch("ctcpTime"),
+  ctcpVersion: tuningSwitch("ctcpVersion"),
+  encoding: Schema.optionalKey(EncodingLabel),
+} satisfies { readonly [Key in keyof FullTuning]-?: Schema.Top };
+
+type TuningKey = TuningNumberKey;
 
 // `low` must not be above `high`, or, when `strictly`, must be below it. Said of the one
 // the Owner set, `high` if both, so that the path is where the fix goes, and against the
 // default of the other when it was left out.
 const ordered = (low: TuningKey, high: TuningKey, strictly: boolean) =>
-  Schema.makeFilter((overrides: Partial<TuningNumbers>) => {
+  Schema.makeFilter((overrides: Partial<FullTuning>) => {
     const tuning = { ...defaultTuning, ...overrides };
 
     if (strictly ? tuning[low] < tuning[high] : tuning[low] <= tuning[high]) {
@@ -619,9 +676,12 @@ const ordered = (low: TuningKey, high: TuningKey, strictly: boolean) =>
   });
 
 /**
- * The Tuning numbers one Network overrides, by name (CONF-3). Only those the Owner changed
- * are stored, so that a new default reaches every Network that never changed it. Each is a
- * whole number within its bounds, and its default is its `default` annotation. Some numbers
+ * The Tuning one Network overrides, by name (CONF-3). Only what the Owner changed is
+ * stored, so that a new default reaches every Network that never changed it. Each number is
+ * a whole number within its bounds, and each number and switch has its default as its
+ * `default` annotation. `encoding` is the fallback for bytes that are not UTF-8, which must
+ * be a label this Daemon can decode with (MSG-4), and `casemapping` forces a mapping
+ * (KNOW-3). Left out, there is no fallback, and the Ircd's mapping stands. Some numbers
  * are fine alone and wrong beside another, counting the defaults of those left out: a
  * silence no longer than the lag check kills a quiet Ircd every Session, because the check
  * is what makes it speak (LIVE-2), and the first reconnect delay cannot be above the

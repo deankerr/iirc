@@ -1,6 +1,8 @@
 import { inspect, start } from "@iirc/lifecycle";
 import type { ConnectionView, Login, NetworkSnapshot } from "@iirc/lifecycle";
 import type { Tuning } from "@iirc/lifecycle/tuning";
+import { parseFallbackEncoding } from "@iirc/protocol/decode";
+import type { FallbackEncoding } from "@iirc/protocol/decode";
 import { channelKey } from "@iirc/protocol/join";
 import { parseFrame } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
@@ -10,11 +12,20 @@ import {
   channelOf,
   initialState,
   mayFoldFurther,
+  sessionState,
   stepState,
 } from "@iirc/state";
 import type { Casemapping, Channels, IrcState, JoinFailure, StateChange } from "@iirc/state";
 import type { Array as Arr } from "effect";
 
+import {
+  afterCtcpDropped,
+  afterCtcpRequest,
+  afterCtcpSent,
+  noCtcpReplies,
+  withoutPending,
+} from "./ctcp.ts";
+import type { CtcpReplies } from "./ctcp.ts";
 import type { Entry, Ircd, NetworkId } from "./entry.ts";
 import { stepEntry } from "./events.ts";
 
@@ -24,9 +35,18 @@ export interface Moment {
   readonly sequence: number;
 }
 
-/** The `attempt` Entry a Network last made, and the Ircd it used. */
+/**
+ * The `attempt` Entry a Network last made, the Ircd it used, and the Tuning it recorded,
+ * which its Connection's Lines are read with: its fallback encoding (MSG-4), its forced
+ * casemapping (KNOW-3), and its CTCP replies (PROT-3, PROT-4). So decoding and CTCP replies
+ * are folds over the Log, and a rebuild reads each Connection as live did, whatever the
+ * Owner has changed since.
+ */
 export interface Attempted extends Moment {
+  /** The fallback `tuning.encoding` names, if it has one this runtime can decode with. */
+  readonly fallback: FallbackEncoding | undefined;
   readonly ircd: Ircd;
+  readonly tuning: Tuning;
 }
 
 /** The Daemon's decision to end a Connection, as its first `closing` Entry said (LOG-2). */
@@ -145,9 +165,11 @@ export interface Gap extends Moment {
  * are functions below, because an Entry's meaning cannot depend on today's numbers.
  *
  * Those reads take today's Tuning on purpose, unlike the machine, which replays each
- * Connection with the Tuning its `attempt` recorded. The machine says what a Connection
- * did, which cannot change. Backoff and rejoining decide what to do next, which is policy,
- * so a tuned value applies to the past as well, and a lowered delay takes effect at once.
+ * Connection with the Tuning its `attempt` recorded, as the fold itself does for how a
+ * Connection's Lines decode, which mapping it forces, and which CTCP requests it answers.
+ * The machine says what a Connection did, which cannot change. Backoff and rejoining decide
+ * what to do next, which is policy, so a tuned value applies to the past as well, and a
+ * lowered delay takes effect at once.
  */
 export interface Standing {
   /** Channels whose `JOIN` was sent on this Connection and has not worked yet. */
@@ -156,6 +178,11 @@ export interface Standing {
   readonly attempt: Attempted | undefined;
   /** The Connection under way, if any. */
   readonly connection: LiveConnection | undefined;
+  /**
+   * The CTCP replies that count against the limits, which outlast every Connection, so a
+   * reconnect or a restart resets no limit (PROT-4, HOST-3).
+   */
+  readonly ctcp: CtcpReplies;
   /** The Network's latest Gap, which is open while it has no `ended`. */
   readonly gap: Gap | undefined;
   /**
@@ -269,6 +296,7 @@ export const noStanding: Standing = {
   asked: noChannels,
   attempt: undefined,
   connection: undefined,
+  ctcp: noCtcpReplies,
   gap: undefined,
   irc: initialState,
   joinFailures: noChannels,
@@ -386,11 +414,20 @@ const withChannel = <Value>(
   value: Value
 ): ReadonlyMap<string, Value> => withHeld(withoutChannel(held, irc, name), channelKey(name), value);
 
+// A Session's state before any Line, under the mapping the Owner forced on its `attempt`,
+// if any (KNOW-3). Between Sessions it keeps the last one's, so a kick is compared as the
+// Owner said.
+const freshState = (attempt: Attempted | undefined): IrcState => {
+  const forced: Casemapping | undefined = attempt?.tuning.casemapping;
+
+  return forced === undefined ? initialState : sessionState({ casemapping: forced });
+};
+
 // What belongs to one Session and is never carried over (LIVE-6).
 const withoutSession = (standing: Standing): Standing => ({
   ...standing,
   asked: noChannels,
-  irc: initialState,
+  irc: freshState(standing.attempt),
   lagChecks: [],
   lagMillis: undefined,
   reads: noChannels,
@@ -440,9 +477,11 @@ const ended = (
   const { network } = connection;
   const since = sessionSince(standing);
 
+  // Whatever reply was still queued went with the Connection, recorded as Dropped or not.
   return {
     ...withoutSession(standing),
     connection: undefined,
+    ctcp: withoutPending(standing.ctcp),
     gap: since === undefined ? standing.gap : { at: endedAt, network, reason, sequence },
     recent: [
       ...standing.recent,
@@ -462,14 +501,21 @@ const endedWithoutClose = (standing: Standing, reason: string): Standing =>
         reason: standing.connection.closing?.reason ?? reason,
       });
 
-// The machine runs on what the `attempt` recorded, as it did when the host stepped it.
+// The machine runs on what the `attempt` recorded, as it did when the host stepped it, and
+// so do decoding, the mapping, and CTCP replies. A label this runtime cannot decode with
+// gives no fallback, and the bytes are read as UTF-8 or else Latin-1.
 const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
   const { at, ircd, loginLines, network, realname, sequence, services, tuning, username } = entry;
   const machine = stepEntry(start({ loginLines, realname, services, tuning, username }), entry);
 
+  const fallback =
+    tuning.encoding === undefined ? undefined : parseFallbackEncoding(tuning.encoding);
+
+  const attempt: Attempted = { at, fallback, ircd, sequence, tuning };
+
   return {
-    ...withoutSession(endedWithoutClose(standing, killed)),
-    attempt: { at, ircd, sequence },
+    ...withoutSession({ ...endedWithoutClose(standing, killed), attempt }),
+    attempt,
     connection: {
       closing: undefined,
       last: { at, sequence },
@@ -480,18 +526,40 @@ const afterAttempt = (standing: Standing, entry: AttemptEntry): Standing => {
   };
 };
 
+/**
+ * The fallback encoding a Connection's Lines are decoded with, from its `attempt` (MSG-4).
+ * @param standing - The Network's Standing.
+ * @param connection - The sequence of the Connection's `attempt` Entry.
+ * @returns The fallback, or `undefined` for none, or for a Connection not the latest.
+ */
+export const fallbackOf = (standing: Standing, connection: number): FallbackEncoding | undefined =>
+  standing.attempt?.sequence === connection ? standing.attempt.fallback : undefined;
+
+// The fallback for an Entry's bytes, if it has any.
+const entryFallback = (standing: Standing, entry: Entry) =>
+  entry._tag === "Line" || entry._tag === "Dropped"
+    ? fallbackOf(standing, entry.connection)
+    : undefined;
+
 // Every Entry of a Connection under way moves its machine, as the host's commit stepped it,
 // and is where the Connection last was.
-const withEntry = (connection: LiveConnection, entry: Entry): LiveConnection => ({
+const withEntry = (
+  connection: LiveConnection,
+  entry: Entry,
+  fallback: FallbackEncoding | undefined
+): LiveConnection => ({
   ...connection,
   last: { at: entry.at, sequence: entry.sequence },
-  machine: stepEntry(connection.machine, entry).next,
+  machine: stepEntry(connection.machine, entry, fallback).next,
 });
 
 const withConnection = (standing: Standing, entry: Entry): Standing =>
   standing.connection === undefined
     ? standing
-    : { ...standing, connection: withEntry(standing.connection, entry) };
+    : {
+        ...standing,
+        connection: withEntry(standing.connection, entry, entryFallback(standing, entry)),
+      };
 
 // The first decision to close says why, and a chosen one stays chosen. Once any is made,
 // no welcome can start a Session, which is what the machine hears as LEAVING or CLOSING.
@@ -514,13 +582,13 @@ const afterConnection = (standing: Standing, entry: ConnectionEntry): Standing =
 
   switch (entry.phase) {
     case "opened": {
-      return { ...standing, connection: withEntry(connection, entry) };
+      return { ...standing, connection: withEntry(connection, entry, undefined) };
     }
 
     case "closing": {
       const closing = afterClosing(connection, entry);
 
-      return { ...standing, connection: { ...withEntry(connection, entry), closing } };
+      return { ...standing, connection: { ...withEntry(connection, entry, undefined), closing } };
     }
 
     case "closed": {
@@ -620,8 +688,10 @@ const afterReadAsked = (
   return withReads(standing, name, { ...held, asked: { ...held.asked, [kind]: ask } });
 };
 
-const afterOutbound = (standing: Standing, entry: LineEntry, line: Line): Standing => {
+const afterOutbound = (before: Standing, entry: LineEntry, line: Line): Standing => {
   const [first] = line.params;
+  const ctcp = afterCtcpSent(before, entry, line);
+  const standing = ctcp === before.ctcp ? before : { ...before, ctcp };
 
   if (line.command === "JOIN") {
     return afterAsked(standing, entry, first);
@@ -994,7 +1064,9 @@ const afterInbound = (
   entry: LineEntry,
   line: Line
 ): Stepped => {
-  const answered = line.command === "PONG" ? afterPong(standing, entry, line) : standing;
+  const ctcp = line.command === "PRIVMSG" ? afterCtcpRequest(standing, entry, line) : standing.ctcp;
+  const replied = ctcp === standing.ctcp ? standing : { ...standing, ctcp };
+  const answered = line.command === "PONG" ? afterPong(replied, entry, line) : replied;
   const welcomed = welcomedAt(before) === undefined && sessionSince(answered) !== undefined;
 
   // Only the welcome the machine took begins a Session, so one it refused names nobody.
@@ -1022,13 +1094,14 @@ const afterLine = (standing: Standing, entry: LineEntry, line: Line | undefined)
 };
 
 // An unparseable Line stays an Entry, but it says nothing. Nor does a cut one, because a
-// fragment is not a Line to trust, and `toEvent` gives it no command either (HOST-2).
-const readLine = (entry: Entry): Line | undefined => {
+// fragment is not a Line to trust, and `toEvent` gives it no command either (HOST-2). Its
+// bytes are decoded with its Connection's fallback (MSG-4).
+const readLine = (standing: Standing, entry: Entry): Line | undefined => {
   if (entry._tag !== "Line" || entry.cut === true) {
     return undefined;
   }
 
-  const parsed = parseFrame(entry.bytes);
+  const parsed = parseFrame(entry.bytes, fallbackOf(standing, entry.connection));
 
   return parsed._tag === "Line" ? parsed.line : undefined;
 };
@@ -1059,9 +1132,15 @@ const advance = (standing: Standing, entry: Entry, line: Line | undefined): Step
     }
 
     // What these do to a Connection is its machine's to say (CONN-2, CONN-6).
-    case "Deadline":
-    case "Dropped": {
+    case "Deadline": {
       return saidNothing(withConnection(own, entry));
+    }
+
+    // A CTCP reply that never left counts no more (PROT-4).
+    case "Dropped": {
+      const ctcp = afterCtcpDropped(own.ctcp, entry);
+
+      return saidNothing(withConnection(ctcp === own.ctcp ? own : { ...own, ctcp }, entry));
     }
 
     default: {
@@ -1071,14 +1150,15 @@ const advance = (standing: Standing, entry: Entry, line: Line | undefined): Step
 };
 
 /**
- * Advances one Network's {@link Standing} by one Entry. Reads no clock and no `Tuning`,
- * so it depends only on Entries and the code (LOG-10), and it never throws.
+ * Advances one Network's {@link Standing} by one Entry. Reads no clock and no `Tuning` but
+ * what an `attempt` recorded, so it depends only on Entries and the code (LOG-10), and it
+ * never throws.
  * @param standing - The Standing so far, which stays as it is.
  * @param entry - The next Entry. One for another Network changes nothing.
  * @returns The Standing after that Entry.
  */
 export const reduceStanding = (standing: Standing, entry: Entry): Standing =>
-  advance(standing, entry, readLine(entry)).standing;
+  advance(standing, entry, readLine(standing, entry)).standing;
 
 /**
  * Advances every Network's {@link Standing} by a run of Entries, parsing each Line once.
@@ -1107,7 +1187,9 @@ export const foldStandings = (
         advanced(network, before, entry, undefined);
       }
     } else if (entry._tag !== "Change") {
-      advanced(entry.network, folded.get(entry.network) ?? noStanding, entry, readLine(entry));
+      const before = folded.get(entry.network) ?? noStanding;
+
+      advanced(entry.network, before, entry, readLine(before, entry));
     }
   }
 

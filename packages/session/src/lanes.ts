@@ -39,6 +39,11 @@ export interface QueuedLine {
   readonly outcome: Deferred.Deferred<number, LineFailure>;
   /** What the Log records in place of a Line built from Credentials (LOG-6). */
   readonly sensitive?: Sensitive;
+  /**
+   * When the Line stops being worth sending, in epoch milliseconds. One that reaches the
+   * head of its lane at or after this is not written: it is Dropped, and takes no token.
+   */
+  readonly expiresAt?: number;
 }
 
 /** How many Lines wait in each lane. */
@@ -229,7 +234,12 @@ export interface PumpWire {
   readonly writeFailed: (reason: string) => Effect.Effect<void>;
   /** A recorded Line whose write did not complete, which the close records as Dropped. */
   readonly unwritten: (queued: QueuedLine, reason: string) => Effect.Effect<void>;
+  /** A Line taken after its `expiresAt`, never recorded as sent, to be recorded as Dropped. */
+  readonly expired: (queued: QueuedLine) => Effect.Effect<void>;
 }
+
+/** Why a Line taken after its `expiresAt` is Dropped. */
+const expiredReason = "it waited in its lane past the time it was worth sending";
 
 /** Why a write that the kernel would not take for too long failed. */
 export const writeTimedOut = "write timed out";
@@ -359,12 +369,21 @@ export const runPump = (pumpLanes: PumpLanes, tuning: Tuning, wire: PumpWire) =>
           : pumpLanes.awaitLine(true)
       );
 
-      const token = takeToken(bucket, limit, yield* Clock.currentTimeMillis);
+      const takenAt = yield* Clock.currentTimeMillis;
+      const token = takeToken(bucket, limit, takenAt);
       const taken = yield* pumpLanes.takeNext(token !== undefined);
 
+      // A Line past its time goes nowhere, so the next one has the token it would have spent.
       if (Option.isSome(taken)) {
-        bucket = taken.value.lane === "control" ? bucket : (token ?? bucket);
-        yield* transmit(taken.value);
+        const { expiresAt } = taken.value;
+
+        if (expiresAt !== undefined && takenAt >= expiresAt) {
+          yield* wire.expired(taken.value);
+          yield* Deferred.fail(taken.value.outcome, new LineDropped({ reason: expiredReason }));
+        } else {
+          bucket = taken.value.lane === "control" ? bucket : (token ?? bucket);
+          yield* transmit(taken.value);
+        }
       }
     });
 

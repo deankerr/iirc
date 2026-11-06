@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { ctcpReply, ctcpText, parseCtcp } from "./ctcp.ts";
+import { ctcpReply, ctcpText, parseCtcp, parseReplyTarget } from "./ctcp.ts";
 import type { Ctcp, CtcpText } from "./ctcp.ts";
 import { encodeLine } from "./outbound.ts";
 import { randomText, seededRandom } from "./random.fixture.ts";
@@ -90,9 +90,52 @@ describe(ctcpText, () => {
   });
 });
 
+const prefixes = { chantypes: "#&", statusmsg: "@+" };
+
+const userNamed = (nick: string) => {
+  const target = parseReplyTarget(nick, prefixes);
+
+  if (target === undefined) {
+    throw new Error(`Expected ${nick} to be a nick`);
+  }
+
+  return target;
+};
+
+describe(parseReplyTarget, () => {
+  it.each(["alice", "a[b]", "x{1}^", "_under", "Bob|away"])("HOST-3 takes %j, a nick", (nick) => {
+    expect(parseReplyTarget(nick, prefixes)?.toString()).toBe(nick);
+  });
+
+  it.each([
+    "#victims",
+    "&local",
+    "$*.test",
+    "@#chan",
+    "+#chan",
+    "a,b",
+    "a b",
+    "a*",
+    "a?",
+    "a!b",
+    "a@b",
+    ":a",
+    "",
+    "1abc",
+  ])("HOST-3 refuses %j, which could name a Channel or a mask", (nick) => {
+    expect(parseReplyTarget(nick, prefixes)).toBeUndefined();
+  });
+
+  it("HOST-3 refuses a nick starting with a prefix the Network has in force", () => {
+    expect(parseReplyTarget("=odd", prefixes)?.toString()).toBe("=odd");
+    expect(parseReplyTarget("=odd", { chantypes: "#=", statusmsg: "" })).toBeUndefined();
+    expect(parseReplyTarget("^odd", { chantypes: "#", statusmsg: "^" })).toBeUndefined();
+  });
+});
+
 describe(ctcpReply, () => {
   it("PROT-4 goes out as a NOTICE, on one Line", () => {
-    const built = ctcpReply("alice", safeText("VERSION", "iirc"));
+    const built = ctcpReply(userNamed("alice"), safeText("VERSION", "iirc"));
 
     expect(built._tag).toBe("Safe");
     expect(built._tag === "Safe" && new TextDecoder().decode(encodeLine(built.line))).toBe(
@@ -100,15 +143,8 @@ describe(ctcpReply, () => {
     );
   });
 
-  it.each(["", "a,b", "a b", ":a"])("rejects %j as a Target", (target) => {
-    expect(ctcpReply(target, safeText("PING", "1"))).toStrictEqual({
-      _tag: "Rejected",
-      reason: "InvalidTarget",
-    });
-  });
-
   it("rejects a reply too long to fit a Line", () => {
-    expect(ctcpReply("alice", safeText("PING", "x".repeat(600)))).toStrictEqual({
+    expect(ctcpReply(userNamed("alice"), safeText("PING", "x".repeat(600)))).toStrictEqual({
       _tag: "Rejected",
       reason: "TooLong",
     });

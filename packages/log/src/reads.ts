@@ -5,7 +5,12 @@ import { flow } from "effect/Function";
 
 import { allowBudgets, inBudget, withinBudget } from "./budget.ts";
 import { ReadFailed } from "./errors.ts";
-import type { ActivityQuery, EntryQuery, NetworkPage } from "./reader-protocol.ts";
+import type {
+  ActivityQuery,
+  ConnectionEncoding,
+  EntryQuery,
+  NetworkPage,
+} from "./reader-protocol.ts";
 import { ActivityRow, afterCursor, EntryRow, GapRow, MessageRow } from "./rows.ts";
 
 const within = `${inBudget}(?)`;
@@ -28,6 +33,11 @@ export const statements = {
     WHERE network = ? AND place_kind = ? AND place_key = ? AND (sequence, ordinal) > (?, ?)
       AND ${within}
     ORDER BY sequence, ordinal LIMIT ?
+  `,
+  // A Connection's `attempt` is its own sequence, so this is one row by the primary key.
+  attemptTuning: `
+    SELECT tuning FROM entries
+    WHERE sequence = ? AND kind = 'Connection' AND phase = 'attempt' AND ${within}
   `,
   entries: `SELECT * FROM entries WHERE sequence > ? AND ${within} ORDER BY sequence LIMIT ?`,
   entriesOfKind: `
@@ -70,6 +80,13 @@ const parseActivity = flow(
   Schema.decodeUnknownEffect(Schema.Array(ActivityRow)),
   Effect.mapError(toReadFailed)
 );
+
+// Only the label of an `attempt`'s Tuning, as it was recorded (MSG-4).
+const AttemptEncoding = Schema.Struct({
+  tuning: Schema.fromJsonString(Schema.Struct({ encoding: Schema.optionalKey(Schema.String) })),
+});
+
+const parseEncoding = Schema.decodeUnknownSync(AttemptEncoding);
 
 const parseMessages = flow(
   Schema.decodeUnknownEffect(Schema.Array(MessageRow)),
@@ -208,6 +225,21 @@ export const makeReads = (database: Database, budgetMillis: number) => {
   const activityOfPlace = prepare(statements.activityOfPlace);
 
   const messagesOfNetwork = prepare(statements.messagesOfNetwork);
+  const attemptTuning = prepare(statements.attemptTuning);
+
+  // The encoding each Connection's `attempt` recorded, for those with one. An `attempt`
+  // never changes, so this needs no snapshot shared with the page it decodes.
+  const encodings = ({ connections }: { readonly connections: readonly number[] }) =>
+    withinBudget(budgetMillis, ({ check, deadline }) =>
+      Arr.dedupe(connections).flatMap((connection): ConnectionEncoding[] => {
+        check();
+
+        const row = attemptTuning.get(connection, deadline);
+        const encoding = row === null ? undefined : parseEncoding(row).tuning.encoding;
+
+        return encoding === undefined ? [] : [{ connection, encoding }];
+      })
+    );
 
   // A read of several statements sees one snapshot, or a commit landing between two of
   // them could give a page that skips an Entry below its last sequence, and a cursor
@@ -267,6 +299,7 @@ export const makeReads = (database: Database, budgetMillis: number) => {
 
   return {
     activity: activityPage,
+    encodings,
     entries: (query: EntryQuery) => {
       const { after, kinds, limit, network } = query;
 

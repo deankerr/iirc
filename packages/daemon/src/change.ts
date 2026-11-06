@@ -1,5 +1,5 @@
 import { KeyScope } from "@iirc/api";
-import { defaultTuning } from "@iirc/lifecycle/tuning";
+import { casemappings, defaultTuningNumbers } from "@iirc/lifecycle/tuning";
 import type { Json } from "@iirc/session/entry";
 import { Option, Record as Records, Schema, SchemaGetter } from "effect";
 
@@ -58,11 +58,22 @@ const Credentials = Schema.Struct({
   ),
 });
 
-// The Tuning numbers there are now. One that has since gone is dropped, since nothing runs
-// it, and only today's defaults stand under those kept, as CONF-3 says.
-const Tuning = Schema.Struct(
-  Records.mapEntries(defaultTuning, (_default, key) => [key, Schema.optionalKey(Schema.Int)])
-);
+// The Tuning there is now. A number that has since gone is dropped, since nothing runs it,
+// and only today's defaults stand under those kept, as CONF-3 says. A Change from before the
+// encoding, the casemapping, and the CTCP switches existed left them out, which meant no
+// fallback, the Ircd's own mapping, and today's defaults, as leaving them out still does.
+// An encoding label is folded as it was recorded, whether or not this runtime knows it.
+const Tuning = Schema.Struct({
+  ...Records.mapEntries(defaultTuningNumbers, (_default, key) => [
+    key,
+    Schema.optionalKey(Schema.Int),
+  ]),
+  casemapping: Schema.optionalKey(Schema.Literals(casemappings)),
+  ctcpPing: Schema.optionalKey(Schema.Boolean),
+  ctcpTime: Schema.optionalKey(Schema.Boolean),
+  ctcpVersion: Schema.optionalKey(Schema.Boolean),
+  encoding: Schema.optionalKey(Schema.String),
+});
 
 // A Change from before a Network had services listed them as these.
 const servicesBefore = [

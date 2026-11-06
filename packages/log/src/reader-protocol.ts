@@ -69,6 +69,15 @@ export const ActivityQuery = Schema.Union([
 /** The decoded form of {@link ActivityQuery}. */
 export type ActivityQuery = typeof ActivityQuery.Type;
 
+/** The fallback encoding a Connection's `attempt` recorded, by its label (MSG-4). */
+export const ConnectionEncoding = Schema.Struct({
+  connection: Schema.Int,
+  encoding: Schema.String,
+});
+
+/** The decoded form of {@link ConnectionEncoding}. */
+export type ConnectionEncoding = typeof ConnectionEncoding.Type;
+
 const error = Schema.Union([ReaderBusy, ReadFailed, ReadTimedOut]);
 
 // When the read was sent, in epoch milliseconds, which both threads share, so the Worker
@@ -98,6 +107,11 @@ export class ReaderRpcs extends RpcGroup.make(
     success: Schema.Array(Schema.toType(EntryRow)),
   }),
   Rpc.make("messages", { error, payload: QueuedNetworkPage, success: Schema.Array(MessageRow) }),
+  Rpc.make("encodings", {
+    error,
+    payload: Schema.Struct({ connections: Schema.Array(Schema.Int), ...queued }),
+    success: Schema.Array(ConnectionEncoding),
+  }),
   Rpc.make("activity", {
     error,
     payload: QueuedActivityQuery,

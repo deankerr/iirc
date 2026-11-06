@@ -1,3 +1,6 @@
+import { decodeBytes } from "./decode.ts";
+import type { FallbackEncoding } from "./decode.ts";
+
 /** A single unit of the IRC protocol, parsed from text. */
 export interface Line {
   readonly tags: ReadonlyMap<string, string>;
@@ -13,18 +16,6 @@ export type UnparseableReason = "Empty" | "NoCommand";
 export type Parsed =
   | { readonly _tag: "Line"; readonly text: string; readonly line: Line }
   | { readonly _tag: "Unparseable"; readonly text: string; readonly reason: UnparseableReason };
-
-const strictDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-const fallbackDecoder = new TextDecoder("latin1");
-
-const decode = (frame: Uint8Array) => {
-  try {
-    return strictDecoder.decode(frame);
-  } catch {
-    // Older networks are not UTF-8, and any bytes are valid latin1.
-    return fallbackDecoder.decode(frame);
-  }
-};
 
 const tagEscapes = new Map([
   [":", ";"],
@@ -150,14 +141,17 @@ export const parseLine = (text: string): Parsed => {
 };
 
 /**
- * Parses one frame of bytes, falling back to latin1 when they are not UTF-8.
+ * Parses one frame of bytes, decoded as {@link decodeBytes} reads them: as UTF-8, else in
+ * the fallback encoding, else as ISO-8859-1, so it never fails (MSG-4).
  * @param frame - The frame's bytes, without its line ending.
+ * @param fallback - The Connection's fallback encoding, if it has one.
  * @returns The parsed Line, or the reason there isn't one.
  */
-export const parseFrame = (frame: Uint8Array) => parseLine(decode(frame));
+export const parseFrame = (frame: Uint8Array, fallback?: FallbackEncoding) =>
+  parseLine(decodeBytes(frame, fallback).text);
 
-// One character per byte. Not `fallbackDecoder`: WHATWG's "latin1" is windows-1252,
-// which maps 0x80 to 0x9f elsewhere, so its text would not map back to the same bytes.
+// One character per byte, as ISO-8859-1. Not WHATWG's "latin1", which is windows-1252 and
+// maps 0x80 to 0x9f elsewhere, so its text would not map back to the same bytes.
 const byteText = (frame: Uint8Array) =>
   Array.from(frame, (byte) => String.fromCodePoint(byte)).join("");
 

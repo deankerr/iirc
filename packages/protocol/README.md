@@ -13,11 +13,11 @@ Each module is its own export path, such as `@iirc/protocol/line`. There is no r
 | Path | Main exports | Role |
 | --- | --- | --- |
 | `./frame` | `takeFrames`, `maxFrameBytes` | Splits a byte stream into frames, cutting any over 8704 bytes (HOST-2) |
-| `./line` | `parseLine`, `parseFrame`, `pingToken`, `Line`, `Parsed` | Parses one frame without ever throwing. Falls back to Latin-1 when bytes are not UTF-8 |
+| `./line` | `parseLine`, `parseFrame`, `pingToken`, `Line`, `Parsed` | Parses one frame without ever throwing. `parseFrame(bytes, fallback?)` decodes with `decodeBytes`: UTF-8, then the Connection's fallback, then Latin-1 (MSG-4) |
 | `./outbound` | `outbound`, `privmsg`, `notice`, `quit`, `user`, `part`, `channelRead`, `pong`, `encodeLine`, `OutboundLine` | Builds a Line that cannot smuggle in a second command, or says why it cannot |
 | `./decode` | `decodeBytes`, `parseFallbackEncoding`, `Decoded`, `FallbackEncoding` | Bytes to text: UTF-8, then the configured fallback, then Latin-1. Never fails, and says which it used (MSG-4) |
 | `./format` | `parseFormatting`, `stripFormatting`, `plainStyle`, `Span`, `Style`, `Colour` | mIRC formatting codes as spans of text and style, or stripped (MSG-3) |
-| `./ctcp` | `parseCtcp`, `ctcpText`, `ctcpReply`, `Ctcp`, `CtcpText` | Reads `ACTION`, `DCC`, and other CTCP out of a Message's text, and builds a CTCP reply that is safe to send (PROT-2, PROT-5) |
+| `./ctcp` | `parseCtcp`, `ctcpText`, `ctcpReply`, `parseReplyTarget`, `Ctcp`, `CtcpText`, `ReplyTarget` | Reads `ACTION`, `DCC`, and other CTCP out of a Message's text, and builds a CTCP reply that is safe to send, to a `ReplyTarget`: a nick that `parseReplyTarget` read as a User, never a Channel, a `STATUSMSG` Target, or a mask, under the prefixes the Network has in force (PROT-2, PROT-4, PROT-5, HOST-3) |
 | `./replies` | `parseStandardReply`, `StandardReply` | `FAIL`, `WARN`, and `NOTE` Lines as kind, command, code, context, and description (PROT-6) |
 | `./nick` | `nickCandidates`, `isNick`, `nickLine` | The fixed, finite list of nicks to try (CONN-4) |
 | `./join` | `joinBatches`, `joinLines`, `channelKey`, `isChannelName`, `joinRejection` | `JOIN` Lines by byte length, keyed Channels first (SEND-11), and the ASCII fold Configuration compares Channels by |
@@ -57,7 +57,7 @@ if (reply._tag === "Safe") {
 
 ## Traps
 
-- `latin1` as a `TextDecoder` label is `windows-1252`, which maps bytes `0x80` to `0x9f` to other characters. `decodeBytes` falls back to real ISO-8859-1, where each byte is the code point of the same value. `parseFallbackEncoding("latin1")` gives `windows-1252`. `parseFrame`'s own fallback still uses the WHATWG label, until `decodeBytes` replaces it.
+- `latin1` as a `TextDecoder` label is `windows-1252`, which maps bytes `0x80` to `0x9f` to other characters. `decodeBytes` falls back to real ISO-8859-1, where each byte is the code point of the same value. `parseFallbackEncoding("latin1")` gives `windows-1252`. `parseFrame` decodes through `decodeBytes`, so with no fallback a byte from `0x80` to `0x9f` is the C1 control of that value, never `€`.
 - `x-user-defined` is refused as a fallback, because Bun drops every byte above `0x7f` when it decodes.
 - A colour of `99` is the default colour, so it is `undefined` in a `Style` and not a `Palette` colour.
 - A colour code with no colour after it resets both colours and consumes nothing else, so `\x03,` shows the comma and `\x0312,x` shows `,x`. A `\x04` needs exactly six hex digits to count as a colour.

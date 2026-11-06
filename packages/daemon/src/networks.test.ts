@@ -272,6 +272,23 @@ describe("Networks through the API", () => {
             "Expected a value between 1 and 10000",
           ],
           [{ ...base, tuning: "soon" }, ["payload", "tuning"], ""],
+          // MSG-4: an encoding no decoder here reads would be ignored, so it is refused.
+          [
+            { ...base, tuning: { encoding: "klingon" } },
+            ["payload", "tuning", "encoding"],
+            "not an encoding label this Daemon can decode",
+          ],
+          [
+            { ...base, tuning: { casemapping: "permissive" } },
+            ["payload", "tuning", "casemapping"],
+            "",
+          ],
+          [{ ...base, tuning: { ctcpTime: "on" } }, ["payload", "tuning", "ctcpTime"], ""],
+          [
+            { ...base, tuning: { ctcpNetworkLimit: 1000 } },
+            ["payload", "tuning", "ctcpNetworkLimit"],
+            "between 1 and 100",
+          ],
           [{ ...base, channels: [{ name: "bad name" }] }, ["payload", "channels", 0, "name"], ""],
           [
             { ...base, channels: [{ name: "#a" }, { name: "#A" }] },
@@ -344,6 +361,45 @@ describe("Networks through the API", () => {
         }
 
         assert.deepStrictEqual(yield* client.networks.list(), []);
+      })
+    )
+  );
+
+  it.live("CONF-3: sets and clears the encoding, the casemapping, and CTCP replies", () =>
+    withDaemon(({ client }) =>
+      Effect.gen(function* () {
+        const tuning = {
+          casemapping: "rfc1459-strict",
+          ctcpNetworkLimit: 3,
+          ctcpNetworkWindowMillis: 30_000,
+          ctcpPing: false,
+          ctcpTime: true,
+          ctcpUserIntervalMillis: 5000,
+          ctcpVersion: false,
+          encoding: "windows-1251",
+        } as const;
+
+        const off = settingsFor("libera", { port: 1 }, { enabled: false });
+        const params = { params: { id: "libera" } };
+
+        yield* client.networks.add({ payload: { ...off, tuning } });
+
+        assert.deepStrictEqual((yield* client.networks.get(params)).settings.tuning, tuning);
+
+        // Each one cleared, alone, leaves the rest as they were.
+        for (const key of Object.keys(tuning)) {
+          const rest = Object.fromEntries(
+            Object.entries(tuning).filter(([other]) => other !== key)
+          );
+
+          yield* client.networks.change({ ...params, payload: { ...off, tuning: rest } });
+
+          assert.deepStrictEqual((yield* client.networks.get(params)).settings.tuning, rest);
+        }
+
+        yield* client.networks.change({ ...params, payload: { ...off, tuning: {} } });
+
+        assert.deepStrictEqual((yield* client.networks.get(params)).settings.tuning, {});
       })
     )
   );

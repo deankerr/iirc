@@ -49,7 +49,7 @@ BunRuntime.runMain(Layer.launch(app)); // SIGINT and SIGTERM stop it cleanly (RU
 ## Key ideas
 
 - **Configuration is a fold over Change Entries** ([ADR 0004](../../docs/adr/0004-configuration-lives-in-the-log.md)). `reduceConfiguration` folds one Change. The Daemon decodes every Change at startup and refuses to start on one it cannot read (CONF-1).
-- **Stored Changes have their own Schemas,** in `change.ts`. They hold shapes and the defaults that absent fields meant then, never today's rules, so a tightened rule cannot keep an old Log from starting.
+- **Stored Changes have their own Schemas,** in `change.ts`. They hold shapes and the defaults that absent fields meant then, never today's rules, so a tightened rule cannot keep an old Log from starting. A Change from before the encoding, the casemapping, and CTCP replies were Tuning left them out, which reads as no fallback, the Ircd's mapping, and today's CTCP defaults. An encoding label is folded as recorded, and one this runtime cannot decode with gives no fallback.
 - **One permit for every Change.** An operation checks itself against Configuration, records its Change, and folds the recorded Entry under one `Semaphore`, so nothing can overtake it.
 - **One host per Network,** in a `FiberMap` keyed by Network ID. Each host reads its settings from a `SubscriptionRef` of Configuration plus Credentials, and is woken by its changes. Removing a Network closes its host's Scope, which says `QUIT`.
 - **Keys are a second fold over the same Changes:** name, scope, and SHA-256. `findKey` hashes what was presented and compares it in constant time against every stored hash ([ADR 0006](../../docs/adr/0006-proportionate-security.md)).
@@ -67,7 +67,7 @@ BunRuntime.runMain(Layer.launch(app)); // SIGINT and SIGTERM stop it cleanly (RU
 
 ## Field vocabulary
 
-`toLogEntry` in `./routes` turns an `Entry` into the API's `LogEntry`, adding `text` and, for an unparseable Line, `reason`. Its return type is checked with `IfFieldsOfEntry`, so a kind or field added to `Entry` fails to compile here until the contract catches up. [`@iirc/session`](../session/README.md#field-vocabulary) has the whole table.
+`toLogEntry` in `./routes` turns an `Entry` into the API's `LogEntry`, adding `text` and, for an unparseable Line, `reason`. `text` is decoded with the fallback the Entry's Connection recorded in its `attempt`, which `Daemon.entries` looks up with `LogReader.encodings` for each Connection in the page, so `/entries` reads bytes as `Standing` did (MSG-4). Its return type is checked with `IfFieldsOfEntry`, so a kind or field added to `Entry` fails to compile here until the contract catches up. [`@iirc/session`](../session/README.md#field-vocabulary) has the whole table.
 
 ## Traps
 

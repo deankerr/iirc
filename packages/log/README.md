@@ -11,7 +11,7 @@ The Daemon's durable Log, in SQLite. It is the durable `Recorder` and `Committed
 | --- | --- |
 | `Log` | The writer. `Log.layer({ dataDir })` provides `Log`, `Recorder`, and `Committed`, and holds the data directory's lock |
 | `Log` operations | `entries`, `changes`, `messages`, `activity`, `gaps`, `head`, `rebuild` (LOG-10), and `redact` (LOG-7). These read on the writer's connection, so only startup and tests use them |
-| `LogReader` | Reads for Frontends: `entries`, `messages`, `activity`, `gaps`, and `backup`, each from a Worker. The four reads have a time budget; `backup` has none, and runs as long as the Log's size needs. `activity` filters by Network, and by a place on it, and pages by an `ActivityCursor` |
+| `LogReader` | Reads for Frontends: `entries`, `encodings`, `messages`, `activity`, `gaps`, and `backup`, each from a Worker. The reads have a time budget; `backup` has none, and runs as long as the Log's size needs. `activity` filters by Network, and by a place on it, and pages by an `ActivityCursor`. `encodings` gives the fallback label each Connection's `attempt` recorded, one primary-key lookup a Connection, so `/entries` decodes a Line's bytes as `Standing` did (MSG-4) |
 | `LogReader.layer({ dataDir, budget? })` | Starts the reader's Worker. Needs `Log` |
 | `inProcessReader({ dataDir, budget? })`, from `./testing` | A `LogReader` for tests not about the Worker: the same reads on its own read-only connection, on the caller's thread, with no Worker to start. Needs `Log` |
 | `longestReadMillis` | The longest a read waits under the default budget, for anything that waits on reads in flight |
@@ -34,6 +34,7 @@ const storage = Layer.mergeAll(Log.layer({ dataDir: "/tmp/iirc" }), Transport.la
 ## Storage
 
 - **One file,** `iirc.sqlite` in the data directory, in WAL mode with `synchronous=FULL` (LOG-4).
+- **An `attempt` keeps its whole Tuning as JSON.** One written before the encoding, the casemapping, and CTCP replies were Tuning reads as no fallback, the Ircd's mapping, and the CTCP defaults, written out in the row codec so that a new default cannot rewrite history (CONF-1). Fields were only added, so this needed no migration: a binary before it ignores them.
 - **One `entries` table** for every kind of Entry, `STRICT`, with indexes by Network, by kind, and by both, so each reader filter is a range over an index.
 - **Derived tables:** `messages`, `activity`, and `gaps`. They are created at startup and not by a migration, because anyone may drop them, and the startup rebuild fills them again (LOG-10). A derived table whose columns are not this binary's is dropped first, so a table's shape can change with the code and never needs a migration.
 - **Startup is one pass over Entries:** it rebuilds every derived table, every Network's `Standing`, and every Network's Direct Message partners through `foldEntries`, the same fold `record` uses, so a rebuilt table can only differ from a live one if the code did.

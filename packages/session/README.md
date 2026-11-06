@@ -13,9 +13,10 @@ Hosts one Network with Effect: dials Ircds, records every Line before acting on 
 | `./network` | `hostNetwork`, `constantNetwork`, `NetworkSettings`, `NetworkHost`, `NetworkStatus`, `NotInSession`, `LaneFull`, `LineDropped`, `WriteFailed` | Stays on a Network for as long as a Scope lasts, with `send` and `status` |
 | `./recorder` | `Recorder`, `Committed`, `MemoryEntries`, `Watched`, `Overflowed`, `RecordFailed`, `makeWatchers` | Records Entries before anything acts on them, and watches them as they commit |
 | `./entry` | `Entry`, `NewEntry`, `Ircd`, `TlsDetails`, `IfFieldsOfEntry` | The Entry kinds, which this package owns |
-| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `ChannelReads`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
+| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `fallbackOf`, `nextAttempt`, `joinPlan`, `ChannelReads`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
 | `./reads` | `readPlan`, `readPlanMoved`, `movesReads`, and the read constants | Which reads of the Channels Self is in to send now, and when to look again (KNOW-5, KNOW-6) |
-| `./events` | `toEvent`, `stepEntry` | The one mapping from an Entry to a machine event |
+| `./ctcp` | `ctcpAnswer`, `ctcpRepliesIn`, `CtcpReplies`, `utcTime`, and the CTCP constants | Whether to answer a CTCP request and with what, and the window of replies that limits it (PROT-3, PROT-4, HOST-3) |
+| `./events` | `toEvent`, `stepEntry` | The one mapping from an Entry to a machine event, decoding a Line with its Connection's fallback |
 | `./transport` | `Transport`, `ConnectFailed` | Dials TCP or TLS, verifies or pins, and reads with backpressure |
 | `./credentials` | `passLine`, `identifyLine`, `connectCommandLine`, `keyedJoins`, `missingCredentials` | Lines built from Credentials, marked sensitive where they are built |
 | `./testing` | `fakeIrcd`, `scriptedIrcd`, `testWire`, `testAuthority`, `eventually` | Ircds and certificates for tests, with no real network |
@@ -72,7 +73,8 @@ Closing the Scope says `QUIT` and waits up to `quitWaitMillis`.
 
 - **Record, then act.** `Recorder.record(entries, within)` appends atomically and runs `within` in the same transaction. The host steps the machine there, and runs its Commands after commit (LOG-4).
 - **`Standing` is everything a host needs from the past:** the Connection under way and its machine, recent outcomes, `@iirc/state` for the Session, kicks, `JOIN` failures, what has been read and asked of each Channel, lag, and the latest Gap. Both Recorders update it in the same transaction, and the host holds no copy, not even of the machine: a commit steps the machine Standing holds, and the loop waits on its deadline. Reading it cannot fail.
-- **Decisions are pure functions of `Standing`.** `nextAttempt` gives backoff, jitter seeded by sequence, and Ircd rotation (LIVE-4, LIVE-5). `joinPlan` gives what to `JOIN` now and when to look again (LIVE-7, LIVE-8). `readPlan` gives which reads to send now and when to look again (KNOW-5, KNOW-6). One reconciler carries out both, joins first, one Line at a time, through the background lane.
+- **Decisions are pure functions of `Standing`.** `nextAttempt` gives backoff, jitter seeded by sequence, and Ircd rotation (LIVE-4, LIVE-5). `joinPlan` gives what to `JOIN` now and when to look again (LIVE-7, LIVE-8). `readPlan` gives which reads to send now and when to look again (KNOW-5, KNOW-6). One reconciler carries out both, joins first, one Line at a time, through the background lane. `ctcpAnswer` gives whether to answer a CTCP request and with what (PROT-3, PROT-4), and a commit sends what it decided.
+- **An `attempt` says how its Connection is read.** `Standing.attempt` holds the Tuning the `attempt` recorded, and the `FallbackEncoding` its `encoding` parses to, if this runtime knows it. Every Line and Dropped Entry of that Connection is decoded with it, by `Standing`, the machine, and `/entries` alike, so decoding is a fold over the Log, and a rebuild reads each Connection as live did, whatever the Owner changed since (MSG-4). Its `casemapping`, when set, is forced on each Session's `IrcState` through `sessionState`, and kept between Sessions until an `attempt` forces none (KNOW-3).
 - **A host reads its settings; nothing pushes them.** `settings` is read whenever the host decides something, and `changes` wakes it. Ircds, Identity, and Tuning apply at the next `attempt`, and the rest at once (CONF-2).
 - **One Connection, three lanes, one pump.** Control, interactive, and background, in strict priority (SEND-1). The pump records each Line as it leaves, then writes it. When the Connection ends, what is queued becomes Dropped Entries in the same commit as `closed` (SEND-4).
 - **Sensitive Lines are marked where they are built** (LOG-6): a Line built from Credentials arrives at the Recorder already as the Log holds it, with its values `<redacted>` and their names. Nothing searches Lines for a Credential's value ([ADR 0008](../../docs/adr/0008-credentials-are-held-not-hunted.md)). The host acts on the Entry as recorded.
@@ -99,6 +101,29 @@ The `JOIN` brings a Channel's members and topic, so the Daemon only asks for wha
 
 These are named constants in `./reads`, not `Tuning`, until an Owner has a reason to change one.
 
+## Answering CTCP
+
+`ctcpAnswer(standing, entry, line)` is a pure function of Standing just before an inbound Line, and of the Line, which says whether to answer it and with what (PROT-3, PROT-4, HOST-3). It answers `VERSION` with `iirc` and `PING` by echoing its argument, and `TIME` with the time in UTC as ISO 8601 to the second with `Z`, from the Entry's own time, never the process's timezone, so a replay says the same, only when the Owner turns it on. Each is a switch in the Connection's Tuning, as its `attempt` recorded it. Nothing else is answered: not `CLIENTINFO`, `USERINFO`, `FINGER`, `DCC` (PROT-5), nor anything in a `NOTICE`. Nor is a Line the Network's Timeline takes (MSG-2): before the welcome, to `*` or `AUTH`, from a source that is not `nick!user@host`, or to a `$` mask. The reply goes to the sender's nick only once `parseReplyTarget` in `@iirc/protocol` has read it as a User, a `ReplyTarget`, which is the only Target `ctcpReply` takes: nothing that is not a nick, and nothing starting with a Channel or `STATUSMSG` prefix the Network has in force, so a forged `#victims!u@h` or `$*.test!u@h` draws no reply (HOST-3). Nor is Self, a `PING` argument over 128 bytes, a reply that cannot be built, or anything on a Connection that is closing.
+
+- **The limits are a fold, not a count in the host.** `Standing.ctcp` holds when each User was last answered, with their nick as spelled, and the latest replies on the Network. It outlasts every Connection, so neither a reconnect nor a restart resets a limit.
+  - **A reply counts from when it is decided,** at its request's time, so 20 requests in one read still get 5. It is pending, holding its `NOTICE`, and counts however old, until the Log records it sent, when it counts from then, or Dropped, when it counts no more and its `NOTICE` is let go. A User with a reply pending gets no other.
+  - **One that waits too long is Dropped.** The host queues a reply to expire a `ctcpNetworkWindowMillis` after it was decided. One that reaches the head of the lane after that is not written: it is Dropped with `replyExpired`, through the same path as one refused by a full lane, and takes no flood token. Every reply sent was decided while fewer than the limit were pending or sent within the window, so no more than the limit leave in any window, however long the lane is held up.
+  - **Nothing pending outlives its Connection.** Its end, recorded or found by the next start after a kill, lets go of every reply still pending (SEND-4).
+  - **Users are keyed again when the mapping changes,** mid-Session or on a new Session, from each nick as spelled, as the Log's Direct Message partners are. Where two become one User, the later time stands (KNOW-3).
+  - Any other CTCP `NOTICE` Self sends, such as the Owner's own through Raw, counts once recorded.
+- **Replay decides the same and sends nothing.** A commit reads Standing after it, in the same unit, and `ctcpRepliesIn` gives the replies decided for what it recorded. The host offers each to the background lane without waiting, so a reply never goes ahead of a Message or a `PONG` (SEND-1), and one that finds the lane full or the Connection closing is Dropped. A request the limits refuse is recorded nowhere new: its Line and its Activity row are all there is.
+- **Bounded.** At most 100 replies, which is the most `ctcpNetworkLimit` may be and so the most that can be pending, so any limit is counted exactly, and 256 Users. A User is let go of only once their interval has run out. While all 256 are inside theirs, a new User gets no reply, which the default limits never come near. Only an Owner's own `NOTICE`, already sent, can then push out the User held longest.
+
+| Constant | Value | Why |
+| --- | --- | --- |
+| `versionReply` | `iirc` | PROT-3 |
+| `longestPingArgument` | 128 bytes | A `PING` carries a timestamp, and the echo must fit in a Line with the prefix an Ircd adds |
+| `heldReplyTimes` | 100 | The most `ctcpNetworkLimit` may be |
+| `heldRepliedUsers` | 256 | Far more Users than the default limits answer within an interval |
+| `replyExpired` |  | Why a reply that waited in its lane past its window is Dropped |
+
+A `PING` argument that arrived in the fallback encoding is echoed as UTF-8, because the reply is built from text.
+
 ## Watching what commits
 
 `Committed.watch` gives a Stream of `Entry | Overflowed`.
@@ -116,6 +141,7 @@ These are named constants in `./reads`, not `Tuning`, until an Owner has a reaso
 - `Standing` holds at most 64 Connection outcomes and 1024 Channels per map.
 - `joinPlanMoved` compares which Channels Self is in, not what is in them, and `readPlanMoved` adds only the reads and whether each Channel is uncertain, so members, topics, and modes moving never wake the reconciler.
 - `Standing.reads` holds at most 1024 Channels, and only Channels Self is in on this Session.
+- `Standing.ctcp` holds at most 100 reply times and 256 Users, and outlasts every Session.
 
 ## Field vocabulary
 
@@ -125,7 +151,7 @@ These are named constants in `./reads`, not `Tuning`, until an Owner has a reaso
 | --- | --- | --- |
 | Entry kinds and their fields | `Entry` here | `EntryRow` in `@iirc/log`, and `toLogEntry` in `@iirc/daemon`, each with `IfFieldsOfEntry` |
 | `Ircd` and `TlsDetails` | Here | The row codec in `@iirc/log` |
-| Tuning numbers | `Tuning` in `@iirc/lifecycle` | `TuningSettings` in `@iirc/api`, and the row codec in `@iirc/log` |
+| Tuning fields | `Tuning` in `@iirc/lifecycle` | `TuningSettings` and the `attempt`'s `Tuning` in `@iirc/api`, and the row codec in `@iirc/log` |
 
 - `IfFieldsOfEntry<Codec, Checked, Added>` is `Checked` when each kind's field names match, and otherwise a type naming what is missing and what is unknown, by kind. `Added` is what an adapter adds, such as `text` and `reason` in `LogEntry`.
 
@@ -142,4 +168,4 @@ These are named constants in `./reads`, not `Tuning`, until an Owner has a reaso
 
 ## Requirements
 
-[The Log](../../docs/requirements.md#the-log) (LOG-2, LOG-4 to LOG-6, LOG-8, LOG-9), [Credentials](../../docs/requirements.md#credentials) (CRED-4), [Connecting](../../docs/requirements.md#connecting), [Staying connected](../../docs/requirements.md#staying-connected), [Sending](../../docs/requirements.md#sending), [Channels and Users](../../docs/requirements.md#channels-and-users) (KNOW-5, KNOW-6), and [Hostile input](../../docs/requirements.md#hostile-input).
+[The Log](../../docs/requirements.md#the-log) (LOG-2, LOG-4 to LOG-6, LOG-8, LOG-9), [Credentials](../../docs/requirements.md#credentials) (CRED-4), [Connecting](../../docs/requirements.md#connecting), [Staying connected](../../docs/requirements.md#staying-connected), [Sending](../../docs/requirements.md#sending), [Network state](../../docs/requirements.md#network-state) (KNOW-3), [Channels and Users](../../docs/requirements.md#channels-and-users) (KNOW-5, KNOW-6), [Messages and Activity](../../docs/requirements.md#messages-and-activity) (MSG-4), [Protocol behaviour](../../docs/requirements.md#protocol-behaviour) (PROT-3, PROT-4), and [Hostile input](../../docs/requirements.md#hostile-input) (HOST-3).

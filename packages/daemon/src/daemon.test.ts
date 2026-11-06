@@ -201,6 +201,7 @@ const withFailingReader = <A, E, R>(
           return {
             activity: (query) => unlessFailing(real.activity(query)),
             backup: real.backup,
+            encodings: (connections) => unlessFailing(real.encodings(connections)),
             entries: (query) => unlessFailing(real.entries(query)),
             gaps: (query) => unlessFailing(real.gaps(query)),
             messages: (query) => unlessFailing(real.messages(query)),
@@ -256,6 +257,10 @@ const toBase64Lines = Schema.decodeUnknownSync(
 );
 
 const pageLength = Schema.decodeUnknownSync(Schema.Array(Schema.Unknown));
+
+// How the one Network compares names, as status shows it (KNOW-3).
+const casemappingOf = (harness: Harness) =>
+  Effect.map(harness.client.daemon.status(), ({ networks }) => networks[0]?.casemapping);
 
 const connections = (entries: readonly LogEntry[]) =>
   entries.flatMap((entry) => (entry._tag === "Connection" ? [entry] : []));
@@ -366,6 +371,7 @@ describe("the Daemon", () => {
             head: entries.at(-1)?.sequence ?? 0,
             networks: [
               {
+                casemapping: { forced: false, inForce: "rfc1459", unrecognised: null },
                 closeReason: null,
                 consecutiveFailures: 0,
                 enabled: true,
@@ -389,6 +395,41 @@ describe("the Daemon", () => {
           });
         })
       )
+    );
+
+    it.live("KNOW-3: shows a mapping the Owner forced, and one the Ircd sent unrecognised", () =>
+      Effect.gen(function* () {
+        const forced = yield* withDaemon(
+          (harness) =>
+            Effect.gen(function* () {
+              yield* inSession(harness);
+              yield* harness.ircd.read(":ircd 005 iirc CASEMAPPING=rfc1459 :are supported\r\n");
+
+              return yield* eventually(casemappingOf(harness), (shown) => shown !== null);
+            }),
+          { tuning: { casemapping: "ascii" } }
+        );
+
+        assert.deepStrictEqual(forced, { forced: true, inForce: "ascii", unrecognised: null });
+
+        const fellBack = yield* withDaemon((harness) =>
+          Effect.gen(function* () {
+            yield* inSession(harness);
+            yield* harness.ircd.read(":ircd 005 iirc CASEMAPPING=unheard :are supported\r\n");
+
+            return yield* eventually(
+              casemappingOf(harness),
+              (shown) => shown?.unrecognised !== null
+            );
+          })
+        );
+
+        assert.deepStrictEqual(fellBack, {
+          forced: false,
+          inForce: "ascii",
+          unrecognised: "CASEMAPPING=unheard",
+        });
+      })
     );
 
     it.live("API-5: reports the API's version, and the Daemon's, with no Network at all", () =>
@@ -753,7 +794,7 @@ describe("the Daemon", () => {
       )
     );
 
-    it.live("API-4: returns bytes that are not UTF-8 as base64, beside the text", () =>
+    it.live("API-4, MSG-4: returns bytes that are not UTF-8 as base64, beside the text", () =>
       withDaemon((harness) =>
         Effect.gen(function* () {
           const hostile = new Uint8Array([0x3a, 0x62, 0x20, 0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28]);
@@ -765,7 +806,9 @@ describe("the Daemon", () => {
           const line = lines(entries, "inbound").at(-1);
 
           assert.deepStrictEqual(line?.bytes, hostile);
-          assert.strictEqual(line?.text, new TextDecoder("latin1").decode(hostile));
+          // With no fallback configured, ISO-8859-1: one character per byte, 0x80 included,
+          // which windows-1252 would have read as `€`.
+          assert.strictEqual(line?.text, String.fromCodePoint(...hostile));
 
           // What a Frontend that is not this typed client gets.
           const response = yield* harness.raw(`/api/entries?after=${(line?.sequence ?? 0) - 1}`);
@@ -773,6 +816,42 @@ describe("the Daemon", () => {
 
           assert.strictEqual(wire?.bytes, Buffer.from(hostile).toString("base64"));
         })
+      )
+    );
+
+    it.live("MSG-4: decodes a Line with its Connection's fallback encoding", () =>
+      withDaemon(
+        (harness) =>
+          Effect.gen(function* () {
+            // "Привет" in windows-1251, which is not UTF-8.
+            const said = Uint8Array.of(
+              ...new TextEncoder().encode(":b!u@h PRIVMSG #iirc :"),
+              0xcf,
+              0xf0,
+              0xe8,
+              0xe2,
+              0xe5,
+              0xf2
+            );
+
+            yield* inSession(harness);
+            yield* harness.ircd.read(said, "\r\n");
+
+            const entries = yield* untilEntries(
+              harness,
+              (all) => lines(all, "inbound").length === 2
+            );
+
+            assert.strictEqual(
+              lines(entries, "inbound").at(-1)?.text,
+              ":b!u@h PRIVMSG #iirc :Привет"
+            );
+            assert.deepInclude(connections(entries).at(0), {
+              phase: "attempt",
+              tuning: { ...defaultTuning, encoding: "windows-1251" },
+            });
+          }),
+        { tuning: { encoding: "windows-1251" } }
       )
     );
 

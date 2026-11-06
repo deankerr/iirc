@@ -19,7 +19,7 @@ The Network machine: one Connection's progress from dial to close, as a pure fol
 | `closeReason(snapshot)` | Why the last Connection closed |
 | `NetworkEvent` | `ATTEMPT`, `OPENED`, `LINE`, `PING`, `HEARD`, `LOGIN_SENT`, `CLOSING`, `LEAVING`, `CLOSED`, `DEADLINE` |
 | `Command` | `sendLine`, `sendPong`, `closeConnection`, `burstComplete`, `loginSettled` |
-| `./tuning`: `Tuning`, `defaultTuning` | Every number in LIVE, CONN, and SEND, in milliseconds or Lines, with the requirements' defaults |
+| `./tuning`: `Tuning`, `defaultTuning`, `defaultTuningNumbers`, `casemappings`, `TuningNumberKey`, `TuningSwitchKey` | Every number in LIVE, CONN, SEND, and PROT-4, in milliseconds or Lines, the CTCP switches (PROT-3), the fallback encoding (MSG-4), and a forced casemapping (KNOW-3), with the requirements' defaults. The machine reads only the numbers it needs; the host and `Standing` read the rest from the `attempt` |
 
 ## Usage
 

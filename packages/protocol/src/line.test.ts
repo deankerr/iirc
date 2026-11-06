@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { parseFallbackEncoding } from "./decode.ts";
 import { parseFrame, parseLine, pingToken } from "./line.ts";
 
 const Vectors = Schema.Struct({
@@ -70,10 +71,44 @@ describe(parseLine, () => {
 });
 
 describe(parseFrame, () => {
-  it("falls back to latin1 when the bytes are not UTF-8", () => {
-    const frame = new Uint8Array([...new TextEncoder().encode("PRIVMSG #a :caf"), 0xe9]);
+  const encoder = new TextEncoder();
+
+  it("MSG-4: falls back to ISO-8859-1 when the bytes are not UTF-8", () => {
+    const frame = new Uint8Array([...encoder.encode("PRIVMSG #a :caf"), 0xe9]);
 
     expect(parseFrame(frame)).toMatchObject({ line: { params: ["#a", "café"] } });
+  });
+
+  it("MSG-4: reads 0x80 to 0x9f as the C1 controls, not as windows-1252 would", () => {
+    const frame = new Uint8Array([...encoder.encode("PRIVMSG #a :"), 0x80, 0x9f]);
+
+    expect(parseFrame(frame)).toMatchObject({ line: { params: ["#a", "\u0080\u009F"] } });
+  });
+
+  it("MSG-4: tries the fallback encoding before ISO-8859-1", () => {
+    const cp1251 = parseFallbackEncoding("windows-1251");
+
+    // "Привет" in windows-1251, which is not UTF-8.
+    const frame = new Uint8Array([
+      ...encoder.encode("PRIVMSG #a :"),
+      0xcf,
+      0xf0,
+      0xe8,
+      0xe2,
+      0xe5,
+      0xf2,
+    ]);
+
+    expect(parseFrame(frame, cp1251)).toMatchObject({ line: { params: ["#a", "Привет"] } });
+    expect(parseFrame(frame)).toMatchObject({ line: { params: ["#a", "Ïðèâåò"] } });
+  });
+
+  it("MSG-4: reads UTF-8 as UTF-8 whatever the fallback", () => {
+    const frame = encoder.encode("PRIVMSG #a :Привет");
+
+    expect(parseFrame(frame, parseFallbackEncoding("windows-1251"))).toMatchObject({
+      line: { params: ["#a", "Привет"] },
+    });
   });
 
   it("survives invalid UTF-8 in tags", () => {

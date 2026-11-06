@@ -19,7 +19,12 @@ import type {
 import type { LoggedActivity, LoggedMessage } from "./fold.ts";
 import { holdDataDirectory } from "./lock.ts";
 import type { LogTooNew } from "./migrations.ts";
-import type { ActivityQuery, EntryQuery, NetworkPage } from "./reader-protocol.ts";
+import type {
+  ActivityQuery,
+  ConnectionEncoding,
+  EntryQuery,
+  NetworkPage,
+} from "./reader-protocol.ts";
 import { makeReader } from "./reader.ts";
 import type { LogReaderOptions } from "./reader.ts";
 import type { ActivityPage } from "./rows.ts";
@@ -42,7 +47,13 @@ export { LogTooNew } from "./migrations.ts";
 
 export type { ActivityDetails, ActivityKind, LoggedActivity, LoggedMessage } from "./fold.ts";
 
-export type { ActivityQuery, EntryQuery, NetworkPage, PlaceKey } from "./reader-protocol.ts";
+export type {
+  ActivityQuery,
+  ConnectionEncoding,
+  EntryQuery,
+  NetworkPage,
+  PlaceKey,
+} from "./reader-protocol.ts";
 
 export type { ActivityCursor, ActivityPage } from "./rows.ts";
 
@@ -181,6 +192,14 @@ export class LogReader extends Context.Service<
      * has no budget to run out of however big the Log (RUN-2). One runs at a time.
      */
     readonly backup: Effect.Effect<Backup, StorageFailed>;
+    /**
+     * The fallback encoding each Connection's `attempt` recorded, by the sequence of that
+     * `attempt`, for those with one, so that a reader decodes a Connection's Lines as its
+     * Standing did (MSG-4). A sequence that is no `attempt` has none.
+     */
+    readonly encodings: (
+      connections: readonly number[]
+    ) => Effect.Effect<readonly ConnectionEncoding[], ReaderBusy | ReadTimedOut | StorageFailed>;
     /**
      * Entries with a sequence greater than `after`, ascending, at most `limit`, from every
      * Network unless `network` names one, and of every kind unless `kinds` lists some.

@@ -1,4 +1,5 @@
 import { upperCaseAscii } from "./line.ts";
+import { isNick } from "./nick.ts";
 import { notice } from "./outbound.ts";
 import type { Outbound } from "./outbound.ts";
 
@@ -116,11 +117,62 @@ export const ctcpText = (command: string, args: string): CtcpTextResult => {
   return { _tag: "Safe", text: new Payload(`${delimiter}${body}${delimiter}`) };
 };
 
+class Nick {
+  // Private, so that nothing but this module can make one that was not checked.
+  readonly #nick: string;
+
+  constructor(nick: string) {
+    this.#nick = nick;
+  }
+
+  /**
+   * @returns The nick, as the Line named it.
+   */
+  toString() {
+    return this.#nick;
+  }
+}
+
 /**
- * Builds the `NOTICE` that carries a CTCP reply (PROT-4).
- * @param target - The User to answer.
+ * A User's nick that an automatic reply can be addressed to, and never a Channel or a mask
+ * (HOST-3). The only way to get one is {@link parseReplyTarget}.
+ */
+export type ReplyTarget = Nick;
+
+/** What the Network says marks a Channel or a `STATUSMSG` Target, as in force. */
+export interface TargetPrefixes {
+  /** `CHANTYPES`, such as `#&`. */
+  readonly chantypes: string;
+  /** `STATUSMSG`, such as `@+`. */
+  readonly statusmsg: string;
+}
+
+/**
+ * Reads the nick of a request's sender as a User to reply to (HOST-3). A source is whatever
+ * the Ircd relayed, so a forged `#victims!u@h` or `$*.test!u@h` would turn a reply into a
+ * `NOTICE` to a Channel or a mask. Only a nick can be one: nothing that is not a nick, as
+ * `isNick` has it, which refuses a space, `,`, `*`, `?`, `!`, `@`, and `$` or a digit first,
+ * and nothing that starts with a Channel or `STATUSMSG` prefix the Network has in force.
+ * @param nick - The sender's nick, from its source.
+ * @param prefixes - What marks a Channel or a `STATUSMSG` Target on the Network now.
+ * @returns The Target, or `undefined` if the nick could name anything but a User.
+ */
+export const parseReplyTarget = (
+  nick: string,
+  { chantypes, statusmsg }: TargetPrefixes
+): ReplyTarget | undefined => {
+  const first = nick.charAt(0);
+
+  return isNick(nick) && !chantypes.includes(first) && !statusmsg.includes(first)
+    ? new Nick(nick)
+    : undefined;
+};
+
+/**
+ * Builds the `NOTICE` that carries a CTCP reply (PROT-4), to a User and nothing else.
+ * @param target - The User to answer, from {@link parseReplyTarget}.
  * @param text - The reply, from {@link ctcpText}.
  * @returns The safe Line, or why it can't be built, such as a reply too long to fit.
  */
-export const ctcpReply = (target: string, text: CtcpText): Outbound =>
-  notice(target, text.toString());
+export const ctcpReply = (target: ReplyTarget, text: CtcpText): Outbound =>
+  notice(target.toString(), text.toString());

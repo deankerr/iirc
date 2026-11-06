@@ -2,6 +2,7 @@ import { deadline, phase, start } from "@iirc/lifecycle";
 import type { Command, Lane, NetworkSnapshot, Phase } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
+import type { FallbackEncoding } from "@iirc/protocol/decode";
 import { encodeLine, outbound, pong } from "@iirc/protocol/outbound";
 import type { Outbound } from "@iirc/protocol/outbound";
 import { movesChannels } from "@iirc/state";
@@ -31,6 +32,8 @@ import {
   passLine,
 } from "./credentials.ts";
 import type { Built, CredentialNames } from "./credentials.ts";
+import { ctcpRepliesIn, ctcpReplyCause, replyExpired } from "./ctcp.ts";
+import type { DecidedReply } from "./ctcp.ts";
 import { describeDefect } from "./diagnostic.ts";
 import type { Entry, Ircd, NetworkId, NewEntry, TlsDetails } from "./entry.ts";
 import { stepEntry } from "./events.ts";
@@ -43,7 +46,7 @@ import { reconcile } from "./reconcile.ts";
 import { RecordFailed } from "./recorder.ts";
 import type { Recorder } from "./recorder.ts";
 import type { Secrets, Sensitive } from "./redact.ts";
-import { joinPlanMoved } from "./standing.ts";
+import { fallbackOf, joinPlanMoved } from "./standing.ts";
 import type { Standing, WantedChannel } from "./standing.ts";
 import { attach, ConnectFailed, describeSocketError } from "./transport.ts";
 import type { Transport } from "./transport.ts";
@@ -212,9 +215,15 @@ type Order =
       readonly cause: string;
       readonly lane: Lane;
       readonly waits: boolean;
+      /** When it stops being worth sending, if it ever does (PROT-4). */
+      readonly expiresAt?: number;
     };
 
-type Committed = Stepped & { readonly recorded: readonly Entry[] };
+type Committed = Stepped & {
+  readonly recorded: readonly Entry[];
+  /** The CTCP replies Standing decided on for what was recorded, to send after it. */
+  readonly replies: readonly DecidedReply[];
+};
 
 type Commit = (
   entries: Arr.NonEmptyReadonlyArray<NewEntry>,
@@ -251,10 +260,43 @@ type Unread = Effect.Effect<readonly Uint8Array[]>;
 
 const nothingUnread: Unread = Effect.succeed([]);
 
+// A CTCP reply goes through the background lane, so that it never goes ahead of a Message
+// or a `PONG` (SEND-1). It is never waited for: one that finds the lane full is Dropped, so
+// a flood of requests cannot hold the loop up (HOST-3). One still queued a window after it
+// was decided is Dropped as it reaches the head of the lane, so however long the lane is
+// held up, no more than the limit leave in any window (PROT-4).
+const replyOrder =
+  (windowMillis: number) =>
+  ({ decidedAt, line }: DecidedReply): Order => ({
+    built: { _tag: "Safe", line },
+    cause: ctcpReplyCause,
+    expiresAt: decidedAt + windowMillis,
+    lane: "background",
+    type: "sendBuilt",
+    waits: false,
+  });
+
+// What a commit steps when no Connection is under way. Only an `attempt` gives the machine
+// anything to act on, and it brings its own input.
+const noConnection = start({
+  loginLines: 0,
+  realname: "",
+  services: [],
+  tuning: defaultTuning,
+  username: "",
+});
+
+const machineOf = (standing: Standing): NetworkSnapshot =>
+  standing.connection?.machine ?? noConnection;
+
 // A transition that throws leaves the machine where it was and closes the Connection,
 // saying what was thrown (HOST-1).
-const stepRecorded = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
-  const stepped = stepEntry(snapshot, entry);
+const stepRecorded = (
+  snapshot: NetworkSnapshot,
+  entry: Entry,
+  fallback: FallbackEncoding | undefined
+): Stepped => {
+  const stepped = stepEntry(snapshot, entry, fallback);
 
   if (stepped._tag === "Threw") {
     const reason = `the machine threw on Entry ${entry.sequence}: ${stepped.defect}`;
@@ -274,13 +316,19 @@ const stepRecorded = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
   return { commands, next, stateMayMove };
 };
 
-const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepped => {
+// Each Line is decoded with its Connection's fallback, as Standing decodes it (MSG-4).
+const stepEntries = (standing: Standing, entries: Iterable<Entry>): Stepped => {
   const commands: Command[] = [];
   let stateMayMove = false;
-  let next = snapshot;
+  let next = machineOf(standing);
 
   for (const entry of entries) {
-    const stepped = stepRecorded(next, entry);
+    const fallback =
+      entry._tag === "Line" || entry._tag === "Dropped"
+        ? fallbackOf(standing, entry.connection)
+        : undefined;
+
+    const stepped = stepRecorded(next, entry, fallback);
 
     stateMayMove ||= stepped.stateMayMove;
     commands.push(...stepped.commands);
@@ -289,19 +337,6 @@ const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepp
 
   return { commands, next, stateMayMove };
 };
-
-// What a commit steps when no Connection is under way. Only an `attempt` gives the machine
-// anything to act on, and it brings its own input.
-const noConnection = start({
-  loginLines: 0,
-  realname: "",
-  services: [],
-  tuning: defaultTuning,
-  username: "",
-});
-
-const machineOf = (standing: Standing): NetworkSnapshot =>
-  standing.connection?.machine ?? noConnection;
 
 /**
  * Makes the one way a host steps its machine. The loop calls it, and so does the pump for
@@ -316,7 +351,8 @@ const machineOf = (standing: Standing): NetworkSnapshot =>
  * commit, and cancelling one whose commit has begun lets the commit finish. That is also
  * what lets a stop let go of a Recorder that never returns. `after` is how a caller
  * publishes what the commit decided in that same unit, and it must not wait on anything
- * for long.
+ * for long. The CTCP replies Standing decided on for what was recorded are read in the same
+ * unit, so no later commit can come between (PROT-3).
  * @param standing - Reads the Network's Standing as of the last commit.
  * @param record - Appends Entries.
  * @returns The commit.
@@ -333,16 +369,21 @@ export const makeCommit = (
         .withPermit(
           Effect.uninterruptible(
             Effect.gen(function* () {
-              const machine = machineOf(yield* standing);
+              const before = yield* standing;
 
               const stepped = yield* record(entries, (recorded) => ({
-                ...stepEntries(machine, recorded),
+                ...stepEntries(before, recorded),
                 recorded,
               }));
 
-              yield* after?.(stepped) ?? Effect.void;
+              const committed: Committed = {
+                ...stepped,
+                replies: ctcpRepliesIn(yield* standing, stepped.recorded),
+              };
 
-              return stepped;
+              yield* after?.(committed) ?? Effect.void;
+
+              return committed;
             })
           )
         )
@@ -629,7 +670,7 @@ export const hostConnection: (
   // Lines the host builds itself, which may be refused for want of a Credential, or of
   // room in a lane they cannot wait for, and are recorded as Dropped then (OBS-1).
   const offerOwn = Effect.fnUntraced(function* (order: Extract<Order, { type: "sendBuilt" }>) {
-    const { built, cause, lane, waits } = order;
+    const { built, cause, expiresAt, lane, waits } = order;
 
     if (built._tag === "Unsendable") {
       unsend(built.recorded.bytes, cause, built.reason, built.recorded.names);
@@ -643,6 +684,7 @@ export const hostConnection: (
       line: built.line,
       outcome: Deferred.makeUnsafe(),
       ...(built.sensitive !== undefined && { sensitive: built.sensitive }),
+      ...(expiresAt !== undefined && { expiresAt }),
     };
 
     const offered = waits ? yield* offerWaiting(queued) : yield* lanes.offerNow(queued);
@@ -804,7 +846,11 @@ export const hostConnection: (
       pending.unrecorded(entries.filter(({ _tag }) => _tag === "Line"));
       yield* logFailed;
     } else {
-      yield* runCommands([...leading, ...committed.value.commands], drainMillis);
+      const { commands, replies } = committed.value;
+
+      const orders = replies.map(replyOrder(tuning.ctcpNetworkWindowMillis));
+
+      yield* runCommands([...leading, ...commands, ...orders], drainMillis);
       yield* flushUnsent.pipe(Effect.catchTag("RecordFailed", () => logFailed));
 
       if (reconciling && committed.value.stateMayMove) {
@@ -940,6 +986,15 @@ export const hostConnection: (
 
   const pumpWire = (writer: Socket.Writer, tls: boolean): PumpWire => ({
     confirmsLater: tls,
+    // Recorded as Dropped through the same path as one refused by a full lane, and the loop
+    // is woken to commit it, which is what lets Standing stop counting it (PROT-4).
+    expired: (queued) =>
+      Effect.andThen(
+        Effect.sync(() => {
+          pending.dropped(droppedOf(queued, replyExpired));
+        }),
+        Queue.offer(inbox, { _tag: "Stepped", commands: [] })
+      ),
     // A Line built from Credentials is recorded as built with each value `<redacted>`,
     // and written as it is (LOG-6). A Line of the login sequence moves the machine, and
     // the loop is told, because only it can carry out what the machine asks for and it

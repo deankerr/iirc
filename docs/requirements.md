@@ -16,18 +16,18 @@ Reading this document:
 | Area | IDs | Status |
 | --- | --- | --- |
 | [The Log](#the-log) | LOG-1 to LOG-11 | Done. Causes for later behaviours, and the reads behind later surfaces, arrive with them |
-| [Configuration](#configuration) | CONF-1 to CONF-6 | Done, except SASL (M5), notification levels (M4), nick and away (M3), and encoding and CTCP Tuning (M2) |
+| [Configuration](#configuration) | CONF-1 to CONF-6 | Done, except SASL (M5), notification levels (M4), and nick and away (M3) |
 | [Credentials](#credentials) | CRED-1 to CRED-4 | Done |
 | [Connecting](#connecting) | CONN-1 to CONN-7 | Done, except CONN-5 (M3) |
 | [Staying connected](#staying-connected) | LIVE-1 to LIVE-11 | Done. Gaps in Timelines wait for Timelines (M4) |
 | [Sending](#sending) | SEND-1 to SEND-11 | SEND-1 to SEND-4 and `JOIN` splitting done. The rest M3 |
 | [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` holds Self, Channels with topics, modes, and ranked members, Users seen, every `RPL_ISUPPORT` token, and every casemapping |
-| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1, MSG-2, MSG-5, and MSG-6 are derived in the Log, and its Activity read is step 6 |
+| [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1, MSG-2, MSG-5, and MSG-6 are derived in the Log, MSG-4's decoding is done, and the Activity read is step 6 |
 | [Timelines and attention](#timelines-and-attention) | VIEW-1 to VIEW-10 | M4 |
 | [Frontend storage](#frontend-storage) | STORE-1 to STORE-5 | M4 |
 | [Lookups](#lookups) | LOOK-1 to LOOK-7 | M3 |
-| [Protocol behaviour](#protocol-behaviour) | PROT-1 to PROT-6 | M2. PROT-1, PROT-2, PROT-5, and PROT-6 are derived in the Log. CTCP replies are step 5 |
-| [Hostile input](#hostile-input) | HOST-1 to HOST-5 | HOST-1 and HOST-2 done, HOST-5 in part. HOST-3 and HOST-4 M2 |
+| [Protocol behaviour](#protocol-behaviour) | PROT-1 to PROT-6 | Done. PROT-1, PROT-2, PROT-5, and PROT-6 are derived in the Log, and CTCP replies are decided in `Standing` |
+| [Hostile input](#hostile-input) | HOST-1 to HOST-5 | HOST-1 to HOST-3 done, HOST-5 in part. HOST-4 M2 |
 | [API](#api) | API-1 to API-10 | Done for the surfaces that exist. `/stream` and `/bootstrap` M4, Acting M3 |
 | [Access](#access) | AUTH-1 to AUTH-7 | AUTH-1 to AUTH-5 done, AUTH-6 in part. AUTH-7 M4 |
 | [Observability](#observability) | OBS-1 to OBS-4 | OBS-4 done, OBS-1 in part. OBS-2 and OBS-3 M4 |
@@ -64,7 +64,7 @@ The Daemon runs one Log and any number of Networks. Everything durable is an Ent
 - **LOG-5.** An outbound Entry records its cause, so "Why did the Daemon send that?" always has an answer.
   - A Frontend's request is recorded as `key:` and its key name, such as `key:phone`. The request ID joins it with SEND-10 _(M3)_.
   - A remembered Join is a Change, and the reconciler sends its `JOIN` as `rejoin`, so the Change before it, which names the key, is the answer. Nothing else can send a duplicate `JOIN`.
-  - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `away-restore`, `ctcp-reply`, or `nick-regain`. Each name arrives with its behaviour: `away-restore`, `ctcp-reply`, and `nick-regain` do not exist yet.
+  - Automatic behaviour is recorded by name, such as `ping-reply`, `lag-check`, `rejoin`, `read`, `ctcp-reply`, `away-restore`, or `nick-regain`. Each name arrives with its behaviour: `away-restore` and `nick-regain` do not exist yet.
 - **LOG-6.** Credentials the Daemon holds stay out of the Log, because the Daemon never writes them down ([ADR 0008](adr/0008-credentials-are-held-not-hunted.md)).
   - A Line built from a Credential is sensitive, and is marked so where it is built. Only that code knows where the value went.
   - A sensitive Line is recorded with each value replaced by `<redacted>`, and its Entry is marked redacted with the names of those Credentials, in the order they stand. The names say what was redacted. The text does not, so a Line that holds `<redacted>` for any other reason redacts nothing.
@@ -109,7 +109,7 @@ Configuration is what the Owner wants, and the Log's Change Entries record it. D
   - **Services:** which nicks are services. Defaults to `NickServ`, `ChanServ`, and the usual `*Serv` names.
   - **Connect commands:** Lines to send after registration and before joining, which refer to Credentials by name.
   - **Channels:** name, autojoin, rejoin-on-kick, key by Credential name, and notification level. _(Notification level M4, with VIEW-8.)_
-  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it. Each number has bounds and a default, which the API's Schema publishes, and a number left out is checked against the others at its default. _(Encoding and CTCP replies M2, with MSG-4, SEND-8, and PROT-3.)_
+  - **Tuning:** encoding, flood control, liveness, and CTCP replies. Only values the Owner changed are stored, so a new default reaches every Network that never changed it. Each number has bounds and a default, which the API's Schema publishes, and a number left out is checked against the others at its default. _(Done. The encoding is the fallback for decoding (MSG-4), and must be a label the Daemon can decode with. A casemapping the Owner forces is Tuning too (KNOW-3). CTCP replies are a switch each for `VERSION`, `PING`, and `TIME`, the interval per User, and the limit per Network with its window (PROT-3, PROT-4). Each Connection's `attempt` records the whole Tuning, and one recorded before these existed reads them as their defaults. Sending in the encoding waits for SEND-8 in M3: text is sent as UTF-8.)_
 - **CONF-4.** The process itself needs only a data directory and a listen address, both given as flags or environment variables. Networks are added through the API, so a fresh Daemon needs no config file.
 - **CONF-5.** What the Owner does through the API is intent, and it survives a reconnect. _(Partial: Join and Part are done. Nick and away come with the Self operations in M3.)_
   - Join adds the Channel to Configuration with autojoin on, unless asked not to. Part removes it.
@@ -240,7 +240,7 @@ Each item here is derived from the Log.
 
 ### Network state
 
-**Status:** M2. Self's nick, the phase, and lag are in status already. `@iirc/state` folds the rest of KNOW-1 to KNOW-3, which reads expose in step 6.
+**Status:** M2. Self's nick, the phase, lag, and the casemapping in force are in status already. `@iirc/state` folds the rest of KNOW-1 to KNOW-3, which reads expose in step 6.
 
 - **KNOW-1.** The Network's phase, burst state, the Ircd and TLS details, lag, Self's nick, `user@host`, and modes, and away state. _(Self's mask, modes, and away state are done in `@iirc/state`. Exposed in step 6.)_
   - Self's mask follows `396`, `900`, `901`, and Self's own `JOIN`.
@@ -248,7 +248,7 @@ Each item here is derived from the Log.
   - Where a token was never sent, these defaults apply: `CASEMAPPING=rfc1459`, `CHANTYPES=#&`, `PREFIX=(ov)@+`, `CHANMODES=beI,k,l`, and `MODES=3`.
   - An empty value differs from an absent token. `PREFIX=` means no prefixes, and `MODES` with no value means no limit.
   - Value escapes such as `\x20` are decoded.
-- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(Every mapping and the fallback are done in `@iirc/state`, which takes an override. Configuring it is step 5, and status step 6.)_
+- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(Done. Every mapping and the fallback are in `@iirc/state`, and the Owner's override is Tuning's `casemapping`, which each Connection's `attempt` records and each Session starts from. Status gives the mapping in force, whether the Owner forced it, and the token the Ircd sent that fell back to `ascii`.)_
   - The fold comes from `CASEMAPPING` and `UTF8MAPPING` together, covering `ascii`, `rfc1459`, `rfc1459-strict`, the variant spelling `strict-rfc1459`, and `rfc8265`. Ergo's `precis` mode advertises `CASEMAPPING=ascii` with `UTF8MAPPING=rfc8265`.
   - Anything unrecognised falls back to `ascii`, which splits names rather than merging them, and is reported in status.
   - An Owner can override the mapping, because Ergo's `permissive` mode looks the same as `ascii` on the wire.
@@ -275,7 +275,7 @@ Each item here is derived from the Log.
 
 ## Messages and Activity
 
-**Status:** M2. The Log derives Messages into `messages` and Activity into `activity`, each with its place, and `/messages` serves the first. MSG-3's spans and MSG-4's decoding are later steps, and the Activity read is step 6.
+**Status:** M2. The Log derives Messages into `messages` and Activity into `activity`, each with its place, and `/messages` serves the first. MSG-4's decoding is done. MSG-3's spans are parsed in `@iirc/protocol` and not yet offered by the API, and the Activity read is step 6.
 
 - **MSG-1.** `PRIVMSG` and `NOTICE` become Messages of kind `PRIVMSG`, `NOTICE`, or `ACTION`, and the text of an `ACTION` is the action itself. Self's Messages come from outbound Lines, because the floor has no `echo-message`. _(Done, in `/messages` from API version 2.)_
 - **MSG-2.** Each inbound Line belongs to one place, decided in this order:
@@ -290,6 +290,7 @@ Each item here is derived from the Log.
   - Highlights and search run on text with the codes stripped.
 - **MSG-4.** Inbound bytes decode as UTF-8, then through the Network's configured fallback encoding, then Latin-1. Decoding never fails.
   - The fallback is any WHATWG `TextDecoder` label.
+  - _(Done. Latin-1 is ISO-8859-1, one character per byte, and not WHATWG's `latin1`, which is windows-1252. A Connection decodes with the fallback its `attempt` recorded, in `Standing`, the machine, the derived tables, and `/entries` alike, so a rebuild gives the same text as live did after the Owner changes the encoding. A label refused by the API's Schema never reaches a Connection, and one recorded that a later runtime cannot read gives no fallback.)_
 - **MSG-5.** Activity covers joins, parts, quits, kicks, nick changes, topic changes, mode changes, invites, and CTCP requests. _(Done in the Log's `activity` table, derived from `@iirc/state`'s changes, with DCC offers, standard replies, and unknown Lines as kinds of their own. Its reads are in `LogReader`, by a cursor of sequence and the row's place among its Entry's, and its route is step 6.)_
 - **MSG-6.** Lines with no Channel or User to belong to, such as the MOTD, `WALLOPS`, and most numerics, go to the Network's Timeline. _(Done: every inbound Line that is no Message and no other Activity is a `line`, or an `unknown` for a command not handled, on the Network's Timeline, one row per Line. Every numeric is one. `PING` and `PONG`, and Lines that do not parse or were cut, are in `/entries` only.)_
 
@@ -356,22 +357,22 @@ A Lookup asks the Network something and collects a reply spanning several Lines.
 
 ## Protocol behaviour
 
-**Status:** M2. Every Line is recorded, whatever its command. PROT-1, PROT-2, PROT-5, and PROT-6 are derived as Activity in the Log. PROT-3 and PROT-4 are step 5.
+**Status:** Done. Every Line is recorded, whatever its command. PROT-1, PROT-2, PROT-5, and PROT-6 are derived as Activity in the Log. PROT-3 and PROT-4 are decided by `ctcpAnswer` in `@iirc/session`, from `Standing`.
 
 - **PROT-1.** The Daemon handles `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `TOPIC`, `MODE`, `INVITE`, `AWAY`, `ERROR`, `PING`, `PONG`, and all numerics in the Modern client protocol. Any other command is still recorded, and appears in the Network's Timeline as an unknown Line. _(Done in the Log's `activity` table, as kind `unknown`.)_
 - **PROT-2.** CTCP `ACTION` is a Message. Other CTCP requests are Activity. _(Done. A CTCP in a `NOTICE` is Activity too, marked a reply. Self's own CTCP requests are no Message and no Activity, and stay in `/entries`.)_
-- **PROT-3.** The Daemon answers CTCP `VERSION` with `iirc` and echoes the sender's argument to CTCP `PING`, and answers nothing else by default. `TIME` reveals a timezone, so it is opt-in.
-- **PROT-4.** CTCP replies go out as `NOTICE`, at most one per User per 10 seconds and 5 per minute per Network. No automatic reply is ever sent in response to a `NOTICE`.
+- **PROT-3.** The Daemon answers CTCP `VERSION` with `iirc` and echoes the sender's argument to CTCP `PING`, and answers nothing else by default. `TIME` reveals a timezone, so it is opt-in. _(Done. Each is a switch in Tuning. `TIME` stays opt-in, and gives the time in UTC, as ISO 8601 to the second with `Z`, from the Entry's time, so it reveals the clock and no timezone, and a replay says the same. A `PING` argument over 128 bytes gets no reply. Only a `PRIVMSG` from a `nick!user@host` other than Self, after the welcome, and not to `*`, `AUTH`, or a `$` mask, is answered, and only to a sender whose nick parses as a User's, never as a Channel, a `STATUSMSG` Target, or a mask.)_
+- **PROT-4.** CTCP replies go out as `NOTICE`, at most one per User per 10 seconds and 5 per minute per Network. No automatic reply is ever sent in response to a `NOTICE`. _(Done, through the background lane with the cause `ctcp-reply`. The limits are a window in `Standing`, folded from the Log: each reply counts from when it is decided and while it is pending, then from when it is recorded as sent, and not at all once Dropped. One not written within the Network's window of being decided is Dropped as it reaches the head of the lane, so no more than the limit leave in any window. Any other CTCP `NOTICE` Self sends counts once recorded, so a restart or a reconnect resets nothing. A User is keyed under the mapping in force, and is let go of only once their interval has run out. A request past a limit gets nothing, and only its Line and Activity row record it.)_
 - **PROT-5.** DCC requests are recorded and never acted on. _(Done: a `dcc` Activity with its subcommand and raw arguments, and nothing reads it to act.)_
 - **PROT-6.** `FAIL`, `WARN`, and `NOTE` are parsed on every Network, whatever was negotiated. Ergo sends them unconditionally. _(Done: a `reply` Activity on the Network's Timeline, by shape alone. One that does not parse is a `line`.)_
 
 ### Hostile input
 
-**Status:** HOST-1 and HOST-2 done. HOST-5 done for Networks and in-process watchers, and for Frontends with `/stream` (M4). HOST-3 and HOST-4 M2.
+**Status:** HOST-1 to HOST-3 done. HOST-5 done for Networks and in-process watchers, and for Frontends with `/stream` (M4). HOST-4 M2.
 
 - **HOST-1.** No sequence of bytes from an Ircd can close a Session, stop the Daemon, or lose a Line. Unparseable input is recorded with its reason.
 - **HOST-2.** Frames longer than 8704 bytes are cut and marked, not buffered without limit.
-- **HOST-3.** Nothing a participant sends can make the Daemon do something beyond what this document names. A CTCP flood is rate limited, and a Message is never interpreted as an instruction.
+- **HOST-3.** Nothing a participant sends can make the Daemon do something beyond what this document names. A CTCP flood is rate limited, and a Message is never interpreted as an instruction. _(Done for what exists. What a participant can draw from the Daemon is a CTCP reply, within PROT-4's limits, and a read of a Channel, within KNOW-5's. DCC is never acted on (PROT-5).)_
 - **HOST-4.** The API marks all participant-supplied text as untrusted. Agents must treat it as data, because anyone on a Network can write text that an agent will read.
 - **HOST-5.** One Network cannot starve another, and no Frontend can stall a Session (LOG-11). A slow reader is disconnected, and resumes from its cursor or gets `resync` (API-6).
   - The same holds in the process. Anything that watches Entries as they commit cannot hold up a commit. A watcher that falls behind is told which run of sequences it missed, and is never left to miss them silently.

@@ -1,5 +1,6 @@
 import { step } from "@iirc/lifecycle";
 import type { Command, NetworkEvent, NetworkSnapshot } from "@iirc/lifecycle";
+import type { FallbackEncoding } from "@iirc/protocol/decode";
 import { parseFrame, pingToken } from "@iirc/protocol/line";
 
 import { loginCauses } from "./credentials.ts";
@@ -59,14 +60,17 @@ const connectionEvent = (entry: ConnectionEntry): NetworkEvent | undefined => {
 // for the login sequence, whose last Line starts the login wait. Anything inbound proves
 // the Connection is alive, but a cut Line is a fragment whose first word is not a command
 // worth obeying, so it says that and nothing more.
-const lineEvent = (entry: LineEntry): NetworkEvent | undefined => {
+const lineEvent = (
+  entry: LineEntry,
+  fallback: FallbackEncoding | undefined
+): NetworkEvent | undefined => {
   const { at, bytes, cut, direction } = entry;
 
   if (direction === "outbound") {
     return loginSent(entry, true);
   }
 
-  const parsed = parseFrame(bytes);
+  const parsed = parseFrame(bytes, fallback);
 
   if (cut === true || parsed._tag === "Unparseable") {
     return { at, type: "HEARD" };
@@ -87,9 +91,10 @@ const lineEvent = (entry: LineEntry): NetworkEvent | undefined => {
  * The machine event an Entry stands for, if any. The only Entry-to-event mapping,
  * which is what makes a live Network and a replayed one the same fold. Never throws.
  * @param entry - The Entry, as the Log holds it.
+ * @param fallback - Its Connection's fallback encoding, from its `attempt` (MSG-4).
  * @returns The event, or `undefined` for an Entry the machine has no use for.
  */
-export const toEvent = (entry: Entry): NetworkEvent | undefined => {
+export const toEvent = (entry: Entry, fallback?: FallbackEncoding): NetworkEvent | undefined => {
   switch (entry._tag) {
     case "Connection": {
       return connectionEvent(entry);
@@ -100,7 +105,7 @@ export const toEvent = (entry: Entry): NetworkEvent | undefined => {
     }
 
     case "Line": {
-      return lineEvent(entry);
+      return lineEvent(entry, fallback);
     }
 
     case "Dropped": {
@@ -137,11 +142,16 @@ export type EntryStep =
  * the Commands. Never throws.
  * @param snapshot - The machine so far.
  * @param entry - The Entry, as the Log holds it.
+ * @param fallback - Its Connection's fallback encoding, from its `attempt` (MSG-4).
  * @returns The machine after it, with the Commands it asked for.
  */
-export const stepEntry = (snapshot: NetworkSnapshot, entry: Entry): EntryStep => {
+export const stepEntry = (
+  snapshot: NetworkSnapshot,
+  entry: Entry,
+  fallback?: FallbackEncoding
+): EntryStep => {
   try {
-    const event = toEvent(entry);
+    const event = toEvent(entry, fallback);
 
     return event === undefined
       ? { _tag: "Stepped", commands: [], event, next: snapshot }

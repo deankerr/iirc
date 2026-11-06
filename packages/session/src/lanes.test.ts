@@ -186,6 +186,7 @@ describe("runPump over a wire that confirms a write only with the next (LOG-2)",
 
     const wire: PumpWire = {
       confirmsLater,
+      expired: () => Effect.void,
       record: () => Effect.sync(() => (sequence += 1)),
       recordFailed: Effect.void,
       unwritten: ({ cause }, reason) =>

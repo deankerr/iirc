@@ -42,7 +42,15 @@ const libera: NetworkSettings = {
     id: "libera",
     nick: "owner",
     quitReason: "back soon",
-    tuning: { drainMillis: 300, reconnectInitialMillis: 1000 },
+    tuning: {
+      casemapping: "ascii",
+      ctcpTime: true,
+      ctcpUserIntervalMillis: 0,
+      ctcpVersion: false,
+      drainMillis: 300,
+      encoding: "windows-1251",
+      reconnectInitialMillis: 1000,
+    },
   }),
   channels: [
     { autojoin: true, name: "#iirc", rejoinOnKick: false },
@@ -165,6 +173,12 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
         assert.notInclude(exported.output, "[networks.oftc.tuning]");
         assert.include(exported.output, "drainMillis = 300");
         assert.notInclude(exported.output, "silenceMillis");
+        // MSG-4, KNOW-3, PROT-3: the encoding, the mapping, and CTCP switches, as set.
+        assert.include(exported.output, 'encoding = "windows-1251"');
+        assert.include(exported.output, 'casemapping = "ascii"');
+        assert.include(exported.output, "ctcpTime = true");
+        assert.include(exported.output, "ctcpVersion = false");
+        assert.notInclude(exported.output, "ctcpPing");
         assert.include(exported.output, `pin = "${pin}"`);
 
         const file = yield* writeFile(dataDir, "exported.toml", exported.output);
@@ -236,13 +250,21 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
           exported.output.replace("drainMillis = 300", "drainMillis = -1")
         );
 
-        const notToml = yield* writeFile(dataDir, "broken.toml", "[networks.libera\n");
-
-        const results = yield* Effect.forEach([badPin, misspelt, badTuning, notToml], (file) =>
-          config(["import", "--api-url", apiUrl, file], { IIRC_KEY: key })
+        // MSG-4: and an encoding the Daemon could not decode with.
+        const badEncoding = yield* writeFile(
+          dataDir,
+          "encoding.toml",
+          exported.output.replace('encoding = "windows-1251"', 'encoding = "klingon"')
         );
 
-        const [pinned, spelt, tuned, broken] = results.map(({ code, output }) => {
+        const notToml = yield* writeFile(dataDir, "broken.toml", "[networks.libera\n");
+
+        const results = yield* Effect.forEach(
+          [badPin, misspelt, badTuning, badEncoding, notToml],
+          (file) => config(["import", "--api-url", apiUrl, file], { IIRC_KEY: key })
+        );
+
+        const [pinned, spelt, tuned, encoded, broken] = results.map(({ code, output }) => {
           assert.notStrictEqual(code, 0, output);
 
           return output;
@@ -256,6 +278,8 @@ describe("the compiled binary's `iirc config` (CONF-6)", () => {
           tuned,
           "networks.libera.tuning.drainMillis: Expected a value between 0 and 2147483647"
         );
+        assert.include(encoded, "nothing was sent");
+        assert.include(encoded, "networks.libera.tuning.encoding: is not an encoding label");
         assert.include(broken, "line 1");
 
         assert.strictEqual(yield* head(client), sequence, "something was recorded");

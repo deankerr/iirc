@@ -133,7 +133,7 @@ const credentialChanges = (daemon: Daemon["Service"]) =>
   daemon
     .entries({ after: 0, kinds: ["Change"], limit: 1000 })
     .pipe(
-      Effect.map((entries) =>
+      Effect.map(({ entries }) =>
         entries.flatMap((entry) =>
           entry._tag === "Change" && /Credential|ChannelKey/u.test(JSON.stringify(entry.change))
             ? [JSON.stringify(entry.change)]
