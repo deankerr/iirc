@@ -185,8 +185,13 @@ const unhearingIrcd = scriptedIrcd(welcoming(nick), {
   ignoresQuit: true,
 });
 
-const joined = (ircd: ScriptedIrcd) =>
+const joinSent = (ircd: ScriptedIrcd) =>
   eventually(ircd.received, (lines) => lines.includes(`JOIN ${channel}`), settleLimit);
+
+// Joined, and its modes asked for, which is the last Line a Session sends unasked (KNOW-5),
+// so that a stop finds nothing queued to drop.
+const joined = (ircd: ScriptedIrcd) =>
+  eventually(ircd.received, (lines) => lines.includes(`MODE ${channel}`), settleLimit);
 
 const entriesOf = (daemon: Client) => daemon.daemon.entries({ query: { after: 0, limit: 1000 } });
 
@@ -373,7 +378,8 @@ describe("the compiled binary, stopping and starting", () => {
         );
 
         yield* eventually(statusOf(daemon), inSession, settleLimit);
-        yield* joined(ircd);
+        // The flood control holds the `MODE` that follows back, and a stop drops it.
+        yield* joinSent(ircd);
         yield* wire.stall;
 
         const send = daemon.daemon.send({

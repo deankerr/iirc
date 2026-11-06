@@ -257,15 +257,16 @@ Each item here is derived from the Log.
 
 ### Channels and Users
 
-**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Log attributes KNOW-8. The Daemon's asking is step 4, and reads step 6.
+**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Log attributes KNOW-8. The Daemon asks for KNOW-5 and KNOW-6 through `readPlan` in `@iirc/session`. Reads are step 6.
 
 - **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`. _(Done in `@iirc/state`, which holds only what `NAMES` and `MODE` show, so without `multi-prefix` a member can be short of a prefix. Exposed in step 6.)_
-- **KNOW-5.** Membership and topic come from what `JOIN` already returns. _(The atomic replacement, the rule for Channels Self is not in, and a change for each removed prefix are done in `@iirc/state`. Sending is step 4.)_
+- **KNOW-5.** Membership and topic come from what `JOIN` already returns. _(Done. The atomic replacement, the rule for Channels Self is not in, and a change for each removed prefix are in `@iirc/state`, and the asking is `readPlan` in `@iirc/session`. Exposed in step 6.)_
   - The Daemon sends only `MODE`, and `WHO` for `user@host`, through the background lane. A large Channel can delay these, and they never delay a Message.
+  - One read waits for a reply at a time on each Network. A read with no reply is asked again after 60 seconds, doubling, three times in all in a Session, and an error naming the Channel answers it at once. A Channel of more than 1000 members gets no `WHO`, because each member costs a Line.
   - `353` up to `366` is an atomic replacement of the member list.
   - `332`, `324`, and `353` never change state for a Channel Self is not in.
-  - Without `multi-prefix`, a member with `@+` shows only `@`, so removing a prefix mode schedules a debounced `NAMES`.
-- **KNOW-6.** `MODE` Lines are parsed using `PREFIX` first and then `CHANMODES`, so that list, parameterised, and flag modes are told apart. _(Done in `@iirc/state`, which marks a Channel uncertain. Reading it again is step 4.)_
+  - Without `multi-prefix`, a member with `@+` shows only `@`, so removing a prefix mode schedules a debounced `NAMES`, 2 seconds after the last removal and at most 10 seconds after the first.
+- **KNOW-6.** `MODE` Lines are parsed using `PREFIX` first and then `CHANMODES`, so that list, parameterised, and flag modes are told apart. _(Done. `@iirc/state` marks a Channel uncertain, and `readPlan` reads its modes with `MODE` and its members with `NAMES` until a `324` and a `366` settle them.)_
   - A letter the Network never advertised takes no argument. If the arguments then fail to add up, the `MODE` is kept raw, the Channel is marked uncertain, and its modes and members are read again.
   - A key shown as `*` is hidden and is not stored.
 - **KNOW-7.** A User's nick, `user@host`, and realname are remembered as seen, and away state where known. _(Folded in `@iirc/state` from `JOIN`, `PRIVMSG`, and `NOTICE` sources, `301`, `311`, and `352`, within a bound that forgets the longest unseen. Asking with `WHO` is step 4, and reads step 6.)_

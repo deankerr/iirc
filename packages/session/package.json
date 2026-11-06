@@ -8,6 +8,7 @@
     "./entry": "./src/entry.ts",
     "./events": "./src/events.ts",
     "./network": "./src/network.ts",
+    "./reads": "./src/reads.ts",
     "./recorder": "./src/recorder.ts",
     "./standing": "./src/standing.ts",
     "./testing": "./src/testing.ts",

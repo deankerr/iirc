@@ -13,7 +13,7 @@ Versions: Bun 1.4.4 and Effect 4.1.1, pinned in the root `package.json` catalog.
 
 | Owner | Owns | Examples |
 | --- | --- | --- |
-| Pure code | Anything that can be computed, including phases that gate behaviour | Parsing, folds, the Network machine, `Standing`, `nextAttempt`, `joinPlan`, the token bucket |
+| Pure code | Anything that can be computed, including phases that gate behaviour | Parsing, folds, the Network machine, `Standing`, `nextAttempt`, `joinPlan`, `readPlan`, the token bucket |
 | Effect | Anything that waits, fails, or holds a resource | Hosts, lanes, the Log, the reader Worker, the API, the CLI |
 | Bun | The runtime and build; what Effect does not offer ([ADR 0005](adr/0005-effect-wins-where-it-overlaps-bun.md)) | The executable, SQLite, the keyring, the HTTP engine |
 
@@ -128,7 +128,7 @@ flowchart TD
   next --> due["Wait until due,<br/>or a change retries now"]
   due --> attempt["Record attempt Entry<br/>with nicks and Tuning"]
   attempt --> dial["Transport.connect"]
-  dial --> conn["One Connection:<br/>read loop, pump, reconciler"]
+  dial --> conn["One Connection:<br/>read loop, pump, reconciler<br/>(joinPlan, then readPlan)"]
   conn --> closed["Record closed Entry,<br/>queued Lines become Dropped"]
   closed --> read
 ```
@@ -153,8 +153,9 @@ stateDiagram-v2
 ```
 
 - **The machine owns a Connection's progress:** registration, nick fallback, giving up, the burst, and the login wait (CONN-2 to CONN-7, LIVE-1 to LIVE-3, LIVE-5).
-- **`Standing` owns what outlasts a Connection:** recent outcomes, kicks, `JOIN` failures, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction.
-- **Pure functions of `Standing` decide:** `nextAttempt` gives backoff and Ircd rotation (LIVE-4), and `joinPlan` gives what to rejoin (LIVE-7, LIVE-8).
+- **`Standing` owns what outlasts a Connection, and what Self asked:** recent outcomes, kicks, `JOIN` failures, the `JOIN`s and reads asked on this Session and their replies, lag, and Gaps. It is a pure fold that both Recorders update in the same transaction. What Self asked is folded from Self's own outbound Lines, apart from `@iirc/state`, which only an Ircd moves (CONN-3).
+- **Pure functions of `Standing` decide:** `nextAttempt` gives backoff and Ircd rotation (LIVE-4), `joinPlan` gives what to rejoin (LIVE-7, LIVE-8), and `readPlan` gives which `MODE`, `NAMES`, and `WHO` to send (KNOW-5, KNOW-6). A plan's waits, such as a debounced `NAMES`, are absolute times derived from Standing, and the Line sent when one passes is its record, so they need no Deadline Entry of their own.
+- **One reconciler carries out both plans,** joins first, one Line at a time through the background lane, so a read never delays a Message or a `PONG` (SEND-1). It holds no plan, and a commit wakes it only when `joinPlanMoved` or `readPlanMoved` says its inputs moved.
 - **A host cannot stay dead.** A defect or a failed `record` ends the Connection and backs off like any failure (LOG-9).
 
 Requirements: [Connecting](requirements.md#connecting), [Staying connected](requirements.md#staying-connected), [Sending](requirements.md#sending).

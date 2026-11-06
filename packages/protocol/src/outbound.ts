@@ -185,6 +185,23 @@ export const part = (channel: string, reason?: string): Outbound => {
   return outbound("PART", reason === undefined ? [channel] : [channel, reason]);
 };
 
+/** A command that only reads a Channel: its modes, its members, or who they are (KNOW-5). */
+export type ChannelReadCommand = "MODE" | "NAMES" | "WHO";
+
+/**
+ * Builds a read of one Channel that changes nothing on it: `MODE #chan` for its modes and
+ * creation time, `NAMES #chan` for its members, or `WHO #chan` for their `user@host`.
+ * @param command - Which read.
+ * @param channel - The Channel to read, which must be one parameter naming one Channel.
+ * @returns The safe Line, or why it can't be built.
+ */
+export const channelRead = (command: ChannelReadCommand, channel: string): Outbound =>
+  // A comma would read a second Channel, and a space would make the Channel the last
+  // parameter, which a `MODE` would take for its letters.
+  channel.includes(",") || !isMiddleParameter(channel)
+    ? rejected("InvalidTarget")
+    : outbound(command, [channel]);
+
 /**
  * Encodes a Line for the wire.
  * @param line - The Line to encode.

@@ -14,7 +14,7 @@ Each module is its own export path, such as `@iirc/protocol/line`. There is no r
 | --- | --- | --- |
 | `./frame` | `takeFrames`, `maxFrameBytes` | Splits a byte stream into frames, cutting any over 8704 bytes (HOST-2) |
 | `./line` | `parseLine`, `parseFrame`, `pingToken`, `Line`, `Parsed` | Parses one frame without ever throwing. Falls back to Latin-1 when bytes are not UTF-8 |
-| `./outbound` | `outbound`, `privmsg`, `notice`, `quit`, `user`, `part`, `pong`, `encodeLine`, `OutboundLine` | Builds a Line that cannot smuggle in a second command, or says why it cannot |
+| `./outbound` | `outbound`, `privmsg`, `notice`, `quit`, `user`, `part`, `channelRead`, `pong`, `encodeLine`, `OutboundLine` | Builds a Line that cannot smuggle in a second command, or says why it cannot |
 | `./decode` | `decodeBytes`, `parseFallbackEncoding`, `Decoded`, `FallbackEncoding` | Bytes to text: UTF-8, then the configured fallback, then Latin-1. Never fails, and says which it used (MSG-4) |
 | `./format` | `parseFormatting`, `stripFormatting`, `plainStyle`, `Span`, `Style`, `Colour` | mIRC formatting codes as spans of text and style, or stripped (MSG-3) |
 | `./ctcp` | `parseCtcp`, `ctcpText`, `ctcpReply`, `Ctcp`, `CtcpText` | Reads `ACTION`, `DCC`, and other CTCP out of a Message's text, and builds a CTCP reply that is safe to send (PROT-2, PROT-5) |

@@ -358,6 +358,23 @@ tests:
         }
       - { _tag: PrefixRemoved, channel: "#a", letter: o, nick: bob }
 
+  - name: KNOW-5 removing a prefix from a member a NAMES reply under way holds says so too
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me @bob"
+      - ":op!o@h MODE #a -o bob"
+    channels:
+      "#a": { members: { me: "" } }
+    changes:
+      - {
+          _tag: ModesChanged,
+          channel: "#a",
+          by: op,
+          changes: [{ adding: false, letter: o, param: bob }],
+        }
+      - { _tag: PrefixRemoved, channel: "#a", letter: o, nick: bob }
+
   - name: KNOW-6 a MODE that does not add up is kept raw, and the Channel is uncertain
     lines:
       - ":irc 001 me :Hi"

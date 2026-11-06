@@ -885,7 +885,14 @@ const prefixChanged = (
 
   const folded = fold(state, param);
   const order = state.isupport.modes.prefix;
-  const had = channel.members.get(folded)?.prefixes.includes(letter) === true;
+
+  // A `NAMES` reply under way holds the member too, and its `366` will publish them with
+  // the prefix gone, which hides any it never showed just the same (KNOW-5).
+  const holder = [channel.members.get(folded), channel.pending?.members.get(folded)].find(
+    (member) => member?.prefixes.includes(letter) === true
+  );
+
+  const had = holder !== undefined;
 
   const change = (members: Members) => {
     const member = members.get(folded);
@@ -906,7 +913,7 @@ const prefixChanged = (
       _tag: "PrefixRemoved",
       channel: channel.name,
       letter,
-      nick: channel.members.get(folded)?.nick ?? param,
+      nick: holder.nick,
     });
   }
 

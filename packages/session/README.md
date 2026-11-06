@@ -13,7 +13,8 @@ Hosts one Network with Effect: dials Ircds, records every Line before acting on 
 | `./network` | `hostNetwork`, `constantNetwork`, `NetworkSettings`, `NetworkHost`, `NetworkStatus`, `NotInSession`, `LaneFull`, `LineDropped`, `WriteFailed` | Stays on a Network for as long as a Scope lasts, with `send` and `status` |
 | `./recorder` | `Recorder`, `Committed`, `MemoryEntries`, `Watched`, `Overflowed`, `RecordFailed`, `makeWatchers` | Records Entries before anything acts on them, and watches them as they commit |
 | `./entry` | `Entry`, `NewEntry`, `Ircd`, `TlsDetails`, `IfFieldsOfEntry` | The Entry kinds, which this package owns |
-| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
+| `./standing` | `Standing`, `reduceStanding`, `foldStandings`, `nextAttempt`, `joinPlan`, `ChannelReads`, `Gap` | A Network's past as a pure fold, and the decisions made from it |
+| `./reads` | `readPlan`, `readPlanMoved`, `movesReads`, and the read constants | Which reads of the Channels Self is in to send now, and when to look again (KNOW-5, KNOW-6) |
 | `./events` | `toEvent`, `stepEntry` | The one mapping from an Entry to a machine event |
 | `./transport` | `Transport`, `ConnectFailed` | Dials TCP or TLS, verifies or pins, and reads with backpressure |
 | `./credentials` | `passLine`, `identifyLine`, `connectCommandLine`, `keyedJoins`, `missingCredentials` | Lines built from Credentials, marked sensitive where they are built |
@@ -70,11 +71,33 @@ Closing the Scope says `QUIT` and waits up to `quitWaitMillis`.
 ## Key ideas
 
 - **Record, then act.** `Recorder.record(entries, within)` appends atomically and runs `within` in the same transaction. The host steps the machine there, and runs its Commands after commit (LOG-4).
-- **`Standing` is everything a host needs from the past:** the Connection under way and its machine, recent outcomes, `@iirc/state` for the Session, kicks, `JOIN` failures, lag, and the latest Gap. Both Recorders update it in the same transaction, and the host holds no copy, not even of the machine: a commit steps the machine Standing holds, and the loop waits on its deadline. Reading it cannot fail.
-- **Decisions are pure functions of `Standing`.** `nextAttempt` gives backoff, jitter seeded by sequence, and Ircd rotation (LIVE-4, LIVE-5). `joinPlan` gives what to `JOIN` now and when to look again (LIVE-7, LIVE-8).
+- **`Standing` is everything a host needs from the past:** the Connection under way and its machine, recent outcomes, `@iirc/state` for the Session, kicks, `JOIN` failures, what has been read and asked of each Channel, lag, and the latest Gap. Both Recorders update it in the same transaction, and the host holds no copy, not even of the machine: a commit steps the machine Standing holds, and the loop waits on its deadline. Reading it cannot fail.
+- **Decisions are pure functions of `Standing`.** `nextAttempt` gives backoff, jitter seeded by sequence, and Ircd rotation (LIVE-4, LIVE-5). `joinPlan` gives what to `JOIN` now and when to look again (LIVE-7, LIVE-8). `readPlan` gives which reads to send now and when to look again (KNOW-5, KNOW-6). One reconciler carries out both, joins first, one Line at a time, through the background lane.
 - **A host reads its settings; nothing pushes them.** `settings` is read whenever the host decides something, and `changes` wakes it. Ircds, Identity, and Tuning apply at the next `attempt`, and the rest at once (CONF-2).
 - **One Connection, three lanes, one pump.** Control, interactive, and background, in strict priority (SEND-1). The pump records each Line as it leaves, then writes it. When the Connection ends, what is queued becomes Dropped Entries in the same commit as `closed` (SEND-4).
 - **Sensitive Lines are marked where they are built** (LOG-6): a Line built from Credentials arrives at the Recorder already as the Log holds it, with its values `<redacted>` and their names. Nothing searches Lines for a Credential's value ([ADR 0008](../../docs/adr/0008-credentials-are-held-not-hunted.md)). The host acts on the Entry as recorded.
+
+## Reading what the Network knows
+
+The `JOIN` brings a Channel's members and topic, so the Daemon only asks for what it does not bring (KNOW-5): `MODE` for `324` and `329`, then `WHO` for `user@host` once the `JOIN`'s own `NAMES` has landed. It reads again what may be wrong: `MODE` when modes become uncertain, `NAMES` when members do (KNOW-6), and a debounced `NAMES` after a prefix mode is removed, because without `multi-prefix` a member with `@+` shows only `@`.
+
+- **What was asked is folded from the Log.** Self's outbound Lines are Entries, so `Standing.reads` holds each read asked and not yet settled, at its sequence. Only the very shape the Daemon sends counts as asked, `MODE <chan>`, `NAMES <chan>`, or `WHO <chan>`, whoever sent it, so a filtered `WHO #a o` or a `NAMES #a,#b` asks nothing. A `324` always settles modes. A `315` ends a `WHO`, and a `366` a `NAMES`, only while one is asked in that shape, besides the `JOIN`'s own `NAMES`. An error naming the Channel, `403`, `442`, `476`, or `479`, answers the read in flight as failed: it frees the slot, says nothing else, and the backoff carries on. It sits beside kicks and `JOIN` failures, apart from `IrcState`, which only an Ircd moves (CONN-3). Whether modes or members are uncertain is `IrcState`'s, read from there and never copied.
+- **`reads` follows `IrcState`'s Channels.** After every Line that can change which Channels `IrcState` holds or their keys, `reads` is rebuilt to exactly those Channels, under the same keys, so `IrcState`'s bound and its choice of what to drop are the only ones. Of two Channels a new mapping merges, the one `IrcState` keeps keeps its own reads. A Channel with nothing held starts with nothing read, which costs at most one read more.
+- **Debounces are absolute times derived from Standing.** A `NAMES` after a removal is due 2 seconds after the latest removal, or 10 seconds after the first, whichever is sooner. Nothing is recorded when one comes due: the outbound `NAMES` is the record, as a rejoin's `JOIN` is for `joinPlan`'s retries.
+- **Bounded.** At most one read waits for a reply per Network, a read never asked goes ahead of one asked again, a read with no reply may be asked again after 60 seconds, doubling, three times in all, and a Channel of more than 1000 members gets no `WHO`. A Channel Self parted or was kicked from, and every new Session, start with nothing asked (LIVE-6).
+- **The worst case is slow, on purpose.** With one read in flight and a 60 second timeout, an Ircd that ignores every read delays the last of 1024 Channels' reads by about 17 hours (1024 × 60 seconds). An error does not count toward that, because it answers at once.
+- **What wakes it.** `movesReads` names the commands whose Lines can move a read plan, `QUIT`, `PART`, `KICK`, and the errors above among them, and `readPlanMoved` compares only Self's Channels, the reads, whether each Channel is uncertain, and which side of the `WHO` limit each is on. Messages and the `352`s of a `WHO` reply wake nothing. A netsplit's `QUIT`s are each looked at, for about 1 µs a Line against the 16 to 36 µs of folding it, measured on fserv with 20 Channels of 2000 and with 1024 Channels.
+
+| Constant | Value | Why |
+| --- | --- | --- |
+| `namesSettleMillis` | 2000 | A `-o` comes in a handful of Lines, and one `NAMES` answers them all |
+| `namesSettleLimitMillis` | 10,000 | A mode storm that never pauses still gets one `NAMES` this often |
+| `readTimeoutMillis` | 60,000 | A 10,000 member `NAMES` is a few hundred Lines, well inside this. It is also the first step of the backoff |
+| `readAsks` | 3 | An Ircd that never answers, or a Channel too large to hold, costs three Lines a Session and no more |
+| `readsInFlight` | 1 | As Halloy's `WHO` queue. Flood control sets the pace anyway, and the lane never holds 400 reads ahead of a CTCP reply or a rejoin |
+| `whoMembersLimit` | 1000 | Each member costs a `352`, and each Line an Entry, on every Session |
+
+These are named constants in `./reads`, not `Tuning`, until an Owner has a reason to change one.
 
 ## Watching what commits
 
@@ -91,7 +114,8 @@ Closing the Scope says `QUIT` and waits up to `quitWaitMillis`.
 - Nothing outlives its Connection: no Line queued on one is sent on the next.
 - A defect during a Connection becomes a `closed` Entry and a normal backoff. A failed `record` backs off the same way, and `status` shows the fault until one succeeds (LOG-9).
 - `Standing` holds at most 64 Connection outcomes and 1024 Channels per map.
-- `joinPlanMoved` compares which Channels Self is in, not what is in them, so members, topics, and modes moving never wake the reconciler.
+- `joinPlanMoved` compares which Channels Self is in, not what is in them, and `readPlanMoved` adds only the reads and whether each Channel is uncertain, so members, topics, and modes moving never wake the reconciler.
+- `Standing.reads` holds at most 1024 Channels, and only Channels Self is in on this Session.
 
 ## Field vocabulary
 
@@ -118,4 +142,4 @@ Closing the Scope says `QUIT` and waits up to `quitWaitMillis`.
 
 ## Requirements
 
-[The Log](../../docs/requirements.md#the-log) (LOG-2, LOG-4 to LOG-6, LOG-8, LOG-9), [Credentials](../../docs/requirements.md#credentials) (CRED-4), [Connecting](../../docs/requirements.md#connecting), [Staying connected](../../docs/requirements.md#staying-connected), [Sending](../../docs/requirements.md#sending), and [Hostile input](../../docs/requirements.md#hostile-input).
+[The Log](../../docs/requirements.md#the-log) (LOG-2, LOG-4 to LOG-6, LOG-8, LOG-9), [Credentials](../../docs/requirements.md#credentials) (CRED-4), [Connecting](../../docs/requirements.md#connecting), [Staying connected](../../docs/requirements.md#staying-connected), [Sending](../../docs/requirements.md#sending), [Channels and Users](../../docs/requirements.md#channels-and-users) (KNOW-5, KNOW-6), and [Hostile input](../../docs/requirements.md#hostile-input).

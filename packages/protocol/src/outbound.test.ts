@@ -2,7 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { maxFrameBytes } from "./frame.ts";
 import { pingToken } from "./line.ts";
-import { encodeLine, maxLineBytes, outbound, part, pong, privmsg, quit, user } from "./outbound.ts";
+import {
+  channelRead,
+  encodeLine,
+  maxLineBytes,
+  outbound,
+  part,
+  pong,
+  privmsg,
+  quit,
+  user,
+} from "./outbound.ts";
 import type { Outbound } from "./outbound.ts";
 
 const encoder = new TextEncoder();
@@ -215,6 +225,26 @@ describe(part, () => {
     expect(part("#a", "bye\r\nQUIT :pwned")).toStrictEqual({
       _tag: "Rejected",
       reason: "InvalidParameter",
+    });
+  });
+});
+
+describe(channelRead, () => {
+  it.each(["MODE", "NAMES", "WHO"] as const)("KNOW-5: reads one Channel with %s", (command) => {
+    expect(decoder.decode(wire(channelRead(command, "#iirc")))).toBe(`${command} #iirc\r\n`);
+  });
+
+  it.each(["#a,#b", "", "#a b", ":#a", "#a\r\nQUIT"])("rejects %j as a Channel", (channel) => {
+    expect(channelRead("MODE", channel)).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidTarget",
+    });
+  });
+
+  it("rejects a Channel too long for a Line", () => {
+    expect(channelRead("WHO", `#${"x".repeat(maxLineBytes)}`)).toStrictEqual({
+      _tag: "Rejected",
+      reason: "TooLong",
     });
   });
 });

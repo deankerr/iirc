@@ -29,7 +29,9 @@ import {
 import type { Overrides } from "./network.fixture.ts";
 import { LaneFull, LineDropped, NotInSession } from "./network.ts";
 import type { NetworkHost } from "./network.ts";
+import { namesSettleMillis, readPlan, readsInFlight, readTimeoutMillis } from "./reads.ts";
 import { Recorder, RecordFailed } from "./recorder.ts";
+import { foldStandings, noStandings } from "./standing.ts";
 import type { WantedChannel } from "./standing.ts";
 import { attemptInput, fakeIrcd } from "./testing.ts";
 import type { FakeIrcd } from "./testing.ts";
@@ -1333,7 +1335,10 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       yield* manyTurns;
       yield* afterSettle();
 
-      assert.strictEqual((yield* wire(ircd)).at(-1), "JOIN #new\r\n");
+      assert.deepStrictEqual(
+        (yield* wire(ircd)).filter((text) => text.startsWith("JOIN")),
+        ["JOIN #new\r\n"]
+      );
       assert.deepStrictEqual((yield* hosted.status).joined, ["#kept"]);
     }).pipe(memory)
   );
@@ -1788,6 +1793,317 @@ describe("LIVE-7, LIVE-8: the reconciler", () => {
       yield* manyTurns;
 
       assert.lengthOf(yield* entries, before);
+    }).pipe(memory)
+  );
+});
+
+// Self joins, and the Ircd answers as a JOIN is answered, members and all (KNOW-5).
+const joinedWithNames = (name: string, members = "iirc @bob") =>
+  `${joined(name)}:ircd 353 iirc = ${name} :${members}\r\n:ircd 366 iirc ${name} :End\r\n`;
+
+const readsOn = (written: readonly string[]) =>
+  written.filter((text) => /^(?:MODE|NAMES|WHO) [^ ]+\r\n$/u.test(text));
+
+const standingNow = Recorder.use(({ standing }) => standing("libera"));
+
+// In #one, with its modes and its users read, so that nothing is left to read.
+const readThrough = Effect.fnUntraced(function* (ircd: FakeIrcd, overrides?: Overrides) {
+  const hosted = yield* burstOver(ircd, overrides);
+
+  yield* afterSettle(overrides?.tuning);
+  yield* ircd.read(joinedWithNames("#one"));
+  yield* manyTurns;
+  yield* ircd.read(":ircd 324 iirc #one +nt\r\n");
+  yield* manyTurns;
+  yield* ircd.read(":ircd 315 iirc #one :End\r\n");
+  yield* manyTurns;
+
+  assert.deepStrictEqual(readsOn(yield* wire(ircd)), ["MODE #one\r\n", "WHO #one\r\n"]);
+
+  return hosted;
+});
+
+describe("KNOW-5, KNOW-6: the Daemon asks", () => {
+  it.effect("KNOW-5: a JOIN gives `MODE`, then `WHO` once it is answered, as `read`", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* burstOver(ircd);
+      yield* afterSettle();
+      yield* ircd.read(joinedWithNames("#one"));
+      yield* manyTurns;
+
+      assert.deepStrictEqual(readsOn(yield* wire(ircd)), ["MODE #one\r\n"]);
+
+      yield* ircd.read(":ircd 324 iirc #one +nt\r\n:ircd 329 iirc #one 1700000000\r\n");
+      yield* manyTurns;
+
+      assert.deepStrictEqual(readsOn(yield* wire(ircd)), ["MODE #one\r\n", "WHO #one\r\n"]);
+      assert.deepStrictEqual(
+        linesOf(yield* entries)
+          .filter(({ cause }) => cause === "read")
+          .map(({ bytes }) => decode(bytes)),
+        ["MODE #one", "WHO #one"]
+      );
+      assert.notInclude((yield* wire(ircd)).join(""), "NAMES");
+      assert.notInclude((yield* wire(ircd)).join(""), "TOPIC");
+    }).pipe(memory)
+  );
+
+  it.effect("KNOW-5, SEND-1: a Message queued beside a read goes out first", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const tuning = { ...defaultTuning, floodBurst: 1 };
+      const hosted = yield* burstOver(ircd, { tuning });
+
+      yield* afterSettle(tuning);
+      yield* hosted.send(line, "spends the token");
+      yield* ircd.read(joinedWithNames("#one"));
+      yield* manyTurns;
+
+      assert.strictEqual((yield* hosted.status).lanes.background, 1);
+
+      const said = yield* Effect.forkChild(hosted.send(safe("PRIVMSG", ["#one", "first"]), "api"));
+
+      yield* manyTurns;
+      yield* TestClock.adjust("2 seconds");
+      yield* manyTurns;
+      yield* Fiber.join(said);
+      yield* TestClock.adjust("2 seconds");
+      yield* manyTurns;
+
+      const written = yield* wire(ircd);
+
+      assert.deepStrictEqual(written.slice(-2), ["PRIVMSG #one first\r\n", "MODE #one\r\n"]);
+    }).pipe(memory)
+  );
+
+  it.effect("KNOW-5: a `-o` gives one `NAMES`, once the removals have stopped for 2 seconds", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* readThrough(ircd);
+      yield* ircd.read(":op!o@h MODE #one -o bob\r\n");
+      yield* manyTurns;
+      yield* TestClock.adjust(`${namesSettleMillis - 1} millis`);
+      yield* manyTurns;
+
+      assert.lengthOf(readsOn(yield* wire(ircd)), 2);
+
+      yield* TestClock.adjust("1 millis");
+      yield* manyTurns;
+
+      assert.strictEqual(readsOn(yield* wire(ircd)).at(-1), "NAMES #one\r\n");
+
+      yield* ircd.read(":ircd 353 iirc = #one :iirc +bob\r\n:ircd 366 iirc #one :End\r\n");
+      yield* manyTurns;
+      yield* TestClock.adjust("80 seconds");
+      yield* manyTurns;
+
+      assert.lengthOf(readsOn(yield* wire(ircd)), 3);
+    }).pipe(memory)
+  );
+
+  it.effect("KNOW-6: a `MODE` that does not add up reads modes, then members, again", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* readThrough(ircd);
+      yield* ircd.read(":op!o@h MODE #one +l\r\n");
+      yield* manyTurns;
+
+      assert.strictEqual(readsOn(yield* wire(ircd)).at(-1), "MODE #one\r\n");
+
+      yield* ircd.read(":ircd 324 iirc #one +ntl 10\r\n");
+      yield* manyTurns;
+
+      assert.strictEqual(readsOn(yield* wire(ircd)).at(-1), "NAMES #one\r\n");
+
+      yield* ircd.read(":ircd 353 iirc = #one :iirc @bob\r\n:ircd 366 iirc #one :End\r\n");
+      yield* manyTurns;
+
+      const { irc } = yield* standingNow;
+
+      assert.isFalse(irc.channels.get("#one")?.modesUncertain);
+      assert.isFalse(irc.channels.get("#one")?.membersUncertain);
+      assert.lengthOf(readsOn(yield* wire(ircd)), 4);
+    }).pipe(memory)
+  );
+
+  it.effect("KNOW-5, LIVE-6: a reconnect starts clean, and reads what it joins at once", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const hosted = yield* burstOver(ircd);
+
+      yield* afterSettle();
+      yield* ircd.read(joinedWithNames("#one"));
+      yield* manyTurns;
+      yield* ircd.hangUp;
+      yield* manyTurns;
+      yield* waitOutBackoff(hosted, ircd);
+      yield* ircd.read(`${welcome}${noMotd}`);
+      yield* manyTurns;
+      yield* afterSettle();
+
+      assert.deepStrictEqual((yield* standingNow).reads.size, 0);
+      assert.deepStrictEqual(readsOn(yield* textsOn(ircd, 1)), []);
+
+      yield* ircd.read(joinedWithNames("#one"));
+      yield* manyTurns;
+
+      assert.deepStrictEqual(readsOn(yield* textsOn(ircd, 1)), ["MODE #one\r\n"]);
+    }).pipe(memory)
+  );
+
+  it.effect(`KNOW-5: 200 Channels at burst keep at most ${readsInFlight} read in flight`, () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const names = Array.from({ length: 200 }, (_unused, index) => `#c${index}`);
+
+      yield* burstOver(ircd);
+      yield* afterSettle();
+      yield* ircd.read(names.map((name) => joinedWithNames(name)).join(""));
+      yield* manyTurns;
+
+      let answered = 0;
+
+      for (let round = 0; round < 1000 && answered < 400; round += 1) {
+        const asked = readsOn(yield* wire(ircd));
+
+        assert.isAtMost(asked.length - answered, readsInFlight);
+
+        const [read] = asked.slice(answered);
+
+        if (read !== undefined) {
+          const [command, name] = read.trim().split(" ");
+
+          answered += 1;
+          yield* ircd.read(
+            command === "MODE"
+              ? `:ircd 324 iirc ${name} +nt\r\n`
+              : `:ircd 315 iirc ${name} :End\r\n`
+          );
+        }
+
+        yield* TestClock.adjust("2 seconds");
+        yield* manyTurns;
+      }
+
+      const asked = readsOn(yield* wire(ircd));
+
+      assert.lengthOf(asked, 400);
+
+      for (const name of names) {
+        assert.include(asked, `MODE ${name}\r\n`);
+        assert.include(asked, `WHO ${name}\r\n`);
+      }
+    }).pipe(memory)
+  );
+
+  // A `WHO` reply is a Line a member, and none of them moves what a plan reads until its
+  // `315`, so it costs no more than a flood of Messages does.
+  it.effect("KNOW-5: does not plan again for every Line of a `WHO` reply", () => {
+    let reads = 0;
+
+    const layer = probed({
+      onStanding: () => {
+        reads += 1;
+      },
+    });
+
+    const flood = (ircd: FakeIrcd, line: (index: number) => string) =>
+      Effect.gen(function* () {
+        const before = reads;
+
+        for (let index = 0; index < 200; index += 1) {
+          yield* ircd.read(line(index));
+          yield* manyTurns;
+        }
+
+        return reads - before;
+      });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* burstOver(ircd);
+      yield* afterSettle();
+      yield* ircd.read(joinedWithNames("#one"));
+      yield* manyTurns;
+      yield* ircd.read(":ircd 324 iirc #one +nt\r\n");
+      yield* manyTurns;
+
+      const said = yield* flood(ircd, (index) => `:a!b@c PRIVMSG #one :${index}\r\n`);
+
+      const who = yield* flood(
+        ircd,
+        (index) => `:ircd 352 iirc #one u${index} h irc n${index} H :0 N\r\n`
+      );
+
+      assert.strictEqual(who, said);
+    }).pipe(Effect.provide(layer));
+  });
+
+  // A `QUIT` can bring a Channel under the `WHO` limit, so each is looked at, as each
+  // `JOIN` is for joining: one read of Standing a Line more than a Message, and no plan.
+  it.effect("KNOW-5: a netsplit's `QUIT`s are looked at, and plan nothing", () => {
+    let reads = 0;
+
+    const layer = probed({
+      onStanding: () => {
+        reads += 1;
+      },
+    });
+
+    const flood = (ircd: FakeIrcd, line: (index: number) => string) =>
+      Effect.gen(function* () {
+        const before = reads;
+
+        for (let index = 0; index < 200; index += 1) {
+          yield* ircd.read(line(index));
+          yield* manyTurns;
+        }
+
+        return reads - before;
+      });
+
+    return Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+      const nicks = Array.from({ length: 400 }, (_unused, index) => `n${index}`).join(" ");
+
+      yield* readThrough(ircd);
+      yield* ircd.read(`:ircd 353 iirc = #one :iirc ${nicks}\r\n:ircd 366 iirc #one :End\r\n`);
+      yield* manyTurns;
+
+      const said = yield* flood(ircd, (index) => `:a!b@c PRIVMSG #one :${index}\r\n`);
+      const quits = yield* flood(ircd, (index) => `:n${index}!u@h QUIT :*.net *.split\r\n`);
+
+      assert.strictEqual(quits - said, 200);
+      assert.lengthOf(readsOn(yield* wire(ircd)), 2);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("LOG-10: a restart mid-read rebuilds what was asked, and asks nothing twice", () =>
+    Effect.gen(function* () {
+      const ircd = yield* fakeIrcd();
+
+      yield* burstOver(ircd);
+      yield* afterSettle();
+      yield* ircd.read(`${joinedWithNames("#one")}${joinedWithNames("#two")}`);
+      yield* manyTurns;
+
+      const live = yield* standingNow;
+      const replayed = foldStandings(noStandings, yield* entries).get("libera");
+      const at = yield* now;
+
+      assert.isDefined(replayed);
+      assert.deepStrictEqual(replayed.reads, live.reads);
+      assert.deepStrictEqual(readPlan(replayed, at), readPlan(live, at));
+      assert.deepStrictEqual(readPlan(replayed, at).reads, []);
+      assert.deepStrictEqual(
+        readPlan(replayed, at + readTimeoutMillis).reads.map(({ channel }) => channel),
+        ["#two"]
+      );
     }).pipe(memory)
   );
 });

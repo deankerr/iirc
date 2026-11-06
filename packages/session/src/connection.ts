@@ -37,6 +37,7 @@ import { stepEntry } from "./events.ts";
 import { LineDropped, makeLanes, runPump, WriteFailed, writeTimedOut } from "./lanes.ts";
 import type { Lanes, LineFailure, PumpWire, QueuedLine } from "./lanes.ts";
 import { makePending } from "./pending.ts";
+import { movesReads, readPlanMoved } from "./reads.ts";
 import { makeReceiver } from "./receive.ts";
 import { reconcile } from "./reconcile.ts";
 import { RecordFailed } from "./recorder.ts";
@@ -189,7 +190,10 @@ export interface Host {
 }
 
 interface Stepped {
-  /** Whether what was stepped holds a Line that can move which Channels Self is in, which alone moves a plan. */
+  /**
+   * Whether what was stepped holds a Line that can move which Channels Self is in, or what
+   * has been read of them, which alone moves a plan.
+   */
   readonly stateMayMove: boolean;
   readonly commands: readonly Command[];
   readonly next: NetworkSnapshot;
@@ -264,7 +268,10 @@ const stepRecorded = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
 
   const { commands, event, next } = stepped;
 
-  return { commands, next, stateMayMove: event?.type === "LINE" && movesChannels(event.command) };
+  const stateMayMove =
+    event?.type === "LINE" && (movesChannels(event.command) || movesReads(event.command));
+
+  return { commands, next, stateMayMove };
 };
 
 const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepped => {
@@ -432,7 +439,7 @@ export const hostConnection: (
   // What the stream has read and the reader has not pulled, for the close to record.
   let unread = nothingUnread;
   let reconciling = false;
-  // The Standing the reconciler was last woken for.
+  // The Standing the reconciler last planned from, or was last woken for.
   let seen: Standing | undefined;
   let stopHandled = false;
   let closingRecorded = false;
@@ -552,26 +559,29 @@ export const hostConnection: (
     );
 
   // Whatever a commit moved that a plan reads wakes the reconciler, whichever Line moved
-  // it. Only a Line `movesChannels` names can: the reconciler's own `JOIN`s are planned for
-  // already, the burst and the end of the login wait wake it through their own Commands, and
-  // a close ends it.
+  // it. Only a Line `movesChannels` or `movesReads` names can: the reconciler's own `JOIN`s
+  // and reads are planned for already, the burst and the end of the login wait wake it
+  // through their own Commands, and a close ends it.
   const noticeChannels = Effect.gen(function* () {
     const current = yield* standing;
 
-    if (seen === undefined || joinPlanMoved(seen, current)) {
+    if (seen === undefined || joinPlanMoved(seen, current) || readPlanMoved(seen, current)) {
       seen = current;
       Queue.offerUnsafe(moved, undefined);
     }
   });
 
-  const join = Effect.fnUntraced(function* (
+  // The reconciler's one way out: the background lane, so that neither a rejoin nor a read
+  // ever goes ahead of a Message or a `PONG` (SEND-1, KNOW-5).
+  const sendBackground = Effect.fnUntraced(function* (
     line: QueuedLine["line"],
+    cause: string,
     sensitive: Sensitive | undefined
   ) {
     const outcome = Deferred.makeUnsafe<number, LineFailure>();
 
     const offered = yield* lanes.offerWaiting({
-      cause: "rejoin",
+      cause,
       lane: "background",
       line,
       outcome,
@@ -584,10 +594,22 @@ export const hostConnection: (
   const startReconciling = Effect.gen(function* () {
     reconciling = true;
 
-    yield* reconcile({ channels: wanted, join, moved, secrets, standing, tuning }).pipe(
-      closingIfItDies,
-      Effect.forkScoped
+    // What it plans from is what a commit is compared with, so its own `JOIN`s and reads,
+    // which it sees as it plans again, wake nothing.
+    const planning = Effect.tap(standing, (current) =>
+      Effect.sync(() => {
+        seen = current;
+      })
     );
+
+    yield* reconcile({
+      channels: wanted,
+      moved,
+      secrets,
+      send: sendBackground,
+      standing: planning,
+      tuning,
+    }).pipe(closingIfItDies, Effect.forkScoped);
   });
 
   // An Ircd's own bytes or a bad Configuration can make a Line that cannot be built, and

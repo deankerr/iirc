@@ -133,6 +133,10 @@ const trustedTlsIrcd = (respond: (line: string) => readonly string[]) =>
 
 const hostOn = (port: number) => hostNetwork(options(port, "127.0.0.1"));
 
+// The `MODE` that follows the `JOIN` is the last Line a Session sends unasked (KNOW-5), so
+// an Ircd that hangs up after it cannot reset a socket with a Line of ours still unread.
+const hasSettled = (received: readonly string[]) => received.includes("MODE #one");
+
 type Ircd = Effect.Success<ReturnType<typeof scriptedIrcd>>;
 
 const closedPort = Effect.scoped(
@@ -278,7 +282,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, hasSettled);
       yield* ircd.push(burstLines.join("\r\n"));
       yield* ircd.push("PING :last");
       yield* ircd.finish;
@@ -305,7 +309,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, hasSettled);
       yield* ircd.push("PING :first");
       yield* ircd.push(burstLines.join("\r\n"));
       yield* ircd.finish;
@@ -332,7 +336,7 @@ describe("Transport.layer when a Connection dies under a burst", () => {
         const ircd = yield* scriptedIrcd(welcoming("iirc"));
         const hosted = yield* hostOn(ircd.port);
 
-        yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+        yield* untilReally(ircd.received, hasSettled);
 
         // One at a time, so they are separate reads, and the inbox fills behind the hold.
         yield* Effect.forEach(lines, (line) => Effect.andThen(ircd.push(line), realMillis(5)), {
@@ -362,7 +366,7 @@ describe("Transport.layer when a close starts locally", () => {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, hasSettled);
       yield* ircd.push("ERROR :Closing Link");
       yield* ircd.push(burstLines.join("\r\n"));
       yield* ircd.finish;
@@ -386,7 +390,7 @@ describe("Transport.layer when a close starts locally", () => {
 
       const hosted = yield* movingClockWhileClosing(hostNetwork(options(ircd.port, quietAddress)));
 
-      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, hasSettled);
       yield* ircd.push("ERROR :Closing Link");
 
       // The wait is on from the moment the host has read `ERROR`.
@@ -469,7 +473,7 @@ describe("Transport.layer against a stream that is going", () => {
         )
       );
 
-      yield* untilReally(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* untilReally(ircd.received, hasSettled);
       yield* wire.stall;
 
       const sent = yield* Ref.make(0);
@@ -866,7 +870,7 @@ describe("Transport.layer staying on", () => {
         })
       );
 
-      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* eventually(ircd.received, hasSettled);
 
       for (let round = 0; round < rounds; round += 1) {
         // The Line reaches the kernel, and then the whole process stops, as it does when
@@ -905,13 +909,18 @@ describe("Transport.layer staying on", () => {
         })
       );
 
-      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* eventually(ircd.received, hasSettled);
       yield* ircd.hangUp;
       yield* eventually(ircd.accepted, (accepted) => accepted === 2);
 
-      const second = yield* eventually(ircd.receivedOn(1), (lines) => lines.includes("JOIN #one"));
+      const second = yield* eventually(ircd.receivedOn(1), hasSettled);
 
-      assert.deepStrictEqual(second, ["NICK iirc", "USER user 0 * :I IRC", "JOIN #one"]);
+      assert.deepStrictEqual(second, [
+        "NICK iirc",
+        "USER user 0 * :I IRC",
+        "JOIN #one",
+        "MODE #one",
+      ]);
       assert.strictEqual((yield* hosted.status).phase, "session");
     }).pipe(Effect.provide([Recorder.memoryReadable, Transport.layer]))
   );
@@ -923,7 +932,7 @@ describe("Transport.layer staying on", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* hostNetwork(options(ircd.port, quietAddress));
-          yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+          yield* eventually(ircd.received, hasSettled);
         })
       );
 
@@ -965,12 +974,13 @@ describe("Transport.layer over a real port", () => {
       const ircd = yield* scriptedIrcd(welcoming("iirc"));
       const hosted = yield* hostOn(ircd.port);
 
-      yield* eventually(ircd.received, (received) => received.includes("JOIN #one"));
+      yield* eventually(ircd.received, hasSettled);
 
       assert.deepStrictEqual(yield* ircd.received, [
         "NICK iirc",
         "USER user 0 * :I IRC",
         "JOIN #one",
+        "MODE #one",
       ]);
       assert.strictEqual((yield* hosted.status).phase, "session");
       assert.strictEqual(yield* ircd.accepted, 1);

@@ -82,6 +82,45 @@ export interface JoinAsked {
   readonly count: number;
 }
 
+/** A read of a Channel the Daemon asks for (KNOW-5): its modes, its members, or who they are. */
+export type ReadKind = "modes" | "names" | "who";
+
+/** The latest ask for one read on this Session, which nothing has settled yet (KNOW-5). */
+export interface ReadAsked extends Moment {
+  /**
+   * The Ircd answered: with a reply that left what it read uncertain, as a `NAMES` cut by a
+   * bound does, or with an error naming the Channel. Either way it is no longer in flight.
+   */
+  readonly answered: boolean;
+  /** How many have been sent since one last settled it. */
+  readonly count: number;
+  /** The answer was an error, such as `403` or `442`, which says nothing more (KNOW-5). */
+  readonly failed: boolean;
+}
+
+/**
+ * Prefix modes removed since the latest `NAMES` asked, which only another `NAMES` can show
+ * the rest of, because without `multi-prefix` a member with `@+` shows only `@` (KNOW-5).
+ */
+export interface PrefixRemovals {
+  readonly first: Moment;
+  readonly latest: Moment;
+}
+
+/**
+ * What has been read of a Channel Self is in on this Session, and what is asked. Self's own
+ * outbound Lines say what was asked, and the Ircd's replies what was read, so this is a fold
+ * of the Log like the rest, and apart from {@link IrcState}, which only an Ircd moves. It
+ * belongs to a Channel `IrcState` holds, under `IrcState`'s key for it, and to nothing else.
+ */
+export interface ChannelReads {
+  /** Each read sent and not yet settled, by kind. */
+  readonly asked: Readonly<Partial<Record<ReadKind, ReadAsked>>>;
+  readonly prefixRemoved: PrefixRemovals | undefined;
+  /** Whether a `324`, a `366`, and a `315` have each come since Self joined. */
+  readonly read: Readonly<Record<ReadKind, boolean>>;
+}
+
 /** An outbound lag check with no answer yet (LIVE-3). */
 export interface LagCheck {
   readonly at: number;
@@ -138,6 +177,13 @@ export interface Standing {
   readonly lagMillis: number | undefined;
   /** The Network this belongs to, which is whichever one it first heard of. */
   readonly network: NetworkId | undefined;
+  /**
+   * What has been read and asked of each Channel Self is in on this Session (KNOW-5,
+   * KNOW-6), which `readPlan` decides from, keyed as `irc.channels` is. It follows
+   * `irc.channels` after every Line, so it holds exactly the Channels that does, and is
+   * bounded by it. Nothing here outlives the Session (LIVE-6).
+   */
+  readonly reads: ReadonlyMap<string, ChannelReads>;
   /** How the latest Connections ended, oldest first. */
   readonly recent: readonly EndedConnection[];
 }
@@ -230,6 +276,7 @@ export const noStanding: Standing = {
   lagChecks: [],
   lagMillis: undefined,
   network: undefined,
+  reads: noChannels,
   recent: [],
 };
 
@@ -346,6 +393,7 @@ const withoutSession = (standing: Standing): Standing => ({
   irc: initialState,
   lagChecks: [],
   lagMillis: undefined,
+  reads: noChannels,
 });
 
 /**
@@ -516,11 +564,73 @@ const afterAsked = (standing: Standing, { at }: Entry, channels: string | undefi
   return { ...standing, asked };
 };
 
+// The key `irc.channels` holds a Channel under, which `reads` shares.
+const readsKey = (irc: IrcState, name: string) => casefold(casemappingOf(irc), name);
+
+const heldReads = (standing: Standing, name: string) =>
+  standing.reads.get(readsKey(standing.irc, name));
+
+// Only a Channel `IrcState` holds has reads, so this changes nothing for any other.
+const withReads = (standing: Standing, name: string, reads: ChannelReads): Standing => {
+  const key = readsKey(standing.irc, name);
+
+  if (!standing.reads.has(key)) {
+    return standing;
+  }
+
+  const next = new Map(standing.reads);
+
+  next.set(key, reads);
+
+  return { ...standing, reads: next };
+};
+
+const readCommands: ReadonlyMap<string, ReadKind> = new Map([
+  ["MODE", "modes"],
+  ["NAMES", "names"],
+  ["WHO", "who"],
+]);
+
+// Which read an outbound Line asks, if it is one. Only the very shape the Daemon sends
+// counts, one Channel and nothing else, whoever sent it: a `WHO #a o` or a `NAMES #a,#b` is
+// answered by replies that do not say what a read of `#a` says, so it asks nothing here.
+const askedRead = ({ command, params }: Line): ReadKind | undefined => {
+  const [channel] = params;
+
+  return params.length === 1 && channel !== undefined && !channel.includes(",")
+    ? readCommands.get(command)
+    : undefined;
+};
+
+const afterReadAsked = (
+  standing: Standing,
+  { at, sequence }: Entry,
+  kind: ReadKind,
+  name: string
+): Standing => {
+  const held = heldReads(standing, name);
+
+  if (held === undefined) {
+    return standing;
+  }
+
+  const count = (held.asked[kind]?.count ?? 0) + 1;
+  const ask: ReadAsked = { answered: false, at, count, failed: false, sequence };
+
+  return withReads(standing, name, { ...held, asked: { ...held.asked, [kind]: ask } });
+};
+
 const afterOutbound = (standing: Standing, entry: LineEntry, line: Line): Standing => {
   const [first] = line.params;
 
   if (line.command === "JOIN") {
     return afterAsked(standing, entry, first);
+  }
+
+  const read = askedRead(line);
+
+  if (read !== undefined && first !== undefined) {
+    return afterReadAsked(standing, entry, read, first);
   }
 
   return entry.cause === lagCheckCause && first !== undefined
@@ -583,10 +693,75 @@ const afterJoined = (standing: Standing, channel: string): Standing => ({
   kicked: withoutChannel(standing.kicked, standing.irc, channel),
 });
 
+const unread: ChannelReads = {
+  asked: {},
+  prefixRemoved: undefined,
+  read: { modes: false, names: false, who: false },
+};
+
+// The changes that can change which Channels `IrcState` holds, or under which keys.
+const movesChannelKeys: ReadonlySet<StateChange["_tag"]> = new Set([
+  "IsupportChanged",
+  "Joined",
+  "Kicked",
+  "Parted",
+  "Welcomed",
+]);
+
+// `reads` follows `irc.channels`, never the other way: the Channels `IrcState` holds, under
+// its keys, and nothing else, so its bound and its choice of which to drop are the only
+// ones. A new mapping folds Channels again, and each keeps what was held under the key its
+// name had before, so of two that merge, the one `IrcState` kept keeps its own. A Channel
+// with nothing held, such as one just joined, starts with nothing read, which at worst
+// costs one read more. A `JOIN` echoed for a Channel Self is in keeps what was read of it,
+// as `@iirc/state` keeps the Channel.
+const realigned = (
+  reads: ReadonlyMap<string, ChannelReads>,
+  before: IrcState,
+  after: IrcState
+): ReadonlyMap<string, ChannelReads> => {
+  const beforeMapping = casemappingOf(before);
+  const isRefolded = beforeMapping !== casemappingOf(after);
+  const next = new Map<string, ChannelReads>();
+
+  for (const [key, channel] of after.channels) {
+    const held = reads.get(isRefolded ? casefold(beforeMapping, channel.name) : key);
+
+    next.set(key, held ?? unread);
+  }
+
+  return next;
+};
+
+// A removal after the latest `NAMES` was asked starts a new run of them, which that
+// `NAMES` cannot answer, so the debounce runs from it (KNOW-5).
+const afterPrefixRemoved = (standing: Standing, moment: Moment, channel: string): Standing => {
+  const held = heldReads(standing, channel);
+
+  if (held === undefined) {
+    return standing;
+  }
+
+  const { prefixRemoved } = held;
+  const asked = held.asked.names;
+
+  const isNewRun =
+    prefixRemoved === undefined ||
+    (asked !== undefined && asked.sequence > prefixRemoved.latest.sequence);
+
+  return withReads(standing, channel, {
+    ...held,
+    prefixRemoved: { first: isNewRun ? moment : prefixRemoved.first, latest: moment },
+  });
+};
+
 // The changes whose whole meaning is in the state they came with: Self, the Channels Self
 // is in, the Users seen, and what the Ircd supports. Every tag `afterChange` does not
 // handle must be here, so a new one fails to compile until someone decides.
-type KeptChange = Exclude<StateChange["_tag"], "Joined" | "JoinRefused" | "Kicked">;
+type KeptChange = Exclude<
+  StateChange["_tag"],
+  "Joined" | "JoinRefused" | "Kicked" | "PrefixRemoved"
+>;
 
 const kept = (standing: Standing): Standing => standing;
 
@@ -602,7 +777,6 @@ const keptChanges: Readonly<Record<KeptChange, (standing: Standing) => Standing>
   NamesReplaced: kept,
   NickChanged: kept,
   Parted: kept,
-  PrefixRemoved: kept,
   SelfAwayChanged: kept,
   SelfMaskChanged: kept,
   SelfModesChanged: kept,
@@ -615,17 +789,21 @@ const keptChanges: Readonly<Record<KeptChange, (standing: Standing) => Standing>
 
 // What outlives the Session, or needs the Entry's place in the Log.
 const afterChange = (standing: Standing, entry: Entry, change: StateChange): Standing => {
+  const { at, sequence } = entry;
+
   if (change._tag === "Joined") {
     return afterJoined(standing, change.channel);
   }
 
   if (change._tag === "Kicked") {
-    const { at, sequence } = entry;
-
     return {
       ...standing,
       kicked: withChannel(standing.kicked, standing.irc, change.channel, { at, sequence }),
     };
+  }
+
+  if (change._tag === "PrefixRemoved") {
+    return afterPrefixRemoved(standing, { at, sequence }, change.channel);
   }
 
   if (change._tag === "JoinRefused") {
@@ -658,11 +836,154 @@ const afterHeard = (standing: Standing, entry: Entry, line: Line): Stepped => {
 
   let after = next === standing.irc ? standing : { ...standing, irc: next };
 
+  if (
+    next.channels.size !== standing.reads.size ||
+    changes.some(({ _tag }) => movesChannelKeys.has(_tag))
+  ) {
+    after = { ...after, reads: realigned(standing.reads, standing.irc, next) };
+  }
+
   for (const change of changes) {
     after = afterChange(after, entry, change);
   }
 
   return { changes, standing: after };
+};
+
+// The numeric that ends each read's reply, naming the Channel second.
+const replies: ReadonlyMap<string, ReadKind> = new Map([
+  ["315", "who"],
+  ["324", "modes"],
+  ["366", "names"],
+]);
+
+// Whether what a read reads is certain now that its reply is in. A `324` or a `NAMES` that
+// did not fit leaves its Channel uncertain, and asking again waits out the backoff.
+const isSettled = (irc: IrcState, kind: ReadKind, name: string) => {
+  const channel = channelOf(irc, name);
+
+  switch (kind) {
+    case "modes": {
+      return channel?.modesUncertain === false;
+    }
+
+    case "names": {
+      return channel?.membersUncertain === false;
+    }
+
+    case "who": {
+      return true;
+    }
+
+    default: {
+      return kind satisfies never;
+    }
+  }
+};
+
+// Whether a reply ends a read of its Channel. A `324` always says the Channel's modes. A
+// `315` and a `366` end whatever `WHO` or `NAMES` came before them, which may have been
+// filtered, so only one asked in the Daemon's own shape counts, and the `JOIN`'s own
+// `NAMES`, which is the first `366` since Self joined.
+const endsRead = (kind: ReadKind, held: ChannelReads) => {
+  switch (kind) {
+    case "modes": {
+      return true;
+    }
+
+    case "names": {
+      return !held.read.names || held.asked.names !== undefined;
+    }
+
+    case "who": {
+      return held.asked.who !== undefined;
+    }
+
+    default: {
+      return kind satisfies never;
+    }
+  }
+};
+
+// A reply says the read was answered, whoever asked, and the state it left says whether
+// it settled anything. It is read after `@iirc/state` has folded the same Line. A `NAMES`
+// clears the prefixes removed only if it was asked after the latest of them.
+const afterReply = (standing: Standing, kind: ReadKind, line: Line): Standing => {
+  const [, name] = line.params;
+  const held = name === undefined ? undefined : heldReads(standing, name);
+
+  if (name === undefined || held === undefined || !endsRead(kind, held)) {
+    return standing;
+  }
+
+  const { [kind]: asked, ...others } = held.asked;
+  const { prefixRemoved } = held;
+  const settled = isSettled(standing.irc, kind, name);
+
+  const answered =
+    kind === "names" &&
+    asked !== undefined &&
+    prefixRemoved !== undefined &&
+    asked.sequence > prefixRemoved.latest.sequence;
+
+  let stillAsked = held.asked;
+
+  if (settled) {
+    stillAsked = others;
+  } else if (asked !== undefined) {
+    stillAsked = { ...others, [kind]: { ...asked, answered: true } };
+  }
+
+  return withReads(standing, name, {
+    asked: stillAsked,
+    prefixRemoved: answered ? undefined : prefixRemoved,
+    read: { ...held.read, [kind]: true },
+  });
+};
+
+/**
+ * The errors that answer a read by naming its Channel: no such Channel (`403`), not on it
+ * (`442`), a bad mask (`476`), and a name the Ircd will not take (`479`). An error says the
+ * read is over and nothing else, so only the reads in flight for that Channel take it.
+ */
+export const readErrors: ReadonlySet<string> = new Set(["403", "442", "476", "479"]);
+
+// The Channel an error names: second after the client, or first where the Ircd leaves the
+// client out, as RFC 2812 gives `476`.
+const erredChannel = ({ params }: Line) => (params.length >= 3 ? params[1] : params[0]);
+
+const afterReadError = (standing: Standing, line: Line): Standing => {
+  const name = erredChannel(line);
+  const held = name === undefined ? undefined : heldReads(standing, name);
+
+  if (name === undefined || held === undefined) {
+    return standing;
+  }
+
+  const asked: Partial<Record<ReadKind, ReadAsked>> = { ...held.asked };
+  let changed = false;
+
+  for (const kind of readCommands.values()) {
+    const ask = asked[kind];
+
+    if (ask !== undefined && !ask.answered) {
+      asked[kind] = { ...ask, answered: true, failed: true };
+      changed = true;
+    }
+  }
+
+  return changed ? withReads(standing, name, { ...held, asked }) : standing;
+};
+
+// What ends a read, if a Line of this command can.
+const afterReadAnswer = (standing: Standing, line: Line): Standing => {
+  const kind = replies.get(line.command);
+
+  if (kind !== undefined) {
+    return afterReply(standing, kind, line);
+  }
+
+  return readErrors.has(line.command) ? afterReadError(standing, line) : standing;
 };
 
 // Whether a Session began is the machine's to say, and the Line it began on has already
@@ -681,7 +1002,11 @@ const afterInbound = (
     return saidNothing(answered);
   }
 
-  return afterHeard(welcomed ? afterWelcome(answered, entry) : answered, entry, line);
+  const heard = afterHeard(welcomed ? afterWelcome(answered, entry) : answered, entry, line);
+
+  return replies.has(line.command) || readErrors.has(line.command)
+    ? { changes: heard.changes, standing: afterReadAnswer(heard.standing, line) }
+    : heard;
 };
 
 const afterLine = (standing: Standing, entry: LineEntry, line: Line | undefined): Stepped => {
