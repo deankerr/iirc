@@ -91,6 +91,7 @@ Closing the Scope says `QUIT` and waits up to `quitWaitMillis`.
 - Nothing outlives its Connection: no Line queued on one is sent on the next.
 - A defect during a Connection becomes a `closed` Entry and a normal backoff. A failed `record` backs off the same way, and `status` shows the fault until one succeeds (LOG-9).
 - `Standing` holds at most 64 Connection outcomes and 1024 Channels per map.
+- `joinPlanMoved` compares which Channels Self is in, not what is in them, so members, topics, and modes moving never wake the reconciler.
 
 ## Field vocabulary
 

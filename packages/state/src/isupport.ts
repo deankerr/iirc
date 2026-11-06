@@ -1,186 +1,237 @@
+import type { Casemapping } from "./casemapping.ts";
 import type { ModeTypes } from "./modes.ts";
 
 /**
- * How a Network compares nicks and Channel names, from `CASEMAPPING` (KNOW-3). Anything
- * unrecognised is `ascii`, which splits names rather than merging them.
+ * The `RPL_ISUPPORT` tokens a Session holds, as they stand now (KNOW-2). `tokens` is every
+ * token as sent, and the rest is read from it, with the defaults KNOW-2 gives for a token
+ * never sent or taken back.
  */
-export type Casemapping = "ascii" | "rfc1459" | "rfc1459-strict";
-
-/** The `RPL_ISUPPORT` tokens a Session holds, already read, as they stand now (KNOW-2). */
 export interface Isupport {
+  /** From `CASEMAPPING` and `UTF8MAPPING` together (KNOW-3). */
   readonly casemapping: Casemapping;
+  /**
+   * The token whose mapping was not recognised, such as `CASEMAPPING=precis`, which made
+   * `casemapping` fall back to `ascii`. `undefined` when nothing fell back.
+   */
+  readonly unknownCasemapping: string | undefined;
+  /** `CHANTYPES`: the characters a Channel name can begin with. `#&` by default. */
+  readonly chantypes: string;
+  /** `MODES`: how many parameterised modes one `MODE` may carry, or `undefined` for no limit. */
+  readonly maxModes: number | undefined;
   /** Which Channel mode letters take parameters, from `PREFIX` and `CHANMODES`. */
   readonly modes: ModeTypes;
-  /** `NICKLEN`, the longest nick the Ircd accepts, if it said (KNOW-2). */
+  /** `NETWORK`, the Network's own name for itself, if it said. */
+  readonly network: string | undefined;
+  /** `NICKLEN`, the longest nick the Ircd accepts, if it said a usable one. */
   readonly nickLength: number | undefined;
+  /** `PREFIX`'s symbols, each the symbol for the letter at its place in `modes.prefix`. */
+  readonly prefixSymbols: string;
+  /** `STATUSMSG`: prefixes that address a Message to some members of a Channel. */
+  readonly statusmsg: string;
+  /**
+   * Every token in force, by name, with `\xHH` escapes decoded. A token sent with no value
+   * holds `""`. Bounded: see {@link heldTokens}.
+   */
+  readonly tokens: ReadonlyMap<string, string>;
+  /** Some tokens were not held, because {@link heldTokens} were already. */
+  readonly tokensDropped: boolean;
 }
+
+/**
+ * The most tokens held. Real Ircds send about 40. Past this, a new token is not held and
+ * `tokensDropped` says so, but the tokens read into fields above are always held.
+ */
+export const heldTokens = 256;
 
 // KNOW-2's defaults, for a Network that never sends a token, or takes one back.
 const defaultCasemapping: Casemapping = "rfc1459";
 
-const defaultPrefixLetters = "ov";
+const defaultPrefix = "(ov)@+";
 
 const defaultChanmodes = "beI,k,l";
 
-const prefixModes = /^\((?<modes>[^)]*)\)/u;
+const defaultChantypes = "#&";
 
-const tokenParts = /^(?<removed>-?)(?<name>[^=]*)(?:=(?<value>.*))?$/u;
+const defaultMaxModes = 3;
 
-const positive = /^[1-9]\d*$/u;
-
-const upper = /[A-Z]/gu;
-
-const rfc1459Extras = /[[\]\\~]/gu;
-
-const strictExtras = /[[\]\\]/gu;
-
-const extraLower: ReadonlyMap<string, string> = new Map([
-  ["[", "{"],
-  ["\\", "|"],
-  ["]", "}"],
-  ["~", "^"],
+const readTokens: ReadonlySet<string> = new Set([
+  "CASEMAPPING",
+  "CHANMODES",
+  "CHANTYPES",
+  "MODES",
+  "NETWORK",
+  "NICKLEN",
+  "PREFIX",
+  "STATUSMSG",
+  "UTF8MAPPING",
 ]);
 
-const lowerLetter = (letter: string) => letter.toLowerCase();
+// The grammar of a token (KNOW-2): a name of up to 20 letters, digits, `.` and `/`, and a
+// value with no space.
+const tokenGrammar = /^(?<removed>-?)(?<name>[A-Za-z0-9./]{1,20})(?:=(?<value>\S*))?$/u;
 
-const lowerExtra = (character: string) => extraLower.get(character) ?? character;
+const escape = /\\x(?<hex>[0-9A-Fa-f]{2})/gu;
 
-/**
- * The form a name is compared in under a mapping (KNOW-3). `ascii` lower-cases `A` to `Z`,
- * and `rfc1459` also takes `[]\~` to `{}|^`, which `rfc1459-strict` does but for `~`.
- * @param casemapping - The mapping in force.
- * @param name - A nick or Channel name, as spelled anywhere.
- * @returns What every spelling of it shares.
- */
-export const casefold = (casemapping: Casemapping, name: string): string => {
-  const lowered = name.replaceAll(upper, lowerLetter);
+const prefixGrammar = /^\((?<letters>[^)]*)\)(?<symbols>.*)$/u;
 
-  switch (casemapping) {
-    case "ascii": {
-      return lowered;
-    }
+const positive = /^[1-9]\d{0,8}$/u;
 
-    case "rfc1459": {
-      return lowered.replaceAll(rfc1459Extras, lowerExtra);
-    }
+const unescaped = (value: string) =>
+  value.replaceAll(escape, (_match, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)));
 
-    case "rfc1459-strict": {
-      return lowered.replaceAll(strictExtras, lowerExtra);
-    }
+const casemappingOf = (
+  tokens: ReadonlyMap<string, string>
+): Pick<Isupport, "casemapping" | "unknownCasemapping"> => {
+  const utf8 = tokens.get("UTF8MAPPING");
+  const value = tokens.get("CASEMAPPING");
 
-    default: {
-      return casemapping satisfies never;
-    }
+  if (utf8 === "rfc8265" || value === "rfc8265") {
+    return { casemapping: "rfc8265", unknownCasemapping: undefined };
   }
-};
 
-const casemappingOf = (value: string | undefined): Casemapping => {
+  if (utf8 !== undefined) {
+    return { casemapping: "ascii", unknownCasemapping: `UTF8MAPPING=${utf8}` };
+  }
+
   switch (value) {
     case undefined: {
-      return defaultCasemapping;
+      return { casemapping: defaultCasemapping, unknownCasemapping: undefined };
     }
 
+    case "ascii":
     case "rfc1459": {
-      return "rfc1459";
+      return { casemapping: value, unknownCasemapping: undefined };
     }
 
     case "rfc1459-strict":
     case "strict-rfc1459": {
-      return "rfc1459-strict";
+      return { casemapping: "rfc1459-strict", unknownCasemapping: undefined };
     }
 
     default: {
-      return "ascii";
+      return { casemapping: "ascii", unknownCasemapping: `CASEMAPPING=${value}` };
     }
   }
 };
 
-// `PREFIX=` means no prefixes at all, which differs from no token (KNOW-2). A value that
-// is neither has no letters to offer, so the default stands in for it.
-const prefixLettersOf = (value: string | undefined) => {
-  if (value === undefined) {
-    return defaultPrefixLetters;
+// `PREFIX=` means no prefixes at all, which differs from no token (KNOW-2). A value that is
+// neither, or pairs letters with symbols unevenly, has nothing to offer, so the default
+// stands in for it.
+interface Prefix {
+  readonly letters: string;
+  readonly symbols: string;
+}
+
+const prefixOf = (value: string | undefined): Prefix => {
+  if (value === "") {
+    return { letters: "", symbols: "" };
   }
 
-  return value === "" ? "" : (prefixModes.exec(value)?.groups?.modes ?? defaultPrefixLetters);
+  const parts = prefixGrammar.exec(value ?? defaultPrefix)?.groups;
+
+  if (parts?.letters === undefined || parts.letters.length !== parts.symbols?.length) {
+    return { letters: "ov", symbols: "@+" };
+  }
+
+  return { letters: parts.letters, symbols: parts.symbols };
 };
 
 // A `CHANMODES` short of groups has none of the missing kinds.
-const chanmodesOf = (modes: ModeTypes, value: string | undefined): ModeTypes => {
+const chanmodesOf = (prefix: string, value: string | undefined): ModeTypes => {
   const [list = "", always = "", whenSet = "", flags = ""] = (value ?? defaultChanmodes).split(",");
 
-  return { ...modes, always, flags, list, whenSet };
+  return { always, flags, list, prefix, whenSet };
+};
+
+// `MODES` with no value means no limit, and one that is no count is as if never sent.
+const maxModesOf = (value: string | undefined): number | undefined => {
+  if (value === "") {
+    return undefined;
+  }
+
+  return value !== undefined && positive.test(value) ? Number(value) : defaultMaxModes;
+};
+
+const isupportOf = (tokens: ReadonlyMap<string, string>, tokensDropped: boolean): Isupport => {
+  const prefix = prefixOf(tokens.get("PREFIX"));
+  const nickLength = tokens.get("NICKLEN");
+
+  return {
+    ...casemappingOf(tokens),
+    chantypes: tokens.get("CHANTYPES") ?? defaultChantypes,
+    maxModes: maxModesOf(tokens.get("MODES")),
+    modes: chanmodesOf(prefix.letters, tokens.get("CHANMODES")),
+    network: tokens.get("NETWORK"),
+    nickLength:
+      nickLength !== undefined && positive.test(nickLength) ? Number(nickLength) : undefined,
+    prefixSymbols: prefix.symbols,
+    statusmsg: tokens.get("STATUSMSG") ?? "",
+    tokens,
+    tokensDropped,
+  };
+};
+
+interface Token {
+  readonly name: string;
+  /** `undefined` for a token taken back. */
+  readonly value: string | undefined;
+}
+
+// One parameter of a `005` as a token, if it is one. A removal never carries a value, so
+// one that does is no token (KNOW-2).
+const tokenOf = (param: string): Token | undefined => {
+  const parts = tokenGrammar.exec(param)?.groups;
+  const name = parts?.name;
+
+  if (name === undefined) {
+    return undefined;
+  }
+
+  if (parts?.removed === "-") {
+    return parts.value === undefined ? { name, value: undefined } : undefined;
+  }
+
+  return { name, value: unescaped(parts?.value ?? "") };
 };
 
 /** What a Session holds before any `RPL_ISUPPORT`. */
-export const defaultIsupport: Isupport = {
-  casemapping: defaultCasemapping,
-  modes: chanmodesOf(
-    { always: "", flags: "", list: "", prefix: defaultPrefixLetters, whenSet: "" },
-    undefined
-  ),
-  nickLength: undefined,
-};
-
-// A token with no value has an empty one, and `-TOKEN` takes it back, so its default
-// applies again. Only a usable `NICKLEN` counts, and anything else leaves it as it was.
-const withToken = (isupport: Isupport, token: string): Isupport => {
-  const { name = "", removed, value: given } = tokenParts.exec(token)?.groups ?? {};
-  const value = removed === "-" ? undefined : (given ?? "");
-
-  switch (name) {
-    case "CASEMAPPING": {
-      return { ...isupport, casemapping: casemappingOf(value) };
-    }
-
-    case "CHANMODES": {
-      return { ...isupport, modes: chanmodesOf(isupport.modes, value) };
-    }
-
-    case "PREFIX": {
-      return { ...isupport, modes: { ...isupport.modes, prefix: prefixLettersOf(value) } };
-    }
-
-    case "NICKLEN": {
-      if (removed === "-") {
-        return given === undefined ? { ...isupport, nickLength: undefined } : isupport;
-      }
-
-      return value !== undefined && positive.test(value)
-        ? { ...isupport, nickLength: Number(value) }
-        : isupport;
-    }
-
-    default: {
-      return isupport;
-    }
-  }
-};
-
-const sameModes = (one: ModeTypes, other: ModeTypes) =>
-  one.prefix === other.prefix &&
-  one.list === other.list &&
-  one.always === other.always &&
-  one.whenSet === other.whenSet &&
-  one.flags === other.flags;
+export const defaultIsupport: Isupport = isupportOf(new Map(), false);
 
 /**
- * Applies the tokens of one `RPL_ISUPPORT`, in order.
+ * Applies the tokens of one `RPL_ISUPPORT`, in order. `-TOKEN` takes a token back, so its
+ * default applies again, and what does not follow the token grammar is not a token.
  * @param current - The tokens so far in this Session.
- * @param tokens - The `005`'s parameters after its own Target. Tokens run to the last,
- * which is usually prose and never looks like one.
- * @returns The tokens after it, and the very same value when nothing it holds moved.
+ * @param params - The `005`'s parameters after its own Target: the tokens, then the text
+ * that always ends it, which is never read, even when it looks like a token.
+ * @returns The tokens after it, and the very same value when no token moved.
  */
-export const withIsupport = (current: Isupport, tokens: readonly string[]): Isupport => {
-  let next = current;
+export const withIsupport = (current: Isupport, params: readonly string[]): Isupport => {
+  const tokens = new Map(current.tokens);
+  let { tokensDropped } = current;
+  let moved = false;
 
-  for (const token of tokens) {
-    next = withToken(next, token);
+  // A `005` is its Target, its tokens, then text for people, which is never read, whatever
+  // it says, so no text an Ircd sends can change what the Session does.
+  for (const param of params.slice(0, -1)) {
+    const token = tokenOf(param);
+
+    if (token?.value === undefined) {
+      moved = (token !== undefined && tokens.delete(token.name)) || moved;
+    } else if (tokens.get(token.name) !== token.value) {
+      const fits = tokens.has(token.name) || tokens.size < heldTokens || readTokens.has(token.name);
+
+      if (fits) {
+        tokens.set(token.name, token.value);
+      }
+
+      moved ||= fits;
+      tokensDropped ||= !fits;
+    }
   }
 
-  return next.casemapping === current.casemapping &&
-    next.nickLength === current.nickLength &&
-    sameModes(next.modes, current.modes)
-    ? current
-    : next;
+  if (!moved) {
+    return tokensDropped === current.tokensDropped ? current : { ...current, tokensDropped };
+  }
+
+  return isupportOf(tokens, tokensDropped);
 };

@@ -62,7 +62,7 @@ Dependencies point down only. Each library package stands alone for whoever want
 | Package | Job | Runtime dependencies |
 | --- | --- | --- |
 | [`@iirc/protocol`](../packages/protocol/README.md) | Bytes to Lines and back, safely: frames, parsing, decoding, formatting, CTCP, standard replies, outbound construction, nick candidates, `JOIN` batches, the token bucket | None |
-| [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in, `RPL_ISUPPORT`, casefolding, modes | `protocol` |
+| [`@iirc/state`](../packages/state/README.md) | What an Ircd's Lines mean for one Session: Self, the Channels Self is in with their topics, modes, and members, the Users seen, `RPL_ISUPPORT`, casefolding | `protocol` |
 | [`@iirc/lifecycle`](../packages/lifecycle/README.md) | The Network machine as a pure fold, and `Tuning` | `protocol` |
 | [`@iirc/session`](../packages/session/README.md) | Hosts one Network: Transport, lanes, `Standing`, reconnect, rejoin, `Recorder`, `Committed` | `protocol`, `state`, `lifecycle`, `effect` |
 | [`@iirc/log`](../packages/log/README.md) | The durable Log in SQLite: the writer, the reader Worker, derived tables, migrations, backup, the lock | `session`, `state`, `effect`, `@effect/sql-sqlite-bun`, `@effect/platform-bun` |

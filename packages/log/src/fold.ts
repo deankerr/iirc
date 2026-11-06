@@ -34,7 +34,7 @@ const messageFrom = ({ before, entry, line }: StandingStep): LoggedMessage | und
   const message =
     direction === "inbound"
       ? messageOf(line)
-      : messageOf({ ...line, source: undefined }, before.irc.self);
+      : messageOf({ ...line, source: undefined }, before.irc.self?.nick);
 
   return message === undefined ? undefined : { ...message, at, network, sequence };
 };

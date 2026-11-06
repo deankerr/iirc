@@ -186,7 +186,7 @@ export const folder = (target: string, gaps: readonly RawGap[]): Folder => {
           });
 
           if (irc.self !== undefined) {
-            nicks.add(irc.self);
+            nicks.add(irc.self.nick);
           }
         }
       }

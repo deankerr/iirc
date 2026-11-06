@@ -673,7 +673,7 @@ describe("LIVE-6: a new Session starts clean", () => {
     const { standing } = busy().attempt();
 
     expect(busy().standing.lagMillis).toBe(0);
-    expect({ lagMillis: standing.lagMillis, self: standing.irc.self }).toStrictEqual({
+    expect({ lagMillis: standing.lagMillis, self: standing.irc.self?.nick }).toStrictEqual({
       lagMillis: undefined,
       self: undefined,
     });
@@ -684,7 +684,7 @@ describe("LIVE-6: a new Session starts clean", () => {
   it("LIVE-6: a close clears them as well, since nobody is on the Network", () => {
     const { standing } = busy().closed("gone");
 
-    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.self?.nick).toBeUndefined();
     expect(standing.irc.channels.size).toBe(0);
     expect(standing.kicked.size).toBe(1);
   });
@@ -692,14 +692,14 @@ describe("LIVE-6: a new Session starts clean", () => {
   it("LIVE-6: `attempt` clears what was left by Lines no Connection owned", () => {
     const { standing } = new Script().welcome().in(":alice!u@h JOIN #iirc").attempt();
 
-    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.self?.nick).toBeUndefined();
     expect(standing.irc.channels.size).toBe(0);
   });
 
   it("LIVE-6: a kill clears them", () => {
     const { standing } = busy().daemon("started");
 
-    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.self?.nick).toBeUndefined();
     expect(standing.irc.channels.size).toBe(0);
   });
 
@@ -722,17 +722,17 @@ describe("CONN-3: Self", () => {
   it("CONN-3: the nick in 001 is the truth, then later NICKs", () => {
     const script = new Script().attempt().opened().welcome("alice_");
 
-    expect(script.standing.irc.self).toBe("alice_");
+    expect(script.standing.irc.self?.nick).toBe("alice_");
 
     script.in(":alice_!u@h NICK :alicia");
 
-    expect(script.standing.irc.self).toBe("alicia");
+    expect(script.standing.irc.self?.nick).toBe("alicia");
   });
 
   it("CONN-3: a second 001 changes nothing, nor when the Session began", () => {
     const script = new Script().attempt().opened().welcome().wait(1000).welcome("mallory");
 
-    expect(script.standing.irc.self).toBe("alice");
+    expect(script.standing.irc.self?.nick).toBe("alice");
     expect(sessionSince(script.standing)).toBe(started);
   });
 
@@ -784,7 +784,7 @@ const turnedAwayAfterSession = () =>
 // What a welcome that starts no Session must leave as it was.
 const sessionOf = ({ standing }: Script) => ({
   gapEnded: standing.gap?.ended,
-  self: standing.irc.self,
+  self: standing.irc.self?.nick,
   since: sessionSince(standing),
 });
 
@@ -817,7 +817,7 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
     script.deadline("registration").welcome();
 
     expect(sessionSince(script.standing)).toBe(started + registrationTimeout - 1);
-    expect(script.standing.irc.self).toBe("alice");
+    expect(script.standing.irc.self?.nick).toBe("alice");
   });
 
   it("LIVE-5: not after an `ERROR` in the same read", () => {
@@ -875,7 +875,7 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
 
     script.in(":x 433 * alice :In use").welcome("alice_");
 
-    expect(script.standing.irc.self).toBe("alice_");
+    expect(script.standing.irc.self?.nick).toBe("alice_");
   });
 
   it("CONN-4: a 437 before the welcome uses up a nick", () => {
@@ -895,11 +895,11 @@ describe("LIVE-11: a welcome starts a Session only while registering", () => {
 
     script.in("FAIL NICK NICKNAME_RESERVED alice :Reserved").welcome();
 
-    expect(script.standing.irc.self).toBe("alice");
+    expect(script.standing.irc.self?.nick).toBe("alice");
   });
 
   it("CONN-2: a welcome from no Connection names nobody", () => {
-    expect(new Script().welcome().standing.irc.self).toBeUndefined();
+    expect(new Script().welcome().standing.irc.self?.nick).toBeUndefined();
   });
 });
 
@@ -1426,7 +1426,7 @@ describe("LOG-2: Entries that move nothing", () => {
       .in(":ircd.example 001 mallory :Welcome", true)
       .in(":mallory!u@h JOIN #fake", true);
 
-    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.self?.nick).toBeUndefined();
     expect(standing.irc.channels.size).toBe(0);
     expect(sessionSince(standing)).toBeUndefined();
   });
@@ -1434,7 +1434,7 @@ describe("LOG-2: Entries that move nothing", () => {
   it("HOST-1: an unparseable Line is not obeyed", () => {
     const { standing } = new Script().attempt().in("").in("   ").in(":only-a-source");
 
-    expect(standing.irc.self).toBeUndefined();
+    expect(standing.irc.self?.nick).toBeUndefined();
   });
 
   it("MSG-1: our own outbound Lines never move Channels or Self", () => {
@@ -1444,7 +1444,7 @@ describe("LOG-2: Entries that move nothing", () => {
       .out(":alice!u@h JOIN #fake")
       .out("KICK #iirc alice");
 
-    expect(standing.irc.self).toBe("alice");
+    expect(standing.irc.self?.nick).toBe("alice");
     expect(standing.irc.channels.size).toBe(0);
     expect(standing.kicked.size).toBe(0);
   });
@@ -1907,7 +1907,7 @@ describe("properties over random Entries", () => {
     for (const { script } of generated) {
       const { standing } = script.attempt();
 
-      expect(standing.irc.self).toBeUndefined();
+      expect(standing.irc.self?.nick).toBeUndefined();
       expect(standing.irc.channels.size).toBe(0);
       expect(standing.asked.size).toBe(0);
       expect(standing.lagChecks).toHaveLength(0);

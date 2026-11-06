@@ -21,7 +21,7 @@ Reading this document:
 | [Connecting](#connecting) | CONN-1 to CONN-7 | Done, except CONN-5 (M3) |
 | [Staying connected](#staying-connected) | LIVE-1 to LIVE-11 | Done. Gaps in Timelines wait for Timelines (M4) |
 | [Sending](#sending) | SEND-1 to SEND-11 | SEND-1 to SEND-4 and `JOIN` splitting done. The rest M3 |
-| [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` already holds Self, the Channels Self is in, part of `RPL_ISUPPORT`, casefolding, and mode parsing |
+| [Network state](#network-state), [Channels and Users](#channels-and-users) | KNOW-1 to KNOW-9 | M2. `@iirc/state` holds Self, Channels with topics, modes, and ranked members, Users seen, every `RPL_ISUPPORT` token, and every casemapping |
 | [Messages and Activity](#messages-and-activity) | MSG-1 to MSG-6 | M2. MSG-1 is done in part |
 | [Timelines and attention](#timelines-and-attention) | VIEW-1 to VIEW-10 | M4 |
 | [Frontend storage](#frontend-storage) | STORE-1 to STORE-5 | M4 |
@@ -240,15 +240,15 @@ Each item here is derived from the Log.
 
 ### Network state
 
-**Status:** M2. Self's nick, the phase, and lag are in status already, and `@iirc/state` reads `CASEMAPPING`, `PREFIX`, `CHANMODES`, and `NICKLEN`.
+**Status:** M2. Self's nick, the phase, and lag are in status already. `@iirc/state` folds the rest of KNOW-1 to KNOW-3, which reads expose in step 6.
 
-- **KNOW-1.** The Network's phase, burst state, the Ircd and TLS details, lag, Self's nick, `user@host`, and modes, and away state.
+- **KNOW-1.** The Network's phase, burst state, the Ircd and TLS details, lag, Self's nick, `user@host`, and modes, and away state. _(Self's mask, modes, and away state are done in `@iirc/state`. Exposed in step 6.)_
   - Self's mask follows `396`, `900`, `901`, and Self's own `JOIN`.
-- **KNOW-2.** Every `RPL_ISUPPORT` token for the current Session, including removals (`-TOKEN`).
+- **KNOW-2.** Every `RPL_ISUPPORT` token for the current Session, including removals (`-TOKEN`). _(Done in `@iirc/state`, up to 256 tokens, beyond which it says some were dropped. Exposed in step 6.)_
   - Where a token was never sent, these defaults apply: `CASEMAPPING=rfc1459`, `CHANTYPES=#&`, `PREFIX=(ov)@+`, `CHANMODES=beI,k,l`, and `MODES=3`.
   - An empty value differs from an absent token. `PREFIX=` means no prefixes, and `MODES` with no value means no limit.
   - Value escapes such as `\x20` are decoded.
-- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(`ascii`, `rfc1459`, and `rfc1459-strict` are done. The rest is M2.)_
+- **KNOW-3.** Nicks and Channel names are compared after casefolding under the mapping in force at that Entry. _(Every mapping and the fallback are done in `@iirc/state`, which takes an override. Configuring it is step 5, and status step 6.)_
   - The fold comes from `CASEMAPPING` and `UTF8MAPPING` together, covering `ascii`, `rfc1459`, `rfc1459-strict`, the variant spelling `strict-rfc1459`, and `rfc8265`. Ergo's `precis` mode advertises `CASEMAPPING=ascii` with `UTF8MAPPING=rfc8265`.
   - Anything unrecognised falls back to `ascii`, which splits names rather than merging them, and is reported in status.
   - An Owner can override the mapping, because Ergo's `permissive` mode looks the same as `ascii` on the wire.
@@ -257,20 +257,20 @@ Each item here is derived from the Log.
 
 ### Channels and Users
 
-**Status:** M2. The Channels Self is in, their keys, and `JOIN` failures are folded already.
+**Status:** M2. `@iirc/state` folds KNOW-4, KNOW-6, and KNOW-7, and the state KNOW-5, KNOW-8, and KNOW-9 need. The Daemon's asking is step 4, attribution step 3, and reads step 6.
 
-- **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`.
-- **KNOW-5.** Membership and topic come from what `JOIN` already returns.
+- **KNOW-4.** For each Channel: topic, who set it and when, modes, creation time, and members with their prefixes, ranked by `PREFIX`. _(Done in `@iirc/state`, which holds only what `NAMES` and `MODE` show, so without `multi-prefix` a member can be short of a prefix. Exposed in step 6.)_
+- **KNOW-5.** Membership and topic come from what `JOIN` already returns. _(The atomic replacement, the rule for Channels Self is not in, and a change for each removed prefix are done in `@iirc/state`. Sending is step 4.)_
   - The Daemon sends only `MODE`, and `WHO` for `user@host`, through the background lane. A large Channel can delay these, and they never delay a Message.
   - `353` up to `366` is an atomic replacement of the member list.
   - `332`, `324`, and `353` never change state for a Channel Self is not in.
   - Without `multi-prefix`, a member with `@+` shows only `@`, so removing a prefix mode schedules a debounced `NAMES`.
-- **KNOW-6.** `MODE` Lines are parsed using `PREFIX` first and then `CHANMODES`, so that list, parameterised, and flag modes are told apart.
+- **KNOW-6.** `MODE` Lines are parsed using `PREFIX` first and then `CHANMODES`, so that list, parameterised, and flag modes are told apart. _(Done in `@iirc/state`, which marks a Channel uncertain. Reading it again is step 4.)_
   - A letter the Network never advertised takes no argument. If the arguments then fail to add up, the `MODE` is kept raw, the Channel is marked uncertain, and its modes and members are read again.
   - A key shown as `*` is hidden and is not stored.
-- **KNOW-7.** A User's nick, `user@host`, and realname are remembered as seen, and away state where known.
-- **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline.
-- **KNOW-9.** A `470` forward puts us in a different Channel from the one requested. It is reported against the configured name, so autojoin does not look like it failed.
+- **KNOW-7.** A User's nick, `user@host`, and realname are remembered as seen, and away state where known. _(Folded in `@iirc/state` from `JOIN`, `PRIVMSG`, and `NOTICE` sources, `301`, `311`, and `352`, within a bound that forgets the longest unseen. Asking with `WHO` is step 4, and reads step 6.)_
+- **KNOW-8.** `QUIT` and `NICK` Lines name no Channel. They are attributed to every Channel the User shared with Self at that moment, which only a fold over the Log can determine. A `NICK` or `QUIT` from a Direct Message partner also appears in that Timeline. _(`@iirc/state` names the shared Channels in each change, those in a `NAMES` reply under way included. Attribution to Channels is step 3. Direct Message partners are not attributed yet.)_
+- **KNOW-9.** A `470` forward puts us in a different Channel from the one requested. It is reported against the configured name, so autojoin does not look like it failed. _(`@iirc/state` names both Channels in a change. Reporting is a later step.)_
 
 ## Messages and Activity
 

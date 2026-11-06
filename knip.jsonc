@@ -3,6 +3,10 @@
   // The tsconfig plugin name is served by @effect/tsgo, not its own package.
   "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
+    // Run by hand with bun, to measure the fold (packages/state/README.md).
+    "packages/state": {
+      "entry": ["bench/*.ts"],
+    },
     // Spawned by path, from the kill tests and as Workers, so nothing imports them.
     "packages/log": {
       "entry": [

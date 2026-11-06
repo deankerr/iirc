@@ -1111,7 +1111,7 @@ describe("the durable Log", () => {
 
           assert.deepStrictEqual(held.connection?.last, { at: 1000, sequence: 3 });
           assert.strictEqual(connectionView(held)?.registration._tag, "Registering");
-          assert.isUndefined(held.irc.self);
+          assert.isUndefined(held.irc.self?.nick);
         })
       )
     );
@@ -1882,7 +1882,7 @@ describe("the durable Log and Configuration", () => {
 
         assert.deepStrictEqual(yield* allSaid, ["libera PRIVMSG bob -> #iirc: still here"]);
         assert.deepStrictEqual(connectionView(held), connectionView(folded));
-        assert.strictEqual(held.irc.self, "alice");
+        assert.strictEqual(held.irc.self?.nick, "alice");
         assert.deepStrictEqual(entries.filter(({ _tag }) => _tag === "Change").map(toEvent), [
           undefined,
           undefined,
@@ -2005,7 +2005,7 @@ describe("the durable Log and Configuration", () => {
               ]
             );
             // The host knows Self by the nick the Ircd gave it.
-            assert.strictEqual((yield* standing()).irc.self, "alicia");
+            assert.strictEqual((yield* standing()).irc.self?.nick, "alicia");
 
             yield* Log.use(({ rebuild }) => rebuild);
 

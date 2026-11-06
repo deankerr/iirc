@@ -4,8 +4,15 @@ import type { Tuning } from "@iirc/lifecycle/tuning";
 import { channelKey } from "@iirc/protocol/join";
 import { parseFrame } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
-import { casefold, channelOf, initialState, stepState } from "@iirc/state";
-import type { IrcState, JoinFailure, StateChange } from "@iirc/state";
+import {
+  casefold,
+  casemappingOf,
+  channelOf,
+  initialState,
+  mayFoldFurther,
+  stepState,
+} from "@iirc/state";
+import type { Casemapping, Channels, IrcState, JoinFailure, StateChange } from "@iirc/state";
 import type { Array as Arr } from "effect";
 
 import type { Entry, Ircd, NetworkId } from "./entry.ts";
@@ -258,18 +265,16 @@ const withHeld = <Value>(
 // compared by folding it again under the mapping in force when it is read (KNOW-3), and a
 // `CASEMAPPING` mid-Session, or a new Session with another, leaves nothing to rekey. Two
 // keys that one mapping makes the same Channel are aliases, and the newest stands for both.
-// Beyond `ascii`, only names holding one of these can have an alias.
-const aliasable = /[[\]\\~{}|^]/u;
-
+// Only a name the mapping can fold further than `ascii` can have an alias.
 const keysFor = <Value>(
   held: ReadonlyMap<string, Value>,
   irc: IrcState,
   name: string
 ): readonly string[] => {
   const key = channelKey(name);
-  const { casemapping } = irc.isupport;
+  const casemapping = casemappingOf(irc);
 
-  if (casemapping === "ascii" || !aliasable.test(key)) {
+  if (!mayFoldFurther(casemapping, key)) {
     return held.has(key) ? [key] : [];
   }
 
@@ -293,7 +298,7 @@ const foldedHeld = <Value>(
   held: ReadonlyMap<string, Value>,
   irc: IrcState
 ): ReadonlyMap<string, Value> => {
-  const { casemapping } = irc.isupport;
+  const casemapping = casemappingOf(irc);
   const folded = new Map<string, Value>();
 
   for (const [key, value] of held) {
@@ -304,7 +309,7 @@ const foldedHeld = <Value>(
 };
 
 const foldedFor = <Value>(folded: ReadonlyMap<string, Value>, irc: IrcState, name: string) =>
-  folded.get(casefold(irc.isupport.casemapping, name));
+  folded.get(casefold(casemappingOf(irc), name));
 
 const withoutChannel = <Value>(
   held: ReadonlyMap<string, Value>,
@@ -578,41 +583,58 @@ const afterJoined = (standing: Standing, channel: string): Standing => ({
   kicked: withoutChannel(standing.kicked, standing.irc, channel),
 });
 
-// What outlives the Session, or needs the Entry's place in the Log. The rest of what a
-// change says is already in the state it came with.
+// The changes whose whole meaning is in the state they came with: Self, the Channels Self
+// is in, the Users seen, and what the Ircd supports. Every tag `afterChange` does not
+// handle must be here, so a new one fails to compile until someone decides.
+type KeptChange = Exclude<StateChange["_tag"], "Joined" | "JoinRefused" | "Kicked">;
+
+const kept = (standing: Standing): Standing => standing;
+
+const keptChanges: Readonly<Record<KeptChange, (standing: Standing) => Standing>> = {
+  ChannelRead: kept,
+  ChannelUncertain: kept,
+  Forwarded: kept,
+  IsupportChanged: kept,
+  MemberJoined: kept,
+  MemberKicked: kept,
+  MemberParted: kept,
+  ModesChanged: kept,
+  NamesReplaced: kept,
+  NickChanged: kept,
+  Parted: kept,
+  PrefixRemoved: kept,
+  SelfAwayChanged: kept,
+  SelfMaskChanged: kept,
+  SelfModesChanged: kept,
+  TopicChanged: kept,
+  UserQuit: kept,
+  UserRenamed: kept,
+  UserSeen: kept,
+  Welcomed: kept,
+};
+
+// What outlives the Session, or needs the Entry's place in the Log.
 const afterChange = (standing: Standing, entry: Entry, change: StateChange): Standing => {
-  switch (change._tag) {
-    case "Joined": {
-      return afterJoined(standing, change.channel);
-    }
-
-    case "Kicked": {
-      const { at, sequence } = entry;
-
-      return {
-        ...standing,
-        kicked: withChannel(standing.kicked, standing.irc, change.channel, { at, sequence }),
-      };
-    }
-
-    case "JoinRefused": {
-      const { channel, numeric, text } = change;
-
-      return afterJoinFailure(standing, entry, channel, { numeric, text });
-    }
-
-    // Self, the Channels Self is in, and what the Ircd supports live in the state.
-    case "IsupportChanged":
-    case "NickChanged":
-    case "Parted":
-    case "Welcomed": {
-      return standing;
-    }
-
-    default: {
-      return change satisfies never;
-    }
+  if (change._tag === "Joined") {
+    return afterJoined(standing, change.channel);
   }
+
+  if (change._tag === "Kicked") {
+    const { at, sequence } = entry;
+
+    return {
+      ...standing,
+      kicked: withChannel(standing.kicked, standing.irc, change.channel, { at, sequence }),
+    };
+  }
+
+  if (change._tag === "JoinRefused") {
+    const { channel, numeric, text } = change;
+
+    return afterJoinFailure(standing, entry, channel, { numeric, text });
+  }
+
+  return keptChanges[change._tag](standing);
 };
 
 /** One Network's Standing after one Entry, and what it did to the Session's state. */
@@ -628,7 +650,7 @@ const saidNothing = (standing: Standing): Stepped => ({ changes: noChanges, stan
 
 // `@iirc/state` says what a Line did, and this keeps what outlasts the Session.
 const afterHeard = (standing: Standing, entry: Entry, line: Line): Stepped => {
-  const { changes, next } = stepState(standing.irc, line);
+  const { changes, next } = stepState(standing.irc, line, entry.at);
 
   if (next === standing.irc && changes.length === 0) {
     return saidNothing(standing);
@@ -908,8 +930,6 @@ const kicksAgainst = (kick: Moment | undefined, { since }: WantedChannel) =>
 export const kickStanding = (standing: Standing, wanted: WantedChannel) =>
   kicksAgainst(heldFor(standing.kicked, standing.irc, wanted.name), wanted);
 
-type Casemapping = IrcState["isupport"]["casemapping"];
-
 // Several wanted Channels can be one Channel under the mapping in force, such as `#x[1]` and
 // `#x{1}` under rfc1459. The Owner's latest wanting of any of them speaks for all, so that
 // status and planning read one intent for the one Channel (LIVE-8, KNOW-3).
@@ -957,7 +977,7 @@ export const kicksInForce = (
   standing: Standing,
   wanted: readonly WantedChannel[]
 ): readonly { readonly at: number; readonly channel: string }[] => {
-  const { casemapping } = standing.irc.isupport;
+  const casemapping = casemappingOf(standing.irc);
   const intents = latestIntents(casemapping, wanted);
 
   return [...standing.kicked].flatMap(([channel, kick]) => {
@@ -1013,6 +1033,28 @@ const dueAt = (
       );
 };
 
+// Whether Self is in the same Channels, whatever moved inside them. Members and topics move
+// a Channel far more often than Self joins or leaves one, and only that matters to a plan.
+const sameChannelsIn = (one: Channels, other: Channels) => {
+  if (one === other) {
+    return true;
+  }
+
+  if (one.size !== other.size) {
+    return false;
+  }
+
+  const keys = other.keys();
+
+  for (const key of one.keys()) {
+    if (keys.next().value !== key) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 /**
  * Whether anything {@link joinPlan} reads of a Standing moved between two of them, so
  * that a plan made from the first could differ from one made from the second.
@@ -1021,8 +1063,8 @@ const dueAt = (
  * @returns Whether to plan again.
  */
 export const joinPlanMoved = (before: Standing, after: Standing): boolean =>
-  before.irc.channels !== after.irc.channels ||
-  before.irc.isupport.casemapping !== after.irc.isupport.casemapping ||
+  !sameChannelsIn(before.irc.channels, after.irc.channels) ||
+  casemappingOf(before.irc) !== casemappingOf(after.irc) ||
   before.asked !== after.asked ||
   before.kicked !== after.kicked ||
   before.joinFailures !== after.joinFailures ||
@@ -1057,7 +1099,7 @@ export const joinPlan = (
   }
 
   const folded = foldedStanding(standing);
-  const { casemapping } = standing.irc.isupport;
+  const casemapping = casemappingOf(standing.irc);
   const intents = latestIntents(casemapping, wanted);
 
   for (const want of wanted) {

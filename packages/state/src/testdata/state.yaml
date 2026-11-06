@@ -1,0 +1,507 @@
+# Network state vectors (KNOW-1 to KNOW-9). Each feeds `lines`, inbound, to a new Session,
+# then checks only what it names:
+#   * isupport: fields of `isupport`, compared as given
+#   * self: fields of Self
+#   * channels: by name, each Channel's `topic` ({ text, setBy, setAt } or null), `createdAt`,
+#     `modes` (letter to parameter, null for none), `members` (nick to prefix letters,
+#     highest first), `modesUncertain`, and `membersUncertain`
+#   * absent: Channels Self must not be in
+#   * users: what `userOf` gives, by nick, or null for a User not known
+#   * changes: what the last Line changed, each matching the change at its place
+# Absent values are null.
+
+tests:
+  # KNOW-2
+  - name: KNOW-2 a Network that sends no token has the defaults
+    lines: []
+    isupport:
+      casemapping: rfc1459
+      chantypes: "#&"
+      maxModes: 3
+      modes: { prefix: ov, list: beI, always: k, whenSet: l, flags: "" }
+      network: null
+      prefixSymbols: "@+"
+      statusmsg: ""
+      unknownCasemapping: null
+
+  - name: KNOW-2 reads CHANTYPES, STATUSMSG, MODES, and NETWORK
+    lines:
+      - ":irc 005 me CHANTYPES=# STATUSMSG=@+ MODES=6 NETWORK=Libera.Chat :are supported by this server"
+    isupport: { chantypes: "#", statusmsg: "@+", maxModes: 6, network: Libera.Chat }
+
+  - name: KNOW-2 MODES with no value means no limit
+    lines:
+      - ":irc 005 me MODES :are supported"
+    isupport: { maxModes: null }
+
+  - name: KNOW-2 a token taken back has its default again
+    lines:
+      - ":irc 005 me MODES= CHANTYPES= NETWORK=x :are supported"
+      - ":irc 005 me -MODES -CHANTYPES -NETWORK :are supported"
+    isupport: { maxModes: 3, chantypes: "#&", network: null }
+
+  - name: KNOW-2 an empty CHANTYPES differs from none
+    lines:
+      - ":irc 005 me CHANTYPES= :are supported"
+    isupport: { chantypes: "" }
+
+  - name: KNOW-2 value escapes are decoded
+    lines:
+      - ':irc 005 me NETWORK=Example\x20Net\x5C\x3D :are supported'
+    isupport: { network: 'Example Net\=' }
+
+  - name: KNOW-2 PREFIX gives letters and symbols together
+    lines:
+      - ":irc 005 me PREFIX=(qaohv)~&@%+ :are supported"
+    isupport:
+      {
+        prefixSymbols: "~&@%+",
+        modes: { prefix: qaohv, list: beI, always: k, whenSet: l, flags: "" },
+      }
+
+  - name: KNOW-2 a PREFIX pairing letters with symbols unevenly is the default
+    lines:
+      - ":irc 005 me PREFIX=(qov)@+ :are supported"
+    isupport:
+      { prefixSymbols: "@+", modes: { prefix: ov, list: beI, always: k, whenSet: l, flags: "" } }
+
+  - name: KNOW-2 PREFIX= means no prefixes
+    lines:
+      - ":irc 005 me PREFIX= :are supported"
+    isupport:
+      { prefixSymbols: "", modes: { prefix: "", list: beI, always: k, whenSet: l, flags: "" } }
+
+  - name: KNOW-2 a removal names no value
+    lines:
+      - ":irc 005 me NETWORK=x :are supported"
+      - ":irc 005 me -NETWORK=y :are supported"
+    isupport: { network: x }
+
+  # KNOW-3
+  - name: KNOW-3 UTF8MAPPING=rfc8265 beside CASEMAPPING=ascii is rfc8265, as Ergo's precis sends
+    lines:
+      - ":irc 005 me CASEMAPPING=ascii UTF8MAPPING=rfc8265 :are supported"
+    isupport: { casemapping: rfc8265, unknownCasemapping: null }
+
+  - name: KNOW-3 an unknown CASEMAPPING falls back to ascii, and says so
+    lines:
+      - ":irc 005 me CASEMAPPING=precis :are supported"
+    isupport: { casemapping: ascii, unknownCasemapping: CASEMAPPING=precis }
+
+  - name: KNOW-3 an unknown UTF8MAPPING falls back to ascii, and says so
+    lines:
+      - ":irc 005 me CASEMAPPING=ascii UTF8MAPPING=rfc3454 :are supported"
+    isupport: { casemapping: ascii, unknownCasemapping: UTF8MAPPING=rfc3454 }
+
+  - name: KNOW-3 members are compared under rfc8265
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 005 me CASEMAPPING=ascii UTF8MAPPING=rfc8265 :are supported"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me ÉMILE ＢＯＢ"
+      - ":irc 366 me #a :End"
+      - ":émile!e@h PART #a"
+      - ":bob!b@h QUIT :bye"
+    channels:
+      "#a": { members: { me: "" } }
+
+  # KNOW-1
+  - name: KNOW-1 Self's mask follows Self's own JOIN, 396, and 900
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!~me@198.51.100.7 JOIN #a"
+      - ":irc 396 me cloak/me :is now your displayed host"
+    self: { nick: me, user: "~me", host: cloak/me }
+    changes:
+      - { _tag: SelfMaskChanged, user: "~me", host: cloak/me }
+
+  - name: KNOW-1 900 and 901 give the whole mask
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 900 me me!id@vhost.example acct :You are now logged in as acct"
+    self: { user: id, host: vhost.example }
+
+  - name: KNOW-1 a 396 can give user@host
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 396 me ident@new.host :is now your displayed host"
+    self: { user: ident, host: new.host }
+
+  - name: KNOW-1 Self's modes follow 221 and MODE on Self
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 221 me +iw"
+      - ":me MODE me :+x-i"
+    self: { modes: wx }
+    changes:
+      - { _tag: SelfModesChanged, modes: wx }
+
+  - name: KNOW-1 user modes with parameters keep only the letters
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc MODE me +is +cF"
+    self: { modes: is }
+
+  - name: KNOW-1 Self is away after 306 and back after 305
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 306 me :You have been marked as being away"
+    self: { away: true }
+    changes:
+      - { _tag: SelfAwayChanged, away: true }
+
+  - name: KNOW-1 a 305 brings Self back
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 306 me :away"
+      - ":irc 305 me :back"
+    self: { away: false }
+
+  # KNOW-4 and KNOW-5
+  - name: KNOW-5 a NAMES reply changes nothing until its 366
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me @op +voice"
+    channels:
+      "#a": { members: { me: "" } }
+    changes: []
+
+  - name: KNOW-5 a 366 swaps in the members its 353s named
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me @op"
+      - ":irc 353 me = #a :+voice plain"
+      - ":irc 366 me #a :End of /NAMES list."
+    channels:
+      "#a": { members: { me: "", op: o, voice: v, plain: "" }, membersUncertain: false }
+    changes:
+      - { _tag: NamesReplaced, channel: "#a" }
+
+  - name: KNOW-5 a later NAMES replaces the members, rather than adding to them
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me gone"
+      - ":irc 366 me #a :End"
+      - ":irc 353 me = #a :me @stays"
+      - ":irc 366 me #a :End"
+    channels:
+      "#a": { members: { me: "", stays: o } }
+
+  - name: KNOW-5 a JOIN between a 353 and its 366 is not lost at the swap
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me bob"
+      - ":carol!c@h JOIN #a"
+      - ":bob!b@h PART #a"
+      - ":irc 366 me #a :End"
+    channels:
+      "#a": { members: { me: "", carol: "" } }
+
+  - name: KNOW-4 members are ranked by PREFIX, multi-prefix or not
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 005 me PREFIX=(qaohv)~&@%+ :are supported"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me +@both &~owner %half"
+      - ":irc 366 me #a :End"
+    channels:
+      "#a": { members: { me: "", both: ov, owner: qa, half: h } }
+
+  - name: KNOW-5 an older 353 with no symbol still names its Channel
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me #a :me bob"
+      - ":irc 366 me #a :End"
+    channels:
+      "#a": { members: { me: "", bob: "" } }
+
+  - name: KNOW-5 a userhost-in-names name gives its nick
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me!u@h @op!o@host"
+      - ":irc 366 me #a :End"
+    channels:
+      "#a": { members: { me: "", op: o } }
+
+  - name: KNOW-5 332, 324, and 353 change nothing for a Channel Self is not in
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 332 me #b :a topic"
+      - ":irc 324 me #b +nt"
+      - ":irc 353 me = #b :me bob"
+      - ":irc 366 me #b :End"
+    absent: ["#b"]
+    changes: []
+
+  - name: KNOW-4 a topic, who set it, and when
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 332 me #a :Welcome to #a"
+      - ":irc 333 me #a op!o@host 1700000000"
+    channels:
+      "#a": { topic: { text: "Welcome to #a", setBy: op!o@host, setAt: 1700000000000 } }
+    changes:
+      - { _tag: ChannelRead, channel: "#a", read: topic }
+
+  - name: KNOW-4 a TOPIC changes the topic, and says who
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 332 me #a :old"
+      - ":bob!b@h TOPIC #A :new"
+    channels:
+      "#a": { topic: { text: new, setBy: bob!b@h, setAt: null } }
+    changes:
+      - { _tag: TopicChanged, channel: "#a", by: bob, topic: new }
+
+  - name: KNOW-4 an empty TOPIC clears it, as 331 does
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a,#b"
+      - ":irc 332 me #a :old"
+      - ":irc 332 me #b :old"
+      - ":bob!b@h TOPIC #a :"
+      - ":irc 331 me #b :No topic is set"
+    channels:
+      "#a": { topic: null }
+      "#b": { topic: null }
+
+  - name: KNOW-4 a creation time
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 329 me #a 1600000000"
+    channels:
+      "#a": { createdAt: 1600000000000 }
+
+  # KNOW-6
+  - name: KNOW-6 flags and parameters are held, and list modes are not
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":op!o@h MODE #a +ntlb 10 *!*@spam"
+    channels:
+      "#a": { modes: { n: null, t: null, l: "10" } }
+    changes:
+      - _tag: ModesChanged
+        channel: "#a"
+        by: op
+        changes:
+          - { adding: true, letter: n }
+          - { adding: true, letter: t }
+          - { adding: true, letter: l, param: "10" }
+          - { adding: true, letter: b, param: "*!*@spam" }
+
+  - name: KNOW-6 unsetting a limit takes no parameter
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":op!o@h MODE #a +nl 10"
+      - ":op!o@h MODE #a -l"
+    channels:
+      "#a": { modes: { n: null } }
+
+  - name: KNOW-6 a key shown as * is hidden, and leaves a known key as it was
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a,#b"
+      - ":op!o@h MODE #a +k sesame"
+      - ":op!o@h MODE #a +k *"
+      - ":op!o@h MODE #b +k *"
+    channels:
+      "#a": { modes: { k: sesame } }
+      "#b": { modes: { k: null } }
+
+  - name: KNOW-6 a 324 replaces every mode but list and prefix modes
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":op!o@h MODE #a +ntk sesame"
+      - ":irc 324 me #a +sk *"
+    channels:
+      "#a": { modes: { s: null, k: sesame }, modesUncertain: false }
+    changes:
+      - { _tag: ChannelRead, channel: "#a", read: modes }
+
+  - name: KNOW-6 a prefix mode moves a member's prefixes
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me bob"
+      - ":irc 366 me #a :End"
+      - ":op!o@h MODE #a +vo bob BOB"
+    channels:
+      "#a": { members: { me: "", bob: ov }, modes: {} }
+
+  - name: KNOW-5 removing a prefix mode says so, for a NAMES to look again
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me @bob"
+      - ":irc 366 me #a :End"
+      - ":op!o@h MODE #a -o bob"
+    channels:
+      "#a": { members: { me: "", bob: "" } }
+    changes:
+      - {
+          _tag: ModesChanged,
+          channel: "#a",
+          by: op,
+          changes: [{ adding: false, letter: o, param: bob }],
+        }
+      - { _tag: PrefixRemoved, channel: "#a", letter: o, nick: bob }
+
+  - name: KNOW-6 a MODE that does not add up is kept raw, and the Channel is uncertain
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me bob"
+      - ":irc 366 me #a :End"
+      - ":op!o@h MODE #a +n"
+      - ":op!o@h MODE #a +Xl bob 10"
+    channels:
+      "#a":
+        {
+          modes: { n: null },
+          members: { me: "", bob: "" },
+          modesUncertain: true,
+          membersUncertain: true,
+        }
+    changes:
+      - { _tag: ChannelUncertain, channel: "#a", field: members }
+      - { _tag: ChannelUncertain, channel: "#a", field: modes }
+
+  - name: KNOW-6 reading the modes and members again settles an uncertain Channel
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":op!o@h MODE #a +Xl bob 10"
+      - ":irc 324 me #a +Xl 10"
+      - ":irc 353 me = #a :me bob"
+      - ":irc 366 me #a :End"
+    channels:
+      "#a": { modes: { X: null, l: "10" }, modesUncertain: false, membersUncertain: false }
+
+  # KNOW-7
+  - name: KNOW-7 a JOIN shows a User's user@host
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":bob!~bob@bob.example JOIN #a"
+    users:
+      bob: { nick: bob, user: "~bob", host: bob.example, realname: null, away: null }
+    channels:
+      "#a": { members: { me: "", bob: "" } }
+    changes:
+      - { _tag: MemberJoined, channel: "#a", nick: bob, user: "~bob", host: bob.example }
+
+  - name: KNOW-7 WHO gives user@host, realname, and away
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 352 me #a ~bob bob.example irc.example bob G :0 Bob Example"
+    users:
+      bob: { user: "~bob", host: bob.example, realname: Bob Example, away: true }
+    changes:
+      - { _tag: UserSeen, nick: bob }
+
+  - name: KNOW-7 WHOIS gives user@host and realname, and 301 says away
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 311 me carol ~c carol.example * :Carol C"
+      - ":irc 301 me carol :gone fishing"
+    users:
+      carol: { user: "~c", host: carol.example, realname: Carol C, away: true }
+
+  - name: KNOW-7 a QUIT forgets a User
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":bob!b@h JOIN #a"
+      - ":bob!b@h QUIT :bye"
+    users:
+      bob: null
+
+  - name: KNOW-7 a member nothing more was seen of is still known by nick
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me Dave"
+      - ":irc 366 me #a :End"
+    users:
+      dave: { nick: Dave, user: null, host: null }
+
+  # Members coming and going
+  - name: KNOW-4 another User's PART and KICK
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":irc 353 me = #a :me bob carol"
+      - ":irc 366 me #a :End"
+      - ":bob!b@h PART #a :later"
+      - ":op!o@h KICK #a carol :out"
+    channels:
+      "#a": { members: { me: "" } }
+    changes:
+      - { _tag: MemberKicked, channel: "#a", nick: carol, by: op, reason: out }
+
+  # KNOW-8
+  - name: KNOW-8 a QUIT names the Channels its User shared with Self
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a,#b,#c"
+      - ":bob!b@h JOIN #c"
+      - ":bob!b@h JOIN #a"
+      - ":bob!b@h QUIT :Quit: bye"
+    channels:
+      "#a": { members: { me: "" } }
+      "#c": { members: { me: "" } }
+    changes:
+      - { _tag: UserQuit, nick: bob, reason: "Quit: bye", channels: ["#a", "#c"] }
+
+  - name: KNOW-8 a NICK names the Channels its User shared with Self
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a,#b"
+      - ":bob!b@h JOIN #b"
+      - ":bob!b@h NICK robert"
+    channels:
+      "#b": { members: { me: "", robert: "" } }
+    users:
+      robert: { user: b, host: h }
+      bob: null
+    changes:
+      - { _tag: UserRenamed, from: bob, to: robert, channels: ["#b"] }
+
+  - name: KNOW-8 Self's own NICK names every Channel Self is in
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a,#b"
+      - ":me!u@h NICK mo"
+    self: { nick: mo }
+    channels:
+      "#a": { members: { mo: "" } }
+    changes:
+      - { _tag: NickChanged, from: me, to: mo, channels: ["#a", "#b"] }
+
+  - name: KNOW-8 a QUIT from someone sharing nothing names no Channel
+    lines:
+      - ":irc 001 me :Hi"
+      - ":me!u@h JOIN #a"
+      - ":stranger!s@h QUIT :bye"
+    changes:
+      - { _tag: UserQuit, nick: stranger, channels: [] }
+
+  # KNOW-9
+  - name: KNOW-9 a 470 names the Channel asked for and the one Self was put in
+    lines:
+      - ":irc 001 me :Hi"
+      - ":irc 470 me #wanted ##overflow :Forwarding to another channel"
+    changes:
+      - { _tag: Forwarded, from: "#wanted", to: "##overflow" }

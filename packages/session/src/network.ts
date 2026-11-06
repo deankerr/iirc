@@ -609,7 +609,7 @@ export const hostNetwork: (
       nextAttemptAt: waiting ? Math.max(attemptDue(known, fault, now, current).at, now) : undefined,
       phase: between ? phaseBetween : yield* phaseOf(held, known),
       rejectedChannels: rejectedOf(current.channels, current.secrets),
-      self: between ? undefined : known.irc.self,
+      self: between ? undefined : known.irc.self?.nick,
     } satisfies NetworkStatus;
   });
 

@@ -172,7 +172,7 @@ const readsOf = (standing: Standing, now: number) => {
         : nextAttempt(standing, { ircds: [attempt.ircd], tuning: defaultTuning }),
     plan: joinPlan(standing, wanted, now, defaultTuning),
     recent: standing.recent,
-    self: standing.irc.self,
+    self: standing.irc.self?.nick,
     since: sessionSince(standing),
   };
 };

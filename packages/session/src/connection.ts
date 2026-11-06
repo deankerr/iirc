@@ -4,7 +4,7 @@ import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
 import { encodeLine, outbound, pong } from "@iirc/protocol/outbound";
 import type { Outbound } from "@iirc/protocol/outbound";
-import { readsCommand } from "@iirc/state";
+import { movesChannels } from "@iirc/state";
 import {
   Array as Arr,
   Clock,
@@ -189,7 +189,7 @@ export interface Host {
 }
 
 interface Stepped {
-  /** Whether what was stepped holds a Line that `@iirc/state` reads, which alone moves a plan. */
+  /** Whether what was stepped holds a Line that can move which Channels Self is in, which alone moves a plan. */
   readonly stateMayMove: boolean;
   readonly commands: readonly Command[];
   readonly next: NetworkSnapshot;
@@ -264,7 +264,7 @@ const stepRecorded = (snapshot: NetworkSnapshot, entry: Entry): Stepped => {
 
   const { commands, event, next } = stepped;
 
-  return { commands, next, stateMayMove: event?.type === "LINE" && readsCommand(event.command) };
+  return { commands, next, stateMayMove: event?.type === "LINE" && movesChannels(event.command) };
 };
 
 const stepEntries = (snapshot: NetworkSnapshot, entries: Iterable<Entry>): Stepped => {
@@ -552,7 +552,7 @@ export const hostConnection: (
     );
 
   // Whatever a commit moved that a plan reads wakes the reconciler, whichever Line moved
-  // it. Only a Line `@iirc/state` reads can: the reconciler's own `JOIN`s are planned for
+  // it. Only a Line `movesChannels` names can: the reconciler's own `JOIN`s are planned for
   // already, the burst and the end of the login wait wake it through their own Commands, and
   // a close ends it.
   const noticeChannels = Effect.gen(function* () {

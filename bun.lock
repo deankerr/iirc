@@ -140,6 +140,7 @@
         "@iirc/protocol": "workspace:*",
       },
       "devDependencies": {
+        "effect": "catalog:",
         "vitest": "catalog:",
       },
     },

@@ -40,37 +40,38 @@ const session = ":ircd 001 claude :Hi";
 
 describe(stepState, () => {
   it("learns Self from the welcome", () => {
-    expect(replay(":ircd 001 claude :Welcome").self).toBe("claude");
+    expect(replay(":ircd 001 claude :Welcome").self?.nick).toBe("claude");
     expect(changesOf(":ircd 001 claude :Welcome")).toStrictEqual([
       { _tag: "Welcomed", self: "claude" },
     ]);
   });
 
   it("takes Self from the first welcome of a Session, and no other", () => {
-    expect(replay(":ircd 001 claude :Hi", ":x 001 mallory :Hi").self).toBe("claude");
+    expect(replay(":ircd 001 claude :Hi", ":x 001 mallory :Hi").self?.nick).toBe("claude");
   });
 
   it("learns nothing from a welcome that names nobody", () => {
-    expect(replay(":ircd 001", ":ircd 001 claude :Hi").self).toBe("claude");
+    expect(replay(":ircd 001", ":ircd 001 claude :Hi").self?.nick).toBe("claude");
   });
 
   it("LIVE-6: carries nothing from before the welcome into the Session", () => {
     expect(replay(":ircd 005 * NICKLEN=5 :ok", session)).toStrictEqual({
       ...initialState,
-      self: "claude",
+      self: { away: false, host: undefined, modes: "", nick: "claude", user: undefined },
     });
   });
 
   it("follows Self through a nick change", () => {
     expect(changesOf(session, ":claude!u@h NICK :claudia")).toContainEqual({
       _tag: "NickChanged",
+      channels: [],
       from: "claude",
       to: "claudia",
     });
   });
 
   it("ignores another User's nick change", () => {
-    expect(replay(session, ":master!u@h NICK :boss").self).toBe("claude");
+    expect(replay(session, ":master!u@h NICK :boss").self?.nick).toBe("claude");
   });
 
   it("tracks the Channels Self is in", () => {
@@ -94,25 +95,54 @@ describe(stepState, () => {
 
   it("survives Lines missing their parameters", () => {
     expect(
-      replay("001", "NICK", "JOIN", "PART", "KICK", "MODE", "005", "471", "437")
+      replay(
+        "001",
+        "NICK",
+        "JOIN",
+        "PART",
+        "KICK",
+        "MODE",
+        "005",
+        "471",
+        "437",
+        "QUIT",
+        "TOPIC",
+        "221",
+        "301",
+        "305",
+        "306",
+        "311",
+        "324",
+        "329",
+        "331",
+        "332",
+        "333",
+        "352",
+        "353",
+        "366",
+        "396",
+        "470",
+        "900",
+        "901"
+      )
     ).toStrictEqual(initialState);
   });
 
   it("gives back the very same state for a Line that changes nothing", () => {
     const state = replay(session, ":claude!u@h JOIN #a");
 
-    for (const text of [":bob!u@h PRIVMSG #a :hi", ":claude!u@h PART #b", ":x KICK #b claude"]) {
+    for (const text of [":irc NOTICE claude :hi", ":claude!u@h PART #b", ":x KICK #b claude"]) {
       expect(stepState(state, lineOf(text))).toStrictEqual({ changes: [], next: state });
       expect(stepState(state, lineOf(text)).next).toBe(state);
     }
   });
 
   it("CONN-3: the nick in 001 is the truth, even when it was not the one asked for", () => {
-    expect(replay(":ircd 001 renamed :Welcome").self).toBe("renamed");
+    expect(replay(":ircd 001 renamed :Welcome").self?.nick).toBe("renamed");
   });
 
   it("CONN-3: a later NICK from the Ircd is the truth too", () => {
-    expect(replay(session, ":claude!u@h NICK Guest123").self).toBe("Guest123");
+    expect(replay(session, ":claude!u@h NICK Guest123").self?.nick).toBe("Guest123");
   });
 });
 
@@ -121,6 +151,7 @@ describe("JOIN, PART, and KICK naming several Channels", () => {
     expect(changesOf(session, ":claude!u@h JOIN #a,#b").slice(1)).toStrictEqual([
       { _tag: "Joined", channel: "#a" },
       { _tag: "Joined", channel: "#b" },
+      { _tag: "SelfMaskChanged", host: "h", user: "u" },
     ]);
   });
 
@@ -133,8 +164,8 @@ describe("JOIN, PART, and KICK naming several Channels", () => {
 
     expect(namesOf(state)).toStrictEqual(["#b"]);
     expect(changes.filter(({ _tag }) => _tag === "Parted")).toStrictEqual([
-      { _tag: "Parted", channel: "#a" },
-      { _tag: "Parted", channel: "#c" },
+      { _tag: "Parted", channel: "#a", reason: "bye" },
+      { _tag: "Parted", channel: "#c", reason: "bye" },
     ]);
   });
 
@@ -181,9 +212,9 @@ describe("LIVE-8: a kick of Self", () => {
   });
 
   it("is not seen for a kick of someone else", () => {
-    expect(changesOf(session, ":claude!u@h JOIN #a", ":op!u@h KICK #a master :out")).toHaveLength(
-      2
-    );
+    expect(
+      changesOf(session, ":claude!u@h JOIN #a", ":op!u@h KICK #a master :out").at(-1)?._tag
+    ).toBe("MemberKicked");
   });
 
   it("is not seen from a Channel Self is not in", () => {
@@ -205,6 +236,7 @@ describe("LIVE-8: a kick of Self", () => {
     expect(changesOf(session, ":claude!u@h JOIN #a", ":claude!u@h PART #a").at(-1)).toStrictEqual({
       _tag: "Parted",
       channel: "#a",
+      reason: undefined,
     });
   });
 });
@@ -219,7 +251,7 @@ describe("KNOW-3: names compared under the mapping in force", () => {
   it("names a Channel left as Self held it", () => {
     expect(
       changesOf(session, ":claude!u@h JOIN #Dev[1]", ":claude!u@h PART #dev{1}").at(-1)
-    ).toStrictEqual({ _tag: "Parted", channel: "#Dev[1]" });
+    ).toStrictEqual({ _tag: "Parted", channel: "#Dev[1]", reason: undefined });
   });
 
   it.each([
@@ -258,11 +290,12 @@ const nickLengthOf = (...lines: readonly string[]) => isupportOf(...lines).nickL
 
 describe("KNOW-2: RPL_ISUPPORT", () => {
   it("gives a Network that sends no token `CASEMAPPING=rfc1459`, `PREFIX=(ov)@+` and `CHANMODES=beI,k,l`", () => {
-    expect(isupportOf()).toStrictEqual({
+    expect(isupportOf()).toMatchObject({
       casemapping: "rfc1459",
       modes: { always: "k", flags: "", list: "beI", prefix: "ov", whenSet: "l" },
       nickLength: undefined,
     });
+    expect(isupportOf().tokens.size).toBe(0);
   });
 
   it("reads every group of `CHANMODES` and the letters of `PREFIX`, prose and all", () => {
@@ -314,7 +347,14 @@ describe("KNOW-2: RPL_ISUPPORT", () => {
     );
 
     expect(changes.slice(1)).toStrictEqual([
-      { _tag: "IsupportChanged", isupport: { ...initialState.isupport, nickLength: 30 } },
+      {
+        _tag: "IsupportChanged",
+        isupport: {
+          ...initialState.isupport,
+          nickLength: 30,
+          tokens: new Map([["NICKLEN", "30"]]),
+        },
+      },
     ]);
   });
 });
@@ -328,8 +368,12 @@ describe("KNOW-2: NICKLEN", () => {
     expect(nickLengthOf(":ircd 005 claude CHANTYPES=# NICKLEN=30 :are supported")).toBe(30);
   });
 
-  it("finds a token in the last parameter, for an Ircd that sends no text", () => {
-    expect(nickLengthOf(":ircd 005 claude NICKLEN=16")).toBe(16);
+  it("never reads the last parameter, which is text for people, even when it looks like a token", () => {
+    expect(nickLengthOf(":ircd 005 claude NICKLEN=16")).toBeUndefined();
+    expect(isupportOf(":irc 005 claude NETWORK=test :CASEMAPPING=ascii")).toMatchObject({
+      casemapping: "rfc1459",
+      network: "test",
+    });
   });
 
   it("keeps what an earlier 005 said", () => {
@@ -398,20 +442,22 @@ describe("KNOW-6: Channel keys", () => {
   it("follows the last `k` of a `MODE` on a Channel Self is in", () => {
     const { state } = run(...joined, ":op MODE #A +ok bob sesame");
 
-    expect(channelOf(state, "#a")?.key).toBe("sesame");
+    expect(channelOf(state, "#a")?.modes.get("k")).toBe("sesame");
   });
 
   it("clears it with `-k`, whether or not the key comes with it", () => {
     for (const mode of ["-k", "-k sesame"]) {
       const { state } = run(...joined, ":op MODE #a +k sesame", `:op MODE #a ${mode}`);
 
-      expect(channelOf(state, "#a")?.key).toBeUndefined();
+      expect(channelOf(state, "#a")?.modes.get("k")).toBeUndefined();
     }
   });
 
   it("stores no key shown as `*`, which is hidden", () => {
     expect(
-      channelOf(run(...joined, ":op MODE #a +k sesame", ":op MODE #a +k *").state, "#a")?.key
+      channelOf(run(...joined, ":op MODE #a +k sesame", ":op MODE #a +k *").state, "#a")?.modes.get(
+        "k"
+      )
     ).toBe("sesame");
   });
 
@@ -422,18 +468,24 @@ describe("KNOW-6: Channel keys", () => {
       ":op MODE #a +qk bob other"
     );
 
-    expect(channelOf(state, "#a")?.key).toBe("other");
+    expect(channelOf(state, "#a")?.modes.get("k")).toBe("other");
   });
 
-  it("reports no change: a key the Network shows is its own, never a Credential (CRED-4)", () => {
-    expect(changesOf(...joined, ":op MODE #a +k sesame", ":op MODE #a -k")).toHaveLength(2);
+  it("names a key change only as a mode change: a key the Network shows is its own, never a Credential (CRED-4)", () => {
+    expect(
+      changesOf(...joined, ":op MODE #a +k sesame", ":op MODE #a -k").map(({ _tag }) => _tag)
+    ).toStrictEqual(["Welcomed", "Joined", "SelfMaskChanged", "ModesChanged", "ModesChanged"]);
   });
 
-  it("says nothing for a `MODE` that does not add up, or on a Channel Self is not in", () => {
-    const { state } = run(...joined, ":op MODE #a +ok sesame", ":op MODE #b +k sesame");
+  it("takes no key from a `MODE` that does not add up, and nothing from one on a Channel Self is not in", () => {
+    const { changes, state } = run(...joined, ":op MODE #a +ok sesame", ":op MODE #b +k sesame");
 
-    expect(channelOf(state, "#a")?.key).toBeUndefined();
+    expect(channelOf(state, "#a")?.modes.get("k")).toBeUndefined();
     expect(channelOf(state, "#b")).toBeUndefined();
+    expect(changes.slice(-2)).toStrictEqual([
+      { _tag: "ChannelUncertain", channel: "#a", field: "members" },
+      { _tag: "ChannelUncertain", channel: "#a", field: "modes" },
+    ]);
   });
 });
 
