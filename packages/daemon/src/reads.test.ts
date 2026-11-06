@@ -705,6 +705,109 @@ describe("reading what the Network knows", () => {
     );
   });
 
+  describe("CRED-4, KNOW-6: a Channel key is set and never given", () => {
+    const keys = ["add-key", "remove-key", "uneven-key", "stray-key", "again-key", "secret"];
+
+    it.live("shows it as set in Activity as in the Channel read, and only /entries keeps it", () =>
+      withSession((harness) =>
+        Effect.gen(function* () {
+          yield* say(
+            harness.ircd,
+            ...joined,
+            ":op!o@h MODE #IIRC +ok bob add-key",
+            ":op!o@h MODE #IIRC -k remove-key",
+            // `l` has no limit, so this does not add up, and cannot say which is the key.
+            ":op!o@h MODE #IIRC +kl uneven-key",
+            ":op!o@h MODE #IIRC +k again-key",
+            // A Channel Self is not in.
+            ":op!o@h MODE #elsewhere +k stray-key",
+            ":ircd 324 iirc #elsewhere +k stray-key",
+            ":op!o@h PRIVMSG #IIRC :done"
+          );
+
+          const said = yield* recorded(harness, ":op!o@h PRIVMSG #IIRC :done");
+
+          const { activity } = yield* harness.client.daemon.activity({
+            query: { after: { sequence: 0 }, limit: 1000, network },
+          });
+
+          const raw = yield* harness.raw.get(`/api/activity?network=${network}&limit=1000&after=0`);
+          const text = yield* Effect.orDie(raw.text);
+          const read = yield* eventually(target(harness, "#IIRC"), ({ at }) => at >= said);
+
+          const detailsOf = (command: string, text_: string) =>
+            activity.find(
+              ({ details }) =>
+                (details.kind === "mode" && details.params.join(" ") === text_) ||
+                (details.kind === "line" &&
+                  details.command === command &&
+                  details.params.join(" ") === text_)
+            )?.details;
+
+          // A `+ok` that added up: the key is set, with no parameter, beside the nick.
+          assert.deepStrictEqual(detailsOf("MODE", "+ok bob"), {
+            changes: [
+              { adding: true, letter: "o", param: "bob" },
+              { adding: true, letter: "k" },
+            ],
+            kind: "mode",
+            params: ["+ok", "bob"],
+          });
+          assert.deepStrictEqual(detailsOf("MODE", "-k"), {
+            changes: [{ adding: false, letter: "k" }],
+            kind: "mode",
+            params: ["-k"],
+          });
+          assert.deepStrictEqual(detailsOf("MODE", "+k"), {
+            changes: [{ adding: true, letter: "k" }],
+            kind: "mode",
+            params: ["+k"],
+          });
+          // One that did not add up keeps its letters and no parameters, and no changes.
+          assert.deepStrictEqual(detailsOf("MODE", "+kl"), { kind: "mode", params: ["+kl"] });
+          // A Channel Self is not in, and a `324`, are Lines of the Network with the same care.
+          assert.deepStrictEqual(detailsOf("MODE", "#elsewhere +k"), {
+            command: "MODE",
+            kind: "line",
+            params: ["#elsewhere", "+k"],
+          });
+          assert.deepStrictEqual(detailsOf("324", "iirc #elsewhere +k"), {
+            command: "324",
+            kind: "line",
+            params: ["iirc", "#elsewhere", "+k"],
+          });
+          // The `324` Self asked for, which was in `joined`, keeps the limit and not the key.
+          assert.deepStrictEqual(detailsOf("324", "iirc #IIRC +ntkl 10"), {
+            command: "324",
+            kind: "line",
+            params: ["iirc", "#IIRC", "+ntkl", "10"],
+          });
+
+          for (const key of keys) {
+            assert.notInclude(JSON.stringify(activity), key);
+            assert.notInclude(text, key);
+            assert.notInclude(JSON.stringify(read), key);
+          }
+
+          // The Channel read and Activity agree that the key is set.
+          assert.deepInclude(read.modes, { letter: "k" });
+          assert.isTrue(
+            read.modes.every(({ letter, param }) => letter !== "k" || param === undefined)
+          );
+
+          // /entries keeps the Lines as they were said (LOG-6, API-4).
+          const lines = inbound(yield* harness.client.daemon.entries(everything)).map(
+            ({ text: said_ }) => said_
+          );
+
+          assert.include(lines, ":op!o@h MODE #IIRC +ok bob add-key");
+          assert.include(lines, ":op!o@h MODE #IIRC +kl uneven-key");
+          assert.include(lines, ":ircd 324 iirc #elsewhere +k stray-key");
+        })
+      )
+    );
+  });
+
   describe("formatting (MSG-3)", () => {
     it.live("gives a Message's spans beside its raw text, and a reason's, as data", () =>
       withSession((harness) =>

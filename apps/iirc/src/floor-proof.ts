@@ -726,9 +726,11 @@ const stop = toCheck(
 
     yield* ensure(quit?.text.includes(quitReason) === true, `it saw: ${quit?.text}`);
 
-    // ngircd says goodbye between these, with a `NOTICE` and an `ERROR` of its own.
-    const tail = yield* logTail(home.dataDir, 8);
-    const closing = tail.indexOf("Connection closing");
+    // ngircd says goodbye between these, with a `NOTICE` and an `ERROR` of its own. Replies
+    // to the Daemon's own reads, such as a `WHO`'s `352`s, can still be arriving as it
+    // closes, so the tail is wide and the close is found by its last mention.
+    const tail = yield* logTail(home.dataDir, 64);
+    const closing = tail.lastIndexOf("Connection closing");
 
     yield* ensure(
       closing !== -1 &&
@@ -1580,33 +1582,31 @@ const storedValues = (database: Database) =>
     );
 
 /**
- * LOG-6, CRED-4, ADR 0008: a Channel key, the Owner's or one seen on the Network, is in
- * the Log's files only where the Network said it. `isSaid` names the inbound Lines that
- * may say it. Anything derived from such a Line, in a table other than `entries` and
- * under the same sequence, may hold it too, and nothing else may.
+ * LOG-6, CRED-4, KNOW-6, ADR 0008: a Channel key, the Owner's or one seen on the Network,
+ * is in the Log's files only where the Network said it. `isSaid` names the inbound Lines that
+ * may say it, and the one place it may be is the `bytes` of their `entries` row. A derived
+ * table never holds it, because a derived read shows the key as set and never with its
+ * value, so a key in `activity`, `messages`, or any other column or table is a leak.
  *
  * Three things are checked, after the last Daemon on the data directory has stopped.
  *
  * - Through SQLite, every value of every row is searched, and each one holding the key
- *   must be one of those allowances, by table, column, and sequence.
+ *   must be `entries.bytes` of a Line that said it, by sequence.
  * - A `VACUUM INTO` copy holds the live records alone, with no WAL, no free pages, and no
  *   free space inside a page. In its bytes every occurrence must sit inside a
- *   byte-for-byte copy of an allowed value, and every allowed value must be there, so
- *   what SQLite reads back and what is on its pages agree.
+ *   byte-for-byte copy of such a `bytes` value, and every one must be there, so what SQLite
+ *   reads back and what is on its pages agree.
  * - In the raw files, the database, the WAL, and any backup, every occurrence must sit
- *   inside a byte-for-byte copy of an allowed value too. A stale copy of an allowed value
- *   is still that value, and a leak in a Dropped Entry, another column, or a page left
- *   over from anything else is not.
+ *   inside a byte-for-byte copy of such a value too. A stale copy of one is still that
+ *   value, and a leak in a Dropped Entry, another column, or a page left over from anything
+ *   else is not.
  *
- * No count can be exact, even in the copy. `activity` is `WITHOUT ROWID`, so it is an index
- * b-tree whose key is the whole row, and an interior page holds a full copy of each row it
- * divides on. A WAL holds a page once for each commit that changed it, and the derived
- * tables are rebuilt at every start, which leaves earlier copies of their rows in freed
- * pages. So each occurrence is located instead.
+ * No count can be exact: a WAL holds a page once for each commit that changed it, and the
+ * Line's `bytes` can sit in a page more than once. So each occurrence is located instead.
  * @param dataDir - The data directory, which no Daemon holds.
  * @param key - The key.
  * @param isSaid - Whether an inbound Line, as text, is one that may say it.
- * @returns How many allowed values hold it, and where, or a failure naming each leak.
+ * @returns How many `bytes` values hold it, and where, or a failure naming each leak.
  */
 const keyStoredOnlyWhereSaid = Effect.fnUntraced(function* (
   dataDir: string,
@@ -1653,9 +1653,10 @@ const keyStoredOnlyWhereSaid = Effect.fnUntraced(function* (
     }
   })();
 
+  // Only the bytes of a Line the Network said it in. No derived table, and no other column.
   const allowed = holding.filter(
     ({ column, sequence, table }) =>
-      saidAt.has(sequence) && (table === "entries" ? column === "bytes" : true)
+      table === "entries" && column === "bytes" && saidAt.has(sequence)
   );
 
   const leaks = holding.filter((stored) => !allowed.includes(stored));
@@ -1953,8 +1954,8 @@ const connectCommand = toCheck(
 );
 
 // The Network says a key of `#keyed` in a `MODE` that sets or unsets it, and in the `324`
-// that answers the Daemon's own `MODE` read, and those, and rows derived from them, are the
-// only places on disk it may be (LOG-6).
+// that answers the Daemon's own `MODE` read, and those Lines' bytes are the only places on
+// disk it may be. Nothing derived from them holds it (LOG-6, KNOW-6).
 const isSaid = (key: string) => (text: string) => {
   const before = text.slice(0, -key.length - 1);
 

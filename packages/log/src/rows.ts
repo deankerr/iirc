@@ -302,7 +302,9 @@ export const ActivityDetails = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("topic"), topic: Schema.String }),
   /**
    * The letters and parameters after the Target, and, for a Channel's `MODE` that added up
-   * under `PREFIX` and `CHANMODES`, each change they made (KNOW-6).
+   * under `PREFIX` and `CHANMODES`, each change they made (KNOW-6). Never a Channel key's
+   * value (CRED-4): `k` has no `param`, the key's parameter is left out of `params`, and a
+   * `MODE` that did not add up keeps its letters alone.
    */
   Schema.Struct({
     changes: Schema.optionalKey(

@@ -12,6 +12,7 @@ import { parseFormatting } from "@iirc/protocol/format";
 import type { Span as ParsedSpan } from "@iirc/protocol/format";
 import { casefold, casemappingOf, channelOf } from "@iirc/state";
 import type { Casemapping, IrcState, Member } from "@iirc/state";
+import { keyMode } from "@iirc/state/modes";
 
 // Only what is on is said, so a plain Message costs one small object.
 const spanOf = ({ style, text }: ParsedSpan): Span => ({
@@ -131,10 +132,6 @@ const memberView = (irc: IrcState, folded: string, { nick, prefixes }: Member) =
     ...(seen?.away !== undefined && { away: seen.away }),
   };
 };
-
-// The key is shown as set and never with its value, which can be the Owner's own Channel
-// key, a Credential (CRED-4).
-const keyMode = "k";
 
 /**
  * A Channel Self is in, as one Standing knows it, with `at` from the same snapshot, so the

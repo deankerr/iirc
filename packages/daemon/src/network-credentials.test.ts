@@ -405,18 +405,25 @@ describe("Channel keys (CONF-5, CRED-4)", () => {
           ]);
 
           // A page of the Log can be in its files more than once, so what counts is that the
-          // key is nowhere but in the `MODE`s that carried it, and the Activity derived from
-          // them, which holds a `MODE`'s parameters and its changes (MSG-5, KNOW-6).
+          // key is nowhere but in the `MODE`s that carried it, as the Network said them, and
+          // never in what is derived from them (MSG-5, KNOW-6).
           const bytes = logBytes(dataDir);
 
+          assert.isAbove(occurrences(bytes, "first-key"), 0);
           assert.strictEqual(
             occurrences(bytes, "first-key"),
-            occurrences(bytes, "+k first-key") +
-              occurrences(bytes, "-k first-key") +
-              occurrences(bytes, '"param":"first-key"') +
-              occurrences(bytes, '"first-key"]')
+            occurrences(bytes, "+k first-key") + occurrences(bytes, "-k first-key")
           );
-          assert.isAbove(occurrences(bytes, '"param":"first-key"'), 0);
+
+          const { activity } = yield* client.daemon.activity({
+            query: { after: { sequence: 0 }, limit: 1000, network: id },
+          });
+
+          const modes = activity.filter(({ details }) => details.kind === "mode");
+
+          assert.lengthOf(modes, 3);
+          assert.notInclude(JSON.stringify(activity), "first-key");
+          assert.notInclude(JSON.stringify(activity), "pizza");
         })
       )
   );

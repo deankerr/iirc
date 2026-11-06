@@ -111,6 +111,11 @@ Wanted, but not needed for the first proof:
 
 - Should the API, the web frontend, and an MCP adapter be projected from one capability definition, as rat-stack does? It would help once MCP is real, and is not needed before then.
 
+For the architectural review that opens milestone 3:
+
+- **Nick after a routine reconnect.** On ngircd, the `MODE` and `WHO` that follow each `JOIN` (KNOW-5) count against its per-command penalty. So after a disconnect and connect, the old `QUIT` can still be unread, the new registration gets `433`, and the Daemon comes back on a fallback nick. Nick regain is CONN-5, in milestone 3. This was seen with `proof:floor`'s 1 s quit wait, and has not been tried with the default 2 s.
+- **The pace of Channel reads.** With one read in flight per Network and a 60 s timeout, an Ircd that ignores every read delays the last of 1024 Channels by about 17 hours. That is bounded, and errors answer at once. Whether reads should run more in parallel, time out sooner, or become Tuning is open.
+
 ## Risks
 
 - **Effect stability:** only Effect's core is stable. `http`, `http-api`, `rpc`, `sql`, `socket`, `cli`, `workers`, `crypto`, and every package outside `effect`, including `platform-bun` and `vitest`, can break in a minor release.

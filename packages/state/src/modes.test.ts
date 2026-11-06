@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseModes } from "./modes.ts";
+import { keyless, parseModes } from "./modes.ts";
 import type { ModeTypes } from "./modes.ts";
 
 // KNOW-2's defaults, `PREFIX=(ov)@+` and `CHANMODES=beI,k,l`.
@@ -98,5 +98,32 @@ describe(parseModes, () => {
 
   it("KNOW-6: a `MODE` with no letters at all changes nothing", () => {
     expect(parseModes([], defaults)).toStrictEqual({ _tag: "Parsed", changes: [] });
+  });
+});
+
+describe(keyless, () => {
+  it("CRED-4, KNOW-6: leaves a Channel key's value out, and every other parameter in", () => {
+    expect(keyless(["+okl-b", "nick", "key", "10", "*!*@a"], defaults)).toStrictEqual({
+      changes: [
+        { adding: true, letter: "o", param: "nick" },
+        { adding: true, letter: "k" },
+        { adding: true, letter: "l", param: "10" },
+        { adding: false, letter: "b", param: "*!*@a" },
+      ],
+      params: ["+okl-b", "nick", "10", "*!*@a"],
+    });
+  });
+
+  it("CRED-4, KNOW-6: an unset `k` with or without its key says the same", () => {
+    expect(keyless(["-k", "key"], defaults)).toStrictEqual(keyless(["-k"], defaults));
+  });
+
+  it("CRED-4, KNOW-6: one that does not add up keeps its letters and no parameters", () => {
+    expect(keyless(["+kl", "key"], defaults)).toStrictEqual({ params: ["+kl"] });
+    expect(keyless(["+n", "key"], defaults)).toStrictEqual({ params: ["+n"] });
+  });
+
+  it("CRED-4, KNOW-6: a `MODE` with no letters has no parameters", () => {
+    expect(keyless([], defaults)).toStrictEqual({ params: [] });
   });
 });

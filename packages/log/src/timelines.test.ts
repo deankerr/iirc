@@ -632,6 +632,73 @@ describe("Timelines in the Log", () => {
       )
     );
 
+    it.effect("CRED-4, KNOW-6: no row holds a Channel key's value, however its Line came", () =>
+      inTempDirectory((dataDir) =>
+        Effect.gen(function* () {
+          const keys = ["key1", "key2", "key3", "key4", "key5", "key6"];
+
+          const shown = yield* Effect.gen(function* () {
+            yield* connected();
+            yield* record([...welcome, ...heard(":alice!a@h JOIN #iirc")]);
+            yield* record(
+              heard(
+                ":bob!b@h MODE #iirc +k key1",
+                ":bob!b@h MODE #iirc -k key1",
+                ":bob!b@h MODE #iirc +ok carol key2",
+                // `l` has no limit, so it does not add up, and does not say which is the key.
+                ":bob!b@h MODE #iirc +kl key3",
+                ":irc.example 324 alice #iirc +ntk key4",
+                // Channels Self is not in, which no state follows.
+                ":irc.example 324 alice #other +k key5",
+                ":bob!b@h MODE #other +k key6"
+              )
+            );
+
+            return (yield* allActivity).map(shownActivity).slice(-7);
+          }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+          assert.deepStrictEqual(shown, [
+            'channel #iirc: mode by bob {"changes":[{"adding":true,"letter":"k"}],"params":["+k"]}',
+            'channel #iirc: mode by bob {"changes":[{"adding":false,"letter":"k"}],"params":["-k"]}',
+            'channel #iirc: mode by bob {"changes":[{"adding":true,"letter":"o","param":"carol"},{"adding":true,"letter":"k"}],"params":["+ok","carol"]}',
+            // Short of a parameter, it cannot say which parameter is the key, so it says none.
+            'channel #iirc: mode by bob {"params":["+kl"]}',
+            'network: line by irc.example {"command":"324","params":["alice","#iirc","+ntk"]}',
+            'network: line by irc.example {"command":"324","params":["alice","#other","+k"]}',
+            'network: line by bob {"command":"MODE","params":["#other","+k"]}',
+          ]);
+
+          // A table left by a binary that kept the value is derived again at the next start.
+          yield* execute(
+            dataDir,
+            `UPDATE activity SET details = replace(details, '"+k"', '"+k","key1"') WHERE kind = 'mode'`
+          );
+
+          const stored = yield* Effect.sync(() => {
+            const database = new Database(`${dataDir}/iirc.sqlite`);
+
+            try {
+              return database
+                .query<{ readonly details: string }, []>("SELECT details FROM activity")
+                .all();
+            } finally {
+              database.close();
+            }
+          });
+
+          assert.isTrue(stored.some(({ details }) => details.includes("key1")));
+
+          const rebuilt = yield* Effect.gen(function* () {
+            return JSON.stringify(yield* allActivity);
+          }).pipe(Effect.provide(Log.layer({ dataDir })));
+
+          for (const key of keys) {
+            assert.notInclude(rebuilt, key);
+          }
+        })
+      )
+    );
+
     it.effect("LIVE-1: a PING or a PONG is in no Timeline, only in /entries", () =>
       withLog(() =>
         Effect.gen(function* () {

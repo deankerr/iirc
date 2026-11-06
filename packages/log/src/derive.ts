@@ -5,6 +5,7 @@ import type { Entry } from "@iirc/session/entry";
 import type { StandingStep } from "@iirc/session/standing";
 import { casemappingOf, messageOf, nickOf } from "@iirc/state";
 import type { Casemapping, IrcState, StateChange } from "@iirc/state";
+import { keyHidden, keyless, keylessParams } from "@iirc/state/modes";
 import { channelPlace, networkPlace, placeOf, placeOfSent, userPlace } from "@iirc/state/place";
 import type { Place } from "@iirc/state/place";
 
@@ -195,10 +196,17 @@ const inChannel = ({ actor, irc, line }: ChangeContext, change: ChannelChange) =
 
     case "ModesChanged": {
       const { by, changes } = change;
+      const [letters = ""] = line.params.slice(1);
 
+      // A Channel key is shown as set and never with its value, which is a Credential when
+      // it is the Owner's (CRED-4, KNOW-6).
       return {
         actor: by,
-        details: { changes, kind: "mode", params: line.params.slice(1) },
+        details: {
+          changes: keyHidden(changes),
+          kind: "mode",
+          params: keylessParams(letters, changes),
+        },
       } as const;
     }
 
@@ -265,7 +273,8 @@ const applied = (context: ChangeContext, change: StateChange) => {
 };
 
 // A Channel's `MODE` that did not add up names no `ModesChanged`, only that the Channel is
-// uncertain (KNOW-6), and is still a change of modes in that Channel, kept raw.
+// uncertain (KNOW-6), and is still a change of modes in that Channel. It cannot say which
+// parameter is a key, so it keeps its letters and no parameters, and has no `changes`.
 const uneven = (context: ChangeContext, changes: readonly StateChange[]) => {
   if (context.line.command !== "MODE" || changes.some(({ _tag }) => _tag === "ModesChanged")) {
     return;
@@ -276,18 +285,38 @@ const uneven = (context: ChangeContext, changes: readonly StateChange[]) => {
   if (uncertain !== undefined) {
     context.add(
       channelPlace(context.irc, uncertain.channel),
-      { kind: "mode", params: context.line.params.slice(1) },
+      { kind: "mode", ...keyless(context.line.params.slice(1), context.irc.isupport.modes) },
       context.actor
     );
   }
 };
 
+// The parameters of a Line that names a Channel's modes, with a key's value out of them
+// (CRED-4, KNOW-6): a `324`, whose modes follow its Self and Channel, and a `MODE` of a
+// Channel, which is no change to any held when Self is not in it. What is not a Channel's
+// modes, such as Self's, goes as it came.
+const paramsOf = ({ command, params }: Line, irc: IrcState) => {
+  const first = params[0]?.charAt(0) ?? "";
+
+  const channelModes =
+    command === "324" ||
+    (command === "MODE" && first !== "" && irc.isupport.chantypes.includes(first));
+
+  if (!channelModes) {
+    return params;
+  }
+
+  const skip = command === "324" ? 2 : 1;
+
+  return [...params.slice(0, skip), ...keyless(params.slice(skip), irc.isupport.modes).params];
+};
+
 // A Line with nothing else to say is still on the Network's Timeline, so nothing the
 // Network sends is invisible (MSG-6, PROT-1).
-const asLine = ({ command, params }: Line): ActivityDetails => ({
-  command,
-  kind: handled.has(command) || numeric.test(command) ? "line" : "unknown",
-  params,
+const asLine = (line: Line, irc: IrcState): ActivityDetails => ({
+  command: line.command,
+  kind: handled.has(line.command) || numeric.test(line.command) ? "line" : "unknown",
+  params: paramsOf(line, irc),
 });
 
 // A `PRIVMSG` or `NOTICE` from someone: a Message, an `ACTION`, or CTCP (PROT-2, PROT-5).
@@ -494,7 +523,7 @@ export const derivedFrom = (
   }
 
   if (message === undefined && rows.length === 0) {
-    add(networkPlace, asLine(line), nickOf(line.source));
+    add(networkPlace, asLine(line, irc), nickOf(line.source));
   }
 
   return {

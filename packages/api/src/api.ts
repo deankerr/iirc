@@ -496,7 +496,9 @@ const UntrustedParams = Schema.Array(UntrustedText);
  * - `nick`: `from` became `to`.
  * - `topic`: the topic set, which an empty `text` cleared.
  * - `mode`: the letters and parameters after the Target, and, for a Channel's `MODE` that
- *   added up under `PREFIX` and `CHANMODES`, each change they made (KNOW-6).
+ *   added up under `PREFIX` and `CHANMODES`, each change they made (KNOW-6). A Channel key
+ *   is set or unset with no value, here and in a `line`'s `params` (CRED-4); one that did
+ *   not add up has its letters alone.
  * - `invite`: `nick` was invited to `channel`, which is recorded and never followed (LIVE-8).
  * - `ctcp`: a CTCP other than `ACTION` and `DCC`, a request in a `PRIVMSG`, which is never
  *   answered here, or a `reply` in a `NOTICE` (PROT-2).
