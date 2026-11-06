@@ -67,6 +67,12 @@ export interface ScriptedIrcdOptions {
    * PEM, and refuses the handshake of any that does not.
    */
   readonly clientAuthority?: string;
+  /**
+   * Takes no notice of `QUIT`, as an Ircd with a stalled peer of its own might. Without
+   * this, it hangs up on a Connection once it has sent everything queued for it after the
+   * `QUIT`, as a real Ircd does.
+   */
+  readonly ignoresQuit?: boolean;
 }
 
 /**
@@ -86,7 +92,9 @@ export const welcoming =
   };
 
 /**
- * Listens on a local port until the enclosing scope closes.
+ * Listens on a local port until the enclosing scope closes. Like a real Ircd, it hangs up
+ * on a Connection that says `QUIT`, once its replies to that Line and anything queued
+ * before it have reached the kernel, unless `ignoresQuit` says otherwise.
  * @param respond - Maps each received Line, and which Connection it came on, counting
  * from the first accepted, to the Lines to send back on that Connection.
  * @param options - Where to listen, and with what certificate if any.
@@ -111,6 +119,8 @@ export const scriptedIrcd = (
     let accepted = 0;
     let closed = 0;
     let finishing = false;
+    // The Connections that said `QUIT`, which are closed as soon as nothing is left to send.
+    const leaving = new Set<Bun.Socket>();
 
     const flush = (connection: Bun.Socket) => {
       const unsent = connections.get(connection) ?? new Uint8Array();
@@ -118,7 +128,7 @@ export const scriptedIrcd = (
 
       connections.set(connection, rest);
 
-      if (finishing && rest.length === 0) {
+      if ((finishing || leaving.has(connection)) && rest.length === 0) {
         connection.end();
       }
     };
@@ -159,6 +169,7 @@ export const scriptedIrcd = (
             close: (connection) => {
               closed += 1;
               connections.delete(connection);
+              leaving.delete(connection);
             },
             data: (connection, data) => {
               bytes.push(new Uint8Array(data));
@@ -175,6 +186,11 @@ export const scriptedIrcd = (
                 for (const reply of respond(line, ordinal)) {
                   writeTo(connection, reply);
                 }
+              }
+
+              if (options?.ignoresQuit !== true && lines.some((line) => line.startsWith("QUIT"))) {
+                leaving.add(connection);
+                flush(connection);
               }
             },
             drain: flush,

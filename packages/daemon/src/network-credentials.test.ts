@@ -5,12 +5,12 @@ import { EntryAlreadyRedacted, EntryNotFound, EntryNotRedactable, Forbidden } fr
 import type { LogEntry, NetworkSettings } from "@iirc/api";
 import { eventually, scriptedIrcd } from "@iirc/session/testing";
 import type { ScriptedIrcd } from "@iirc/session/testing";
-import { Transport } from "@iirc/session/transport";
 import { Effect, Redacted } from "effect";
 
 import { channelKeyName } from "./channel-keys.ts";
 import {
   clientWith,
+  coreFor,
   inTempDirectory,
   invalidRequest,
   localKey,
@@ -22,7 +22,6 @@ import {
   version,
 } from "./daemon.fixture.ts";
 import type { Client, RawRequests } from "./daemon.fixture.ts";
-import { DaemonCore } from "./daemon.ts";
 
 // CRED-1 to CRED-4, CONN-2, CONN-6, LOG-6, and LOG-7 through the API, against an Ircd
 // scripted here: Credentials reach the hosts by name, and their values reach the wire and
@@ -102,7 +101,7 @@ const withDaemon = <A, E, R>(test: (harness: Harness) => Effect.Effect<A, E, R>)
 
         return yield* test({ client, dataDir, raw });
       }).pipe(
-        Effect.provide(servingWith(DaemonCore({ dataDir, version }, Transport.layer, noKeyring))),
+        Effect.provide(servingWith(coreFor({ dataDir, version }, { keyring: noKeyring }))),
         Effect.scoped
       )
     )

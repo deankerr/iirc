@@ -9,13 +9,13 @@ import {
   maxCredentialBytes,
 } from "@iirc/api";
 import type { LogEntry } from "@iirc/api";
-import { Transport } from "@iirc/session/transport";
 import { Effect, Logger, Redacted, References } from "effect";
 import type { HttpClientResponse } from "effect/http";
 
 import { credentialsFile } from "./credentials.ts";
 import {
   clientWith,
+  coreFor,
   inTempDirectory,
   invalidRequest,
   localKey,
@@ -26,7 +26,6 @@ import {
   version,
 } from "./daemon.fixture.ts";
 import type { Client, RawRequests } from "./daemon.fixture.ts";
-import { DaemonCore } from "./daemon.ts";
 
 // CRED-1 to CRED-3 and RUN-2 through the API: a value goes in, only names come out, each
 // write is a Change that names it, and a backup holds the Log and no Credential.
@@ -53,7 +52,7 @@ const servingIn = <A, E, R>(
 
     return yield* test({ client, dataDir, raw });
   }).pipe(
-    Effect.provide(servingWith(DaemonCore({ dataDir, version }, Transport.layer, noKeyring))),
+    Effect.provide(servingWith(coreFor({ dataDir, version }, { keyring: noKeyring }))),
     Effect.scoped
   );
 

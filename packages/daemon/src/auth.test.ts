@@ -7,6 +7,7 @@ import { OpenApi } from "effect/http-api";
 
 import {
   clientWith,
+  coreFor,
   inTempDirectory,
   invalidRequest,
   localKey,
@@ -16,7 +17,6 @@ import {
   version,
 } from "./daemon.fixture.ts";
 import type { Client, RawRequests } from "./daemon.fixture.ts";
-import { DaemonCore } from "./daemon.ts";
 import { hashKey, keyCrypto } from "./keys.ts";
 import { maxBodySize } from "./routes.ts";
 
@@ -41,7 +41,7 @@ const withDaemon = <A, E, R>(test: (harness: Harness) => Effect.Effect<A, E, R>)
         const anonymous = yield* rawWith();
 
         return yield* test({ anonymous, client, key, raw });
-      }).pipe(Effect.provide(servingWith(DaemonCore({ dataDir, version }))), Effect.scoped);
+      }).pipe(Effect.provide(servingWith(coreFor({ dataDir, version }))), Effect.scoped);
     })
   );
 

@@ -1,5 +1,5 @@
 import { BunServices } from "@effect/platform-bun";
-import { assert, beforeAll, describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { NetworkSettings } from "@iirc/api";
 import type { LogEntry } from "@iirc/api";
 import {
@@ -14,20 +14,17 @@ import { Effect, Exit, FileSystem, Layer, Schema, Scope } from "effect";
 import { FetchHttpClient } from "effect/http";
 
 import {
-  appRoot,
+  testBinary,
   createKey,
   freePort,
   healthyClient,
   networkStatus,
   startBinary,
 } from "./binary.ts";
-import { buildBinary, buildTimeout } from "./testing.ts";
 
 // CONN-1 against the real thing: the minified binary, on a real socket, with nothing
 // faked but the authority it trusts. It trusts what `NODE_EXTRA_CA_CERTS` names, and a
 // test that leaves that out shows the variable is what did the trusting.
-
-const binary = `${appRoot}/dist/iirc-tls`;
 
 // Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
 // several times what it does alone.
@@ -80,9 +77,9 @@ const startDaemon = Effect.fnUntraced(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const dataDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iirc-tls-" });
   const httpPort = yield* freePort;
-  const key = yield* createKey(binary, dataDir);
+  const key = yield* createKey(testBinary, dataDir);
 
-  const running = yield* startBinary(binary, ["daemon", "--http-port", String(httpPort)], {
+  const running = yield* startBinary(testBinary, ["daemon", "--http-port", String(httpPort)], {
     IIRC_DATA_DIR: dataDir,
     ...(options.caFile !== undefined && { NODE_EXTRA_CA_CERTS: options.caFile }),
   });
@@ -217,10 +214,6 @@ const opensslPin = (cert: string) => {
 const layers = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer);
 
 describe("the compiled binary over TLS (CONN-1)", () => {
-  beforeAll(async () => {
-    await Effect.runPromise(buildBinary(binary));
-  }, buildTimeout);
-
   it.live(
     "reaches a Session on a trusted certificate for its hostname, sending SNI",
     () =>

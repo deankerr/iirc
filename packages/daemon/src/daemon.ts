@@ -1039,21 +1039,37 @@ export class Daemon extends Context.Service<
   );
 }
 
+/** What {@link DaemonCore} builds the Daemon on by default, any of which a test can replace. */
+export interface DaemonParts {
+  /** How to reach an Ircd. */
+  readonly transport?: Layer.Layer<Transport>;
+  /** The system keyring to try for Credentials. */
+  readonly keyring?: Keyring;
+  /** How long a Credential's write is waited for. */
+  readonly writeTimeout?: Duration.Input;
+  /**
+   * The Log's reader, on its Worker unless a test gives it one that reads in process, to
+   * spare the Worker's start.
+   */
+  readonly reader?: Layer.Layer<LogReader, StorageFailed, Log>;
+}
+
 /**
  * The Daemon and everything under it, with no HTTP and no argv. Provide it outside
  * `HttpRouter.serve`, which forks the MemoMap, or the Log is built twice and locks
  * itself out.
  * @param config - Where the Log lives, and the Daemon's version.
- * @param transport - How to reach an Ircd, which a test can replace.
- * @param keyring - The system keyring to try for Credentials, which a test can replace.
- * @param writeTimeout - How long a Credential's write is waited for, which a test can shorten.
+ * @param parts - What to build it on in place of the real thing, which only a test gives.
  * @returns The Daemon, holding the data directory for as long as it lives.
  */
 export const DaemonCore = (
   config: DaemonConfig,
-  transport: Layer.Layer<Transport> = Transport.layer,
-  keyring: Keyring = Bun.secrets,
-  writeTimeout?: Duration.Input
+  {
+    keyring = Bun.secrets,
+    reader = LogReader.layer({ dataDir: config.dataDir }),
+    transport = Transport.layer,
+    writeTimeout,
+  }: DaemonParts = {}
 ): Layer.Layer<
   Daemon,
   CredentialsUnreadable | DataDirectoryLocked | LogTooNew | StorageFailed | UndecodableChange
@@ -1063,7 +1079,7 @@ export const DaemonCore = (
     // before it lets go.
     Layer.provide(
       Layer.mergeAll(
-        LogReader.layer({ dataDir: config.dataDir }),
+        reader,
         Credentials.layer({
           dataDir: config.dataDir,
           keyring,

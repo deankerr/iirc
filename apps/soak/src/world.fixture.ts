@@ -90,7 +90,7 @@ const daemonNamed = Effect.fnUntraced(function* (
           Layer.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port }))
         )
       ),
-      Layer.provide(DaemonCore({ dataDir, version: "0.0.0-soak-test" }, undefined, noKeyring))
+      Layer.provide(DaemonCore({ dataDir, version: "0.0.0-soak-test" }, { keyring: noKeyring }))
     )
   );
 

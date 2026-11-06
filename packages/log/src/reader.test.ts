@@ -30,6 +30,7 @@ import { ReaderBusy } from "./errors.ts";
 import { Log, LogReader, ReadTimedOut } from "./log.ts";
 import type { EntryQuery, LogReaderOptions } from "./log.ts";
 import { pageBytes, statements } from "./reads.ts";
+import { inProcessReader } from "./testing.ts";
 
 // LOG-11 from the outside: a Worker with its own connection serves every read, keeps to
 // a budget, and leaves the writer alone however slow it is.
@@ -144,18 +145,31 @@ const dataDirectory = Effect.gen(function* () {
   });
 }).pipe(Effect.provide(BunServices.layer));
 
-const logAndReader = (dataDir: string, options: Omit<LogReaderOptions, "dataDir"> = {}) =>
-  LogReader.layer({ dataDir, ...options }).pipe(Layer.provideMerge(Log.layer({ dataDir })));
+type Reader = typeof LogReader.layer;
+
+const logAndReader = (
+  dataDir: string,
+  options: Omit<LogReaderOptions, "dataDir"> = {},
+  reader: Reader = LogReader.layer
+) => reader({ dataDir, ...options }).pipe(Layer.provideMerge(Log.layer({ dataDir })));
 
 const withReader = <A, E>(
   test: (dataDir: string) => Effect.Effect<A, E, Log | LogReader | Recorder | Scope.Scope>,
-  options?: Omit<LogReaderOptions, "dataDir">
+  options?: Omit<LogReaderOptions, "dataDir">,
+  reader?: Reader
 ) =>
   Effect.gen(function* () {
     const dataDir = yield* dataDirectory;
 
-    return yield* test(dataDir).pipe(Effect.provide(logAndReader(dataDir, options)));
+    return yield* test(dataDir).pipe(Effect.provide(logAndReader(dataDir, options, reader)));
   }).pipe(Effect.scoped);
+
+// The reader that tests not about the Worker read through instead, which must read what
+// the Worker's does.
+const readers: readonly (readonly [string, Reader])[] = [
+  ["on its Worker", LogReader.layer],
+  ["in process, for tests", inProcessReader],
+];
 
 // A reader whose Worker costs every row 5 ms, and announces when it starts to, so that the
 // test is given the moment a read is running.
@@ -227,70 +241,85 @@ const describeLatencies = (values: readonly number[]) =>
 
 describe("the Log's reader", () => {
   describe("reading", () => {
-    it.live("LOG-11: reads only what has committed, and every commit as soon as it lands", () =>
-      withReader((dataDir) =>
-        Effect.gen(function* () {
-          const reader = yield* LogReader;
-          const [first] = yield* record([line("one", "libera", "inbound")]);
+    for (const [where, readerLayer] of readers) {
+      it.live(
+        `LOG-11: reads only what has committed, and every commit as soon as it lands, ${where}`,
+        () =>
+          withReader(
+            (dataDir) =>
+              Effect.gen(function* () {
+                const reader = yield* LogReader;
+                const [first] = yield* record([line("one", "libera", "inbound")]);
 
-          // Another connection's transaction, open and holding a row the reader must not see.
-          const intruder = yield* Effect.acquireRelease(
-            Effect.sync(() => {
-              const database = new Database(`${dataDir}/iirc.sqlite`);
+                // Another connection's transaction, open and holding a row the reader must not see.
+                const intruder = yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    const database = new Database(`${dataDir}/iirc.sqlite`);
 
-              database.run("BEGIN IMMEDIATE");
-              database.run(
-                "INSERT INTO entries (sequence, at, kind, phase, version) VALUES (2, 0, 'Daemon', 'started', 'uncommitted')"
-              );
+                    database.run("BEGIN IMMEDIATE");
+                    database.run(
+                      "INSERT INTO entries (sequence, at, kind, phase, version) VALUES (2, 0, 'Daemon', 'started', 'uncommitted')"
+                    );
 
-              return database;
-            }),
-            (database) =>
-              Effect.sync(() => {
-                database.close();
-              })
-          );
+                    return database;
+                  }),
+                  (database) =>
+                    Effect.sync(() => {
+                      database.close();
+                    })
+                );
 
-          assert.deepStrictEqual(yield* reader.entries(everything), [first]);
+                assert.deepStrictEqual(yield* reader.entries(everything), [first]);
 
-          intruder.run("ROLLBACK");
+                intruder.run("ROLLBACK");
 
-          // The very next read after each commit has it, with no wait in between.
-          for (const index of Arr.range(1, 25)) {
-            const [entry] = yield* record([line(`line ${index}`, "oftc", "inbound")]);
+                // The very next read after each commit has it, with no wait in between.
+                for (const index of Arr.range(1, 25)) {
+                  const [entry] = yield* record([line(`line ${index}`, "oftc", "inbound")]);
 
-            assert.deepStrictEqual(
-              yield* reader.entries({ after: entry.sequence - 1, limit: 10 }),
-              [entry],
-              `commit ${index}`
-            );
-          }
+                  assert.deepStrictEqual(
+                    yield* reader.entries({ after: entry.sequence - 1, limit: 10 }),
+                    [entry],
+                    `commit ${index}`
+                  );
+                }
 
-          const [message] = yield* reader.messages({ after: first.sequence, limit: 1 });
+                const [message] = yield* reader.messages({ after: first.sequence, limit: 1 });
 
-          assert.isUndefined(message, "no Line here was a Message");
-        })
-      )
-    );
+                assert.isUndefined(message, "no Line here was a Message");
+              }),
+            {},
+            readerLayer
+          )
+      );
 
-    it.live("LOG-11: returns exactly what the writer holds, Entries, Messages, and Gaps", () =>
-      withReader(() =>
-        Effect.gen(function* () {
-          yield* seedMixed;
+      it.live(
+        `LOG-11: returns exactly what the writer holds, Entries, Messages, and Gaps, ${where}`,
+        () =>
+          withReader(
+            () =>
+              Effect.gen(function* () {
+                yield* seedMixed;
 
-          const log = yield* Log;
-          const reader = yield* LogReader;
+                const log = yield* Log;
+                const reader = yield* LogReader;
 
-          assert.deepStrictEqual(yield* reader.entries(everything), yield* log.entries(everything));
-          assert.deepStrictEqual(
-            yield* reader.messages(everything),
-            yield* log.messages(everything)
-          );
-          assert.deepStrictEqual(yield* reader.gaps(everything), yield* log.gaps(everything));
-          assert.lengthOf(yield* reader.gaps(everything), 9);
-        })
-      )
-    );
+                assert.deepStrictEqual(
+                  yield* reader.entries(everything),
+                  yield* log.entries(everything)
+                );
+                assert.deepStrictEqual(
+                  yield* reader.messages(everything),
+                  yield* log.messages(everything)
+                );
+                assert.deepStrictEqual(yield* reader.gaps(everything), yield* log.gaps(everything));
+                assert.lengthOf(yield* reader.gaps(everything), 9);
+              }),
+            {},
+            readerLayer
+          )
+      );
+    }
 
     it.live("LOG-11: filters by Network and kind exactly, paging by `after`", () =>
       withReader(() =>

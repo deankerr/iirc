@@ -1,9 +1,9 @@
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 
 import { Array as Arr, Effect, Schema } from "effect";
 import { flow } from "effect/Function";
 
-import { inBudget, withinBudget } from "./budget.ts";
+import { allowBudgets, inBudget, withinBudget } from "./budget.ts";
 import { ReadFailed } from "./errors.ts";
 import type { EntryQuery, NetworkPage } from "./reader-protocol.ts";
 import { EntryRow, GapRow, MessageRow } from "./rows.ts";
@@ -129,6 +129,36 @@ const mergePages = (pages: readonly { readonly cut: boolean; readonly page: Size
     .filter(({ sequence }) => sequence <= bound)
     .toSorted((left, right) => left.sequence - right.sequence);
 };
+
+// A reader never waits on the writer in WAL mode, but SQLite can still answer busy while
+// the WAL index is rebuilt, and that wait is outside any budget, so it is short.
+const busyTimeoutMillis = 50;
+
+/**
+ * Opens a connection of the reader's own to the Log, until the enclosing scope closes. It
+ * is read-only, so nothing on it can ever take the writer's lock, and in WAL mode it sees
+ * only what has committed (LOG-11).
+ * @param filename - The Log's database.
+ * @returns The connection, which allows budgets.
+ */
+export const openReadConnection = (filename: string) =>
+  Effect.acquireRelease(
+    Effect.try({
+      catch: (cause) => new ReadFailed({ reason: String(cause) }),
+      try: () => {
+        const database = new Database(filename, { readonly: true });
+
+        database.run(`PRAGMA busy_timeout = ${busyTimeoutMillis}`);
+        allowBudgets(database);
+
+        return database;
+      },
+    }),
+    (database) =>
+      Effect.sync(() => {
+        database.close();
+      })
+  );
 
 /**
  * The Log's reads, over a connection that allows budgets and is never written.

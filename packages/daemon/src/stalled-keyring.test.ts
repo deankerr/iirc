@@ -8,8 +8,8 @@ import { TestClock } from "effect/testing";
 
 import { finishes, untilTrue, withinClock } from "./clock.fixture.ts";
 import type { Keyring } from "./credentials.ts";
-import { inTempDirectory, version } from "./daemon.fixture.ts";
-import { Daemon, DaemonCore } from "./daemon.ts";
+import { coreFor, inTempDirectory, version } from "./daemon.fixture.ts";
+import { Daemon } from "./daemon.ts";
 
 // CRED-1 when the keyring answered the probe and then stopped answering, as a locked one
 // does. A write that never ends must cost its callers a bounded wait and no more, and must
@@ -94,11 +94,13 @@ const withLockedKeyring = <A, E, R>(test: (harness: Harness) => Effect.Effect<A,
         const { entered, keyring, persisted, writes } = lockedKeyring(release);
 
         const context = yield* Layer.build(
-          DaemonCore(
+          coreFor(
             { dataDir, version },
-            Layer.succeed(Transport, ircd.transport),
-            keyring,
-            `${bound} millis`
+            {
+              keyring,
+              transport: Layer.succeed(Transport, ircd.transport),
+              writeTimeout: `${bound} millis`,
+            }
           )
         );
 

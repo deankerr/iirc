@@ -9,7 +9,7 @@ The Daemon, with no HTTP server and no argv: Configuration as a fold over Change
 
 | Path | Export | Role |
 | --- | --- | --- |
-| `.` | `DaemonCore(config, transport?, keyring?, writeTimeout?)` | The Daemon and everything under it as one Layer: the Log, the reader, Credentials, and the hosts |
+| `.` | `DaemonCore(config, { transport?, keyring?, writeTimeout?, reader? })` | The Daemon and everything under it as one Layer: the Log, the reader, Credentials, and the hosts. Only a test gives the parts |
 | `.` | `Daemon` | The service: every operation, each on behalf of a key, and `status` |
 | `.` | `Daemon.stopsFirst` | A Layer that makes the Networks the first thing to stop |
 | `.` | `createLocalKey` | `iirc key create`: appends a key's Change with the Daemon stopped (AUTH-4) |

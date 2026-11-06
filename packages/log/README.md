@@ -13,6 +13,7 @@ The Daemon's durable Log, in SQLite. It is the durable `Recorder` and `Committed
 | `Log` operations | `entries`, `changes`, `messages`, `gaps`, `head`, `rebuild` (LOG-10), and `redact` (LOG-7). These read on the writer's connection, so only startup and tests use them |
 | `LogReader` | Reads for Frontends: `entries`, `messages`, `gaps`, and `backup`, each from a Worker. The three reads have a time budget; `backup` has none, and runs as long as the Log's size needs |
 | `LogReader.layer({ dataDir, budget? })` | Starts the reader's Worker. Needs `Log` |
+| `inProcessReader({ dataDir, budget? })`, from `./testing` | A `LogReader` for tests not about the Worker: the same reads on its own read-only connection, on the caller's thread, with no Worker to start. Needs `Log` |
 | `longestReadMillis` | The longest a read waits under the default budget, for anything that waits on reads in flight |
 | Errors | `StorageFailed`, `DataDirectoryLocked`, `LogTooNew`, `ReadTimedOut`, `ReaderBusy`, `EntryNotFound`, `EntryNotRedactable`, `EntryAlreadyRedacted` |
 | Types | `LoggedMessage`, `Gap`, `Backup`, `EntryQuery`, `NetworkPage`, `ChangeEntry` |

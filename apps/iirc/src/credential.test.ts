@@ -2,19 +2,16 @@ import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 
 import { BunServices } from "@effect/platform-bun";
-import { assert, beforeAll, describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Effect, Fiber, FileSystem, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import { appRoot, createKey, freePort, healthyClient, startBinary } from "./binary.ts";
+import { testBinary, createKey, freePort, healthyClient, startBinary } from "./binary.ts";
 import { withoutFinalLineEnding } from "./credential-command.ts";
-import { buildBinary, buildTimeout } from "./testing.ts";
 
 // CRED-2, RUN-2, and RUN-5 against the real thing: `iirc credential` and `iirc backup` in
 // the minified binary, as Frontends of a running Daemon (API-1), and `iirc daemon`
 // refusing a Log or Credentials it must not use, in one plain line.
-
-const binary = `${appRoot}/dist/iirc-credential`;
 
 // Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
 // several times what it does alone.
@@ -30,10 +27,10 @@ const newDataDir = FileSystem.FileSystem.use((fileSystem) =>
 
 // A Daemon with a key made before it started (AUTH-4), until the enclosing scope closes.
 const runningDaemonIn = Effect.fnUntraced(function* (dataDir: string) {
-  const key = yield* createKey(binary, dataDir);
+  const key = yield* createKey(testBinary, dataDir);
   const httpPort = yield* freePort;
 
-  yield* startBinary(binary, ["daemon", "--http-port", String(httpPort)], {
+  yield* startBinary(testBinary, ["daemon", "--http-port", String(httpPort)], {
     IIRC_DATA_DIR: dataDir,
   });
 
@@ -55,7 +52,7 @@ const run = (
   stdin?: string
 ) =>
   Effect.gen(function* () {
-    const running = yield* startBinary(binary, flags, environment, stdin);
+    const running = yield* startBinary(testBinary, flags, environment, stdin);
     const code = Number(yield* running.child.exitCode);
 
     yield* Fiber.join(running.reader);
@@ -64,10 +61,6 @@ const run = (
   }).pipe(Effect.scoped);
 
 describe("the compiled binary's Credentials and backups", () => {
-  beforeAll(async () => {
-    await Effect.runPromise(buildBinary(binary));
-  }, buildTimeout);
-
   it("CRED-2: a value piped in loses only the line ending the pipe added", () => {
     assert.strictEqual(withoutFinalLineEnding(`${secret}\n`), secret);
     assert.strictEqual(withoutFinalLineEnding(`${secret}\r\n`), secret);
@@ -163,7 +156,7 @@ describe("the compiled binary's Credentials and backups", () => {
       Effect.gen(function* () {
         const dataDir = yield* newDataDir;
 
-        yield* createKey(binary, dataDir);
+        yield* createKey(testBinary, dataDir);
 
         // What a newer binary would have left: a migration this one does not know.
         const database = new Database(`${dataDir}/iirc.sqlite`);

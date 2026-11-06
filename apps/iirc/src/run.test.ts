@@ -1,7 +1,7 @@
 import { writeSync } from "node:fs";
 
 import { BunServices } from "@effect/platform-bun";
-import { assert, beforeAll, describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import type { LogEntry, NetworkSettings } from "@iirc/api";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
 import type { Tuning } from "@iirc/lifecycle/tuning";
@@ -12,7 +12,7 @@ import type { Schema } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
 import {
-  appRoot,
+  testBinary,
   createKey,
   freePort,
   healthyClient,
@@ -23,12 +23,10 @@ import {
   startBinary,
 } from "./binary.ts";
 import type { Client } from "./binary.ts";
-import { assertBackoff, buildBinary, buildTimeout, shortestWait } from "./testing.ts";
+import { assertBackoff, shortestWait } from "./testing.ts";
 
 // RUN-3 and LIVE-9 against the real thing: the minified binary, under signals, on a real
 // socket, with the Ircd counting what actually reached it.
-
-const binary = `${appRoot}/dist/iirc-run`;
 
 // Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
 // several times what it does alone.
@@ -97,7 +95,7 @@ const startIn = (dataDir: string) =>
   Effect.gen(function* () {
     const httpPort = yield* freePort;
 
-    return yield* startBinary(binary, daemonFlags(httpPort), { IIRC_DATA_DIR: dataDir }).pipe(
+    return yield* startBinary(testBinary, daemonFlags(httpPort), { IIRC_DATA_DIR: dataDir }).pipe(
       Effect.map((running) => ({ ...running, httpPort }))
     );
   });
@@ -174,12 +172,18 @@ const dataDirectory = Effect.gen(function* () {
 const home = Effect.gen(function* () {
   const dataDir = yield* dataDirectory;
 
-  return { dataDir, key: yield* createKey(binary, dataDir) } satisfies Home;
+  return { dataDir, key: yield* createKey(testBinary, dataDir) } satisfies Home;
 });
 
 const inSession = ({ phase }: { readonly phase: string }) => phase === "session";
 
 const welcomingIrcd = scriptedIrcd(welcoming(nick), { hostname: ircdAddress });
+
+// One that hears `QUIT` and says nothing, which a Daemon must wait out.
+const unhearingIrcd = scriptedIrcd(welcoming(nick), {
+  hostname: ircdAddress,
+  ignoresQuit: true,
+});
 
 const joined = (ircd: ScriptedIrcd) =>
   eventually(ircd.received, (lines) => lines.includes(`JOIN ${channel}`), settleLimit);
@@ -192,7 +196,7 @@ const attemptsIn = (entries: readonly LogEntry[]) =>
 // Runs the binary to its end, for commands that are not the Daemon.
 const runToEnd = (flags: readonly string[], environment: Readonly<Record<string, string>> = {}) =>
   Effect.gen(function* () {
-    const running = yield* startBinary(binary, flags, environment);
+    const running = yield* startBinary(testBinary, flags, environment);
     const code = Number(yield* running.child.exitCode);
 
     yield* Fiber.join(running.reader);
@@ -223,10 +227,6 @@ const assertRefusedPlainly = (
 const layers = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer);
 
 describe("the compiled binary, stopping and starting", () => {
-  beforeAll(async () => {
-    await Effect.runPromise(buildBinary(binary));
-  }, buildTimeout);
-
   it.live(
     "LOG-11: answers `/api/entries` from the reader's Worker, which it carries",
     () =>
@@ -280,16 +280,7 @@ describe("the compiled binary, stopping and starting", () => {
           yield* eventually(statusOf(daemon), inSession, settleLimit);
           yield* joined(ircd);
 
-          const stopped = yield* Effect.forkChild(signal(running, name));
-
-          yield* eventually(
-            ircd.received,
-            (lines) => lines.includes(`QUIT :${quitReason}`),
-            settleLimit
-          );
-          yield* ircd.finish;
-
-          const { code, millis } = yield* Fiber.join(stopped);
+          const { code, millis } = yield* signal(running, name);
 
           assert.strictEqual(code, 0, running.output());
           assert.isBelow(
@@ -316,7 +307,7 @@ describe("the compiled binary, stopping and starting", () => {
         const quitWaitMillis = 300;
         const where = yield* home;
         const { dataDir } = where;
-        const ircd = yield* welcomingIrcd;
+        const ircd = yield* unhearingIrcd;
         const { daemon, running } = yield* startDaemon(where, ircd, { quitWaitMillis });
 
         yield* eventually(statusOf(daemon), inSession, settleLimit);
@@ -340,7 +331,7 @@ describe("the compiled binary, stopping and starting", () => {
         const quitWaitMillis = 400;
         const where = yield* home;
         const { dataDir } = where;
-        const ircd = yield* welcomingIrcd;
+        const ircd = yield* unhearingIrcd;
         const { daemon, running } = yield* startDaemon(where, ircd, { quitWaitMillis });
 
         yield* eventually(statusOf(daemon), inSession, settleLimit);
@@ -553,8 +544,12 @@ describe("the compiled binary, stopping and starting", () => {
     { timeout: testTimeout }
   );
 
+  // That a Daemon dials once the wait is over, and not before, is not waited out here, as
+  // the wait is real time and the first backoff is at least 12 seconds. The host does so
+  // exactly on `TestClock` (`waitOutBackoff` in staying.test.ts, with an ERROR among its
+  // cases), and the binary does so across kills in `assertBackoff`.
   it.live(
-    "LIVE-4, LIVE-5: a Network's ERROR backs off across restarts, none of which dial during the wait",
+    "LIVE-4, LIVE-5: a Network's ERROR wait survives a restart and a kill, and none of them dials",
     () =>
       Effect.gen(function* () {
         const text = "You are banned from this Network (scripted)";
@@ -612,7 +607,7 @@ describe("the compiled binary, stopping and starting", () => {
           })
         );
 
-        const { daemon, status: third } = yield* turnedAway;
+        const { status: third } = yield* turnedAway;
 
         assert.strictEqual(second.closeReason, text);
         assert.strictEqual(third.closeReason, text);
@@ -620,12 +615,6 @@ describe("the compiled binary, stopping and starting", () => {
         assert.strictEqual(third.nextAttemptAt, dueAt, "nor must a kill");
         assert.isBelow(Date.now(), dueAt, "this test took too long to prove anything");
         assert.strictEqual(yield* ircd.accepted, 1, "a restart dialed during the wait");
-
-        yield* eventually(ircd.accepted, (accepted) => accepted === 2, settleLimit);
-
-        const [, attempt] = attemptsIn(yield* entriesOf(daemon));
-
-        assert.isAtLeast(attempt?.at ?? 0, dueAt, "it dialed before the wait was over");
       }).pipe(Effect.scoped, Effect.provide(layers)),
     { timeout: testTimeout }
   );
@@ -684,7 +673,7 @@ describe("the compiled binary, stopping and starting", () => {
         const { dataDir, key } = yield* home;
         const httpPort = yield* freePort;
 
-        yield* startBinary(binary, ["daemon"], {
+        yield* startBinary(testBinary, ["daemon"], {
           IIRC_DATA_DIR: dataDir,
           IIRC_HTTP_PORT: String(httpPort),
         });
@@ -796,10 +785,6 @@ describe("the compiled binary, stopping and starting", () => {
 });
 
 describe("the compiled binary's `iirc key create` (AUTH-4)", () => {
-  beforeAll(async () => {
-    await Effect.runPromise(buildBinary(binary));
-  }, buildTimeout);
-
   it.live(
     "prints a key that works, records only its Change as `local`, and starts no Daemon",
     () =>

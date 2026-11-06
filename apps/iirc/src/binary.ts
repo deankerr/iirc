@@ -12,6 +12,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 /** Where this package's sources sit above. */
 export const appRoot = `${import.meta.dirname}/..`;
 
+/**
+ * The binary the tests run, which `global-setup.ts` builds once before any test file
+ * starts. Test files only read it, and each gives its own data directory to what it runs,
+ * so nothing a test does can reach it or another test file.
+ */
+export const testBinary = `${appRoot}/dist/iirc-test`;
+
 /** Asks the kernel for a port nothing is using. */
 export const freePort = Effect.acquireUseRelease(
   Effect.sync(() => Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data: constVoid } })),

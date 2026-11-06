@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { writeSync } from "node:fs";
 
 import { BunServices } from "@effect/platform-bun";
-import { assert, beforeAll, describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import type { Gap, LogEntry } from "@iirc/api";
 import { fold, phase } from "@iirc/lifecycle";
 import { defaultTuning } from "@iirc/lifecycle/tuning";
@@ -19,7 +19,7 @@ import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Random, Schedule } fr
 import { FetchHttpClient } from "effect/http";
 
 import {
-  appRoot,
+  testBinary,
   createKey,
   freePort,
   healthyClient,
@@ -28,13 +28,12 @@ import {
   settingsFor,
   startBinary,
 } from "./binary.ts";
-import { assertBackoff, buildBinary, buildTimeout } from "./testing.ts";
+import { assertBackoff } from "./testing.ts";
 
 // PROOF-4 against the real thing: the minified binary the release build makes, on a real
 // socket, killed for real. Set
 // IIRC_KILL_SEED to the seed a failure logged, and the same plan runs again.
 
-const binary = `${appRoot}/dist/iirc`;
 const seedVariable = "IIRC_KILL_SEED";
 
 // Twenty-odd seconds alone, for the rounds it kills and restarts, and several times that on
@@ -410,7 +409,7 @@ const killNetwork = (ircd: { readonly host: string; readonly port: number }) =>
   });
 
 const startKillable = (flags: readonly string[], environment: Readonly<Record<string, string>>) =>
-  startBinary(binary, flags, environment);
+  startBinary(testBinary, flags, environment);
 
 type Running = Effect.Success<ReturnType<typeof startKillable>>;
 
@@ -833,10 +832,6 @@ const chooseSeed = Random.nextIntBetween(1, 2 ** 31).pipe(
 const layers = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer);
 
 describe("the compiled binary", () => {
-  beforeAll(async () => {
-    await Effect.runPromise(buildBinary(binary));
-  }, buildTimeout);
-
   it.live(
     "PROOF-4: loses nothing, whenever it is killed",
     () =>
@@ -864,7 +859,7 @@ describe("the compiled binary", () => {
         });
 
         // AUTH-4: the first key comes before any Daemon, and starts no run of its own.
-        const key = yield* createKey(binary, dataDir);
+        const key = yield* createKey(testBinary, dataDir);
         const ircdHost = yield* random(loopbackAlias);
 
         report(`Ircd on ${ircdHost}`);

@@ -9,12 +9,13 @@ import {
 } from "@iirc/api";
 import type { LogEntry, NetworkSettings } from "@iirc/api";
 import { eventually, scriptedIrcd } from "@iirc/session/testing";
-import type { ScriptedIrcd } from "@iirc/session/testing";
+import type { ScriptedIrcd, ScriptedIrcdOptions } from "@iirc/session/testing";
 import { Effect, Fiber } from "effect";
 import type { Schema } from "effect";
 
 import {
   clientWith,
+  coreFor,
   inTempDirectory,
   invalidRequest,
   localKey,
@@ -25,7 +26,6 @@ import {
   version,
 } from "./daemon.fixture.ts";
 import type { Client, RawRequests } from "./daemon.fixture.ts";
-import { DaemonCore } from "./daemon.ts";
 
 // Other software on this machine dials 127.0.0.1, and nothing dials this.
 const ircdAddress = "127.79.0.1";
@@ -47,8 +47,12 @@ const brisk = {
 const limit = "30 seconds";
 
 // An Ircd that welcomes `nick`, ends the burst at once, and answers each `JOIN` and `PART`
-// as Self, one Channel to a Line, the way an Ircd does, unless `respond` says otherwise.
-const welcomingIrcd = (respond?: (line: string) => readonly string[] | undefined) =>
+// as Self, one Channel to a Line, the way an Ircd does, unless `respond` says otherwise. It
+// hangs up on `QUIT` unless `ignoresQuit` says it does not.
+const welcomingIrcd = (
+  respond?: (line: string) => readonly string[] | undefined,
+  { ignoresQuit }: Pick<ScriptedIrcdOptions, "ignoresQuit"> = {}
+) =>
   scriptedIrcd(
     (line) => {
       const scripted = respond?.(line);
@@ -67,7 +71,7 @@ const welcomingIrcd = (respond?: (line: string) => readonly string[] | undefined
         ? channels.split(",").map((channel) => `:${nick}!~u@host ${command} ${channel}`)
         : [];
     },
-    { hostname: ircdAddress }
+    { hostname: ircdAddress, ...(ignoresQuit !== undefined && { ignoresQuit }) }
   );
 
 type Channels = NetworkSettings["channels"];
@@ -110,7 +114,7 @@ const withDaemonIn = <A, E, R>(
     const raw = yield* rawWith(key);
 
     return yield* test({ client, dataDir, raw });
-  }).pipe(Effect.provide(servingWith(DaemonCore({ dataDir, version }))), Effect.scoped);
+  }).pipe(Effect.provide(servingWith(coreFor({ dataDir, version }))), Effect.scoped);
 
 // A Daemon on the real Transport, with an `admin` key named `owner`.
 const withDaemon = <A, E, R>(test: (harness: Harness) => Effect.Effect<A, E, R>) =>
@@ -490,7 +494,7 @@ describe("Networks through the API", () => {
   it.live("LIVE-9: removing a Network holds up no other Change while it says `QUIT`", () =>
     withDaemon(({ client }) =>
       Effect.gen(function* () {
-        const ircd = yield* welcomingIrcd();
+        const ircd = yield* welcomingIrcd(undefined, { ignoresQuit: true });
         const params = { params: { id: "libera" } };
         // An Ircd that never hangs up keeps the host in its `QUIT` wait for as long as the
         // test likes, and the wait is as long as the Tuning allows, ten seconds.
@@ -522,7 +526,7 @@ describe("Networks through the API", () => {
   it.live("LIVE-9: a Network added again while its old host leaves waits for it to go", () =>
     withDaemon(({ client }) =>
       Effect.gen(function* () {
-        const ircd = yield* welcomingIrcd();
+        const ircd = yield* welcomingIrcd(undefined, { ignoresQuit: true });
         const params = { params: { id: "libera" } };
         const lingering = { ...brisk, drainMillis: 500, quitWaitMillis: 500 };
         const settings = settingsFor("libera", ircd, { tuning: lingering });

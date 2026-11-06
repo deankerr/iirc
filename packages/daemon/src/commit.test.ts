@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Log, LogReader } from "@iirc/log";
+import { Log } from "@iirc/log";
+import { inProcessReader } from "@iirc/log/testing";
 import { Recorder } from "@iirc/session/recorder";
 import { eventually, fakeIrcd } from "@iirc/session/testing";
 import type { FakeIrcd } from "@iirc/session/testing";
@@ -65,7 +66,7 @@ const withSlowRecorder = <A, E, R>(
 
       const core = Daemon.layer({ dataDir, version }).pipe(
         Layer.provide(slow),
-        Layer.provide(Layer.merge(LogReader.layer({ dataDir }), credentialsIn(dataDir))),
+        Layer.provide(Layer.merge(inProcessReader({ dataDir }), credentialsIn(dataDir))),
         Layer.provideMerge(Log.layer({ dataDir })),
         Layer.provide(Layer.succeed(Transport, ircd.transport)),
         Layer.provide(keyCrypto)

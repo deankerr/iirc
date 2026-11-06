@@ -23,6 +23,7 @@ import {
   ReadTimedOut as ReaderTimedOut,
   StorageFailed,
 } from "@iirc/log";
+import { inProcessReader } from "@iirc/log/testing";
 import { RecordFailed, Recorder } from "@iirc/session/recorder";
 import { eventually, fakeIrcd } from "@iirc/session/testing";
 import type { FakeIrcd, FakeIrcdOptions } from "@iirc/session/testing";
@@ -34,6 +35,7 @@ import { OpenApi } from "effect/http-api";
 
 import {
   clientWith,
+  coreFor,
   credentialsIn,
   inTempDirectory,
   invalidRequest,
@@ -130,7 +132,12 @@ const keyFor = (dataDir: string) =>
   });
 
 const serving = (dataDir: string, ircd: FakeIrcd) =>
-  servingWith(DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport), noKeyring));
+  servingWith(
+    coreFor(configIn(dataDir), {
+      keyring: noKeyring,
+      transport: Layer.succeed(Transport, ircd.transport),
+    })
+  );
 
 // Adds the Network through the API unless an earlier run on this Log already did, since
 // Configuration outlives a restart.
@@ -198,7 +205,7 @@ const withFailingReader = <A, E, R>(
             messages: (query) => unlessFailing(real.messages(query)),
           } satisfies LogReader["Service"];
         })
-      ).pipe(Layer.provide(LogReader.layer({ dataDir })));
+      ).pipe(Layer.provide(inProcessReader({ dataDir })));
 
       const core = Daemon.layer(configIn(dataDir)).pipe(
         Layer.provide(Layer.merge(reader, credentialsIn(dataDir))),
@@ -574,7 +581,7 @@ describe("the Daemon", () => {
 
           const core = Daemon.layer(configIn(dataDir)).pipe(
             Layer.provide(brittle),
-            Layer.provide(Layer.merge(LogReader.layer({ dataDir }), credentialsIn(dataDir))),
+            Layer.provide(Layer.merge(inProcessReader({ dataDir }), credentialsIn(dataDir))),
             Layer.provideMerge(Log.layer({ dataDir })),
             Layer.provide(Layer.succeed(Transport, ircd.transport)),
             Layer.provide(keyCrypto)
@@ -1410,11 +1417,10 @@ describe("the Daemon", () => {
 
           const scope = yield* Scope.make();
 
-          const core = DaemonCore(
-            configIn(dataDir),
-            Layer.succeed(Transport, ircd.transport),
-            noKeyring
-          );
+          const core = coreFor(configIn(dataDir), {
+            keyring: noKeyring,
+            transport: Layer.succeed(Transport, ircd.transport),
+          });
 
           const context = yield* Layer.buildWithScope(
             Daemon.stopsFirst.pipe(Layer.provide(frontend), Layer.provideMerge(core)),
@@ -1450,7 +1456,10 @@ describe("the Daemon", () => {
           const scope = yield* Scope.make();
 
           const context = yield* Layer.buildWithScope(
-            DaemonCore(configIn(dataDir), Layer.succeed(Transport, ircd.transport), noKeyring),
+            coreFor(configIn(dataDir), {
+              keyring: noKeyring,
+              transport: Layer.succeed(Transport, ircd.transport),
+            }),
             scope
           );
 
@@ -1620,6 +1629,8 @@ describe("the Daemon", () => {
     );
   });
 
+  // These start the Daemon as it ships, reader's Worker and all, since starting is what
+  // they are about. Every other test here reads in process, through `coreFor`.
   describe("starting", () => {
     it.live("RUN-4: fails when another Daemon holds the data directory", () =>
       inTempDirectory((dataDir) =>
@@ -1737,7 +1748,8 @@ describe("the Daemon", () => {
               )
             );
 
-            // A reader that can read nothing in time, so startup cannot depend on it.
+            // A reader that can read nothing in time, so startup cannot depend on it. It is
+            // the real one, because the CPU its Worker takes to start is part of the start.
             const core = Daemon.layer(configIn(dataDir)).pipe(
               Layer.provide(
                 Layer.merge(

@@ -1,17 +1,21 @@
 import { BunServices } from "@effect/platform-bun";
-import { assert, beforeAll, describe, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import type { NetworkSettings } from "@iirc/api";
 import { Effect, Fiber, FileSystem, Layer, Redacted } from "effect";
 import { FetchHttpClient } from "effect/http";
 
-import { appRoot, createKey, freePort, healthyClient, settingsFor, startBinary } from "./binary.ts";
+import {
+  testBinary,
+  createKey,
+  freePort,
+  healthyClient,
+  settingsFor,
+  startBinary,
+} from "./binary.ts";
 import type { Client } from "./binary.ts";
-import { buildBinary, buildTimeout } from "./testing.ts";
 
 // CONF-6 against the real thing: `iirc config` in the minified binary, as a Frontend of a
 // running Daemon, with the key only in its environment.
-
-const binary = `${appRoot}/dist/iirc-config`;
 
 // Only a hang reaches it: a binary is started and stopped, and on a busy machine that takes
 // several times what it does alone.
@@ -71,10 +75,10 @@ const layers = Layer.mergeAll(BunServices.layer, FetchHttpClient.layer);
 const daemonWithNetworks = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const dataDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "iirc-config-" });
-  const key = yield* createKey(binary, dataDir);
+  const key = yield* createKey(testBinary, dataDir);
   const httpPort = yield* freePort;
 
-  yield* startBinary(binary, ["daemon", "--http-port", String(httpPort)], {
+  yield* startBinary(testBinary, ["daemon", "--http-port", String(httpPort)], {
     IIRC_DATA_DIR: dataDir,
   });
 
@@ -93,7 +97,7 @@ const daemonWithNetworks = Effect.gen(function* () {
 // Runs `iirc config` to its end, with only the environment given.
 const config = (flags: readonly string[], environment: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
-    const running = yield* startBinary(binary, ["config", ...flags], environment);
+    const running = yield* startBinary(testBinary, ["config", ...flags], environment);
     const code = Number(yield* running.child.exitCode);
 
     yield* Fiber.join(running.reader);
@@ -116,10 +120,6 @@ const writeFile = (directory: string, name: string, text: string) =>
   });
 
 describe("the compiled binary's `iirc config` (CONF-6)", () => {
-  beforeAll(async () => {
-    await Effect.runPromise(buildBinary(binary));
-  }, buildTimeout);
-
   it.live(
     "CONF-4: reaches the Daemon at IIRC_API_URL when no flag says where",
     () =>

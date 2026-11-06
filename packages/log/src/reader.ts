@@ -23,7 +23,8 @@ export interface LogReaderOptions {
   readonly spawn?: () => globalThis.Worker;
 }
 
-const defaultBudget = Duration.seconds(1);
+/** How long a read may take unless its reader is told otherwise. */
+export const defaultBudget = Duration.seconds(1);
 
 // How much longer than a read's budget anything waits on the Worker: a caller, for the
 // queue ahead of it and the trip there and back, and a close, for the read in flight.

@@ -1,6 +1,7 @@
 import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { DaemonApi } from "@iirc/api";
 import type { KeyScope, NetworkStatus } from "@iirc/api";
+import { inProcessReader } from "@iirc/log/testing";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 import type { HttpClientResponse } from "effect/http";
@@ -8,7 +9,8 @@ import { HttpApiClient } from "effect/http-api";
 
 import { Credentials } from "./credentials.ts";
 import type { Keyring } from "./credentials.ts";
-import { createLocalKey, Daemon } from "./daemon.ts";
+import { createLocalKey, Daemon, DaemonCore } from "./daemon.ts";
+import type { DaemonConfig, DaemonParts } from "./daemon.ts";
 import { ApiRoutes } from "./routes.ts";
 
 /** The name of the key every test harness starts with, which causes carry (LOG-5). */
@@ -79,6 +81,18 @@ export const statusOf = (client: Client, id: string) =>
       ? Effect.die(new Error(`${id} is not in /status`))
       : Effect.succeed<NetworkStatus>(found);
   });
+
+/**
+ * The Daemon as `DaemonCore` builds it, but reading the Log in process, which spares the
+ * Worker's start, about 180 ms, in every test that builds one. Its reads are the Worker's
+ * own, on the same Log, so a test of what a read returns is as true here. A test of the
+ * Worker itself uses `DaemonCore`, as the binary's tests and the reader's own do.
+ * @param config - Where the Log lives, and the Daemon's version.
+ * @param parts - What else to build it on in place of the real thing.
+ * @returns The Daemon, holding the data directory for as long as it lives.
+ */
+export const coreFor = (config: DaemonConfig, parts: DaemonParts = {}) =>
+  DaemonCore(config, { reader: inProcessReader({ dataDir: config.dataDir }), ...parts });
 
 /**
  * Serves the API over a Daemon in the same order as `apps/iirc`, so this also proves the
