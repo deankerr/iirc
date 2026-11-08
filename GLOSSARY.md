@@ -10,9 +10,9 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Owner**: The one human a deployment belongs to. _Avoid_: User, admin, operator
 
-**Log**: The Daemon's ordered record of everything that happened, as Entries. _Avoid_: History, scrollback, buffer
+**Journal**: The Daemon's ordered record of everything that happened, as Entries: what it was told, and what it did. Everything else is derived from it. _Avoid_: Log (overloaded), history, scrollback, buffer
 
-**Entry**: One numbered record in the Log, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
+**Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
 
 **Change**: Something the Owner altered, such as Configuration or a Read Marker. _Avoid_: Update, mutation
 

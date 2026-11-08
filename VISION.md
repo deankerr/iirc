@@ -20,31 +20,19 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 
 ## How we build
 
-- **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun ([ADR 0005](docs/adr/0005-effect-wins-where-it-overlaps-bun.md)). Finite lifecycles are pure folds over the Log ([ADR 0003](docs/adr/0003-machines-are-projections.md)).
+- **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun ([ADR 0005](docs/adr/0005-effect-wins-where-it-overlaps-bun.md)). Finite lifecycles are pure folds over the Journal ([ADR 0003](docs/adr/0003-machines-are-projections.md)).
 - **Parse, don't validate.** Bytes from the network and input from frontends become precise types at the boundary. A value that exists is a value that is valid, and that goes for outbound lines too: an IRC line that cannot be sent safely cannot be constructed.
-- **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt ([ADR 0002](docs/adr/0002-the-log-holds-bytes.md), [ADR 0004](docs/adr/0004-configuration-lives-in-the-log.md)).
+- **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt ([ADR 0002](docs/adr/0002-the-journal-holds-bytes.md), [ADR 0004](docs/adr/0004-configuration-lives-in-the-journal.md)).
 - **Deep modules, compositional packages.** Small interfaces hide real work. One package has one job, and packages combine without knowing about each other.
 - **Contract-driven.** Schemas define the boundaries first, and implementations follow. `HttpApi` is the primary surface. Other transports, such as Effect RPC, SSE, or a wire format of our own, are adapters over the same contract.
 - **Agent-drivable and observable from the start.** Everything the Daemon can do is reachable through its API, and everything it knows can be inspected, except Credentials. An agent can run a real Daemon on a real Network, see exactly what happened, and check its own work. We build this first because it is what makes everything else fast.
-- **Bare IRC is the floor.** Every core behaviour works on a Network with no IRCv3 at all. IRCv3 makes things better when it is available, and nothing depends on it ([ADR 0001](docs/adr/0001-bare-irc-is-the-floor.md)).
+- **The RFC protocol is the floor.** Any Ircd that speaks RFC 1459 and 2812 gets at least base support, and nothing core depends on an IRCv3 capability. Beyond that, features arrive by progressive enhancement, when they are worth their cost, which is a high bar for anything that needs polling ([ADR 0001](docs/adr/0001-the-rfc-protocol-is-the-floor.md)).
 - **Hostile input is the normal case.** Networks and Users can send anything. Bad input never takes down a Connection, loses a Message, or reaches another system as a command. Security is proportionate: we defend against hostile Networks and text, not the Owner's own software ([ADR 0006](docs/adr/0006-proportionate-security.md)).
 - **Prove it against the real thing.** Shared conformance vectors, fuzzing, and real networks matter more than fakes.
 
 ## Core stack
 
 Bun, TypeScript, and Effect, with Ultracite as the fence. The local protocol documents in [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) are our reference for IRC. The language we use is defined in [`GLOSSARY.md`](GLOSSARY.md). We choose everything else when we reach it, and we are free to try more than one option. The frontend framework is an open experiment.
-
-## Where we are going
-
-The first proof is simple: the Daemon stays on a real Network for 30 days without losing a Line, and the web frontend is good enough to be the only IRC client its Owner uses.
-
-After that, we can head in whichever direction is most interesting:
-
-- **Depth:** the most correct IRC implementation available, with full use of IRCv3 wherever a network offers it.
-- **Breadth:** more surfaces, more transports, more kinds of frontend.
-- **Exploration:** experiments that a typed, remembering IRC client makes possible.
-
-Good foundations keep all three open, so we do not have to choose in advance.
 
 ## Not now
 
@@ -58,4 +46,4 @@ These are not rejections. They wait until something real needs them:
 
 ## Keeping this document
 
-This document holds goals and principles. Requirements live in [`docs/requirements.md`](docs/requirements.md), plans in [`docs/roadmap.md`](docs/roadmap.md), and decisions in [`docs/adr/`](docs/adr/). Change it when the direction changes, and keep it short enough to reread.
+This document holds goals and principles. Each module's README describes its features, from the floor up. Decisions live in [`docs/adr/`](docs/adr/), and proposals and surveys in [`docs/notes/`](docs/notes/). Change it when the direction changes, and keep it short enough to reread.

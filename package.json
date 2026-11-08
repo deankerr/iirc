@@ -16,12 +16,10 @@
   },
   "type": "module",
   "scripts": {
-    "build": "bun run --filter @iirc/app --filter @iirc/soak build",
     "check": "ultracite check",
     "fix": "ultracite fix",
     "knip": "knip",
     "prepare": "effect-tsgo patch --oxlint && if git rev-parse --git-dir >/dev/null 2>&1; then lefthook install; fi",
-    "proof:floor": "bun run build && bun apps/iirc/src/floor-proof.ts",
     "test": "bun run --parallel --filter '*' test"
   },
   "devDependencies": {
