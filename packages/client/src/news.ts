@@ -89,5 +89,6 @@ export type News =
   | { readonly _tag: "Activity"; readonly at: Fact<Instant>; readonly activity: Activity }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
+  | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }
   | { readonly _tag: "Refused"; readonly intent: IntentId; readonly reason: RefusedReason }
   | { readonly _tag: "Ignored"; readonly reason: IgnoredReason };

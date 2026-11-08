@@ -13,7 +13,7 @@ import type { Encoding, Line, OutboundLine, SecretLine } from "@iirc/protocol/li
 import type { NetworkConfiguration } from "./configuration.ts";
 import type { CapName, FeatureName, Instant, IntentId, MessageId } from "./ids.ts";
 import type { Fact, Knowledge, MemberKnowledge } from "./known.ts";
-import type { News } from "./news.ts";
+import type { EndReason, News } from "./news.ts";
 
 /** Facts a Feature keeps up to date. When it turns off, the core marks each one stale. */
 export type Kept = "user.away" | "user.account" | "user.mask";
@@ -29,9 +29,19 @@ export interface Effects<Own> {
   readonly own?: Own;
   /** Lines to send, after the step's own. */
   readonly send?: readonly Sendable[];
-  /** `true` keeps registration open, before `CAP END`. `false` lets it go. */
-  readonly hold?: boolean;
+  /** What should happen to registration, which a Feature may hold open before `CAP END`. */
+  readonly registration?: Registration;
 }
+
+/**
+ * A Feature's say over registration. `Hold` keeps it open, `Continue` lets it go, and
+ * `Abandon` ends the Connection: the core sends `QUIT`, hangs up, and reports why.
+ * While any Feature holds, the core keeps one deadline, and calls `expired` when it passes.
+ */
+export type Registration =
+  | { readonly _tag: "Hold" }
+  | { readonly _tag: "Continue" }
+  | { readonly _tag: "Abandon"; readonly reason: EndReason };
 
 /** A hook's result: the refined value, and its effects. */
 export interface Refined<V, Own> extends Effects<Own> {
@@ -105,6 +115,12 @@ export interface Feature<Own = undefined> {
   readonly encoding?: Encoding;
   /** When it turns on, such as SASL beginning to authenticate. */
   readonly start?: (context: Context<Own>) => Effects<Own>;
+  /**
+   * When the core's deadline for a held registration passes, such as SASL hearing
+   * nothing. The Feature decides whether to `Continue` or `Abandon`. Left out, the
+   * core lets registration go.
+   */
+  readonly expired?: (context: Context<Own>) => Effects<Own>;
   readonly tags?: (arrival: Arrival, context: Context<Own>) => Refined<Arrival, Own>;
   /** Return no Arrivals to hold this one, and several to release those held. */
   readonly batch?: (arrival: Arrival, context: Context<Own>) => Refined<readonly Arrival[], Own>;

@@ -72,6 +72,13 @@ Choices made while typing it:
 - **A hook that throws turns its Feature off** for the rest of the Connection, and is recorded (from A). A throw replays the same way, so replay still matches.
 - **Inputs and outputs are Schemas,** because the Journal decodes them. News and Knowledge are types until the API needs their Schemas.
 
+The first review found four gaps, fixed on 2026-11-08:
+
+- **`OutboundLine` now checks what it promises.** Its Schema refuses NUL, CR, and LF in any parameter, a bad middle parameter, a bad command, more than 15 parameters, more than 510 bytes, and any tag that is not client-only or that runs past 4094 bytes. Decoding a recorded Line checks it again.
+- **A Feature has a say over registration.** `hold` became `registration`: `Hold`, `Continue`, or `Abandon` with a reason. Features set no timers. While any Feature holds, the core keeps one deadline and calls the Feature's `expired` hook when it passes. A Connection that ends before registration is reported as `ConnectionFailed`, not as the end of a Session that never began.
+- **`Fired` carries `due`,** the instant its `Wake` set, so a late firing from an earlier setting of the same timer is told apart. Fresh timer ids for every setting would also work, but would make the timer table grow.
+- **The lint fence closes two gaps.** It now refuses Effect's services by subpath, such as `effect/Clock`, as well as from `effect`, and refuses `Math.random` and `DateTime`'s clock reads.
+
 Deferred on purpose, to be added when their modules are designed:
 
 - Lookups: an `Ask` input and an `Answer` in News.

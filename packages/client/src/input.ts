@@ -35,8 +35,11 @@ export const Input = Schema.TaggedUnion({
   Closed: { at: Instant, connection: ConnectionId, reason: CloseReason },
   /** The Owner's Configuration for this Network, whole. */
   Configured: { at: Instant, configuration: NetworkConfiguration },
-  /** A timer the Client asked for is due. */
-  Fired: { at: Instant, timer: TimerId },
+  /**
+   * A timer the Client asked for is due. `due` is the instant its `Wake` set, so a
+   * firing from an earlier setting of the same timer is told apart and ignored.
+   */
+  Fired: { at: Instant, due: Instant, timer: TimerId },
   /** A Connection the Client dialled is open. */
   Opened: { at: Instant, connection: ConnectionId },
   /** One Line's bytes, without its line ending, framed by the Transport. */

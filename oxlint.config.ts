@@ -18,10 +18,39 @@ interface Pattern {
 
 const pure = "The core is pure: time arrives on inputs and effects leave as outputs.";
 
+// Effect's services, which the core may not use whether imported from `effect` or by path.
+const services = [
+  "Clock",
+  "Context",
+  "Effect",
+  "Fiber",
+  "Layer",
+  "Queue",
+  "Random",
+  "Ref",
+  "Schedule",
+  "Scope",
+  "Stream",
+] as const;
+
 const impureModules: Pattern = {
-  group: ["bun", "bun:*", "node:*", "@effect/*", "effect/unstable/*"],
+  group: [
+    "bun",
+    "bun:*",
+    "node:*",
+    "@effect/*",
+    "effect/unstable/*",
+    ...services.map((name) => `effect/${name}`),
+  ],
   message: pure,
 };
+
+const noRandomOrNow: NonNullable<DummyRuleMap["no-restricted-properties"]> = [
+  "error",
+  { message: pure, object: "Math", property: "random" },
+  { message: pure, object: "DateTime", property: "nowUnsafe" },
+  { message: pure, object: "DateTime", property: "unsafeNow" },
+];
 
 const ours = (allowed: readonly string[], message: string): Pattern => ({
   group: ["@iirc/*", ...allowed.map((name) => `!${name}`)],
@@ -44,19 +73,7 @@ const pureImports = (
   {
     paths: [
       {
-        importNames: [
-          "Clock",
-          "Context",
-          "Effect",
-          "Fiber",
-          "Layer",
-          "Queue",
-          "Random",
-          "Ref",
-          "Schedule",
-          "Scope",
-          "Stream",
-        ],
+        importNames: [...services],
         message: pure,
         name: "effect",
       },
@@ -96,6 +113,7 @@ const coreFence: OxlintOverride[] = [
       "no-restricted-imports": pureImports(
         ours([], "`@iirc/protocol` depends on no other package of ours.")
       ),
+      "no-restricted-properties": noRandomOrNow,
     },
   },
   {
@@ -103,6 +121,7 @@ const coreFence: OxlintOverride[] = [
     rules: {
       "no-restricted-globals": noClock,
       "no-restricted-imports": pureImports(ours(["@iirc/protocol/*"], toClient)),
+      "no-restricted-properties": noRandomOrNow,
     },
   },
   {

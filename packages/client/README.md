@@ -37,7 +37,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Opened` | Transport | A Connection the Client dialled is open. |
 | `Received` | Transport | One Line's bytes, without its line ending. |
 | `Closed` | Transport | A Connection is over, and how. |
-| `Fired` | Clock | A timer the Client set is due. |
+| `Fired` | Clock | A timer the Client set is due, with the instant its `Wake` set. |
 
 ## Outputs
 
@@ -53,7 +53,7 @@ The timer table is a projection of outputs: `timers(table, outputs)` keeps the l
 
 ## News
 
-News is what happened in one step, in order: a `Message`, an `Activity`, `SessionBegan`, `SessionEnded`, `Refused` (an Owner intent that cannot be carried out, with its intent id), and `Ignored` (an input that changed nothing, and why). News is derived, so replaying the Journal makes it again, and it is never journaled.
+News is what happened in one step, in order: a `Message`, an `Activity`, `SessionBegan`, `SessionEnded`, `ConnectionFailed` (a Connection that ended before registration), `Refused` (an Owner intent that cannot be carried out, with its intent id), and `Ignored` (an input that changed nothing, and why). News is derived, so replaying the Journal makes it again, and it is never journaled.
 
 ## Knowledge
 
@@ -73,7 +73,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 - **Pure.** `step` reads no clock and no randomness, and does no I/O. The lint fence keeps Effect's services, Bun, Node, and adapters out of `src/`.
 - **Total.** `step` never throws, for any input in any state.
 - **Exact replay.** Folding the Journal's inputs from `initial` gives the same states, outputs, and News. The Client never reads its outputs back.
-- **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` for a timer that was reset or cancelled since is stale and ignored.
+- **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. The Runtime gives `due` back unchanged.
 - **One Connection at a time.** The Client dials only after the previous Connection's `Closed`, or after `Started`.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
 - **Decisions come from structure.** Commands, numerics, tags, and parameters decide behaviour. An Ircd's free text never does, and it may appear in News only as data.
@@ -106,8 +106,9 @@ A Feature brings one IRCv3 cap or ISUPPORT token, or a tight group of them, to t
 - **On and off.** A Feature is on while every cap in `needs` is enabled and every token is in ISUPPORT, unless the Owner declined it. The core works this out again on `CAP ACK`, `CAP NEW`, `CAP DEL`, ISUPPORT, and at the end of a Session.
 - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `meaning`. Egress runs `egress`. Within a stage, Features run in the order of one registry array in one file.
 - **Refining, not branching.** A hook takes what the core derived and returns it refined, in the core's own vocabulary. The model reads the result and never asks which Feature produced it.
-- **Effects.** A hook returns `{ value }`, with optional effects: its new `own` state, Lines to `send`, and `hold` to keep registration open, as SASL does.
+- **Effects.** A hook returns `{ value }`, with optional effects: its new `own` state, Lines to `send`, and a say over `registration`: `Hold` it open before `CAP END`, as SASL does, then `Continue`, or `Abandon` it with a reason, which ends the Connection.
 - **Turning off.** When a Feature turns off, the core marks the facts it `keeps` stale. No Feature handles `CAP DEL` itself, and nothing is polled.
+- **Deadlines.** Features set no timers. While any Feature holds registration, the core keeps one deadline, and when it passes it calls each holding Feature's `expired` hook to choose `Continue` or `Abandon`. SASL uses this to go on without login when login is optional, and to give up when it is required.
 - **Encoding.** A Feature can say how bytes become text while it is on, as `UTF8ONLY` does.
 
 Three Features, to show the shape:
