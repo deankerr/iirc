@@ -1,0 +1,18 @@
+{
+  "name": "@iirc/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./line": "./src/line.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

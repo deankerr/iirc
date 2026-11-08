@@ -19,8 +19,10 @@ bun run test          # every workspace's tests
 
 ## Repository
 
-| Path           | What             |
-| -------------- | ---------------- |
+| Path | What |
+| --- | --- |
+| [`packages/protocol`](packages/protocol) | The IRC protocol as values: Lines in and out, and where a Credential can go |
+| [`packages/client`](packages/client) | The pure IRC client for one Network |
 | [`docs`](docs) | Everything below |
 
 ## Documentation

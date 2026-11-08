@@ -7,9 +7,6 @@
       "packages/*"
     ],
     "catalog": {
-      "@effect/platform-bun": "4.1.1",
-      "@effect/sql-sqlite-bun": "4.1.1",
-      "@effect/vitest": "4.1.1",
       "effect": "4.1.1",
       "vitest": "5.0.5"
     }
