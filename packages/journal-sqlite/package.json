@@ -1,0 +1,21 @@
+{
+  "name": "@iirc/journal-sqlite",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "4.1.1",
+    "@iirc/runtime": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@iirc/client": "workspace:*",
+    "vitest": "catalog:"
+  }
+}
