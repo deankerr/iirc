@@ -1,7 +1,7 @@
 import { Redacted, Schema } from "effect";
 import { Base64 } from "effect/encoding";
 
-import { fallbackDecoder, utf8Lossy, utf8OrElse } from "./decode.ts";
+import { binaryString, fallbackDecoder, utf8Lossy, utf8OrElse } from "./decode.ts";
 
 /**
  * One Line received from an Ircd, after parsing. Anything that parses is a Line, so a
@@ -256,15 +256,17 @@ export const parse = (bytes: Uint8Array, encoding: Encoding): Parsed => {
  * A Line's parameters as the bytes that arrived, split exactly as {@link parse} splits
  * them, for what must be echoed byte for byte, such as a `PING`'s token. Text cannot
  * promise that: a token that is not UTF-8 is decoded, and would be re-encoded as UTF-8.
+ * Each is a {@link RawParam}, whose bytes are a string, so nothing done to `bytes` later
+ * changes it, and a Client can keep one in its State.
  * @param bytes - The Line's bytes, as the Transport framed them.
- * @returns Copies of each parameter's bytes, or none if the Line does not parse.
+ * @returns Each parameter's bytes, or none if the Line does not parse.
  */
-export const rawParams = (bytes: Uint8Array): readonly Uint8Array[] => {
+export const rawParams = (bytes: Uint8Array): readonly RawParam[] => {
   const layout = layoutOf(bytes);
 
   return layout._tag === "Unparseable"
     ? []
-    : layout.params.map(([start, end]) => bytes.slice(start, end));
+    : layout.params.map((span) => ({ bytes: binaryString(partOf(bytes, span)) }));
 };
 
 /** A source's parts: `nick!user@host`, where a server's name is all nick. */
@@ -315,11 +317,29 @@ const tagEscape: ReadonlyMap<string, string> = new Map([
   ["\\", "\\\\"],
 ]);
 
+const isBinary = (text: string) => {
+  for (let index = 0; index < text.length; index += 1) {
+    if ((text.codePointAt(index) ?? 0) > 0xff) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+/** Bytes held as a string with one code unit per byte, from 0 to 255. */
+const BinaryString = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(isBinary, { expected: "a string of one code unit per byte, 0 to 255" })
+  )
+);
+
 /**
  * A parameter given as bytes, sent exactly as they are, such as a `PING`'s token echoed
- * in a `PONG`. Recorded, the bytes are base64.
+ * in a `PONG`. The bytes are a binary string, one code unit per byte, so they cannot be
+ * changed once checked, and are recorded as they are.
  */
-export const RawParam = Schema.Struct({ bytes: Schema.Uint8Array });
+export const RawParam = Schema.Struct({ bytes: BinaryString });
 
 /** The decoded form of {@link RawParam}. */
 export type RawParam = typeof RawParam.Type;
@@ -330,7 +350,7 @@ export const Param = Schema.Union([Schema.String, RawParam]);
 /** The decoded form of {@link Param}. */
 export type Param = typeof Param.Type;
 
-const isRaw = Schema.is(RawParam);
+const isText = Schema.is(Schema.String);
 
 /**
  * Whether a text survives being encoded as UTF-8: it has no lone surrogate.
@@ -339,7 +359,11 @@ const isRaw = Schema.is(RawParam);
  */
 const isWellFormed = (text: string) => text.isWellFormed();
 
-const bytesOf = (param: Param) => (isRaw(param) ? param.bytes : utf8.encode(param));
+// A raw parameter is checked to be binary before its bytes are taken.
+const bytesOf = (param: Param) =>
+  isText(param)
+    ? utf8.encode(param)
+    : Uint8Array.from(param.bytes, (char) => char.codePointAt(0) ?? 0);
 
 const breaksLines = (bytes: Uint8Array) =>
   bytes.some((byte) => byte === 0x00 || byte === 0x0d || byte === 0x0a);
@@ -426,7 +450,7 @@ interface Unchecked {
 }
 
 const isSafeParam = (param: Param) =>
-  (isRaw(param) || isWellFormed(param)) && !breaksLines(bytesOf(param));
+  (isText(param) ? isWellFormed(param) : isBinary(param.bytes)) && !breaksLines(bytesOf(param));
 
 const isSafeTag = ([key, value]: readonly [string, string]) =>
   isSendableTag(key) && !value.includes("\0") && isWellFormed(value);
@@ -504,16 +528,12 @@ export const OutboundLine = Schema.Struct({
 /** The decoded form of {@link OutboundLine}. */
 export type OutboundLine = typeof OutboundLine.Type;
 
-// Byte parameters are copied in, so a caller changing its bytes later changes nothing.
-const owned = (param: Param): Param =>
-  isRaw(param) ? { bytes: Uint8Array.from(param.bytes) } : param;
-
 const checked = (line: Unchecked): OutboundLine | Rejected => {
   const reason = problem(line);
 
   return reason === undefined
     ? OutboundLine.make(
-        { command: line.command, params: line.params.map(owned), tags: { ...line.tags } },
+        { command: line.command, params: [...line.params], tags: { ...line.tags } },
         { disableChecks: true }
       )
     : rejected(reason);
@@ -704,13 +724,14 @@ export const authenticate = (argument: string): OutboundLine | Rejected =>
 export const ping = (token: string): OutboundLine | Rejected => outbound("PING", [token]);
 
 /**
- * `PONG`, the answer to a `PING`. Give it the token's bytes from {@link rawParams}, so it
- * echoes a token that is not UTF-8 exactly, as an Ircd that compares bytes expects.
- * @param token - The `PING`'s token, as bytes, or as text.
+ * `PONG`, the answer to a `PING`. Give it the token from {@link rawParams}, so it echoes
+ * a token that is not UTF-8 exactly, as an Ircd that compares bytes expects. Bytes are
+ * read into a {@link RawParam} at once, so changing them later changes nothing.
+ * @param token - The `PING`'s token: its raw parameter, its bytes, or its text.
  * @returns The Line, or why it cannot be sent.
  */
-export const pong = (token: string | Uint8Array): OutboundLine | Rejected =>
-  outbound("PONG", [token instanceof Uint8Array ? { bytes: token } : token]);
+export const pong = (token: string | RawParam | Uint8Array): OutboundLine | Rejected =>
+  outbound("PONG", [token instanceof Uint8Array ? { bytes: binaryString(token) } : token]);
 
 /**
  * `NAMES` of one Channel.

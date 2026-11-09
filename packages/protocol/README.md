@@ -18,7 +18,7 @@ The floor is RFC 1459 and 2812 as [Modern IRC](../../docs/irc-docs-2026-10-26/mo
 
 1. **Parsing a Line.** `parse` reads the grammar at the byte level: an optional source, a command, middle parameters, and a trailing parameter with or without its colon. Runs of spaces count as one, spaces before the first part are skipped, and any number of parameters is read. The Transport hands over Lines split at CR or LF, so a Line's bytes hold neither; should one hold a CR, LF, or NUL anyway, the Line ends there. Commands are upper-cased in ASCII. Bytes with no command are `Unparseable`, as `Empty` or `NoCommand`, and nothing throws.
 2. **Decoding.** Each part of a Line is decoded on its own, so one part in another encoding leaves the rest readable. Under `Utf8OrElse`, a part is UTF-8 if it is valid UTF-8, else in the fallback if it is valid there, else ISO-8859-1 byte for byte, which reads anything. Under `Utf8Only`, what `UTF8ONLY` promises, bytes that are not UTF-8 read as U+FFFD. A byte order mark is kept.
-3. **Sources and raw parameters.** `parseSource` splits `nick!user@host`, where a server's name is all nick. `rawParams` gives each parameter as the bytes that arrived, split exactly as `parse` splits them, so a `PING` token that is not UTF-8 can be echoed byte for byte.
+3. **Sources and raw parameters.** `parseSource` splits `nick!user@host`, where a server's name is all nick. `rawParams` gives each parameter as the bytes that arrived, as a `RawParam`, split exactly as `parse` splits them, so a `PING` token that is not UTF-8 can be echoed byte for byte.
 4. **Sending.** `outbound` builds an `OutboundLine` or says why it cannot, and `encode` gives its bytes with CRLF, writing the last parameter as trailing only when it must be. A parameter is text, sent as UTF-8, or a `RawParam`, sent as its bytes, which `pong` uses to echo a token exactly. The builders cover the Lines a Client sends: `nick`, `user`, `join`, `part`, `privmsg`, `notice`, `quit`, `ping`, `pong`, `names`, `mode`, `who`, and `away` on the floor, and `cap`, `authenticate`, `tagmsg`, and `withTags` above it.
 5. **Credentials.** `fillSecret` fills `PASS` and a `JOIN` with a key on the floor, and the SASL `PLAIN` response above it.
 6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, and `ctcpReply` build CTCP that is safe to send, and a reply only ever to a User.
@@ -42,16 +42,17 @@ The floor is RFC 1459 and 2812 as [Modern IRC](../../docs/irc-docs-2026-10-26/mo
 | `CredentialName` | The name of a Credential, which the Vault holds. |
 | `SecretLine` | A Line with a Credential's name where its value goes: `Pass`, `AuthenticatePlain`, or `JoinWithKey`. |
 | `Source` | A source's parts: nick, user, and host. |
-| `Param` | A parameter to send: text, sent as UTF-8, or a `RawParam`, `{ bytes }`, sent as it is. |
+| `Param` | A parameter to send: text, sent as UTF-8, or a `RawParam`, sent as its bytes. |
+| `RawParam` | `{ bytes: string }`: bytes as a binary string, one code unit per byte from 0 to 255. A string cannot change once it is checked, so no buffer is shared with a caller, and it is plain data a Client can keep in its State. |
 
-`Encoding`, `OutboundLine`, `Param`, and `SecretLine` are Schemas, because the Journal records them. A `RawParam`'s bytes are recorded as base64. Decoding a recorded `OutboundLine` checks it again.
+`Encoding`, `OutboundLine`, `Param`, and `SecretLine` are Schemas, because the Journal records them. A `RawParam`'s binary string is recorded as it is, and a string with a code unit past 255 is refused, so an `OutboundLine` holds no `Uint8Array` anywhere. Decoding a recorded `OutboundLine` checks it again.
 
 ### Functions
 
 ```ts
 parse(bytes: Uint8Array, encoding: Encoding): Parsed
 parseSource(source: string): Source
-rawParams(bytes: Uint8Array): readonly Uint8Array[]   // each parameter as it arrived
+rawParams(bytes: Uint8Array): readonly RawParam[]     // each parameter as it arrived
 encode(line: OutboundLine): Uint8Array              // with CRLF
 outbound(command, params: readonly Param[], tags = {}): OutboundLine | Rejected
 withTags(line: OutboundLine, tags): OutboundLine | Rejected
@@ -63,7 +64,7 @@ privmsg(target, text)   notice(target, text)   tagmsg(target, tags)
 join(channels)          part(channel, reason?)  quit(reason?)
 nick(name)              user(username, realname)
 cap("LS" | "LIST" | "REQ" | "END", argument?)   authenticate(argument)
-ping(token)             pong(token: string | Uint8Array)
+ping(token)             pong(token: string | RawParam | Uint8Array)
 names(channel)          mode(target, args?)     who(mask, fields?)   away(reason?)
 ```
 
@@ -132,12 +133,12 @@ A colour of `99` is the default colour, so it is `undefined` in a `Style`. A col
 ## Traps
 
 - `latin1` as a WHATWG label is `windows-1252`, which maps bytes `0x80` to `0x9f` to other characters. The last resort, when the fallback cannot read the bytes, is real ISO-8859-1, where each byte is the code point of the same value.
-- A `PONG` built from a parsed token's text re-encodes it as UTF-8, which changes a token that was not UTF-8. Build it from `rawParams` instead, which echoes the token's bytes exactly.
+- A `PONG` built from a parsed token's text re-encodes it as UTF-8, which changes a token that was not UTF-8. Build it from the token's `RawParam` from `rawParams` instead, which echoes its bytes exactly. Bytes given to `pong` are read into a `RawParam` at once.
 
 ## Tests
 
 - `src/testdata/msg-split.yaml` holds the ircdocs parser vectors, and `formatting.yaml` and `ctcp.yaml` hold the formatting and CTCP vectors, in the same style.
 - Every `<<` Line in `fixtures/transcripts/` parses, and every `>>` Line we sent there can be built and reads back the same.
-- Property tests, with fast-check: `parse` never throws on arbitrary bytes, in any encoding; every `OutboundLine`, with text and byte parameters, round-trips, holds no NUL, CR, or LF but its line ending, and fits; `rawParams` splits exactly as `parse` does; every SASL `PLAIN` response is valid `AUTHENTICATE` Lines of at most 400 bytes of payload, with the `+` rule, that decode to the response; formatting, CTCP, ISUPPORT, and casemapping never throw, and agree with their other halves.
+- Property tests, with fast-check: `parse` never throws on arbitrary bytes, in any encoding; every `OutboundLine`, with text and byte parameters, round-trips, holds no NUL, CR, or LF but its line ending, and fits; `rawParams` splits exactly as `parse` does; changing a buffer after `OutboundLine.make`, `pong`, or `rawParams`, including a `Buffer`, whose slices share memory, changes nothing that is encoded; every SASL `PLAIN` response is valid `AUTHENTICATE` Lines of at most 400 bytes of payload, with the `+` rule, that decode to the response; formatting, CTCP, ISUPPORT, and casemapping never throw, and agree with their other halves.
 
 Tests read vectors and fixtures with Vite's `?raw` imports and Effect's YAML parser, so they need no file I/O.

@@ -36,6 +36,14 @@ const text = new TextDecoder();
 const utf8 = new TextEncoder();
 const isRaw = Schema.is(RawParam);
 
+// Bytes as a RawParam holds them: one code unit per byte.
+const raw = (bytes: Uint8Array): RawParam => ({
+  bytes: Array.from(bytes, (byte) => String.fromCodePoint(byte)).join(""),
+});
+
+const bytesOfRaw = (param: RawParam) =>
+  Uint8Array.from(param.bytes, (char) => char.codePointAt(0) ?? 0);
+
 const sendableLine = (built: OutboundLine | Rejected): OutboundLine => {
   if (isRejected(built)) {
     throw new Error(`Expected a Line, not ${built.reason}`);
@@ -222,15 +230,15 @@ const anyBytes = fc.uint8Array({ maxLength: 120 });
 
 const rawMiddle = fc
   .uint8Array({ maxLength: 20, minLength: 1 })
-  .map((bytes) => ({ bytes: bytes.map((byte) => (byte === 0x20 ? 0x41 : byte)) }));
+  .map((bytes) => raw(bytes.map((byte) => (byte === 0x20 ? 0x41 : byte))));
 
 const rawLast = fc.oneof(
-  anyBytes.map((bytes) => ({ bytes })),
+  anyBytes.map(raw),
   fc.constantFrom(
-    { bytes: Uint8Array.of(0xff, 0xfe) },
-    { bytes: Uint8Array.of(0x3a, 0x20) },
-    { bytes: Uint8Array.of() },
-    { bytes: Uint8Array.of(0x61, 0x0d, 0x0a, 0x51) }
+    raw(Uint8Array.of(0xff, 0xfe)),
+    raw(Uint8Array.of(0x3a, 0x20)),
+    raw(Uint8Array.of()),
+    raw(Uint8Array.of(0x61, 0x0d, 0x0a, 0x51))
   )
 );
 
@@ -290,7 +298,7 @@ describe("every OutboundLine", () => {
             },
           });
           expect(rawParams(encoded)).toStrictEqual(
-            line.params.map((param) => (isRaw(param) ? param.bytes : utf8.encode(param)))
+            line.params.map((param) => (isRaw(param) ? param : raw(utf8.encode(param))))
           );
           expect(texts.filter((_text, index) => !isRaw(line.params[index]))).toStrictEqual(
             line.params.filter((param) => !isRaw(param))
@@ -349,11 +357,11 @@ describe("a PING token that is not UTF-8", () => {
   ] as const)("is echoed byte for byte under %s", (fallback, token) => {
     const received = Uint8Array.of(...utf8.encode("PING :"), ...token);
     const parsed = parse(received, { _tag: "Utf8OrElse", fallback });
-    const [raw] = rawParams(received);
+    const [token_] = rawParams(received);
 
     expect(parsed._tag).toBe("Line");
-    expect(raw).toStrictEqual(token);
-    expect(encode(sendableLine(pong(raw ?? Uint8Array.of())))).toStrictEqual(pongOf(token));
+    expect(bytesOfRaw(token_ ?? raw(Uint8Array.of()))).toStrictEqual(token);
+    expect(encode(sendableLine(pong(token_ ?? "")))).toStrictEqual(pongOf(token));
   });
 
   it("would not be, if it were echoed as text", () => {
@@ -366,26 +374,36 @@ describe("a PING token that is not UTF-8", () => {
     );
   });
 
-  it("is recorded as base64, and checked again when it is decoded", () => {
+  it("is recorded as its string, and checked again when it is decoded", () => {
     const json = Schema.toCodecJson(OutboundLine);
     const line = sendableLine(pong(Uint8Array.of(0xff, 0x41)));
     const recorded = Schema.encodeSync(json)(line);
 
-    expect(recorded).toStrictEqual({ command: "PONG", params: [{ bytes: "/0E=" }], tags: {} });
+    expect(recorded).toStrictEqual({ command: "PONG", params: [{ bytes: "ÿA" }], tags: {} });
     expect(Schema.decodeSync(json)(recorded)).toStrictEqual(line);
     expect(() =>
-      Schema.decodeSync(json)({ command: "PONG", params: [{ bytes: "YQ0KUQ==" }], tags: {} })
+      Schema.decodeSync(json)({ command: "PONG", params: [{ bytes: "a\r\nQUIT" }], tags: {} })
     ).toThrow("no parameter may hold NUL, CR, LF");
   });
 
+  it("refuses a string that is not bytes, however it is made", () => {
+    expect(outbound("PONG", [{ bytes: "\u0100" }])).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(() =>
+      OutboundLine.make({ command: "PONG", params: [{ bytes: "€" }], tags: {} })
+    ).toThrow("Schema validation failed");
+  });
+
   it.each([
-    ["CR", [{ bytes: Uint8Array.of(0x61, 0x0d) }], "InvalidParameter"],
-    ["LF", [{ bytes: Uint8Array.of(0x0a) }], "InvalidParameter"],
-    ["NUL", [{ bytes: Uint8Array.of(0x00) }], "InvalidParameter"],
-    ["a space in a middle one", [{ bytes: Uint8Array.of(0x61, 0x20) }, "x"], "InvalidParameter"],
-    ["a colon starting a middle one", [{ bytes: Uint8Array.of(0x3a) }, "x"], "InvalidParameter"],
-    ["an empty middle one", [{ bytes: Uint8Array.of() }, "x"], "InvalidParameter"],
-    ["506 bytes", [{ bytes: new Uint8Array(506).fill(0x78) }], "TooLong"],
+    ["CR", [raw(Uint8Array.of(0x61, 0x0d))], "InvalidParameter"],
+    ["LF", [raw(Uint8Array.of(0x0a))], "InvalidParameter"],
+    ["NUL", [raw(Uint8Array.of(0x00))], "InvalidParameter"],
+    ["a space in a middle one", [raw(Uint8Array.of(0x61, 0x20)), "x"], "InvalidParameter"],
+    ["a colon starting a middle one", [raw(Uint8Array.of(0x3a)), "x"], "InvalidParameter"],
+    ["an empty middle one", [raw(Uint8Array.of()), "x"], "InvalidParameter"],
+    ["506 bytes", [raw(new Uint8Array(506).fill(0x78))], "TooLong"],
   ] as const)("refuses bytes with %s", (_name, values, reason) => {
     expect(outbound("PONG", values)).toStrictEqual({ _tag: "Rejected", reason });
   });
@@ -395,12 +413,19 @@ describe("a PING token that is not UTF-8", () => {
     expect(text.decode(encode(sendableLine(pong(utf8.encode("a b")))))).toBe("PONG :a b\r\n");
   });
 
-  it("keeps its own copy of the bytes it was given", () => {
-    const token = Uint8Array.of(0x41);
-    const line = sendableLine(pong(token));
+  it("is not changed by changing the buffer it was made from, however it was made", () => {
+    const bytes = utf8.encode("xOPER root bad");
+    const made = OutboundLine.make({ command: "PONG", params: [raw(bytes)], tags: {} });
+    const ponged = sendableLine(pong(bytes));
+    const received = utf8.encode("PING :xOPER root bad");
+    const [token] = rawParams(received);
+    const echoed = sendableLine(pong(token ?? ""));
 
-    token[0] = 0x0a;
+    bytes[0] = 0x0a;
+    received[6] = 0x0a;
 
-    expect(text.decode(encode(line))).toBe("PONG A\r\n");
+    for (const line of [made, ponged, echoed]) {
+      expect(text.decode(encode(line))).toBe("PONG :xOPER root bad\r\n");
+    }
   });
 });

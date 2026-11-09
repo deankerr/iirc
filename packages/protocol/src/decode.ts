@@ -68,9 +68,13 @@ const attempt = (decoder: TextDecoder, bytes: Uint8Array): string | undefined =>
   }
 };
 
-// One character per byte, as ISO-8859-1, which reads any bytes. Not WHATWG's `latin1`,
-// which is windows-1252.
-const latin1 = (bytes: Uint8Array) => {
+/**
+ * One character per byte, as ISO-8859-1, which reads any bytes. Not WHATWG's `latin1`,
+ * which is windows-1252. It is also how a raw parameter holds its bytes.
+ * @param bytes - The bytes.
+ * @returns A string with one code unit per byte, of the same value.
+ */
+export const binaryString = (bytes: Uint8Array): string => {
   let text = "";
 
   for (const byte of bytes) {
@@ -89,7 +93,7 @@ const isAscii = (bytes: Uint8Array) => bytes.every((byte) => byte < 0x80);
  * @returns The text.
  */
 export const utf8Lossy = (bytes: Uint8Array): string =>
-  isAscii(bytes) ? latin1(bytes) : lossyUtf8.decode(bytes);
+  isAscii(bytes) ? binaryString(bytes) : lossyUtf8.decode(bytes);
 
 /**
  * Reads bytes as UTF-8 if they are UTF-8, else in the fallback if they are valid in it,
@@ -100,12 +104,12 @@ export const utf8Lossy = (bytes: Uint8Array): string =>
  */
 export const utf8OrElse = (bytes: Uint8Array, fallback: TextDecoder | undefined): string => {
   if (isAscii(bytes)) {
-    return latin1(bytes);
+    return binaryString(bytes);
   }
 
   return (
     attempt(strictUtf8, bytes) ??
     (fallback === undefined ? undefined : attempt(fallback, bytes)) ??
-    latin1(bytes)
+    binaryString(bytes)
   );
 };

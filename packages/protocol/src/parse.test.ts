@@ -8,7 +8,7 @@ import ergoFloor from "../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import { Encoding, encode, isRejected, outbound, parse, parseSource, rawParams } from "./line.ts";
-import type { Line, Parsed } from "./line.ts";
+import type { Line, Parsed, RawParam } from "./line.ts";
 import msgSplit from "./testdata/msg-split.yaml?raw";
 
 const utf8 = new TextEncoder();
@@ -302,6 +302,9 @@ describe("parsing arbitrary bytes", () => {
   });
 });
 
+const bytesOfRaw = (param: RawParam) =>
+  Uint8Array.from(param.bytes, (char) => char.codePointAt(0) ?? 0);
+
 describe(rawParams, () => {
   const utf8Decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
@@ -323,7 +326,7 @@ describe(rawParams, () => {
           const parsed = parse(input, utf8Only);
           const raw = rawParams(input);
 
-          expect(raw.map((part) => utf8Decoder.decode(part))).toStrictEqual(
+          expect(raw.map((part) => utf8Decoder.decode(bytesOfRaw(part)))).toStrictEqual(
             parsed._tag === "Line" ? parsed.line.params : []
           );
         }),
@@ -334,10 +337,19 @@ describe(rawParams, () => {
 
   it("gives the bytes as they came, which text could not", () => {
     expect(rawParams(Uint8Array.of(0x50, 0x20, 0xff, 0x20, 0x3a, 0xfe, 0x20))).toStrictEqual([
-      Uint8Array.of(0xff),
-      Uint8Array.of(0xfe, 0x20),
+      { bytes: "\u00FF" },
+      { bytes: "\u00FE " },
     ]);
     expect(rawParams(utf8.encode(":only.a.source"))).toStrictEqual([]);
+  });
+
+  it("is not changed by changing a Buffer it was read from, whose slices share memory", () => {
+    const received = Buffer.from("PING :abc");
+    const [token] = rawParams(received);
+
+    received.write("XYZ", 6);
+
+    expect(token).toStrictEqual({ bytes: "abc" });
   });
 });
 
