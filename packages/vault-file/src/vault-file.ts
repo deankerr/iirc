@@ -81,6 +81,10 @@ const make = (path: string) =>
       return fresh;
     });
 
+    // Bun's `FileSystem` closes a file in a finalizer that turns a failed close into a defect,
+    // so a close that fails after the write surfaces as a defect of the scope. `write` turns
+    // every defect before the rename into a `VaultFailed` with a fixed reason, because what
+    // a defect says is not ours to put in a reason.
     const stage = (text: string) =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -91,17 +95,13 @@ const make = (path: string) =>
         })
       );
 
-    // A directory that cannot be synced leaves the new file in place. Only a power cut can
-    // then lose the rename, which the next start reads as the Vault before it.
-    const syncDirectory = Effect.scoped(
-      Effect.flatMap(fs.open(directory, { flag: "r" }), (dir) => dir.sync)
-    ).pipe(Effect.ignore);
-
-    const removeTemporary = fs.remove(temporary, { force: true }).pipe(Effect.ignore);
+    // Cleanup is best effort. A temporary file that stays is removed by the next write.
+    const removeTemporary = fs.remove(temporary, { force: true }).pipe(Effect.ignoreCause);
 
     // Writes the whole Vault beside the file, then renames it into place. A crash leaves
-    // the old file or the new one, never half of either.
-    const save = (next: Held) =>
+    // the old file or the new one, never half of either. When this succeeds the new file is
+    // the Vault, and when it fails the old file still is.
+    const write = (next: Held) =>
       Effect.gen(function* () {
         const credentials = Object.fromEntries(
           [...next].map(([name, value]) => [name, Redacted.value(value)])
@@ -110,16 +110,25 @@ const make = (path: string) =>
         yield* removeTemporary;
         yield* stage(writeVaultFile({ credentials, version: 1 }));
         yield* fs.rename(temporary, path);
-        yield* syncDirectory;
       }).pipe(
         Effect.onError(() => removeTemporary),
-        Effect.mapError(fail("write"))
+        Effect.mapError(fail("write")),
+        Effect.catchDefect(() => Effect.fail(failed("write: the file system failed")))
       );
 
-    // The memory changes only once the file has, and a change is never interrupted between
-    // the two.
+    // Once the rename has happened the file is the new Vault, so nothing after it may stop
+    // the memory from following, whether an error, a defect from closing the directory, or
+    // an interruption. A directory that cannot be synced leaves the new file in place, and
+    // only a power cut can then lose the rename, which the next start reads as the Vault
+    // before it.
+    const syncDirectory = Effect.scoped(
+      Effect.flatMap(fs.open(directory, { flag: "r" }), (dir) => dir.sync)
+    ).pipe(Effect.ignoreCause);
+
     const replace = (next: Held) =>
-      Effect.uninterruptible(Effect.andThen(save(next), Ref.set(loaded, next)));
+      Effect.uninterruptible(
+        write(next).pipe(Effect.andThen(Ref.set(loaded, next)), Effect.andThen(syncDirectory))
+      );
 
     const locked = <A, E>(effect: Effect.Effect<A, E>) => lock.withPermit(effect);
 

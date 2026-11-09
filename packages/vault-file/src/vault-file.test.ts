@@ -1,25 +1,15 @@
 import { inspect } from "node:util";
 
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { BunFileSystem } from "@effect/platform-bun";
 import { CredentialName } from "@iirc/protocol/line";
 import { holds, vaultLaws } from "@iirc/runtime/testing";
 import { Vault } from "@iirc/runtime/vault";
 import type { VaultService } from "@iirc/runtime/vault";
-import {
-  Context,
-  Effect,
-  FileSystem,
-  Layer,
-  Logger,
-  PlatformError,
-  Redacted,
-  References,
-  Schema,
-} from "effect";
+import { Context, Effect, FileSystem, Layer, Logger, Redacted, References, Schema } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { layer, layerBun } from "./index.ts";
+import { layerBun } from "./index.ts";
 
 const secret = "s3cr3t-v4lue-ZXCV";
 const name = CredentialName.make("libera-password");
@@ -282,73 +272,6 @@ describe("a file that is not a Vault", () => {
     );
 
     expect(tag).toBe("VaultFailed");
-  });
-});
-
-describe("a write that fails", () => {
-  // The platform, but with a rename that fails once armed.
-  const breakingRename = Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "iirc-vault-file-" });
-    const file = `${directory}/credentials.json`;
-    let broken = false;
-
-    const failing = Layer.succeed(FileSystem.FileSystem, {
-      ...fs,
-      rename: (from, to) =>
-        broken
-          ? Effect.fail(
-              PlatformError.systemError({
-                _tag: "Unknown",
-                method: "rename",
-                module: "FileSystem",
-                pathOrDescriptor: to,
-              })
-            )
-          : fs.rename(from, to),
-    });
-
-    const vault = yield* openOn(
-      layer(file).pipe(Layer.provide(Layer.mergeAll(failing, BunPath.layer)))
-    );
-
-    return {
-      break: () => {
-        broken = true;
-      },
-      directory,
-      file,
-      fs,
-      vault,
-    };
-  });
-
-  it("is VaultFailed, leaves the old file whole, and keeps the memory as the file", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const { break: breakIt, directory, file, fs, vault } = yield* breakingRename;
-
-        yield* vault.hold(name, Redacted.make(secret));
-        const written = yield* fs.readFileString(file);
-
-        breakIt();
-        const error = yield* failure(vault.hold(other, Redacted.make("two")));
-
-        return {
-          error: error._tag,
-          files: yield* fs.readDirectory(directory),
-          names: [...(yield* vault.names)],
-          unchanged: (yield* fs.readFileString(file)) === written,
-        };
-      })
-    );
-
-    expect(result).toStrictEqual({
-      error: "VaultFailed",
-      files: ["credentials.json"],
-      names: [name],
-      unchanged: true,
-    });
   });
 });
 

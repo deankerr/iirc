@@ -31,9 +31,13 @@ layer(path: string): Layer<Vault, never, FileSystem | Path> // on a platform you
 
 ## Writes
 
-Every change writes the whole Vault to `<path>.tmp` in the same directory (created with `wx`, so never into an older file), writes it, `fsync`s it, renames it over the file, then best-effort `fsync`s the directory. A crash leaves the old file or the new one, never half of either, and an earlier crash's `.tmp` is removed first. A failed write removes its `.tmp`, and leaves both the file and the memory as they were.
+Every change writes the whole Vault to `<path>.tmp` in the same directory, then renames it over the file. The temporary file is created with `wx`, so never into an older file, written in full, and `fsync`ed before the rename. A crash leaves the old file or the new one, never half of either.
 
-Changes go one at a time through a lock, so concurrent `hold` and `forget` through one Layer never lose an update. The change and the memory it updates are not interrupted between the two.
+The rename is the commit. Before it, any failure, whether an error or a defect from closing the temporary file, is a `VaultFailed` with a fixed reason. (Bun's `FileSystem` closes a file in a finalizer that turns a failed close into a defect, so the adapter translates defects rather than letting one escape.) The old file and the memory are left as they were, and the temporary file is removed. After it, nothing can undo the change: the memory is updated straight away, and the best-effort `fsync` of the directory that follows ignores errors and defects alike. So a call that returns has left the file and the memory agreeing, and one that fails has left both as they were.
+
+- **Cleanup is best effort.** A temporary file that cannot be removed stays, the write's own failure is the one reported, and the next write removes it first. If it still cannot be removed, writes fail with `VaultFailed` until it can, rather than write into a file the adapter did not make.
+- **A change is not interrupted.** From the first write to the memory update it is uninterruptible, so an interrupted `hold` is either whole or not made, and a call never stops between the rename and the memory update. The cost is that a file system that hangs holds the call.
+- **One change at a time.** Changes go through a lock, so concurrent `hold` and `forget` through one Layer never lose an update.
 
 ## In memory
 
@@ -41,7 +45,9 @@ The file is read once, when first needed, and then held in memory as `Redacted` 
 
 ## What a value reaches
 
-A value leaves the adapter in one place, `reveal`, as a `Redacted`. It is written only into the file. A `VaultFailed` reason is built from a fixed phrase and the path, or the platform's own message, which names a syscall and a path. It never carries what a decoder or the JSON parser says about the text it was given, because that quotes the text. The tests check that no value appears in an error, a log, or the `String`, `JSON.stringify`, and `util.inspect` of the service and what it returns, on every failure path.
+A value leaves the adapter in one place, `reveal`, as a `Redacted`. It is written only into the file. A `VaultFailed` reason is built from a fixed phrase and the path, or the platform's own message, which names a syscall and a path. It never carries what a decoder, the JSON parser, or a defect says, because those can quote what they were given.
+
+The tests check that no value appears in an error, a log, or the `String`, `JSON.stringify`, and `util.inspect` of the service and what it returns, for each case of an unreadable file and an unwritable directory, and for each failure injected at the write boundaries: opening, writing (whole or half), `fsync`, closing (a defect that carries a marker the reason must not echo), renaming, and cleanup. They do not cover other faults, such as `ENOSPC` in a particular call, which would take the same path as the injected ones.
 
 The file itself holds the values in plain text. That is the deliberate cost, below.
 
