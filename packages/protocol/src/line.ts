@@ -30,8 +30,8 @@ export type Parsed =
  * drops bytes above 0x7f, and ISO-2022-JP is all 7-bit bytes, so its text always reads as
  * UTF-8 first and the fallback would never be tried. It is a fixed list, not whatever this
  * runtime knows, so a recorded Configuration means the same everywhere, and a runtime
- * without one of these decoders is refused by {@link missingDecoders}, never served a
- * different reading. ISO-8859-1, which WHATWG reads as `windows-1252`, is `windows-1252`.
+ * without one of these decoders is refused by {@link missingDecoders}. Runtimes still
+ * decode some bytes differently, so replay is exact only on the pinned Bun. ISO-8859-1, which WHATWG reads as `windows-1252`, is `windows-1252`.
  */
 export const fallbackEncodings = [
   "ibm866",

@@ -49,7 +49,7 @@ JournalRecord = Input { network, input } | Outputs { network, of, outputs }
 - **Versioned, not migrated.** `journalVersion` is 1. An adapter that finds another version refuses to open with `JournalVersionMismatch`. Nothing is migrated until the shape has settled. No Daemon has written a Journal yet, so until the first one does, the records' shape changes freely under version 1. From then on, any change that an earlier Journal would not decode under bumps the version.
 - **`JournalFailed`** means the Journal could not be written or read. The Runtime stops that Network rather than step an input it did not keep.
 
-Before it reads a Journal, the Runtime checks that `missingDecoders()` from `@iirc/protocol/line` is empty, and refuses to start otherwise, so a replay never reads the same bytes as different text.
+Before it reads a Journal, the Runtime checks that `missingDecoders()` from `@iirc/protocol/line` is empty, and refuses to start otherwise. Replay is exact on the Bun pinned in the root `package.json`. Another runtime, or another version of Bun, may decode some fallback bytes differently, as a parser fix would (ADR 0002).
 
 The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. Every Line goes through `@iirc/protocol`'s `encode`, the last guard on what is sent: a `Rejected` from it means a bug upstream, which the Runtime logs, and that Line is not sent. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table from the outputs, sets those timers, and steps a `Started`.
 
