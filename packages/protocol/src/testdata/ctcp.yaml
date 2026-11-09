@@ -1,0 +1,142 @@
+# CTCP vectors (PROT-2, PROT-5). The shape is `\x01COMMAND args\x01`, and the closing
+# `\x01` is optional.
+#
+# `input` is the last parameter of a PRIVMSG or NOTICE. `result` is what parsing it
+# gives, by `type`:
+#   * none: not CTCP
+#   * action: `text`
+#   * dcc: `subcommand` and `args`
+#   * other: `command` and `args`
+
+tests:
+  # not CTCP
+  - name: empty text
+    input: ""
+    result: { type: none }
+
+  - name: ordinary text
+    input: "hello \x01ACTION\x01"
+    result: { type: none }
+
+  - name: a lone delimiter
+    input: "\x01"
+    result: { type: none }
+
+  - name: an empty CTCP
+    input: "\x01\x01"
+    result: { type: none }
+
+  - name: a delimiter and a space have no command
+    input: "\x01 ACTION hi\x01"
+    result: { type: none }
+
+  # action
+  - name: action
+    input: "\x01ACTION waves\x01"
+    result: { type: action, text: waves }
+
+  - name: action without its closing delimiter
+    input: "\x01ACTION waves"
+    result: { type: action, text: waves }
+
+  - name: action in lower case
+    input: "\x01action waves\x01"
+    result: { type: action, text: waves }
+
+  - name: action with no text
+    input: "\x01ACTION\x01"
+    result: { type: action, text: "" }
+
+  - name: action with a space and no text
+    input: "\x01ACTION \x01"
+    result: { type: action, text: "" }
+
+  - name: action with no text and no closing delimiter
+    input: "\x01ACTION"
+    result: { type: action, text: "" }
+
+  - name: action keeps spaces after the first
+    input: "\x01ACTION  is  spaced \x01"
+    result: { type: action, text: " is  spaced " }
+
+  - name: action keeps formatting codes for the formatter
+    input: "\x01ACTION \x02waves\x02\x01"
+    result: { type: action, text: "\x02waves\x02" }
+
+  - name: text after the closing delimiter is ignored
+    input: "\x01ACTION waves\x01 and then some"
+    result: { type: action, text: waves }
+
+  - name: a second CTCP after the first is ignored
+    input: "\x01ACTION waves\x01\x01VERSION\x01"
+    result: { type: action, text: waves }
+
+  - name: a command that only starts with action is another command
+    input: "\x01ACTIONS waves\x01"
+    result: { type: other, command: ACTIONS, args: waves }
+
+  # requests
+  - name: version
+    input: "\x01VERSION\x01"
+    result: { type: other, command: VERSION, args: "" }
+
+  - name: version with a trailing space
+    input: "\x01VERSION \x01"
+    result: { type: other, command: VERSION, args: "" }
+
+  - name: version without its closing delimiter
+    input: "\x01VERSION"
+    result: { type: other, command: VERSION, args: "" }
+
+  - name: ping with a token
+    input: "\x01PING 1730900000 123\x01"
+    result: { type: other, command: PING, args: "1730900000 123" }
+
+  - name: commands are made upper case
+    input: "\x01Time\x01"
+    result: { type: other, command: TIME, args: "" }
+
+  - name: only ASCII letters change case
+    input: "\x01straße x\x01"
+    result: { type: other, command: STRAßE, args: x }
+
+  - name: an unknown command
+    input: "\x01FINGER\x01"
+    result: { type: other, command: FINGER, args: "" }
+
+  - name: a reply carries its answer
+    input: "\x01VERSION irssi v1.4.5 - running on Linux x86_64\x01"
+    result: { type: other, command: VERSION, args: "irssi v1.4.5 - running on Linux x86_64" }
+
+  # dcc
+  - name: dcc send
+    input: "\x01DCC SEND file.txt 3232235777 5000 1024\x01"
+    result: { type: dcc, subcommand: SEND, args: "file.txt 3232235777 5000 1024" }
+
+  - name: dcc chat
+    input: "\x01DCC CHAT chat 3232235777 5000\x01"
+    result: { type: dcc, subcommand: CHAT, args: "chat 3232235777 5000" }
+
+  - name: dcc in lower case
+    input: "\x01dcc send \"a file.txt\" 2130706433 5000\x01"
+    result: { type: dcc, subcommand: SEND, args: '"a file.txt" 2130706433 5000' }
+
+  - name: dcc without its closing delimiter
+    input: "\x01DCC RESUME file.txt 5000 512"
+    result: { type: dcc, subcommand: RESUME, args: "file.txt 5000 512" }
+
+  - name: dcc with a subcommand and nothing else
+    input: "\x01DCC ACCEPT\x01"
+    result: { type: dcc, subcommand: ACCEPT, args: "" }
+
+  - name: dcc with no subcommand is another command
+    input: "\x01DCC\x01"
+    result: { type: other, command: DCC, args: "" }
+
+  - name: dcc with only a space is another command
+    input: "\x01DCC \x01"
+    result: { type: other, command: DCC, args: "" }
+
+  - name: a command that only starts with dcc is another command
+    input: "\x01DCCX SEND f 1 2\x01"
+    result: { type: other, command: DCCX, args: "SEND f 1 2" }

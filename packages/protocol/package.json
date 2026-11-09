@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./casemapping": "./src/casemapping.ts",
+    "./ctcp": "./src/ctcp.ts",
+    "./format": "./src/format.ts",
+    "./isupport": "./src/isupport.ts",
     "./line": "./src/line.ts"
   },
   "scripts": {
@@ -13,6 +17,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "fast-check": "4.10.2",
     "vitest": "catalog:"
   }
 }

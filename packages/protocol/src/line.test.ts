@@ -71,6 +71,8 @@ describe("an outbound Line", () => {
     ["an empty middle parameter", { ...ok, params: ["", "hi"] }],
     ["a middle parameter starting with a colon", { ...ok, params: [":x", "hi"] }],
     ["a command that is not one", { ...ok, command: "PRIV MSG" }],
+    ["a lower-case command, which would not parse back the same", { ...ok, command: "privmsg" }],
+    ["a lone surrogate, which UTF-8 cannot carry", { ...ok, params: ["#iirc", "\uD800"] }],
     ["more than 15 parameters", { ...ok, params: Array.from({ length: 16 }, () => "x") }],
     ["more than 510 bytes", { ...ok, params: ["#iirc", "é".repeat(250)] }],
     ["a tag that is not client-only", { ...ok, tags: { time: "2026-11-08T00:00:00Z" } }],
