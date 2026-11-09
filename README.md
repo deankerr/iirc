@@ -26,6 +26,7 @@ bun run test          # every workspace's tests
 | [`packages/runtime`](packages/runtime) | The ports the Runtime drives Clients through: Transport, Journal, Vault, and Clock |
 | [`packages/vault-file`](packages/vault-file) | The production Vault: Credentials in a `0600` file, written atomically |
 | [`packages/journal-sqlite`](packages/journal-sqlite) | The production Journal: Entries in SQLite, durable before `append` returns |
+| [`packages/transport-bun`](packages/transport-bun) | The production Transport: TCP and TLS on Bun, verified, framed, and bounded |
 | [`docs`](docs) | Everything below |
 
 ## Documentation

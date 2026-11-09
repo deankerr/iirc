@@ -64,6 +64,19 @@
         "vitest": "catalog:",
       },
     },
+    "packages/transport-bun": {
+      "name": "@iirc/transport-bun",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/platform-bun": "4.1.1",
+        "@iirc/client": "workspace:*",
+        "@iirc/runtime": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
     "packages/vault-file": {
       "name": "@iirc/vault-file",
       "version": "0.0.0",
@@ -166,6 +179,8 @@
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 
     "@iirc/runtime": ["@iirc/runtime@workspace:packages/runtime"],
+
+    "@iirc/transport-bun": ["@iirc/transport-bun@workspace:packages/transport-bun"],
 
     "@iirc/vault-file": ["@iirc/vault-file@workspace:packages/vault-file"],
 
