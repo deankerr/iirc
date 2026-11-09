@@ -131,6 +131,26 @@ describe(isupportTokens, () => {
     ).toStrictEqual([{ _tag: "Set", name: "VENDOR.EXAMPLE/LONG_TOKEN_NAME", value: "1" }]);
   });
 
+  it("reads a name that starts with punctuation, as the grammar allows", () => {
+    expect(
+      isupportTokens(["me", ".VENDOR/FEATURE=1", "/SLASH", "_UNDER=x", "-.GONE", "text"])
+    ).toStrictEqual([
+      { _tag: "Set", name: ".VENDOR/FEATURE", value: "1" },
+      { _tag: "Set", name: "/SLASH", value: "" },
+      { _tag: "Set", name: "_UNDER", value: "x" },
+      { _tag: "Removed", name: ".GONE" },
+    ]);
+  });
+
+  it("undoes escapes in a value of a million bytes without running out of stack", () => {
+    const long = "x".repeat(1_000_000);
+
+    expect(unescapeValue(`${long}\\x20`)).toBe(`${long} `);
+    expect(isupportTokens(["me", `NETWORK=${long}\\x41`, "text"])).toStrictEqual([
+      { _tag: "Set", name: "NETWORK", value: `${long}A` },
+    ]);
+  });
+
   it("never throws on any parameters", () => {
     expect(() => {
       fc.assert(

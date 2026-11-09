@@ -7,7 +7,7 @@ import ergoFeatures from "../../../fixtures/transcripts/ergo/first-features.irc?
 import ergoFloor from "../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../fixtures/transcripts/ngircd/floor.irc?raw";
-import { Encoding, encode, isRejected, outbound, parse, parseSource } from "./line.ts";
+import { Encoding, encode, isRejected, outbound, parse, parseSource, rawParams } from "./line.ts";
 import type { Line, Parsed } from "./line.ts";
 import msgSplit from "./testdata/msg-split.yaml?raw";
 
@@ -74,7 +74,9 @@ const received = (transcript: string): readonly Uint8Array[] =>
           bytes.push(0x5c);
           index += 1;
         } else {
-          bytes.push(...utf8.encode(text.charAt(index)));
+          for (const byte of utf8.encode(text.charAt(index))) {
+            bytes.push(byte);
+          }
         }
       }
 
@@ -297,6 +299,45 @@ describe("parsing arbitrary bytes", () => {
         { numRuns: 5000 }
       );
     }).not.toThrow();
+  });
+});
+
+describe(rawParams, () => {
+  const utf8Decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+  const bytes = fc.uint8Array({ maxLength: 300 }).map((values) =>
+    // Spaces and colons often, so the split is worth checking.
+    values.map((byte) => {
+      if (byte % 5 === 0) {
+        return 0x20;
+      }
+
+      return byte % 7 === 0 ? 0x3a : byte;
+    })
+  );
+
+  it("splits exactly as parse does, so each part decodes to the parsed text", () => {
+    expect(() => {
+      fc.assert(
+        fc.property(bytes, (input) => {
+          const parsed = parse(input, utf8Only);
+          const raw = rawParams(input);
+
+          expect(raw.map((part) => utf8Decoder.decode(part))).toStrictEqual(
+            parsed._tag === "Line" ? parsed.line.params : []
+          );
+        }),
+        { numRuns: 5000 }
+      );
+    }).not.toThrow();
+  });
+
+  it("gives the bytes as they came, which text could not", () => {
+    expect(rawParams(Uint8Array.of(0x50, 0x20, 0xff, 0x20, 0x3a, 0xfe, 0x20))).toStrictEqual([
+      Uint8Array.of(0xff),
+      Uint8Array.of(0xfe, 0x20),
+    ]);
+    expect(rawParams(utf8.encode(":only.a.source"))).toStrictEqual([]);
   });
 });
 

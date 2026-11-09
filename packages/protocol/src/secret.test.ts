@@ -3,7 +3,14 @@ import { Base64 } from "effect/encoding";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { CredentialName, encode, fillSecret, isRejected, maxAuthenticateBytes } from "./line.ts";
+import {
+  CredentialName,
+  encode,
+  fillSecret,
+  isRejected,
+  maxAuthenticateBytes,
+  parse,
+} from "./line.ts";
 import type { OutboundLine, SecretLine } from "./line.ts";
 
 const text = new TextDecoder();
@@ -88,11 +95,15 @@ describe(fillSecret, () => {
   });
 });
 
+// The payload as it goes on the wire, read back by the parser.
 const payloadOf = (line: OutboundLine) => {
-  expect(line.command).toBe("AUTHENTICATE");
-  expect(line.params).toHaveLength(1);
+  const parsed = parse(encode(line).subarray(0, -2), { _tag: "Utf8Only" });
+  const params = parsed._tag === "Line" ? parsed.line.params : [];
 
-  return line.params[0] ?? "";
+  expect(parsed).toMatchObject({ line: { command: "AUTHENTICATE" } });
+  expect(params).toHaveLength(1);
+
+  return params[0] ?? "";
 };
 
 describe("every SASL PLAIN response", () => {

@@ -12,9 +12,10 @@ export type IsupportToken =
   | { readonly _tag: "Set"; readonly name: string; readonly value: string }
   | { readonly _tag: "Removed"; readonly name: string };
 
-// A name is what the grammar allows, `1*20 (letter / digit / "." / "/")`, widened to any
-// length and to `-` and `_`, so a token an Ircd misspells is still read.
-const token = /^(?<removed>-?)(?<name>[A-Za-z0-9][A-Za-z0-9./_-]*)(?:=(?<value>.*))?$/su;
+// A name is what the grammar allows, `1*20 (letter / digit / "." / "/")` in any position,
+// widened to any length, and to `_` anywhere and `-` after the first character, so a
+// token an Ircd misspells is still read. A `-` first takes the token back.
+const token = /^(?<removed>-?)(?<name>[A-Za-z0-9./_][A-Za-z0-9./_-]*)(?:=(?<value>.*))?$/su;
 
 const escape = /\\x(?<hex>[0-9A-Fa-f]{2})/gu;
 const utf8 = new TextEncoder();
@@ -30,20 +31,28 @@ export const unescapeValue = (value: string): string => {
     return value;
   }
 
-  const bytes: number[] = [];
+  const parts: Uint8Array[] = [];
   let last = 0;
 
   for (const match of value.matchAll(escape)) {
-    bytes.push(
-      ...utf8.encode(value.slice(last, match.index)),
-      Number.parseInt(match.groups?.hex ?? "0", 16)
+    parts.push(
+      utf8.encode(value.slice(last, match.index)),
+      Uint8Array.of(Number.parseInt(match.groups?.hex ?? "0", 16))
     );
     last = match.index + match[0].length;
   }
 
-  bytes.push(...utf8.encode(value.slice(last)));
+  parts.push(utf8.encode(value.slice(last)));
 
-  return utf8Lossy(Uint8Array.from(bytes));
+  const bytes = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+
+  return utf8Lossy(bytes);
 };
 
 const tokenOf = (param: string): IsupportToken | undefined => {

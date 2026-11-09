@@ -51,7 +51,10 @@ export type Encoding = typeof Encoding.Type;
 /** The most bytes a Line may take, without its tags and line ending. */
 export const maxLineBytes = 510;
 
-/** The most bytes client-only tags may take, with the leading `@` and the space after. */
+/**
+ * The most bytes of tag data a client may send: the bytes between the leading `@` and
+ * the space after the tags, which are not counted.
+ */
 export const maxTagBytes = 4094;
 
 // Parsing
@@ -150,20 +153,32 @@ const wordAt = (bytes: Uint8Array, start: number, end: number) => {
   return bytes.subarray(start, stop === -1 ? end : start + stop);
 };
 
+type Span = readonly [start: number, end: number];
+
+/** Where a Line's parts lie in its bytes, or why it has none. */
+type Layout =
+  | { readonly _tag: "Unparseable"; readonly reason: UnparseableReason }
+  | {
+      readonly _tag: "Layout";
+      readonly tags: Span | undefined;
+      readonly source: Span | undefined;
+      readonly command: Span;
+      readonly params: readonly Span[];
+    };
+
+const wordSpan = (bytes: Uint8Array, start: number, end: number): Span => [
+  start,
+  start + wordAt(bytes, start, end).length,
+];
+
 /**
- * Parses one Line's bytes, without its line ending, and never throws. It reads the
- * grammar at the byte level, then decodes each part on its own, so one part in another
- * encoding leaves the rest readable. It accepts what any Ircd might send: runs of spaces
- * between parts, spaces before the first, a source or none, tags or none, a trailing
- * parameter with or without its colon, and any number of parameters. A command is
- * upper-cased. Tags are UTF-8, and the rest is read as `encoding` says.
- * @param bytes - The Line's bytes, as the Transport framed them.
- * @param encoding - How bytes that are not UTF-8 become text.
- * @returns The Line, or why there is none.
+ * Finds a Line's parts in its bytes. `parse` and `rawParams` both read this, so they
+ * always agree on where each parameter starts and ends.
+ * @param bytes - The Line's bytes.
+ * @returns Where each part lies, without the `@` or `:` that marks it.
  */
-export const parse = (bytes: Uint8Array, encoding: Encoding): Parsed => {
+const layoutOf = (bytes: Uint8Array): Layout => {
   const end = lineEnd(bytes);
-  const text = decoderFor(encoding);
   const words = wordsOf(bytes, end);
   const [first] = words;
 
@@ -182,24 +197,74 @@ export const parse = (bytes: Uint8Array, encoding: Encoding): Parsed => {
     return { _tag: "Unparseable", reason: "NoCommand" };
   }
 
-  const tags = hasTags ? parseTags(utf8Lossy(wordAt(bytes, first + 1, end))) : new Map();
-  const source = hasSource ? text(wordAt(bytes, sourceStart + 1, end)) : undefined;
-  const command = upperCaseAscii(text(wordAt(bytes, commandStart, end)));
-  const params: string[] = [];
+  const params: Span[] = [];
 
   for (const start of words.slice(commandAt + 1)) {
     if (bytes[start] === colon) {
-      params.push(text(bytes.subarray(start + 1, end)));
+      params.push([start + 1, end]);
       break;
     }
 
-    params.push(text(wordAt(bytes, start, end)));
+    params.push(wordSpan(bytes, start, end));
   }
 
   return {
-    _tag: "Line",
-    line: { command, params, source: source === "" ? undefined : source, tags },
+    _tag: "Layout",
+    command: wordSpan(bytes, commandStart, end),
+    params,
+    source: hasSource ? wordSpan(bytes, sourceStart + 1, end) : undefined,
+    tags: hasTags ? wordSpan(bytes, first + 1, end) : undefined,
   };
+};
+
+const partOf = (bytes: Uint8Array, [start, end]: Span) => bytes.subarray(start, end);
+
+/**
+ * Parses one Line's bytes, without its line ending, and never throws. It reads the
+ * grammar at the byte level, then decodes each part on its own, so one part in another
+ * encoding leaves the rest readable. It accepts what any Ircd might send: runs of spaces
+ * between parts, spaces before the first, a source or none, tags or none, a trailing
+ * parameter with or without its colon, and any number of parameters. A command is
+ * upper-cased. Tags are UTF-8, and the rest is read as `encoding` says.
+ * @param bytes - The Line's bytes, as the Transport framed them.
+ * @param encoding - How bytes that are not UTF-8 become text.
+ * @returns The Line, or why there is none.
+ */
+export const parse = (bytes: Uint8Array, encoding: Encoding): Parsed => {
+  const layout = layoutOf(bytes);
+
+  if (layout._tag === "Unparseable") {
+    return layout;
+  }
+
+  const text = decoderFor(encoding);
+  const source = layout.source === undefined ? "" : text(partOf(bytes, layout.source));
+
+  return {
+    _tag: "Line",
+    line: {
+      command: upperCaseAscii(text(partOf(bytes, layout.command))),
+      params: layout.params.map((span) => text(partOf(bytes, span))),
+      source: source === "" ? undefined : source,
+      tags:
+        layout.tags === undefined ? new Map() : parseTags(utf8Lossy(partOf(bytes, layout.tags))),
+    },
+  };
+};
+
+/**
+ * A Line's parameters as the bytes that arrived, split exactly as {@link parse} splits
+ * them, for what must be echoed byte for byte, such as a `PING`'s token. Text cannot
+ * promise that: a token that is not UTF-8 is decoded, and would be re-encoded as UTF-8.
+ * @param bytes - The Line's bytes, as the Transport framed them.
+ * @returns Copies of each parameter's bytes, or none if the Line does not parse.
+ */
+export const rawParams = (bytes: Uint8Array): readonly Uint8Array[] => {
+  const layout = layoutOf(bytes);
+
+  return layout._tag === "Unparseable"
+    ? []
+    : layout.params.map(([start, end]) => bytes.slice(start, end));
 };
 
 /** A source's parts: `nick!user@host`, where a server's name is all nick. */
@@ -240,7 +305,6 @@ const clientTag = /^\+(?:[A-Za-z0-9.-]+\/)?[A-Za-z0-9-]+$/u;
 const sentTags: ReadonlySet<string> = new Set(["batch", "draft/multiline-concat", "label"]);
 
 const isSendableTag = (key: string) => clientTag.test(key) || sentTags.has(key);
-const lineBreaking = /[\0\r\n]/u;
 const escapedInTags = /[; \\\r\n]/gu;
 
 const tagEscape: ReadonlyMap<string, string> = new Map([
@@ -251,7 +315,22 @@ const tagEscape: ReadonlyMap<string, string> = new Map([
   ["\\", "\\\\"],
 ]);
 
-const isMiddle = (param: string) => param !== "" && !param.includes(" ") && !param.startsWith(":");
+/**
+ * A parameter given as bytes, sent exactly as they are, such as a `PING`'s token echoed
+ * in a `PONG`. Recorded, the bytes are base64.
+ */
+export const RawParam = Schema.Struct({ bytes: Schema.Uint8Array });
+
+/** The decoded form of {@link RawParam}. */
+export type RawParam = typeof RawParam.Type;
+
+/** A parameter to send: text, sent as UTF-8, or bytes, sent as they are. */
+export const Param = Schema.Union([Schema.String, RawParam]);
+
+/** The decoded form of {@link Param}. */
+export type Param = typeof Param.Type;
+
+const isRaw = Schema.is(RawParam);
 
 /**
  * Whether a text survives being encoded as UTF-8: it has no lone surrogate.
@@ -260,8 +339,16 @@ const isMiddle = (param: string) => param !== "" && !param.includes(" ") && !par
  */
 const isWellFormed = (text: string) => text.isWellFormed();
 
-const lineBytes = (line: { readonly command: string; readonly params: readonly string[] }) =>
-  utf8.encode([line.command, ...line.params].join(" ")).length + (line.params.length > 0 ? 1 : 0);
+const bytesOf = (param: Param) => (isRaw(param) ? param.bytes : utf8.encode(param));
+
+const breaksLines = (bytes: Uint8Array) =>
+  bytes.some((byte) => byte === 0x00 || byte === 0x0d || byte === 0x0a);
+
+// What only the last parameter may be: empty, holding a space, or starting with a colon.
+const needsTrailing = (bytes: Uint8Array) =>
+  bytes.length === 0 || bytes[0] === colon || bytes.includes(space);
+
+const isMiddle = (param: string) => !needsTrailing(utf8.encode(param));
 
 const tagText = (tags: Readonly<Record<string, string>>) =>
   Object.entries(tags)
@@ -272,8 +359,29 @@ const tagText = (tags: Readonly<Record<string, string>>) =>
     )
     .join(";");
 
-const tagBytes = (tags: Readonly<Record<string, string>>) =>
-  Object.keys(tags).length === 0 ? 0 : utf8.encode(tagText(tags)).length + 2;
+/**
+ * The bytes of a Line's command and parameters, exactly as {@link encode} writes them,
+ * with the colon only when the last parameter needs it.
+ * @param line - The command and parameters.
+ * @returns The pieces, in order.
+ */
+const lineParts = (line: { readonly command: string; readonly params: readonly Param[] }) => {
+  const parts: Uint8Array[] = [utf8.encode(line.command)];
+  const separator = Uint8Array.of(space);
+  const trailing = Uint8Array.of(space, colon);
+
+  for (const [index, param] of line.params.entries()) {
+    const bytes = bytesOf(param);
+    const isLast = index === line.params.length - 1;
+
+    parts.push(isLast && needsTrailing(bytes) ? trailing : separator, bytes);
+  }
+
+  return parts;
+};
+
+const lengthOf = (parts: readonly Uint8Array[]) =>
+  parts.reduce((total, part) => total + part.length, 0);
 
 /** Why a Line cannot be sent safely. */
 export type RejectedReason =
@@ -287,7 +395,7 @@ export type RejectedReason =
   | "TooLong"
   /** A tag we may not send, or a value that holds NUL or a lone surrogate. */
   | "InvalidTag"
-  /** Tags over {@link maxTagBytes} bytes. */
+  /** More than {@link maxTagBytes} bytes of tag data. */
   | "TagsTooLong"
   /** A Target, Channel, or nick that would name something else, such as a list. */
   | "InvalidTarget"
@@ -313,11 +421,12 @@ export const isRejected = (
 
 interface Unchecked {
   readonly command: string;
-  readonly params: readonly string[];
+  readonly params: readonly Param[];
   readonly tags: Readonly<Record<string, string>>;
 }
 
-const isSafeParam = (param: string) => !lineBreaking.test(param) && isWellFormed(param);
+const isSafeParam = (param: Param) =>
+  (isRaw(param) || isWellFormed(param)) && !breaksLines(bytesOf(param));
 
 const isSafeTag = ([key, value]: readonly [string, string]) =>
   isSendableTag(key) && !value.includes("\0") && isWellFormed(value);
@@ -336,11 +445,13 @@ const problem = (line: Unchecked): RejectedReason | undefined => {
     return "TooManyParameters";
   }
 
-  if (!line.params.every(isSafeParam) || !line.params.slice(0, -1).every(isMiddle)) {
+  const middle = line.params.slice(0, -1);
+
+  if (!line.params.every(isSafeParam) || middle.some((param) => needsTrailing(bytesOf(param)))) {
     return "InvalidParameter";
   }
 
-  if (lineBytes(line) > maxLineBytes) {
+  if (lengthOf(lineParts(line)) > maxLineBytes) {
     return "TooLong";
   }
 
@@ -348,7 +459,7 @@ const problem = (line: Unchecked): RejectedReason | undefined => {
     return "InvalidTag";
   }
 
-  return tagBytes(line.tags) > maxTagBytes ? "TagsTooLong" : undefined;
+  return utf8.encode(tagText(line.tags)).length > maxTagBytes ? "TagsTooLong" : undefined;
 };
 
 const explanations: Readonly<Record<RejectedReason, string>> = {
@@ -359,21 +470,22 @@ const explanations: Readonly<Record<RejectedReason, string>> = {
   InvalidTag:
     "a tag we send must be client-only, or label, batch, or draft/multiline-concat, and its value may not hold NUL or a lone surrogate",
   InvalidTarget: "a Target must name one thing",
-  TagsTooLong: `tags take at most ${maxTagBytes} bytes`,
+  TagsTooLong: `tag data takes at most ${maxTagBytes} bytes`,
   TooLong: `a Line takes at most ${maxLineBytes} bytes`,
   TooManyParameters: "a Line has at most 15 parameters",
 };
 
 /**
- * A Line that is safe to send: it cannot inject a second Line, it fits, and it encodes
- * to UTF-8 and parses back the same. The only way to get one is from this module's
- * builders, or by decoding a recorded one, which checks it again. The tags are ones a
- * Feature added: client-only tags, or `label`, `batch`, and `draft/multiline-concat`.
- * The last parameter is written as a trailing parameter when it needs to be.
+ * A Line that is safe to send: it cannot inject a second Line, it fits, and it parses
+ * back the same. The only way to get one is from this module's builders, or by decoding
+ * a recorded one, which checks it again. A parameter is text, sent as UTF-8, or a
+ * {@link RawParam}, sent as its bytes. The tags are ones a Feature added: client-only
+ * tags, or `label`, `batch`, and `draft/multiline-concat`, and their values are escaped
+ * when encoded. The last parameter is written as a trailing parameter when it must be.
  */
 export const OutboundLine = Schema.Struct({
   command: Schema.String,
-  params: Schema.Array(Schema.String),
+  params: Schema.Array(Param),
   tags: Schema.Record(Schema.String, Schema.String),
 }).pipe(
   Schema.check(
@@ -392,12 +504,16 @@ export const OutboundLine = Schema.Struct({
 /** The decoded form of {@link OutboundLine}. */
 export type OutboundLine = typeof OutboundLine.Type;
 
+// Byte parameters are copied in, so a caller changing its bytes later changes nothing.
+const owned = (param: Param): Param =>
+  isRaw(param) ? { bytes: Uint8Array.from(param.bytes) } : param;
+
 const checked = (line: Unchecked): OutboundLine | Rejected => {
   const reason = problem(line);
 
   return reason === undefined
     ? OutboundLine.make(
-        { command: line.command, params: [...line.params], tags: { ...line.tags } },
+        { command: line.command, params: line.params.map(owned), tags: { ...line.tags } },
         { disableChecks: true }
       )
     : rejected(reason);
@@ -406,15 +522,15 @@ const checked = (line: Unchecked): OutboundLine | Rejected => {
 /**
  * Builds a Line that is safe to send, or says why it cannot be.
  * @param command - The command, such as `PRIVMSG`, which is upper-cased.
- * @param params - The parameters, where only the last may be empty, hold a space, or
- * start with a colon.
+ * @param params - The parameters, as text or bytes, where only the last may be empty,
+ * hold a space, or start with a colon.
  * @param tags - Tags to send, which must be client-only, or `label`, `batch`, or
  * `draft/multiline-concat`.
  * @returns The Line, or why it cannot be sent.
  */
 export const outbound = (
   command: string,
-  params: readonly string[],
+  params: readonly Param[],
   tags: Readonly<Record<string, string>> = {}
 ): OutboundLine | Rejected => checked({ command: upperCaseAscii(command), params, tags });
 
@@ -430,32 +546,33 @@ export const withTags = (
   tags: Readonly<Record<string, string>>
 ): OutboundLine | Rejected => checked({ ...line, tags: { ...line.tags, ...tags } });
 
-const needsTrailing = (param: string) => !isMiddle(param);
+const lineEnding = Uint8Array.of(0x0d, 0x0a);
 
 /**
- * The text of a Line, without its line ending: tags escaped, and the last parameter
- * written as a trailing parameter when it must be.
- * @param line - The Line.
- * @returns Its text.
- */
-const lineText = (line: OutboundLine) => {
-  const tags = Object.keys(line.tags).length === 0 ? "" : `@${tagText(line.tags)} `;
-  const last = line.params.at(-1);
-
-  const params =
-    last === undefined
-      ? []
-      : [...line.params.slice(0, -1), needsTrailing(last) ? `:${last}` : last];
-
-  return `${tags}${[line.command, ...params].join(" ")}`;
-};
-
-/**
- * Encodes a Line for the wire, as UTF-8.
+ * Encodes a Line for the wire: tags escaped, text as UTF-8, bytes as they are, and the
+ * last parameter written as a trailing parameter when it must be.
  * @param line - The Line.
  * @returns Its bytes, with CRLF.
  */
-export const encode = (line: OutboundLine): Uint8Array => utf8.encode(`${lineText(line)}\r\n`);
+export const encode = (line: OutboundLine): Uint8Array => {
+  const hasTags = Object.keys(line.tags).length > 0;
+
+  const parts = [
+    ...(hasTags ? [utf8.encode(`@${tagText(line.tags)} `)] : []),
+    ...lineParts(line),
+    lineEnding,
+  ];
+
+  const encoded = new Uint8Array(lengthOf(parts));
+  let offset = 0;
+
+  for (const part of parts) {
+    encoded.set(part, offset);
+    offset += part.length;
+  }
+
+  return encoded;
+};
 
 // Builders
 
@@ -464,7 +581,7 @@ export const encode = (line: OutboundLine): Uint8Array => utf8.encode(`${lineTex
  * @param name - The parameter.
  * @returns Whether it does.
  */
-const isOne = (name: string) => isMiddle(name) && !name.includes(",") && isSafeParam(name);
+const isOne = (name: string) => isSafeParam(name) && isMiddle(name) && !name.includes(",");
 
 const toOne = (name: string, build: () => OutboundLine | Rejected): OutboundLine | Rejected =>
   isOne(name) ? build() : rejected("InvalidTarget");
@@ -587,11 +704,13 @@ export const authenticate = (argument: string): OutboundLine | Rejected =>
 export const ping = (token: string): OutboundLine | Rejected => outbound("PING", [token]);
 
 /**
- * `PONG`, the answer to a `PING`.
- * @param token - The `PING`'s token, as it was parsed.
+ * `PONG`, the answer to a `PING`. Give it the token's bytes from {@link rawParams}, so it
+ * echoes a token that is not UTF-8 exactly, as an Ircd that compares bytes expects.
+ * @param token - The `PING`'s token, as bytes, or as text.
  * @returns The Line, or why it cannot be sent.
  */
-export const pong = (token: string): OutboundLine | Rejected => outbound("PONG", [token]);
+export const pong = (token: string | Uint8Array): OutboundLine | Rejected =>
+  outbound("PONG", [token instanceof Uint8Array ? { bytes: token } : token]);
 
 /**
  * `NAMES` of one Channel.
