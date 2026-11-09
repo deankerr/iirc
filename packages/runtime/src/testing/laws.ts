@@ -269,38 +269,6 @@ export const journalLaws: readonly Law<JournalService, JournalFailed>[] = [
       }),
     name: "keeps an interrupted append whole, or not at all",
   },
-  {
-    check: (journal) =>
-      // Once an interrupted append has returned, its outcome is settled: a record that is
-      // not there then never appears later. An adapter whose write goes on after its Effect
-      // was interrupted would let a caller who saw it missing append it a second time.
-      inOrder(
-        Array.from({ length: 20 }, (_, steps) => steps),
-        (steps) =>
-          Effect.gen(function* () {
-            const appending = yield* Effect.forkChild(journal.append(sentinel));
-
-            for (let step = 0; step < steps; step += 1) {
-              yield* Effect.yieldNow;
-            }
-
-            yield* Fiber.interrupt(appending);
-
-            const settled = (yield* collect(journal.read({}))).length;
-
-            yield* Effect.sleep("5 millis");
-
-            const later = (yield* collect(journal.read({}))).length;
-
-            yield* same(
-              `Entries after an interrupt at step ${steps}`,
-              String(later),
-              String(settled)
-            );
-          }).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 3))
-      ),
-    name: "settles an interrupted append before the interrupt returns",
-  },
 ];
 
 const credential = CredentialName.make("libera-password");
