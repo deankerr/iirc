@@ -21,6 +21,7 @@ const pure = "The core is pure: time arrives on inputs and effects leave as outp
 // Effect's services, which the core may not use whether imported from `effect` or by path.
 const services = [
   "Clock",
+  "Console",
   "Context",
   "Effect",
   "Fiber",
@@ -88,15 +89,9 @@ const ours = (allowed: readonly string[], message: string): Pattern => ({
   message,
 });
 
+// `**/testing` covers a test kit at every depth, by package name or by relative path.
 const testKit: Pattern = {
-  group: [
-    "@iirc/*/testing",
-    "@iirc/*/testing/**",
-    "./testing",
-    "./testing/*",
-    "../testing",
-    "../testing/*",
-  ],
+  group: ["**/testing", "**/testing/**", "./testing", "./testing/*", "../testing", "../testing/*"],
   message: "Production code never imports the test kit.",
 };
 
@@ -172,6 +167,7 @@ const noClock = restrictGlobals({
     "Intl",
     "Temporal",
     "navigator",
+    "console",
     ...globalObjects,
   ],
 });
@@ -226,6 +222,8 @@ const runtimeGlobals = restrictGlobals(
       "Bun",
       "require",
       "navigator",
+      // The Runtime logs through Effect, so a test can see and silence it.
+      "console",
       ...globalObjects,
     ],
   }
@@ -234,12 +232,18 @@ const runtimeGlobals = restrictGlobals(
 const runtimeProperties = restrictProperties(
   throughClock,
   "The Runtime takes randomness from Effect's Random.",
-  { message: throughClock, object: "Effect", property: "clockWith" }
+  { message: throughClock, property: "clockWith" }
 );
 
 // Every Runtime file, tests included, reaches no adapter and reads no wall clock.
+const clockWithImport = {
+  importNames: ["clockWith"],
+  message: throughClock,
+  name: "effect/Effect",
+};
+
 const runtimeImports = (...patterns: readonly Pattern[]) =>
-  restrictImports([wallClockImport(throughClock)], [adapters, ...patterns]);
+  restrictImports([wallClockImport(throughClock), clockWithImport], [adapters, ...patterns]);
 
 // Production code reads time only in `clock.ts`: Effect's `Clock`, and `DateTime`, whose
 // `now` reads it too, are imported nowhere else.
@@ -248,6 +252,7 @@ const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly P
   restrictImports(
     [
       wallClockImport(throughClock),
+      clockWithImport,
       ...(clock === "allowed"
         ? []
         : [{ importNames: ["Clock", "DateTime"], message: throughClock, name: "effect" }]),
@@ -337,8 +342,9 @@ const coreFence: OxlintOverride[] = [
       "no-restricted-imports": pureImports(
         ours([], "`known` imports nothing of ours but ids."),
         {
-          group: ["./*", "./**", "../*", "../**", "!./ids.ts"],
-          message: "`known` imports nothing of ours but ids.",
+          // An allowlist: every import is refused but `./ids.ts`.
+          group: ["*", "**", "./*", "./**", "../*", "../**", "!./ids.ts"],
+          message: "`known` imports nothing but ids.",
         },
         testKit,
         effectTesting

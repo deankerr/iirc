@@ -9,7 +9,8 @@ const root = path.resolve(import.meta.dirname, "../../..");
 
 /**
  * One probe file: the directory it goes in, and the lines the fence must refuse or allow.
- * A directory that does not exist is made for the run. `name` starts the file's name, so
+ * A directory that does not exist is made for the run. `{run}` in it names the run, so
+ * a directory one run makes holds only that run's probes. `name` starts the file's name, so
  * a probe can be linted under a rule for one file, such as `known.ts`'s.
  */
 interface Probe {
@@ -49,6 +50,8 @@ const probes: readonly Probe[] = [
       "export const now = Date.now();",
       "export const formatted = new Intl.DateTimeFormat().format();",
       "export const instant = Temporal.Now;",
+      'console.log("hello");',
+      'import { Console } from "effect";',
       "export const random = Math.random();",
       "export const aliased = Time.nowUnsafe();",
       "export const { isPastUnsafe } = Time;",
@@ -76,6 +79,7 @@ const probes: readonly Probe[] = [
   {
     allowed: [
       'import { Effect, Stream } from "effect";',
+      'import { Effect as Fx } from "effect";',
       'import { Input } from "@iirc/client";',
       'import { Line } from "@iirc/protocol/line";',
       'import { Journal } from "./journal.ts";',
@@ -94,6 +98,9 @@ const probes: readonly Probe[] = [
       'import { DateTime } from "effect";',
       'import * as DateTimeModule from "effect/DateTime";',
       "export const clockRead = Effect.clockWith;",
+      'import { clockWith } from "effect/Effect";',
+      "export const aliasedClock = Fx.clockWith;",
+      'console.log("hello");',
       "export const formatted = new Intl.DateTimeFormat().format();",
       'import { serve } from "bun";',
       'import { Socket } from "effect/unstable/socket";',
@@ -131,13 +138,18 @@ const probes: readonly Probe[] = [
       'export { scripted as kit } from "@iirc/client/testing";',
       'export { TestClock } from "effect/testing";',
       'import { Line } from "@iirc/protocol/line";',
+      'export { Schema } from "effect";',
     ],
   },
   {
     // A file deeper inside a package may still reach its siblings by a relative path.
     allowed: ['import { Journal } from "../../journal.ts";'],
-    directory: "packages/runtime/src/fence-deep/inner",
-    refused: ['import { Client } from "../../../../client/src/client.ts";'],
+    directory: "packages/runtime/src/fence-deep-{run}/inner",
+    refused: [
+      'import { Client } from "../../../../client/src/client.ts";',
+      'export { makeMemoryJournal } from "../../testing/memory-journal.ts";',
+      'export { makeMemoryVault } from "../../testing";',
+    ],
   },
 ];
 
@@ -147,8 +159,10 @@ const linesOf = (probe: Probe) => [...(probe.allowed ?? []), ...probe.refused];
 // overwrites a file, and removes only the files it created.
 const run = `${process.pid}-${Date.now()}`;
 
+const directoryOf = (probe: Probe) => probe.directory.replace("{run}", run);
+
 const files = probes.map((probe, index) =>
-  path.join(probe.directory, `${probe.name ?? "fence-probe"}-${run}-${index}.ts`)
+  path.join(directoryOf(probe), `${probe.name ?? "fence-probe"}-${run}-${index}.ts`)
 );
 
 const lint = (): readonly Diagnostic[] => {
@@ -158,7 +172,7 @@ const lint = (): readonly Diagnostic[] => {
   try {
     for (const [index, probe] of probes.entries()) {
       const file = files[index] ?? "";
-      const directory = mkdirSync(path.join(root, probe.directory), { recursive: true });
+      const directory = mkdirSync(path.join(root, directoryOf(probe)), { recursive: true });
 
       if (directory !== undefined) {
         made.push(directory);
@@ -181,6 +195,7 @@ const lint = (): readonly Diagnostic[] => {
       rmSync(path.join(root, file));
     }
 
+    // Only this run made these, and only its own probes were in them.
     for (const directory of made.toReversed()) {
       rmSync(directory, { recursive: true });
     }

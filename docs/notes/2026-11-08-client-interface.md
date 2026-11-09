@@ -115,6 +115,14 @@ The fifth review found five more, fixed on 2026-11-09:
 - **`new Intl.DateTimeFormat().format()` reads the wall clock.** `Intl`, `Temporal`, and `navigator` are refused in the core and the Runtime.
 - **A deeper file could not reach its own siblings,** because `../../` was refused. A relative path into another package always names its `src`, so only that is refused now, and a probe two directories deep proves a sibling import is allowed.
 
+The sixth review found five more, fixed the same day:
+
+- **`clockWith` under another name,** imported from `effect/Effect` or called on an alias of `Effect`, read the Clock outside `clock.ts`. It is now refused under any name.
+- **A deeper file could import a test kit** by `../../testing`. `**/testing` now covers every depth.
+- **The core could write to the console.** `console` is refused in the core and the Runtime, and Effect's `Console` in the core.
+- **`known.ts` could import from `effect`.** Its rule is now an allowlist: everything but `./ids.ts` is refused.
+- **Concurrent fence runs shared a probe directory,** so one run's cleanup could delete another's probe. Each run now makes its own.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:
