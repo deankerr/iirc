@@ -128,6 +128,16 @@ const coreFence: OxlintOverride[] = [
   })),
   ...layer(["packages/protocol/src/**"], coreRules(toNothing)),
   ...layer(["packages/client/src/**"], coreRules(toProtocol)),
+  ...layer(["packages/api/src/**"], (production) => ({
+    "no-restricted-imports": imports(
+      production,
+      adapters,
+      ours(
+        ["@iirc/client", "@iirc/protocol/*"],
+        "`@iirc/api` is the contract alone: it never imports the Runtime or an adapter."
+      )
+    ),
+  })),
   ...layer(["packages/runtime/src/**"], (production) => ({
     "no-restricted-globals": globals(throughPorts),
     "no-restricted-imports": imports(production, adapters, toClient(production)),
