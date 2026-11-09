@@ -132,6 +132,15 @@ The eighth review found four more gaps, now inside or around the allowlist:
 - `DateTime`'s zoned constructors default to the machine's time zone, so `DateTime` left the core's allowlist.
 - `Logger.toFile` writes a file through `FileSystem`, so it is refused in the Runtime.
 
+The ninth review audited every export of the allowed modules, one by one, and found the last ambient reads in them:
+
+- **Locale.** `localeCompare` and the `toLocale*` methods use the machine's locale. They are refused by name, on Effect's `String` and on native strings alike.
+- **Local time.** `Schema.Date`, `DateFromString`, `SchemaGetter.Date`, `dateFromString`, and the cookie schemas parse a date without an offset in the machine's time zone. They are refused. `DateTimeUtcFromString` reads such a date as UTC, and stays allowed.
+- **Hashing.** Effect hashes a function, or a value hashed by reference, with `Math.random`. Equality still gives the same answer, but a `HashMap`'s order can differ on replay. `HashMap` and `HashSet` left the core's list, and the core uses `Map` and `Set`. That state is plain data is now an invariant in the Client's README, which the replay law checks, because lint cannot.
+- **Loggers.** `Logger.consolePretty` inspects the TTY, and loggers format local time. `Logger` left the Runtime's list: the Runtime logs with `Effect.log*`, and the composition root builds its Logger.
+
+The audit found nothing else in the allowed modules that reads time, randomness, the environment, or the world, outside Effect's Clock and Random services.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:

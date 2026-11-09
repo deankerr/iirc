@@ -26,6 +26,9 @@ const pure = "The core is pure: time arrives on inputs and effects leave as outp
 // The core may use pure data and Schema, and nothing that runs, waits, or reaches out.
 // `DateTime` is left out: besides reading the clock, its zoned constructors default to
 // the machine's time zone, so the same input could give a different result elsewhere.
+// `HashMap` and `HashSet` are left out too: a key hashed by reference, such as a
+// function, is hashed with `Math.random`, so iteration order could differ on replay.
+// The core uses `Map` and `Set`, whose order is the order of insertion.
 const pureEffect = [
   "Array",
   "BigDecimal",
@@ -40,8 +43,6 @@ const pureEffect = [
   "Filter",
   "Function",
   "Hash",
-  "HashMap",
-  "HashSet",
   "Inspectable",
   "Iterable",
   "Match",
@@ -75,7 +76,8 @@ const pureSubpaths = ["effect/encoding/Base64"];
 
 // The Runtime may also run, wait for, and compose Effects. It may not use a platform
 // service, read configuration from the environment, or use Cron, whose schedule starts
-// from the wall clock unless told otherwise. `DateTime` and `Clock` read time, so only
+// from the wall clock unless told otherwise. It logs with `Effect.log*`, and never builds
+// a Logger: the composition root does, because loggers write files or inspect the TTY. `DateTime` and `Clock` read time, so only
 // `clock.ts` and tests have them.
 const runtimeEffect = [
   ...pureEffect,
@@ -91,7 +93,6 @@ const runtimeEffect = [
   "Latch",
   "Layer",
   "LogLevel",
-  "Logger",
   "Metric",
   "PubSub",
   "Queue",
@@ -165,7 +166,51 @@ const restrictProperties = (
   ...more,
 ];
 
-const noRandomOrNow = restrictProperties(pure, pure);
+// What reads the machine's locale or parses a date in its time zone. Each is refused as a
+// property of any object, and as a named import from the Effect module that has it.
+const ambientProperties = [
+  "localeCompare",
+  "toLocaleLowerCase",
+  "toLocaleUpperCase",
+  "toLocaleString",
+  "toLocaleDateString",
+  "toLocaleTimeString",
+  "Date",
+  "DateFromString",
+  "dateFromString",
+  "Cookie",
+  "Cookies",
+  "RecordFromCookies",
+  "HashMap",
+  "HashSet",
+];
+
+const ambientImports = [
+  {
+    importNames: ["localeCompare", "toLocaleLowerCase", "toLocaleUpperCase"],
+    name: "effect/String",
+  },
+  {
+    importNames: [
+      "Date",
+      "DateFromString",
+      "Cookie",
+      "Cookies",
+      "RecordFromCookies",
+      "HashMap",
+      "HashSet",
+    ],
+    name: "effect/Schema",
+  },
+  { importNames: ["Date"], name: "effect/SchemaGetter" },
+  { importNames: ["dateFromString"], name: "effect/SchemaTransformation" },
+].map((path) => ({ ...path, message: pure }));
+
+const noRandomOrNow = restrictProperties(
+  pure,
+  pure,
+  ...ambientProperties.map((property) => ({ message: pure, property }))
+);
 
 const wallClockImport = (message: string) => ({
   importNames: wallClock,
@@ -223,7 +268,7 @@ const randomHashImport = { importNames: ["random"], message: pure, name: "effect
 
 const pureImports = (...patterns: readonly Pattern[]) =>
   restrictImports(
-    [effectPath(pureEffect, pure), wallClockImport(pure), randomHashImport],
+    [effectPath(pureEffect, pure), wallClockImport(pure), randomHashImport, ...ambientImports],
     [impureModules, effectSubpaths(pureEffect, pureSubpaths, pure), ...patterns]
   );
 
