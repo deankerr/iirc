@@ -36,7 +36,7 @@ The floor is RFC 1459 and 2812 as [Modern IRC](../../docs/irc-docs-2026-10-26/mo
 | `Line` | One received Line, parsed: tags, source, command, and parameters. Anything that parses is a Line. |
 | `Parsed` | A `Line`, or `Unparseable` with a reason. |
 | `Encoding` | How bytes become text: `Utf8Only`, or UTF-8 or else a fallback encoding named by its WHATWG label. |
-| `FallbackEncoding` | One of a fixed list of WHATWG encodings, by canonical name, such as `windows-1252` or `shift_jis`. It is a list rather than whatever the runtime knows, so a recorded Configuration decodes on every runtime, and a test checks each decodes on this one. UTF-8, UTF-16, `x-user-defined`, and `replacement` are not in it. |
+| `FallbackEncoding` | One of a fixed list of WHATWG encodings, by canonical name, such as `windows-1252` or `shift_jis`. It is a list rather than whatever the runtime knows, so a recorded Configuration means the same on every runtime. UTF-8, UTF-16, `x-user-defined`, `replacement`, and ISO-2022-JP, which is 7-bit and so always reads as UTF-8 first, are not in it. `missingDecoders()` lists any this runtime cannot decode: whatever processes or replays a Journal refuses to start unless it is empty, so the same bytes never read as different text. |
 | `OutboundLine` | A Line that is safe to send. It cannot inject a second Line, it fits, and it parses back the same. |
 | `Rejected` | Why a Line cannot be sent, as a `RejectedReason`. |
 | `CredentialName` | The name of a Credential, which the Vault holds. |

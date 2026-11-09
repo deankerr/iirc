@@ -12,6 +12,7 @@ import {
   encode,
   fallbackEncodings,
   isRejected,
+  missingDecoders,
   outbound,
   parse,
   parseSource,
@@ -292,7 +293,6 @@ describe("parsing arbitrary bytes", () => {
     utf8Only,
     latin1,
     { _tag: "Utf8OrElse", fallback: "shift_jis" },
-    { _tag: "Utf8OrElse", fallback: "iso-2022-jp" },
     { _tag: "Utf8OrElse", fallback: "gb18030" }
   );
 
@@ -381,11 +381,17 @@ describe("the Encoding schema", () => {
     expect(new TextDecoder(fallback, { fatal: true }).encoding).toBe(fallback);
   });
 
+  it("has every one of them on this runtime", () => {
+    expect(missingDecoders()).toStrictEqual([]);
+  });
+
   // Only canonical names, so a recorded Configuration means the same on every runtime.
+  // ISO-2022-JP is 7-bit, so it would always read as UTF-8 and never as itself.
   it.each([
     "",
     "bogus",
     "utf-8",
+    "iso-2022-jp",
     "latin1",
     "Shift_JIS",
     "utf-16le",

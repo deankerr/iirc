@@ -25,11 +25,13 @@ export type Parsed =
 
 /**
  * The encodings a fallback may be: every WHATWG encoding by its canonical name, except
- * UTF-8 itself and those that cannot read a Line's spaces and colons as themselves
- * (UTF-16, `x-user-defined`, and `replacement`). It is a fixed list, not whatever this
- * runtime knows, so a Configuration recorded on one runtime decodes on every other. Each
- * one decodes on Bun and Node, which a test checks. ISO-8859-1, which WHATWG reads as
- * `windows-1252`, is `windows-1252` here.
+ * UTF-8 itself and those that cannot be a fallback. UTF-16 reads every space and colon as
+ * half a character, `replacement` reads everything as one U+FFFD, Bun's `x-user-defined`
+ * drops bytes above 0x7f, and ISO-2022-JP is all 7-bit bytes, so its text always reads as
+ * UTF-8 first and the fallback would never be tried. It is a fixed list, not whatever this
+ * runtime knows, so a recorded Configuration means the same everywhere, and a runtime
+ * without one of these decoders is refused by {@link missingDecoders}, never served a
+ * different reading. ISO-8859-1, which WHATWG reads as `windows-1252`, is `windows-1252`.
  */
 export const fallbackEncodings = [
   "ibm866",
@@ -64,7 +66,6 @@ export const fallbackEncodings = [
   "gb18030",
   "big5",
   "euc-jp",
-  "iso-2022-jp",
   "shift_jis",
   "euc-kr",
 ] as const;
@@ -74,6 +75,15 @@ export const FallbackEncoding = Schema.Literals(fallbackEncodings);
 
 /** The decoded form of {@link FallbackEncoding}. */
 export type FallbackEncoding = typeof FallbackEncoding.Type;
+
+/**
+ * The fallback encodings this runtime cannot decode. A runtime that misses any would read
+ * the same bytes as different text, so whatever processes or replays a Journal checks
+ * this is empty before it starts, and refuses to run otherwise.
+ * @returns The missing encodings, empty on a runtime that has them all.
+ */
+export const missingDecoders = (): readonly FallbackEncoding[] =>
+  fallbackEncodings.filter((name) => fallbackDecoder(name)?.encoding !== name);
 
 /**
  * How an Ircd's bytes become text. `Utf8Only` is what `UTF8ONLY` promises. Otherwise
