@@ -423,14 +423,19 @@ const capList = (text: string): readonly (readonly [CapName, string])[] =>
         : [CapNameSchema.make(word.slice(0, at)), word.slice(at + 1)];
     });
 
-const request = (run: Run, held: Negotiated, after: "Requesting" | "Changing"): void => {
-  const wanted = capsWanted(
-    run.registry,
+// The caps worth asking for now. Given caps just offered, only those of the Features
+// that need one of them, so nothing refused before is asked for again.
+const wantedNow = (run: Run, held: Negotiated, only?: ReadonlySet<CapName>): readonly CapName[] =>
+  capsWanted(
+    only === undefined
+      ? run.registry
+      : run.registry.filter((feature) => (feature.needs.caps ?? []).some((name) => only.has(name))),
     { ...held, isupport: openOf(run.state)?.isupport ?? new Map() },
     run.state.configuration?.declined ?? []
   );
 
-  // Caps share `CAP REQ` Lines, as many to a Line as fit.
+// Caps share `CAP REQ` Lines, as many to a Line as fit. Gives how many were sent.
+const requestLines = (run: Run, wanted: readonly CapName[]): number => {
   const lines: string[][] = [];
 
   for (const name of wanted) {
@@ -443,23 +448,34 @@ const request = (run: Run, held: Negotiated, after: "Requesting" | "Changing"): 
     }
   }
 
-  const sent = lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined);
+  return lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined)
+    .length;
+};
 
-  if (sent.length === 0 && after === "Changing") {
+const request = (
+  run: Run,
+  held: Negotiated,
+  after: "Requesting" | "Changing",
+  only?: ReadonlySet<CapName>
+): void => {
+  const sent = requestLines(run, wantedNow(run, held, only));
+
+  if (sent === 0 && after === "Changing") {
     setCaps(run, { ...held, _tag: "Steady" });
 
     return;
   }
 
   // With nothing to ask for, `Requesting` is already answered, and `settle` ends it.
-  setCaps(run, { ...held, _tag: after, asked: sent.length });
+  setCaps(run, { ...held, _tag: after, asked: sent });
 };
 
 const answered = (
   run: Run,
   caps: Extract<Caps, { readonly asked: number }>,
   list: readonly (readonly [CapName, string])[],
-  ack: boolean
+  ack: boolean,
+  more: boolean
 ): void => {
   const enabled = new Set(caps.enabled);
 
@@ -473,7 +489,8 @@ const answered = (
     }
   }
 
-  const asked = caps.asked - 1;
+  // An answer spread over several Lines counts once, at its last.
+  const asked = more ? caps.asked : caps.asked - 1;
 
   if (caps._tag === "Changing") {
     setCaps(run, asked <= 0 ? { ...caps, _tag: "Steady", enabled } : { ...caps, asked, enabled });
@@ -523,28 +540,41 @@ const listing: CapStep = (run, caps, list, more) => {
 
 const answering =
   (ack: boolean): CapStep =>
-  (run, caps, list) => {
+  (run, caps, list, more) => {
     if (caps._tag !== "Requesting" && caps._tag !== "Changing") {
       return false;
     }
 
-    answered(run, caps, list, ack);
+    answered(run, caps, list, ack, more);
 
     return true;
   };
 
-// `NEW`: more is offered, and once negotiation is over, the Client asks for what it wants.
+// `NEW`: more is offered, and the Client asks for what it wants of it at once, whether
+// negotiation is over or not. What it asked for before is not asked for again.
 const added: CapStep = (run, caps, list) => {
   if (caps._tag === "Listing" || caps._tag === "None") {
     return false;
   }
 
   const held = { enabled: caps.enabled, offered: withOffered(caps.offered, list) };
+  const listed = new Set(list.map(([name]) => name));
 
   if (caps._tag === "Steady") {
-    request(run, held, "Changing");
-  } else {
+    request(run, held, "Changing", listed);
+
+    return true;
+  }
+
+  const sent = requestLines(run, wantedNow(run, held, listed));
+
+  if (caps._tag !== "Holding") {
+    setCaps(run, { ...caps, ...held, asked: caps.asked + sent });
+  } else if (sent === 0) {
     setCaps(run, { ...caps, ...held });
+  } else {
+    // While Features hold registration, nothing is awaited: now the new request is.
+    setCaps(run, { ...held, _tag: "Requesting", asked: sent });
   }
 
   return true;

@@ -17,11 +17,6 @@ import { configured, joined, play, registered, replay, replayFresh } from "../te
 const ergo = (port: number, tls: boolean) => ({ host: "ergo.test", port, tls });
 const ngircd = { host: "ngircd.test", port: 6667, tls: false };
 
-// The recorder asked for caps the floor Client has no Feature for. With an empty
-// registry, the Client ends negotiation at once, so the Ircd's acknowledgement of the
-// recorder's request comes when nothing was asked: that alone is ignored.
-const unasked = "?? ignored NotNow Received";
-
 const fixtures = [
   [
     "ergo/first-features",
@@ -35,23 +30,22 @@ const fixtures = [
         required: true,
       },
     }),
-    [unasked],
   ],
-  ["ergo/floor", ergoFloor, configured({ ircds: [ergo(6667, false)] }), []],
-  ["ngircd/first-features", ngircdFeatures, configured({ ircds: [ngircd] }), [unasked]],
-  ["ngircd/floor", ngircdFloor, configured({ ircds: [ngircd] }), []],
+  ["ergo/floor", ergoFloor, configured({ ircds: [ergo(6667, false)] })],
+  ["ngircd/first-features", ngircdFeatures, configured({ ircds: [ngircd] })],
+  ["ngircd/floor", ngircdFloor, configured({ ircds: [ngircd] })],
 ] as const;
 
 describe("the recorded fixtures", () => {
   it.each(fixtures)(
-    "%s registers, joins, and ignores only what it should",
-    (_name, transcript, configuration, ignored) => {
+    "%s registers, joins, and ignores nothing",
+    (_name, transcript, configuration) => {
       const played = replay(client, { configuration, transcript });
 
-      expect(played.ignored.map((each) => each.split("\n").at(-1))).toStrictEqual(ignored);
+      expect(played.ignored).toStrictEqual([]);
       expect(played.transcript).toContain("?? session-began iirc_");
       expect(played.transcript).toContain("?? activity Joined #iirc iirc_");
-      expect(played.transcript).toContain("?? message Privmsg peer #iirc :hello from the peer");
+      expect(played.transcript).toMatch(/\?\? message Privmsg peer #iirc .*:hello from the peer/u);
       expect(played.transcript).toContain("?? session-ended Error");
     }
   );
@@ -73,6 +67,71 @@ describe("the recorded fixtures", () => {
       expect([...(channel?.members.keys() ?? [])].toSorted()).toStrictEqual(["iirc_", "peer"]);
     }
   );
+});
+
+const until = (transcript: string, marker: string) =>
+  transcript.slice(0, transcript.indexOf(marker));
+
+describe("the first Features on the recorded Ircds", () => {
+  const [[, ergoTranscript, ergoConfiguration], , [, ngircdTranscript, ngircdConfiguration]] =
+    fixtures;
+
+  it("logs in to Ergo with SASL, and confirms our Messages by their echoes", () => {
+    const played = replay(client, {
+      configuration: ergoConfiguration,
+      transcript: ergoTranscript,
+    });
+
+    expect(played.transcript).toContain(
+      ">> {AuthenticatePlain credential=iirc authcid=iirc authzid=iirc}"
+    );
+    expect(played.transcript).toContain(">> @label=l1 PRIVMSG #iirc :hello from iirc");
+    expect(played.transcript).toContain(
+      "?? message Privmsg iirc_ #iirc at=ours:t+1s ours=i1 echo :hello from iirc"
+    );
+    expect(played.transcript).toContain("?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello from iirc");
+    expect(played.transcript).toContain("?? confirmed i2 at=ircd:t+2s id=ircd:m6 :psst back");
+  });
+
+  it("knows what Ergo's Features made known", () => {
+    const played = replay(client, {
+      configuration: ergoConfiguration,
+      transcript: until(ergoTranscript, ">> QUIT"),
+    });
+
+    const known = client.known(played.state);
+
+    expect(client.inspect(played.state).features).toStrictEqual([
+      "cap-notify",
+      "sasl",
+      "message-tags",
+      "server-time",
+      "batch",
+      "echo-message",
+      "multi-prefix",
+      "utf8only",
+    ]);
+    expect(known.self?.account).toMatchObject({ _tag: "Known", value: "iirc" });
+    expect(known.channels.get("#iirc")?.members.get("iirc_")?.prefixes).toMatchObject({
+      _tag: "Known",
+      value: new Set(["o"]),
+    });
+  });
+
+  it("turns on only multi-prefix with ngircd", () => {
+    const played = replay(client, {
+      configuration: ngircdConfiguration,
+      transcript: until(ngircdTranscript, ">> QUIT"),
+    });
+
+    expect(client.inspect(played.state).features).toStrictEqual(["multi-prefix"]);
+    expect(
+      client.known(played.state).channels.get("#iirc")?.members.get("iirc_")?.prefixes
+    ).toMatchObject({ _tag: "Known", value: new Set(["o"]) });
+    expect(played.transcript).toContain(
+      "?? message Privmsg iirc_ #iirc at=ours:t+5s ours=i1 :hello from iirc"
+    );
+  });
 });
 
 const base = configured();

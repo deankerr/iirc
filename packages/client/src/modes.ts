@@ -112,6 +112,25 @@ export interface Listed {
 }
 
 /**
+ * Whether one name of a `NAMES` listing leads with a symbol `PREFIX` does not name, which
+ * stands for a prefix that cannot be named.
+ * @param name - The name, with its prefixes.
+ * @param rules - The Network's rules.
+ * @returns Whether it does.
+ */
+export const hasUnnamedPrefix = (name: string, rules: ModeRules): boolean => {
+  for (const character of name) {
+    if (rules.prefix.some((each) => each.symbol === character)) {
+      continue;
+    }
+
+    return notNickStart.test(character);
+  }
+
+  return false;
+};
+
+/**
  * Reads one name of a `NAMES` listing, such as `@+peer`. The floor shows only a member's
  * highest prefix, so a member shown with one holds at least that one. A member shown
  * with none holds none, since any would have shown. A symbol `PREFIX` does not name
