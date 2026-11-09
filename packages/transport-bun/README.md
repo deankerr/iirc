@@ -12,7 +12,9 @@ const TransportLive = layer(); // production: every option at its default
 
 ## How it is built
 
-It uses Effect's socket from `@effect/platform-bun` (`BunSocket.makeNet`, which is Effect's Node socket over Bun's `node:net` and `node:tls`), as [ADR 0005](../../docs/adr/0005-effect-wins-where-it-overlaps-bun.md) asks. Effect covers every need: it connects, upgrades to TLS with SNI, trust anchors, and hostname checks, reads only when pulled, and makes writes wait for `drain`. Nothing calls `Bun.connect` directly.
+It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Effect's Node socket over Bun's `node:net` and `node:tls`), as [ADR 0005](../../docs/adr/0005-effect-wins-where-it-overlaps-bun.md) asks. Effect reads only when pulled and makes writes wait for `drain`.
+
+`src/open.ts` opens the socket itself, with `node:net` and then `node:tls`, and hands it to `fromDuplex`. Effect's own TLS upgrade takes only `servername` as the identity, and SNI may not carry an IP. Without a `servername`, a routed IP would be checked against the address it reached rather than the address dialled. Opening TLS directly lets the dialled host go to `host` and `checkServerIdentity`, apart from SNI. Nothing calls `Bun.connect` directly.
 
 ## What it guarantees beyond the port
 
@@ -29,9 +31,10 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.makeNet`, which 
   | Any TLS failure: an untrusted certificate, a wrong name, an Ircd that answers in plaintext, or a closed handshake | `Tls` |
   | `hangup` | `HungUp` |
 
-- **TLS is verified, always.** It verifies against the system's trust store (`tls.getCACertificates("system")`), or against Bun's bundled Mozilla roots where the system has none, plus any `trust` roots. `rejectUnauthorized` is always on. SNI carries the address's host. For an address given as an IP, which SNI may not carry (RFC 6066), the certificate is verified against that IP. A TLS failure never falls back to plaintext.
+- **TLS is verified, always.** It verifies against the system's trust store (`tls.getCACertificates("system")`), or against Bun's bundled Mozilla roots where the system has none, plus any `trust` roots. `rejectUnauthorized` is always on. The certificate is always checked against the host that was dialled (`IrcdAddress.host`), never against where `route` sent the dial. SNI carries that host too, except for an IP, which SNI may not carry (RFC 6066). Then no SNI is sent, and the certificate must still name that IP. A TLS failure never falls back to plaintext.
 - **`Opened` over TLS comes after the handshake.** The handshake has its own timer, which starts once TCP is open.
-- **Ending destroys the socket at once.** `hangup`, an error, a timer, and closing the Scope all destroy the socket immediately, without waiting for unsent bytes to flush, because a peer that never reads would never let them flush. The kernel still delivers whatever it has already accepted. So a `QUIT` that `send` has returned from survives a `hangup` right after it, unless the far end had already stopped reading. No socket outlives its Connection. The tests check this from the far end after every way a Connection can end.
+- **`hangup` is a bounded graceful close.** It ends the socket's write side and waits until everything already sent has been written, so a `QUIT` sent just before it arrives. Then it destroys the socket. The wait lasts at most `hangupTimeout`, so a peer that has stopped reading cannot hold it longer. The Connection still ends with one `Closed HungUp`, which is reported as soon as `hangup` starts. Interrupting a `hangup` cuts only the wait short, and the socket is destroyed anyway.
+- **Every other ending destroys the socket at once.** An error, a timer, or the closing of the Scope destroys the socket without waiting for unsent bytes, because a peer that never reads would never let them flush. No socket outlives its Connection. The tests check this after every way a Connection can end. Where the far end is paused, they check that our socket was destroyed while the far end was still paused, not merely that the far end later saw an end.
 - **`send` applies backpressure.** It returns once the socket has taken the bytes. When the far end has stopped reading, it waits for up to `writeTimeout`. If the wait runs out, the Connection ends as `TimedOut`, and `send` returns. A `send` after the Connection has ended returns at once.
 
 ## Options
@@ -41,6 +44,7 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.makeNet`, which 
 | `connectTimeout` | 30 seconds | How long reaching the Ircd may take: `route`, resolving the name, and the TCP connect. |
 | `handshakeTimeout` | 30 seconds | How long the TLS handshake may take once TCP is open. |
 | `writeTimeout` | 60 seconds | How long one `send` may wait for a far end that has stopped reading. |
+| `hangupTimeout` | 2 seconds | How long `hangup` may wait for what was sent to be written before it destroys the socket. |
 | `route` | the address itself | Where to connect for an `IrcdAddress`, as `{ host, port }`. SNI and the certificate are still checked against the address's own host, so a route can redirect a dial without weakening TLS. The loopback harness uses it. |
 | `trust` | none | Extra certificate authorities, as PEM, added to the system roots. A test trusts its own self-signed certificate this way. |
 
@@ -55,8 +59,8 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.makeNet`, which 
 
 ## Tests
 
-`bun run test` runs the following, using only loopback and no external network, in under a second:
+`bun run test` runs the following, using only loopback and no external network, in about two seconds:
 
 - `src/laws.test.ts`: every `transportLaws` law, over TLS with a self-signed certificate for `irc.test` made by `openssl` for the run, and again over plain TCP. The harness in `src/testing/loopback.ts` plays `TestIrcd`. It opens a listener for each call and routes the dial there, or routes it to a refusing port or an `.invalid` name when the call is refused.
 - `src/framer.test.ts`: framing byte by byte. It covers a Line split across reads, CRLF split between reads, several Lines in one read, an unfinished Line at the end, and a long Line over many reads cut at `maxReceivedBytes`.
-- `src/transport.test.ts`: the failures and edge cases the laws cannot see. These are a refused dial, an unknown host, a connect timeout, SNI, an untrusted certificate, a wrong-name certificate, a plaintext answer to TLS, a handshake timeout, a reset over TCP and TLS, a stalled write, a flood that waits in the kernel, a `send` before `Opened`, a hangup while connecting, and the closing of the Scope.
+- `src/transport.test.ts`: the failures and edge cases the laws cannot see. These are a refused dial, an unknown host, a connect timeout, SNI, an untrusted certificate, a wrong-name certificate, a plaintext answer to TLS, a handshake timeout, a reset over TCP and TLS, a routed IP or name whose certificate names only the destination, a stalled write, a hangup that lets 1,000 Lines and a `QUIT` arrive over TLS, a hangup that a paused peer cannot hold past `hangupTimeout`, a flood that waits in the kernel, a `send` before `Opened`, a hangup while connecting, the closing of the Scope while open, while routing, and during the TLS handshake, and connect and handshake timers that race `Opened` and end only once. On loopback a connect always beats even a 0 ms timer, so that race is only seen to end once, not seen to time out.

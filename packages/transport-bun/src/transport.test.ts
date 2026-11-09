@@ -1,12 +1,13 @@
-import type * as Net from "node:net";
+import * as Net from "node:net";
 import { TLSSocket } from "node:tls";
 
 import type { IrcdAddress } from "@iirc/client";
 import { maxReceivedBytes } from "@iirc/runtime/transport";
 import type { LinkEvent } from "@iirc/runtime/transport";
-import { Deferred, Effect, Fiber, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, Stream } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it } from "vitest";
+import { constVoid } from "effect/Function";
+import { describe, expect, it, vi } from "vitest";
 
 import { listen, makeCertificate, refusingPort } from "./testing/loopback.ts";
 import type { Certificate } from "./testing/loopback.ts";
@@ -17,6 +18,7 @@ const bytes = new TextEncoder();
 const text = new TextDecoder();
 const certificate = makeCertificate("irc.test");
 const ipCertificate = makeCertificate("127.0.0.1", "IP:127.0.0.1");
+const otherIpCertificate = makeCertificate("127.0.0.2", "IP:127.0.0.2");
 
 const tlsAddress: IrcdAddress = { host: "irc.test", port: 6697, tls: true };
 const plainAddress: IrcdAddress = { host: "irc.test", port: 6667, tls: false };
@@ -84,6 +86,63 @@ const dialAndRead = (address: IrcdAddress, options: BunTransportOptions) =>
 // A TLS server's socket says what SNI the client sent, which `Net.Socket` does not type.
 const servername = (socket: Net.Socket) =>
   socket instanceof TLSSocket ? socket.servername : "not TLS";
+
+/**
+ * Records, for the Scope, the local port of every TCP socket this process destroys. The
+ * far end of a test can then tell that the Transport destroyed its socket while the far
+ * end is still paused, which no remote end of stream could show.
+ * @returns Whether the socket with a local port has been destroyed, given the far end's
+ * remote port, read while it was open.
+ */
+const destroys = Effect.acquireRelease(
+  Effect.sync(() => {
+    const ports = new Set<number>();
+    // oxlint-disable-next-line typescript/unbound-method -- called with its own `this` below.
+    const { destroy } = Net.Socket.prototype;
+
+    const spy = vi.spyOn(Net.Socket.prototype, "destroy").mockImplementation(function recorded(
+      this: Net.Socket,
+      error?: Error
+    ) {
+      ports.add(this.localPort ?? 0);
+
+      return destroy.call(this, error);
+    });
+
+    return { ports, spy };
+  }),
+  ({ spy }) =>
+    Effect.sync(() => {
+      spy.mockRestore();
+    })
+).pipe(
+  Effect.map(
+    ({ ports }) =>
+      (port: number | undefined) =>
+        ports.has(port ?? -1)
+  )
+);
+
+/**
+ * Sends until a send stalls, because the far end has stopped reading.
+ * @param send - Sends one chunk.
+ * @returns The stalled send, still running.
+ */
+const sendUntilStalled = (send: Effect.Effect<void>) =>
+  Effect.gen(function* () {
+    for (;;) {
+      const sending = yield* Effect.forkChild(send);
+
+      const done = yield* Fiber.await(sending).pipe(
+        Effect.as(true),
+        Effect.timeoutOrElse({ duration: "50 millis", orElse: () => Effect.succeed(false) })
+      );
+
+      if (!done) {
+        return sending;
+      }
+    }
+  });
 
 const to = (port: number) => () => Effect.succeed({ host: "127.0.0.1", port });
 
@@ -167,6 +226,43 @@ describe("TLS", () => {
     expect(events).toStrictEqual(["Opened", "Closed Ended"]);
   });
 
+  it("verifies a routed address against the address dialled, and sends it no SNI", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const far = yield* ircd(otherIpCertificate);
+
+        const link = yield* makeBunTransport({
+          route: to(far.port),
+          trust: [otherIpCertificate.cert],
+        }).dial({ host: "127.0.0.2", port: 6697, tls: true });
+
+        const socket = yield* far.accepted;
+        const sni = servername(socket);
+
+        socket.end();
+
+        return { events: (yield* Stream.runCollect(link.events)).map(show), sni };
+      })
+    );
+
+    expect(result).toStrictEqual({ events: ["Opened", "Closed Ended"], sni: false });
+  });
+
+  it("refuses a routed address whose certificate is only for where it was routed", async () => {
+    const events = await run(
+      Effect.gen(function* () {
+        const far = yield* ircd(ipCertificate);
+
+        return yield* dialAndRead(
+          { host: "127.0.0.2", port: 6697, tls: true },
+          { route: to(far.port), trust: [ipCertificate.cert] }
+        );
+      })
+    );
+
+    expect(events).toStrictEqual(["Closed Tls"]);
+  });
+
   it("refuses an Ircd dialled by address whose certificate names another", async () => {
     const events = await run(
       Effect.gen(function* () {
@@ -204,7 +300,7 @@ describe("TLS", () => {
     expect(result).toStrictEqual({ events: ["Closed Tls"], far: "closed" });
   });
 
-  it("refuses a trusted certificate for another name", async () => {
+  it("refuses a routed name whose trusted certificate is for another", async () => {
     const events = await run(
       Effect.gen(function* () {
         const far = yield* ircd(certificate);
@@ -282,6 +378,7 @@ describe("an open Connection", () => {
   it("ends a write the peer never reads as TimedOut, and closes the socket", async () => {
     const result = await run(
       Effect.gen(function* () {
+        const destroyed = yield* destroys;
         const far = yield* ircd(undefined);
 
         const link = yield* makeBunTransport({
@@ -302,12 +399,17 @@ describe("an open Connection", () => {
         }
 
         const events = yield* Fiber.join(reading);
+        const destroyedWhilePaused = destroyed(socket.remotePort) && socket.isPaused();
 
-        return { events: events.map(show), far: yield* farClosed(socket) };
+        return { destroyedWhilePaused, events: events.map(show), far: yield* farClosed(socket) };
       })
     );
 
-    expect(result).toStrictEqual({ events: ["Opened", "Closed TimedOut"], far: "closed" });
+    expect(result).toStrictEqual({
+      destroyedWhilePaused: true,
+      events: ["Opened", "Closed TimedOut"],
+      far: "closed",
+    });
   });
 
   it("frames Lines however the reads split them", async () => {
@@ -461,6 +563,95 @@ describe("an open Connection", () => {
     expect(result).toStrictEqual({ events: ["Opened", "Closed HungUp"], far: "closed" });
   });
 
+  it("lets what was sent be written before a hangup ends it, over TLS", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const far = yield* ircd(certificate);
+
+        const link = yield* makeBunTransport({
+          route: to(far.port),
+          trust: [certificate.cert],
+        }).dial(tlsAddress);
+
+        const socket = yield* far.accepted;
+        const chunks: Buffer[] = [];
+        const ended = yield* Deferred.make<string>();
+
+        socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+        socket.on("end", () => Deferred.doneUnsafe(ended, Effect.succeed("ended")));
+        const reading = yield* Effect.forkChild(Stream.runCollect(link.events));
+
+        const lines = Array.from(
+          { length: 1000 },
+          (_, index) =>
+            `:iirc NOTICE #flood :${String(index).padStart(4, "0")} ${"y".repeat(460)}\r\n`
+        );
+
+        for (const line of [...lines, "QUIT :bye\r\n"]) {
+          yield* link.send(bytes.encode(line));
+        }
+
+        yield* link.hangup;
+        yield* Deferred.await(ended);
+        const heard = Buffer.concat(chunks).toString();
+
+        return {
+          events: (yield* Fiber.join(reading)).map(show),
+          heard: heard.length,
+          quit: heard.endsWith("QUIT :bye\r\n"),
+          sent: lines.join("").length + 11,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      events: ["Opened", "Closed HungUp"],
+      heard: result.sent,
+      quit: true,
+      sent: result.sent,
+    });
+  });
+
+  it("does not let a peer that never reads hold a hangup past hangupTimeout", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const destroyed = yield* destroys;
+        const far = yield* ircd(undefined);
+
+        const link = yield* makeBunTransport({
+          hangupTimeout: "100 millis",
+          route: to(far.port),
+          writeTimeout: "1 minute",
+        }).dial(plainAddress);
+
+        const socket = yield* far.accepted;
+
+        socket.pause();
+        const reading = yield* Effect.forkChild(Stream.runCollect(link.events));
+        const chunk = bytes.encode(`PRIVMSG #flood :${"x".repeat(65_000)}\r\n`);
+
+        yield* sendUntilStalled(link.send(chunk));
+        const started = performance.now();
+
+        yield* link.hangup;
+        const took = performance.now() - started;
+        const destroyedWhilePaused = destroyed(socket.remotePort) && socket.isPaused();
+
+        return {
+          destroyedWhilePaused,
+          events: (yield* Fiber.join(reading)).map(show),
+          inBound: took >= 90 && took < 1000,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      destroyedWhilePaused: true,
+      events: ["Opened", "Closed HungUp"],
+      inBound: true,
+    });
+  });
+
   it("ends without Closed when its Scope closes, and closes the socket", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -483,5 +674,113 @@ describe("an open Connection", () => {
 
     expect(result.far).toBe("closed");
     expect(result.events.filter((event) => event.startsWith("Closed"))).toStrictEqual([]);
+  });
+});
+
+describe("a Scope or a timer racing the dial", () => {
+  it("ends without Closed, and dials nothing, when the Scope closes during routing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const accepted = yield* Deferred.make<string>();
+
+        const port = yield* listen(undefined, () => {
+          Deferred.doneUnsafe(accepted, Effect.succeed("accepted"));
+        });
+
+        const gate = yield* Deferred.make<undefined>();
+
+        const link = yield* Effect.scoped(
+          makeBunTransport({
+            route: () => Effect.as(Deferred.await(gate), { host: "127.0.0.1", port }),
+          }).dial(plainAddress)
+        );
+
+        yield* Deferred.succeed(gate, undefined);
+        const events = (yield* Stream.runCollect(link.events)).map(show);
+
+        const dialled = yield* Deferred.await(accepted).pipe(
+          Effect.as("dialled"),
+          Effect.timeoutOrElse({ duration: "100 millis", orElse: () => Effect.succeed("not") })
+        );
+
+        return { dialled, events };
+      })
+    );
+
+    expect(result).toStrictEqual({ dialled: "not", events: [] });
+  });
+
+  it("ends without Closed, and destroys the socket, when the Scope closes during TLS", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const destroyed = yield* destroys;
+        // A plain listener never answers the handshake, so it is still going when the
+        // Scope closes.
+        const far = yield* ircd(undefined);
+
+        const { link, port, socket } = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const dialled = yield* makeBunTransport({
+              route: to(far.port),
+              trust: [certificate.cert],
+            }).dial(tlsAddress);
+
+            const accepted = yield* far.accepted;
+
+            // Long enough for TCP to be open on our side too, and the handshake waiting.
+            yield* Effect.sleep("20 millis");
+
+            return { link: dialled, port: accepted.remotePort, socket: accepted };
+          })
+        );
+
+        return {
+          destroyed: destroyed(port),
+          events: (yield* Stream.runCollect(link.events)).map(show),
+          far: yield* farClosed(socket),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ destroyed: true, events: [], far: "closed" });
+  });
+
+  it.each([
+    ["connect", plainAddress, (ms: number) => ({ connectTimeout: Duration.millis(ms) })],
+    ["handshake", tlsAddress, (ms: number) => ({ handshakeTimeout: Duration.millis(ms) })],
+  ] as const)("ends once when a %s timer races Opened", async (_, address, timer) => {
+    const outcomes = await run(
+      Effect.gen(function* () {
+        const port = yield* listen(address.tls ? certificate : undefined, constVoid);
+        const seen = new Set<string>();
+
+        for (let attempt = 0; attempt < 24; attempt += 1) {
+          const shown = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const link = yield* makeBunTransport({
+                ...timer(attempt % 6),
+                route: to(port),
+                trust: [certificate.cert],
+              }).dial(address);
+
+              const reading = yield* Effect.forkChild(Stream.runCollect(link.events));
+
+              yield* Effect.sleep("10 millis");
+              yield* link.hangup;
+
+              return (yield* Fiber.join(reading)).map(show).join(" | ");
+            })
+          );
+
+          seen.add(shown);
+        }
+
+        return [...seen];
+      })
+    );
+
+    expect(
+      outcomes.filter((shown) => !/^(?:Opened \| Closed HungUp|Closed TimedOut)$/u.test(shown))
+    ).toStrictEqual([]);
   });
 });

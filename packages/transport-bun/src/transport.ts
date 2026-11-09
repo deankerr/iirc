@@ -1,14 +1,14 @@
-import { isIP } from "node:net";
+import type { Duplex } from "node:stream";
 import { getCACertificates } from "node:tls";
 
 /**
  * The production Transport: TCP and TLS on Bun, through Effect's sockets.
  *
  * It is built on `@effect/platform-bun`'s `BunSocket`, which is Effect's Node socket over
- * Bun's `node:net` and `node:tls`, as ADR 0005 asks. Effect covers every need here:
- * connecting, a TLS upgrade with SNI, trust anchors and hostname verification, reads that
- * wait for a pull, so the kernel holds back a peer we are not reading, and writes that
- * wait for `drain`. `Bun.connect` is not needed.
+ * Bun's `node:net` and `node:tls`, as ADR 0005 asks. Effect reads only when pulled, so the
+ * kernel holds back a peer we are not reading, and its writes wait for `drain`. The socket
+ * itself is opened in `open.ts`, which says why TLS is opened with `node:tls` there rather
+ * than with Effect's upgrade. `Bun.connect` is not needed.
  *
  * @packageDocumentation
  */
@@ -18,15 +18,13 @@ import { maxReceivedBytes, Transport } from "@iirc/runtime/transport";
 import type { Link, LinkEvent, TransportService } from "@iirc/runtime/transport";
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
 import type { Duration } from "effect";
-import * as Socket from "effect/socket/Socket";
+import type * as Socket from "effect/socket/Socket";
 
 import { makeFramer } from "./framer.ts";
+import { openSocket } from "./open.ts";
+import type { Destination } from "./open.ts";
 
-/** Where a dial actually goes: a host name or address, and a port. */
-export interface Destination {
-  readonly host: string;
-  readonly port: number;
-}
+export type { Destination } from "./open.ts";
 
 /** How the Bun Transport dials. Production leaves every option at its default. */
 export interface BunTransportOptions {
@@ -43,6 +41,11 @@ export interface BunTransportOptions {
    * when the far end has stopped reading. Defaults to 60 seconds.
    */
   readonly writeTimeout?: Duration.Input;
+  /**
+   * How long `hangup` may wait for what was sent to be written before it destroys the
+   * socket anyway. Defaults to 2 seconds.
+   */
+  readonly hangupTimeout?: Duration.Input;
   /**
    * Where to connect for an address. SNI and the certificate are still checked against
    * the address's own host, so this redirects a dial without weakening TLS. Defaults to
@@ -137,15 +140,12 @@ const reasonOf = (error: Socket.SocketError): CloseReason => {
   }
 };
 
-const timedOut = new Socket.SocketError({
-  reason: new Socket.SocketOpenError({ cause: undefined, kind: "Timeout" }),
-});
-
-/** An open Connection's two halves. */
+/** An open Connection: its two halves, and the socket under them. */
 interface Open {
   readonly _tag: "Open";
   readonly pull: Effect.Effect<readonly Uint8Array[], Socket.SocketError>;
   readonly writer: Socket.Writer;
+  readonly socket: Duplex;
 }
 
 /** How the dial settled: open, or ended first. `undefined` is a closed Scope. */
@@ -158,6 +158,36 @@ const closed = (reason: CloseReason): LinkEvent => ({ _tag: "Closed", reason });
 const received = (bytes: Uint8Array): LinkEvent => ({ _tag: "Received", bytes });
 
 /**
+ * Ends a socket's write side and waits until everything sent before has been written,
+ * which is when `finish` comes. It may never come, if the far end has stopped reading.
+ * @param socket - The socket to end.
+ * @returns An Effect that ends the socket and waits.
+ */
+const flushed = (socket: Duplex) =>
+  Effect.callback<Duplex>((resume) => {
+    const done = () => {
+      socket.off("finish", done);
+      socket.off("close", done);
+      resume(Effect.succeed(socket));
+    };
+
+    if (socket.writableFinished || socket.destroyed) {
+      resume(Effect.succeed(socket));
+
+      return Effect.void;
+    }
+
+    socket.once("finish", done);
+    socket.once("close", done);
+    socket.end();
+
+    return Effect.sync(() => {
+      socket.off("finish", done);
+      socket.off("close", done);
+    });
+  });
+
+/**
  * Makes the Transport.
  * @param options - How to dial. Production leaves them at their defaults.
  * @returns A Transport over TCP and TLS.
@@ -166,16 +196,10 @@ export const makeBunTransport = (options: BunTransportOptions = {}): TransportSe
   const connectTimeout = options.connectTimeout ?? "30 seconds";
   const handshakeTimeout = options.handshakeTimeout ?? "30 seconds";
   const writeTimeout = options.writeTimeout ?? "60 seconds";
+  const hangupTimeout = options.hangupTimeout ?? "2 seconds";
   const route = options.route ?? ((address) => Effect.succeed(address));
   // Read once per Transport rather than once per dial.
   const roots = [...systemRoots(), ...(options.trust ?? [])];
-
-  const tlsOptions = (host: string): Socket.TlsUpgradeOptions => ({
-    ca: roots,
-    rejectUnauthorized: true,
-    // SNI may not carry an address (RFC 6066), so an address is verified without it.
-    ...(isIP(host) === 0 && { servername: host }),
-  });
 
   const dial = (address: IrcdAddress): Effect.Effect<Link, never, Scope.Scope> =>
     Effect.gen(function* () {
@@ -184,9 +208,10 @@ export const makeBunTransport = (options: BunTransportOptions = {}): TransportSe
       const settled = yield* Deferred.make<Settled>();
       const ended = yield* Deferred.make<CloseReason | undefined>();
 
-      // Ends the Connection once: the first reason wins, and the socket is destroyed at
-      // once rather than waiting to flush, which a peer that never reads would never let
-      // happen. Bytes the kernel already holds are still delivered.
+      // Ends the Connection once, and the first reason wins. A hangup first lets what was
+      // sent be written, for at most `hangupTimeout`. Then the socket is destroyed at once,
+      // rather than left to flush to a peer that may never read. Bytes the kernel already
+      // holds are still delivered.
       const finish = (reason: CloseReason | undefined) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
@@ -199,45 +224,38 @@ export const makeBunTransport = (options: BunTransportOptions = {}): TransportSe
             );
 
             if (now._tag === "Open") {
-              yield* Effect.ignore(now.writer.write(new Socket.CloseEvent(1000)));
+              if (reason === "HungUp") {
+                // Only the wait may be cut short, by its bound or by interrupting the hangup.
+                // The socket is destroyed either way.
+                yield* Effect.interruptible(flushed(now.socket)).pipe(
+                  Effect.timeoutOrElse({ duration: hangupTimeout, orElse: () => Effect.void }),
+                  Effect.exit
+                );
+              }
+
+              now.socket.destroy();
             }
 
             yield* Scope.close(connection, Exit.void);
           })
         );
 
-      const reach = Effect.gen(function* () {
-        const destination = yield* route(address);
+      const connect = Effect.gen(function* () {
+        const opening = yield* Deferred.make<Duplex>();
 
-        const socket = yield* BunSocket.makeNet({
-          host: destination.host,
-          port: destination.port,
-        });
+        const socket = yield* BunSocket.fromDuplex(
+          openSocket({ address, connectTimeout, handshakeTimeout, roots, route }).pipe(
+            Effect.tap((open) => Deferred.succeed(opening, open))
+          )
+        );
 
         const reader = yield* Scope.provide(socket.reader, connection);
-
-        return { reader, socket };
-      }).pipe(
-        Effect.timeoutOrElse({ duration: connectTimeout, orElse: () => Effect.fail(timedOut) })
-      );
-
-      const connect = Effect.gen(function* () {
-        const { reader, socket } = yield* reach;
-
-        if (address.tls) {
-          yield* reader.upgrade(tlsOptions(address.host)).pipe(
-            Effect.timeoutOrElse({
-              duration: handshakeTimeout,
-              orElse: () => Effect.fail(timedOut),
-            })
-          );
-        }
-
         const writer = yield* Scope.provide(socket.writer, connection);
 
         yield* Deferred.succeed(settled, {
           _tag: "Open",
           pull: reader.pull.pipe(Effect.map(asBytes)),
+          socket: yield* Deferred.await(opening),
           writer,
         });
       }).pipe(Effect.catch((error) => finish(reasonOf(error))));
