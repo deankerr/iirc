@@ -767,42 +767,56 @@ describe("a Scope or a timer racing the dial", () => {
     expect(result).toStrictEqual({ destroyed: true, events: [], far: "closed" });
   });
 
+  // No wall clock decides the outcome: the hangup is made only in answer to Opened. So a
+  // timer that wins gives `Closed TimedOut`, an Opened that wins gives `Opened`, then
+  // `Closed HungUp`, and anything else, such as two endings, none, or a timer after
+  // Opened, is a bug. Which one wins, under load or not, is not asserted.
   it.each([
     ["connect", plainAddress, (ms: number) => ({ connectTimeout: Duration.millis(ms) })],
     ["handshake", tlsAddress, (ms: number) => ({ handshakeTimeout: Duration.millis(ms) })],
-  ] as const)("ends once when a %s timer races Opened", async (_, address, timer) => {
-    const outcomes = await run(
-      Effect.gen(function* () {
-        const port = yield* listen(address.tls ? certificate : undefined, constVoid);
-        const seen = new Set<string>();
+  ] as const)(
+    "ends once when a %s timer races Opened",
+    async (_, address, timer) => {
+      const outcomes = await run(
+        Effect.gen(function* () {
+          const port = yield* listen(address.tls ? certificate : undefined, constVoid);
+          const seen = new Set<string>();
 
-        for (let attempt = 0; attempt < 24; attempt += 1) {
-          const shown = yield* Effect.scoped(
-            Effect.gen(function* () {
-              const link = yield* makeBunTransport({
-                ...timer(attempt % 6),
-                route: to(port),
-                trust: [certificate.cert],
-              }).dial(address);
+          for (let attempt = 0; attempt < 24; attempt += 1) {
+            const shown = yield* Effect.scoped(
+              Effect.gen(function* () {
+                const link = yield* makeBunTransport({
+                  ...timer(attempt % 6),
+                  route: to(port),
+                  trust: [certificate.cert],
+                }).dial(address);
 
-              const reading = yield* Effect.forkChild(Stream.runCollect(link.events));
+                const events: string[] = [];
 
-              yield* Effect.sleep("10 millis");
-              yield* link.hangup;
+                yield* Stream.runForEach(link.events, (event) => {
+                  events.push(show(event));
 
-              return (yield* Fiber.join(reading)).map(show).join(" | ");
-            })
-          );
+                  return event._tag === "Opened" ? link.hangup : Effect.void;
+                });
 
-          seen.add(shown);
-        }
+                return events.join(" | ");
+              })
+            );
 
-        return [...seen];
-      })
-    );
+            seen.add(shown);
+          }
 
-    expect(
-      outcomes.filter((shown) => !/^(?:Opened \| Closed HungUp|Closed TimedOut)$/u.test(shown))
-    ).toStrictEqual([]);
-  });
+          return [...seen];
+        })
+      );
+
+      expect(
+        outcomes.filter(
+          (shown) => shown !== "Opened | Closed HungUp" && shown !== "Closed TimedOut"
+        )
+      ).toStrictEqual([]);
+    },
+    // Only a bound on a run under load, not part of what is checked.
+    30_000
+  );
 });
