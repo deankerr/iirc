@@ -177,10 +177,11 @@ const makeNetwork = <S>(id: NetworkId, folded: Folded<S>) =>
     return network;
   });
 
+// The first reason stands: stopping a stopped Network does nothing.
 const stop = <S>(network: Network<S>, reason: string) =>
-  Effect.andThen(
-    Ref.set(network.status, { _tag: "Stopped", reason }),
-    Deferred.fail(network.stopped, new NetworkStopped({ network: network.id, reason }))
+  Effect.flatMap(
+    Deferred.fail(network.stopped, new NetworkStopped({ network: network.id, reason })),
+    (first) => (first ? Ref.set(network.status, { _tag: "Stopped", reason }) : Effect.void)
   );
 
 /**
@@ -445,7 +446,7 @@ export const startNetwork = <S>(
       return network;
     }
 
-    yield* Effect.scoped(drive(ports, network, restarted)).pipe(
+    const driver = yield* Effect.scoped(drive(ports, network, restarted)).pipe(
       Effect.catchCauseIf(
         (cause) => !Cause.hasInterruptsOnly(cause),
         (cause) =>
@@ -460,6 +461,12 @@ export const startNetwork = <S>(
       Effect.annotateLogs({ network: id }),
       Effect.forkScoped
     );
+
+    // A driver forked into a Scope already closing is interrupted before it starts, so
+    // its `onInterrupt` never runs. A driver that has ended by now has stopped either way.
+    if (driver.pollUnsafe() !== undefined) {
+      yield* stop(network, runtimeClosed);
+    }
 
     return network;
   });

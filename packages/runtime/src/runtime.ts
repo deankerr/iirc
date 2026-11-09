@@ -15,7 +15,7 @@ import type {
 } from "@iirc/client";
 import type { Knowledge } from "@iirc/client/known";
 import { FallbackEncoding, missingDecoders } from "@iirc/protocol/line";
-import { Context, Effect, Layer, Random, Ref, Schema, Scope, Semaphore } from "effect";
+import { Context, Effect, Exit, Layer, Random, Ref, Schema, Scope, Semaphore } from "effect";
 import type { Stream } from "effect";
 
 import { Journal, NetworkId } from "./journal.ts";
@@ -53,6 +53,12 @@ export interface Saying {
   readonly kind: SayKind;
   readonly target: string;
   readonly text: string;
+  /**
+   * The intent id to say it under. Left out, the Runtime names one. A caller that names
+   * its own knows it before the `Say` is stepped, so after a `NetworkStopped` it can look
+   * for it in the News rather than say it again.
+   */
+  readonly intent?: IntentId | undefined;
 }
 
 /** A Network as the Runtime holds it, for agents and debugging. */
@@ -73,7 +79,7 @@ export interface RuntimeService {
     network: NetworkId,
     configuration: NetworkConfiguration
   ) => Effect.Effect<Sequence, NetworkStopped>;
-  /** Journals a `Say`, with an intent id the Runtime names, and waits until it is stepped. */
+  /** Journals a `Say`, under the caller's intent id or one the Runtime names, and waits until it is stepped. */
   readonly say: (
     network: NetworkId,
     saying: Saying
@@ -135,22 +141,26 @@ export const makeRuntime = <S>(
       vault: yield* Vault,
     };
 
-    const scope = yield* Effect.scope;
     const held = yield* Ref.make<ReadonlyMap<NetworkId, Network<S>>>(new Map());
+    // Admission and shutdown take the same permit, so a Network is either added before
+    // shutdown begins, and stopped by it, or refused.
     const adding = yield* Semaphore.make(1);
+    const closed = yield* Ref.make(false);
+    // Every driver lives here. Shutdown closes it under the permit, whatever order the
+    // Layer's other finalizers run in.
+    const drivers = yield* Scope.make();
+
+    yield* Effect.addFinalizer(() =>
+      adding.withPermit(Effect.andThen(Ref.set(closed, true), Scope.close(drivers, Exit.void)))
+    );
 
     const folded = yield* refold(client, ports.journal);
 
     for (const [id, network] of folded) {
-      const started = yield* startNetwork(ports, id, network, true);
+      const started = yield* startNetwork(ports, id, network, true).pipe(Scope.provide(drivers));
 
       yield* Ref.update(held, (networks) => new Map(networks).set(id, started));
     }
-
-    // Set first on shutdown, before any Network stops, so no Network is added after.
-    const closed = yield* Ref.make(false);
-
-    yield* Effect.addFinalizer(() => Ref.set(closed, true));
 
     const find = (id: NetworkId) =>
       Effect.flatMap(Ref.get(held), (networks) => {
@@ -175,7 +185,7 @@ export const makeRuntime = <S>(
           }
 
           return startNetwork(ports, id, fresh(client), false).pipe(
-            Scope.provide(scope),
+            Scope.provide(drivers),
             Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
             Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
           );
@@ -220,8 +230,17 @@ export const makeRuntime = <S>(
       say: (id, saying) =>
         Effect.gen(function* () {
           const network = yield* find(id);
-          const intent = yield* intentId;
-          const sequence = yield* tell(network, (at) => ({ _tag: "Say", at, intent, ...saying }));
+          const intent = saying.intent ?? (yield* intentId);
+          const { kind, target, text } = saying;
+
+          const sequence = yield* tell(network, (at) => ({
+            _tag: "Say",
+            at,
+            intent,
+            kind,
+            target,
+            text,
+          }));
 
           return { intent, sequence };
         }),

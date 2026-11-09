@@ -1,10 +1,10 @@
-import { ConnectionId, Instant, TimerId } from "@iirc/client";
+import { ConnectionId, Instant, IntentId, TimerId } from "@iirc/client";
 import type { Client, Input, News, Output } from "@iirc/client";
 import { configured, scripted } from "@iirc/client/testing";
 import type { Scripted } from "@iirc/client/testing";
 import { CredentialName, isRejected, nick, privmsg } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected } from "@iirc/protocol/line";
-import { Effect, Exit, Fiber, Latch, Redacted, Schema, Stream } from "effect";
+import { Effect, Exit, Fiber, Latch, Redacted, References, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -666,6 +666,90 @@ describe("closing the Runtime", () => {
       networks: new Map<NetworkId, NetworkStatus>([
         [libera, { _tag: "Stopped", reason: "The Runtime closed" }],
       ]),
+    });
+  });
+
+  it("never leaves a Network added as it closes running, or its caller waiting", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const outcomes: string[] = [];
+
+        // Close after each number of scheduler turns, to land in every gap of adding one.
+        for (let turns = 0; turns < 40; turns += 1) {
+          const { close, runtime } = yield* startRuntime(world, scripted([]));
+          const network = NetworkId.make(`net-${turns}`);
+          const adding = yield* Effect.forkChild(runtime.configure(network, configuration));
+
+          for (let turn = 0; turn < turns; turn += 1) {
+            yield* Effect.yieldNow;
+          }
+
+          yield* close;
+          yield* settle;
+          const exit = adding.pollUnsafe();
+          const statuses = [...(yield* runtime.networks).values()];
+
+          if (exit === undefined || statuses.some((status) => status._tag === "Running")) {
+            outcomes.push(`after ${turns} turns: ${exit === undefined ? "waiting" : "done"}`);
+          }
+        }
+
+        return outcomes;
+      }).pipe(Effect.provideService(References.MaxOpsBeforeYield, 20))
+    );
+
+    expect(result).toStrictEqual([]);
+  });
+
+  it("fails an input appended but not yet stepped, which a restart then folds", async () => {
+    const intent = IntentId.make("mine");
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const gate = yield* Latch.make(true);
+
+        // Waits just after the Say is durably appended, before it is stepped.
+        const journal = wrapJournal(world.journal, {
+          after: (record) =>
+            record._tag === "Input" && record.input._tag === "Say" ? gate.await : Effect.void,
+        });
+
+        const script: readonly Scripted[] = [
+          { when: "Configured" },
+          { news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }], when: "Say" },
+          { news: [told("STARTED")], when: "Started" },
+        ];
+
+        const first = yield* startRuntime({ ...world, journal }, scripted(script));
+
+        yield* first.runtime.configure(libera, configuration);
+        yield* gate.close;
+
+        const saying = yield* Effect.forkChild(
+          first.runtime.say(libera, { intent, kind: "Privmsg", target: "#iirc", text: "hi" })
+        );
+
+        yield* settle;
+        yield* first.close;
+        const said = yield* Fiber.await(saying);
+        const second = yield* startRuntime(world, scripted(script));
+
+        yield* settle;
+        const news = yield* Stream.runCollect(Stream.take(second.runtime.news(), 2));
+
+        return {
+          news: news.flatMap((happened) => happened.news),
+          outline: yield* outline(world.journal),
+          said,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      // The caller finds its intent in the News, so it knows the Say was journaled.
+      news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }, told("STARTED")],
+      outline: ["1 libera Configured", "2 libera Say", "3 libera Started"],
+      said: Exit.fail(closedFor(libera)),
     });
   });
 
