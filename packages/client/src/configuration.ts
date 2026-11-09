@@ -1,4 +1,4 @@
-import { CredentialName } from "@iirc/protocol/line";
+import { CredentialName, FallbackEncoding } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import { FeatureName } from "./ids.ts";
@@ -42,7 +42,7 @@ export const NetworkConfiguration = Schema.Struct({
   declined: Schema.Array(FeatureName),
   enabled: Schema.Boolean,
   /** The WHATWG label to read bytes that are not UTF-8 with, until the Ircd says `UTF8ONLY`. */
-  fallbackEncoding: Schema.String,
+  fallbackEncoding: FallbackEncoding,
   ircds: Schema.NonEmptyArray(IrcdAddress),
   login: Login,
   nicks: Schema.NonEmptyArray(Schema.String),

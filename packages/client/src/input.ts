@@ -22,10 +22,11 @@ export const CloseReason = Schema.Literals([
 export type CloseReason = typeof CloseReason.Type;
 
 /**
- * Why the Runtime could not fill a `SecretLine`: the Vault holds no such Credential, or
- * the Vault could not be read.
+ * Why the Runtime could not fill a `SecretLine`: the Vault holds no such Credential, the
+ * Vault could not be read, or the Credential's value cannot be sent in that Line, such as
+ * a password with a line break.
  */
-export const UnfilledReason = Schema.Literals(["Missing", "Unavailable"]);
+export const UnfilledReason = Schema.Literals(["Missing", "Unavailable", "Unsendable"]);
 
 /** The decoded form of {@link UnfilledReason}. */
 export type UnfilledReason = typeof UnfilledReason.Type;

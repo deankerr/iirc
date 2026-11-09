@@ -38,7 +38,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Received` | Transport | One Line's bytes, without its line ending. |
 | `Closed` | Transport | A Connection is over, and how. |
 | `Fired` | Clock | A timer the Client set is due, with the instant its `Wake` set. |
-| `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent: the Credential is `Missing`, or the Vault is `Unavailable`. |
+| `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent: the Credential is `Missing`, the Vault is `Unavailable`, or the value is `Unsendable` in that Line, such as a password with a line break. |
 
 ## Outputs
 

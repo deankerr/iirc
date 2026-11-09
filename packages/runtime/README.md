@@ -49,7 +49,7 @@ JournalRecord = Input { network, input } | Outputs { network, of, outputs }
 - **Versioned, not migrated.** `journalVersion` is 1. An adapter that finds another version refuses to open with `JournalVersionMismatch`. Nothing is migrated until the shape has settled.
 - **`JournalFailed`** means the Journal could not be written or read. The Runtime stops that Network rather than step an input it did not keep.
 
-The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table from the outputs, sets those timers, and steps a `Started`.
+The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. Every Line goes through `@iirc/protocol`'s `encode`, the last guard on what is sent: a `Rejected` from it means a bug upstream, which the Runtime logs, and that Line is not sent. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table from the outputs, sets those timers, and steps a `Started`.
 
 ## Vault
 
@@ -62,7 +62,7 @@ names: Effect<ReadonlySet<CredentialName>, VaultFailed>
 
 - **Values are always `Redacted`,** so a value cannot be logged or journaled by accident. Only `fillSecret` in `@iirc/protocol` unwraps one, and its result is sent, never kept.
 - **The Runtime reveals at the last moment,** for each `SendSecret`, and lets go of the value once the Line is sent.
-- **A Credential that cannot be revealed sends nothing.** The Runtime steps an `Unfilled` input naming the `SecretLine`, so the Client decides what follows. Its reason is `Missing` for `CredentialMissing`, which the Owner must fix, or `Unavailable` for `VaultFailed`, which may pass.
+- **A Credential that cannot be revealed sends nothing.** The Runtime steps an `Unfilled` input naming the `SecretLine`, so the Client decides what follows. Its reason is `Missing` for `CredentialMissing`, which the Owner must fix, `Unavailable` for `VaultFailed`, which may pass, or `Unsendable` when `fillSecret` refuses the value, such as a password with a line break, which the Owner must fix. The `Unfilled` input never holds the value or the refused Lines.
 - **`VaultFailed` can come from any call,** `reveal` and `names` included, whenever the Vault cannot be read, such as when its file's directory is missing.
 - **`names` lists names, never values.** The Owner API holds and forgets Credentials, and can list them, but never reads one back.
 - **Only passwords for now.** SASL `EXTERNAL` would add a client certificate as a kind of Credential, which `Dial` names.
