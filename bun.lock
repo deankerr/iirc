@@ -29,6 +29,14 @@
         "vitest": "catalog:",
       },
     },
+    "packages/fence": {
+      "name": "@iirc/fence",
+      "version": "0.0.0",
+      "devDependencies": {
+        "effect": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/protocol": {
       "name": "@iirc/protocol",
       "version": "0.0.0",
@@ -128,6 +136,8 @@
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
     "@iirc/client": ["@iirc/client@workspace:packages/client"],
+
+    "@iirc/fence": ["@iirc/fence@workspace:packages/fence"],
 
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 

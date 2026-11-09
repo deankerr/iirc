@@ -51,14 +51,18 @@ export const makeMemoryTransport: Effect.Effect<MemoryTransport> = Effect.gen(fu
       const heard = yield* Queue.unbounded<Uint8Array>();
       const phase = yield* Ref.make<Phase>("Dialling");
 
+      // Marking it closed, reporting `Closed`, and ending the stream cannot be interrupted
+      // apart, or the stream would never end and a later close would do nothing.
       const close = (event: LinkEvent | undefined) =>
-        Effect.flatMap(Ref.getAndSet(phase, "Closed"), (was) =>
-          was === "Closed"
-            ? Effect.void
-            : Effect.andThen(
-                event === undefined ? Effect.void : Queue.offer(events, event),
-                Queue.end(events)
-              )
+        Effect.uninterruptible(
+          Effect.flatMap(Ref.getAndSet(phase, "Closed"), (was) =>
+            was === "Closed"
+              ? Effect.void
+              : Effect.andThen(
+                  event === undefined ? Effect.void : Queue.offer(events, event),
+                  Queue.end(events)
+                )
+          )
         );
 
       yield* Effect.addFinalizer(() => close(undefined));

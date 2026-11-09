@@ -53,7 +53,8 @@ const noRandomOrNow: NonNullable<DummyRuleMap["no-restricted-properties"]> = [
 ];
 
 const ours = (allowed: readonly string[], message: string): Pattern => ({
-  group: ["@iirc/*", ...allowed.map((name) => `!${name}`)],
+  // `@iirc/*` matches one segment only, so subpaths such as `@iirc/runtime/journal` need `/**`.
+  group: ["@iirc/*", "@iirc/*/**", ...allowed.map((name) => `!${name}`)],
   message,
 });
 
@@ -82,20 +83,41 @@ const pureImports = (
   },
 ];
 
-const noClock: NonNullable<DummyRuleMap["no-restricted-globals"]> = [
+// The global object itself is refused too, so `globalThis.Date` or an alias of
+// `globalThis` cannot reach what is refused by name.
+const globalObjects = ["globalThis", "self", "window", "global"];
+
+const restrictGlobals = (
+  ...groups: readonly { readonly message: string; readonly names: readonly string[] }[]
+): NonNullable<DummyRuleMap["no-restricted-globals"]> => [
   "error",
-  ...[
+  {
+    checkGlobalObject: true,
+    globalObjects,
+    globals: groups.flatMap(({ message, names }) => names.map((name) => ({ message, name }))),
+  },
+];
+
+const noClock = restrictGlobals({
+  message: pure,
+  names: [
     "Date",
     "setTimeout",
     "setInterval",
+    "setImmediate",
     "queueMicrotask",
     "performance",
     "crypto",
     "fetch",
+    "WebSocket",
+    "XMLHttpRequest",
+    "EventSource",
     "process",
     "Bun",
-  ].map((name) => ({ message: pure, name })),
-];
+    "require",
+    ...globalObjects,
+  ],
+});
 
 const toClient = "`@iirc/client` depends only on `@iirc/protocol`.";
 
@@ -119,22 +141,26 @@ const runtimeTestOurs = ours(
 const throughClock = "The Runtime reads time only through the Clock port.";
 const throughPorts = "The Runtime reaches the world only through its ports.";
 
-const runtimeGlobals: NonNullable<DummyRuleMap["no-restricted-globals"]> = [
-  "error",
-  ...["Date", "setTimeout", "setInterval", "setImmediate", "queueMicrotask", "performance"].map(
-    (name) => ({ message: throughClock, name })
-  ),
-  ...[
-    "fetch",
-    "WebSocket",
-    "XMLHttpRequest",
-    "EventSource",
-    "crypto",
-    "process",
-    "Bun",
-    "require",
-  ].map((name) => ({ message: throughPorts, name })),
-];
+const runtimeGlobals = restrictGlobals(
+  {
+    message: throughClock,
+    names: ["Date", "setTimeout", "setInterval", "setImmediate", "queueMicrotask", "performance"],
+  },
+  {
+    message: throughPorts,
+    names: [
+      "fetch",
+      "WebSocket",
+      "XMLHttpRequest",
+      "EventSource",
+      "crypto",
+      "process",
+      "Bun",
+      "require",
+      ...globalObjects,
+    ],
+  }
+);
 
 const runtimeProperties: NonNullable<DummyRuleMap["no-restricted-properties"]> = [
   "error",

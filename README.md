@@ -24,6 +24,7 @@ bun run test          # every workspace's tests
 | [`packages/protocol`](packages/protocol) | The IRC protocol as values: Lines in and out, and where a Credential can go |
 | [`packages/client`](packages/client) | The pure IRC client for one Network |
 | [`packages/runtime`](packages/runtime) | The ports the Runtime drives Clients through: Transport, Journal, Vault, and Clock |
+| [`packages/fence`](packages/fence) | Tests that the lint fence refuses what it should, and allows what it should |
 | [`docs`](docs) | Everything below |
 
 ## Documentation

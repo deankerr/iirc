@@ -95,7 +95,13 @@ The second review, of those changes and the ports, found five gaps, fixed on 202
 - **The Runtime's fence had gaps.** It now refuses `fetch`, `WebSocket`, `crypto`, `effect/unstable/*`, `effect/testing` in production code, and Effect's `Clock` outside `clock.ts`.
 - **The memory Transport did not frame.** It delivered empty and overlong Lines, which a real Transport skips or cuts. It now frames as the README says, and two laws check it.
 
-The review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
+The third review found three more, fixed the same day:
+
+- **The fence could be reached around.** `globalThis.Date` and `globalThis.fetch` passed it. The global objects are now refused by name in the core and the Runtime, and `checkGlobalObject` is on. [`packages/fence`](../../packages/fence/README.md) now lints probe files to prove each refusal, and the first run of it found that `@iirc/*` matched one segment only, so the Client could import `@iirc/runtime/journal`. Subpaths are fenced now too.
+- **An interrupted hangup could leave a Link open for good.** The memory Transport now closes in one uninterruptible step, and a law interrupts a hangup at every point between operations.
+- **Filtered following was untested live.** The follow law now appends for both Networks while a follower watches one.
+
+The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:
 

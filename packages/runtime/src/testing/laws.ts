@@ -128,6 +128,11 @@ const showEntries = (entries: readonly Entry[]) => JSON.stringify(entryJson(entr
 
 const collect = <A, E>(stream: Stream.Stream<A, E>) => Stream.runCollect(stream);
 
+const laterForOftc = JournalRecord.cases.Input.make({
+  input: Input.cases.Retry.make({ at }),
+  network: oftc,
+});
+
 const sentinel = JournalRecord.cases.Input.make({
   input: Input.cases.Retry.make({ at }),
   network: libera,
@@ -225,10 +230,11 @@ export const journalLaws: readonly Law<JournalService, JournalFailed>[] = [
         const positions: readonly Position[] = [{}, { network: oftc }, { after: first }];
         const followers = yield* inOrder(positions, (from) => following(journal, from));
 
-        // Every follower has had the past before anything new is appended, and the new
-        // Entries are appended concurrently.
+        // Every follower has had the past before anything new is appended. The new Entries
+        // are appended concurrently, for both Networks, so the filtered follower must take
+        // its own and leave the rest.
         yield* inOrder(followers, (follower) => Deferred.await(follower.caughtUp));
-        yield* atOnce(records.slice(2), (record) => journal.append(record));
+        yield* atOnce([...records.slice(2), laterForOftc], (record) => journal.append(record));
         yield* inOrder(followers, (follower, i) => agrees(journal, positions[i] ?? {}, follower));
       }),
     name: "follows the past and then each new Entry, once each, in order",
@@ -398,6 +404,38 @@ export const transportLaws: readonly Law<TransportHarness, never>[] = [
         yield* same("events", showEvents(events), "Opened | Closed HungUp");
       }),
     name: "ends with HungUp when asked, and ignores anything after",
+  },
+  {
+    check: ({ ircd, transport }) =>
+      // Interrupt a hangup at every point between two operations, as the Journal's law
+      // does. A second hangup then ends the Connection, with one Closed, wherever the
+      // first was stopped.
+      inOrder(
+        Array.from({ length: 40 }, (_, steps) => steps),
+        (steps) =>
+          Effect.gen(function* () {
+            const link = yield* transport.dial(address);
+            const call = yield* ircd.accept;
+
+            yield* call.open;
+            const hangingUp = yield* Effect.forkChild(link.hangup);
+
+            for (let step = 0; step < steps; step += 1) {
+              yield* Effect.yieldNow;
+            }
+
+            yield* Fiber.interrupt(hangingUp);
+            yield* link.hangup;
+            const events = yield* collect(link.events);
+
+            yield* same(
+              `events after ${steps} steps`,
+              showEvents(events),
+              "Opened | Closed HungUp"
+            );
+          }).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 3))
+      ),
+    name: "ends once, however a hangup is interrupted",
   },
   {
     check: ({ ircd, transport }) =>

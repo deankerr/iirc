@@ -11,7 +11,7 @@ This README is the ports' written interface. The types are in `src/`, the in-mem
 | Vault | Hold Credentials, give a value at the last moment | `@iirc/runtime/vault` | `makeMemoryVault` |
 | Clock | Tell the time, and wake at a time | `@iirc/runtime/clock` | `TestClock` from `effect/testing` |
 
-Each port is an Effect service. An adapter provides it as a Layer, from its own package, which the Runtime never imports. The lint fence keeps Bun, Node, `@effect/*`, and `effect/unstable/*` out of `src/`, along with `fetch`, `WebSocket`, `crypto`, and `process`. Time is read only through the Clock port: production code outside `clock.ts` may not import Effect's `Clock`, and none may import `effect/testing`.
+Each port is an Effect service. An adapter provides it as a Layer, from its own package, which the Runtime never imports. The lint fence keeps Bun, Node, `@effect/*`, and `effect/unstable/*` out of `src/`, along with `fetch`, `WebSocket`, `crypto`, and `process`. Neither can be reached through `globalThis`, `self`, `window`, or `global`, which are refused too. Time is read only through the Clock port: production code outside `clock.ts` may not import Effect's `Clock`, and none may import `effect/testing`. [`packages/fence`](../fence/README.md) tests every one of these.
 
 ## Transport
 
@@ -26,7 +26,7 @@ LinkEvent = Opened | Received { bytes } | Closed { reason: CloseReason }
 - **It frames Lines.** `Received` holds one Line's bytes without its line ending. A Line ends at LF, with one CR before it removed. Empty Lines are skipped. A Line longer than `maxReceivedBytes` (8191 tag bytes plus 510) is cut to that length, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped. The laws check skipping and cutting through `TestCall.say`. A byte-level adapter also tests its framing directly: a line ending split across reads, several Lines in one read, and an unfinished Line at the end.
 - **It decodes nothing.** Bytes go to the Client as they came, so a parser fix repairs history on replay (ADR 0002).
 - **`send` writes one Line's bytes,** line ending included. Before `Opened` or after `Closed`, it does nothing.
-- **`hangup` ends the Connection** with `Closed` `HungUp`, unless it had already ended for another reason.
+- **`hangup` ends the Connection** with `Closed` `HungUp`, unless it had already ended for another reason. An interrupted `hangup` either ended it or did nothing, so another `hangup` still works.
 - **Closing the Scope** ends the Connection without a `Closed`, because nothing is left to read it.
 - **TLS is verified.** Certificates are checked against the system roots, and SNI is sent. Falling back to plaintext is the Client's decision, and under STS it never does.
 - **Socket timers are the Transport's.** Connecting, the TLS handshake, and a stalled write each end as `Closed` with `TimedOut` or `Tls`. Timers about Lines, such as silence, are the Client's.
@@ -77,7 +77,7 @@ The Clock port is Effect's own `Clock`. Its live adapter is the default Clock, a
 
 ## The laws
 
-`@iirc/runtime/testing` holds the laws every adapter of a port keeps, as data: `journalLaws`, `vaultLaws`, and `transportLaws`. The Journal's laws follow from three positions while appends run concurrently, and interrupt appends at every point between two operations. A law is an Effect that fails with `LawBroken`, so the module needs no test runner. `holds(law, make)` checks one against a fresh harness, in its own Scope, and fails after two seconds rather than hanging.
+`@iirc/runtime/testing` holds the laws every adapter of a port keeps, as data: `journalLaws`, `vaultLaws`, and `transportLaws`. The Journal's laws follow from three positions while appends for two Networks run concurrently, and interrupt appends at every point between two operations. The Transport's laws interrupt a hangup the same way, and check that the Connection still ends once. A law is an Effect that fails with `LawBroken`, so the module needs no test runner. `holds(law, make)` checks one against a fresh harness, in its own Scope, and fails after two seconds rather than hanging.
 
 ```ts
 it.each(journalLaws)("$name", async (law) => {
