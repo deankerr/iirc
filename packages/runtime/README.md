@@ -51,7 +51,7 @@ JournalRecord = Input { network, input } | Outputs { network, of, outputs }
 
 Before it reads a Journal, the Runtime checks that `missingDecoders()` from `@iirc/protocol/line` is empty, and refuses to start otherwise. Replay is exact on the Bun pinned in the root `package.json`. Another runtime, or another version of Bun, may decode some fallback bytes differently, as a parser fix would (ADR 0002).
 
-The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. Every Line goes through `@iirc/protocol`'s `encode`, the last guard on what is sent: a `Rejected` from it means a bug upstream, which the Runtime logs, and that Line is not sent. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table from the outputs, sets those timers, and steps a `Started`.
+The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. Every Line goes through `@iirc/protocol`'s `encode`, the last guard on what is sent: a `Rejected` from it means a bug upstream, which the Runtime logs, and that Line is not sent. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table, which `timers` projects from each step's input and outputs, so a timer whose `Fired` was stepped is gone, sets those timers, and steps a `Started`.
 
 ## Vault
 

@@ -3,6 +3,7 @@ import { Schema } from "effect";
 
 import { IrcdAddress } from "./configuration.ts";
 import { ConnectionId, Instant, TimerId } from "./ids.ts";
+import type { Input } from "./input.ts";
 
 /**
  * Everything a Client can ask the Runtime to do. Outputs are journaled with the input
@@ -32,14 +33,22 @@ export type Output = typeof Output.Type;
 export type TimerTable = ReadonlyMap<TimerId, Instant>;
 
 /**
- * The timer table is a projection of outputs: the last `Wake` for each id. The Runtime
- * folds it while replaying the Journal, and so does the test kit.
- * @param table - The timers set before these outputs.
- * @param outputs - One step's outputs, in order.
- * @returns The timers set after them.
+ * The timer table is a projection of the Journal's inputs and outputs. A timer is set by
+ * the last `Wake` for its id, and is one-shot: a `Fired` input whose `due` matches the
+ * table consumes it, so the timer is gone unless that step's outputs set it again. A
+ * stale `Fired`, whose `due` does not match, changes nothing. The Runtime folds this
+ * over every step while replaying the Journal, and so does the test kit.
+ * @param table - The timers set before this step.
+ * @param input - The step's input.
+ * @param outputs - The step's outputs, in order.
+ * @returns The timers set after it.
  */
-export const timers = (table: TimerTable, outputs: readonly Output[]): TimerTable => {
+export const timers = (table: TimerTable, input: Input, outputs: readonly Output[]): TimerTable => {
   const next = new Map(table);
+
+  if (input._tag === "Fired" && next.get(input.timer) === input.due) {
+    next.delete(input.timer);
+  }
 
   for (const output of outputs) {
     if (output._tag === "Wake") {

@@ -2,7 +2,7 @@
 
 The pure IRC client for one Network. It does no I/O and reads no clock. Every input carries its time, and every effect leaves as an output, so the same inputs always give the same states and outputs.
 
-This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. There is no Client behind the interface yet. The XState spike decides its insides.
+This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. There is no Client behind the interface yet. Its machines will be reducers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
 
 ## Callers
 
@@ -37,8 +37,14 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Opened` | Transport | A Connection the Client dialled is open. |
 | `Received` | Transport | One Line's bytes, without its line ending. |
 | `Closed` | Transport | A Connection is over, and how. |
-| `Fired` | Clock | A timer the Client set is due, with the instant its `Wake` set. |
+| `Fired` | Clock | A timer the Client set is due, with the instant its `Wake` set. It consumes the timer. |
 | `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent: the Credential is `Missing`, the Vault is `Unavailable`, or the value is `Unsendable` in that Line, such as a password with a line break. |
+
+When the Client dials:
+
+- A `Configured` or `Started` with the Network enabled dials at once, if no Connection is open. There is no backoff before a first dial.
+- Backoff applies only to redialling after a `Closed`. `Retry` cuts that wait short.
+- A `Configured` that disables the Network while a Connection is open hangs up, and the Client waits for its `Closed`.
 
 ## Outputs
 
@@ -50,7 +56,9 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Hangup` | End a Connection. The Client still waits for its `Closed`. |
 | `Wake` | Set a timer to an instant, or cancel it with `null`. The same id replaces the earlier one. |
 
-The timer table is a projection of outputs: `timers(table, outputs)` keeps the last `Wake` for each id. The Runtime folds it while replaying, then sets every timer in it.
+Connection ids start at 1 and go up by 1 for each `Dial`. They are never reused, and replaying the Journal rebuilds them.
+
+Timers are one-shot. The timer table is a projection of the Journal's inputs and outputs: `timers(table, input, outputs)` folds one step. A `Fired` whose `due` matches the table consumes its timer, and then the last `Wake` for each id sets it, so the Client re-arms a timer with a fresh `Wake` if it wants it again. A stale `Fired` changes nothing. The Runtime folds it over every step while replaying, then sets every timer in it.
 
 ## News
 
@@ -88,12 +96,12 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 ## Invariants
 
 - **Pure.** `step` reads no clock, randomness, locale, or time zone, and does no I/O. So it uses no `DateTime`, whose zoned constructors default to the machine's time zone, nothing locale-aware such as `localeCompare`, and no Schema that parses a date in local time, such as `Schema.DateFromString`. The lint fence catches the obvious cases, such as `Date`, `Math.random`, Effect's `Clock` and `Effect`, and Bun or Node. Review catches the rest.
-- **Plain data.** State holds only strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. It never holds a function, a class instance, or a `HashMap` or `HashSet`, because Effect hashes a value by reference with `Math.random`, so their order could differ on replay. Lint cannot see this. The transcript test kit's replay law will check it, run in a fresh process, so that a hash seeded in one run cannot match the next. Until the kit is built, review holds it.
+- **Plain data.** State holds only strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. It never holds a function, a class instance, or a `HashMap` or `HashSet`, because Effect hashes a value by reference with `Math.random`, so their order could differ on replay. Lint cannot see this. The transcript test kit checks it after every scenario, and `replayFresh` folds again in a fresh process, so that a hash seeded in one run cannot match the next.
 - **Total.** `step` never throws, for any input in any state.
 - **Hardened, not tuned.** The Client accepts anything the protocol allows, from any Ircd: a reply at any point it may legally come, tags and names in any order, and optional parts present or absent, such as a trailing colon or a `time` tag. The Ircds we record, such as Ergo and ngircd, show where Ircds differ. They are examples, never the cases to code for, so an Ircd we have never seen still works. What it cannot read is `Ignored`, never fatal.
 - **Exact replay.** Folding the Journal's inputs from `initial` gives the same states, outputs, and News. The Client never reads its outputs back.
-- **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. The Runtime gives `due` back unchanged. `Fired` names only the timer, so State keeps which machine each timer belongs to and what it means. Each machine's timers are derived from its state, and a step outputs a `Wake` for each difference, so leaving a state cancels its timers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
-- **One Connection at a time.** The Client dials only after the previous Connection's `Closed`, or after `Started`.
+- **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. Timers are one-shot: once the Client has stepped a `Fired` whose `due` matches, the timer is gone, and the Client sets it again with a fresh `Wake` if it still wants it. The Runtime gives `due` back unchanged. `Fired` names only the timer, so State keeps which machine each timer belongs to and what it means. Each machine's timers are derived from its state, and a step outputs a `Wake` for each difference, so leaving a state cancels its timers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
+- **One Connection at a time.** The Client dials only when no Connection is open: after the previous Connection's `Closed`, or after `Started`, which ends any it believed open. A `Configured` or `Started` with the Network enabled dials at once, and only a redial after a `Closed` waits for backoff. A `Configured` that disables the Network while connected hangs up.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
 - **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext.
   - A policy is learnt only over TLS, from `duration`, on the port of the Connection it arrived on. A `port` key sent over TLS is ignored.
@@ -107,7 +115,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 
 - Journal each input before stepping it. Step inputs one at a time, in Journal order.
 - Journal each step's outputs with its input, then carry them out in order.
-- On restart, fold the Journal from `initial`, keeping only the timer table from the outputs, then set those timers and step a `Started`.
+- On restart, fold the Journal from `initial`, keeping only the timer table, folded with `timers` from each step's input and outputs, then set those timers and step a `Started`.
 - Send `Configured` first. Until then, every other input is ignored.
 
 ## Error modes
@@ -193,4 +201,4 @@ export const awayNotify: Feature = {
 
 ## The test kit
 
-`@iirc/client/testing` holds `scripted(script)`, a Client that answers each expected input with set outputs and ignores anything else. It is for testing the Runtime without a real Client. The transcript test kit described in [the design note](../../docs/notes/2026-11-08-client-interface.md#the-transcript-test-kit) is built with the Client. Production code may not import `@iirc/client/testing`.
+`@iirc/client/testing` holds the transcript test kit, whose written interface is [its README](src/testing/README.md). A scenario is a transcript of IRC that `play` runs through a Client on a fake clock, matching every Line it sends, every `Ignored`, and each News written, and failing with a transcript diff. `replay` feeds a recorded fixture and reports what the Client did. After either, the kit replays the inputs and checks the Invariants "Plain data" and "Exact replay", and `replayFresh` checks them again in a fresh process. Preludes write registration and joins, and the four laws run over every set of caps `across` gives. It also holds `scripted(script)`, a Client that answers each expected input with set outputs and ignores anything else, for testing the Runtime without a real Client. Production code may not import `@iirc/client/testing`.
