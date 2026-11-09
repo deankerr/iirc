@@ -1,0 +1,27 @@
+{
+  "name": "@iirc/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run --exclude 'src/e2e/**'",
+    "e2e": "bun --bun vitest run src/e2e"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@iirc/api": "workspace:*",
+    "@iirc/client": "workspace:*",
+    "@iirc/journal-sqlite": "workspace:*",
+    "@iirc/runtime": "workspace:*",
+    "@iirc/transport-bun": "workspace:*",
+    "@iirc/vault-file": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@iirc/protocol": "workspace:*",
+    "vitest": "catalog:"
+  }
+}
