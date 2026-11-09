@@ -19,8 +19,6 @@ export interface Seam {
   readonly failed: ReadonlySet<FeatureName>;
   /** Features holding registration open before `CAP END`. */
   readonly holding: ReadonlySet<FeatureName>;
-  /** Facts no Feature keeps up to date any longer, since when. */
-  readonly stale: ReadonlyMap<Kept, Instant>;
 }
 
 /** A new Connection's Seam: nothing on, nothing held. */
@@ -28,7 +26,6 @@ export const freshSeam: Seam = {
   failed: new Set(),
   holding: new Set(),
   own: new Map(),
-  stale: new Map(),
 };
 
 /** What decides which Features are on. */
@@ -74,23 +71,46 @@ export const featuresOn = (
 ): readonly Registered[] => registry.filter((feature) => isOn(feature, offer, declined, seam));
 
 /**
- * The caps worth asking for: those of each Feature the Owner has not declined whose caps
- * are all offered, less any already enabled, in registry order.
+ * The caps a Feature asks for: those it needs, then those it uses.
+ * @param feature - The Feature.
+ * @returns Its caps.
+ */
+export const capsOf = (feature: Registered): readonly CapName[] => [
+  ...(feature.needs.caps ?? []),
+  ...(feature.uses ?? []),
+];
+
+/**
+ * The caps worth asking for: those each Feature the Owner has not declined needs or
+ * uses, when they are all offered and none is needed by a Feature the Owner declined,
+ * less any already enabled, in registry order.
  * @param registry - Every Feature.
  * @param offer - What the Ircd offers now.
  * @param declined - What the Owner declined.
+ * @param eligible - Which Features to ask for, such as those a `CAP NEW` concerns. Left
+ * out, every one.
  * @returns The caps to request.
  */
 export const capsWanted = (
   registry: readonly Registered[],
   offer: Offer,
-  declined: readonly FeatureName[]
+  declined: readonly FeatureName[],
+  eligible: (feature: Registered) => boolean = () => true
 ): readonly CapName[] => {
-  const wanted = registry.flatMap((feature) => {
-    const caps = feature.needs.caps ?? [];
+  // A cap a declined Feature needs is asked for by no other Feature either. This is
+  // worked out over the whole registry, before narrowing to the Features in question.
+  const refused = new Set(
+    registry
+      .filter((feature) => declined.includes(feature.name))
+      .flatMap((feature) => feature.needs.caps ?? [])
+  );
+
+  const wanted = registry.filter(eligible).flatMap((feature) => {
+    const caps = capsOf(feature);
 
     const asked =
       !declined.includes(feature.name) &&
+      !caps.some((cap) => refused.has(cap)) &&
       caps.length > 0 &&
       caps.every((cap) => offer.offered.has(cap));
 
@@ -113,6 +133,8 @@ export interface Ran<V> {
   readonly value: V;
   readonly seam: Seam;
   readonly send: readonly Sendable[];
+  /** Caps the Features asked to give up, in registry order. */
+  readonly drop: readonly CapName[];
   /** Each Feature's say over registration, in registry order. */
   readonly registration: readonly (readonly [FeatureName, Registration])[];
   /** Features whose hook threw, in registry order. */
@@ -120,12 +142,13 @@ export interface Ran<V> {
 }
 
 const contextFor = (feature: Registered, seam: Seam, reading: Reading): Context<unknown> => {
-  const caps = new Set(feature.needs.caps);
+  const caps = new Set(capsOf(feature));
 
   return {
     at: reading.at,
     cap: (name) => (caps.has(name) ? reading.offer.offered.get(name) : undefined),
     configuration: reading.configuration,
+    enabled: (name) => caps.has(name) && reading.offer.enabled.has(name),
     known: reading.known,
     own: seam.own.has(feature.name) ? seam.own.get(feature.name) : feature.own,
     token: (name) => reading.offer.isupport.get(name),
@@ -157,6 +180,7 @@ export const runStage = <V>(
   let current = value;
   let { own, failed } = seam;
   const send: Sendable[] = [];
+  const drop: CapName[] = [];
   const registration: (readonly [FeatureName, Registration])[] = [];
   const threw: FeatureName[] = [];
 
@@ -172,6 +196,7 @@ export const runStage = <V>(
         current = refined.value;
         own = "own" in refined ? new Map(own).set(feature.name, refined.own) : own;
         send.push(...(refined.send ?? []));
+        drop.push(...(refined.drop ?? []));
 
         if (refined.registration !== undefined) {
           registration.push([feature.name, refined.registration]);
@@ -183,7 +208,14 @@ export const runStage = <V>(
     }
   }
 
-  return { failed: threw, registration, seam: { ...seam, failed, own }, send, value: current };
+  return {
+    drop,
+    failed: threw,
+    registration,
+    seam: { ...seam, failed, own },
+    send,
+    value: current,
+  };
 };
 
 /**
@@ -207,31 +239,20 @@ export const runEffects = (
   });
 
 /**
- * Marks as stale the facts kept by Features that were on and are now off.
- * @param seam - The Connection's Seam.
+ * The facts that go stale as Features turn off: those a Feature that was on and is now
+ * off kept, unless a Feature still on keeps them too.
  * @param was - The Features on before.
  * @param now - The Features on after.
- * @param at - When.
- * @returns The Seam, with those facts stale since `at`.
+ * @returns The facts, once each.
  */
-export const turnedOff = (
-  seam: Seam,
+export const goneStale = (
   was: readonly Registered[],
-  now: readonly Registered[],
-  at: Instant
-): Seam => {
-  const off = was.filter((feature) => !now.includes(feature));
-  const kept = off.flatMap((feature) => feature.keeps ?? []);
-
-  if (kept.length === 0) {
-    return seam;
-  }
-
-  const stale = new Map(seam.stale);
-
-  for (const fact of kept) {
-    stale.set(fact, at);
-  }
-
-  return { ...seam, stale };
-};
+  now: readonly Registered[]
+): readonly Kept[] => [
+  ...new Set(
+    was
+      .filter((feature) => !now.includes(feature))
+      .flatMap((feature) => feature.keeps ?? [])
+      .filter((fact) => !now.some((feature) => feature.keeps?.includes(fact) === true))
+  ),
+];

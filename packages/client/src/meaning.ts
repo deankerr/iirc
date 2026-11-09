@@ -116,8 +116,12 @@ const message: Reader = ({ run, arrival, params: [target, text], by }) => {
     return [];
   }
 
+  const said = ctcp._tag === "Action" ? ctcp.text : text;
+
   if (arrival.answers !== undefined && isSelf(run, by)) {
-    return [{ _tag: "Confirmed", at: arrival.time, id: arrival.id, intent: arrival.answers, text }];
+    return [
+      { _tag: "Confirmed", at: arrival.time, id: arrival.id, intent: arrival.answers, text: said },
+    ];
   }
 
   return [
@@ -131,7 +135,7 @@ const message: Reader = ({ run, arrival, params: [target, text], by }) => {
       sender: by,
       tags: clientTags(arrival.line),
       target,
-      text: ctcp._tag === "Action" ? ctcp.text : text,
+      text: said,
     },
   ];
 };

@@ -198,3 +198,28 @@ describe("casemapping", () => {
     expect(client.known(odd.state).casemapping).toBe("ascii");
   });
 });
+
+describe("what registration sent", () => {
+  it("knows the realname and nick registration sent, not a Configuration that came after", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: lines(
+        "!! configure",
+        "-> dial irc.test:6697 tls",
+        "== opened",
+        ">> CAP LS 302",
+        ">> NICK iirc",
+        ">> USER iirc 0 * iirc",
+        "<< :irc.test 421 * CAP :Unknown command",
+        "!! configure realname=changed nicks=other",
+        "<< :irc.test 001",
+        "?? session-began iirc"
+      ),
+    });
+
+    expect(client.known(played.state).self).toMatchObject({
+      nick: "iirc",
+      realname: { _tag: "Known", from: "ours", value: "iirc" },
+    });
+  });
+});

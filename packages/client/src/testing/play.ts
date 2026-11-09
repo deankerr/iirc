@@ -255,6 +255,18 @@ const apply = (configuration: NetworkConfiguration, change: Change): NetworkConf
       };
     }
 
+    case "Login": {
+      return { ...configuration, login: change.login };
+    }
+
+    case "Realname": {
+      return { ...configuration, realname: change.realname };
+    }
+
+    case "Nicks": {
+      return { ...configuration, nicks: change.nicks };
+    }
+
     default: {
       return change satisfies never;
     }

@@ -2,14 +2,14 @@
  * The Feature seam, driven through `step` with Features made for these tests. The real
  * registry is empty on the floor, so these show the seam works before stage 2 fills it.
  */
-import { isRejected, withTags } from "@iirc/protocol/line";
+import { CredentialName, isRejected, withTags } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
 import { makeClient } from "../core.ts";
 import type { Feature, Meant } from "../feature.ts";
 import { CapName, FeatureName, IntentId, TimerId } from "../ids.ts";
 import type { MemberKnowledge } from "../known.ts";
-import { register } from "../registry.ts";
+import { register, registry } from "../registry.ts";
 import { configured, joined, play, registered } from "../testing/index.ts";
 
 const base = configured();
@@ -165,11 +165,9 @@ const holding: Feature = {
   name: FeatureName.make("hold"),
   needs: { caps: [CapName.make("hold")] },
   own: undefined,
+  react: (arrival) =>
+    arrival.line.command === "903" ? { registration: { _tag: "Continue" } } : {},
   start: () => ({ registration: { _tag: "Hold" } }),
-  tags: (arrival) =>
-    arrival.line.command === "903"
-      ? { registration: { _tag: "Continue" }, value: arrival }
-      : { value: arrival },
 };
 
 describe("holding registration", () => {
@@ -354,5 +352,208 @@ describe("the other stages", () => {
       _tag: "Stale",
       was: { host: "iirc.test", user: "~iirc" },
     });
+  });
+});
+
+describe("egress refusing a Line", () => {
+  // Refuses every Line to `#nowhere`, the Owner's and the protocol's alike.
+  const refusing: Feature = {
+    egress: (departure) => ({
+      value: departure.line.params[0] === "#nowhere" ? { _tag: "Refusal" } : departure,
+    }),
+    name: FeatureName.make("refusing"),
+    needs: { caps: [CapName.make("refusing")] },
+    own: undefined,
+  };
+
+  const client = makeClient([register(refusing)]);
+
+  it("refuses a Say as Unsendable, sends nothing, and reports no Message", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["refusing"] }),
+        lines("!! say #nowhere :hi", "?? refused i1 Unsendable"),
+      ],
+    });
+
+    expect(played.steps.at(-1)?.news.map((news) => news._tag)).toStrictEqual(["Refused"]);
+  });
+
+  it("drops any other Line, and says so by its command", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["refusing"] }),
+        lines("!! configure +#nowhere", "?? ignored Unsendable JOIN"),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
+// A Feature that only keeps away status, on its own cap.
+const keeper = (cap: string): Feature => ({
+  keeps: ["user.away"],
+  name: FeatureName.make(cap),
+  needs: { caps: [CapName.make(cap)] },
+  own: undefined,
+});
+
+describe("facts more than one Feature keeps", () => {
+  const client = makeClient([register(keeper("one")), register(keeper("two"))]);
+
+  const away = [
+    registered(base, { offered: ["one", "two"] }),
+    joined(base, "#iirc", ["peer"]),
+    lines("<< :peer!u@h AWAY :out", "+1s"),
+  ];
+
+  it("stay known while a Feature that keeps them is still on", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [...away, lines("<< :irc.test CAP iirc DEL :one")],
+    });
+
+    expect(client.known(played.state).users.get("peer")?.away).toMatchObject({ _tag: "Known" });
+  });
+
+  it("go stale once none that keeps them is on", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        ...away,
+        lines("<< :irc.test CAP iirc DEL :one", "<< :irc.test CAP iirc DEL :two"),
+      ],
+    });
+
+    expect(client.known(played.state).users.get("peer")?.away).toMatchObject({ _tag: "Stale" });
+  });
+});
+
+describe("a Feature's own state", () => {
+  // Counts the Lines it hears while on.
+  const counting: Feature<number> = {
+    name: FeatureName.make("counting"),
+    needs: { caps: [CapName.make("counting")] },
+    own: 0,
+    tags: (arrival, context) => ({ own: context.own + 1, value: arrival }),
+  };
+
+  const client = makeClient([register(counting)]);
+
+  it("is kept while it is off, and goes on when it is on again in the same Connection", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["counting"] }),
+        lines(
+          "<< :irc.test CAP iirc DEL :counting",
+          "<< :irc.test CAP iirc NEW :counting",
+          ">> CAP REQ counting",
+          "<< :irc.test CAP iirc ACK :counting"
+        ),
+      ],
+    });
+
+    const open =
+      played.state.network._tag === "Connection" ? played.state.network.link.phase : undefined;
+
+    const own = open?._tag === "Open" ? open.seam.own.get(FeatureName.make("counting")) : undefined;
+
+    // Heard while on: 001 to 005, and the DEL. Started again, it would be 0.
+    expect(own).toBe(6);
+  });
+});
+
+describe("history, and hooks that act", () => {
+  // Every Line the batch Feature says is in a batch is history, as `chathistory` will be.
+  const history: Feature = {
+    label: (arrival) => ({
+      value: arrival.batch === undefined ? arrival : { ...arrival, live: false },
+    }),
+    name: FeatureName.make("history"),
+    needs: {},
+    own: undefined,
+  };
+
+  const client = makeClient([...registry, register(history)]);
+
+  const login = configured({
+    login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
+  });
+
+  const asked = lines(
+    "!! configure",
+    "-> dial irc.test:6697 tls",
+    "== opened",
+    ">> CAP LS 302",
+    ">> NICK iirc",
+    ">> USER iirc 0 * iirc",
+    "<< :irc.test CAP * LS :sasl=PLAIN batch",
+    ">> CAP REQ :sasl batch",
+    "<< :irc.test CAP * ACK :sasl batch",
+    ">> AUTHENTICATE PLAIN"
+  );
+
+  it("never sends the Credential for an AUTHENTICATE + from history", () => {
+    const played = play(client, {
+      configuration: login,
+      transcript: [
+        asked,
+        lines(
+          "<< :irc.test BATCH +h chathistory",
+          "<< @batch=h AUTHENTICATE +",
+          "<< :irc.test BATCH -h"
+        ),
+      ],
+    });
+
+    expect(played.steps.flatMap((step) => step.outputs).map((output) => output._tag)).not.toContain(
+      "SendSecret"
+    );
+  });
+
+  it("never logs in, or lets registration go, on a 903 or a 904 from history", () => {
+    const played = play(client, {
+      configuration: login,
+      transcript: [
+        asked,
+        lines(
+          "<< AUTHENTICATE +",
+          ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}",
+          "<< :irc.test BATCH +h chathistory",
+          "<< @batch=h :irc.test 903 iirc :SASL authentication successful",
+          "<< @batch=h :irc.test 904 iirc :SASL authentication failed",
+          "<< :irc.test BATCH -h"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).states.caps).toBe("Holding");
+  });
+
+  it("discards what a refining hook asks to send or decide", () => {
+    const pushy: Feature = {
+      label: (arrival) => ({
+        registration: { _tag: "Abandon", reason: { _tag: "LoginFailed" } },
+        send: [{ _tag: "Secret", line: { _tag: "Pass", credential: CredentialName.make("pw") } }],
+        value: arrival,
+      }),
+      name: FeatureName.make("pushy"),
+      needs: { caps: [CapName.make("pushy")] },
+      own: undefined,
+    };
+
+    const played = play(makeClient([register(pushy)]), {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["pushy"] }),
+        lines("<< :peer!u@h PRIVMSG iirc :hi"),
+      ],
+    });
+
+    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
   });
 });

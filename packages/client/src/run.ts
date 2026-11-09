@@ -9,7 +9,7 @@ import { casefold } from "@iirc/protocol/casemapping";
 import { isRejected } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected, SecretLine } from "@iirc/protocol/line";
 
-import type { Departure, Sendable } from "./feature.ts";
+import type { Departure, Refusal, Sendable } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
 import type { Knowledge } from "./known.ts";
@@ -142,6 +142,8 @@ export const sendSecret = (run: Run, line: SecretLine): void => {
 
 const protocol: Departure["for"] = { _tag: "Protocol" };
 
+const isRefusal = (value: Departure | Refusal): value is Refusal => !("line" in value);
+
 /**
  * Sends what Feature hooks asked to send, as they built it: their Lines do not go
  * through `egress` again.
@@ -162,31 +164,35 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
 
 /**
  * Sends a Line on the Connection, through each Feature's `egress`. A Line that cannot be
- * built is not sent, and is recorded as `Malformed` with its command.
+ * built is not sent, and is recorded as `Malformed` with its command. One a Feature
+ * refuses is not sent either: a `Said` one is `Refused` as `Unsendable`, and any other
+ * is `Ignored` as `Unsendable`, with its command.
  * @param run - The step.
  * @param line - The Line, or why it cannot be built.
  * @param command - Its command, to report if it cannot be built.
  * @param purpose - What it is for, if it is the Owner's, else a protocol Line.
- * @returns Whether it was sent.
+ * @returns The Line as it was sent, with whether the Ircd will echo it, or `undefined`
+ * if it was not sent.
  */
 export const send = (
   run: Run,
   line: OutboundLine | Rejected,
   command: string,
   purpose?: Departure["for"]
-): boolean => {
+): Departure | undefined => {
   const id = connection(run);
 
   if (isRejected(line)) {
     ignore(run, { _tag: "Malformed", command });
 
-    return false;
+    return undefined;
   }
 
   if (id === undefined) {
-    return false;
+    return undefined;
   }
 
+  const departure: Departure = { echo: false, for: purpose ?? protocol, line };
   const features = onNow(run.registry, run.state).filter((feature) => feature.egress !== undefined);
   const reading = features.length === 0 ? undefined : readingOf(run);
   const open = openOf(run.state);
@@ -194,23 +200,38 @@ export const send = (
   if (reading === undefined || open === undefined) {
     run.outputs.push({ _tag: "Send", connection: id, line });
 
-    return true;
+    return departure;
   }
 
-  const ran = runStage(
+  const ran = runStage<Departure | Refusal>(
     features,
     open.seam,
     reading,
-    { for: purpose ?? protocol, line },
-    (feature, departure, context) => feature.egress?.(departure, context)
+    departure,
+    (feature, value, context) => (isRefusal(value) ? undefined : feature.egress?.(value, context))
   );
 
   updateOpen(run, (phase) => ({ ...phase, seam: ran.seam }));
   reportFailed(run, ran.failed);
+
+  if (isRefusal(ran.value)) {
+    if (departure.for._tag === "Said") {
+      run.news.push({
+        _tag: "Refused",
+        intent: departure.for.intent,
+        reason: { _tag: "Unsendable" },
+      });
+    } else {
+      ignore(run, { _tag: "Unsendable", command: line.command });
+    }
+
+    return undefined;
+  }
+
   run.outputs.push({ _tag: "Send", connection: id, line: ran.value.line });
   sendAll(run, ran.send);
 
-  return true;
+  return ran.value;
 };
 
 /**

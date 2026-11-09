@@ -1,9 +1,13 @@
 import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
-import { client } from "../core.ts";
+import { makeClient } from "../core.ts";
 import { CapName } from "../ids.ts";
 import { configured, play, registered } from "../testing/index.ts";
+
+// The floor: a Client with no Features, so it asks for no caps. The Features' own
+// negotiation is in `caps.test.ts`.
+const client = makeClient([]);
 
 const base = configured();
 

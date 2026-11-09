@@ -56,6 +56,8 @@ The changes `!! configure` takes, separated by one space:
 | `-#iirc` | Part a Channel. |
 | `enable`, `disable` | Turn the Network on or off. |
 | `decline=multi-prefix`, `accept=multi-prefix` | Decline a Feature, or stop declining it. |
+| `realname=new`, `nicks=one,two` | The realname registration sends, with no space, or the nicks it offers, in order. |
+| `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw` | How Self logs in: not at all, or with SASL to an account, with its Credential's name, required or optional. |
 
 Instants are written against the clock, which starts at the epoch, 2026-01-01T00:00:00.000Z: `t+13s`, `t+1500ms`, `t-5s`.
 
@@ -65,7 +67,7 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 
 | News | Example |
 | --- | --- |
-| `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl` |
+| `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl`, `?? ignored Unsendable PONG`, `?? ignored UnmatchedEcho` |
 | `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404` |
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |

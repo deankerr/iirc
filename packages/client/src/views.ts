@@ -5,21 +5,19 @@
  * @packageDocumentation
  */
 import type { Inspection } from "./client.ts";
-import type { Kept } from "./feature.ts";
 import type { CapName } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
 import type {
   ChannelKnowledge,
-  Fact,
   Knowledge,
+  MemberKnowledge,
   SessionKnowledge,
   Standing,
   UserKnowledge,
 } from "./known.ts";
 import type { Registered } from "./registry.ts";
-import type { Seam } from "./seam.ts";
 import { featuresOn } from "./seam.ts";
-import type { Caps, ChannelPhase, InSession, Link, Network, Open, State } from "./state.ts";
+import type { Caps, ChannelPhase, InSession, Link, Member, Network, Open, State } from "./state.ts";
 import { tableOf } from "./timers.ts";
 
 /**
@@ -66,17 +64,11 @@ export const negotiated = (caps: Caps | undefined): CapsNow => {
     : { enabled: caps.enabled, offered: caps.offered };
 };
 
-// A fact a Feature kept, which no Feature keeps since `since`, is stale unless something
-// on the floor said it again afterwards.
-const kept = <T>(fact: Fact<T>, which: Kept, seam: Seam): Fact<T> => {
-  const since = seam.stale.get(which);
-
-  if (since === undefined || fact._tag === "Unknown" || fact._tag === "Stale" || fact.at > since) {
-    return fact;
-  }
-
-  return { _tag: "Stale", since, was: fact._tag === "Known" ? fact.value : fact.atLeast };
-};
+// A Channel's members, as Views see them.
+const membersOf = (
+  members: ReadonlyMap<string, Member> | undefined
+): ReadonlyMap<string, MemberKnowledge> =>
+  new Map([...(members ?? [])].map(([key, { nick, prefixes }]) => [key, { nick, prefixes }]));
 
 const sessionKnowledge = (network: Network): SessionKnowledge => {
   switch (network._tag) {
@@ -111,52 +103,26 @@ const standingOf = (phase: ChannelPhase): Standing => phase._tag;
 
 const userOf = (nick: string, open: Open, key: string): UserKnowledge => {
   const seen = open.users.get(key);
-  const mask = seen?.mask;
-  const away = seen?.away;
 
   return {
     account: unknown,
-    away: kept(
-      away === undefined
-        ? unknown
-        : { _tag: "Known", at: away.at, from: "ircd", value: away.value },
-      "user.away",
-      open.seam
-    ),
-    mask: kept(
-      mask === undefined
-        ? unknown
-        : { _tag: "Known", at: mask.at, from: "ircd", value: { host: mask.host, user: mask.user } },
-      "user.mask",
-      open.seam
-    ),
+    away: seen?.away ?? unknown,
+    mask: seen?.mask ?? unknown,
     nick,
     realname: unknown,
   };
 };
 
-const selfOf = (
-  state: State,
-  open: Open | undefined,
-  session: InSession | undefined
-): UserKnowledge | undefined => {
-  if (open === undefined || session === undefined) {
-    return undefined;
-  }
-
-  const realname: Fact<string> =
-    state.configuration === undefined
-      ? unknown
-      : { _tag: "Known", at: open.opened, from: "ours", value: state.configuration.realname };
-
-  return {
-    account: kept(session.account, "user.account", open.seam),
-    away: unknown,
-    mask: kept(session.mask, "user.mask", open.seam),
-    nick: session.nick,
-    realname: kept(realname, "user.realname", open.seam),
-  };
-};
+const selfOf = (session: InSession | undefined): UserKnowledge | undefined =>
+  session === undefined
+    ? undefined
+    : {
+        account: session.account,
+        away: unknown,
+        mask: session.mask,
+        nick: session.nick,
+        realname: session.realname,
+      };
 
 /**
  * What is known, for Views.
@@ -167,7 +133,7 @@ const selfOf = (
 export const knowledgeOf = (state: State, fold: (name: string) => string): Knowledge => {
   const open = openOf(state);
   const session = sessionOf(state);
-  const self = selfOf(state, open, session);
+  const self = selfOf(session);
   const users = new Map<string, UserKnowledge>();
 
   const channels = new Map(
@@ -184,7 +150,7 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
       return [
         key,
         {
-          members: joined?.members ?? new Map(),
+          members: membersOf(joined?.members),
           modes: joined?.modes ?? unknown,
           name: channel.name,
           standing: standingOf(phase),

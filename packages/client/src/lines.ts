@@ -25,8 +25,10 @@ import { Instant } from "./ids.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { applyModes, readModes } from "./modes.ts";
 import {
+  abandon,
   capLine,
-  carryOut,
+  loginOwed,
+  carryOutRefined,
   nickRefused,
   offered,
   unknownCommand,
@@ -74,17 +76,50 @@ const ownMask = (run: Run, user: string, host: string): void => {
   );
 };
 
-// Folds what a Line meant into the model, and reports it.
-const fold = (run: Run, meant: Meant, line: Line): void => {
+const none: ReadonlySet<string> = new Set();
+
+const memberKey = (channel: string, nick: string): string => `${channel} ${nick}`;
+
+// The members of a listing whose prefixes the core knew only in part, and a Feature made
+// known in full.
+const listedWith = (meant: readonly Meant[], tag: "Partial" | "Known"): readonly string[] =>
+  meant.flatMap((each) =>
+    each._tag === "Listed"
+      ? each.members
+          .filter((member) => member.prefixes._tag === tag)
+          .map((member) => memberKey(each.channel, member.nick))
+      : []
+  );
+
+const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): ReadonlySet<string> => {
+  const partial = new Set(listedWith(derived, "Partial"));
+
+  return new Set(listedWith(refined, "Known").filter((key) => partial.has(key)));
+};
+
+// Folds what a Line meant into the model, and reports it. History is reported, and
+// never changes what is known now.
+const fold = (
+  run: Run,
+  meant: Meant,
+  arrival: Arrival,
+  completed: ReadonlySet<string> = none
+): void => {
+  const { line, live } = arrival;
+
   if (meant._tag === "Listed") {
-    foldListed(run, meant.channel, meant.members);
+    if (live) {
+      foldListed(run, meant.channel, meant.members, (nick) =>
+        completed.has(memberKey(meant.channel, nick))
+      );
+    }
 
     return;
   }
 
   run.news.push(meant);
 
-  if (meant._tag !== "Activity") {
+  if (meant._tag !== "Activity" || !live) {
     return;
   }
 
@@ -113,7 +148,7 @@ const fold = (run: Run, meant: Meant, line: Line): void => {
   } else if (activity._tag === "Joined" || activity._tag === "NickChanged") {
     see(run, activity._tag === "Joined" ? source.nick : activity.to, (seen) => ({
       ...seen,
-      mask: { at: run.at, host, user },
+      mask: { _tag: "Known", at: run.at, from: "ircd", value: { host, user } },
     }));
   }
 };
@@ -139,17 +174,19 @@ const means = (run: Run, arrival: Arrival): void => {
       feature.meaning?.(value, arrival, context)
     );
 
-    carryOut(run, ran);
+    carryOutRefined(run, ran);
+
+    const completed = completedBy(derived, ran.value);
 
     for (const each of ran.value) {
-      fold(run, each, arrival.line);
+      fold(run, each, arrival, completed);
     }
 
     return;
   }
 
   for (const each of derived) {
-    fold(run, each, arrival.line);
+    fold(run, each, arrival);
   }
 };
 
@@ -163,11 +200,23 @@ const welcome = (run: Run, line: Line): void => {
     return;
   }
 
-  const { account } = open.presence;
+  // What registration sent, not what the Configuration says now.
+  const { account, realname } = open.presence;
   const [first] = line.params;
-  const nick = first ?? offered(run) ?? run.state.configuration?.nicks[0] ?? "*";
+  const nick = first ?? offered(run) ?? "*";
 
   welcomed(run);
+
+  // A login the Configuration requires never happened: give up, and take up no Session.
+  if (linkOf(run)?.closing === undefined && loginOwed(run)) {
+    abandon(run, { _tag: "LoginFailed" });
+  }
+
+  // A Feature, or the login rule, gave up the Connection: registration is not taken up.
+  if (linkOf(run)?.closing !== undefined) {
+    return;
+  }
+
   updateOpen(run, (phase) => ({
     ...phase,
     presence: {
@@ -179,6 +228,7 @@ const welcome = (run: Run, line: Line): void => {
       // the echo of our own `JOIN`.
       mask: { _tag: "Unknown" },
       nick,
+      realname: { _tag: "Known", at: phase.opened, from: "ours", value: realname },
       server: line.source ?? link.ircd.host,
     },
   }));
@@ -345,6 +395,12 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
     },
   ],
   [
+    "903",
+    (run) => {
+      updateOpen(run, (open) => ({ ...open, loggedIn: true }));
+    },
+  ],
+  [
     "901",
     (run) => {
       account(run, null);
@@ -364,6 +420,40 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
   ],
 ]);
 
+// A protocol Line moves the machines on.
+const protocolLine = (run: Run, line: Line, raw: readonly RawParam[] | undefined): void => {
+  const { command } = line;
+
+  if (refusals.has(command) || (command === "437" && !isRegistering(run))) {
+    second(run, line, (name) => {
+      refused(run, name);
+    });
+  } else if (nickRefusals.has(command) || command === "437") {
+    if (isRegistering(run)) {
+      nickRefused(run);
+    }
+  } else {
+    handlers.get(command)?.(run, line, raw);
+  }
+};
+
+/**
+ * Whether a Line that answers an intent rejects it, and the reply, read by structure: an
+ * error numeric is its number, a `FAIL` is its code, as standard replies give it, and an
+ * `ACK` says the Ircd did nothing it would echo.
+ * @param line - The Line.
+ * @returns The reply, or `undefined` if it does not reject.
+ */
+const rejection = (line: Line): string | undefined => {
+  const { command } = line;
+
+  if (/^[45]\d\d$/u.test(command) || command === "ACK") {
+    return command;
+  }
+
+  return command === "FAIL" ? (line.params[1] ?? command) : undefined;
+};
+
 /**
  * Does what one Line says, once it has been through the Features' ingress stages.
  * @param run - The step.
@@ -378,25 +468,20 @@ export const interpret = (
   const { line } = arrival;
   const { command } = line;
 
-  if (arrival.answers !== undefined && /^[45]\d\d$/u.test(command)) {
+  const reply = arrival.answers === undefined ? undefined : rejection(line);
+
+  if (arrival.answers !== undefined && reply !== undefined) {
     run.news.push({
       _tag: "Refused",
       intent: arrival.answers,
-      reason: { _tag: "Rejected", reply: command },
+      reason: { _tag: "Rejected", reply },
     });
   }
 
   if (hasMeaning(command)) {
     means(run, arrival);
-  } else if (refusals.has(command) || (command === "437" && !isRegistering(run))) {
-    second(run, line, (name) => {
-      refused(run, name);
-    });
-  } else if (nickRefusals.has(command) || command === "437") {
-    if (isRegistering(run)) {
-      nickRefused(run);
-    }
-  } else {
-    handlers.get(command)?.(run, line, raw);
+  } else if (arrival.live) {
+    // History is reported, and moves no machine: it says what was, not what is.
+    protocolLine(run, line, raw);
   }
 };

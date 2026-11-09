@@ -282,6 +282,7 @@ const withoutMember = (
 const none: ReadonlySet<string> = new Set();
 
 const fresh = (run: Run, nick: string): Member => ({
+  complete: false,
   nick,
   prefixes: { _tag: "Known", at: run.at, from: "ircd", value: none },
 });
@@ -311,7 +312,11 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
   }
 
   updateOpen(run, (open) => {
-    const was = open.users.get(folded) ?? { away: undefined, mask: undefined, nick };
+    const was: Seen = open.users.get(folded) ?? {
+      away: { _tag: "Unknown" },
+      mask: { _tag: "Unknown" },
+      nick,
+    };
 
     return { ...open, users: new Map(open.users).set(folded, change(was)) };
   });
@@ -591,7 +596,7 @@ export const foldActivity = (
     case "AwayChanged": {
       see(run, activity.nick, (seen) => ({
         ...seen,
-        away: { at: run.at, value: activity.away },
+        away: { _tag: "Known", at: run.at, from: "ircd", value: activity.away },
       }));
 
       return;
@@ -609,15 +614,25 @@ export const foldActivity = (
  * @param run - The step.
  * @param channel - The Channel, as the listing names it.
  * @param members - Its members, as listed.
+ * @param complete - Whether a Feature made a member's prefixes complete.
  */
-export const foldListed = (run: Run, channel: string, members: readonly Listed[]): void => {
+export const foldListed = (
+  run: Run,
+  channel: string,
+  members: readonly Listed[],
+  complete: (nick: string) => boolean
+): void => {
   const fold = folder(run.state);
 
   changeJoined(run, channel, (joined) => {
     let listing = joined.listing ?? new Map<string, Member>();
 
     for (const member of members) {
-      listing = withMember(listing, fold(member.nick), member);
+      listing = withMember(listing, fold(member.nick), {
+        complete: complete(member.nick),
+        nick: member.nick,
+        prefixes: member.prefixes,
+      });
     }
 
     return { ...joined, listing };

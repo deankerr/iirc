@@ -17,16 +17,28 @@ import type { Seam } from "./seam.ts";
 export type Caps =
   /** `CAP LS 302` is sent, and the list is arriving. */
   | { readonly _tag: "Listing"; readonly offered: ReadonlyMap<CapName, string> }
-  /** `CAP REQ` is sent, and `asked` answers are still to come. */
-  | ({ readonly _tag: "Requesting"; readonly asked: number } & Negotiated)
+  /** `CAP REQ` is sent, and answers are still to come. */
+  | ({ readonly _tag: "Requesting" } & Asking & Negotiated)
   /** Features hold registration open before `CAP END`. */
   | ({ readonly _tag: "Holding" } & Negotiated)
   /** Negotiation is over. */
   | ({ readonly _tag: "Steady" } & Negotiated)
-  /** After registration, `CAP REQ` is sent for caps `CAP NEW` offered. */
-  | ({ readonly _tag: "Changing"; readonly asked: number } & Negotiated)
+  /** After registration, `CAP REQ` is sent for caps `CAP NEW` offered, or to give some up. */
+  | ({ readonly _tag: "Changing" } & Asking & Negotiated)
   /** The Ircd has no cap negotiation. */
   | { readonly _tag: "None" };
+
+/** Requests awaiting their answers. Each part is bounded by what was asked. */
+export interface Asking {
+  /** How many `CAP REQ` Lines are still to be answered. */
+  readonly asked: number;
+  /** Every change still to be answered, such as `sasl` or `-echo-message`. */
+  readonly requested: ReadonlySet<string>;
+  /** What an `ACK` spread over several Lines has acknowledged so far, applied at its last. */
+  readonly acked: ReadonlySet<string>;
+  /** How many Lines that `ACK` has spread over so far. */
+  readonly continued: number;
+}
 
 /** What negotiation has established. */
 export interface Negotiated {
@@ -50,6 +62,10 @@ type Presence =
       readonly _tag: "Registering";
       /** Which nick is on offer: an index into the configured nicks, and past them the fallbacks. */
       readonly offer: number;
+      /** The nick on offer, as `NICK` sent it, whatever the Configuration says since. */
+      readonly nick: string | undefined;
+      /** The realname, as `USER` sent it, whatever the Configuration says since. */
+      readonly realname: string;
       readonly deadline: Instant;
       /** Self's account, if a login said so before `001`. */
       readonly account: Fact<string | null>;
@@ -64,6 +80,8 @@ type Presence =
       readonly server: string;
       readonly mask: Fact<{ readonly user: string; readonly host: string }>;
       readonly account: Fact<string | null>;
+      /** Self's realname, as registration sent it. */
+      readonly realname: Fact<string>;
       readonly keepalive: Keepalive;
     };
 
@@ -89,24 +107,17 @@ type LinkPhase =
       readonly seam: Seam;
       /** Whether the Ircd has sent `ERROR`, which says it is closing the Connection. */
       readonly error: boolean;
+      /** Whether a `903` arrived, live, on this Connection: Self logged in. */
+      readonly loggedIn: boolean;
       /** What Lines have shown of other Users, by folded nick, while they share a Channel with Self. */
       readonly users: ReadonlyMap<string, Seen>;
     };
 
-/** What Lines have shown of a User. */
+/** What Lines have shown of a User. A fact no Feature keeps any longer is held as stale. */
 export interface Seen {
   readonly nick: string;
-  readonly mask: Mask | undefined;
-  readonly away:
-    | { readonly value: { readonly message: string } | null; readonly at: Instant }
-    | undefined;
-}
-
-/** A User's mask, and when a Line showed it. */
-interface Mask {
-  readonly user: string;
-  readonly host: string;
-  readonly at: Instant;
+  readonly mask: Fact<{ readonly user: string; readonly host: string }>;
+  readonly away: Fact<{ readonly message: string } | null>;
 }
 
 /** The Network: whether it is wanted, and the Connection or the wait for one. */
@@ -122,6 +133,11 @@ export type Network =
 export interface Member {
   readonly nick: string;
   readonly prefixes: Fact<ReadonlySet<string>>;
+  /**
+   * Whether a Feature made the prefixes complete, where the floor would know them only in
+   * part. They are known only while such a Feature is on.
+   */
+  readonly complete: boolean;
 }
 
 /** What is known of a Channel Self is in. */

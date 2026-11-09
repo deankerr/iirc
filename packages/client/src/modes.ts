@@ -112,6 +112,25 @@ export interface Listed {
 }
 
 /**
+ * Whether one name of a `NAMES` listing leads with a symbol `PREFIX` does not name, which
+ * stands for a prefix that cannot be named.
+ * @param name - The name, with its prefixes.
+ * @param rules - The Network's rules.
+ * @returns Whether it does.
+ */
+export const hasUnnamedPrefix = (name: string, rules: ModeRules): boolean => {
+  for (const character of name) {
+    if (rules.prefix.some((each) => each.symbol === character)) {
+      continue;
+    }
+
+    return notNickStart.test(character);
+  }
+
+  return false;
+};
+
+/**
  * Reads one name of a `NAMES` listing, such as `@+peer`. The floor shows only a member's
  * highest prefix, so a member shown with one holds at least that one. A member shown
  * with none holds none, since any would have shown. A symbol `PREFIX` does not name
@@ -161,7 +180,8 @@ export const readListed = (name: string, rules: ModeRules, at: Instant): Listed 
 };
 
 /**
- * Changes a member's prefixes by one mode change. A set that was partial stays partial.
+ * Changes a member's prefixes by one mode change. A set that was partial stays partial,
+ * and one that was stale becomes partial: what it was, with the change.
  * @param prefixes - What was known.
  * @param change - The change.
  * @param at - When.
@@ -193,7 +213,12 @@ export const changePrefix = (
       return { _tag: "Partial", at, atLeast: apply(prefixes.atLeast), from: "ircd" };
     }
 
-    case "Stale":
+    // What was held still is, unless a change since said otherwise, since every change is
+    // read: so at least that, with this change.
+    case "Stale": {
+      return { _tag: "Partial", at, atLeast: apply(prefixes.was), from: "ircd" };
+    }
+
     case "Unknown": {
       return change.set
         ? { _tag: "Partial", at, atLeast: new Set([change.mode]), from: "ircd" }
