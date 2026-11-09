@@ -8,7 +8,10 @@ import type { LinkEvent, TransportService } from "../transport.ts";
 /** The far end of one dialled Connection, played by a test. */
 export interface TestCall {
   readonly address: IrcdAddress;
-  /** Accepts the Connection, so the Link reports `Opened`. */
+  /**
+   * Accepts the Connection. It returns once the Link has published `Opened`, though the
+   * caller need not have read it yet, so a law may hang up right after.
+   */
   readonly open: Effect.Effect<void>;
   /**
    * Sends one Line's bytes, without its line ending, framed by the Transport as an Ircd's
@@ -17,7 +20,11 @@ export interface TestCall {
   readonly say: (bytes: Uint8Array) => Effect.Effect<void>;
   /** The next Line the Link sent, with its line ending, waiting until one comes. */
   readonly heard: Effect.Effect<Uint8Array>;
-  /** Ends the Connection, or refuses it if it was never opened. */
+  /**
+   * Ends the Connection, or refuses it if it was never opened. A harness over real sockets
+   * may play only some reasons, such as `Refused` and `Unreachable` before `open`, and
+   * `Ended` and `Reset` after. It refuses the rest rather than fake them.
+   */
   readonly close: (reason: CloseReason) => Effect.Effect<void>;
 }
 

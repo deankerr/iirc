@@ -23,13 +23,13 @@ LinkEvent = Opened | Received { bytes } | Closed { reason: CloseReason }
 
 - **It never fails.** A refused, unreachable, or timed-out dial, a TLS failure, a reset, and a stalled write all end as `Closed` with a reason. The Runtime journals that as a `Closed` input.
 - **Events come in order.** At most one `Opened`, then any number of `Received`, then exactly one `Closed`, and then the stream ends. A failed dial gives `Closed` with no `Opened`. Over TLS, `Opened` comes after the handshake. `events` is read once.
-- **It frames Lines.** `Received` holds one Line's bytes without its line ending. A Line ends at LF, with one CR before it removed. Empty Lines are skipped. A Line longer than `maxReceivedBytes` (8191 tag bytes plus 510) is cut to that length, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped. The laws check skipping and cutting through `TestCall.say`. A byte-level adapter also tests its framing directly: a line ending split across reads, several Lines in one read, and an unfinished Line at the end.
+- **It frames Lines.** `Received` holds one Line's bytes without its line ending. A Line ends at CR or LF, and empty Lines are skipped, so CRLF, a bare LF, and a bare CR each end one, as Ircds differ. A Line longer than `maxReceivedBytes` (8191 tag bytes plus 510) is cut to that length, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped. The laws check skipping and cutting through `TestCall.say`. A byte-level adapter also tests its framing directly: each line ending, CRLF split across reads, several Lines in one read, and an unfinished Line at the end.
 - **It decodes nothing.** Bytes go to the Client as they came, so a parser fix repairs history on replay (ADR 0002).
 - **`send` writes one Line's bytes,** line ending included. Before `Opened` or after `Closed`, it does nothing.
-- **`hangup` ends the Connection** with `Closed` `HungUp`, unless it had already ended for another reason. An interrupted `hangup` either ended it or did nothing, so another `hangup` still works.
+- **`hangup` ends the Connection** with `Closed` `HungUp`, unless it had already ended for another reason. It first lets what was already sent reach the Ircd, within a bound, so a `QUIT` arrives, and a peer that never reads cannot hold it past the bound. An interrupted `hangup` either ended it or did nothing, so another `hangup` still works.
 - **Closing the Scope** ends the Connection without a `Closed`, because nothing is left to read it.
 - **TLS is verified.** Certificates are checked against the system roots, and SNI is sent. Falling back to plaintext is the Client's decision, and under STS it never does.
-- **Socket timers are the Transport's.** Connecting, the TLS handshake, and a stalled write each end as `Closed` with `TimedOut` or `Tls`. Timers about Lines, such as silence, are the Client's.
+- **Socket timers are the Transport's.** Connecting, the TLS handshake, and a stalled write each end as `Closed` `TimedOut`. A TLS failure, such as a certificate that is not trusted or names another host, ends as `Closed` `Tls`. Timers about Lines, such as silence, are the Client's.
 
 ## Journal
 
@@ -63,6 +63,7 @@ names: Effect<ReadonlySet<CredentialName>, VaultFailed>
 - **Values are always `Redacted`,** so a value cannot be logged or journaled by accident. Only `fillSecret` in `@iirc/protocol` unwraps one, and its result is sent, never kept.
 - **The Runtime reveals at the last moment,** for each `SendSecret`, and lets go of the value once the Line is sent.
 - **A Credential that cannot be revealed sends nothing.** The Runtime steps an `Unfilled` input naming the `SecretLine`, so the Client decides what follows. Its reason is `Missing` for `CredentialMissing`, which the Owner must fix, or `Unavailable` for `VaultFailed`, which may pass.
+- **`VaultFailed` can come from any call,** `reveal` and `names` included, whenever the Vault cannot be read, such as when its file's directory is missing.
 - **`names` lists names, never values.** The Owner API holds and forgets Credentials, and can list them, but never reads one back.
 - **Only passwords for now.** SASL `EXTERNAL` would add a client certificate as a kind of Credential, which `Dial` names.
 

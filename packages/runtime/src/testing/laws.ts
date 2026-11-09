@@ -43,9 +43,10 @@ export interface Law<Harness, E> {
 export const holds = <Harness, E, M>(
   law: Law<Harness, E>,
   make: Effect.Effect<Harness, M, Scope.Scope>
-) =>
+): Effect.Effect<void, E | M | LawBroken> =>
   make.pipe(
     Effect.flatMap(law.check),
+    Effect.asVoid,
     Effect.scoped,
     Effect.timeoutOrElse({
       duration: "2 seconds",
