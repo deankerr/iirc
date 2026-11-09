@@ -18,6 +18,33 @@
         "ultracite": "8.1.0",
       },
     },
+    "apps/iirc": {
+      "name": "iirc",
+      "version": "0.0.0",
+      "bin": {
+        "iirc": "./src/main.ts",
+      },
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/daemon": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
+    "packages/api": {
+      "name": "@iirc/api",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/client": "workspace:*",
+        "@iirc/protocol": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
     "packages/client": {
       "name": "@iirc/client",
       "version": "0.0.0",
@@ -27,6 +54,23 @@
       },
       "devDependencies": {
         "fast-check": "4.10.2",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/daemon": {
+      "name": "@iirc/daemon",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/api": "workspace:*",
+        "@iirc/client": "workspace:*",
+        "@iirc/journal-sqlite": "workspace:*",
+        "@iirc/runtime": "workspace:*",
+        "@iirc/transport-bun": "workspace:*",
+        "@iirc/vault-file": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
         "vitest": "catalog:",
       },
     },
@@ -176,7 +220,11 @@
 
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
+    "@iirc/api": ["@iirc/api@workspace:packages/api"],
+
     "@iirc/client": ["@iirc/client@workspace:packages/client"],
+
+    "@iirc/daemon": ["@iirc/daemon@workspace:packages/daemon"],
 
     "@iirc/journal-sqlite": ["@iirc/journal-sqlite@workspace:packages/journal-sqlite"],
 
@@ -643,6 +691,8 @@
     "human-signals": ["human-signals@8.0.1", "", {}, "sha512-eKCa6bwnJhvxj14kZk5NCPc6Hb6BdsU9DZcOnmQKSnO1VKrfV0zCvtttPZUsBvjmNDn8rpcJfpwSYnHBjc95MQ=="],
 
     "ignore": ["ignore@5.3.2", "", {}, "sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g=="],
+
+    "iirc": ["iirc@workspace:apps/iirc"],
 
     "imurmurhash": ["imurmurhash@0.1.4", "", {}, "sha512-JmXMZ6wuvDmLiHEml9ykzqO6lwFbof0GG4IkcGaENdCRDDmMVnny7s5HsIgHCbaq0w2MyPhDqkhTUgS2LU2PHA=="],
 

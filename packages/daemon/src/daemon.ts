@@ -1,0 +1,149 @@
+/**
+ * The composition root: the data directory, the production adapters, the Runtime driving
+ * the real Client, the keys, and the API served over HTTP.
+ *
+ * @packageDocumentation
+ */
+import { BunFileSystem, BunHttpServer, BunPath } from "@effect/platform-bun";
+import { client } from "@iirc/client";
+import { layerSqliteJournal } from "@iirc/journal-sqlite";
+import { layerRuntime } from "@iirc/runtime";
+import { layer as layerTransport } from "@iirc/transport-bun";
+import type { BunTransportOptions } from "@iirc/transport-bun";
+import { layerBun as layerVault } from "@iirc/vault-file";
+import { Context, Duration, Effect, Exit, FileSystem, Layer, Logger, Scope } from "effect";
+import { Digest } from "effect/crypto";
+import { HttpRouter } from "effect/http";
+
+import { ApiRoutes, Heartbeat } from "./handlers.ts";
+import { ApiKeys } from "./keys.ts";
+import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
+
+/** What a Daemon needs besides where to listen. */
+export interface DaemonOptions {
+  /** Where the Journal, the Credentials, and the keys live. Made, owner-only, if missing. */
+  readonly dataDir: string;
+  /** The Transport's options, such as extra roots to `trust`. */
+  readonly transport?: BunTransportOptions | undefined;
+  /** How often the News stream sends a heartbeat. 15 seconds unless given. */
+  readonly heartbeat?: Duration.Input | undefined;
+}
+
+/** Where the API listens. */
+export interface Listen {
+  readonly host: string;
+  readonly port: number;
+}
+
+/** Loopback only, as ADR 0006 says: remote access goes through a proxy. */
+export const defaultListen: Listen = { host: "127.0.0.1", port: 7667 };
+
+/**
+ * How long serving waits for requests in flight once asked to stop. By then the Runtime
+ * has stopped, so this only covers reads and News streams, which are cut.
+ */
+const gracefulShutdownTimeout = Duration.millis(500);
+
+/** Closes the Runtime's Scope. Closing it again does nothing. */
+class StopRuntime extends Context.Service<StopRuntime, Effect.Effect<void>>()(
+  "@iirc/daemon/StopRuntime"
+) {}
+
+/**
+ * Makes the data directory if it is missing, owner-only, and holds it for as long as the
+ * Layer lives.
+ * @param dataDir - The data directory.
+ * @returns The Layer.
+ */
+const dataDirectory = (dataDir: string) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+
+      yield* fs
+        .makeDirectory(dataDir, { mode: 0o700, recursive: true })
+        .pipe(
+          Effect.mapError((error) => new DataDirectoryFailed({ dataDir, reason: error.message }))
+        );
+
+      yield* holdDataDirectory(dataDir);
+    })
+  ).pipe(Layer.provide(BunFileSystem.layer));
+
+/**
+ * The Runtime in a Scope of its own, which {@link StopRuntime} closes, so the Daemon can
+ * stop it before serving stops.
+ */
+const runtimeFirstToStop = Layer.effectContext(
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    const close = Scope.close(scope, Exit.void);
+
+    yield* Effect.addFinalizer(() => close);
+
+    const built = yield* Layer.buildWithScope(layerRuntime(client), scope);
+
+    return Context.add(built, StopRuntime, close);
+  })
+);
+
+/**
+ * Everything but HTTP: the data directory held, the Journal, the Vault, the Transport,
+ * the Runtime, and the keys. Each is opened only once the directory is held.
+ * @param options - The data directory and the Transport's options.
+ * @returns The core.
+ */
+const layerCore = (options: DaemonOptions) => {
+  const { dataDir } = options;
+
+  const ports = Layer.mergeAll(
+    layerSqliteJournal(`${dataDir}/journal.sqlite`),
+    layerVault(`${dataDir}/credentials.json`),
+    layerTransport(options.transport)
+  );
+
+  const keys = ApiKeys.layer(dataDir).pipe(
+    Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, Digest.layerWebCrypto))
+  );
+
+  const heartbeat =
+    options.heartbeat === undefined
+      ? Layer.empty
+      : Layer.succeed(Heartbeat, Duration.fromInputUnsafe(options.heartbeat));
+
+  return Layer.mergeAll(runtimeFirstToStop.pipe(Layer.provideMerge(ports)), keys, heartbeat).pipe(
+    Layer.provide(dataDirectory(dataDir))
+  );
+};
+
+// Built after serving, so it closes first: the Runtime stops, every Owner input still
+// waiting fails with `NetworkStopped`, and only then does serving stop.
+const stopsFirst = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const stop = yield* StopRuntime;
+
+    yield* Effect.addFinalizer(() => stop);
+  })
+);
+
+/**
+ * The Daemon: the core, provided outside `HttpRouter.serve`, which forks the MemoMap and
+ * would build anything shared inside it twice, and the API served on `listen`.
+ * @param options - The data directory and the Transport's options.
+ * @param listen - Where to listen.
+ * @returns The Daemon, which runs for as long as the Layer lives, and its `HttpServer`.
+ */
+export const layerDaemon = (options: DaemonOptions, listen: Listen = defaultListen) =>
+  stopsFirst.pipe(
+    Layer.provideMerge(
+      HttpRouter.serve(ApiRoutes, { disableLogger: true }).pipe(
+        Layer.provideMerge(
+          BunHttpServer.layer({ gracefulShutdownTimeout, hostname: listen.host, port: listen.port })
+        )
+      )
+    ),
+    Layer.provide(layerCore(options))
+  );
+
+/** Logs as logfmt to stderr, so stdout holds only what a command was asked for. */
+export const layerLogger = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);

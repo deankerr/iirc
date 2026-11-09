@@ -19,7 +19,8 @@
     "fix": "ultracite fix",
     "knip": "knip",
     "prepare": "effect-tsgo patch --oxlint && if git rev-parse --git-dir >/dev/null 2>&1; then lefthook install; fi",
-    "test": "bun run --parallel --filter '*' test"
+    "test": "bun run --parallel --filter '*' test",
+    "e2e": "bun run --filter @iirc/daemon e2e"
   },
   "devDependencies": {
     "@effect/tsgo": "0.63.0",
