@@ -12,7 +12,7 @@
 << @time=2026-01-01T00:00:00.000Z :ergo.test CAP * ACK :multi-prefix message-tags server-time cap-notify sasl echo-message labeled-response batch
 >> AUTHENTICATE PLAIN
 << AUTHENTICATE +
->> AUTHENTICATE {AuthenticatePlain iirc}
+>> {AuthenticatePlain credential=iirc authcid=iirc authzid=iirc}
 << @time=2026-01-01T00:00:00.000Z :ergo.test 900 * * iirc :You are now logged in as iirc
 << @time=2026-01-01T00:00:00.000Z :ergo.test 903 * :Authentication successful
 >> CAP END
