@@ -30,6 +30,7 @@ import type { Ran } from "./seam.ts";
 import { capsOf, capsWanted, freshSeam, goneStale, runEffects } from "./seam.ts";
 import { markStale } from "./stale.ts";
 import type { Asking, Caps, Negotiated, Open } from "./state.ts";
+import { readSts } from "./sts.ts";
 import { holdTime, registrationTime } from "./timers.ts";
 import { negotiated, onNow, openOf } from "./views.ts";
 
@@ -826,7 +827,15 @@ export const capLine = (run: Run, line: Line): void => {
 
   const more = third === "*" && fourth !== undefined;
   const list = capList(more ? fourth : (line.params.at(-1) ?? ""));
-  const step = capSteps.get(upperCaseAscii(subcommand));
+  const name = upperCaseAscii(subcommand);
+  const step = capSteps.get(name);
+
+  // STS is read from every `LS` and `NEW` Line, whatever negotiation is doing: a policy
+  // is the Ircd's word on the Connection, not part of negotiation. An upgrade ends the
+  // Connection, and nothing more is read or asked.
+  if ((name === "LS" || name === "NEW") && readSts(run, list)) {
+    return;
+  }
 
   if (step?.(run, open.caps, list, more) !== true) {
     ignore(run, { _tag: "NotNow", input: "Received" });
