@@ -1,5 +1,5 @@
 import { BunHttpServer } from "@effect/platform-bun";
-import { Happened } from "@iirc/api";
+import { Happened, SaidAnswer } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { makeSqliteJournal } from "@iirc/journal-sqlite";
 import { Context, Duration, Effect, Layer, Schema } from "effect";
@@ -152,6 +152,12 @@ const sayTo = (served: Served, text: string) =>
     ...json(JSON.stringify({ kind: "Privmsg", target: "peer", text })),
   });
 
+const sayUnder = (served: Served, intent: string) =>
+  served.request("/api/networks/libera/say", {
+    method: "POST",
+    ...json(JSON.stringify({ intent, kind: "Privmsg", target: "peer", text: "hi" })),
+  });
+
 /**
  * Configures `libera`, registers it on the floor, and has a peer say each text.
  * @param served - The server.
@@ -177,6 +183,8 @@ const talk = (served: Served, texts: readonly string[]) =>
 
 // Every `happened` event decodes as the contract says.
 const decodeHappened = Schema.decodeUnknownSync(Schema.fromJsonString(Happened));
+
+const decodeSaid = Schema.decodeUnknownSync(Schema.fromJsonString(SaidAnswer));
 
 const messagesOf = (events: readonly Sse[]) =>
   happened(events).flatMap((event) =>
@@ -342,6 +350,30 @@ describe("the API over a real server", () => {
     expect(
       [result.credential[1], result.notJson[1]].map((body) => String(body).includes(secret))
     ).toStrictEqual([false, false]);
+  });
+
+  it("finds a dotted intent through `said`, and refuses the two that URL handling collapses", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* talk(served, []);
+
+        const dotted = yield* sayUnder(served, "...");
+        const lookup = yield* served.request("/api/networks/libera/said/...");
+        const found = decodeSaid(yield* Effect.promise(async () => await lookup.text()));
+        const one = yield* sayUnder(served, ".");
+        const two = yield* sayUnder(served, "..");
+
+        return {
+          found: found._tag,
+          statuses: [dotted.status, lookup.status, one.status, two.status],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      found: "Journaled",
+      statuses: [200, 200, 400, 400],
+    });
   });
 
   it("refuses a body over 1 MiB", async () => {

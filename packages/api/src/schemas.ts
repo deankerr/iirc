@@ -86,11 +86,11 @@ export const After = Schema.FiniteFromString.check(
 /**
  * An intent id a caller chose, which it can ask `said` about later: 1 to 128 letters,
  * digits, `.`, `_`, `~`, or `-`. It is a path segment, so it holds nothing that needs
- * escaping.
+ * escaping, and it is never `.` or `..`, which URL handling collapses before routing.
  */
 export const CallerIntent = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9._~-]{1,128}$/u, {
-    message: "must be 1 to 128 letters, digits, `.`, `_`, `~`, or `-`",
+  Schema.isPattern(/^(?!\.\.?$)[A-Za-z0-9._~-]{1,128}$/u, {
+    message: "must be 1 to 128 letters, digits, `.`, `_`, `~`, or `-`, and not `.` or `..`",
   })
 ).pipe(Schema.brand("IntentId"));
 

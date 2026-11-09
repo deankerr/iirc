@@ -18,7 +18,7 @@ import { presenting } from "./world.ts";
 /** The API's typed client. */
 export type Api = HttpApiClient.ForApi<typeof DaemonApi>;
 
-/** A Daemon that runs until `stop`. */
+/** A Daemon that runs until `stop`, or until the Scope it was started in closes. */
 interface Running {
   readonly api: Api;
   readonly base: string;
@@ -35,6 +35,8 @@ interface Running {
 export const startDaemon = (options: DaemonOptions, key: string) =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
+    // A run that fails before its `stop` still stops the Daemon. Closing twice does nothing.
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
 
     const context = yield* Layer.buildWithScope(
       layerDaemon(options, { host: "127.0.0.1", port: 0 }),

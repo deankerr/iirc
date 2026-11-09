@@ -47,11 +47,14 @@ describe("the contract", () => {
       false,
       false,
     ]);
-    expect([intent("a1.b_c~d-e"), intent("a/b"), intent("a".repeat(129))]).toStrictEqual([
-      true,
-      false,
-      false,
-    ]);
+    expect([
+      intent("a1.b_c~d-e"),
+      intent("..."),
+      intent("a/b"),
+      intent("a".repeat(129)),
+      intent("."),
+      intent(".."),
+    ]).toStrictEqual([true, true, false, false, false, false]);
   });
 
   it("refuses to say text no Line can carry", () => {
