@@ -54,8 +54,13 @@ export type Fact<T> =
   | StaleFact<T>
   | UnknownFact;
 
-/** How the Network folds names, from `CASEMAPPING`. Until it says, `rfc1459`. */
-export type Casemapping = "ascii" | "rfc1459" | "strict-rfc1459" | "rfc7613";
+/**
+ * How the Network folds names, from `CASEMAPPING` and `UTF8MAPPING`, named as
+ * `@iirc/protocol/casemapping` names them. Until it says, `rfc1459`. A mapping the
+ * Client does not know folds as `ascii`, which can split one name in two but never
+ * merges two.
+ */
+export type Casemapping = "ascii" | "rfc1459" | "rfc1459-strict" | "rfc8265";
 
 /** Where the Client is with the Network. */
 export type SessionKnowledge =
