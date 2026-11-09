@@ -14,11 +14,16 @@ import type { Run } from "./run.ts";
 import { hangup, linkOf } from "./run.ts";
 import type { Link, State } from "./state.ts";
 
-/** The most policies kept. Only hosts the Client has dialled make one. */
-export const maxPolicies = 64;
-
-/** The longest `duration` kept, in seconds: the largest signed 32-bit integer, about 68 years. */
-export const longestDuration = 2_147_483_647;
+/**
+ * Until when a policy holds: `at` plus `duration` seconds, exactly, while that fits in a
+ * safe integer of milliseconds, and beyond it the largest that does, so a policy never
+ * ends sooner than it says.
+ * @param at - When it was learnt, or its Connection ended.
+ * @param duration - Seconds.
+ * @returns Its expiry.
+ */
+const untilAfter = (at: Instant, duration: number): Instant =>
+  Instant.make(Math.min(at + duration * 1000, Number.MAX_SAFE_INTEGER));
 
 /** The parts of an `sts` value the Client reads. A part missing or malformed is `undefined`. */
 interface StsValue {
@@ -60,7 +65,7 @@ const parseValue = (value: string): StsValue => {
   const duration = integer("duration");
 
   return {
-    duration: duration === undefined ? undefined : Math.min(duration, longestDuration),
+    duration: duration === undefined ? undefined : Math.min(duration, Number.MAX_SAFE_INTEGER),
     port: port !== undefined && port >= 1 && port <= 65_535 ? port : undefined,
   };
 };
@@ -108,21 +113,14 @@ export const addressFor = (state: State, ircd: IrcdAddress, at: Instant): IrcdAd
   return policy === undefined ? ircd : { host: ircd.host, port: policy.port, tls: true };
 };
 
-// Sets or removes one host's policy. Past the bound, the policy that expires first goes.
+// Sets or removes one host's policy. No policy that holds is ever dropped to make room:
+// only the hosts of Connections the Client dialled, from the Owner's \`ircds\`, have one.
 const withPolicy = (state: State, key: string, policy: StsPolicy | undefined): State => {
   const policies = new Map(state.policies);
 
   policies.delete(key);
 
   if (policy !== undefined) {
-    if (policies.size >= maxPolicies) {
-      const [first] = [...policies].toSorted(([, left], [, right]) => left.until - right.until);
-
-      if (first !== undefined) {
-        policies.delete(first[0]);
-      }
-    }
-
     policies.set(key, policy);
   }
 
@@ -174,7 +172,7 @@ export const readSts = (run: Run, list: readonly (readonly [CapName, string])[])
       : {
           duration: value.duration,
           port: link.ircd.port,
-          until: Instant.make(run.at + value.duration * 1000),
+          until: untilAfter(run.at, value.duration),
         }
   );
 
@@ -203,7 +201,7 @@ export const rescheduled = (state: State, link: Link, at: Instant): State => {
     return state;
   }
 
-  return withPolicy(state, key, { ...policy, until: Instant.make(at + policy.duration * 1000) });
+  return withPolicy(state, key, { ...policy, until: untilAfter(at, policy.duration) });
 };
 
 /**

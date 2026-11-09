@@ -727,11 +727,6 @@ const listing: CapStep = (run, caps, list, more) => {
     return false;
   }
 
-  // An upgrade ends the Connection, and nothing more is asked.
-  if (readSts(run, list)) {
-    return true;
-  }
-
   const listed = withOffered(caps.offered, list);
 
   if (more) {
@@ -760,10 +755,6 @@ const answering =
 const added: CapStep = (run, caps, list) => {
   if (caps._tag === "Listing" || caps._tag === "None") {
     return false;
-  }
-
-  if (readSts(run, list)) {
-    return true;
   }
 
   const held = { enabled: caps.enabled, offered: withOffered(caps.offered, list) };
@@ -836,7 +827,15 @@ export const capLine = (run: Run, line: Line): void => {
 
   const more = third === "*" && fourth !== undefined;
   const list = capList(more ? fourth : (line.params.at(-1) ?? ""));
-  const step = capSteps.get(upperCaseAscii(subcommand));
+  const name = upperCaseAscii(subcommand);
+  const step = capSteps.get(name);
+
+  // STS is read from every `LS` and `NEW` Line, whatever negotiation is doing: a policy
+  // is the Ircd's word on the Connection, not part of negotiation. An upgrade ends the
+  // Connection, and nothing more is read or asked.
+  if ((name === "LS" || name === "NEW") && readSts(run, list)) {
+    return;
+  }
 
   if (step?.(run, open.caps, list, more) !== true) {
     ignore(run, { _tag: "NotNow", input: "Received" });

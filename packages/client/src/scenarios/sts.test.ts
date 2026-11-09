@@ -14,7 +14,6 @@ import type { Input } from "../input.ts";
 import { timers as timersFold } from "../output.ts";
 import type { Output, TimerTable } from "../output.ts";
 import type { State } from "../state.ts";
-import { longestDuration, maxPolicies } from "../sts.ts";
 import { configured, epoch, play, registered, replayFresh } from "../testing/index.ts";
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
@@ -58,6 +57,37 @@ const lastDial = (played: ReturnType<typeof play>): IrcdAddress | undefined =>
 const policiesOf = (state: State): ReadonlyMap<string, StsPolicy> => client.inspect(state).policies;
 
 describe("learning a policy over TLS", () => {
+  it("takes a CAP NEW while CAP LS is still listing", () => {
+    const base = configured({ ircds: [tls("irc.test"), plain("irc.test")] });
+
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        "!! configure\n",
+        dial(tls("irc.test")),
+        opening,
+        lines(
+          "<< :irc.test CAP * LS * :sts=duration=10",
+          "<< :irc.test CAP * NEW :sts=duration=600",
+          // As negotiation, a NEW before the list ends makes no sense, but its policy counts.
+          "?? ignored NotNow Received",
+          "<< :irc.test CAP * LS :foo",
+          ">> CAP END",
+          "== closed Ended",
+          "+2s"
+        ),
+        dial(tls("irc.test")),
+        lines("== closed Refused", "+4s"),
+        dial(tls("irc.test")),
+        // At t+14s: past the first duration, within the second.
+        lines("== closed Refused", "+8s"),
+        dial(tls("irc.test")),
+      ],
+    });
+
+    expect(policiesOf(played.state).get("irc.test")?.duration).toBe(600);
+  });
+
   it("learns one from CAP LS, on the port of the Connection, and never asks for the cap", () => {
     const base = configured();
 
@@ -232,9 +262,31 @@ describe("malformed values", () => {
     );
   });
 
-  it("keeps a huge duration as the longest it holds", () => {
-    expect(learnt("sts=duration=99999999999999999999999")).toStrictEqual(
-      new Map([["irc.test", policy(6697, longestDuration, longestDuration * 1000)]])
+  it("keeps a duration past 32 bits exactly", () => {
+    expect(learnt("sts=duration=2147483648")).toStrictEqual(
+      new Map([["irc.test", policy(6697, 2_147_483_648, 2_147_483_648_000)]])
+    );
+  });
+
+  it("keeps the longest duration that fits exactly, and holds one past it to the last instant", () => {
+    const fits = Math.floor((Number.MAX_SAFE_INTEGER - epoch) / 1000);
+
+    expect(learnt(`sts=duration=${fits}`)).toStrictEqual(
+      new Map([["irc.test", policy(6697, fits, fits * 1000)]])
+    );
+    expect(learnt(`sts=duration=${fits + 1}`)).toStrictEqual(
+      new Map([
+        [
+          "irc.test",
+          { duration: fits + 1, port: 6697, until: Instant.make(Number.MAX_SAFE_INTEGER) },
+        ],
+      ])
+    );
+  });
+
+  it("holds a huge duration to the last instant", () => {
+    expect(learnt("sts=duration=99999999999999999999999").get("irc.test")?.until).toBe(
+      Number.MAX_SAFE_INTEGER
     );
   });
 
@@ -277,6 +329,29 @@ describe("malformed values", () => {
 });
 
 describe("upgrading from plaintext", () => {
+  it("upgrades on CAP NEW while CAP LS is still listing", () => {
+    const base = configured({ ircds: [plain("irc.test")] });
+
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        "!! configure\n",
+        dial(plain("irc.test")),
+        opening,
+        lines(
+          "<< :irc.test CAP * LS * :foo",
+          "<< :irc.test CAP * NEW :sts=port=6697",
+          "-> hangup",
+          "== closed HungUp",
+          "?? connection-failed Upgrading 6697"
+        ),
+        dial(tls("irc.test")),
+      ],
+    });
+
+    expect(lastDial(played)).toStrictEqual(tls("irc.test"));
+  });
+
   it("hangs up at once, sends nothing more, and dials TLS on the port given", () => {
     const base = configured({ ircds: [plain("irc.test"), tls("other.test")] });
 
@@ -502,29 +577,62 @@ describe("dialling under a policy", () => {
   });
 });
 
-describe("the bound", () => {
-  it("keeps at most so many policies, forgetting the one that expires first", () => {
-    const hosts = Array.from({ length: maxPolicies + 1 }, (_, index) => tls(`h${index}.test`));
-    const base = configured({ ircds: [hosts[0] ?? tls("h0.test"), ...hosts.slice(1)] });
+describe("many policies", () => {
+  it("forgets none that holds: every host dials TLS, however many there are", () => {
+    const count = 100;
+    const hosts = Array.from({ length: count }, (_, index) => `h${index}.test`);
+    const first = tls("h0.test");
+
+    // Each host over TLS, then each again, configured plaintext on another port.
+    const base = configured({
+      ircds: [
+        first,
+        ...hosts.slice(1).map((host) => tls(host)),
+        ...hosts.map((host) => plain(host)),
+      ],
+    });
 
     const played = play(client, {
       configuration: base,
       transcript: [
         "!! configure\n",
         ...hosts.map(
-          (ircd, index) =>
+          (host, index) =>
             (index === 0 ? "" : "+5m\n") +
-            session(ircd, "sts=duration=86400") +
+            session(tls(host), "sts=duration=86400") +
             lines("== closed Ended")
         ),
+        ...hosts.map((host) => `+5m\n${dial(tls(host))}== closed Refused\n`),
       ],
     });
 
-    const policies = policiesOf(played.state);
+    expect(policiesOf(played.state).size).toBe(count);
+  });
 
-    expect(policies.size).toBe(maxPolicies);
-    expect(policies.has("h0.test")).toBeFalsy();
-    expect(policies.has(`h${maxPolicies}.test`)).toBeTruthy();
+  it("dials TLS to the first host learnt, on Retry, after 64 others", () => {
+    const count = 65;
+    const hosts = Array.from({ length: count }, (_, index) => `h${index}.test`);
+
+    const base = configured({
+      ircds: [tls("h0.test"), ...hosts.slice(1).map((host) => tls(host)), plain("h0.test")],
+    });
+
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        "!! configure\n",
+        ...hosts.map(
+          (host, index) =>
+            (index === 0 ? "" : "+5m\n") +
+            session(tls(host), "sts=duration=86400") +
+            lines("== closed Ended")
+        ),
+        "!! retry\n",
+        dial(tls("h0.test")),
+      ],
+    });
+
+    expect(lastDial(played)).toStrictEqual(tls("h0.test"));
   });
 });
 
@@ -667,25 +775,47 @@ const worlds = [
   configured({ ircds: [plain("a.test")] }),
 ];
 
-// Each Line, and what it means for a policy when it arrives over TLS and is read: a
-// duration to set, 0 to remove, or nothing.
-const pool: readonly (readonly [string, number | undefined])[] = [
-  [":irc.test CAP * LS :sts=duration=600", 600],
-  [":irc.test CAP * LS * :foo sts=duration=900", 900],
-  [":irc.test CAP * LS :sts=port=7000,duration=60", 60],
-  [":irc.test CAP * LS :sts=port=6697", undefined],
-  [":irc.test CAP * LS :foo", undefined],
-  [":irc.test CAP iirc NEW :sts=duration=300", 300],
-  [":irc.test CAP iirc NEW :sts=duration=0", 0],
-  [":irc.test CAP iirc NEW :sts=duration=abc", undefined],
-  [":irc.test CAP iirc NEW :sts=port=6697", undefined],
-  [":irc.test CAP iirc DEL :sts", undefined],
-  [":irc.test CAP iirc ACK :foo", undefined],
-  [":irc.test 421 iirc CAP :Unknown command", undefined],
-  [":irc.test 001 iirc :Welcome", undefined],
-  ["PING :x", undefined],
-  ["ERROR :bye", undefined],
+// Lines an Ircd might send, with and without STS, in every place negotiation may be.
+const pool: readonly string[] = [
+  ":irc.test CAP * LS :sts=duration=600",
+  ":irc.test CAP * LS * :foo sts=duration=900",
+  ":irc.test CAP * LS * :sts=duration=5",
+  ":irc.test CAP * LS :sts=port=7000,duration=60",
+  ":irc.test CAP * LS :sts=port=6697",
+  ":irc.test CAP * LS :foo",
+  ":irc.test CAP iirc NEW :sts=duration=300",
+  ":irc.test CAP iirc NEW :sts=duration=0",
+  ":irc.test CAP iirc NEW :sts=duration=abc",
+  ":irc.test CAP iirc NEW :sts=port=6697",
+  ":irc.test CAP iirc DEL :sts",
+  ":irc.test CAP iirc ACK :foo",
+  ":irc.test 421 iirc CAP :Unknown command",
+  ":irc.test 001 iirc :Welcome",
+  "PING :x",
+  "ERROR :bye",
 ];
+
+// What a Line says of a persistence policy, by the spec alone: the `duration` of an `sts`
+// cap that `CAP LS` or `CAP NEW` offers, if it is all digits, else nothing.
+const durationIn = (text: string): number | undefined => {
+  const cut = text.indexOf(" :");
+  const words = text.slice(0, cut === -1 ? undefined : cut).split(" ");
+  const caps = cut === -1 ? [] : text.slice(cut + 2).split(" ");
+  const [, command, , subcommand] = words;
+
+  if (command !== "CAP" || (subcommand !== "LS" && subcommand !== "NEW")) {
+    return undefined;
+  }
+
+  const value = caps.find((each) => each.startsWith("sts="))?.slice(4) ?? "";
+
+  const duration = value
+    .split(",")
+    .find((token) => token.startsWith("duration="))
+    ?.slice(9);
+
+  return duration !== undefined && /^[0-9]+$/u.test(duration) ? Number(duration) : undefined;
+};
 
 type Move =
   | { readonly _tag: "Configure"; readonly which: number }
@@ -734,7 +864,8 @@ interface Seen {
 const utf8 = new TextEncoder();
 
 // Folds the moves through the Client, keeping beside it what the spec says each policy
-// is: a lower bound, since it leaves out rescheduling, which only moves expiry later.
+// is, from the inputs alone and never from what the Client reports: a lower bound, since
+// it leaves out rescheduling, which only moves expiry later.
 const fold = (sequence: readonly Move[], seen: Seen): void => {
   let state = client.initial;
   let table: TimerTable = new Map();
@@ -743,10 +874,37 @@ const fold = (sequence: readonly Move[], seen: Seen): void => {
   const dialled = new Map<number, IrcdAddress>();
   const policies = new Map<string, { readonly port: number; readonly until: number }>();
 
-  const step = (input: Input, meaning?: number): void => {
-    const result = client.step(state, input);
+  // Where the current Connection is: dialled, then open on an `Opened` that comes
+  // before the Client hangs it up, until it is `Closed` or the Runtime restarts.
+  let phase: "Dialing" | "Open" | "Over" = "Over";
+  let hungUp = false;
 
-    for (const output of result.outputs) {
+  // A Line read on an open TLS Connection, judged from its text alone.
+  const hear = (input: Input & { readonly _tag: "Received" }): void => {
+    const ircd = dialled.get(connection);
+
+    if (input.connection !== connection || phase !== "Open" || ircd?.tls !== true) {
+      return;
+    }
+
+    const duration = durationIn(new TextDecoder().decode(input.bytes));
+
+    if (duration === 0) {
+      policies.delete(keyOf(ircd.host));
+    } else if (duration !== undefined) {
+      seen.learnt += 1;
+      policies.set(keyOf(ircd.host), { port: ircd.port, until: input.at + duration * 1000 });
+    }
+  };
+
+  // What the Client did: each dial is checked against the policies, and starts a
+  // Connection; a hang-up keeps the current one from opening.
+  const watch = (input: Input, outputs: readonly Output[]): void => {
+    for (const output of outputs) {
+      if (output._tag === "Hangup" && output.connection === connection) {
+        hungUp = true;
+      }
+
       if (output._tag === "Dial") {
         const held = policies.get(keyOf(output.ircd.host));
 
@@ -756,19 +914,29 @@ const fold = (sequence: readonly Move[], seen: Seen): void => {
 
         ({ connection } = output);
         dialled.set(output.connection, output.ircd);
+        phase = "Dialing";
+        hungUp = false;
       }
     }
+  };
 
-    const ircd = input._tag === "Received" ? dialled.get(input.connection) : undefined;
-    const read = !result.news.some((news) => news._tag === "Ignored");
+  const step = (input: Input): void => {
+    const result = client.step(state, input);
+    const ours = "connection" in input && input.connection === connection;
 
-    if (ircd?.tls === true && read && meaning === 0) {
-      policies.delete(keyOf(ircd.host));
-    } else if (ircd?.tls === true && read && meaning !== undefined) {
-      seen.learnt += 1;
-      policies.set(keyOf(ircd.host), { port: ircd.port, until: input.at + meaning * 1000 });
+    if (input._tag === "Received") {
+      hear(input);
     }
 
+    if (input._tag === "Opened" && ours && phase === "Dialing" && !hungUp) {
+      phase = "Open";
+    }
+
+    if ((input._tag === "Closed" && ours) || input._tag === "Started") {
+      phase = "Over";
+    }
+
+    watch(input, result.outputs);
     ({ state } = result);
     table = timersFold(table, input, result.outputs);
   };
@@ -802,13 +970,10 @@ const fold = (sequence: readonly Move[], seen: Seen): void => {
       }
 
       case "Received": {
-        const [text, meaning] = pool[each.line] ?? ["", undefined];
+        const text = pool[each.line] ?? "";
         const from = each.stale ? ConnectionId.make(connection - 1) : current;
 
-        step(
-          { _tag: "Received", at: instant, bytes: utf8.encode(text), connection: from },
-          meaning
-        );
+        step({ _tag: "Received", at: instant, bytes: utf8.encode(text), connection: from });
         break;
       }
 
