@@ -47,7 +47,7 @@ The file is read once, when first needed, and then held in memory as `Redacted` 
 
 A value leaves the adapter in one place, `reveal`, as a `Redacted`. It is written only into the file. A `VaultFailed` reason is built from a fixed phrase and the path, or the platform's own message, which names a syscall and a path. It never carries what a decoder, the JSON parser, or a defect says, because those can quote what they were given.
 
-The tests check that no value appears in an error, a log, or the `String`, `JSON.stringify`, and `util.inspect` of the service and what it returns, for each case of an unreadable file and an unwritable directory, and for each failure injected at the write boundaries: opening, writing (whole or half), `fsync`, closing (a defect that carries a marker the reason must not echo), renaming, and cleanup. They do not cover other faults, such as `ENOSPC` in a particular call, which would take the same path as the injected ones.
+The tests check that no value appears in a log, or in the `String`, `JSON.stringify`, and `util.inspect` of the service and what it returns, for an unreadable file and an unwritable directory. For each failure injected at the write boundaries (opening, writing whole or half, `fsync`, closing with a defect that carries a marker the reason must not echo, and renaming), they check the returned error's rendering only, not logs. The cleanup tests check the error that is reported, not its rendering. They do not cover other faults, such as `ENOSPC` in a particular call, which would take the same path as the injected ones.
 
 The file itself holds the values in plain text. That is the deliberate cost, below.
 
