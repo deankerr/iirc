@@ -3,9 +3,9 @@
 // `BEGIN IMMEDIATE`. Its only gap is that `executeStream` is not implemented, so `read`
 // pages through the table by sequence instead of streaming one statement.
 //
-// Followers never hold Entries. An append says only "committed through N" on a signal that
-// keeps nothing but its latest value, and a follower fetches what it has not yet delivered
-// from the table, a page at a time. A slow follower therefore costs a number, not a backlog.
+// Followers never hold Entries. An append says only "look again" on a signal that keeps
+// nothing but one pending wake-up, and a follower fetches what it has not yet delivered
+// from the table, a page at a time. A slow follower therefore costs a wake-up, not a backlog.
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import {
   Journal,
@@ -16,7 +16,7 @@ import {
   journalVersion,
 } from "@iirc/runtime/journal";
 import type { JournalService, Position } from "@iirc/runtime/journal";
-import { Effect, Layer, Option, PubSub, Schema, Stream } from "effect";
+import { Effect, Layer, Option, PubSub, Schema, Semaphore, Stream } from "effect";
 import type { Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import type { SqlClient } from "effect/sql/SqlClient";
@@ -85,14 +85,22 @@ interface Progress {
   readonly committed: number;
 }
 
+/** Seams for tests. */
+export interface OpenOptions {
+  /** Runs after an Entry is inserted and before it is signalled, to make the scheduler yield there. */
+  readonly afterInsert?: Effect.Effect<void> | undefined;
+}
+
 /**
  * Opens a Journal in a SQLite file, creating it if it does not exist, and gives it with
  * the size of its followers' backlog, which tests check. It is closed when the Scope ends.
  * @param filename - The path of the database file.
+ * @param options - Seams for tests.
  * @returns The Journal and its backlog.
  */
 export const openSqliteJournal = (
-  filename: string
+  filename: string,
+  options: OpenOptions = {}
 ): Effect.Effect<OpenedJournal, JournalFailed | JournalVersionMismatch, Scope.Scope> =>
   Effect.gen(function* () {
     // The file is opened as it is. Nothing that persists in it is changed until it is known
@@ -112,9 +120,10 @@ export const openSqliteJournal = (
     );
     yield* sql`PRAGMA journal_mode = WAL`.pipe(Effect.mapError(failed("cannot configure")));
 
-    // "Committed through N", and nothing else. Capacity 1 and sliding means a subscriber
-    // that is not taking holds the latest value only, whatever is appended meanwhile.
-    const committed = yield* Effect.acquireRelease(PubSub.sliding<number>(1), PubSub.shutdown);
+    // "Look again", and nothing else. Capacity 1 and sliding means a subscriber that is not
+    // taking holds one signal, whatever is appended meanwhile.
+    const committed = yield* Effect.acquireRelease(PubSub.sliding<undefined>(1), PubSub.shutdown);
+    const lock = yield* Semaphore.make(1);
 
     const decodeRow = (row: typeof rowSchema.Encoded) =>
       Schema.decodeEffect(rowSchema)(row).pipe(Effect.mapError(failed("cannot decode an Entry")));
@@ -176,9 +185,11 @@ export const openSqliteJournal = (
       backlog: PubSub.size(committed),
       journal: {
         // The record is decoded back before it is inserted, so nothing is kept that could not
-        // be read. The insert and the signal cannot be interrupted apart, or a follower could
-        // sleep through an Entry. Statements run one at a time on one connection, so an Entry
-        // is committed before its number is signalled, and a follower keeps the highest it hears.
+        // be read. One append at a time, from insert to signal, so Entries are committed,
+        // completed and signalled in the order they are numbered. The scheduler may yield
+        // between the insert and the signal, and the one connection does not prevent that. The
+        // insert and the signal cannot be interrupted apart, or a follower could sleep through
+        // an Entry.
         append: (record: JournalRecord) =>
           Effect.gen(function* () {
             const text = yield* Schema.encodeEffect(recordText)(record).pipe(
@@ -189,25 +200,30 @@ export const openSqliteJournal = (
               Effect.mapError(failed("cannot decode the record"))
             );
 
-            return yield* Effect.uninterruptible(
-              Effect.gen(function* () {
-                const rows = yield* sql<{ readonly sequence: number }>`
+            return yield* lock.withPermit(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const rows = yield* sql<{ readonly sequence: number }>`
                   INSERT INTO journal (record) VALUES (${text}) RETURNING sequence
                 `.pipe(Effect.mapError(failed("cannot append")));
 
-                const sequence = yield* Schema.decodeEffect(Sequence)(rows[0]?.sequence ?? 0).pipe(
-                  Effect.mapError(failed("cannot number the Entry"))
-                );
+                  const sequence = yield* Schema.decodeEffect(Sequence)(
+                    rows[0]?.sequence ?? 0
+                  ).pipe(Effect.mapError(failed("cannot number the Entry")));
 
-                yield* PubSub.publish(committed, sequence);
+                  yield* options.afterInsert ?? Effect.void;
+                  yield* PubSub.publish(committed, undefined);
 
-                return sequence;
-              })
+                  return sequence;
+                })
+              )
             );
           }),
         // Subscribes before settling where the past ends, so an Entry appended in between is
         // covered by the past or by a signal. Then it pages from the table whenever the
-        // Journal is committed further than it has delivered, and waits on the signal when not.
+        // Journal is committed further than it has delivered. When it has caught up it waits
+        // for a signal, which only tells it to look again: it reads where the Journal ends now
+        // and trusts no number from a signal.
         follow: (from: Position) =>
           Stream.unwrap(
             Effect.gen(function* () {
@@ -223,10 +239,11 @@ export const openSqliteJournal = (
                           Effect.map(([rows, next]) => [rows, Option.some(next)])
                         )
                       : PubSub.take(signal).pipe(
-                          Effect.map((through) => [
+                          Effect.andThen(last),
+                          Effect.map((end) => [
                             [],
                             Option.some({
-                              committed: Math.max(progress.committed, through),
+                              committed: Math.max(progress.committed, end),
                               delivered: progress.delivered,
                             }),
                           ])

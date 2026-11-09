@@ -25,11 +25,11 @@ CREATE INDEX journal_by_network ON journal (network);
 PRAGMA user_version = 1;  -- journalVersion
 ```
 
-- **`sequence`** is the Entry's `Sequence`. The database numbers it, `AUTOINCREMENT` never reuses a number, and appends are serialized by the one connection, so sequences increase in the order appends complete. The port allows skipped numbers, and this adapter has none unless the file is changed by hand.
+- **`sequence`** is the Entry's `Sequence`. The database numbers it, `AUTOINCREMENT` never reuses a number, and one append at a time runs from its insert to its return, so sequences increase in the order appends complete. The port allows skipped numbers, and this adapter has none unless the file is changed by hand.
 - **`record`** is the JSON text of the `JournalRecord`'s Schema encoding (`Schema.toCodecJson`), so the Journal can be read with `sqlite3` or anything else that reads JSON, and Credentials appear only as names (a `SendSecret` holds a `CredentialName`). Bytes are in whatever form that encoding gives them. It is written as given and never rewritten.
 - **`network`** is derived from `record`, so it cannot disagree with it. It exists for `journal_by_network`, which serves reading one Network after a sequence. Nothing writes it.
 
-Reading is filtered in SQL: `read` and `follow` ask for `sequence > after`, and `network = ?` when a Network is named, in sequence order, a page of 500 at a time. A stream's memory is a page, not the Journal, and a follower's is a page and a number (see below).
+Reading is filtered in SQL: `read` and `follow` ask for `sequence > after`, and `network = ?` when a Network is named, in sequence order, a page of 500 at a time. A stream's memory is a page, not the Journal, and a follower's is a page and one wake-up (see below).
 
 ## Settings
 
@@ -38,7 +38,7 @@ Reading is filtered in SQL: `read` and `follow` ask for `sequence > after`, and 
 | `journal_mode` | `WAL` | Appends are one small write each, and readers (an inspector with `sqlite3`, for instance) never block the Daemon's writes. Set only once the file is known to be a Journal, because it persists in the file. |
 | `synchronous` | `FULL` | Every commit syncs the WAL to the disk before it returns. With `NORMAL` the last commits could be lost on power failure, which would break "durable before `append` returns". |
 | `busy_timeout` | 5 seconds | The default of `@effect/sql-sqlite-bun`. One Daemon owns the file, so it matters only if something else holds a write lock. |
-| One connection | serialized by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, one at a time. The ordering below depends on it. |
+| One connection | serialized by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, one at a time. That orders statements, not appends: the scheduler can still yield between an append's insert and its signal, so appends take a lock of our own. |
 
 ## Durable
 
@@ -46,11 +46,11 @@ An `append` that has returned has been committed by SQLite with `synchronous = F
 
 ## Whole or absent, and `follow`
 
-An append is one `INSERT` statement, which SQLite makes atomic, followed by a signal that the Journal is committed through that sequence. Both run in one uninterruptible region, so an interrupted append is either kept and signalled, or never started. Statements run one at a time on the one connection, so an Entry is committed before its number is signalled.
+An append is one `INSERT` statement, which SQLite makes atomic, followed by a signal to followers. One append at a time holds a lock from its insert to its signal, and the pair runs in one uninterruptible region, so an interrupted append is either kept and signalled, or never started, and appends commit, complete and signal in the order they are numbered. The lock is needed because the connection only orders statements: the scheduler can yield between the insert and the signal, and without the lock a second append could commit, signal and return in that gap, so the first would return a lower number after a higher one.
 
-**Followers hold a signal, never Entries.** The signal is a `PubSub` of capacity 1 that slides: a subscriber that is not taking holds the latest number and nothing else, however many appends it sleeps through. A follower fetches what it has not yet delivered from the table, a page at a time, and waits on the signal only when it has caught up. So a slow follower costs one number and one page, not a backlog, and no Entry is dropped, because the Entries are in the file and the signal only says when to look.
+**Followers hold a wake-up, never Entries.** The signal is a `PubSub` of capacity 1 that slides, carrying no value but "look again": a subscriber that is not taking holds one pending wake-up, however many appends it sleeps through. A follower fetches what it has not yet delivered from the table, a page at a time, and waits on the signal only when it has caught up. So a slow follower costs one wake-up and one page, not a backlog, and no Entry is dropped, because the Entries are in the file and the signal only says when to look.
 
-`follow` subscribes to the signal first, then reads the highest sequence, then pages the past up to it, then pages up to each higher number it hears. An Entry appended in between is covered by the highest sequence it read or by the signal, and each Entry is fetched once, after the last one delivered. `read` settles the same highest sequence first, so it ends where the Journal stood when reading began.
+`follow` subscribes to the signal first, then reads the highest sequence, then pages the past up to it. When it has caught up it waits for a signal, and on waking reads where the Journal ends then, rather than trusting any number from the signal, and pages up to that. An Entry appended in between is covered by the highest sequence it read or by a pending signal, and each Entry is fetched once, after the last one delivered. `read` settles the same highest sequence first, so it ends where the Journal stood when reading began.
 
 Followers see the appends made through the same Layer. Another process appending to the file is not followed. One Daemon owns the file.
 

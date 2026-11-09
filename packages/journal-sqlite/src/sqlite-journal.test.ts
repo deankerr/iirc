@@ -456,4 +456,71 @@ describe("following", () => {
       })
     );
   }, 30_000);
+
+  it("completes concurrent appends in the order they are numbered, and wakes a paused follower for all of them", async () => {
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        // The scheduler may yield between an insert and its signal, and the one connection
+        // does not prevent that. The first append here yields a hundred times there, long
+        // enough for a second to commit, signal and return if nothing stopped it.
+        const first = yield* Ref.make(true);
+
+        const slowFirst = Ref.getAndSet(first, false).pipe(
+          Effect.flatMap((isFirst) =>
+            isFirst
+              ? Effect.forEach(
+                  Array.from({ length: 100 }, (_, i) => i),
+                  () => Effect.yieldNow
+                )
+              : Effect.void
+          ),
+          Effect.asVoid
+        );
+
+        const { journal } = yield* openSqliteJournal(file, { afterInsert: slowFirst });
+
+        // The follower takes Entry 1 and stops, so its signal is the one that can be lost.
+        yield* journal.append(retry(libera, 1));
+        yield* Ref.set(first, true);
+        const gate = yield* Deferred.make<undefined>();
+        const taken = yield* Deferred.make<undefined>();
+        const seen = yield* Ref.make<readonly number[]>([]);
+
+        const follower = yield* Effect.forkChild(
+          Stream.runForEach(journal.follow({}), (entry) =>
+            Effect.gen(function* () {
+              yield* Ref.update(seen, (all) => [...all, entry.sequence]);
+              yield* Deferred.succeed(taken, undefined);
+              yield* Deferred.await(gate);
+            })
+          )
+        );
+
+        yield* Deferred.await(taken);
+
+        // Each append notes its number as it returns, so completion order is visible.
+        const completed = yield* Ref.make<readonly number[]>([]);
+
+        const noted = journal
+          .append(retry(libera, 2))
+          .pipe(Effect.flatMap((sequence) => Ref.update(completed, (all) => [...all, sequence])));
+
+        yield* Effect.all([noted, noted], { concurrency: "unbounded" });
+        const order = yield* Ref.get(completed);
+
+        expect(order).toStrictEqual([2, 3]);
+
+        yield* Deferred.succeed(gate, undefined);
+
+        while ((yield* Ref.get(seen)).length < 3) {
+          yield* Effect.sleep("1 millis");
+        }
+
+        expect(yield* Ref.get(seen)).toStrictEqual([1, 2, 3]);
+        yield* Fiber.interrupt(follower);
+      })
+    );
+  });
 });
