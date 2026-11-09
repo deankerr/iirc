@@ -255,7 +255,7 @@ describe("offering nicks", () => {
     expect.assertions(0);
   });
 
-  it("keeps a fallback as long as the first nick, or 9 characters", () => {
+  it("fits a fallback to RFC 2812's 9 characters before NICKLEN is known", () => {
     const long = "averyveryverylongnick";
 
     play(client, {
@@ -264,9 +264,9 @@ describe("offering nicks", () => {
         opened(long),
         lines(
           `<< :irc.test 433 * ${long} :in use`,
-          ">> NICK averyveryverylongnic_",
-          "<< :irc.test 433 * averyveryverylongnic_ :in use",
-          ">> NICK averyveryverylongnic2"
+          ">> NICK averyver_",
+          "<< :irc.test 433 * averyver_ :in use",
+          ">> NICK averyver2"
         ),
       ],
     });

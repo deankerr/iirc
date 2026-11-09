@@ -189,6 +189,7 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
           name: channel.name,
           standing: standingOf(phase),
           topic: joined?.topic ?? unknown,
+          wanted: channel.wanted,
         },
       ];
     })

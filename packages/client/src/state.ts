@@ -147,11 +147,16 @@ export type ChannelPhase =
   | { readonly _tag: "Refused"; readonly retry: Instant | undefined }
   | { readonly _tag: "Kicked"; readonly retry: Instant };
 
-/** A Channel the Owner wants. */
+/**
+ * A Channel the Owner wants, or one Self was put in without asking, such as by an
+ * oper's `SAJOIN` or another session of the same account.
+ */
 export interface Channel {
   /** Its name as the Owner wrote it. */
   readonly name: string;
   readonly key: CredentialName | undefined;
+  /** Whether the Owner wants it. One that is not is modelled while Self is in it, and never joined again. */
+  readonly wanted: boolean;
   /** How many joins in a row have failed, for the backoff. */
   readonly attempt: number;
   readonly phase: ChannelPhase;

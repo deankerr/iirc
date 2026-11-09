@@ -98,6 +98,12 @@ export type Standing = "Wanted" | "Joining" | "Joined" | "Refused" | "Kicked";
 /** A Channel as we know it. */
 export interface ChannelKnowledge {
   readonly name: string;
+  /**
+   * Whether the Owner wants Self in it. Self can be put in a Channel without asking,
+   * such as by an oper's `SAJOIN` or another session of the same account. Such a
+   * Channel is known while Self is in it, and never joined again.
+   */
+  readonly wanted: boolean;
   readonly standing: Standing;
   readonly topic: Fact<Topic | null>;
   /** Each mode set, with its parameter. A key shows as set, with `null`, never its value. */

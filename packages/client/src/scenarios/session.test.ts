@@ -41,28 +41,12 @@ describe("a Session", () => {
     expect(known.users.get("iirc")?.nick).toBe("iirc");
   });
 
-  it("reads Self's mask from 001 when the Ircd ends its welcome with it", () => {
+  it("never reads Self's mask from 001's text, which is for people", () => {
     const played = play(client, {
       configuration: base,
       transcript: registered(base).replace(
         ":Welcome to the iirc-test Network iirc",
         ":Welcome to the Internet Relay Network iirc!~iirc@127.0.0.1"
-      ),
-    });
-
-    expect(client.known(played.state).self?.mask).toMatchObject({
-      _tag: "Known",
-      from: "ircd",
-      value: { host: "127.0.0.1", user: "~iirc" },
-    });
-  });
-
-  it("does not take another nick's mask from 001", () => {
-    const played = play(client, {
-      configuration: base,
-      transcript: registered(base).replace(
-        ":Welcome to the iirc-test Network iirc",
-        ":Welcome other!~o@elsewhere"
       ),
     });
 

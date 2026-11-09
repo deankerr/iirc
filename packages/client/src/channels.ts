@@ -6,18 +6,18 @@
  *
  * @packageDocumentation
  */
-import { targetLimitsOf } from "@iirc/protocol/isupport";
+import { limitsOf, targetLimitsOf } from "@iirc/protocol/isupport";
 import { isRejected, join, part } from "@iirc/protocol/line";
 
 import { backoff } from "./backoff.ts";
 import type { WantedChannel } from "./configuration.ts";
 import { Instant } from "./ids.ts";
-import type { Fact } from "./known.ts";
+import type { Casemapping, Fact } from "./known.ts";
 import type { Listed, ModeRules } from "./modes.ts";
 import { applyModes, changePrefix } from "./modes.ts";
-import type { Activity } from "./news.ts";
+import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
-import { folder, send, sendSecret, updateOpen } from "./run.ts";
+import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
 import type { Channel, ChannelPhase, Joined, Member, Seen, State } from "./state.ts";
 import { openOf, sessionOf } from "./views.ts";
 
@@ -40,37 +40,44 @@ const retryAt = (run: Run, channel: Channel): Instant =>
   Instant.make(run.at + backoff(channel.attempt));
 
 const membersOf = (phase: ChannelPhase): readonly string[] =>
-  phase._tag === "Joined" ? [...phase.members.keys()] : [];
+  phase._tag === "Joined" ? [...phase.members.keys(), ...(phase.listing?.keys() ?? [])] : [];
 
-// Forgets what was seen of Users who no longer share a Channel with Self.
-const forgetUnshared = (run: Run, nicks: readonly string[]): void => {
+/**
+ * Forgets what was seen of every User who no longer shares a Channel with Self, so the
+ * Users kept are never more than the members kept. It runs wherever membership is
+ * replaced or removed.
+ * @param run - The step.
+ */
+const pruneUsers = (run: Run): void => {
+  const users = openOf(run.state)?.users;
+
+  if (users === undefined || users.size === 0) {
+    return;
+  }
+
   const shared = new Set(
     [...run.state.channels.values()].flatMap((channel) => membersOf(channel.phase))
   );
 
-  const leaving = nicks.filter((nick) => !shared.has(nick));
+  const kept = [...users].filter(([nick]) => shared.has(nick));
 
-  if (leaving.length > 0) {
-    updateOpen(run, (open) => {
-      const users = new Map(open.users);
-
-      for (const nick of leaving) {
-        users.delete(nick);
-      }
-
-      return { ...open, users };
-    });
+  if (kept.length < users.size) {
+    updateOpen(run, (open) => ({ ...open, users: new Map(kept) }));
   }
 };
 
 /**
- * Takes the Owner's wanted Channels: a new one is Wanted, one no longer wanted is
- * parted if Self is in it or joining it, and one refused for want of its key may try
- * again.
+ * Takes the Owner's wanted Channels. A new one is Wanted, one no longer wanted is parted
+ * if Self is in it or joining it, and a Channel Self was put in without asking stays
+ * until Self leaves it, wanted from now on if the Owner names it. On a new
+ * Configuration, one refused for want of its key may try again. Run again after the
+ * casemapping changes, it keeps every machine that survived the refold, and makes one
+ * for each wanted Channel that the new casemapping tells apart.
  * @param run - The step.
- * @param wanted - The Channels in the new Configuration.
+ * @param wanted - The Channels in the Configuration.
+ * @param fresh - Whether this is a new Configuration, rather than a refold.
  */
-export const reconcile = (run: Run, wanted: readonly WantedChannel[]): void => {
+export const reconcile = (run: Run, wanted: readonly WantedChannel[], fresh = true): void => {
   const fold = folder(run.state);
   const next = new Map<string, Channel>();
   const inSession = sessionOf(run.state) !== undefined;
@@ -83,26 +90,33 @@ export const reconcile = (run: Run, wanted: readonly WantedChannel[]): void => {
       continue;
     }
 
-    const waiting = was?.phase._tag === "Refused" && was.phase.retry === undefined;
+    const waiting = fresh && was?.phase._tag === "Refused" && was.phase.retry === undefined;
 
     next.set(
       folded,
       was === undefined
-        ? { attempt: 0, key, name, phase: { _tag: "Wanted" } }
-        : { ...was, key, name, phase: waiting ? { _tag: "Wanted" } : was.phase }
+        ? { attempt: 0, key, name, phase: { _tag: "Wanted" }, wanted: true }
+        : { ...was, key, name, phase: waiting ? { _tag: "Wanted" } : was.phase, wanted: true }
     );
   }
 
+  for (const [folded, channel] of run.state.channels) {
+    if (!next.has(folded) && !channel.wanted) {
+      next.set(folded, channel);
+    }
+  }
+
   const gone = [...run.state.channels].filter(([folded]) => !next.has(folded));
+
   run.state = { ...run.state, channels: next };
 
   for (const [, channel] of gone) {
     if (inSession && (channel.phase._tag === "Joined" || channel.phase._tag === "Joining")) {
       send(run, part(channel.name), "PART");
     }
-
-    forgetUnshared(run, membersOf(channel.phase));
   }
+
+  pruneUsers(run);
 };
 
 /**
@@ -115,7 +129,12 @@ export const reconcile = (run: Run, wanted: readonly WantedChannel[]): void => {
 export const joinWanted = (run: Run): void => {
   const open = openOf(run.state);
 
-  if (open === undefined || sessionOf(run.state) === undefined) {
+  if (
+    open === undefined ||
+    sessionOf(run.state) === undefined ||
+    run.state.configuration?.enabled !== true ||
+    linkOf(run)?.closing !== undefined
+  ) {
     return;
   }
 
@@ -168,17 +187,17 @@ export const rejoin = (run: Run, folded: string): void => {
 };
 
 /**
- * Every Channel goes back to Wanted, as when a Session ends.
+ * Every wanted Channel goes back to Wanted, as when a Session ends, and every Channel
+ * Self was put in without asking is forgotten, never to be joined again.
  * @param state - The State.
- * @returns The State, with every Channel Wanted.
+ * @returns The State, with every wanted Channel Wanted.
  */
 export const allWanted = (state: State): State => ({
   ...state,
   channels: new Map(
-    [...state.channels].map(([folded, channel]) => [
-      folded,
-      { ...channel, phase: { _tag: "Wanted" } },
-    ])
+    [...state.channels].flatMap(([folded, channel]) =>
+      channel.wanted ? [[folded, { ...channel, phase: { _tag: "Wanted" } }] as const] : []
+    )
   ),
 });
 
@@ -303,14 +322,22 @@ const kickedOrParted = (run: Run, channel: string, nick: string): void => {
 
   if (isSelf(run, nick)) {
     const folded = fold(channel);
-    const members = membersOf(run.state.channels.get(folded)?.phase ?? { _tag: "Wanted" });
+    const was = run.state.channels.get(folded);
 
-    changeChannel(run, folded, (wanted) => ({
-      ...wanted,
-      attempt: wanted.attempt + 1,
-      phase: { _tag: "Kicked", retry: retryAt(run, wanted) },
-    }));
-    forgetUnshared(run, members);
+    if (was !== undefined && !was.wanted) {
+      const channels = new Map(run.state.channels);
+
+      channels.delete(folded);
+      run.state = { ...run.state, channels };
+    } else {
+      changeChannel(run, folded, (wanted) => ({
+        ...wanted,
+        attempt: wanted.attempt + 1,
+        phase: { _tag: "Kicked", retry: retryAt(run, wanted) },
+      }));
+    }
+
+    pruneUsers(run);
 
     return;
   }
@@ -320,7 +347,7 @@ const kickedOrParted = (run: Run, channel: string, nick: string): void => {
     listing: joined.listing === undefined ? undefined : withoutMember(joined.listing, fold(nick)),
     members: withoutMember(joined.members, fold(nick)),
   }));
-  forgetUnshared(run, [fold(nick)]);
+  pruneUsers(run);
 };
 
 const renamed = (
@@ -336,28 +363,84 @@ const renamed = (
     : withMember(withoutMember(members, from), to, { ...member, nick });
 };
 
-const joinedSelf = (run: Run, channel: string): void => {
-  const fold = folder(run.state);
-  const folded = fold(channel);
-  const self = sessionOf(run.state);
+/** The most Channels kept that Self was put in without asking, when `CHANLIMIT` says no fewer. */
+const maxUnwanted = 64;
 
-  changeChannel(run, folded, (wanted) =>
-    wanted.phase._tag === "Joined" || self === undefined
-      ? wanted
-      : {
-          ...wanted,
-          attempt: 0,
-          phase: {
-            _tag: "Joined",
-            burst: true,
-            listing: undefined,
-            members: new Map([[fold(self.nick), fresh(run, self.nick)]]),
-            modes: { _tag: "Unknown" },
-            synced: false,
-            topic: { _tag: "Unknown" },
-          },
-        }
-  );
+// How many unwanted Channels may be modelled: `CHANLIMIT` for this Channel's prefix,
+// when the Ircd gives one, else a fixed cap.
+const unwantedLimit = (run: Run, channel: string): number => {
+  const first = String.fromCodePoint(channel.codePointAt(0) ?? 0);
+  const limits = limitsOf(openOf(run.state)?.isupport.get("CHANLIMIT"));
+
+  return limits.find((each) => each.of.includes(first))?.limit ?? maxUnwanted;
+};
+
+const joining = (run: Run, nick: string): Joined => ({
+  _tag: "Joined",
+  burst: true,
+  listing: undefined,
+  members: new Map([[folder(run.state)(nick), fresh(run, nick)]]),
+  modes: { _tag: "Unknown" },
+  synced: false,
+  topic: { _tag: "Unknown" },
+});
+
+const joinedSelf = (run: Run, channel: string): void => {
+  const folded = folder(run.state)(channel);
+  const self = sessionOf(run.state);
+  const was = run.state.channels.get(folded);
+
+  if (self === undefined || was?.phase._tag === "Joined") {
+    return;
+  }
+
+  if (was !== undefined) {
+    setChannel(run, folded, { ...was, attempt: 0, phase: joining(run, self.nick) });
+
+    return;
+  }
+
+  // Self was put in a Channel without asking. It is modelled, up to a bound, and not
+  // undone.
+  const unwanted = [...run.state.channels.values()].filter((each) => !each.wanted).length;
+
+  if (unwanted >= unwantedLimit(run, channel)) {
+    ignore(run, { _tag: "NotNow", input: "Received" });
+
+    return;
+  }
+
+  setChannel(run, folded, {
+    attempt: 0,
+    key: undefined,
+    name: channel,
+    phase: joining(run, self.nick),
+    wanted: false,
+  });
+};
+
+// Applies membership mode changes, such as `+o peer`, to members.
+const prefixed = (
+  start: ReadonlyMap<string, Member>,
+  changes: readonly ModeChange[],
+  rules: ModeRules,
+  at: Instant,
+  fold: (name: string) => string
+): ReadonlyMap<string, Member> => {
+  let members = start;
+
+  for (const change of changes) {
+    const member = change.param === undefined ? undefined : members.get(fold(change.param));
+
+    if (member !== undefined && rules.prefix.some((each) => each.mode === change.mode)) {
+      members = withMember(members, fold(member.nick), {
+        ...member,
+        prefixes: changePrefix(member.prefixes, change, at),
+      });
+    }
+  }
+
+  return members;
 };
 
 /**
@@ -414,7 +497,7 @@ export const foldActivity = (
         }));
       }
 
-      forgetUnshared(run, [folded]);
+      pruneUsers(run);
 
       return;
     }
@@ -456,18 +539,13 @@ export const foldActivity = (
       }
 
       changeJoined(run, activity.target, (joined) => {
-        let { members } = joined;
+        // A pending listing replaces the members when it ends, so it takes the change too.
+        const members = prefixed(joined.members, activity.changes, rules, run.at, fold);
 
-        for (const change of activity.changes) {
-          const member = change.param === undefined ? undefined : members.get(fold(change.param));
-
-          if (member !== undefined && rules.prefix.some((each) => each.mode === change.mode)) {
-            members = withMember(members, fold(member.nick), {
-              ...member,
-              prefixes: changePrefix(member.prefixes, change, run.at),
-            });
-          }
-        }
+        const listing =
+          joined.listing === undefined
+            ? undefined
+            : prefixed(joined.listing, activity.changes, rules, run.at, fold);
 
         const modes: Fact<ReadonlyMap<string, string | null>> =
           joined.modes._tag === "Known"
@@ -479,7 +557,7 @@ export const foldActivity = (
               }
             : joined.modes;
 
-        return { ...joined, members, modes };
+        return { ...joined, listing, members, modes };
       });
 
       return;
@@ -548,6 +626,7 @@ export const endOfNames = (run: Run, channel: string): void => {
         ? { _tag: "Known", at: run.at, from: "ircd", value: null }
         : joined.topic,
   }));
+  pruneUsers(run);
 };
 
 // Keys and values, where the first of any that share a key is kept.
@@ -568,7 +647,7 @@ const once = <V>(entries: readonly (readonly [string, V])[]): ReadonlyMap<string
  * the Users seen. Where two keys now fold together, the first is kept.
  * @param run - The step.
  */
-export const refold = (run: Run): void => {
+const refold = (run: Run): void => {
   const fold = folder(run.state);
 
   const members = (map: ReadonlyMap<string, Member>) =>
@@ -601,4 +680,18 @@ export const refold = (run: Run): void => {
     ...open,
     users: once([...open.users.values()].map((seen) => [fold(seen.nick), seen] as const)),
   }));
+};
+
+/**
+ * Takes another casemapping: every key is folded again, and the Channels are reconciled
+ * with the Configuration, so a wanted Channel the new mapping tells apart from another
+ * gets its own machine, and the first of any it merges is kept.
+ * @param run - The step.
+ * @param mapping - The casemapping now in force.
+ */
+export const remap = (run: Run, mapping: Casemapping): void => {
+  run.state = { ...run.state, casemapping: mapping };
+  refold(run);
+  reconcile(run, run.state.configuration?.channels ?? [], false);
+  joinWanted(run);
 };

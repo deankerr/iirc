@@ -16,7 +16,7 @@ import {
   foldActivity,
   foldListed,
   joinWanted,
-  refold,
+  remap,
   refused,
   see,
 } from "./channels.ts";
@@ -33,7 +33,7 @@ import {
   welcomed,
 } from "./registration.ts";
 import type { Run } from "./run.ts";
-import { folder, ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
+import { ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
 import { runStage } from "./seam.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf } from "./views.ts";
@@ -153,22 +153,6 @@ const means = (run: Run, arrival: Arrival): void => {
   }
 };
 
-// Self's mask from `001`'s last word, where an Ircd ends its welcome with `nick!user@host`.
-const welcomeMask = (run: Run, line: Line, nick: string) => {
-  const last = line.params.length >= 2 ? (line.params.at(-1)?.split(" ").at(-1) ?? "") : "";
-  const shown = parseSource(last);
-  const fold = folder(run.state);
-
-  return shown.user !== undefined && shown.host !== undefined && fold(shown.nick) === fold(nick)
-    ? ({
-        _tag: "Known",
-        at: run.at,
-        from: "ircd",
-        value: { host: shown.host, user: shown.user },
-      } as const)
-    : ({ _tag: "Unknown" } as const);
-};
-
 const welcome = (run: Run, line: Line): void => {
   const open = openOf(run.state);
   const link = linkOf(run);
@@ -191,7 +175,9 @@ const welcome = (run: Run, line: Line): void => {
       account,
       began: run.at,
       keepalive: { check: Instant.make(run.at + lagAfter), heard: run.at, pinged: false },
-      mask: welcomeMask(run, line, nick),
+      // `001`'s text is for people. Self's mask waits for a structured source, such as
+      // the echo of our own `JOIN`.
+      mask: { _tag: "Unknown" },
       nick,
       server: line.source ?? link.ircd.host,
     },
@@ -223,8 +209,7 @@ const isupport = (run: Run, line: Line): void => {
     casemappingOf(tokensNow.get("CASEMAPPING"), tokensNow.get("UTF8MAPPING")) ?? "ascii";
 
   if (mapping !== run.state.casemapping) {
-    run.state = { ...run.state, casemapping: mapping };
-    refold(run);
+    remap(run, mapping);
   }
 };
 

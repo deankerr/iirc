@@ -5,6 +5,7 @@
  *
  * @packageDocumentation
  */
+import { limitOf } from "@iirc/protocol/isupport";
 import { cap, isRejected, nick, quit, upperCaseAscii, user } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
 
@@ -47,26 +48,36 @@ const characters = (text: string): readonly string[] => {
   return all;
 };
 
+/** RFC 2812's longest nick, assumed until the Ircd announces `NICKLEN`. */
+const rfcNickLength = 9;
+
 /**
- * The nick offered at an index: the configured nicks in order, then fallbacks made from
- * the first: `_` added, then `2`, `3`, and so on, cut to keep it as long as the first
- * nick or 9 characters, whichever is longer, so an Ircd with the RFC's `NICKLEN` still
- * takes it.
+ * The longest nick the Ircd takes: `NICKLEN` once announced, else RFC 2812's 9.
+ * @param run - The step.
+ * @returns The length, in characters.
+ */
+const nickLength = (run: Run): number =>
+  limitOf(openOf(run.state)?.isupport.get("NICKLEN")) ?? rfcNickLength;
+
+/**
+ * The nick offered at an index: the configured nicks in order, as the Owner wrote them,
+ * then fallbacks made from the first: `_` added, then `2`, `3`, and so on, each cut to
+ * leave room for its suffix within the longest nick the Ircd takes.
  * @param nicks - The configured nicks.
  * @param index - Which offer, from 0.
+ * @param length - The longest nick the Ircd takes.
  * @returns The nick.
  */
-const offerAt = (nicks: readonly [string, ...string[]], index: number): string => {
+const offerAt = (nicks: readonly [string, ...string[]], index: number, length: number): string => {
   if (index < nicks.length) {
     return nicks[index] ?? nicks[0];
   }
 
   const fallback = index - nicks.length + 1;
   const suffix = fallback === 1 ? "_" : String(fallback);
-  const base = characters(nicks[0]);
-  const room = Math.max(1, Math.max(base.length, 9) - suffix.length);
+  const room = Math.max(1, length - suffix.length);
 
-  return `${base.slice(0, room).join("")}${suffix}`;
+  return `${characters(nicks[0]).slice(0, room).join("")}${suffix}`;
 };
 
 /**
@@ -82,7 +93,7 @@ const offerNick = (run: Run, from: number): void => {
   }
 
   for (let index = from; index < from + nicks.length + maxTries; index += 1) {
-    const line = nick(offerAt(nicks, index));
+    const line = nick(offerAt(nicks, index, nickLength(run)));
 
     if (!isRejected(line)) {
       send(run, line, "NICK");
@@ -161,7 +172,7 @@ export const offered = (run: Run): string | undefined => {
   const nicks = run.state.configuration?.nicks;
 
   return presence?._tag === "Registering" && nicks !== undefined
-    ? offerAt(nicks, presence.offer)
+    ? offerAt(nicks, presence.offer, nickLength(run))
     : undefined;
 };
 

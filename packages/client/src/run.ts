@@ -116,10 +116,15 @@ export const reportFailed = (run: Run, failed: readonly string[]): void => {
   }
 };
 
+// The Connection a Line may be sent on: one that is open, and that the Client has not
+// begun to hang up. Every Line goes through here, so nothing follows a `QUIT` or a
+// `Hangup`.
 const connection = (run: Run): ConnectionId | undefined => {
   const link = linkOf(run);
 
-  return link === undefined ? undefined : ConnectionId.make(link.id);
+  return link?.phase._tag === "Open" && link.closing === undefined
+    ? ConnectionId.make(link.id)
+    : undefined;
 };
 
 /**

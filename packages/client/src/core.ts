@@ -6,6 +6,7 @@
  *
  * @packageDocumentation
  */
+import { defaultCasemapping } from "@iirc/protocol/casemapping";
 import { action } from "@iirc/protocol/ctcp";
 import {
   encode,
@@ -20,7 +21,7 @@ import {
 import type { Encoding, Line, RawParam } from "@iirc/protocol/line";
 
 import { backoff, lasting } from "./backoff.ts";
-import { allWanted, joinWanted, reconcile, rejoin, unfilledKey } from "./channels.ts";
+import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
 import type { Client, Step } from "./client.ts";
 import type { NetworkConfiguration } from "./configuration.ts";
 import type { Arrival, Refined, Sendable } from "./feature.ts";
@@ -69,6 +70,12 @@ const dial = (run: Run): void => {
     rotation: run.state.rotation + 1,
   };
   run.outputs.push({ _tag: "Dial", connection: ConnectionId.make(id), ircd });
+
+  // Each Connection may reach another Ircd, so it starts from the protocol's casemapping
+  // until its own ISUPPORT says otherwise.
+  if (run.state.casemapping !== defaultCasemapping) {
+    remap(run, defaultCasemapping);
+  }
 };
 
 const disable = (run: Run): void => {
@@ -109,11 +116,16 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
   const { network } = run.state;
 
   run.state = { ...run.state, configuration };
-  reconcile(run, configuration.channels);
 
+  // Disabling hangs up first, so nothing this Configuration also asks for is sent after
+  // the `QUIT`.
   if (!configuration.enabled) {
     disable(run);
-  } else if (network._tag === "Unconfigured" || network._tag === "Idle") {
+  }
+
+  reconcile(run, configuration.channels);
+
+  if (configuration.enabled && (network._tag === "Unconfigured" || network._tag === "Idle")) {
     dial(run);
   }
 

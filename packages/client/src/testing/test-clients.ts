@@ -540,6 +540,7 @@ const known =
           name,
           standing: "Joined",
           topic: { _tag: "Unknown" },
+          wanted: true,
         },
       ])
     ),

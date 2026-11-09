@@ -16,6 +16,7 @@ import { timers } from "../output.ts";
 import type { TimerTable } from "../output.ts";
 import type { State } from "../state.ts";
 import { configured, epoch, impurity, snapshot } from "../testing/index.ts";
+import { openOf } from "../views.ts";
 
 const configurations = [
   configured(),
@@ -60,6 +61,8 @@ const line = fc.oneof(
     "ERROR :Closing",
     ":irc.test 900 * * acct :logged in",
     ":irc.test 901 * * :out",
+    ":irc.test 353 iirc = #iirc :iirc",
+    ":irc.test 366 iirc #iirc :End",
     "AUTHENTICATE +",
     ""
   ),
@@ -351,9 +354,20 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
     }
   }
 
-  expect(inspection.isupport.size).toBeLessThanOrEqual(256);
-  expect(inspection.caps.offered.size).toBeLessThanOrEqual(256);
-  expect(knowledge.channels.size).toBeLessThanOrEqual(3);
+  expect(Math.max(inspection.isupport.size, inspection.caps.offered.size)).toBeLessThanOrEqual(256);
+  // The Channels the Owner wants, and at most 64 that Self was put in without asking.
+  expect(knowledge.channels.size).toBeLessThanOrEqual(2 + 64);
+
+  // Users kept are never more than the members kept: membership churn cannot grow them.
+  const members = new Set(
+    [...step.state.channels.values()].flatMap(({ phase }) =>
+      phase._tag === "Joined" ? [...phase.members.keys(), ...(phase.listing?.keys() ?? [])] : []
+    )
+  );
+
+  const users = [...(openOf(step.state)?.users.keys() ?? [])];
+
+  expect(users.filter((nick) => !members.has(nick))).toStrictEqual([]);
 };
 
 const runMoves = (moves: readonly Move[]): Fold => {
