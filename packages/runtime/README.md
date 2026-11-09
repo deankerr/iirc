@@ -1,8 +1,72 @@
 # @iirc/runtime
 
-The Runtime drives one Client per Network. It journals each input, steps the Client, journals the outputs, and carries them out through its ports. This package defines those ports. The Runtime itself is built from its brief, after the Client.
+The Runtime drives one Client per Network. It journals each input, steps the Client, journals the outputs, and carries them out through its ports. This package holds the Runtime and the ports it drives through.
 
-This README is the ports' written interface. The types are in `src/`, the in-memory adapters and the laws are in `src/testing/`, and [the proposal](../../docs/notes/2026-11-07-architecture-proposal.md#1-the-system-as-a-hexagon) says why the hexagon has this shape.
+This README is the written interface of both. The types are in `src/`, the in-memory adapters and the laws are in `src/testing/`, and [the proposal](../../docs/notes/2026-11-07-architecture-proposal.md#1-the-system-as-a-hexagon) says why the hexagon has this shape.
+
+## The Runtime
+
+```ts
+layerRuntime(client): Layer<Runtime, DecodersMissing | JournalFailed, Journal | Transport | Vault>
+
+configure(network, configuration): Effect<Sequence, NetworkStopped>      // the first one adds the Network
+say(network, { kind, target, text }): Effect<{ intent, sequence }, UnknownNetwork | NetworkStopped>
+retry(network): Effect<Sequence, UnknownNetwork | NetworkStopped>
+known(network): Effect<Knowledge, UnknownNetwork>
+inspect(network): Effect<NetworkInspection, UnknownNetwork>             // { status, client, connections, timers }
+networks: Effect<ReadonlyMap<NetworkId, NetworkStatus>>                 // Running | Stopped { reason }
+news({ after? }): Stream<Happened, JournalFailed>                        // { network, sequence, at, news }, never ends
+```
+
+`Runtime` is an Effect service, imported from `@iirc/runtime`. `layerRuntime` takes the Client to drive, which is `client` from `@iirc/client` in the Daemon and a scripted Client in tests, and needs the Transport, the Journal, and the Vault. It reads time from Effect's `Clock`, and names intents with Effect's `Random`. Closing the Layer's Scope is shutdown.
+
+- **Owner inputs wait until they are stepped.** `configure`, `say`, and `retry` give the Input's sequence once it is journaled, stepped, and its outputs carried out. `say` names the intent, so its `Refused`, `Message`, and `Confirmed` News can be matched to it. A Network that has stopped fails them with `NetworkStopped`.
+- **`known` and `inspect` read the Client as it is now.** `inspect` adds what the Runtime holds: whether the Network is running, the Connections it holds a Link for, and the timers it has set.
+- **News is derived from the Journal.** `news` follows the Journal from the start, folds each Network's Inputs from `initial`, and gives each step's News with its Network, the sequence of its Input, and its `at`, for steps after `after`, and then live. A reader that resumes after the last sequence it has misses nothing, and sees exactly what the Runtime's own fold saw. Each reader folds from the start, which is simple and costs time on a long Journal. Snapshots or a shared projection can come when one is slow.
+
+### Driving a Network
+
+Each Network has one fiber, which takes its inputs one at a time from one queue: Owner inputs, Transport events, and timer firings. The queue is bounded, so a flooding Ircd waits on its own socket rather than growing memory. For each input, in order:
+
+1. Give it its `at`, from the Clock, as it is taken from the queue, so `at` never goes back in Journal order.
+2. Append the `Input`.
+3. Step the Client.
+4. Append its `Outputs` with `of` set to the Input's sequence. A step with no outputs appends none.
+5. Carry out the outputs, in order.
+6. Step each `SendSecret` that could not be filled as an `Unfilled`, in order, the same way.
+
+Carrying out each output:
+
+| Output | What the Runtime does |
+| --- | --- |
+| `Dial` | Opens a Scope for the Connection and `dial`s in it. Its events become `Opened`, `Received`, and `Closed` inputs with that Connection's id. Once its `Closed` is stepped, the Scope is closed. |
+| `Send` | `encode`s the Line and sends it. A `Rejected` is a bug upstream: it is logged, and nothing is sent. A Line for a Connection the Runtime holds no Link for is dropped, because the Client is authoritative and judges stale Connections itself. |
+| `SendSecret` | `reveal`s the Credential, `fillSecret`s the Line, `encode`s each Line, and sends them. Nothing is sent if any step fails, and the input that follows is `Unfilled`: `Missing` for `CredentialMissing`, `Unavailable` for `VaultFailed`, `Unsendable` when `fillSecret` or `encode` refuses. The value is never logged or journaled. |
+| `Hangup` | Calls `hangup` on the Link. The `Closed` that follows is stepped like any other. |
+| `Wake` | Sets one timer per `TimerId`, replacing the earlier one, with `sleepUntil`, or cancels it for `null`. When it is due, `Fired { at, due, timer }` is queued, with `due` as the `Wake` set it. A firing that went stale while it waited is stepped all the same, and the Client ignores it. |
+
+The timer table `inspect` shows is projected with `timers` from every step's input and outputs, the same projection a restart folds.
+
+### Restart
+
+On start, the Runtime refuses with `DecodersMissing` unless `missingDecoders()` is empty. Then it reads every Entry once. For each Network, it folds the Inputs from `initial`, keeping only the state and the timer table that `timers` projects from each step. Journaled Outputs are never read back: the outputs come from the refold, so a parser fix repairs history (ADR 0002), and a fixed Client asks for what it would have asked for. It then sets every timer in the table, appends and steps a `Started`, and drives the Network as before. A timer already due fires at once.
+
+A Connection open at shutdown is over, and the `Started` says so to the Client. It does not get a `Closed`, as closing a Connection's Scope gives none.
+
+### Failure
+
+- **A `JournalFailed` stops its Network.** The Runtime does not step an input it did not keep, or carry out outputs it did not keep. The Network's Connections are hung up and its timers stopped, it reports `Stopped` with the reason, the failure is logged, and other Networks carry on. It stays stopped until the Runtime starts again.
+- **A defect stops only its Network.** The Client is total, so one that throws has a bug. That Network stops as above. On restart its refold stops at the same input, so it stays stopped, with the state from before that input, and the other Networks start.
+- **An Ircd reaches only its own Network.** Its bytes go to its own Client through its own queue.
+- **Shutdown** stops every Network's fiber, hangs up every Connection, and stops every timer. Nothing that happens after is journaled. A graceful `QUIT` on shutdown can come later, as an input the Client answers.
+
+Every log goes through `Effect.log*`, annotated with the Network.
+
+### Not yet
+
+- **Flood pacing.** The Runtime sends each Line as soon as it is carried out. A burst, such as many joins or a long `say`, can get the Connection killed for flooding. Pacing belongs to the Outbox, a later module that sits between the Runtime and the Transport.
+- **The Owner API and the Daemon.** The HTTP API and the composition root that wires the production adapters together are the Daemon's.
+- **End-to-end runs against real Ircds.** They will live in the Daemon's package. This package's tests run the real Client on the in-memory ports, on a `TestClock`.
 
 | Port | Its job | Imports | In-memory adapter |
 | --- | --- | --- | --- |
@@ -51,7 +115,7 @@ JournalRecord = Input { network, input } | Outputs { network, of, outputs }
 
 Before it reads a Journal, the Runtime checks that `missingDecoders()` from `@iirc/protocol/line` is empty, and refuses to start otherwise. Replay is exact on the Bun pinned in the root `package.json`. Another runtime, or another version of Bun, may decode some fallback bytes differently, as a parser fix would (ADR 0002).
 
-The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. Every Line goes through `@iirc/protocol`'s `encode`, the last guard on what is sent: a `Rejected` from it means a bug upstream, which the Runtime logs, and that Line is not sent. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table, which `timers` projects from each step's input and outputs, so a timer whose `Fired` was stepped is gone, sets those timers, and steps a `Started`.
+The Runtime's order for each input, and how it restarts, are in [Driving a Network](#driving-a-network) and [Restart](#restart).
 
 ## Vault
 
@@ -88,4 +152,4 @@ it.each(journalLaws)("$name", async (law) => {
 });
 ```
 
-A Transport's laws need the far end too, so their harness is the Transport with a `TestIrcd` that accepts each dial as a `TestCall`. The Bun adapter's harness plays it with a local listener. Production code may not import `@iirc/runtime/testing`.
+A Transport's laws need the far end too, so their harness is the Transport with a `TestIrcd` that accepts each dial as a `TestCall`. The Bun adapter's harness plays it with a local listener. Production code may not import `@iirc/runtime/testing`. `src/testing/harness.ts` is the Runtime's own test harness, and not part of the kit.
