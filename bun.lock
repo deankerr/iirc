@@ -39,6 +39,18 @@
         "vitest": "catalog:",
       },
     },
+    "packages/runtime": {
+      "name": "@iirc/runtime",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/client": "workspace:*",
+        "@iirc/protocol": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
   },
   "catalog": {
     "effect": "4.1.1",
@@ -118,6 +130,8 @@
     "@iirc/client": ["@iirc/client@workspace:packages/client"],
 
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
+
+    "@iirc/runtime": ["@iirc/runtime@workspace:packages/runtime"],
 
     "@jridgewell/resolve-uri": ["@jridgewell/resolve-uri@3.1.2", "", {}, "sha512-bRISgCIjP20/tbWSPWMEi54QVPRZExkuD9lJL+UIxUKtwVJA8wW1Trb1jMs1RFXo1CBTNZ/5hpC9QvmKWdopKw=="],
 

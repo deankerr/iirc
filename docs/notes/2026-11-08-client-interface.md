@@ -161,4 +161,4 @@ The recorder that the transcript spike builds writes this format, so a recorded 
 
 ## Where this leaves step 1
 
-These parts of the substrate have landed: the Line, Client, and Feature types, the written interfaces, the scripted Client, and the lint fence. The Transport, Journal, Vault, and Clock ports come next, each with an in-memory adapter.
+Every part of the substrate has landed: the Line, Client, and Feature types, the scripted Client, and the Transport, Journal, Vault, and Clock ports in [`packages/runtime`](../../packages/runtime/README.md), each with a written interface and a fake, behind the lint fence. Each port also has laws, which every adapter of it must keep. Next come the spikes, and the modules that need only the substrate.

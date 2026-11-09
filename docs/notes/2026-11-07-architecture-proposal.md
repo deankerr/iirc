@@ -527,7 +527,7 @@ The substrate is the set of interfaces that every module crosses. It is laid in 
 | Clock | now, and wake at | Effect's `Clock` and `TestClock` |
 
 - **Design it twice** for the Client and the Feature interfaces. Three subagents each design a radically different interface, and we compare them on depth, locality, and seam placement before choosing. Done on 2026-11-08: [the Client and Feature interfaces](2026-11-08-client-interface.md) records the designs and the choice.
-- **Each seam lands as types, a written interface, and a fake.** The written interface gives invariants, ordering, and error modes. Nothing in it has behaviour yet.
+- **Each seam lands as types, a written interface, and a fake.** The written interface gives invariants, ordering, and error modes. Nothing in it has behaviour yet. The ports landed on 2026-11-09 in [`packages/runtime`](../../packages/runtime/README.md), each with an in-memory adapter and laws that every adapter of it must keep.
 - **The workspace skeleton enforces the direction of dependencies** with a lint fence, as Rat Stack does.
 - **Once accepted, the substrate changes only on purpose.** A module's brief may not change it. A builder that needs a change stops and says so.
 

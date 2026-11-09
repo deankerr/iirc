@@ -58,7 +58,7 @@ const ours = (allowed: readonly string[], message: string): Pattern => ({
 });
 
 const testKit: Pattern = {
-  group: ["@iirc/client/testing", "./testing/*", "../testing/*"],
+  group: ["@iirc/*/testing", "./testing/*", "../testing/*"],
   message: "Production code never imports the test kit.",
 };
 
@@ -98,6 +98,25 @@ const noClock: NonNullable<DummyRuleMap["no-restricted-globals"]> = [
 ];
 
 const toClient = "`@iirc/client` depends only on `@iirc/protocol`.";
+
+// The Runtime may use Effect's services, but reads time only through the Clock port, so
+// that `TestClock` drives it, and reaches no adapter.
+const adapters: Pattern = {
+  group: ["bun", "bun:*", "node:*", "@effect/*"],
+  message:
+    "The Runtime reaches the world only through its ports. Adapters live in their own packages.",
+};
+
+const toRuntime = "`@iirc/runtime` depends only on `@iirc/client` and `@iirc/protocol`.";
+const runtimeOurs = ours(["@iirc/client", "@iirc/client/known", "@iirc/protocol/*"], toRuntime);
+
+// The Runtime's tests and test kit may also drive it with the scripted Client.
+const runtimeTestOurs = ours(
+  ["@iirc/client", "@iirc/client/known", "@iirc/client/testing", "@iirc/protocol/*"],
+  toRuntime
+);
+
+const throughClock = "The Runtime reads time only through the Clock port.";
 const tests = ["**/*.test.ts", "**/testing/**"];
 
 const coreFence: OxlintOverride[] = [
@@ -128,6 +147,29 @@ const coreFence: OxlintOverride[] = [
     excludeFiles: tests,
     files: ["packages/client/src/**"],
     rules: { "no-restricted-imports": pureImports(ours(["@iirc/protocol/*"], toClient), testKit) },
+  },
+  {
+    files: ["packages/runtime/src/**"],
+    rules: {
+      "no-restricted-globals": [
+        "error",
+        ...["Date", "setTimeout", "setInterval", "performance", "process", "Bun"].map((name) => ({
+          message: throughClock,
+          name,
+        })),
+      ],
+      "no-restricted-imports": imports(adapters, runtimeTestOurs),
+      "no-restricted-properties": [
+        "error",
+        { message: throughClock, object: "DateTime", property: "nowUnsafe" },
+        { message: throughClock, object: "DateTime", property: "unsafeNow" },
+      ],
+    },
+  },
+  {
+    excludeFiles: tests,
+    files: ["packages/runtime/src/**"],
+    rules: { "no-restricted-imports": imports(adapters, runtimeOurs, testKit) },
   },
   {
     // Views read `known` alone, so it cannot reach the Client's inputs, outputs, or Features.
