@@ -17,27 +17,28 @@ import type { Seam } from "./seam.ts";
 export type Caps =
   /** `CAP LS 302` is sent, and the list is arriving. */
   | { readonly _tag: "Listing"; readonly offered: ReadonlyMap<CapName, string> }
-  /**
-   * `CAP REQ` is sent, and `asked` answers are still to come. `acked` holds the caps of an
-   * `ACK` spread over several Lines, applied only at its last.
-   */
-  | ({
-      readonly _tag: "Requesting";
-      readonly asked: number;
-      readonly acked: readonly CapName[];
-    } & Negotiated)
+  /** `CAP REQ` is sent, and answers are still to come. */
+  | ({ readonly _tag: "Requesting" } & Asking & Negotiated)
   /** Features hold registration open before `CAP END`. */
   | ({ readonly _tag: "Holding" } & Negotiated)
   /** Negotiation is over. */
   | ({ readonly _tag: "Steady" } & Negotiated)
   /** After registration, `CAP REQ` is sent for caps `CAP NEW` offered, or to give some up. */
-  | ({
-      readonly _tag: "Changing";
-      readonly asked: number;
-      readonly acked: readonly CapName[];
-    } & Negotiated)
+  | ({ readonly _tag: "Changing" } & Asking & Negotiated)
   /** The Ircd has no cap negotiation. */
   | { readonly _tag: "None" };
+
+/** Requests awaiting their answers. Each part is bounded by what was asked. */
+export interface Asking {
+  /** How many `CAP REQ` Lines are still to be answered. */
+  readonly asked: number;
+  /** Every change still to be answered, such as `sasl` or `-echo-message`. */
+  readonly requested: ReadonlySet<string>;
+  /** What an `ACK` spread over several Lines has acknowledged so far, applied at its last. */
+  readonly acked: ReadonlySet<string>;
+  /** How many Lines that `ACK` has spread over so far. */
+  readonly continued: number;
+}
 
 /** What negotiation has established. */
 export interface Negotiated {

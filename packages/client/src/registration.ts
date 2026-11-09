@@ -29,7 +29,7 @@ import {
 import type { Ran } from "./seam.ts";
 import { capsOf, capsWanted, freshSeam, goneStale, runEffects } from "./seam.ts";
 import { markStale } from "./stale.ts";
-import type { Caps, Negotiated, Open } from "./state.ts";
+import type { Asking, Caps, Negotiated, Open } from "./state.ts";
 import { holdTime, registrationTime } from "./timers.ts";
 import { negotiated, onNow, openOf } from "./views.ts";
 
@@ -237,8 +237,30 @@ const applyRegistration = (
   }
 };
 
-// Caps share `CAP REQ` Lines, as many to a Line as fit. Gives how many were sent.
-const requestLines = (run: Run, wanted: readonly string[]): number => {
+/** What some `CAP REQ` Lines asked for. */
+interface Asked {
+  readonly lines: number;
+  readonly names: readonly string[];
+}
+
+/** The most Lines one answer may spread over before the Client stops reading it. */
+const maxContinued = 16;
+
+/**
+ * Requests awaiting answers, with more asked.
+ * @param before - What was awaited, if anything.
+ * @param asked - What was just asked.
+ * @returns What is awaited now.
+ */
+const askingWith = (before: Asking | undefined, asked: Asked): Asking => ({
+  acked: before?.acked ?? new Set(),
+  asked: (before?.asked ?? 0) + asked.lines,
+  continued: before?.continued ?? 0,
+  requested: new Set([...(before?.requested ?? []), ...asked.names]),
+});
+
+// Caps share `CAP REQ` Lines, as many to a Line as fit. Gives what was sent.
+const requestLines = (run: Run, wanted: readonly string[]): Asked => {
   const lines: string[][] = [];
 
   for (const name of wanted) {
@@ -251,8 +273,9 @@ const requestLines = (run: Run, wanted: readonly string[]): number => {
     }
   }
 
-  return lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined)
-    .length;
+  const sent = lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined);
+
+  return { lines: sent.length, names: sent.flat() };
 };
 
 /**
@@ -272,13 +295,13 @@ const dropCaps = (run: Run, names: readonly CapName[]): void => {
 
   const sent =
     enabled.length === 0
-      ? 0
+      ? { lines: 0, names: [] }
       : requestLines(
           run,
           enabled.map((name) => `-${name}`)
         );
 
-  if (sent === 0) {
+  if (sent.lines === 0) {
     return;
   }
 
@@ -287,17 +310,17 @@ const dropCaps = (run: Run, names: readonly CapName[]): void => {
   switch (caps._tag) {
     case "Requesting":
     case "Changing": {
-      setCaps(run, { ...caps, asked: caps.asked + sent });
+      setCaps(run, { ...caps, ...askingWith(caps, sent) });
       break;
     }
 
     case "Holding": {
-      setCaps(run, { ...held, _tag: "Requesting", acked: [], asked: sent });
+      setCaps(run, { ...held, ...askingWith(undefined, sent), _tag: "Requesting" });
       break;
     }
 
     case "Steady": {
-      setCaps(run, { ...held, _tag: "Changing", acked: [], asked: sent });
+      setCaps(run, { ...held, ...askingWith(undefined, sent), _tag: "Changing" });
       break;
     }
 
@@ -566,18 +589,20 @@ const request = (
 ): void => {
   const sent = requestLines(run, wantedNow(run, held, only));
 
-  if (sent === 0 && after === "Changing") {
+  if (sent.lines === 0 && after === "Changing") {
     setCaps(run, { ...held, _tag: "Steady" });
 
     return;
   }
 
   // With nothing to ask for, `Requesting` is already answered, and `settle` ends it.
-  setCaps(run, { ...held, _tag: after, acked: [], asked: sent });
+  setCaps(run, { ...held, ...askingWith(undefined, sent), _tag: after });
 };
 
-// An `ACK` or `NAK` for one `REQ`. An `ACK` spread over several Lines, all but the last
-// marked with `*`, changes nothing until its last, and counts as one answer.
+// An `ACK` or `NAK` for one `REQ`. Only what was asked counts: a cap not asked for, or
+// one said again, is ignored. An `ACK` spread over several Lines, all but the last
+// marked with `*`, changes nothing until its last, and counts as one answer. One spread
+// over more than `maxContinued` Lines is taken as a refusal, and reported.
 const answered = (
   run: Run,
   caps: Extract<Caps, { readonly asked: number }>,
@@ -585,27 +610,46 @@ const answered = (
   ack: boolean,
   more: boolean
 ): void => {
-  const names = list.map(([name]) => name);
+  const names = list.flatMap(([name]) => (caps.requested.has(name) ? [name] : []));
+  const continued = more ? caps.continued + 1 : 0;
+  const endless = continued > maxContinued;
 
-  if (more) {
-    setCaps(run, { ...caps, acked: ack ? [...caps.acked, ...names] : caps.acked });
+  if (more && !endless) {
+    setCaps(run, {
+      ...caps,
+      acked: ack ? new Set([...caps.acked, ...names]) : caps.acked,
+      continued,
+    });
 
     return;
   }
 
+  if (endless) {
+    ignore(run, { _tag: "Endless", command: "CAP" });
+  }
+
   const enabled = new Set(caps.enabled);
 
-  if (ack) {
-    for (const name of [...caps.acked, ...names]) {
+  if (ack && !endless) {
+    for (const name of new Set([...caps.acked, ...names])) {
       if (name.startsWith("-")) {
         enabled.delete(CapNameSchema.make(name.slice(1)));
-      } else if (caps.offered.has(name) || enabled.size < maxCaps) {
-        enabled.add(name);
+      } else {
+        enabled.add(CapNameSchema.make(name));
       }
     }
   }
 
-  setCaps(run, { ...caps, acked: [], asked: caps.asked - 1, enabled });
+  const asked = caps.asked - 1;
+
+  setCaps(run, {
+    ...caps,
+    acked: new Set(),
+    asked,
+    continued: 0,
+    enabled,
+    requested: asked <= 0 ? new Set() : caps.requested,
+  });
 };
 
 const withOffered = (
@@ -676,12 +720,12 @@ const added: CapStep = (run, caps, list) => {
   const sent = requestLines(run, wantedNow(run, held, listed));
 
   if (caps._tag !== "Holding") {
-    setCaps(run, { ...caps, ...held, asked: caps.asked + sent });
-  } else if (sent === 0) {
+    setCaps(run, { ...caps, ...held, ...askingWith(caps, sent) });
+  } else if (sent.lines === 0) {
     setCaps(run, { ...caps, ...held });
   } else {
     // While Features hold registration, nothing is awaited: now the new request is.
-    setCaps(run, { ...held, _tag: "Requesting", acked: [], asked: sent });
+    setCaps(run, { ...held, ...askingWith(undefined, sent), _tag: "Requesting" });
   }
 
   return true;

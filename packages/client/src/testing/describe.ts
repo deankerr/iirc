@@ -135,6 +135,10 @@ const writeIgnored = (reason: IgnoredReason): string => {
       return `Unsendable ${atom(reason.command)}`;
     }
 
+    case "Endless": {
+      return `Endless ${atom(reason.command)}`;
+    }
+
     case "UnmatchedEcho": {
       return "UnmatchedEcho";
     }

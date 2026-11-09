@@ -338,3 +338,82 @@ describe("caps changing mid-Session", () => {
     expect.assertions(0);
   });
 });
+
+// Continuation Lines of one ACK, each marked with `*`.
+const continuing = (count: number, cap = "multi-prefix") =>
+  Array.from({ length: count }, () => `<< :irc.test CAP iirc ACK * :${cap}`);
+
+describe("an ACK that will not end", () => {
+  it("is taken as a refusal after 16 continuation Lines, and reported", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: lines(
+        opened.trimEnd(),
+        "<< :irc.test CAP * LS :multi-prefix away-notify",
+        ">> CAP REQ :multi-prefix away-notify",
+        ...continuing(16),
+        ...continuing(1),
+        "?? ignored Endless CAP",
+        ">> CAP END",
+        ...continuing(3).flatMap((line) => [line, "?? ignored NotNow Received"])
+      ),
+    });
+
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set());
+  });
+
+  it("holds each change once, and only what was asked, however many Lines repeat it", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: lines(
+        opened.trimEnd(),
+        "<< :irc.test CAP * LS :multi-prefix away-notify",
+        ">> CAP REQ :multi-prefix away-notify",
+        ...continuing(15, "multi-prefix chghost sasl -away-notify")
+      ),
+    });
+
+    const open =
+      played.state.network._tag === "Connection" ? played.state.network.link.phase : undefined;
+
+    expect(open?._tag === "Open" ? open.caps : undefined).toMatchObject({
+      acked: new Set(["multi-prefix"]),
+      continued: 15,
+    });
+  });
+
+  it("is bounded in a Session too, where no deadline would end it", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["cap-notify"] }),
+        lines(
+          "<< :irc.test CAP iirc NEW :multi-prefix",
+          ">> CAP REQ multi-prefix",
+          ...continuing(17),
+          "?? ignored Endless CAP"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state)).toMatchObject({
+      features: ["cap-notify"],
+      states: { caps: "Ready.Steady" },
+    });
+  });
+
+  it("enables nothing it did not ask for, even on its last Line", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: lines(
+        opened.trimEnd(),
+        "<< :irc.test CAP * LS :multi-prefix chghost",
+        ">> CAP REQ multi-prefix",
+        "<< :irc.test CAP * ACK :multi-prefix chghost",
+        ">> CAP END"
+      ),
+    });
+
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set(["multi-prefix"]));
+  });
+});

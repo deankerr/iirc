@@ -91,6 +91,8 @@ export type IgnoredReason =
   | { readonly _tag: "FeatureFailed"; readonly feature: string }
   /** A Line the Client meant to send that a Feature refused, such as bytes not UTF-8 under `UTF8ONLY`. */
   | { readonly _tag: "Unsendable"; readonly command: string }
+  /** An answer spread over more Lines than the Client reads, taken as a refusal. */
+  | { readonly _tag: "Endless"; readonly command: string }
   /** An echo of what Self said that nothing can tie to what we sent, while `echo-message` is being given up. */
   | { readonly _tag: "UnmatchedEcho" };
 
