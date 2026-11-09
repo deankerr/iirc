@@ -2,13 +2,13 @@
 
 The pure IRC client for one Network. It does no I/O and reads no clock. Every input carries its time, and every effect leaves as an output, so the same inputs always give the same states and outputs.
 
-This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. There is no Client behind the interface yet. Its machines will be reducers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
+This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. The Client is `client`, exported from `@iirc/client`. Its machines are reducers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)): the Network and its Connection, cap negotiation, Presence, the keepalive, and a keyed `Map` of Channels, as the statecharts in [the architecture proposal](../../docs/notes/2026-11-07-architecture-proposal.md) §3 draw them. [Features](#features) lists what it does, from the floor up.
 
 ## Callers
 
 | Caller | Uses | Imports |
 | --- | --- | --- |
-| The Runtime | `step` for each input, then carries out the outputs and journals both | `@iirc/client` |
+| The Runtime | `client.step` for each input, then carries out the outputs and journals both | `@iirc/client` |
 | Views | `known` for what is known, and News for Timelines | `@iirc/client/known`, and News from `@iirc/client` |
 | Scenario tests | inputs in, outputs and News out, with a fake clock | `@iirc/client/testing` |
 | Agents and debugging | `inspect` for machine states, caps, Features, and timers | `@iirc/client` |
@@ -42,9 +42,11 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 
 When the Client dials:
 
-- A `Configured` or `Started` with the Network enabled dials at once, if no Connection is open. There is no backoff before a first dial.
-- Backoff applies only to redialling after a `Closed`. `Retry` cuts that wait short.
-- A `Configured` that disables the Network while a Connection is open hangs up, and the Client waits for its `Closed`.
+- A `Configured` or `Started` with the Network enabled dials at once, if no Connection is open and none is waiting to be redialled. There is no backoff before a first dial.
+- Backoff applies only to redialling after a `Closed`. A `Configured` while waiting keeps waiting, and `Retry` cuts the wait short.
+- A `Configured` that disables the Network while a Connection is open sends `QUIT` if registration has begun, hangs up, and the Client waits for its `Closed`. Enabled again before that `Closed`, it dials as soon as the `Closed` arrives.
+- A `Started` ends the Connection the Client believed open, with `Restarted`, and dials at once.
+- Each dial takes the next Ircd in `ircds`, round and round.
 
 ## Outputs
 
@@ -59,6 +61,18 @@ When the Client dials:
 Connection ids start at 1 and go up by 1 for each `Dial`. They are never reused, and replaying the Journal rebuilds them.
 
 Timers are one-shot. The timer table is a projection of the Journal's inputs and outputs: `timers(table, input, outputs)` folds one step. A `Fired` whose `due` matches the table consumes its timer, and then the last `Wake` for each id sets it, so the Client re-arms a timer with a fresh `Wake` if it wants it again. A stale `Fired` changes nothing. The Runtime folds it over every step while replaying, then sets every timer in it.
+
+The Client's timers, by id:
+
+| Timer | Set while | When it fires |
+| --- | --- | --- |
+| `redial` | waiting after a `Closed` | dials the next Ircd |
+| `register` | registering, 60 s from `Opened` | hangs up: the Connection ends `Silent` |
+| `hold` | a Feature holds registration, 30 s from when it began | asks each holding Feature's `expired` |
+| `keepalive` | in a Session | a lag `PING` after 60 s with nothing heard, and a hang-up after 90 s |
+| `rejoin <channel>` | a Channel is refused or kicked, with its folded name | joins it again |
+
+The State holds no timer table. Each machine's state names the instants it waits for, the table is derived from them, and `inspect` shows it.
 
 ## News
 
@@ -82,7 +96,7 @@ Three rules for Timelines:
 
 ## Knowledge
 
-`known(state)` gives Channels, members, Users, Self, and where the Session is. Every fact is a `Fact<T>`:
+`known(state)` gives Channels, members, Users, Self, and where the Session is. Channels and Users are keyed by name folded with the casemapping in force, named as `@iirc/protocol/casemapping` names it: `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`. Until the Ircd says, it is `rfc1459`, and a mapping the Client does not know folds as `ascii`. Each Connection starts from `rfc1459`, whatever the last Ircd said. When the casemapping changes, every key is folded again, and the Channels are reconciled with the Configuration: a wanted Channel the new mapping tells apart from another gets its own machine, and of Channels it merges, the first is kept. Users are those who share a Channel with Self, and Self: what was seen of a User is forgotten once they share none. A Channel's `wanted` says whether the Owner wants Self in it, which is false for one Self was put in without asking. Every fact is a `Fact<T>`:
 
 | Case      | Means                                                        |
 | --------- | ------------------------------------------------------------ |
@@ -93,6 +107,20 @@ Three rules for Timelines:
 
 A fact's source is `ircd` (said as it happened), `replied` (said in reply to a Lookup), `receipt` (inferred from when a Line arrived), or `ours` (we said or set it). Nothing in Knowledge names a cap or a Feature. A View learns how a fact is known, never why, so a new Feature changes which case a fact lands in and not the View's code. `@iirc/client/known` imports nothing from the rest of the Client, and the lint fence holds it to that.
 
+## Inspection
+
+`inspect(state)` gives what Views do not need: each machine's state, the Connection, the caps offered and enabled, ISUPPORT, the Features on, and the timer table. `states` names each machine's state as the statecharts do:
+
+| Machine | States |
+| --- | --- |
+| `network` | `Unconfigured`, `Idle`, `Waiting`, `Connection.Dialing`, `Connection.Open`, `Connection.Closing` |
+| `caps` | `Listing`, `Requesting`, `Holding`, `Ready.Steady`, `Ready.Changing`, `None` |
+| `presence` | `Registering`, `Session` |
+| `keepalive` | `Listening`, `Pinged` |
+| `channel <name>` | `Wanted`, `Joining`, `Joined.Syncing`, `Joined.Synced`, `Refused`, `Kicked` |
+
+A machine that is not running, such as `caps` with no Connection open, is left out.
+
 ## Invariants
 
 - **Pure.** `step` reads no clock, randomness, locale, or time zone, and does no I/O. So it uses no `DateTime`, whose zoned constructors default to the machine's time zone, nothing locale-aware such as `localeCompare`, and no Schema that parses a date in local time, such as `Schema.DateFromString`. The lint fence catches the obvious cases, such as `Date`, `Math.random`, Effect's `Clock` and `Effect`, and Bun or Node. Review catches the rest.
@@ -100,10 +128,10 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 - **Total.** `step` never throws, for any input in any state.
 - **Hardened, not tuned.** The Client accepts anything the protocol allows, from any Ircd: a reply at any point it may legally come, tags and names in any order, and optional parts present or absent, such as a trailing colon or a `time` tag. The Ircds we record, such as Ergo and ngircd, show where Ircds differ. They are examples, never the cases to code for, so an Ircd we have never seen still works. What it cannot read is `Ignored`, never fatal.
 - **Exact replay.** Folding the Journal's inputs from `initial` gives the same states, outputs, and News. The Client never reads its outputs back.
-- **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. Timers are one-shot: once the Client has stepped a `Fired` whose `due` matches, the timer is gone, and the Client sets it again with a fresh `Wake` if it still wants it. The Runtime gives `due` back unchanged. `Fired` names only the timer, so State keeps which machine each timer belongs to and what it means. Each machine's timers are derived from its state, and a step outputs a `Wake` for each difference, so leaving a state cancels its timers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
-- **One Connection at a time.** The Client dials only when no Connection is open: after the previous Connection's `Closed`, or after `Started`, which ends any it believed open. A `Configured` or `Started` with the Network enabled dials at once, and only a redial after a `Closed` waits for backoff. A `Configured` that disables the Network while connected hangs up.
+- **Time comes from inputs.** Every `Wake` instant is computed from the `at` of an input: the one being stepped, or, for the keepalive, the one that last brought a Line, which is never later. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. Timers are one-shot: once the Client has stepped a `Fired` whose `due` matches, the timer is gone, and the Client sets it again with a fresh `Wake` if it still wants it. The Runtime gives `due` back unchanged. `Fired` names only the timer, so State keeps which machine each timer belongs to and what it means. Each machine's timers are derived from its state, and a step outputs a `Wake` for each difference, so leaving a state cancels its timers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
+- **One Connection at a time.** The Client dials only when no Connection is open: after the previous Connection's `Closed`, or after `Started`, which ends any it believed open. A `Configured` or `Started` with the Network enabled dials at once, unless a redial is pending: only a redial after a `Closed` waits for backoff, a `Configured` leaves that wait as it is, and `Started` or `Retry` cuts it short. A `Configured` that disables the Network while connected hangs up. Once the Client has begun to hang up, it sends nothing more on that Connection.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
-- **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext.
+- **Never insecure under STS.** This is stage 3's, and is not built yet: today `Dial` uses the configured address, and `policies` is empty. Once built: once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext.
   - A policy is learnt only over TLS, from `duration`, on the port of the Connection it arrived on. A `port` key sent over TLS is ignored.
   - `duration=0` removes the policy at once. When a Connection closes, the expiry moves to the close plus the last `duration`.
   - It survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`.
@@ -127,9 +155,9 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 | A tag value that does not parse, such as `time=yesterday` | The fact keeps its default, such as the time of receipt. |
 | Input from an old Connection | `Ignored` with `StaleConnection`. |
 | `Fired` for a timer that was reset or cancelled | `Ignored` with `StaleTimer`. |
-| An input that makes no sense now, such as `Opened` twice | `Ignored` with `NotNow`. |
+| An input that makes no sense now, such as `Opened` twice | `Ignored` with `NotNow`. A Line that makes no sense now, such as a `CAP ACK` when nothing was asked or a second `001`, is `NotNow` with `Received`. A Line the Client does not read, such as most numerics, is not ignored: it changes nothing, and that is no error. |
 | An Owner intent that cannot be carried out, such as `Say` while offline | `Refused` with the intent id. It is not queued. |
-| `Unfilled` | SASL sends `AUTHENTICATE *` and counts as a failed login, so a required login abandons the Connection. A Channel whose key is unfilled is `Refused` until the next Session or a change of Configuration. Registration goes on without `PASS`, and the Ircd decides. |
+| `Unfilled` | SASL sends `AUTHENTICATE *` and counts as a failed login, so a required login abandons the Connection. A Channel whose key is unfilled is `Refused` until the next Session or the next `Configured`. Registration goes on without `PASS`, and the Ircd decides. On the floor, with no SASL Feature, an unfilled `AuthenticatePlain` is `NotNow`. |
 | A Feature hook that throws | That Feature is off for the rest of the Connection, and `Ignored` with `FeatureFailed` records it. |
 
 ## The Feature seam
@@ -198,6 +226,65 @@ export const awayNotify: Feature = {
   own: undefined,
 };
 ```
+
+## Features
+
+Each feature is built from the floor up ([the architecture proposal](../../docs/notes/2026-11-07-architecture-proposal.md) §10): what it needs, what it changes, and where its scenarios are. A feature exists when its scenarios pass. Every scenario plays strictly through `step`, in `src/scenarios/`.
+
+### Connecting and redialling
+
+- Needs: nothing. The floor.
+- Changes: dials the first Ircd at once on `Configured` or `Started`. After a `Closed`, it waits on the one backoff, 2 s doubling to at most 5 minutes, then dials the next Ircd in `ircds`. A Session that lasted 5 minutes starts the backoff again from 2 s. The backoff takes no randomness: one Daemon serves one Owner, so there is no herd to spread out. `Retry` dials at once while waiting. Disabling hangs up, and enabling dials. Connection ids start at 1, and only one Connection is open at a time. `ERROR` from the Ircd is why its Session ended.
+- Scenarios: `connection.test.ts`
+
+### Registration and cap negotiation
+
+- Needs: nothing. An Ircd with no cap negotiation answers `CAP` with `421`, or ignores it and sends `001`.
+- Changes: sends `CAP LS 302`, `PASS` as a `SendSecret` when configured, `NICK`, and `USER` at once. Reads `CAP LS` over as many Lines as it takes, requests the caps of the Features in the registry less those declined, and sends `CAP END` when nothing is awaited and no Feature holds registration. On `432`, `433`, `436`, or `437` at any point before `001`, it offers the next nick: the configured nicks in order, as the Owner wrote them, then `_` added to the first, then `2`, `3`, and on, the first cut to leave room for the suffix within `NICKLEN`, or RFC 2812's 9 until the Ircd announces it. A fallback is made only if it keeps at least the first nick's leading character, and that character may start a nick. Once a suffix leaves no room, as with `NICKLEN=1` or after `i9` with `NICKLEN=2`, the Client offers no nick for that `433`, and the registration deadline ends the Connection unless a later `005` raises `NICKLEN`, after which the next `433` resumes the offers where they stopped. A nick that cannot be sent is skipped. Registration that takes more than 60 s ends the Connection. `CAP NEW` and `CAP DEL` change the caps for the rest of the Connection.
+- Scenarios: `registration.test.ts`
+
+### The Session and ISUPPORT
+
+- Needs: nothing.
+- Changes: `001` begins a Session, and Self's nick is its first parameter. Self's mask is never read from `001`, whose text is for people. It stays unknown until a structured source gives it, which on the floor is the echo of Self's own `JOIN`, and until then a `Say` keeps the conservative allowance for the source an Ircd adds when it relays. `900` and `901` give Self's account. ISUPPORT accumulates over every `005`, a negated token is taken back, and at most 256 tokens are kept. `CASEMAPPING`, `UTF8MAPPING`, `PREFIX`, `CHANTYPES`, `CHANMODES`, and `TARGMAX` are read with `@iirc/protocol/isupport` and `@iirc/protocol/casemapping`, with the protocol's defaults until they are sent. `SessionBegan` and `SessionEnded` report it.
+- Scenarios: `session.test.ts`
+
+### Keepalive
+
+- Needs: nothing.
+- Changes: answers the Ircd's `PING` at once, before or after `001`, echoing its first parameter byte for byte through `rawParams`, so a token that is not UTF-8 comes back exactly. One timer checks when a Line was last heard: after 60 s of silence it sends `PING iirc`, and after 90 s it hangs up, and the Session ends `Silent`. A Line heard changes only State, never a `Wake`.
+- Scenarios: `keepalive.test.ts`
+
+### Channels
+
+- Needs: nothing. Without `multi-prefix`, a member's prefixes are partial.
+- Changes: each Channel the Owner wants is a machine: Wanted, Joining, Joined (Syncing, then Synced at the end of `NAMES`), Refused, and Kicked. After `001`, and whenever the Configuration wants more, every Wanted Channel without a key shares `JOIN` Lines, as many to a Line as fit and as `TARGMAX` allows. One with a key goes alone as a `JoinWithKey`. Self is in a Channel on the echo of its `JOIN`. A `NAMES` listing over any number of `353`s replaces the members at its `366`, and a `JOIN`, `PART`, `QUIT`, `KICK`, `NICK`, or membership `MODE` that arrives while it is pending changes it too, so nothing is lost when it ends. A member listed with a prefix holds at least that one, and one listed with none holds none, since the floor shows only the highest. A leading symbol `PREFIX` does not name is a prefix that cannot be named, so what is known is partial. The topic comes from `332`, `333`, and `331`, as said on joining or replied later, and a join whose replies end with no topic has none. Modes come from `324` and follow `MODE`, with list and membership modes left out and a key shown only as set. `403`, `405`, `437`, `471`, `473`, `474`, `475`, `476`, `477`, and `489` refuse a Channel Self is joining, and a kick, or a `PART` the Owner did not ask for, removes Self: each is joined again on the one backoff, which starts again once joined. A Channel no longer wanted is parted. A Session ending returns every wanted Channel to Wanted. A key that cannot be filled refuses its Channel until the next Session or `Configured`. At most 100,000 members are kept for a Channel.
+
+  A Channel Self is put in without asking, such as by an oper's `SAJOIN` or another session of the same account, is not undone. Its `JOIN` makes a machine, Joined and not wanted, that syncs and is modelled like any other, and Knowledge shows it with `wanted` false. It is never joined again: it is forgotten when Self leaves it or the Session ends. A Configuration that names it makes it wanted, and one that does not leaves it alone. Such Channels are counted within their `CHANLIMIT` group, so `#:1,&:1` keeps one of each and `#&:2` keeps two between them. A prefix in no group, or a group with no limit, is counted the same way against 64, and past that one is reported as Activity and `Ignored` with `NotNow`, and modelled no further.
+
+- Scenarios: `channels.test.ts`
+
+### Messages and Activity
+
+- Needs: nothing. Without `server-time`, a time is when the Line arrived, and says so. Without `echo-message`, our own Messages are reported when we send them, and stay unconfirmed.
+- Changes: `PRIVMSG` and `NOTICE` are a `Message` with sender, Target, and kind, and a CTCP `ACTION` is an `Action`. Other CTCP is a request between IRC clients, not something said, and is neither reported nor answered. A Line with no source names the Ircd as its sender. Client-only tags are kept as data. `JOIN`, `PART`, `QUIT`, `NICK` (Self's included), `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and fold into what is known of Channels, members, and Users. A `Say` is sent, and reported as a `Message` that is `ours`, at the time we said it. It is `Refused` with `Offline` outside a Session or while hanging up, and `Unsendable` when no Line can carry it, or when the Ircd would cut it short relaying it with our source.
+- Scenarios: `messages.test.ts`
+
+### What is ignored
+
+- Needs: nothing.
+- Changes: bytes that do not parse are `Unparseable`. A Line the Client reads whose parameters do not fit its command is `Malformed`. A Line that makes no sense in this state is `NotNow`. None of these ends the Connection, and nothing is decided from an Ircd's text.
+- Scenarios: `ignored.test.ts`, and `properties.test.ts`, which folds random and hostile input from every state and checks the Invariants after every step.
+
+### The Feature seam
+
+- Needs: nothing. The registry in `src/registry.ts` is empty on the floor.
+- Changes: the stages run on every Line as the seam above describes, and do nothing while no Feature is on. The core reads `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `MODE`, `TOPIC`, `AWAY`, and `353` as `Meant`, through `meaning`. Every Line sent, the Owner's and the protocol's, goes through `egress`. Lines a hook asks to `send` do not go through `egress` again.
+- Scenarios: `seam.test.ts`, which drives each stage through `step` with Features of its own, and `laws.test.ts`, which runs the four laws over the registry.
+
+### Recorded Ircds
+
+- The four fixtures in `fixtures/transcripts/` replay through the Client: it registers, joins, and follows the Session. The only `Ignored` is a `CAP ACK` for what the recorder asked and the floor Client did not. `fixtures.test.ts` also folds a long scenario, with reconnects and timers, again in a fresh process.
 
 ## The test kit
 

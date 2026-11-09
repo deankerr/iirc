@@ -2,11 +2,4 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // The tsconfig plugin name is served by @effect/tsgo, not its own package.
   "ignoreDependencies": ["@effect/language-service"],
-  "workspaces": {
-    "packages/client": {
-      // The Feature seam is internal to the Client and has no adapters yet. Remove this
-      // once the registry of Features imports it.
-      "entry": ["src/feature.ts"],
-    },
-  },
 }
