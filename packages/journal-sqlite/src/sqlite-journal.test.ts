@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,11 +7,11 @@ import { Input, Instant } from "@iirc/client";
 import { Journal, JournalRecord, NetworkId, Sequence, journalVersion } from "@iirc/runtime/journal";
 import type { Entry, Position } from "@iirc/runtime/journal";
 import { holds, journalLaws } from "@iirc/runtime/testing";
-import { Effect, Exit, Fiber, Schema, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Ref, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { layerSqliteJournal, makeSqliteJournal } from "./sqlite-journal.ts";
+import { layerSqliteJournal, makeSqliteJournal, openSqliteJournal } from "./sqlite-journal.ts";
 
 const libera = NetworkId.make("libera");
 const oftc = NetworkId.make("oftc");
@@ -231,23 +231,32 @@ describe("the version check", () => {
     );
   });
 
-  it("refuses a database that is not a Journal, and leaves it alone", async () => {
+  it("refuses a database that is not a Journal, and leaves it exactly as it was", async () => {
     await run(
       Effect.gen(function* () {
-        const file = yield* temporaryFile;
+        const directory = yield* temporaryDirectory;
+        const file = path.join(directory, "notes.db");
         const raw = new Database(file);
 
         raw.run("CREATE TABLE notes (body TEXT)");
+        raw.run("INSERT INTO notes VALUES ('keep me')");
         raw.close();
 
+        const before = yield* Effect.promise(async () => await readFile(file));
         const failure = yield* using(file, () => Effect.void).pipe(Effect.flip);
-
-        expect(failure).toMatchObject({ _tag: "JournalVersionMismatch", found: 0 });
+        const after = yield* Effect.promise(async () => await readFile(file));
         const check = new Database(file, { readonly: true });
+        const mode = check.query("PRAGMA journal_mode").get();
         const tables = check.query("SELECT name FROM sqlite_master").all();
 
         check.close();
+        expect(failure).toMatchObject({ _tag: "JournalVersionMismatch", found: 0 });
+        expect(mode).toStrictEqual({ journal_mode: "delete" });
         expect(tables).toStrictEqual([{ name: "notes" }]);
+        expect(after.equals(before)).toBeTruthy();
+        expect(yield* Effect.promise(async () => await readdir(directory))).toStrictEqual([
+          "notes.db",
+        ]);
       })
     );
   });
@@ -284,7 +293,7 @@ describe("a Journal that cannot be read or written", () => {
     );
   });
 
-  it("fails a record that does not decode with JournalFailed, after the Entries before it", async () => {
+  it("gives the Entries before a record that does not decode, then fails with JournalFailed", async () => {
     await run(
       Effect.gen(function* () {
         const file = yield* temporaryFile;
@@ -300,19 +309,24 @@ describe("a Journal that cannot be read or written", () => {
 
         yield* using(file, (journal) =>
           Effect.gen(function* () {
-            const read = yield* Effect.exit(collect(journal.read({})));
-            const followed = yield* Effect.exit(collect(journal.follow({}).pipe(Stream.take(3))));
+            // Both are in one page, so the valid Entry must not wait for the page's end.
+            for (const stream of [journal.read({}), journal.follow({})]) {
+              const seen = yield* Ref.make<readonly number[]>([]);
 
-            const failures = [read, followed].map((exit) =>
-              Exit.isFailure(exit) ? JSON.stringify(exit.cause) : "succeeded"
-            );
+              const exit = yield* Effect.exit(
+                Stream.runForEach(stream, (entry) =>
+                  Ref.update(seen, (all) => [...all, entry.sequence])
+                )
+              );
 
-            for (const failure of failures) {
+              const failure = Exit.isFailure(exit) ? JSON.stringify(exit.cause) : "succeeded";
+
+              expect(yield* Ref.get(seen)).toStrictEqual([1]);
               expect(failure).toContain("JournalFailed");
               expect(failure).not.toContain("Die");
             }
 
-            // The Entries around it are still there for a reader that skips the bad one.
+            // The Entries around it are still there for a reader that starts past the bad one.
             const around = yield* collect(journal.read({ after: Sequence.make(2) }));
 
             expect(around.map((entry) => entry.sequence)).toStrictEqual([3]);
@@ -391,4 +405,55 @@ describe("following", () => {
       })
     );
   });
+
+  it("holds a signal and not the Entries for a follower that stops taking them", async () => {
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+        const appended = 2000;
+        const { backlog, journal } = yield* openSqliteJournal(file);
+
+        yield* Effect.forEach([1, 2, 3], (n) => journal.append(retry(libera, n)));
+
+        // The follower takes its first Entry and then stops, with a thousand more to come.
+        const gate = yield* Deferred.make<undefined>();
+        const taken = yield* Deferred.make<undefined>();
+        const seen = yield* Ref.make<readonly number[]>([]);
+
+        const follower = yield* Effect.forkChild(
+          Stream.runForEach(journal.follow({}), (entry) =>
+            Effect.gen(function* () {
+              yield* Ref.update(seen, (all) => [...all, entry.sequence]);
+              yield* Deferred.succeed(taken, undefined);
+              yield* Deferred.await(gate);
+            })
+          )
+        );
+
+        yield* Deferred.await(taken);
+
+        const sizes = yield* Effect.forEach(
+          Array.from({ length: appended }, (_, n) => n),
+          (n) =>
+            journal.append(retry(n % 2 === 0 ? libera : oftc, n + 10)).pipe(Effect.andThen(backlog))
+        );
+
+        // However many appends the follower slept through, one signal is all that waits.
+        expect(Math.max(...sizes)).toBeLessThanOrEqual(1);
+        expect(yield* Ref.get(seen)).toStrictEqual([1]);
+
+        yield* Deferred.succeed(gate, undefined);
+        const total = 3 + appended;
+
+        while ((yield* Ref.get(seen)).length < total) {
+          yield* Effect.sleep("1 millis");
+        }
+
+        // It never got ahead of itself while waiting, and misses nothing now.
+        yield* Effect.sleep("20 millis");
+        expect(yield* Ref.get(seen)).toStrictEqual(Array.from({ length: total }, (_, i) => i + 1));
+        yield* Fiber.interrupt(follower);
+      })
+    );
+  }, 30_000);
 });

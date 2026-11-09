@@ -2,6 +2,10 @@
 // `bun:sqlite`, serializes access to the one connection, and starts transactions with
 // `BEGIN IMMEDIATE`. Its only gap is that `executeStream` is not implemented, so `read`
 // pages through the table by sequence instead of streaming one statement.
+//
+// Followers never hold Entries. An append says only "committed through N" on a signal that
+// keeps nothing but its latest value, and a follower fetches what it has not yet delivered
+// from the table, a page at a time. A slow follower therefore costs a number, not a backlog.
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import {
   Journal,
@@ -11,8 +15,8 @@ import {
   Sequence,
   journalVersion,
 } from "@iirc/runtime/journal";
-import type { Entry, JournalService, Position } from "@iirc/runtime/journal";
-import { Effect, Layer, Option, PubSub, Schema, Semaphore, Stream } from "effect";
+import type { JournalService, Position } from "@iirc/runtime/journal";
+import { Effect, Layer, Option, PubSub, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import type { SqlClient } from "effect/sql/SqlClient";
@@ -28,10 +32,6 @@ const rowSchema = Schema.Struct({ record: recordText, sequence: Sequence });
 
 const failed = (what: string) => (cause: { readonly message: string }) =>
   new JournalFailed({ reason: `${what}: ${cause.message}` });
-
-const matches = (from: Position) => (entry: Entry) =>
-  entry.sequence > (from.after ?? 0) &&
-  (from.network === undefined || entry.record.network === from.network);
 
 // The one place the table is created. `network` is derived from the record, so it cannot
 // disagree with it, and the index makes reading one Network cheap.
@@ -72,38 +72,52 @@ const openJournal = (sql: SqlClient) =>
     })
   );
 
+/** A Journal, and how many signals its slowest follower has yet to take. */
+export interface OpenedJournal {
+  readonly journal: JournalService;
+  /** At most one however many appends a follower has missed. Not part of the port. */
+  readonly backlog: Effect.Effect<number>;
+}
+
+/** How far a stream has delivered, and how far the Journal is known to be committed. */
+interface Progress {
+  readonly delivered: number;
+  readonly committed: number;
+}
+
 /**
- * Opens a Journal in a SQLite file, creating it if it does not exist. It is closed when
- * the Scope ends.
+ * Opens a Journal in a SQLite file, creating it if it does not exist, and gives it with
+ * the size of its followers' backlog, which tests check. It is closed when the Scope ends.
  * @param filename - The path of the database file.
- * @returns The Journal.
+ * @returns The Journal and its backlog.
  */
-export const makeSqliteJournal = (
+export const openSqliteJournal = (
   filename: string
-): Effect.Effect<JournalService, JournalFailed | JournalVersionMismatch, Scope.Scope> =>
+): Effect.Effect<OpenedJournal, JournalFailed | JournalVersionMismatch, Scope.Scope> =>
   Effect.gen(function* () {
-    const sql = yield* SqliteClient.make({ filename }).pipe(
+    // The file is opened as it is. Nothing that persists in it is changed until it is known
+    // to be a Journal, so a file that is refused is left exactly as it was found.
+    const sql = yield* SqliteClient.make({ disableWAL: true, filename }).pipe(
       Effect.provide(Reactivity.layer),
       Effect.mapError(failed(`cannot open ${filename}`))
     );
 
-    // Each commit waits for the WAL to reach the disk, so an append that has returned
-    // survives a crash of the process and of the machine.
+    // Each commit waits for the log to reach the disk, so an append that has returned
+    // survives a crash of the process and of the machine. This is per connection.
     yield* sql`PRAGMA synchronous = FULL`.pipe(Effect.mapError(failed("cannot configure")));
     yield* openJournal(sql).pipe(
       Effect.catchTag("SqlError", (error: SqlError) =>
         Effect.fail(failed("cannot open the Journal")(error))
       )
     );
+    yield* sql`PRAGMA journal_mode = WAL`.pipe(Effect.mapError(failed("cannot configure")));
 
-    const appended = yield* Effect.acquireRelease(PubSub.unbounded<Entry>(), PubSub.shutdown);
-    const lock = yield* Semaphore.make(1);
+    // "Committed through N", and nothing else. Capacity 1 and sliding means a subscriber
+    // that is not taking holds the latest value only, whatever is appended meanwhile.
+    const committed = yield* Effect.acquireRelease(PubSub.sliding<number>(1), PubSub.shutdown);
 
-    const decodeRows = (rows: readonly (typeof rowSchema.Encoded)[]) =>
-      // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
-      Effect.forEach(rows, (row) =>
-        Schema.decodeEffect(rowSchema)(row).pipe(Effect.mapError(failed("cannot decode an Entry")))
-      );
+    const decodeRow = (row: typeof rowSchema.Encoded) =>
+      Schema.decodeEffect(rowSchema)(row).pipe(Effect.mapError(failed("cannot decode an Entry")));
 
     const last = sql<{
       readonly last: number;
@@ -112,48 +126,70 @@ export const makeSqliteJournal = (
       Effect.mapError(failed("cannot read the Journal"))
     );
 
-    // Pages through the Entries after a position, up to a sequence that was settled before
-    // the first page, so the stream ends where the Journal stood and no later.
-    const upTo = (from: Position, end: number): Stream.Stream<Entry, JournalFailed> =>
-      Stream.paginate(from.after ?? 0, (cursor) =>
-        sql<typeof rowSchema.Encoded>`
-          SELECT sequence, record FROM journal
-          WHERE sequence > ${cursor} AND sequence <= ${end}
-          ${from.network === undefined ? sql`` : sql`AND network = ${from.network}`}
-          ORDER BY sequence LIMIT ${pageSize}
-        `.pipe(
-          Effect.mapError(failed("cannot read the Journal")),
-          Effect.flatMap(decodeRows),
-          Effect.map((entries) => {
-            const final = entries.at(-1);
+    // One page of rows after what has been delivered, up to what is committed. A page that
+    // is not full has everything up to `committed` that matches, so that is where the
+    // stream has got to, whichever Entries it skipped for another Network.
+    const page = (from: Position, progress: Progress) =>
+      sql<typeof rowSchema.Encoded>`
+        SELECT sequence, record FROM journal
+        WHERE sequence > ${progress.delivered} AND sequence <= ${progress.committed}
+        ${from.network === undefined ? sql`` : sql`AND network = ${from.network}`}
+        ORDER BY sequence LIMIT ${pageSize}
+      `.pipe(
+        Effect.mapError(failed("cannot read the Journal")),
+        Effect.map((rows) => {
+          const final = rows.at(-1);
 
-            return [
-              entries,
-              final !== undefined && entries.length === pageSize
-                ? Option.some<number>(final.sequence)
-                : Option.none<number>(),
-            ] as const;
-          })
+          return [
+            rows,
+            {
+              committed: progress.committed,
+              delivered:
+                final !== undefined && rows.length === pageSize
+                  ? final.sequence
+                  : progress.committed,
+            },
+          ] as const;
+        })
+      );
+
+    // Rows are decoded one at a time as they are given, so those before a damaged record
+    // reach the reader, and then the stream fails.
+    const entries = (rows: Stream.Stream<typeof rowSchema.Encoded, JournalFailed>) =>
+      rows.pipe(Stream.mapEffect(decodeRow));
+
+    const read = (from: Position, end: number) =>
+      entries(
+        Stream.paginate<Progress, typeof rowSchema.Encoded, JournalFailed>(
+          { committed: end, delivered: from.after ?? 0 },
+          (progress) =>
+            page(from, progress).pipe(
+              Effect.map(([rows, next]) => [
+                rows,
+                next.delivered < next.committed ? Option.some(next) : Option.none(),
+              ])
+            )
         )
       );
 
     return {
-      // One append at a time, so Entries are published in the order they are numbered. The
-      // insert and the publish cannot be interrupted apart, or a follower would miss an
-      // Entry that a read would give. The record is decoded back before it is inserted, so
-      // nothing is kept that could not be read.
-      append: (record: JournalRecord) =>
-        Effect.gen(function* () {
-          const text = yield* Schema.encodeEffect(recordText)(record).pipe(
-            Effect.mapError(failed("cannot encode the record"))
-          );
+      backlog: PubSub.size(committed),
+      journal: {
+        // The record is decoded back before it is inserted, so nothing is kept that could not
+        // be read. The insert and the signal cannot be interrupted apart, or a follower could
+        // sleep through an Entry. Statements run one at a time on one connection, so an Entry
+        // is committed before its number is signalled, and a follower keeps the highest it hears.
+        append: (record: JournalRecord) =>
+          Effect.gen(function* () {
+            const text = yield* Schema.encodeEffect(recordText)(record).pipe(
+              Effect.mapError(failed("cannot encode the record"))
+            );
 
-          const stored = yield* Schema.decodeEffect(recordText)(text).pipe(
-            Effect.mapError(failed("cannot decode the record"))
-          );
+            yield* Schema.decodeEffect(recordText)(text).pipe(
+              Effect.mapError(failed("cannot decode the record"))
+            );
 
-          return yield* lock.withPermit(
-            Effect.uninterruptible(
+            return yield* Effect.uninterruptible(
               Effect.gen(function* () {
                 const rows = yield* sql<{ readonly sequence: number }>`
                   INSERT INTO journal (record) VALUES (${text}) RETURNING sequence
@@ -163,32 +199,57 @@ export const makeSqliteJournal = (
                   Effect.mapError(failed("cannot number the Entry"))
                 );
 
-                yield* PubSub.publish(appended, { record: stored, sequence });
+                yield* PubSub.publish(committed, sequence);
 
                 return sequence;
               })
-            )
-          );
-        }),
-      // Subscribes before settling where the past ends, so an Entry appended in between is
-      // in the past or in the subscription, and the sequence cut keeps it from being in both.
-      follow: (from: Position) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const live = yield* PubSub.subscribe(appended);
-            const end = yield* last;
-
-            return Stream.concat(
-              upTo(from, end),
-              Stream.fromSubscription(live).pipe(
-                Stream.filter((entry) => entry.sequence > end && matches(from)(entry))
-              )
             );
-          })
-        ),
-      read: (from: Position) => Stream.unwrap(last.pipe(Effect.map((end) => upTo(from, end)))),
-    } satisfies JournalService;
+          }),
+        // Subscribes before settling where the past ends, so an Entry appended in between is
+        // covered by the past or by a signal. Then it pages from the table whenever the
+        // Journal is committed further than it has delivered, and waits on the signal when not.
+        follow: (from: Position) =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const signal = yield* PubSub.subscribe(committed);
+              const end = yield* last;
+
+              return entries(
+                Stream.paginate<Progress, typeof rowSchema.Encoded, JournalFailed>(
+                  { committed: end, delivered: from.after ?? 0 },
+                  (progress) =>
+                    progress.delivered < progress.committed
+                      ? page(from, progress).pipe(
+                          Effect.map(([rows, next]) => [rows, Option.some(next)])
+                        )
+                      : PubSub.take(signal).pipe(
+                          Effect.map((through) => [
+                            [],
+                            Option.some({
+                              committed: Math.max(progress.committed, through),
+                              delivered: progress.delivered,
+                            }),
+                          ])
+                        )
+                )
+              );
+            })
+          ),
+        read: (from: Position) => Stream.unwrap(last.pipe(Effect.map((end) => read(from, end)))),
+      } satisfies JournalService,
+    };
   });
+
+/**
+ * Opens a Journal in a SQLite file, creating it if it does not exist. It is closed when
+ * the Scope ends.
+ * @param filename - The path of the database file.
+ * @returns The Journal.
+ */
+export const makeSqliteJournal = (
+  filename: string
+): Effect.Effect<JournalService, JournalFailed | JournalVersionMismatch, Scope.Scope> =>
+  openSqliteJournal(filename).pipe(Effect.map(({ journal }) => journal));
 
 /**
  * The Journal port, in a SQLite file.
