@@ -56,7 +56,7 @@ const characters = (text: string): readonly string[] => {
  * @param index - Which offer, from 0.
  * @returns The nick.
  */
-export const offerAt = (nicks: readonly [string, ...string[]], index: number): string => {
+const offerAt = (nicks: readonly [string, ...string[]], index: number): string => {
   if (index < nicks.length) {
     return nicks[index] ?? nicks[0];
   }
@@ -170,7 +170,7 @@ export const offered = (run: Run): string | undefined => {
  * @param run - The step.
  * @param reason - Why, as `Closed` will report it.
  */
-export const abandon = (run: Run, reason: EndReason): void => {
+const abandon = (run: Run, reason: EndReason): void => {
   if (linkOf(run)?.closing === undefined) {
     send(run, quit(), "QUIT");
   }

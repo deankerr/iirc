@@ -9,7 +9,7 @@
 const first = 2000;
 
 /** The longest wait, in milliseconds. */
-export const longest = 300_000;
+const longest = 300_000;
 
 /**
  * How long to wait before the next try: 2 s, doubling with each try that failed in a

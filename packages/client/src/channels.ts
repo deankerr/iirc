@@ -22,7 +22,7 @@ import type { Channel, ChannelPhase, Joined, Member, Seen, State } from "./state
 import { openOf, sessionOf } from "./views.ts";
 
 /** The most members kept for one Channel, so a hostile Ircd cannot grow the State without bound. */
-export const maxMembers = 100_000;
+const maxMembers = 100_000;
 
 const setChannel = (run: Run, key: string, channel: Channel): void => {
   run.state = { ...run.state, channels: new Map(run.state.channels).set(key, channel) };

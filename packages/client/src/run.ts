@@ -65,7 +65,7 @@ export const linkOf = (run: Run): Link | undefined =>
  * @param run - The step.
  * @param link - The Connection after.
  */
-export const setLink = (run: Run, link: Link): void => {
+const setLink = (run: Run, link: Link): void => {
   run.state = { ...run.state, network: { _tag: "Connection", link } };
 };
 

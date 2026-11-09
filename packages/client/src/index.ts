@@ -5,6 +5,11 @@
  */
 export type { Client, Inspection, Step, StsPolicy } from "./client.ts";
 
+export { client } from "./core.ts";
+
+/** The real Client's State: opaque, plain data, and rebuilt by replaying the Journal. */
+export type { State as ClientState } from "./state.ts";
+
 export { IrcdAddress, Login, NetworkConfiguration, WantedChannel } from "./configuration.ts";
 
 export {

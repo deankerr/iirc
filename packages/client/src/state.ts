@@ -35,7 +35,7 @@ export interface Negotiated {
 }
 
 /** The silence check: one timer, against when we last heard something. */
-export interface Keepalive {
+interface Keepalive {
   /** When the last Line arrived. */
   readonly heard: Instant;
   /** Whether a lag `PING` has gone out since then. */
@@ -45,7 +45,7 @@ export interface Keepalive {
 }
 
 /** Where Self is with the Network. */
-export type Presence =
+type Presence =
   | {
       readonly _tag: "Registering";
       /** Which nick is on offer: an index into the configured nicks, and past them the fallbacks. */
@@ -78,7 +78,7 @@ export interface Link {
 }
 
 /** A Connection is dialling, or open. */
-export type LinkPhase =
+type LinkPhase =
   | { readonly _tag: "Dialing" }
   | {
       readonly _tag: "Open";
@@ -103,7 +103,7 @@ export interface Seen {
 }
 
 /** A User's mask, and when a Line showed it. */
-export interface Mask {
+interface Mask {
   readonly user: string;
   readonly host: string;
   readonly at: Instant;

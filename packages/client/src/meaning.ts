@@ -24,7 +24,7 @@ import { openOf, sessionOf } from "./views.ts";
  * @param run - The step.
  * @returns The name.
  */
-export const serverName = (run: Run): string =>
+const serverName = (run: Run): string =>
   sessionOf(run.state)?.server ?? linkOf(run)?.ircd.host ?? "";
 
 /**
@@ -71,7 +71,7 @@ export const channelTest =
  * @param arrival - The Line.
  * @returns The instant.
  */
-export const timeOf = (run: Run, arrival: Arrival): Instant =>
+const timeOf = (run: Run, arrival: Arrival): Instant =>
   arrival.time._tag === "Known" ? arrival.time.value : run.at;
 
 const clientTags = (line: Line): ReadonlyMap<string, string> =>
