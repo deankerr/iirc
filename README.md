@@ -25,6 +25,7 @@ bun run test          # every workspace's tests
 | [`packages/client`](packages/client) | The pure IRC client for one Network |
 | [`packages/runtime`](packages/runtime) | The ports the Runtime drives Clients through: Transport, Journal, Vault, and Clock |
 | [`packages/vault-file`](packages/vault-file) | The production Vault: Credentials in a `0600` file, written atomically |
+| [`packages/journal-sqlite`](packages/journal-sqlite) | The production Journal: Entries in SQLite, durable before `append` returns |
 | [`docs`](docs) | Everything below |
 
 ## Documentation
