@@ -7,7 +7,16 @@ import ergoFeatures from "../../../fixtures/transcripts/ergo/first-features.irc?
 import ergoFloor from "../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../fixtures/transcripts/ngircd/floor.irc?raw";
-import { Encoding, encode, isRejected, outbound, parse, parseSource, rawParams } from "./line.ts";
+import {
+  Encoding,
+  encode,
+  fallbackEncodings,
+  isRejected,
+  outbound,
+  parse,
+  parseSource,
+  rawParams,
+} from "./line.ts";
 import type { Line, OutboundLine, Parsed, RawParam } from "./line.ts";
 import msgSplit from "./testdata/msg-split.yaml?raw";
 
@@ -24,7 +33,7 @@ const encodedBytes = (line: OutboundLine): Uint8Array => {
 
 const utf8 = new TextEncoder();
 const utf8Only: Encoding = { _tag: "Utf8Only" };
-const latin1: Encoding = { _tag: "Utf8OrElse", fallback: "latin1" };
+const latin1: Encoding = { _tag: "Utf8OrElse", fallback: "windows-1252" };
 
 const lineOf = (parsed: Parsed): Line => {
   if (parsed._tag === "Unparseable") {
@@ -250,12 +259,12 @@ describe(parse, () => {
     });
   });
 
-  it("reads ISO-8859-1 byte for byte when it falls back, not as windows-1252", () => {
-    // Under `latin1`, which is windows-1252, 0x80 would read as "€".
-    const unknown: Encoding = { _tag: "Utf8OrElse", fallback: "no-such-label" };
+  it("reads ISO-8859-1 byte for byte when the fallback cannot read it either", () => {
+    // 0x82 0xff is no Shift_JIS character, so neither UTF-8 nor the fallback reads it.
+    const shiftJis: Encoding = { _tag: "Utf8OrElse", fallback: "shift_jis" };
 
-    expect(parse(Uint8Array.of(0x50, 0x20, 0x80), unknown)).toMatchObject({
-      line: { params: ["\u0080"] },
+    expect(parse(Uint8Array.of(0x50, 0x20, 0x82, 0xff), shiftJis)).toMatchObject({
+      line: { params: ["\u0082\u00FF"] },
     });
   });
 
@@ -367,19 +376,26 @@ describe(rawParams, () => {
 describe("the Encoding schema", () => {
   const decode = Schema.decodeUnknownExit(Encoding);
 
-  it.each(["latin1", "Shift_JIS", "windows-1251", "  utf-8 ", "iso-2022-jp"])(
-    "takes %j as a fallback",
-    (fallback) => {
-      expect(decode({ _tag: "Utf8OrElse", fallback })._tag).toBe("Success");
-    }
-  );
+  it.each(fallbackEncodings)("takes %s as a fallback, which this runtime decodes", (fallback) => {
+    expect(decode({ _tag: "Utf8OrElse", fallback })._tag).toBe("Success");
+    expect(new TextDecoder(fallback, { fatal: true }).encoding).toBe(fallback);
+  });
 
-  it.each(["", "bogus", "utf-16le", "UTF-16", "x-user-defined", "replacement", "iso-2022-kr"])(
-    "refuses %j as a fallback",
-    (fallback) => {
-      expect(decode({ _tag: "Utf8OrElse", fallback })._tag).toBe("Failure");
-    }
-  );
+  // Only canonical names, so a recorded Configuration means the same on every runtime.
+  it.each([
+    "",
+    "bogus",
+    "utf-8",
+    "latin1",
+    "Shift_JIS",
+    "utf-16le",
+    "UTF-16",
+    "x-user-defined",
+    "replacement",
+    "iso-2022-kr",
+  ])("refuses %j as a fallback", (fallback) => {
+    expect(decode({ _tag: "Utf8OrElse", fallback })._tag).toBe("Failure");
+  });
 });
 
 describe(parseSource, () => {

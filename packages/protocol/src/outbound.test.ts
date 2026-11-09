@@ -361,7 +361,7 @@ describe("a PING token that is not UTF-8", () => {
     Uint8Array.of(...utf8.encode("PONG "), ...token, 0x0d, 0x0a);
 
   it.each([
-    ["latin1", Uint8Array.of(0xff, 0x41, 0xe9)],
+    ["windows-1252", Uint8Array.of(0xff, 0x41, 0xe9)],
     ["shift_jis", Uint8Array.of(0x82, 0xa0, 0x41)],
     ["shift_jis", Uint8Array.of(0x82, 0xff, 0xff)],
     ["windows-1251", Uint8Array.of(0xc0, 0xff)],
@@ -376,7 +376,7 @@ describe("a PING token that is not UTF-8", () => {
   });
 
   it("would not be, if it were echoed as text", () => {
-    const parsed = parse(ping, { _tag: "Utf8OrElse", fallback: "latin1" });
+    const parsed = parse(ping, { _tag: "Utf8OrElse", fallback: "windows-1252" });
     const token = parsed._tag === "Line" ? (parsed.line.params[0] ?? "") : "";
 
     expect(token).toBe("ÿAé");

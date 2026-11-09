@@ -24,17 +24,56 @@ export type Parsed =
   | { readonly _tag: "Unparseable"; readonly reason: UnparseableReason };
 
 /**
- * A WHATWG encoding label that this runtime can read with, such as `latin1` or
- * `Shift_JIS`. UTF-16, `x-user-defined`, and `replacement` are refused, because none of
- * them reads a Line's spaces and colons as themselves.
+ * The encodings a fallback may be: every WHATWG encoding by its canonical name, except
+ * UTF-8 itself and those that cannot read a Line's spaces and colons as themselves
+ * (UTF-16, `x-user-defined`, and `replacement`). It is a fixed list, not whatever this
+ * runtime knows, so a Configuration recorded on one runtime decodes on every other. Each
+ * one decodes on Bun and Node, which a test checks. ISO-8859-1, which WHATWG reads as
+ * `windows-1252`, is `windows-1252` here.
  */
-export const FallbackEncoding = Schema.String.pipe(
-  Schema.check(
-    Schema.makeFilter((label: string) => fallbackDecoder(label) !== undefined, {
-      expected: "a WHATWG encoding label this runtime can read with",
-    })
-  )
-);
+export const fallbackEncodings = [
+  "ibm866",
+  "iso-8859-2",
+  "iso-8859-3",
+  "iso-8859-4",
+  "iso-8859-5",
+  "iso-8859-6",
+  "iso-8859-7",
+  "iso-8859-8",
+  "iso-8859-8-i",
+  "iso-8859-10",
+  "iso-8859-13",
+  "iso-8859-14",
+  "iso-8859-15",
+  "iso-8859-16",
+  "koi8-r",
+  "koi8-u",
+  "macintosh",
+  "windows-874",
+  "windows-1250",
+  "windows-1251",
+  "windows-1252",
+  "windows-1253",
+  "windows-1254",
+  "windows-1255",
+  "windows-1256",
+  "windows-1257",
+  "windows-1258",
+  "x-mac-cyrillic",
+  "gbk",
+  "gb18030",
+  "big5",
+  "euc-jp",
+  "iso-2022-jp",
+  "shift_jis",
+  "euc-kr",
+] as const;
+
+/** An encoding to read bytes that are not UTF-8 with, by its canonical WHATWG name. */
+export const FallbackEncoding = Schema.Literals(fallbackEncodings);
+
+/** The decoded form of {@link FallbackEncoding}. */
+export type FallbackEncoding = typeof FallbackEncoding.Type;
 
 /**
  * How an Ircd's bytes become text. `Utf8Only` is what `UTF8ONLY` promises. Otherwise

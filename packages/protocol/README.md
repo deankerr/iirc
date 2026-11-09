@@ -36,7 +36,7 @@ The floor is RFC 1459 and 2812 as [Modern IRC](../../docs/irc-docs-2026-10-26/mo
 | `Line` | One received Line, parsed: tags, source, command, and parameters. Anything that parses is a Line. |
 | `Parsed` | A `Line`, or `Unparseable` with a reason. |
 | `Encoding` | How bytes become text: `Utf8Only`, or UTF-8 or else a fallback encoding named by its WHATWG label. |
-| `FallbackEncoding` | A WHATWG label this runtime can read with. UTF-16, `x-user-defined`, and `replacement` are refused. |
+| `FallbackEncoding` | One of a fixed list of WHATWG encodings, by canonical name, such as `windows-1252` or `shift_jis`. It is a list rather than whatever the runtime knows, so a recorded Configuration decodes on every runtime, and a test checks each decodes on this one. UTF-8, UTF-16, `x-user-defined`, and `replacement` are not in it. |
 | `OutboundLine` | A Line that is safe to send. It cannot inject a second Line, it fits, and it parses back the same. |
 | `Rejected` | Why a Line cannot be sent, as a `RejectedReason`. |
 | `CredentialName` | The name of a Credential, which the Vault holds. |
@@ -133,7 +133,7 @@ A colour of `99` is the default colour, so it is `undefined` in a `Style`. A col
 
 ## Traps
 
-- `latin1` as a WHATWG label is `windows-1252`, which maps bytes `0x80` to `0x9f` to other characters. The last resort, when the fallback cannot read the bytes, is real ISO-8859-1, where each byte is the code point of the same value.
+- ISO-8859-1 is `windows-1252` in WHATWG, which maps bytes `0x80` to `0x9f` to other characters. The last resort, when the fallback cannot read the bytes, is real ISO-8859-1, where each byte is the code point of the same value.
 - A `PONG` built from a parsed token's text re-encodes it as UTF-8, which changes a token that was not UTF-8. Build it from the token's `RawParam` from `rawParams` instead, which echoes its bytes exactly. Bytes given to `pong` are read into a `RawParam` at once.
 
 ## Tests
