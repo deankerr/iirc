@@ -43,6 +43,8 @@ export interface Flaws {
   readonly changesWithMore?: boolean;
   /** After any `CAP DEL`, it reports another casemapping, outside any fact. */
   readonly remapsAfterDel?: boolean;
+  /** Its Inspection counts the Features the Owner declined, even ones that are off. */
+  readonly inspectsDeclined?: boolean;
 }
 
 /** The toy Client's State, which is plain data. */
@@ -556,6 +558,16 @@ const inspect = (state: ToyState): Inspection => ({
   timers: new Map([...state.timers].map(([id, due]) => [TimerId.make(id), Instant.make(due)])),
 });
 
+const inspectWith =
+  (flaws: Flaws) =>
+  (state: ToyState): Inspection => ({
+    ...inspect(state),
+    states:
+      flaws.inspectsDeclined === true
+        ? { connection: state.phase, declined: String(state.configuration?.declined.length ?? 0) }
+        : { connection: state.phase },
+  });
+
 /**
  * The toy Client: dials on its first Configuration, registers with `CAP LS 302`, asks
  * for `multi-prefix` and `server-time` when offered and not declined, keeps NAMES, sets
@@ -566,7 +578,7 @@ const inspect = (state: ToyState): Inspection => ({
  */
 export const toy = (flaws: Flaws = {}): Client<ToyState> => ({
   initial,
-  inspect,
+  inspect: inspectWith(flaws),
   known: known(flaws),
   step: step(flaws),
 });
@@ -615,6 +627,23 @@ export const seededClient: Client<{ readonly dialled: boolean }> = {
           state: { dialled: true },
         }
       : { news: [], outputs: [], state },
+};
+
+/**
+ * Wraps a Client so that `known` and `inspect` hand back one shared object each,
+ * overwritten on every call, as a Client caching its views might.
+ * @param client - The Client.
+ * @returns The same Client, sharing its views.
+ */
+export const sharingViews = <State>(client: Client<State>): Client<State> => {
+  const knowledge = {};
+  const inspection = {};
+
+  return {
+    ...client,
+    inspect: (state) => Object.assign(inspection, client.inspect(state)),
+    known: (state) => Object.assign(knowledge, client.known(state)),
+  };
 };
 
 /**

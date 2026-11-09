@@ -33,7 +33,7 @@ describe(describeNews, () => {
         ours: { echo: true, intent: IntentId.make("i1") },
         tags: new Map([["+draft/reply", "m0"]]),
       },
-      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history tags=+draft/reply="m0" ours=i1/echo :hi there',
+      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history tags=+draft/reply="m0" ours=i1 echo :hi there',
     ],
     [
       {
@@ -118,5 +118,15 @@ describe("descriptions that cannot imitate each other", () => {
     expect(describeNews({ ...message, sender: 'a"b', target: "#a:b" }, now)).toBe(
       'message Privmsg "a\\"b" "#a:b" :hi there'
     );
+  });
+});
+
+describe("an intent and its echo", () => {
+  it("cannot be told from an intent whose id holds /echo", () => {
+    const echoed: News = { ...message, ours: { echo: true, intent: IntentId.make("i1") } };
+    const named: News = { ...message, ours: { echo: false, intent: IntentId.make("i1/echo") } };
+
+    expect(describeNews(echoed, now)).toBe("message Privmsg peer #iirc ours=i1 echo :hi there");
+    expect(describeNews(named, now)).toBe("message Privmsg peer #iirc ours=i1/echo :hi there");
   });
 });

@@ -16,7 +16,7 @@ import { printItem, writeInstant } from "./transcript.ts";
 
 /**
  * Writes a string from News as one token, bare when it holds nothing a description uses
- * as syntax, and otherwise quoted as JSON, so no value can imitate an instant, an
+ * as syntax (a space, `"`, `=`, `@`, `:`, or `;`), and otherwise quoted as JSON, so no value can imitate an instant, an
  * attribute, or the trailing text: an id `m1@t+0s` is written `"m1@t+0s"`.
  * @param text - The string, such as a nick, a Channel, an id, or a command.
  * @returns The token.
@@ -79,7 +79,7 @@ const writeTags = (tags: ReadonlyMap<string, string>): readonly string[] =>
       ];
 
 const writeOurs = (ours: Ours | undefined): readonly string[] =>
-  ours === undefined ? [] : [`ours=${atom(ours.intent)}${ours.echo ? "/echo" : ""}`];
+  ours === undefined ? [] : [`ours=${atom(ours.intent)}`, ...(ours.echo ? ["echo"] : [])];
 
 const writeEnd = (reason: EndReason): string => {
   switch (reason._tag) {

@@ -16,7 +16,7 @@ import type { Client } from "../client.ts";
 import type { NetworkConfiguration } from "../configuration.ts";
 import type { Feature } from "../feature.ts";
 import type { CapName } from "../ids.ts";
-import { canonical, difference } from "./plain.ts";
+import { canonical, difference, impurity, textDifference } from "./plain.ts";
 import { replay } from "./play.ts";
 import type { Played } from "./play.ts";
 import { across } from "./preludes.ts";
@@ -58,12 +58,32 @@ const run = <State>(
 ): Played<State> => replay(subject.client, { configuration, transcript });
 
 // What a run did: everything it output and said, and where it ended up.
-const outcome = <State>(subject: Subject<State>, played: Played<State>) => ({
-  inspection: subject.client.inspect(played.state),
-  knowledge: subject.client.known(played.state),
-  news: played.steps.map((step) => step.news),
-  outputs: played.steps.map((step) => step.outputs),
-});
+// Written as canonical text at once, so a Client that hands back one shared view and
+// changes it on the next call cannot make two runs compare equal.
+const outcome = <State>(subject: Subject<State>, played: Played<State>): string =>
+  canonical({
+    inspection: subject.client.inspect(played.state),
+    knowledge: subject.client.known(played.state),
+    news: played.steps.map((step) => step.news),
+    outputs: played.steps.map((step) => step.outputs),
+  });
+
+/**
+ * A view the laws read, copied the moment it is obtained, so a later call that changes a
+ * shared view cannot change it.
+ * @param view - What `known` or `inspect` just gave.
+ * @param what - What to call it if it is not plain data.
+ * @returns A copy of it.
+ */
+const kept = <View>(view: View, what: string): View => {
+  const notPlain = impurity(view, what);
+
+  if (notPlain !== undefined) {
+    throw new LawBrokenError(`the laws read only plain data, but ${notPlain}`);
+  }
+
+  return structuredClone(view);
+};
 
 /**
  * **inert:** a Feature that is off changes nothing. For each set of caps that leaves a
@@ -90,7 +110,10 @@ export const inert = <State>(subject: Subject<State>): void => {
         declined: [...new Set([...subject.configuration.declined, feature.name])],
       };
 
-      const changed = differs(plain, outcome(subject, run(subject, transcript, declined)));
+      const changed = textDifference(plain, outcome(subject, run(subject, transcript, declined)), [
+        "one",
+        "the other",
+      ]);
 
       if (changed !== undefined) {
         throw new LawBrokenError(
@@ -225,7 +248,10 @@ export const refines = <State>(subject: Subject<State>): void => {
   const sets = across(capsOf(subject));
 
   const known = new Map(
-    sets.map((caps) => [caps, subject.client.known(run(subject, subject.transcript(caps)).state)])
+    sets.map((caps) => [
+      caps,
+      kept(subject.client.known(run(subject, subject.transcript(caps)).state), "known"),
+    ])
   );
 
   for (const fewer of sets) {
@@ -362,8 +388,8 @@ export const deactivates = <State>(
       }
 
       const broken = sameExceptStale(
-        subject.client.known(had.state),
-        subject.client.known(never.state),
+        kept(subject.client.known(had.state), "known"),
+        kept(subject.client.known(never.state), "known"),
         "known"
       );
 

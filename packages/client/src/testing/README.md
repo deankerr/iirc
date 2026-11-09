@@ -2,6 +2,8 @@
 
 `@iirc/client/testing` is how a Client is tested: a scenario is a transcript of IRC, and the kit plays it through the Client on a fake clock. It holds the scripted Client too. Production code never imports it, and the lint fence holds it to that. [The design note](../../../../docs/notes/2026-11-08-client-interface.md#the-transcript-test-kit) says why it has this shape, and [the transcript spike](../../../../docs/notes/2026-11-09-transcript-spike.md) says where the format came from.
 
+The kit catches the bugs a Client plausibly has, and does not defend against a Client written to fool it, such as one that hides a Proxy in its State.
+
 ```ts
 import { configured, joined, play, registered } from "@iirc/client/testing";
 
@@ -68,7 +70,7 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
-| `Message` | `?? message Privmsg peer #iirc id=ircd:m1 at=ircd:t+1s history tags=+draft/reply="m0" ours=i1/echo :hi` |
+| `Message` | `?? message Privmsg peer #iirc id=ircd:m1 at=ircd:t+1s history tags=+draft/reply="m0" ours=i1 echo :hi` |
 | `Confirmed` | `?? confirmed i1 id=ircd:m4 at=ircd:t+1s :hello` |
 | `Activity` | `?? activity Joined #iirc peer`, `?? activity Kicked #iirc peer by=op :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k`, `?? activity TopicChanged #iirc by=op setBy=op :topic`, `?? activity AwayChanged peer back` |
 
@@ -82,7 +84,7 @@ A string from News, such as a nick, a Channel, an id, or a command, is written b
 | --- | --- |
 | `play(client, { configuration, transcript })` | Strict, for hand-written scenarios. Returns what happened: `inputs`, `steps`, the last `state`, the `transcript`, each `ignored`, and the `timers` still set. |
 | `replay(client, { configuration, transcript })` | For recorded fixtures. Feeds only `<<`, `==`, `+Ns`, and `!!`, and reports every output and News in its `transcript` and every `Ignored` in `ignored`, without matching `>>` or `->`, which are the recorder's Lines. Unless the first input is an `!! configure`, one is stepped first. |
-| `checkReplay(client, inputs, snapshots)` | The exact-replay check that `play` and `replay` run, against `Played.snapshots`. `snapshot(client, step)` writes one step down. |
+| `checkReplay(client, played)` | The exact-replay check that `play` and `replay` run, given a `Played`'s `inputs`, `snapshots`, and `steps`. `snapshot(client, step)` writes one step down. |
 | `replayFresh(client, inputs, { module, name })` | The same fold in a child `bun` process, compared by a digest of the initial Inspection and Knowledge and every step's state, outputs, News, Inspection, and Knowledge. Async, and slower, so a suite runs it on a few scenarios. |
 
 `transcript` is text, or its parts in order. Each throws on failure: `TranscriptMismatchError`, `ReplayMismatchError`, `FreshReplayMismatchError`, or `ScenarioError` for a transcript the kit cannot play.
@@ -106,7 +108,7 @@ TranscriptMismatchError: The transcript did not play as written. - is the scenar
   >> USER iirc 0 * iirc
 ```
 
-**Exact replay** runs after every `play` and `replay`, without being asked. The inputs are folded again from `initial`, and each step's state, outputs, News, Inspection, and Knowledge must be the same, order included. Each is compared against a snapshot, canonical text written down the moment the step first returned, never against the live values, so a Client that reuses or changes what it returned is caught. The kit's own copies of each step's outputs and News, in `Played.steps`, are cloned at once for the same reason. Every State must be plain data: strings, numbers, booleans, `null`, `undefined`, arrays, plain objects, `Map`, and `Set`, with no class instance, function, getter, symbol key, bigint, `Uint8Array`, `HashMap`, or cycle. An array holds only its elements, with no holes, getters, or other properties, and a `Map` or `Set` has no own property at all. No getter is ever run. A step that changes the state it was given fails too. `replayFresh` adds what one process cannot see, such as a hash order or a random number taken when a module loads.
+**Exact replay** runs after every `play` and `replay`, without being asked. The inputs are folded again from `initial`, and each step's state, outputs, News, Inspection, and Knowledge must be the same, order included. Each is compared against a snapshot, a hash of its canonical text taken the moment the step first returned, never against the live values, so a Client that reuses or changes what it returned is caught, and a long scenario keeps a few bytes a step. On a mismatch, the part that differs is written out from the first run's own copy of that step and from the replay, and diffed. The kit's own copies of each step's outputs and News, in `Played.steps`, are cloned at once for the same reason. The Client gets its own copy of every input, and the kit keeps another to replay, so a step that changes its input, such as a Line's bytes or the Configuration, fails, in play and in replay. Every State must be plain data: strings, numbers, booleans, `null`, `undefined`, arrays, plain objects, `Map`, and `Set`, with no class instance, function, getter, symbol key, bigint, `Uint8Array`, `HashMap`, or cycle. An array holds only its elements, with no holes, getters, or other properties, and a `Map` or `Set` has no own property at all. No getter is ever run. A step that changes the state it was given fails too. `replayFresh` adds what one process cannot see, such as a hash order or a random number taken when a module loads.
 
 ## Preludes
 
@@ -121,7 +123,7 @@ Preludes write transcript text, and commit to how a Client registers. The Client
 
 ## The laws
 
-Each law takes a `Subject`: the Client, its Configuration, its Features (`name`, `needs`, `keeps`), the caps to range over (by default every cap the Features need), and `transcript(caps)`, which writes the scenario with an Ircd that offers exactly those caps, usually with `registered(configuration, { offered: caps })`. The laws replay, so `requested` need not be exact there. Each runs `replay` for every set `across` gives, and throws `LawBrokenError` naming the law, the caps, and what differed.
+Each law takes a `Subject`: the Client, its Configuration, its Features (`name`, `needs`, `keeps`), the caps to range over (by default every cap the Features need), and `transcript(caps)`, which writes the scenario with an Ircd that offers exactly those caps, usually with `registered(configuration, { offered: caps })`. The laws replay, so `requested` need not be exact there. Each runs `replay` for every set `across` gives, and throws `LawBrokenError` naming the law, the caps, and what differed. Every Knowledge and Inspection a law reads is copied, or written as canonical text, the moment it is obtained, so a Client that hands back one shared view cannot make two runs compare equal.
 
 ```ts
 const subject = {
@@ -142,7 +144,7 @@ deactivates(subject, { after: () => "+1s\n<< :other!u@h JOIN #iirc\n" });
 | `inert` | For each set of caps that leaves a Feature off, declining it changes no output, News, Knowledge, or Inspection. |
 | `refines` | For each set and each larger one, every fact the smaller knows is in the larger, and goes only from unknown to stale to partial to known. What was established stays: a known value is the same, sets compared in any order, and a set holds every member of the partial set it refines. Knowledge is walked generically, so a fact added anywhere is checked. |
 | `replays` | Every set replays exactly, with plain State. |
-| `deactivates` | After `CAP DEL` of a cap, `after` gives the same outputs and News as never having had it, and the same Knowledge, whole, every leaf and key, except where the run that had the cap holds a fact marked stale. |
+| `deactivates` | After `CAP DEL` of a cap, `after` gives the same outputs and News as never having had it, and the same Knowledge, whole, every leaf and key, except where the run that had the cap holds a fact marked stale. Anything inside a Stale fact may differ, its `was` and `since` included: scenarios check those, not the law. |
 
 ## Other helpers
 

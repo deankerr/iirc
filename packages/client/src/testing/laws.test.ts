@@ -4,7 +4,7 @@ import { CapName, FeatureName } from "../ids.ts";
 import { deactivates, inert, refines, replays } from "./laws.ts";
 import type { Subject } from "./laws.ts";
 import { across, configured, joined, registered } from "./preludes.ts";
-import { failure, toy } from "./test-clients.ts";
+import { failure, sharingViews, toy } from "./test-clients.ts";
 import type { Flaws, ToyState } from "./test-clients.ts";
 
 const base = configured();
@@ -157,6 +157,52 @@ describe("the laws check contents, not only ranks", () => {
       })
     ).toBe(
       'LawBrokenError: deactivates: after CAP DEL :multi-prefix from multi-prefix, known.casemapping is "ascii", but never having had it gives "rfc1459"'
+    );
+  });
+});
+
+const shared = (flaws: Flaws): Subject<ToyState> => ({
+  ...subject(flaws),
+  client: sharingViews(toy(flaws)),
+});
+
+describe("the laws copy each view as they read it", () => {
+  it("holds for a Client that shares its views but keeps every law", () => {
+    expect(
+      failure(() => {
+        refines(shared({}));
+      })
+    ).toBe("it held");
+    expect(
+      failure(() => {
+        deactivates(shared({}), { after });
+      })
+    ).toBe("it held");
+  });
+
+  it("refines still catches a lost set when Knowledge is one shared object", () => {
+    expect(
+      failure(() => {
+        refines(shared({ losesWithCaps: true }));
+      })
+    ).toMatch(/^LawBrokenError: refines: .* lost "o"/u);
+  });
+
+  it("deactivates still catches a changed casemapping when Knowledge is one shared object", () => {
+    expect(
+      failure(() => {
+        deactivates(shared({ remapsAfterDel: true }), { after });
+      })
+    ).toMatch(/^LawBrokenError: deactivates: .*known\.casemapping is "ascii"/u);
+  });
+
+  it("inert catches a declined Feature that changes the Inspection, when Inspection is one shared object", () => {
+    expect(
+      failure(() => {
+        inert(shared({ inspectsDeclined: true }));
+      })
+    ).toMatch(
+      /^LawBrokenError: inert: multi-prefix is off with no caps, yet declining it changed what the Client did/u
     );
   });
 });

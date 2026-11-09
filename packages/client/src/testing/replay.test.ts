@@ -8,11 +8,13 @@ import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-featur
 import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import type { Client } from "../client.ts";
 import { ConnectionId } from "../ids.ts";
+import type { Input } from "../input.ts";
 import type { Output } from "../output.ts";
 import { canonical, impurity } from "./plain.ts";
 import { play, replay } from "./play.ts";
 import { configured, registered } from "./preludes.ts";
 import { failure, scriptedClient, toy } from "./test-clients.ts";
+import type { ToyState } from "./test-clients.ts";
 
 const base = configured();
 
@@ -304,6 +306,86 @@ describe("plain data in collections", () => {
     );
     expect(canonical(Object.defineProperty({}, "value", { enumerable: true, get: throwing }))).toBe(
       '{"value":getter}'
+    );
+  });
+});
+
+const changing = (change: (input: Input, call: number) => void): Client<ToyState> => {
+  const client = toy();
+  let calls = 0;
+
+  return {
+    ...client,
+    step: (state, input) => {
+      calls += 1;
+      change(input, calls);
+
+      return client.step(state, input);
+    },
+  };
+};
+
+describe("inputs the Client changes", () => {
+  it("fails a Client that overwrites a Line's bytes", () => {
+    const filling = changing((input) => {
+      if (input._tag === "Received") {
+        input.bytes.fill(88);
+      }
+    });
+
+    expect(
+      failure(() => replay(filling, { configuration: base, transcript: registered(base) }))
+    ).toMatch(
+      /^ReplayMismatchError: step 3 \(<< :irc\.test 421 \* CAP :Unknown command\) changed the input it was given/u
+    );
+  });
+
+  it("fails a Client that changes the Configuration it was given", () => {
+    const renaming = changing((input) => {
+      if (input._tag === "Configured") {
+        Reflect.set(input.configuration, "realname", "changed");
+      }
+    });
+
+    expect(
+      failure(() => replay(renaming, { configuration: base, transcript: registered(base) }))
+    ).toMatch(/^ReplayMismatchError: step 1 \(Configured at 0ms\) changed the input it was given/u);
+  });
+
+  it("fails a Client that changes its input only when replayed", () => {
+    const late = changing((input, call) => {
+      if (call > 1 && input._tag === "Configured") {
+        Reflect.set(input.configuration, "enabled", false);
+      }
+    });
+
+    expect(failure(() => play(late, { configuration: base, transcript: once }))).toMatch(
+      /^ReplayMismatchError: step 1 \(Configured at 0ms\) changed the input it was given/u
+    );
+  });
+});
+
+describe("snapshots", () => {
+  it("hold a short hash of each part, not its text", () => {
+    const played = play(toy(), { configuration: base, transcript: registered(base) });
+
+    const hashes = played.snapshots.flatMap((each) => [
+      each.state,
+      each.outputs,
+      each.news,
+      each.inspection,
+      each.knowledge,
+    ]);
+
+    expect(hashes.every((hash) => hash.length <= 16)).toBeTruthy();
+  });
+
+  it("still show a readable diff of the part that differs", () => {
+    // oxlint-disable-next-line no-restricted-properties -- A Client that is not deterministic, on purpose.
+    const random = keeping(() => ({ roll: Math.random() }));
+
+    expect(failure(() => play(random, { configuration: base, transcript: once }))).toMatch(
+      /its state differ\nplayed {3}…\{"roll":0\.\d+\}…\nreplayed …\{"roll":0\.\d+\}…$/u
     );
   });
 });

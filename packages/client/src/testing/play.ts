@@ -19,7 +19,7 @@ import type { Output, TimerTable } from "../output.ts";
 import { timers } from "../output.ts";
 import { describeNews, describeOutput } from "./describe.ts";
 import { diff } from "./diff.ts";
-import { canonical, impurity, textDifference } from "./plain.ts";
+import { canonical, hashText, impurity, textDifference } from "./plain.ts";
 import { epoch, parse, printItem, writeInstant } from "./transcript.ts";
 import type { Change, Item, Owner } from "./transcript.ts";
 
@@ -51,8 +51,9 @@ export interface Played<State> {
 }
 
 /**
- * One step, written down as canonical text the moment it was stepped, so nothing the
- * Client does to its values afterwards can change what replay is compared against.
+ * One step, written down the moment it was stepped as a hash of each part's canonical
+ * text, so nothing the Client does to its values afterwards can change what replay is
+ * compared against, and a long scenario holds a few bytes a step rather than its text.
  */
 export interface Snapshot {
   readonly state: string;
@@ -62,19 +63,39 @@ export interface Snapshot {
   readonly knowledge: string;
 }
 
-/**
- * Writes one step down as canonical text.
- * @param client - The Client, for its views of the state.
- * @param step - The step, as it was just returned.
- * @returns Its snapshot.
- */
-export const snapshot = <State>(client: Client<State>, step: Step<State>): Snapshot => ({
+type Part = keyof Snapshot;
+
+const parts: readonly Part[] = ["state", "outputs", "news", "inspection", "knowledge"];
+
+// Each part of a step as canonical text.
+const texts = <State>(
+  client: Client<State>,
+  step: Step<State>
+): Readonly<Record<Part, string>> => ({
   inspection: canonical(client.inspect(step.state)),
   knowledge: canonical(client.known(step.state)),
   news: canonical(step.news),
   outputs: canonical(step.outputs),
   state: canonical(step.state),
 });
+
+/**
+ * Writes one step down, as a hash of each part's canonical text.
+ * @param client - The Client, for its views of the state.
+ * @param step - The step, as it was just returned.
+ * @returns Its snapshot.
+ */
+export const snapshot = <State>(client: Client<State>, step: Step<State>): Snapshot => {
+  const written = texts(client, step);
+
+  return {
+    inspection: hashText(written.inspection),
+    knowledge: hashText(written.knowledge),
+    news: hashText(written.news),
+    outputs: hashText(written.outputs),
+    state: hashText(written.state),
+  };
+};
 
 /** A scenario that did not play as written. The message is a transcript diff. */
 export class TranscriptMismatchError extends Error {
@@ -208,11 +229,39 @@ const copied = <A>(value: A): A => {
   }
 };
 
-const stepInput = <State>(at: Driver<State>, input: Input): Step<State> => {
+// Steps an input, giving the Client its own copy, and fails a step that changed it.
+const stepCopy = <State>(
+  client: Client<State>,
+  state: State,
+  input: Input,
+  where: () => string
+): Step<State> => {
+  const given = structuredClone(input);
+  const returned = client.step(state, given);
+
+  if (canonical(given) !== canonical(input)) {
+    throw new ReplayMismatchError(
+      `${where()} changed the input it was given, which a reducer must never do`
+    );
+  }
+
+  return returned;
+};
+
+const stepInput = <State>(at: Driver<State>, fed: Input): Step<State> => {
+  // The kit keeps its own copy of the input, to journal and replay, and the Client gets another.
+  const input = structuredClone(fed);
   const given = at.state;
-  const before = at.snapshots.at(-1)?.state ?? canonical(given);
-  const returned = at.client.step(given, input);
+  const before = at.snapshots.at(-1)?.state ?? hashText(canonical(given));
   const number = at.steps.length + 1;
+
+  const returned = stepCopy(
+    at.client,
+    given,
+    input,
+    () => `step ${number} (${describeInput(input)})`
+  );
+
   const notPlain = impurity(returned.state);
 
   if (notPlain !== undefined) {
@@ -221,7 +270,7 @@ const stepInput = <State>(at: Driver<State>, input: Input): Step<State> => {
     );
   }
 
-  if (canonical(given) !== before) {
+  if (hashText(canonical(given)) !== before) {
     throw new ReplayMismatchError(
       `step ${number} changed the state it was given, which a reducer must never do`
     );
@@ -461,17 +510,18 @@ const visible = (outputs: readonly Output[]): readonly Visible[] =>
 /**
  * Checks exact replay: folding the inputs again from `initial` gives, at every step, the
  * same state, outputs, News, Inspection, and Knowledge as the snapshots written down when
- * they were first stepped, and every state is plain data. It compares against snapshots,
- * never live values, so a Client that reuses or changes what it returned is caught.
+ * they were first stepped, and every state is plain data. Snapshots are hashes taken the
+ * moment a step returned, never live values, so a Client that reuses or changes what it
+ * returned is caught. A step that changes its input fails too. On a mismatch, the failing
+ * part is written out from the first run's own copy of that step and from the replay, and
+ * diffed.
  * It throws `ReplayMismatchError` at the first step that differs, or the first state that is not plain.
  * @param client - The Client.
- * @param inputs - The inputs it was given.
- * @param snapshots - Each step as first stepped, such as `play(…).snapshots`.
+ * @param played - The inputs, the snapshots, and the steps of the first run, such as `play(…)`.
  */
 export const checkReplay = <State>(
   client: Client<State>,
-  inputs: readonly Input[],
-  snapshots: readonly Snapshot[]
+  played: Pick<Played<State>, "inputs" | "snapshots" | "steps">
 ): void => {
   let state = client.initial;
   const initialImpurity = impurity(state, "initial");
@@ -480,26 +530,30 @@ export const checkReplay = <State>(
     throw new ReplayMismatchError(`State must be plain data, but ${initialImpurity}`);
   }
 
-  for (const [index, input] of inputs.entries()) {
-    const played = snapshots[index];
-    const replayed = client.step(state, input);
+  for (const [index, input] of played.inputs.entries()) {
     const where = `step ${index + 1} (${describeInput(input)})`;
+    const replayed = stepCopy(client, state, input, () => where);
     const notPlain = impurity(replayed.state);
 
     if (notPlain !== undefined) {
       throw new ReplayMismatchError(`State must be plain data, but after ${where} ${notPlain}`);
     }
 
+    const recorded = played.snapshots[index];
     const again = snapshot(client, replayed);
+    const part = parts.find((each) => recorded?.[each] !== again[each]);
 
-    for (const part of ["state", "outputs", "news", "inspection", "knowledge"] as const) {
-      const differs = textDifference(played?.[part] ?? "", again[part]);
+    if (part !== undefined) {
+      const first = played.steps[index];
+      const before = first === undefined ? "" : texts(client, first)[part];
+      const after = texts(client, replayed)[part];
 
-      if (differs !== undefined) {
-        throw new ReplayMismatchError(
-          `${where} does not replay exactly: its ${part} differ\n${differs}`
-        );
-      }
+      throw new ReplayMismatchError(
+        `${where} does not replay exactly: its ${part} differ\n${
+          textDifference(before, after) ??
+          `their hashes differ, yet the first run's copy now writes the same as the replay, so its ${part} changed after it was returned`
+        }`
+      );
     }
 
     ({ state } = replayed);
@@ -706,7 +760,7 @@ export const play = <State>(client: Client<State>, scenario: Scenario): Played<S
     );
   }
 
-  checkReplay(client, at.inputs, at.snapshots);
+  checkReplay(client, at);
 
   return {
     ignored,
@@ -776,7 +830,7 @@ export const replay = <State>(client: Client<State>, scenario: Scenario): Played
     }
   }
 
-  checkReplay(client, at.inputs, at.snapshots);
+  checkReplay(client, at);
 
   return {
     ignored,

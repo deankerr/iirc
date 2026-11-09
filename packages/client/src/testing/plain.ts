@@ -200,6 +200,37 @@ const leafText = (value: unknown): string => {
   }
 };
 
+// JSON's quoting, quick for the common string that needs no escape. JSON.stringify
+// escapes only `"`, `\`, control characters, and lone surrogates, so a string with none of
+// them is written the same either way.
+const needsEscape = /["\\\p{Cc}]/u;
+
+const quote = (text: string): string =>
+  !needsEscape.test(text) && text.isWellFormed() ? `"${text}"` : JSON.stringify(text);
+
+// Property keys repeat, so their written form is kept, up to a bound.
+const keyTexts = new Map<string, string>();
+
+const keyQuote = (key: PropertyKey): string => {
+  if (typeof key !== "string") {
+    return key.toString();
+  }
+
+  const known = keyTexts.get(key);
+
+  if (known !== undefined) {
+    return known;
+  }
+
+  const written = quote(key);
+
+  if (keyTexts.size < 10_000) {
+    keyTexts.set(key, written);
+  }
+
+  return written;
+};
+
 // An own property, written without running a getter. A hole is written as `hole`.
 const descriptorText = (
   descriptor: PropertyDescriptor | undefined,
@@ -212,20 +243,27 @@ const descriptorText = (
   return "value" in descriptor ? write(descriptor.value) : "getter";
 };
 
-// Properties beside a collection's data, or an object's own, as `{key:value,…}`, or
-// nothing when there are none and they are beside a collection.
+// Properties as `key:value,…`, in order, without running a getter.
 const propertiesText = (
-  descriptors: Readonly<Record<PropertyKey, PropertyDescriptor>>,
+  value: object,
   keys: readonly PropertyKey[],
   write: (value: unknown) => string
 ): string => {
-  const written = keys.map(
-    (key) =>
-      `${typeof key === "string" ? JSON.stringify(key) : key.toString()}:${descriptorText(descriptors[key], write)}`
-  );
+  let out = "";
 
-  return written.length === 0 ? "" : `{${written.join(",")}}`;
+  for (const key of keys) {
+    out += `${out === "" ? "" : ","}${keyQuote(key)}:${descriptorText(Reflect.getOwnPropertyDescriptor(value, key), write)}`;
+  }
+
+  return out;
 };
+
+// Properties beside a collection's data, as `{key:value,…}`, or nothing when there are none.
+const besideText = (
+  value: object,
+  keys: readonly PropertyKey[],
+  write: (value: unknown) => string
+): string => (keys.length === 0 ? "" : `{${propertiesText(value, keys, write)}}`);
 
 /**
  * Writes plain data as text that is the same for the same value in any process, so two
@@ -236,42 +274,57 @@ const propertiesText = (
  * @returns Its canonical text.
  */
 export const canonical = (value: unknown): string => {
+  if (typeof value === "string") {
+    return quote(value);
+  }
+
   if (typeof value !== "object" || value === null) {
     return leafText(value);
   }
 
   if (value instanceof Uint8Array) {
-    return `bytes[${[...value].join(",")}]`;
+    return `bytes[${value.join(",")}]`;
   }
 
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  const keys = Reflect.ownKeys(descriptors);
+  const keys = Reflect.ownKeys(value);
 
   if (Array.isArray(value)) {
-    const items = Array.from({ length: value.length }, (_unused, index) =>
-      descriptorText(descriptors[String(index)], canonical)
-    );
+    let items = "";
+
+    for (let index = 0; index < value.length; index += 1) {
+      items += `${index === 0 ? "" : ","}${descriptorText(Reflect.getOwnPropertyDescriptor(value, String(index)), canonical)}`;
+    }
 
     const extra = keys.filter(
       (key) => typeof key !== "string" || (key !== "length" && !isIndex(key, value.length))
     );
 
-    return `[${items.join(",")}]${propertiesText(descriptors, extra, canonical)}`;
+    return `[${items}]${besideText(value, extra, canonical)}`;
   }
 
   if (value instanceof Map) {
-    const entries = [...value].map(
-      ([key, item]: readonly [unknown, unknown]) => `${canonical(key)}=>${canonical(item)}`
-    );
+    let entries = "";
 
-    return `Map{${entries.join(",")}}${propertiesText(descriptors, keys, canonical)}`;
+    // SAFETY: a Map's entries are pairs, and nothing is read from them but unknowns.
+    for (const [key, item] of value as ReadonlyMap<unknown, unknown>) {
+      entries += `${entries === "" ? "" : ","}${canonical(key)}=>${canonical(item)}`;
+    }
+
+    return `Map{${entries}}${besideText(value, keys, canonical)}`;
   }
 
   if (value instanceof Set) {
-    return `Set{${[...value].map((item: unknown) => canonical(item)).join(",")}}${propertiesText(descriptors, keys, canonical)}`;
+    let items = "";
+
+    // SAFETY: a Set's items are read only as unknowns.
+    for (const item of value as ReadonlySet<unknown>) {
+      items += `${items === "" ? "" : ","}${canonical(item)}`;
+    }
+
+    return `Set{${items}}${besideText(value, keys, canonical)}`;
   }
 
-  return `{${propertiesText(descriptors, keys, canonical).slice(1, -1)}}`;
+  return `{${propertiesText(value, keys, canonical)}}`;
 };
 
 /**
@@ -313,3 +366,12 @@ export const difference = (
   right: unknown,
   names: readonly [string, string] = ["played  ", "replayed"]
 ): string | undefined => textDifference(canonical(left), canonical(right), names);
+
+/**
+ * A stable hash of some text, to keep in place of the text itself.
+ * @param text - The text, such as a step's canonical state.
+ * @returns The hash, as hex, the same for the same text in any process.
+ */
+export const hashText = (text: string): string =>
+  // oxlint-disable-next-line no-restricted-globals -- The kit is test code, and a native hash keeps long scenarios fast; the result depends only on the text.
+  Bun.hash.wyhash(text, 0n).toString(16);
