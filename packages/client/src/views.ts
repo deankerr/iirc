@@ -242,6 +242,7 @@ const statesOf = (state: State): Inspection["states"] => {
   const { network } = state;
   const open = openOf(state);
   const session = sessionOf(state);
+
   const states = new Map([
     ["network", network._tag === "Connection" ? linkName(network.link) : network._tag],
   ]);
