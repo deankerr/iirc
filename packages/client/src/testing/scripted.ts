@@ -29,6 +29,7 @@ const inspection: Inspection = {
   connection: undefined,
   features: [],
   isupport: new Map(),
+  policies: new Map(),
   states: {},
   timers: new Map(),
 };

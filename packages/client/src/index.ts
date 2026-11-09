@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-export type { Client, Inspection, Step } from "./client.ts";
+export type { Client, Inspection, Step, StsPolicy } from "./client.ts";
 
 export { IrcdAddress, Login, NetworkConfiguration, WantedChannel } from "./configuration.ts";
 
@@ -25,6 +25,7 @@ export type {
   IgnoredReason,
   ModeChange,
   News,
+  Ours,
   RefusedReason,
 } from "./news.ts";
 

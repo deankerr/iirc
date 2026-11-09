@@ -43,7 +43,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 
 | Output | Meaning |
 | --- | --- |
-| `Dial` | Open a Connection to an Ircd, numbered by the Client. |
+| `Dial` | Open a Connection to an Ircd, numbered by the Client. While an STS policy holds for the host, the address is TLS on the policy's port, whatever Configuration says. |
 | `Send` | Send an `OutboundLine`. It counts as sent once it is output. |
 | `SendSecret` | Send a `SecretLine`. The Runtime fills in the Credential with `fillSecret` from `@iirc/protocol`. |
 | `Hangup` | End a Connection. The Client still waits for its `Closed`. |
@@ -53,7 +53,23 @@ The timer table is a projection of outputs: `timers(table, outputs)` keeps the l
 
 ## News
 
-News is what happened in one step, in order: a `Message`, an `Activity`, `SessionBegan`, `SessionEnded`, `ConnectionFailed` (a Connection that ended before registration), `Refused` (an Owner intent that cannot be carried out, with its intent id), and `Ignored` (an input that changed nothing, and why). News is derived, so replaying the Journal makes it again, and it is never journaled.
+News is what happened in one step, in order. It is derived, so replaying the Journal makes it again, and it is never journaled.
+
+| News | Meaning |
+| --- | --- |
+| `Message` | Something said, with its time, id, client-only tags, and whether it is `live`. One we said carries `ours`: its intent id, and whether the Ircd will echo it. |
+| `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
+| `Activity` | Something that changed, with its time, id, and whether it is `live`. |
+| `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
+| `ConnectionFailed` | A Connection that ended before registration, and why. |
+| `Refused` | An Owner intent that was not carried out, with its intent id: `Offline`, `Unsendable`, or `Rejected` by the Ircd's reply. |
+| `Ignored` | An input that changed nothing, and why. |
+
+Three rules for Timelines:
+
+- **Our own Messages.** A Message we say appears as News when we send it. If `ours.echo` is set, a `Confirmed` for its intent follows when the Ircd echoes it, and the echo is not a second Message. With no echo, it stays unconfirmed: sent, with delivery unknown.
+- **Order by time.** History arrives late, with `live` false. A Timeline orders by `at`, not by when the News came.
+- **One per id.** A Message can arrive live and again from history. A Timeline keeps one per id. One with an unknown id is kept as it came.
 
 ## Knowledge
 
@@ -76,6 +92,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 - **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. The Runtime gives `due` back unchanged.
 - **One Connection at a time.** The Client dials only after the previous Connection's `Closed`, or after `Started`.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
+- **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext. A policy is learnt only over TLS, survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`. Over plaintext, an upgrade policy ends the Connection with `Upgrading` and dials TLS at once.
 - **Decisions come from structure.** Commands, numerics, tags, and parameters decide behaviour. An Ircd's free text never does, and it may appear in News only as data.
 - **Bounded.** Everything the Client holds from Ircd input has a bound. A hostile Ircd can make facts unknown, but it cannot make the state grow without limit.
 
@@ -110,6 +127,10 @@ A Feature brings one IRCv3 cap or ISUPPORT token, or a tight group of them, to t
 - **Turning off.** When a Feature turns off, the core marks the facts it `keeps` stale. No Feature handles `CAP DEL` itself, and nothing is polled.
 - **Deadlines.** Features set no timers. While any Feature holds registration, the core keeps one deadline, and when it passes it calls each holding Feature's `expired` hook to choose `Continue` or `Abandon`. SASL uses this to go on without login when login is optional, and to give up when it is required.
 - **Encoding.** A Feature can say how bytes become text while it is on, as `UTF8ONLY` does.
+
+- **Answers and history.** `label` can tie an Arrival to the intent it `answers`, and `batch` can mark it as not `live`. The core then confirms or rejects that intent, or treats the Line as history.
+
+STS is not a Feature. Its policy outlives Connections and decides where to dial before any cap is negotiated, so the core keeps it. With no `sts` cap, nothing changes, so the floor does not depend on it.
 
 Three Features, to show the shape:
 

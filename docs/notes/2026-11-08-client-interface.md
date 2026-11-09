@@ -79,11 +79,55 @@ The first review found four gaps, fixed on 2026-11-08:
 - **`Fired` carries `due`,** the instant its `Wake` set, so a late firing from an earlier setting of the same timer is told apart. Fresh timer ids for every setting would also work, but would make the timer table grow.
 - **The lint fence closes two gaps.** It now refuses Effect's services by subpath, such as `effect/Clock`, as well as from `effect`, and refuses `Math.random` and `DateTime`'s clock reads.
 
+Three caps beyond the first Features changed the types on 2026-11-09, because other modules build on what they change. [IRCv3 to be aware of](#ircv3-to-be-aware-of) has the rest.
+
+- **STS decides where to dial.** The core keeps an `StsPolicy` per hostname, shown in `inspect`, and `Dial` applies it: TLS on the policy's port until it expires, and never plaintext after a failed TLS Connection. It is not a Feature, because its policy outlives Connections and acts before any cap is negotiated. A plaintext Connection that sees an upgrade policy ends with `Upgrading`.
+- **Our own Messages can be confirmed.** A `Message` we say carries `ours`, with its intent id and whether the Ircd will echo it. The echo arrives as `Confirmed`, with the Ircd's time, id, and final text, not as a second Message. The echo is tied to its intent by `labeled-response`, so the echo Feature needs both caps. A reply that `labeled-response` ties to an intent can also refuse it, so `RefusedReason` gained `Rejected`, carrying the numeric or standard reply code.
+- **History arrives late, and twice.** `Message` and `Activity` carry `live` and an id. A Timeline orders by `at` and keeps one per id. An `Arrival` carries `live` for the `chathistory` batch to clear, and `answers` for `labeled-response` to fill.
+
+With them, `UserKnowledge` gained `realname` for `setname`, and `Message` gained its client-only tags. `OutboundLine` now allows `label`, `batch`, and `draft/multiline-concat` as well as client-only tags. `SecretLine` and `Dial` note where SASL `SCRAM-SHA-256` and `EXTERNAL` would land.
+
 Deferred on purpose, to be added when their modules are designed:
 
-- Lookups: an `Ask` input and an `Answer` in News.
+- Lookups: an `Ask` input and an `Answer` in News. Asking for history after a Gap is one, and needs the latest time heard per Target.
 - The `read` helpers that fold names for Views.
 - `Gap` as News, because a Gap is derived from one Session's end and the next one's start.
+
+## IRCv3 to be aware of
+
+The first Features came from memory, so we went through the 48 IRCv3 specs in [`docs/irc-docs-2026-10-26/`](../irc-docs-2026-10-26/README.md) for others. Most fit the Feature seam as it is.
+
+**Changed the types now:** `sts`, `echo-message` with `labeled-response`, and `chathistory`, as above.
+
+**Would change the types, but can wait:**
+
+- **SASL `SCRAM-SHA-256` and `EXTERNAL`.** PLAIN over TLS is enough for now. SCRAM's replies depend on the Credential and the Ircd's challenge, so it lands in `SecretLine` or on the Runtime's side. EXTERNAL logs in with a client certificate, which `Dial` would name as a Credential.
+- **`message-redaction` and `channel-rename` (drafts).** A redaction is News that points at an earlier message id, which fits an append-only Journal. A rename means a Timeline cannot be keyed by a Channel's name. Both matter before Views choose their keys.
+- **`TAGMSG` and client tags such as `typing` and `react`.** Enabling `message-tags` brings `TAGMSG` traffic. `typing` is sent as often as every 3 seconds per Target, and every received Line is journaled (ADR 0002), so it is the same worry as polling, arriving from the Ircd. Decide how the Journal holds it before turning it on.
+
+**Fit the Feature seam as it is:**
+
+| Cap or token | What it refines |
+| --- | --- |
+| `account-notify`, `extended-join`, `account-tag` | A User's account, which `keeps: user.account` covers |
+| `chghost`, `userhost-in-names` | A User's mask |
+| `setname` | A User's realname |
+| `invite-notify` | An `Invited` Activity |
+| `bot-mode` (`BOT` token) | Whether a User is a bot |
+| `MONITOR`, `extended-monitor` | Whether a Direct Message partner is online, pushed rather than polled. The floor's alternative is polling with `ISON`, which we leave out. |
+| `WHOX` | Richer `WHO` replies, with accounts, once on joining |
+| `netsplit` and `netjoin` batches | A mass quit shown as one Activity |
+| `standard-replies` | `FAIL`, `WARN`, and `NOTE` with codes to decide from, and good `Rejected` reasons |
+| `draft/multiline` | Long Messages, both ways |
+| `draft/pre-away` | Away before registration, for being away when no Frontend is attached |
+| `draft/read-marker` | Our Read Marker, shared through an Ircd or bouncer that has it |
+| `draft/extended-isupport` | ISUPPORT before registration |
+
+**Not Features:**
+
+- **Transport concerns.** SNI, which the TLS Transport must send, and WebSocket, which would be another Transport adapter.
+- **Not relevant now.** `webirc`, the deprecated `tls` cap, `account-registration`, `metadata`, `network-icon`, `oper-tag`, `account-extban`, and `no-implicit-names`, because we want NAMES.
+- **If iirc connects through a bouncer.** soju and ZNC have their own caps, such as `soju.im/bouncer-networks` and `znc.in/self-message`.
 
 ## The transcript test kit
 

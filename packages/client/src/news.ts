@@ -60,10 +60,26 @@ export type EndReason =
   | { readonly _tag: "Error" }
   | { readonly _tag: "LoginFailed" }
   | { readonly _tag: "Disabled" }
-  | { readonly _tag: "Restarted" };
+  | { readonly _tag: "Restarted" }
+  /** An STS policy said to connect over TLS, so this plaintext Connection ends and a secure one follows at once. */
+  | { readonly _tag: "Upgrading"; readonly port: number };
 
-/** Why the Client did not carry out something the Owner asked for. */
-export type RefusedReason = "Offline" | "Unsendable";
+/**
+ * Why the Client did not carry out something the Owner asked for. `Rejected` comes after
+ * sending, when the Ircd's reply is tied to the intent, as `labeled-response` ties it:
+ * `reply` is the numeric, or a standard reply's code, never the reply's text.
+ */
+export type RefusedReason =
+  | { readonly _tag: "Offline" }
+  | { readonly _tag: "Unsendable" }
+  | { readonly _tag: "Rejected"; readonly reply: string };
+
+/** That we said a Message ourselves, as the Owner's intent. */
+export interface Ours {
+  readonly intent: IntentId;
+  /** Whether the Ircd will echo it back, which a `Confirmed` then reports. */
+  readonly echo: boolean;
+}
 
 /** Why an input changed nothing. Each is recorded, and none ends a Connection. */
 export type IgnoredReason =
@@ -74,19 +90,47 @@ export type IgnoredReason =
   | { readonly _tag: "NotNow"; readonly input: Input["_tag"] }
   | { readonly _tag: "FeatureFailed"; readonly feature: string };
 
-/** What happened in one step, in order. */
+/**
+ * What happened in one step, in order.
+ *
+ * A Message or Activity can arrive twice: live, and again later from the Ircd's history.
+ * `live` tells them apart, and a Timeline keeps one per id and orders by `at`, not by
+ * when the News came.
+ */
 export type News =
   | {
       readonly _tag: "Message";
       readonly at: Fact<Instant>;
       readonly id: Fact<MessageId>;
+      /** False when the Ircd sent it later, from its history. It fills a Gap and calls for no Highlight. */
+      readonly live: boolean;
       readonly sender: string;
       readonly target: string;
       readonly text: string;
       readonly kind: SayKind;
-      readonly ours: boolean;
+      /** Client-only tags, such as `+draft/reply`, as data. */
+      readonly tags: ReadonlyMap<string, string>;
+      /** Set when we said it, as the Owner's intent. A Message from Self said elsewhere has none. */
+      readonly ours: Ours | undefined;
     }
-  | { readonly _tag: "Activity"; readonly at: Fact<Instant>; readonly activity: Activity }
+  | {
+      /**
+       * The Ircd echoed back the Message for an intent. Its time, id, and text are the
+       * Ircd's, and the text may differ from what we sent.
+       */
+      readonly _tag: "Confirmed";
+      readonly intent: IntentId;
+      readonly at: Fact<Instant>;
+      readonly id: Fact<MessageId>;
+      readonly text: string;
+    }
+  | {
+      readonly _tag: "Activity";
+      readonly at: Fact<Instant>;
+      readonly id: Fact<MessageId>;
+      readonly live: boolean;
+      readonly activity: Activity;
+    }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
   | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }

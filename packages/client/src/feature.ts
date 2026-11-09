@@ -16,7 +16,7 @@ import type { Fact, Knowledge, MemberKnowledge } from "./known.ts";
 import type { EndReason, News } from "./news.ts";
 
 /** Facts a Feature keeps up to date. When it turns off, the core marks each one stale. */
-export type Kept = "user.away" | "user.account" | "user.mask";
+export type Kept = "user.away" | "user.account" | "user.mask" | "user.realname";
 
 /** A Line to send, or one that carries a Credential. */
 export type Sendable =
@@ -70,6 +70,10 @@ export interface Arrival {
   readonly id: Fact<MessageId>;
   readonly batch: string | undefined;
   readonly label: string | undefined;
+  /** The intent this Line answers. Starts unknown. `labeled-response` works it out from `label`. */
+  readonly answers: IntentId | undefined;
+  /** Starts true. A `chathistory` batch makes it false, so the Line is history, not news. */
+  readonly live: boolean;
 }
 
 /**

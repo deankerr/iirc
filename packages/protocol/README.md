@@ -30,7 +30,8 @@ fillSecret(line: SecretLine, value: Redacted<string>): readonly OutboundLine[]
 ## Invariants
 
 - **Total.** Nothing here throws. Bytes that do not parse give `Unparseable`, and a Line that cannot be sent safely gives `Rejected`.
-- **Safe by construction.** An `OutboundLine` has no NUL, CR, or LF anywhere, and only its last parameter may be empty, contain a space, or start with `:`. Encoded, it fits in 512 bytes with its line ending, not counting tags.
+- **Safe by construction.** An `OutboundLine` has no NUL, CR, or LF anywhere, and only its last parameter may be empty, contain a space, or start with `:`. Encoded, it fits in 512 bytes with its line ending, not counting tags. Its tags are client-only, or `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
 - **Round trip.** Parsing an encoded `OutboundLine` gives back its command and parameters.
 - **One place for Credentials.** `fillSecret` is the only code that puts a Credential's value into a Line. It splits the SASL PLAIN response into 400-byte `AUTHENTICATE` chunks, which depend on the value. Its result is sent and never journaled. The Journal records the `SecretLine`, which holds only the name.
+- **Where SASL goes next.** `SCRAM-SHA-256` would land in `SecretLine`: its replies depend on the Ircd's challenge, a nonce, and keys derived from the Credential, so it needs cases that take the challenge, or an exchange run on the Runtime's side. `EXTERNAL` needs no `SecretLine`, because its Credential is a client certificate that `Dial` would name.
 - **Structure, not text.** Nothing here reads an Ircd's free text to decide anything.

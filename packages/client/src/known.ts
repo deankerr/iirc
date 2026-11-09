@@ -70,6 +70,8 @@ export interface UserKnowledge {
   readonly mask: Fact<{ readonly user: string; readonly host: string }>;
   readonly account: Fact<string | null>;
   readonly away: Fact<{ readonly message: string } | null>;
+  /** The realname from registration, which `setname` keeps up to date. */
+  readonly realname: Fact<string>;
 }
 
 /** A member of a Channel, with the prefix modes they hold, such as `o` and `v`. */

@@ -41,6 +41,14 @@ export const maxTagBytes = 4094;
 const utf8 = new TextEncoder();
 const command = /^(?:[A-Za-z]+|\d{3})$/u;
 const clientTag = /^\+(?:[A-Za-z0-9.-]+\/)?[A-Za-z0-9-]+$/u;
+
+/**
+ * The tags without `+` that a client may send: `label` for `labeled-response`, and
+ * `batch` and `draft/multiline-concat` for `draft/multiline`.
+ */
+const sentTags: ReadonlySet<string> = new Set(["batch", "draft/multiline-concat", "label"]);
+
+const isSendableTag = (key: string) => clientTag.test(key) || sentTags.has(key);
 const lineBreaking = /[\0\r\n]/u;
 const tagEscapes = /[; \\\r\n]/gu;
 
@@ -96,8 +104,8 @@ const unsafe = (line: {
     return `a Line takes at most ${maxLineBytes} bytes`;
   }
 
-  if (!tags.every(([key, value]) => clientTag.test(key) && !value.includes("\0"))) {
-    return "a tag we send must be a client-only tag, and its value may not hold NUL";
+  if (!tags.every(([key, value]) => isSendableTag(key) && !value.includes("\0"))) {
+    return "a tag we send must be client-only, or label, batch, or draft/multiline-concat, and its value may not hold NUL";
   }
 
   if (tagBytes(line.tags) > maxTagBytes) {
@@ -110,7 +118,8 @@ const unsafe = (line: {
 /**
  * A Line that is safe to send: it cannot inject a second Line, and it fits. The only
  * way to get one is from this module's builders, or by decoding a recorded one, which
- * checks it again. The tags are client-only tags that a Feature added. The last
+ * checks it again. The tags are ones a Feature added: client-only tags, or `label`,
+ * `batch`, and `draft/multiline-concat`. The last
  * parameter is written as a trailing parameter when it needs to be.
  */
 export const OutboundLine = Schema.Struct({
@@ -135,6 +144,11 @@ export type CredentialName = typeof CredentialName.Type;
  * A Line that carries a Credential, written with the Credential's name in place of its
  * value. It is a closed list, so this module knows every place a Credential can go,
  * and is the only code that fills one in.
+ *
+ * SASL `SCRAM-SHA-256` would land here. Its replies depend on the Ircd's challenge, a
+ * nonce, and keys derived from the Credential, so it needs either cases that take the
+ * challenge or an exchange run on the Runtime's side. SASL `EXTERNAL` needs no case
+ * here: its Credential is a client certificate, which `Dial` would name.
  */
 export const SecretLine = Schema.TaggedUnion({
   /** The SASL PLAIN response, which may be split over several `AUTHENTICATE` Lines. */

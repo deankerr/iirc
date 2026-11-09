@@ -59,6 +59,11 @@ describe("an outbound Line", () => {
     expect(safe({ command: "001", params: [], tags: {} })).toBeTruthy();
   });
 
+  it("decodes the tags without + that a client may send", () => {
+    expect(safe({ ...ok, tags: { label: "a1" } })).toBeTruthy();
+    expect(safe({ ...ok, tags: { batch: "ml", "draft/multiline-concat": "" } })).toBeTruthy();
+  });
+
   it.each([
     ["a second Line in a parameter", { ...ok, params: ["#iirc", "hi\r\nOPER root bad"] }],
     ["NUL in a parameter", { ...ok, params: ["#iirc", "hi\0"] }],

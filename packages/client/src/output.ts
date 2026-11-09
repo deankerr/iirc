@@ -9,7 +9,11 @@ import { ConnectionId, Instant, TimerId } from "./ids.ts";
  * that caused them, and carried out in order.
  */
 export const Output = Schema.TaggedUnion({
-  /** Open a new Connection, numbered by the Client. */
+  /**
+   * Open a new Connection, numbered by the Client. The address is worked out, not copied:
+   * while an STS policy holds for the host, it is TLS on the policy's port, whatever
+   * Configuration says. A failed TLS Connection is never retried in plaintext.
+   */
   Dial: { connection: ConnectionId, ircd: IrcdAddress },
   /** End a Connection. The Client still waits for its `Closed`. */
   Hangup: { connection: ConnectionId },

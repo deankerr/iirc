@@ -1,4 +1,4 @@
-import type { CapName, ConnectionId, FeatureName } from "./ids.ts";
+import type { CapName, ConnectionId, FeatureName, Instant } from "./ids.ts";
 import type { Input } from "./input.ts";
 import type { Knowledge } from "./known.ts";
 import type { News } from "./news.ts";
@@ -13,6 +13,18 @@ export interface Step<State> {
   readonly news: readonly News[];
 }
 
+/**
+ * An Ircd's Strict Transport Security policy for one hostname: connect only over TLS, on
+ * `port`, until `until`. It is learnt only over TLS, survives Connections and restarts
+ * because it is derived from journaled Lines, and is never ended by `CAP DEL`.
+ */
+export interface StsPolicy {
+  readonly port: number;
+  /** The `duration` last advertised, in seconds. The expiry moves to the end plus this when a Connection closes. */
+  readonly duration: number;
+  readonly until: Instant;
+}
+
 /** Everything else a Client holds, for agents and debugging. Views read {@link Knowledge} instead. */
 export interface Inspection {
   /** Each machine's current state, named as in the statechart, such as `caps: "Steady"`. */
@@ -24,6 +36,8 @@ export interface Inspection {
     readonly enabled: ReadonlySet<CapName>;
   };
   readonly isupport: ReadonlyMap<string, string>;
+  /** STS policies by hostname, as `Dial` applies them. */
+  readonly policies: ReadonlyMap<string, StsPolicy>;
   /** Features on now, in registry order. */
   readonly features: readonly FeatureName[];
   readonly timers: TimerTable;
