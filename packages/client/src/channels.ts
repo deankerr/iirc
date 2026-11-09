@@ -366,13 +366,22 @@ const renamed = (
 /** The most Channels kept that Self was put in without asking, when `CHANLIMIT` says no fewer. */
 const maxUnwanted = 64;
 
-// How many unwanted Channels may be modelled: `CHANLIMIT` for this Channel's prefix,
-// when the Ircd gives one, else a fixed cap.
-const unwantedLimit = (run: Run, channel: string): number => {
-  const first = String.fromCodePoint(channel.codePointAt(0) ?? 0);
-  const limits = limitsOf(openOf(run.state)?.isupport.get("CHANLIMIT"));
+const prefixOf = (name: string): string => String.fromCodePoint(name.codePointAt(0) ?? 0);
 
-  return limits.find((each) => each.of.includes(first))?.limit ?? maxUnwanted;
+// Whether one more unwanted Channel may be modelled. `CHANLIMIT` counts by groups of
+// prefixes, such as `#:1,&:1` or `#&:2`, so the Channels Self was put in without asking
+// are counted within the incoming Channel's group alone. A prefix in no group, or a
+// group with no limit, falls back to a fixed cap, counted the same way.
+const admits = (run: Run, channel: string): boolean => {
+  const limits = limitsOf(openOf(run.state)?.isupport.get("CHANLIMIT"));
+  const groupOf = (name: string) => limits.find((each) => each.of.includes(prefixOf(name)));
+  const group = groupOf(channel);
+
+  const counted = [...run.state.channels.values()].filter(
+    (each) => !each.wanted && groupOf(each.name)?.of === group?.of
+  ).length;
+
+  return counted < (group?.limit ?? maxUnwanted);
 };
 
 const joining = (run: Run, nick: string): Joined => ({
@@ -402,9 +411,7 @@ const joinedSelf = (run: Run, channel: string): void => {
 
   // Self was put in a Channel without asking. It is modelled, up to a bound, and not
   // undone.
-  const unwanted = [...run.state.channels.values()].filter((each) => !each.wanted).length;
-
-  if (unwanted >= unwantedLimit(run, channel)) {
+  if (!admits(run, channel)) {
     ignore(run, { _tag: "NotNow", input: "Received" });
 
     return;

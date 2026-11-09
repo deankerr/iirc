@@ -338,3 +338,107 @@ describe("8. Self's mask is never read from 001's text", () => {
     expect.assertions(0);
   });
 });
+
+describe("re-review 1. Generated nicks fit even a small NICKLEN", () => {
+  const opening = lines(
+    "!! configure",
+    "-> dial irc.test:6697 tls",
+    "== opened",
+    ">> CAP LS 302",
+    ">> NICK iirc",
+    ">> USER iirc 0 * iirc"
+  );
+
+  it("offers no fallback at all when NICKLEN=1 leaves no room, and the deadline ends it", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        opening,
+        lines(
+          "<< :irc.test 005 * NICKLEN=1 :are supported",
+          "<< :irc.test 433 * iirc :in use",
+          "+60s",
+          "-> hangup"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("stops at the first fallback whose suffix leaves no room, when NICKLEN=2", () => {
+    const fallbacks = ["i_", ...Array.from({ length: 8 }, (_unused, index) => `i${index + 2}`)];
+
+    const offers = ["iirc", ...fallbacks]
+      .map((refused, index) =>
+        lines(
+          `<< :irc.test 433 * ${refused} :in use`,
+          ...(index < fallbacks.length ? [`>> NICK ${fallbacks[index]}`] : [])
+        )
+      )
+      .join("");
+
+    play(client, {
+      configuration: base,
+      transcript: [
+        opening,
+        "<< :irc.test 005 * NICKLEN=2 :are supported\n",
+        offers,
+        lines("+60s", "-> hangup"),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
+// Self put in Channels without asking.
+const forced = (...names: readonly string[]) =>
+  lines(...names.map((name) => `<< :iirc!~iirc@h JOIN ${name}`));
+
+describe("re-review 2. Forced Channels count within their own CHANLIMIT group", () => {
+  it("keeps separate groups independent", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport: ["CHANTYPES=#&", "CHANLIMIT=#:1,&:1"] }),
+        forced("#one"),
+        forced("#two"),
+        "?? ignored NotNow Received\n",
+        forced("&one"),
+      ],
+    });
+
+    expect([...played.state.channels.keys()]).toStrictEqual(["#one", "&one"]);
+  });
+
+  it("shares one count within a grouped entry", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport: ["CHANTYPES=#&+", "CHANLIMIT=#&:2,+:5"] }),
+        forced("+other", "#one", "&one"),
+        forced("#two"),
+        "?? ignored NotNow Received\n",
+      ],
+    });
+
+    expect([...played.state.channels.keys()]).toStrictEqual(["+other", "#one", "&one"]);
+  });
+
+  it("falls back to 64 for a prefix CHANLIMIT does not list", () => {
+    const many = Array.from({ length: 64 }, (_unused, index) => `&c${index}`);
+
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport: ["CHANTYPES=#&", "CHANLIMIT=#:1"] }),
+        forced("#one", ...many),
+        forced("&late"),
+        "?? ignored NotNow Received\n",
+      ],
+    });
+
+    expect(played.state.channels.size).toBe(65);
+  });
+});

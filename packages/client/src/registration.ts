@@ -59,25 +59,35 @@ const rfcNickLength = 9;
 const nickLength = (run: Run): number =>
   limitOf(openOf(run.state)?.isupport.get("NICKLEN")) ?? rfcNickLength;
 
+// A nick cannot start with a digit, `-`, or other ASCII punctuation but `[]\\`^_{|}`.
+const badNickStart = /^[\u0021-\u0040~]/u;
+
 /**
  * The nick offered at an index: the configured nicks in order, as the Owner wrote them,
  * then fallbacks made from the first: `_` added, then `2`, `3`, and so on, each cut to
- * leave room for its suffix within the longest nick the Ircd takes.
+ * leave room for its suffix within the longest nick the Ircd takes. A fallback that
+ * cannot keep at least one character of the first nick, or would not start as a nick
+ * may, is not made, and since suffixes only grow, neither is any after it.
  * @param nicks - The configured nicks.
  * @param index - Which offer, from 0.
  * @param length - The longest nick the Ircd takes.
- * @returns The nick.
+ * @returns The nick, or `undefined` when there are no more to offer.
  */
-const offerAt = (nicks: readonly [string, ...string[]], index: number, length: number): string => {
+const offerAt = (
+  nicks: readonly [string, ...string[]],
+  index: number,
+  length: number
+): string | undefined => {
   if (index < nicks.length) {
     return nicks[index] ?? nicks[0];
   }
 
   const fallback = index - nicks.length + 1;
   const suffix = fallback === 1 ? "_" : String(fallback);
-  const room = Math.max(1, length - suffix.length);
+  const room = length - suffix.length;
+  const base = characters(nicks[0]).slice(0, room).join("");
 
-  return `${characters(nicks[0]).slice(0, room).join("")}${suffix}`;
+  return room < 1 || base === "" || badNickStart.test(base) ? undefined : `${base}${suffix}`;
 };
 
 /**
@@ -93,7 +103,15 @@ const offerNick = (run: Run, from: number): void => {
   }
 
   for (let index = from; index < from + nicks.length + maxTries; index += 1) {
-    const line = nick(offerAt(nicks, index, nickLength(run)));
+    const offer = offerAt(nicks, index, nickLength(run));
+
+    // No nick left that fits: offer none, and the registration deadline ends the
+    // Connection.
+    if (offer === undefined) {
+      return;
+    }
+
+    const line = nick(offer);
 
     if (!isRejected(line)) {
       send(run, line, "NICK");
