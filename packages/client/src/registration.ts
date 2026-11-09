@@ -321,6 +321,17 @@ export const carryOut = <V>(run: Run, ran: Ran<V>): void => {
   applyRegistration(run, ran.registration);
 };
 
+/**
+ * Carries out what refining hooks said: their own state, and any that threw. Lines they
+ * asked to send, their say over registration, and caps they asked to drop are discarded:
+ * only `react` and the hooks that are not about an Arrival act.
+ * @param run - The step.
+ * @param ran - What the hooks returned.
+ */
+export const carryOutRefined = <V>(run: Run, ran: Ran<V>): void => {
+  carryOut(run, { ...ran, drop: [], registration: [], send: [] });
+};
+
 /** What decides a recompute: the Features on, and the caps enabled. */
 export interface Before {
   readonly on: readonly Registered[];

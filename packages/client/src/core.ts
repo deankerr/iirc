@@ -24,18 +24,27 @@ import { backoff, lasting } from "./backoff.ts";
 import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
 import type { Client, Step } from "./client.ts";
 import type { NetworkConfiguration } from "./configuration.ts";
-import type { Arrival, Refined, Sendable } from "./feature.ts";
+import type { Arrival, Refined } from "./feature.ts";
 import { ConnectionId, Instant } from "./ids.ts";
 import type { TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
 import type { EndReason } from "./news.ts";
-import { before, begin, carryOut, expire, recompute, settle, unfilled } from "./registration.ts";
+import {
+  before,
+  begin,
+  carryOut,
+  carryOutRefined,
+  expire,
+  recompute,
+  settle,
+  unfilled,
+} from "./registration.ts";
 import type { Registered } from "./registry.ts";
 import { registry } from "./registry.ts";
 import type { Run } from "./run.ts";
 import { folder, hangup, ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
-import { runStage } from "./seam.ts";
+import { runEffects, runStage } from "./seam.ts";
 import type { Link, State } from "./state.ts";
 import { initialState } from "./state.ts";
 import { lagAfter, silentAfter, tableOf, timersOf, wakes } from "./timers.ts";
@@ -241,7 +250,8 @@ type Hook<V> = (
   context: Parameters<NonNullable<Registered["start"]>>[0]
 ) => Refined<V, unknown> | undefined;
 
-// Runs one ingress stage over the Features on now that have its hook.
+// Runs one ingress stage over the Features on now that have its hook. Ingress stages
+// refine: what they return and their own state are kept, and nothing else they say.
 const stage = <V>(run: Run, value: V, has: (feature: Registered) => boolean, hook: Hook<V>): V => {
   const features = onNow(run.registry, run.state).filter(has);
   const seam = openOf(run.state)?.seam;
@@ -253,7 +263,7 @@ const stage = <V>(run: Run, value: V, has: (feature: Registered) => boolean, hoo
 
   const ran = runStage(features, seam, reading, value, hook);
 
-  carryOut(run, ran);
+  carryOutRefined(run, ran);
 
   return ran.value;
 };
@@ -266,29 +276,33 @@ const batchAll = (
 ): Refined<readonly Arrival[], unknown> => {
   let { own } = context;
   const value: Arrival[] = [];
-  const sends: Sendable[] = [];
-  const decided: Refined<readonly Arrival[], unknown>[] = [];
 
   for (const arrival of arrivals) {
     const refined = batch(arrival, { ...context, own });
 
     value.push(...refined.value);
     own = "own" in refined ? refined.own : own;
-    sends.push(...(refined.send ?? []));
-
-    if (refined.registration !== undefined) {
-      decided.push(refined);
-    }
   }
 
-  const registration = decided.at(-1)?.registration;
-  const refined: Refined<readonly Arrival[], unknown> = { own, send: sends, value };
-
-  return registration === undefined ? refined : { ...refined, registration };
+  return { own, value };
 };
 
 const batching: Hook<readonly Arrival[]> = (feature, arrivals, context) =>
   feature.batch === undefined ? undefined : batchAll(feature.batch, arrivals, context);
+
+// Features act on what arrived, once history is told apart, and only on what is live.
+const react = (run: Run, arrival: Arrival): void => {
+  const features = onNow(run.registry, run.state).filter((feature) => feature.react !== undefined);
+  const seam = openOf(run.state)?.seam;
+  const reading = features.length === 0 || !arrival.live ? undefined : readingOf(run);
+
+  if (seam !== undefined && reading !== undefined) {
+    carryOut(
+      run,
+      runEffects(features, seam, reading, (feature, context) => feature.react?.(arrival, context))
+    );
+  }
+};
 
 const ingress = (run: Run, line: Line, raw: readonly RawParam[]): void => {
   const tagged = stage(
@@ -313,6 +327,7 @@ const ingress = (run: Run, line: Line, raw: readonly RawParam[]): void => {
       (feature, value, context) => feature.label?.(value, context)
     );
 
+    react(run, labelled);
     interpret(run, labelled, labelled.line === line ? raw : undefined);
   }
 };

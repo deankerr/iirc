@@ -132,8 +132,13 @@ export interface Departure {
  * - **On and off.** A Feature is on while every cap in `needs` is enabled and every token
  *   is in ISUPPORT, unless the Owner declined it. This is worked out again on `CAP ACK`,
  *   `CAP NEW`, `CAP DEL`, ISUPPORT, and at the end of a Session.
- * - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `meaning`. Within a
- *   stage, Features run in the registry's order, which is one array in one file.
+ * - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `react`, then
+ *   `meaning`. Within a stage, Features run in the registry's order, which is one array
+ *   in one file.
+ * - **Refining, then acting.** `tags`, `batch`, `label`, and `meaning` refine: the core
+ *   keeps what they return and their own state, and discards any Lines to send, say over
+ *   registration, or caps to drop. Only `react` acts on what arrived, and only on a live
+ *   Arrival, once history is told apart, so nothing from history sends or decides.
  * - **State.** `own` is the Feature's state when it first turns on in a Connection. It is
  *   kept while the Feature is off, so turned on again in the same Connection it goes on
  *   from where it was, and each Connection starts it again.
@@ -179,6 +184,11 @@ export interface Feature<Own = undefined> {
   /** Return no Arrivals to hold this one, and several to release those held. */
   readonly batch?: (arrival: Arrival, context: Context<Own>) => Refined<readonly Arrival[], Own>;
   readonly label?: (arrival: Arrival, context: Context<Own>) => Refined<Arrival, Own>;
+  /**
+   * Acts on a live Arrival, after `label`: Lines to send and a say over registration, as
+   * SASL answers `AUTHENTICATE +`. An Arrival that is history never reaches it.
+   */
+  readonly react?: (arrival: Arrival, context: Context<Own>) => Effects<Own>;
   readonly meaning?: (
     meant: readonly Meant[],
     arrival: Arrival,

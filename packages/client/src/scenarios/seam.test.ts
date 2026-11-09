@@ -2,14 +2,14 @@
  * The Feature seam, driven through `step` with Features made for these tests. The real
  * registry is empty on the floor, so these show the seam works before stage 2 fills it.
  */
-import { isRejected, withTags } from "@iirc/protocol/line";
+import { CredentialName, isRejected, withTags } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
 import { makeClient } from "../core.ts";
 import type { Feature, Meant } from "../feature.ts";
 import { CapName, FeatureName, IntentId, TimerId } from "../ids.ts";
 import type { MemberKnowledge } from "../known.ts";
-import { register } from "../registry.ts";
+import { register, registry } from "../registry.ts";
 import { configured, joined, play, registered } from "../testing/index.ts";
 
 const base = configured();
@@ -165,11 +165,9 @@ const holding: Feature = {
   name: FeatureName.make("hold"),
   needs: { caps: [CapName.make("hold")] },
   own: undefined,
+  react: (arrival) =>
+    arrival.line.command === "903" ? { registration: { _tag: "Continue" } } : {},
   start: () => ({ registration: { _tag: "Hold" } }),
-  tags: (arrival) =>
-    arrival.line.command === "903"
-      ? { registration: { _tag: "Continue" }, value: arrival }
-      : { value: arrival },
 };
 
 describe("holding registration", () => {
@@ -466,5 +464,96 @@ describe("a Feature's own state", () => {
 
     // Heard while on: 001 to 005, and the DEL. Started again, it would be 0.
     expect(own).toBe(6);
+  });
+});
+
+describe("history, and hooks that act", () => {
+  // Every Line the batch Feature says is in a batch is history, as `chathistory` will be.
+  const history: Feature = {
+    label: (arrival) => ({
+      value: arrival.batch === undefined ? arrival : { ...arrival, live: false },
+    }),
+    name: FeatureName.make("history"),
+    needs: {},
+    own: undefined,
+  };
+
+  const client = makeClient([...registry, register(history)]);
+
+  const login = configured({
+    login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
+  });
+
+  const asked = lines(
+    "!! configure",
+    "-> dial irc.test:6697 tls",
+    "== opened",
+    ">> CAP LS 302",
+    ">> NICK iirc",
+    ">> USER iirc 0 * iirc",
+    "<< :irc.test CAP * LS :sasl=PLAIN batch",
+    ">> CAP REQ :sasl batch",
+    "<< :irc.test CAP * ACK :sasl batch",
+    ">> AUTHENTICATE PLAIN"
+  );
+
+  it("never sends the Credential for an AUTHENTICATE + from history", () => {
+    const played = play(client, {
+      configuration: login,
+      transcript: [
+        asked,
+        lines(
+          "<< :irc.test BATCH +h chathistory",
+          "<< @batch=h AUTHENTICATE +",
+          "<< :irc.test BATCH -h"
+        ),
+      ],
+    });
+
+    expect(played.steps.flatMap((step) => step.outputs).map((output) => output._tag)).not.toContain(
+      "SendSecret"
+    );
+  });
+
+  it("never logs in, or lets registration go, on a 903 or a 904 from history", () => {
+    const played = play(client, {
+      configuration: login,
+      transcript: [
+        asked,
+        lines(
+          "<< AUTHENTICATE +",
+          ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}",
+          "<< :irc.test BATCH +h chathistory",
+          "<< @batch=h :irc.test 903 iirc :SASL authentication successful",
+          "<< @batch=h :irc.test 904 iirc :SASL authentication failed",
+          "<< :irc.test BATCH -h"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).states.caps).toBe("Holding");
+  });
+
+  it("discards what a refining hook asks to send or decide", () => {
+    const pushy: Feature = {
+      label: (arrival) => ({
+        registration: { _tag: "Abandon", reason: { _tag: "LoginFailed" } },
+        send: [{ _tag: "Secret", line: { _tag: "Pass", credential: CredentialName.make("pw") } }],
+        value: arrival,
+      }),
+      name: FeatureName.make("pushy"),
+      needs: { caps: [CapName.make("pushy")] },
+      own: undefined,
+    };
+
+    const played = play(makeClient([register(pushy)]), {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["pushy"] }),
+        lines("<< :peer!u@h PRIVMSG iirc :hi"),
+      ],
+    });
+
+    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
   });
 });

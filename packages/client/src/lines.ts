@@ -26,7 +26,7 @@ import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./mean
 import { applyModes, readModes } from "./modes.ts";
 import {
   capLine,
-  carryOut,
+  carryOutRefined,
   nickRefused,
   offered,
   unknownCommand,
@@ -172,7 +172,7 @@ const means = (run: Run, arrival: Arrival): void => {
       feature.meaning?.(value, arrival, context)
     );
 
-    carryOut(run, ran);
+    carryOutRefined(run, ran);
 
     const completed = completedBy(derived, ran.value);
 

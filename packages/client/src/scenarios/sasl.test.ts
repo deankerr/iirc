@@ -477,3 +477,34 @@ describe("a required login never goes unmet", () => {
     }
   });
 });
+
+describe("PLAIN withdrawn mid-exchange", () => {
+  const withdrawn = lines(
+    "<< :irc.test CAP * NEW :sasl=EXTERNAL",
+    "<< AUTHENTICATE +",
+    ">> AUTHENTICATE *"
+  );
+
+  it("sends no Credential once the sasl value no longer lists PLAIN, and fails the login", () => {
+    play(client, { configuration: optional, transcript: [asked(), withdrawn, goesOn] });
+    play(client, { configuration: required, transcript: [asked(), withdrawn, givesUp] });
+
+    expect.assertions(0);
+  });
+
+  it("sends the Credential when the value still lists PLAIN", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [
+        asked(),
+        lines(
+          "<< :irc.test CAP * NEW :sasl=EXTERNAL,PLAIN",
+          "<< AUTHENTICATE +",
+          ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});

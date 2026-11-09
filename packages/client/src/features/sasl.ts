@@ -100,42 +100,31 @@ export const saslPlain: Feature<Exchange> = {
   name: FeatureName.make("sasl"),
   needs: { caps: [sasl] },
   own: idle,
-  start: (context) => {
-    const { login } = context.configuration;
-
-    if (login._tag !== "Sasl" || context.known.session._tag !== "Registering") {
-      return {};
-    }
-
-    if (!offersPlain(context.cap(sasl))) {
-      return failed(context);
-    }
-
-    return { own: { _tag: "Asked" }, registration: { _tag: "Hold" }, send: line("PLAIN") };
-  },
-  tags: (arrival, context) => {
+  // SASL acts on its replies only as they arrive live, never from history.
+  react: (arrival, context) => {
     const { own, configuration } = context;
     const { command, params } = arrival.line;
     const { login } = configuration;
 
     if (!running(own) || login._tag !== "Sasl") {
-      return { value: arrival };
+      return {};
     }
 
     if (command === "903") {
-      return { own: loggedIn, registration: { _tag: "Continue" }, value: arrival };
+      return { own: loggedIn, registration: { _tag: "Continue" } };
     }
 
     if (failures.has(command)) {
-      return { ...failed(context), value: arrival };
+      return failed(context);
     }
 
     if (command !== "AUTHENTICATE" || own._tag !== "Asked") {
-      return { value: arrival };
+      return {};
     }
 
-    if (params[0] !== "+") {
-      return { ...failed(context, line("*")), value: arrival };
+    // A challenge PLAIN does not make, or PLAIN withdrawn since it was asked for.
+    if (params[0] !== "+" || !offersPlain(context.cap(sasl))) {
+      return failed(context, line("*"));
     }
 
     return {
@@ -151,8 +140,20 @@ export const saslPlain: Feature<Exchange> = {
           },
         },
       ],
-      value: arrival,
     };
+  },
+  start: (context) => {
+    const { login } = context.configuration;
+
+    if (login._tag !== "Sasl" || context.known.session._tag !== "Registering") {
+      return {};
+    }
+
+    if (!offersPlain(context.cap(sasl))) {
+      return failed(context);
+    }
+
+    return { own: { _tag: "Asked" }, registration: { _tag: "Hold" }, send: line("PLAIN") };
   },
   unfilled: (secret, context) =>
     secret._tag === "AuthenticatePlain" && running(context.own) ? failed(context, line("*")) : {},
