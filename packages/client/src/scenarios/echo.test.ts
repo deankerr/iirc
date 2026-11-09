@@ -415,7 +415,7 @@ describe("the caps changing mid-Session", () => {
   });
 });
 
-describe("one of the two acknowledged", () => {
+describe("part of the three acknowledged", () => {
   const asked = lines(
     "!! configure",
     "-> dial irc.test:6697 tls",
@@ -423,8 +423,8 @@ describe("one of the two acknowledged", () => {
     ">> CAP LS 302",
     ">> NICK iirc",
     ">> USER iirc 0 * iirc",
-    "<< :irc.test CAP * LS :echo-message labeled-response",
-    ">> CAP REQ :echo-message labeled-response"
+    "<< :irc.test CAP * LS :echo-message labeled-response batch",
+    ">> CAP REQ :batch echo-message labeled-response"
   );
 
   it("gives up echo-message alone before CAP END", () => {
@@ -433,7 +433,7 @@ describe("one of the two acknowledged", () => {
       transcript: [
         asked,
         lines(
-          "<< :irc.test CAP * ACK :echo-message",
+          "<< :irc.test CAP * ACK :batch echo-message",
           ">> CAP REQ -echo-message",
           "<< :irc.test CAP * ACK :-echo-message",
           ">> CAP END"
@@ -441,7 +441,7 @@ describe("one of the two acknowledged", () => {
       ],
     });
 
-    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set());
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set(["batch"]));
   });
 
   it("gives up labeled-response alone before CAP END", () => {
@@ -450,7 +450,26 @@ describe("one of the two acknowledged", () => {
       transcript: [
         asked,
         lines(
-          "<< :irc.test CAP * ACK :labeled-response",
+          "<< :irc.test CAP * ACK :batch labeled-response",
+          ">> CAP REQ -labeled-response",
+          "<< :irc.test CAP * ACK :-labeled-response",
+          ">> CAP END"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set(["batch"]));
+  });
+
+  it("gives up the pair, one after the other, when batch is not acknowledged", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        asked,
+        lines(
+          "<< :irc.test CAP * ACK :echo-message labeled-response",
+          ">> CAP REQ -echo-message",
+          "<< :irc.test CAP * ACK :-echo-message",
           ">> CAP REQ -labeled-response",
           "<< :irc.test CAP * ACK :-labeled-response",
           ">> CAP END"
@@ -465,7 +484,7 @@ describe("one of the two acknowledged", () => {
     play(client, {
       configuration: base,
       transcript: [
-        ...inChannel("cap-notify"),
+        ...inChannel("cap-notify", "batch"),
         lines(
           "<< :irc.test CAP iirc NEW :echo-message labeled-response",
           ">> CAP REQ :echo-message labeled-response",
@@ -476,5 +495,57 @@ describe("one of the two acknowledged", () => {
     });
 
     expect.assertions(0);
+  });
+});
+
+describe("labels need batch", () => {
+  it("asks for neither of the pair when batch is not offered", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { offered: ["echo-message", "labeled-response"], requested: [] }),
+        lines("!! say #iirc :hello", ">> PRIVMSG #iirc hello"),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("asks for neither of the pair when the Owner declined batch", () => {
+    const declined = configured({ declined: [FeatureName.make("batch")] });
+
+    play(client, {
+      configuration: declined,
+      transcript: [
+        registered(declined, { offered: both, requested: [] }),
+        lines("!! say #iirc :hello", ">> PRIVMSG #iirc hello"),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up the pair when batch is deleted, and ignores echoes until echo-message is gone", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannel("cap-notify", ...both),
+        say(1),
+        lines(
+          "<< :irc.test CAP iirc DEL :batch",
+          ">> CAP REQ -echo-message",
+          "<< :iirc!u@h PRIVMSG #iirc :hello",
+          "?? ignored UnmatchedEcho",
+          "!! say #iirc :again",
+          ">> PRIVMSG #iirc again",
+          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i2 :again",
+          "<< :irc.test CAP iirc ACK :-echo-message",
+          ">> CAP REQ -labeled-response",
+          "<< :irc.test CAP iirc ACK :-labeled-response"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set(["cap-notify"]));
   });
 });

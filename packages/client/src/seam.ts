@@ -82,7 +82,8 @@ export const capsOf = (feature: Registered): readonly CapName[] => [
 
 /**
  * The caps worth asking for: those each Feature the Owner has not declined needs or
- * uses, when they are all offered, less any already enabled, in registry order.
+ * uses, when they are all offered and none is needed by a Feature the Owner declined,
+ * less any already enabled, in registry order.
  * @param registry - Every Feature.
  * @param offer - What the Ircd offers now.
  * @param declined - What the Owner declined.
@@ -93,11 +94,19 @@ export const capsWanted = (
   offer: Offer,
   declined: readonly FeatureName[]
 ): readonly CapName[] => {
+  // A cap a declined Feature needs is asked for by no other Feature either.
+  const refused = new Set(
+    registry
+      .filter((feature) => declined.includes(feature.name))
+      .flatMap((feature) => feature.needs.caps ?? [])
+  );
+
   const wanted = registry.flatMap((feature) => {
     const caps = capsOf(feature);
 
     const asked =
       !declined.includes(feature.name) &&
+      !caps.some((cap) => refused.has(cap)) &&
       caps.length > 0 &&
       caps.every((cap) => offer.offered.has(cap));
 

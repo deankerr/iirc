@@ -41,11 +41,15 @@ const features: readonly LawFeature[] = registry.map((feature) =>
 
 const caps = features.flatMap(({ needs }) => needs.caps ?? []);
 
-// What the Client asks for: the caps of each Feature whose caps are all offered.
-const requested = (offered: readonly string[]): readonly string[] =>
-  registry
-    .filter(({ needs }) => (needs.caps ?? []).every((cap) => offered.includes(cap)))
-    .flatMap(({ needs }) => needs.caps ?? []);
+// What the Client asks for: the caps each Feature needs or uses, when all are offered.
+const requested = (offered: readonly string[]): readonly string[] => [
+  ...new Set(
+    registry
+      .map((feature) => [...(feature.needs.caps ?? []), ...(feature.uses ?? [])])
+      .filter((wanted) => wanted.length > 0 && wanted.every((cap) => offered.includes(cap)))
+      .flat()
+  ),
+];
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 

@@ -11,12 +11,15 @@
  *   which the core reports as `Confirmed`. Its first `FAIL`, `ACK`, or error numeric
  *   rejects the intent, and the core reports it `Refused`. A Line in it that is neither,
  *   such as a `WARN`, answers nothing.
- * - **Never one without the other.** The Feature is on while `echo-message` is enabled,
- *   and uses `labeled-response`. When only `echo-message` is left, whether the Ircd
- *   acknowledged only it or deleted `labeled-response`, it gives `echo-message` up with
- *   `CAP REQ :-echo-message`, and until it is gone, a Message from Self is an echo
- *   nothing can tie to what we sent, so it is `Ignored`. When only `labeled-response` is
- *   left, the Feature is off, and gives it up the same way.
+ * - **Never one without the other.** `labeled-response` depends on `batch`, which must be
+ *   negotiated to use it, so labels need all three. The Feature is on while
+ *   `echo-message` is enabled, and uses `labeled-response` and `batch`, asked for only
+ *   when all three are offered and the Owner has not declined `batch`. When
+ *   `echo-message` is left without either, whether the Ircd acknowledged only part or
+ *   deleted one since, it gives `echo-message` up with `CAP REQ :-echo-message`, and
+ *   until it is gone, a Message from Self is an echo nothing can tie to what we sent, so
+ *   it is `Ignored`. When `labeled-response` is left without `echo-message`, the Feature
+ *   is off, and gives it up the same way. `batch` is the `batch` Feature's own.
  * - **Bounds.** At most {@link maxPending} labels await an answer: past that, the oldest
  *   is forgotten, and its Message stays unconfirmed, as one the Ircd never answers does.
  *   An answer for a label not awaited, such as one forgotten, is read as any other Line.
@@ -57,9 +60,12 @@ const fresh: Echoes = { batches: new Map(), next: 1, pending: new Map() };
 
 const echoMessage = CapName.make("echo-message");
 const labeledResponse = CapName.make("labeled-response");
+const batch = CapName.make("batch");
 
-// Whether answers can be tied to what we sent: both caps are enabled.
-const labelling = (context: Context<Echoes>): boolean => context.enabled(labeledResponse);
+// Whether answers can be tied to what we sent: `labeled-response` is enabled, with the
+// `batch` it depends on, as well as `echo-message`.
+const labelling = (context: Context<Echoes>): boolean =>
+  context.enabled(labeledResponse) && context.enabled(batch);
 
 // Whether a Message was said by Self, as its source names it.
 const bySelf = (meant: Meant, context: Context<Echoes>): boolean => {
@@ -205,7 +211,7 @@ export const echo: Feature<Echoes> = {
   name: FeatureName.make("echo-message"),
   needs: { caps: [echoMessage] },
   own: fresh,
-  // On with only `echo-message`, or `labeled-response` gone since: give it up.
+  // On without `labeled-response` or `batch`, or with one gone since: give it up.
   start: (context) => (labelling(context) ? {} : { drop: [echoMessage] }),
-  uses: [labeledResponse],
+  uses: [labeledResponse, batch],
 };

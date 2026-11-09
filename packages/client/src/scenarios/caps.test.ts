@@ -73,11 +73,11 @@ describe("asking for caps", () => {
       configuration: base,
       transcript: lines(
         opened.trimEnd(),
-        "<< :irc.test CAP * LS * :labeled-response sasl=PLAIN,EXTERNAL",
+        "<< :irc.test CAP * LS * :labeled-response sasl=PLAIN,EXTERNAL batch",
         "<< :irc.test CAP * LS * :draft/languages=1,en multi-prefix",
         "<< :irc.test CAP * LS :echo-message",
-        ">> CAP REQ :sasl echo-message labeled-response multi-prefix",
-        "<< :irc.test CAP * ACK :sasl labeled-response echo-message multi-prefix",
+        ">> CAP REQ :sasl batch echo-message labeled-response multi-prefix",
+        "<< :irc.test CAP * ACK :sasl batch labeled-response echo-message multi-prefix",
         ">> CAP END"
       ),
     });
@@ -251,8 +251,8 @@ describe("caps changing mid-Session", () => {
       configuration: base,
       transcript: [
         registered(base, {
-          offered: ["cap-notify", "labeled-response"],
-          requested: ["cap-notify"],
+          offered: ["cap-notify", "batch", "labeled-response"],
+          requested: ["cap-notify", "batch"],
         }),
         lines(
           "<< :irc.test CAP iirc NEW :echo-message",
