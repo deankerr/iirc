@@ -8,506 +8,146 @@ import vitest from "ultracite/oxlint/vitest";
 
 const jsPlugins = selectJsPlugins(["jsdoc-js", "tsdoc"]);
 
-// The fence around the core. `@iirc/protocol` and `@iirc/client` are pure: time and
-// randomness arrive on inputs, effects leave as outputs, and no adapter is reachable.
+// The lint fence catches what is cheap to catch by name: dependencies that point the wrong
+// way, test kits in production code, and the obvious clocks, randomness, and I/O in the core
+// and the Runtime. It is not a proof of purity. AGENTS.md states the rule, and review and the
+// replay law hold the rest. Keep it this small: a gap it misses goes to review, not here.
+//
 // An override replaces a rule's options, so each file group lists every pattern it needs.
 interface Pattern {
   readonly group: string[];
   readonly message: string;
 }
 
-const pure = "The core is pure: time arrives on inputs and effects leave as outputs.";
+type Imports = NonNullable<DummyRuleMap["no-restricted-imports"]>;
 
-// Effect is fenced by allowlist, because it is large and grows: platform services such
-// as FileSystem, randomness such as SecureRandom, and whole packages such as `effect/sql`
-// sit beside its pure modules. Each layer names the modules it may use, from the `effect`
-// barrel or by subpath, and every other one is refused.
-//
-// The core may use pure data and Schema, and nothing that runs, waits, or reaches out.
-// `DateTime` is left out: besides reading the clock, its zoned constructors default to
-// the machine's time zone, so the same input could give a different result elsewhere.
-// `HashMap` and `HashSet` are left out too: a key hashed by reference, such as a
-// function, is hashed with `Math.random`, so iteration order could differ on replay.
-// The core uses `Map` and `Set`, whose order is the order of insertion.
-const pureEffect = [
-  "Array",
-  "BigDecimal",
-  "BigInt",
-  "Boolean",
-  "Brand",
-  "Chunk",
-  "Data",
-  "Duration",
-  "Equal",
-  "Equivalence",
-  "Filter",
-  "Function",
-  "Hash",
-  "Inspectable",
-  "Iterable",
-  "Match",
-  "NonEmptyIterable",
-  "Number",
-  "Option",
-  "Order",
-  "Ordering",
-  "Pipeable",
-  "Predicate",
-  "Record",
-  "Redacted",
-  "RegExp",
-  "Result",
-  "Schema",
-  "SchemaAST",
-  "SchemaGetter",
-  "SchemaIssue",
-  "SchemaParser",
-  "SchemaTransformation",
-  "String",
-  "Struct",
-  "Trie",
-  "Tuple",
-  "Types",
-  "UndefinedOr",
-];
-
-// SASL PLAIN is base64, so the core may encode it.
-const pureSubpaths = ["effect/encoding/Base64"];
-
-// The Runtime may also run, wait for, and compose Effects. It may not use a platform
-// service, read configuration from the environment, or use Cron, whose schedule starts
-// from the wall clock unless told otherwise. It logs with `Effect.log*`, and never builds
-// a Logger: the composition root does, because loggers write files or inspect the TTY. `DateTime` and `Clock` read time, so only
-// `clock.ts` and tests have them.
-const runtimeEffect = [
-  ...pureEffect,
-  "Cause",
-  "Context",
-  "Deferred",
-  "Effect",
-  "Exit",
-  "Fiber",
-  "FiberHandle",
-  "FiberMap",
-  "FiberSet",
-  "Latch",
-  "Layer",
-  "LogLevel",
-  "Metric",
-  "PubSub",
-  "Queue",
-  "Random",
-  "Ref",
-  "References",
-  "Schedule",
-  "Scheduler",
-  "Scope",
-  "Semaphore",
-  "Sink",
-  "Stream",
-  "SubscriptionRef",
-  "SynchronizedRef",
-  "Take",
-  "Tracer",
-];
-
-const timeModules = ["Clock", "DateTime"];
-
-const effectPath = (allowed: readonly string[], message: string) => ({
-  allowImportNames: [...allowed],
-  message,
-  name: "effect",
-});
-
-const effectSubpaths = (
-  allowed: readonly string[],
-  subpaths: readonly string[],
-  message: string
-): Pattern => ({
-  group: [
-    "effect/**",
-    ...allowed.map((name) => `!effect/${name}`),
-    ...subpaths.map((subpath) => `!${subpath}`),
-  ],
-  message,
-});
-
-const impureModules: Pattern = {
-  group: ["bun", "bun:*", "node:*", "@effect/*"],
-  message: pure,
-};
-
-// What reads the wall clock or the system's time zone without an Effect. Each is refused
-// as a property of any object, so an alias of `DateTime` or a namespace import cannot
-// reach it, and as a named import from `effect/DateTime`.
-const wallClock = [
-  "nowUnsafe",
-  "unsafeNow",
-  "isFutureUnsafe",
-  "isPastUnsafe",
-  "zoneMakeLocal",
-  "formatLocal",
-];
-
-interface Property {
-  readonly message: string;
-  readonly object?: string;
-  readonly property: string;
-}
-
-const restrictProperties = (
-  clock: string,
-  randomness: string,
-  ...more: readonly Property[]
-): NonNullable<DummyRuleMap["no-restricted-properties"]> => [
-  "error",
-  ...wallClock.map((property) => ({ message: clock, property })),
-  { message: randomness, property: "random" },
-  ...more,
-];
-
-// What reads the machine's locale or parses a date in its time zone. Each is refused as a
-// property of any object, and as a named import from the Effect module that has it.
-const ambientProperties = [
-  "localeCompare",
-  "toLocaleLowerCase",
-  "toLocaleUpperCase",
-  "toLocaleString",
-  "toLocaleDateString",
-  "toLocaleTimeString",
-  "Date",
-  "DateFromString",
-  "dateFromString",
-  "Cookie",
-  "Cookies",
-  "RecordFromCookies",
-  "HashMap",
-  "HashSet",
-];
-
-const ambientImports = [
-  {
-    importNames: ["localeCompare", "toLocaleLowerCase", "toLocaleUpperCase"],
-    name: "effect/String",
-  },
-  {
-    importNames: [
-      "Date",
-      "DateFromString",
-      "Cookie",
-      "Cookies",
-      "RecordFromCookies",
-      "HashMap",
-      "HashSet",
-    ],
-    name: "effect/Schema",
-  },
-  { importNames: ["Date"], name: "effect/SchemaGetter" },
-  { importNames: ["dateFromString"], name: "effect/SchemaTransformation" },
-].map((path) => ({ ...path, message: pure }));
-
-const noRandomOrNow = restrictProperties(
-  pure,
-  pure,
-  ...ambientProperties.map((property) => ({ message: pure, property }))
-);
-
-const wallClockImport = (message: string) => ({
-  importNames: wallClock,
-  message,
-  name: "effect/DateTime",
-});
-
-const ours = (allowed: readonly string[], message: string): Pattern => ({
-  // `@iirc/*` matches one segment only, so subpaths such as `@iirc/runtime/journal` need `/**`.
-  group: ["@iirc/*", "@iirc/*/**", ...allowed.map((name) => `!${name}`)],
-  message,
-});
-
-// `**/testing` covers a test kit at every depth, by package name or by relative path.
-const testKit: Pattern = {
-  group: ["**/testing", "**/testing/**", "./testing", "./testing/*", "../testing", "../testing/*"],
-  message: "Production code never imports the test kit.",
-};
-
-// Another package is reached by its name and its exports, never by a relative path into
-// it, so the fences on package names cannot be walked around. All code lives in `src/`,
-// so a relative path into another package names a `src`, and one within a package never
-// does, however deep the file.
+// Another package is reached by its name, never by a relative path into its `src`.
 const outOfPackage: Pattern = {
   group: ["**/src", "**/src/**"],
   message: "Import another package by its name, such as `@iirc/protocol/line`.",
 };
 
-// Production code never reaches Effect's test kit, such as `TestClock`.
-const effectTesting: Pattern = {
-  group: ["effect/testing", "effect/testing/*"],
+const testKit: Pattern = {
+  group: ["**/testing", "**/testing/**", "effect/testing", "effect/testing/*"],
   message: "Production code never imports a test kit.",
 };
 
-interface Path {
-  readonly allowImportNames?: string[];
-  readonly importNames?: string[];
-  readonly message: string;
-  readonly name: string;
-}
+const adapters: Pattern = {
+  group: ["bun", "bun:*", "node:*", "@effect/*", "effect/unstable/*"],
+  message: "Adapters live in their own packages, and the core and Runtime reach none of them.",
+};
 
-const restrictImports = (
-  paths: readonly Path[],
-  patterns: readonly Pattern[]
-): NonNullable<DummyRuleMap["no-restricted-imports"]> => [
+// `@iirc/*` matches one segment only, so subpaths such as `@iirc/runtime/journal` need `/**`.
+const ours = (allowed: readonly string[], message: string): Pattern => ({
+  group: ["@iirc/*", "@iirc/*/**", ...allowed.map((name) => `!${name}`)],
+  message,
+});
+
+const pure = "The core is pure: time arrives on inputs, and effects leave as outputs.";
+
+// What runs, reads time or randomness, or reaches out, from the `effect` barrel or by subpath.
+const effectful = ["Clock", "Console", "DateTime", "Effect", "FileSystem", "Random"];
+
+const imports = (production: boolean, ...patterns: readonly Pattern[]): Imports => [
   "error",
-  { paths: [...paths], patterns: [...patterns, outOfPackage] },
+  { patterns: [outOfPackage, ...patterns, ...(production ? [testKit] : [])] },
 ];
 
-const imports = (...patterns: readonly Pattern[]) => restrictImports([], patterns);
-
-// `Hash.random` hashes by a random number. The `random` property is refused everywhere,
-// and this refuses it as a named import.
-const randomHashImport = { importNames: ["random"], message: pure, name: "effect/Hash" };
-
-const pureImports = (...patterns: readonly Pattern[]) =>
-  restrictImports(
-    [effectPath(pureEffect, pure), wallClockImport(pure), randomHashImport, ...ambientImports],
-    [impureModules, effectSubpaths(pureEffect, pureSubpaths, pure), ...patterns]
-  );
-
-// The global object itself is refused too, so `globalThis.Date` or an alias of
-// `globalThis` cannot reach what is refused by name.
-const globalObjects = ["globalThis", "self", "window", "global"];
-
-const restrictGlobals = (
-  ...groups: readonly { readonly message: string; readonly names: readonly string[] }[]
-): NonNullable<DummyRuleMap["no-restricted-globals"]> => [
+const coreImports = (production: boolean, ...patterns: readonly Pattern[]): Imports => [
   "error",
   {
-    checkGlobalObject: true,
-    globalObjects,
-    globals: groups.flatMap(({ message, names }) => names.map((name) => ({ message, name }))),
+    paths: [{ importNames: effectful, message: pure, name: "effect" }],
+    patterns: [
+      outOfPackage,
+      adapters,
+      { group: effectful.map((name) => `effect/${name}`), message: pure },
+      ...patterns,
+      ...(production ? [testKit] : []),
+    ],
   },
 ];
 
-const noClock = restrictGlobals({
-  message: pure,
-  names: [
+const globals = (message: string): NonNullable<DummyRuleMap["no-restricted-globals"]> => [
+  "error",
+  ...[
     "Date",
     "setTimeout",
     "setInterval",
-    "setImmediate",
-    "queueMicrotask",
     "performance",
+    "Intl",
     "crypto",
     "fetch",
-    "WebSocket",
-    "XMLHttpRequest",
-    "EventSource",
     "process",
     "Bun",
-    "require",
-    "Intl",
-    "Temporal",
-    "navigator",
     "console",
-    ...globalObjects,
-  ],
-});
+  ].map((name) => ({ message, name })),
+];
 
-const toClient = "`@iirc/client` depends only on `@iirc/protocol`.";
+const noMathRandom = (message: string): NonNullable<DummyRuleMap["no-restricted-properties"]> => [
+  "error",
+  { message, object: "Math", property: "random" },
+];
+
+const throughPorts =
+  "The Runtime reaches the world through its ports, time through Effect's Clock, and randomness through Effect's Random.";
+
 const toNothing = ours([], "`@iirc/protocol` depends on no other package of ours.");
+const toProtocol = ours(["@iirc/protocol/*"], "`@iirc/client` depends only on `@iirc/protocol`.");
 
-// The Runtime may use Effect's services, but reads time only through the Clock port, so
-// that `TestClock` drives it, and reaches no adapter.
-const adapters: Pattern = {
-  group: ["bun", "bun:*", "node:*", "@effect/*", "effect/unstable/*"],
-  message:
-    "The Runtime reaches the world only through its ports. Adapters live in their own packages.",
-};
-
-const toRuntime = "`@iirc/runtime` depends only on `@iirc/client` and `@iirc/protocol`.";
-const runtimeOurs = ours(["@iirc/client", "@iirc/client/known", "@iirc/protocol/*"], toRuntime);
-
-// The Runtime's tests and test kit may also drive it with the scripted Client.
-const runtimeTestOurs = ours(
-  ["@iirc/client", "@iirc/client/known", "@iirc/client/testing", "@iirc/protocol/*"],
-  toRuntime
-);
-
-const throughClock = "The Runtime reads time only through the Clock port.";
-const throughPorts = "The Runtime reaches the world only through its ports.";
-
-const runtimeGlobals = restrictGlobals(
-  {
-    message: throughClock,
-    // `Intl` and `Temporal` read the wall clock, the time zone, or the locale.
-    names: [
-      "Date",
-      "setTimeout",
-      "setInterval",
-      "setImmediate",
-      "queueMicrotask",
-      "performance",
-      "Intl",
-      "Temporal",
-    ],
-  },
-  {
-    message: throughPorts,
-    names: [
-      "fetch",
-      "WebSocket",
-      "XMLHttpRequest",
-      "EventSource",
-      "crypto",
-      "process",
-      "Bun",
-      "require",
-      "navigator",
-      // The Runtime logs through Effect, so a test can see and silence it.
-      "console",
-      ...globalObjects,
-    ],
-  }
-);
-
-const runtimeProperties = restrictProperties(
-  throughClock,
-  "The Runtime takes randomness from Effect's Random.",
-  { message: throughClock, property: "clockWith" },
-  { message: throughPorts, property: "toFile" }
-);
-
-// `Logger.toFile` opens a file through FileSystem, around the ports.
-const toFileImport = { importNames: ["toFile"], message: throughPorts, name: "effect/Logger" };
-
-// Every Runtime file, tests included, reaches no adapter and reads no wall clock.
-const clockWithImport = {
-  importNames: ["clockWith"],
-  message: throughClock,
-  name: "effect/Effect",
-};
-
-const runtimeImports = (...patterns: readonly Pattern[]) =>
-  restrictImports(
+// A negation un-blocks every group, so the Runtime's allowed subpaths are listed exactly,
+// and only its tests may import the scripted Client.
+const toClient = (production: boolean) =>
+  ours(
     [
-      wallClockImport(throughClock),
-      clockWithImport,
-      toFileImport,
-      effectPath([...runtimeEffect, ...timeModules], throughPorts),
+      "@iirc/client",
+      "@iirc/client/known",
+      "@iirc/protocol/*",
+      ...(production ? [] : ["@iirc/client/testing"]),
     ],
-    [
-      adapters,
-      effectSubpaths(
-        [...runtimeEffect, ...timeModules],
-        ["effect/testing", "effect/testing/*"],
-        throughPorts
-      ),
-      ...patterns,
-    ]
+    "`@iirc/runtime` depends only on `@iirc/client` and `@iirc/protocol`."
   );
-
-// Production code reads time only in `clock.ts`: Effect's `Clock`, and `DateTime`, whose
-// `now` reads it too, are imported nowhere else. Nor is `effect/testing`.
-const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly Pattern[]) => {
-  const allowed = clock === "allowed" ? [...runtimeEffect, ...timeModules] : runtimeEffect;
-
-  return restrictImports(
-    [
-      wallClockImport(throughClock),
-      clockWithImport,
-      toFileImport,
-      effectPath(allowed, throughPorts),
-    ],
-    [adapters, effectSubpaths(allowed, [], throughPorts), ...patterns, effectTesting]
-  );
-};
 
 const tests = ["**/*.test.ts", "**/testing/**"];
 
+// Each layer's rules, once for every file and once more, with the test kits refused, for
+// production code.
+const layer = (files: string[], rules: (production: boolean) => DummyRuleMap): OxlintOverride[] => [
+  { files, rules: rules(false) },
+  { excludeFiles: tests, files, rules: rules(true) },
+];
+
+const coreRules = (to: Pattern) => (production: boolean) => ({
+  "no-restricted-globals": globals(pure),
+  "no-restricted-imports": coreImports(production, to),
+  "no-restricted-properties": noMathRandom(pure),
+});
+
 const coreFence: OxlintOverride[] = [
+  ...layer(["packages/*/src/**", "apps/*/src/**"], (production) => ({
+    "no-restricted-imports": imports(production),
+  })),
+  ...layer(["packages/protocol/src/**"], coreRules(toNothing)),
+  ...layer(["packages/client/src/**"], coreRules(toProtocol)),
+  ...layer(["packages/runtime/src/**"], (production) => ({
+    "no-restricted-globals": globals(throughPorts),
+    "no-restricted-imports": imports(production, adapters, toClient(production)),
+    "no-restricted-properties": noMathRandom(throughPorts),
+  })),
   {
-    // The import rules see a module only by name, so fenced code imports statically.
-    files: ["packages/protocol/src/**", "packages/client/src/**", "packages/runtime/src/**"],
-    rules: { "fence/no-dynamic-import": "error" },
-  },
-  {
-    // Tests too reach another package only by its name.
-    files: ["packages/*/src/**", "apps/*/src/**"],
-    rules: { "no-restricted-imports": imports() },
-  },
-  {
-    excludeFiles: tests,
-    files: ["packages/*/src/**", "apps/*/src/**"],
-    rules: { "no-restricted-imports": imports(testKit, effectTesting) },
-  },
-  {
-    files: ["packages/protocol/src/**"],
+    // Views read `known` alone, so it imports nothing but ids.
+    files: ["packages/client/src/known.ts"],
     rules: {
-      "no-restricted-globals": noClock,
-      "no-restricted-imports": pureImports(toNothing),
-      "no-restricted-properties": noRandomOrNow,
-    },
-  },
-  {
-    excludeFiles: tests,
-    files: ["packages/protocol/src/**"],
-    rules: { "no-restricted-imports": pureImports(toNothing, testKit, effectTesting) },
-  },
-  {
-    files: ["packages/client/src/**"],
-    rules: {
-      "no-restricted-globals": noClock,
-      "no-restricted-imports": pureImports(ours(["@iirc/protocol/*"], toClient)),
-      "no-restricted-properties": noRandomOrNow,
-    },
-  },
-  {
-    excludeFiles: tests,
-    files: ["packages/client/src/**"],
-    rules: {
-      "no-restricted-imports": pureImports(
-        ours(["@iirc/protocol/*"], toClient),
-        testKit,
-        effectTesting
-      ),
-    },
-  },
-  {
-    files: ["packages/runtime/src/**"],
-    rules: {
-      "no-restricted-globals": runtimeGlobals,
-      "no-restricted-imports": runtimeImports(runtimeTestOurs),
-      "no-restricted-properties": runtimeProperties,
-    },
-  },
-  {
-    excludeFiles: tests,
-    files: ["packages/runtime/src/**"],
-    rules: {
-      "no-restricted-imports": runtimeProduction("refused", runtimeOurs, testKit),
-    },
-  },
-  {
-    // The Clock port's helpers are the one place the Runtime reads Effect's Clock.
-    files: ["packages/runtime/src/clock.ts"],
-    rules: {
-      "no-restricted-imports": runtimeProduction("allowed", runtimeOurs, testKit),
-    },
-  },
-  {
-    // Views read `known` alone, so it cannot reach the Client's inputs, outputs, or Features.
-    // The fence test lints its probes for `known` under the second name.
-    files: ["packages/client/src/known.ts", "packages/client/src/known-fence-probe-*.ts"],
-    rules: {
-      "no-restricted-imports": pureImports(
-        ours([], "`known` imports nothing of ours but ids."),
+      "no-restricted-imports": [
+        "error",
         {
-          // An allowlist: every import is refused but `./ids.ts`.
-          group: ["*", "**", "./*", "./**", "../*", "../**", "!./ids.ts"],
-          message: "`known` imports nothing but ids.",
+          patterns: [
+            {
+              group: ["*", "**", "./*", "./**", "../*", "../**", "!./ids.ts"],
+              message: "`known` imports nothing but ids.",
+            },
+          ],
         },
-        testKit,
-        effectTesting
-      ),
+      ],
     },
   },
 ];
@@ -516,10 +156,7 @@ export default defineConfig({
   ...(core.env && { env: core.env }),
   extends: [core, antiSlop, jsPlugins, vitest, effect],
   ignorePatterns: core.ignorePatterns ?? [],
-  jsPlugins: [
-    ...jsPlugins.jsPlugins,
-    { name: "fence", specifier: "./packages/fence/src/plugin.ts" },
-  ],
+  jsPlugins: jsPlugins.jsPlugins,
   options: { typeAware: true, typeCheck: true },
   overrides: coreFence,
   rules: {

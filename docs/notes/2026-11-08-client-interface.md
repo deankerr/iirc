@@ -141,6 +141,10 @@ The ninth review audited every export of the allowed modules, one by one, and fo
 
 The audit found nothing else in the allowed modules that reads time, randomness, the environment, or the world, outside Effect's Clock and Random services.
 
+The tenth review found three more: Schemas that make a native `Date`, whose getters read the time zone; `Hash`, which hashes a function with `Math.random`; and the Client's README, which claimed a replay law that is not built yet.
+
+**So the fence was stripped back (2026-11-09).** Ten rounds had each found new corners of Effect's API, and the fence was growing faster than the code it guarded. A lint rule can only refuse names, and purity is not a property of names. The fence now catches only what is cheap to catch by name: dependencies that point the wrong way, test kits in production code, adapters, and the obvious globals such as `Date`, `console`, and `Math.random`. The rule itself is stated in `AGENTS.md`. Review holds the rest, and so will the replay law, run in a fresh process, once the transcript test kit is built. The allowlist, the property bans, the `fence` plugin, and `packages/fence` and its probe tests are gone. The Runtime may now read Effect's `Clock` anywhere, because Effect's `Clock` is the Clock port, so `TestClock` drives every read of it.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:

@@ -14,6 +14,12 @@ This project uses Ultracite with Oxlint + Oxfmt and Lefthook to enforce strict c
 - **Check for issues**: `bunx ultracite check`
 - **Diagnose setup**: `bunx ultracite doctor`
 
+# Determinism
+
+`@iirc/protocol` and `@iirc/client` are pure functions of their inputs. They never read the clock, randomness, the locale, the time zone, the environment, or the world, and Client state holds only plain data: strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. The Runtime reaches the world only through its ports, reads time only through Effect's `Clock`, and takes randomness only from Effect's `Random`.
+
+The lint fence in `oxlint.config.ts` catches the obvious slips by name, such as `Date.now()`, `console`, or an import of an adapter or a test kit. It is deliberately small. Review catches the rest, and the replay law, once the transcript test kit is built, proves it. A gap the fence misses is fixed in the code and named in review, not added to the fence.
+
 # Reference Repos
 
 When writing Effect code, inspect `~/code/ref/effect` for examples of idiomatic usage, tests, module structure, and API design. Treat it as the source of truth for Effect v4 patterns.

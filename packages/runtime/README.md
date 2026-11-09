@@ -11,7 +11,7 @@ This README is the ports' written interface. The types are in `src/`, the in-mem
 | Vault | Hold Credentials, give a value at the last moment | `@iirc/runtime/vault` | `makeMemoryVault` |
 | Clock | Tell the time, and wake at a time | `@iirc/runtime/clock` | `TestClock` from `effect/testing` |
 
-Each port is an Effect service. An adapter provides it as a Layer, from its own package, which the Runtime never imports. The lint fence keeps Bun, Node, and `@effect/*` out of `src/`, along with `fetch`, `WebSocket`, `crypto`, and `process`. Effect itself is fenced by allowlist: the Runtime may use the modules that run, wait for, and compose Effects, such as `Effect`, `Stream`, `Queue`, and `Layer`, and pure data and Schema. Every other module is refused, including platform services such as `FileSystem`, `Config`, `Cron`, `effect/crypto`, and packages such as `effect/sql`. So are `Logger.toFile`, which writes through `FileSystem`, and `import()`, which the import rules cannot see into. Neither can be reached through `globalThis`, `self`, `window`, or `global`, which are refused too. Nor can `DateTime`'s functions that read the wall clock or the system's time zone, such as `nowUnsafe`, by any name or import, nor `Intl`, `Temporal`, or `console`. Another package is reached only by its name, never by a relative path into it. Time is read only through the Clock port: production code outside `clock.ts` may not import Effect's `Clock` or `DateTime`, or call `Effect.clockWith`, and no production code may import `effect/testing`. [`packages/fence`](../fence/README.md) tests every one of these.
+Each port is an Effect service. An adapter provides it as a Layer, from its own package, which the Runtime never imports. So the Runtime uses no platform service, such as `FileSystem`, `Config`, or a socket, reads no wall clock, such as `DateTime.nowUnsafe`, and builds no Logger: it logs with `Effect.log*`, and the composition root builds the Logger. The lint fence catches the obvious cases, such as Bun, Node, `@effect/*`, `effect/unstable/*`, `Date`, `fetch`, `process`, `console`, and `Math.random`, and another package reached by a relative path. Review catches the rest.
 
 ## Transport
 
@@ -73,7 +73,7 @@ now: Effect<Instant>
 sleepUntil(at: Instant): Effect<void>
 ```
 
-The Clock port is Effect's own `Clock`. Its live adapter is the default Clock, and its test adapter is `TestClock`. Every input's `at` comes from `now`, and every timer in the timer table is waited for with `sleepUntil`. The Runtime reads time no other way, which the lint fence enforces, so a test drives all of it with `TestClock.adjust`.
+The Clock port is Effect's own `Clock`. Its live adapter is the default Clock, and its test adapter is `TestClock`. Every input's `at` comes from `now`, and every timer in the timer table is waited for with `sleepUntil`. The Runtime reads time no other way, so a test drives all of it with `TestClock.adjust`.
 
 ## The laws
 
