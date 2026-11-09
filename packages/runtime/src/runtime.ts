@@ -15,8 +15,19 @@ import type {
 } from "@iirc/client";
 import type { Knowledge } from "@iirc/client/known";
 import { FallbackEncoding, missingDecoders } from "@iirc/protocol/line";
-import { Context, Effect, Exit, Layer, Random, Ref, Schema, Scope, Semaphore } from "effect";
-import type { Stream } from "effect";
+import {
+  Context,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Random,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import { Journal, NetworkId } from "./journal.ts";
 import type { JournalFailed, Sequence } from "./journal.ts";
@@ -55,8 +66,10 @@ export interface Saying {
   readonly text: string;
   /**
    * The intent id to say it under. Left out, the Runtime names one. A caller that names
-   * its own knows it before the `Say` is stepped, so after a `NetworkStopped` it can look
-   * for it in the News rather than say it again.
+   * its own knows it before the `Say` is stepped, so after a `NetworkStopped` it can ask
+   * `said` rather than say it again. It must be unique for the Network across its whole
+   * Journal, calls in flight included: the Runtime correlates by it, and never
+   * deduplicates.
    */
   readonly intent?: IntentId | undefined;
 }
@@ -87,6 +100,15 @@ export interface RuntimeService {
     { readonly intent: IntentId; readonly sequence: Sequence },
     UnknownNetwork | NetworkStopped
   >;
+  /**
+   * Whether a `Say` under this intent was journaled for the Network, by its sequence.
+   * It reads the Network's Inputs once, to the Journal's end as it stood, and ends. A
+   * `Say` journaled is stepped on restart, but its Line may not have been sent.
+   */
+  readonly said: (
+    network: NetworkId,
+    intent: IntentId
+  ) => Effect.Effect<Option.Option<Sequence>, JournalFailed>;
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
@@ -227,6 +249,17 @@ export const makeRuntime = <S>(
       news: (from = {}) => newsAfter(client, ports.journal, from.after),
       retry: (id) =>
         Effect.flatMap(find(id), (network) => tell(network, (at) => ({ _tag: "Retry", at }))),
+      said: (id, intent) =>
+        ports.journal.read({ network: id }).pipe(
+          Stream.filter(
+            ({ record }) =>
+              record._tag === "Input" &&
+              record.input._tag === "Say" &&
+              record.input.intent === intent
+          ),
+          Stream.runHead,
+          Effect.map(Option.map(({ sequence }) => sequence))
+        ),
       say: (id, saying) =>
         Effect.gen(function* () {
           const network = yield* find(id);

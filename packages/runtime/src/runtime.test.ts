@@ -4,7 +4,7 @@ import { configured, scripted } from "@iirc/client/testing";
 import type { Scripted } from "@iirc/client/testing";
 import { CredentialName, isRejected, nick, privmsg } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected } from "@iirc/protocol/line";
-import { Effect, Exit, Fiber, Latch, Redacted, References, Schema, Stream } from "effect";
+import { Effect, Exit, Fiber, Latch, Option, Redacted, References, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -586,6 +586,43 @@ const brief = (happened: Happened) =>
     )
     .join(" ")}`;
 
+describe("`said`", () => {
+  it("finds a Say journaled under an intent, only on its Network, and nothing else", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, scripted([]));
+        const mine = IntentId.make("mine");
+
+        yield* runtime.configure(libera, configuration);
+        yield* runtime.configure(oftc, configuration);
+
+        const { sequence } = yield* runtime.say(libera, {
+          intent: mine,
+          kind: "Privmsg",
+          target: "#iirc",
+          text: "hi",
+        });
+
+        return {
+          absent: yield* runtime.said(libera, IntentId.make("other")),
+          elsewhere: yield* runtime.said(oftc, mine),
+          present: yield* runtime.said(libera, mine),
+          sequence,
+          unknown: yield* runtime.said(NetworkId.make("nowhere"), mine),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      absent: Option.none(),
+      elsewhere: Option.none(),
+      present: Option.some(result.sequence),
+      sequence: 3,
+      unknown: Option.none(),
+    });
+  });
+});
+
 describe("the News stream", () => {
   it("gives every Network's News from a sequence, in order, then live", async () => {
     const result = await runTest((world) =>
@@ -738,6 +775,7 @@ describe("closing the Runtime", () => {
         const news = yield* Stream.runCollect(Stream.take(second.runtime.news(), 2));
 
         return {
+          found: yield* second.runtime.said(libera, intent),
           news: news.flatMap((happened) => happened.news),
           outline: yield* outline(world.journal),
           said,
@@ -746,11 +784,46 @@ describe("closing the Runtime", () => {
     );
 
     expect(result).toStrictEqual({
-      // The caller finds its intent in the News, so it knows the Say was journaled.
+      // `said` finds the Say, which the restart folded before its Started.
+      found: Option.some(2),
       news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }, told("STARTED")],
       outline: ["1 libera Configured", "2 libera Say", "3 libera Started"],
       said: Exit.fail(closedFor(libera)),
     });
+  });
+
+  it("fails an input stopped before its append, which `said` then finds absent", async () => {
+    const intent = IntentId.make("mine");
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const gate = yield* Latch.make(true);
+
+        // Waits just before the Say is appended.
+        const journal = wrapJournal(world.journal, {
+          before: (record) =>
+            record._tag === "Input" && record.input._tag === "Say" ? gate.await : Effect.void,
+        });
+
+        const first = yield* startRuntime({ ...world, journal }, scripted([]));
+
+        yield* first.runtime.configure(libera, configuration);
+        yield* gate.close;
+
+        const saying = yield* Effect.forkChild(
+          first.runtime.say(libera, { intent, kind: "Privmsg", target: "#iirc", text: "hi" })
+        );
+
+        yield* settle;
+        yield* first.close;
+        const said = yield* Fiber.await(saying);
+        const second = yield* startRuntime(world, scripted([]));
+
+        return { found: yield* second.runtime.said(libera, intent), said };
+      })
+    );
+
+    expect(result).toStrictEqual({ found: Option.none(), said: Exit.fail(closedFor(libera)) });
   });
 
   it("fails an Owner input given after it closed at once", async () => {
