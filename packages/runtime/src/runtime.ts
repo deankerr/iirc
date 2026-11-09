@@ -20,8 +20,8 @@ import type { Stream } from "effect";
 
 import { Journal, NetworkId } from "./journal.ts";
 import type { JournalFailed, Sequence } from "./journal.ts";
-import { startNetwork, tell } from "./network.ts";
-import type { Network, NetworkStatus, NetworkStopped, Ports } from "./network.ts";
+import { NetworkStopped, runtimeClosed, startNetwork, tell } from "./network.ts";
+import type { Network, NetworkStatus, Ports } from "./network.ts";
 import { fresh, newsAfter, refold } from "./replay.ts";
 import type { Happened } from "./replay.ts";
 import { Transport } from "./transport.ts";
@@ -147,6 +147,11 @@ export const makeRuntime = <S>(
       yield* Ref.update(held, (networks) => new Map(networks).set(id, started));
     }
 
+    // Set first on shutdown, before any Network stops, so no Network is added after.
+    const closed = yield* Ref.make(false);
+
+    yield* Effect.addFinalizer(() => Ref.set(closed, true));
+
     const find = (id: NetworkId) =>
       Effect.flatMap(Ref.get(held), (networks) => {
         const network = networks.get(id);
@@ -158,11 +163,15 @@ export const makeRuntime = <S>(
 
     const findOrAdd = (id: NetworkId) =>
       adding.withPermit(
-        Effect.flatMap(Ref.get(held), (networks) => {
+        Effect.flatMap(Effect.all([Ref.get(held), Ref.get(closed)]), ([networks, over]) => {
           const network = networks.get(id);
 
           if (network !== undefined) {
             return Effect.succeed(network);
+          }
+
+          if (over) {
+            return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
           }
 
           return startNetwork(ports, id, fresh(client), false).pipe(

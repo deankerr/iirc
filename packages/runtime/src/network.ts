@@ -39,6 +39,9 @@ export class NetworkStopped extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("NetworkStopped", { network: Schema.String, reason: Schema.String }) {}
 
+/** Why every Network stops when the Runtime's Scope closes. */
+export const runtimeClosed = "The Runtime closed";
+
 /** What waits in a Network's queue, before it is given its `at` and journaled. */
 type Pending =
   | {
@@ -451,6 +454,9 @@ export const startNetwork = <S>(
             stop(network, stoppedReason(cause))
           )
       ),
+      // Shutdown is no failure, so it is not logged as one, but an Owner input still
+      // waiting is told the Network has stopped.
+      Effect.onInterrupt(() => stop(network, runtimeClosed)),
       Effect.annotateLogs({ network: id }),
       Effect.forkScoped
     );

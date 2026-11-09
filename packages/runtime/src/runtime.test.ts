@@ -633,7 +633,67 @@ describe("the News stream", () => {
   });
 });
 
+const closedFor = (network: NetworkId) =>
+  new NetworkStopped({ network, reason: "The Runtime closed" });
+
 describe("closing the Runtime", () => {
+  it("fails an Owner input still waiting, marks the Network stopped, and logs no error", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const gate = yield* Latch.make(true);
+        const journal = wrapJournal(world.journal, { before: () => gate.await });
+        const { close, runtime } = yield* startRuntime({ ...world, journal }, scripted([]));
+
+        yield* runtime.configure(libera, configuration);
+        // The next append waits, so this Configured is pending when the Runtime closes.
+        yield* gate.close;
+        const pending = yield* Effect.forkChild(runtime.configure(libera, configuration));
+
+        yield* settle;
+        yield* close;
+
+        return {
+          errors: world.logged.filter((logged) => logged.level === "Error"),
+          exit: yield* Fiber.await(pending),
+          networks: yield* runtime.networks,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      errors: [],
+      exit: Exit.fail(closedFor(libera)),
+      networks: new Map<NetworkId, NetworkStatus>([
+        [libera, { _tag: "Stopped", reason: "The Runtime closed" }],
+      ]),
+    });
+  });
+
+  it("fails an Owner input given after it closed at once", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { close, runtime } = yield* startRuntime(world, scripted([]));
+
+        yield* runtime.configure(libera, configuration);
+        yield* close;
+
+        return yield* Effect.all([
+          Effect.flip(runtime.configure(libera, configuration)),
+          Effect.flip(runtime.retry(libera)),
+          Effect.flip(runtime.say(libera, { kind: "Privmsg", target: "#iirc", text: "hi" })),
+          Effect.flip(runtime.configure(oftc, configuration)),
+        ]);
+      })
+    );
+
+    expect(result).toStrictEqual([
+      closedFor(libera),
+      closedFor(libera),
+      closedFor(libera),
+      closedFor(oftc),
+    ]);
+  });
+
   it("hangs up every Connection and stops every timer", async () => {
     const result = await runTest((world) =>
       Effect.gen(function* () {

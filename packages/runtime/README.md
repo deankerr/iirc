@@ -20,7 +20,7 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 
 `Runtime` is an Effect service, imported from `@iirc/runtime`. `layerRuntime` takes the Client to drive, which is `client` from `@iirc/client` in the Daemon and a scripted Client in tests, and needs the Transport, the Journal, and the Vault. It reads time from Effect's `Clock`, and names intents with Effect's `Random`. Closing the Layer's Scope is shutdown.
 
-- **Owner inputs wait until they are stepped.** `configure`, `say`, and `retry` give the Input's sequence once it is journaled, stepped, and its outputs carried out. `say` names the intent, so its `Refused`, `Message`, and `Confirmed` News can be matched to it. A Network that has stopped fails them with `NetworkStopped`.
+- **Owner inputs wait until they are stepped.** `configure`, `say`, and `retry` give the Input's sequence once it is journaled, stepped, and its outputs carried out. `say` names the intent, so its `Refused`, `Message`, and `Confirmed` News can be matched to it. A Network that has stopped fails them with `NetworkStopped`, at once or as it stops, so none waits forever. Closing the Runtime stops every Network with the reason `The Runtime closed`, and fails every call made after, including a `configure` that would add a Network.
 - **`known` and `inspect` read the Client as it is now.** `inspect` adds what the Runtime holds: whether the Network is running, the Connections it holds a Link for, and the timers it has set.
 - **News is derived from the Journal.** `news` follows the Journal from the start, folds each Network's Inputs from `initial`, and gives each step's News with its Network, the sequence of its Input, and its `at`, for steps after `after`, and then live. A reader that resumes after the last sequence it has misses nothing, and sees exactly what the Runtime's own fold saw. Each reader folds from the start, which is simple and costs time on a long Journal. Snapshots or a shared projection can come when one is slow.
 
@@ -28,12 +28,14 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 
 Each Network has one fiber, which takes its inputs one at a time from one queue: Owner inputs, Transport events, and timer firings. The queue is bounded, so a flooding Ircd waits on its own socket rather than growing memory. For each input, in order:
 
-1. Give it its `at`, from the Clock, as it is taken from the queue, so `at` never goes back in Journal order.
+1. Give it its `at`, from the Clock, sampled when processing of the input begins.
 2. Append the `Input`.
 3. Step the Client.
 4. Append its `Outputs` with `of` set to the Input's sequence. A step with no outputs appends none.
 5. Carry out the outputs, in order.
 6. Step each `SendSecret` that could not be filled as an `Unfilled`, in order, the same way.
+
+The sequence alone orders the Journal. Networks run side by side, so one may sample its `at` before another and append after it, and a Clock may move backwards, so `at` is not ordered by sequence. A Timeline orders by `at` within its Network, as [the Client's README](../client/README.md#news) says.
 
 Carrying out each output:
 
@@ -58,7 +60,7 @@ A Connection open at shutdown is over, and the `Started` says so to the Client. 
 - **A `JournalFailed` stops its Network.** The Runtime does not step an input it did not keep, or carry out outputs it did not keep. The Network's Connections are hung up and its timers stopped, it reports `Stopped` with the reason, the failure is logged, and other Networks carry on. It stays stopped until the Runtime starts again.
 - **A defect stops only its Network.** The Client is total, so one that throws has a bug. That Network stops as above. On restart its refold stops at the same input, so it stays stopped, with the state from before that input, and the other Networks start.
 - **An Ircd reaches only its own Network.** Its bytes go to its own Client through its own queue.
-- **Shutdown** stops every Network's fiber, hangs up every Connection, and stops every timer. Nothing that happens after is journaled. A graceful `QUIT` on shutdown can come later, as an input the Client answers.
+- **Shutdown** stops every Network's fiber, hangs up every Connection, and stops every timer. Nothing that happens after is journaled. Each Network reports `Stopped` with `The Runtime closed`, which is not logged as an error, and an Owner input still waiting fails with `NetworkStopped`. A graceful `QUIT` on shutdown can come later, as an input the Client answers.
 
 Every log goes through `Effect.log*`, annotated with the Network.
 
