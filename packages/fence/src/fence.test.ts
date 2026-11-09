@@ -37,9 +37,19 @@ type Diagnostic = (typeof Report.Type)["diagnostics"][number];
 
 const probes: readonly Probe[] = [
   {
-    allowed: ['import { DateTime as Time, Schema } from "effect";'],
+    allowed: [
+      'import { DateTime as Time, Schema } from "effect";',
+      'import { Option, Result } from "effect";',
+      'import * as Base64 from "effect/encoding/Base64";',
+      'import * as SchemaModule from "effect/Schema";',
+    ],
     directory: "packages/protocol/src",
     refused: [
+      'import { FileSystem } from "effect";',
+      'import { Cron } from "effect";',
+      'import { uuidV4Unsafe } from "effect/crypto/SecureRandom";',
+      'import { random } from "effect/encoding/Hex";',
+      'import * as Http from "effect/http";',
       'import { Client } from "@iirc/client";',
       'import { Knowledge } from "@iirc/client/known";',
       'import { Effect } from "effect";',
@@ -80,6 +90,8 @@ const probes: readonly Probe[] = [
     allowed: [
       'import { Effect, Stream } from "effect";',
       'import { Effect as Fx } from "effect";',
+      'import { Queue, Semaphore } from "effect";',
+      'import * as PubSubModule from "effect/PubSub";',
       'import { Input } from "@iirc/client";',
       'import { Line } from "@iirc/protocol/line";',
       'import { Journal } from "./journal.ts";',
@@ -95,6 +107,11 @@ const probes: readonly Probe[] = [
       'export { makeMemoryTransport } from "./testing";',
       'export { makeMemoryJournal } from "./testing/memory-journal.ts";',
       'import { Client } from "../../client/src/client.ts";',
+      'import { FileSystem } from "effect";',
+      'import * as FileSystemModule from "effect/FileSystem";',
+      'import { Config } from "effect";',
+      'import { Cron } from "effect";',
+      'import { uuidV4Unsafe } from "effect/crypto/SecureRandom";',
       'import { DateTime } from "effect";',
       'import * as DateTimeModule from "effect/DateTime";',
       "export const clockRead = Effect.clockWith;",
@@ -119,9 +136,11 @@ const probes: readonly Probe[] = [
       'import { TestClock } from "effect/testing";',
       'import { scripted } from "@iirc/client/testing";',
       'import { Journal } from "../journal.ts";',
+      'import { DateTime } from "effect";',
     ],
     directory: "packages/runtime/src/testing",
     refused: [
+      'import { FileSystem } from "effect";',
       'import { readFileSync } from "node:fs";',
       'import { scripted as relative } from "../../../client/src/testing/scripted.ts";',
       'import { nowUnsafe } from "effect/DateTime";',

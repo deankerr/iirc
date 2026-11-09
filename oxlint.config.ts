@@ -18,31 +18,120 @@ interface Pattern {
 
 const pure = "The core is pure: time arrives on inputs and effects leave as outputs.";
 
-// Effect's services, which the core may not use whether imported from `effect` or by path.
-const services = [
-  "Clock",
-  "Console",
+// Effect is fenced by allowlist, because it is large and grows: platform services such
+// as FileSystem, randomness such as SecureRandom, and whole packages such as `effect/sql`
+// sit beside its pure modules. Each layer names the modules it may use, from the `effect`
+// barrel or by subpath, and every other one is refused.
+//
+// The core may use pure data and Schema, and nothing that runs, waits, or reaches out.
+const pureEffect = [
+  "Array",
+  "BigDecimal",
+  "BigInt",
+  "Boolean",
+  "Brand",
+  "Chunk",
+  "Data",
+  "DateTime",
+  "Duration",
+  "Equal",
+  "Equivalence",
+  "Filter",
+  "Function",
+  "Hash",
+  "HashMap",
+  "HashSet",
+  "Inspectable",
+  "Iterable",
+  "Match",
+  "NonEmptyIterable",
+  "Number",
+  "Option",
+  "Order",
+  "Ordering",
+  "Pipeable",
+  "Predicate",
+  "Record",
+  "Redacted",
+  "RegExp",
+  "Result",
+  "Schema",
+  "SchemaAST",
+  "SchemaGetter",
+  "SchemaIssue",
+  "SchemaParser",
+  "SchemaTransformation",
+  "String",
+  "Struct",
+  "Trie",
+  "Tuple",
+  "Types",
+  "UndefinedOr",
+];
+
+// SASL PLAIN is base64, so the core may encode it.
+const pureSubpaths = ["effect/encoding/Base64"];
+
+// The Runtime may also run, wait for, and compose Effects. It may not use a platform
+// service, read configuration from the environment, or use Cron, whose schedule starts
+// from the wall clock unless told otherwise. `DateTime` and `Clock` read time, so only
+// `clock.ts` and tests have them.
+const runtimeEffect = [
+  ...pureEffect.filter((name) => name !== "DateTime"),
+  "Cause",
   "Context",
+  "Deferred",
   "Effect",
+  "Exit",
   "Fiber",
+  "FiberHandle",
+  "FiberMap",
+  "FiberSet",
+  "Latch",
   "Layer",
+  "LogLevel",
+  "Logger",
+  "Metric",
+  "PubSub",
   "Queue",
   "Random",
   "Ref",
+  "References",
   "Schedule",
+  "Scheduler",
   "Scope",
+  "Semaphore",
+  "Sink",
   "Stream",
-] as const;
+  "SubscriptionRef",
+  "SynchronizedRef",
+  "Take",
+  "Tracer",
+];
+
+const timeModules = ["Clock", "DateTime"];
+
+const effectPath = (allowed: readonly string[], message: string) => ({
+  allowImportNames: [...allowed],
+  message,
+  name: "effect",
+});
+
+const effectSubpaths = (
+  allowed: readonly string[],
+  subpaths: readonly string[],
+  message: string
+): Pattern => ({
+  group: [
+    "effect/**",
+    ...allowed.map((name) => `!effect/${name}`),
+    ...subpaths.map((subpath) => `!${subpath}`),
+  ],
+  message,
+});
 
 const impureModules: Pattern = {
-  group: [
-    "bun",
-    "bun:*",
-    "node:*",
-    "@effect/*",
-    "effect/unstable/*",
-    ...services.map((name) => `effect/${name}`),
-  ],
+  group: ["bun", "bun:*", "node:*", "@effect/*"],
   message: pure,
 };
 
@@ -111,7 +200,8 @@ const effectTesting: Pattern = {
 };
 
 interface Path {
-  readonly importNames: string[];
+  readonly allowImportNames?: string[];
+  readonly importNames?: string[];
   readonly message: string;
   readonly name: string;
 }
@@ -128,8 +218,8 @@ const imports = (...patterns: readonly Pattern[]) => restrictImports([], pattern
 
 const pureImports = (...patterns: readonly Pattern[]) =>
   restrictImports(
-    [{ importNames: [...services], message: pure, name: "effect" }, wallClockImport(pure)],
-    [impureModules, ...patterns]
+    [effectPath(pureEffect, pure), wallClockImport(pure)],
+    [impureModules, effectSubpaths(pureEffect, pureSubpaths, pure), ...patterns]
   );
 
 // The global object itself is refused too, so `globalThis.Date` or an alias of
@@ -243,29 +333,33 @@ const clockWithImport = {
 };
 
 const runtimeImports = (...patterns: readonly Pattern[]) =>
-  restrictImports([wallClockImport(throughClock), clockWithImport], [adapters, ...patterns]);
-
-// Production code reads time only in `clock.ts`: Effect's `Clock`, and `DateTime`, whose
-// `now` reads it too, are imported nowhere else.
-
-const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly Pattern[]) =>
   restrictImports(
     [
       wallClockImport(throughClock),
       clockWithImport,
-      ...(clock === "allowed"
-        ? []
-        : [{ importNames: ["Clock", "DateTime"], message: throughClock, name: "effect" }]),
+      effectPath([...runtimeEffect, ...timeModules], throughPorts),
     ],
     [
       adapters,
+      effectSubpaths(
+        [...runtimeEffect, ...timeModules],
+        ["effect/testing", "effect/testing/*"],
+        throughPorts
+      ),
       ...patterns,
-      effectTesting,
-      ...(clock === "allowed"
-        ? []
-        : [{ group: ["effect/Clock", "effect/DateTime"], message: throughClock }]),
     ]
   );
+
+// Production code reads time only in `clock.ts`: Effect's `Clock`, and `DateTime`, whose
+// `now` reads it too, are imported nowhere else. Nor is `effect/testing`.
+const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly Pattern[]) => {
+  const allowed = clock === "allowed" ? [...runtimeEffect, ...timeModules] : runtimeEffect;
+
+  return restrictImports(
+    [wallClockImport(throughClock), clockWithImport, effectPath(allowed, throughPorts)],
+    [adapters, effectSubpaths(allowed, [], throughPorts), ...patterns, effectTesting]
+  );
+};
 
 const tests = ["**/*.test.ts", "**/testing/**"];
 

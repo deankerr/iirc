@@ -87,7 +87,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 
 ## Invariants
 
-- **Pure.** `step` reads no clock and no randomness, and does no I/O. The lint fence keeps Effect's services, Bun, Node, and adapters out of `src/`.
+- **Pure.** `step` reads no clock and no randomness, and does no I/O. The lint fence keeps Bun, Node, and adapters out of `src/`, and allows only Effect's pure data modules and Schema, from an allowlist.
 - **Total.** `step` never throws, for any input in any state.
 - **Exact replay.** Folding the Journal's inputs from `initial` gives the same states, outputs, and News. The Client never reads its outputs back.
 - **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. The Runtime gives `due` back unchanged.

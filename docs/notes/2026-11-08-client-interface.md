@@ -123,6 +123,8 @@ The sixth review found five more, fixed the same day:
 - **`known.ts` could import from `effect`.** Its rule is now an allowlist: everything but `./ids.ts` is refused.
 - **Concurrent fence runs shared a probe directory,** so one run's cleanup could delete another's probe. Each run now makes its own.
 
+The seventh review found three more in Effect itself: `FileSystem` reached from the Runtime, `SecureRandom` and `Hex.random` in the core, and `Cron`, whose schedule starts from the wall clock unless told otherwise. Refusing Effect's modules one at a time would keep missing the next, so Effect is now fenced by allowlist. The core may use pure data and Schema, and `effect/encoding/Base64` for SASL. The Runtime may also run, wait for, and compose Effects. Everything else is refused, from the `effect` barrel or by subpath, and a new module needs a deliberate change to the list.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:
