@@ -200,9 +200,10 @@ const welcome = (run: Run, line: Line): void => {
     return;
   }
 
-  const { account } = open.presence;
+  // What registration sent, not what the Configuration says now.
+  const { account, realname } = open.presence;
   const [first] = line.params;
-  const nick = first ?? offered(run) ?? run.state.configuration?.nicks[0] ?? "*";
+  const nick = first ?? offered(run) ?? "*";
 
   welcomed(run);
 
@@ -227,12 +228,7 @@ const welcome = (run: Run, line: Line): void => {
       // the echo of our own `JOIN`.
       mask: { _tag: "Unknown" },
       nick,
-      realname: {
-        _tag: "Known",
-        at: phase.opened,
-        from: "ours",
-        value: run.state.configuration?.realname ?? "",
-      },
+      realname: { _tag: "Known", at: phase.opened, from: "ours", value: realname },
       server: line.source ?? link.ircd.host,
     },
   }));

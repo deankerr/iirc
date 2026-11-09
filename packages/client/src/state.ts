@@ -62,6 +62,10 @@ type Presence =
       readonly _tag: "Registering";
       /** Which nick is on offer: an index into the configured nicks, and past them the fallbacks. */
       readonly offer: number;
+      /** The nick on offer, as `NICK` sent it, whatever the Configuration says since. */
+      readonly nick: string | undefined;
+      /** The realname, as `USER` sent it, whatever the Configuration says since. */
+      readonly realname: string;
       readonly deadline: Instant;
       /** Self's account, if a login said so before `001`. */
       readonly account: Fact<string | null>;

@@ -118,7 +118,7 @@ const offerNick = (run: Run, from: number): void => {
       send(run, line, "NICK");
       updateOpen(run, (open) =>
         open.presence._tag === "Registering"
-          ? { ...open, presence: { ...open.presence, offer: index } }
+          ? { ...open, presence: { ...open.presence, nick: offer, offer: index } }
           : open
       );
 
@@ -153,7 +153,9 @@ export const begin = (run: Run): void => {
       account: { _tag: "Unknown" },
       deadline: Instant.make(run.at + registrationTime),
       hold: undefined,
+      nick: undefined,
       offer: 0,
+      realname: configuration.realname,
     },
     seam: freshSeam,
     users: new Map(),
@@ -183,17 +185,14 @@ export const nickRefused = (run: Run): void => {
 };
 
 /**
- * The nick on offer now.
+ * The nick on offer now, as `NICK` sent it.
  * @param run - The step.
  * @returns It, while registering.
  */
 export const offered = (run: Run): string | undefined => {
   const presence = openOf(run.state)?.presence;
-  const nicks = run.state.configuration?.nicks;
 
-  return presence?._tag === "Registering" && nicks !== undefined
-    ? offerAt(nicks, presence.offer, nickLength(run))
-    : undefined;
+  return presence?._tag === "Registering" ? presence.nick : undefined;
 };
 
 /**
@@ -624,11 +623,10 @@ const capList = (text: string): readonly (readonly [CapName, string])[] =>
 // that need one of them, so nothing refused before is asked for again.
 const wantedNow = (run: Run, held: Negotiated, only?: ReadonlySet<CapName>): readonly CapName[] =>
   capsWanted(
-    only === undefined
-      ? run.registry
-      : run.registry.filter((feature) => capsOf(feature).some((name) => only.has(name))),
+    run.registry,
     { ...held, isupport: openOf(run.state)?.isupport ?? new Map() },
-    run.state.configuration?.declined ?? []
+    run.state.configuration?.declined ?? [],
+    (feature) => only === undefined || capsOf(feature).some((name) => only.has(name))
   );
 
 const request = (

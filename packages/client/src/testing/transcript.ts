@@ -37,7 +37,11 @@ export type Change =
    * `login=none`, or `login=required,iirc,pw` and `login=optional,iirc,pw`: how Self logs
    * in, with the account and the Credential's name.
    */
-  | { readonly _tag: "Login"; readonly login: Login };
+  | { readonly _tag: "Login"; readonly login: Login }
+  /** `realname=new`: the realname registration sends, with no space in it. */
+  | { readonly _tag: "Realname"; readonly realname: string }
+  /** `nicks=one,two`: the nicks registration offers, in order. */
+  | { readonly _tag: "Nicks"; readonly nicks: readonly [string, ...string[]] };
 
 /** What the Owner does, written after `!!`. */
 export type Owner =
@@ -396,7 +400,7 @@ const readLogin = (text: string): Login | undefined => {
 };
 
 // A change that is a setting rather than a Channel: `enable`, `disable`, `decline=`,
-// `accept=`, or `login=`.
+// `accept=`, `realname=`, `nicks=`, or `login=`.
 const readSetting = (token: string): Change | undefined => {
   if (token === "enable" || token === "disable") {
     return { _tag: token === "enable" ? "Enable" : "Disable" };
@@ -408,6 +412,16 @@ const readSetting = (token: string): Change | undefined => {
 
   if (token.length > 7 && token.startsWith("accept=")) {
     return { _tag: "Accept", feature: FeatureName.make(token.slice(7)) };
+  }
+
+  if (token.length > 9 && token.startsWith("realname=")) {
+    return { _tag: "Realname", realname: token.slice(9) };
+  }
+
+  const [first, ...rest] = token.startsWith("nicks=") ? token.slice(6).split(",") : [];
+
+  if (first !== undefined && first !== "" && rest.every((each) => each !== "")) {
+    return { _tag: "Nicks", nicks: [first, ...rest] };
   }
 
   const login = token.startsWith("login=") ? readLogin(token.slice(6)) : undefined;
@@ -472,6 +486,14 @@ const writeChange = (change: Change): string => {
 
     case "Accept": {
       return `accept=${change.feature}`;
+    }
+
+    case "Realname": {
+      return `realname=${change.realname}`;
+    }
+
+    case "Nicks": {
+      return `nicks=${change.nicks.join(",")}`;
     }
 
     case "Login": {

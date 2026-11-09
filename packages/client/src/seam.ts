@@ -87,21 +87,25 @@ export const capsOf = (feature: Registered): readonly CapName[] => [
  * @param registry - Every Feature.
  * @param offer - What the Ircd offers now.
  * @param declined - What the Owner declined.
+ * @param eligible - Which Features to ask for, such as those a `CAP NEW` concerns. Left
+ * out, every one.
  * @returns The caps to request.
  */
 export const capsWanted = (
   registry: readonly Registered[],
   offer: Offer,
-  declined: readonly FeatureName[]
+  declined: readonly FeatureName[],
+  eligible: (feature: Registered) => boolean = () => true
 ): readonly CapName[] => {
-  // A cap a declined Feature needs is asked for by no other Feature either.
+  // A cap a declined Feature needs is asked for by no other Feature either. This is
+  // worked out over the whole registry, before narrowing to the Features in question.
   const refused = new Set(
     registry
       .filter((feature) => declined.includes(feature.name))
       .flatMap((feature) => feature.needs.caps ?? [])
   );
 
-  const wanted = registry.flatMap((feature) => {
+  const wanted = registry.filter(eligible).flatMap((feature) => {
     const caps = capsOf(feature);
 
     const asked =

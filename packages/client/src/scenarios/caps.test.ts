@@ -417,3 +417,118 @@ describe("an ACK that will not end", () => {
     expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set(["multi-prefix"]));
   });
 });
+
+// Registration with an Ircd that lists these caps, none of which is asked for.
+const steady = (ls: string) =>
+  lines(
+    "!! configure",
+    "-> dial irc.test:6697 tls",
+    "== opened",
+    ">> CAP LS 302",
+    ">> NICK iirc",
+    ">> USER iirc 0 * iirc",
+    `<< :irc.test CAP * LS :${ls}`,
+    ">> CAP END",
+    "<< :irc.test 001 iirc :Welcome",
+    "?? session-began iirc"
+  );
+
+describe("caps a declined Feature needs, on every path that asks", () => {
+  const noBatch = configured({ declined: [FeatureName.make("batch")] });
+
+  it("asks for nothing a CAP NEW would complete with a declined batch", () => {
+    // The reviewer's interleaving: `batch` declined, then `echo-message` new.
+    const played = play(client, {
+      configuration: noBatch,
+      transcript: [
+        steady("batch labeled-response"),
+        lines("<< :irc.test CAP iirc NEW :echo-message"),
+      ],
+    });
+
+    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
+  });
+
+  it("asks for nothing when CAP NEW offers all three with batch declined", () => {
+    const played = play(client, {
+      configuration: noBatch,
+      transcript: [
+        steady("chghost"),
+        lines("<< :irc.test CAP iirc NEW :batch echo-message labeled-response"),
+      ],
+    });
+
+    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
+  });
+
+  it("follows a Configured that declines batch, and one that accepts it again", () => {
+    const declining = play(client, {
+      configuration: base,
+      transcript: [
+        lines(
+          "!! configure",
+          "-> dial irc.test:6697 tls",
+          "== opened",
+          ">> CAP LS 302",
+          ">> NICK iirc",
+          ">> USER iirc 0 * iirc",
+          "<< :irc.test CAP * LS :labeled-response",
+          ">> CAP END",
+          "<< :irc.test 001 iirc :Welcome",
+          "!! configure decline=batch",
+          "<< :irc.test CAP iirc NEW :batch echo-message"
+        ),
+      ],
+    });
+
+    expect(declining.steps.at(-1)?.outputs).toStrictEqual([]);
+
+    const accepting = play(client, {
+      configuration: base,
+      transcript: [
+        lines(
+          "!! configure",
+          "-> dial irc.test:6697 tls",
+          "== opened",
+          ">> CAP LS 302",
+          ">> NICK iirc",
+          ">> USER iirc 0 * iirc",
+          "<< :irc.test CAP * LS :labeled-response",
+          ">> CAP END",
+          "<< :irc.test 001 iirc :Welcome",
+          "!! configure decline=batch",
+          "!! configure accept=batch",
+          "<< :irc.test CAP iirc NEW :batch echo-message",
+          ">> CAP REQ :batch echo-message labeled-response"
+        ),
+      ],
+    });
+
+    expect(client.inspect(accepting.state).states.caps).toBe("Ready.Changing");
+  });
+
+  it("asks for nothing after a NAK when batch is declined before the NEW", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        lines(
+          "!! configure",
+          "-> dial irc.test:6697 tls",
+          "== opened",
+          ">> CAP LS 302",
+          ">> NICK iirc",
+          ">> USER iirc 0 * iirc",
+          "<< :irc.test CAP * LS :batch echo-message labeled-response",
+          ">> CAP REQ :batch echo-message labeled-response",
+          "<< :irc.test CAP * NAK :batch echo-message labeled-response",
+          ">> CAP END",
+          "<< :irc.test 001 iirc :Welcome",
+          "!! configure decline=batch",
+          "<< :irc.test CAP iirc NEW :echo-message"
+        ),
+      ],
+    });
+
+    expect(played.steps.at(-1)?.outputs).toStrictEqual([]);
+  });
+});
