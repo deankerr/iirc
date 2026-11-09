@@ -248,8 +248,13 @@ describe("the API over a real server", () => {
       Effect.gen(function* () {
         const stalled = yield* served.request("/api/news");
         const call = yield* talk(served, texts);
+        const last = texts.at(-1) ?? "";
 
-        // The Runtime still takes the Owner's input and answers it.
+        // Another reader sees every Message arrive while the first reads nothing, so the
+        // Session is up, and the Runtime still takes the Owner's input and answers it.
+        yield* Effect.flatMap(served.request("/api/news"), (response) =>
+          readEvents(response, (read) => messagesOf(read).includes(last))
+        );
         const said = yield* sayTo(served, "still here");
         const line = new TextDecoder().decode(yield* call.heard);
 

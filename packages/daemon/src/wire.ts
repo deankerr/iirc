@@ -374,7 +374,7 @@ const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
  * @param source - The Client's News.
  * @returns Its wire form.
  */
-export const news = (source: News): WireNews => {
+const news = (source: News): WireNews => {
   switch (source._tag) {
     case "Activity": {
       const wire: Case<News, WireNews, "Activity"> = {

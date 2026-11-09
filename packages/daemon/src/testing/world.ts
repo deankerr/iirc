@@ -31,7 +31,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /** Crypto and the file system, as the key commands and the keys service need them. */
-export const platform = Layer.mergeAll(
+const platform = Layer.mergeAll(
   BunFileSystem.layer,
   BunPath.layer,
   Digest.layerWebCrypto,
