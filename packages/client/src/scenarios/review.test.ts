@@ -366,6 +366,24 @@ describe("re-review 1. Generated nicks fit even a small NICKLEN", () => {
     expect.assertions(0);
   });
 
+  it("resumes offering when a later 005 raises NICKLEN", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        opening,
+        lines(
+          "<< :irc.test 005 * NICKLEN=1 :are supported",
+          "<< :irc.test 433 * iirc :in use",
+          "<< :irc.test 005 * NICKLEN=2 :are supported",
+          "<< :irc.test 433 * iirc :in use",
+          ">> NICK i_"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("stops at the first fallback whose suffix leaves no room, when NICKLEN=2", () => {
     const fallbacks = ["i_", ...Array.from({ length: 8 }, (_unused, index) => `i${index + 2}`)];
 
@@ -424,6 +442,20 @@ describe("re-review 2. Forced Channels count within their own CHANLIMIT group", 
     });
 
     expect([...played.state.channels.keys()]).toStrictEqual(["+other", "#one", "&one"]);
+  });
+
+  it("ignores a JOIN to a name that is no Channel by CHANTYPES, and counts it nowhere", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport: ["CHANTYPES=#", "CHANLIMIT=#&:2"] }),
+        forced("&one"),
+        "?? ignored Malformed JOIN\n",
+        forced("#one", "#two"),
+      ],
+    });
+
+    expect([...played.state.channels.keys()]).toStrictEqual(["#one", "#two"]);
   });
 
   it("falls back to 64 for a prefix CHANLIMIT does not list", () => {

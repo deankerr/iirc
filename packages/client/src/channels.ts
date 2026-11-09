@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import { limitsOf, targetLimitsOf } from "@iirc/protocol/isupport";
+import { chantypesOf, limitsOf, targetLimitsOf } from "@iirc/protocol/isupport";
 import { isRejected, join, part } from "@iirc/protocol/line";
 
 import { backoff } from "./backoff.ts";
@@ -410,7 +410,16 @@ const joinedSelf = (run: Run, channel: string): void => {
   }
 
   // Self was put in a Channel without asking. It is modelled, up to a bound, and not
-  // undone.
+  // undone. A name that is no Channel by `CHANTYPES` is not one, and counts against nothing.
+  const first = channel.codePointAt(0);
+  const chantypes = chantypesOf(openOf(run.state)?.isupport.get("CHANTYPES"));
+
+  if (first === undefined || !chantypes.includes(String.fromCodePoint(first))) {
+    ignore(run, { _tag: "Malformed", command: "JOIN" });
+
+    return;
+  }
+
   if (!admits(run, channel)) {
     ignore(run, { _tag: "NotNow", input: "Received" });
 
