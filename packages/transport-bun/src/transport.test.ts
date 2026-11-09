@@ -163,6 +163,18 @@ describe("a dial that fails", () => {
     expect(events).toStrictEqual(["Closed Unreachable"]);
   });
 
+  it("reports a socket that cannot even be made as Unreachable", async () => {
+    // Node throws at once for a port out of range, before any event.
+    const events = await run(
+      dialAndRead(plainAddress, {
+        connectTimeout: "1 second",
+        route: () => Effect.succeed({ host: "127.0.0.1", port: 65_536 }),
+      })
+    );
+
+    expect(events).toStrictEqual(["Closed Unreachable"]);
+  });
+
   it("times out connecting", async () => {
     const started = performance.now();
 

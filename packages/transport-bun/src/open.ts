@@ -52,7 +52,8 @@ const handshakeFailed = (cause: unknown) =>
  * Makes a socket that lives as long as the Scope, and waits for the event that means it
  * is ready. The listeners are attached in the same step that makes the socket, since on
  * loopback the event can come before the fiber runs again. The socket always keeps an
- * `error` listener, so an error no one is waiting for cannot crash the process.
+ * `error` listener, so an error no one is waiting for cannot crash the process. Making the
+ * socket can throw at once, such as for a port out of range, and that fails the dial too.
  * @param make - Makes the socket.
  * @param ready - The event that means it is ready.
  * @param failed - Makes the error for an error or a close before then.
@@ -67,19 +68,22 @@ const start = <A extends Duplex>(
     const outcome = yield* Deferred.make<A, Socket.SocketError>();
 
     yield* Effect.acquireRelease(
-      Effect.sync(() => {
-        const socket = make();
+      Effect.try({
+        catch: failed,
+        try: () => {
+          const socket = make();
 
-        socket.on("error", constVoid);
-        socket.once(ready, () => Deferred.doneUnsafe(outcome, Effect.succeed(socket)));
-        socket.once("error", (cause: unknown) =>
-          Deferred.doneUnsafe(outcome, Effect.fail(failed(cause)))
-        );
-        socket.once("close", () =>
-          Deferred.doneUnsafe(outcome, Effect.fail(failed(new Error(`closed before ${ready}`))))
-        );
+          socket.on("error", constVoid);
+          socket.once(ready, () => Deferred.doneUnsafe(outcome, Effect.succeed(socket)));
+          socket.once("error", (cause: unknown) =>
+            Deferred.doneUnsafe(outcome, Effect.fail(failed(cause)))
+          );
+          socket.once("close", () =>
+            Deferred.doneUnsafe(outcome, Effect.fail(failed(new Error(`closed before ${ready}`))))
+          );
 
-        return socket;
+          return socket;
+        },
       }),
       (socket) =>
         Effect.sync(() => {
