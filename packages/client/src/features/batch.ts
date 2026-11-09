@@ -4,7 +4,8 @@
  * one carries its reference on to the later stages, and a batch may open inside another.
  * Lines are read as they arrive, never held back, whatever the batch's type, so a type the
  * Client does not know changes nothing. At most {@link maxOpen} batches are open at
- * once, and one that never closes is dropped when the Connection ends.
+ * once, and one that never closes is dropped when the Connection ends, or when the cap
+ * is deleted.
  *
  * @packageDocumentation
  */
@@ -81,4 +82,6 @@ export const batch: Feature<Batches> = {
   name: FeatureName.make("batch"),
   needs: { caps: [CapName.make("batch")] },
   own: none,
+  // Turned on again, it knows of no batch: those open before were cancelled with the cap.
+  start: () => ({ own: none }),
 };

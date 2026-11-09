@@ -6,6 +6,7 @@ import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
 import { client } from "../core.ts";
+import { FeatureName } from "../ids.ts";
 import { configured, play, registered } from "../testing/index.ts";
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
@@ -338,5 +339,141 @@ describe("an Ircd that does not keep to the exchange", () => {
     });
 
     expect(client.inspect(played.state).features).toStrictEqual(["sasl", "multi-prefix"]);
+  });
+});
+
+describe("a required login never goes unmet", () => {
+  const welcomeOnly = lines("<< :irc.test 001 iirc :Welcome");
+
+  it("gives up when the Ircd answers CAP with 421", () => {
+    play(client, {
+      configuration: required,
+      transcript: [opened, lines("<< :irc.test 421 * CAP :Unknown command"), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up, and takes up no Session, when the Ircd goes straight to 001", () => {
+    const played = play(client, {
+      configuration: required,
+      transcript: [opened, welcomeOnly, givesUp],
+    });
+
+    expect(played.transcript).not.toContain("session-began");
+  });
+
+  it("gives up when sasl is not offered, before CAP END", () => {
+    play(client, {
+      configuration: required,
+      transcript: [
+        opened,
+        lines(
+          "<< :irc.test CAP * LS :multi-prefix",
+          ">> CAP REQ multi-prefix",
+          "<< :irc.test CAP * ACK :multi-prefix"
+        ),
+        givesUp,
+      ],
+    });
+    play(client, {
+      configuration: required,
+      transcript: [opened, lines("<< :irc.test CAP * LS :chghost"), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up when sasl is refused", () => {
+    play(client, {
+      configuration: required,
+      transcript: [
+        opened,
+        lines(
+          "<< :irc.test CAP * LS :sasl=PLAIN",
+          ">> CAP REQ sasl",
+          "<< :irc.test CAP * NAK :sasl"
+        ),
+        givesUp,
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up when the Owner declined sasl", () => {
+    const declined = configured({
+      declined: [FeatureName.make("sasl")],
+      login: {
+        _tag: "Sasl",
+        account: "iirc",
+        credential: CredentialName.make("pw"),
+        required: true,
+      },
+    });
+
+    play(client, {
+      configuration: declined,
+      transcript: [opened, lines("<< :irc.test CAP * LS :sasl=PLAIN"), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up when sasl is deleted before 903", () => {
+    play(client, {
+      configuration: required,
+      transcript: [sent, lines("<< :irc.test CAP * DEL :sasl"), givesUp],
+    });
+    play(client, {
+      configuration: required,
+      transcript: [asked(), lines("<< :irc.test CAP * DEL :sasl"), givesUp],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("gives up when 001 comes before 903, and takes up no Session", () => {
+    const played = play(client, {
+      configuration: required,
+      transcript: [sent, welcomeOnly, lines(">> AUTHENTICATE *"), givesUp],
+    });
+
+    expect(played.transcript).not.toContain("session-began");
+  });
+
+  it("goes on with an optional login in each of those cases", () => {
+    play(client, {
+      configuration: optional,
+      transcript: [opened, lines("<< :irc.test 421 * CAP :Unknown command"), welcome],
+    });
+    play(client, {
+      configuration: optional,
+      transcript: [opened, lines("<< :irc.test CAP * LS :chghost", ">> CAP END")],
+    });
+    play(client, {
+      configuration: optional,
+      transcript: [sent, lines("<< :irc.test CAP * DEL :sasl"), goesOn],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("changes nothing when sasl is deleted after 903: the account stays known", () => {
+    for (const configuration of [optional, required]) {
+      const played = play(client, {
+        configuration,
+        transcript: [
+          registered(configuration, { offered: ["cap-notify", "sasl=PLAIN"] }),
+          lines("+1s", "<< :irc.test CAP iirc DEL :sasl"),
+        ],
+      });
+
+      expect(played.steps.at(-1)).toMatchObject({ news: [], outputs: [] });
+      expect(client.known(played.state).self?.account).toMatchObject({
+        _tag: "Known",
+        value: "iirc",
+      });
+    }
   });
 });

@@ -74,14 +74,42 @@ const ownMask = (run: Run, user: string, host: string): void => {
   );
 };
 
+const none: ReadonlySet<string> = new Set();
+
+const memberKey = (channel: string, nick: string): string => `${channel} ${nick}`;
+
+// The members of a listing whose prefixes the core knew only in part, and a Feature made
+// known in full.
+const listedWith = (meant: readonly Meant[], tag: "Partial" | "Known"): readonly string[] =>
+  meant.flatMap((each) =>
+    each._tag === "Listed"
+      ? each.members
+          .filter((member) => member.prefixes._tag === tag)
+          .map((member) => memberKey(each.channel, member.nick))
+      : []
+  );
+
+const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): ReadonlySet<string> => {
+  const partial = new Set(listedWith(derived, "Partial"));
+
+  return new Set(listedWith(refined, "Known").filter((key) => partial.has(key)));
+};
+
 // Folds what a Line meant into the model, and reports it. History is reported, and
 // never changes what is known now.
-const fold = (run: Run, meant: Meant, arrival: Arrival): void => {
+const fold = (
+  run: Run,
+  meant: Meant,
+  arrival: Arrival,
+  completed: ReadonlySet<string> = none
+): void => {
   const { line, live } = arrival;
 
   if (meant._tag === "Listed") {
     if (live) {
-      foldListed(run, meant.channel, meant.members);
+      foldListed(run, meant.channel, meant.members, (nick) =>
+        completed.has(memberKey(meant.channel, nick))
+      );
     }
 
     return;
@@ -146,8 +174,10 @@ const means = (run: Run, arrival: Arrival): void => {
 
     carryOut(run, ran);
 
+    const completed = completedBy(derived, ran.value);
+
     for (const each of ran.value) {
-      fold(run, each, arrival);
+      fold(run, each, arrival, completed);
     }
 
     return;
@@ -173,6 +203,13 @@ const welcome = (run: Run, line: Line): void => {
   const nick = first ?? offered(run) ?? run.state.configuration?.nicks[0] ?? "*";
 
   welcomed(run);
+
+  // A Feature gave up the Connection, such as a required login that did not happen:
+  // registration is not taken up.
+  if (linkOf(run)?.closing !== undefined) {
+    return;
+  }
+
   updateOpen(run, (phase) => ({
     ...phase,
     presence: {

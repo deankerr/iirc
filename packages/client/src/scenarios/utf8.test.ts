@@ -60,12 +60,12 @@ describe("UTF8ONLY", () => {
     expect.assertions(0);
   });
 
-  it("answers a PING token that is not UTF-8 in UTF-8", () => {
+  it("refuses to answer a PING token that is not UTF-8, and sends nothing", () => {
     play(client, {
       configuration: base,
       transcript: [
         registered(base, { isupport: utf8Only }),
-        lines("<<\\ PING :t\\xe9", ">> PONG t�"),
+        lines("<<\\ PING :t\\xe9", "?? ignored Unsendable PONG"),
       ],
     });
     play(client, {

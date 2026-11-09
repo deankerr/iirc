@@ -88,7 +88,11 @@ export type IgnoredReason =
   | { readonly _tag: "StaleConnection"; readonly connection: ConnectionId }
   | { readonly _tag: "StaleTimer"; readonly timer: TimerId }
   | { readonly _tag: "NotNow"; readonly input: Input["_tag"] }
-  | { readonly _tag: "FeatureFailed"; readonly feature: string };
+  | { readonly _tag: "FeatureFailed"; readonly feature: string }
+  /** A Line the Client meant to send that a Feature refused, such as bytes not UTF-8 under `UTF8ONLY`. */
+  | { readonly _tag: "Unsendable"; readonly command: string }
+  /** An echo of what Self said that nothing can tie to what we sent, while `echo-message` is being given up. */
+  | { readonly _tag: "UnmatchedEcho" };
 
 /**
  * What happened in one step, in order.

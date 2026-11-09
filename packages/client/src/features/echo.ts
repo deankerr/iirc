@@ -1,28 +1,33 @@
 /**
  * `labeled-response` with `echo-message`: a Message we say is sent with a `label`, and
- * the Ircd's answer for that label confirms or rejects it. The two caps are only useful
- * together, so this one Feature needs both. Without `labeled-response`, an echo cannot be
- * told from a Message Self sent to itself, so nothing waits for one.
+ * the Ircd's answer for that label confirms or rejects it. Without `labeled-response`, an
+ * echo cannot be told from a Message Self sent to itself, so the two are asked for only
+ * together, and never kept apart.
  *
- * - **Egress.** Each `Say` is sent with the next label, `l1`, `l2`, and on, and its
- *   Message reports that the Ircd will echo it. Turned on again mid-Session, after a
- *   `CAP DEL` and `CAP NEW`, labels also name the instant, as `l<ms>-1`, so a late
- *   answer to a label given before is not taken for one given since.
+ * - **Egress.** While both are enabled, each `Say` is sent with the next label of the
+ *   Connection, `l1`, `l2`, and on, and its Message reports that the Ircd will echo it.
  * - **Answers.** The answer is one Line with the label, or a batch whose `BATCH +` carries
  *   it, with batches opened inside that one. Its first `PRIVMSG` or `NOTICE` is the echo,
  *   which the core reports as `Confirmed`. Its first `FAIL`, `ACK`, or error numeric
  *   rejects the intent, and the core reports it `Refused`. A Line in it that is neither,
  *   such as a `WARN`, answers nothing.
+ * - **Never one without the other.** The Feature is on while `echo-message` is enabled,
+ *   and uses `labeled-response`. When only `echo-message` is left, whether the Ircd
+ *   acknowledged only it or deleted `labeled-response`, it gives `echo-message` up with
+ *   `CAP REQ :-echo-message`, and until it is gone, a Message from Self is an echo
+ *   nothing can tie to what we sent, so it is `Ignored`. When only `labeled-response` is
+ *   left, the Feature is off, and gives it up the same way.
  * - **Bounds.** At most {@link maxPending} labels await an answer: past that, the oldest
  *   is forgotten, and its Message stays unconfirmed, as one the Ircd never answers does.
  *   An answer for a label not awaited, such as one forgotten, is read as any other Line.
  *
  * @packageDocumentation
  */
-import { withTags, isRejected } from "@iirc/protocol/line";
+import { casefold } from "@iirc/protocol/casemapping";
+import { isRejected, withTags } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
 
-import type { Feature } from "../feature.ts";
+import type { Context, Feature, Meant } from "../feature.ts";
 import { CapName, FeatureName } from "../ids.ts";
 import type { IntentId } from "../ids.ts";
 
@@ -38,10 +43,8 @@ interface Answering {
   readonly top: boolean;
 }
 
-/** What the Feature holds while it is on. */
+/** What the Feature holds for one Connection. */
 interface Echoes {
-  /** What each label starts with, before its number. */
-  readonly prefix: string;
   /** The number of the next label. */
   readonly next: number;
   /** Labels awaiting an answer, oldest first, with the intent each was sent for. */
@@ -50,7 +53,25 @@ interface Echoes {
   readonly batches: ReadonlyMap<string, Answering>;
 }
 
-const fresh: Echoes = { batches: new Map(), next: 1, pending: new Map(), prefix: "l" };
+const fresh: Echoes = { batches: new Map(), next: 1, pending: new Map() };
+
+const echoMessage = CapName.make("echo-message");
+const labeledResponse = CapName.make("labeled-response");
+
+// Whether answers can be tied to what we sent: both caps are enabled.
+const labelling = (context: Context<Echoes>): boolean => context.enabled(labeledResponse);
+
+// Whether a Message was said by Self, as its source names it.
+const bySelf = (meant: Meant, context: Context<Echoes>): boolean => {
+  const { self, casemapping } = context.known;
+
+  return (
+    meant._tag === "Message" &&
+    meant.ours === undefined &&
+    self !== undefined &&
+    casefold(casemapping, meant.sender) === casefold(casemapping, self.nick)
+  );
+};
 
 // A Line that settles an intent: its echo, or a rejection.
 const settles = ({ command }: Line): boolean =>
@@ -107,12 +128,17 @@ const batchLine = (own: Echoes, line: Line): Echoes => {
 
 /** The `labeled-response` and `echo-message` Feature. */
 export const echo: Feature<Echoes> = {
+  // Only `labeled-response` is left: give it up.
+  absent: (context) =>
+    context.enabled(labeledResponse) && !context.enabled(echoMessage)
+      ? { drop: [labeledResponse] }
+      : {},
   egress: (departure, context) => {
-    if (departure.for._tag !== "Said") {
+    if (departure.for._tag !== "Said" || !labelling(context)) {
       return { value: departure };
     }
 
-    const label = `${context.own.prefix}${context.own.next}`;
+    const label = `l${context.own.next}`;
     const line = withTags(departure.line, { label });
 
     if (isRejected(line)) {
@@ -137,6 +163,10 @@ export const echo: Feature<Echoes> = {
   label: (arrival, context) => {
     const { own } = context;
     const { line } = arrival;
+
+    if (!labelling(context)) {
+      return { value: arrival };
+    }
 
     if (line.command === "BATCH") {
       return { own: batchLine(own, line), value: arrival };
@@ -164,13 +194,18 @@ export const echo: Feature<Echoes> = {
       ? { value: arrival }
       : { own: { ...own, pending: without(own.pending, answers) }, value: arrival };
   },
+  // Until `echo-message` is gone, an echo of ours cannot be told from a new Message.
+  meaning: (meant, _arrival, context) => ({
+    value: labelling(context)
+      ? meant
+      : meant.map((each): Meant =>
+          bySelf(each, context) ? { _tag: "Ignored", reason: { _tag: "UnmatchedEcho" } } : each
+        ),
+  }),
   name: FeatureName.make("echo-message"),
-  needs: { caps: [CapName.make("labeled-response"), CapName.make("echo-message")] },
+  needs: { caps: [echoMessage] },
   own: fresh,
-  // Turned on again mid-Session, its count starts again, so its labels are told from the
-  // ones it gave before, whose answers may still come.
-  start: (context) =>
-    context.known.session._tag === "Registered"
-      ? { own: { ...fresh, prefix: `l${context.at}-` } }
-      : { own: fresh },
+  // On with only `echo-message`, or `labeled-response` gone since: give it up.
+  start: (context) => (labelling(context) ? {} : { drop: [echoMessage] }),
+  uses: [labeledResponse],
 };

@@ -11,11 +11,13 @@
  *   an unfilled Credential and the core's deadline passing, after `AUTHENTICATE *`.
  * - A failed login lets registration go when the login is optional, and gives up the
  *   Connection with `LoginFailed` when it is required.
+ * - A required login never goes unmet. While registering, if the cap is not offered,
+ *   not acknowledged, deleted before `903`, or the Ircd has no cap negotiation at all,
+ *   the Feature is off, and `absent` gives up the Connection. So does `001` before `903`.
  * - `900` and `901`, which say Self's account, are the core's, whoever logged in.
  *
- * A `CAP NEW` for `sasl` after registration does not log in again. Self's account is
- * what a login made known, so when the cap is deleted, it goes stale until a `900` or
- * `901` says it again.
+ * A `CAP NEW` for `sasl` after registration does not log in again, and a `CAP DEL` after
+ * `903` changes nothing: Self is logged in, and the account stays known.
  *
  * @packageDocumentation
  */
@@ -32,11 +34,14 @@ type Exchange =
   | { readonly _tag: "Asked" }
   /** The Credential is sent, and the result is awaited. */
   | { readonly _tag: "Sent" }
-  /** Over, whether it logged in or not. */
-  | { readonly _tag: "Over" };
+  /** Over, logged in. */
+  | { readonly _tag: "LoggedIn" }
+  /** Over, without a login. */
+  | { readonly _tag: "Failed" };
 
 const idle: Exchange = { _tag: "Idle" };
-const over: Exchange = { _tag: "Over" };
+const loggedIn: Exchange = { _tag: "LoggedIn" };
+const notLoggedIn: Exchange = { _tag: "Failed" };
 
 const sasl = CapName.make("sasl");
 
@@ -61,7 +66,7 @@ const failed = (context: Context<Exchange>, send: readonly Sendable[] = []): Eff
   const required = login._tag === "Sasl" && login.required;
 
   return {
-    own: over,
+    own: notLoggedIn,
     registration: required
       ? { _tag: "Abandon", reason: { _tag: "LoginFailed" } }
       : { _tag: "Continue" },
@@ -72,11 +77,26 @@ const failed = (context: Context<Exchange>, send: readonly Sendable[] = []): Eff
 const running = (exchange: Exchange): boolean =>
   exchange._tag === "Asked" || exchange._tag === "Sent";
 
+const isRequired = (context: Context<Exchange>): boolean => {
+  const { login } = context.configuration;
+
+  return login._tag === "Sasl" && login.required;
+};
+
 /** The `sasl` Feature, with `PLAIN`. */
 export const saslPlain: Feature<Exchange> = {
+  // Off while registering, with a login required and none made: give up.
+  absent: (context) =>
+    context.known.session._tag === "Registering" &&
+    isRequired(context) &&
+    context.own._tag !== "LoggedIn"
+      ? { own: notLoggedIn, registration: { _tag: "Abandon", reason: { _tag: "LoginFailed" } } }
+      : {},
+  // The deadline passed, `001` came, or the cap was deleted: abort, if it can be heard.
   expired: (context) =>
-    running(context.own) ? failed(context, line("*")) : { registration: { _tag: "Continue" } },
-  keeps: ["user.account"],
+    running(context.own)
+      ? failed(context, context.enabled(sasl) ? line("*") : [])
+      : { registration: { _tag: "Continue" } },
   name: FeatureName.make("sasl"),
   needs: { caps: [sasl] },
   own: idle,
@@ -84,7 +104,7 @@ export const saslPlain: Feature<Exchange> = {
     const { login } = context.configuration;
 
     if (login._tag !== "Sasl" || context.known.session._tag !== "Registering") {
-      return { own: over };
+      return {};
     }
 
     if (!offersPlain(context.cap(sasl))) {
@@ -103,7 +123,7 @@ export const saslPlain: Feature<Exchange> = {
     }
 
     if (command === "903") {
-      return { own: over, registration: { _tag: "Continue" }, value: arrival };
+      return { own: loggedIn, registration: { _tag: "Continue" }, value: arrival };
     }
 
     if (failures.has(command)) {

@@ -27,10 +27,10 @@ import {
   updateOpen,
 } from "./run.ts";
 import type { Ran } from "./seam.ts";
-import { capsWanted, freshSeam, runEffects, turnedOff } from "./seam.ts";
+import { capsOf, capsWanted, freshSeam, runEffects, turnedOff } from "./seam.ts";
 import type { Caps, Negotiated, Open } from "./state.ts";
 import { holdTime, registrationTime } from "./timers.ts";
-import { onNow, openOf } from "./views.ts";
+import { negotiated, onNow, openOf } from "./views.ts";
 
 /** The most caps kept from what an Ircd offers. */
 const maxCaps = 256;
@@ -236,6 +236,76 @@ const applyRegistration = (
   }
 };
 
+// Caps share `CAP REQ` Lines, as many to a Line as fit. Gives how many were sent.
+const requestLines = (run: Run, wanted: readonly string[]): number => {
+  const lines: string[][] = [];
+
+  for (const name of wanted) {
+    const last = lines.at(-1);
+
+    if (last !== undefined && !isRejected(cap("REQ", [...last, name].join(" ")))) {
+      last.push(name);
+    } else {
+      lines.push([name]);
+    }
+  }
+
+  return lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined)
+    .length;
+};
+
+/**
+ * Gives up caps with `CAP REQ :-cap`, for each still enabled, and awaits the answers as
+ * for any request.
+ * @param run - The step.
+ * @param names - The caps.
+ */
+const dropCaps = (run: Run, names: readonly CapName[]): void => {
+  const caps = openOf(run.state)?.caps;
+
+  if (caps === undefined || caps._tag === "Listing" || caps._tag === "None") {
+    return;
+  }
+
+  const enabled = [...new Set(names)].filter((name) => caps.enabled.has(name));
+
+  const sent =
+    enabled.length === 0
+      ? 0
+      : requestLines(
+          run,
+          enabled.map((name) => `-${name}`)
+        );
+
+  if (sent === 0) {
+    return;
+  }
+
+  const held: Negotiated = { enabled: caps.enabled, offered: caps.offered };
+
+  switch (caps._tag) {
+    case "Requesting":
+    case "Changing": {
+      setCaps(run, { ...caps, asked: caps.asked + sent });
+      break;
+    }
+
+    case "Holding": {
+      setCaps(run, { ...held, _tag: "Requesting", acked: [], asked: sent });
+      break;
+    }
+
+    case "Steady": {
+      setCaps(run, { ...held, _tag: "Changing", acked: [], asked: sent });
+      break;
+    }
+
+    default: {
+      caps satisfies never;
+    }
+  }
+};
+
 /**
  * Carries out what Feature hooks said: their Lines, their say over registration, and
  * any that threw.
@@ -246,74 +316,133 @@ export const carryOut = <V>(run: Run, ran: Ran<V>): void => {
   updateOpen(run, (open) => ({ ...open, seam: ran.seam }));
   reportFailed(run, ran.failed);
   sendAll(run, ran.send);
+  dropCaps(run, ran.drop);
   applyRegistration(run, ran.registration);
+};
+
+/** What decides a recompute: the Features on, and the caps enabled. */
+export interface Before {
+  readonly on: readonly Registered[];
+  readonly enabled: ReadonlySet<CapName>;
+}
+
+/**
+ * The Features on and the caps enabled now, to recompute against after a change.
+ * @param run - The step.
+ * @returns Them.
+ */
+export const before = (run: Run): Before => ({
+  enabled: negotiated(openOf(run.state)?.caps).enabled,
+  on: onNow(run.registry, run.state),
+});
+
+// Runs one hook over some Features, and carries out what they said.
+const runHook = (
+  run: Run,
+  features: readonly Registered[],
+  hook: Parameters<typeof runEffects>[3]
+): void => {
+  const reading = readingOf(run);
+  const open = openOf(run.state);
+
+  if (features.length > 0 && reading !== undefined && open !== undefined) {
+    carryOut(run, runEffects(features, open.seam, reading, hook));
+  }
+};
+
+const letGo: Registration = { _tag: "Continue" };
+
+// Features holding registration decide, with `expired`, whether to go on or give up.
+// Those that are off, or whose `expired` threw, hold nothing after.
+const expireHolding = (run: Run, features: readonly Registered[]): void => {
+  const holding = openOf(run.state)?.seam.holding;
+  const held = features.filter((feature) => holding?.has(feature.name) === true);
+  const on = onNow(run.registry, run.state);
+
+  runHook(run, held, (feature, context) => feature.expired?.(context) ?? { registration: letGo });
+
+  updateOpen(run, (open) => ({
+    ...open,
+    seam: {
+      ...open.seam,
+      holding: new Set(
+        [...open.seam.holding].filter(
+          (name) => !open.seam.failed.has(name) && on.some((each) => each.name === name)
+        )
+      ),
+    },
+  }));
+};
+
+/**
+ * Each Feature that is off hears, through `absent`, that negotiation settled without it.
+ * @param run - The step.
+ */
+const absentOff = (run: Run): void => {
+  const on = onNow(run.registry, run.state);
+
+  runHook(
+    run,
+    run.registry.filter((feature) => !on.includes(feature)),
+    (feature, context) => feature.absent?.(context)
+  );
 };
 
 /**
  * Works out again which Features are on, after caps, ISUPPORT, or the Owner's choices
- * changed. A Feature that turns on starts with its own state and runs `start`. One that
- * turns off lets go of registration, and the facts it kept go stale.
+ * changed. A Feature that turns off and was holding registration decides with `expired`
+ * whether to go on, the facts only it kept go stale, and it hears `absent`. One that
+ * turns on, or is on while a cap it uses comes or goes, runs `start`. Each keeps its own
+ * state for the rest of the Connection, whether on or off.
  * @param run - The step.
- * @param was - The Features on before the change.
+ * @param was - What was on and enabled before the change.
  */
-export const recompute = (run: Run, was: readonly Registered[]): void => {
+export const recompute = (run: Run, was: Before): void => {
   const now = onNow(run.registry, run.state);
-  const started = now.filter((feature) => !was.includes(feature));
-  const stopped = was.filter((feature) => !now.includes(feature));
+  const { enabled } = negotiated(openOf(run.state)?.caps);
+  const stopped = was.on.filter((feature) => !now.includes(feature));
+
+  const started = now.filter(
+    (feature) =>
+      !was.on.includes(feature) ||
+      (feature.uses ?? []).some((name) => was.enabled.has(name) !== enabled.has(name))
+  );
 
   if (started.length === 0 && stopped.length === 0) {
     return;
   }
 
-  updateOpen(run, (open) => {
-    const own = new Map(open.seam.own);
-    const holding = new Set(open.seam.holding);
-
-    for (const feature of started) {
-      own.delete(feature.name);
-    }
-
-    for (const feature of stopped) {
-      holding.delete(feature.name);
-    }
-
-    return { ...open, seam: { ...turnedOff(open.seam, was, now, run.at), holding, own } };
-  });
-
-  const reading = readingOf(run);
-  const open = openOf(run.state);
-
-  if (reading !== undefined && open !== undefined) {
-    carryOut(
-      run,
-      runEffects(started, open.seam, reading, (feature, context) => feature.start?.(context))
-    );
-  }
+  expireHolding(run, stopped);
+  updateOpen(run, (open) => ({ ...open, seam: turnedOff(open.seam, was.on, now, run.at) }));
+  runHook(run, stopped, (feature, context) => feature.absent?.(context));
+  runHook(run, started, (feature, context) => feature.start?.(context));
 };
+
+// Whether negotiation is waiting for nothing more.
+const isDone = (caps: Caps): caps is Extract<Caps, { readonly enabled: ReadonlySet<CapName> }> =>
+  ((caps._tag === "Requesting" || caps._tag === "Changing") && caps.asked <= 0) ||
+  caps._tag === "Holding";
 
 /**
  * Ends negotiation once nothing more is awaited: `CAP END` while registering, unless a
- * Feature holds registration open, in which case the hold's deadline is set.
+ * Feature holds registration open, in which case the hold's deadline is set. Features
+ * that are off hear `absent` first, and may give up the Connection, or give up caps,
+ * which is more to await.
  * @param run - The step.
  */
 export const settle = (run: Run): void => {
   const open = openOf(run.state);
 
-  if (open === undefined || linkOf(run)?.closing !== undefined) {
+  if (open === undefined || linkOf(run)?.closing !== undefined || !isDone(open.caps)) {
     return;
   }
 
   const { caps, presence, seam } = open;
-  const done = (caps._tag === "Requesting" && caps.asked <= 0) || caps._tag === "Holding";
-
-  if (!done) {
-    return;
-  }
-
   const held: Negotiated = { enabled: caps.enabled, offered: caps.offered };
 
   if (presence._tag !== "Registering") {
     setCaps(run, { ...held, _tag: "Steady" });
+    absentOff(run);
 
     return;
   }
@@ -332,7 +461,15 @@ export const settle = (run: Run): void => {
     return;
   }
 
-  setCaps(run, { ...held, _tag: "Steady" });
+  absentOff(run);
+
+  const after = openOf(run.state);
+
+  if (after === undefined || linkOf(run)?.closing !== undefined || !isDone(after.caps)) {
+    return;
+  }
+
+  setCaps(run, { _tag: "Steady", enabled: after.caps.enabled, offered: after.caps.offered });
   updateOpen(run, (phase) =>
     phase.presence._tag === "Registering"
       ? { ...phase, presence: { ...phase.presence, hold: undefined } }
@@ -347,37 +484,12 @@ export const settle = (run: Run): void => {
  * @param run - The step.
  */
 export const expire = (run: Run): void => {
-  const open = openOf(run.state);
-  const reading = readingOf(run);
-
-  if (open === undefined || reading === undefined) {
-    return;
-  }
-
-  const holding = onNow(run.registry, run.state).filter((feature) =>
-    open.seam.holding.has(feature.name)
-  );
-
-  const ran = runEffects(
-    holding,
-    open.seam,
-    reading,
-    (feature, context) => feature.expired?.(context) ?? { registration: { _tag: "Continue" } }
-  );
-
   updateOpen(run, (phase) =>
     phase.presence._tag === "Registering"
       ? { ...phase, presence: { ...phase.presence, hold: undefined } }
       : phase
   );
-  carryOut(run, {
-    ...ran,
-    // A Feature whose `expired` threw holds nothing.
-    seam: {
-      ...ran.seam,
-      holding: new Set([...ran.seam.holding].filter((name) => !ran.failed.includes(name))),
-    },
-  });
+  expireHolding(run, onNow(run.registry, run.state));
 };
 
 /**
@@ -429,28 +541,10 @@ const wantedNow = (run: Run, held: Negotiated, only?: ReadonlySet<CapName>): rea
   capsWanted(
     only === undefined
       ? run.registry
-      : run.registry.filter((feature) => (feature.needs.caps ?? []).some((name) => only.has(name))),
+      : run.registry.filter((feature) => capsOf(feature).some((name) => only.has(name))),
     { ...held, isupport: openOf(run.state)?.isupport ?? new Map() },
     run.state.configuration?.declined ?? []
   );
-
-// Caps share `CAP REQ` Lines, as many to a Line as fit. Gives how many were sent.
-const requestLines = (run: Run, wanted: readonly CapName[]): number => {
-  const lines: string[][] = [];
-
-  for (const name of wanted) {
-    const last = lines.at(-1);
-
-    if (last !== undefined && !isRejected(cap("REQ", [...last, name].join(" ")))) {
-      last.push(name);
-    } else {
-      lines.push([name]);
-    }
-  }
-
-  return lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined)
-    .length;
-};
 
 const request = (
   run: Run,
@@ -467,9 +561,11 @@ const request = (
   }
 
   // With nothing to ask for, `Requesting` is already answered, and `settle` ends it.
-  setCaps(run, { ...held, _tag: after, asked: sent });
+  setCaps(run, { ...held, _tag: after, acked: [], asked: sent });
 };
 
+// An `ACK` or `NAK` for one `REQ`. An `ACK` spread over several Lines, all but the last
+// marked with `*`, changes nothing until its last, and counts as one answer.
 const answered = (
   run: Run,
   caps: Extract<Caps, { readonly asked: number }>,
@@ -477,10 +573,18 @@ const answered = (
   ack: boolean,
   more: boolean
 ): void => {
+  const names = list.map(([name]) => name);
+
+  if (more) {
+    setCaps(run, { ...caps, acked: ack ? [...caps.acked, ...names] : caps.acked });
+
+    return;
+  }
+
   const enabled = new Set(caps.enabled);
 
   if (ack) {
-    for (const [name] of list) {
+    for (const name of [...caps.acked, ...names]) {
       if (name.startsWith("-")) {
         enabled.delete(CapNameSchema.make(name.slice(1)));
       } else if (caps.offered.has(name) || enabled.size < maxCaps) {
@@ -489,16 +593,7 @@ const answered = (
     }
   }
 
-  // An answer spread over several Lines counts once, at its last.
-  const asked = more ? caps.asked : caps.asked - 1;
-
-  if (caps._tag === "Changing") {
-    setCaps(run, asked <= 0 ? { ...caps, _tag: "Steady", enabled } : { ...caps, asked, enabled });
-
-    return;
-  }
-
-  setCaps(run, { ...caps, asked, enabled });
+  setCaps(run, { ...caps, acked: [], asked: caps.asked - 1, enabled });
 };
 
 const withOffered = (
@@ -574,7 +669,7 @@ const added: CapStep = (run, caps, list) => {
     setCaps(run, { ...caps, ...held });
   } else {
     // While Features hold registration, nothing is awaited: now the new request is.
-    setCaps(run, { ...held, _tag: "Requesting", asked: sent });
+    setCaps(run, { ...held, _tag: "Requesting", acked: [], asked: sent });
   }
 
   return true;
@@ -645,12 +740,15 @@ export const unknownCommand = (run: Run, line: Line): void => {
 
   if (open?.caps._tag === "Listing" && upperCaseAscii(line.params[1] ?? "") === "CAP") {
     setCaps(run, { _tag: "None" });
+    absentOff(run);
   }
 };
 
 /**
  * `001` ended negotiation, whether or not it was over: what was listed and never
- * answered is no cap negotiation, and an outstanding `REQ` is answered later.
+ * answered is no cap negotiation, and an outstanding `REQ` is answered later. It ends any
+ * hold, so each holding Feature decides with `expired` whether to go on, and each Feature
+ * that is off hears `absent`. Either may give up the Connection.
  * @param run - The step.
  */
 export const welcomed = (run: Run): void => {
@@ -663,13 +761,17 @@ export const welcomed = (run: Run): void => {
     }
 
     case "Requesting": {
-      setCaps(run, caps.asked <= 0 ? { ...caps, _tag: "Steady" } : { ...caps, _tag: "Changing" });
+      setCaps(
+        run,
+        caps.asked <= 0
+          ? { _tag: "Steady", enabled: caps.enabled, offered: caps.offered }
+          : { ...caps, _tag: "Changing" }
+      );
       break;
     }
 
     case "Holding": {
-      setCaps(run, { ...caps, _tag: "Steady" });
-      updateOpen(run, (open) => ({ ...open, seam: { ...open.seam, holding: new Set() } }));
+      setCaps(run, { _tag: "Steady", enabled: caps.enabled, offered: caps.offered });
       break;
     }
 
@@ -684,4 +786,8 @@ export const welcomed = (run: Run): void => {
       caps satisfies never;
     }
   }
+
+  expireHolding(run, onNow(run.registry, run.state));
+  updateOpen(run, (open) => ({ ...open, seam: { ...open.seam, holding: new Set() } }));
+  absentOff(run);
 };

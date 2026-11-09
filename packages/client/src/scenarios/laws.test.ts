@@ -4,6 +4,10 @@
  * the transcript sends it as a token when the set names it, and the laws treat it as a
  * cap of the `utf8only` Feature. Deleting it is a `005 -UTF8ONLY`, which `utf8.test.ts`
  * plays, so `deactivates` ranges over the caps alone.
+ *
+ * `deactivates` leaves out `sasl` too. Deleting it after `903` changes nothing, because
+ * Self is logged in and the account stays known, but a run that never had it never
+ * logged in, so the two cannot match. `sasl.test.ts` plays the deletion instead.
  */
 import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
@@ -97,21 +101,25 @@ describe("the laws, over every Feature", { timeout: 60_000 }, () => {
   it("deactivates: after CAP DEL, as if the cap had never been", () => {
     expect(() => {
       deactivates(
-        { ...subject, caps: caps.filter((cap) => cap !== token) },
+        { ...subject, caps: caps.filter((cap) => cap !== token && cap !== "sasl") },
         {
-          after: () =>
+          after: (without) =>
             lines(
               "+1s",
+              // A prefix a listing made complete, changed after the cap is gone.
+              "<< :op!u@h MODE #iirc +o voiced",
               "<< :other!u@h JOIN #iirc",
-              "<< :irc.test 353 iirc = #iirc :iirc @+op other",
-              "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
               "<< @msgid=m3;time=2026-01-01T00:00:01.500Z :peer!u@h PRIVMSG #iirc :after",
               "<< :irc.test BATCH +c netsplit irc.hub other.host",
               "<< @batch=c :other!u@h PRIVMSG #iirc :in a batch",
               "<< :irc.test BATCH -c",
               "<< :voiced!u@h AWAY :later",
               "!! say #iirc :again",
-              "<< @label=l2 :iirc!~iirc@iirc.test PRIVMSG #iirc :again"
+              // The Ircd echoes only with both caps.
+              ...(without.includes(CapName.make("echo-message")) &&
+              without.includes(CapName.make("labeled-response"))
+                ? ["<< @label=l2 :iirc!~iirc@iirc.test PRIVMSG #iirc :again"]
+                : [])
             ),
         }
       );

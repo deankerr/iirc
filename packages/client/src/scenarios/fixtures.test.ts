@@ -223,8 +223,8 @@ const everyCap = [
   "message-tags",
   "server-time",
   "batch",
-  "labeled-response",
   "echo-message",
+  "labeled-response",
   "multi-prefix",
   "away-notify",
 ];

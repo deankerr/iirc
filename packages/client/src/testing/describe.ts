@@ -131,6 +131,14 @@ const writeIgnored = (reason: IgnoredReason): string => {
       return `FeatureFailed ${atom(reason.feature)}`;
     }
 
+    case "Unsendable": {
+      return `Unsendable ${atom(reason.command)}`;
+    }
+
+    case "UnmatchedEcho": {
+      return "UnmatchedEcho";
+    }
+
     default: {
       return reason satisfies never;
     }

@@ -13,7 +13,7 @@ const base = configured();
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 
-const both = ["batch", "labeled-response", "echo-message"];
+const both = ["batch", "echo-message", "labeled-response"];
 
 const inChannel = (...offered: readonly string[]) => [
   registered(base, { offered }),
@@ -321,7 +321,7 @@ describe("without both caps", () => {
 });
 
 describe("the caps changing mid-Session", () => {
-  it("awaits no echo once a cap is deleted, and an echo that comes is a Message", () => {
+  it("gives up labeled-response when echo-message is deleted, and labels nothing after", () => {
     play(client, {
       configuration: base,
       transcript: [
@@ -329,8 +329,8 @@ describe("the caps changing mid-Session", () => {
         say(1),
         lines(
           "<< :irc.test CAP iirc DEL :echo-message",
-          "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello",
+          ">> CAP REQ -labeled-response",
+          "<< :irc.test CAP iirc ACK :-labeled-response",
           "!! say #iirc :again",
           ">> PRIVMSG #iirc again",
           "?? message Privmsg iirc #iirc at=ours:t+0s ours=i2 :again"
@@ -341,24 +341,53 @@ describe("the caps changing mid-Session", () => {
     expect.assertions(0);
   });
 
-  it("tells labels given before a DEL from those given after a NEW", () => {
+  it("gives up echo-message when labeled-response is deleted, and ignores echoes until it is gone", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannel("cap-notify", ...both),
+        say(1),
+        lines(
+          "<< :irc.test CAP iirc DEL :labeled-response",
+          ">> CAP REQ -echo-message",
+          "<< :iirc!u@h PRIVMSG #iirc :hello",
+          "?? ignored UnmatchedEcho",
+          "!! say #iirc :again",
+          ">> PRIVMSG #iirc again",
+          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i2 :again",
+          "<< :iirc!u@h PRIVMSG #iirc :again",
+          "?? ignored UnmatchedEcho",
+          "<< :peer!u@h PRIVMSG #iirc :from someone else",
+          "?? message Privmsg peer #iirc :from someone else",
+          "<< :irc.test CAP iirc ACK :-echo-message",
+          "<< :iirc!u@elsewhere PRIVMSG #iirc :said elsewhere",
+          "?? message Privmsg iirc #iirc :said elsewhere"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).features).not.toContain("echo-message");
+  });
+
+  it("goes on from the labels it gave when both are back, so a late echo is still matched", () => {
     play(client, {
       configuration: base,
       transcript: [
         ...inChannel("cap-notify", ...both),
         say(1),
         lines(
-          "+1s",
           "<< :irc.test CAP iirc DEL :echo-message",
-          "<< :irc.test CAP iirc NEW :echo-message",
-          ">> CAP REQ echo-message",
-          "<< :irc.test CAP iirc ACK :echo-message",
-          "!! say #iirc :again",
-          ">> @label=l1767225601000-1 PRIVMSG #iirc again",
-          "?? message Privmsg iirc #iirc at=ours:t+1s ours=i2 echo :again",
+          ">> CAP REQ -labeled-response",
+          "<< :irc.test CAP iirc ACK :-labeled-response",
+          "<< :irc.test CAP iirc NEW :echo-message labeled-response",
+          ">> CAP REQ :echo-message labeled-response",
+          "<< :irc.test CAP iirc ACK :echo-message labeled-response"
+        ),
+        say(2, "again"),
+        lines(
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello",
-          "<< @label=l1767225601000-1 :iirc!u@h PRIVMSG #iirc :again",
+          "?? confirmed i1 :hello",
+          "<< @label=l2 :iirc!u@h PRIVMSG #iirc :again",
           "?? confirmed i2 :again"
         ),
       ],
@@ -374,13 +403,74 @@ describe("the caps changing mid-Session", () => {
         ...inChannel("cap-notify"),
         lines(
           "<< :irc.test CAP iirc NEW :echo-message labeled-response batch",
-          ">> CAP REQ :batch labeled-response echo-message",
-          "<< :irc.test CAP iirc ACK :batch labeled-response echo-message",
-          "!! say #iirc :hello",
-          ">> @label=l1767225600000-1 PRIVMSG #iirc hello",
-          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i1 echo :hello",
-          "<< @label=l1767225600000-1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? confirmed i1 :hello"
+          ">> CAP REQ :batch echo-message labeled-response",
+          "<< :irc.test CAP iirc ACK :batch echo-message labeled-response"
+        ),
+        say(1),
+        lines("<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello", "?? confirmed i1 :hello"),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+});
+
+describe("one of the two acknowledged", () => {
+  const asked = lines(
+    "!! configure",
+    "-> dial irc.test:6697 tls",
+    "== opened",
+    ">> CAP LS 302",
+    ">> NICK iirc",
+    ">> USER iirc 0 * iirc",
+    "<< :irc.test CAP * LS :echo-message labeled-response",
+    ">> CAP REQ :echo-message labeled-response"
+  );
+
+  it("gives up echo-message alone before CAP END", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        asked,
+        lines(
+          "<< :irc.test CAP * ACK :echo-message",
+          ">> CAP REQ -echo-message",
+          "<< :irc.test CAP * ACK :-echo-message",
+          ">> CAP END"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set());
+  });
+
+  it("gives up labeled-response alone before CAP END", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        asked,
+        lines(
+          "<< :irc.test CAP * ACK :labeled-response",
+          ">> CAP REQ -labeled-response",
+          "<< :irc.test CAP * ACK :-labeled-response",
+          ">> CAP END"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).caps.enabled).toStrictEqual(new Set());
+  });
+
+  it("gives one up the same way when CAP NEW offered both and one was acknowledged", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannel("cap-notify"),
+        lines(
+          "<< :irc.test CAP iirc NEW :echo-message labeled-response",
+          ">> CAP REQ :echo-message labeled-response",
+          "<< :irc.test CAP iirc ACK :labeled-response",
+          ">> CAP REQ -labeled-response"
         ),
       ],
     });

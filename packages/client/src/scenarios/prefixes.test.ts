@@ -85,3 +85,39 @@ describe("multi-prefix", () => {
     expect(prefixesOf(relisted, "op")).toMatchObject({ _tag: "Partial", atLeast: new Set(["o"]) });
   });
 });
+
+describe("multi-prefix, once deleted", () => {
+  const deleted = [
+    registered(base, { offered: ["cap-notify", "multi-prefix"] }),
+    joined(base, "#iirc", ["@+op", "peer"]),
+    lines("+1s", "<< :irc.test CAP iirc DEL :multi-prefix", "+1s"),
+  ];
+
+  it("makes a MODE on prefixes it made complete give what the floor would: partial", () => {
+    expect(prefixesOf([...deleted, lines("<< :op!u@h MODE #iirc -v op")], "op")).toMatchObject({
+      _tag: "Partial",
+      atLeast: new Set(["o"]),
+    });
+  });
+
+  it("keeps them known through a MODE while it is on", () => {
+    expect(
+      prefixesOf(
+        [
+          registered(base, { offered: ["multi-prefix"] }),
+          joined(base, "#iirc", ["@+op"]),
+          lines("<< :op!u@h MODE #iirc -v op"),
+        ],
+        "op"
+      )
+    ).toMatchObject({ _tag: "Known", value: new Set(["o"]) });
+  });
+
+  it("leaves alone what the floor knew in full: a member listed with no prefix", () => {
+    expect(prefixesOf(deleted, "peer")).toMatchObject({ _tag: "Known", value: new Set() });
+    expect(prefixesOf([...deleted, lines("<< :op!u@h MODE #iirc +v peer")], "peer")).toMatchObject({
+      _tag: "Known",
+      value: new Set(["v"]),
+    });
+  });
+});

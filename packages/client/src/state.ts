@@ -17,14 +17,25 @@ import type { Seam } from "./seam.ts";
 export type Caps =
   /** `CAP LS 302` is sent, and the list is arriving. */
   | { readonly _tag: "Listing"; readonly offered: ReadonlyMap<CapName, string> }
-  /** `CAP REQ` is sent, and `asked` answers are still to come. */
-  | ({ readonly _tag: "Requesting"; readonly asked: number } & Negotiated)
+  /**
+   * `CAP REQ` is sent, and `asked` answers are still to come. `acked` holds the caps of an
+   * `ACK` spread over several Lines, applied only at its last.
+   */
+  | ({
+      readonly _tag: "Requesting";
+      readonly asked: number;
+      readonly acked: readonly CapName[];
+    } & Negotiated)
   /** Features hold registration open before `CAP END`. */
   | ({ readonly _tag: "Holding" } & Negotiated)
   /** Negotiation is over. */
   | ({ readonly _tag: "Steady" } & Negotiated)
-  /** After registration, `CAP REQ` is sent for caps `CAP NEW` offered. */
-  | ({ readonly _tag: "Changing"; readonly asked: number } & Negotiated)
+  /** After registration, `CAP REQ` is sent for caps `CAP NEW` offered, or to give some up. */
+  | ({
+      readonly _tag: "Changing";
+      readonly asked: number;
+      readonly acked: readonly CapName[];
+    } & Negotiated)
   /** The Ircd has no cap negotiation. */
   | { readonly _tag: "None" };
 
@@ -122,6 +133,11 @@ export type Network =
 export interface Member {
   readonly nick: string;
   readonly prefixes: Fact<ReadonlySet<string>>;
+  /**
+   * Whether a Feature made the prefixes complete, where the floor would know them only in
+   * part. They are known only while such a Feature is on.
+   */
+  readonly complete: boolean;
 }
 
 /** What is known of a Channel Self is in. */

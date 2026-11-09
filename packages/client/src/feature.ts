@@ -37,6 +37,11 @@ export interface Effects<Own> {
   readonly send?: readonly Sendable[];
   /** What should happen to registration, which a Feature may hold open before `CAP END`. */
   readonly registration?: Registration;
+  /**
+   * Caps to give up, among those it needs or uses. The core asks with `CAP REQ :-cap` for
+   * each one still enabled, and awaits the answer as for any request.
+   */
+  readonly drop?: readonly CapName[];
 }
 
 /**
@@ -58,8 +63,10 @@ export interface Refined<V, Own> extends Effects<Own> {
 export interface Context<Own> {
   readonly own: Own;
   readonly at: Instant;
-  /** The value of a cap in this Feature's `needs`, such as `PLAIN,EXTERNAL` for `sasl`. */
+  /** The value of a cap this Feature needs or uses, such as `PLAIN,EXTERNAL` for `sasl`. */
   readonly cap: (name: CapName) => string | undefined;
+  /** Whether a cap this Feature needs or uses is enabled now. */
+  readonly enabled: (name: CapName) => boolean;
   /** An ISUPPORT token's value, or `undefined` if the Ircd did not send it. */
   readonly token: (name: string) => string | undefined;
   readonly configuration: NetworkConfiguration;
@@ -99,6 +106,11 @@ export type Meant =
       readonly members: readonly MemberKnowledge[];
     };
 
+/** A Line `egress` will not let leave, which the core does not send. */
+export interface Refusal {
+  readonly _tag: "Refusal";
+}
+
 /** One Line on its way out, and what it is for. */
 export interface Departure {
   readonly line: OutboundLine;
@@ -122,23 +134,40 @@ export interface Departure {
  *   `CAP NEW`, `CAP DEL`, ISUPPORT, and at the end of a Session.
  * - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `meaning`. Within a
  *   stage, Features run in the registry's order, which is one array in one file.
- * - **State.** `own` is the Feature's state when it turns on, and again at each Session.
+ * - **State.** `own` is the Feature's state when it first turns on in a Connection. It is
+ *   kept while the Feature is off, so turned on again in the same Connection it goes on
+ *   from where it was, and each Connection starts it again.
  * - **Failure.** A hook that throws is a bug. The core turns that Feature off for the
  *   rest of the Connection and records it, and a throw replays the same way.
  */
 export interface Feature<Own = undefined> {
   readonly name: FeatureName;
   readonly needs: { readonly caps?: readonly CapName[]; readonly tokens?: readonly string[] };
+  /**
+   * Caps it reads but can be on without. They are asked for with `needs`, and only when
+   * every one of both is offered, so a Feature never asks for part of what it wants.
+   */
+  readonly uses?: readonly CapName[];
   readonly keeps?: readonly Kept[];
   readonly own: Own;
   /** While on, how bytes become text. */
   readonly encoding?: Encoding;
-  /** When it turns on, such as SASL beginning to authenticate. */
+  /**
+   * When it turns on, such as SASL beginning to authenticate, and again when a cap it
+   * `uses` is enabled or disabled while it is on.
+   */
   readonly start?: (context: Context<Own>) => Effects<Own>;
   /**
+   * When it is off and that matters: as negotiation settles with it off, which includes
+   * an Ircd with no cap negotiation at all, and as it turns off. SASL gives up a
+   * Connection here when a login is required and none happened.
+   */
+  readonly absent?: (context: Context<Own>) => Effects<Own>;
+  /**
    * When the core's deadline for a held registration passes, such as SASL hearing
-   * nothing. The Feature decides whether to `Continue` or `Abandon`. Left out, the
-   * core lets registration go.
+   * nothing, and when a Feature holding registration turns off, or `001` ends it. The
+   * Feature decides whether to `Continue` or `Abandon`. Left out, the core lets
+   * registration go.
    */
   readonly expired?: (context: Context<Own>) => Effects<Own>;
   /**
@@ -155,5 +184,9 @@ export interface Feature<Own = undefined> {
     arrival: Arrival,
     context: Context<Own>
   ) => Refined<readonly Meant[], Own>;
-  readonly egress?: (departure: Departure, context: Context<Own>) => Refined<Departure, Own>;
+  /** Refines a Line on its way out, or refuses it, so it is not sent. */
+  readonly egress?: (
+    departure: Departure,
+    context: Context<Own>
+  ) => Refined<Departure | Refusal, Own>;
 }

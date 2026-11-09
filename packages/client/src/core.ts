@@ -30,7 +30,7 @@ import type { TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
 import type { EndReason } from "./news.ts";
-import { begin, carryOut, expire, recompute, settle, unfilled } from "./registration.ts";
+import { before, begin, carryOut, expire, recompute, settle, unfilled } from "./registration.ts";
 import type { Registered } from "./registry.ts";
 import { registry } from "./registry.ts";
 import type { Run } from "./run.ts";
@@ -112,7 +112,7 @@ const disable = (run: Run): void => {
 };
 
 const configure = (run: Run, configuration: NetworkConfiguration): void => {
-  const was = onNow(run.registry, run.state);
+  const was = before(run);
   const { network } = run.state;
 
   run.state = { ...run.state, configuration };
@@ -334,7 +334,7 @@ const received = (run: Run, link: Link, bytes: Uint8Array): void => {
     return;
   }
 
-  const was = onNow(run.registry, run.state);
+  const was = before(run);
 
   ingress(run, parsed.line, rawParams(bytes));
   recompute(run, was);
@@ -378,13 +378,18 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
 
   const sent = send(run, line, line.command, { _tag: "Said", intent: input.intent });
 
+  // A Feature refused it at egress, and `send` reported it.
+  if (sent === undefined) {
+    return;
+  }
+
   run.news.push({
     _tag: "Message",
     at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
     id: { _tag: "Unknown" },
     kind: input.kind,
     live: true,
-    ours: { echo: sent?.echo ?? false, intent: input.intent },
+    ours: { echo: sent.echo, intent: input.intent },
     sender: session.nick,
     tags: new Map(),
     target: input.target,
@@ -473,7 +478,7 @@ const fired = (run: Run, input: Input & { readonly _tag: "Fired" }): void => {
   const timer = timersOf(run.state).get(input.timer);
 
   if (timer?.due === input.due) {
-    const was = onNow(run.registry, run.state);
+    const was = before(run);
 
     fire(run, timer.purpose);
     recompute(run, was);
@@ -494,7 +499,7 @@ const consumedBy = (state: State, input: Input): TimerId | undefined =>
 // A `SecretLine` a holding Feature sent could not be filled. With none to hear it, it
 // changes nothing.
 const unfilledHeld = (run: Run, line: SecretLine): void => {
-  const was = onNow(run.registry, run.state);
+  const was = before(run);
 
   if (!unfilled(run, line)) {
     ignore(run, { _tag: "NotNow", input: "Unfilled" });

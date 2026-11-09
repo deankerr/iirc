@@ -25,7 +25,7 @@ const welcome = lines("<< :irc.test 001 iirc :Welcome", "?? session-began iirc")
 
 // Every cap a Feature in the registry asks for, in the order it asks.
 const all =
-  "cap-notify sasl message-tags server-time batch labeled-response echo-message multi-prefix away-notify";
+  "cap-notify sasl message-tags server-time batch echo-message labeled-response multi-prefix away-notify";
 
 describe("asking for caps", () => {
   it("asks for every cap a Feature needs, in registry order, whatever order they are offered in", () => {
@@ -60,7 +60,7 @@ describe("asking for caps", () => {
     play(client, {
       configuration: declined,
       transcript: registered(declined, {
-        offered: ["batch", "labeled-response", "echo-message", "multi-prefix", "away-notify"],
+        offered: ["batch", "echo-message", "labeled-response", "multi-prefix", "away-notify"],
         requested: ["batch", "away-notify"],
       }),
     });
@@ -76,7 +76,7 @@ describe("asking for caps", () => {
         "<< :irc.test CAP * LS * :labeled-response sasl=PLAIN,EXTERNAL",
         "<< :irc.test CAP * LS * :draft/languages=1,en multi-prefix",
         "<< :irc.test CAP * LS :echo-message",
-        ">> CAP REQ :sasl labeled-response echo-message multi-prefix",
+        ">> CAP REQ :sasl echo-message labeled-response multi-prefix",
         "<< :irc.test CAP * ACK :sasl labeled-response echo-message multi-prefix",
         ">> CAP END"
       ),
@@ -178,6 +178,23 @@ describe("answers", () => {
     expect(client.inspect(played.state).features).toStrictEqual(["multi-prefix", "away-notify"]);
   });
 
+  it("enables nothing from an ACK spread over several Lines until its last", () => {
+    const first = lines(
+      opened.trimEnd(),
+      "<< :irc.test CAP * LS :multi-prefix away-notify",
+      ">> CAP REQ :multi-prefix away-notify",
+      "<< :irc.test CAP * ACK * :multi-prefix"
+    );
+
+    const partway = play(client, { configuration: base, transcript: first });
+
+    expect(client.inspect(partway.state)).toMatchObject({
+      caps: { enabled: new Set() },
+      features: [],
+      states: { caps: "Requesting" },
+    });
+  });
+
   it("takes an answer that comes after 001", () => {
     const played = play(client, {
       configuration: base,
@@ -239,8 +256,8 @@ describe("caps changing mid-Session", () => {
         }),
         lines(
           "<< :irc.test CAP iirc NEW :echo-message",
-          ">> CAP REQ :labeled-response echo-message",
-          "<< :irc.test CAP iirc ACK :labeled-response echo-message"
+          ">> CAP REQ :echo-message labeled-response",
+          "<< :irc.test CAP iirc ACK :echo-message labeled-response"
         ),
       ],
     });

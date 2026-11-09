@@ -3,51 +3,39 @@
  * it is on, bytes are read as UTF-8 with no fallback, and nothing leaves that is not
  * UTF-8. Text the Client sends is always UTF-8, and a `Say` that cannot be is `Refused`
  * as `Unsendable` before it reaches egress. The only bytes sent as they came are a `PING`
- * token echoed in its `PONG`, so one that is not UTF-8 is sent as UTF-8 read from it.
+ * token echoed in its `PONG`, so one that is not UTF-8 is refused at egress, and not sent.
  *
  * @packageDocumentation
  */
-import { isRejected, outbound, RawParam } from "@iirc/protocol/line";
+import { RawParam } from "@iirc/protocol/line";
 import type { Param } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import type { Feature } from "../feature.ts";
 import { FeatureName } from "../ids.ts";
 
-const lossy = new TextDecoder("utf-8", { ignoreBOM: true });
+const strict = new TextDecoder("utf-8", { ignoreBOM: true });
 const utf8 = new TextEncoder();
 
-// A parameter as UTF-8: text already is, and bytes are read as UTF-8, any that are not
-// becoming U+FFFD.
 const isRaw = Schema.is(RawParam);
 
-const asUtf8 = (param: Param): Param => {
+// Whether a parameter is UTF-8: text always is, and bytes are when they read back the same.
+const isUtf8 = (param: Param): boolean => {
   if (!isRaw(param)) {
-    return param;
+    return true;
   }
 
   const bytes = Uint8Array.from(param.bytes, (char) => char.codePointAt(0) ?? 0);
-  const text = lossy.decode(bytes);
-  const same = utf8.encode(text);
+  const same = utf8.encode(strict.decode(bytes));
 
-  return same.length === bytes.length && same.every((byte, index) => byte === bytes[index])
-    ? param
-    : text;
+  return same.length === bytes.length && same.every((byte, index) => byte === bytes[index]);
 };
 
 /** The `UTF8ONLY` Feature. */
 export const utf8Only: Feature = {
-  egress: (departure) => {
-    const params = departure.line.params.map(asUtf8);
-
-    if (params.every((param, index) => param === departure.line.params[index])) {
-      return { value: departure };
-    }
-
-    const line = outbound(departure.line.command, params, departure.line.tags);
-
-    return { value: isRejected(line) ? departure : { ...departure, line } };
-  },
+  egress: (departure) => ({
+    value: departure.line.params.every(isUtf8) ? departure : { _tag: "Refusal" },
+  }),
   encoding: { _tag: "Utf8Only" },
   name: FeatureName.make("utf8only"),
   needs: { tokens: ["UTF8ONLY"] },

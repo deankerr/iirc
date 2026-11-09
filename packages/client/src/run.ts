@@ -9,7 +9,7 @@ import { casefold } from "@iirc/protocol/casemapping";
 import { isRejected } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected, SecretLine } from "@iirc/protocol/line";
 
-import type { Departure, Sendable } from "./feature.ts";
+import type { Departure, Refusal, Sendable } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
 import type { Knowledge } from "./known.ts";
@@ -142,6 +142,8 @@ export const sendSecret = (run: Run, line: SecretLine): void => {
 
 const protocol: Departure["for"] = { _tag: "Protocol" };
 
+const isRefusal = (value: Departure | Refusal): value is Refusal => !("line" in value);
+
 /**
  * Sends what Feature hooks asked to send, as they built it: their Lines do not go
  * through `egress` again.
@@ -162,7 +164,9 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
 
 /**
  * Sends a Line on the Connection, through each Feature's `egress`. A Line that cannot be
- * built is not sent, and is recorded as `Malformed` with its command.
+ * built is not sent, and is recorded as `Malformed` with its command. One a Feature
+ * refuses is not sent either: a `Said` one is `Refused` as `Unsendable`, and any other
+ * is `Ignored` as `Unsendable`, with its command.
  * @param run - The step.
  * @param line - The Line, or why it cannot be built.
  * @param command - Its command, to report if it cannot be built.
@@ -199,12 +203,31 @@ export const send = (
     return departure;
   }
 
-  const ran = runStage(features, open.seam, reading, departure, (feature, value, context) =>
-    feature.egress?.(value, context)
+  const ran = runStage<Departure | Refusal>(
+    features,
+    open.seam,
+    reading,
+    departure,
+    (feature, value, context) => (isRefusal(value) ? undefined : feature.egress?.(value, context))
   );
 
   updateOpen(run, (phase) => ({ ...phase, seam: ran.seam }));
   reportFailed(run, ran.failed);
+
+  if (isRefusal(ran.value)) {
+    if (departure.for._tag === "Said") {
+      run.news.push({
+        _tag: "Refused",
+        intent: departure.for.intent,
+        reason: { _tag: "Unsendable" },
+      });
+    } else {
+      ignore(run, { _tag: "Unsendable", command: line.command });
+    }
+
+    return undefined;
+  }
+
   run.outputs.push({ _tag: "Send", connection: id, line: ran.value.line });
   sendAll(run, ran.send);
 

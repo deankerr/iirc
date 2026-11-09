@@ -20,7 +20,7 @@ import type {
 import type { Registered } from "./registry.ts";
 import type { Seam } from "./seam.ts";
 import { featuresOn } from "./seam.ts";
-import type { Caps, ChannelPhase, InSession, Link, Network, Open, State } from "./state.ts";
+import type { Caps, ChannelPhase, InSession, Link, Member, Network, Open, State } from "./state.ts";
 import { tableOf } from "./timers.ts";
 
 /**
@@ -79,26 +79,22 @@ const kept = <T>(fact: Fact<T>, which: Kept, seam: Seam): Fact<T> => {
   return { _tag: "Stale", since, was: fact._tag === "Known" ? fact.value : fact.atLeast };
 };
 
-// A Channel's members, with prefixes a Feature made complete marked stale once it is off.
+// A Channel's members, with prefixes a Feature made complete marked stale once no
+// Feature that keeps them is on.
 const membersOf = (
-  members: ReadonlyMap<string, MemberKnowledge> | undefined,
+  members: ReadonlyMap<string, Member> | undefined,
   seam: Seam | undefined
-): ReadonlyMap<string, MemberKnowledge> => {
-  if (members === undefined) {
-    return new Map();
-  }
-
-  if (seam?.stale.has("member.prefixes") !== true) {
-    return members;
-  }
-
-  return new Map(
-    [...members].map(([key, member]) => [
+): ReadonlyMap<string, MemberKnowledge> =>
+  new Map(
+    [...(members ?? [])].map(([key, { nick, prefixes, complete }]) => [
       key,
-      { ...member, prefixes: kept(member.prefixes, "member.prefixes", seam) },
+      {
+        nick,
+        prefixes:
+          complete && seam !== undefined ? kept(prefixes, "member.prefixes", seam) : prefixes,
+      },
     ])
   );
-};
 
 const sessionKnowledge = (network: Network): SessionKnowledge => {
   switch (network._tag) {
