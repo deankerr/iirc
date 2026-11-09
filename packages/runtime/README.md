@@ -74,8 +74,9 @@ Every log goes through `Effect.log*`, annotated with the Network.
 ### Not yet
 
 - **Flood pacing.** The Runtime sends each Line as soon as it is carried out. A burst, such as many joins or a long `say`, can get the Connection killed for flooding. Pacing belongs to the Outbox, a later module that sits between the Runtime and the Transport.
-- **The Owner API and the Daemon.** The HTTP API and the composition root that wires the production adapters together are the Daemon's.
-- **End-to-end runs against real Ircds.** They will live in the Daemon's package. This package's tests run the real Client on the in-memory ports, on a `TestClock`.
+- **A graceful `QUIT` on shutdown.** Closing the Runtime hangs up every Connection without one. It can come as an input the Client answers.
+
+The Owner API is [`@iirc/api`](../api/README.md), and the composition root that wires the production adapters to the Runtime is [`@iirc/daemon`](../daemon/README.md), whose end-to-end runs drive it against private Ircds. This package's tests run the real Client on the in-memory ports, on a `TestClock`.
 
 | Port | Its job | Imports | In-memory adapter |
 | --- | --- | --- | --- |
