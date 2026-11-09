@@ -24,6 +24,8 @@ const pure = "The core is pure: time arrives on inputs and effects leave as outp
 // barrel or by subpath, and every other one is refused.
 //
 // The core may use pure data and Schema, and nothing that runs, waits, or reaches out.
+// `DateTime` is left out: besides reading the clock, its zoned constructors default to
+// the machine's time zone, so the same input could give a different result elsewhere.
 const pureEffect = [
   "Array",
   "BigDecimal",
@@ -32,7 +34,6 @@ const pureEffect = [
   "Brand",
   "Chunk",
   "Data",
-  "DateTime",
   "Duration",
   "Equal",
   "Equivalence",
@@ -77,7 +78,7 @@ const pureSubpaths = ["effect/encoding/Base64"];
 // from the wall clock unless told otherwise. `DateTime` and `Clock` read time, so only
 // `clock.ts` and tests have them.
 const runtimeEffect = [
-  ...pureEffect.filter((name) => name !== "DateTime"),
+  ...pureEffect,
   "Cause",
   "Context",
   "Deferred",
@@ -216,9 +217,13 @@ const restrictImports = (
 
 const imports = (...patterns: readonly Pattern[]) => restrictImports([], patterns);
 
+// `Hash.random` hashes by a random number. The `random` property is refused everywhere,
+// and this refuses it as a named import.
+const randomHashImport = { importNames: ["random"], message: pure, name: "effect/Hash" };
+
 const pureImports = (...patterns: readonly Pattern[]) =>
   restrictImports(
-    [effectPath(pureEffect, pure), wallClockImport(pure)],
+    [effectPath(pureEffect, pure), wallClockImport(pure), randomHashImport],
     [impureModules, effectSubpaths(pureEffect, pureSubpaths, pure), ...patterns]
   );
 
@@ -322,8 +327,12 @@ const runtimeGlobals = restrictGlobals(
 const runtimeProperties = restrictProperties(
   throughClock,
   "The Runtime takes randomness from Effect's Random.",
-  { message: throughClock, property: "clockWith" }
+  { message: throughClock, property: "clockWith" },
+  { message: throughPorts, property: "toFile" }
 );
+
+// `Logger.toFile` opens a file through FileSystem, around the ports.
+const toFileImport = { importNames: ["toFile"], message: throughPorts, name: "effect/Logger" };
 
 // Every Runtime file, tests included, reaches no adapter and reads no wall clock.
 const clockWithImport = {
@@ -337,6 +346,7 @@ const runtimeImports = (...patterns: readonly Pattern[]) =>
     [
       wallClockImport(throughClock),
       clockWithImport,
+      toFileImport,
       effectPath([...runtimeEffect, ...timeModules], throughPorts),
     ],
     [
@@ -356,7 +366,12 @@ const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly P
   const allowed = clock === "allowed" ? [...runtimeEffect, ...timeModules] : runtimeEffect;
 
   return restrictImports(
-    [wallClockImport(throughClock), clockWithImport, effectPath(allowed, throughPorts)],
+    [
+      wallClockImport(throughClock),
+      clockWithImport,
+      toFileImport,
+      effectPath(allowed, throughPorts),
+    ],
     [adapters, effectSubpaths(allowed, [], throughPorts), ...patterns, effectTesting]
   );
 };
@@ -364,6 +379,11 @@ const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly P
 const tests = ["**/*.test.ts", "**/testing/**"];
 
 const coreFence: OxlintOverride[] = [
+  {
+    // The import rules see a module only by name, so fenced code imports statically.
+    files: ["packages/protocol/src/**", "packages/client/src/**", "packages/runtime/src/**"],
+    rules: { "fence/no-dynamic-import": "error" },
+  },
   {
     // Tests too reach another package only by its name.
     files: ["packages/*/src/**", "apps/*/src/**"],
@@ -451,7 +471,10 @@ export default defineConfig({
   ...(core.env && { env: core.env }),
   extends: [core, antiSlop, jsPlugins, vitest, effect],
   ignorePatterns: core.ignorePatterns ?? [],
-  jsPlugins: jsPlugins.jsPlugins,
+  jsPlugins: [
+    ...jsPlugins.jsPlugins,
+    { name: "fence", specifier: "./packages/fence/src/plugin.ts" },
+  ],
   options: { typeAware: true, typeCheck: true },
   overrides: coreFence,
   rules: {

@@ -38,7 +38,7 @@ type Diagnostic = (typeof Report.Type)["diagnostics"][number];
 const probes: readonly Probe[] = [
   {
     allowed: [
-      'import { DateTime as Time, Schema } from "effect";',
+      'import { Schema } from "effect";',
       'import { Option, Result } from "effect";',
       'import * as Base64 from "effect/encoding/Base64";',
       'import * as SchemaModule from "effect/Schema";',
@@ -47,6 +47,9 @@ const probes: readonly Probe[] = [
     refused: [
       'import { FileSystem } from "effect";',
       'import { Cron } from "effect";',
+      'import { DateTime as Time } from "effect";',
+      'import { random as randomHash } from "effect/Hash";',
+      'export const lazy = await import("effect");',
       'import { uuidV4Unsafe } from "effect/crypto/SecureRandom";',
       'import { random } from "effect/encoding/Hex";',
       'import * as Http from "effect/http";',
@@ -79,6 +82,7 @@ const probes: readonly Probe[] = [
       'import * as DateTimeModule from "effect/DateTime";',
       'import { Journal } from "@iirc/runtime/journal";',
       'import { Journal as Relative } from "../../runtime/src/journal.ts";',
+      'export const lazy = import("effect");',
       'export { TestClock } from "effect/testing";',
       "export const viaGlobal = globalThis.fetch;",
       "export const alias = self;",
@@ -91,6 +95,7 @@ const probes: readonly Probe[] = [
       'import { Effect, Stream } from "effect";',
       'import { Effect as Fx } from "effect";',
       'import { Queue, Semaphore } from "effect";',
+      'import { Logger } from "effect";',
       'import * as PubSubModule from "effect/PubSub";',
       'import { Input } from "@iirc/client";',
       'import { Line } from "@iirc/protocol/line";',
@@ -109,6 +114,9 @@ const probes: readonly Probe[] = [
       'import { Client } from "../../client/src/client.ts";',
       'import { FileSystem } from "effect";',
       'import * as FileSystemModule from "effect/FileSystem";',
+      'export const lazy = import("effect");',
+      'import { toFile } from "effect/Logger";',
+      "export const fileLog = Logger.toFile;",
       'import { Config } from "effect";',
       'import { Cron } from "effect";',
       'import { uuidV4Unsafe } from "effect/crypto/SecureRandom";',
@@ -140,6 +148,7 @@ const probes: readonly Probe[] = [
     ],
     directory: "packages/runtime/src/testing",
     refused: [
+      'export const lazy = import("effect");',
       'import { FileSystem } from "effect";',
       'import { readFileSync } from "node:fs";',
       'import { scripted as relative } from "../../../client/src/testing/scripted.ts";',
@@ -206,8 +215,8 @@ const lint = (): readonly Diagnostic[] => {
       encoding: "utf-8",
     });
 
-    return Schema.decodeSync(Report)(linted.stdout).diagnostics.filter((d) =>
-      d.code.includes("no-restricted-")
+    return Schema.decodeSync(Report)(linted.stdout).diagnostics.filter(
+      (d) => d.code.includes("no-restricted-") || d.code.startsWith("fence(")
     );
   } finally {
     for (const file of created) {

@@ -125,6 +125,13 @@ The sixth review found five more, fixed the same day:
 
 The seventh review found three more in Effect itself: `FileSystem` reached from the Runtime, `SecureRandom` and `Hex.random` in the core, and `Cron`, whose schedule starts from the wall clock unless told otherwise. Refusing Effect's modules one at a time would keep missing the next, so Effect is now fenced by allowlist. The core may use pure data and Schema, and `effect/encoding/Base64` for SASL. The Runtime may also run, wait for, and compose Effects. Everything else is refused, from the `effect` barrel or by subpath, and a new module needs a deliberate change to the list.
 
+The eighth review found four more gaps, now inside or around the allowlist:
+
+- `await import("effect")` loaded the whole barrel, so a new `fence/no-dynamic-import` rule, in `packages/fence/src/plugin.ts`, refuses `import()` in fenced code.
+- `random` imported by name from `effect/Hash` hashed by a random number.
+- `DateTime`'s zoned constructors default to the machine's time zone, so `DateTime` left the core's allowlist.
+- `Logger.toFile` writes a file through `FileSystem`, so it is refused in the Runtime.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:
