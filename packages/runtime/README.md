@@ -116,7 +116,7 @@ JournalRecord = Input { network, input } | Outputs { network, of, outputs }
 
 - **One Journal for the Daemon.** Every Network's Entries share one sequence, and each record names its Network.
 - **Appends are durable** before `append` returns, and are numbered in the order they complete. Sequences only increase, and may skip numbers.
-- **An append is whole or absent.** One interrupted is either kept, and read and followed like any other, or not kept at all.
+- **An append is whole or absent, and settled when it returns.** One interrupted is either kept, and read and followed like any other, or not kept at all, and which is decided before the append returns, interrupted or failed: a record not there then never appears later. An adapter whose write can go on after its Effect is interrupted must make the append uninterruptible, or wait for the write to settle, as the SQLite one does. The Runtime's recovery through `said` relies on this.
 - **`read` and `follow` give each Entry once, in order.** `follow` gives the past and then each new Entry as it is appended, with no gap between them, and never ends.
 - **Records are Schemas.** Every adapter stores their encoding, so the in-memory one does too, and a record that cannot be stored fails in tests. A `SendSecret` is recorded with the Credential's name, never its value.
 - **Versioned, not migrated.** `journalVersion` is 1. An adapter that finds another version refuses to open with `JournalVersionMismatch`. Nothing is migrated until the shape has settled. No Daemon has written a Journal yet, so until the first one does, the records' shape changes freely under version 1. From then on, any change that an earlier Journal would not decode under bumps the version.
