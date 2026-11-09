@@ -9,6 +9,17 @@ import { encode, isRejected, upperCaseAscii } from "./line.ts";
 import type { OutboundLine, Rejected } from "./line.ts";
 import ctcp from "./testdata/ctcp.yaml?raw";
 
+// The bytes `encode` writes for a Line our own builders made, which it never rejects.
+const encodedBytes = (line: OutboundLine): Uint8Array => {
+  const bytes = encode(line);
+
+  if (isRejected(bytes)) {
+    throw new Error(`Expected bytes, not ${bytes.reason}`);
+  }
+
+  return bytes;
+};
+
 const Vectors = Schema.Struct({
   tests: Schema.Array(
     Schema.Struct({
@@ -76,7 +87,7 @@ const wire = (built: OutboundLine | Rejected) => {
     throw new Error(built.reason);
   }
 
-  return new TextDecoder().decode(encode(built));
+  return new TextDecoder().decode(encodedBytes(built));
 };
 
 describe(ctcpText, () => {

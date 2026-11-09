@@ -13,6 +13,17 @@ import {
 } from "./line.ts";
 import type { OutboundLine, SecretLine } from "./line.ts";
 
+// The bytes `encode` writes for a Line our own builders made, which it never rejects.
+const encodedBytes = (line: OutboundLine): Uint8Array => {
+  const bytes = encode(line);
+
+  if (isRejected(bytes)) {
+    throw new Error(`Expected bytes, not ${bytes.reason}`);
+  }
+
+  return bytes;
+};
+
 const text = new TextDecoder();
 const credential = CredentialName.make("libera");
 
@@ -21,7 +32,7 @@ const wires = (lines: ReturnType<typeof fillSecret>) => {
     throw new Error(`Expected Lines, not ${lines.reason}`);
   }
 
-  return lines.map((line) => text.decode(encode(line)));
+  return lines.map((line) => text.decode(encodedBytes(line)));
 };
 
 const plain = (authcid: string, authzid = ""): SecretLine => ({
@@ -97,7 +108,7 @@ describe(fillSecret, () => {
 
 // The payload as it goes on the wire, read back by the parser.
 const payloadOf = (line: OutboundLine) => {
-  const parsed = parse(encode(line).subarray(0, -2), { _tag: "Utf8Only" });
+  const parsed = parse(encodedBytes(line).subarray(0, -2), { _tag: "Utf8Only" });
   const params = parsed._tag === "Line" ? parsed.line.params : [];
 
   expect(parsed).toMatchObject({ line: { command: "AUTHENTICATE" } });

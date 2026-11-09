@@ -32,6 +32,17 @@ import {
 } from "./line.ts";
 import type { Rejected } from "./line.ts";
 
+// The bytes `encode` writes for a Line our own builders made, which it never rejects.
+const encodedBytes = (line: OutboundLine): Uint8Array => {
+  const bytes = encode(line);
+
+  if (isRejected(bytes)) {
+    throw new Error(`Expected bytes, not ${bytes.reason}`);
+  }
+
+  return bytes;
+};
+
 const text = new TextDecoder();
 const utf8 = new TextEncoder();
 const isRaw = Schema.is(RawParam);
@@ -52,7 +63,7 @@ const sendableLine = (built: OutboundLine | Rejected): OutboundLine => {
   return built;
 };
 
-const wire = (built: OutboundLine | Rejected) => text.decode(encode(sendableLine(built)));
+const wire = (built: OutboundLine | Rejected) => text.decode(encodedBytes(sendableLine(built)));
 
 describe(encode, () => {
   it("writes the last parameter as trailing only when it must be", () => {
@@ -100,7 +111,7 @@ describe(outbound, () => {
 
   it("takes 510 bytes with no colon, and refuses 511", () => {
     // `PING ` is 5 bytes, so a token of 505 makes 510, and 512 with CRLF.
-    expect(encode(sendableLine(outbound("PING", ["x".repeat(505)])))).toHaveLength(512);
+    expect(encodedBytes(sendableLine(outbound("PING", ["x".repeat(505)])))).toHaveLength(512);
     expect(outbound("PING", ["x".repeat(506)])).toStrictEqual({
       _tag: "Rejected",
       reason: "TooLong",
@@ -109,7 +120,7 @@ describe(outbound, () => {
 
   it("takes 510 bytes with the colon a trailing parameter needs, and refuses 511", () => {
     // `PRIVMSG #a :` is 12 bytes, so text of 498 with a space in it makes 510.
-    expect(encode(sendableLine(outbound("PRIVMSG", ["#a", said(498)])))).toHaveLength(512);
+    expect(encodedBytes(sendableLine(outbound("PRIVMSG", ["#a", said(498)])))).toHaveLength(512);
     expect(outbound("PRIVMSG", ["#a", said(499)])).toStrictEqual({
       _tag: "Rejected",
       reason: "TooLong",
@@ -120,7 +131,7 @@ describe(outbound, () => {
     // `+a=` is 3 bytes, so a value of 4091 makes 4094.
     const tagged = sendableLine(outbound("TAGMSG", ["#a"], { "+a": "x".repeat(4091) }));
 
-    expect(encode(tagged)).toHaveLength(1 + 4094 + 1 + "TAGMSG #a\r\n".length);
+    expect(encodedBytes(tagged)).toHaveLength(1 + 4094 + 1 + "TAGMSG #a\r\n".length);
     expect(outbound("TAGMSG", ["#a"], { "+a": "x".repeat(4092) })).toStrictEqual({
       _tag: "Rejected",
       reason: "TagsTooLong",
@@ -267,7 +278,7 @@ const sendable = fc
   .map(([verb, values, tagged]) => outbound(verb, values, tagged))
   .filter((built): built is OutboundLine => !isRejected(built));
 
-const bytesOf = (line: OutboundLine) => encode(line);
+const bytesOf = (line: OutboundLine) => encodedBytes(line);
 
 describe("every OutboundLine", () => {
   it("is built often enough from these generators to prove something", () => {
@@ -335,7 +346,7 @@ describe("every OutboundLine", () => {
         fc.property(middle, anyText, (target, said) => {
           const built = privmsg(target, said);
 
-          return isRejected(built) || text.decode(encode(built)).split("\r\n").length === 2;
+          return isRejected(built) || text.decode(encodedBytes(built)).split("\r\n").length === 2;
         }),
         { numRuns: 3000 }
       );
@@ -361,7 +372,7 @@ describe("a PING token that is not UTF-8", () => {
 
     expect(parsed._tag).toBe("Line");
     expect(bytesOfRaw(token_ ?? raw(Uint8Array.of()))).toStrictEqual(token);
-    expect(encode(sendableLine(pong(token_ ?? "")))).toStrictEqual(pongOf(token));
+    expect(encodedBytes(sendableLine(pong(token_ ?? "")))).toStrictEqual(pongOf(token));
   });
 
   it("would not be, if it were echoed as text", () => {
@@ -369,7 +380,7 @@ describe("a PING token that is not UTF-8", () => {
     const token = parsed._tag === "Line" ? (parsed.line.params[0] ?? "") : "";
 
     expect(token).toBe("ÿAé");
-    expect(encode(sendableLine(pong(token)))).not.toStrictEqual(
+    expect(encodedBytes(sendableLine(pong(token)))).not.toStrictEqual(
       pongOf(Uint8Array.of(0xff, 0x41, 0xe9))
     );
   });
@@ -409,8 +420,8 @@ describe("a PING token that is not UTF-8", () => {
   });
 
   it("takes 505 bytes, which fit, and writes them trailing when they must be", () => {
-    expect(encode(sendableLine(pong(new Uint8Array(505).fill(0x78))))).toHaveLength(512);
-    expect(text.decode(encode(sendableLine(pong(utf8.encode("a b")))))).toBe("PONG :a b\r\n");
+    expect(encodedBytes(sendableLine(pong(new Uint8Array(505).fill(0x78))))).toHaveLength(512);
+    expect(text.decode(encodedBytes(sendableLine(pong(utf8.encode("a b")))))).toBe("PONG :a b\r\n");
   });
 
   it("is not changed by changing the buffer it was made from, however it was made", () => {
@@ -425,7 +436,197 @@ describe("a PING token that is not UTF-8", () => {
     received[6] = 0x0a;
 
     for (const line of [made, ponged, echoed]) {
-      expect(text.decode(encode(line))).toBe("PONG :xOPER root bad\r\n");
+      expect(text.decode(encodedBytes(line))).toBe("PONG :xOPER root bad\r\n");
     }
+  });
+});
+
+// These tests make values typed as what they are not, to show the guard holds for a
+// value our own code built wrongly. Nothing outside the tests does this.
+// oxlint-disable-next-line anti-slop/no-unknown-parameters, typescript/no-unnecessary-type-parameters, typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion -- SAFETY: forging an ill-typed value is the point of these tests.
+const forged = <T>(value: unknown): T => value as T;
+
+describe("encode, as the one guard on what leaves", () => {
+  const good = sendableLine(pong("ok"));
+  const injected = "ĊOPER root bad";
+
+  it("is not fooled by a getter that changes between reads", () => {
+    let reads = 0;
+
+    const turning = {
+      get bytes() {
+        reads += 1;
+
+        return reads <= 3 ? "ok" : injected;
+      },
+    };
+
+    const line = sendableLine(pong(turning));
+    const forgedLine = { ...good, params: [turning] };
+
+    // pong read it once, and kept that read. Each encode of the forged Line reads it once
+    // more, and refuses it as soon as it has turned.
+    expect(text.decode(encodedBytes(line))).toBe("PONG ok\r\n");
+    expect(text.decode(encodedBytes(forgedLine))).toBe("PONG ok\r\n");
+    expect(text.decode(encodedBytes(forgedLine))).toBe("PONG ok\r\n");
+    expect(encode(forgedLine)).toStrictEqual({ _tag: "Rejected", reason: "InvalidParameter" });
+    expect(text.decode(encodedBytes(line))).toBe("PONG ok\r\n");
+  });
+
+  it("writes what it read once, whatever a getter says after", () => {
+    let reads = 0;
+
+    const once = {
+      get bytes() {
+        reads += 1;
+
+        return reads === 1 ? "ok" : injected;
+      },
+    };
+
+    expect(text.decode(encodedBytes({ ...good, params: [once] }))).toBe("PONG ok\r\n");
+  });
+
+  it("refuses a spread Line whose parameters were replaced", () => {
+    expect(encode({ ...good, params: [{ bytes: injected }] })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(encode({ ...good, params: ["a\r\nQUIT"] })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(encode({ ...good, params: ["a b", "c"] })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+  });
+
+  it("refuses a spread Line whose parameters or tags were made too long", () => {
+    expect(encode({ ...good, params: ["x".repeat(506)] })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "TooLong",
+    });
+    expect(encode({ ...good, params: [{ bytes: "x".repeat(506) }] })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "TooLong",
+    });
+    expect(encode({ ...good, tags: { "+a": "x".repeat(4092) } })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "TagsTooLong",
+    });
+  });
+
+  it("refuses a spread Line with a command or a tag it may not send", () => {
+    expect(encode({ ...good, command: "PONG\r\nQUIT" })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidCommand",
+    });
+    expect(encode({ ...good, tags: { time: "now" } })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidTag",
+    });
+  });
+
+  it("refuses rather than throws on fields that are not what they claim", () => {
+    const throwing = {
+      get bytes(): string {
+        throw new Error("no");
+      },
+    };
+
+    expect(encode(forged({ command: "PONG", params: null, tags: {} }))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(encode({ ...good, params: [throwing] })).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(encode(forged({ command: "PONG", params: ["x"], tags: "x" }))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidTag",
+    });
+  });
+
+  it("never writes NUL, CR, or LF but its line ending, for any record at all", () => {
+    const odd = fc.oneof(
+      fc.anything(),
+      fc.string({ unit: "binary" }),
+      fc.constantFrom("a\r\nQUIT", "\0", "\n", "Ċ", "Ā\u000D", " :x", "")
+    );
+
+    const param = fc.oneof(
+      odd,
+      fc.record({ bytes: odd }),
+      fc.constant(Object.assign(Object.create(null), { bytes: "ok" }))
+    );
+
+    const record = fc.record({
+      command: fc.oneof(fc.constantFrom("PONG", "PRIVMSG", "001"), odd),
+      params: fc.oneof(fc.array(param, { maxLength: 17 }), odd),
+      tags: fc.oneof(fc.dictionary(fc.string(), odd, { maxKeys: 3 }), odd),
+    });
+
+    expect(() => {
+      fc.assert(
+        fc.property(record, (value) => {
+          const bytes = encode(forged(value));
+
+          if (isRejected(bytes)) {
+            return;
+          }
+
+          const body = bytes.subarray(0, -2);
+          const tagged = body[0] === 0x40;
+          const tagLength = tagged ? body.indexOf(0x20) + 1 : 0;
+
+          expect(text.decode(bytes.subarray(-2))).toBe("\r\n");
+          expect(body.some((byte) => byte === 0 || byte === 0x0d || byte === 0x0a)).toBeFalsy();
+          expect(bytes.length - tagLength).toBeLessThanOrEqual(maxLineBytes + 2);
+          expect(tagLength).toBeLessThanOrEqual(maxTagBytes + 2);
+        }),
+        { numRuns: 5000 }
+      );
+    }).not.toThrow();
+  });
+});
+
+// A boxed String. Lint would unbox `new String(...)` when it fixes the file.
+const boxed = (value: string) => new Object(value);
+
+describe("outbound, given anything", () => {
+  it("returns Rejected rather than throwing", () => {
+    expect(outbound(forged(boxed("PING")), ["x"])).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidCommand",
+    });
+    expect(outbound(forged(42), ["x"])).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidCommand",
+    });
+    expect(outbound("PING", [forged(boxed("x"))])).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(outbound("PING", forged("x"))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidParameter",
+    });
+    expect(outbound("PING", ["x"], forged({ "+a": 1 }))).toStrictEqual({
+      _tag: "Rejected",
+      reason: "InvalidTag",
+    });
+  });
+
+  it("never throws on any arguments", () => {
+    expect(() => {
+      fc.assert(
+        fc.property(fc.anything(), fc.anything(), fc.anything(), (verb, values, tagged) => {
+          outbound(forged(verb), forged(values), forged(tagged));
+        }),
+        { numRuns: 3000 }
+      );
+    }).not.toThrow();
   });
 });

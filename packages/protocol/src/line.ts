@@ -1,4 +1,4 @@
-import { Redacted, Schema } from "effect";
+import { Redacted, Result, Schema } from "effect";
 import { Base64 } from "effect/encoding";
 
 import { binaryString, fallbackDecoder, utf8Lossy, utf8OrElse } from "./decode.ts";
@@ -352,19 +352,6 @@ export type Param = typeof Param.Type;
 
 const isText = Schema.is(Schema.String);
 
-/**
- * Whether a text survives being encoded as UTF-8: it has no lone surrogate.
- * @param text - The text.
- * @returns Whether it does.
- */
-const isWellFormed = (text: string) => text.isWellFormed();
-
-// A raw parameter is checked to be binary before its bytes are taken.
-const bytesOf = (param: Param) =>
-  isText(param)
-    ? utf8.encode(param)
-    : Uint8Array.from(param.bytes, (char) => char.codePointAt(0) ?? 0);
-
 const breaksLines = (bytes: Uint8Array) =>
   bytes.some((byte) => byte === 0x00 || byte === 0x0d || byte === 0x0a);
 
@@ -372,40 +359,10 @@ const breaksLines = (bytes: Uint8Array) =>
 const needsTrailing = (bytes: Uint8Array) =>
   bytes.length === 0 || bytes[0] === colon || bytes.includes(space);
 
-const isMiddle = (param: string) => !needsTrailing(utf8.encode(param));
-
-const tagText = (tags: Readonly<Record<string, string>>) =>
-  Object.entries(tags)
-    .map(([key, value]) =>
-      value === ""
-        ? key
-        : `${key}=${value.replaceAll(escapedInTags, (char) => tagEscape.get(char) ?? char)}`
-    )
-    .join(";");
-
-/**
- * The bytes of a Line's command and parameters, exactly as {@link encode} writes them,
- * with the colon only when the last parameter needs it.
- * @param line - The command and parameters.
- * @returns The pieces, in order.
- */
-const lineParts = (line: { readonly command: string; readonly params: readonly Param[] }) => {
-  const parts: Uint8Array[] = [utf8.encode(line.command)];
-  const separator = Uint8Array.of(space);
-  const trailing = Uint8Array.of(space, colon);
-
-  for (const [index, param] of line.params.entries()) {
-    const bytes = bytesOf(param);
-    const isLast = index === line.params.length - 1;
-
-    parts.push(isLast && needsTrailing(bytes) ? trailing : separator, bytes);
-  }
-
-  return parts;
-};
-
-const lengthOf = (parts: readonly Uint8Array[]) =>
-  parts.reduce((total, part) => total + part.length, 0);
+const escapeTag = ([key, value]: readonly [string, string]) =>
+  value === ""
+    ? key
+    : `${key}=${value.replaceAll(escapedInTags, (char) => tagEscape.get(char) ?? char)}`;
 
 /** Why a Line cannot be sent safely. */
 export type RejectedReason =
@@ -435,55 +392,145 @@ export interface Rejected {
 const rejected = (reason: RejectedReason): Rejected => ({ _tag: "Rejected", reason });
 
 /**
- * Whether a builder's result is {@link Rejected}.
- * @param result - What a builder or {@link fillSecret} returned.
+ * Whether a result is {@link Rejected}.
+ * @param result - What a builder, {@link encode}, or {@link fillSecret} returned.
  * @returns Whether it is a rejection.
  */
 export const isRejected = (
-  result: OutboundLine | readonly OutboundLine[] | Rejected
+  result: OutboundLine | readonly OutboundLine[] | Uint8Array | Rejected
 ): result is Rejected => "_tag" in result && result._tag === "Rejected";
 
+/** A Line before it is checked, whatever its fields hold. */
 interface Unchecked {
-  readonly command: string;
-  readonly params: readonly Param[];
-  readonly tags: Readonly<Record<string, string>>;
+  readonly command: unknown;
+  readonly params: unknown;
+  readonly tags: unknown;
 }
 
-const isSafeParam = (param: Param) =>
-  (isText(param) ? isWellFormed(param) : isBinary(param.bytes)) && !breaksLines(bytesOf(param));
-
-const isSafeTag = ([key, value]: readonly [string, string]) =>
-  isSendableTag(key) && !value.includes("\0") && isWellFormed(value);
+/** One parameter, read once: the plain value to keep, and the bytes it encodes to. */
+interface ReadParam {
+  readonly param: Param;
+  readonly bytes: Uint8Array;
+}
 
 /**
- * Says why a Line cannot be sent safely, or `undefined` if it can.
- * @param line - The Line to check.
- * @returns The first problem found, or `undefined`.
+ * A Line read once into plain data, every invariant checked on it. Checking and
+ * encoding both work from this, so what was checked is what is written.
  */
-const problem = (line: Unchecked): RejectedReason | undefined => {
-  if (!command.test(line.command)) {
-    return "InvalidCommand";
+interface Snapshot {
+  readonly _tag: "Snapshot";
+  readonly command: string;
+  readonly params: readonly ReadParam[];
+  readonly tags: readonly (readonly [string, string])[];
+}
+
+// The shapes a Line's fields are read into: plain strings, arrays, and objects, made
+// fresh by decoding, so each field is read once and a getter cannot change what was
+// checked. A boxed `String` is not a string here.
+const readCommand = Schema.decodeUnknownResult(Schema.String);
+
+const readParams = Schema.decodeUnknownResult(
+  Schema.Array(Schema.Union([Schema.String, Schema.Struct({ bytes: Schema.String })]))
+);
+
+const readTags = Schema.decodeUnknownResult(Schema.Record(Schema.String, Schema.String));
+
+// Text must survive UTF-8, and bytes must be one code unit per byte.
+const readParam = (param: Param): ReadParam | undefined => {
+  if (isText(param)) {
+    return param.isWellFormed() ? { bytes: utf8.encode(param), param } : undefined;
   }
 
-  if (line.params.length > 15) {
-    return "TooManyParameters";
+  return isBinary(param.bytes)
+    ? {
+        bytes: Uint8Array.from(param.bytes, (char) => char.codePointAt(0) ?? 0),
+        param: { bytes: param.bytes },
+      }
+    : undefined;
+};
+
+const isSafeTag = ([key, value]: readonly [string, string]) =>
+  isSendableTag(key) && !value.includes("\0") && value.isWellFormed();
+
+const separator = Uint8Array.of(space);
+const trailing = Uint8Array.of(space, colon);
+
+/**
+ * The bytes of a Line's command and parameters, exactly as {@link encode} writes them,
+ * with the colon only when the last parameter needs it.
+ * @param line - The Line, read.
+ * @returns The pieces, in order.
+ */
+const lineParts = (line: Pick<Snapshot, "command" | "params">) => {
+  const parts: Uint8Array[] = [utf8.encode(line.command)];
+
+  for (const [index, { bytes }] of line.params.entries()) {
+    const isLast = index === line.params.length - 1;
+
+    parts.push(isLast && needsTrailing(bytes) ? trailing : separator, bytes);
   }
 
-  const middle = line.params.slice(0, -1);
+  return parts;
+};
 
-  if (!line.params.every(isSafeParam) || middle.some((param) => needsTrailing(bytesOf(param)))) {
-    return "InvalidParameter";
+const lengthOf = (parts: readonly Uint8Array[]) =>
+  parts.reduce((total, part) => total + part.length, 0);
+
+/**
+ * Reads a Line once into plain data and checks every invariant on what it read: the
+ * command, each parameter, which may hold a space or a colon, the limits, and the tags.
+ * It never throws: a field that cannot be read is a parameter that cannot be sent.
+ * @param line - The Line, however it was made.
+ * @returns What was read, or why it cannot be sent.
+ */
+const snapshotOf = (line: Unchecked): Snapshot | Rejected => {
+  try {
+    const verb = readCommand(line.command);
+
+    if (Result.isFailure(verb) || !command.test(verb.success)) {
+      return rejected("InvalidCommand");
+    }
+
+    const values = readParams(line.params);
+
+    if (Result.isFailure(values)) {
+      return rejected("InvalidParameter");
+    }
+
+    if (values.success.length > 15) {
+      return rejected("TooManyParameters");
+    }
+
+    const params = values.success.map(readParam);
+    const read = params.flatMap((param) => (param === undefined ? [] : [param]));
+    const middle = read.slice(0, -1);
+
+    if (
+      read.length !== params.length ||
+      read.some(({ bytes }) => breaksLines(bytes)) ||
+      middle.some(({ bytes }) => needsTrailing(bytes))
+    ) {
+      return rejected("InvalidParameter");
+    }
+
+    if (lengthOf(lineParts({ command: verb.success, params: read })) > maxLineBytes) {
+      return rejected("TooLong");
+    }
+
+    const tagged = readTags(line.tags);
+    const tags = Result.isFailure(tagged) ? [] : Object.entries(tagged.success);
+
+    if (Result.isFailure(tagged) || !tags.every(isSafeTag)) {
+      return rejected("InvalidTag");
+    }
+
+    return utf8.encode(tags.map(escapeTag).join(";")).length > maxTagBytes
+      ? rejected("TagsTooLong")
+      : { _tag: "Snapshot", command: verb.success, params: read, tags };
+  } catch {
+    // Only a getter that throws gets here, and what cannot be read cannot be sent.
+    return rejected("InvalidParameter");
   }
-
-  if (lengthOf(lineParts(line)) > maxLineBytes) {
-    return "TooLong";
-  }
-
-  if (!Object.entries(line.tags).every(isSafeTag)) {
-    return "InvalidTag";
-  }
-
-  return utf8.encode(tagText(line.tags)).length > maxTagBytes ? "TagsTooLong" : undefined;
 };
 
 const explanations: Readonly<Record<RejectedReason, string>> = {
@@ -501,11 +548,12 @@ const explanations: Readonly<Record<RejectedReason, string>> = {
 
 /**
  * A Line that is safe to send: it cannot inject a second Line, it fits, and it parses
- * back the same. The only way to get one is from this module's builders, or by decoding
- * a recorded one, which checks it again. A parameter is text, sent as UTF-8, or a
- * {@link RawParam}, sent as its bytes. The tags are ones a Feature added: client-only
- * tags, or `label`, `batch`, and `draft/multiline-concat`, and their values are escaped
- * when encoded. The last parameter is written as a trailing parameter when it must be.
+ * back the same. Get one from this module's builders, or by decoding a recorded one,
+ * which checks it again. A parameter is text, sent as UTF-8, or a {@link RawParam},
+ * sent as its bytes. The tags are ones a Feature added: client-only tags, or `label`,
+ * `batch`, and `draft/multiline-concat`, and their values are escaped when encoded.
+ * The last parameter is written as a trailing parameter when it must be. {@link encode}
+ * checks it all again, so a value that only looks like one is never sent.
  */
 export const OutboundLine = Schema.Struct({
   command: Schema.String,
@@ -515,9 +563,9 @@ export const OutboundLine = Schema.Struct({
   Schema.check(
     Schema.makeFilter(
       (line) => {
-        const reason = problem(line);
+        const snapshot = snapshotOf(line);
 
-        return reason === undefined ? true : explanations[reason];
+        return snapshot._tag === "Rejected" ? explanations[snapshot.reason] : true;
       },
       { expected: "a Line that is safe to send" }
     )
@@ -528,19 +576,25 @@ export const OutboundLine = Schema.Struct({
 /** The decoded form of {@link OutboundLine}. */
 export type OutboundLine = typeof OutboundLine.Type;
 
+// What is kept is what was read and checked, as fresh plain data.
 const checked = (line: Unchecked): OutboundLine | Rejected => {
-  const reason = problem(line);
+  const snapshot = snapshotOf(line);
 
-  return reason === undefined
-    ? OutboundLine.make(
-        { command: line.command, params: [...line.params], tags: { ...line.tags } },
+  return snapshot._tag === "Rejected"
+    ? snapshot
+    : OutboundLine.make(
+        {
+          command: snapshot.command,
+          params: snapshot.params.map(({ param }) => param),
+          tags: Object.fromEntries(snapshot.tags),
+        },
         { disableChecks: true }
-      )
-    : rejected(reason);
+      );
 };
 
 /**
- * Builds a Line that is safe to send, or says why it cannot be.
+ * Builds a Line that is safe to send, or says why it cannot be. It never throws,
+ * whatever it is given.
  * @param command - The command, such as `PRIVMSG`, which is upper-cased.
  * @param params - The parameters, as text or bytes, where only the last may be empty,
  * hold a space, or start with a colon.
@@ -552,7 +606,8 @@ export const outbound = (
   command: string,
   params: readonly Param[],
   tags: Readonly<Record<string, string>> = {}
-): OutboundLine | Rejected => checked({ command: upperCaseAscii(command), params, tags });
+): OutboundLine | Rejected =>
+  checked({ command: isText(command) ? upperCaseAscii(command) : command, params, tags });
 
 /**
  * Adds tags to a Line, as `labeled-response` adds `label`. A tag already there is
@@ -570,16 +625,25 @@ const lineEnding = Uint8Array.of(0x0d, 0x0a);
 
 /**
  * Encodes a Line for the wire: tags escaped, text as UTF-8, bytes as they are, and the
- * last parameter written as a trailing parameter when it must be.
+ * last parameter written as a trailing parameter when it must be. This is the one guard
+ * on what leaves: it reads the Line once, checks every invariant on what it read, and
+ * writes from that, so however a value typed as an `OutboundLine` was made, no unsafe
+ * byte is written. A `Rejected` here means code upstream built a Line it should not have.
  * @param line - The Line.
- * @returns Its bytes, with CRLF.
+ * @returns Its bytes, with CRLF, or why it cannot be sent.
  */
-export const encode = (line: OutboundLine): Uint8Array => {
-  const hasTags = Object.keys(line.tags).length > 0;
+export const encode = (line: OutboundLine): Uint8Array | Rejected => {
+  const snapshot = snapshotOf(line);
+
+  if (snapshot._tag === "Rejected") {
+    return snapshot;
+  }
 
   const parts = [
-    ...(hasTags ? [utf8.encode(`@${tagText(line.tags)} `)] : []),
-    ...lineParts(line),
+    ...(snapshot.tags.length > 0
+      ? [utf8.encode(`@${snapshot.tags.map(escapeTag).join(";")} `)]
+      : []),
+    ...lineParts(snapshot),
     lineEnding,
   ];
 
@@ -601,7 +665,16 @@ export const encode = (line: OutboundLine): Uint8Array => {
  * @param name - The parameter.
  * @returns Whether it does.
  */
-const isOne = (name: string) => isSafeParam(name) && isMiddle(name) && !name.includes(",");
+const isOne = (name: string) => {
+  const read = Result.isSuccess(readCommand(name)) ? readParam(name) : undefined;
+
+  return (
+    read !== undefined &&
+    !breaksLines(read.bytes) &&
+    !needsTrailing(read.bytes) &&
+    !name.includes(",")
+  );
+};
 
 const toOne = (name: string, build: () => OutboundLine | Rejected): OutboundLine | Rejected =>
   isOne(name) ? build() : rejected("InvalidTarget");
@@ -816,7 +889,7 @@ const plain = (
 ): readonly OutboundLine[] | Rejected => {
   const parts = [authzid, authcid, value];
 
-  if (parts.some((part) => part.includes("\0") || !isWellFormed(part))) {
+  if (parts.some((part) => part.includes("\0") || !part.isWellFormed())) {
     return rejected("InvalidParameter");
   }
 

@@ -8,8 +8,19 @@ import ergoFloor from "../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import { Encoding, encode, isRejected, outbound, parse, parseSource, rawParams } from "./line.ts";
-import type { Line, Parsed, RawParam } from "./line.ts";
+import type { Line, OutboundLine, Parsed, RawParam } from "./line.ts";
 import msgSplit from "./testdata/msg-split.yaml?raw";
+
+// The bytes `encode` writes for a Line our own builders made, which it never rejects.
+const encodedBytes = (line: OutboundLine): Uint8Array => {
+  const bytes = encode(line);
+
+  if (isRejected(bytes)) {
+    throw new Error(`Expected bytes, not ${bytes.reason}`);
+  }
+
+  return bytes;
+};
 
 const utf8 = new TextEncoder();
 const utf8Only: Encoding = { _tag: "Utf8Only" };
@@ -118,7 +129,7 @@ describe("the recorded transcripts", () => {
       for (const text of sent(transcript)) {
         const line = parsedText(text);
         const built = outbound(line.command, line.params, Object.fromEntries(line.tags));
-        const bytes = isRejected(built) ? new Uint8Array() : encode(built).subarray(0, -2);
+        const bytes = isRejected(built) ? new Uint8Array() : encodedBytes(built).subarray(0, -2);
 
         expect(parse(bytes, utf8Only)).toStrictEqual({ _tag: "Line", line });
       }
