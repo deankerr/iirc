@@ -389,3 +389,75 @@ describe("snapshots", () => {
     );
   });
 });
+
+describe("the diff rebuilt on a mismatch", () => {
+  it("shows the values compared, not later calls, when Inspection counts its calls", () => {
+    const client = toy();
+    let generation = 0;
+
+    const counting: Client<ToyState> = {
+      ...client,
+      inspect: (state) => {
+        generation += 1;
+
+        return { ...client.inspect(state), states: { generation: String(generation) } };
+      },
+    };
+
+    const message = failure(() => play(counting, { configuration: base, transcript: once }));
+
+    expect(message).toBe(
+      'ReplayMismatchError: step 1 (Configured at 0ms) does not replay exactly: its inspection differ\nthe first run\'s view could not be rebuilt: `inspect` gives a different answer when called again\nreplayed {"caps":{"enabled":Set{},"offered":Map{}},"connection":1,"features":[],"isupport":Map{},"policies":Map{},"states":{"generation":"2"},"timers":Map{}}'
+    );
+  });
+
+  it("does not report a change after return when Knowledge answers once one way, then another", () => {
+    const client = toy();
+    let calls = 0;
+
+    const flipping: Client<ToyState> = {
+      ...client,
+      known: (state) => {
+        calls += 1;
+
+        return { ...client.known(state), casemapping: calls === 1 ? "ascii" : "rfc1459" };
+      },
+    };
+
+    const message = failure(() => play(flipping, { configuration: base, transcript: once }));
+
+    expect(message).toMatch(
+      /^ReplayMismatchError: step 1 \(Configured at 0ms\) does not replay exactly: its knowledge differ\nthe first run's view could not be rebuilt: `known` gives a different answer when called again\nreplayed \{"casemapping":"rfc1459"/u
+    );
+    expect(message).not.toContain("changed after it was returned");
+  });
+
+  it("reports a change after return only when the returned state no longer hashes as it did", () => {
+    let calls = 0;
+    let first: { n: number } | undefined;
+
+    const reaching: Client<{ n: number } | undefined> = {
+      initial: undefined,
+      inspect: () => toy().inspect(toy().initial),
+      known: () => toy().known(toy().initial),
+      step: () => {
+        calls += 1;
+        const state = { n: calls };
+
+        if (first === undefined) {
+          first = state;
+        } else {
+          first.n = 99;
+        }
+
+        return { news: [], outputs: [], state };
+      },
+    };
+
+    expect(
+      failure(() => play(reaching, { configuration: base, transcript: "!! configure\n" }))
+    ).toBe(
+      'ReplayMismatchError: step 1 (Configured at 0ms) does not replay exactly: its state differ\nthe first run\'s state changed after it was returned: the object it returned no longer hashes as it did\nreplayed {"n":2}'
+    );
+  });
+});

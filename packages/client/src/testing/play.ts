@@ -79,22 +79,87 @@ const texts = <State>(
   state: canonical(step.state),
 });
 
+// A step's texts, hashed, so a hash and the text it came from are always the same text.
+const hashes = (written: Readonly<Record<Part, string>>): Snapshot => ({
+  inspection: hashText(written.inspection),
+  knowledge: hashText(written.knowledge),
+  news: hashText(written.news),
+  outputs: hashText(written.outputs),
+  state: hashText(written.state),
+});
+
+// One part of a step as canonical text, calling only the view it needs.
+const partText = <State>(client: Client<State>, step: Step<State>, part: Part): string => {
+  switch (part) {
+    case "inspection": {
+      return canonical(client.inspect(step.state));
+    }
+
+    case "knowledge": {
+      return canonical(client.known(step.state));
+    }
+
+    case "news":
+    case "outputs":
+    case "state": {
+      return canonical(step[part]);
+    }
+
+    default: {
+      return part satisfies never;
+    }
+  }
+};
+
 /**
  * Writes one step down, as a hash of each part's canonical text.
  * @param client - The Client, for its views of the state.
  * @param step - The step, as it was just returned.
  * @returns Its snapshot.
  */
-export const snapshot = <State>(client: Client<State>, step: Step<State>): Snapshot => {
-  const written = texts(client, step);
+export const snapshot = <State>(client: Client<State>, step: Step<State>): Snapshot =>
+  hashes(texts(client, step));
 
-  return {
-    inspection: hashText(written.inspection),
-    knowledge: hashText(written.knowledge),
-    news: hashText(written.news),
-    outputs: hashText(written.outputs),
-    state: hashText(written.state),
-  };
+// The start of a long text, to show beside a failure.
+const excerpt = (text: string): string => (text.length > 240 ? `${text.slice(0, 240)}…` : text);
+
+/**
+ * Explains a part of a step that replayed differently, as best it can. The replay's text
+ * is the very text its hash came from. The first run kept only a hash, so its text is
+ * rebuilt, and shown as `played` only when it matches that hash: state from the object
+ * the step returned, outputs and News from the kit's own copies, and Inspection and
+ * Knowledge by calling the view again, which may give another answer.
+ * @param client - The Client.
+ * @param first - The first run's step, as the kit kept it.
+ * @param recorded - The hash recorded for this part when the step first returned.
+ * @param part - The part that differs.
+ * @param replayed - The replay's text for this part.
+ * @returns What can be shown of the difference.
+ */
+const explain = <State>(
+  client: Client<State>,
+  first: Step<State> | undefined,
+  recorded: string | undefined,
+  part: Part,
+  replayed: string
+): string => {
+  const rebuilt = first === undefined ? undefined : partText(client, first, part);
+
+  if (rebuilt !== undefined && hashText(rebuilt) === recorded) {
+    return textDifference(rebuilt, replayed) ?? `replayed ${excerpt(replayed)}`;
+  }
+
+  if (part === "inspection" || part === "knowledge") {
+    const view = part === "inspection" ? "inspect" : "known";
+
+    return `the first run's view could not be rebuilt: \`${view}\` gives a different answer when called again\nreplayed ${excerpt(replayed)}`;
+  }
+
+  if (part === "state") {
+    return `the first run's state changed after it was returned: the object it returned no longer hashes as it did\nreplayed ${excerpt(replayed)}`;
+  }
+
+  return `the first run's ${part} could not be rebuilt from the kit's copy\nreplayed ${excerpt(replayed)}`;
 };
 
 /** A scenario that did not play as written. The message is a transcript diff. */
@@ -540,19 +605,20 @@ export const checkReplay = <State>(
     }
 
     const recorded = played.snapshots[index];
-    const again = snapshot(client, replayed);
+    // The replay's views are called once: its hashes and anything shown come from these texts.
+    const written = texts(client, replayed);
+    const again = hashes(written);
     const part = parts.find((each) => recorded?.[each] !== again[each]);
 
     if (part !== undefined) {
-      const first = played.steps[index];
-      const before = first === undefined ? "" : texts(client, first)[part];
-      const after = texts(client, replayed)[part];
-
       throw new ReplayMismatchError(
-        `${where} does not replay exactly: its ${part} differ\n${
-          textDifference(before, after) ??
-          `their hashes differ, yet the first run's copy now writes the same as the replay, so its ${part} changed after it was returned`
-        }`
+        `${where} does not replay exactly: its ${part} differ\n${explain(
+          client,
+          played.steps[index],
+          recorded?.[part],
+          part,
+          written[part]
+        )}`
       );
     }
 
