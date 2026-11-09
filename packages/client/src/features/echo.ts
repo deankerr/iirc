@@ -5,7 +5,9 @@
  * told from a Message Self sent to itself, so nothing waits for one.
  *
  * - **Egress.** Each `Say` is sent with the next label, `l1`, `l2`, and on, and its
- *   Message reports that the Ircd will echo it.
+ *   Message reports that the Ircd will echo it. Turned on again mid-Session, after a
+ *   `CAP DEL` and `CAP NEW`, labels also name the instant, as `l<ms>-1`, so a late
+ *   answer to a label given before is not taken for one given since.
  * - **Answers.** The answer is one Line with the label, or a batch whose `BATCH +` carries
  *   it, with batches opened inside that one. Its first `PRIVMSG` or `NOTICE` is the echo,
  *   which the core reports as `Confirmed`. Its first `FAIL`, `ACK`, or error numeric
@@ -36,8 +38,10 @@ interface Answering {
   readonly top: boolean;
 }
 
-/** What the Feature holds for one Connection. */
+/** What the Feature holds while it is on. */
 interface Echoes {
+  /** What each label starts with, before its number. */
+  readonly prefix: string;
   /** The number of the next label. */
   readonly next: number;
   /** Labels awaiting an answer, oldest first, with the intent each was sent for. */
@@ -46,7 +50,7 @@ interface Echoes {
   readonly batches: ReadonlyMap<string, Answering>;
 }
 
-const fresh: Echoes = { batches: new Map(), next: 1, pending: new Map() };
+const fresh: Echoes = { batches: new Map(), next: 1, pending: new Map(), prefix: "l" };
 
 // A Line that settles an intent: its echo, or a rejection.
 const settles = ({ command }: Line): boolean =>
@@ -108,7 +112,7 @@ export const echo: Feature<Echoes> = {
       return { value: departure };
     }
 
-    const label = `l${context.own.next}`;
+    const label = `${context.own.prefix}${context.own.next}`;
     const line = withTags(departure.line, { label });
 
     if (isRejected(line)) {
@@ -163,4 +167,10 @@ export const echo: Feature<Echoes> = {
   name: FeatureName.make("echo-message"),
   needs: { caps: [CapName.make("labeled-response"), CapName.make("echo-message")] },
   own: fresh,
+  // Turned on again mid-Session, its count starts again, so its labels are told from the
+  // ones it gave before, whose answers may still come.
+  start: (context) =>
+    context.known.session._tag === "Registered"
+      ? { own: { ...fresh, prefix: `l${context.at}-` } }
+      : { own: fresh },
 };

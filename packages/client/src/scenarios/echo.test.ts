@@ -341,6 +341,32 @@ describe("the caps changing mid-Session", () => {
     expect.assertions(0);
   });
 
+  it("tells labels given before a DEL from those given after a NEW", () => {
+    play(client, {
+      configuration: base,
+      transcript: [
+        ...inChannel("cap-notify", ...both),
+        say(1),
+        lines(
+          "+1s",
+          "<< :irc.test CAP iirc DEL :echo-message",
+          "<< :irc.test CAP iirc NEW :echo-message",
+          ">> CAP REQ echo-message",
+          "<< :irc.test CAP iirc ACK :echo-message",
+          "!! say #iirc :again",
+          ">> @label=l1767225601000-1 PRIVMSG #iirc again",
+          "?? message Privmsg iirc #iirc at=ours:t+1s ours=i2 echo :again",
+          "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
+          "?? message Privmsg iirc #iirc :hello",
+          "<< @label=l1767225601000-1 :iirc!u@h PRIVMSG #iirc :again",
+          "?? confirmed i2 :again"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("begins labelling once both are new", () => {
     play(client, {
       configuration: base,
@@ -349,10 +375,13 @@ describe("the caps changing mid-Session", () => {
         lines(
           "<< :irc.test CAP iirc NEW :echo-message labeled-response batch",
           ">> CAP REQ :batch labeled-response echo-message",
-          "<< :irc.test CAP iirc ACK :batch labeled-response echo-message"
+          "<< :irc.test CAP iirc ACK :batch labeled-response echo-message",
+          "!! say #iirc :hello",
+          ">> @label=l1767225600000-1 PRIVMSG #iirc hello",
+          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i1 echo :hello",
+          "<< @label=l1767225600000-1 :iirc!u@h PRIVMSG #iirc :hello",
+          "?? confirmed i1 :hello"
         ),
-        say(1),
-        lines("<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello", "?? confirmed i1 :hello"),
       ],
     });
 
