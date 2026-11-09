@@ -7,6 +7,7 @@
  */
 import type { CredentialName } from "@iirc/protocol/line";
 
+import type { StsPolicy } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import type { CapName, Instant } from "./ids.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
@@ -192,6 +193,8 @@ export interface State {
   readonly casemapping: Casemapping;
   /** Keyed by folded name. */
   readonly channels: ReadonlyMap<string, Channel>;
+  /** STS policies, keyed by host as `hostKey` folds it. They outlive Connections. */
+  readonly policies: ReadonlyMap<string, StsPolicy>;
 }
 
 /** Before anything has happened. */
@@ -202,6 +205,7 @@ export const initialState: State = {
   configuration: undefined,
   dialled: 0,
   network: { _tag: "Unconfigured" },
+  policies: new Map(),
   rotation: 0,
 };
 

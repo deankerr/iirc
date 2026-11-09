@@ -265,7 +265,7 @@ export const inspectionOf = (registry: readonly Registered[], state: State): Ins
       state.network._tag === "Connection" ? ConnectionId.make(state.network.link.id) : undefined,
     features: onNow(registry, state).map((feature) => feature.name),
     isupport: open?.isupport ?? new Map(),
-    policies: new Map(),
+    policies: state.policies,
     states: statesOf(state),
     timers: tableOf(state),
   };

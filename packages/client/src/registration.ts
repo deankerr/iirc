@@ -30,6 +30,7 @@ import type { Ran } from "./seam.ts";
 import { capsOf, capsWanted, freshSeam, goneStale, runEffects } from "./seam.ts";
 import { markStale } from "./stale.ts";
 import type { Asking, Caps, Negotiated, Open } from "./state.ts";
+import { readSts } from "./sts.ts";
 import { holdTime, registrationTime } from "./timers.ts";
 import { negotiated, onNow, openOf } from "./views.ts";
 
@@ -726,6 +727,11 @@ const listing: CapStep = (run, caps, list, more) => {
     return false;
   }
 
+  // An upgrade ends the Connection, and nothing more is asked.
+  if (readSts(run, list)) {
+    return true;
+  }
+
   const listed = withOffered(caps.offered, list);
 
   if (more) {
@@ -754,6 +760,10 @@ const answering =
 const added: CapStep = (run, caps, list) => {
   if (caps._tag === "Listing" || caps._tag === "None") {
     return false;
+  }
+
+  if (readSts(run, list)) {
+    return true;
   }
 
   const held = { enabled: caps.enabled, offered: withOffered(caps.offered, list) };

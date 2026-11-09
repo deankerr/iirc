@@ -23,7 +23,7 @@ import type { Encoding, Line, RawParam, SecretLine } from "@iirc/protocol/line";
 import { backoff, lasting } from "./backoff.ts";
 import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
 import type { Client, Step } from "./client.ts";
-import type { NetworkConfiguration } from "./configuration.ts";
+import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import type { Arrival, Refined } from "./feature.ts";
 import { ConnectionId, Instant } from "./ids.ts";
 import type { TimerId } from "./ids.ts";
@@ -48,6 +48,7 @@ import { folder, hangup, ignore, linkOf, readingOf, send, updateOpen } from "./r
 import { runEffects, runStage } from "./seam.ts";
 import type { Link, State } from "./state.ts";
 import { initialState } from "./state.ts";
+import { addressFor, pruned, rescheduled } from "./sts.ts";
 import { lagAfter, silentAfter, tableOf, timersOf, wakes } from "./timers.ts";
 import type { Purpose } from "./timers.ts";
 import { inspectionOf, knowledgeOf, onNow, openOf, sessionOf } from "./views.ts";
@@ -59,7 +60,9 @@ const utf8 = new TextEncoder();
 
 // The Network
 
-const dial = (run: Run): void => {
+// Dials the next Ircd in `ircds`, or, for an upgrade, the same one again, without
+// moving on. Either way an STS policy for its host decides the address.
+const dial = (run: Run, upgrade?: IrcdAddress): void => {
   const { configuration } = run.state;
 
   if (configuration === undefined) {
@@ -68,7 +71,8 @@ const dial = (run: Run): void => {
 
   const id = run.state.dialled + 1;
   const { ircds } = configuration;
-  const ircd = ircds[run.state.rotation % ircds.length] ?? ircds[0];
+  const next = upgrade ?? ircds[run.state.rotation % ircds.length] ?? ircds[0];
+  const ircd = addressFor(run.state, next, run.at);
 
   run.state = {
     ...run.state,
@@ -77,7 +81,7 @@ const dial = (run: Run): void => {
       _tag: "Connection",
       link: { closing: undefined, dialled: run.at, id, ircd, phase: { _tag: "Dialing" } },
     },
-    rotation: run.state.rotation + 1,
+    rotation: run.state.rotation + (upgrade === undefined ? 1 : 0),
   };
   run.outputs.push({ _tag: "Dial", connection: ConnectionId.make(id), ircd });
 
@@ -149,9 +153,12 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
 };
 
 // A Connection is over: report how, return every Channel to Wanted, and wait to redial.
-// A Session that lasted starts the backoff again from its first wait.
+// A Session that lasted starts the backoff again from its first wait. The expiry of an
+// STS policy for its host moves to now plus its last `duration`.
 const ended = (run: Run, link: Link, reason: EndReason): void => {
   const { phase } = link;
+
+  run.state = rescheduled(run.state, link, run.at);
 
   const session =
     phase._tag === "Open" && phase.presence._tag === "Session" ? phase.presence : undefined;
@@ -179,6 +186,14 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
   if (reason._tag === "Disabled" || reason._tag === "Restarted") {
     run.state = { ...run.state, attempt };
     dial(run);
+
+    return;
+  }
+
+  // An upgrade dials the same host over TLS on the port the Ircd gave, at once.
+  if (reason._tag === "Upgrading") {
+    run.state = { ...run.state, attempt };
+    dial(run, { host: link.ircd.host, port: reason.port, tls: true });
 
     return;
   }
@@ -668,6 +683,7 @@ export const makeClient = (features: readonly Registered[]): Client<State> => ({
     };
 
     dispatch(run, input);
+    run.state = pruned(run.state, run.at);
 
     return {
       news: run.news,

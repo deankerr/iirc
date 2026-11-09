@@ -46,7 +46,8 @@ When the Client dials:
 - Backoff applies only to redialling after a `Closed`. A `Configured` while waiting keeps waiting, and `Retry` cuts the wait short.
 - A `Configured` that disables the Network while a Connection is open sends `QUIT` if registration has begun, hangs up, and the Client waits for its `Closed`. Enabled again before that `Closed`, it dials as soon as the `Closed` arrives.
 - A `Started` ends the Connection the Client believed open, with `Restarted`, and dials at once.
-- Each dial takes the next Ircd in `ircds`, round and round.
+- Each dial takes the next Ircd in `ircds`, round and round, except an STS upgrade, which dials the same host again over TLS, at once.
+- While an STS policy holds for a dial's host, the dial is TLS on the policy's port, whatever Configuration says.
 
 ## Outputs
 
@@ -109,7 +110,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 
 ## Inspection
 
-`inspect(state)` gives what Views do not need: each machine's state, the Connection, the caps offered and enabled, ISUPPORT, the Features on, and the timer table. `states` names each machine's state as the statecharts do:
+`inspect(state)` gives what Views do not need: each machine's state, the Connection, the caps offered and enabled, ISUPPORT, the STS policies by host, the Features on, and the timer table. `states` names each machine's state as the statecharts do:
 
 | Machine | States |
 | --- | --- |
@@ -131,10 +132,10 @@ A machine that is not running, such as `caps` with no Connection open, is left o
 - **Time comes from inputs.** Every `Wake` instant is computed from the `at` of an input: the one being stepped, or, for the keepalive, the one that last brought a Line, which is never later. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. Timers are one-shot: once the Client has stepped a `Fired` whose `due` matches, the timer is gone, and the Client sets it again with a fresh `Wake` if it still wants it. The Runtime gives `due` back unchanged. `Fired` names only the timer, so State keeps which machine each timer belongs to and what it means. Each machine's timers are derived from its state, and a step outputs a `Wake` for each difference, so leaving a state cancels its timers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
 - **One Connection at a time.** The Client dials only when no Connection is open: after the previous Connection's `Closed`, or after `Started`, which ends any it believed open. A `Configured` or `Started` with the Network enabled dials at once, unless a redial is pending: only a redial after a `Closed` waits for backoff, a `Configured` leaves that wait as it is, and `Started` or `Retry` cuts it short. A `Configured` that disables the Network while connected hangs up. Once the Client has begun to hang up, it sends nothing more on that Connection.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
-- **Never insecure under STS.** This is stage 3's, and is not built yet: today `Dial` uses the configured address, and `policies` is empty. Once built: once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext.
+- **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS, on the policy's port, until the policy expires, and never falls back to plaintext. [Strict Transport Security](#strict-transport-security) has the details.
   - A policy is learnt only over TLS, from `duration`, on the port of the Connection it arrived on. A `port` key sent over TLS is ignored.
-  - `duration=0` removes the policy at once. When a Connection closes, the expiry moves to the close plus the last `duration`.
-  - It survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`.
+  - `duration=0` removes the policy at once. When a Connection that opened over TLS ends, the expiry moves to its end plus the last `duration`.
+  - It survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`. Its expiry is checked against inputs' `at`, never a clock.
   - Over plaintext, only `port` counts: it ends the Connection with `Upgrading` and dials TLS on that port at once. A `duration` sent over plaintext is ignored.
 - **A required login is never skipped.** A Session begins, and anything is sent past registration, only if the Configuration in force does not require a login, or a `903` arrived, live, on this Connection. The core holds to this itself, whatever the Features do: before `CAP END`, at `001`, and whenever a `Configured` arrives. A `Configured` that requires a login on a Session that never logged in gives the Connection up with `LoginFailed`. One that requires it before `CAP END` lets SASL begin if it can, and otherwise gives up; after `CAP END`, or with an Ircd that has no cap negotiation, it gives up at once. A Connection given up at `001` takes up no Session.
 - **History does not change the present.** A Line a Feature marks as not `live`, such as one from a `chathistory` batch, is reported as News with `live` false, and never changes what is known now: membership, nicks, topics, modes, away status, and every machine stay as they were. It says what was, not what is.
@@ -155,6 +156,7 @@ A machine that is not running, such as `caps` with no Connection open, is left o
 | Bytes that do not parse | `Ignored` with `Unparseable`. The bytes stay in the Journal, and the Connection stays up. |
 | A Line whose parameters do not fit its command | `Ignored` with `Malformed`. |
 | A tag value that does not parse, such as `time=yesterday` | The fact keeps its default, such as the time of receipt. |
+| An `sts` value whose `duration` or `port` is malformed, such as `duration=abc` | That part is taken as not given. A value missing its required part changes nothing, and a policy already held stays. |
 | Input from an old Connection | `Ignored` with `StaleConnection`. |
 | `Fired` for a timer that was reset or cancelled | `Ignored` with `StaleTimer`. |
 | An input that makes no sense now, such as `Opened` twice | `Ignored` with `NotNow`. A Line that makes no sense now, such as a `CAP ACK` when nothing was asked or a second `001`, is `NotNow` with `Received`. A Line the Client does not read, such as most numerics, is not ignored: it changes nothing, and that is no error. |
@@ -185,7 +187,7 @@ A Feature brings one IRCv3 cap or ISUPPORT token, or a tight group of them, to t
 
 - **Answers and history.** `label` can tie an Arrival to the intent it `answers`, and a later stage can mark it as not `live`. The core then confirms the intent with an echo from Self, or rejects it with an error numeric, a `FAIL` by its code, or an `ACK`, or treats the Line as history.
 
-STS is not a Feature. Its policy outlives Connections and decides where to dial before any cap is negotiated, so the core keeps it. With no `sts` cap, nothing changes, so the floor does not depend on it.
+STS is not a Feature. Its policy outlives Connections and decides where to dial before any cap is negotiated, so the core keeps it, in `src/sts.ts`. With no `sts` cap, nothing changes, so the floor does not depend on it.
 
 Three Features, to show the shape, simplified from `src/features/`:
 
@@ -299,6 +301,19 @@ Each feature is built from the floor up ([the architecture proposal](../../docs/
 - Needs: caps from the Ircd. `CAP LS 302` turns on `cap-notify` implicitly, and the `cap-notify` Feature asks for it as well, for an Ircd that keeps to the older rules.
 - Changes: asks, in registry order, for every cap each Feature needs or uses, when all of them are offered, less the Features the Owner declined and any Feature that would ask for a cap a declined Feature needs, which is worked out over the whole registry on every path that asks, `CAP LS` and `CAP NEW` alike, before narrowing to the Features a `CAP NEW` concerns, whatever order the Ircd lists them in. Values are read, such as `sasl=PLAIN,EXTERNAL`, and a value may hold `=`. Only what the Ircd acknowledges is enabled, and a `NAK` enables nothing of its request, even when it names only part of it. Only what was asked counts: an `ACK` for a cap not asked for, or one said again, is ignored. An `ACK` spread over several Lines, all but the last marked with `*`, enables nothing until its last, and counts as one answer. What it holds meanwhile is bounded by what was asked, and one spread over more than 16 Lines is taken as a refusal, and `Ignored` as `Endless`, during registration or in a Session alike. `CAP NEW` is answered at once, at any point: before `001`, while SASL holds registration, or after, for the caps of each Feature that needs a cap it names, so a Feature whose other cap was already offered is asked for whole, and nothing it lists that no Feature wants is asked for. `CAP DEL` turns off each Feature that needed a deleted cap, and the facts only it kept go stale. A Feature may give caps up with `CAP REQ :-cap`, as the echo Feature does with one of its two left alone, and negotiation waits for the answer.
 - Scenarios: `caps.test.ts`
+
+### Strict Transport Security
+
+- Needs: the `sts` cap's value, which the core reads wherever `CAP LS` or `CAP NEW` offers it, and never asks for, since the spec forbids requesting it. A policy is learnt only over TLS. With no `sts` cap, nothing changes. STS is core, not a Feature, but it is built from the floor up like one.
+- Changes:
+  - **Learning.** Over TLS, a valid `duration` stores a policy for the Connection's host: TLS on the port of this Connection, until the input's `at` plus `duration`. Each valid `duration`, from `CAP LS` or `CAP NEW`, resets the expiry, and `duration=0` removes the policy at once. A `port` key over TLS is ignored, and so is `preload`. A policy learnt mid-Session does not end it, and SASL and the Features go on as without it. `CAP DEL sts` changes nothing.
+  - **Upgrading.** Over plaintext, a valid `port` ends the Connection with `Upgrading`, during registration or, from `CAP NEW`, in a Session: nothing more is sent, the Client hangs up, and once `Closed` arrives it dials the same host over TLS on that port at once, with no backoff and without moving on through `ircds`. A `duration` over plaintext is ignored, and nothing is stored. If the upgrade's TLS fails, that attempt is never retried in plaintext: it is a failed Connection like any other, and backs off. No policy was confirmed over TLS, and the spec binds the Client to TLS only once one is, so the next dial follows Configuration, and the Ircd may ask for the upgrade again.
+  - **Dialling.** While a policy holds for a host, `at` before its expiry, every `Dial` to that host is TLS on the policy's port, whatever Configuration says: the first dial, a redial, `Retry`, `Configured`, and `Started` alike. Rotation through `ircds` goes on, each host under its own policy. A TLS failure backs off and retries TLS, never plaintext. Once the policy expires, Configuration applies again.
+  - **Hosts.** Policies are keyed by host as a DNS name: folded to lower case in ASCII, with one trailing dot left off, so `Irc.Test.` and `irc.test` share one. An IP literal, a host with a `:` or only digits and dots, never gets a policy: the spec ties a policy to the hostname the Ircd sees through SNI, and TLS sends no name for an IP literal, which is also why HSTS leaves them out. An upgrade still applies to one, since it concerns only the Connection at hand.
+  - **Rescheduling.** When a Connection that opened over TLS ends, whether closed, given up, or ended by `Started`, the expiry of its host's policy moves to then plus the `duration` last advertised, if the policy held when it was dialled or was learnt on it. A policy that expires while such a Connection is open is kept until it ends. A Connection that never opened moves nothing, so a run of TLS failures does not keep a policy alive.
+  - **Values.** An `sts` value is comma-separated tokens, each `key` or `key=value`, in any order. Unknown keys and empty tokens are ignored. A `duration` or `port` that is not all ASCII digits, a `port` outside 1 to 65535, an empty value, and a key given more than once, which the spec forbids and which leaves nothing to believe, are each taken as not given. A value missing the part its Connection needs changes nothing, so a policy already held stays. A `duration` beyond 2,147,483,647 seconds, about 68 years, is kept as that.
+  - **Bounded and derived.** Only hosts the Client has dialled can have a policy, and at most 64 are kept: past that, the one that expires first is forgotten. A policy that has expired is forgotten at the end of the step whose `at` finds it so, unless a Connection it covers is in progress. Policies are derived from journaled Lines, so replaying the Journal rebuilds them across a restart, and `Inspection.policies` shows them by host key.
+- Scenarios: `sts.test.ts`, with a property test that, for any sequence of inputs, no `Dial` to a host is plaintext or on another port while a policy learnt over TLS holds for it, and a fresh-process replay with STS in play.
 
 ### SASL
 
