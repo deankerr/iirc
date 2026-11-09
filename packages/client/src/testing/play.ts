@@ -44,6 +44,8 @@ export interface Played<State> {
   readonly transcript: string;
   /** Each `Ignored`, as `?? …`, after the input that caused it. */
   readonly ignored: readonly string[];
+  /** The timers still set, as `timers` projects them from the inputs and outputs. */
+  readonly timers: TimerTable;
 }
 
 /** A scenario that did not play as written. The message is a transcript diff. */
@@ -191,7 +193,7 @@ const stepInput = <State>(at: Driver<State>, input: Input): Step<State> => {
   at.steps.push(step);
   at.written.push(canonical(step.state));
   at.state = step.state;
-  at.table = timers(at.table, step.outputs);
+  at.table = timers(at.table, input, step.outputs);
 
   return step;
 };
@@ -236,8 +238,9 @@ const nextDue = (table: TimerTable, until: number): readonly [TimerId, Instant] 
     .toSorted(([leftId, left], [rightId, right]) => left - right || (leftId < rightId ? -1 : 1))
     .at(0);
 
-// Moves the clock on, firing each timer as it falls due, in order. A timer fires once:
-// it leaves the table as it fires, unless that step sets it again.
+// Moves the clock on, firing each timer as it falls due, in order. A timer is one-shot:
+// the `timers` projection drops it once its `Fired` is stepped, unless that step sets it
+// again, exactly as the Runtime's table does on restart.
 const advance = <State>(at: Driver<State>, millis: number): Step<State>[] => {
   const until = at.now + millis;
   const fired: Step<State>[] = [];
@@ -248,9 +251,6 @@ const advance = <State>(at: Driver<State>, millis: number): Step<State>[] => {
     }
 
     const [timer, instant] = due;
-    const table = new Map(at.table);
-    table.delete(timer);
-    at.table = table;
     at.now = Instant.make(Math.max(at.now, instant));
     fired.push(stepInput(at, { _tag: "Fired", at: at.now, due: instant, timer }));
   }
@@ -313,12 +313,6 @@ const feedSteps = <State>(at: Driver<State>, item: Item): Step<State>[] => {
 
     case "Fired": {
       const timer = TimerId.make(item.timer);
-
-      if (at.table.get(timer) === item.due) {
-        const table = new Map(at.table);
-        table.delete(timer);
-        at.table = table;
-      }
 
       return [stepInput(at, { _tag: "Fired", at: at.now, due: Instant.make(item.due), timer })];
     }
@@ -682,6 +676,7 @@ export const play = <State>(client: Client<State>, scenario: Scenario): Played<S
     inputs: at.inputs,
     state: at.state,
     steps: at.steps,
+    timers: at.table,
     transcript: `${actual.join("\n")}\n`,
   };
 };
@@ -750,6 +745,7 @@ export const replay = <State>(client: Client<State>, scenario: Scenario): Played
     inputs: at.inputs,
     state: at.state,
     steps: at.steps,
+    timers: at.table,
     transcript: `${report.join("\n")}\n`,
   };
 };

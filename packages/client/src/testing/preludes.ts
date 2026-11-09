@@ -56,8 +56,18 @@ export const floorIsupport: readonly string[] = [
 
 /** What `registered` may be told. */
 export interface Registration {
-  /** Caps the Ircd offers and acknowledges, such as `multi-prefix` or `sasl=PLAIN`. None means the floor. */
-  readonly caps?: readonly string[];
+  /**
+   * Caps the Ircd offers in `CAP LS`, with their values, such as `multi-prefix` or
+   * `sasl=PLAIN`. None means the floor, which answers `CAP` with `421`.
+   */
+  readonly offered?: readonly string[];
+  /**
+   * The caps the Client is expected to `CAP REQ`, by name, which the Ircd acknowledges.
+   * The real Client asks only for caps it has a Feature for, less those the Owner
+   * declined. Left out, every cap offered, which keeps a simple scenario short. Empty,
+   * the Client ends negotiation at once.
+   */
+  readonly requested?: readonly string[];
   /** ISUPPORT tokens, sent 13 to a `005`. */
   readonly isupport?: readonly string[];
   /** The Ircd's name. */
@@ -85,10 +95,14 @@ const chunked = (tokens: readonly string[], size: number): readonly (readonly st
 
 const capName = (cap: string): string => cap.split("=")[0] ?? cap;
 
-const sasl = (configuration: NetworkConfiguration, caps: readonly string[], server: string) => {
+const sasl = (
+  configuration: NetworkConfiguration,
+  requested: readonly string[],
+  server: string
+) => {
   const { login } = configuration;
 
-  if (login._tag !== "Sasl" || !caps.map(capName).includes("sasl")) {
+  if (login._tag !== "Sasl" || !requested.includes("sasl")) {
     return [];
   }
 
@@ -102,35 +116,45 @@ const sasl = (configuration: NetworkConfiguration, caps: readonly string[], serv
 };
 
 /**
- * Writes a Session's start, from the first `!! configure` to the last `005`. The Client
- * dials the first Ircd, sends `CAP LS 302`, `PASS` if it has one, `NICK` and `USER`.
- * With caps, the Ircd offers them, the Client requests them all and they are
- * acknowledged, SASL `PLAIN` logs in when the Configuration has a login and `sasl` is
- * offered, and `CAP END` follows. With none, the Ircd is the floor and answers `CAP`
+ * Writes a Session's start, from the first `!! configure` to the last `005`. The first
+ * `Configured` dials the first Ircd at once, and the Client sends `CAP LS 302`, `PASS`
+ * if it has one, `NICK` and `USER`. When the Ircd offers caps, the Client requests
+ * `requested`, which the Ircd acknowledges, SASL `PLAIN` logs in when the Configuration
+ * has a login and `sasl` is requested, and `CAP END` follows. When it requests
+ * none, `CAP END` follows `LS` at once. When the Ircd offers none, it is the floor and answers `CAP`
  * with `421`. Then `001` to `005`.
  * @param configuration - The scenario's Configuration, which names the Ircd and Self.
- * @param registration - The caps and ISUPPORT tokens the Ircd sends.
+ * @param registration - The caps the Ircd offers, those the Client requests, and the
+ * ISUPPORT tokens the Ircd sends.
  * @returns The transcript text.
  */
 export const registered = (
   configuration: NetworkConfiguration,
-  { caps = [], isupport = floorIsupport, server = "irc.test" }: Registration = {}
+  { offered = [], requested, isupport = floorIsupport, server = "irc.test" }: Registration = {}
 ): string => {
   const [ircd] = configuration.ircds;
   const [nick] = configuration.nicks;
-  const offered = caps.join(" ");
-  const named = caps.map(capName).join(" ");
+  const names = offered.map(capName);
+  const asked = requested ?? names;
+  const unoffered = asked.filter((name) => !names.includes(name));
+
+  if (unoffered.length > 0) {
+    throw new TypeError(`a prelude requests caps the Ircd does not offer: ${unoffered.join(" ")}`);
+  }
+
+  const request =
+    asked.length === 0
+      ? []
+      : [
+          sent(cap("REQ", asked.join(" "))),
+          `<< :${server} CAP * ACK :${asked.join(" ")}`,
+          ...sasl(configuration, asked, server),
+        ];
 
   const negotiation =
-    caps.length === 0
+    offered.length === 0
       ? [`<< :${server} 421 * CAP :Unknown command`]
-      : [
-          `<< :${server} CAP * LS :${offered}`,
-          sent(cap("REQ", named)),
-          `<< :${server} CAP * ACK :${named}`,
-          ...sasl(configuration, caps, server),
-          sent(cap("END")),
-        ];
+      : [`<< :${server} CAP * LS :${offered.join(" ")}`, ...request, sent(cap("END"))];
 
   return lines(
     "!! configure",

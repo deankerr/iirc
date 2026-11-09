@@ -10,7 +10,7 @@ const base = configured({ nicks: ["iirc"] });
 play(client, {
   configuration: base,
   transcript: [
-    registered(base, { caps: ["multi-prefix"] }),
+    registered(base, { offered: ["multi-prefix"] }),
     joined(base, "#iirc", ["@peer"]),
     "<< :peer!u@h PRIVMSG #iirc :hi\n",
     "?? message Privmsg peer #iirc :hi\n",
@@ -78,7 +78,7 @@ A fact is `unknown`, `<from>:<value>` when known as of now, with `@<instant>` wh
 
 | Function | What it does |
 | --- | --- |
-| `play(client, { configuration, transcript })` | Strict, for hand-written scenarios. Returns what happened: `inputs`, `steps`, the last `state`, the `transcript`, and each `ignored`. |
+| `play(client, { configuration, transcript })` | Strict, for hand-written scenarios. Returns what happened: `inputs`, `steps`, the last `state`, the `transcript`, each `ignored`, and the `timers` still set. |
 | `replay(client, { configuration, transcript })` | For recorded fixtures. Feeds only `<<`, `==`, `+Ns`, and `!!`, and reports every output and News in its `transcript` and every `Ignored` in `ignored`, without matching `>>` or `->`, which are the recorder's Lines. Unless the first input is an `!! configure`, one is stepped first. |
 | `checkReplay(client, inputs, steps)` | The exact-replay check that `play` and `replay` run. |
 | `replayFresh(client, inputs, { module, name })` | The same fold in a child `bun` process, compared by digest. Async, and slower, so a suite runs it on a few scenarios. |
@@ -90,7 +90,7 @@ The rules of strict play:
 - **Outputs.** Every `Send`, `SendSecret`, `Dial`, and `Hangup` must be written, in order, before the next input. A Line on another Connection, or a dial out of order, is a mismatch.
 - **Ignored.** Every `Ignored` must be written, and a `??` cannot skip one to reach a later News. Other News need not be written, but a `??` that is written must match a News of its step, in order.
 - **`...`** allows anything, `Ignored` included, until the next expectation matches.
-- **Timers.** `Wake` is never written. The kit keeps the timer table from `Wake` outputs, and fires `Fired { at, due, timer }` as the clock passes `due`. A timer fires once, and leaves the table unless that step sets it again. The kit never filters a firing: a stale one is the Client's to ignore, as in production, and `== fired` writes one by hand.
+- **Timers.** `Wake` is never written. The kit keeps the timer table with the Client's own projection, `timers(table, input, outputs)`, and fires `Fired { at, due, timer }` as the clock passes `due`. Timers are one-shot: a `Fired` whose `due` matches consumes its timer, and it is set again only if that step outputs a fresh `Wake`. `Played.timers` is the table at the end, exactly as the Runtime would rebuild it on restart. The kit never filters a firing: a stale one is the Client's to ignore, as in production, and `== fired` writes one by hand.
 - **Diffs.** A mismatch throws a transcript diff, `-` for the scenario and `+` for what the Client did, so a failing test reads as IRC:
 
 ```
@@ -113,20 +113,20 @@ Preludes write transcript text, and commit to how a Client registers. The Client
 | Helper | Example | Writes |
 | --- | --- | --- |
 | `configured(overrides)` | `configured({ channels: [{ name: "#iirc" }] })` | A base Configuration, decoded: `iirc` on `irc.test:6697` over TLS, enabled, no Channels, no login, nothing declined. |
-| `registered(configuration, { caps, isupport, server })` | `registered(base, { caps: ["sasl=PLAIN", "multi-prefix"] })` | `!! configure`, the dial, `== opened`, `CAP LS 302`, `PASS` if configured, `NICK`, `USER`. With caps: `LS`, `REQ` for them all, `ACK`, SASL `PLAIN` when the Configuration logs in and `sasl` is offered, `CAP END`. With none, the floor: `421` for `CAP`. Then `001` to `005`, 13 tokens to a `005`, `floorIsupport` by default. |
+| `registered(configuration, { offered, requested, isupport, server })` | `registered(base, { offered: ["sasl=PLAIN", "multi-prefix", "away-notify"], requested: ["sasl", "multi-prefix"] })` | `!! configure`, the dial it makes at once, `== opened`, `CAP LS 302`, `PASS` if configured, `NICK`, `USER`. `offered` is what the Ircd lists in `CAP LS`, with values. `requested` is what the Client is expected to `CAP REQ`, by name: the caps it has a Feature for, less those the Owner declined. Left out, it is every cap offered, so a simple scenario stays short. The Ircd acknowledges them, SASL `PLAIN` logs in when the Configuration has a login and `sasl` is requested, and `CAP END` follows, at once after `LS` when nothing is requested. Requesting a cap that is not offered throws. With nothing offered, the floor: `421` for `CAP`. Then `001` to `005`, 13 tokens to a `005`, `floorIsupport` by default. |
 | `joined(configuration, channel, names, { nick, server })` | `joined(base, "#iirc", ["@peer"])` | `!! configure +#iirc`, `>> JOIN #iirc`, the echo, `353` with Self first, and `366`. |
 | `across(caps)` | `across(["a", "b"])` | `[[], ["a"], ["b"], ["a", "b"]]`: none, each cap alone, and every pair. |
 
 ## The laws
 
-Each law takes a `Subject`: the Client, its Configuration, its Features (`name`, `needs`, `keeps`), the caps to range over (by default every cap the Features need), and `transcript(caps)`, which writes the scenario with an Ircd that offers exactly those caps. Each runs `replay` for every set `across` gives, and throws `LawBrokenError` naming the law, the caps, and what differed.
+Each law takes a `Subject`: the Client, its Configuration, its Features (`name`, `needs`, `keeps`), the caps to range over (by default every cap the Features need), and `transcript(caps)`, which writes the scenario with an Ircd that offers exactly those caps, usually with `registered(configuration, { offered: caps })`. The laws replay, so `requested` need not be exact there. Each runs `replay` for every set `across` gives, and throws `LawBrokenError` naming the law, the caps, and what differed.
 
 ```ts
 const subject = {
   client,
   configuration: base,
   features: [multiPrefix, serverTime],
-  transcript: (caps) => registered(base, { caps }) + joined(base, "#iirc", ["@peer"]),
+  transcript: (caps) => registered(base, { offered: caps }) + joined(base, "#iirc", ["@peer"]),
 };
 
 inert(subject);
@@ -152,5 +152,9 @@ deactivates(subject, { after: () => "+1s\n<< :other!u@h JOIN #iirc\n" });
 
 ## Conventions the Client must keep
 
-- It dials on its first `Configured` while enabled, and numbers its Connections 1, 2, 3, … in order.
-- It registers as `registered` writes it.
+These are the Client's own rules, from [its README](../../README.md), which the kit relies on:
+
+- A `Configured` or `Started` with the Network enabled dials at once. Only a redial after a `Closed` waits for backoff, and a `Configured` that disables the Network while connected hangs up.
+- Connection ids start at 1 and go up by 1 for each `Dial`, never reused. The nth `-> dial` in a transcript is Connection n.
+- Timers are one-shot, as `timers` projects them.
+- It registers as `registered` writes it, requesting the caps it has a Feature for, less those declined.

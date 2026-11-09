@@ -44,7 +44,7 @@ describe("exact replay, after every play", () => {
       failure(() =>
         play(toy(), {
           configuration: base,
-          transcript: registered(base, { caps: ["multi-prefix"] }),
+          transcript: registered(base, { offered: ["multi-prefix"] }),
         })
       )
     ).toBe("it held");

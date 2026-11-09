@@ -33,7 +33,7 @@ export interface Subject<State> {
   readonly caps?: readonly string[];
   /**
    * The transcript with an Ircd that offers exactly these caps, such as
-   * `registered(configuration, { caps })` and then a body that reads the same for all.
+   * `registered(configuration, { offered: caps })` and then a body that reads the same for all.
    */
   readonly transcript: (caps: readonly CapName[]) => string;
 }

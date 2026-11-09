@@ -19,7 +19,7 @@ const subject = (flaws: Flaws = {}): Subject<ToyState> => ({
   configuration: base,
   features,
   transcript: (caps) =>
-    `${registered(base, { caps })}${joined(base, "#iirc", ["@peer", "+voiced"])}`,
+    `${registered(base, { offered: caps })}${joined(base, "#iirc", ["@peer", "+voiced"])}`,
 });
 
 const after = () => "+1s\n<< :other!u@irc.test JOIN #iirc\n";

@@ -25,7 +25,7 @@ describe("the fresh-process replay check", () => {
     const played = play(toyClient, {
       configuration: base,
       transcript: [
-        registered(base, { caps: ["multi-prefix"] }),
+        registered(base, { offered: ["multi-prefix"] }),
         joined(base, "#iirc", ["@peer"]),
         "+60s\n>> PRIVMSG iirc ping\n",
       ],

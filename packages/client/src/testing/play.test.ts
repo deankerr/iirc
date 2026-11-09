@@ -1,7 +1,9 @@
 import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
-import { ConnectionId, Instant } from "../ids.ts";
+import { ConnectionId, FeatureName, Instant } from "../ids.ts";
+import { timers } from "../output.ts";
+import type { TimerTable } from "../output.ts";
 import { play, replay } from "./play.ts";
 import { configured, joined, registered } from "./preludes.ts";
 import { scripted } from "./scripted.ts";
@@ -24,7 +26,7 @@ describe("strict play", () => {
 
   it("plays the prelude with caps, and a join", () => {
     const transcript = [
-      registered(base, { caps: ["multi-prefix", "server-time"] }),
+      registered(base, { offered: ["multi-prefix", "server-time"] }),
       joined(base, "#iirc", ["@peer", "+voiced"]),
     ];
 
@@ -363,5 +365,90 @@ describe(replay, () => {
     });
 
     expect(played.inputs.map((input) => input._tag)).toStrictEqual(["Configured"]);
+  });
+});
+
+describe("registration", () => {
+  it("offers more caps than the Client requests", () => {
+    const transcript = registered(base, {
+      offered: ["sasl=PLAIN", "multi-prefix", "away-notify"],
+      requested: ["multi-prefix"],
+    });
+
+    expect(transcript).toContain(
+      "<< :irc.test CAP * LS :sasl=PLAIN multi-prefix away-notify\n>> CAP REQ multi-prefix\n<< :irc.test CAP * ACK :multi-prefix\n>> CAP END\n"
+    );
+    expect(failure(() => play(client, { configuration: base, transcript }))).toBe("it held");
+  });
+
+  it("ends negotiation at once when the Client requests nothing", () => {
+    const declined = configured({ declined: [FeatureName.make("multi-prefix")] });
+    const transcript = registered(declined, { offered: ["multi-prefix"], requested: [] });
+
+    expect(transcript).toContain("<< :irc.test CAP * LS :multi-prefix\n>> CAP END\n");
+    expect(failure(() => play(client, { configuration: declined, transcript }))).toBe("it held");
+  });
+
+  it("refuses to request a cap the Ircd does not offer", () => {
+    expect(
+      failure(() => registered(base, { offered: ["multi-prefix"], requested: ["sasl"] }))
+    ).toBe("TypeError: a prelude requests caps the Ircd does not offer: sasl");
+  });
+});
+
+describe("dialling", () => {
+  it("dials at once on Started, as the next Connection", () => {
+    const transcript =
+      "!! configure\n-> dial irc.test:6697 tls\n== started\n-> dial irc.test:6697 tls\n";
+
+    expect(
+      play(client, { configuration: base, transcript }).inputs.map(({ _tag }) => _tag)
+    ).toStrictEqual(["Configured", "Started"]);
+  });
+
+  it("hangs up when a Configured disables the Network", () => {
+    expect(
+      failure(() =>
+        play(client, {
+          configuration: base,
+          transcript: `${floor}!! configure disable\n-> hangup\n`,
+        })
+      )
+    ).toBe("it held");
+  });
+
+  it("does not dial while disabled", () => {
+    const off = configured({ enabled: false });
+
+    expect(
+      failure(() => play(client, { configuration: off, transcript: "!! configure\n== started\n" }))
+    ).toBe("it held");
+  });
+});
+
+// The table the Runtime would rebuild on restart: `timers` folded over every step.
+const project = (played: ReturnType<typeof play>): TimerTable => {
+  let table: TimerTable = new Map();
+
+  for (const [index, input] of played.inputs.entries()) {
+    table = timers(table, input, played.steps[index]?.outputs ?? []);
+  }
+
+  return table;
+};
+
+describe("the timer table", () => {
+  it.each([
+    [
+      "a timer that fired and was not set again",
+      "!! configure\n-> dial irc.test:6697 tls\n== opened\n>> CAP LS 302\n>> NICK iirc\n>> USER iirc 0 * iirc\n+30s\n-> hangup\n",
+    ],
+    ["a timer that fired and was set again", `${floor}+60s\n>> PRIVMSG iirc ping\n`],
+    ["a stale firing", `${floor}== fired ping t+5s\n?? ignored StaleTimer ping\n`],
+  ])("agrees with the projection and the Client for %s", (_name, transcript) => {
+    const played = play(client, { configuration: base, transcript });
+
+    expect(played.timers).toStrictEqual(project(played));
+    expect(played.timers).toStrictEqual(client.inspect(played.state).timers);
   });
 });

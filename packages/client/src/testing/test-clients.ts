@@ -287,12 +287,61 @@ const received = (state: ToyState, input: Received, flaws: Flaws): Step<ToyState
     : handler({ flaws, heard, input, line: parsed.line, state });
 };
 
+// Dials at once, as the first dial after a `Configured` or `Started` does. Connections
+// are numbered from 1, one more for each dial.
+const dial = (
+  before: ToyState,
+  after: ToyState,
+  at: number,
+  ircd: NetworkConfiguration["ircds"][0],
+  news: readonly News[] = []
+): Step<ToyState> => {
+  const connection = before.connection + 1;
+
+  return finish(
+    before,
+    { ...after, channels: new Map(), connection, enabled: [], phase: "Dialling" },
+    at,
+    [{ _tag: "Dial", connection: ConnectionId.make(connection), ircd }],
+    news
+  );
+};
+
+// The Runtime has started, so a Connection the Client believed open is over. While
+// enabled, it dials at once.
+const started = (state: ToyState, at: number): Step<ToyState> => {
+  const { configuration } = state;
+
+  const news: readonly News[] =
+    state.phase === "Registered"
+      ? [{ _tag: "SessionEnded", at: Instant.make(at), reason: { _tag: "Restarted" } }]
+      : [];
+
+  const idle = { ...state, channels: new Map(), enabled: [], phase: "Idle" as const };
+
+  return configuration?.enabled === true
+    ? dial(state, idle, at, configuration.ircds[0], news)
+    : finish(state, idle, at, [], news);
+};
+
 const configured = (
   state: ToyState,
   input: Extract<Input, { readonly _tag: "Configured" }>
 ): Step<ToyState> => {
   const next = { ...state, configuration: input.configuration };
   const [ircd] = input.configuration.ircds;
+
+  if (!input.configuration.enabled) {
+    // Disabled while connected: hang up, and wait for the `Closed`.
+    return finish(
+      state,
+      next,
+      input.at,
+      state.phase === "Idle"
+        ? []
+        : [{ _tag: "Hangup", connection: ConnectionId.make(state.connection) }]
+    );
+  }
 
   if (state.phase === "Registered") {
     const had = new Set(state.configuration?.channels.map(({ name }) => name));
@@ -306,15 +355,9 @@ const configured = (
     );
   }
 
-  if (state.phase !== "Idle" || !input.configuration.enabled) {
-    return finish(state, next, input.at, []);
-  }
-
-  const connection = state.connection + 1;
-
-  return finish(state, { ...next, connection, phase: "Dialling" }, input.at, [
-    { _tag: "Dial", connection: ConnectionId.make(connection), ircd },
-  ]);
+  return state.phase === "Idle"
+    ? dial(state, next, input.at, ircd)
+    : finish(state, next, input.at, []);
 };
 
 const opened = (state: ToyState, at: number): Step<ToyState> => {
@@ -351,13 +394,18 @@ const fired = (
     return ignore(state, { _tag: "StaleTimer", timer: input.timer });
   }
 
+  // A firing consumes its timer. The keepalive is set again by deriving it from state.
+  const timers = new Map(state.timers);
+  timers.delete(input.timer);
+  const consumed = { ...state, timers };
+
   return input.timer === "register"
-    ? finish(state, state, input.at, [
+    ? finish(consumed, consumed, input.at, [
         { _tag: "Hangup", connection: ConnectionId.make(state.connection) },
       ])
     : finish(
-        state,
-        { ...state, lastHeard: input.at },
+        consumed,
+        { ...consumed, lastHeard: input.at },
         input.at,
         send(state, privmsg(state.self, "ping"))
       );
@@ -424,8 +472,11 @@ const step =
         return said(state, input);
       }
 
+      case "Started": {
+        return started(state, input.at);
+      }
+
       case "Retry":
-      case "Started":
       case "Unfilled": {
         return ignore(state, { _tag: "NotNow", input: input._tag });
       }
