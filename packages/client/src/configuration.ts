@@ -5,8 +5,8 @@ import { FeatureName } from "./ids.ts";
 
 /** One Ircd to reach a Network through. */
 export const IrcdAddress = Schema.Struct({
-  host: Schema.String,
-  port: Schema.Int,
+  host: Schema.String.check(Schema.isNonEmpty()),
+  port: Schema.Int.check(Schema.isBetween({ maximum: 65_535, minimum: 1 })),
   tls: Schema.Boolean,
 });
 

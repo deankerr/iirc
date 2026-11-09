@@ -33,7 +33,7 @@
       "name": "@iirc/journal-sqlite",
       "version": "0.0.0",
       "dependencies": {
-        "@effect/sql-sqlite-bun": "4.1.1",
+        "@effect/sql-sqlite-bun": "catalog:",
         "@iirc/runtime": "workspace:*",
         "effect": "catalog:",
       },
@@ -68,7 +68,7 @@
       "name": "@iirc/transport-bun",
       "version": "0.0.0",
       "dependencies": {
-        "@effect/platform-bun": "4.1.1",
+        "@effect/platform-bun": "catalog:",
         "@iirc/client": "workspace:*",
         "@iirc/runtime": "workspace:*",
         "effect": "catalog:",
@@ -81,7 +81,7 @@
       "name": "@iirc/vault-file",
       "version": "0.0.0",
       "dependencies": {
-        "@effect/platform-bun": "4.1.1",
+        "@effect/platform-bun": "catalog:",
         "@iirc/protocol": "workspace:*",
         "@iirc/runtime": "workspace:*",
         "effect": "catalog:",
@@ -92,6 +92,8 @@
     },
   },
   "catalog": {
+    "@effect/platform-bun": "4.1.1",
+    "@effect/sql-sqlite-bun": "4.1.1",
     "effect": "4.1.1",
     "vitest": "5.0.5",
   },

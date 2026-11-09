@@ -10,7 +10,7 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@effect/sql-sqlite-bun": "4.1.1",
+    "@effect/sql-sqlite-bun": "catalog:",
     "@iirc/runtime": "workspace:*",
     "effect": "catalog:"
   },

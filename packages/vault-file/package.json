@@ -10,7 +10,7 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.1.1",
+    "@effect/platform-bun": "catalog:",
     "@iirc/protocol": "workspace:*",
     "@iirc/runtime": "workspace:*",
     "effect": "catalog:"
