@@ -107,6 +107,14 @@ The fourth review found three more ways around the fence, fixed the same day:
 - **Relative paths walked around package names.** `../../runtime/src/journal.ts` reached another package, and `./testing` reached a test kit as a directory. Relative imports may no longer leave a package, and `testing` is refused as a directory too.
 - **The fence test could clobber files.** Its probes had fixed names. Each run now names its own, creates them exclusively, and removes only those.
 
+The fifth review found five more, fixed on 2026-11-09:
+
+- **`known.ts` could reach the Client's internals** through a nested path such as `./testing/scripted.ts`, because its rule refused only `./*` and dropped the test-kit patterns. It now refuses every relative path but `./ids.ts`. The fence test lints a probe under `known.ts`'s rule, through a second file name the rule also matches.
+- **The core's production code could import `effect/testing`.** Every production rule now refuses it.
+- **The Runtime could read time outside `clock.ts`,** through `DateTime.now`, which reads the Clock. Production code outside `clock.ts` now may not import `DateTime` or call `Effect.clockWith`.
+- **`new Intl.DateTimeFormat().format()` reads the wall clock.** `Intl`, `Temporal`, and `navigator` are refused in the core and the Runtime.
+- **A deeper file could not reach its own siblings,** because `../../` was refused. A relative path into another package always names its `src`, so only that is refused now, and a probe two directories deep proves a sibling import is allowed.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:

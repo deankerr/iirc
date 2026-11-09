@@ -57,13 +57,21 @@ const wallClock = [
   "formatLocal",
 ];
 
+interface Property {
+  readonly message: string;
+  readonly object?: string;
+  readonly property: string;
+}
+
 const restrictProperties = (
   clock: string,
-  randomness: string
+  randomness: string,
+  ...more: readonly Property[]
 ): NonNullable<DummyRuleMap["no-restricted-properties"]> => [
   "error",
   ...wallClock.map((property) => ({ message: clock, property })),
   { message: randomness, property: "random" },
+  ...more,
 ];
 
 const noRandomOrNow = restrictProperties(pure, pure);
@@ -93,11 +101,18 @@ const testKit: Pattern = {
 };
 
 // Another package is reached by its name and its exports, never by a relative path into
-// it, so the fences on package names cannot be walked around. Code sits at most one
-// directory below `src/`, so `../../` always leaves the package.
+// it, so the fences on package names cannot be walked around. All code lives in `src/`,
+// so a relative path into another package names a `src`, and one within a package never
+// does, however deep the file.
 const outOfPackage: Pattern = {
-  group: ["../../*", "../../**", "**/src/**"],
+  group: ["**/src", "**/src/**"],
   message: "Import another package by its name, such as `@iirc/protocol/line`.",
+};
+
+// Production code never reaches Effect's test kit, such as `TestClock`.
+const effectTesting: Pattern = {
+  group: ["effect/testing", "effect/testing/*"],
+  message: "Production code never imports a test kit.",
 };
 
 interface Path {
@@ -154,11 +169,15 @@ const noClock = restrictGlobals({
     "process",
     "Bun",
     "require",
+    "Intl",
+    "Temporal",
+    "navigator",
     ...globalObjects,
   ],
 });
 
 const toClient = "`@iirc/client` depends only on `@iirc/protocol`.";
+const toNothing = ours([], "`@iirc/protocol` depends on no other package of ours.");
 
 // The Runtime may use Effect's services, but reads time only through the Clock port, so
 // that `TestClock` drives it, and reaches no adapter.
@@ -183,7 +202,17 @@ const throughPorts = "The Runtime reaches the world only through its ports.";
 const runtimeGlobals = restrictGlobals(
   {
     message: throughClock,
-    names: ["Date", "setTimeout", "setInterval", "setImmediate", "queueMicrotask", "performance"],
+    // `Intl` and `Temporal` read the wall clock, the time zone, or the locale.
+    names: [
+      "Date",
+      "setTimeout",
+      "setInterval",
+      "setImmediate",
+      "queueMicrotask",
+      "performance",
+      "Intl",
+      "Temporal",
+    ],
   },
   {
     message: throughPorts,
@@ -196,6 +225,7 @@ const runtimeGlobals = restrictGlobals(
       "process",
       "Bun",
       "require",
+      "navigator",
       ...globalObjects,
     ],
   }
@@ -203,18 +233,16 @@ const runtimeGlobals = restrictGlobals(
 
 const runtimeProperties = restrictProperties(
   throughClock,
-  "The Runtime takes randomness from Effect's Random."
+  "The Runtime takes randomness from Effect's Random.",
+  { message: throughClock, object: "Effect", property: "clockWith" }
 );
 
 // Every Runtime file, tests included, reaches no adapter and reads no wall clock.
 const runtimeImports = (...patterns: readonly Pattern[]) =>
   restrictImports([wallClockImport(throughClock)], [adapters, ...patterns]);
 
-// Production code reads the Clock only in `clock.ts`, and never reaches `TestClock`.
-const effectTesting: Pattern = {
-  group: ["effect/testing", "effect/testing/*"],
-  message: "Production code never imports a test kit.",
-};
+// Production code reads time only in `clock.ts`: Effect's `Clock`, and `DateTime`, whose
+// `now` reads it too, are imported nowhere else.
 
 const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly Pattern[]) =>
   restrictImports(
@@ -222,13 +250,15 @@ const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly P
       wallClockImport(throughClock),
       ...(clock === "allowed"
         ? []
-        : [{ importNames: ["Clock"], message: throughClock, name: "effect" }]),
+        : [{ importNames: ["Clock", "DateTime"], message: throughClock, name: "effect" }]),
     ],
     [
       adapters,
       ...patterns,
       effectTesting,
-      ...(clock === "allowed" ? [] : [{ group: ["effect/Clock"], message: throughClock }]),
+      ...(clock === "allowed"
+        ? []
+        : [{ group: ["effect/Clock", "effect/DateTime"], message: throughClock }]),
     ]
   );
 
@@ -243,17 +273,20 @@ const coreFence: OxlintOverride[] = [
   {
     excludeFiles: tests,
     files: ["packages/*/src/**", "apps/*/src/**"],
-    rules: { "no-restricted-imports": imports(testKit) },
+    rules: { "no-restricted-imports": imports(testKit, effectTesting) },
   },
   {
     files: ["packages/protocol/src/**"],
     rules: {
       "no-restricted-globals": noClock,
-      "no-restricted-imports": pureImports(
-        ours([], "`@iirc/protocol` depends on no other package of ours.")
-      ),
+      "no-restricted-imports": pureImports(toNothing),
       "no-restricted-properties": noRandomOrNow,
     },
+  },
+  {
+    excludeFiles: tests,
+    files: ["packages/protocol/src/**"],
+    rules: { "no-restricted-imports": pureImports(toNothing, testKit, effectTesting) },
   },
   {
     files: ["packages/client/src/**"],
@@ -266,7 +299,13 @@ const coreFence: OxlintOverride[] = [
   {
     excludeFiles: tests,
     files: ["packages/client/src/**"],
-    rules: { "no-restricted-imports": pureImports(ours(["@iirc/protocol/*"], toClient), testKit) },
+    rules: {
+      "no-restricted-imports": pureImports(
+        ours(["@iirc/protocol/*"], toClient),
+        testKit,
+        effectTesting
+      ),
+    },
   },
   {
     files: ["packages/runtime/src/**"],
@@ -292,12 +331,18 @@ const coreFence: OxlintOverride[] = [
   },
   {
     // Views read `known` alone, so it cannot reach the Client's inputs, outputs, or Features.
-    files: ["packages/client/src/known.ts"],
+    // The fence test lints its probes for `known` under the second name.
+    files: ["packages/client/src/known.ts", "packages/client/src/known-fence-probe-*.ts"],
     rules: {
-      "no-restricted-imports": pureImports(ours([], "`known` imports nothing of ours but ids."), {
-        group: ["./*", "../*", "!./ids.ts"],
-        message: "`known` imports nothing of ours but ids.",
-      }),
+      "no-restricted-imports": pureImports(
+        ours([], "`known` imports nothing of ours but ids."),
+        {
+          group: ["./*", "./**", "../*", "../**", "!./ids.ts"],
+          message: "`known` imports nothing of ours but ids.",
+        },
+        testKit,
+        effectTesting
+      ),
     },
   },
 ];
