@@ -45,12 +45,34 @@ const impureModules: Pattern = {
   message: pure,
 };
 
-const noRandomOrNow: NonNullable<DummyRuleMap["no-restricted-properties"]> = [
-  "error",
-  { message: pure, object: "Math", property: "random" },
-  { message: pure, object: "DateTime", property: "nowUnsafe" },
-  { message: pure, object: "DateTime", property: "unsafeNow" },
+// What reads the wall clock or the system's time zone without an Effect. Each is refused
+// as a property of any object, so an alias of `DateTime` or a namespace import cannot
+// reach it, and as a named import from `effect/DateTime`.
+const wallClock = [
+  "nowUnsafe",
+  "unsafeNow",
+  "isFutureUnsafe",
+  "isPastUnsafe",
+  "zoneMakeLocal",
+  "formatLocal",
 ];
+
+const restrictProperties = (
+  clock: string,
+  randomness: string
+): NonNullable<DummyRuleMap["no-restricted-properties"]> => [
+  "error",
+  ...wallClock.map((property) => ({ message: clock, property })),
+  { message: randomness, property: "random" },
+];
+
+const noRandomOrNow = restrictProperties(pure, pure);
+
+const wallClockImport = (message: string) => ({
+  importNames: wallClock,
+  message,
+  name: "effect/DateTime",
+});
 
 const ours = (allowed: readonly string[], message: string): Pattern => ({
   // `@iirc/*` matches one segment only, so subpaths such as `@iirc/runtime/journal` need `/**`.
@@ -59,29 +81,46 @@ const ours = (allowed: readonly string[], message: string): Pattern => ({
 });
 
 const testKit: Pattern = {
-  group: ["@iirc/*/testing", "./testing/*", "../testing/*"],
+  group: [
+    "@iirc/*/testing",
+    "@iirc/*/testing/**",
+    "./testing",
+    "./testing/*",
+    "../testing",
+    "../testing/*",
+  ],
   message: "Production code never imports the test kit.",
 };
 
-const imports = (
-  ...patterns: readonly Pattern[]
-): NonNullable<DummyRuleMap["no-restricted-imports"]> => ["error", { patterns: [...patterns] }];
+// Another package is reached by its name and its exports, never by a relative path into
+// it, so the fences on package names cannot be walked around. Code sits at most one
+// directory below `src/`, so `../../` always leaves the package.
+const outOfPackage: Pattern = {
+  group: ["../../*", "../../**", "**/src/**"],
+  message: "Import another package by its name, such as `@iirc/protocol/line`.",
+};
 
-const pureImports = (
-  ...patterns: readonly Pattern[]
+interface Path {
+  readonly importNames: string[];
+  readonly message: string;
+  readonly name: string;
+}
+
+const restrictImports = (
+  paths: readonly Path[],
+  patterns: readonly Pattern[]
 ): NonNullable<DummyRuleMap["no-restricted-imports"]> => [
   "error",
-  {
-    paths: [
-      {
-        importNames: [...services],
-        message: pure,
-        name: "effect",
-      },
-    ],
-    patterns: [impureModules, ...patterns],
-  },
+  { paths: [...paths], patterns: [...patterns, outOfPackage] },
 ];
+
+const imports = (...patterns: readonly Pattern[]) => restrictImports([], patterns);
+
+const pureImports = (...patterns: readonly Pattern[]) =>
+  restrictImports(
+    [{ importNames: [...services], message: pure, name: "effect" }, wallClockImport(pure)],
+    [impureModules, ...patterns]
+  );
 
 // The global object itself is refused too, so `globalThis.Date` or an alias of
 // `globalThis` cannot reach what is refused by name.
@@ -162,16 +201,14 @@ const runtimeGlobals = restrictGlobals(
   }
 );
 
-const runtimeProperties: NonNullable<DummyRuleMap["no-restricted-properties"]> = [
-  "error",
-  { message: throughClock, object: "DateTime", property: "nowUnsafe" },
-  { message: throughClock, object: "DateTime", property: "unsafeNow" },
-  {
-    message: "The Runtime takes randomness from Effect's Random.",
-    object: "Math",
-    property: "random",
-  },
-];
+const runtimeProperties = restrictProperties(
+  throughClock,
+  "The Runtime takes randomness from Effect's Random."
+);
+
+// Every Runtime file, tests included, reaches no adapter and reads no wall clock.
+const runtimeImports = (...patterns: readonly Pattern[]) =>
+  restrictImports([wallClockImport(throughClock)], [adapters, ...patterns]);
 
 // Production code reads the Clock only in `clock.ts`, and never reaches `TestClock`.
 const effectTesting: Pattern = {
@@ -179,27 +216,30 @@ const effectTesting: Pattern = {
   message: "Production code never imports a test kit.",
 };
 
-const runtimeProduction = (
-  clock: "allowed" | "refused",
-  ...patterns: readonly Pattern[]
-): NonNullable<DummyRuleMap["no-restricted-imports"]> => [
-  "error",
-  {
-    paths:
-      clock === "allowed"
+const runtimeProduction = (clock: "allowed" | "refused", ...patterns: readonly Pattern[]) =>
+  restrictImports(
+    [
+      wallClockImport(throughClock),
+      ...(clock === "allowed"
         ? []
-        : [{ importNames: ["Clock"], message: throughClock, name: "effect" }],
-    patterns: [
+        : [{ importNames: ["Clock"], message: throughClock, name: "effect" }]),
+    ],
+    [
+      adapters,
       ...patterns,
       effectTesting,
       ...(clock === "allowed" ? [] : [{ group: ["effect/Clock"], message: throughClock }]),
-    ],
-  },
-];
+    ]
+  );
 
 const tests = ["**/*.test.ts", "**/testing/**"];
 
 const coreFence: OxlintOverride[] = [
+  {
+    // Tests too reach another package only by its name.
+    files: ["packages/*/src/**", "apps/*/src/**"],
+    rules: { "no-restricted-imports": imports() },
+  },
   {
     excludeFiles: tests,
     files: ["packages/*/src/**", "apps/*/src/**"],
@@ -232,7 +272,7 @@ const coreFence: OxlintOverride[] = [
     files: ["packages/runtime/src/**"],
     rules: {
       "no-restricted-globals": runtimeGlobals,
-      "no-restricted-imports": imports(adapters, runtimeTestOurs),
+      "no-restricted-imports": runtimeImports(runtimeTestOurs),
       "no-restricted-properties": runtimeProperties,
     },
   },
@@ -240,14 +280,14 @@ const coreFence: OxlintOverride[] = [
     excludeFiles: tests,
     files: ["packages/runtime/src/**"],
     rules: {
-      "no-restricted-imports": runtimeProduction("refused", adapters, runtimeOurs, testKit),
+      "no-restricted-imports": runtimeProduction("refused", runtimeOurs, testKit),
     },
   },
   {
     // The Clock port's helpers are the one place the Runtime reads Effect's Clock.
     files: ["packages/runtime/src/clock.ts"],
     rules: {
-      "no-restricted-imports": runtimeProduction("allowed", adapters, runtimeOurs, testKit),
+      "no-restricted-imports": runtimeProduction("allowed", runtimeOurs, testKit),
     },
   },
   {

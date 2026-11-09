@@ -101,6 +101,12 @@ The third review found three more, fixed the same day:
 - **An interrupted hangup could leave a Link open for good.** The memory Transport now closes in one uninterruptible step, and a law interrupts a hangup at every point between operations.
 - **Filtered following was untested live.** The follow law now appends for both Networks while a follower watches one.
 
+The fourth review found three more ways around the fence, fixed the same day:
+
+- **`import { nowUnsafe } from "effect/DateTime"`** read the wall clock. `DateTime`'s functions that read the wall clock or the system's time zone are now refused as a property of any object, which covers aliases and namespaces, and as named imports.
+- **Relative paths walked around package names.** `../../runtime/src/journal.ts` reached another package, and `./testing` reached a test kit as a directory. Relative imports may no longer leave a package, and `testing` is refused as a directory too.
+- **The fence test could clobber files.** Its probes had fixed names. Each run now names its own, creates them exclusively, and removes only those.
+
 The second review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
 
 Deferred on purpose, to be added when their modules are designed:
