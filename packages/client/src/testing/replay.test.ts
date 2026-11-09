@@ -460,4 +460,38 @@ describe("the diff rebuilt on a mismatch", () => {
       'ReplayMismatchError: step 1 (Configured at 0ms) does not replay exactly: its state differ\nthe first run\'s state changed after it was returned: the object it returned no longer hashes as it did\nreplayed {"n":2}'
     );
   });
+
+  it("keeps the mismatch when the first run's state has since become a cycle", () => {
+    interface Cyclic {
+      n: number;
+      self?: Cyclic;
+    }
+
+    let calls = 0;
+    let first: Cyclic | undefined;
+
+    const cycling: Client<Cyclic | undefined> = {
+      initial: undefined,
+      inspect: () => toy().inspect(toy().initial),
+      known: () => toy().known(toy().initial),
+      step: () => {
+        calls += 1;
+        const state: Cyclic = { n: calls };
+
+        if (first === undefined) {
+          first = state;
+        } else {
+          first.self = first;
+        }
+
+        return { news: [], outputs: [], state };
+      },
+    };
+
+    expect(
+      failure(() => play(cycling, { configuration: base, transcript: "!! configure\n" }))
+    ).toBe(
+      'ReplayMismatchError: step 1 (Configured at 0ms) does not replay exactly: its state differ\nthe first run\'s state changed after it was returned, and can no longer be written down, such as by a cycle\nreplayed {"n":2}'
+    );
+  });
 });

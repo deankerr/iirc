@@ -111,6 +111,21 @@ const partText = <State>(client: Client<State>, step: Step<State>, part: Part): 
   }
 };
 
+// A part's text rebuilt after the fact, or `undefined` if writing it down throws: the
+// first run's state may since have been changed into something that is not plain data,
+// such as a cycle, and a view may throw when called again.
+const rebuild = <State>(
+  client: Client<State>,
+  step: Step<State>,
+  part: Part
+): string | undefined => {
+  try {
+    return partText(client, step, part);
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * Writes one step down, as a hash of each part's canonical text.
  * @param client - The Client, for its views of the state.
@@ -143,7 +158,13 @@ const explain = <State>(
   part: Part,
   replayed: string
 ): string => {
-  const rebuilt = first === undefined ? undefined : partText(client, first, part);
+  const rebuilt = first === undefined ? undefined : rebuild(client, first, part);
+
+  if (first !== undefined && rebuilt === undefined) {
+    return part === "state"
+      ? `the first run's state changed after it was returned, and can no longer be written down, such as by a cycle\nreplayed ${excerpt(replayed)}`
+      : `the first run's ${part} could not be rebuilt: writing it down failed, such as by a cycle or a view that throws\nreplayed ${excerpt(replayed)}`;
+  }
 
   if (rebuilt !== undefined && hashText(rebuilt) === recorded) {
     return textDifference(rebuilt, replayed) ?? `replayed ${excerpt(replayed)}`;
