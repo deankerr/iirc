@@ -1,0 +1,21 @@
+{
+  "name": "@iirc/vault-file",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.1.1",
+    "@iirc/protocol": "workspace:*",
+    "@iirc/runtime": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}
