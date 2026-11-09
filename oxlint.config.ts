@@ -102,7 +102,7 @@ const toClient = "`@iirc/client` depends only on `@iirc/protocol`.";
 // The Runtime may use Effect's services, but reads time only through the Clock port, so
 // that `TestClock` drives it, and reaches no adapter.
 const adapters: Pattern = {
-  group: ["bun", "bun:*", "node:*", "@effect/*"],
+  group: ["bun", "bun:*", "node:*", "@effect/*", "effect/unstable/*"],
   message:
     "The Runtime reaches the world only through its ports. Adapters live in their own packages.",
 };
@@ -117,6 +117,60 @@ const runtimeTestOurs = ours(
 );
 
 const throughClock = "The Runtime reads time only through the Clock port.";
+const throughPorts = "The Runtime reaches the world only through its ports.";
+
+const runtimeGlobals: NonNullable<DummyRuleMap["no-restricted-globals"]> = [
+  "error",
+  ...["Date", "setTimeout", "setInterval", "setImmediate", "queueMicrotask", "performance"].map(
+    (name) => ({ message: throughClock, name })
+  ),
+  ...[
+    "fetch",
+    "WebSocket",
+    "XMLHttpRequest",
+    "EventSource",
+    "crypto",
+    "process",
+    "Bun",
+    "require",
+  ].map((name) => ({ message: throughPorts, name })),
+];
+
+const runtimeProperties: NonNullable<DummyRuleMap["no-restricted-properties"]> = [
+  "error",
+  { message: throughClock, object: "DateTime", property: "nowUnsafe" },
+  { message: throughClock, object: "DateTime", property: "unsafeNow" },
+  {
+    message: "The Runtime takes randomness from Effect's Random.",
+    object: "Math",
+    property: "random",
+  },
+];
+
+// Production code reads the Clock only in `clock.ts`, and never reaches `TestClock`.
+const effectTesting: Pattern = {
+  group: ["effect/testing", "effect/testing/*"],
+  message: "Production code never imports a test kit.",
+};
+
+const runtimeProduction = (
+  clock: "allowed" | "refused",
+  ...patterns: readonly Pattern[]
+): NonNullable<DummyRuleMap["no-restricted-imports"]> => [
+  "error",
+  {
+    paths:
+      clock === "allowed"
+        ? []
+        : [{ importNames: ["Clock"], message: throughClock, name: "effect" }],
+    patterns: [
+      ...patterns,
+      effectTesting,
+      ...(clock === "allowed" ? [] : [{ group: ["effect/Clock"], message: throughClock }]),
+    ],
+  },
+];
+
 const tests = ["**/*.test.ts", "**/testing/**"];
 
 const coreFence: OxlintOverride[] = [
@@ -151,25 +205,24 @@ const coreFence: OxlintOverride[] = [
   {
     files: ["packages/runtime/src/**"],
     rules: {
-      "no-restricted-globals": [
-        "error",
-        ...["Date", "setTimeout", "setInterval", "performance", "process", "Bun"].map((name) => ({
-          message: throughClock,
-          name,
-        })),
-      ],
+      "no-restricted-globals": runtimeGlobals,
       "no-restricted-imports": imports(adapters, runtimeTestOurs),
-      "no-restricted-properties": [
-        "error",
-        { message: throughClock, object: "DateTime", property: "nowUnsafe" },
-        { message: throughClock, object: "DateTime", property: "unsafeNow" },
-      ],
+      "no-restricted-properties": runtimeProperties,
     },
   },
   {
     excludeFiles: tests,
     files: ["packages/runtime/src/**"],
-    rules: { "no-restricted-imports": imports(adapters, runtimeOurs, testKit) },
+    rules: {
+      "no-restricted-imports": runtimeProduction("refused", adapters, runtimeOurs, testKit),
+    },
+  },
+  {
+    // The Clock port's helpers are the one place the Runtime reads Effect's Clock.
+    files: ["packages/runtime/src/clock.ts"],
+    rules: {
+      "no-restricted-imports": runtimeProduction("allowed", adapters, runtimeOurs, testKit),
+    },
   },
   {
     // Views read `known` alone, so it cannot reach the Client's inputs, outputs, or Features.

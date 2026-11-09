@@ -38,6 +38,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Received` | Transport | One Line's bytes, without its line ending. |
 | `Closed` | Transport | A Connection is over, and how. |
 | `Fired` | Clock | A timer the Client set is due, with the instant its `Wake` set. |
+| `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent: the Credential is `Missing`, or the Vault is `Unavailable`. |
 
 ## Outputs
 
@@ -92,7 +93,11 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 - **Time comes from inputs.** Every `Wake` instant is computed from the `at` of the input being stepped. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. The Runtime gives `due` back unchanged.
 - **One Connection at a time.** The Client dials only after the previous Connection's `Closed`, or after `Started`.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
-- **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext. A policy is learnt only over TLS, survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`. Over plaintext, an upgrade policy ends the Connection with `Upgrading` and dials TLS at once.
+- **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS until the policy expires, and never falls back to plaintext.
+  - A policy is learnt only over TLS, from `duration`, on the port of the Connection it arrived on. A `port` key sent over TLS is ignored.
+  - `duration=0` removes the policy at once. When a Connection closes, the expiry moves to the close plus the last `duration`.
+  - It survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`.
+  - Over plaintext, only `port` counts: it ends the Connection with `Upgrading` and dials TLS on that port at once. A `duration` sent over plaintext is ignored.
 - **Decisions come from structure.** Commands, numerics, tags, and parameters decide behaviour. An Ircd's free text never does, and it may appear in News only as data.
 - **Bounded.** Everything the Client holds from Ircd input has a bound. A hostile Ircd can make facts unknown, but it cannot make the state grow without limit.
 
@@ -114,6 +119,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 | `Fired` for a timer that was reset or cancelled | `Ignored` with `StaleTimer`. |
 | An input that makes no sense now, such as `Opened` twice | `Ignored` with `NotNow`. |
 | An Owner intent that cannot be carried out, such as `Say` while offline | `Refused` with the intent id. It is not queued. |
+| `Unfilled` | SASL sends `AUTHENTICATE *` and counts as a failed login, so a required login abandons the Connection. A Channel whose key is unfilled is `Refused` until the next Session or a change of Configuration. Registration goes on without `PASS`, and the Ircd decides. |
 | A Feature hook that throws | That Feature is off for the rest of the Connection, and `Ignored` with `FeatureFailed` records it. |
 
 ## The Feature seam

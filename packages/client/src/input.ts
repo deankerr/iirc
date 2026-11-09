@@ -1,3 +1,4 @@
+import { SecretLine } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import { NetworkConfiguration } from "./configuration.ts";
@@ -19,6 +20,15 @@ export const CloseReason = Schema.Literals([
 
 /** The decoded form of {@link CloseReason}. */
 export type CloseReason = typeof CloseReason.Type;
+
+/**
+ * Why the Runtime could not fill a `SecretLine`: the Vault holds no such Credential, or
+ * the Vault could not be read.
+ */
+export const UnfilledReason = Schema.Literals(["Missing", "Unavailable"]);
+
+/** The decoded form of {@link UnfilledReason}. */
+export type UnfilledReason = typeof UnfilledReason.Type;
 
 /** The kinds of Message the Owner can say. */
 export const SayKind = Schema.Literals(["Privmsg", "Notice", "Action"]);
@@ -50,6 +60,11 @@ export const Input = Schema.TaggedUnion({
   Say: { at: Instant, intent: IntentId, kind: SayKind, target: Schema.String, text: Schema.String },
   /** The Runtime has started. A Connection the Client believed open is over. */
   Started: { at: Instant },
+  /**
+   * The Runtime could not fill a `SendSecret`, so nothing was sent. It is stepped after
+   * the rest of that step's outputs are carried out.
+   */
+  Unfilled: { at: Instant, connection: ConnectionId, line: SecretLine, reason: UnfilledReason },
 });
 
 /** The decoded form of {@link Input}. */

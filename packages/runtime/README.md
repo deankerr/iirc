@@ -11,7 +11,7 @@ This README is the ports' written interface. The types are in `src/`, the in-mem
 | Vault | Hold Credentials, give a value at the last moment | `@iirc/runtime/vault` | `makeMemoryVault` |
 | Clock | Tell the time, and wake at a time | `@iirc/runtime/clock` | `TestClock` from `effect/testing` |
 
-Each port is an Effect service. An adapter provides it as a Layer, from its own package, which the Runtime never imports. The lint fence keeps Bun, Node, and `@effect/*` platform packages out of `src/`, and makes every read of time go through the Clock port.
+Each port is an Effect service. An adapter provides it as a Layer, from its own package, which the Runtime never imports. The lint fence keeps Bun, Node, `@effect/*`, and `effect/unstable/*` out of `src/`, along with `fetch`, `WebSocket`, `crypto`, and `process`. Time is read only through the Clock port: production code outside `clock.ts` may not import Effect's `Clock`, and none may import `effect/testing`.
 
 ## Transport
 
@@ -23,7 +23,7 @@ LinkEvent = Opened | Received { bytes } | Closed { reason: CloseReason }
 
 - **It never fails.** A refused, unreachable, or timed-out dial, a TLS failure, a reset, and a stalled write all end as `Closed` with a reason. The Runtime journals that as a `Closed` input.
 - **Events come in order.** At most one `Opened`, then any number of `Received`, then exactly one `Closed`, and then the stream ends. A failed dial gives `Closed` with no `Opened`. `events` is read once.
-- **It frames Lines.** `Received` holds one Line's bytes without its line ending. A Line ends at LF, with one CR before it removed. Empty Lines are skipped. A Line longer than `maxReceivedBytes` (8191 tag bytes plus 510) is cut to that length, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped.
+- **It frames Lines.** `Received` holds one Line's bytes without its line ending. A Line ends at LF, with one CR before it removed. Empty Lines are skipped. A Line longer than `maxReceivedBytes` (8191 tag bytes plus 510) is cut to that length, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped. The laws check skipping and cutting through `TestCall.say`. A byte-level adapter also tests its framing directly: a line ending split across reads, several Lines in one read, and an unfinished Line at the end.
 - **It decodes nothing.** Bytes go to the Client as they came, so a parser fix repairs history on replay (ADR 0002).
 - **`send` writes one Line's bytes,** line ending included. Before `Opened` or after `Closed`, it does nothing.
 - **`hangup` ends the Connection** with `Closed` `HungUp`, unless it had already ended for another reason.
@@ -38,17 +38,18 @@ append(record: JournalRecord): Effect<Sequence, JournalFailed>
 read({ after?, network? }): Stream<Entry, JournalFailed>    // up to the end as it stood
 follow({ after?, network? }): Stream<Entry, JournalFailed>  // and then each new Entry
 Entry = { sequence: Sequence, record: JournalRecord }
-JournalRecord = Input { network, input } | Outputs { network, of, outputs } | Unfilled { network, of, credential }
+JournalRecord = Input { network, input } | Outputs { network, of, outputs }
 ```
 
 - **One Journal for the Daemon.** Every Network's Entries share one sequence, and each record names its Network.
 - **Appends are durable** before `append` returns, and are numbered in the order they complete. Sequences only increase, and may skip numbers.
+- **An append is whole or absent.** One interrupted is either kept, and read and followed like any other, or not kept at all.
 - **`read` and `follow` give each Entry once, in order.** `follow` gives the past and then each new Entry as it is appended, with no gap between them, and never ends.
 - **Records are Schemas.** Every adapter stores their encoding, so the in-memory one does too, and a record that cannot be stored fails in tests. A `SendSecret` is recorded with the Credential's name, never its value.
 - **Versioned, not migrated.** `journalVersion` is 1. An adapter that finds another version refuses to open with `JournalVersionMismatch`. Nothing is migrated until the shape has settled.
 - **`JournalFailed`** means the Journal could not be written or read. The Runtime stops that Network rather than step an input it did not keep.
 
-The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table from the outputs, sets those timers, and steps a `Started`.
+The Runtime's order for each input is: append the `Input`, step the Client, append its `Outputs` with `of` set to the input's sequence, then carry them out. A `SendSecret` it cannot fill becomes an `Unfilled` input, appended and stepped once the rest of those outputs are carried out. On restart it reads every `Input` for a Network, folds them from `initial`, keeps only the timer table from the outputs, sets those timers, and steps a `Started`.
 
 ## Vault
 
@@ -61,7 +62,7 @@ names: Effect<ReadonlySet<CredentialName>, VaultFailed>
 
 - **Values are always `Redacted`,** so a value cannot be logged or journaled by accident. Only `fillSecret` in `@iirc/protocol` unwraps one, and its result is sent, never kept.
 - **The Runtime reveals at the last moment,** for each `SendSecret`, and lets go of the value once the Line is sent.
-- **A missing Credential sends nothing.** The Runtime journals `Unfilled` with the Credential's name. The Client learns of it only from the Ircd, as a failed login or a refused join, and its deadlines handle the rest.
+- **A Credential that cannot be revealed sends nothing.** The Runtime steps an `Unfilled` input naming the `SecretLine`, so the Client decides what follows. Its reason is `Missing` for `CredentialMissing`, which the Owner must fix, or `Unavailable` for `VaultFailed`, which may pass.
 - **`names` lists names, never values.** The Owner API holds and forgets Credentials, and can list them, but never reads one back.
 - **Only passwords for now.** SASL `EXTERNAL` would add a client certificate as a kind of Credential, which `Dial` names.
 
@@ -76,7 +77,7 @@ The Clock port is Effect's own `Clock`. Its live adapter is the default Clock, a
 
 ## The laws
 
-`@iirc/runtime/testing` holds the laws every adapter of a port keeps, as data: `journalLaws`, `vaultLaws`, and `transportLaws`. A law is an Effect that fails with `LawBroken`, so the module needs no test runner. `holds(law, make)` checks one against a fresh harness, in its own Scope, and fails after two seconds rather than hanging.
+`@iirc/runtime/testing` holds the laws every adapter of a port keeps, as data: `journalLaws`, `vaultLaws`, and `transportLaws`. The Journal's laws follow from three positions while appends run concurrently, and interrupt appends at every point between two operations. A law is an Effect that fails with `LawBroken`, so the module needs no test runner. `holds(law, make)` checks one against a fresh harness, in its own Scope, and fails after two seconds rather than hanging.
 
 ```ts
 it.each(journalLaws)("$name", async (law) => {

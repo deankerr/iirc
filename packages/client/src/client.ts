@@ -15,8 +15,11 @@ export interface Step<State> {
 
 /**
  * An Ircd's Strict Transport Security policy for one hostname: connect only over TLS, on
- * `port`, until `until`. It is learnt only over TLS, survives Connections and restarts
- * because it is derived from journaled Lines, and is never ended by `CAP DEL`.
+ * `port`, until `until`. It is learnt only over TLS, from `duration`, and `port` is the
+ * port of the TLS Connection it arrived on: a `port` key over TLS is ignored, and over
+ * plaintext only asks for an upgrade. `duration=0` removes it at once. It survives
+ * Connections and restarts because it is derived from journaled Lines, and is never
+ * ended by `CAP DEL`.
  */
 export interface StsPolicy {
   readonly port: number;

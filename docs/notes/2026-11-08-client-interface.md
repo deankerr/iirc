@@ -87,6 +87,16 @@ Three caps beyond the first Features changed the types on 2026-11-09, because ot
 
 With them, `UserKnowledge` gained `realname` for `setname`, and `Message` gained its client-only tags. `OutboundLine` now allows `label`, `batch`, and `draft/multiline-concat` as well as client-only tags. `SecretLine` and `Dial` note where SASL `SCRAM-SHA-256` and `EXTERNAL` would land.
 
+The second review, of those changes and the ports, found five gaps, fixed on 2026-11-09:
+
+- **An interrupted append could vanish from a follower.** The in-memory Journal stored an Entry and then published it, and an interrupt between the two lost it from every follower. The two are now one uninterruptible step. A new law interrupts appends at every point between two operations, which it does by making the scheduler yield every three operations.
+- **The follow law did not test following.** A `follow` that gave only the past passed it. Followers now catch up before anything new is appended, and the new Entries are appended concurrently, for three positions.
+- **A missing Credential stranded a join.** A `JoinWithKey` that cannot be filled sends nothing, so no reply comes back. `Unfilled` is now a Client input, with the `SecretLine` and why, so the Client decides what follows. It replaces the record that only the Journal saw.
+- **The Runtime's fence had gaps.** It now refuses `fetch`, `WebSocket`, `crypto`, `effect/unstable/*`, `effect/testing` in production code, and Effect's `Clock` outside `clock.ts`.
+- **The memory Transport did not frame.** It delivered empty and overlong Lines, which a real Transport skips or cuts. It now frames as the README says, and two laws check it.
+
+The review also asked for STS's persisted port to be pinned down: it is the port of the TLS Connection the policy arrived on, and `duration=0` removes the policy at once.
+
 Deferred on purpose, to be added when their modules are designed:
 
 - Lookups: an `Ask` input and an `Answer` in News. Asking for history after a Gap is one, and needs the latest time heard per Target.

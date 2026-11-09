@@ -25,19 +25,22 @@ export const makeMemoryJournal: Effect.Effect<JournalService> = Effect.gen(funct
 
   return {
     // One append at a time, so Entries are published in the order they are numbered.
+    // Storing and publishing cannot be interrupted apart, or a follower would miss an Entry.
     append: (record) =>
       lock.withPermit(
-        Effect.gen(function* () {
-          const entry = yield* Ref.modify(stored, (texts) => {
-            const text = encode({ record, sequence: Sequence.make(texts.length + 1) });
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const entry = yield* Ref.modify(stored, (texts) => {
+              const text = encode({ record, sequence: Sequence.make(texts.length + 1) });
 
-            return [decode(text), [...texts, text]] as const;
-          });
+              return [decode(text), [...texts, text]] as const;
+            });
 
-          yield* PubSub.publish(appended, entry);
+            yield* PubSub.publish(appended, entry);
 
-          return entry.sequence;
-        })
+            return entry.sequence;
+          })
+        )
       ),
     follow: (from) =>
       Stream.unwrap(

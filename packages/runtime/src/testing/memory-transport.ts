@@ -2,6 +2,7 @@ import type { CloseReason, IrcdAddress } from "@iirc/client";
 import { Effect, Queue, Ref, Stream } from "effect";
 import type { Cause } from "effect";
 
+import { maxReceivedBytes } from "../transport.ts";
 import type { LinkEvent, TransportService } from "../transport.ts";
 
 /** The far end of one dialled Connection, played by a test. */
@@ -9,7 +10,10 @@ export interface TestCall {
   readonly address: IrcdAddress;
   /** Accepts the Connection, so the Link reports `Opened`. */
   readonly open: Effect.Effect<void>;
-  /** Sends one Line's bytes, without its line ending. Only while open. */
+  /**
+   * Sends one Line's bytes, without its line ending, framed by the Transport as an Ircd's
+   * would be. Only while open.
+   */
   readonly say: (bytes: Uint8Array) => Effect.Effect<void>;
   /** The next Line the Link sent, with its line ending, waiting until one comes. */
   readonly heard: Effect.Effect<Uint8Array>;
@@ -68,12 +72,17 @@ export const makeMemoryTransport: Effect.Effect<MemoryTransport> = Effect.gen(fu
             ? Effect.andThen(Ref.set(phase, "Open"), Queue.offer(events, { _tag: "Opened" }))
             : misuse(`open while ${now}`)
         ),
+        // Framed as a real Transport frames: an empty Line is skipped, and a long one is cut.
         say: (bytes) =>
-          Effect.flatMap(Ref.get(phase), (now) =>
-            now === "Open"
-              ? Queue.offer(events, { _tag: "Received", bytes })
-              : misuse(`say while ${now}`)
-          ),
+          Effect.flatMap(Ref.get(phase), (now) => {
+            if (now !== "Open") {
+              return misuse(`say while ${now}`);
+            }
+
+            return bytes.length === 0
+              ? Effect.void
+              : Queue.offer(events, { _tag: "Received", bytes: bytes.slice(0, maxReceivedBytes) });
+          }),
       });
 
       return {

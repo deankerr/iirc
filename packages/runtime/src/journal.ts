@@ -6,7 +6,6 @@
  * @packageDocumentation
  */
 import { Input, Output } from "@iirc/client";
-import { CredentialName } from "@iirc/protocol/line";
 import { Context, Schema } from "effect";
 import type { Effect, Stream } from "effect";
 
@@ -38,11 +37,6 @@ export const JournalRecord = Schema.TaggedUnion({
   Input: { input: Input, network: NetworkId },
   /** What the Client asked for when it stepped the input at `of`, as it was carried out. */
   Outputs: { network: NetworkId, of: Sequence, outputs: Schema.Array(Output) },
-  /**
-   * A `SendSecret` the Runtime could not fill, because the Vault does not hold the
-   * Credential. Nothing was sent. The Client learns of it only from the Ircd.
-   */
-  Unfilled: { credential: CredentialName, network: NetworkId, of: Sequence },
 });
 
 /** The decoded form of {@link JournalRecord}. */
