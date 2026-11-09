@@ -121,3 +121,55 @@ describe("multi-prefix, once deleted", () => {
     });
   });
 });
+
+describe("completed prefixes, with inputs at one instant", () => {
+  const start = [
+    registered(base, { offered: ["cap-notify", "multi-prefix"] }),
+    joined(base, "#iirc", ["@+op"]),
+  ];
+
+  it("are known again when the cap comes back and a listing says them, at the same instant", () => {
+    expect(
+      prefixesOf(
+        [
+          ...start,
+          lines(
+            "<< :irc.test CAP iirc DEL :multi-prefix",
+            "<< :irc.test CAP iirc NEW :multi-prefix",
+            ">> CAP REQ multi-prefix",
+            "<< :irc.test CAP iirc ACK :multi-prefix",
+            "<< :irc.test 353 iirc = #iirc :iirc @+op",
+            "<< :irc.test 366 iirc #iirc :End"
+          ),
+        ],
+        "op"
+      )
+    ).toMatchObject({ _tag: "Known", value: new Set(["o", "v"]) });
+  });
+
+  it("stay stale through the cap coming back, until something says them again", () => {
+    expect(
+      prefixesOf(
+        [
+          ...start,
+          lines(
+            "<< :irc.test CAP iirc DEL :multi-prefix",
+            "<< :irc.test CAP iirc NEW :multi-prefix",
+            ">> CAP REQ multi-prefix",
+            "<< :irc.test CAP iirc ACK :multi-prefix"
+          ),
+        ],
+        "op"
+      )
+    ).toMatchObject({ _tag: "Stale", was: new Set(["o", "v"]) });
+  });
+
+  it("are partial after a MODE at the same instant as the CAP DEL", () => {
+    expect(
+      prefixesOf(
+        [...start, lines("<< :irc.test CAP iirc DEL :multi-prefix", "<< :op!u@h MODE #iirc -v op")],
+        "op"
+      )
+    ).toMatchObject({ _tag: "Partial", atLeast: new Set(["o"]) });
+  });
+});

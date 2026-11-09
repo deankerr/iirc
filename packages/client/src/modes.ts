@@ -180,7 +180,8 @@ export const readListed = (name: string, rules: ModeRules, at: Instant): Listed 
 };
 
 /**
- * Changes a member's prefixes by one mode change. A set that was partial stays partial.
+ * Changes a member's prefixes by one mode change. A set that was partial stays partial,
+ * and one that was stale becomes partial: what it was, with the change.
  * @param prefixes - What was known.
  * @param change - The change.
  * @param at - When.
@@ -212,7 +213,12 @@ export const changePrefix = (
       return { _tag: "Partial", at, atLeast: apply(prefixes.atLeast), from: "ircd" };
     }
 
-    case "Stale":
+    // What was held still is, unless a change since said otherwise, since every change is
+    // read: so at least that, with this change.
+    case "Stale": {
+      return { _tag: "Partial", at, atLeast: apply(prefixes.was), from: "ircd" };
+    }
+
     case "Unknown": {
       return change.set
         ? { _tag: "Partial", at, atLeast: new Set([change.mode]), from: "ircd" }

@@ -19,7 +19,7 @@ import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
 import type { Channel, ChannelPhase, Joined, Member, Seen, State } from "./state.ts";
-import { onNow, openOf, sessionOf } from "./views.ts";
+import { openOf, sessionOf } from "./views.ts";
 
 /** The most members kept for one Channel, so a hostile Ircd cannot grow the State without bound. */
 const maxMembers = 100_000;
@@ -312,7 +312,11 @@ export const see = (run: Run, nick: string, change: (seen: Seen) => Seen): void 
   }
 
   updateOpen(run, (open) => {
-    const was = open.users.get(folded) ?? { away: undefined, mask: undefined, nick };
+    const was: Seen = open.users.get(folded) ?? {
+      away: { _tag: "Unknown" },
+      mask: { _tag: "Unknown" },
+      nick,
+    };
 
     return { ...open, users: new Map(open.users).set(folded, change(was)) };
   });
@@ -436,39 +440,20 @@ const joinedSelf = (run: Run, channel: string): void => {
   });
 };
 
-// Prefixes a Feature made complete are known only while one that does is on. With none
-// on, they are what the floor would know: at least those.
-const asFloor = (member: Member, completing: boolean): Member =>
-  member.complete && !completing && member.prefixes._tag === "Known"
-    ? {
-        ...member,
-        complete: false,
-        prefixes: {
-          _tag: "Partial",
-          at: member.prefixes.at,
-          atLeast: member.prefixes.value,
-          from: member.prefixes.from,
-        },
-      }
-    : member;
-
 // Applies membership mode changes, such as `+o peer`, to members.
 const prefixed = (
   start: ReadonlyMap<string, Member>,
   changes: readonly ModeChange[],
   rules: ModeRules,
   at: Instant,
-  fold: (name: string) => string,
-  completing: boolean
+  fold: (name: string) => string
 ): ReadonlyMap<string, Member> => {
   let members = start;
 
   for (const change of changes) {
-    const found = change.param === undefined ? undefined : members.get(fold(change.param));
+    const member = change.param === undefined ? undefined : members.get(fold(change.param));
 
-    if (found !== undefined && rules.prefix.some((each) => each.mode === change.mode)) {
-      const member = asFloor(found, completing);
-
+    if (member !== undefined && rules.prefix.some((each) => each.mode === change.mode)) {
       members = withMember(members, fold(member.nick), {
         ...member,
         prefixes: changePrefix(member.prefixes, change, at),
@@ -574,19 +559,14 @@ export const foldActivity = (
         return;
       }
 
-      // Whether a Feature that makes prefixes complete is on.
-      const completing = onNow(run.registry, run.state).some(
-        (feature) => feature.keeps?.includes("member.prefixes") === true
-      );
-
       changeJoined(run, activity.target, (joined) => {
         // A pending listing replaces the members when it ends, so it takes the change too.
-        const members = prefixed(joined.members, activity.changes, rules, run.at, fold, completing);
+        const members = prefixed(joined.members, activity.changes, rules, run.at, fold);
 
         const listing =
           joined.listing === undefined
             ? undefined
-            : prefixed(joined.listing, activity.changes, rules, run.at, fold, completing);
+            : prefixed(joined.listing, activity.changes, rules, run.at, fold);
 
         const modes: Fact<ReadonlyMap<string, string | null>> =
           joined.modes._tag === "Known"
@@ -616,7 +596,7 @@ export const foldActivity = (
     case "AwayChanged": {
       see(run, activity.nick, (seen) => ({
         ...seen,
-        away: { at: run.at, value: activity.away },
+        away: { _tag: "Known", at: run.at, from: "ircd", value: activity.away },
       }));
 
       return;

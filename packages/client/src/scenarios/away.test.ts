@@ -77,3 +77,35 @@ describe("away-notify", () => {
     ).toMatchObject({ _tag: "Known", value: { message: "out" } });
   });
 });
+
+describe("away status, with inputs at one instant", () => {
+  it("is fresh when said again after CAP DEL at the same instant", () => {
+    expect(
+      awayOf(
+        [
+          registered(base, { offered: ["cap-notify", "away-notify"] }),
+          joined(base, "#iirc", ["peer"]),
+          lines(
+            "<< :peer!u@h AWAY :out",
+            "<< :irc.test CAP iirc DEL :away-notify",
+            "<< :peer!u@h AWAY :still out"
+          ),
+        ],
+        "peer"
+      )
+    ).toMatchObject({ _tag: "Known", value: { message: "still out" } });
+  });
+
+  it("is stale when not said again, even at the same instant", () => {
+    expect(
+      awayOf(
+        [
+          registered(base, { offered: ["cap-notify", "away-notify"] }),
+          joined(base, "#iirc", ["peer"]),
+          lines("<< :peer!u@h AWAY :out", "<< :irc.test CAP iirc DEL :away-notify"),
+        ],
+        "peer"
+      )
+    ).toMatchObject({ _tag: "Stale", was: { message: "out" } });
+  });
+});

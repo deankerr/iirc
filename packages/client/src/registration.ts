@@ -27,7 +27,8 @@ import {
   updateOpen,
 } from "./run.ts";
 import type { Ran } from "./seam.ts";
-import { capsOf, capsWanted, freshSeam, runEffects, turnedOff } from "./seam.ts";
+import { capsOf, capsWanted, freshSeam, goneStale, runEffects } from "./seam.ts";
+import { markStale } from "./stale.ts";
 import type { Caps, Negotiated, Open } from "./state.ts";
 import { holdTime, registrationTime } from "./timers.ts";
 import { negotiated, onNow, openOf } from "./views.ts";
@@ -413,7 +414,7 @@ export const recompute = (run: Run, was: Before): void => {
   }
 
   expireHolding(run, stopped);
-  updateOpen(run, (open) => ({ ...open, seam: turnedOff(open.seam, was.on, now, run.at) }));
+  markStale(run, goneStale(was.on, now));
   runHook(run, stopped, (feature, context) => feature.absent?.(context));
   runHook(run, started, (feature, context) => feature.start?.(context));
 };

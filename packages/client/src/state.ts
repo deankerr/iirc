@@ -75,6 +75,8 @@ type Presence =
       readonly server: string;
       readonly mask: Fact<{ readonly user: string; readonly host: string }>;
       readonly account: Fact<string | null>;
+      /** Self's realname, as registration sent it. */
+      readonly realname: Fact<string>;
       readonly keepalive: Keepalive;
     };
 
@@ -104,20 +106,11 @@ type LinkPhase =
       readonly users: ReadonlyMap<string, Seen>;
     };
 
-/** What Lines have shown of a User. */
+/** What Lines have shown of a User. A fact no Feature keeps any longer is held as stale. */
 export interface Seen {
   readonly nick: string;
-  readonly mask: Mask | undefined;
-  readonly away:
-    | { readonly value: { readonly message: string } | null; readonly at: Instant }
-    | undefined;
-}
-
-/** A User's mask, and when a Line showed it. */
-interface Mask {
-  readonly user: string;
-  readonly host: string;
-  readonly at: Instant;
+  readonly mask: Fact<{ readonly user: string; readonly host: string }>;
+  readonly away: Fact<{ readonly message: string } | null>;
 }
 
 /** The Network: whether it is wanted, and the Connection or the wait for one. */

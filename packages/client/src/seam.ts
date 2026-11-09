@@ -19,8 +19,6 @@ export interface Seam {
   readonly failed: ReadonlySet<FeatureName>;
   /** Features holding registration open before `CAP END`. */
   readonly holding: ReadonlySet<FeatureName>;
-  /** Facts no Feature keeps up to date any longer, since when. */
-  readonly stale: ReadonlyMap<Kept, Instant>;
 }
 
 /** A new Connection's Seam: nothing on, nothing held. */
@@ -28,7 +26,6 @@ export const freshSeam: Seam = {
   failed: new Set(),
   holding: new Set(),
   own: new Map(),
-  stale: new Map(),
 };
 
 /** What decides which Features are on. */
@@ -229,36 +226,20 @@ export const runEffects = (
   });
 
 /**
- * Marks as stale the facts kept by Features that were on and are now off, unless a
- * Feature still on keeps them too.
- * @param seam - The Connection's Seam.
+ * The facts that go stale as Features turn off: those a Feature that was on and is now
+ * off kept, unless a Feature still on keeps them too.
  * @param was - The Features on before.
  * @param now - The Features on after.
- * @param at - When.
- * @returns The Seam, with those facts stale since `at`.
+ * @returns The facts, once each.
  */
-export const turnedOff = (
-  seam: Seam,
+export const goneStale = (
   was: readonly Registered[],
-  now: readonly Registered[],
-  at: Instant
-): Seam => {
-  const off = was.filter((feature) => !now.includes(feature));
-
-  // A fact goes stale only when no Feature still on keeps it.
-  const kept = off
-    .flatMap((feature) => feature.keeps ?? [])
-    .filter((fact) => !now.some((feature) => feature.keeps?.includes(fact) === true));
-
-  if (kept.length === 0) {
-    return seam;
-  }
-
-  const stale = new Map(seam.stale);
-
-  for (const fact of kept) {
-    stale.set(fact, at);
-  }
-
-  return { ...seam, stale };
-};
+  now: readonly Registered[]
+): readonly Kept[] => [
+  ...new Set(
+    was
+      .filter((feature) => !now.includes(feature))
+      .flatMap((feature) => feature.keeps ?? [])
+      .filter((fact) => !now.some((feature) => feature.keeps?.includes(fact) === true))
+  ),
+];

@@ -146,7 +146,7 @@ const fold = (
   } else if (activity._tag === "Joined" || activity._tag === "NickChanged") {
     see(run, activity._tag === "Joined" ? source.nick : activity.to, (seen) => ({
       ...seen,
-      mask: { at: run.at, host, user },
+      mask: { _tag: "Known", at: run.at, from: "ircd", value: { host, user } },
     }));
   }
 };
@@ -221,6 +221,12 @@ const welcome = (run: Run, line: Line): void => {
       // the echo of our own `JOIN`.
       mask: { _tag: "Unknown" },
       nick,
+      realname: {
+        _tag: "Known",
+        at: phase.opened,
+        from: "ours",
+        value: run.state.configuration?.realname ?? "",
+      },
       server: line.source ?? link.ircd.host,
     },
   }));
