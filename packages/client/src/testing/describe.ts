@@ -14,6 +14,16 @@ import type { Activity, EndReason, IgnoredReason, News, Ours, RefusedReason } fr
 import type { Output } from "../output.ts";
 import { printItem, writeInstant } from "./transcript.ts";
 
+/**
+ * Writes a string from News as one token, bare when it holds nothing a description uses
+ * as syntax, and otherwise quoted as JSON, so no value can imitate an instant, an
+ * attribute, or the trailing text: an id `m1@t+0s` is written `"m1@t+0s"`.
+ * @param text - The string, such as a nick, a Channel, an id, or a command.
+ * @returns The token.
+ */
+export const atom = (text: string): string =>
+  /^[^\s"=@:;]+$/u.test(text) ? text : JSON.stringify(text);
+
 const isAt = (fact: Fact<Instant>, now: Instant): boolean =>
   fact._tag === "Known" && fact.from === "receipt" && fact.value === now && fact.at === now;
 
@@ -54,7 +64,7 @@ const attributes = (
   now: Instant
 ): readonly string[] => [
   ...(isAt(news.at, now) ? [] : [`at=${writeFact(news.at, now, writeInstant)}`]),
-  ...(news.id._tag === "Unknown" ? [] : [`id=${writeFact(news.id, now, String)}`]),
+  ...(news.id._tag === "Unknown" ? [] : [`id=${writeFact(news.id, now, atom)}`]),
   ...(news.live === false ? ["history"] : []),
 ];
 
@@ -63,13 +73,13 @@ const writeTags = (tags: ReadonlyMap<string, string>): readonly string[] =>
     ? []
     : [
         `tags=${[...tags]
-          .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+          .map(([key, value]) => `${atom(key)}=${JSON.stringify(value)}`)
           .toSorted()
           .join(";")}`,
       ];
 
 const writeOurs = (ours: Ours | undefined): readonly string[] =>
-  ours === undefined ? [] : [`ours=${ours.intent}${ours.echo ? "/echo" : ""}`];
+  ours === undefined ? [] : [`ours=${atom(ours.intent)}${ours.echo ? "/echo" : ""}`];
 
 const writeEnd = (reason: EndReason): string => {
   switch (reason._tag) {
@@ -102,7 +112,7 @@ const writeIgnored = (reason: IgnoredReason): string => {
     }
 
     case "Malformed": {
-      return `Malformed ${reason.command}`;
+      return `Malformed ${atom(reason.command)}`;
     }
 
     case "StaleConnection": {
@@ -110,7 +120,7 @@ const writeIgnored = (reason: IgnoredReason): string => {
     }
 
     case "StaleTimer": {
-      return `StaleTimer ${reason.timer}`;
+      return `StaleTimer ${atom(reason.timer)}`;
     }
 
     case "NotNow": {
@@ -118,7 +128,7 @@ const writeIgnored = (reason: IgnoredReason): string => {
     }
 
     case "FeatureFailed": {
-      return `FeatureFailed ${reason.feature}`;
+      return `FeatureFailed ${atom(reason.feature)}`;
     }
 
     default: {
@@ -128,10 +138,15 @@ const writeIgnored = (reason: IgnoredReason): string => {
 };
 
 const writeRefused = (reason: RefusedReason): string =>
-  reason._tag === "Rejected" ? `Rejected ${reason.reply}` : reason._tag;
+  reason._tag === "Rejected" ? `Rejected ${atom(reason.reply)}` : reason._tag;
 
-const optional = (key: string, value: string | undefined): readonly string[] =>
-  value === undefined ? [] : [`${key}=${value}`];
+const optional = (key: string, value: string | undefined, written = false): readonly string[] => {
+  if (value === undefined) {
+    return [];
+  }
+
+  return [`${key}=${written ? value : atom(value)}`];
+};
 
 /** An Activity's positional fields, and its trailing text, which go either side of its attributes. */
 interface ActivityParts {
@@ -143,36 +158,39 @@ interface ActivityParts {
 const writeActivity = (activity: Activity): ActivityParts => {
   switch (activity._tag) {
     case "Joined": {
-      return { head: [activity.channel, activity.nick], tail: [] };
+      return { head: [atom(activity.channel), atom(activity.nick)], tail: [] };
     }
 
     case "Parted": {
-      return { head: [activity.channel, activity.nick], tail: trailing(activity.reason) };
+      return {
+        head: [atom(activity.channel), atom(activity.nick)],
+        tail: trailing(activity.reason),
+      };
     }
 
     case "Quit": {
-      return { head: [activity.nick], tail: trailing(activity.reason) };
+      return { head: [atom(activity.nick)], tail: trailing(activity.reason) };
     }
 
     case "Kicked": {
       return {
-        head: [activity.channel, activity.nick, `by=${activity.by}`],
+        head: [atom(activity.channel), atom(activity.nick), `by=${atom(activity.by)}`],
         tail: trailing(activity.reason),
       };
     }
 
     case "NickChanged": {
-      return { head: [activity.from, activity.to], tail: [] };
+      return { head: [atom(activity.from), atom(activity.to)], tail: [] };
     }
 
     case "ModeChanged": {
       return {
         head: [
-          activity.target,
-          `by=${activity.by}`,
+          atom(activity.target),
+          `by=${atom(activity.by)}`,
           ...activity.changes.map(
             (change) =>
-              `${change.set ? "+" : "-"}${change.mode}${change.param === undefined ? "" : `=${change.param}`}`
+              `${change.set ? "+" : "-"}${atom(change.mode)}${change.param === undefined ? "" : `=${atom(change.param)}`}`
           ),
         ],
         tail: [],
@@ -183,15 +201,16 @@ const writeActivity = (activity: Activity): ActivityParts => {
       const { topic } = activity;
 
       return topic === null
-        ? { head: [activity.channel, `by=${activity.by}`, "cleared"], tail: [] }
+        ? { head: [atom(activity.channel), `by=${atom(activity.by)}`, "cleared"], tail: [] }
         : {
             head: [
-              activity.channel,
-              `by=${activity.by}`,
+              atom(activity.channel),
+              `by=${atom(activity.by)}`,
               ...optional("setBy", topic.setBy),
               ...optional(
                 "setAt",
-                topic.setAt === undefined ? undefined : writeInstant(topic.setAt)
+                topic.setAt === undefined ? undefined : writeInstant(topic.setAt),
+                true
               ),
             ],
             tail: trailing(topic.text),
@@ -200,8 +219,8 @@ const writeActivity = (activity: Activity): ActivityParts => {
 
     case "AwayChanged": {
       return activity.away === null
-        ? { head: [activity.nick, "back"], tail: [] }
-        : { head: [activity.nick], tail: trailing(activity.away.message) };
+        ? { head: [atom(activity.nick), "back"], tail: [] }
+        : { head: [atom(activity.nick)], tail: trailing(activity.away.message) };
     }
 
     default: {
@@ -229,11 +248,11 @@ export const describeNews = (news: News, now: Instant): string => {
     }
 
     case "Refused": {
-      return `refused ${news.intent} ${writeRefused(news.reason)}`;
+      return `refused ${atom(news.intent)} ${writeRefused(news.reason)}`;
     }
 
     case "SessionBegan": {
-      return words(["session-began", news.nick, ...sessionAt(news.at, now)]);
+      return words(["session-began", atom(news.nick), ...sessionAt(news.at, now)]);
     }
 
     case "SessionEnded": {
@@ -248,8 +267,8 @@ export const describeNews = (news: News, now: Instant): string => {
       return words([
         "message",
         news.kind,
-        news.sender,
-        news.target,
+        atom(news.sender),
+        atom(news.target),
         ...attributes(news, now),
         ...writeTags(news.tags),
         ...writeOurs(news.ours),
@@ -258,7 +277,7 @@ export const describeNews = (news: News, now: Instant): string => {
     }
 
     case "Confirmed": {
-      return words(["confirmed", news.intent, ...attributes(news, now), `:${news.text}`]);
+      return words(["confirmed", atom(news.intent), ...attributes(news, now), `:${news.text}`]);
     }
 
     case "Activity": {

@@ -90,8 +90,14 @@ export interface ParseError {
 // Bytes
 
 const encoder = new TextEncoder();
-const lenient = new TextDecoder("utf-8");
-const strict = new TextDecoder("utf-8", { fatal: true });
+
+// A decoder strips a leading byte order mark unless told not to, which would change the
+// bytes a transcript holds. Every decoder here keeps it.
+const lenient = new TextDecoder("utf-8", { ignoreBOM: true });
+const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+/** U+FEFF, a byte order mark, which is invisible as text, so it is always escaped. */
+const bom = "\uFEFF";
 
 const backslash = 0x5c;
 const space = 0x20;
@@ -149,12 +155,18 @@ const escapeBytes = (bytes: Uint8Array): string => {
     const byte = bytes[index] ?? 0;
     const width = utf8Width(bytes, index);
 
+    const char = width === 0 ? "" : lenient.decode(bytes.subarray(index, index + width));
+
     if (byte === backslash) {
       out += "\\\\";
     } else if (isControl(byte) || width === 0 || (byte === space && index === bytes.length - 1)) {
       out += hex(byte);
+    } else if (char === bom) {
+      out += [...bytes.subarray(index, index + width)].map(hex).join("");
+      index += width;
+      continue;
     } else {
-      out += lenient.decode(bytes.subarray(index, index + width));
+      out += char;
       index += width;
       continue;
     }
@@ -506,6 +518,7 @@ const writeBytes = (arrow: "<<" | ">>", bytes: Uint8Array): string => {
 
   const plain =
     text !== undefined &&
+    !text.includes(bom) &&
     !bytes.some(isControl) &&
     bytes.at(-1) !== space &&
     !(arrow === ">>" && bytes[0] === openBrace);

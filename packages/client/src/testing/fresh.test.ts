@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import { replayFresh } from "./fresh.ts";
 import { play, replay } from "./play.ts";
 import { configured, joined, registered } from "./preludes.ts";
-import { scriptedClient, seededClient, toyClient } from "./test-clients.ts";
+import {
+  failure,
+  knowsSeededClient,
+  scriptedClient,
+  seededClient,
+  toyClient,
+} from "./test-clients.ts";
 
 const base = configured();
 const module = new URL("test-clients.ts", import.meta.url);
@@ -48,5 +54,26 @@ describe("the fresh-process replay check", () => {
     await expect(replayFresh(toyClient, [], { module, name: "nothing" })).rejects.toThrow(
       /the fresh process failed/u
     );
+  });
+});
+
+describe("the fresh-process digest of Knowledge", () => {
+  it("catches Knowledge seeded per process, which replay in one process cannot", async () => {
+    const played = replay(knowsSeededClient, { configuration: base, transcript: "!! configure\n" });
+
+    expect(
+      failure(() =>
+        replay(knowsSeededClient, { configuration: base, transcript: "!! configure\n" })
+      )
+    ).toBe("it held");
+    await expect(
+      replayFresh(knowsSeededClient, played.inputs, { module, name: "knowsSeededClient" })
+    ).rejects.toThrow(/folds 1 inputs differently/u);
+  });
+
+  it("compares the initial Knowledge, with no inputs at all", async () => {
+    await expect(
+      replayFresh(knowsSeededClient, [], { module, name: "knowsSeededClient" })
+    ).rejects.toThrow(/folds 0 inputs differently/u);
   });
 });

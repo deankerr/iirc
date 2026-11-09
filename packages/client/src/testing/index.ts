@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-export { describeNews, describeOutput } from "./describe.ts";
+export { atom, describeNews, describeOutput } from "./describe.ts";
 
 export { replayFresh, FreshReplayMismatchError } from "./fresh.ts";
 
@@ -23,10 +23,11 @@ export {
   replay,
   ReplayMismatchError,
   ScenarioError,
+  snapshot,
   TranscriptMismatchError,
 } from "./play.ts";
 
-export type { Played, Scenario } from "./play.ts";
+export type { Played, Scenario, Snapshot } from "./play.ts";
 
 export { across, configured, floorIsupport, joined, registered } from "./preludes.ts";
 

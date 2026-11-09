@@ -8,7 +8,8 @@ import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-featur
 import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import type { Client } from "../client.ts";
 import { ConnectionId } from "../ids.ts";
-import { impurity } from "./plain.ts";
+import type { Output } from "../output.ts";
+import { canonical, impurity } from "./plain.ts";
 import { play, replay } from "./play.ts";
 import { configured, registered } from "./preludes.ts";
 import { failure, scriptedClient, toy } from "./test-clients.ts";
@@ -98,7 +99,7 @@ describe("exact replay, after every play", () => {
     };
 
     expect(failure(() => play(drifting, { configuration: base, transcript: once }))).toMatch(
-      /^ReplayMismatchError: the last inspection does not replay exactly/u
+      /^ReplayMismatchError: step 1 \(Configured at 0ms\) does not replay exactly: its inspection differ/u
     );
   });
 
@@ -231,4 +232,78 @@ describe("the recorded fixtures, replayed", () => {
       expect(played.transcript).toContain("?? session-ended Closed Ended");
     }
   );
+});
+
+describe("exact replay against snapshots", () => {
+  it("catches a Client that reuses its outputs array and empties it on replay", () => {
+    const shared: Output[] = [];
+    let calls = 0;
+
+    const reusing: Client<number> = {
+      initial: 0,
+      inspect: () => toy().inspect(toy().initial),
+      known: () => toy().known(toy().initial),
+      step: (state) => {
+        calls += 1;
+        shared.length = 0;
+
+        if (calls === 1) {
+          shared.push({ _tag: "Hangup", connection: ConnectionId.make(1) });
+        }
+
+        return { news: [], outputs: shared, state };
+      },
+    };
+
+    expect(
+      failure(() => play(reusing, { configuration: base, transcript: "!! configure\n-> hangup\n" }))
+    ).toMatch(
+      /^ReplayMismatchError: step 1 \(Configured at 0ms\) does not replay exactly: its outputs differ/u
+    );
+  });
+});
+
+const throwing = (): never => {
+  throw new Error("a getter ran");
+};
+
+describe("plain data in collections", () => {
+  it.each([
+    [
+      "an array with a function property",
+      () => Object.assign([1], { next: () => 1 }),
+      'state has a property "next"',
+    ],
+    [
+      "a Map with a property",
+      () => Object.assign(new Map(), { when: new Box() }),
+      'state is a Map with a property "when"',
+    ],
+    [
+      "a Set with a property",
+      () => Object.assign(new Set(), { size2: 1 }),
+      'state is a Set with a property "size2"',
+    ],
+    [
+      "an array with an indexed getter",
+      () => Object.defineProperty([1], 0, { enumerable: true, get: throwing }),
+      "state[0] is a getter",
+    ],
+    ["an array with a hole", () => Object.assign([], { length: 1 }), "state has a hole at [0]"],
+  ] satisfies readonly (readonly [string, () => object, string])[])(
+    "finds %s, and runs no getter",
+    (_name, make: () => object, found) => {
+      expect(impurity(make())).toBe(found);
+    }
+  );
+
+  it("writes a collection's extra properties, and runs no getter", () => {
+    expect(canonical(Object.assign([1], { x: 2 }))).not.toBe(canonical([1]));
+    expect(canonical(Object.assign(new Map([["a", 1]]), { x: 2 }))).not.toBe(
+      canonical(new Map([["a", 1]]))
+    );
+    expect(canonical(Object.defineProperty({}, "value", { enumerable: true, get: throwing }))).toBe(
+      '{"value":getter}'
+    );
+  });
 });

@@ -90,3 +90,33 @@ describe(describeNews, () => {
     expect(describeNews(news, now)).toBe(text);
   });
 });
+
+describe("descriptions that cannot imitate each other", () => {
+  it("tells an id known as of earlier from an id that holds an instant", () => {
+    const asOfEarlier: News = {
+      ...message,
+      id: { _tag: "Known", at: earlier, from: "ircd", value: MessageId.make("m1") },
+    };
+
+    const holdsInstant: News = {
+      ...message,
+      id: { _tag: "Known", at: now, from: "ircd", value: MessageId.make("m1@t+0s") },
+    };
+
+    expect(describeNews(asOfEarlier, now)).toBe(
+      "message Privmsg peer #iirc id=ircd:m1@t+0s :hi there"
+    );
+    expect(describeNews(holdsInstant, now)).toBe(
+      'message Privmsg peer #iirc id=ircd:"m1@t+0s" :hi there'
+    );
+  });
+
+  it("quotes a string from the Ircd that holds syntax", () => {
+    expect(
+      describeNews({ _tag: "Ignored", reason: { _tag: "Malformed", command: "MODE id=x" } }, now)
+    ).toBe('ignored Malformed "MODE id=x"');
+    expect(describeNews({ ...message, sender: 'a"b', target: "#a:b" }, now)).toBe(
+      'message Privmsg "a\\"b" "#a:b" :hi there'
+    );
+  });
+});

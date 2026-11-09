@@ -232,3 +232,28 @@ describe("the format", () => {
     expect(refusal(`${line}\n`)).toMatchObject({ line: 1, text: line });
   });
 });
+
+describe("byte order marks", () => {
+  const bom = [0xef, 0xbb, 0xbf];
+
+  it.each([
+    ["a leading BOM", "Received", [...bom, 0x50, 0x49, 0x4e, 0x47], "<<\\ \\xef\\xbb\\xbfPING"],
+    [
+      "an embedded BOM",
+      "Sent",
+      [...bytes("PRIVMSG #iirc :a"), ...bom, 0x62],
+      ">>\\ PRIVMSG #iirc :a\\xef\\xbb\\xbfb",
+    ],
+    [
+      "a BOM beside a control byte",
+      "Received",
+      [...bom, ...bytes(":a PRIVMSG #b :\u0001x"), ...bom],
+      "<<\\ \\xef\\xbb\\xbf:a PRIVMSG #b :\\x01x\\xef\\xbb\\xbf",
+    ],
+  ] as const)("keeps %s, visibly, through a round trip", (_name, tag, raw, line) => {
+    const item: Item = { _tag: tag, bytes: Uint8Array.from(raw) };
+
+    expect(print([item])).toBe(`${line}\n`);
+    expect(items(print([item]))).toStrictEqual([item]);
+  });
+});

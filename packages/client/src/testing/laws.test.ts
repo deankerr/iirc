@@ -128,3 +128,35 @@ describe("the four laws, broken", () => {
     );
   });
 });
+
+describe("the laws check contents, not only ranks", () => {
+  it("refines catches a set that loses what the floor knew", () => {
+    expect(
+      failure(() => {
+        refines(subject({ losesWithCaps: true }));
+      })
+    ).toBe(
+      'LawBrokenError: refines: known.channels.get(#iirc).members.get(peer).prefixes lost "o" from no caps to multi-prefix'
+    );
+  });
+
+  it("refines catches a known value that changes", () => {
+    expect(
+      failure(() => {
+        refines(subject({ changesWithMore: true }));
+      })
+    ).toBe(
+      'LawBrokenError: refines: known.channels.get(#iirc).members.get(iirc).prefixes was known as {}, but as {"v"} from multi-prefix to multi-prefix server-time'
+    );
+  });
+
+  it("deactivates catches Knowledge that changes outside any fact", () => {
+    expect(
+      failure(() => {
+        deactivates(subject({ remapsAfterDel: true }), { after });
+      })
+    ).toBe(
+      'LawBrokenError: deactivates: after CAP DEL :multi-prefix from multi-prefix, known.casemapping is "ascii", but never having had it gives "rfc1459"'
+    );
+  });
+});

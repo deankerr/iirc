@@ -32,35 +32,76 @@ const className = (value: object): string => {
 /** One part of a value, with what to call it. */
 type Part = readonly [at: string, part: unknown];
 
+// Whether a key names an array's element: a canonical index below its length.
+const isIndex = (key: string, length: number): boolean =>
+  /^(?:0|[1-9]\d*)$/u.test(key) && Number(key) < length;
+
+// An array's elements, read from its descriptors so no getter runs, or what is wrong with it.
+const elementsOf = (value: readonly unknown[], at: string): readonly Part[] | string => {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const parts: Part[] = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = descriptors[String(index)];
+
+    if (descriptor === undefined) {
+      return `${at} has a hole at [${index}]`;
+    }
+
+    if (!("value" in descriptor)) {
+      return `${at}[${index}] is a getter`;
+    }
+
+    parts.push([`${at}[${index}]`, descriptor.value]);
+  }
+
+  const extra = Object.keys(descriptors).find(
+    (key) => key !== "length" && !isIndex(key, value.length)
+  );
+
+  return extra === undefined ? parts : `${at} has a property ${JSON.stringify(extra)}`;
+};
+
+// A Map or a Set holds its data in entries, so any own property of its own is not plain.
+const ownPropertyOf = (value: object): string | undefined =>
+  Reflect.ownKeys(value)
+    .map((key) => (typeof key === "string" ? JSON.stringify(key) : key.toString()))
+    .at(0);
+
 // The parts of an array, a Map, a Set, or a plain object, or what is wrong with it.
 const partsOf = (value: object, at: string): readonly Part[] | string => {
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    return `${at} has a symbol key`;
+  }
+
   if (Array.isArray(value)) {
     return Object.getPrototypeOf(value) === Array.prototype
-      ? value.map((item: unknown, index): Part => [`${at}[${index}]`, item])
+      ? elementsOf(value, at)
       : `${at} is a subclass of Array`;
   }
 
-  if (value instanceof Map) {
-    return Object.getPrototypeOf(value) === Map.prototype
+  if (value instanceof Map || value instanceof Set) {
+    const kind = value instanceof Map ? "Map" : "Set";
+    const extra = ownPropertyOf(value);
+
+    if (Object.getPrototypeOf(value) !== (value instanceof Map ? Map.prototype : Set.prototype)) {
+      return `${at} is a subclass of ${kind}`;
+    }
+
+    if (extra !== undefined) {
+      return `${at} is a ${kind} with a property ${extra}`;
+    }
+
+    return value instanceof Map
       ? [...value].flatMap(([key, item]: readonly [unknown, unknown]): readonly Part[] => [
           [`${at} key ${keyText(key)}`, key],
           [`${at}.get(${keyText(key)})`, item],
         ])
-      : `${at} is a subclass of Map`;
-  }
-
-  if (value instanceof Set) {
-    return Object.getPrototypeOf(value) === Set.prototype
-      ? [...value].map((item: unknown, index): Part => [`${at} item ${index}`, item])
-      : `${at} is a subclass of Set`;
+      : [...value].map((item: unknown, index): Part => [`${at} item ${index}`, item]);
   }
 
   if (!isPlainObject(value)) {
     return `${at} is an instance of ${className(value)}`;
-  }
-
-  if (Object.getOwnPropertySymbols(value).length > 0) {
-    return `${at} has a symbol key`;
   }
 
   const descriptors = Object.entries(Object.getOwnPropertyDescriptors(value));
@@ -159,6 +200,33 @@ const leafText = (value: unknown): string => {
   }
 };
 
+// An own property, written without running a getter. A hole is written as `hole`.
+const descriptorText = (
+  descriptor: PropertyDescriptor | undefined,
+  write: (value: unknown) => string
+): string => {
+  if (descriptor === undefined) {
+    return "hole";
+  }
+
+  return "value" in descriptor ? write(descriptor.value) : "getter";
+};
+
+// Properties beside a collection's data, or an object's own, as `{key:value,…}`, or
+// nothing when there are none and they are beside a collection.
+const propertiesText = (
+  descriptors: Readonly<Record<PropertyKey, PropertyDescriptor>>,
+  keys: readonly PropertyKey[],
+  write: (value: unknown) => string
+): string => {
+  const written = keys.map(
+    (key) =>
+      `${typeof key === "string" ? JSON.stringify(key) : key.toString()}:${descriptorText(descriptors[key], write)}`
+  );
+
+  return written.length === 0 ? "" : `{${written.join(",")}}`;
+};
+
 /**
  * Writes plain data as text that is the same for the same value in any process, so two
  * values can be compared, or digested, in order. A `Map` and a `Set` keep their order,
@@ -176,8 +244,19 @@ export const canonical = (value: unknown): string => {
     return `bytes[${[...value].join(",")}]`;
   }
 
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+
   if (Array.isArray(value)) {
-    return `[${value.map((item: unknown) => canonical(item)).join(",")}]`;
+    const items = Array.from({ length: value.length }, (_unused, index) =>
+      descriptorText(descriptors[String(index)], canonical)
+    );
+
+    const extra = keys.filter(
+      (key) => typeof key !== "string" || (key !== "length" && !isIndex(key, value.length))
+    );
+
+    return `[${items.join(",")}]${propertiesText(descriptors, extra, canonical)}`;
   }
 
   if (value instanceof Map) {
@@ -185,35 +264,28 @@ export const canonical = (value: unknown): string => {
       ([key, item]: readonly [unknown, unknown]) => `${canonical(key)}=>${canonical(item)}`
     );
 
-    return `Map{${entries.join(",")}}`;
+    return `Map{${entries.join(",")}}${propertiesText(descriptors, keys, canonical)}`;
   }
 
   if (value instanceof Set) {
-    return `Set{${[...value].map((item: unknown) => canonical(item)).join(",")}}`;
+    return `Set{${[...value].map((item: unknown) => canonical(item)).join(",")}}${propertiesText(descriptors, keys, canonical)}`;
   }
 
-  const entries = Object.entries(value).map(
-    ([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`
-  );
-
-  return `{${entries.join(",")}}`;
+  return `{${propertiesText(descriptors, keys, canonical).slice(1, -1)}}`;
 };
 
 /**
- * Shows where two values part, as their canonical text around the first difference.
- * @param left - One value, such as what was played.
- * @param right - The other, such as what was replayed.
+ * Shows where two canonical texts part, around the first difference.
+ * @param before - One text, such as what was played.
+ * @param after - The other, such as what was replayed.
  * @param names - What to call each.
  * @returns The two around where they part, or `undefined` if they are the same.
  */
-export const difference = (
-  left: unknown,
-  right: unknown,
+export const textDifference = (
+  before: string,
+  after: string,
   names: readonly [string, string] = ["played  ", "replayed"]
 ): string | undefined => {
-  const before = canonical(left);
-  const after = canonical(right);
-
   if (before === after) {
     return undefined;
   }
@@ -228,3 +300,16 @@ export const difference = (
 
   return `${names[0]} …${before.slice(from, index + 40)}…\n${names[1]} …${after.slice(from, index + 40)}…`;
 };
+
+/**
+ * Shows where two values part, as their canonical text around the first difference.
+ * @param left - One value.
+ * @param right - The other.
+ * @param names - What to call each.
+ * @returns The two around where they part, or `undefined` if they are the same.
+ */
+export const difference = (
+  left: unknown,
+  right: unknown,
+  names: readonly [string, string] = ["played  ", "replayed"]
+): string | undefined => textDifference(canonical(left), canonical(right), names);

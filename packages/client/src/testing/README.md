@@ -26,7 +26,7 @@ A transcript is one item per line, and ends with a newline. `print(parse(text))`
 | --- | --- | --- |
 | `<<` | `<< :irc.test 001 iirc :Welcome` | The Ircd sends a Line: a `Received` now, from the current Connection. |
 | `>>` | `>> CAP LS 302` | The Client must `Send` exactly these bytes next, as `encode` writes them. |
-| `<<\ `, `>>\ ` | `<<\ :irc.test 375 iirc :- MOTD -\x20` | The same, escaped: `\\` and `\xNN`. Used for bytes that are not UTF-8, control bytes such as CTCP's `\x01`, a trailing space, and a sent Line that starts with `{`. |
+| `<<\ `, `>>\ ` | `<<\ :irc.test 375 iirc :- MOTD -\x20` | The same, escaped: `\\` and `\xNN`. Used for bytes that are not UTF-8, control bytes such as CTCP's `\x01`, a byte order mark anywhere (written `\xef\xbb\xbf`, never dropped), a trailing space, and a sent Line that starts with `{`. |
 | `>> {…}` | `>> {AuthenticatePlain credential=libera authcid=iirc authzid=iirc}` | The Client must `SendSecret` this `SecretLine`. The placeholder is the whole item and names every field but the value, so a strict match checks them all. Values escape a space, `\`, `{`, and `}` as `\xNN`. |
 | `-> dial` | `-> dial irc.test:6697 tls` | The Client must `Dial` this Ircd. The nth dial in a transcript is Connection n, from 1. |
 | `-> hangup` | `-> hangup` | The Client must `Hangup` the current Connection. |
@@ -74,14 +74,16 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 
 A fact is `unknown`, `<from>:<value>` when known as of now, with `@<instant>` when known as of another time, `partial:<from>:<value>`, or `stale:<was>@<since>`.
 
+A string from News, such as a nick, a Channel, an id, or a command, is written bare when it holds no space, `"`, `=`, `@`, `:`, or `;`, and otherwise quoted as JSON, so no value can imitate an instant or an attribute: an id `m1` known as of `t+0s` is `id=ircd:m1@t+0s`, and an id `m1@t+0s` is `id=ircd:"m1@t+0s"`. `atom(text)` writes one. The trailing text after ` :` is written as it is, since nothing follows it.
+
 ## Playing
 
 | Function | What it does |
 | --- | --- |
 | `play(client, { configuration, transcript })` | Strict, for hand-written scenarios. Returns what happened: `inputs`, `steps`, the last `state`, the `transcript`, each `ignored`, and the `timers` still set. |
 | `replay(client, { configuration, transcript })` | For recorded fixtures. Feeds only `<<`, `==`, `+Ns`, and `!!`, and reports every output and News in its `transcript` and every `Ignored` in `ignored`, without matching `>>` or `->`, which are the recorder's Lines. Unless the first input is an `!! configure`, one is stepped first. |
-| `checkReplay(client, inputs, steps)` | The exact-replay check that `play` and `replay` run. |
-| `replayFresh(client, inputs, { module, name })` | The same fold in a child `bun` process, compared by digest. Async, and slower, so a suite runs it on a few scenarios. |
+| `checkReplay(client, inputs, snapshots)` | The exact-replay check that `play` and `replay` run, against `Played.snapshots`. `snapshot(client, step)` writes one step down. |
+| `replayFresh(client, inputs, { module, name })` | The same fold in a child `bun` process, compared by a digest of the initial Inspection and Knowledge and every step's state, outputs, News, Inspection, and Knowledge. Async, and slower, so a suite runs it on a few scenarios. |
 
 `transcript` is text, or its parts in order. Each throws on failure: `TranscriptMismatchError`, `ReplayMismatchError`, `FreshReplayMismatchError`, or `ScenarioError` for a transcript the kit cannot play.
 
@@ -104,7 +106,7 @@ TranscriptMismatchError: The transcript did not play as written. - is the scenar
   >> USER iirc 0 * iirc
 ```
 
-**Exact replay** runs after every `play` and `replay`, without being asked. The inputs are folded again from `initial`, and each step's state, outputs, and News, and the last state's Inspection and Knowledge, must be the same, order included. Every State must be plain data: strings, numbers, booleans, `null`, `undefined`, arrays, plain objects, `Map`, and `Set`, with no class instance, function, getter, symbol key, bigint, `Uint8Array`, `HashMap`, or cycle. A step that changes the state it was given fails too. `replayFresh` adds what one process cannot see, such as a hash order or a random number taken when a module loads.
+**Exact replay** runs after every `play` and `replay`, without being asked. The inputs are folded again from `initial`, and each step's state, outputs, News, Inspection, and Knowledge must be the same, order included. Each is compared against a snapshot, canonical text written down the moment the step first returned, never against the live values, so a Client that reuses or changes what it returned is caught. The kit's own copies of each step's outputs and News, in `Played.steps`, are cloned at once for the same reason. Every State must be plain data: strings, numbers, booleans, `null`, `undefined`, arrays, plain objects, `Map`, and `Set`, with no class instance, function, getter, symbol key, bigint, `Uint8Array`, `HashMap`, or cycle. An array holds only its elements, with no holes, getters, or other properties, and a `Map` or `Set` has no own property at all. No getter is ever run. A step that changes the state it was given fails too. `replayFresh` adds what one process cannot see, such as a hash order or a random number taken when a module loads.
 
 ## Preludes
 
@@ -138,9 +140,9 @@ deactivates(subject, { after: () => "+1s\n<< :other!u@h JOIN #iirc\n" });
 | Law | Holds when |
 | --- | --- |
 | `inert` | For each set of caps that leaves a Feature off, declining it changes no output, News, Knowledge, or Inspection. |
-| `refines` | For each set and each larger one, every fact the smaller knows is in the larger, and goes only from unknown to stale to partial to known. Knowledge is walked generically, so a fact added anywhere is checked. |
+| `refines` | For each set and each larger one, every fact the smaller knows is in the larger, and goes only from unknown to stale to partial to known. What was established stays: a known value is the same, sets compared in any order, and a set holds every member of the partial set it refines. Knowledge is walked generically, so a fact added anywhere is checked. |
 | `replays` | Every set replays exactly, with plain State. |
-| `deactivates` | After `CAP DEL` of a cap, `after` gives the same outputs and News as never having had it, and the same Knowledge, except where a fact is stale. |
+| `deactivates` | After `CAP DEL` of a cap, `after` gives the same outputs and News as never having had it, and the same Knowledge, whole, every leaf and key, except where the run that had the cap holds a fact marked stale. |
 
 ## Other helpers
 

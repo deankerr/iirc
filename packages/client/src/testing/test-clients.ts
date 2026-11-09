@@ -37,6 +37,12 @@ export interface Flaws {
   readonly forgetsWithCaps?: boolean;
   /** After `CAP DEL multi-prefix`, it keeps prefixes known instead of stale. */
   readonly keepsAfterDel?: boolean;
+  /** With `multi-prefix`, it knows each member's prefixes as empty, losing what the floor knew. */
+  readonly losesWithCaps?: boolean;
+  /** With `server-time` too, it knows a voice no listing gave, changing a known value. */
+  readonly changesWithMore?: boolean;
+  /** After any `CAP DEL`, it reports another casemapping, outside any fact. */
+  readonly remapsAfterDel?: boolean;
 }
 
 /** The toy Client's State, which is plain data. */
@@ -492,8 +498,16 @@ const prefixesOf = (state: ToyState, prefix: string, flaws: Flaws): Fact<Readonl
   const at = Instant.make(state.lastHeard);
 
   if (state.enabled.includes("multi-prefix")) {
-    return flaws.forgetsWithCaps === true
-      ? { _tag: "Unknown" }
+    if (flaws.forgetsWithCaps === true) {
+      return { _tag: "Unknown" };
+    }
+
+    if (flaws.losesWithCaps === true) {
+      return { _tag: "Known", at, from: "ircd", value: new Set() };
+    }
+
+    return flaws.changesWithMore === true && state.enabled.includes("server-time")
+      ? { _tag: "Known", at, from: "ircd", value: new Set([...modes, "v"]) }
       : { _tag: "Known", at, from: "ircd", value: modes };
   }
 
@@ -509,7 +523,7 @@ const prefixesOf = (state: ToyState, prefix: string, flaws: Flaws): Fact<Readonl
 const known =
   (flaws: Flaws) =>
   (state: ToyState): Knowledge => ({
-    casemapping: "rfc1459",
+    casemapping: flaws.remapsAfterDel === true && state.deleted.length > 0 ? "ascii" : "rfc1459",
     channels: new Map(
       [...state.channels].map(([name, members]) => [
         name,
@@ -601,6 +615,31 @@ export const seededClient: Client<{ readonly dialled: boolean }> = {
           state: { dialled: true },
         }
       : { news: [], outputs: [], state },
+};
+
+/**
+ * A Client that steps the same in any process, but whose Knowledge names a User from a
+ * value seeded when its module loads, so only a digest of Knowledge can tell two
+ * processes apart.
+ */
+export const knowsSeededClient: Client<{ readonly dialled: boolean }> = {
+  ...seededClient,
+  known: () => ({
+    ...known({})(initial),
+    users: new Map([
+      [
+        String(seed),
+        {
+          account: { _tag: "Unknown" },
+          away: { _tag: "Unknown" },
+          mask: { _tag: "Unknown" },
+          nick: String(seed),
+          realname: { _tag: "Unknown" },
+        },
+      ],
+    ]),
+  }),
+  step: (state) => ({ news: [], outputs: [], state }),
 };
 
 /**

@@ -3,7 +3,7 @@
  * The fresh-process replay check. Replay in one process cannot see a value seeded per
  * process, such as a hash order or a random number taken when a module loads, because
  * both folds see the same seed. This folds the same inputs in a child `bun` process and
- * compares a digest of every step's state, outputs, News, and Inspection.
+ * compares a digest of every step's state, outputs, News, Inspection, and Knowledge.
  *
  * It is slower than `replay`, so a Client's suite runs it on a few scenarios, not all.
  *
@@ -52,8 +52,9 @@ export const readInputs = (json: string): readonly Input[] =>
   Schema.decodeUnknownSync(InputsJson)(JSON.parse(json));
 
 /**
- * Folds inputs from `initial` and digests every step's state, outputs, News, and
- * Inspection, in order.
+ * Folds inputs from `initial` and digests the initial Inspection and Knowledge, and then
+ * every step's state, outputs, News, Inspection, and Knowledge, in order. So even an
+ * empty fold compares what the Client shows before anything has happened.
  * @param client - The Client.
  * @param inputs - The inputs.
  * @returns A SHA-256 digest, as hex.
@@ -61,12 +62,15 @@ export const readInputs = (json: string): readonly Input[] =>
 export const digest = <State>(client: Client<State>, inputs: readonly Input[]): string => {
   const hasher = new Bun.CryptoHasher("sha256");
   let state = client.initial;
+  hasher.update(`${canonical(client.inspect(state))}\n${canonical(client.known(state))}\n`);
 
   for (const input of inputs) {
     const step = client.step(state, input);
     ({ state } = step);
     hasher.update(
-      `${canonical(step.state)}\n${canonical(step.outputs)}\n${canonical(step.news)}\n${canonical(client.inspect(state))}\n`
+      [step.state, step.outputs, step.news, client.inspect(state), client.known(state)]
+        .map((part) => `${canonical(part)}\n`)
+        .join("")
     );
   }
 

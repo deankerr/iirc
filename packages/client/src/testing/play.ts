@@ -19,7 +19,7 @@ import type { Output, TimerTable } from "../output.ts";
 import { timers } from "../output.ts";
 import { describeNews, describeOutput } from "./describe.ts";
 import { diff } from "./diff.ts";
-import { canonical, difference, impurity } from "./plain.ts";
+import { canonical, impurity, textDifference } from "./plain.ts";
 import { epoch, parse, printItem, writeInstant } from "./transcript.ts";
 import type { Change, Item, Owner } from "./transcript.ts";
 
@@ -46,7 +46,35 @@ export interface Played<State> {
   readonly ignored: readonly string[];
   /** The timers still set, as `timers` projects them from the inputs and outputs. */
   readonly timers: TimerTable;
+  /** Each step, written down as canonical text the moment it was stepped. */
+  readonly snapshots: readonly Snapshot[];
 }
+
+/**
+ * One step, written down as canonical text the moment it was stepped, so nothing the
+ * Client does to its values afterwards can change what replay is compared against.
+ */
+export interface Snapshot {
+  readonly state: string;
+  readonly outputs: string;
+  readonly news: string;
+  readonly inspection: string;
+  readonly knowledge: string;
+}
+
+/**
+ * Writes one step down as canonical text.
+ * @param client - The Client, for its views of the state.
+ * @param step - The step, as it was just returned.
+ * @returns Its snapshot.
+ */
+export const snapshot = <State>(client: Client<State>, step: Step<State>): Snapshot => ({
+  inspection: canonical(client.inspect(step.state)),
+  knowledge: canonical(client.known(step.state)),
+  news: canonical(step.news),
+  outputs: canonical(step.outputs),
+  state: canonical(step.state),
+});
 
 /** A scenario that did not play as written. The message is a transcript diff. */
 export class TranscriptMismatchError extends Error {
@@ -140,8 +168,8 @@ interface Driver<State> {
   secret: SecretLine | undefined;
   readonly inputs: Input[];
   readonly steps: Step<State>[];
-  /** Each step's state, written down at once, to catch a step that changes an earlier one. */
-  readonly written: string[];
+  /** Each step written down at once, to replay against, and to catch a step that changes an earlier state. */
+  readonly snapshots: Snapshot[];
 }
 
 const driver = <State>(
@@ -156,10 +184,10 @@ const driver = <State>(
   intents: 0,
   now: Instant.make(epoch),
   secret: undefined,
+  snapshots: [],
   state: client.initial,
   steps: [],
   table: new Map(),
-  written: [],
 });
 
 const describeInput = (input: Input): string => {
@@ -170,12 +198,22 @@ const describeInput = (input: Input): string => {
   return `${input._tag} at ${input.at - epoch}ms`;
 };
 
+// A deep copy, where the value can be copied. One that cannot holds something a Client
+// should not output anyway, and replay's snapshots still catch it changing.
+const copied = <A>(value: A): A => {
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+};
+
 const stepInput = <State>(at: Driver<State>, input: Input): Step<State> => {
   const given = at.state;
-  const before = at.written.at(-1) ?? canonical(given);
-  const step = at.client.step(given, input);
+  const before = at.snapshots.at(-1)?.state ?? canonical(given);
+  const returned = at.client.step(given, input);
   const number = at.steps.length + 1;
-  const notPlain = impurity(step.state);
+  const notPlain = impurity(returned.state);
 
   if (notPlain !== undefined) {
     throw new ReplayMismatchError(
@@ -189,9 +227,18 @@ const stepInput = <State>(at: Driver<State>, input: Input): Step<State> => {
     );
   }
 
+  at.snapshots.push(snapshot(at.client, returned));
+
+  // The kit reads its own copy of what the step said, so a Client that later changes the
+  // arrays or values it returned cannot change what was matched.
+  const step: Step<State> = {
+    news: copied(returned.news),
+    outputs: copied(returned.outputs),
+    state: returned.state,
+  };
+
   at.inputs.push(input);
   at.steps.push(step);
-  at.written.push(canonical(step.state));
   at.state = step.state;
   at.table = timers(at.table, input, step.outputs);
 
@@ -412,18 +459,19 @@ const visible = (outputs: readonly Output[]): readonly Visible[] =>
 // Exact replay
 
 /**
- * Checks exact replay: folding the inputs again from `initial` gives the same states,
- * outputs, and News, every state is plain data, and what `inspect` and `known` give for
- * the last state is the same.
+ * Checks exact replay: folding the inputs again from `initial` gives, at every step, the
+ * same state, outputs, News, Inspection, and Knowledge as the snapshots written down when
+ * they were first stepped, and every state is plain data. It compares against snapshots,
+ * never live values, so a Client that reuses or changes what it returned is caught.
  * It throws `ReplayMismatchError` at the first step that differs, or the first state that is not plain.
  * @param client - The Client.
  * @param inputs - The inputs it was given.
- * @param steps - What it gave back the first time.
+ * @param snapshots - Each step as first stepped, such as `play(…).snapshots`.
  */
 export const checkReplay = <State>(
   client: Client<State>,
   inputs: readonly Input[],
-  steps: readonly Step<State>[]
+  snapshots: readonly Snapshot[]
 ): void => {
   let state = client.initial;
   const initialImpurity = impurity(state, "initial");
@@ -433,7 +481,7 @@ export const checkReplay = <State>(
   }
 
   for (const [index, input] of inputs.entries()) {
-    const played = steps[index];
+    const played = snapshots[index];
     const replayed = client.step(state, input);
     const where = `step ${index + 1} (${describeInput(input)})`;
     const notPlain = impurity(replayed.state);
@@ -442,8 +490,10 @@ export const checkReplay = <State>(
       throw new ReplayMismatchError(`State must be plain data, but after ${where} ${notPlain}`);
     }
 
-    for (const part of ["state", "outputs", "news"] as const) {
-      const differs = difference(played?.[part], replayed[part]);
+    const again = snapshot(client, replayed);
+
+    for (const part of ["state", "outputs", "news", "inspection", "knowledge"] as const) {
+      const differs = textDifference(played?.[part] ?? "", again[part]);
 
       if (differs !== undefined) {
         throw new ReplayMismatchError(
@@ -453,19 +503,6 @@ export const checkReplay = <State>(
     }
 
     ({ state } = replayed);
-  }
-
-  const last = steps.at(-1)?.state ?? client.initial;
-
-  for (const [part, view] of [
-    ["inspection", client.inspect],
-    ["knowledge", client.known],
-  ] as const) {
-    const differs = difference(view(last), view(state));
-
-    if (differs !== undefined) {
-      throw new ReplayMismatchError(`the last ${part} does not replay exactly\n${differs}`);
-    }
   }
 };
 
@@ -669,11 +706,12 @@ export const play = <State>(client: Client<State>, scenario: Scenario): Played<S
     );
   }
 
-  checkReplay(client, at.inputs, at.steps);
+  checkReplay(client, at.inputs, at.snapshots);
 
   return {
     ignored,
     inputs: at.inputs,
+    snapshots: at.snapshots,
     state: at.state,
     steps: at.steps,
     timers: at.table,
@@ -738,11 +776,12 @@ export const replay = <State>(client: Client<State>, scenario: Scenario): Played
     }
   }
 
-  checkReplay(client, at.inputs, at.steps);
+  checkReplay(client, at.inputs, at.snapshots);
 
   return {
     ignored,
     inputs: at.inputs,
+    snapshots: at.snapshots,
     state: at.state,
     steps: at.steps,
     timers: at.table,

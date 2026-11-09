@@ -1,4 +1,4 @@
-/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof -- The laws walk a Knowledge generically, so a fact added to it anywhere is checked without changing them. */
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-runtime-typeof -- The laws walk a Knowledge generically, so a fact added to it anywhere is checked without changing them. */
 /**
  * The four laws a Client and its Features keep, run over every set of caps `across`
  * gives. Each law replays the suite's transcript, so it needs no `>>` written, and
@@ -169,10 +169,55 @@ const walkFacts = (
   return undefined;
 };
 
+// A fact's field, read without knowing its shape.
+const fieldOf = (fact: unknown, key: string): unknown =>
+  typeof fact === "object" && fact !== null ? new Map(Object.entries(fact)).get(key) : undefined;
+
+// What a fact holds, as canonical texts: a set's members, in any order, or one value.
+const contentsOf = (value: unknown): readonly string[] =>
+  value instanceof Set
+    ? [...value].map((member: unknown) => canonical(member)).toSorted()
+    : [canonical(value)];
+
+// A fact's value as a reader sees it: a set as `{a,b}`, in order, or the value itself.
+const shown = (value: unknown): string =>
+  value instanceof Set ? `{${contentsOf(value).join(",")}}` : contentsOf(value).join(",");
+
+// Whether a refined fact keeps what the coarser one established: a known value stays the
+// same, and a refined set holds every member of the partial set it refines.
+const keepsContents = (
+  left: unknown,
+  right: unknown,
+  path: string,
+  names: string
+): string | undefined => {
+  const was = factTag(left);
+  const now = factTag(right);
+
+  if (was === "Known") {
+    const before = shown(fieldOf(left, "value"));
+    const after = shown(fieldOf(right, "value"));
+
+    return before === after
+      ? undefined
+      : `${path} was known as ${before}, but as ${after} ${names}`;
+  }
+
+  if (was === "Partial") {
+    const held = new Set(contentsOf(fieldOf(right, now === "Known" ? "value" : "atLeast")));
+    const lost = contentsOf(fieldOf(left, "atLeast")).filter((member) => !held.has(member));
+
+    return lost.length === 0 ? undefined : `${path} lost ${lost.join(", ")} ${names}`;
+  }
+
+  return undefined;
+};
+
 /**
  * **refines:** more caps only sharpen what fewer know. For each set of caps and each
  * larger one, every fact the smaller knows is there in the larger, and its case goes
- * only from unknown to stale to partial to known, never back.
+ * only from unknown to stale to partial to known, never back. What was established stays:
+ * a known value is the same, and a set holds every member of the partial set it refines.
  * It throws `LawBrokenError` for the first pair of caps and fact that break it.
  * @param subject - The Client, its Features, and the transcript.
  */
@@ -193,9 +238,11 @@ export const refines = <State>(subject: Subject<State>): void => {
         const was = factTag(left);
         const now = factTag(right);
 
-        return was !== undefined && (now === undefined || ranks[now] < ranks[was])
-          ? `${path} was ${was} with ${named(fewer)}, but ${now ?? "missing"} with ${named(more)}`
-          : undefined;
+        if (was !== undefined && (now === undefined || ranks[now] < ranks[was])) {
+          return `${path} was ${was} with ${named(fewer)}, but ${now ?? "missing"} with ${named(more)}`;
+        }
+
+        return keepsContents(left, right, path, `from ${named(fewer)} to ${named(more)}`);
       });
 
       if (broken !== undefined) {
@@ -203,6 +250,58 @@ export const refines = <State>(subject: Subject<State>): void => {
       }
     }
   }
+};
+
+// Keys of a Map or an object, as canonical texts, with the value each names.
+const entriesOf = (value: unknown): ReadonlyMap<string, unknown> | undefined => {
+  if (value instanceof Map) {
+    return new Map(
+      [...value].map(([key, item]: readonly [unknown, unknown]) => [keyName(key), item])
+    );
+  }
+
+  return typeof value === "object" &&
+    value !== null &&
+    !(value instanceof Set) &&
+    !Array.isArray(value)
+    ? new Map(Object.entries(value))
+    : undefined;
+};
+
+// Compares two Knowledges whole, every leaf and key, and allows a difference only where
+// the first holds a fact marked stale.
+const sameExceptStale = (had: unknown, never: unknown, path: string): string | undefined => {
+  if (factTag(had) === "Stale") {
+    return undefined;
+  }
+
+  const left = factTag(had) === undefined ? entriesOf(had) : undefined;
+  const right = factTag(never) === undefined ? entriesOf(never) : undefined;
+
+  if (left === undefined || right === undefined) {
+    const before = canonical(had);
+    const after = canonical(never);
+
+    return before === after
+      ? undefined
+      : `${path} is ${before}, but never having had it gives ${after}`;
+  }
+
+  for (const key of new Set([...left.keys(), ...right.keys()])) {
+    const at = had instanceof Map ? `${path}.get(${key})` : `${path}.${key}`;
+
+    if (!left.has(key) || !right.has(key)) {
+      return `${at} is there only ${left.has(key) ? "after CAP DEL" : "without ever having had it"}`;
+    }
+
+    const found = sameExceptStale(left.get(key), right.get(key), at);
+
+    if (found !== undefined) {
+      return found;
+    }
+  }
+
+  return undefined;
 };
 
 /**
@@ -229,8 +328,8 @@ export interface Deactivation {
  * **deactivates:** after `CAP DEL`, behaviour matches never having had the cap, except
  * for facts marked stale. For each cap and each set holding it, the transcript with that
  * set, a `CAP DEL` of the cap, and `after` must give the same outputs and News in `after`
- * as the transcript without the cap and then `after`, and the same Knowledge, except
- * where the first holds a stale fact.
+ * as the transcript without the cap and then `after`, and the same Knowledge, whole,
+ * every leaf and key, except where the first holds a fact marked stale.
  * It throws `LawBrokenError` for the first cap and set that break it.
  * @param subject - The Client, its Features, and the transcript up to the `CAP DEL`.
  * @param deactivation - What comes after it.
@@ -262,24 +361,11 @@ export const deactivates = <State>(
         );
       }
 
-      const visit = (left: unknown, right: unknown, path: string) =>
-        factTag(left) === "Stale" || canonical(left) === canonical(right)
-          ? undefined
-          : `${path} is ${canonical(left)}, but never having had it gives ${canonical(right)}`;
-
-      const broken =
-        walkFacts(
-          subject.client.known(had.state),
-          subject.client.known(never.state),
-          "known",
-          visit
-        ) ??
-        walkFacts(
-          subject.client.known(never.state),
-          subject.client.known(had.state),
-          "known",
-          (left, right, path) => (factTag(right) === "Stale" ? undefined : visit(right, left, path))
-        );
+      const broken = sameExceptStale(
+        subject.client.known(had.state),
+        subject.client.known(never.state),
+        "known"
+      );
 
       if (broken !== undefined) {
         throw new LawBrokenError(`${where}, ${broken}`);
