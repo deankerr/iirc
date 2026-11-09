@@ -13,52 +13,70 @@ const frame = (limit: number, reads: readonly string[]) => {
 };
 
 describe("the framer", () => {
-  it("ends a Line at LF, removing one CR before it", () => {
-    expect(frame(512, ["PING :a\r\nPING :b\nPING :c\r\r\n"])).toStrictEqual([
-      "PING :a",
-      "PING :b",
-      "PING :c\r",
+  it("ends a Line at CRLF", () => {
+    expect(frame(512, ["PING :a\r\nPING :b\r\n"])).toStrictEqual(["PING :a", "PING :b"]);
+  });
+
+  it("ends a Line at a bare LF", () => {
+    expect(frame(512, ["PING :a\nPING :b\n"])).toStrictEqual(["PING :a", "PING :b"]);
+  });
+
+  it("ends a Line at a bare CR, rather than joining it to the next", () => {
+    expect(frame(512, ["PING :a\rPING :b\r"])).toStrictEqual(["PING :a", "PING :b"]);
+  });
+
+  it("takes every kind of ending in one read", () => {
+    expect(frame(512, ["one\r\ntwo\nthree\rfour\r\n"])).toStrictEqual([
+      "one",
+      "two",
+      "three",
+      "four",
     ]);
   });
 
-  it("gives several Lines from one read", () => {
-    expect(frame(512, ["one\r\ntwo\r\nthree\r\n"])).toStrictEqual(["one", "two", "three"]);
+  it("ends a Line once at a CRLF split across reads", () => {
+    expect(frame(512, ["PING :x\r", "\nPONG :y\r", "\n"])).toStrictEqual(["PING :x", "PONG :y"]);
+  });
+
+  it("ends a Line at a CR at the end of a read, before the next Line's read", () => {
+    expect(frame(512, ["PING :x\r", "PING :y\r"])).toStrictEqual(["PING :x", "PING :y"]);
+  });
+
+  it("gives nothing between LF and CR, which are two endings", () => {
+    expect(frame(512, ["PING :x\n\rPING :y\n", "\r"])).toStrictEqual(["PING :x", "PING :y"]);
   });
 
   it("joins a Line split across reads", () => {
     expect(frame(512, ["PI", "NG :spl", "it\r\n"])).toStrictEqual(["PING :split"]);
   });
 
-  it("strips a CR that arrived in an earlier read than its LF", () => {
-    expect(frame(512, ["PING :x\r", "\nPONG :y\r", "\n"])).toStrictEqual(["PING :x", "PONG :y"]);
-  });
-
   it("gives a Line one byte at a time", () => {
     expect(frame(512, "NOTICE * :slow\r\n".split(""))).toStrictEqual(["NOTICE * :slow"]);
   });
 
-  it("skips empty Lines, including a lone CR", () => {
-    expect(frame(512, ["\r\n\n\r\nPING :x\r\n\r", "\n"])).toStrictEqual(["PING :x"]);
+  it("skips empty Lines", () => {
+    expect(frame(512, ["\r\n\n\r\r\nPING :x\r\n\r", "\n"])).toStrictEqual(["PING :x"]);
   });
 
   it("holds back an unfinished Line, which the end of the stream drops", () => {
     expect(frame(512, ["PING :done\r\nPING :unfin", "ished"])).toStrictEqual(["PING :done"]);
   });
 
-  it("keeps a CR inside a Line", () => {
-    expect(frame(512, ["a\rb\r\n"])).toStrictEqual(["a\rb"]);
-  });
-
-  it("gives a Line of exactly the limit whole, with or without CR", () => {
+  it("gives a Line of exactly the limit whole", () => {
     expect(frame(4, ["abcd\r\nefgh\n"])).toStrictEqual(["abcd", "efgh"]);
   });
 
   it("cuts a Line over the limit, keeping its start, and drops the rest of it", () => {
-    expect(frame(4, ["abcde\r\nfghij\nk\r\n"])).toStrictEqual(["abcd", "fghi", "k"]);
+    expect(frame(4, ["abcdefg\r\nhi\r\n"])).toStrictEqual(["abcd", "hi"]);
   });
 
-  it("does not take a CR past the limit for the Line's ending", () => {
-    expect(frame(4, ["abc\rx\r\n"])).toStrictEqual(["abc\r"]);
+  it.each([
+    ["CR", "\r"],
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+  ])("recovers after a cut Line that ends in %s", (_, ending) => {
+    expect(frame(4, [`abcdefgh${ending}next${ending}`])).toStrictEqual(["abcd", "next"]);
+    expect(frame(4, ["abcde", "fgh", ending, `next${ending}`])).toStrictEqual(["abcd", "next"]);
   });
 
   it("cuts a long Line that arrives over many reads, and holds no more than the limit", () => {
@@ -71,7 +89,7 @@ describe("the framer", () => {
       lines.push(...framer.push(read));
     }
 
-    lines.push(...framer.push(bytes.encode("\r\nPING :after\r\n")));
+    lines.push(...framer.push(bytes.encode("\rPING :after\r\n")));
 
     expect(lines.map((line) => line.length)).toStrictEqual([limit, 11]);
     expect(lines[0]?.every((byte) => byte === 0x78)).toBeTruthy();

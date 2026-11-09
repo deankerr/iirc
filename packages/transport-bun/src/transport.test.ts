@@ -418,7 +418,14 @@ describe("an open Connection", () => {
         const far = yield* ircd(undefined);
         const link = yield* makeBunTransport({ route: to(far.port) }).dial(plainAddress);
         const socket = yield* far.accepted;
-        const reads = ["PING :a\r", "\nPING :b\r\nPING :c\r\nPI", "NG :d\r\n", "PING :unfinished"];
+
+        const reads = [
+          "PING :a\r",
+          "\nPING :b\r\nPING :c\r\nPI",
+          "NG :d\r\n",
+          "PING :e\rPING :f\nPING :g\r",
+          "PING :unfinished",
+        ];
 
         socket.setNoDelay(true);
 
@@ -439,6 +446,9 @@ describe("an open Connection", () => {
       "Received PING :b",
       "Received PING :c",
       "Received PING :d",
+      "Received PING :e",
+      "Received PING :f",
+      "Received PING :g",
       "Closed Ended",
     ]);
   });

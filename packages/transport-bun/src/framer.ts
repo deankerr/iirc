@@ -1,12 +1,13 @@
 /**
- * Frames a byte stream into Lines as the Transport port says. A Line ends at LF, with one
- * CR before it removed. Empty Lines are skipped. A Line longer than the limit is cut to it
- * and the rest of it dropped. An unfinished Line when the stream ends is dropped, which
- * here means it is simply never given.
+ * Frames a byte stream into Lines as the Transport port says. A Line ends at CR or at LF,
+ * and empty Lines are skipped, so CRLF, a bare LF, and a bare CR all end a Line: a CRLF
+ * ends the Line and then an empty one, even when it is split across reads. A Line longer
+ * than the limit is cut to it, and the rest of it, up to its ending, is dropped. An
+ * unfinished Line when the stream ends is dropped, which here means it is never given.
  *
  * Ported on purpose from the transcript spike's framer, which pushed byte by byte. This
- * one copies runs between LFs, and holds at most `limit + 1` bytes of an unfinished Line
- * however the bytes arrive, so a hostile Ircd cannot grow it.
+ * one copies runs between line endings, and holds at most `limit` bytes of an unfinished
+ * Line however the bytes arrive, so a hostile Ircd cannot grow it.
  *
  * @packageDocumentation
  */
@@ -21,27 +22,31 @@ export interface Framer {
 }
 
 /**
+ * Where the next line ending is in a read, or its length if there is none.
+ * @param chunk - The read.
+ * @param from - Where to start looking.
+ * @returns The index of the next CR or LF, or the read's length.
+ */
+const nextEnding = (chunk: Uint8Array, from: number) => {
+  for (let index = from; index < chunk.length; index += 1) {
+    const byte = chunk[index];
+
+    if (byte === cr || byte === lf) {
+      return index;
+    }
+  }
+
+  return chunk.length;
+};
+
+/**
  * Makes a framer that gives at most `limit` bytes of any one Line.
  * @param limit - The most bytes of one Line to give.
  * @returns A fresh framer with nothing pending.
  */
 export const makeFramer = (limit: number): Framer => {
-  // One byte past the limit is kept, in case it is the CR of the Line's ending.
-  const pending = new Uint8Array(limit + 1);
+  const pending = new Uint8Array(limit);
   let length = 0;
-  let overlong = false;
-
-  const finish = (lines: Uint8Array[]) => {
-    const end = !overlong && length > 0 && pending[length - 1] === cr ? length - 1 : length;
-    const kept = Math.min(end, limit);
-
-    if (kept > 0) {
-      lines.push(pending.slice(0, kept));
-    }
-
-    length = 0;
-    overlong = false;
-  };
 
   return {
     push: (chunk) => {
@@ -49,24 +54,23 @@ export const makeFramer = (limit: number): Framer => {
       let start = 0;
 
       while (start < chunk.length) {
-        const found = chunk.indexOf(lf, start);
-        const end = found === -1 ? chunk.length : found;
+        const end = nextEnding(chunk, start);
+        // Whatever does not fit is past the limit, and is dropped.
+        const kept = Math.min(end - start, pending.length - length);
 
-        if (!overlong) {
-          const room = pending.length - length;
-          const run = end - start;
+        pending.set(chunk.subarray(start, start + kept), length);
+        length += kept;
 
-          pending.set(chunk.subarray(start, start + Math.min(run, room)), length);
-          length += Math.min(run, room);
-          overlong = run > room;
-        }
-
-        if (found === -1) {
+        if (end === chunk.length) {
           break;
         }
 
-        finish(lines);
-        start = found + 1;
+        if (length > 0) {
+          lines.push(pending.slice(0, length));
+        }
+
+        length = 0;
+        start = end + 1;
       }
 
       return lines;

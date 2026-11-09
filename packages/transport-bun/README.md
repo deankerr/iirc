@@ -18,7 +18,9 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Eff
 
 ## What it guarantees beyond the port
 
-- **Reading is pulled.** The socket is read only when the `events` stream asks for more. While nothing reads the events, a flooding Ircd waits in the kernel, so memory does not grow. Within a Line, the framer keeps at most `maxReceivedBytes + 1` bytes, however the bytes arrive.
+- **A Line ends at CR or at LF, and empty Lines are skipped.** So CRLF, a bare LF, and a bare CR each end a Line, including a CRLF split across reads, which yields the Line and then an empty Line that is skipped. An Ircd that ends Lines with a bare CR does not have two Lines merged into one.
+
+- **Reading is pulled.** The socket is read only when the `events` stream asks for more. While nothing reads the events, a flooding Ircd waits in the kernel, so memory does not grow. Within a Line, the framer keeps at most `maxReceivedBytes` bytes, however the bytes arrive.
 - **Every way it ends is decided by error kind and code, never by error message.**
 
   | What happened | `Closed` reason |
@@ -62,5 +64,5 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Eff
 `bun run test` runs the following, using only loopback and no external network, in about two seconds:
 
 - `src/laws.test.ts`: every `transportLaws` law, over TLS with a self-signed certificate for `irc.test` made by `openssl` for the run, and again over plain TCP. The harness in `src/testing/loopback.ts` plays `TestIrcd`. It opens a listener for each call and routes the dial there, or routes it to a refusing port or an `.invalid` name when the call is refused.
-- `src/framer.test.ts`: framing byte by byte. It covers a Line split across reads, CRLF split between reads, several Lines in one read, an unfinished Line at the end, and a long Line over many reads cut at `maxReceivedBytes`.
+- `src/framer.test.ts`: framing byte by byte. It covers CRLF, a bare LF, and a bare CR. It also covers a CRLF split across reads, a CR at the end of one read with the next Line in the next, and an LF followed by a CR, which is two endings with nothing between them. It covers a Line split across reads, several Lines in one read, and an unfinished Line at the end. It covers a long Line over many reads cut at `maxReceivedBytes`, and recovery after a cut Line that ends in CR, LF, or CRLF.
 - `src/transport.test.ts`: the failures and edge cases the laws cannot see. These are a refused dial, an unknown host, a connect timeout, SNI, an untrusted certificate, a wrong-name certificate, a plaintext answer to TLS, a handshake timeout, a reset over TCP and TLS, a routed IP or name whose certificate names only the destination, a stalled write, a hangup that lets 1,000 Lines and a `QUIT` arrive over TLS, a hangup that a paused peer cannot hold past `hangupTimeout`, a flood that waits in the kernel, a `send` before `Opened`, a hangup while connecting, the closing of the Scope while open, while routing, and during the TLS handshake, and connect and handshake timers that race `Opened` and end only once. On loopback a connect always beats even a 0 ms timer, so that race is only seen to end once, not seen to time out.
