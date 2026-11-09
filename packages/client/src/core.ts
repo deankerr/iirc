@@ -18,7 +18,7 @@ import {
   quit,
   rawParams,
 } from "@iirc/protocol/line";
-import type { Encoding, Line, RawParam } from "@iirc/protocol/line";
+import type { Encoding, Line, RawParam, SecretLine } from "@iirc/protocol/line";
 
 import { backoff, lasting } from "./backoff.ts";
 import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
@@ -30,7 +30,7 @@ import type { TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
 import type { EndReason } from "./news.ts";
-import { begin, carryOut, expire, recompute, settle } from "./registration.ts";
+import { begin, carryOut, expire, recompute, settle, unfilled } from "./registration.ts";
 import type { Registered } from "./registry.ts";
 import { registry } from "./registry.ts";
 import type { Run } from "./run.ts";
@@ -376,14 +376,15 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
     return;
   }
 
-  send(run, line, line.command, { _tag: "Said", intent: input.intent });
+  const sent = send(run, line, line.command, { _tag: "Said", intent: input.intent });
+
   run.news.push({
     _tag: "Message",
     at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
     id: { _tag: "Unknown" },
     kind: input.kind,
     live: true,
-    ours: { echo: false, intent: input.intent },
+    ours: { echo: sent?.echo ?? false, intent: input.intent },
     sender: session.nick,
     tags: new Map(),
     target: input.target,
@@ -490,6 +491,21 @@ const consumedBy = (state: State, input: Input): TimerId | undefined =>
 
 // The Transport
 
+// A `SecretLine` a holding Feature sent could not be filled. With none to hear it, it
+// changes nothing.
+const unfilledHeld = (run: Run, line: SecretLine): void => {
+  const was = onNow(run.registry, run.state);
+
+  if (!unfilled(run, line)) {
+    ignore(run, { _tag: "NotNow", input: "Unfilled" });
+
+    return;
+  }
+
+  recompute(run, was);
+  settle(run);
+};
+
 // Inputs from the Transport name their Connection: one from another is stale.
 const current = (run: Run, connection: ConnectionId): Link | undefined => {
   const link = linkOf(run);
@@ -535,12 +551,13 @@ const transport = (run: Run, input: FromTransport): void => {
     }
 
     // A Channel whose key could not be filled is refused for now. Registration goes on
-    // without `PASS`, and the Ircd decides.
+    // without `PASS`, and the Ircd decides. A Feature holding registration hears of a
+    // Line it sent, such as SASL's.
     case "Unfilled": {
       if (input.line._tag === "JoinWithKey") {
         unfilledKey(run, input.line.channel);
       } else if (input.line._tag === "AuthenticatePlain") {
-        ignore(run, { _tag: "NotNow", input: "Unfilled" });
+        unfilledHeld(run, input.line);
       }
 
       break;

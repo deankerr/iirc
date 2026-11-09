@@ -74,17 +74,22 @@ const ownMask = (run: Run, user: string, host: string): void => {
   );
 };
 
-// Folds what a Line meant into the model, and reports it.
-const fold = (run: Run, meant: Meant, line: Line): void => {
+// Folds what a Line meant into the model, and reports it. History is reported, and
+// never changes what is known now.
+const fold = (run: Run, meant: Meant, arrival: Arrival): void => {
+  const { line, live } = arrival;
+
   if (meant._tag === "Listed") {
-    foldListed(run, meant.channel, meant.members);
+    if (live) {
+      foldListed(run, meant.channel, meant.members);
+    }
 
     return;
   }
 
   run.news.push(meant);
 
-  if (meant._tag !== "Activity") {
+  if (meant._tag !== "Activity" || !live) {
     return;
   }
 
@@ -142,14 +147,14 @@ const means = (run: Run, arrival: Arrival): void => {
     carryOut(run, ran);
 
     for (const each of ran.value) {
-      fold(run, each, arrival.line);
+      fold(run, each, arrival);
     }
 
     return;
   }
 
   for (const each of derived) {
-    fold(run, each, arrival.line);
+    fold(run, each, arrival);
   }
 };
 
@@ -364,6 +369,40 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
   ],
 ]);
 
+// A protocol Line moves the machines on.
+const protocolLine = (run: Run, line: Line, raw: readonly RawParam[] | undefined): void => {
+  const { command } = line;
+
+  if (refusals.has(command) || (command === "437" && !isRegistering(run))) {
+    second(run, line, (name) => {
+      refused(run, name);
+    });
+  } else if (nickRefusals.has(command) || command === "437") {
+    if (isRegistering(run)) {
+      nickRefused(run);
+    }
+  } else {
+    handlers.get(command)?.(run, line, raw);
+  }
+};
+
+/**
+ * Whether a Line that answers an intent rejects it, and the reply, read by structure: an
+ * error numeric is its number, a `FAIL` is its code, as standard replies give it, and an
+ * `ACK` says the Ircd did nothing it would echo.
+ * @param line - The Line.
+ * @returns The reply, or `undefined` if it does not reject.
+ */
+const rejection = (line: Line): string | undefined => {
+  const { command } = line;
+
+  if (/^[45]\d\d$/u.test(command) || command === "ACK") {
+    return command;
+  }
+
+  return command === "FAIL" ? (line.params[1] ?? command) : undefined;
+};
+
 /**
  * Does what one Line says, once it has been through the Features' ingress stages.
  * @param run - The step.
@@ -378,25 +417,20 @@ export const interpret = (
   const { line } = arrival;
   const { command } = line;
 
-  if (arrival.answers !== undefined && /^[45]\d\d$/u.test(command)) {
+  const reply = arrival.answers === undefined ? undefined : rejection(line);
+
+  if (arrival.answers !== undefined && reply !== undefined) {
     run.news.push({
       _tag: "Refused",
       intent: arrival.answers,
-      reason: { _tag: "Rejected", reply: command },
+      reason: { _tag: "Rejected", reply },
     });
   }
 
   if (hasMeaning(command)) {
     means(run, arrival);
-  } else if (refusals.has(command) || (command === "437" && !isRegistering(run))) {
-    second(run, line, (name) => {
-      refused(run, name);
-    });
-  } else if (nickRefusals.has(command) || command === "437") {
-    if (isRegistering(run)) {
-      nickRefused(run);
-    }
-  } else {
-    handlers.get(command)?.(run, line, raw);
+  } else if (arrival.live) {
+    // History is reported, and moves no machine: it says what was, not what is.
+    protocolLine(run, line, raw);
   }
 };

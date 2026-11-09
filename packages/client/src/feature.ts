@@ -16,7 +16,13 @@ import type { Fact, Knowledge, MemberKnowledge } from "./known.ts";
 import type { EndReason, News } from "./news.ts";
 
 /** Facts a Feature keeps up to date. When it turns off, the core marks each one stale. */
-export type Kept = "user.away" | "user.account" | "user.mask" | "user.realname";
+export type Kept =
+  | "user.away"
+  | "user.account"
+  | "user.mask"
+  | "user.realname"
+  /** Each member's prefixes in each Channel, as a complete listing made them known. */
+  | "member.prefixes";
 
 /** A Line to send, or one that carries a Credential. */
 export type Sendable =
@@ -72,7 +78,11 @@ export interface Arrival {
   readonly label: string | undefined;
   /** The intent this Line answers. Starts unknown. `labeled-response` works it out from `label`. */
   readonly answers: IntentId | undefined;
-  /** Starts true. A `chathistory` batch makes it false, so the Line is history, not news. */
+  /**
+   * Starts true. A `chathistory` batch makes it false, so the Line is history, not news:
+   * it is reported, with `live` false, and never changes what is known now, such as
+   * membership, nicks, topics, or modes.
+   */
   readonly live: boolean;
 }
 
@@ -95,6 +105,12 @@ export interface Departure {
   readonly for:
     | { readonly _tag: "Said"; readonly intent: IntentId }
     | { readonly _tag: "Protocol" };
+  /**
+   * Whether the Ircd will echo this Line back, tied to its intent. It starts false, and
+   * only a Feature that can tie the echo to the intent sets it, as `labeled-response`
+   * with `echo-message` does. A `Said` Line's Message reports it as `ours.echo`.
+   */
+  readonly echo: boolean;
 }
 
 /**
@@ -125,6 +141,11 @@ export interface Feature<Own = undefined> {
    * core lets registration go.
    */
   readonly expired?: (context: Context<Own>) => Effects<Own>;
+  /**
+   * While it holds registration, a `SecretLine` could not be filled, so nothing was sent,
+   * such as SASL's `AuthenticatePlain` with no Credential. The Feature decides what follows.
+   */
+  readonly unfilled?: (line: SecretLine, context: Context<Own>) => Effects<Own>;
   readonly tags?: (arrival: Arrival, context: Context<Own>) => Refined<Arrival, Own>;
   /** Return no Arrivals to hold this one, and several to release those held. */
   readonly batch?: (arrival: Arrival, context: Context<Own>) => Refined<readonly Arrival[], Own>;

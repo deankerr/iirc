@@ -7,7 +7,7 @@
  */
 import { limitOf } from "@iirc/protocol/isupport";
 import { cap, isRejected, nick, quit, upperCaseAscii, user } from "@iirc/protocol/line";
-import type { Line } from "@iirc/protocol/line";
+import type { Line, SecretLine } from "@iirc/protocol/line";
 
 import type { Registration } from "./feature.ts";
 import type { CapName, FeatureName } from "./ids.ts";
@@ -380,6 +380,37 @@ export const expire = (run: Run): void => {
   });
 };
 
+/**
+ * A `SecretLine` could not be filled: each Feature holding registration that has an
+ * `unfilled` hook decides what follows.
+ * @param run - The step.
+ * @param line - The Line that was not sent.
+ * @returns Whether any Feature heard it.
+ */
+export const unfilled = (run: Run, line: SecretLine): boolean => {
+  const open = openOf(run.state);
+  const reading = readingOf(run);
+
+  if (open === undefined || reading === undefined) {
+    return false;
+  }
+
+  const hearing = onNow(run.registry, run.state).filter(
+    (feature) => feature.unfilled !== undefined && open.seam.holding.has(feature.name)
+  );
+
+  if (hearing.length === 0) {
+    return false;
+  }
+
+  carryOut(
+    run,
+    runEffects(hearing, open.seam, reading, (feature, context) => feature.unfilled?.(line, context))
+  );
+
+  return true;
+};
+
 const capList = (text: string): readonly (readonly [CapName, string])[] =>
   text
     .split(" ")
@@ -412,7 +443,7 @@ const request = (run: Run, held: Negotiated, after: "Requesting" | "Changing"): 
     }
   }
 
-  const sent = lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP"));
+  const sent = lines.filter((names) => send(run, cap("REQ", names.join(" ")), "CAP") !== undefined);
 
   if (sent.length === 0 && after === "Changing") {
     setCaps(run, { ...held, _tag: "Steady" });

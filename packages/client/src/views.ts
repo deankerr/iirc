@@ -12,6 +12,7 @@ import type {
   ChannelKnowledge,
   Fact,
   Knowledge,
+  MemberKnowledge,
   SessionKnowledge,
   Standing,
   UserKnowledge,
@@ -76,6 +77,27 @@ const kept = <T>(fact: Fact<T>, which: Kept, seam: Seam): Fact<T> => {
   }
 
   return { _tag: "Stale", since, was: fact._tag === "Known" ? fact.value : fact.atLeast };
+};
+
+// A Channel's members, with prefixes a Feature made complete marked stale once it is off.
+const membersOf = (
+  members: ReadonlyMap<string, MemberKnowledge> | undefined,
+  seam: Seam | undefined
+): ReadonlyMap<string, MemberKnowledge> => {
+  if (members === undefined) {
+    return new Map();
+  }
+
+  if (seam?.stale.has("member.prefixes") !== true) {
+    return members;
+  }
+
+  return new Map(
+    [...members].map(([key, member]) => [
+      key,
+      { ...member, prefixes: kept(member.prefixes, "member.prefixes", seam) },
+    ])
+  );
 };
 
 const sessionKnowledge = (network: Network): SessionKnowledge => {
@@ -184,7 +206,7 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
       return [
         key,
         {
-          members: joined?.members ?? new Map(),
+          members: membersOf(joined?.members, open?.seam),
           modes: joined?.modes ?? unknown,
           name: channel.name,
           standing: standingOf(phase),
