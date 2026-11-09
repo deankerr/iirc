@@ -136,6 +136,7 @@ A machine that is not running, such as `caps` with no Connection open, is left o
   - `duration=0` removes the policy at once. When a Connection closes, the expiry moves to the close plus the last `duration`.
   - It survives restarts because it is derived from journaled Lines, and is never ended by `CAP DEL`.
   - Over plaintext, only `port` counts: it ends the Connection with `Upgrading` and dials TLS on that port at once. A `duration` sent over plaintext is ignored.
+- **History does not change the present.** A Line a Feature marks as not `live`, such as one from a `chathistory` batch, is reported as News with `live` false, and never changes what is known now: membership, nicks, topics, modes, away status, and every machine stay as they were. It says what was, not what is.
 - **Decisions come from structure.** Commands, numerics, tags, and parameters decide behaviour. An Ircd's free text never does, and it may appear in News only as data.
 - **Bounded.** Everything the Client holds from Ircd input has a bound. A hostile Ircd can make facts unknown, but it cannot make the state grow without limit.
 
@@ -157,7 +158,7 @@ A machine that is not running, such as `caps` with no Connection open, is left o
 | `Fired` for a timer that was reset or cancelled | `Ignored` with `StaleTimer`. |
 | An input that makes no sense now, such as `Opened` twice | `Ignored` with `NotNow`. A Line that makes no sense now, such as a `CAP ACK` when nothing was asked or a second `001`, is `NotNow` with `Received`. A Line the Client does not read, such as most numerics, is not ignored: it changes nothing, and that is no error. |
 | An Owner intent that cannot be carried out, such as `Say` while offline | `Refused` with the intent id. It is not queued. |
-| `Unfilled` | SASL sends `AUTHENTICATE *` and counts as a failed login, so a required login abandons the Connection. A Channel whose key is unfilled is `Refused` until the next Session or the next `Configured`. Registration goes on without `PASS`, and the Ircd decides. On the floor, with no SASL Feature, an unfilled `AuthenticatePlain` is `NotNow`. |
+| `Unfilled` | SASL sends `AUTHENTICATE *` and counts as a failed login, so a required login abandons the Connection. A Channel whose key is unfilled is `Refused` until the next Session or the next `Configured`. Registration goes on without `PASS`, and the Ircd decides. With no Feature holding registration to hear it, such as on the floor, an unfilled `AuthenticatePlain` is `NotNow`. |
 | A Feature hook that throws | That Feature is off for the rest of the Connection, and `Ignored` with `FeatureFailed` records it. |
 
 ## The Feature seam
@@ -168,15 +169,17 @@ A Feature brings one IRCv3 cap or ISUPPORT token, or a tight group of them, to t
 - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `meaning`. Egress runs `egress`. Within a stage, Features run in the order of one registry array in one file.
 - **Refining, not branching.** A hook takes what the core derived and returns it refined, in the core's own vocabulary. The model reads the result and never asks which Feature produced it.
 - **Effects.** A hook returns `{ value }`, with optional effects: its new `own` state, Lines to `send`, and a say over `registration`: `Hold` it open before `CAP END`, as SASL does, then `Continue`, or `Abandon` it with a reason, which ends the Connection.
-- **Turning off.** When a Feature turns off, the core marks the facts it `keeps` stale. No Feature handles `CAP DEL` itself, and nothing is polled.
+- **Unfilled.** A Feature holding registration hears, through `unfilled`, of a `SecretLine` the Runtime could not fill, so SASL can abort and decide as for a failed login.
+- **Echo.** A `Departure` starts with `echo` false. An `egress` hook that can tie the Ircd's echo to the intent sets it, as `labeled-response` with `echo-message` does, and the Message reports it as `ours.echo`. The core never sets it.
+- **Turning off.** When a Feature turns off, the core marks the facts it `keeps` stale: a User's away status, account, mask, or realname, or every member's prefixes. A fact said again afterwards is fresh. No Feature handles `CAP DEL` itself, and nothing is polled.
 - **Deadlines.** Features set no timers. While any Feature holds registration, the core keeps one deadline, and when it passes it calls each holding Feature's `expired` hook to choose `Continue` or `Abandon`. SASL uses this to go on without login when login is optional, and to give up when it is required.
 - **Encoding.** A Feature can say how bytes become text while it is on, as `UTF8ONLY` does.
 
-- **Answers and history.** `label` can tie an Arrival to the intent it `answers`, and `batch` can mark it as not `live`. The core then confirms or rejects that intent, or treats the Line as history.
+- **Answers and history.** `label` can tie an Arrival to the intent it `answers`, and a later stage can mark it as not `live`. The core then confirms the intent with an echo from Self, or rejects it with an error numeric, a `FAIL` by its code, or an `ACK`, or treats the Line as history.
 
 STS is not a Feature. Its policy outlives Connections and decides where to dial before any cap is negotiated, so the core keeps it. With no `sts` cap, nothing changes, so the floor does not depend on it.
 
-Three Features, to show the shape:
+Three Features, to show the shape, simplified from `src/features/`:
 
 ```ts
 // The floor shows only a member's highest prefix, so the core reads a NAMES listing
@@ -184,6 +187,7 @@ Three Features, to show the shape:
 export const multiPrefix: Feature = {
   name: FeatureName.make("multi-prefix"),
   needs: { caps: [CapName.make("multi-prefix")] },
+  keeps: ["member.prefixes"],
   own: undefined,
   meaning: (meant) => ({
     value: meant.map((m) =>
@@ -241,7 +245,7 @@ Each feature is built from the floor up ([the architecture proposal](../../docs/
 
 - Needs: nothing. An Ircd with no cap negotiation answers `CAP` with `421`, or ignores it and sends `001`.
 - Changes: sends `CAP LS 302`, `PASS` as a `SendSecret` when configured, `NICK`, and `USER` at once. Reads `CAP LS` over as many Lines as it takes, requests the caps of the Features in the registry less those declined, and sends `CAP END` when nothing is awaited and no Feature holds registration. On `432`, `433`, `436`, or `437` at any point before `001`, it offers the next nick: the configured nicks in order, as the Owner wrote them, then `_` added to the first, then `2`, `3`, and on, the first cut to leave room for the suffix within `NICKLEN`, or RFC 2812's 9 until the Ircd announces it. A fallback is made only if it keeps at least the first nick's leading character, and that character may start a nick. Once a suffix leaves no room, as with `NICKLEN=1` or after `i9` with `NICKLEN=2`, the Client offers no nick for that `433`, and the registration deadline ends the Connection unless a later `005` raises `NICKLEN`, after which the next `433` resumes the offers where they stopped. A nick that cannot be sent is skipped. Registration that takes more than 60 s ends the Connection. `CAP NEW` and `CAP DEL` change the caps for the rest of the Connection.
-- Scenarios: `registration.test.ts`
+- Scenarios: `registration.test.ts`, on the floor
 
 ### The Session and ISUPPORT
 
@@ -266,7 +270,7 @@ Each feature is built from the floor up ([the architecture proposal](../../docs/
 
 ### Messages and Activity
 
-- Needs: nothing. Without `server-time`, a time is when the Line arrived, and says so. Without `echo-message`, our own Messages are reported when we send them, and stay unconfirmed.
+- Needs: nothing. Without `server-time`, a time is when the Line arrived, and says so. Without `labeled-response` and `echo-message`, our own Messages are reported when we send them, and stay unconfirmed.
 - Changes: `PRIVMSG` and `NOTICE` are a `Message` with sender, Target, and kind, and a CTCP `ACTION` is an `Action`. Other CTCP is a request between IRC clients, not something said, and is neither reported nor answered. A Line with no source names the Ircd as its sender. Client-only tags are kept as data. `JOIN`, `PART`, `QUIT`, `NICK` (Self's included), `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and fold into what is known of Channels, members, and Users. A `Say` is sent, and reported as a `Message` that is `ours`, at the time we said it. It is `Refused` with `Offline` outside a Session or while hanging up, and `Unsendable` when no Line can carry it, or when the Ircd would cut it short relaying it with our source.
 - Scenarios: `messages.test.ts`
 
@@ -278,13 +282,67 @@ Each feature is built from the floor up ([the architecture proposal](../../docs/
 
 ### The Feature seam
 
-- Needs: nothing. The registry in `src/registry.ts` is empty on the floor.
-- Changes: the stages run on every Line as the seam above describes, and do nothing while no Feature is on. The core reads `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `MODE`, `TOPIC`, `AWAY`, and `353` as `Meant`, through `meaning`. Every Line sent, the Owner's and the protocol's, goes through `egress`. Lines a hook asks to `send` do not go through `egress` again.
-- Scenarios: `seam.test.ts`, which drives each stage through `step` with Features of its own, and `laws.test.ts`, which runs the four laws over the registry.
+- Needs: nothing. With no Feature on, the Client is the floor.
+- Changes: the stages run on every Line as the seam above describes, and do nothing while no Feature is on. The registry in `src/registry.ts` lists the Features below, in the order their hooks run and their caps are asked for: `cap-notify`, `sasl`, `message-tags`, `server-time`, `batch`, `echo-message`, `multi-prefix`, `away-notify`, and `utf8only`. The core reads `PRIVMSG`, `NOTICE`, `JOIN`, `PART`, `KICK`, `QUIT`, `NICK`, `MODE`, `TOPIC`, `AWAY`, and `353` as `Meant`, through `meaning`. Every Line sent, the Owner's and the protocol's, goes through `egress`. Lines a hook asks to `send` do not go through `egress` again.
+- Scenarios: `seam.test.ts`, which drives each stage through `step` with Features of its own, and `laws.test.ts`, which runs the four laws over every Feature in the registry, across every set of caps `across` gives.
+
+### Cap negotiation
+
+- Needs: caps from the Ircd. `CAP LS 302` turns on `cap-notify` implicitly, and the `cap-notify` Feature asks for it as well, for an Ircd that keeps to the older rules.
+- Changes: asks, in registry order, for every cap of each Feature whose caps are all offered, less the Features the Owner declined, whatever order the Ircd lists them in. Values are read, such as `sasl=PLAIN,EXTERNAL`, and a value may hold `=`. Only what the Ircd acknowledges is enabled, and a `NAK` enables nothing of its request, even when it names only part of it. An `ACK` spread over several Lines with `*` counts once, at its last. `CAP NEW` is answered at once, at any point: before `001`, while SASL holds registration, or after, for the caps of each Feature that needs a cap it names, so a Feature whose other cap was already offered is asked for whole, and nothing it lists that no Feature wants is asked for. `CAP DEL` turns off each Feature that needed a deleted cap, and the facts it kept go stale.
+- Scenarios: `caps.test.ts`
+
+### SASL
+
+- Needs: `sasl`, and a login in the Configuration. Without them, Self's account is unknown, except from a `900` or `901`.
+- Changes: when the cap turns on during registration, sends `AUTHENTICATE PLAIN` and holds registration. On `AUTHENTICATE +` it sends the Credential as `SendSecret` `AuthenticatePlain`, with the account as both identities, and on `903` it lets registration go. `902` and `904` to `908`, a challenge `PLAIN` does not make, an `Unfilled` for the Credential, and the hold's 30 s deadline are a failed login, and the last three abort with `AUTHENTICATE *`. A failed login lets registration go when the login is optional, and gives up the Connection with `LoginFailed` when it is required. When the cap lists mechanisms and `PLAIN` is not among them, it does not try, which is a failed login. A `903` before our `+` is taken as the Ircd's word, and no Credential is sent after it. `900` and `901` set Self's account, and when `sasl` is deleted, the account goes stale until one says it again. A `CAP NEW` for `sasl` after `001` does not log in again.
+- Scenarios: `sasl.test.ts`
+
+### Message tags
+
+- Needs: `message-tags`. Without it, ids are unknown.
+- Changes: a Line's `msgid` is the id of its Message or Activity, known from the Ircd. Tags the Client does not read stay on the Line, and client-only tags (`+…`) are reported with the Message. `@iirc/protocol` allows client-only tags on a Line we send, though nothing the Owner says carries one yet.
+- Scenarios: `tags.test.ts`
+
+### Server time
+
+- Needs: `server-time`. Without it, a time is when the Line arrived.
+- Changes: a Line's `time` tag is when its Message or Activity happened, known from the Ircd, and a topic's time with it. It is read without a clock or a time zone: `YYYY-MM-DDThh:mm:ss.sssZ`, with the milliseconds left out or to any precision up to nine digits, lower-case `t` and `z`, and a leap second, held at the last millisecond of its minute. A date that does not exist, any other form, or no `time` leaves the time of receipt.
+- Scenarios: `tags.test.ts`
+
+### Batches
+
+- Needs: `batch`. Without it, no Line is in a batch.
+- Changes: tracks open batches by reference, with the batch each opened inside, so a Line tagged with an open batch carries it to the later stages, and a batch may nest in another or interleave with it. Lines are read as they arrive, never held back, whatever the type, so a type the Client does not know changes nothing. Closing a batch closes any left open inside it. A `BATCH +` with no type, and a Line tagged with a batch never opened, are in no batch. At most 64 are open at once, and those that never close are dropped when the Connection ends.
+- Scenarios: `batch.test.ts`, with a Feature of its own that treats each Line in a batch as history, to show the core's rule that history does not change the present
+
+### Echoes
+
+- Needs: `labeled-response` and `echo-message`, together. Without both, our Messages are not labelled, `ours.echo` is false, and nothing waits for an echo: an echo that comes anyway is a Message from Self.
+- Changes: each `Say` is sent with the next label of the Connection, `l1`, `l2`, and on, and its Message is reported at once with `ours.echo`. The answer is the one Line with that label, or the batch whose `BATCH +` carries it, with any batch opened inside. Its first `PRIVMSG` or `NOTICE` from Self is the echo, reported as `Confirmed` with the Ircd's time, id, and final text, and the action's text for an `ACTION`. Its first error numeric, `FAIL`, or `ACK` is `Refused` as `Rejected`, with the numeric, the `FAIL`'s code, or `ACK`. A labelled Line that is neither, such as a `WARN`, ends the answer unconfirmed. Answers are matched by label, in any order, and each answers once. At most 64 labels await an answer, and past that the oldest is forgotten and stays unconfirmed, as one the Ircd never answers does. A Message Self sends to itself is told from its echo by the label.
+- Scenarios: `echo.test.ts`
+
+### Member prefixes
+
+- Needs: `multi-prefix`. Without it, a member's prefixes are partial.
+- Changes: a `NAMES` listing shows every prefix, in any order, so a member's prefixes are known, not partial. A symbol `PREFIX` does not name still stands for a prefix that cannot be named, so that member's stay partial. When the cap is deleted, prefixes a listing made known go stale, and the next listing makes them partial again.
+- Scenarios: `prefixes.test.ts`
+
+### Away status
+
+- Needs: `away-notify`. Without it, away status is known only from the `AWAY` Lines an Ircd sends anyway.
+- Changes: the core reads `AWAY` Lines with or without the cap. With it, they keep away status up to date, so when the cap is deleted, every away fact goes stale until an `AWAY` says it again.
+- Scenarios: `away.test.ts`
+
+### UTF-8 only
+
+- Needs: the ISUPPORT token `UTF8ONLY`. Without it, bytes that are not UTF-8 are read with the configured fallback.
+- Changes: bytes are read as UTF-8 with no fallback, so a byte that is not UTF-8 becomes U+FFFD. Nothing leaves that is not UTF-8: text always is, a `Say` that cannot be is `Refused` as `Unsendable`, and a `PING` token that is not UTF-8 is answered with UTF-8 read from it, rather than its bytes. A `005` that takes it back, or the Owner declining it, returns to the fallback.
+- Scenarios: `utf8.test.ts`
 
 ### Recorded Ircds
 
-- The four fixtures in `fixtures/transcripts/` replay through the Client: it registers, joins, and follows the Session. The only `Ignored` is a `CAP ACK` for what the recorder asked and the floor Client did not. `fixtures.test.ts` also folds a long scenario, with reconnects and timers, again in a fresh process.
+- The four fixtures in `fixtures/transcripts/` replay through the Client with nothing `Ignored`: it registers, joins, and follows the Session. On Ergo, it logs in with SASL, reads times and ids from tags, and confirms our Messages by their labelled echoes. ngircd offers only `multi-prefix`, so that alone is on. `fixtures.test.ts` also folds two long scenarios again in a fresh process: one on the floor with reconnects and timers, and one with every Feature on.
 
 ## The test kit
 

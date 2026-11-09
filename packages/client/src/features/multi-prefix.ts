@@ -31,6 +31,10 @@ const complete = (member: MemberKnowledge): MemberKnowledge =>
 export const multiPrefix: Feature = {
   keeps: ["member.prefixes"],
   meaning: (meant, arrival, context) => {
+    if (!meant.some((each) => each._tag === "Listed")) {
+      return { value: meant };
+    }
+
     const rules: ModeRules = {
       channel: channelModesOf(context.token("CHANMODES")),
       prefix: prefixOf(context.token("PREFIX")) ?? defaultPrefix,

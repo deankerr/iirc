@@ -12,7 +12,15 @@ import ergoFloor from "../../../../fixtures/transcripts/ergo/floor.irc?raw";
 import ngircdFeatures from "../../../../fixtures/transcripts/ngircd/first-features.irc?raw";
 import ngircdFloor from "../../../../fixtures/transcripts/ngircd/floor.irc?raw";
 import { client } from "../core.ts";
-import { configured, joined, play, registered, replay, replayFresh } from "../testing/index.ts";
+import {
+  configured,
+  floorIsupport,
+  joined,
+  play,
+  registered,
+  replay,
+  replayFresh,
+} from "../testing/index.ts";
 
 const ergo = (port: number, tls: boolean) => ({ host: "ergo.test", port, tls });
 const ngircd = { host: "ngircd.test", port: 6667, tls: false };
@@ -195,6 +203,97 @@ describe("a long scenario", () => {
 
   it("folds the same in a fresh process", async () => {
     const played = play(client, { configuration: base, transcript: long });
+
+    await expect(
+      replayFresh(client, played.inputs, {
+        module: new URL("../core.ts", import.meta.url),
+        name: "client",
+      })
+    ).resolves.toBeUndefined();
+  });
+});
+
+const login = configured({
+  login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: true },
+});
+
+const everyCap = [
+  "cap-notify",
+  "sasl=PLAIN",
+  "message-tags",
+  "server-time",
+  "batch",
+  "labeled-response",
+  "echo-message",
+  "multi-prefix",
+  "away-notify",
+];
+
+// A Session's worth of traffic with every Feature on: tags, batches, labelled echoes,
+// prefixes, away status, and a cap deleted and offered again.
+const featured = (round: number, from: number): string =>
+  Array.from({ length: 15 }, (_unused, index) => {
+    const label = from + index;
+    const time = `2026-01-01T00:0${round}:${String(index * 3).padStart(2, "0")}.000Z`;
+
+    return lines(
+      "+3s",
+      `<< @msgid=j${round}-${index};time=${time} :peer${index}!u@h JOIN #iirc`,
+      `<< :peer${index}!u@h AWAY :away ${index}`,
+      `<< @msgid=p${round}-${index};time=${time};+draft/reply=x :peer${index}!u@h PRIVMSG #iirc :round ${round} line ${index}`,
+      `<< :irc.test BATCH +b${index} netsplit irc.hub other.host`,
+      `<< @batch=b${index} :irc.test BATCH +n${index} example.com/inner`,
+      `<< @batch=n${index};time=${time} :op!u@h MODE #iirc +v peer${index}`,
+      `<< @batch=b${index} :irc.test BATCH -n${index}`,
+      `<< :irc.test BATCH -b${index}`,
+      `!! say #iirc :reply ${index}`,
+      `>> @label=l${label} PRIVMSG #iirc :reply ${index}`,
+      index % 3 === 0
+        ? `<< @label=l${label} :irc.test BATCH +r${index} labeled-response`
+        : `<< @label=l${label};msgid=e${round}-${index} :iirc!~iirc@iirc.test PRIVMSG #iirc :reply ${index}`,
+      index % 3 === 0 ? `<< @batch=r${index} :irc.test 404 iirc #iirc :Cannot send` : "# echoed",
+      index % 3 === 0 ? `<< :irc.test BATCH -r${index}` : "# answered",
+      `<< :peer${index}!u@h QUIT :bye`,
+      "<< PING :keep",
+      ">> PONG keep"
+    );
+  }).join("") + lines("+60s", ">> PING iirc", "<< :irc.test PONG irc.test iirc");
+
+const everyFeature = [
+  registered(login, { isupport: [...floorIsupport, "UTF8ONLY"], offered: everyCap }),
+  joined(login, "#iirc", ["@+op"]),
+  featured(1, 1),
+  lines(
+    "<< :irc.test CAP iirc DEL :multi-prefix away-notify",
+    "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
+    "<< :irc.test CAP iirc NEW :multi-prefix away-notify",
+    ">> CAP REQ :multi-prefix away-notify",
+    "<< :irc.test CAP iirc ACK :multi-prefix away-notify",
+    "== closed Reset",
+    "+2s",
+    "-> dial irc.test:6697 tls"
+  ),
+  registered(login, { isupport: [...floorIsupport, "UTF8ONLY"], offered: everyCap })
+    .replace(/^!! configure\n-> dial[^\n]*\n/u, "")
+    .replace(/(?<welcome><< :irc\.test 001 [^\n]*\n)/u, "$<welcome>>> JOIN #iirc\n"),
+  lines(
+    "<< :iirc!~iirc@iirc.test JOIN #iirc",
+    "<< :irc.test 353 iirc = #iirc :iirc @+op",
+    "<< :irc.test 366 iirc #iirc :End"
+  ),
+  featured(2, 1),
+];
+
+describe("a long scenario with every Feature on", () => {
+  it("plays, with SASL, echoes, batches, and a reconnect", () => {
+    const played = play(client, { configuration: login, transcript: everyFeature });
+
+    expect(played.inputs.length).toBeGreaterThan(400);
+    expect(client.inspect(played.state).features).toHaveLength(9);
+  });
+
+  it("folds the same in a fresh process", async () => {
+    const played = play(client, { configuration: login, transcript: everyFeature });
 
     await expect(
       replayFresh(client, played.inputs, {

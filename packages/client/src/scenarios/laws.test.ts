@@ -1,20 +1,22 @@
 /**
- * The four laws over the Client and its registry. With no Features on the floor, `inert`
- * and `deactivates` hold trivially, but they run here so that stage 2's Features inherit
- * them by joining the registry.
+ * The four laws over the Client and its registry, across every set of caps `across`
+ * gives: none, each alone, and every pair. `UTF8ONLY` is an ISUPPORT token, not a cap, so
+ * the transcript sends it as a token when the set names it, and the laws treat it as a
+ * cap of the `utf8only` Feature. Deleting it is a `005 -UTF8ONLY`, which `utf8.test.ts`
+ * plays, so `deactivates` ranges over the caps alone.
  */
+import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
-import { client, makeClient } from "../core.ts";
-import type { Feature, Meant } from "../feature.ts";
-import { CapName, FeatureName } from "../ids.ts";
-import type { MemberKnowledge } from "../known.ts";
-import { register, registry } from "../registry.ts";
+import { client } from "../core.ts";
+import { CapName } from "../ids.ts";
+import { registry } from "../registry.ts";
 import type { State } from "../state.ts";
-import type { Subject } from "../testing/index.ts";
+import type { LawFeature, Subject } from "../testing/index.ts";
 import {
   configured,
   deactivates,
+  floorIsupport,
   inert,
   joined,
   refines,
@@ -22,20 +24,58 @@ import {
   replays,
 } from "../testing/index.ts";
 
-const base = configured();
+const base = configured({
+  login: { _tag: "Sasl", account: "iirc", credential: CredentialName.make("pw"), required: false },
+});
 
-const subject: Subject<State> = {
-  caps: ["multi-prefix", "server-time", "away-notify"],
-  client,
-  configuration: base,
-  features: registry,
-  transcript: (caps) =>
-    `${
-      registered(base, { offered: caps }) + joined(base, "#iirc", ["@op", "+voiced", "peer"])
-    }<< :peer!u@h PRIVMSG #iirc :hello\n<< :op!u@h MODE #iirc +o peer\n`,
+const token = CapName.make("UTF8ONLY");
+
+// The laws read a Feature's `needs.caps`, so the token stands in as one.
+const features: readonly LawFeature[] = registry.map((feature) =>
+  feature.needs.tokens === undefined ? feature : { ...feature, needs: { caps: [token] } }
+);
+
+const caps = features.flatMap(({ needs }) => needs.caps ?? []);
+
+// What the Client asks for: the caps of each Feature whose caps are all offered.
+const requested = (offered: readonly string[]): readonly string[] =>
+  registry
+    .filter(({ needs }) => (needs.caps ?? []).every((cap) => offered.includes(cap)))
+    .flatMap(({ needs }) => needs.caps ?? []);
+
+const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
+
+// A Session with something for every Feature to refine: tags, a batch, a labelled echo,
+// prefixes, away status, and bytes that are not UTF-8.
+const transcript = (set: readonly CapName[]): string => {
+  const offered = set.filter((cap) => cap !== token);
+
+  return [
+    registered(base, {
+      isupport: set.includes(token) ? [...floorIsupport, token] : floorIsupport,
+      offered,
+      requested: requested(offered),
+    }),
+    joined(base, "#iirc", ["@+op", "+voiced", "peer"]),
+    lines(
+      "<< @msgid=m1;time=2026-01-01T00:00:00.500Z;+draft/reply=m0 :peer!u@h PRIVMSG #iirc :hello",
+      "<< :irc.test BATCH +b netsplit irc.hub other.host",
+      "<< @batch=b :gone!u@h QUIT :irc.hub other.host",
+      "<< :irc.test BATCH -b",
+      "<< :peer!u@h AWAY :out",
+      "<<\\ :peer!u@h PRIVMSG #iirc :caf\\xe9",
+      "!! say #iirc :hi",
+      "<< @label=l1;msgid=m2 :iirc!~iirc@iirc.test PRIVMSG #iirc :hi",
+      "<< :op!u@h MODE #iirc +v peer"
+    ),
+  ].join("");
 };
 
-describe("the laws", () => {
+const subject: Subject<State> = { caps, client, configuration: base, features, transcript };
+
+// Each law replays the transcript for each of 56 sets of caps, and `inert` and
+// `deactivates` several times over, so they take longer than a scenario.
+describe("the laws, over every Feature", { timeout: 60_000 }, () => {
   it("inert: a Feature that is off changes nothing", () => {
     expect(() => {
       inert(subject);
@@ -56,50 +96,25 @@ describe("the laws", () => {
 
   it("deactivates: after CAP DEL, as if the cap had never been", () => {
     expect(() => {
-      deactivates(subject, {
-        after: () => "+1s\n<< :other!u@h JOIN #iirc\n<< :peer!u@h AWAY :out\n",
-      });
-    }).not.toThrow();
-  });
-});
-
-const complete = (member: MemberKnowledge): MemberKnowledge =>
-  member.prefixes._tag === "Partial"
-    ? {
-        ...member,
-        prefixes: {
-          _tag: "Known",
-          at: member.prefixes.at,
-          from: member.prefixes.from,
-          value: member.prefixes.atLeast,
-        },
-      }
-    : member;
-
-// A Feature as `multi-prefix` will be, to show the laws see through the seam.
-const listing: Feature = {
-  meaning: (meant) => ({
-    value: meant.map((each): Meant =>
-      each._tag === "Listed" ? { ...each, members: each.members.map(complete) } : each
-    ),
-  }),
-  name: FeatureName.make("multi-prefix"),
-  needs: { caps: [CapName.make("multi-prefix")] },
-  own: undefined,
-};
-
-describe("the laws, with a Feature in the registry", () => {
-  const withListing: Subject<State> = {
-    ...subject,
-    client: makeClient([register(listing)]),
-    features: [listing],
-  };
-
-  it("inert, refines, and replays hold", () => {
-    expect(() => {
-      inert(withListing);
-      refines(withListing);
-      replays(withListing);
+      deactivates(
+        { ...subject, caps: caps.filter((cap) => cap !== token) },
+        {
+          after: () =>
+            lines(
+              "+1s",
+              "<< :other!u@h JOIN #iirc",
+              "<< :irc.test 353 iirc = #iirc :iirc @+op other",
+              "<< :irc.test 366 iirc #iirc :End of /NAMES list.",
+              "<< @msgid=m3;time=2026-01-01T00:00:01.500Z :peer!u@h PRIVMSG #iirc :after",
+              "<< :irc.test BATCH +c netsplit irc.hub other.host",
+              "<< @batch=c :other!u@h PRIVMSG #iirc :in a batch",
+              "<< :irc.test BATCH -c",
+              "<< :voiced!u@h AWAY :later",
+              "!! say #iirc :again",
+              "<< @label=l2 :iirc!~iirc@iirc.test PRIVMSG #iirc :again"
+            ),
+        }
+      );
     }).not.toThrow();
   });
 });

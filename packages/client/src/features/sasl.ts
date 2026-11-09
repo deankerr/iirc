@@ -13,7 +13,9 @@
  *   Connection with `LoginFailed` when it is required.
  * - `900` and `901`, which say Self's account, are the core's, whoever logged in.
  *
- * A `CAP NEW` for `sasl` after registration does not log in again.
+ * A `CAP NEW` for `sasl` after registration does not log in again. Self's account is
+ * what a login made known, so when the cap is deleted, it goes stale until a `900` or
+ * `901` says it again.
  *
  * @packageDocumentation
  */
@@ -74,6 +76,7 @@ const running = (exchange: Exchange): boolean =>
 export const saslPlain: Feature<Exchange> = {
   expired: (context) =>
     running(context.own) ? failed(context, line("*")) : { registration: { _tag: "Continue" } },
+  keeps: ["user.account"],
   name: FeatureName.make("sasl"),
   needs: { caps: [sasl] },
   own: idle,
