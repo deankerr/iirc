@@ -2,7 +2,7 @@
 
 The pure IRC client for one Network. It does no I/O and reads no clock. Every input carries its time, and every effect leaves as an output, so the same inputs always give the same states and outputs.
 
-This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. There is no Client behind the interface yet. The XState spike decides its insides.
+This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. There is no Client behind the interface yet. Its machines will be reducers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
 
 ## Callers
 
@@ -88,7 +88,7 @@ A fact's source is `ircd` (said as it happened), `replied` (said in reply to a L
 ## Invariants
 
 - **Pure.** `step` reads no clock, randomness, locale, or time zone, and does no I/O. So it uses no `DateTime`, whose zoned constructors default to the machine's time zone, nothing locale-aware such as `localeCompare`, and no Schema that parses a date in local time, such as `Schema.DateFromString`. The lint fence catches the obvious cases, such as `Date`, `Math.random`, Effect's `Clock` and `Effect`, and Bun or Node. Review catches the rest.
-- **Plain data.** State holds only strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. It never holds a function, a class instance, or a `HashMap` or `HashSet`, because Effect hashes a value by reference with `Math.random`, so their order could differ on replay. Lint cannot see this. The transcript test kit's replay law will check it, run in a fresh process, so that a hash seeded in one run cannot match the next. Until the kit is built, review holds it.
+- **Plain data.** State holds only strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. It never holds a function, a class instance, or a `HashMap` or `HashSet`, because Effect hashes a value by reference with `Math.random`, so their order could differ on replay. Lint cannot see this. The transcript test kit checks it after every scenario, and `replayFresh` folds again in a fresh process, so that a hash seeded in one run cannot match the next.
 - **Total.** `step` never throws, for any input in any state.
 - **Hardened, not tuned.** The Client accepts anything the protocol allows, from any Ircd: a reply at any point it may legally come, tags and names in any order, and optional parts present or absent, such as a trailing colon or a `time` tag. The Ircds we record, such as Ergo and ngircd, show where Ircds differ. They are examples, never the cases to code for, so an Ircd we have never seen still works. What it cannot read is `Ignored`, never fatal.
 - **Exact replay.** Folding the Journal's inputs from `initial` gives the same states, outputs, and News. The Client never reads its outputs back.
@@ -193,4 +193,4 @@ export const awayNotify: Feature = {
 
 ## The test kit
 
-`@iirc/client/testing` holds `scripted(script)`, a Client that answers each expected input with set outputs and ignores anything else. It is for testing the Runtime without a real Client. The transcript test kit described in [the design note](../../docs/notes/2026-11-08-client-interface.md#the-transcript-test-kit) is built with the Client. Production code may not import `@iirc/client/testing`.
+`@iirc/client/testing` holds the transcript test kit, whose written interface is [its README](src/testing/README.md). A scenario is a transcript of IRC that `play` runs through a Client on a fake clock, matching every Line it sends, every `Ignored`, and each News written, and failing with a transcript diff. `replay` feeds a recorded fixture and reports what the Client did. After either, the kit replays the inputs and checks the Invariants "Plain data" and "Exact replay", and `replayFresh` checks them again in a fresh process. Preludes write registration and joins, and the four laws run over every set of caps `across` gives. It also holds `scripted(script)`, a Client that answers each expected input with set outputs and ignores anything else, for testing the Runtime without a real Client. Production code may not import `@iirc/client/testing`.
