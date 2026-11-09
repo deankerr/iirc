@@ -1,0 +1,62 @@
+# ergo floor: no CAP at all.
+# Recorded by `bun run record:transcripts`. Do not edit by hand; re-record instead.
+
+-> dial ergo.test:6667
+== opened
+>> NICK iirc
+>> USER iirc 0 * :iirc transcript spike
+<< :ergo.test 433 * iirc :Nickname is already in use
+>> NICK iirc_
+<< :ergo.test 001 iirc_ :Welcome to the iirc-spike IRC Network iirc_
+<< :ergo.test 002 iirc_ :Your host is ergo.test, running version ergo-2.19.1
+<< :ergo.test 003 iirc_ :This server was created at the epoch
+<< :ergo.test 004 iirc_ ergo.test ergo-2.19.1 BERTZios CEIMRUabefhiklmnoqstuv Iabefhkloqv
+<< :ergo.test 005 iirc_ AWAYLEN=390 BOT=B CASEMAPPING=ascii CHANLIMIT=#:100 CHANMODES=Ibe,k,fl,CEMRUimnstu CHANNELLEN=64 CHANTYPES=# CHATHISTORY=1000 ELIST=U EXCEPTS EXTBAN=,m FORWARD=f INVEX :are supported by this server
+<< :ergo.test 005 iirc_ KICKLEN=390 MAXLIST=beI:100 MAXTARGETS=4 MODES MONITOR=100 MSGREFTYPES=msgid,timestamp NETWORK=iirc-spike NICKLEN=32 PREFIX=(qaohv)~&@%+ SAFELIST SAFERATE STATUSMSG=~&@%+ TARGMAX=NAMES:1,LIST:1,KICK:,WHOIS:1,USERHOST:10,PRIVMSG:4,TAGMSG:4,NOTICE:4,MONITOR:100 :are supported by this server
+<< :ergo.test 005 iirc_ TOPICLEN=390 UTF8ONLY WHOX draft/CHATHISTORY=1000 :are supported by this server
+<< :ergo.test 251 iirc_ :There are 0 users and 2 invisible on 1 server(s)
+<< :ergo.test 252 iirc_ 0 :IRC Operators online
+<< :ergo.test 253 iirc_ 0 :unregistered connections
+<< :ergo.test 254 iirc_ 0 :channels formed
+<< :ergo.test 255 iirc_ :I have 2 clients and 0 servers
+<< :ergo.test 265 iirc_ 2 2 :Current local users 2, max 2
+<< :ergo.test 266 iirc_ 2 2 :Current global users 2, max 2
+<<\ :ergo.test 375 iirc_ :- ergo.test Message of the day -\x20
+<< :ergo.test 372 iirc_ :- iirc transcript spike
+<< :ergo.test 376 iirc_ :End of MOTD command
+<< :ergo.test 221 iirc_ +Zi
+# peer >> NICK peer
++1s
+!! configure +#iirc
+>> JOIN #iirc
+<< :iirc_!~u@127.0.0.1 JOIN #iirc
+<< :ergo.test 353 iirc_ = #iirc :@iirc_
+<< :ergo.test 366 iirc_ #iirc :End of NAMES list
+# peer >> JOIN #iirc
+<< :peer!~u@127.0.0.1 JOIN #iirc
+# peer >> PRIVMSG #iirc :hello from the peer
+<< :peer!~u@127.0.0.1 PRIVMSG #iirc :hello from the peer
+!! say #iirc :hello from iirc
+>> PRIVMSG #iirc :hello from iirc
+# peer >> PRIVMSG iirc_ :psst
++1s
+<< :peer!~u@127.0.0.1 PRIVMSG iirc_ :psst
+!! say peer :psst back
+>> PRIVMSG peer :psst back
+>> NAMES #iirc
+<< :ergo.test 353 iirc_ = #iirc :@iirc_ peer
+<< :ergo.test 366 iirc_ #iirc :End of NAMES list
+>> MODE #iirc
+<< :ergo.test 324 iirc_ #iirc +nt
+<< :ergo.test 329 iirc_ #iirc 1767225600
++1s
+>> PING :iirc-1
+<< :ergo.test PONG ergo.test iirc-1
++10s
+<< PING iirc_
+>> PONG :iirc_
+>> QUIT :bye
+<< :iirc_!~u@127.0.0.1 QUIT :Quit: bye
+<< ERROR :Quit: bye
+== closed Ended
+# peer >> QUIT :bye

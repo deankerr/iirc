@@ -1,0 +1,77 @@
+# ergo first-features: the first Features, with SASL PLAIN over TLS.
+# Recorded by `bun run record:transcripts`. Do not edit by hand; re-record instead.
+
+-> dial ergo.test:6697 tls
+== opened
+>> CAP LS 302
+>> NICK iirc
+>> USER iirc 0 * :iirc transcript spike
+<< :ergo.test CAP * LS * :account-notify account-tag away-notify batch cap-notify chghost draft/account-registration=before-connect draft/channel-rename draft/chathistory draft/event-playback draft/extended-isupport draft/languages=1,en draft/multiline=max-bytes=4096,max-lines=100 draft/persistence draft/pre-away draft/read-marker draft/whoami echo-message ergo.chat/nope extended-join extended-monitor invite-notify labeled-response message-tags multi-prefix no-implicit-names sasl=PLAIN,EXTERNAL,SCRAM-SHA-256
+<< :ergo.test CAP * LS :server-time setname standard-replies userhost-in-names znc.in/playback znc.in/self-message
+>> CAP REQ :multi-prefix message-tags server-time cap-notify sasl echo-message labeled-response batch
+<< @time=2026-01-01T00:00:00.000Z :ergo.test CAP * ACK :multi-prefix message-tags server-time cap-notify sasl echo-message labeled-response batch
+>> AUTHENTICATE PLAIN
+<< AUTHENTICATE +
+>> AUTHENTICATE {AuthenticatePlain iirc}
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 900 * * iirc :You are now logged in as iirc
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 903 * :Authentication successful
+>> CAP END
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 433 * iirc :Nickname is already in use
+>> NICK iirc_
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 001 iirc_ :Welcome to the iirc-spike IRC Network iirc_
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 002 iirc_ :Your host is ergo.test, running version ergo-2.19.1
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 003 iirc_ :This server was created at the epoch
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 004 iirc_ ergo.test ergo-2.19.1 BERTZios CEIMRUabefhiklmnoqstuv Iabefhkloqv
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 005 iirc_ AWAYLEN=390 BOT=B CASEMAPPING=ascii CHANLIMIT=#:100 CHANMODES=Ibe,k,fl,CEMRUimnstu CHANNELLEN=64 CHANTYPES=# CHATHISTORY=1000 ELIST=U EXCEPTS EXTBAN=,m FORWARD=f INVEX :are supported by this server
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 005 iirc_ KICKLEN=390 MAXLIST=beI:100 MAXTARGETS=4 MODES MONITOR=100 MSGREFTYPES=msgid,timestamp NETWORK=iirc-spike NICKLEN=32 PREFIX=(qaohv)~&@%+ SAFELIST SAFERATE STATUSMSG=~&@%+ TARGMAX=NAMES:1,LIST:1,KICK:,WHOIS:1,USERHOST:10,PRIVMSG:4,TAGMSG:4,NOTICE:4,MONITOR:100 :are supported by this server
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 005 iirc_ TOPICLEN=390 UTF8ONLY WHOX draft/CHATHISTORY=1000 :are supported by this server
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 251 iirc_ :There are 0 users and 2 invisible on 1 server(s)
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 252 iirc_ 0 :IRC Operators online
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 253 iirc_ 0 :unregistered connections
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 254 iirc_ 0 :channels formed
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 255 iirc_ :I have 2 clients and 0 servers
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 265 iirc_ 2 2 :Current local users 2, max 2
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 266 iirc_ 2 2 :Current global users 2, max 2
+<<\ @time=2026-01-01T00:00:00.000Z :ergo.test 375 iirc_ :- ergo.test Message of the day -\x20
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 372 iirc_ :- iirc transcript spike
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 376 iirc_ :End of MOTD command
+<< @time=2026-01-01T00:00:00.000Z :ergo.test 221 iirc_ +Zi
+# peer >> NICK peer
++1s
+!! configure +#iirc
+>> JOIN #iirc
+<< @msgid=m1;time=2026-01-01T00:00:01.000Z :iirc_!~u@127.0.0.1 JOIN #iirc
+<< @time=2026-01-01T00:00:01.000Z :ergo.test 353 iirc_ = #iirc :@iirc_
+<< @time=2026-01-01T00:00:01.000Z :ergo.test 366 iirc_ #iirc :End of NAMES list
+# peer >> JOIN #iirc
+<< @msgid=m2;time=2026-01-01T00:00:01.000Z :peer!~u@127.0.0.1 JOIN #iirc
+# peer >> PRIVMSG #iirc :hello from the peer
+<< @msgid=m3;time=2026-01-01T00:00:01.000Z :peer!~u@127.0.0.1 PRIVMSG #iirc :hello from the peer
+!! say #iirc :hello from iirc
+>> @label=l1 PRIVMSG #iirc :hello from iirc
+<< @label=l1;msgid=m4;time=2026-01-01T00:00:01.000Z :iirc_!~u@127.0.0.1 PRIVMSG #iirc :hello from iirc
+# peer >> PRIVMSG iirc_ :psst
++1s
+<< @msgid=m5;time=2026-01-01T00:00:02.000Z :peer!~u@127.0.0.1 PRIVMSG iirc_ :psst
+!! say peer :psst back
+>> @label=l2 PRIVMSG peer :psst back
+<< @label=l2;msgid=m6;time=2026-01-01T00:00:02.000Z :iirc_!~u@127.0.0.1 PRIVMSG peer :psst back
+>> @label=l3 NAMES #iirc
+<< @label=l3 :ergo.test BATCH +b1 labeled-response
+<< @batch=b1;time=2026-01-01T00:00:02.000Z :ergo.test 353 iirc_ = #iirc :@iirc_ peer
+<< @batch=b1;time=2026-01-01T00:00:02.000Z :ergo.test 366 iirc_ #iirc :End of NAMES list
+<< :ergo.test BATCH -b1
+>> MODE #iirc
+<< @time=2026-01-01T00:00:02.000Z :ergo.test 324 iirc_ #iirc +nt
+<< @time=2026-01-01T00:00:02.000Z :ergo.test 329 iirc_ #iirc 1767225600
++1s
+>> PING :iirc-1
+<< @time=2026-01-01T00:00:03.000Z :ergo.test PONG ergo.test iirc-1
++10s
+<< @time=2026-01-01T00:00:13.000Z PING iirc_
+>> PONG :iirc_
+>> QUIT :bye
+<< @time=2026-01-01T00:00:13.000Z :iirc_!~u@127.0.0.1 QUIT :Quit: bye
+<< ERROR :Quit: bye
+== closed Ended
+# peer >> QUIT :bye

@@ -22,7 +22,7 @@ LinkEvent = Opened | Received { bytes } | Closed { reason: CloseReason }
 ```
 
 - **It never fails.** A refused, unreachable, or timed-out dial, a TLS failure, a reset, and a stalled write all end as `Closed` with a reason. The Runtime journals that as a `Closed` input.
-- **Events come in order.** At most one `Opened`, then any number of `Received`, then exactly one `Closed`, and then the stream ends. A failed dial gives `Closed` with no `Opened`. `events` is read once.
+- **Events come in order.** At most one `Opened`, then any number of `Received`, then exactly one `Closed`, and then the stream ends. A failed dial gives `Closed` with no `Opened`. Over TLS, `Opened` comes after the handshake. `events` is read once.
 - **It frames Lines.** `Received` holds one Line's bytes without its line ending. A Line ends at LF, with one CR before it removed. Empty Lines are skipped. A Line longer than `maxReceivedBytes` (8191 tag bytes plus 510) is cut to that length, and the rest of it is dropped. An unfinished Line when the Connection ends is dropped. The laws check skipping and cutting through `TestCall.say`. A byte-level adapter also tests its framing directly: a line ending split across reads, several Lines in one read, and an unfinished Line at the end.
 - **It decodes nothing.** Bytes go to the Client as they came, so a parser fix repairs history on replay (ADR 0002).
 - **`send` writes one Line's bytes,** line ending included. Before `Opened` or after `Closed`, it does nothing.

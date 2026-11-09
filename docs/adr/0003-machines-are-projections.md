@@ -1,6 +1,6 @@
 # Machines are projections
 
-**Under review, 2026-11-08.** The [architecture proposal](../notes/2026-11-07-architecture-proposal.md) re-examines XState 5's pure `transition` for control flow, and replaces Deadline Entries with timers that the Client asks for as outputs. A pure step whose state is rebuilt from the Journal still stands. The XState spike decides what replaces this ADR.
+**Superseded by [ADR 0009](0009-client-machines-are-reducers.md), 2026-11-09.** The machines stay reducers, as here, but timers are outputs the Client asks for, not Deadline Entries. [The XState spike](../notes/2026-11-09-xstate-spike.md) has the evidence.
 
 A Network's lifecycle machine is a pure fold over Entries, written as a plain reducer, and it holds no timers. Running it as a live actor was the obvious choice, but an actor's state and timers would be a second truth beside the Journal, and could not be rebuilt after a crash or read at a past sequence. As a fold, status and `/state?at=` are the same computation, and a machine steps inside the append transaction.
 

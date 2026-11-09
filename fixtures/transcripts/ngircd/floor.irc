@@ -1,0 +1,63 @@
+# ngircd floor: no CAP at all.
+# Recorded by `bun run record:transcripts`. Do not edit by hand; re-record instead.
+
+-> dial ngircd.test:6667
+== opened
+>> NICK iirc
+>> USER iirc 0 * :iirc transcript spike
+<< :ngircd.test 433 * iirc :Nickname already in use
+>> NICK iirc_
++2s
+<< :ngircd.test 001 iirc_ :Welcome to the Internet Relay Network iirc_!~iirc@127.0.0.1
+<< :ngircd.test 002 iirc_ :Your host is ngircd.test, running version ngircd-28 (x86_64/redhat/linux-gnu)
+<< :ngircd.test 003 iirc_ :This server was created at the epoch
+<< :ngircd.test 004 iirc_ ngircd.test ngircd-28 abBcCFiIoqrRswx abehiIklmMnoOPqQrRstvVz
+<< :ngircd.test 005 iirc_ RFC2812 IRCD=ngIRCd CHARSET=UTF-8 CASEMAPPING=ascii PREFIX=(qaohv)~&@%+ CHANTYPES=#&+ CHANMODES=beI,k,l,imMnOPQRstVz CHANLIMIT=#&+:10 :are supported on this server
+<< :ngircd.test 005 iirc_ CHANNELLEN=50 NICKLEN=9 TOPICLEN=399 AWAYLEN=127 KICKLEN=399 MODES=5 MAXLIST=beI:50 EXCEPTS=e INVEX=I PENALTY FNC :are supported on this server
+<< :ngircd.test 251 iirc_ :There are 2 users and 0 services on 1 servers
+<< :ngircd.test 254 iirc_ 1 :channels formed
+<< :ngircd.test 255 iirc_ :I have 2 users, 0 services and 0 servers
+<< :ngircd.test 265 iirc_ 2 2 :Current local users: 2, Max: 2
+<< :ngircd.test 266 iirc_ 2 2 :Current global users: 2, Max: 2
+<< :ngircd.test 250 iirc_ :Highest connection count: 2
+<< :ngircd.test 375 iirc_ :- ngircd.test message of the day
+<< :ngircd.test 372 iirc_ :- iirc transcript spike
+<< :ngircd.test 376 iirc_ :End of MOTD command
+# peer >> NICK peer
++1s
+!! configure +#iirc
+>> JOIN #iirc
+<< :iirc_!~iirc@127.0.0.1 JOIN :#iirc
+<< :ngircd.test 353 iirc_ = #iirc :@iirc_
+<< :ngircd.test 366 iirc_ #iirc :End of NAMES list
+# peer >> JOIN #iirc
++1s
+<< :peer!~iirc@127.0.0.1 JOIN :#iirc
+# peer >> PRIVMSG #iirc :hello from the peer
++1s
+<< :peer!~iirc@127.0.0.1 PRIVMSG #iirc :hello from the peer
+!! say #iirc :hello from iirc
+>> PRIVMSG #iirc :hello from iirc
+# peer >> PRIVMSG iirc_ :psst
+<< :peer!~iirc@127.0.0.1 PRIVMSG iirc_ :psst
+!! say peer :psst back
+>> PRIVMSG peer :psst back
++1s
+>> NAMES #iirc
+<< :ngircd.test 353 iirc_ = #iirc :@iirc_ peer
+<< :ngircd.test 366 iirc_ #iirc :End of NAMES list
+>> MODE #iirc
++1s
+<< :ngircd.test 324 iirc_ #iirc +
+<< :ngircd.test 329 iirc_ #iirc 1767225603
+>> PING :iirc-1
++1s
+<< :ngircd.test PONG ngircd.test :iirc-1
++11s
+<< PING :ngircd.test
+>> PONG :ngircd.test
+>> QUIT :bye
+<< :ngircd.test NOTICE iirc_ :Connection statistics: client 0.2 kb, server 1.7 kb.
+<< ERROR :Closing connection: iirc_[~iirc@127.0.0.1] ("bye")
+== closed Ended
+# peer >> QUIT :bye

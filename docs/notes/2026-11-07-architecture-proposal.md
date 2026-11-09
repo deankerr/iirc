@@ -10,6 +10,8 @@ Status: proposal, 2026-11-07, revised 2026-11-08 after a first review. It decide
 - **IRCv3 is in the design now,** with a first set of Features chosen to exercise the extension mechanism (§3, "The first Features").
 - **Features under modules replace requirements.** Each module grows by progressive enhancement from its floor (§10). The central requirements list and roadmap are gone.
 - **Milestone 2's code is not an interface to stay compatible with.** It is salvaged only by deliberate porting (§11).
+- **The Client's machines are reducers (2026-11-09).** [The XState spike](2026-11-09-xstate-spike.md) found that XState's pure `transition` fits behind `step` but does not earn its place, so [ADR 0009](../adr/0009-client-machines-are-reducers.md) keeps plain reducers, with timers derived from state. §6 is settled by it.
+- **Transcripts are a projection of the Journal (2026-11-09).** [The transcript spike](2026-11-09-transcript-spike.md) fixed the fixture format and recorded Ergo and ngircd. The real recorder is the Daemon run against a private Ircd, with its Journal printed through a normaliser. Recorded Ircds are examples of what the protocol allows, not the cases to code for.
 
 ## In brief
 
