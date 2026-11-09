@@ -1,0 +1,321 @@
+# IRC formatting vectors (MSG-3), after https://modern.ircdocs.horse/formatting
+#
+# `input` is the text of a Message. `spans` are the runs of text that should come out,
+# in order, each with the style in force. A style key that is left out is off, and a
+# colour that is left out is the default.
+#   * bold, italic, underline, strikethrough, monospace, reverse: true
+#   * fg, bg: { palette: 0 to 98 } or { hex: six lower-case digits }
+# `plain` is the text with every code removed.
+
+tests:
+  # no codes
+  - name: plain text is one span
+    input: "hello world"
+    spans:
+      - { text: "hello world" }
+    plain: "hello world"
+
+  - name: empty text has no spans
+    input: ""
+    spans: []
+    plain: ""
+
+  - name: other control characters are text
+    input: "a\x00\x01\x07\x7fb"
+    spans:
+      - { text: "a\x00\x01\x07\x7fb" }
+    plain: "a\x00\x01\x07\x7fb"
+
+  - name: astral characters survive
+    input: "\U0001F600\x02\U0001F600"
+    spans:
+      - { text: "\U0001F600" }
+      - { text: "\U0001F600", bold: true }
+    plain: "\U0001F600\U0001F600"
+
+  # toggles
+  - name: bold toggles on and off
+    input: "a\x02b\x02c"
+    spans:
+      - { text: a }
+      - { text: b, bold: true }
+      - { text: c }
+    plain: abc
+
+  - name: italic toggles on and off
+    input: "a\x1db\x1dc"
+    spans:
+      - { text: a }
+      - { text: b, italic: true }
+      - { text: c }
+    plain: abc
+
+  - name: underline toggles on and off
+    input: "a\x1fb\x1fc"
+    spans:
+      - { text: a }
+      - { text: b, underline: true }
+      - { text: c }
+    plain: abc
+
+  - name: strikethrough toggles on and off
+    input: "a\x1eb\x1ec"
+    spans:
+      - { text: a }
+      - { text: b, strikethrough: true }
+      - { text: c }
+    plain: abc
+
+  - name: monospace toggles on and off
+    input: "a\x11b\x11c"
+    spans:
+      - { text: a }
+      - { text: b, monospace: true }
+      - { text: c }
+    plain: abc
+
+  - name: reverse toggles on and off, and swaps no colours
+    input: "\x0304,12a\x16b\x16c"
+    spans:
+      - { text: a, fg: { palette: 4 }, bg: { palette: 12 } }
+      - { text: b, fg: { palette: 4 }, bg: { palette: 12 }, reverse: true }
+      - { text: c, fg: { palette: 4 }, bg: { palette: 12 } }
+    plain: abc
+
+  - name: toggles stack
+    input: "\x02\x1ditalic bold\x02 italic"
+    spans:
+      - { text: "italic bold", bold: true, italic: true }
+      - { text: " italic", italic: true }
+    plain: "italic bold italic"
+
+  - name: a toggle left on lasts to the end
+    input: "a\x02b"
+    spans:
+      - { text: a }
+      - { text: b, bold: true }
+    plain: ab
+
+  - name: two toggles in a row cancel, and the text joins
+    input: "a\x02\x02b"
+    spans:
+      - { text: ab }
+    plain: ab
+
+  # reset
+  - name: reset clears toggles and colours
+    input: "\x0304\x02\x1da\x0fb"
+    spans:
+      - { text: a, bold: true, italic: true, fg: { palette: 4 } }
+      - { text: b }
+    plain: ab
+
+  - name: reset with nothing on changes nothing
+    input: "a\x0fb"
+    spans:
+      - { text: ab }
+    plain: ab
+
+  # colour
+  - name: foreground with two digits
+    input: "\x0304red"
+    spans:
+      - { text: red, fg: { palette: 4 } }
+    plain: red
+
+  - name: foreground with one digit
+    input: "\x034red"
+    spans:
+      - { text: red, fg: { palette: 4 } }
+    plain: red
+
+  - name: foreground and background
+    input: "\x0304,12red on blue"
+    spans:
+      - { text: "red on blue", fg: { palette: 4 }, bg: { palette: 12 } }
+    plain: "red on blue"
+
+  - name: foreground and background with one digit each
+    input: "\x033,4x"
+    spans:
+      - { text: x, fg: { palette: 3 }, bg: { palette: 4 } }
+    plain: x
+
+  - name: colour 00 is white, not the default
+    input: "\x0300w"
+    spans:
+      - { text: w, fg: { palette: 0 } }
+    plain: w
+
+  - name: a third digit is text
+    input: "\x03123"
+    spans:
+      - { text: "3", fg: { palette: 12 } }
+    plain: "3"
+
+  - name: a third digit of the background is text
+    input: "\x0304,123"
+    spans:
+      - { text: "3", fg: { palette: 4 }, bg: { palette: 12 } }
+    plain: "3"
+
+  - name: a space ends a one-digit foreground
+    input: "\x034 5"
+    spans:
+      - { text: " 5", fg: { palette: 4 } }
+    plain: " 5"
+
+  - name: the next digit is part of the foreground, because two are always read
+    input: "\x0345x"
+    spans:
+      - { text: x, fg: { palette: 45 } }
+    plain: x
+
+  - name: a bare code resets both colours
+    input: "\x0304,12a\x03b"
+    spans:
+      - { text: a, fg: { palette: 4 }, bg: { palette: 12 } }
+      - { text: b }
+    plain: ab
+
+  - name: a bare code with a comma resets both colours and shows the comma
+    input: "\x0304,12a\x03,b"
+    spans:
+      - { text: a, fg: { palette: 4 }, bg: { palette: 12 } }
+      - { text: ",b" }
+    plain: "a,b"
+
+  - name: a comma with no digit after it is text
+    input: "\x0312,x"
+    spans:
+      - { text: ",x", fg: { palette: 12 } }
+    plain: ",x"
+
+  - name: a comma at the end is text
+    input: "\x0312,"
+    spans:
+      - { text: ",", fg: { palette: 12 } }
+    plain: ","
+
+  - name: a comma and digit with no foreground is text, after a reset
+    input: "\x0304a\x03,12"
+    spans:
+      - { text: a, fg: { palette: 4 } }
+      - { text: ",12" }
+    plain: "a,12"
+
+  - name: a new foreground leaves the background
+    input: "\x0304,12a\x0305b"
+    spans:
+      - { text: a, fg: { palette: 4 }, bg: { palette: 12 } }
+      - { text: b, fg: { palette: 5 }, bg: { palette: 12 } }
+    plain: ab
+
+  - name: colour 99 is the default
+    input: "\x0304,12a\x0399,99b"
+    spans:
+      - { text: a, fg: { palette: 4 }, bg: { palette: 12 } }
+      - { text: b }
+    plain: ab
+
+  - name: colour 99 as the foreground alone leaves the background
+    input: "\x0304,12a\x0399b"
+    spans:
+      - { text: a, fg: { palette: 4 }, bg: { palette: 12 } }
+      - { text: b, bg: { palette: 12 } }
+    plain: ab
+
+  - name: toggles survive a colour change
+    input: "\x02\x0304a\x0305b"
+    spans:
+      - { text: a, bold: true, fg: { palette: 4 } }
+      - { text: b, bold: true, fg: { palette: 5 } }
+    plain: ab
+
+  - name: the same colour twice joins the text
+    input: "\x0304a\x0304b"
+    spans:
+      - { text: ab, fg: { palette: 4 } }
+    plain: ab
+
+  # hex colour
+  - name: hex foreground
+    input: "\x04FF0000red"
+    spans:
+      - { text: red, fg: { hex: ff0000 } }
+    plain: red
+
+  - name: hex foreground and background
+    input: "\x04ff0000,00FF00x"
+    spans:
+      - { text: x, fg: { hex: ff0000 }, bg: { hex: 00ff00 } }
+    plain: x
+
+  - name: hex colours mix with palette colours
+    input: "\x0304a\x04112233,445566b\x0305c"
+    spans:
+      - { text: a, fg: { palette: 4 } }
+      - { text: b, fg: { hex: "112233" }, bg: { hex: "445566" } }
+      - { text: c, fg: { palette: 5 }, bg: { hex: "445566" } }
+    plain: abc
+
+  - name: a bare hex code resets both colours
+    input: "\x04ff0000,00ff00a\x04b"
+    spans:
+      - { text: a, fg: { hex: ff0000 }, bg: { hex: 00ff00 } }
+      - { text: b }
+    plain: ab
+
+  - name: five hex digits are not a colour, so the code resets and the digits are text
+    input: "\x0304a\x04ff000-"
+    spans:
+      - { text: a, fg: { palette: 4 } }
+      - { text: ff000- }
+    plain: aff000-
+
+  - name: only six hex digits are read
+    input: "\x04ff0000ff"
+    spans:
+      - { text: ff, fg: { hex: ff0000 } }
+    plain: ff
+
+  - name: a hex comma with no colour after it is text
+    input: "\x04ff0000,zz"
+    spans:
+      - { text: ",zz", fg: { hex: ff0000 } }
+    plain: ",zz"
+
+  - name: a short hex background is text
+    input: "\x04ff0000,00ffa"
+    spans:
+      - { text: ",00ffa", fg: { hex: ff0000 } }
+    plain: ",00ffa"
+
+  # codes at the end
+  - name: a toggle at the end is dropped
+    input: "a\x02"
+    spans:
+      - { text: a }
+    plain: a
+
+  - name: a colour code at the end is dropped
+    input: "a\x0304"
+    spans:
+      - { text: a }
+    plain: a
+
+  - name: a bare colour code alone leaves nothing
+    input: "\x03"
+    spans: []
+    plain: ""
+
+  - name: a hex code at the end is dropped
+    input: "a\x04"
+    spans:
+      - { text: a }
+    plain: a
+
+  - name: only codes leave nothing
+    input: "\x02\x0304,12\x0f\x16"
+    spans: []
+    plain: ""
