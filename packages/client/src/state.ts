@@ -103,6 +103,8 @@ type LinkPhase =
       readonly seam: Seam;
       /** Whether the Ircd has sent `ERROR`, which says it is closing the Connection. */
       readonly error: boolean;
+      /** Whether a `903` arrived, live, on this Connection: Self logged in. */
+      readonly loggedIn: boolean;
       /** What Lines have shown of other Users, by folded nick, while they share a Channel with Self. */
       readonly users: ReadonlyMap<string, Seen>;
     };

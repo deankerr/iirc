@@ -10,6 +10,7 @@
 import { CredentialName, SecretLine } from "@iirc/protocol/line";
 import { Result, Schema } from "effect";
 
+import type { Login } from "../configuration.ts";
 import { FeatureName } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
 import type { SayKind } from "../input.ts";
@@ -31,7 +32,12 @@ export type Change =
   /** `decline=multi-prefix`: the Owner turns a Feature off. */
   | { readonly _tag: "Decline"; readonly feature: FeatureName }
   /** `accept=multi-prefix`: the Owner stops declining a Feature. */
-  | { readonly _tag: "Accept"; readonly feature: FeatureName };
+  | { readonly _tag: "Accept"; readonly feature: FeatureName }
+  /**
+   * `login=none`, or `login=required,iirc,pw` and `login=optional,iirc,pw`: how Self logs
+   * in, with the account and the Credential's name.
+   */
+  | { readonly _tag: "Login"; readonly login: Login };
 
 /** What the Owner does, written after `!!`. */
 export type Owner =
@@ -366,6 +372,49 @@ const sayVerbs: Readonly<Record<SayKind, string>> = {
   Privmsg: "say",
 };
 
+// `none`, or `required,<account>,<credential>` or `optional,<account>,<credential>`.
+const readLogin = (text: string): Login | undefined => {
+  if (text === "none") {
+    return { _tag: "None" };
+  }
+
+  const [kind, account, credential, ...rest] = text.split(",");
+
+  return (kind === "required" || kind === "optional") &&
+    account !== undefined &&
+    account !== "" &&
+    credential !== undefined &&
+    credential !== "" &&
+    rest.length === 0
+    ? {
+        _tag: "Sasl",
+        account,
+        credential: CredentialName.make(credential),
+        required: kind === "required",
+      }
+    : undefined;
+};
+
+// A change that is a setting rather than a Channel: `enable`, `disable`, `decline=`,
+// `accept=`, or `login=`.
+const readSetting = (token: string): Change | undefined => {
+  if (token === "enable" || token === "disable") {
+    return { _tag: token === "enable" ? "Enable" : "Disable" };
+  }
+
+  if (token.length > 8 && token.startsWith("decline=")) {
+    return { _tag: "Decline", feature: FeatureName.make(token.slice(8)) };
+  }
+
+  if (token.length > 7 && token.startsWith("accept=")) {
+    return { _tag: "Accept", feature: FeatureName.make(token.slice(7)) };
+  }
+
+  const login = token.startsWith("login=") ? readLogin(token.slice(6)) : undefined;
+
+  return login === undefined ? undefined : { _tag: "Login", login };
+};
+
 const readChanges = (tokens: readonly string[]): Result.Result<readonly Change[], string> => {
   const changes: Change[] = [];
 
@@ -383,14 +432,14 @@ const readChanges = (tokens: readonly string[]): Result.Result<readonly Change[]
       changes.push({ _tag: "Join", channel: token.slice(1), key: undefined });
     } else if (token.length > 1 && token.startsWith("-")) {
       changes.push({ _tag: "Part", channel: token.slice(1) });
-    } else if (token === "enable" || token === "disable") {
-      changes.push({ _tag: token === "enable" ? "Enable" : "Disable" });
-    } else if (token.length > 8 && token.startsWith("decline=")) {
-      changes.push({ _tag: "Decline", feature: FeatureName.make(token.slice(8)) });
-    } else if (token.length > 7 && token.startsWith("accept=")) {
-      changes.push({ _tag: "Accept", feature: FeatureName.make(token.slice(7)) });
     } else {
-      return Result.fail(`not a change to a Configuration: \`${token}\``);
+      const change = readSetting(token);
+
+      if (change === undefined) {
+        return Result.fail(`not a change to a Configuration: \`${token}\``);
+      }
+
+      changes.push(change);
     }
   }
 
@@ -423,6 +472,14 @@ const writeChange = (change: Change): string => {
 
     case "Accept": {
       return `accept=${change.feature}`;
+    }
+
+    case "Login": {
+      const { login } = change;
+
+      return login._tag === "None"
+        ? "login=none"
+        : `login=${login.required ? "required" : "optional"},${login.account},${login.credential}`;
     }
 
     default: {

@@ -83,6 +83,21 @@ const isRequired = (context: Context<Exchange>): boolean => {
   return login._tag === "Sasl" && login.required;
 };
 
+// Begins a login, while registering, if the Configuration names one and PLAIN is offered.
+const begin = (context: Context<Exchange>): Effects<Exchange> => {
+  const { login } = context.configuration;
+
+  if (login._tag !== "Sasl" || context.known.session._tag !== "Registering") {
+    return {};
+  }
+
+  if (!offersPlain(context.cap(sasl))) {
+    return failed(context);
+  }
+
+  return { own: { _tag: "Asked" }, registration: { _tag: "Hold" }, send: line("PLAIN") };
+};
+
 /** The `sasl` Feature, with `PLAIN`. */
 export const saslPlain: Feature<Exchange> = {
   // Off while registering, with a login required and none made: give up.
@@ -92,6 +107,9 @@ export const saslPlain: Feature<Exchange> = {
     context.own._tag !== "LoggedIn"
       ? { own: notLoggedIn, registration: { _tag: "Abandon", reason: { _tag: "LoginFailed" } } }
       : {},
+  // A login the Configuration now names, before `CAP END`, begins if it is not under way.
+  configured: (context) =>
+    context.own._tag === "Idle" || context.own._tag === "Failed" ? begin(context) : {},
   // The deadline passed, `001` came, or the cap was deleted: abort, if it can be heard.
   expired: (context) =>
     running(context.own)
@@ -142,19 +160,7 @@ export const saslPlain: Feature<Exchange> = {
       ],
     };
   },
-  start: (context) => {
-    const { login } = context.configuration;
-
-    if (login._tag !== "Sasl" || context.known.session._tag !== "Registering") {
-      return {};
-    }
-
-    if (!offersPlain(context.cap(sasl))) {
-      return failed(context);
-    }
-
-    return { own: { _tag: "Asked" }, registration: { _tag: "Hold" }, send: line("PLAIN") };
-  },
+  start: (context) => begin(context),
   unfilled: (secret, context) =>
     secret._tag === "AuthenticatePlain" && running(context.own) ? failed(context, line("*")) : {},
 };

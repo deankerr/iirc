@@ -36,6 +36,7 @@ import {
   carryOut,
   carryOutRefined,
   expire,
+  reconfigured,
   recompute,
   settle,
   unfilled,
@@ -125,6 +126,10 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
   const { network } = run.state;
 
   run.state = { ...run.state, configuration };
+
+  // A login it now requires must happen, or the Connection is given up before anything
+  // else is sent.
+  reconfigured(run);
 
   // Disabling hangs up first, so nothing this Configuration also asks for is sent after
   // the `QUIT`.

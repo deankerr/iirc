@@ -25,7 +25,9 @@ import { Instant } from "./ids.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { applyModes, readModes } from "./modes.ts";
 import {
+  abandon,
   capLine,
+  loginOwed,
   carryOutRefined,
   nickRefused,
   offered,
@@ -204,8 +206,12 @@ const welcome = (run: Run, line: Line): void => {
 
   welcomed(run);
 
-  // A Feature gave up the Connection, such as a required login that did not happen:
-  // registration is not taken up.
+  // A login the Configuration requires never happened: give up, and take up no Session.
+  if (linkOf(run)?.closing === undefined && loginOwed(run)) {
+    abandon(run, { _tag: "LoginFailed" });
+  }
+
+  // A Feature, or the login rule, gave up the Connection: registration is not taken up.
   if (linkOf(run)?.closing !== undefined) {
     return;
   }
@@ -390,6 +396,12 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
       } else {
         account(run, name);
       }
+    },
+  ],
+  [
+    "903",
+    (run) => {
+      updateOpen(run, (open) => ({ ...open, loggedIn: true }));
     },
   ],
   [

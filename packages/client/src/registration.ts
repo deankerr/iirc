@@ -146,6 +146,7 @@ export const begin = (run: Run): void => {
     caps: { _tag: "Listing", offered: new Map() },
     error: false,
     isupport: new Map(),
+    loggedIn: false,
     opened: run.at,
     presence: {
       _tag: "Registering",
@@ -196,11 +197,11 @@ export const offered = (run: Run): string | undefined => {
 };
 
 /**
- * Gives up the Connection, as a Feature asked: `QUIT`, then `Hangup`.
+ * Gives up the Connection, as a Feature or the login rule asked: `QUIT`, then `Hangup`.
  * @param run - The step.
  * @param reason - Why, as `Closed` will report it.
  */
-const abandon = (run: Run, reason: EndReason): void => {
+export const abandon = (run: Run, reason: EndReason): void => {
   if (linkOf(run)?.closing === undefined) {
     send(run, quit(), "QUIT");
   }
@@ -453,6 +454,48 @@ export const recompute = (run: Run, was: Before): void => {
   runHook(run, started, (feature, context) => feature.start?.(context));
 };
 
+/**
+ * Whether the Configuration in force requires a login that has not happened on this
+ * Connection: no `903` arrived. Until one does, no Session begins and nothing is sent
+ * past registration.
+ * @param run - The step.
+ * @returns Whether the login is still owed.
+ */
+export const loginOwed = (run: Run): boolean => {
+  const login = run.state.configuration?.login;
+
+  return login?._tag === "Sasl" && login.required && openOf(run.state)?.loggedIn === false;
+};
+
+/**
+ * A `Configured` arrived. While negotiation is still open before `CAP END`, Features hear
+ * it, so SASL can begin a login the Configuration now names. If it now requires a login
+ * that cannot happen any longer, because a Session began, `CAP END` was sent, or the
+ * Ircd has no cap negotiation, the Connection is given up.
+ * @param run - The step.
+ */
+export const reconfigured = (run: Run): void => {
+  const open = openOf(run.state);
+
+  if (open === undefined || linkOf(run)?.closing !== undefined) {
+    return;
+  }
+
+  const { caps, presence } = open;
+  const registering = presence._tag === "Registering";
+  const negotiating = registering && (caps._tag === "Requesting" || caps._tag === "Holding");
+
+  if (negotiating) {
+    runHook(run, onNow(run.registry, run.state), (feature, context) =>
+      feature.configured?.(context)
+    );
+  }
+
+  if (loginOwed(run) && !negotiating && !(registering && caps._tag === "Listing")) {
+    abandon(run, { _tag: "LoginFailed" });
+  }
+};
+
 // Whether negotiation is waiting for nothing more.
 const isDone = (caps: Caps): caps is Extract<Caps, { readonly enabled: ReadonlySet<CapName> }> =>
   ((caps._tag === "Requesting" || caps._tag === "Changing") && caps.asked <= 0) ||
@@ -501,6 +544,13 @@ export const settle = (run: Run): void => {
   const after = openOf(run.state);
 
   if (after === undefined || linkOf(run)?.closing !== undefined || !isDone(after.caps)) {
+    return;
+  }
+
+  // A login owed and none under way: registration may not end without it.
+  if (loginOwed(run)) {
+    abandon(run, { _tag: "LoginFailed" });
+
     return;
   }
 

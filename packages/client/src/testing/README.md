@@ -56,6 +56,7 @@ The changes `!! configure` takes, separated by one space:
 | `-#iirc` | Part a Channel. |
 | `enable`, `disable` | Turn the Network on or off. |
 | `decline=multi-prefix`, `accept=multi-prefix` | Decline a Feature, or stop declining it. |
+| `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw` | How Self logs in: not at all, or with SASL to an account, with its Credential's name, required or optional. |
 
 Instants are written against the clock, which starts at the epoch, 2026-01-01T00:00:00.000Z: `t+13s`, `t+1500ms`, `t-5s`.
 

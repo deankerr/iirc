@@ -169,6 +169,11 @@ export interface Feature<Own = undefined> {
    */
   readonly absent?: (context: Context<Own>) => Effects<Own>;
   /**
+   * When a `Configured` arrives while negotiation is still open before `CAP END`, such
+   * as SASL beginning a login the Configuration now names.
+   */
+  readonly configured?: (context: Context<Own>) => Effects<Own>;
+  /**
    * When the core's deadline for a held registration passes, such as SASL hearing
    * nothing, and when a Feature holding registration turns off, or `001` ends it. The
    * Feature decides whether to `Continue` or `Abandon`. Left out, the core lets
