@@ -339,6 +339,7 @@ const wireItem = (item: ModelItem) =>
   decodeItem({
     changed: item.changed,
     content: wireContent(item),
+    level: null,
     network: item.network,
     position: cursor(item.spot.at, item.spot.sequence),
     sequence: item.spot.sequence,
@@ -356,6 +357,8 @@ const wireTimeline = (timeline: ModelTimeline) =>
       timeline.latest === undefined ? null : cursor(timeline.latest.at, timeline.latest.sequence),
     name: timeline.kind === "Network" ? timeline.network : `#${timeline.id}`,
     network: timeline.network,
+    read: null,
+    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const wireGap = (gap: ModelGap) => ({
@@ -1172,6 +1175,8 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
     latest: null,
     name,
     network: "alpha",
+    read: null,
+    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const listOf = (through: number, ...timelines: readonly ReturnType<typeof timelineOf>[]) =>
@@ -1198,6 +1203,7 @@ const message = (timeline: string, at: number, sequence: number, changed = seque
       target: "#c",
       text: `m${sequence}`,
     },
+    level: "Message",
     network: "alpha",
     position: cursor(at, sequence),
     sequence,
@@ -1353,6 +1359,8 @@ const direct = (id: string, name: string, detached = false) =>
       latest: null,
       name,
       network: "alpha",
+      read: null,
+      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
     })
   );
 

@@ -7,7 +7,7 @@
 import type { Instant, IntentId, MessageId } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 
-import type { Content, Delivery } from "./content.ts";
+import type { Content, Delivery, Level } from "./content.ts";
 import type { Position } from "./position.ts";
 import type { Descriptor, TimelineId } from "./timeline.ts";
 
@@ -30,6 +30,8 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  *   items move into `into`, by the same rule as `Added`, and `from` is left as a tombstone
  *   that says where it went.
  * - `Gap`: a period when the Network was not on, from `from`, to `to` once it is back on.
+ * - `ReadMarker`: the Owner has read `timeline` up to `read`, which is always later than
+ *   any Read Marker it had. What stands after it counts as unread.
  */
 export type Change =
   | { readonly _tag: "Described"; readonly sequence: number; readonly timeline: Descriptor }
@@ -44,6 +46,8 @@ export type Change =
       readonly messageId: MessageId | undefined;
       /** The Owner's intent, for one of our Messages. */
       readonly intent: IntentId | undefined;
+      /** How much it calls for the Owner in this Timeline, or `undefined` for one Self said. */
+      readonly level: Level | undefined;
     }
   | {
       readonly _tag: "Confirmed";
@@ -82,6 +86,13 @@ export type Change =
       readonly network: string;
       readonly from: Position;
       readonly to: Position | undefined;
+    }
+  | {
+      readonly _tag: "ReadMarker";
+      readonly sequence: number;
+      readonly network: string;
+      readonly timeline: TimelineId;
+      readonly read: Instant;
     };
 
 /** A change to how one of our Messages stands with the Ircd. */

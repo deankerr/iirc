@@ -263,6 +263,7 @@ export const routeMessage = (
   return {
     ...message,
     highlight: isHighlight(run, message, fromUser),
+    self: fromUser && isSelf(run, message.sender),
     where: messageWhere(run, message.sender, fromUser, message.target),
   };
 };
@@ -276,6 +277,7 @@ export const routeMessage = (
 export const routeOurs = (run: Run, message: Unrouted<MessageNews>): MessageNews => ({
   ...message,
   highlight: false,
+  self: true,
   where: messageWhere(run, message.sender, true, message.target),
 });
 

@@ -88,7 +88,7 @@ The browser runs end to end in `apps/iirc`'s `bun run e2e`, against the built fr
 
 - **News, panes, and theming,** which [ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md), [ADR 0012](../../docs/adr/0012-the-web-frontend-builds-on-react-aria-and-resizable-panels.md), and [ADR 0013](../../docs/adr/0013-configuration-is-an-option-tree.md) describe.
 - **Splitting the bundle.** It is one script of about 820 kB, 260 kB gzipped, most of it Effect, React Aria, and the Client's types the Timelines' positions bring with them, and Vite warns past 500 kB.
-- **Marking where the Owner has read,** and Highlights, which wait on Read Markers in the API.
+- **Marking where the Owner has read, and showing what is unread and what is a Highlight.** The API gives each Timeline's Read Marker and what lies after it, by level, and each item's level, and nothing here shows them yet.
 - **An installable web app,** with a manifest and an icon.
 - **Keys of the Owner's own,** set as options under `ui`, and kept per device.
 - **The palette's first entry focused as it opens,** so Enter alone takes the most recent choice. React Aria's Autocomplete focuses the first entry as the Owner types, and ArrowDown focuses it before then.

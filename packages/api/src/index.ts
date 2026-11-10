@@ -80,6 +80,7 @@ export {
   SignInRequest,
   SessionKnowledge,
   Tag,
+  Level,
   Timeline,
   TimelineChange,
   TimelineChangesEvent,
@@ -91,6 +92,7 @@ export {
   Tombstone,
   Topic,
   Untrusted,
+  Unread,
   UserKnowledge,
   Where,
   WindowGap,
@@ -98,4 +100,4 @@ export {
   windowLimit,
 } from "./schemas.ts";
 
-export { TimelineId } from "@iirc/timelines";
+export { TimelineId, unreadCap } from "@iirc/timelines";

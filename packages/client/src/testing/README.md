@@ -78,11 +78,11 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
 | `Refolded` | `?? refolded ascii` |
 | `ReadMarker` | `?? read-marker t+5s in=channel:#iirc`, `?? read-marker t+1s in=network` |
-| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi`, and `highlight` after the time, id, and `history` for a Highlight: `?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hi` |
+| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi`, and `highlight` after the time, id, and `history` for a Highlight: `?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hi`, or `self` there for one Self said that is not ours: `?? message Privmsg iirc #iirc self in=channel:#iirc :from my phone` |
 | `Confirmed` | `?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello` |
 | `Activity` | `?? activity Joined #iirc peer in=channel:#iirc`, `?? activity Kicked #iirc peer by=op in=channel:#iirc :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc`, `?? activity TopicChanged #iirc by=op setBy=op in=channel:#iirc :topic`, `?? activity AwayChanged peer back in=existing-direct:peer` |
 
-A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, `history`, and `highlight`. A Read Marker's one `where` is written the same way, after its instant.
+A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, `history`, `highlight`, and `self`. A Read Marker's one `where` is written the same way, after its instant.
 
 | `where` | Written |
 | --- | --- |

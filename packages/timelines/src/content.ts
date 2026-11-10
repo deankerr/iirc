@@ -60,3 +60,26 @@ export type Content =
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
   | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason };
+
+/**
+ * How much an item calls for the Owner, as WeeChat ranks activity, which unread counts are
+ * kept by:
+ *
+ * - `Highlight`: a Message that is a Highlight, wherever it stands.
+ * - `Direct`: any other Message in a Direct Message Timeline.
+ * - `Message`: any other Message in a Channel's Timeline.
+ * - `Activity`: an Activity, a Session's start or end, a failed Connection, or a Message
+ *   in the Network's own Timeline.
+ *
+ * Our own Messages, and every Message Self said, have no level, and never count.
+ */
+export type Level = "Highlight" | "Direct" | "Message" | "Activity";
+
+/** Every level, from the one that calls for the Owner most. */
+export const levels: readonly Level[] = ["Highlight", "Direct", "Message", "Activity"];
+
+/**
+ * The most an unread count says exactly. A count of `unreadCap + 1` means more than
+ * `unreadCap`, so counting never reads more than `unreadCap + 1` items of a level.
+ */
+export const unreadCap = 999;

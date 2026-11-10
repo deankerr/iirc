@@ -5,12 +5,12 @@
  *
  * @packageDocumentation
  */
-import type { Instant, MessageId, Named, News, Where } from "@iirc/client";
+import type { Instant, Marked, MessageId, Named, News, Where } from "@iirc/client";
 import type { Casemapping, Fact } from "@iirc/client/known";
 import { casefold } from "@iirc/protocol/casemapping";
 
 import type { Change } from "./change.ts";
-import type { Content } from "./content.ts";
+import type { Content, Level } from "./content.ts";
 import type { Position } from "./position.ts";
 import { timelineIdOf } from "./timeline.ts";
 import type { Kind, TimelineId } from "./timeline.ts";
@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 2;
+export const projectionVersion = 3;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -38,12 +38,16 @@ export interface Keyed {
   readonly kind: Exclude<Kind, "Network">;
   readonly name: string;
   readonly key: string;
+  /** How far the Owner has read it, or `undefined` before any Read Marker. */
+  readonly read: Instant | undefined;
 }
 
 /** What the fold keeps for one Network. */
 export interface NetworkDirectory {
   /** The Network's own Timeline. */
   readonly timeline: TimelineId;
+  /** How far the Owner has read the Network's own Timeline, or `undefined` before any Read Marker. */
+  readonly read: Instant | undefined;
   /** Each Channel and Direct Message Timeline that has a key, by id. */
   readonly keyed: ReadonlyMap<TimelineId, Keyed>;
   /** Channel Timelines, by key. */
@@ -92,6 +96,7 @@ interface Draft {
   };
   written: Maps | undefined;
   gap: Position | undefined;
+  read: Instant | undefined;
 }
 
 const write = (draft: Draft): Maps => {
@@ -131,7 +136,7 @@ const open = (draft: Draft, kind: Keyed["kind"], named: Named, n: number, w: num
   const id = timelineIdOf(draft.sequence, n, w + 1);
   const maps = write(draft);
 
-  maps.keyed.set(id, { id, key: named.key, kind, name: named.name });
+  maps.keyed.set(id, { id, key: named.key, kind, name: named.name, read: undefined });
   byKind(maps, kind).set(named.key, id);
   describe(draft, kind, id, named.name, named.key);
 
@@ -212,9 +217,23 @@ const resolve = (draft: Draft, where: Where, n: number, w: number): TimelineId |
   }
 };
 
+const later = (left: Instant | undefined, right: Instant | undefined) =>
+  left === undefined || (right !== undefined && right > left) ? right : left;
+
+const marked = (draft: Draft, timeline: TimelineId, read: Instant) => {
+  draft.changes.push({
+    _tag: "ReadMarker",
+    network: draft.network,
+    read,
+    sequence: draft.sequence,
+    timeline,
+  });
+};
+
 /**
  * Folds every keyed Timeline's name again by a new casemapping. Of Timelines whose keys
- * now meet, the first opened is kept, and each other is merged into it.
+ * now meet, the first opened is kept, and each other is merged into it, which has then
+ * been read as far as either.
  * @param draft - The step.
  * @param casemapping - The mapping keys fold by from now on.
  */
@@ -242,7 +261,11 @@ const refold = (draft: Draft, casemapping: Casemapping) => {
       }
     } else {
       changed = true;
-      write(draft).keyed.delete(entry.id);
+
+      const maps = write(draft);
+      const kept = maps.keyed.get(into);
+
+      maps.keyed.delete(entry.id);
       draft.changes.push({
         _tag: "Merged",
         from: entry.id,
@@ -250,6 +273,13 @@ const refold = (draft: Draft, casemapping: Casemapping) => {
         network: draft.network,
         sequence: draft.sequence,
       });
+
+      const read = later(kept?.read, entry.read);
+
+      if (kept !== undefined && read !== undefined && read !== kept.read) {
+        maps.keyed.set(into, { ...kept, read });
+        marked(draft, into, read);
+      }
     }
   }
 
@@ -299,17 +329,75 @@ const contentOf = (news: Routed): Content => {
   };
 };
 
+const kindOf = (where: Where): Kind => {
+  switch (where._tag) {
+    case "Network":
+    case "Channel": {
+      return where._tag;
+    }
+
+    case "Direct":
+    case "DirectRenamed": {
+      return "Direct";
+    }
+
+    default: {
+      return where satisfies never;
+    }
+  }
+};
+
+/**
+ * How much a Message or an Activity calls for the Owner in one Timeline.
+ * @param news - The News.
+ * @param kind - The Timeline's kind.
+ * @returns Its level, or `undefined` for a Message Self said.
+ */
+const levelOf = (news: Routed, kind: Kind): Level | undefined => {
+  if (news._tag === "Activity") {
+    return "Activity";
+  }
+
+  if (news.self || news.ours !== undefined) {
+    return undefined;
+  }
+
+  if (news.highlight) {
+    return "Highlight";
+  }
+
+  switch (kind) {
+    case "Direct": {
+      return "Direct";
+    }
+
+    case "Channel": {
+      return "Message";
+    }
+
+    case "Network": {
+      return "Activity";
+    }
+
+    default: {
+      return kind satisfies never;
+    }
+  }
+};
+
 const add = (
   draft: Draft,
   timeline: TimelineId,
   position: Position,
   content: Content,
-  routed: Routed | undefined
+  routed: Routed | undefined,
+  level: Level | undefined
 ) => {
   draft.changes.push({
     _tag: "Added",
     content,
     intent: routed?._tag === "Message" ? routed.ours?.intent : undefined,
+    level,
     messageId: routed === undefined ? undefined : idOf(routed.id),
     network: draft.network,
     position,
@@ -334,8 +422,34 @@ const place = (draft: Draft, news: Routed, n: number) => {
 
     if (timeline !== undefined && !touched.has(timeline)) {
       touched.add(timeline);
-      add(draft, timeline, position, content, news);
+      add(draft, timeline, position, content, news, levelOf(news, kindOf(where)));
     }
+  }
+};
+
+/**
+ * Moves the Read Marker of the Timeline `where` names forward, and only forward, whatever
+ * the News says. Marking read opens no Timeline.
+ * @param draft - The step.
+ * @param where - The Timeline.
+ * @param read - How far the Owner has read it.
+ */
+const mark = (draft: Draft, where: Marked, read: Instant) => {
+  if (where._tag === "Network") {
+    if (later(draft.read, read) !== draft.read) {
+      draft.read = read;
+      marked(draft, draft.timeline, read);
+    }
+
+    return;
+  }
+
+  const id = (where._tag === "Channel" ? draft.maps.channels : draft.maps.directs).get(where.key);
+  const entry = id === undefined ? undefined : draft.maps.keyed.get(id);
+
+  if (entry !== undefined && later(entry.read, read) !== entry.read) {
+    write(draft).keyed.set(entry.id, { ...entry, read });
+    marked(draft, entry.id, read);
   }
 };
 
@@ -402,7 +516,8 @@ const foldNews = (draft: Draft, news: News, n: number) => {
         draft.timeline,
         position,
         { _tag: "SessionBegan", at: news.at, nick: news.nick },
-        undefined
+        undefined,
+        "Activity"
       );
 
       if (draft.gap !== undefined) {
@@ -422,7 +537,8 @@ const foldNews = (draft: Draft, news: News, n: number) => {
         draft.timeline,
         position,
         { _tag: news._tag, at: news.at, reason: news.reason },
-        undefined
+        undefined,
+        "Activity"
       );
 
       // A restart learns only now that the Network was off, so the Gap began no later
@@ -444,8 +560,12 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       break;
     }
 
-    // Read Markers are not folded yet.
-    case "ReadMarker":
+    case "ReadMarker": {
+      mark(draft, news.where, news.read);
+
+      break;
+    }
+
     case "Ignored": {
       break;
     }
@@ -477,6 +597,7 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
     last: known?.last,
     maps: known ?? { channels: new Map(), directs: new Map(), keyed: new Map() },
     network: happened.network,
+    read: known?.read,
     sequence: happened.sequence,
     timeline,
     written: undefined,
@@ -500,6 +621,7 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
       n: Math.max(0, happened.news.length - 1),
       sequence: happened.sequence,
     },
+    read: draft.read,
     timeline,
   };
 

@@ -14,6 +14,7 @@ import type {
   ItemContent as WireItemContent,
   Projection as WireProjection,
   Timeline as WireTimeline,
+  Unread as WireUnread,
   TimelineItem as WireTimelineItem,
   Tombstone as WireTombstone,
   WindowGap as WireWindowGap,
@@ -59,7 +60,7 @@ import type {
   UserKnowledge,
 } from "@iirc/client/known";
 import type { Happened, NetworkInspection, NetworkStatus } from "@iirc/runtime";
-import type { CollapsedGap, Gap, Item, Summary, Tombstone } from "@iirc/timeline-store";
+import type { CollapsedGap, Gap, Item, Summary, Tombstone, Unread } from "@iirc/timeline-store";
 import type { Content, Delivery } from "@iirc/timelines";
 
 import type { ProjectorStatus } from "./projector.ts";
@@ -545,6 +546,7 @@ const news = (source: News): WireNews => {
         live: source.live,
         ours:
           source.ours === undefined ? null : { echo: source.ours.echo, intent: source.ours.intent },
+        self: source.self,
         sender: source.sender,
         tags: [...source.tags].map(([key, value]) => ({ key, value })),
         target: source.target,
@@ -898,10 +900,23 @@ const itemContent = (source: Content): WireItemContent => {
 export const timelineItem = (source: Item): Fields<Item, WireTimelineItem, "sequence"> => ({
   changed: WireSequence.make(source.changed),
   content: itemContent(source.content),
+  level: orNull(source.level),
   network: networkOf(source.network),
   position: source.position,
   sequence: WireSequence.make(source.position.sequence),
   timeline: source.timeline,
+});
+
+/**
+ * How much stands after a Timeline's Read Marker, by level, as the store counted it.
+ * @param source - The counts.
+ * @returns Their wire form.
+ */
+const unread = (source: Unread): Fields<Unread, WireUnread> => ({
+  activity: source.activity,
+  direct: source.direct,
+  highlights: source.highlights,
+  messages: source.messages,
 });
 
 /**
@@ -919,6 +934,8 @@ export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detach
   latest: orNull(source.latest),
   name: source.name,
   network: networkOf(source.network),
+  read: orNull(source.read),
+  unread: unread(source.unread),
 });
 
 /**

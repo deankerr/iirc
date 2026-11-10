@@ -153,9 +153,9 @@ describe("what is never a Highlight", () => {
           ">> PRIVMSG #iirc :iirc talking to itself",
           "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :iirc talking to itself",
           "<< :iirc!u@h PRIVMSG #iirc :iirc from elsewhere",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :iirc from elsewhere",
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :iirc from elsewhere",
           "<< :IIRC!u@h PRIVMSG #iirc :iirc in any case",
-          "?? message Privmsg IIRC #iirc in=channel:#iirc :iirc in any case",
+          "?? message Privmsg IIRC #iirc self in=channel:#iirc :iirc in any case",
           "<< :irc.test NOTICE iirc :welcome, iirc",
           "?? message Notice irc.test iirc in=network :welcome, iirc"
         ),

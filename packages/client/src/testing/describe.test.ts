@@ -16,6 +16,7 @@ const message: Extract<News, { readonly _tag: "Message" }> = {
   kind: "Privmsg",
   live: true,
   ours: undefined,
+  self: false,
   sender: "peer",
   tags: new Map(),
   target: "#iirc",
@@ -30,6 +31,7 @@ describe(describeNews, () => {
       { ...message, highlight: true },
       "message Privmsg peer #iirc highlight in=channel:#iirc :hi there",
     ],
+    [{ ...message, self: true }, "message Privmsg peer #iirc self in=channel:#iirc :hi there"],
     [
       {
         _tag: "ReadMarker",

@@ -61,6 +61,16 @@ const cursorPattern = /^(?<at>[0-9a-f]{14})-(?<sequence>[0-9a-f]{14})-(?<n>[0-9a
 export const cursorOf = (position: Position): string =>
   `${hex(BigInt(position.at) + offset, atDigits)}-${hex(BigInt(position.sequence), sequenceDigits)}-${hex(BigInt(position.n), indexDigits)}`;
 
+/**
+ * Text that every cursor of a position later than an instant compares above, and every
+ * other cursor below: the instant's part of a cursor, then `-~`, since `~` comes after every
+ * hex digit. So a store finds what stands after a Read Marker by cursor alone, without the
+ * instant after it, which the largest instant does not have.
+ * @param at - The instant.
+ * @returns The bound, which is no cursor itself.
+ */
+export const cursorsAfter = (at: Instant): string => `${hex(BigInt(at) + offset, atDigits)}-~`;
+
 const safe = (value: bigint): number | undefined =>
   value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER)
     ? Number(value)

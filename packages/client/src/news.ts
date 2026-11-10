@@ -168,6 +168,11 @@ export type News =
        * nick or one of the Configuration's `highlights` as a whole word.
        */
       readonly highlight: boolean;
+      /**
+       * Whether Self said it, by the source: ours, Self's echo, or Self said elsewhere, as
+       * from another IRC client. A projection counts none of these as unread.
+       */
+      readonly self: boolean;
       /** The Timelines it belongs to. Never empty. */
       readonly where: readonly Where[];
     }
@@ -210,9 +215,9 @@ export type News =
   | { readonly _tag: "Ignored"; readonly reason: IgnoredReason };
 
 /**
- * News as the core reads it from a Line, before the step works out where it belongs, and
- * whether a Message is a Highlight.
+ * News as the core reads it from a Line, before the step works out where it belongs,
+ * whether a Message is a Highlight, and whether Self said it.
  */
 export type Unrouted<T extends News = News> = T extends { readonly where: readonly Where[] }
-  ? Omit<T, "where" | "highlight">
+  ? Omit<T, "where" | "highlight" | "self">
   : T;

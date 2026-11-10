@@ -25,7 +25,7 @@ import {
 import type { Input } from "@iirc/client";
 import { CredentialName } from "@iirc/protocol/line";
 import type { UnparseableReason } from "@iirc/protocol/line";
-import { TimelineId, cursorOf, parseCursor } from "@iirc/timelines";
+import { TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 
@@ -414,6 +414,8 @@ export const News = Schema.TaggedUnion({
     kind: SayKind,
     live: Schema.Boolean,
     ours: Schema.NullOr(Schema.Struct({ echo: Schema.Boolean, intent: IntentId })),
+    /** Whether Self said it: ours, Self's echo, or Self said elsewhere, as from another IRC client. */
+    self: Schema.Boolean,
     sender: Untrusted,
     tags: Schema.Array(Tag),
     target: Untrusted,
@@ -660,12 +662,28 @@ export const ItemContent = Schema.TaggedUnion({
 export type ItemContent = typeof ItemContent.Type;
 
 /**
+ * How much an item calls for the Owner, which unread counts are kept by: a `Highlight`, any
+ * other Message in a `Direct` Message Timeline, or in a Channel's (`Message`), and
+ * `Activity`, which a Session's start or end and a Message in the Network's own Timeline
+ * are too. A Message Self said has none.
+ */
+export const Level = Schema.Literals(["Highlight", "Direct", "Message", "Activity"]).annotate({
+  description:
+    "How much an item calls for the Owner: Highlight, Direct, Message, or Activity. A Message Self said has none.",
+});
+
+/** The decoded form of {@link Level}. */
+export type Level = typeof Level.Type;
+
+/**
  * One item of a Timeline, as it stands now: where it stands, the step that made it, which
- * `GET /api/networks/{network}/at/{sequence}` finds it by, and the last step that changed it.
+ * `GET /api/networks/{network}/at/{sequence}` finds it by, how much it calls for the Owner,
+ * and the last step that changed it.
  */
 export const TimelineItem = Schema.Struct({
   changed: Sequence,
   content: ItemContent,
+  level: Schema.NullOr(Level),
   network: NetworkId,
   position: Cursor,
   sequence: Sequence,
@@ -675,11 +693,31 @@ export const TimelineItem = Schema.Struct({
 /** The decoded form of {@link TimelineItem}. */
 export type TimelineItem = typeof TimelineItem.Type;
 
+const UnreadCount = Schema.Int.check(Schema.isBetween({ maximum: unreadCap + 1, minimum: 0 }));
+
+/**
+ * How many items of each level stand after a Timeline's Read Marker, or in it at all when it
+ * has none, each counted by the Daemon up to `unreadCap`, with `unreadCap + 1` meaning more.
+ */
+export const Unread = Schema.Struct({
+  activity: UnreadCount,
+  direct: UnreadCount,
+  highlights: UnreadCount,
+  messages: UnreadCount,
+}).annotate({
+  description: `How many items of each level stand after the Read Marker, up to ${unreadCap}, and ${unreadCap + 1} for more.`,
+});
+
+/** The decoded form of {@link Unread}. */
+export type Unread = typeof Unread.Type;
+
 /**
  * A Timeline: the Network's own, a Channel's, or a Direct Message partner's. `key` is its
  * name folded by the Network's casemapping, and `null` for the Network's own and for a
  * detached one, which keeps its items and receives nothing more. `latest` is where its
- * last item stands, and `changed` the last step that changed it or any of its items.
+ * last item stands, `read` its Read Marker, `null` before any, `unread` how much stands
+ * after it, by level, and `changed` the last step that changed it, its Read Marker, or any
+ * of its items.
  */
 export const Timeline = Schema.Struct({
   changed: Sequence,
@@ -690,6 +728,8 @@ export const Timeline = Schema.Struct({
   latest: Schema.NullOr(Cursor),
   name: Untrusted,
   network: NetworkId,
+  read: Schema.NullOr(Instant),
+  unread: Unread,
 });
 
 /** The decoded form of {@link Timeline}. */

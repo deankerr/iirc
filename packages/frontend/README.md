@@ -342,5 +342,5 @@ Part = Words { text } | Nick { nick, colour } | Name { text } | Said { inlines }
 - **The pane layout,** which [ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md) and [ADR 0012](../../docs/adr/0012-the-web-frontend-builds-on-react-aria-and-resizable-panels.md) describe.
 - **Options under `ui`,** for Frontends, such as the theme and overrides of the keymap, which [ADR 0013](../../docs/adr/0013-configuration-is-an-option-tree.md) puts in the same tree, and options of the Daemon's own. `keymapOf` is ready to read them, dropping what does not parse.
 - **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone opens the palette, so a sequence beginning with it would make the palette wait.
-- **The next Timeline with something unread,** which waits on Read Markers.
+- **The next Timeline with something unread.** Each Timeline the API lists carries its Read Marker and what lies after it, by level, and nothing here reads them yet.
 - **Removing a Network,** which the API cannot do yet. `/network add` only adds.

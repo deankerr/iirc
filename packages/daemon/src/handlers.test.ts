@@ -848,6 +848,54 @@ describe("the handlers", () => {
     });
   });
 
+  it("lists each Timeline's Read Marker and what lies after it, by level", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, ["psst"]);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :hi there");
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :iirc: look");
+        yield* say(call, ":iirc!~iirc@elsewhere PRIVMSG #iirc :from my phone");
+        yield* settle;
+
+        const counts = api.timelines
+          .list({ params: { network: libera }, query: {} })
+          .pipe(
+            Effect.map((listed) =>
+              listed.timelines.map(({ name, read, unread }) => ({ name, read, unread }))
+            )
+          );
+
+        const before = yield* counts;
+
+        yield* TestClock.adjust(1000);
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :later");
+        yield* api.networks.read({
+          params: { network: libera },
+          payload: { read: Instant.make(epoch + 500), target: "#iirc" },
+        });
+        yield* settle;
+
+        return { after: yield* counts, before };
+      })
+    );
+
+    const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+
+    expect(result.before).toStrictEqual([
+      { name: "libera", read: null, unread: { ...none, activity: 1 } },
+      { name: "peer", read: null, unread: { ...none, direct: 1 } },
+      { name: "#iirc", read: null, unread: { ...none, activity: 1, highlights: 1, messages: 1 } },
+    ]);
+    expect(result.after.find(({ name }) => name === "#iirc")).toStrictEqual({
+      name: "#iirc",
+      read: epoch + 500,
+      unread: { ...none, messages: 1 },
+    });
+  });
+
   it("reads windows before, after, and around a cursor, and says whether more lie beyond", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

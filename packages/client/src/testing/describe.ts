@@ -334,6 +334,8 @@ export const describeNews = (news: News, now: Instant): string => {
         atom(news.target),
         ...attributes(news, now),
         ...(news.highlight ? ["highlight"] : []),
+        // Ours is always Self's, so only Self said elsewhere is marked.
+        ...(news.self && news.ours === undefined ? ["self"] : []),
         ...writeWhere(news.where),
         ...writeTags(news.tags),
         ...writeOurs(news.ours),

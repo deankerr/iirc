@@ -19,15 +19,17 @@ One row of how far it has folded, and four tables, each with the indexes its rea
 CREATE TABLE folded (only INTEGER PRIMARY KEY CHECK (only = 1), version INTEGER, through INTEGER,
   directory TEXT NOT NULL) STRICT;
 CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NOT NULL,
-  name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL) STRICT;
+  name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER,
+  unread_highlights INTEGER NOT NULL, unread_direct INTEGER NOT NULL,
+  unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL) STRICT;
 CREATE TABLE items (timeline TEXT NOT NULL, cursor TEXT NOT NULL, network TEXT NOT NULL,
   step INTEGER NOT NULL, message_id TEXT, intent TEXT, content TEXT NOT NULL,
-  changed INTEGER NOT NULL, PRIMARY KEY (timeline, cursor)) STRICT;
+  changed INTEGER NOT NULL, level TEXT, PRIMARY KEY (timeline, cursor)) STRICT;
 CREATE TABLE tombstones (id TEXT PRIMARY KEY, network TEXT NOT NULL, into_id TEXT NOT NULL,
   changed INTEGER NOT NULL) STRICT;
 CREATE TABLE gaps (network TEXT NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT,
   changed INTEGER NOT NULL, PRIMARY KEY (network, from_cursor)) STRICT;
-PRAGMA user_version = 1;  -- the layout's version
+PRAGMA user_version = 2;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, and the directory, in one row, so they are written together.
@@ -41,7 +43,8 @@ PRAGMA user_version = 1;  -- the layout's version
 | one item per message id, as `Added` and `Merged` keep it | `items_by_message_id`, unique on `(timeline, message_id)` where there is one |
 | `Confirmed`, `Unsent`, and `Rejected` | `items_by_intent` on `(network, intent)` |
 | `locate` | `items_by_step` on `(network, step, cursor, timeline)`, from the page's `after` by the row value `(cursor, timeline)`, covered by the index |
-| `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and the primary key of `items` for each one's latest position |
+| `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and the primary key of `items` for each one's latest position. Each row holds its Read Marker and unread counts |
+| counting a level again, after a Read Marker moves or a merge | `items_by_level` on `(timeline, level, cursor)` where there is a level, above `cursorsAfter` of the Read Marker, `LIMIT unreadCap + 1`, from the index alone |
 | `gaps`, and each run of `collapsedGaps` | the primary key `(network, from_cursor)`, bounded below. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended, so one seek finds the last Gap that began strictly before the range's start, which is kept if it reaches the start, and every Gap that began at or after the start is in. Every other condition is on the key, except for a page read before a cursor, which keeps only the Gaps that ended before it: that run is bounded above on the key too, by the cursor, since a Gap that ended before it began before it, and only then filtered on `to_cursor` for which Gaps are the page's, so it never reads the Gaps after the cursor. A run is one statement that counts its Gaps from the index alone, and takes the first's start and the last's end from either end of the key's range |
 | `changedAfter` | `timelines_by_changed`, `items_by_changed`, `tombstones_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |
 | where a page of `changedAfter` ends | the same indexes: the next sequence by one seek each, and how much it changed by a count that stops at what the page has left, so a page costs at most `limit + 1` of each however big a step is |
@@ -51,6 +54,10 @@ PRAGMA user_version = 1;  -- the layout's version
 ## Counting Gaps
 
 A window's Gaps cost one seek, then one statement for each run between two of its items. Counting a run walks the Gaps in it, in the index alone. A Gap needs a disconnect and then a reconnect, and the one backoff paces reconnects: a Session that ends inside 5 minutes makes the next wait double, up to 5 minutes, so even an Ircd that drops every Session as it begins makes a few hundred Gaps a day. A run spanning a year of that is about a hundred thousand index entries, which SQLite counts in a few tens of milliseconds, and a run over a week of ordinary use is a handful. There are no ranks or running counts kept to make it faster.
+
+## Counting unread
+
+Each Timeline's row keeps its Read Marker, `read`, and a count for each level, so a read of Timelines reads no items to give them. Keeping an item adds one to its level's count, by its primary key, when it stands after the Read Marker, and stops at `unreadCap + 1`. A Read Marker that moves, and a merge, count the Timeline again: one statement, four counts, each a search of `items_by_level` above `cursorsAfter` of the Read Marker, from `@iirc/timelines`, so `at` alone decides and no instant after the Read Marker is ever made, which the largest has not, that stops after `unreadCap + 1` entries. A Timeline with no Read Marker is counted with no bound on the cursor. So counting again reads at most four thousand index entries however long the Timeline is, and a Timeline with no Read Marker and a million items costs the same to keep as an empty one.
 
 ## Settings
 
@@ -81,7 +88,7 @@ The store made again has no projection version, so whatever starts it folds the 
 
 ## Tests
 
-`bun run test` runs the port's laws against a fresh file each, and then: applying steps of every kind, closing the file, and opening it again reads exactly the same; the Layer keeps what it was given; a file of another layout, one of this layout's version whose `folded` table lacks a column, one whose directory does not decode, a database that is not a store, and a file that is not a database are each made again and then keep what they are given; a path that cannot be opened fails, removes nothing, and says SQLite's own reason; a store another connection holds locked fails to open, and keeps its file and everything in it; and the file is in WAL mode, with each read's query plan using an index, never a scan of a table or a sort. The plans are of the statements the store itself emits, captured as the SQL client compiles them, through Effect's `CurrentTransformer`, and explained with their parameters, never of copies: a step's lookups by intent and message id, a page of what changed and a step too big for one, a page of Timelines, a window from each anchor, a step's items, the Gaps over a range, and runs of Gaps with no cursor, after one, and before one. A run of Gaps must be bounded below by the key and counted from the index alone, which a run that filtered on `to_cursor` is not, and the test checks that it can tell the two apart. Each run of a page read before a cursor, its count and the search for its end, must be bounded on both sides by the key, which it is not without the bound at the cursor.
+`bun run test` runs the port's laws against a fresh file each, and then: applying steps of every kind, closing the file, and opening it again reads exactly the same; the Layer keeps what it was given; a file of another layout, one of this layout's version whose `folded` table lacks a column, one whose directory does not decode, a database that is not a store, and a file that is not a database are each made again and then keep what they are given; a path that cannot be opened fails, removes nothing, and says SQLite's own reason; a store another connection holds locked fails to open, and keeps its file and everything in it; and the file is in WAL mode, with each read's query plan using an index, never a scan of a table or a sort. The plans are of the statements the store itself emits, captured as the SQL client compiles them, through Effect's `CurrentTransformer`, and explained with their parameters, never of copies: a step's lookups by intent and message id and the count it keeps, a Read Marker moved and a merge, each counting its Timeline again, a page of what changed and a step too big for one, a page of Timelines, a window from each anchor, a step's items, the Gaps over a range, and runs of Gaps with no cursor, after one, and before one. A run of Gaps must be bounded below by the key and counted from the index alone, which a run that filtered on `to_cursor` is not, and the test checks that it can tell the two apart. Each run of a page read before a cursor, its count and the search for its end, must be bounded on both sides by the key, which it is not without the bound at the cursor. Each count of a level after a Read Marker must search `items_by_level` by the Timeline, the level, and the cursor, from the index alone, and stop at a `LIMIT`, and the test checks that it can tell that from a count of a Timeline's items with no level, which walks them all.
 
 ## Choices
 

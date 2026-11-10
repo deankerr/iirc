@@ -36,6 +36,8 @@ const describeTimeline = (
   latest: null,
   name,
   network: "libera",
+  read: null,
+  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 /**

@@ -13,6 +13,7 @@ import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
 import type { Input, UnsentLine } from "../input.ts";
+import type { News } from "../news.ts";
 import { timers } from "../output.ts";
 import type { TimerTable } from "../output.ts";
 import type { State } from "../state.ts";
@@ -382,6 +383,14 @@ const inputOf = (fold: Fold, next: Exclude<Move, { readonly _tag: "Read" }>): In
 // the same, and a Quit or a nick change lists only Channels Self knew.
 const declared = (state: State) => state.declared ?? defaultCasemapping;
 
+// Ours is Self's, and Self is never a Highlight.
+const checkSelf = (news: News): void => {
+  if (news._tag === "Message") {
+    expect(news.ours === undefined || news.self).toBeTruthy();
+    expect(news.self && news.highlight).toBeFalsy();
+  }
+};
+
 const checkWhere = (step: Step<State>, before: State): void => {
   const known = client.known(before);
   const fold = (name: string) => casefold(declared(before), name);
@@ -405,6 +414,8 @@ const checkWhere = (step: Step<State>, before: State): void => {
         known.self === undefined || knownFold(news.sender) !== knownFold(known.self.nick)
       ).toBeTruthy();
     }
+
+    checkSelf(news);
 
     // A Read Marker is keyed as `where` is, and only by the Owner's `Read`.
     if (news._tag === "ReadMarker") {

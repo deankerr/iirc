@@ -87,7 +87,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 
 | News | Meaning |
 | --- | --- |
-| `Message` | Something said, with its time, id, client-only tags, whether it is `live`, whether it is a `highlight`, and `where` it belongs. One we said carries `ours`: its intent id, and whether the Ircd will echo it. |
+| `Message` | Something said, with its time, id, client-only tags, whether it is `live`, whether it is a `highlight`, whether Self said it (`self`), and `where` it belongs. One we said carries `ours`: its intent id, and whether the Ircd will echo it. |
 | `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
 | `Activity` | Something that changed, with its time, id, whether it is `live`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
@@ -102,6 +102,7 @@ Three rules for Timelines, which [`@iirc/timelines`](../timelines/README.md) fol
 - **Our own Messages.** A Message we say appears as News when we send it. If `ours.echo` is set, a `Confirmed` for its intent follows when the Ircd echoes it, and the echo is not a second Message. With no echo, it stays unconfirmed: sent, with delivery unknown. If its Line never left, a `Refused` `Unsent` for its intent follows instead, unless the Ircd had already confirmed it on that Connection, so a Timeline marks the Message as not sent.
 - **Order by time.** History arrives late, with `live` false. A Timeline orders by `at`, not by when the News came.
 - **One per id.** A Message can arrive live and again from history. A Timeline keeps one per id. One with an unknown id is kept as it came.
+- **Self's own.** A Message is `self` when Self said it, by the source, as a Highlight is judged: ours, Self's echo, or Self said elsewhere, as from another IRC client, live or from history. Ours is always `self`, and a Message that is `self` is never a `highlight`. A projection counts none of them as unread.
 
 ### Where News belongs
 

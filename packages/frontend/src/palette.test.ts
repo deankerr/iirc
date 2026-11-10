@@ -29,6 +29,8 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
     latest: null,
     name,
     network: "libera",
+    read: null,
+    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const sidebar: readonly SidebarNetwork[] = [
