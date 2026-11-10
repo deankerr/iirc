@@ -3,6 +3,7 @@
  *
  * @packageDocumentation
  */
+import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
 import { CallerIntent, NetworkId } from "./schemas.ts";
@@ -12,6 +13,25 @@ export class UnknownNetwork extends Schema.TaggedError<
   UnknownNetwork,
   { readonly brand: unique symbol }
 >()("UnknownNetwork", { network: NetworkId }, { httpApiStatus: 404 }) {}
+
+/**
+ * No Timeline has ever had this id, nor been merged from one that had. An id is never
+ * given again to another Timeline, and a merged one reads the Timeline it went to.
+ */
+export class UnknownTimeline extends Schema.TaggedError<
+  UnknownTimeline,
+  { readonly brand: unique symbol }
+>()("UnknownTimeline", { timeline: TimelineId }, { httpApiStatus: 404 }) {}
+
+/**
+ * The Timelines could not be read. They are derived from the Journal, and a read may
+ * succeed when asked again, as one that waited on a lock does, while a store that is
+ * damaged is made again when the Daemon restarts: a 503.
+ */
+export class TimelinesFailed extends Schema.TaggedError<
+  TimelinesFailed,
+  { readonly brand: unique symbol }
+>()("TimelinesFailed", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
 /**
  * The Network stopped, so it took no more input. This does not mean the input was
@@ -54,11 +74,33 @@ export class VaultFailed extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("VaultFailed", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
-/** No key came with the request in `Authorization: Bearer`, or none matches it. */
+/**
+ * No key came with the request in `Authorization: Bearer`, and no sign-in in its
+ * cookie, or none that matches. Signing in, it is a key that does not match.
+ */
 export class Unauthorized extends Schema.TaggedError<
   Unauthorized,
   { readonly brand: unique symbol }
 >()("Unauthorized", {}, { httpApiStatus: 401 }) {}
+
+/**
+ * A request that changes something, carried by a sign-in's cookie rather than a
+ * bearer key, did not come from the Daemon's own origin, so another site may have sent it.
+ * Signing in and signing out are checked the same way.
+ */
+export class CrossOrigin extends Schema.TaggedError<
+  CrossOrigin,
+  { readonly brand: unique symbol }
+>()("CrossOrigin", {}, { httpApiStatus: 403 }) {}
+
+/**
+ * The Daemon could not write its sign-ins, so nothing changed: a sign-in made none,
+ * and a sign-out forgot none. It tries again on the next call: a 503.
+ */
+export class SignInsFailed extends Schema.TaggedError<
+  SignInsFailed,
+  { readonly brand: unique symbol }
+>()("SignInsFailed", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
 /**
  * A request the API could not read, and what was wrong with it. Each issue says where in

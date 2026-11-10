@@ -109,6 +109,14 @@ const daemon = Command.make(
             return failed(`The API keys in ${error.path} could not be read: ${error.reason}`);
           }
 
+          case "SignInsUnreadable": {
+            return failed(`The sign-ins in ${error.path} could not be read: ${error.reason}`);
+          }
+
+          case "SignInsUnwritable": {
+            return failed(`The sign-ins in ${error.path} could not be written: ${error.reason}`);
+          }
+
           case "JournalFailed": {
             return failed(
               `The Journal in ${directory} could not be opened or read: ${error.reason}`
@@ -118,6 +126,12 @@ const daemon = Command.make(
           case "JournalVersionMismatch": {
             return failed(
               `The Journal in ${directory} is version ${error.found}, and this iirc reads version ${error.expected}. Nothing was changed.`
+            );
+          }
+
+          case "TimelineStoreFailed": {
+            return failed(
+              `The Timelines in ${directory}/views.sqlite could not be opened: ${error.reason}. They are derived from the Journal, so removing the file rebuilds them.`
             );
           }
 

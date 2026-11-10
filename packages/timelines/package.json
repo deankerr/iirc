@@ -1,0 +1,21 @@
+{
+  "name": "@iirc/timelines",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/client": "workspace:*",
+    "@iirc/protocol": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "vitest": "catalog:"
+  }
+}

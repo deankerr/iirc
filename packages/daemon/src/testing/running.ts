@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import { DaemonApi } from "@iirc/api";
-import type { Happened } from "@iirc/api";
+import type { Happened, Resume, TimelineChangesEvent } from "@iirc/api";
 import { Context, Data, Effect, Exit, Layer, Schedule, Scope, Stream } from "effect";
 import type { Duration } from "effect";
 import { FetchHttpClient, HttpServer } from "effect/http";
@@ -107,4 +107,38 @@ export const followNews = (
     );
 
     return happened;
+  });
+
+/** One `changed` event of the Timelines' changes, with its id. */
+type Changed = Extract<TimelineChangesEvent, { readonly event: "changed" }>;
+
+/**
+ * Follows the Timelines' changes from where a read left off until `until` says to stop.
+ * @param api - The client.
+ * @param after - Where to resume: the version and `through` a read gave.
+ * @param until - When to stop, given every `changed` event so far.
+ * @returns The `changed` events, in order.
+ */
+export const followChanges = (
+  api: Api,
+  after: Resume,
+  until: (changed: readonly Changed[]) => boolean
+) =>
+  Effect.gen(function* () {
+    const stream = yield* api.timelines.changes({ headers: {}, query: { after } });
+    const changed: Changed[] = [];
+
+    yield* stream.pipe(
+      Stream.takeUntil((event) => {
+        if (event.event === "changed") {
+          changed.push(event);
+        }
+
+        return until(changed);
+      }),
+      Stream.runDrain,
+      Effect.timeout("30 seconds")
+    );
+
+    return changed;
   });

@@ -254,7 +254,7 @@ describe("refused, kicked, and parted", () => {
         echo("#iirc"),
         lines(
           "<< :op!u@h KICK #iirc iirc :out",
-          "?? activity Kicked #iirc iirc by=op :out",
+          "?? activity Kicked #iirc iirc by=op in=channel:#iirc :out",
           "+1999ms",
           "+1ms",
           ">> JOIN #iirc"
@@ -304,7 +304,7 @@ describe("refused, kicked, and parted", () => {
           "!! configure -#iirc",
           ">> PART #iirc",
           "<< :iirc!~iirc@iirc.test PART #iirc",
-          "?? activity Parted #iirc iirc"
+          "?? activity Parted #iirc iirc in=channel:#iirc"
         ),
       ],
     });
@@ -446,9 +446,9 @@ describe("what is known of a Channel", () => {
         lines(
           "+1s",
           "<< :op!u@h TOPIC #iirc :new topic",
-          "?? activity TopicChanged #iirc by=op setBy=op setAt=t+1s :new topic",
+          "?? activity TopicChanged #iirc by=op setBy=op setAt=t+1s in=channel:#iirc :new topic",
           "<< :op!u@h TOPIC #iirc :",
-          "?? activity TopicChanged #iirc by=op cleared"
+          "?? activity TopicChanged #iirc by=op cleared in=channel:#iirc"
         ),
       ],
     });
@@ -495,9 +495,9 @@ describe("what is known of a Channel", () => {
         lines(
           "<< :irc.test 324 iirc #iirc +ntk secret",
           "<< :op!u@h MODE #iirc +o-t+l peer 10",
-          "?? activity ModeChanged #iirc by=op +o=peer -t +l=10",
+          "?? activity ModeChanged #iirc by=op +o=peer -t +l=10 in=channel:#iirc",
           "<< :op!u@h MODE #iirc -k+b secret *!*@bad",
-          '?? activity ModeChanged #iirc by=op -k +b="*!*@bad"'
+          '?? activity ModeChanged #iirc by=op -k +b="*!*@bad" in=channel:#iirc'
         ),
       ],
     });
@@ -543,15 +543,15 @@ describe("what is known of a Channel", () => {
         joined(base, "#iirc", ["a", "b", "c"]),
         lines(
           "<< :d!~d@d.host JOIN #iirc",
-          "?? activity Joined #iirc d",
+          "?? activity Joined #iirc d in=channel:#iirc",
           "<< :a!~a@a.host PART #iirc :later",
-          "?? activity Parted #iirc a :later",
+          "?? activity Parted #iirc a in=channel:#iirc :later",
           "<< :b!~b@b.host QUIT :gone",
-          "?? activity Quit b :gone",
+          "?? activity Quit b in=channel:#iirc in=existing-direct:b :gone",
           "<< :op!u@h KICK #iirc c :out",
-          "?? activity Kicked #iirc c by=op :out",
+          "?? activity Kicked #iirc c by=op in=channel:#iirc :out",
           "<< :d!~d@d.host NICK e",
-          "?? activity NickChanged d e"
+          "?? activity NickChanged d e in=channel:#iirc in=renamed:d>e"
         ),
       ],
     });
@@ -572,7 +572,10 @@ describe("what is known of a Channel", () => {
       transcript: [
         registered(base),
         joined(base, "#iirc"),
-        lines("<< :iirc!~iirc@iirc.test NICK :renamed", "?? activity NickChanged iirc renamed"),
+        lines(
+          "<< :iirc!~iirc@iirc.test NICK :renamed",
+          "?? activity NickChanged iirc renamed in=network in=channel:#iirc"
+        ),
       ],
     });
 
@@ -590,9 +593,9 @@ describe("what is known of a Channel", () => {
         joined(base, "#iirc", ["peer"]),
         lines(
           "<< :peer!u@h AWAY :lunch",
-          "?? activity AwayChanged peer :lunch",
+          "?? activity AwayChanged peer in=existing-direct:peer :lunch",
           "<< :stranger!u@h AWAY :elsewhere",
-          "?? activity AwayChanged stranger :elsewhere"
+          "?? activity AwayChanged stranger in=existing-direct:stranger :elsewhere"
         ),
       ],
     });

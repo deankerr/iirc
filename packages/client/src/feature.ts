@@ -13,7 +13,7 @@ import type { Encoding, Line, OutboundLine, SecretLine } from "@iirc/protocol/li
 import type { NetworkConfiguration } from "./configuration.ts";
 import type { CapName, FeatureName, Instant, IntentId, MessageId } from "./ids.ts";
 import type { Fact, Knowledge, MemberKnowledge } from "./known.ts";
-import type { EndReason, News } from "./news.ts";
+import type { EndReason, Unrouted } from "./news.ts";
 
 /** Facts a Feature keeps up to date. When it turns off, the core marks each one stale. */
 export type Kept =
@@ -95,10 +95,11 @@ export interface Arrival {
 
 /**
  * What the core derived from a Line, before the model folds it in: News, and changes
- * that only the model sees. It grows as the core does.
+ * that only the model sees. It grows as the core does. A Message or Activity has no
+ * `where` yet: the step works that out as it folds it in.
  */
 export type Meant =
-  | News
+  | Unrouted
   | {
       /** A `NAMES` listing, in part or whole. */
       readonly _tag: "Listed";

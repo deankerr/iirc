@@ -19,7 +19,7 @@ Either makes the data directory, mode `0700`, if it is missing.
 
 - **SIGINT and SIGTERM exit 0.** `BunRuntime.runMain` interrupts the Daemon, which stops the Runtime, then serving, then the rest, and an interrupt is a clean exit rather than the default 130.
 - **stdout holds only what was asked for.** The key from `iirc key create` is alone on stdout, so `KEY=$(iirc key create …)` holds nothing else. Logs, as logfmt, and every refusal go to stderr.
-- **A refusal is one line in words, and exits 1:** a data directory another Daemon holds, a key name taken, a Journal of another version, a port it cannot listen on.
+- **A refusal is one line in words, and exits 1:** a data directory another Daemon holds, a key name taken, a Journal of another version, a Timeline store that cannot be opened, a port it cannot listen on.
 
 ## Not yet
 

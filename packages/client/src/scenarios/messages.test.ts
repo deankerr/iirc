@@ -18,13 +18,14 @@ describe("Messages heard", () => {
         ...inChannel,
         lines(
           "<< :peer!u@h PRIVMSG #iirc :hello all",
-          "?? message Privmsg peer #iirc :hello all",
+          "?? message Privmsg peer #iirc in=channel:#iirc :hello all",
           "<< :peer!u@h PRIVMSG iirc :psst",
-          "?? message Privmsg peer iirc :psst",
+          "?? message Privmsg peer iirc in=direct:peer :psst",
           "<< :peer!u@h NOTICE #iirc :heads up",
-          "?? message Notice peer #iirc :heads up",
+          "?? message Notice peer #iirc in=channel:#iirc :heads up",
           "<< :peer!u@h PRIVMSG @#iirc :ops only",
-          '?? message Privmsg peer "@#iirc" :ops only'
+          // With no `STATUSMSG`, `@#iirc` names no Channel.
+          '?? message Privmsg peer "@#iirc" in=network :ops only'
         ),
       ],
     });
@@ -43,7 +44,7 @@ describe("Messages heard", () => {
         ">> NICK iirc",
         ">> USER iirc 0 * iirc",
         "<< NOTICE * :*** Looking up your hostname",
-        "?? message Notice irc.test * :*** Looking up your hostname"
+        "?? message Notice irc.test * in=network :*** Looking up your hostname"
       ),
     });
 
@@ -57,9 +58,9 @@ describe("Messages heard", () => {
         ...inChannel,
         lines(
           "<<\\ :peer!u@h PRIVMSG #iirc :\\x01ACTION waves\\x01",
-          "?? message Action peer #iirc :waves",
+          "?? message Action peer #iirc in=channel:#iirc :waves",
           "<<\\ :peer!u@h PRIVMSG #iirc :\\x01ACTION shrugs",
-          "?? message Action peer #iirc :shrugs"
+          "?? message Action peer #iirc in=channel:#iirc :shrugs"
         ),
       ],
     });
@@ -83,7 +84,7 @@ describe("Messages heard", () => {
         ...inChannel,
         lines(
           "<< @+draft/reply=m0;time=2020-01-01T00:00:00.000Z;msgid=x :peer!u@h PRIVMSG #iirc :yes",
-          '?? message Privmsg peer #iirc tags=+draft/reply="m0" :yes'
+          '?? message Privmsg peer #iirc in=channel:#iirc tags=+draft/reply="m0" :yes'
         ),
       ],
     });
@@ -114,13 +115,13 @@ describe("saying something", () => {
           "+1s",
           "!! say #iirc :hello there",
           ">> PRIVMSG #iirc :hello there",
-          "?? message Privmsg iirc #iirc at=ours:t+1s ours=i1 :hello there",
+          "?? message Privmsg iirc #iirc at=ours:t+1s in=channel:#iirc ours=i1 :hello there",
           "!! notice peer :fyi",
           ">> NOTICE peer fyi",
-          "?? message Notice iirc peer at=ours:t+1s ours=i2 :fyi",
+          "?? message Notice iirc peer at=ours:t+1s in=direct:peer ours=i2 :fyi",
           "!! action #iirc :waves",
           ">>\\ PRIVMSG #iirc :\\x01ACTION waves\\x01",
-          "?? message Action iirc #iirc at=ours:t+1s ours=i3 :waves"
+          "?? message Action iirc #iirc at=ours:t+1s in=channel:#iirc ours=i3 :waves"
         ),
       ],
     });

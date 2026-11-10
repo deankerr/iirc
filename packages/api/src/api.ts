@@ -1,10 +1,11 @@
 /**
  * The contract every Frontend drives the Daemon through. Every route is under `/api`, and
- * every one needs a key.
+ * every one but signing a browser in and out needs a key or a sign-in.
  *
  * @packageDocumentation
  */
 import { NetworkConfiguration } from "@iirc/client";
+import { TimelineId } from "@iirc/timelines";
 import { Context, Schema } from "effect";
 import {
   HttpApi,
@@ -17,11 +18,15 @@ import {
 } from "effect/http-api";
 
 import {
+  CrossOrigin,
   InvalidRequest,
   JournalFailed,
   NetworkStopped,
+  SignInsFailed,
+  TimelinesFailed,
   Unauthorized,
   UnknownNetwork,
+  UnknownTimeline,
   VaultFailed,
 } from "./errors.ts";
 import {
@@ -32,13 +37,23 @@ import {
   CredentialValue,
   Journaled,
   Knowledge,
+  ListQuery,
+  LocateQuery,
+  Located,
   NetworkEntry,
   NetworkId,
   NetworkInspection,
   NewsEvent,
+  Resume,
   Said,
   SaidAnswer,
   SayRequest,
+  SequenceFromString,
+  SignInRequest,
+  TimelineChangesEvent,
+  TimelineList,
+  TimelineWindow,
+  WindowQuery,
 } from "./schemas.ts";
 
 /**
@@ -47,18 +62,33 @@ import {
  */
 export const requestParseOptions = { onExcessProperty: "error" } as const;
 
-/** The name of the key a request came with, which its handler acts for. */
+/**
+ * The name of the key a request came with, or that its sign-in was made with,
+ * which its handler acts for.
+ */
 export class Caller extends Context.Service<Caller, { readonly key: string }>()(
   "@iirc/api/Caller"
 ) {}
 
-/** Checks the key in `Authorization: Bearer`, and nowhere else, and provides {@link Caller}. */
+/** The cookie a sign-in travels in. It names the sign-in, never a key. */
+export const signInCookie = "iirc_sign_in";
+
+/**
+ * Checks the key in `Authorization: Bearer`, or else the sign-in in the
+ * {@link signInCookie} cookie, and provides {@link Caller} either way. A request the
+ * cookie carries that changes something must come from the Daemon's own origin, or it is
+ * {@link CrossOrigin}.
+ */
+// oxlint-disable-next-line effecttsgo/leaking-requirements -- A security middleware runs inside the request, which it may read, as Effect's own `HttpApiMiddlewareSecurity` type says.
 export class Authorization extends HttpApiMiddleware.Service<Authorization, { provides: Caller }>()(
   "@iirc/api/Authorization",
   {
-    error: Unauthorized,
+    error: [Unauthorized, CrossOrigin],
     requiredForClient: true,
-    security: { bearer: HttpApiSecurity.bearer },
+    security: {
+      bearer: HttpApiSecurity.bearer,
+      signIn: HttpApiSecurity.apiKey({ in: "cookie", key: signInCookie }),
+    },
   }
 ) {}
 
@@ -123,6 +153,41 @@ export class NewsGroup extends HttpApiGroup.make("news")
   )
   .middleware(Authorization) {}
 
+/**
+ * Timelines, as the Daemon folds them from News, so a Frontend never folds News itself:
+ * a Network's Timelines, a page at a time, a window of one, the items a step made, and what
+ * changed, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
+ * Each read says the projection version and the last step folded into what it gave, to
+ * follow the changes after.
+ */
+export class TimelinesGroup extends HttpApiGroup.make("timelines")
+  .add(
+    HttpApiEndpoint.get("list", "/networks/:network/timelines", {
+      error: [UnknownNetwork, TimelinesFailed],
+      params: NetworkPath,
+      query: ListQuery,
+      success: TimelineList,
+    }),
+    HttpApiEndpoint.get("changes", "/timelines/changes", {
+      headers: { "last-event-id": Schema.optionalKey(Resume) },
+      query: { after: Schema.optionalKey(Resume) },
+      success: HttpApiSchema.StreamSse({ error: TimelinesFailed, events: TimelineChangesEvent }),
+    }),
+    HttpApiEndpoint.get("window", "/timelines/:timeline", {
+      error: [UnknownTimeline, TimelinesFailed],
+      params: { timeline: TimelineId },
+      query: WindowQuery,
+      success: TimelineWindow,
+    }),
+    HttpApiEndpoint.get("locate", "/networks/:network/at/:sequence", {
+      error: [UnknownNetwork, TimelinesFailed],
+      params: { network: NetworkId, sequence: SequenceFromString },
+      query: LocateQuery,
+      success: Located,
+    })
+  )
+  .middleware(Authorization) {}
+
 /** Credentials, by name. A value goes in, and only names come out. */
 export class CredentialsGroup extends HttpApiGroup.make("credentials")
   .add(
@@ -141,10 +206,30 @@ export class CredentialsGroup extends HttpApiGroup.make("credentials")
   )
   .middleware(Authorization) {}
 
+/**
+ * A browser signs in: it gives a key once, for a sign-in in an `HttpOnly`
+ * cookie, since a browser never holds a key in script and an `EventSource` cannot send
+ * `Authorization`. Neither route needs the key check, since this is where a browser gets
+ * what it presents.
+ */
+export class SignInGroup extends HttpApiGroup.make("signIn").add(
+  HttpApiEndpoint.post("signIn", "/sign-in", {
+    error: [Unauthorized, CrossOrigin, SignInsFailed],
+    payload: SignInRequest,
+    success: HttpApiSchema.NoContent,
+  }),
+  HttpApiEndpoint.delete("signOut", "/sign-in", {
+    error: [CrossOrigin, SignInsFailed],
+    success: HttpApiSchema.NoContent,
+  })
+) {}
+
 /** The Daemon's API. */
 export class DaemonApi extends HttpApi.make("iirc")
+  .add(SignInGroup)
   .add(NetworksGroup)
   .add(NewsGroup)
+  .add(TimelinesGroup)
   .add(CredentialsGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)

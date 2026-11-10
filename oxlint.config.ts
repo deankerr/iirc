@@ -113,6 +113,32 @@ const toClient = (production: boolean) =>
     "`@iirc/runtime` depends only on `@iirc/client`, `@iirc/outbox`, and `@iirc/protocol`."
   );
 
+// The fold may read the Client's News and casemapping, and its tests may play a Client.
+const toTimelines = (production: boolean) =>
+  ours(
+    [
+      "@iirc/client",
+      "@iirc/client/known",
+      "@iirc/protocol/*",
+      ...(production ? [] : ["@iirc/client/testing"]),
+    ],
+    "`@iirc/timelines` depends only on `@iirc/client` and `@iirc/protocol`."
+  );
+
+// Its laws are checked with the Runtime's `holds`, so only its test kit reaches the Runtime's.
+const toTimelineStore = (production: boolean) =>
+  ours(
+    [
+      "@iirc/client",
+      "@iirc/client/known",
+      "@iirc/timelines",
+      ...(production ? [] : ["@iirc/runtime/testing"]),
+    ],
+    "`@iirc/timeline-store` depends only on `@iirc/timelines` and `@iirc/client`."
+  );
+
+const storeAlone = "A Timeline store reaches the world only through an adapter of its own.";
+
 const tests = ["**/*.test.ts", "**/testing/**"];
 
 // Each layer's rules, once for every file and once more, with the test kits refused, for
@@ -135,12 +161,20 @@ const coreFence: OxlintOverride[] = [
   ...layer(["packages/protocol/src/**"], coreRules(toNothing)),
   ...layer(["packages/client/src/**"], coreRules(toProtocol)),
   ...layer(["packages/outbox/src/**"], coreRules(outboxToProtocol)),
+  ...layer(["packages/timelines/src/**"], (production) =>
+    coreRules(toTimelines(production))(production)
+  ),
+  ...layer(["packages/timeline-store/src/**"], (production) => ({
+    "no-restricted-globals": globals(storeAlone),
+    "no-restricted-imports": imports(production, adapters, toTimelineStore(production)),
+    "no-restricted-properties": noMathRandom(storeAlone),
+  })),
   ...layer(["packages/api/src/**"], (production) => ({
     "no-restricted-imports": imports(
       production,
       adapters,
       ours(
-        ["@iirc/client", "@iirc/protocol/*"],
+        ["@iirc/client", "@iirc/protocol/*", "@iirc/timelines"],
         "`@iirc/api` is the contract alone: it never imports the Runtime or an adapter."
       )
     ),

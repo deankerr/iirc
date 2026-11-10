@@ -433,6 +433,7 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
           tags: new Map(),
           target: input.target,
           text: input.text,
+          where: [{ _tag: "Network" }],
         },
       ])
     : {

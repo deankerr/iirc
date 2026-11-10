@@ -6,7 +6,6 @@
  * @packageDocumentation
  */
 import { parseCtcp } from "@iirc/protocol/ctcp";
-import { chantypesOf } from "@iirc/protocol/isupport";
 import { parseSource } from "@iirc/protocol/line";
 import type { Line, Source } from "@iirc/protocol/line";
 
@@ -14,6 +13,8 @@ import type { Arrival, Meant } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import type { ModeRules } from "./modes.ts";
 import { readListed, readModes, rulesOf } from "./modes.ts";
+import type { Naming } from "./names.ts";
+import { namingOf, parseChannel } from "./names.ts";
 import type { Activity } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, linkOf } from "./run.ts";
@@ -24,7 +25,7 @@ import { openOf, sessionOf } from "./views.ts";
  * @param run - The step.
  * @returns The name.
  */
-const serverName = (run: Run): string =>
+export const serverName = (run: Run): string =>
   sessionOf(run.state)?.server ?? linkOf(run)?.ircd.host ?? "";
 
 /**
@@ -48,22 +49,22 @@ export const isSelf = (run: Run, nick: string): boolean => {
 export const rulesNow = (run: Run): ModeRules => rulesOf(openOf(run.state)?.isupport ?? new Map());
 
 /**
- * Whether a name is a Channel's, by `CHANTYPES`.
+ * The Network's naming rules now.
+ * @param run - The step.
+ * @returns The rules.
+ */
+export const namingNow = (run: Run): Naming => namingOf(openOf(run.state)?.isupport ?? new Map());
+
+/**
+ * Whether a name is a Channel's, as {@link parseChannel} reads it.
  * @param run - The step.
  * @returns The test.
  */
-export const channelTest =
-  (run: Run) =>
-  (name: string): boolean => {
-    const first = name.codePointAt(0);
+export const channelTest = (run: Run): ((name: string) => boolean) => {
+  const naming = namingNow(run);
 
-    return (
-      first !== undefined &&
-      chantypesOf(openOf(run.state)?.isupport.get("CHANTYPES")).includes(
-        String.fromCodePoint(first)
-      )
-    );
-  };
+  return (name) => parseChannel(naming, name) !== undefined;
+};
 
 /**
  * When a Line was said: from the Ircd where a Feature knows it, else when it arrived.
@@ -78,6 +79,30 @@ const clientTags = (line: Line): ReadonlyMap<string, string> =>
   new Map([...line.tags].filter(([key]) => key.startsWith("+")));
 
 const listOf = (names: string): readonly string[] => names.split(",").filter((name) => name !== "");
+
+/**
+ * Reads a list of Channels' names, as `JOIN` and `PART` carry it.
+ * @param run - The step.
+ * @param names - The parameter.
+ * @returns Each name, or `undefined` when any item cannot be a Channel's, or none is given.
+ */
+const channelsOf = (run: Run, names: string): readonly string[] | undefined => {
+  const naming = namingNow(run);
+  const read = listOf(names).map((name) => parseChannel(naming, name));
+
+  return read.length === 0 || read.includes(undefined)
+    ? undefined
+    : read.filter((name) => name !== undefined);
+};
+
+/**
+ * Reads one Channel's name, as `KICK` and `TOPIC` carry it.
+ * @param run - The step.
+ * @param name - The parameter, or `undefined` when it is missing.
+ * @returns The name, or `undefined` when it is missing or cannot be a Channel's.
+ */
+const channelOf = (run: Run, name: string | undefined): string | undefined =>
+  name === undefined ? undefined : parseChannel(namingNow(run), name);
 
 /** What a reader is given. */
 interface Said {
@@ -145,28 +170,35 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
   ["NOTICE", message],
   [
     "JOIN",
-    ({ params: [channels], source, activity }) =>
-      channels === undefined || source === undefined
+    ({ run, params: [names], source, activity }) => {
+      const channels = names === undefined ? undefined : channelsOf(run, names);
+
+      return channels === undefined || source === undefined
         ? unfit
-        : listOf(channels).map((channel) =>
-            activity({ _tag: "Joined", channel, nick: source.nick })
-          ),
+        : channels.map((channel) => activity({ _tag: "Joined", channel, nick: source.nick }));
+    },
   ],
   [
     "PART",
-    ({ params: [channels, reason], source, activity }) =>
-      channels === undefined || source === undefined
+    ({ run, params: [names, reason], source, activity }) => {
+      const channels = names === undefined ? undefined : channelsOf(run, names);
+
+      return channels === undefined || source === undefined
         ? unfit
-        : listOf(channels).map((channel) =>
+        : channels.map((channel) =>
             activity({ _tag: "Parted", channel, nick: source.nick, reason })
-          ),
+          );
+    },
   ],
   [
     "KICK",
-    ({ params: [channel, nicks, reason], by, activity }) =>
-      channel === undefined || nicks === undefined
+    ({ run, params: [name, nicks, reason], by, activity }) => {
+      const channel = channelOf(run, name);
+
+      return channel === undefined || nicks === undefined
         ? unfit
-        : listOf(nicks).map((nick) => activity({ _tag: "Kicked", by, channel, nick, reason })),
+        : listOf(nicks).map((nick) => activity({ _tag: "Kicked", by, channel, nick, reason }));
+    },
   ],
   [
     "QUIT",
@@ -196,8 +228,10 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
   ],
   [
     "TOPIC",
-    ({ run, arrival, params: [channel, text], by, activity }) =>
-      channel === undefined || text === undefined
+    ({ run, arrival, params: [name, text], by, activity }) => {
+      const channel = channelOf(run, name);
+
+      return channel === undefined || text === undefined
         ? unfit
         : [
             activity({
@@ -206,7 +240,8 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
               channel,
               topic: text === "" ? null : { setAt: timeOf(run, arrival), setBy: by, text },
             }),
-          ],
+          ];
+    },
   ],
   [
     "AWAY",

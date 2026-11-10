@@ -4,16 +4,16 @@
  * never in `bun run test`.
  */
 import { CallerIntent, CredentialPathName, NetworkId } from "@iirc/api";
-import type { Happened } from "@iirc/api";
+import type { Happened, TimelineItem } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
-import { Effect, Redacted } from "effect";
+import { Effect, Fiber, Redacted } from "effect";
 import type { Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { startErgo, startNgircd } from "../testing/ircd.ts";
 import type { Ircd } from "../testing/ircd.ts";
 import { connectPeer, registerAccount } from "../testing/peer.ts";
-import { eventually, followNews, startDaemon } from "../testing/running.ts";
+import { eventually, followChanges, followNews, startDaemon } from "../testing/running.ts";
 import type { Api } from "../testing/running.ts";
 import { makeKey, temporaryDirectory } from "../testing/world.ts";
 
@@ -29,6 +29,9 @@ const said = (happened: readonly Happened[], sender: string, text: string) =>
   );
 
 const sequences = (happened: readonly Happened[]) => happened.map((one) => one.sequence);
+
+const sent = (item: TimelineItem, sender: string, text: string) =>
+  item.content._tag === "Message" && item.content.sender === sender && item.content.text === text;
 
 const joined = (api: Api) =>
   eventually(api.networks.known({ params: { network } }), (known) =>
@@ -119,7 +122,7 @@ describe("ngircd, on the floor", () => {
       nicks: ["iirc"],
     });
 
-  it("configures, registers, joins, says, and hears the other User as News", async () => {
+  it("configures, registers, joins, says, and hears the other User as News and in its Timeline", async () => {
     const result = await run(
       Effect.gen(function* () {
         const dataDir = yield* temporaryDirectory;
@@ -148,9 +151,35 @@ describe("ngircd, on the floor", () => {
             )
         );
 
+        // The Timelines as they stand, and their changes followed from there, live.
+        const before = yield* api.timelines.list({ params: { network }, query: {} });
+
+        const resume = { sequence: before.through ?? 0, version: before.version };
+
+        const following = yield* followChanges(api, resume, (changed) =>
+          changed.some((event) =>
+            event.data.items.some((item) => sent(item, "peer", "hello from peer"))
+          )
+        ).pipe(Effect.forkChild);
+
         peer.send(`PRIVMSG ${channel} :hello from peer`);
 
         const happened = yield* followNews(api, 0, (all) => said(all, "peer", "hello from peer"));
+        const changes = yield* Fiber.join(following);
+
+        const carried = changes.find((event) =>
+          event.data.items.some((item) => sent(item, "peer", "hello from peer"))
+        );
+
+        const listed = yield* api.timelines.list({ params: { network }, query: {} });
+        const timeline = listed.timelines.find((one) => one.name === channel);
+
+        const window =
+          timeline === undefined
+            ? undefined
+            : yield* api.timelines.window({ params: { timeline: timeline.id }, query: {} });
+
+        const read = window?.items.find((item) => sent(item, "peer", "hello from peer"));
 
         const inspected = yield* api.networks.inspect({ params: { network } });
 
@@ -163,6 +192,15 @@ describe("ngircd, on the floor", () => {
           ours: said(happened, "iirc", "hello from iirc"),
           peer: said(happened, "peer", "hello from peer"),
           session: known.session._tag,
+          timeline: {
+            carriedAt: carried?.id.sequence === read?.sequence,
+            kind: timeline?.kind,
+            ours: window?.items.some((item) => sent(item, "iirc", "hello from iirc")),
+            projection: listed.projection._tag,
+            read: read !== undefined,
+            through: (listed.through ?? 0) >= (carried?.id.sequence ?? Number.POSITIVE_INFINITY),
+            version: carried?.id.version === listed.version,
+          },
           wasSaid: saying.sequence > 0,
         };
       })
@@ -175,6 +213,15 @@ describe("ngircd, on the floor", () => {
       ours: true,
       peer: true,
       session: "Registered",
+      timeline: {
+        carriedAt: true,
+        kind: "Channel",
+        ours: true,
+        projection: "Running",
+        read: true,
+        through: true,
+        version: true,
+      },
       wasSaid: true,
     });
   }, 60_000);

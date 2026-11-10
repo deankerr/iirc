@@ -1,0 +1,84 @@
+# @iirc/timeline-store
+
+The Timeline store port: where the changes [`@iirc/timelines`](../timelines/README.md) folds from News are kept, and what Timelines are read from. The store is derived. It can be emptied and folded again from the Journal at any time, so nothing in it is the only copy of anything ([ADR 0002](../../docs/adr/0002-the-journal-holds-bytes.md), [ADR 0011](../../docs/adr/0011-timelines-are-a-projection-the-client-routes.md)).
+
+This README is the port's written interface. The types are in `src/store.ts`, and the in-memory adapter and the laws are in `src/testing/`, exported from `@iirc/timeline-store/testing`. The port lives beside the fold, not in the Runtime, because the Runtime never drives it: what drives it is whatever folds the Runtime's News, and the port's types are the fold's.
+
+```ts
+import { TimelineStore } from "@iirc/timeline-store";
+
+apply({ changes, through, directory }): Effect<void, TimelineStoreFailed>
+folded: Effect<{ version, through }, TimelineStoreFailed>      // each undefined until set
+directory: Effect<Directory, TimelineStoreFailed>
+timelines(network, { after?, limit? }?): Effect<readonly Summary[], TimelineStoreFailed>
+window(timeline, anchor, limit): Effect<Option<Window>, TimelineStoreFailed>
+locate(network, sequence, { after?, limit? }?): Effect<readonly Item[], TimelineStoreFailed>
+gaps(network, { from?, to? }): Effect<readonly Gap[], TimelineStoreFailed>
+collapsedGaps(network, { from?, to?, at }): Effect<readonly CollapsedGap[], TimelineStoreFailed>
+changedAfter(after, limit?): Effect<Changed, TimelineStoreFailed>
+consistent(reads): Effect<{ value, through, version }, TimelineStoreFailed>
+reset(version): Effect<void, TimelineStoreFailed>
+
+Summary = Descriptor & { latest: Position | undefined, changed }   // { id, network, kind, name, key }
+Item = { network, timeline, position, content, changed }
+Window = { timeline, network, items, earlier, later }
+Anchor = Before { position? } | After { position? } | Around { position }
+Changed = { timelines, items, merged, gaps, overflowed, through, more }
+Overflowed = { sequence, timelines: readonly TimelineId[] | undefined }
+CollapsedGap = { from, to: Position | undefined, count }
+Tombstone = { network, id, into, changed }
+Gap = { network, from, to: Position | undefined, changed }
+```
+
+`TimelineStore` is an Effect service. An adapter provides it as a Layer from its own package: [`@iirc/timeline-store-sqlite`](../timeline-store-sqlite/README.md) in production, which the Daemon keeps in `views.sqlite`.
+
+## Writing
+
+- **One step at a time, whole or absent.** `apply` takes one step's changes, the sequence it folded through, and the directory after it, and keeps all three or none. An interrupted `apply` is either kept whole or not at all.
+- **A step at or before the last one folded changes nothing,** so applying a step again after a failure whose outcome was unknown is safe.
+- **`folded` says how far the store has folded,** and the projection version it was built with. A freshly made store has neither, and `reset(version)` sets only the version, so a store reset and not yet applied to has a version and no `through`.
+- **`directory` gives the fold's state** as of the last step, so the fold resumes after `through` without folding the Journal again.
+- **`reset(version)` empties the store,** directory included, and records the version it is about to be folded by. Whatever starts the store compares `version` with `projectionVersion`, and on a difference resets it and folds the Journal again from the start.
+
+## What the changes mean
+
+- **`Described`** holds a Timeline as given, replacing what was there: its name, its key, and whether it is detached, which is a Channel or Direct Message Timeline with no key.
+- **`Added`** keeps an item at its position in its Timeline, with **one item per message id per Timeline**. When an item with the same message id, or at the same position, is already in that Timeline, the first is kept and the new one dropped. An item with no message id is always kept. The same message id may stand in many Timelines.
+- **`Confirmed`** confirms every item of ours for that intent in that Network, wherever it stands, with the Ircd's time, id, and text. Its **position does not move**. From then on the item is kept under the Ircd's message id too, unless another item in its Timeline already has that id, so the same Message arriving again from history is dropped. An item already confirmed stays as it was.
+- **`Unsent`** marks every item of ours for that intent in that Network as `Unsent`, in place, unless it was confirmed.
+- **`Merged`** moves every item of `from` into `into`, by the same rule as `Added`, so an item whose message id or position `into` already has is dropped. `from` is gone from `timelines` and leaves a **tombstone** naming `into`. A tombstone always names a Timeline that exists: a tombstone that named `from` is moved on to `into`.
+- **`Gap`** keeps a Network's Gap by where it began, so the one that says where it ended replaces the one that did not.
+
+Each Timeline, item, tombstone, and Gap records `changed`, the last sequence that changed it. A Timeline's counts any change to its items too: one added, confirmed, marked unsent, or moved in.
+
+## Reading
+
+- **`timelines(network, { after, limit })`** gives the Network's Timelines, merged ones aside and detached ones included, in the order they were opened, which is by id, each with the position of its last item and its `changed`: those after the id `after`, up to `limit`, or every one without a page.
+- **`window(timeline, anchor, limit)`** gives up to `limit` items in position order, and whether more lie `earlier` and `later`. `Before` gives the last before a position, or the last of all without one. `After` gives the first after a position, or the first of all without one. `Around` gives as many before a position as from it on, and more from either side when the other runs out, so an item at the position is in the window. A merged id reads the Timeline it went to, which `timeline` names, with the Network it is one of. An id never given is `None`.
+- **`locate(network, sequence, { after, limit })`** gives the items a step made, wherever they stand now, in position order and, for items at one position, by Timeline id, which is how a link to a step finds its items: those after the item `after` names by its position and Timeline in that order, up to `limit`, or every one without a page. One step can make an item in every Channel a User shared with Self, so a reader that must stay bounded pages it.
+- **`gaps(network, { from, to })`** gives the Network's Gaps that overlap the range of positions, either end of which may be left open, in the order they began, which is by where, since a Network has one Gap from each. A Gap still going on overlaps everything after it began. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended: a Session that begins closes one Gap at its position, and when a restart then ends it before any more News, the next Gap begins at the last step folded, which is that same position. So of the Gaps that began before `from`, only the last can reach it, and every adapter keeps that one when it does, with every Gap that began at or after `from`, and nothing older.
+- **`collapsedGaps(network, { from, to, at })`** gives the same Gaps over a range, split at a Timeline's item positions `at`, in order, with each run between two of them collapsed into one `{ from, to, count }`: where its first began, where its last ended, or `undefined` while it goes on, and how many. A run is the Gaps that began after one position and at or before the next, the first run those that began at or before the first position, and the last those that began after the last. A run with none is left out, so there are at most one more than there are positions, however many Gaps there are. A window asks this for its items, so a quiet Timeline that spans many reconnects gives one Gap that counts them.
+- **`changedAfter(after, limit)`** gives every Timeline, item, tombstone, and Gap whose `changed` is after `after`, as it stands now, each list ordered by `changed` and then by a tie-break, so every adapter gives the same lists: among what changed in one sequence, Timelines and tombstones come **by Timeline id** (a tombstone's is the merged one's), items **by their Timeline's id, then by position**, and Gaps **by Network id, then by where they began**. Timeline ids are unique across Networks, and Network ids are compared as text by code point, so a database comparing UTF-8 bytes agrees, which is not the order of UTF-16 code units that JavaScript compares in. The store takes any text as a Network's id, and its laws tie Gaps on ids that the API's own pattern would refuse, such as `""` and `"\u{10000}"`, because the order is the store's to keep. With a limit, it gives whole sequences while they come to at most `limit` things together, so no sequence is split and no page holds more. A first sequence that alone changed more, such as a merge of two long Timelines, which changes every item it moves, is given as `overflowed` instead, with every list empty: its sequence, and the ids of the Timelines it touched or merged, in id order, or `undefined` when they too are more than `limit`. A page is found without reading more than it gives: each sequence takes a seek and a count that stops at the limit, and an overflowed step's Timelines are found by seeking from one to the next. Without a limit, it gives everything, which is for tests and tools, not a reader that must stay bounded. `through` is the last sequence given, and a reader resumes after it, with `more` saying whether anything changed later. When nothing more is left, `through` is the last step folded. Something changed again after a reader saw it is given again, as it stands then.
+- **`consistent(reads)`** runs reads of this store against one state of it, which no `apply` or `reset` changes while they run, and gives what they read with `through`, the last step folded into that state, or `undefined` before any, and `version`, the projection version it was folded by, or `undefined` for a store never reset. So a reader that reads a window, its Gaps, or a step's items together, and then follows `changedAfter(through)`, misses nothing they did not show and loses nothing to a race with the projector. It is for the store's own reads: a write inside it would wait on itself.
+
+## Failure
+
+`TimelineStoreFailed` means the store could not be written or read. A store is derived, so the remedy for one that cannot be read is to reset it and fold again.
+
+## The laws
+
+`@iirc/timeline-store/testing` holds `timelineStoreLaws`, the laws every adapter keeps, as data, and `makeMemoryTimelineStore`, the in-memory adapter that keeps them. The laws cover each rule above: a fresh store, `reset`, a reset that leaves no history behind, so the same steps are accepted again, a step applied twice, one item per message id and position, order by position with late history in the middle, confirming and marking unsent in place, merging with tombstones, windows on every anchor and their ends, `locate` a page at a time, Gaps over ranges, found from the last that began before the range, including two that meet where the range begins, as a failed Connection, a Session, and a restart folded in turn leave them, read in full and collapsed, `changedAfter` page by page, a merge bigger than the page given as overflowed with the Timelines it touched, or with none when they too are more than the page, and the step after it given whole, Timelines paged by id, Gaps collapsed between a quiet Timeline's items, open or closed at each end, reads made together with the last step folded and its version, and a window's Network, a step held back while reads made together run, so two reads inside see the same state, describing and detaching, a step at or before the last one folded that changes nothing, directory included, even one carrying a delivery update for a Message of ours, the order among what changed in one sequence, applied in an order that differs from the order of ids, and an `apply` interrupted at every point between two operations. A law is checked with `holds` from `@iirc/runtime/testing`, as the Runtime's ports' laws are.
+
+```ts
+it.each(timelineStoreLaws)("$name", async (law) => {
+  await expect(Effect.runPromise(holds(law, makeMemoryTimelineStore))).resolves.toBeUndefined();
+});
+```
+
+A law compares what a read returns structurally, so an adapter's objects may hold their properties in any order. Arrays are compared in order, and a `Map` or a `Set` by what it holds, whatever order it holds it in, because no read promises an order from one: the directory's Maps are the only ones that cross the port, and the fold reads them by key. An interrupted `apply` is checked with each of these steps: one that carries items, Timelines described anew, and a directory of its own; one that confirms one intent of ours and marks another `Unsent`, each with items in two Timelines; one that closes a Gap and opens another; and one that merges a Timeline into another, with items in both, so a merge half done, items moved with no tombstone or the reverse, is seen. Afterwards everything a read returns is together exactly what it was before, or exactly what the step leaves, and never part of each. That is the directory, how far the store has folded, every Timeline's summary with its `latest` and `changed`, every item in full, the windows, the Gaps, and the tombstones, each as `changedAfter`, `timelines`, `window`, and `gaps` give them. A step the store drops as obsolete is checked the same way, with changes of every kind, `Confirmed` and `Unsent` for Messages of ours included.
+
+The memory adapter applies each step to a copy and swaps it in at once, and a write and reads made together take turns on one permit. Production code may not import `@iirc/timeline-store/testing`.
+
+## Not yet
+
+- **Search.** Items are read by position and by step, not by what they say.

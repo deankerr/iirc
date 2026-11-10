@@ -52,6 +52,7 @@ import { addressFor, pruned, rescheduled } from "./sts.ts";
 import { lagAfter, silentAfter, tableOf, timersOf, wakes } from "./timers.ts";
 import type { Purpose } from "./timers.ts";
 import { inspectionOf, knowledgeOf, onNow, openOf, sessionOf } from "./views.ts";
+import { routeOurs } from "./where.ts";
 
 /** The token of the `PING` the Client sends to hear from a quiet Ircd. */
 const lagToken = "iirc";
@@ -466,18 +467,20 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
     return;
   }
 
-  run.news.push({
-    _tag: "Message",
-    at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
-    id: { _tag: "Unknown" },
-    kind: input.kind,
-    live: true,
-    ours: { echo: sent.echo, intent: input.intent },
-    sender: session.nick,
-    tags: new Map(),
-    target: input.target,
-    text: input.text,
-  });
+  run.news.push(
+    routeOurs(run, {
+      _tag: "Message",
+      at: { _tag: "Known", at: run.at, from: "ours", value: run.at },
+      id: { _tag: "Unknown" },
+      kind: input.kind,
+      live: true,
+      ours: { echo: sent.echo, intent: input.intent },
+      sender: session.nick,
+      tags: new Map(),
+      target: input.target,
+      text: input.text,
+    })
+  );
 };
 
 // Timers

@@ -172,7 +172,7 @@ The Clock port is Effect's own `Clock`. Its live adapter is the default Clock, a
 
 ## The laws
 
-`@iirc/runtime/testing` holds the laws every adapter of a port keeps, as data: `journalLaws`, `vaultLaws`, and `transportLaws`. The Journal's laws follow from three positions while appends for two Networks run concurrently, and interrupt appends at every point between two operations. The Transport's laws interrupt a hangup the same way, and check that the Connection still ends once. A law is an Effect that fails with `LawBroken`, so the module needs no test runner. `holds(law, make)` checks one against a fresh harness, in its own Scope, and fails after two seconds rather than hanging.
+`@iirc/runtime/testing` holds the laws every adapter of a port keeps, as data: `journalLaws`, `vaultLaws`, and `transportLaws`. The Journal's laws follow from three positions while appends for two Networks run concurrently, and interrupt appends at every point between two operations. The Transport's laws interrupt a hangup the same way, and check that the Connection still ends once. A law is an Effect that fails with `LawBroken`, so the module needs no test runner. `holds(law, make)` checks one against a fresh harness, in its own Scope, and fails after ten seconds rather than hanging. That is a guard against a hang, not a bound on speed, so a loaded machine does not fail a law that is only slow.
 
 ```ts
 it.each(journalLaws)("$name", async (law) => {

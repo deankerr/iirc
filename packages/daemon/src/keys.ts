@@ -4,12 +4,12 @@
  *
  * @packageDocumentation
  */
-// `node:crypto` for `timingSafeEqual`, which `effect/crypto` does not offer.
-import { timingSafeEqual } from "node:crypto";
+import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import type { Redacted } from "effect";
+import { Digest } from "effect/crypto";
 
-import { Context, DateTime, Effect, FileSystem, Layer, Option, Redacted, Schema } from "effect";
-import type { PlatformError } from "effect";
-import { Digest, SecureRandom } from "effect/crypto";
+import { readIfPresent, writeAtomically } from "./files.ts";
+import { makeToken, matching, Sha256Hex } from "./tokens.ts";
 
 /** A key's name, which says whose it is, such as `phone` or `agent`. */
 export const KeyName = Schema.String.check(
@@ -19,12 +19,8 @@ export const KeyName = Schema.String.check(
   })
 );
 
-const Sha256Hex = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u));
-
 /** One key as stored: its name, the SHA-256 of the key as hex, and when it was made. */
 const StoredKey = Schema.Struct({ created: Schema.String, name: KeyName, sha256: Sha256Hex });
-
-type StoredKey = typeof StoredKey.Type;
 
 // Versioned JSON. A later format is a new version, never a reinterpretation of this one.
 const KeysFile = Schema.fromJsonString(
@@ -61,8 +57,6 @@ export class KeyExists extends Schema.TaggedError<KeyExists, { readonly brand: u
   }
 ) {}
 
-const mode = 0o600;
-
 const keysPath = (dataDir: string) => `${dataDir}/keys.json`;
 
 /**
@@ -72,19 +66,11 @@ const keysPath = (dataDir: string) => `${dataDir}/keys.json`;
  */
 const readKeys = (dataDir: string) =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
     const path = keysPath(dataDir);
 
     // Only a fixed phrase or the platform's own message, never what a decoder says about
     // the text, which would quote a hash.
-    const text = yield* fs.readFileString(path).pipe(
-      Effect.asSome,
-      Effect.catchTag("PlatformError", (error) =>
-        error.reason._tag === "NotFound"
-          ? Effect.succeed(Option.none<string>())
-          : Effect.fail(new KeysUnreadable({ path, reason: error.message }))
-      )
-    );
+    const text = yield* readIfPresent(path, (reason) => new KeysUnreadable({ path, reason }));
 
     if (Option.isNone(text)) {
       return [];
@@ -96,72 +82,6 @@ const readKeys = (dataDir: string) =>
       ? file.value.keys
       : yield* new KeysUnreadable({ path, reason: "it is not a version 1 keys file" });
   });
-
-/**
- * Writes every key to a temporary file beside `keys.json`, syncs it, and renames it into
- * place, as vault-file writes. A crash leaves the old file or the new one.
- * @param dataDir - The data directory.
- * @param keys - Every key to keep.
- * @returns An Effect that fails with nothing changed, or replaces the file.
- */
-const writeKeys = (dataDir: string, keys: readonly StoredKey[]) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = keysPath(dataDir);
-    const temporary = `${path}.tmp`;
-    const removeTemporary = fs.remove(temporary, { force: true }).pipe(Effect.ignoreCause);
-
-    const stage = Effect.scoped(
-      Effect.gen(function* () {
-        const file = yield* fs.open(temporary, { flag: "wx", mode });
-
-        yield* file.writeAll(new TextEncoder().encode(encodeKeysFile({ keys, version: 1 })));
-        yield* file.sync;
-      })
-    );
-
-    yield* Effect.uninterruptible(
-      Effect.gen(function* () {
-        yield* removeTemporary;
-        yield* stage;
-        yield* fs.rename(temporary, path);
-        yield* Effect.scoped(
-          Effect.flatMap(fs.open(dataDir, { flag: "r" }), (dir) => dir.sync)
-        ).pipe(Effect.ignoreCause);
-      }).pipe(
-        Effect.onError(() => removeTemporary),
-        Effect.mapError(
-          (error: PlatformError.PlatformError) =>
-            new KeysUnwritable({ path, reason: error.message })
-        ),
-        Effect.catchDefect(() =>
-          Effect.fail(new KeysUnwritable({ path, reason: "the file system failed" }))
-        )
-      )
-    );
-  });
-
-const toHex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
-
-const fromHex = (hex: string) => new Uint8Array(Buffer.from(hex, "hex"));
-
-const encoder = new TextEncoder();
-
-const hashOf = (key: string) =>
-  Effect.gen(function* () {
-    const digest = yield* Digest.Digest;
-
-    return yield* digest.digest(Digest.sha256, encoder.encode(key));
-  });
-
-/**
- * Compares two SHA-256 digests in time that does not depend on where they differ.
- * @param left - One digest.
- * @param right - The other.
- * @returns Whether they are equal.
- */
-const equalDigests = (left: Uint8Array, right: Uint8Array): boolean =>
-  left.length === right.length && timingSafeEqual(left, right);
 
 /**
  * Makes a key and stores its hash. Call it with the data directory held, so no Daemon is
@@ -178,23 +98,34 @@ export const createKey = (dataDir: string, name: typeof KeyName.Type) =>
       return yield* new KeyExists({ key: name });
     }
 
-    const random = yield* SecureRandom.SecureRandom;
-    const bytes = yield* random.randomBytes(32);
-    const key = `iirc_${Buffer.from(bytes).toString("base64url")}`;
-    const sha256 = toHex(yield* hashOf(key));
+    const { sha256, token } = yield* makeToken("iirc_");
     const created = DateTime.formatIso(yield* DateTime.now);
+    const path = keysPath(dataDir);
 
-    yield* writeKeys(dataDir, [...stored, { created, name, sha256 }]);
+    yield* writeAtomically(
+      dataDir,
+      path,
+      encodeKeysFile({ keys: [...stored, { created, name, sha256 }], version: 1 }),
+      (reason) => new KeysUnwritable({ path, reason })
+    );
 
-    return Redacted.make(key);
+    return token;
   });
+
+/** A key held: its name, and its SHA-256 as hex, which says exactly which key it is. */
+export interface HeldKey {
+  readonly name: string;
+  readonly sha256: string;
+}
 
 /** Checks the keys a request presents. */
 export class ApiKeys extends Context.Service<
   ApiKeys,
   {
-    /** The name of the key presented, if it is one. */
-    readonly verify: (presented: Redacted.Redacted) => Effect.Effect<Option.Option<string>>;
+    /** The key presented, if it is one. */
+    readonly verify: (presented: Redacted.Redacted) => Effect.Effect<Option.Option<HeldKey>>;
+    /** The name of the key with this SHA-256, if it is still held. */
+    readonly holding: (sha256: string) => Option.Option<string>;
   }
 >()("@iirc/daemon/ApiKeys") {
   /**
@@ -217,24 +148,14 @@ export class ApiKeys extends Context.Service<
           );
         }
 
-        const hashes = stored.map((key) => ({ hash: fromHex(key.sha256), name: key.name }));
+        const names = new Map(stored.map((key) => [key.sha256, key.name]));
 
         return {
+          holding: (sha256) => Option.fromNullishOr(names.get(sha256)),
           verify: (presented) =>
-            Effect.map(
-              digest.digest(Digest.sha256, encoder.encode(Redacted.value(presented))),
-              (hash) => {
-                // Every stored hash is compared, so the time taken says nothing of which matched.
-                let found: string | undefined;
-
-                for (const key of hashes) {
-                  if (equalDigests(hash, key.hash)) {
-                    found = key.name;
-                  }
-                }
-
-                return Option.fromNullishOr(found);
-              }
+            matching(stored, presented).pipe(
+              Effect.map(Option.map(({ name, sha256 }) => ({ name, sha256 }))),
+              Effect.provideService(Digest.Digest, digest)
             ),
         };
       })

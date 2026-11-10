@@ -20,7 +20,10 @@ describe("UTF8ONLY", () => {
       configuration: base,
       transcript: [
         registered(base, { isupport: utf8Only }),
-        lines("<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9", "?? message Privmsg peer iirc :caf�"),
+        lines(
+          "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
+          "?? message Privmsg peer iirc in=direct:peer :caf�"
+        ),
       ],
     });
 
@@ -32,7 +35,10 @@ describe("UTF8ONLY", () => {
       configuration: base,
       transcript: [
         registered(base),
-        lines("<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9", "?? message Privmsg peer iirc :café"),
+        lines(
+          "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
+          "?? message Privmsg peer iirc in=direct:peer :café"
+        ),
       ],
     });
     play(client, {
@@ -42,7 +48,7 @@ describe("UTF8ONLY", () => {
         lines(
           "<< :irc.test 005 iirc -UTF8ONLY :are supported by this server",
           "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
-          "?? message Privmsg peer iirc :café"
+          "?? message Privmsg peer iirc in=direct:peer :café"
         ),
       ],
     });
@@ -53,7 +59,10 @@ describe("UTF8ONLY", () => {
       configuration: declined,
       transcript: [
         registered(declined, { isupport: utf8Only }),
-        lines("<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9", "?? message Privmsg peer iirc :café"),
+        lines(
+          "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
+          "?? message Privmsg peer iirc in=direct:peer :café"
+        ),
       ],
     });
 

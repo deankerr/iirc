@@ -19,11 +19,12 @@ const message: News = {
   tags: new Map(),
   target: "#iirc",
   text: "hi there",
+  where: [{ _tag: "Channel", key: "#iirc", name: "#iirc" }],
 };
 
 describe(describeNews, () => {
   it.each<readonly [News, string]>([
-    [message, "message Privmsg peer #iirc :hi there"],
+    [message, "message Privmsg peer #iirc in=channel:#iirc :hi there"],
     [
       {
         ...message,
@@ -33,7 +34,7 @@ describe(describeNews, () => {
         ours: { echo: true, intent: IntentId.make("i1") },
         tags: new Map([["+draft/reply", "m0"]]),
       },
-      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history tags=+draft/reply="m0" ours=i1 echo :hi there',
+      'message Privmsg peer #iirc at=ircd:t+0s@t+0s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi there',
     ],
     [
       {
@@ -60,8 +61,9 @@ describe(describeNews, () => {
         at: message.at,
         id: { _tag: "Unknown" },
         live: true,
+        where: [{ _tag: "Channel", key: "#iirc", name: "#iirc" }],
       },
-      "activity ModeChanged #iirc by=op +o=peer -k",
+      "activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc",
     ],
     [
       {
@@ -75,8 +77,51 @@ describe(describeNews, () => {
         at: message.at,
         id: { _tag: "Unknown" },
         live: true,
+        where: [{ _tag: "Channel", key: "#foo{", name: "#Foo[" }],
       },
-      "activity TopicChanged #iirc by=op setBy=op setAt=t+0s :a topic",
+      "activity TopicChanged #iirc by=op setBy=op setAt=t+0s in=channel:#foo{:#Foo[ :a topic",
+    ],
+    [
+      {
+        _tag: "Activity",
+        activity: { _tag: "NickChanged", from: "Peer", to: "pal" },
+        at: message.at,
+        id: { _tag: "Unknown" },
+        live: true,
+        where: [
+          { _tag: "Channel", key: "#iirc", name: "#iirc" },
+          {
+            _tag: "DirectRenamed",
+            key: "peer",
+            name: "Peer",
+            to: { key: "pal", name: "pal" },
+          },
+        ],
+      },
+      "activity NickChanged Peer pal in=channel:#iirc in=renamed:peer:Peer>pal",
+    ],
+    [
+      {
+        _tag: "Activity",
+        activity: { _tag: "AwayChanged", away: null, nick: "peer" },
+        at: message.at,
+        id: { _tag: "Unknown" },
+        live: true,
+        where: [{ _tag: "Direct", existing: true, key: "peer", name: "peer" }],
+      },
+      "activity AwayChanged peer back in=existing-direct:peer",
+    ],
+    [
+      {
+        ...message,
+        target: "iirc",
+        where: [{ _tag: "Direct", existing: false, key: "peer", name: "peer" }],
+      },
+      "message Privmsg peer iirc in=direct:peer :hi there",
+    ],
+    [
+      { ...message, target: "$*", where: [{ _tag: "Network" }] },
+      "message Privmsg peer $* in=network :hi there",
     ],
     [
       { _tag: "SessionEnded", at: earlier, reason: { _tag: "Upgrading", port: 6697 } },
@@ -104,10 +149,10 @@ describe("descriptions that cannot imitate each other", () => {
     };
 
     expect(describeNews(asOfEarlier, now)).toBe(
-      "message Privmsg peer #iirc id=ircd:m1@t+0s :hi there"
+      "message Privmsg peer #iirc id=ircd:m1@t+0s in=channel:#iirc :hi there"
     );
     expect(describeNews(holdsInstant, now)).toBe(
-      'message Privmsg peer #iirc id=ircd:"m1@t+0s" :hi there'
+      'message Privmsg peer #iirc id=ircd:"m1@t+0s" in=channel:#iirc :hi there'
     );
   });
 
@@ -116,8 +161,17 @@ describe("descriptions that cannot imitate each other", () => {
       describeNews({ _tag: "Ignored", reason: { _tag: "Malformed", command: "MODE id=x" } }, now)
     ).toBe('ignored Malformed "MODE id=x"');
     expect(describeNews({ ...message, sender: 'a"b', target: "#a:b" }, now)).toBe(
-      'message Privmsg "a\\"b" "#a:b" :hi there'
+      'message Privmsg "a\\"b" "#a:b" in=channel:#iirc :hi there'
     );
+    expect(
+      describeNews(
+        {
+          ...message,
+          where: [{ _tag: "DirectRenamed", key: "a>b", name: "a>b", to: { key: "c", name: "c" } }],
+        },
+        now
+      )
+    ).toBe('message Privmsg peer #iirc in=renamed:"a>b">c :hi there');
   });
 });
 
@@ -126,7 +180,11 @@ describe("an intent and its echo", () => {
     const echoed: News = { ...message, ours: { echo: true, intent: IntentId.make("i1") } };
     const named: News = { ...message, ours: { echo: false, intent: IntentId.make("i1/echo") } };
 
-    expect(describeNews(echoed, now)).toBe("message Privmsg peer #iirc ours=i1 echo :hi there");
-    expect(describeNews(named, now)).toBe("message Privmsg peer #iirc ours=i1/echo :hi there");
+    expect(describeNews(echoed, now)).toBe(
+      "message Privmsg peer #iirc in=channel:#iirc ours=i1 echo :hi there"
+    );
+    expect(describeNews(named, now)).toBe(
+      "message Privmsg peer #iirc in=channel:#iirc ours=i1/echo :hi there"
+    );
   });
 });

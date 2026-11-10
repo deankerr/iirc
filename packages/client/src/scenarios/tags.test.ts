@@ -26,9 +26,9 @@ describe("message-tags", () => {
         ...withCaps("message-tags"),
         lines(
           "<< @msgid=abc-123 :peer!u@h PRIVMSG #iirc :hi",
-          "?? message Privmsg peer #iirc id=ircd:abc-123 :hi",
+          "?? message Privmsg peer #iirc id=ircd:abc-123 in=channel:#iirc :hi",
           "<< @msgid=m@2;foo=bar :peer!u@h TOPIC #iirc :new",
-          '?? activity TopicChanged #iirc by=peer setBy=peer setAt=t+0s id=ircd:"m@2" :new'
+          '?? activity TopicChanged #iirc by=peer setBy=peer setAt=t+0s id=ircd:"m@2" in=channel:#iirc :new'
         ),
       ],
     });
@@ -43,7 +43,7 @@ describe("message-tags", () => {
         ...withCaps("message-tags"),
         lines(
           "<< @+draft/reply=m0;example.com/vendor=x;+typing;msgid=m1 :peer!u@h PRIVMSG #iirc :hi",
-          '?? message Privmsg peer #iirc id=ircd:m1 tags=+draft/reply="m0";+typing="" :hi'
+          '?? message Privmsg peer #iirc id=ircd:m1 in=channel:#iirc tags=+draft/reply="m0";+typing="" :hi'
         ),
       ],
     });
@@ -58,9 +58,9 @@ describe("message-tags", () => {
         ...withCaps("message-tags"),
         lines(
           "<< @msgid= :peer!u@h PRIVMSG #iirc :a",
-          "?? message Privmsg peer #iirc :a",
+          "?? message Privmsg peer #iirc in=channel:#iirc :a",
           "<< :peer!u@h PRIVMSG #iirc :b",
-          "?? message Privmsg peer #iirc :b"
+          "?? message Privmsg peer #iirc in=channel:#iirc :b"
         ),
       ],
     });
@@ -73,7 +73,10 @@ describe("message-tags", () => {
       configuration: base,
       transcript: [
         ...withCaps(),
-        lines("<< @msgid=m1 :peer!u@h PRIVMSG #iirc :hi", "?? message Privmsg peer #iirc :hi"),
+        lines(
+          "<< @msgid=m1 :peer!u@h PRIVMSG #iirc :hi",
+          "?? message Privmsg peer #iirc in=channel:#iirc :hi"
+        ),
       ],
     });
 
@@ -90,7 +93,7 @@ describe("server-time", () => {
         lines(
           "+30s",
           "<< @time=2026-01-01T00:00:05.250Z :peer!u@h PRIVMSG #iirc :hi",
-          "?? message Privmsg peer #iirc at=ircd:t+5250ms@t+5250ms :hi"
+          "?? message Privmsg peer #iirc at=ircd:t+5250ms@t+5250ms in=channel:#iirc :hi"
         ),
       ],
     });
@@ -144,7 +147,10 @@ describe("server-time", () => {
       configuration: base,
       transcript: [
         ...withCaps("server-time"),
-        lines(`<< @time=${time} :peer!u@h PRIVMSG #iirc :hi`, "?? message Privmsg peer #iirc :hi"),
+        lines(
+          `<< @time=${time} :peer!u@h PRIVMSG #iirc :hi`,
+          "?? message Privmsg peer #iirc in=channel:#iirc :hi"
+        ),
       ],
     });
 
@@ -156,7 +162,10 @@ describe("server-time", () => {
       configuration: base,
       transcript: [
         ...withCaps("server-time"),
-        lines("<< :peer!u@h PRIVMSG #iirc :hi", "?? message Privmsg peer #iirc :hi"),
+        lines(
+          "<< :peer!u@h PRIVMSG #iirc :hi",
+          "?? message Privmsg peer #iirc in=channel:#iirc :hi"
+        ),
       ],
     });
     play(client, {
@@ -165,7 +174,7 @@ describe("server-time", () => {
         ...withCaps(),
         lines(
           "<< @time=2026-01-01T00:00:01.000Z :peer!u@h PRIVMSG #iirc :hi",
-          "?? message Privmsg peer #iirc :hi"
+          "?? message Privmsg peer #iirc in=channel:#iirc :hi"
         ),
       ],
     });

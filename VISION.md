@@ -32,7 +32,7 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 
 ## Core stack
 
-Bun, TypeScript, and Effect, with Ultracite as the fence. The local protocol documents in [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) are our reference for IRC. The language we use is defined in [`GLOSSARY.md`](GLOSSARY.md). We choose everything else when we reach it, and we are free to try more than one option. The frontend framework is an open experiment.
+Bun, TypeScript, and Effect, with Ultracite as the fence. The local protocol documents in [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) are our reference for IRC. The language we use is defined in [`GLOSSARY.md`](GLOSSARY.md). We choose everything else when we reach it, and we are free to try more than one option. The web frontend is React over a pure core ([ADR 0010](docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md)).
 
 ## Not now
 

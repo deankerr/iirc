@@ -571,6 +571,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["connection-failed", "ConnectionFailed"],
   ["ignored", "Ignored"],
   ["message", "Message"],
+  ["refolded", "Refolded"],
   ["refused", "Refused"],
   ["session-began", "SessionBegan"],
   ["session-ended", "SessionEnded"],

@@ -97,7 +97,7 @@ describe("logging in", () => {
         asked(),
         lines(
           "<< NOTICE * :*** Checking Ident",
-          "?? message Notice irc.test * :*** Checking Ident",
+          "?? message Notice irc.test * in=network :*** Checking Ident",
           "+5s",
           "<< AUTHENTICATE +",
           ">> {AuthenticatePlain credential=pw authcid=iirc authzid=iirc}",

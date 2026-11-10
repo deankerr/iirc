@@ -35,7 +35,7 @@ describe("what cannot be read is ignored, never fatal", () => {
           line,
           `?? ignored ${reason}`,
           "<< :peer!u@h PRIVMSG #iirc :still here",
-          "?? message Privmsg peer #iirc :still here"
+          "?? message Privmsg peer #iirc in=channel:#iirc :still here"
         ),
       ],
     });
@@ -74,7 +74,7 @@ describe("what cannot be read is ignored, never fatal", () => {
           "<< :irc.test 366 iirc #iirc End",
           "<< :peer!u@h JOIN :#iirc",
           "<< :peer!u@h PART :#iirc",
-          "?? activity Parted #iirc peer"
+          "?? activity Parted #iirc peer in=channel:#iirc"
         ),
       ],
     });
