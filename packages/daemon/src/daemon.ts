@@ -1,6 +1,6 @@
 /**
  * The composition root: the data directory, the production adapters, the Runtime driving
- * the real Client, the keys, and the API served over HTTP.
+ * the real Client, the keys and sign-ins, and the API served over HTTP.
  *
  * @packageDocumentation
  */
@@ -13,16 +13,17 @@ import { layer as layerTransport } from "@iirc/transport-bun";
 import type { BunTransportOptions } from "@iirc/transport-bun";
 import { layerBun as layerVault } from "@iirc/vault-file";
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Logger, Scope } from "effect";
-import { Digest } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import { HttpRouter } from "effect/http";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
+import { SignIns } from "./sign-ins.ts";
 
 /** What a Daemon needs besides where to listen. */
 export interface DaemonOptions {
-  /** Where the Journal, the Credentials, and the keys live. Made, owner-only, if missing. */
+  /** Where the Journal, the Credentials, the keys, and the sign-ins live. Made, owner-only, if missing. */
   readonly dataDir: string;
   /** The Transport's options, such as extra roots to `trust`. */
   readonly transport?: BunTransportOptions | undefined;
@@ -105,7 +106,7 @@ const runtimeFirstToStop = (options: DaemonOptions) =>
 
 /**
  * Everything but HTTP: the data directory held, the Journal, the Vault, the Transport,
- * the Runtime, and the keys. Each is opened only once the directory is held.
+ * the Runtime, the keys, and the sign-ins. Each is opened only once the directory is held.
  * @param options - The data directory and the Transport's options.
  * @returns The core.
  */
@@ -118,8 +119,16 @@ const layerCore = (options: DaemonOptions) => {
     layerTransport(options.transport)
   );
 
-  const keys = ApiKeys.layer(dataDir).pipe(
-    Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, Digest.layerWebCrypto))
+  const platform = Layer.mergeAll(
+    BunFileSystem.layer,
+    BunPath.layer,
+    Digest.layerWebCrypto,
+    SecureRandom.layerWebCrypto
+  );
+
+  const access = SignIns.layer(dataDir).pipe(
+    Layer.provideMerge(ApiKeys.layer(dataDir)),
+    Layer.provide(platform)
   );
 
   const heartbeat =
@@ -129,7 +138,7 @@ const layerCore = (options: DaemonOptions) => {
 
   return Layer.mergeAll(
     runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)),
-    keys,
+    access,
     heartbeat
   ).pipe(Layer.provide(dataDirectory(dataDir)));
 };

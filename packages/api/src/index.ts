@@ -13,12 +13,16 @@ export {
   NewsGroup,
   RequestValidation,
   requestParseOptions,
+  SignInGroup,
+  signInCookie,
 } from "./api.ts";
 
 export {
+  CrossOrigin,
   InvalidRequest,
   JournalFailed,
   NetworkStopped,
+  SignInsFailed,
   Unauthorized,
   UnknownNetwork,
   VaultFailed,
@@ -51,6 +55,7 @@ export {
   SaidAnswer,
   SayRequest,
   Sequence,
+  SignInRequest,
   SessionKnowledge,
   Tag,
   Topic,

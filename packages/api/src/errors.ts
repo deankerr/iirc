@@ -54,11 +54,33 @@ export class VaultFailed extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("VaultFailed", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
-/** No key came with the request in `Authorization: Bearer`, or none matches it. */
+/**
+ * No key came with the request in `Authorization: Bearer`, and no sign-in in its
+ * cookie, or none that matches. Signing in, it is a key that does not match.
+ */
 export class Unauthorized extends Schema.TaggedError<
   Unauthorized,
   { readonly brand: unique symbol }
 >()("Unauthorized", {}, { httpApiStatus: 401 }) {}
+
+/**
+ * A request that changes something, carried by a sign-in's cookie rather than a
+ * bearer key, did not come from the Daemon's own origin, so another site may have sent it.
+ * Signing in and signing out are checked the same way.
+ */
+export class CrossOrigin extends Schema.TaggedError<
+  CrossOrigin,
+  { readonly brand: unique symbol }
+>()("CrossOrigin", {}, { httpApiStatus: 403 }) {}
+
+/**
+ * The Daemon could not write its sign-ins, so nothing changed: a sign-in made none,
+ * and a sign-out forgot none. It tries again on the next call: a 503.
+ */
+export class SignInsFailed extends Schema.TaggedError<
+  SignInsFailed,
+  { readonly brand: unique symbol }
+>()("SignInsFailed", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
 /**
  * A request the API could not read, and what was wrong with it. Each issue says where in

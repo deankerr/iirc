@@ -128,6 +128,14 @@ export const CredentialValue = Schema.Struct({
   value: Schema.RedactedFromValue(Schema.String.check(Schema.isNonEmpty())),
 });
 
+/**
+ * An API key, given once to sign a browser in. It is `Redacted` from the moment it is
+ * decoded, and never sent back.
+ */
+export const SignInRequest = Schema.Struct({
+  key: Schema.RedactedFromValue(Schema.String.check(Schema.isNonEmpty())),
+});
+
 /** The names of the Credentials held, never their values. */
 export const CredentialNames = Schema.Struct({ names: Schema.Array(CredentialName) });
 

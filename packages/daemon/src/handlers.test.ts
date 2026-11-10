@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import { CallerIntent, CredentialPathName, DaemonApi, NetworkId } from "@iirc/api";
 import type { NewsEvent } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
@@ -11,6 +13,8 @@ import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { ApiHandlers } from "./handlers.ts";
+import { ApiKeys } from "./keys.ts";
+import { SignIns } from "./sign-ins.ts";
 import {
   faultyJournal,
   heard,
@@ -18,6 +22,7 @@ import {
   makeKey,
   makeWorld,
   presenting,
+  presentingSignIn,
   registerOnFloor,
   say,
   temporaryDirectory,
@@ -34,23 +39,29 @@ const floor = configured({
 /** 2026-01-01T00:00:00Z, where every test's clock starts. */
 const epoch = 1_767_225_600_000;
 
-const makeClient = HttpApiTest.groups(DaemonApi, ["networks", "news", "credentials"]);
+const makeClient = HttpApiTest.groups(DaemonApi, ["signIn", "networks", "news", "credentials"]);
 
 /**
  * Runs a test against the handlers, through an in-process client, on the in-memory ports
  * and a TestClock, with a key made for it.
- * @param test - The test, given the world, a client presenting the key, and the key.
+ * @param test - The test, given the world, a client presenting the key, the key, and the data directory.
  * @param fault - Which Journal appends to fail.
  * @returns A promise of its result.
  */
-// What a test may ask of its context: what the client needs, and the key check's client side.
-type Provided = Effect.Services<typeof makeClient> | Layer.Success<ReturnType<typeof presenting>>;
+// What a test may ask of its context: what the client needs, the key check's client side,
+// and the keys and sign-ins behind it.
+type Provided =
+  | Effect.Services<typeof makeClient>
+  | Layer.Success<ReturnType<typeof presenting>>
+  | ApiKeys
+  | SignIns;
 
 const run = async <A, E>(
   test: (
     world: World,
     api: Effect.Success<typeof makeClient>,
-    key: string
+    key: string,
+    dataDir: string
   ) => Effect.Effect<A, E, Provided>,
   fault?: AppendFault
 ): Promise<A> =>
@@ -72,11 +83,28 @@ const run = async <A, E>(
         return yield* Effect.gen(function* () {
           const api = yield* makeClient;
 
-          return yield* test(world, api, key);
+          return yield* test(world, api, key, dataDir);
         }).pipe(Effect.provide(Layer.merge(presenting(key), handlers)));
       })
     ).pipe(Effect.provide(TestClock.layer()))
   );
+
+/**
+ * A client as a browser is: a sign-in's cookie, and no key.
+ * @param token - The sign-in's token.
+ * @param headers - What the browser says of the request's origin.
+ * @returns The client.
+ */
+const browser = (token: string, headers: Readonly<Record<string, string>> = {}) =>
+  makeClient.pipe(Effect.provide(presentingSignIn(token, headers)));
+
+/**
+ * What a call came to: `ok`, or its error's tag.
+ * @param effect - The call.
+ * @returns The outcome.
+ */
+const outcome = <A, E extends { readonly _tag: string }, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.match(effect, { onFailure: (error) => error._tag, onSuccess: () => "ok" });
 
 const settle = Effect.gen(function* () {
   for (let turn = 0; turn < 200; turn += 1) {
@@ -382,5 +410,83 @@ describe("the handlers", () => {
       false,
       false,
     ]);
+  });
+
+  it("authorizes by a sign-in's cookie, and refuses a write from another origin", async () => {
+    const name = CredentialPathName.make("libera-pass");
+
+    const result = await run((_, api, key) =>
+      Effect.gen(function* () {
+        const keys = yield* ApiKeys;
+        const signIns = yield* SignIns;
+        const held = yield* Effect.flatMap(keys.verify(Redacted.make(key)), Effect.fromOption);
+        const token = yield* signIns.start(held);
+
+        const write = (client: Effect.Success<typeof makeClient>) =>
+          outcome(
+            client.credentials.set({ params: { name }, payload: { value: Redacted.make("x") } })
+          );
+
+        const own = yield* browser(Redacted.value(token), { "sec-fetch-site": "same-origin" });
+        const silent = yield* browser(Redacted.value(token));
+
+        const writes = {
+          bearer: yield* write(api),
+          crossSite: yield* write(
+            yield* browser(Redacted.value(token), { "sec-fetch-site": "cross-site" })
+          ),
+          foreignOrigin: yield* write(
+            yield* browser(Redacted.value(token), { origin: "https://evil.test" })
+          ),
+          sameOrigin: yield* write(own),
+          sameSite: yield* write(
+            yield* browser(Redacted.value(token), { "sec-fetch-site": "same-site" })
+          ),
+          silent: yield* write(silent),
+        };
+
+        const reads = {
+          forged: yield* outcome((yield* browser("iirc_s_forged")).networks.list()),
+          silent: yield* outcome(silent.networks.list()),
+        };
+
+        yield* signIns.end(token);
+
+        return { after: yield* outcome(own.networks.list()), reads, writes };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      after: "Unauthorized",
+      reads: { forged: "Unauthorized", silent: "ok" },
+      writes: {
+        bearer: "ok",
+        crossSite: "CrossOrigin",
+        foreignOrigin: "CrossOrigin",
+        sameOrigin: "ok",
+        sameSite: "CrossOrigin",
+        silent: "CrossOrigin",
+      },
+    });
+  });
+
+  it("refuses to sign a browser in or out by a request that says nothing of its origin", async () => {
+    const result = await run((_, api, key, dataDir) =>
+      Effect.gen(function* () {
+        const signIn = yield* api.signIn
+          .signIn({ payload: { key: Redacted.make(key) } })
+          .pipe(Effect.flip);
+
+        const signOut = yield* api.signIn.signOut().pipe(Effect.flip);
+
+        return {
+          signIn: signIn._tag,
+          signOut: signOut._tag,
+          written: existsSync(`${dataDir}/sign-ins.json`),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ signIn: "CrossOrigin", signOut: "CrossOrigin", written: false });
   });
 });

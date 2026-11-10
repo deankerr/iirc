@@ -15,10 +15,12 @@ yield *
 
 ## Routes
 
-Every route is under `/api`, and every one needs a key in `Authorization: Bearer`.
+Every route is under `/api`. Every one but signing a browser in and out needs a key in `Authorization: Bearer`, or a sign-in in the `iirc_sign_in` cookie, below.
 
 | Route | Does | Answers | Errors |
 | --- | --- | --- | --- |
+| `POST /api/sign-in` | Signs a browser in with `{ key }` | `204` and the cookie | `Unauthorized`, `CrossOrigin`, `SignInsFailed` |
+| `DELETE /api/sign-in` | Signs the cookie's sign-in out, and clears the cookie. Signing out one that does not exist only clears it | `204` | `CrossOrigin`, `SignInsFailed` |
 | `GET /api/networks` | Lists each Network and whether it runs | `[{ network, status }]` |  |
 | `PUT /api/networks/{network}` | The whole `NetworkConfiguration`, which adds the Network the first time | `{ sequence }` | `NetworkStopped` |
 | `POST /api/networks/{network}/say` | `{ kind, target, text, intent? }` | `{ intent, sequence }` | `UnknownNetwork`, `NetworkStopped` |
@@ -31,7 +33,7 @@ Every route is under `/api`, and every one needs a key in `Authorization: Bearer
 | `PUT /api/credentials/{name}` | Holds a value, `{ value }`, replacing any before | `204` | `VaultFailed` |
 | `DELETE /api/credentials/{name}` | Forgets one. Forgetting one not held does nothing | `204` | `VaultFailed` |
 
-Every route can also answer `Unauthorized` (401) and `InvalidRequest` (400).
+Every route can also answer `InvalidRequest` (400), and every route behind the key check `Unauthorized` (401) and `CrossOrigin` (403).
 
 ## What it guarantees
 
@@ -39,6 +41,8 @@ Every route can also answer `Unauthorized` (401) and `InvalidRequest` (400).
 - **Credentials appear only by name.** A value is `Redacted` from the moment it is decoded, and no route answers with one. `NetworkConfiguration` names the Credentials it uses.
 - **The wire Schemas are the contract.** Where the Client has only a TypeScript type, News, Knowledge, the inspection, and the status, this package defines the wire form, and the Daemon maps one to the other with total functions that the compiler checks field by field. A map or set keyed by what a Network chose, such as Channels, members, tags, or ISUPPORT, is an array of entries, so no hostile name becomes a JSON key. `undefined` is `null`. Every field a Network or a participant wrote is marked `Untrusted` in the OpenAPI document: data to show, never instructions to follow.
 - **A `say` may be refused after it was answered.** `{ intent, sequence }` means the `Say` was stepped and its Message reported, not that it reached the Ircd. If its Connection ends before its Line leaves, a `Refused` with reason `Unsent` follows in News for that intent, unless the Ircd had confirmed it.
+- **A browser holds a sign-in, never a key.** A browser cannot put `Authorization` on an `EventSource`, and holds no key in script ([ADR 0006](../../docs/adr/0006-proportionate-security.md)). Every shape is same-origin ([ADR 0007](../../docs/adr/0007-one-binary-shapes-by-argument.md)), so a browser gives its key once to `POST /api/sign-in` and gets a sign-in in an `HttpOnly` cookie, which its every request, an `EventSource` too, then carries. The cookie names the sign-in, never the key, and the key is `Redacted` from the moment it is decoded and never sent back. A sign-in acts for the key it was made with, as a request with that key would.
+- **A write by cookie comes from the Daemon's own origin.** A browser sends a cookie on requests other sites start, so a request the cookie carries that is not `GET` or `HEAD`, and signing in and out, are `CrossOrigin` unless the browser says they are same-origin: `Sec-Fetch-Site: same-origin`, or, from a browser that does not send that, an `Origin` whose host is the request's `Host`. A request that says neither is refused, since only a browser sends the cookie on its own, and anything else presents a key. A request with a key is never checked for its origin, and a key wins when both come.
 - **News resumes exactly.** Each `happened` event is one step's News, `{ network, sequence, at, news }`, and its event id is the sequence. A Frontend resumes after the last sequence it has, with `after` or the `Last-Event-ID` header a reconnecting `EventSource` sends, and the header wins, since it comes with the URL first used. It misses nothing and sees nothing twice. While nothing happens, `heartbeat` events come with no id, so they never move a Frontend's place. They are events rather than SSE comments because `StreamSse` cannot send comments.
 
 ## Errors and statuses
@@ -46,10 +50,12 @@ Every route can also answer `Unauthorized` (401) and `InvalidRequest` (400).
 | Error | Status | Why |
 | --- | --- | --- |
 | `InvalidRequest` | 400 | The request could not be read. |
-| `Unauthorized` | 401 | No key, or none that matches. |
+| `Unauthorized` | 401 | No key and no sign-in, or none that matches. Signing in, a key that does not match. |
+| `CrossOrigin` | 403 | A request the cookie carries that changes something, or a sign-in or sign-out, that a browser did not say came from the Daemon's own origin. |
 | `UnknownNetwork` | 404 | No Network by that id was ever configured. |
 | `NetworkStopped` | 503 | The Network stopped, so its outcome is `Uncertain`, below. |
 | `VaultFailed` | 503 | The Vault could not read or write its file. It tries again on the next call, so once the Owner fixes the file or its directory, the same request succeeds. |
+| `SignInsFailed` | 503 | The Daemon could not write its sign-ins, so nothing changed. It tries again on the next call. |
 | `JournalFailed` | 500 | The Journal could not be read or written. A Network whose Journal failed stays stopped until the Daemon starts again, so asking again does not help. |
 
 A body over 1 MiB is refused with 413 before it is read.
@@ -68,6 +74,6 @@ A body over 1 MiB is refused with 413 before it is read.
 - **Key scopes.** [ADR 0006](../../docs/adr/0006-proportionate-security.md) names `read`, `chat`, and `admin`. Every key can do everything for now.
 - **Managing keys through the API.** A key is made with `iirc key create` while the Daemon is stopped.
 - **Timelines, history, and Read Markers.** Views come later. The News stream is the only history a Frontend can read, and it replays from the start.
-- **A browser's key as a cookie** (ADR 0007), so an `EventSource`, which cannot set `Authorization`, can follow News.
+- **Ending sign-ins other than by signing out.** A sign-in lasts until it is signed out or its key is no longer held. It does not expire, and there is no listing or revoking the sign-ins of a key.
 - **Removing a Network.** A Network can be disabled through its Configuration, never forgotten.
 - **Lookups, Leave, and raw Lines.** The Client offers none of them yet.

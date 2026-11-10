@@ -1,14 +1,14 @@
-import { Schema } from "effect";
+import { Option, Redacted, Schema } from "effect";
 import { OpenApi } from "effect/http-api";
 import { describe, expect, it } from "vitest";
 
-import { DaemonApi } from "./api.ts";
-import { CallerIntent, NetworkId, NewsEvent, SayRequest } from "./schemas.ts";
+import { DaemonApi, requestParseOptions } from "./api.ts";
+import { CallerIntent, NetworkId, NewsEvent, SayRequest, SignInRequest } from "./schemas.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
 
 describe("the contract", () => {
-  it("puts every route under /api, and every one behind a bearer key", () => {
+  it("puts every route under /api, and every one but signing in and out behind a key or a sign-in", () => {
     const routes = Object.entries(document.paths).flatMap(([path, operations]) =>
       (["get", "put", "post", "delete"] as const).flatMap((method) => {
         const operation = operations[method];
@@ -19,8 +19,11 @@ describe("the contract", () => {
       })
     );
 
+    const guarded = routes.filter(({ route }) => !route.endsWith(" /api/sign-in"));
+
     expect(routes.map(({ route }) => route).toSorted()).toStrictEqual([
       "DELETE /api/credentials/{name}",
+      "DELETE /api/sign-in",
       "GET /api/credentials",
       "GET /api/networks",
       "GET /api/networks/{network}/inspect",
@@ -29,12 +32,32 @@ describe("the contract", () => {
       "GET /api/news",
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
+      "POST /api/sign-in",
       "PUT /api/credentials/{name}",
       "PUT /api/networks/{network}",
     ]);
-    expect(new Set(routes.map(({ security }) => JSON.stringify(security)))).toStrictEqual(
-      new Set(['[{"bearer":[]}]'])
+    expect(new Set(guarded.map(({ security }) => JSON.stringify(security)))).toStrictEqual(
+      new Set(['[{"bearer":[]},{"signIn":[]}]'])
     );
+    expect(
+      routes.filter(({ route }) => route.endsWith(" /api/sign-in")).map(({ security }) => security)
+    ).toStrictEqual([[], []]);
+    expect(document.components.securitySchemes).toStrictEqual({
+      bearer: { scheme: "Bearer", type: "http" },
+      signIn: { in: "cookie", name: "iirc_sign_in", type: "apiKey" },
+    });
+  });
+
+  it("takes a key to sign in with, and nothing else", () => {
+    const signIn = Schema.decodeUnknownOption(SignInRequest, requestParseOptions);
+    const decoded = signIn({ key: "iirc_abc" });
+
+    expect([
+      decoded.pipe(Option.map(({ key }) => Redacted.value(key))),
+      JSON.stringify(decoded).includes("iirc_abc"),
+      signIn({ key: "" }),
+      signIn({ key: "iirc_abc", remember: true }),
+    ]).toStrictEqual([Option.some("iirc_abc"), false, Option.none(), Option.none()]);
   });
 
   it("parses ids that are safe in a path, and refuses the rest", () => {

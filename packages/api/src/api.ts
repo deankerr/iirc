@@ -1,6 +1,6 @@
 /**
  * The contract every Frontend drives the Daemon through. Every route is under `/api`, and
- * every one needs a key.
+ * every one but signing a browser in and out needs a key or a sign-in.
  *
  * @packageDocumentation
  */
@@ -17,9 +17,11 @@ import {
 } from "effect/http-api";
 
 import {
+  CrossOrigin,
   InvalidRequest,
   JournalFailed,
   NetworkStopped,
+  SignInsFailed,
   Unauthorized,
   UnknownNetwork,
   VaultFailed,
@@ -39,6 +41,7 @@ import {
   Said,
   SaidAnswer,
   SayRequest,
+  SignInRequest,
 } from "./schemas.ts";
 
 /**
@@ -47,18 +50,33 @@ import {
  */
 export const requestParseOptions = { onExcessProperty: "error" } as const;
 
-/** The name of the key a request came with, which its handler acts for. */
+/**
+ * The name of the key a request came with, or that its sign-in was made with,
+ * which its handler acts for.
+ */
 export class Caller extends Context.Service<Caller, { readonly key: string }>()(
   "@iirc/api/Caller"
 ) {}
 
-/** Checks the key in `Authorization: Bearer`, and nowhere else, and provides {@link Caller}. */
+/** The cookie a sign-in travels in. It names the sign-in, never a key. */
+export const signInCookie = "iirc_sign_in";
+
+/**
+ * Checks the key in `Authorization: Bearer`, or else the sign-in in the
+ * {@link signInCookie} cookie, and provides {@link Caller} either way. A request the
+ * cookie carries that changes something must come from the Daemon's own origin, or it is
+ * {@link CrossOrigin}.
+ */
+// oxlint-disable-next-line effecttsgo/leaking-requirements -- A security middleware runs inside the request, which it may read, as Effect's own `HttpApiMiddlewareSecurity` type says.
 export class Authorization extends HttpApiMiddleware.Service<Authorization, { provides: Caller }>()(
   "@iirc/api/Authorization",
   {
-    error: Unauthorized,
+    error: [Unauthorized, CrossOrigin],
     requiredForClient: true,
-    security: { bearer: HttpApiSecurity.bearer },
+    security: {
+      bearer: HttpApiSecurity.bearer,
+      signIn: HttpApiSecurity.apiKey({ in: "cookie", key: signInCookie }),
+    },
   }
 ) {}
 
@@ -141,8 +159,27 @@ export class CredentialsGroup extends HttpApiGroup.make("credentials")
   )
   .middleware(Authorization) {}
 
+/**
+ * A browser signs in: it gives a key once, for a sign-in in an `HttpOnly`
+ * cookie, since a browser never holds a key in script and an `EventSource` cannot send
+ * `Authorization`. Neither route needs the key check, since this is where a browser gets
+ * what it presents.
+ */
+export class SignInGroup extends HttpApiGroup.make("signIn").add(
+  HttpApiEndpoint.post("signIn", "/sign-in", {
+    error: [Unauthorized, CrossOrigin, SignInsFailed],
+    payload: SignInRequest,
+    success: HttpApiSchema.NoContent,
+  }),
+  HttpApiEndpoint.delete("signOut", "/sign-in", {
+    error: [CrossOrigin, SignInsFailed],
+    success: HttpApiSchema.NoContent,
+  })
+) {}
+
 /** The Daemon's API. */
 export class DaemonApi extends HttpApi.make("iirc")
+  .add(SignInGroup)
   .add(NetworksGroup)
   .add(NewsGroup)
   .add(CredentialsGroup)

@@ -226,7 +226,7 @@ sequenceDiagram
 
 ## The Daemon and its API
 
-`iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal and the Vault in it, starts the Runtime with the real Client, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
+`iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal and the Vault in it, starts the Runtime with the real Client, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`, or a sign-in, which a browser gets for its key once and holds in an `HttpOnly` cookie. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
 
 ## Testing
 

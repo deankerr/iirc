@@ -5,12 +5,12 @@
  *
  * @packageDocumentation
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { Authorization } from "@iirc/api";
+import { Authorization, signInCookie } from "@iirc/api";
 import { client } from "@iirc/client";
 import { layerRuntime } from "@iirc/runtime";
 import { Journal, JournalFailed } from "@iirc/runtime/journal";
@@ -20,12 +20,13 @@ import type { MemoryTransport, TestCall } from "@iirc/runtime/testing";
 import { Transport } from "@iirc/runtime/transport";
 import { Vault } from "@iirc/runtime/vault";
 import type { VaultService } from "@iirc/runtime/vault";
-import { Effect, Layer, Logger, Redacted } from "effect";
+import { Effect, Layer, Logger, Redacted, Schema } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { HttpClientRequest } from "effect/http";
 import { HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys, createKey } from "../keys.ts";
+import { SignIns } from "../sign-ins.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -59,6 +60,25 @@ export const temporaryDirectory = Effect.acquireRelease(
 export const makeKey = (dataDir: string, name = "test") =>
   createKey(dataDir, name).pipe(Effect.map(Redacted.value), Effect.provide(platform), Effect.orDie);
 
+const StoredSignIns = Schema.fromJsonString(
+  Schema.Struct({ signIns: Schema.Array(Schema.Struct({ sha256: Schema.String })) })
+);
+
+const decodeStoredSignIns = Schema.decodeUnknownSync(StoredSignIns);
+
+/**
+ * The SHA-256 of each token `sign-ins.json` holds, in order.
+ * @param dataDir - The data directory.
+ * @returns The hashes, none if there is no file.
+ */
+export const storedSignIns = (dataDir: string): readonly string[] => {
+  const file = `${dataDir}/sign-ins.json`;
+
+  return existsSync(file)
+    ? decodeStoredSignIns(readFileSync(file, "utf-8")).signIns.map((signIn) => signIn.sha256)
+    : [];
+};
+
 /** What a test's Daemon runs on, which outlives one Runtime. */
 export interface World {
   readonly journal: JournalService;
@@ -83,10 +103,10 @@ export const makeWorld = (journal?: JournalService): Effect.Effect<World> =>
   });
 
 /**
- * The Runtime, on the world's ports, with the real Client, and the keys of a data
- * directory.
+ * The Runtime, on the world's ports, with the real Client, and the keys and browser
+ * sign-ins of a data directory.
  * @param world - The ports.
- * @param dataDir - Where the keys are.
+ * @param dataDir - Where the keys and the sign-ins are.
  * @returns The Layer.
  */
 export const layerWorld = (world: World, dataDir: string) =>
@@ -100,7 +120,10 @@ export const layerWorld = (world: World, dataDir: string) =>
         )
       )
     ),
-    ApiKeys.layer(dataDir).pipe(Layer.provide(platform)),
+    SignIns.layer(dataDir).pipe(
+      Layer.provideMerge(ApiKeys.layer(dataDir)),
+      Layer.provide(platform)
+    ),
     Logger.layer([
       Logger.make(({ message }) => {
         world.logged.push(JSON.stringify(message));
@@ -116,6 +139,18 @@ export const layerWorld = (world: World, dataDir: string) =>
 export const presenting = (key: string | undefined) =>
   HttpApiMiddleware.layerClient(Authorization, ({ next, request }) =>
     next(key === undefined ? request : HttpClientRequest.bearerToken(request, key))
+  );
+
+/**
+ * The client side of the key check as a browser does it: a sign-in's cookie, and no
+ * key, with whatever a browser says of the request's origin.
+ * @param token - The sign-in's token.
+ * @param headers - Headers such as `sec-fetch-site` or `origin`.
+ * @returns The Layer.
+ */
+export const presentingSignIn = (token: string, headers: Readonly<Record<string, string>> = {}) =>
+  HttpApiMiddleware.layerClient(Authorization, ({ next, request }) =>
+    next(HttpClientRequest.setHeaders(request, { ...headers, cookie: `${signInCookie}=${token}` }))
   );
 
 /**

@@ -17,9 +17,10 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `layerDaemon(options, listen?)` | The Daemon, serving the API on `listen` (`127.0.0.1:7667` unless given), for as long as the Layer lives. It also provides its `HttpServer`, so a test can find an ephemeral port. |
 | `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s), as [the Runtime's README](../runtime/README.md#the-runtime) describes them. |
 | `layerLogger` | logfmt on stderr, so stdout holds only what a command was asked for. |
-| `ApiRoutes`, `ApiHandlers` | The API's routes with the key check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, and `ApiKeys`. |
+| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `ApiKeys`, and `SignIns`. |
 | `createKey(dataDir, name)` | `iirc key create`: makes a key, stores its hash, and gives the key once. Call it with the data directory held. |
 | `ApiKeys` | Checks a presented key against `keys.json`, read once at start. |
+| `SignIns` | Makes, checks, and ends sign-ins, kept in `sign-ins.json`. |
 | `holdDataDirectory(dataDir)` | Holds a data directory exclusively for the enclosing Scope, or fails with `DataDirectoryLocked`. |
 
 ## The data directory
@@ -29,6 +30,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `journal.sqlite`   | The Journal                      | `@iirc/journal-sqlite`           |
 | `credentials.json` | The Credentials, mode `0600`     | `@iirc/vault-file`               |
 | `keys.json`        | The API keys as SHA-256 hashes   | `iirc key create`                |
+| `sign-ins.json`    | The sign-ins as SHA-256 hashes   | the Daemon                       |
 | `daemon.lock`      | The lock below. It holds nothing | the Daemon and `iirc key create` |
 
 The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is read at start: there is no configuration file ([ADR 0004](../../docs/adr/0004-configuration-lives-in-the-journal.md)).
@@ -51,6 +53,28 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 - **Keys are made only while the Daemon is stopped.** `iirc key create` holds the data directory, so the Daemon reads `keys.json` once at start, and nothing changes it under a running Daemon. A Daemon with no keys warns, and refuses every request.
 - **Keys live in a file, not the Journal.** That is deliberate for now. The Journal's records are each a Network's, `Input` or `Outputs`, and this module may not change that substrate. A key is the Daemon's, not a Network's, and is checked rather than replayed. When the Journal can hold Changes that are not a Network's, keys can move there.
 
+## Sign-ins
+
+`sign-ins.json` is versioned JSON, written as `keys.json` is. The running Daemon writes it, which is safe because it holds the data directory, and it writes the file before a change takes effect, so a sign-in or sign-out that could not be written changes nothing and answers `SignInsFailed`. A change is uninterruptible from taking its turn to keeping what it wrote, so a request that goes away mid-write, as Bun interrupts a disconnected one, never leaves the file holding a change that memory did not make, nor a later write undoing it. A sign-out the file already holds is a sign-out.
+
+```json
+{
+  "version": 1,
+  "signIns": [
+    {
+      "created": "2026-11-10T00:00:00.000Z",
+      "key": "phone",
+      "keySha256": "…64 hex digits…",
+      "sha256": "…64 hex digits…"
+    }
+  ]
+}
+```
+
+- **A sign-in is 256 random bits,** from Effect's `SecureRandom`, written `iirc_s_` and base64url, and kept only as its SHA-256, compared with `timingSafeEqual` against every stored hash, as a key is. The browser holds it in the cookie. The key it was exchanged for is never stored, logged, or sent back.
+- **A sign-in survives a restart,** and lasts until it is signed out or its key is no longer held. It names its key by name and by the key's SHA-256, so a key removed from `keys.json` and made again under the same name does not bring back the sign-ins of the old one. At start, the Daemon drops every sign-in whose key it does not hold, from the file too.
+- **Sign-ins live in a file, not the Journal,** for the same reason keys do.
+
 ## Composition
 
 - **The core is provided outside `HttpRouter.serve`.** `serve` forks the MemoMap, so anything shared built inside it would be built twice, and the Journal and the lock would each be opened again.
@@ -66,14 +90,17 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 - **The wire forms are total maps** in `src/wire.ts`. Each return type is checked by `Fields`, so a field the Client adds to News, Knowledge, or the inspection, or a field the contract has and the Client does not, fails to compile there until the contract catches up, and a new variant fails the `switch` that ends in `satisfies never`.
 - **A request that does not decode** is `InvalidRequest` with the path of each issue. Its messages never quote the input, since a body can carry a Credential's value.
 - **A body over 1 MiB is refused unread,** with 413 and `Connection: close`. Bun's graceful stop waits for a client still sending a body, so without the close, one oversized upload could hold up shutdown.
+- **A request may present a key or a sign-in.** The key in `Authorization: Bearer` is tried first, then the `iirc_sign_in` cookie, and either gives the handler the key's name as its `Caller`. A request the cookie carries that is not `GET` or `HEAD` must say it is same-origin, as the API's README describes, and so must signing in and out.
+- **The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/api`, and `Max-Age` 400 days,** the most a browser keeps a cookie. It is `Secure` only when `X-Forwarded-Proto` says the browser's connection was `https`. The API listens on loopback only, so the header comes from the Owner's own reverse proxy, which [ADR 0006](../../docs/adr/0006-proportionate-security.md) trusts. On plain `http` to loopback the cookie is not `Secure`, because WebKit refuses a `Secure` cookie over `http://localhost`. Signing out clears the cookie with the same attributes, whether or not its sign-in existed.
 - **The News stream** is the Runtime's `news`, from `after` or `Last-Event-ID`, mapped to the wire and merged with a heartbeat every 15 s that stops when it does. Each reader follows the Journal on its own, so a reader that reads nothing holds back only its own response, never the Runtime or another reader.
 
 ## Tests
 
 `bun run test` runs, with no network:
 
-- `src/handlers.test.ts`: the handlers through an in-process client (`HttpApiTest`), on the Runtime's in-memory ports and a `TestClock`, with a key made in a temporary data directory. It covers refusing a missing or wrong key, configuring, registering on the floor, joining, saying, hearing a Message as News, `known`, `inspect`, resuming News after a sequence from the query and from `Last-Event-ID`, heartbeats, `UnknownNetwork`, `NetworkStopped` with `said` answering `NotJournaled` when the `Say` failed to append and `Journaled` when only its outputs did, and holding, using as `PASS`, and forgetting a Credential, whose value appears in no response, log, or Journal Entry.
-- `src/server.test.ts`: the routes over a real Bun server on an ephemeral loopback port, on the SQLite Journal. It covers SSE as the wire carries it, with the sequence as each event's id, resuming with `after` and `Last-Event-ID`, heartbeats with no id, a reader that reads nothing while 300 Messages and a `say` go through and then misses none of them, 401 before anything else, 400 with the issue's path and no quoting of the body, and 413 with the Connection closed.
+- `src/handlers.test.ts`: the handlers through an in-process client (`HttpApiTest`), on the Runtime's in-memory ports and a `TestClock`, with a key made in a temporary data directory. It covers refusing a missing or wrong key, configuring, registering on the floor, joining, saying, hearing a Message as News, `known`, `inspect`, resuming News after a sequence from the query and from `Last-Event-ID`, heartbeats, `UnknownNetwork`, `NetworkStopped` with `said` answering `NotJournaled` when the `Say` failed to append and `Journaled` when only its outputs did, and holding, using as `PASS`, and forgetting a Credential, whose value appears in no response, log, or Journal Entry. It covers a sign-in's cookie authorizing a read and a same-origin write, and refusing a write that is cross-site, same-site, from a foreign `Origin`, or says nothing of its origin, while a key needs no origin, and signing in and out refused when the request says nothing of its origin.
+- `src/sign-ins.test.ts`: the sign-ins service alone, on a file system whose rename is held. It covers a sign-out and a sign-in each interrupted during their write, after which memory and file agree: the signed-out token is refused, the abandoned sign-in is kept, and a later write brings back nothing old.
+- `src/server.test.ts`: the routes over a real Bun server on an ephemeral loopback port, on the SQLite Journal. It covers SSE as the wire carries it, with the sequence as each event's id, resuming with `after` and `Last-Event-ID`, heartbeats with no id, a reader that reads nothing while 300 Messages and a `say` go through and then misses none of them, 401 before anything else, 400 with the issue's path and no quoting of the body, and 413 with the Connection closed. For sign-ins, it covers signing in for a cookie with the right attributes, `Secure` only with `X-Forwarded-Proto: https`, a wrong key refused with 401 and no cookie, a sign-in from another origin refused with 403, the cookie alone authorizing a read and the News stream, a write by cookie refused from another origin and allowed from the same one, by `Sec-Fetch-Site` or `Origin`, a key needing no `Origin`, signing out so the cookie authorizes nothing and is cleared, signing out with no sign-in still clearing it, a sign-in surviving a restart on the same data directory and refused once its key is gone, even under a key made again with the same name, a sign-in and a sign-out that cannot be written, which answer 503 with no `Set-Cookie`, leave the authorization and `sign-ins.json` as they were, and succeed on a retry once the write works again, and no key appearing in any response, log, or `sign-ins.json`, nor the token anywhere but its cookie.
 
 ### End to end
 
@@ -90,5 +117,5 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 - **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser that follows [the fixtures' rules](../../fixtures/transcripts/README.md#normalising).
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
-- **Key scopes, keys through the API, Views, and removing a Network,** as the API's README lists.
+- **Key scopes, keys through the API, ending sign-ins other than by signing out, Views, and removing a Network,** as the API's README lists.
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.

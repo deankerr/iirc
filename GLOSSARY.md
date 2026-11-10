@@ -20,6 +20,8 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Credential**: A secret the Owner gives the Daemon to use on their behalf, which it can use but never reveal. Nothing a Network sends is a Credential. _Avoid_: Password, secret
 
+**Sign-in**: A browser's proof that it was given a key, which it holds as a cookie so that no script ever holds the key. _Avoid_: Session, login
+
 ## The IRC side
 
 **Network**: An IRC service the Owner belongs to, which is what gets configured and what history belongs to. It outlives any Ircd, Connection, or Session. _Avoid_: Server, IRC server

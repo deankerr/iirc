@@ -12,4 +12,8 @@ export { ApiHandlers, ApiRoutes, Heartbeat, maxBodySize } from "./handlers.ts";
 
 export { ApiKeys, createKey, KeyExists, KeyName, KeysUnreadable, KeysUnwritable } from "./keys.ts";
 
+export type { HeldKey } from "./keys.ts";
+
+export { SignIns, SignInsUnreadable, SignInsUnwritable } from "./sign-ins.ts";
+
 export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./lock.ts";

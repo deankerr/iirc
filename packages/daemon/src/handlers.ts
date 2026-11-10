@@ -1,18 +1,21 @@
 /**
  * The handlers of {@link DaemonApi}: each operation, over the Runtime and the Vault, with
- * its errors mapped to the contract's, plus the key check, request validation, and the
- * body limit.
+ * its errors mapped to the contract's, plus the key and sign-in check, signing a browser
+ * in and out, request validation, and the body limit.
  *
  * @packageDocumentation
  */
 import {
   Authorization,
   Caller,
+  CrossOrigin,
   DaemonApi,
   InvalidRequest,
   JournalFailed,
   NetworkStopped,
   RequestValidation,
+  SignInsFailed,
+  signInCookie,
   Unauthorized,
   UnknownNetwork,
   VaultFailed,
@@ -34,14 +37,24 @@ import {
   Option,
   Predicate,
   Random,
+  Redacted,
   Schedule,
   SchemaIssue,
   Stream,
 } from "effect";
-import { HttpIncomingMessage, HttpRouter, HttpServerError, HttpServerResponse } from "effect/http";
+import {
+  HttpEffect,
+  HttpIncomingMessage,
+  HttpRouter,
+  HttpServerError,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys } from "./keys.ts";
+import { SignIns } from "./sign-ins.ts";
+import type { SignInsUnwritable } from "./sign-ins.ts";
 import { happened, knowledge, networkInspection, networkStatus } from "./wire.ts";
 
 /** The largest request body the API reads. Anything larger is refused before it is read. */
@@ -63,6 +76,8 @@ const networkStopped = (network: WireNetworkId, error: RuntimeNetworkStopped, in
 const journalFailed = (error: RuntimeJournalFailed) => new JournalFailed({ reason: error.reason });
 
 const vaultFailed = (error: RuntimeVaultFailed) => new VaultFailed({ reason: error.reason });
+
+const signInsFailed = (error: SignInsUnwritable) => new SignInsFailed({ reason: error.reason });
 
 const unknownNetwork = (error: { readonly network: NetworkId }) =>
   new UnknownNetwork({ network: error.network });
@@ -110,10 +125,52 @@ const requestValidation = HttpApiMiddleware.layerSchemaErrorTransform(RequestVal
       )
 );
 
+/** How long a browser keeps its sign-in's cookie: 400 days, the most a browser allows. */
+const signInLifetime = Duration.days(400);
+
+/** The methods that change nothing, which another site may send with the cookie. */
+const safeMethods: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+
+/**
+ * Whether a browser says a request came from the Daemon's own origin: `Sec-Fetch-Site`,
+ * or, from a browser that does not send it, `Origin` against the request's own host. A
+ * request with neither did not come from a browser, which presents a bearer key instead.
+ * @param request - The request.
+ * @returns Whether it is same-origin.
+ */
+const fromOwnOrigin = (request: HttpServerRequest.HttpServerRequest): boolean => {
+  const { host, origin, "sec-fetch-site": site } = request.headers;
+
+  if (site !== undefined) {
+    return site === "same-origin";
+  }
+
+  return (
+    host !== undefined && origin !== undefined && URL.parse(origin)?.host === host.toLowerCase()
+  );
+};
+
+/**
+ * Whether a request reached the Owner's reverse proxy over TLS, as it says in
+ * `X-Forwarded-Proto`. The API listens on loopback only, so the header comes from the
+ * Owner's own software (ADR 0006). The first value is the hop nearest the browser.
+ * @param request - The request.
+ * @returns Whether the browser's connection was TLS.
+ */
+const overTls = (request: HttpServerRequest.HttpServerRequest): boolean =>
+  request.headers["x-forwarded-proto"]?.split(",")[0]?.trim().toLowerCase() === "https";
+
+// `Secure` only over TLS: WebKit refuses a `Secure` cookie over http://localhost.
+const cookieOptions = (request: HttpServerRequest.HttpServerRequest) =>
+  ({ httpOnly: true, path: "/api", sameSite: "strict", secure: overTls(request) }) as const;
+
+// A bearer key wins when both come, and is never checked for its origin: only a browser
+// sends a cookie on its own.
 const authorization = Layer.effect(
   Authorization,
   Effect.gen(function* () {
     const keys = yield* ApiKeys;
+    const signIns = yield* SignIns;
 
     return {
       bearer: (handler, { credential }) =>
@@ -124,9 +181,91 @@ const authorization = Layer.effect(
             return yield* new Unauthorized();
           }
 
+          return yield* Effect.provideService(handler, Caller, { key: found.value.name });
+        }),
+      signIn: (handler, { credential }) =>
+        Effect.gen(function* () {
+          const found = yield* signIns.verify(credential);
+
+          if (Option.isNone(found)) {
+            return yield* new Unauthorized();
+          }
+
+          const request = yield* HttpServerRequest.HttpServerRequest;
+
+          if (!safeMethods.has(request.method) && !fromOwnOrigin(request)) {
+            return yield* new CrossOrigin();
+          }
+
           return yield* Effect.provideService(handler, Caller, { key: found.value });
         }),
     };
+  })
+);
+
+/**
+ * Refuses a request a browser did not send from the Daemon's own origin.
+ * @param request - The request.
+ * @returns An Effect that fails with {@link CrossOrigin} unless it is same-origin.
+ */
+const requireOwnOrigin = (request: HttpServerRequest.HttpServerRequest) =>
+  fromOwnOrigin(request) ? Effect.void : Effect.fail(new CrossOrigin());
+
+// Signing in and out are checked for their origin like any request the cookie carries, so
+// another site can neither sign a browser in to a key of its choosing nor sign it out.
+const signIn = HttpApiBuilder.group(
+  DaemonApi,
+  "signIn",
+  Effect.fn(function* (handlers) {
+    const keys = yield* ApiKeys;
+    const signIns = yield* SignIns;
+
+    return handlers
+      .handle("signIn", ({ payload, request }) =>
+        Effect.gen(function* () {
+          yield* requireOwnOrigin(request);
+
+          const key = yield* keys.verify(payload.key).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.fail(new Unauthorized()),
+                onSome: Effect.succeed,
+              })
+            )
+          );
+
+          const token = yield* signIns.start(key).pipe(Effect.mapError(signInsFailed));
+
+          yield* HttpApiBuilder.securitySetCookie(Authorization.security.signIn, token, {
+            ...cookieOptions(request),
+            maxAge: signInLifetime,
+          });
+          yield* Effect.logInfo("Signed a browser in", { key: key.name });
+        })
+      )
+      .handle("signOut", ({ request }) =>
+        Effect.gen(function* () {
+          yield* requireOwnOrigin(request);
+
+          const presented = request.cookies[signInCookie];
+
+          if (presented !== undefined) {
+            const ended = yield* signIns
+              .end(Redacted.make(presented))
+              .pipe(Effect.mapError(signInsFailed));
+
+            if (Option.isSome(ended)) {
+              yield* Effect.logInfo("Signed a browser out", { key: ended.value });
+            }
+          }
+
+          yield* HttpEffect.appendPreResponseHandler((_, response) =>
+            Effect.orDie(
+              HttpServerResponse.expireCookie(response, signInCookie, cookieOptions(request))
+            )
+          );
+        })
+      );
   })
 );
 
@@ -285,8 +424,11 @@ const bodyLimit = HttpRouter.middleware(
   { global: true }
 );
 
-/** The handler groups, with the key check and request validation, needing the Runtime, the Vault, and the keys. */
-export const ApiHandlers = Layer.mergeAll(networks, news, credentials).pipe(
+/**
+ * The handler groups, with the key and sign-in check and request validation, needing the
+ * Runtime, the Vault, the keys, and the sign-ins.
+ */
+export const ApiHandlers = Layer.mergeAll(signIn, networks, news, credentials).pipe(
   Layer.provideMerge(Layer.mergeAll(requestValidation, authorization))
 );
 
