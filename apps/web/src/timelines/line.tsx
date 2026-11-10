@@ -134,6 +134,14 @@ export const Line = ({ row }: { readonly row: Row }) => {
     return <GapLine gap={row.gap} />;
   }
 
+  if (row._tag === "New") {
+    return (
+      <p className={styles.new}>
+        <span className={styles.newText}>new</span>
+      </p>
+    );
+  }
+
   const line = lineOf(row.item.content);
   const time = <Time at={row.item.position.at} />;
 
@@ -154,13 +162,14 @@ export const Line = ({ row }: { readonly row: Row }) => {
 
   const delivery = line.delivered;
   const nick = <Nick colour={line.colour} nick={line.nick} />;
+  let tone = row.item.level === "Highlight" ? styles.highlight : styles.message;
+
+  if (line.delivery !== undefined && failed.has(line.delivery)) {
+    tone = styles.unsent;
+  }
 
   return (
-    <div
-      className={
-        line.delivery !== undefined && failed.has(line.delivery) ? styles.unsent : styles.message
-      }
-    >
+    <div className={tone}>
       {time}
       <span className={styles.sender}>
         {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}

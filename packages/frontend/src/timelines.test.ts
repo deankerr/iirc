@@ -26,7 +26,7 @@ import {
   timelinesWith,
   wanted,
 } from "./timelines.ts";
-import type { Place, Read, Timelines, TimelinesEvent, WindowRequest } from "./timelines.ts";
+import type { Place, Read, Row, Timelines, TimelinesEvent, WindowRequest } from "./timelines.ts";
 
 // Wire forms, parsed as the API parses them, so every value here is one the runtime could
 // hand the reducer.
@@ -955,7 +955,7 @@ const simulate = (played: Scenario) => {
     if (action === "Older" || action === "Newer") {
       dispatch({ _tag: action === "Older" ? "OlderWanted" : "NewerWanted", timeline });
     } else {
-      dispatch({ _tag: "Following", following: action === "Return", timeline });
+      dispatch({ _tag: "Following", following: action === "Return", seen: undefined, timeline });
     }
   };
 
@@ -1277,6 +1277,19 @@ const shownItems = (state: Timelines) => {
   return shown._tag === "Shown" ? shown.window.items.map((item) => item.sequence) : [];
 };
 
+/**
+ * A row as a test compares it: an item's sequence, a Gap's count, or the divider.
+ * @param row - The row.
+ * @returns What it shows.
+ */
+const rowText = (row: Row) => {
+  if (row._tag === "Item") {
+    return row.item.sequence;
+  }
+
+  return row._tag === "Gap" ? `gap ${row.gap.count}` : "new";
+};
+
 // The page before the first item held carries the Gaps up to it, as the API gives them.
 const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.Encoded)[]) => {
   let state = reduceTimelines(following(), {
@@ -1316,12 +1329,7 @@ const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.E
 
   return {
     before: read?._tag === "Older" ? read.before.sequence : undefined,
-    rows:
-      shown._tag === "Shown"
-        ? rowsOf(shown.window).map((row) =>
-            row._tag === "Item" ? row.item.sequence : `gap ${row.gap.count}`
-          )
-        : [],
+    rows: shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : [],
   };
 };
 
@@ -2025,11 +2033,7 @@ describe("the Timelines' state", () => {
     const shown = opened(state);
 
     expect(
-      shown._tag === "Shown"
-        ? rowsOf(shown.window).map((row) =>
-            row._tag === "Item" ? row.item.sequence : `gap ${row.gap.count}`
-          )
-        : []
+      shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : []
     ).toStrictEqual([3, "gap 1", 4, "gap 3"]);
   });
 });

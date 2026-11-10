@@ -24,8 +24,11 @@ import type { Atom } from "effect/reactivity";
 import { layerDaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { IntentNames } from "../composer/atoms.ts";
+import { Notifier } from "../notifications/notifier.ts";
+import type { NotifierPort } from "../notifications/notifier.ts";
 import { Waits } from "../timelines/atoms.ts";
 import type { WaitTimes } from "../timelines/atoms.ts";
+import { testNotifier } from "./notifier.ts";
 
 export const theKey = "iirc_the-key";
 
@@ -126,6 +129,10 @@ const ConfigurationBody = Schema.fromJsonString(
 
 const CredentialBody = Schema.fromJsonString(Schema.Struct({ value: Schema.String }));
 
+const ReadBody = Schema.fromJsonString(
+  Schema.Struct({ read: Schema.Finite, target: Schema.NullOr(Schema.String) })
+);
+
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
   channels: [{ name: "#iirc" }],
@@ -192,6 +199,7 @@ export const fakeDaemon = () => {
   const hung: string[] = [];
   const networksHeld: (() => void)[] = [];
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
+  const reads: (typeof ReadBody.Type)[] = [];
 
   const daemon = {
     /** How many requests that never began their answer were given up. */
@@ -245,6 +253,10 @@ export const fakeDaemon = () => {
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
     /** Each `PUT` of Configuration, with the sequence it was made from. */
     puts,
+    /** How many of the next marks read get no answer. */
+    readFailures: 0,
+    /** Each Timeline marked read, as its body said it, in order. */
+    reads,
     /** Whether `said` answers at all. */
     saidDown: false,
     /** How the next `say`s are answered, first to last; past them, each is said. */
@@ -532,6 +544,27 @@ export const fakeDaemon = () => {
     return undefined;
   };
 
+  /**
+   * Marks a Timeline read, kept for a test to look at, or gets no answer as a test asks.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const markRead = async (init: RequestInit) => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    if (daemon.readFailures > 0) {
+      daemon.readFailures -= 1;
+      throw new TypeError("fetch failed");
+    }
+
+    daemon.reads.push(Schema.decodeSync(ReadBody)(await new Response(init.body).text()));
+    daemon.nextSequence += 1;
+
+    return json(200, { sequence: daemon.nextSequence - 1 });
+  };
+
   const elsewhere = async (url: URL, init: RequestInit) =>
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??
@@ -579,6 +612,10 @@ export const fakeDaemon = () => {
             }))
           )
         );
+      }
+
+      case "POST /api/networks/libera/read": {
+        return await markRead(init);
       }
 
       case "POST /api/networks/libera/say": {
@@ -700,9 +737,14 @@ export const fakeDaemon = () => {
  * @param fetch - The fake's `fetch`.
  * @param waits - Waits other than a test's defaults, such as how long the changes stream
  * may give nothing before it is followed again.
+ * @param notifier - The notifications' host, a test's, which shows none by default.
  * @returns The registry.
  */
-export const registryFor = (fetch: typeof globalThis.fetch, waits: Partial<WaitTimes> = {}) => {
+export const registryFor = (
+  fetch: typeof globalThis.fetch,
+  waits: Partial<WaitTimes> = {},
+  notifier: NotifierPort = testNotifier().port
+) => {
   let named = 0;
 
   return AtomRegistry.make({
@@ -718,8 +760,10 @@ export const registryFor = (fetch: typeof globalThis.fetch, waits: Partial<WaitT
             longest: "50 millis",
             reconnect: "10 millis",
             retry: "10 millis",
+            settle: "50 millis",
             ...waits,
           }),
+          Layer.succeed(Notifier, notifier),
           // Intents named in order, web-1, web-2, and on, so a test can name them.
           Layer.succeed(IntentNames, () => {
             named += 1;

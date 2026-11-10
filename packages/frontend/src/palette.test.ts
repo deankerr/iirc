@@ -72,6 +72,7 @@ const inChannel: CommandContext = {
   open: channel,
   session: true,
   timelines: [own, channel, direct],
+  unread: [],
 };
 
 const nowhere: CommandContext = { ...inChannel, focus: undefined, open: undefined, session: false };
@@ -153,6 +154,9 @@ describe("the palette's entries", () => {
         "command:network.add",
         "command:timeline.next",
         "command:timeline.previous",
+        "command:timeline.unread",
+        "command:timeline.read",
+        "command:notify.set",
         "command:composer.focus",
       ],
       here: [
@@ -167,6 +171,9 @@ describe("the palette's entries", () => {
         "command:network.add",
         "command:timeline.next",
         "command:timeline.previous",
+        "command:timeline.unread",
+        "command:timeline.read",
+        "command:notify.set",
         "command:composer.focus",
       ],
       timelines: 3,

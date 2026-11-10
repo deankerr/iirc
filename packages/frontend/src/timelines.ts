@@ -118,6 +118,11 @@ export interface Window extends Load {
    * past the cap. When not, one is left for reading after the end, and `later` says so.
    */
   readonly following: boolean;
+  /**
+   * The last item the view said is in view while it is at the latest, or none until it says
+   * so. Only the view knows what was shown: opening a Timeline never sets it.
+   */
+  readonly seen: Position | undefined;
 }
 
 /** What the changes stream gave, kept while reads are in flight, to bring them up to date. */
@@ -151,10 +156,29 @@ export type MainView =
   | { readonly _tag: "Timeline" }
   | { readonly _tag: "Options"; readonly filter: string };
 
+/**
+ * Where the "new" divider goes in the open Timeline: before the first item after `read`,
+ * the Read Marker the Timeline had when it opened with something unread, or before the
+ * first item held when it had none. It stays while the Timeline stays open, so it does not
+ * move as the Daemon's Read Marker does.
+ */
+export interface Divider {
+  readonly timeline: TimelineId;
+  readonly read: Timeline["read"];
+}
+
 /** Everything the Frontend holds of the Timelines. */
 export interface Timelines {
   /** What the main view shows. */
   readonly main: MainView;
+  /** The "new" divider of the open Timeline, if it opened with something unread. */
+  readonly divider: Divider | undefined;
+  /**
+   * The highest step the stream gave that was considered for notifications, kept for the
+   * page's life, through resets and overflows, so no step notifies twice. It is a Journal
+   * sequence, which every projection version shares, and apart from the stream's place.
+   */
+  readonly considered: number;
   readonly follow: Follow;
   /** `GET /api/networks`, with the stream's place when it was read. */
   readonly entries: StatusLoad;
@@ -286,7 +310,12 @@ export type TimelinesEvent =
   | { readonly _tag: "Located"; readonly timeline: TimelineId; readonly navigation: number }
   | { readonly _tag: "OlderWanted"; readonly timeline: TimelineId }
   | { readonly _tag: "NewerWanted"; readonly timeline: TimelineId }
-  | { readonly _tag: "Following"; readonly timeline: TimelineId; readonly following: boolean }
+  | {
+      readonly _tag: "Following";
+      readonly timeline: TimelineId;
+      readonly following: boolean;
+      readonly seen: Position | undefined;
+    }
   | { readonly _tag: "OptionsShown"; readonly filter: string }
   | { readonly _tag: "OptionsFiltered"; readonly filter: string };
 
@@ -303,6 +332,8 @@ const unreadStatus: StatusLoad = { ...unread, from: 0 };
  */
 export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   closed: [],
+  considered: 0,
+  divider: undefined,
   entries: unreadStatus,
   follow: { _tag: "Waiting", version: undefined },
   kept,
@@ -1191,6 +1222,7 @@ const started = (state: Timelines, read: Read): Timelines => {
         network: undefined,
         newer: false,
         older: false,
+        seen: undefined,
         through: 0,
         timeline: read.timeline,
       };
@@ -1683,6 +1715,7 @@ const windowRead = (
     newer: false,
     older: false,
     reading: false,
+    seen: held.seen,
     through,
     timeline: answer.timeline,
   };
@@ -1702,15 +1735,59 @@ const windowRead = (
 };
 
 /**
+ * A Timeline as its Network lists it.
+ * @param state - The state.
+ * @param timeline - Its id.
+ * @returns The Timeline, or none while no Network lists it.
+ */
+const listed = (state: Timelines, timeline: TimelineId): Timeline | undefined => {
+  for (const network of state.networks.values()) {
+    const found = network.timelines.get(timeline);
+
+    if (found !== undefined) {
+      return found;
+    }
+  }
+
+  return undefined;
+};
+
+/**
+ * The divider a Timeline opens with: at its Read Marker when something said in it is
+ * unread, Highlights, Direct Messages, or Messages, and none otherwise.
+ * @param timeline - The Timeline, as its Network lists it.
+ * @returns The divider, or none.
+ */
+const dividerOf = (timeline: Timeline | undefined): Divider | undefined => {
+  if (timeline === undefined) {
+    return undefined;
+  }
+
+  const { direct, highlights, messages } = timeline.unread;
+
+  return direct + highlights + messages > 0
+    ? { read: timeline.read, timeline: timeline.id }
+    : undefined;
+};
+
+/**
  * Opens a Timeline, on its latest. The one open before joins the most recently closed, and
  * only the open one's window and those of the few closed most recently are kept: any other
- * is read again when it is opened.
+ * is read again when it is opened. Opened with something unread, it remembers where its
+ * Read Marker was, for the "new" divider, until another opens. Opening the Timeline already
+ * open changes nothing but showing it in the main view.
  * @param state - The state.
  * @param timeline - The Timeline opened.
  * @returns The state.
  */
 const opening = (state: Timelines, timeline: TimelineId): Timelines => {
   const before = state.open;
+
+  // The Timeline already open stays as the Owner left it, scrolled back or not: only the
+  // main view goes back to it.
+  if (before !== undefined && resolve(state, before) === resolve(state, timeline)) {
+    return { ...state, main: { _tag: "Timeline" } };
+  }
 
   const closed = [
     ...(before === undefined || before === timeline ? [] : [before]),
@@ -1723,12 +1800,19 @@ const opening = (state: Timelines, timeline: TimelineId): Timelines => {
   const window = windows.get(id);
 
   // A Timeline opens on its latest: its window follows again, and one left behind the
-  // latest is read again.
+  // latest is read again. What was seen of it, the view says again once it shows it.
   if (window !== undefined) {
-    windows.set(id, { ...window, following: true, fresh: window.fresh && !window.later });
+    windows.set(id, {
+      ...window,
+      following: true,
+      fresh: window.fresh && !window.later,
+      seen: undefined,
+    });
   }
 
-  return { ...state, closed, main: { _tag: "Timeline" }, open: timeline, windows };
+  const divider = dividerOf(listed(state, id));
+
+  return { ...state, closed, divider, main: { _tag: "Timeline" }, open: timeline, windows };
 };
 
 /**
@@ -1761,7 +1845,11 @@ const marked = (
     case "Following": {
       return {
         ...state,
-        windows: setIn(state.windows, id, { ...window, following: event.following }),
+        windows: setIn(state.windows, id, {
+          ...window,
+          following: event.following,
+          seen: event.following ? event.seen : undefined,
+        }),
       };
     }
 
@@ -1869,6 +1957,15 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
   }
 };
 
+/**
+ * Moves the notification boundary up to a step the stream gave, never down.
+ * @param state - The state.
+ * @param place - Where the step left the stream.
+ * @returns The state.
+ */
+const considering = (state: Timelines, place: Place): Timelines =>
+  place.sequence > state.considered ? { ...state, considered: place.sequence } : state;
+
 const apply = (state: Timelines, event: TimelinesEvent): Applied => {
   if (isNavigation(event)) {
     return { state: navigated(state, event) };
@@ -1922,7 +2019,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
         ? { state }
         : {
             recorded: { _tag: "Changed", change: event.change },
-            state: applyChange(at, event.change),
+            state: applyChange(considering(at, event.place), event.change),
           };
     }
 
@@ -1933,7 +2030,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
         ? { state }
         : {
             recorded: { _tag: "Overflowed", overflow: event.overflow },
-            state: applyOverflow(at, event.overflow),
+            state: applyOverflow(considering(at, event.place), event.overflow),
           };
     }
 
@@ -2121,22 +2218,43 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
       timelines: [...network.timelines.values()].toSorted(sidebarOrder),
     }));
 
-/** One row of a window as shown: an item, or a collapsed Gap among them. */
+/**
+ * One row of a window as shown: an item, a collapsed Gap among them, or the "new" divider
+ * before the first item after the Read Marker the Timeline opened with.
+ */
 export type Row =
   | { readonly _tag: "Item"; readonly key: string; readonly item: TimelineItem }
-  | { readonly _tag: "Gap"; readonly key: string; readonly gap: WindowGap };
+  | { readonly _tag: "Gap"; readonly key: string; readonly gap: WindowGap }
+  | { readonly _tag: "New"; readonly key: string };
+
+/** The key of the "new" divider's row, which no item's or Gap's can be. */
+const newKey = "new";
+
+/**
+ * Whether an item stands after a divider's Read Marker, as the Daemon counts it unread:
+ * its position's time is later, or there was no Read Marker.
+ * @param divider - The divider.
+ * @param item - The item.
+ * @returns Whether it does.
+ */
+const isNew = (divider: Divider, item: TimelineItem): boolean =>
+  divider.read === null || item.position.at > divider.read;
 
 const gapRow = (gap: WindowGap): Row => ({ _tag: "Gap", gap, key: `gap-${cursorOf(gap.from)}` });
 
 /**
  * A window's rows: its items in order, each collapsed Gap after the items at or before
- * where it began. Each row's key is stable as rows are added around it.
+ * where it began, and with a divider, the "new" divider before the first item after its
+ * Read Marker, if the window holds one. Each row's key is stable as rows are added around it.
  * @param window - The window.
+ * @param divider - The divider, if the Timeline opened with something unread.
  * @returns The rows.
  */
-export const rowsOf = (window: Window): readonly Row[] => {
+export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
   const rows: Row[] = [];
   let next = 0;
+  // Whether the divider still waits for its item: the first after the Read Marker.
+  let waiting = divider !== undefined;
 
   for (const item of window.items) {
     for (
@@ -2146,6 +2264,11 @@ export const rowsOf = (window: Window): readonly Row[] => {
     ) {
       rows.push(gapRow(gap));
       next += 1;
+    }
+
+    if (waiting && divider !== undefined && isNew(divider, item)) {
+      waiting = false;
+      rows.push({ _tag: "New", key: newKey });
     }
 
     rows.push({ _tag: "Item", item, key: cursorOf(item.position) });
@@ -2168,6 +2291,8 @@ export type Opened =
       readonly timeline: TimelineId;
       readonly window: Window;
       readonly description: Timeline | undefined;
+      /** The "new" divider, if it opened with something unread. */
+      readonly divider: Divider | undefined;
     };
 
 /**
@@ -2192,12 +2317,16 @@ export const opened = (state: Timelines): Opened => {
     return { _tag: "Reading", timeline };
   }
 
+  const { divider } = state;
+
   return {
     _tag: "Shown",
     description:
       window.network === undefined
         ? undefined
         : state.networks.get(window.network)?.timelines.get(timeline),
+    divider:
+      divider === undefined || resolve(state, divider.timeline) !== timeline ? undefined : divider,
     timeline,
     window,
   };

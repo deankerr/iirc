@@ -470,7 +470,8 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
 
 /**
  * The bindings the Frontend starts with. Opening the palette and moving between Timelines
- * work while typing in the composer, as an IRC client's do. Focusing the composer is `i`,
+ * work while typing in the composer, as an IRC client's do, and Alt+A jumps to what calls
+ * for the Owner most, as WeeChat's does. Focusing the composer is `i`,
  * outside a field: a letter outside a field has no browser default, where Ctrl+L and Cmd+L
  * go to the address bar, and inside one it is typed.
  */
@@ -479,6 +480,7 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "palette.open", keys: "mod+shift+p", when: "!palette" },
   { command: "timeline.next", keys: "alt+arrowdown", when: "!palette" },
   { command: "timeline.previous", keys: "alt+arrowup", when: "!palette" },
+  { command: "timeline.unread", keys: "alt+a", when: "!palette" },
   { command: "composer.focus", keys: "i", when: "!editing && !palette" },
   { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
 ];

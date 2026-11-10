@@ -45,7 +45,9 @@
   color: var(--color-on-accent);
 }
 
-.item[data-selected] .muted {
+.item[data-selected] .muted,
+.item[data-selected] .name,
+.item[data-selected] .counts > * {
   color: inherit;
 }
 
@@ -96,4 +98,48 @@
 .options[aria-current="page"] {
   background: var(--color-accent);
   color: var(--color-on-accent);
+}
+
+/* A name by the highest level unread in it: read and Activity dim, Messages as text, and
+   Direct Messages and Highlights accented. */
+.levelNone {
+  color: var(--color-level-none);
+}
+
+.levelActivity {
+  color: var(--color-level-activity);
+}
+
+.levelMessage {
+  color: var(--color-level-message);
+}
+
+.levelDirect {
+  color: var(--color-level-direct);
+  font-weight: 600;
+}
+
+.levelHighlight {
+  color: var(--color-level-highlight);
+  font-weight: 600;
+}
+
+.counts {
+  display: flex;
+  gap: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.calling {
+  color: var(--color-level-highlight);
+  font-weight: 600;
+}
+
+.direct {
+  color: var(--color-level-direct);
+  font-weight: 600;
+}
+
+.messages {
+  color: var(--color-muted);
 }

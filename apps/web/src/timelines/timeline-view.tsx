@@ -8,9 +8,9 @@
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import type { TimelineId } from "@iirc/api";
+import type { TimelineId, TimelineItem } from "@iirc/api";
 import { rowsOf } from "@iirc/frontend/timelines";
-import type { Row, Window } from "@iirc/frontend/timelines";
+import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
@@ -30,6 +30,9 @@ type Shown = Row | { readonly _tag: "Start"; readonly key: string };
 
 const start: Shown = { _tag: "Start", key: "start" };
 
+/** Where an item stands. */
+type Position = TimelineItem["position"];
+
 /** A row in view, and how far below the top of the view it starts. */
 interface Anchor {
   readonly key: string;
@@ -37,15 +40,17 @@ interface Anchor {
 }
 
 /**
- * The rows of a window, virtualized.
- * @param props - The window and its Timeline.
+ * The rows of a window, virtualized, with the "new" divider where the core puts it.
+ * @param props - The window, its Timeline, and its divider.
  * @returns The log.
  */
 const Lines = ({
+  divider,
   label,
   timeline,
   window,
 }: {
+  readonly divider: Divider | undefined;
   readonly label: string;
   readonly timeline: TimelineId;
   readonly window: Window;
@@ -53,8 +58,8 @@ const Lines = ({
   // With nothing earlier, the first row says so, inside the list, so it is anchored and
   // measured as every row is.
   const rows: readonly Shown[] = useMemo(
-    () => (window.earlier ? rowsOf(window) : [start, ...rowsOf(window)]),
-    [window]
+    () => (window.earlier ? rowsOf(window, divider) : [start, ...rowsOf(window, divider)]),
+    [divider, window]
   );
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -67,8 +72,9 @@ const Lines = ({
   const atBottom = useRef(true);
   const anchor = useRef<Anchor | undefined>(undefined);
   const firstKey = useRef<string | undefined>(undefined);
-  // What the core was last told: whether the Owner is at the latest.
-  const told = useRef(true);
+  // What the core was last told: at the latest with the last item in view, or away. Nothing
+  // yet, so the view says so once it has first laid out.
+  const told = useRef<string | undefined>(undefined);
 
   // TanStack Virtual hands back new functions each render, which nothing here memoizes.
   // oxlint-disable-next-line react/incompatible-library
@@ -95,6 +101,58 @@ const Lines = ({
         : { key: String(top.key), offset: top.start - element.scrollTop };
   };
 
+  /**
+   * The last item in view: of the rows drawn, the last item that overlaps the view, none
+   * when the view has no height or shows only other rows, such as a Gap, the divider, or
+   * the start of the Timeline. Rows fewer than the view holds sit at its bottom, so they
+   * stand lower by the room left above them.
+   * @param element - The scroller.
+   * @returns Its position, or none when no item is in view.
+   */
+  const lastInView = (element: HTMLDivElement): Position | undefined => {
+    const top = element.scrollTop;
+    const height = element.clientHeight;
+    const below = Math.max(0, height - virtualizer.getTotalSize());
+
+    if (height <= 0) {
+      return undefined;
+    }
+
+    for (const item of virtualizer.getVirtualItems().toReversed()) {
+      const row = rows[item.index];
+      const overlaps = item.start + below < top + height && item.end + below > top;
+
+      if (overlaps && row?._tag === "Item") {
+        return row.item.position;
+      }
+    }
+
+    return undefined;
+  };
+
+  /**
+   * Tells the core whether the Owner is at the latest, and the last item in view, when that
+   * changed. Only this says the Owner has seen the latest: opening a Timeline never does.
+   * @param element - The scroller.
+   */
+  const tell = (element: HTMLDivElement) => {
+    const atLatest =
+      element.scrollHeight - element.scrollTop - element.clientHeight <= nearBottom &&
+      !window.later;
+
+    const seen = atLatest ? lastInView(element) : undefined;
+    let now = "away";
+
+    if (atLatest) {
+      now = seen === undefined ? "latest" : `latest ${seen.at} ${seen.sequence} ${seen.n}`;
+    }
+
+    if (now !== told.current) {
+      told.current = now;
+      tellFollowing({ following: atLatest, seen, timeline });
+    }
+  };
+
   // After rows change: at the bottom, stay there; with rows added above, put the row that
   // was in view back where it was. A row above the view that changes height is kept still
   // by the virtualizer itself.
@@ -110,16 +168,12 @@ const Lines = ({
       return;
     }
 
+    const held = anchor.current;
+
     // Pinned only with nothing more beyond the last row.
     if (atBottom.current && !window.later) {
       element.scrollTop = element.scrollHeight;
-
-      return;
-    }
-
-    const held = anchor.current;
-
-    if (shifted && held !== undefined) {
+    } else if (shifted && held !== undefined) {
       const index = rows.findIndex((row) => row.key === held.key);
       const start = virtualizer.measurementsCache[index]?.start;
 
@@ -127,7 +181,10 @@ const Lines = ({
         element.scrollTop = start - held.offset;
       }
     }
-  }, [rows, total, virtualizer, window.later]);
+
+    // Laid out: what is in view now is what the Owner can see.
+    tell(element);
+  });
 
   return (
     <div
@@ -137,14 +194,9 @@ const Lines = ({
         const element = event.currentTarget;
 
         remember(element);
+        tell(element);
 
         const nearEnd = element.scrollHeight - element.scrollTop - element.clientHeight < nearTop;
-        const atLatest = atBottom.current && !window.later;
-
-        if (atLatest !== told.current) {
-          told.current = atLatest;
-          tellFollowing({ following: atLatest, timeline });
-        }
 
         if (element.scrollTop < nearTop && window.earlier && !window.reading) {
           askOlder(timeline);
@@ -218,6 +270,7 @@ export const TimelineView = () => {
             <bdi>{label}</bdi>
           </h2>
           <Lines
+            divider={shown.divider}
             key={shown.timeline}
             label={label}
             timeline={shown.timeline}

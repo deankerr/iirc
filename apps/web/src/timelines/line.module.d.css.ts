@@ -4,7 +4,10 @@ declare const styles: {
   readonly delivery: string;
   readonly gap: string;
   readonly gapText: string;
+  readonly highlight: string;
   readonly message: string;
+  readonly new: string;
+  readonly newText: string;
   readonly nick0: string;
   readonly nick1: string;
   readonly nick10: string;

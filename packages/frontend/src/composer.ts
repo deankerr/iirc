@@ -9,6 +9,7 @@
  */
 import type { CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api";
 
+import { levelOf, markLatest } from "./activity.ts";
 import { interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
 import { contained } from "./render.ts";
@@ -178,16 +179,26 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
 
 /**
  * The context commands are judged in: the open Timeline as its Network lists it, whether
- * that Network has a Session, and every Timeline in the sidebar's order.
+ * that Network has a Session, every Timeline in the sidebar's order, and those with
+ * something unread.
  * @param timelines - The Timelines.
  * @returns The context.
  */
 export const contextOf = (timelines: Timelines): CommandContext => {
   const shown = opened(timelines);
 
+  const listed = sidebar(timelines).flatMap((one) => one.timelines);
+
   const around = {
     open: timelines.open === undefined ? undefined : resolve(timelines, timelines.open),
-    timelines: sidebar(timelines).flatMap((one) => one.timelines.map((timeline) => timeline.id)),
+    timelines: listed.map((timeline) => timeline.id),
+    unread: listed.flatMap((timeline) => {
+      const level = levelOf(timeline.unread);
+
+      return level === undefined
+        ? []
+        : [{ level, mark: markLatest(timeline), timeline: timeline.id }];
+    }),
   };
 
   if (shown._tag !== "Shown" || shown.description === undefined) {

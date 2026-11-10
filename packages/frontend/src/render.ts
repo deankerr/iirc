@@ -8,7 +8,7 @@
  */
 import type { Activity, Delivery as WireDelivery, EndReason, ItemContent } from "@iirc/api";
 import { casefold } from "@iirc/protocol/casemapping";
-import { parseFormatting } from "@iirc/protocol/format";
+import { parseFormatting, stripFormatting } from "@iirc/protocol/format";
 import type { Style } from "@iirc/protocol/format";
 
 export type { Colour, Style } from "@iirc/protocol/format";
@@ -100,6 +100,63 @@ export const contained = (text: string): string => {
       .map((code) => String.fromCodePoint(isolates.has(code) ? popIsolate : popEmbedding))
       .join("")
   );
+};
+
+/** How many characters of text a notification shows, before it is cut short. */
+export const plainLimit = 200;
+
+const firstStrongIsolate = "\u2068";
+const popDirectionalIsolate = "\u2069";
+
+/**
+ * Whether a character is dropped from plain text: a control, a bidirectional formatting
+ * character or mark, or a lone surrogate. A line or paragraph separator becomes a space.
+ * @param code - Its code point.
+ * @returns Whether it is.
+ */
+const dropped = (code: number): boolean =>
+  code < 0x20 ||
+  (code >= 0x7f && code <= 0x9f) ||
+  (code >= 0xd8_00 && code <= 0xdf_ff) ||
+  code === 0x06_1c ||
+  code === 0x20_0e ||
+  code === 0x20_0f ||
+  embeddings.has(code) ||
+  code === popEmbedding ||
+  isolates.has(code) ||
+  code === popIsolate;
+
+/**
+ * Text a Network sent as plain text for somewhere that shows no formatting, such as a
+ * notification: mIRC formatting stripped, every control, bidirectional formatting
+ * character, and lone surrogate dropped, line and paragraph separators made spaces, cut to
+ * `limit` characters with an ellipsis, and the whole isolated, so its direction cannot
+ * reorder what is around it.
+ * @param text - The text, as the Network sent it.
+ * @param limit - The most characters kept.
+ * @returns The text, isolated.
+ */
+export const plainText = (text: string, limit = plainLimit): string => {
+  const kept: string[] = [];
+
+  for (const character of stripFormatting(text)) {
+    const code = character.codePointAt(0) ?? 0;
+
+    if (code === 0x20_28 || code === 0x20_29) {
+      kept.push(" ");
+    } else if (!dropped(code)) {
+      kept.push(character);
+    }
+
+    // One past the limit says it is cut, and nothing further is needed.
+    if (kept.length > limit) {
+      break;
+    }
+  }
+
+  const cut = kept.length > limit ? `${kept.slice(0, limit - 1).join("")}\u2026` : kept.join("");
+
+  return `${firstStrongIsolate}${cut}${popDirectionalIsolate}`;
 };
 
 // A link starts at a scheme we allow and runs to whitespace, a control, a bidirectional
