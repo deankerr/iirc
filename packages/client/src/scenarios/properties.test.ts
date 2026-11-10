@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
-import type { Input } from "../input.ts";
+import type { Input, UnsentLine } from "../input.ts";
 import { timers } from "../output.ts";
 import type { TimerTable } from "../output.ts";
 import type { State } from "../state.ts";
@@ -158,9 +158,12 @@ type Move =
   | { readonly _tag: "Fire"; readonly which: number; readonly early: boolean }
   | { readonly _tag: "Wait"; readonly millis: number }
   | { readonly _tag: "Say"; readonly target: string; readonly text: string }
-  | { readonly _tag: "Unfilled"; readonly line: number };
+  | { readonly _tag: "Unfilled"; readonly line: number }
+  | { readonly _tag: "Stopping" }
+  | { readonly _tag: "Unsent"; readonly count: number; readonly stale: boolean };
 
-const move: fc.Arbitrary<Move> = fc.oneof(
+// The moves of a running Network.
+const running: fc.Arbitrary<Move> = fc.oneof(
   {
     arbitrary: fc
       .nat(configurations.length - 1)
@@ -199,6 +202,19 @@ const move: fc.Arbitrary<Move> = fc.oneof(
   { arbitrary: fc.nat(2).map((which) => ({ _tag: "Unfilled", line: which }) as const), weight: 1 }
 );
 
+// And shutting down: a `Stopping` shuts the gate until the next `Started`, and Lines the
+// Runtime dropped come back as `Unsent`. Each is rare, so a run still meets the rest.
+const move: fc.Arbitrary<Move> = fc.oneof(
+  { arbitrary: running, weight: 30 },
+  { arbitrary: fc.constant({ _tag: "Stopping" } as const), weight: 1 },
+  {
+    arbitrary: fc
+      .tuple(fc.nat(4), fc.boolean())
+      .map(([count, stale]) => ({ _tag: "Unsent", count, stale }) as const),
+    weight: 1,
+  }
+);
+
 const received = (text: string): Move => ({
   _tag: "Received",
   bytes: utf8.encode(text),
@@ -233,9 +249,12 @@ const preludes: readonly (readonly Move[])[] = [
   ],
 ];
 
-const run = fc
-  .tuple(fc.nat(preludes.length - 1), fc.array(move, { maxLength: 150, minLength: 1 }))
-  .map(([which, moves]) => [...(preludes[which] ?? []), ...moves]);
+const runOf = (moves: fc.Arbitrary<Move>) =>
+  fc
+    .tuple(fc.nat(preludes.length - 1), fc.array(moves, { maxLength: 150, minLength: 1 }))
+    .map(([which, each]) => [...(preludes[which] ?? []), ...each]);
+
+const run = runOf(move);
 
 const reasons = ["Ended", "Reset", "Refused", "HungUp"] as const;
 
@@ -245,6 +264,8 @@ interface Fold {
   now: number;
   table: TimerTable;
   intents: number;
+  /** Whether a `Stopping` has been stepped since the last `Started`. */
+  stopping: boolean;
   readonly inputs: Input[];
   readonly steps: Step<State>[];
 }
@@ -271,8 +292,23 @@ const inputOf = (fold: Fold, next: Move): Input => {
     }
 
     case "Started":
-    case "Retry": {
+    case "Retry":
+    case "Stopping": {
       return { _tag: next._tag, at };
+    }
+
+    // The last Lines sent on a Connection never left.
+    case "Unsent": {
+      const on = connection(next.stale);
+
+      const sent = fold.steps.flatMap((step) =>
+        step.outputs.filter(
+          (output): output is UnsentLine =>
+            (output._tag === "Send" || output._tag === "SendSecret") && output.connection === on
+        )
+      );
+
+      return { _tag: "Unsent", at, connection: on, outputs: sent.slice(-next.count) };
     }
 
     case "Opened":
@@ -343,6 +379,8 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
     if (output._tag === "Dial") {
       // One Connection at a time: a dial only when none is open, or this input ended it.
       expect(was === undefined || input._tag === "Closed" || input._tag === "Started").toBeTruthy();
+      // Nothing is dialled between a `Stopping` and the next `Started`.
+      expect(fold.stopping && input._tag !== "Started").toBeFalsy();
     }
 
     if (output._tag === "Send") {
@@ -377,6 +415,7 @@ const runMoves = (moves: readonly Move[]): Fold => {
     now: epoch,
     state: client.initial,
     steps: [],
+    stopping: false,
     table: new Map(),
   };
 
@@ -393,7 +432,16 @@ const runMoves = (moves: readonly Move[]): Fold => {
     const step = client.step(before, input);
 
     fold.table = timers(fold.table, input, step.outputs);
+
+    if (input._tag === "Started") {
+      fold.stopping = false;
+    }
+
     check(fold, input, step, before);
+
+    if (input._tag === "Stopping") {
+      fold.stopping = true;
+    }
 
     for (const output of step.outputs) {
       if (output._tag === "Dial") {
@@ -415,7 +463,7 @@ describe("properties", () => {
   it("reaches every machine's states, so the properties mean something", () => {
     const reached = new Map<string, number>();
 
-    for (const moves of fc.sample(run, { numRuns: 200, seed: 1 })) {
+    for (const moves of fc.sample(runOf(running), { numRuns: 200, seed: 1 })) {
       const fold = runMoves(moves);
       const states = fold.steps.map((step) => client.inspect(step.state).states);
 
@@ -424,19 +472,19 @@ describe("properties", () => {
       }
     }
 
-    expect([...reached.keys()]).toStrictEqual(
-      expect.arrayContaining([
-        "caps=None",
-        "caps=Ready.Steady",
-        "channel #iirc=Joined.Synced",
-        "channel #iirc=Refused",
-        "keepalive=Pinged",
-        "network=Connection.Closing",
-        "network=Idle",
-        "network=Waiting",
-        "presence=Session",
-      ])
-    );
+    const wanted = [
+      "caps=None",
+      "caps=Ready.Steady",
+      "channel #iirc=Joined.Synced",
+      "channel #iirc=Refused",
+      "keepalive=Pinged",
+      "network=Connection.Closing",
+      "network=Idle",
+      "network=Waiting",
+      "presence=Session",
+    ];
+
+    expect(wanted.filter((state) => !reached.has(state))).toStrictEqual([]);
   });
 
   it("never throws, and keeps its invariants, for random and hostile input in any state", () => {

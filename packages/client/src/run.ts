@@ -197,8 +197,11 @@ export const send = (
   const reading = features.length === 0 ? undefined : readingOf(run);
   const open = openOf(run.state);
 
+  // Every Line of a `Say` names its intent, so an `Unsent` can be tied back to it.
+  const intent = departure.for._tag === "Said" ? { intent: departure.for.intent } : {};
+
   if (reading === undefined || open === undefined) {
-    run.outputs.push({ _tag: "Send", connection: id, line });
+    run.outputs.push({ _tag: "Send", connection: id, line, ...intent });
 
     return departure;
   }
@@ -228,7 +231,7 @@ export const send = (
     return undefined;
   }
 
-  run.outputs.push({ _tag: "Send", connection: id, line: ran.value.line });
+  run.outputs.push({ _tag: "Send", connection: id, line: ran.value.line, ...intent });
   sendAll(run, ran.send);
 
   return ran.value;

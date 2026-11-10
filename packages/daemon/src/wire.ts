@@ -283,7 +283,8 @@ const refusedReason = (source: RefusedReason): WireRefusedReason => {
     }
 
     case "Offline":
-    case "Unsendable": {
+    case "Unsendable":
+    case "Unsent": {
       const wire: Case<RefusedReason, WireRefusedReason, typeof source._tag> = {
         _tag: source._tag,
       };

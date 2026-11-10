@@ -9,7 +9,7 @@ import type { CredentialName } from "@iirc/protocol/line";
 
 import type { StsPolicy } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
-import type { CapName, Instant } from "./ids.ts";
+import type { CapName, Instant, IntentId } from "./ids.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
 import type { EndReason } from "./news.ts";
 import type { Seam } from "./seam.ts";
@@ -112,7 +112,15 @@ type LinkPhase =
       readonly loggedIn: boolean;
       /** What Lines have shown of other Users, by folded nick, while they share a Channel with Self. */
       readonly users: ReadonlyMap<string, Seen>;
+      /**
+       * The intents the Ircd has confirmed on this Connection, the latest last, at most
+       * {@link maxConfirmed}. An `Unsent` for one of them refuses nothing.
+       */
+      readonly confirmed: readonly IntentId[];
     };
+
+/** How many confirmed intents a Connection remembers. */
+export const maxConfirmed = 64;
 
 /** What Lines have shown of a User. A fact no Feature keeps any longer is held as stale. */
 export interface Seen {
@@ -195,6 +203,8 @@ export interface State {
   readonly channels: ReadonlyMap<string, Channel>;
   /** STS policies, keyed by host as `hostKey` folds it. They outlive Connections. */
   readonly policies: ReadonlyMap<string, StsPolicy>;
+  /** Set by `Stopping`: nothing is dialled until the next `Started`. */
+  readonly stopping: boolean;
 }
 
 /** Before anything has happened. */
@@ -207,6 +217,7 @@ export const initialState: State = {
   network: { _tag: "Unconfigured" },
   policies: new Map(),
   rotation: 0,
+  stopping: false,
 };
 
 /** An open Connection's phase. */

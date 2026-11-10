@@ -2,7 +2,7 @@ import { OutboundLine, SecretLine } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import { IrcdAddress } from "./configuration.ts";
-import { ConnectionId, Instant, TimerId } from "./ids.ts";
+import { ConnectionId, Instant, IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 
 /**
@@ -18,8 +18,11 @@ export const Output = Schema.TaggedUnion({
   Dial: { connection: ConnectionId, ircd: IrcdAddress },
   /** End a Connection. The Client still waits for its `Closed`. */
   Hangup: { connection: ConnectionId },
-  /** Send a Line. It counts as sent once it is output. */
-  Send: { connection: ConnectionId, line: OutboundLine },
+  /**
+   * Send a Line. It counts as sent unless an `Unsent` input says otherwise. `intent` is set
+   * on every Line of a `Say`, so an `Unsent` can be tied back to it.
+   */
+  Send: { connection: ConnectionId, intent: Schema.optionalKey(IntentId), line: OutboundLine },
   /** Send a Line with a Credential filled in by the Runtime, which the Journal records by name. */
   SendSecret: { connection: ConnectionId, line: SecretLine },
   /** Set a timer to fire at an instant, replacing any earlier one with the same id, or cancel it with `null`. */

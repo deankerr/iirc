@@ -1,4 +1,4 @@
-import { SecretLine } from "@iirc/protocol/line";
+import { OutboundLine, SecretLine } from "@iirc/protocol/line";
 import { Schema } from "effect";
 
 import { NetworkConfiguration } from "./configuration.ts";
@@ -38,6 +38,23 @@ export const SayKind = Schema.Literals(["Privmsg", "Notice", "Action"]);
 export type SayKind = typeof SayKind.Type;
 
 /**
+ * A Line the Client output that never left: a `Send` or a `SendSecret`, as it was output.
+ * It is the same shape as those outputs, so the Runtime gives back exactly what it was
+ * given.
+ */
+export const UnsentLine = Schema.TaggedUnion({
+  Send: {
+    connection: ConnectionId,
+    intent: Schema.optionalKey(IntentId),
+    line: OutboundLine,
+  },
+  SendSecret: { connection: ConnectionId, line: SecretLine },
+});
+
+/** The decoded form of {@link UnsentLine}. */
+export type UnsentLine = typeof UnsentLine.Type;
+
+/**
  * Everything that can happen to a Client. Each input is journaled before it is stepped,
  * and carries the instant it happened as the Runtime saw it.
  */
@@ -62,10 +79,22 @@ export const Input = Schema.TaggedUnion({
   /** The Runtime has started. A Connection the Client believed open is over. */
   Started: { at: Instant },
   /**
+   * The Runtime is shutting down. The Client says `QUIT` on its Connection and hangs it
+   * up, and dials nothing until the next `Started`.
+   */
+  Stopping: { at: Instant },
+  /**
    * The Runtime could not fill a `SendSecret`, so nothing was sent. It is stepped after
    * the rest of that step's outputs are carried out.
    */
   Unfilled: { at: Instant, connection: ConnectionId, line: SecretLine, reason: UnfilledReason },
+  /**
+   * Lines the Client output on a Connection that never left, in the order they were
+   * output: the Runtime's queue for that Connection dropped them, because the Connection
+   * ended or its hang-up ran out of time. A `Send` counts as sent unless an `Unsent` says
+   * otherwise.
+   */
+  Unsent: { at: Instant, connection: ConnectionId, outputs: Schema.Array(UnsentLine) },
 });
 
 /** The decoded form of {@link Input}. */

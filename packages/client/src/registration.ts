@@ -145,6 +145,7 @@ export const begin = (run: Run): void => {
   const open: Open = {
     _tag: "Open",
     caps: { _tag: "Listing", offered: new Map() },
+    confirmed: [],
     error: false,
     isupport: new Map(),
     loggedIn: false,

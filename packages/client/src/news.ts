@@ -67,11 +67,14 @@ export type EndReason =
 /**
  * Why the Client did not carry out something the Owner asked for. `Rejected` comes after
  * sending, when the Ircd's reply is tied to the intent, as `labeled-response` ties it:
- * `reply` is the numeric, or a standard reply's code, never the reply's text.
+ * `reply` is the numeric, or a standard reply's code, never the reply's text. `Unsent`
+ * comes after the Message was reported: at least part of it never left, because its
+ * Connection ended first.
  */
 export type RefusedReason =
   | { readonly _tag: "Offline" }
   | { readonly _tag: "Unsendable" }
+  | { readonly _tag: "Unsent" }
   | { readonly _tag: "Rejected"; readonly reply: string };
 
 /** That we said a Message ourselves, as the Owner's intent. */

@@ -236,6 +236,8 @@ export const RefusedReason = Schema.TaggedUnion({
   Offline: {},
   Rejected: { reply: Untrusted },
   Unsendable: {},
+  /** At least part of the Message never left, because its Connection ended first. */
+  Unsent: {},
 });
 
 /** The decoded form of {@link RefusedReason}. */
@@ -252,7 +254,9 @@ const inputTags = everyOf<Input["_tag"]>()([
   "Retry",
   "Say",
   "Started",
+  "Stopping",
   "Unfilled",
+  "Unsent",
 ]);
 
 /** Why an input changed nothing. */

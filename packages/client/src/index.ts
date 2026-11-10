@@ -22,7 +22,7 @@ export {
   TimerId,
 } from "./ids.ts";
 
-export { CloseReason, Input, SayKind, UnfilledReason } from "./input.ts";
+export { CloseReason, Input, SayKind, UnfilledReason, UnsentLine } from "./input.ts";
 
 export type {
   Activity,
