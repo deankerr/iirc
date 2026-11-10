@@ -1,0 +1,54 @@
+/* The Panes fill the room between the sidebar and the composer. */
+.tree {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A Split's Group: the library sets its direction itself. */
+.group {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A Panel's inner element, which holds a Pane's slot or a nested Group. */
+.panel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Where a Pane's own node is moved in. */
+.slot,
+.host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A divider: a thin line, wider to the pointer, accented while held or focused. */
+.separator {
+  background: var(--color-border);
+  outline: none;
+}
+
+/* Between Panes side by side, a divider is upright; between Panes one above another, flat. */
+.separator[aria-orientation="vertical"] {
+  width: var(--border-width);
+}
+
+.separator[aria-orientation="horizontal"] {
+  height: var(--border-width);
+}
+
+.separator[data-separator="hover"] {
+  background: var(--color-muted);
+}
+
+.separator[data-separator="active"],
+.separator[data-separator="focus"] {
+  background: var(--color-focus);
+}

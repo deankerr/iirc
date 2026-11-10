@@ -475,7 +475,10 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
  * does beside it: Mod+Shift+M is the browser's own in Chrome and Firefox. Focusing the
  * composer is `i`,
  * outside a field: a letter outside a field has no browser default, where Ctrl+L and Cmd+L
- * go to the address bar, and inside one it is typed.
+ * go to the address bar, and inside one it is typed. The Panes are Alt+Shift: with the
+ * arrows to move between them, as Alt and the arrows move between Timelines, and with a
+ * letter to split, close, zoom, equalize, grow, or shrink, a letter because Option on a
+ * Mac types another character, which only a letter's or a digit's physical key names back.
  */
 export const defaultBindings: readonly BindingText[] = [
   { command: "palette.open", keys: "mod+k", when: "!palette" },
@@ -486,6 +489,17 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "members.toggle", keys: "alt+m", when: "!palette" },
   { command: "composer.focus", keys: "i", when: "!editing && !palette" },
   { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
+  { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft", when: "!palette" },
+  { args: "right", command: "pane.focus", keys: "alt+shift+arrowright", when: "!palette" },
+  { args: "up", command: "pane.focus", keys: "alt+shift+arrowup", when: "!palette" },
+  { args: "down", command: "pane.focus", keys: "alt+shift+arrowdown", when: "!palette" },
+  { args: "h", command: "pane.split", keys: "alt+shift+s", when: "!palette" },
+  { args: "v", command: "pane.split", keys: "alt+shift+d", when: "!palette" },
+  { command: "pane.close", keys: "alt+shift+w", when: "!palette" },
+  { command: "pane.zoom", keys: "alt+shift+z", when: "!palette" },
+  { command: "pane.equalize", keys: "alt+shift+e", when: "!palette" },
+  { command: "pane.grow", keys: "alt+shift+g", when: "!palette" },
+  { command: "pane.shrink", keys: "alt+shift+r", when: "!palette" },
 ];
 
 /** The keymap the Frontend starts with. */

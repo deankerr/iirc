@@ -34,7 +34,9 @@ const context: CommandContext = {
     timeline: channel,
   },
   open: channel,
+  panes: 1,
   session: true,
+  shown: [],
   timelines: [channel],
   unread: [],
 };

@@ -95,3 +95,8 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* The focused Pane's number, among several: dim, before the Timeline's name. */
+.pane {
+  color: var(--color-muted);
+}

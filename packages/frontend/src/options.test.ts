@@ -68,7 +68,9 @@ const inChannel: CommandContext = {
     timeline,
   },
   open: timeline,
+  panes: 1,
   session: false,
+  shown: [],
   timelines: [timeline],
   unread: [],
 };
@@ -76,7 +78,9 @@ const inChannel: CommandContext = {
 const nowhere: CommandContext = {
   focus: undefined,
   open: undefined,
+  panes: 1,
   session: false,
+  shown: [],
   timelines: [],
   unread: [],
 };

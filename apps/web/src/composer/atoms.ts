@@ -51,7 +51,7 @@ import type { Outcome as Changed } from "../options/atoms.ts";
 import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
-import { open, timelinesState, Waits } from "../timelines/atoms.ts";
+import { open, paned, timelinesState, Waits } from "../timelines/atoms.ts";
 import { cancelCompletion } from "./completion-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
@@ -72,7 +72,7 @@ export const draft = Atom.family((timeline: Place) =>
 export const composerFocus = Atom.make(0).pipe(Atom.keepAlive);
 
 /**
- * Where the composer under the main view is: the open Timeline's, or the one under none.
+ * Where the composer is: the focused Pane's open Timeline's, or the one under none.
  * @param registry - The registry.
  * @returns Its place.
  */
@@ -251,7 +251,8 @@ type Local = Extract<
       | "Open"
       | "OpenPalette"
       | "FocusComposer"
-      | "ShowMembers";
+      | "ShowMembers"
+      | "Pane";
   }
 >;
 
@@ -260,6 +261,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "Open",
   "OpenOptions",
   "OpenPalette",
+  "Pane",
   "PromptCredential",
   "ShowMembers",
 ]);
@@ -273,8 +275,8 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
  * Carries out an intent in the page: shows the options or a Timeline, opens the password
- * prompt or the palette, focuses the composer, starting an empty draft with text, or shows
- * or hides the members.
+ * prompt or the palette, focuses the composer, starting an empty draft with text, shows
+ * or hides the members, or changes the Panes.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -310,6 +312,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "ShowMembers": {
       showMembers(registry, intent.shown);
+      break;
+    }
+
+    case "Pane": {
+      registry.set(paned, intent.change);
       break;
     }
 

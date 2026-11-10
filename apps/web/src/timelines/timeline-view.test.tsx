@@ -113,7 +113,7 @@ const signedIn = async (gaps: readonly (typeof WindowGap.Encoded)[] = []) => {
 
   const registry = registryFor(fake.fetch);
 
-  registry.set(pageState, { focused: true, visible: true });
+  registry.set(pageState, { compact: false, focused: true, visible: true });
   await run(registry, check, undefined);
   registry.mount(sync);
   registry.mount(marking);

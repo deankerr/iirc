@@ -1,0 +1,38 @@
+/* One row of the Panes, scrolled sideways when they do not fit. */
+.switcher {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  overflow-x: auto;
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.choice {
+  flex-shrink: 0;
+  max-width: 16ch;
+  overflow: hidden;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.choice[data-selected] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.choice[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}
+
+.number {
+  color: var(--color-muted);
+}

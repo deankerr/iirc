@@ -19,6 +19,7 @@ import {
 } from "@iirc/frontend/activity";
 import type { Activity } from "@iirc/frontend/activity";
 import { endReason } from "@iirc/frontend/render";
+import { openOf } from "@iirc/frontend/timelines";
 import type { Connection, SidebarNetwork } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
@@ -32,8 +33,8 @@ import styles from "./sidebar.module.css";
 /** The Networks the Owner collapsed in the sidebar. Every other is expanded. */
 const collapsed = Atom.make<readonly string[]>([]).pipe(Atom.keepAlive);
 
-/** The Timeline opened, as the sidebar marks it. */
-const selected = Atom.make((get) => get(timelinesState).open);
+/** The Timeline open in the focused Pane, as the sidebar marks it. */
+const selected = Atom.make((get) => openOf(get(timelinesState)));
 
 // A Network's row has an id no Timeline's can have, since a Timeline's is hex and `-`.
 const networkKey = (network: string) => `network:${network}`;

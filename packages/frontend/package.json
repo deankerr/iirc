@@ -10,6 +10,7 @@
     "./completion": "./src/completion.ts",
     "./composer": "./src/composer.ts",
     "./keymap": "./src/keymap.ts",
+    "./layout": "./src/layout.ts",
     "./notifications": "./src/notifications.ts",
     "./options": "./src/options.ts",
     "./palette": "./src/palette.ts",

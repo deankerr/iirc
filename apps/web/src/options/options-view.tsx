@@ -22,7 +22,7 @@ import {
   confirming as confirmingAtom,
   editing as editingAtom,
   filterOptions,
-  mainView,
+  optionsFilter,
   optionRows,
   optionsState,
   promptCredential,
@@ -183,8 +183,7 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
 export const OptionsView = () => {
   const rows = useAtomValue(optionRows);
   const { confirming, editing, notice } = useAtomValue(optionsState);
-  const main = useAtomValue(mainView);
-  const filter = main._tag === "Options" ? main.filter : "";
+  const filter = useAtomValue(optionsFilter) ?? "";
   const setFilter = useAtomSet(filterOptions);
   const edit = useAtomSet(editingAtom);
   const ask = useAtomSet(confirmingAtom);

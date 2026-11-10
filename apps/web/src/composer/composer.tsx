@@ -1,5 +1,5 @@
 /**
- * The composer under the main view, the open Timeline's or, with none open, one where
+ * The composer under the Panes, the focused Pane's Timeline's or, with none open, one where
  * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
  * Enter sends and Shift+Enter starts a new line, Up and Down recall what was sent from
  * the first and last lines, and Escape lets go of an error or a confirmation. What it
@@ -15,6 +15,7 @@ import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
+import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { openTimeline } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import {
@@ -50,7 +51,15 @@ const offerLabel = (offer: Offer) => {
  * @param props - Where it is, and the name its prompt shows.
  * @returns The composer.
  */
-const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name: string }) => {
+const Composer = ({
+  name,
+  number,
+  timeline,
+}: {
+  readonly timeline: Place;
+  readonly name: string;
+  readonly number: number | undefined;
+}) => {
   const draft = useAtomValue(draftAtom(timeline));
   const context = useAtomValue(commandContext);
   const completion = useAtomValue(completionState);
@@ -254,10 +263,13 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
       </output>
       <div className={styles.line}>
         <label className={styles.prompt} htmlFor={id}>
+          {number === undefined ? null : <span className={styles.pane}>{number}</span>}
           <bdi>{name}</bdi>
           <span aria-hidden="true">&gt;</span>
         </label>
         <textarea
+          // Among several Panes, the number shown is said with what it is.
+          aria-label={number === undefined ? undefined : `Pane ${number}: ${name}`}
           aria-describedby={describedBy === "" ? undefined : describedBy}
           aria-invalid={notice === undefined ? undefined : true}
           autoComplete="off"
@@ -278,19 +290,21 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
 };
 
 /**
- * The composer under the main view: the open Timeline's, or, with none open, the one
- * where commands that need no Timeline, such as `/network add` and `/set`, are typed.
+ * The composer under the Panes: the focused Pane's open Timeline's, or, with none open, the
+ * one where commands that need no Timeline, such as `/network add` and `/set`, are typed.
+ * Among several Panes, its prompt says the focused Pane's number, as its header does.
  * @returns The composer.
  */
 export const MainComposer = () => {
   const shown = useAtomValue(openTimeline);
+  const number = useAtomValue(paneNumber(useAtomValue(focusedId)));
 
   if (shown._tag === "Shown") {
     const name = shown.description?.name ?? "Timeline";
 
-    return <Composer name={name} timeline={shown.timeline} />;
+    return <Composer name={name} number={number} timeline={shown.timeline} />;
   }
 
   // One composer element under every Timeline, so focus stays in it as Timelines open.
-  return <Composer name="iirc" timeline="Nowhere" />;
+  return <Composer name="iirc" number={number} timeline="Nowhere" />;
 };

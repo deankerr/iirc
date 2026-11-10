@@ -1,24 +1,24 @@
 /**
- * What a signed-in browser sees: the Networks and their Timelines, the open Timeline or
- * the options, the composer under them, the open Channel's members beside them when shown,
- * the command palette and the keys, and signing out.
+ * What a signed-in browser sees: the Networks and their Timelines, the Panes, each showing
+ * a Timeline or the options, with its Channel's members beside it when shown, the composer
+ * under them, writing to the focused Pane's Timeline, the command palette and the keys, and
+ * signing out.
  *
  * @packageDocumentation
  */
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomSet } from "@effect/atom-react";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 
-import { MembersPanel } from "../channel/members-panel.tsx";
 import { MainComposer } from "../composer/composer.tsx";
-import { mainView } from "../options/atoms.ts";
 import { CredentialPrompt } from "../options/credential-prompt.tsx";
-import { OptionsView } from "../options/options-view.tsx";
 import { Keys } from "../palette/keys.tsx";
 import { Palette } from "../palette/palette.tsx";
+import { PaneSwitcher } from "../panes/pane-switcher.tsx";
+import { PaneTree } from "../panes/pane-tree.tsx";
+import { Pane } from "../panes/pane.tsx";
 import { signOut } from "../sign-in/atoms.ts";
 import { Sidebar } from "../timelines/sidebar.tsx";
-import { TimelineView } from "../timelines/timeline-view.tsx";
 import { Button } from "../ui/button.tsx";
 
 import styles from "./shell.module.css";
@@ -30,7 +30,6 @@ import styles from "./shell.module.css";
  */
 export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
   const signOutNow = useAtomSet(signOut);
-  const main = useAtomValue(mainView);
 
   return (
     <div className={styles.shell}>
@@ -53,13 +52,13 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
       <div className={styles.body}>
         <Sidebar />
         <main className={styles.main}>
+          <PaneSwitcher />
           <div className={styles.view}>
-            {main._tag === "Options" ? <OptionsView /> : <TimelineView />}
+            <PaneTree render={(pane) => <Pane pane={pane} />} />
           </div>
           <CredentialPrompt />
           <MainComposer />
         </main>
-        <MembersPanel />
       </div>
       <Palette />
       <Keys />

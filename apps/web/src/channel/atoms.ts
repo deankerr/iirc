@@ -1,25 +1,28 @@
 /**
- * Who is here, as atoms: the open Timeline's header and the open Channel's members,
- * derived from what the core holds, and the reads it calls for. While the browser is
- * signed in, `channelSync` makes each read the core asks for: the head of the open
- * Channel, and while its members show, their pages. A change that may have changed the
+ * Who is here, as atoms: each Pane's header and its Channel's members, derived from what
+ * the core holds, and the reads it calls for. While the browser is signed in,
+ * `channelSync` makes each read the core asks for: the head of each Channel a Pane shows,
+ * and while the members show, their pages. A change that may have changed the
  * Channel, which the one changes stream folds in, has it read again, after a moment, each
  * later change superseding the read before.
  *
  * @packageDocumentation
  */
-import type { MembersQuery, NetworkId } from "@iirc/api";
+import type { MembersQuery, NetworkId, TimelineId } from "@iirc/api";
 import {
-  channelReads,
+  channelIn,
+  channelsReads,
   headerOf,
-  initialChannel,
+  initialChannels,
   openChannel,
+  openChannels,
   queried,
   refreshDelay,
   rosterOf,
 } from "@iirc/frontend/channel";
 import type { ChannelEvent, ChannelRead } from "@iirc/frontend/channel";
 import type { Intent } from "@iirc/frontend/commands";
+import { opened } from "@iirc/frontend/timelines";
 import { Clock, Duration, Effect, FiberMap, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -31,36 +34,74 @@ import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, timelinesState, Waits } from "../timelines/atoms.ts";
 import { channelHappened, channelState, membersShown } from "./state.ts";
 
-/** What the open Timeline shows at its head. */
-export const timelineHeader = Atom.make((get) => headerOf(get(timelinesState), get(channelState)));
+/**
+ * The Channel a Pane shows, as held, or nothing read of it yet.
+ * @param pane - The Pane's id.
+ * @returns The atom.
+ */
+const paneChannel = Atom.family((pane: string) =>
+  Atom.make((get) => {
+    const shown = opened(get(timelinesState), pane);
 
-/** Whether a Channel is open, so its members can show. */
-export const channelOpen = Atom.make((get) => openChannel(get(timelinesState)) !== undefined);
+    return channelIn(get(channelState), shown._tag === "Closed" ? undefined : shown.timeline);
+  })
+);
 
-/** The open Channel's members, as the list shows them. */
-export const roster = Atom.make((get) => rosterOf(get(timelinesState), get(channelState)));
+/** What a Pane's open Timeline shows at its head, by the Pane's id. */
+export const timelineHeader = Atom.family((pane: string) =>
+  Atom.make((get) => headerOf(get(timelinesState), get(paneChannel(pane)), pane))
+);
 
-/** The member the Owner chose in the list, by nick. */
-const memberChoice = Atom.make<string | undefined>(undefined).pipe(Atom.keepAlive);
+/** Whether a Pane shows a Channel, so its members can show, by the Pane's id. */
+export const channelOpen = Atom.family((pane: string) =>
+  Atom.make((get) => openChannel(get(timelinesState), pane) !== undefined)
+);
 
-/** The member chosen, while the list still holds them. */
-export const chosenMember = Atom.make((get) => {
-  const chosen = get(memberChoice);
-  const members = get(roster);
+/** A Pane's Channel's members, as the list shows them, by the Pane's id. */
+export const roster = Atom.family((pane: string) =>
+  Atom.make((get) => rosterOf(get(timelinesState), get(paneChannel(pane)), pane))
+);
 
-  return members._tag === "Listed" && members.rows.some((row) => row.nick === chosen)
-    ? chosen
-    : undefined;
-});
+/** The member the Owner chose in a Pane's list, by nick, by the Pane's id. */
+const memberChoice = Atom.family((_pane: string) =>
+  Atom.make<string | undefined>(undefined).pipe(Atom.keepAlive)
+);
 
-/** Chooses a member in the list, or none. */
-export const chooseMember = Atom.fnSync((nick: string | undefined, get) => {
-  get.registry.set(memberChoice, nick);
-}).pipe(Atom.keepAlive);
+/** The member chosen in a Pane's list, while the list still holds them. */
+export const chosenMember = Atom.family((pane: string) =>
+  Atom.make((get) => {
+    const chosen = get(memberChoice(pane));
+    const members = get(roster(pane));
+
+    return members._tag === "Listed" && members.rows.some((row) => row.nick === chosen)
+      ? chosen
+      : undefined;
+  })
+);
+
+/** Chooses a member in a Pane's list, or none. */
+export const chooseMember = Atom.fnSync(
+  ({ nick, pane }: { readonly pane: string; readonly nick: string | undefined }, get) => {
+    get.registry.set(memberChoice(pane), nick);
+  }
+).pipe(Atom.keepAlive);
+
+/**
+ * The reads the core calls for now, for every Channel the Panes show.
+ * @param read - Reads an atom, from the registry or as a derived atom does.
+ * @returns The reads.
+ */
+const readsNow = (read: <A>(atom: Atom.Atom<A>) => A) =>
+  channelsReads(read(channelState), openChannels(read(timelinesState)), read(membersShown));
 
 /** The reads the core calls for now. */
-const wanted = Atom.make((get) =>
-  channelReads(get(channelState), openChannel(get(timelinesState)), get(membersShown))
+const wanted = Atom.make((get) => readsNow(get));
+
+/** The Channels the Panes show, to keep, as their Timelines' ids. */
+const shownChannels = Atom.make((get) =>
+  openChannels(get(timelinesState))
+    .map((one) => one.timeline)
+    .join(" ")
 );
 
 /** The errors a read gives up on: no sign-in, or nothing to read. */
@@ -125,7 +166,7 @@ const perform = (registry: AtomRegistry.AtomRegistry, read: ChannelRead, delay: 
       yield* Effect.sleep(Duration.millis(delay));
     }
 
-    const { generation } = registry.get(channelState);
+    const { generation } = channelIn(registry.get(channelState), read.timeline);
 
     const event =
       read._tag === "Head"
@@ -195,45 +236,60 @@ export const channelSync = runtime
         interval: Duration.toMillis(interval),
       };
 
-      registry.set(channelState, initialChannel);
+      registry.set(channelState, initialChannels);
 
       if (!get(signedIn)) {
         return;
       }
 
-      const fibers = yield* FiberMap.make<ChannelRead["_tag"]>();
+      // One fiber for each kind of read of each Channel.
+      const fibers = yield* FiberMap.make<string>();
 
-      yield* get.stream(wanted).pipe(
-        Stream.runForEach(() =>
+      // A Channel no Pane shows any more is let go of, and a read of it in flight with it.
+      const keep = get.stream(shownChannels).pipe(
+        Stream.runForEach((shown) =>
           Effect.gen(function* () {
-            // As the state is now, so a read taken on since is not taken on again.
-            const reads = channelReads(
-              registry.get(channelState),
-              openChannel(registry.get(timelinesState)),
-              registry.get(membersShown)
-            );
+            const timelines = openChannels(registry.get(timelinesState)).map((one) => one.timeline);
 
-            for (const read of reads) {
-              const now = yield* Clock.currentTimeMillis;
-              const delay = refreshDelay(registry.get(channelState), read, now, timing);
+            channelHappened(registry, { _tag: "Kept", timelines });
 
-              channelHappened(registry, { _tag: "ReadStarted", at: now + delay, read });
-              yield* FiberMap.run(fibers, read._tag, perform(registry, read, delay));
+            for (const key of [...fibers].map(([one]) => one)) {
+              if (!shown.includes(key.slice(key.indexOf(" ") + 1))) {
+                yield* FiberMap.remove(fibers, key);
+              }
             }
           })
         )
       );
+
+      const read = get.stream(wanted).pipe(
+        Stream.runForEach(() =>
+          Effect.gen(function* () {
+            // As the state is now, so a read taken on since is not taken on again.
+            for (const one of readsNow((atom) => registry.get(atom))) {
+              const now = yield* Clock.currentTimeMillis;
+              const channel = channelIn(registry.get(channelState), one.timeline);
+              const delay = refreshDelay(channel, one, now, timing);
+
+              channelHappened(registry, { _tag: "ReadStarted", at: now + delay, read: one });
+              yield* FiberMap.run(
+                fibers,
+                `${one._tag} ${one.timeline}`,
+                perform(registry, one, delay)
+              );
+            }
+          })
+        )
+      );
+
+      yield* Effect.all([keep, read], { concurrency: "unbounded", discard: true });
     })
   )
   .pipe(Atom.keepAlive);
 
-/** Asks for the members after those held, as the Owner scrolls to the end of them. */
-export const moreMembers = Atom.fnSync((_: undefined, get) => {
-  const { timeline } = get.registry.get(channelState);
-
-  if (timeline !== undefined) {
-    channelHappened(get.registry, { _tag: "MoreWanted", timeline });
-  }
+/** Asks for a Channel's members after those held, as the Owner scrolls to the end of them. */
+export const moreMembers = Atom.fnSync((timeline: TimelineId, get) => {
+  channelHappened(get.registry, { _tag: "MoreWanted", timeline });
 }).pipe(Atom.keepAlive);
 
 /**

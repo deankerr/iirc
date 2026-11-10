@@ -70,7 +70,9 @@ const inChannel: CommandContext = {
     timeline: channel,
   },
   open: channel,
+  panes: 1,
   session: true,
+  shown: [],
   timelines: [own, channel, direct],
   unread: [],
 };
@@ -158,6 +160,7 @@ describe("the palette's entries", () => {
         "command:timeline.read",
         "command:notify.set",
         "command:members.toggle",
+        "command:pane.split",
         "command:composer.focus",
       ],
       here: [
@@ -177,6 +180,7 @@ describe("the palette's entries", () => {
         "command:notify.set",
         "command:timeline.query",
         "command:members.toggle",
+        "command:pane.split",
         "command:composer.focus",
       ],
       timelines: 3,

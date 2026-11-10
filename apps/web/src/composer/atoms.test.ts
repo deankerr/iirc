@@ -1,7 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline, TimelineChangesEvent } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
-import { followFrom } from "@iirc/frontend/timelines";
+import { followFrom, openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -321,7 +321,7 @@ describe("saying", () => {
     // The projection catches up while the lookup waits.
     placeAt10(daemon);
     sendChange(foldedThrough(10));
-    await until(registry, timelinesState, (state) => state.open === idOf(4));
+    await until(registry, timelinesState, (state) => openOf(state) === idOf(4));
 
     expect({ after: daemon.locatesRead, before, says: daemon.says }).toStrictEqual({
       after: [10],
@@ -341,7 +341,7 @@ describe("saying", () => {
     await eventually(() => daemon.says.length === 1);
     placeAt10(daemon);
     sendChange(foldedThrough(10));
-    await until(registry, timelinesState, (state) => state.open === idOf(4));
+    await until(registry, timelinesState, (state) => openOf(state) === idOf(4));
 
     expect({ after: registry.get(mainView), before }).toStrictEqual({
       after: { _tag: "Timeline" },
@@ -359,7 +359,7 @@ describe("saying", () => {
 
     registry.set(edit, { text: "/msg {bob} hello", timeline: channel });
     registry.set(send, channel);
-    await until(registry, timelinesState, (state) => state.open === idOf(4));
+    await until(registry, timelinesState, (state) => openOf(state) === idOf(4));
 
     expect({ reads: daemon.locatesRead, says: daemon.says.length }).toStrictEqual({
       reads: [10, 10],
@@ -380,10 +380,12 @@ describe("saying", () => {
     await until(registry, timelinesState, (state) => followFrom(state)?.sequence === 10);
     await Effect.runPromise(Effect.sleep("50 millis"));
 
-    expect({ open: registry.get(timelinesState).open, reads: daemon.locatesRead }).toStrictEqual({
-      open: network,
-      reads: [],
-    });
+    expect({ open: openOf(registry.get(timelinesState)), reads: daemon.locatesRead }).toStrictEqual(
+      {
+        open: network,
+        reads: [],
+      }
+    );
   });
 
   it("opens nothing when the Owner opened another Timeline while the read was answered late", async () => {
@@ -405,7 +407,7 @@ describe("saying", () => {
 
     await Effect.runPromise(Effect.sleep("50 millis"));
 
-    expect(registry.get(timelinesState).open).toBe(network);
+    expect(openOf(registry.get(timelinesState))).toBe(network);
   });
 
   it("opens nothing for a `/msg` the Client refused", async () => {
@@ -415,7 +417,7 @@ describe("saying", () => {
     daemon.through = 10;
     await type("/msg peer hi");
 
-    expect({ notice: notice()?.offer, open: registry.get(timelinesState).open }).toStrictEqual({
+    expect({ notice: notice()?.offer, open: openOf(registry.get(timelinesState)) }).toStrictEqual({
       notice: undefined,
       open: channel,
     });

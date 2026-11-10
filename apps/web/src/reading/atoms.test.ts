@@ -2,6 +2,7 @@ import { TimelineId } from "@iirc/api";
 import type { Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import type { Place } from "@iirc/frontend/composer";
+import { openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -110,8 +111,8 @@ const changed = (
   id: `1.${sequence}`,
 });
 
-const seeing = { focused: true, visible: true };
-const away = { focused: false, visible: false };
+const seeing = { compact: false, focused: true, visible: true };
+const away = { compact: false, focused: false, visible: false };
 
 /**
  * A Daemon with libera's own Timeline, `#iirc` holding two unread Messages, `#other`, and a
@@ -332,10 +333,10 @@ describe("what calls for the Owner", () => {
     const calling = await until(registry, documentTitle, (title) => title !== calm);
 
     await type(timelineId(iirc), "/next-unread");
-    const first = registry.get(timelinesState).open;
+    const first = openOf(registry.get(timelinesState));
 
     await type(timelineId(other), "/next-unread");
-    const second = registry.get(timelinesState).open;
+    const second = openOf(registry.get(timelinesState));
 
     expect({ calling, calm, first, second }).toStrictEqual({
       calling: "(3) iirc",
@@ -384,7 +385,7 @@ describe("notifications", () => {
     const showing = [...notifier.showing.keys()];
 
     notifier.showing.get(`iirc:${other}`)?.choose();
-    const chosen = registry.get(timelinesState).open;
+    const chosen = openOf(registry.get(timelinesState));
 
     await type(timelineId(other), "/notify off");
     send(highlight(7, iirc));

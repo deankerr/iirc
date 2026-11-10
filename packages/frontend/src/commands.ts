@@ -10,8 +10,10 @@ import type { Level, NetworkId, TimelineId } from "@iirc/api";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
+import type { Axis, Direction } from "./layout.ts";
 import { channelsOf, networkIdOf, parseIrcd, parseText, resolve, starting } from "./options.ts";
 import type { Configuration, Edit, Path } from "./options.ts";
+import type { PaneChange } from "./timelines.ts";
 
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
 export type SayKind = "Privmsg" | "Notice" | "Action";
@@ -36,8 +38,15 @@ export interface CommandContext {
   readonly session: boolean;
   /** Every Timeline, in the sidebar's order. */
   readonly timelines: readonly TimelineId[];
-  /** The Timeline the Owner opened, as a merge resolves it, even while it is still read. */
+  /**
+   * The Timeline open in the focused Pane, as a merge resolves it, even while it is still
+   * read.
+   */
   readonly open: TimelineId | undefined;
+  /** Every Timeline open in a Pane, as a merge resolves it. */
+  readonly shown: readonly TimelineId[];
+  /** How many Panes there are. */
+  readonly panes: number;
   /** Every Timeline with something unread, in the sidebar's order. */
   readonly unread: readonly Unseen[];
 }
@@ -89,7 +98,7 @@ export interface Say {
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it. A value never goes through the
  *   composer, nor through an intent.
- * - `Open`: open a Timeline in the main view.
+ * - `Open`: open a Timeline in the focused Pane, or focus the Pane it is open in.
  * - `OpenPalette`: open the command palette.
  * - `FocusComposer`: focus the composer under the main view, starting it with `text` when
  *   there is one, as the palette starts a command that needs arguments. A draft with text
@@ -102,6 +111,7 @@ export interface Say {
  * - `Query`: open the Timeline of a name on a Network, as the Daemon keyed it, such as a
  *   Direct Message's. A Timeline exists only once something was said in it, so with none,
  *   the composer starts `/msg <name> ` to say the first Message, which opens it.
+ * - `Pane`: change the Panes: split, close, focus, swap, resize, or zoom.
  */
 export type Intent =
   | Say
@@ -119,7 +129,8 @@ export type Intent =
   | MarkRead
   | { readonly _tag: "Notify"; readonly on: boolean }
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
-  | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string };
+  | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string }
+  | { readonly _tag: "Pane"; readonly change: PaneChange };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -133,11 +144,13 @@ export type Parsed<A> =
  * - `Target`: the Timeline in focus has a Target: a Channel's, or a Direct Message
  *   partner's it still follows.
  * - `Session`: the focused Timeline's Network has a Session.
+ * - `Panes`: there is more than one Pane.
  */
 export type Condition =
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Target" }
-  | { readonly _tag: "Session" };
+  | { readonly _tag: "Session" }
+  | { readonly _tag: "Panes" };
 
 /** A command: how it is named and described, when it can run, and what it gives. */
 export interface Command {
@@ -449,25 +462,23 @@ const readArguments = (args: string, context: CommandContext): Parsed<readonly M
 const worthJumping = rank("Message");
 
 /**
- * The Timeline with the most calling for the Owner, other than the open one: the highest
- * level unread, Highlights first, then Direct Messages, then Messages, and ties by the
- * sidebar's order. Activity alone is not enough, since joins and quits pile up everywhere.
- * @param args - The text after `/next-unread`.
+ * The Timeline with the most calling for the Owner, of those not skipped: the highest level
+ * unread, at least Messages, and ties by the sidebar's order.
  * @param context - The context.
- * @returns The Timeline to open, or none when nothing else calls.
+ * @param skip - Whether a Timeline is skipped.
+ * @returns The Timeline, or none when nothing calls.
  */
-const nextUnread = (args: string, context: CommandContext): Parsed<TimelineId | undefined> => {
-  if (args.trim() !== "") {
-    return invalid("/next-unread takes nothing after it.");
-  }
-
+const calling = (
+  context: CommandContext,
+  skip: (timeline: TimelineId) => boolean
+): TimelineId | undefined => {
   let best: Unseen | undefined;
 
   for (const one of context.unread) {
     const ranked = rank(one.level);
 
     if (
-      one.timeline !== context.open &&
+      !skip(one.timeline) &&
       ranked >= worthJumping &&
       (best === undefined || ranked > rank(best.level))
     ) {
@@ -475,8 +486,109 @@ const nextUnread = (args: string, context: CommandContext): Parsed<TimelineId | 
     }
   }
 
-  return parsed(best?.timeline);
+  return best?.timeline;
 };
+
+/**
+ * The Timeline with the most calling for the Owner, other than the open one: the highest
+ * level unread, Highlights first, then Direct Messages, then Messages, and ties by the
+ * sidebar's order. Activity alone is not enough, since joins and quits pile up everywhere.
+ * @param args - The text after `/next-unread`.
+ * @param context - The context.
+ * @returns The Timeline to open, or none when nothing else calls.
+ */
+const nextUnread = (args: string, context: CommandContext): Parsed<TimelineId | undefined> =>
+  args.trim() === ""
+    ? parsed(calling(context, (timeline) => timeline === context.open))
+    : invalid("/next-unread takes nothing after it.");
+
+const directions: ReadonlyMap<string, Direction> = new Map([
+  ["left", "Left"],
+  ["right", "Right"],
+  ["up", "Up"],
+  ["down", "Down"],
+]);
+
+/**
+ * A direction, `left`, `right`, `up`, or `down`, in any ASCII case.
+ * @param name - The command's name, to say how it is typed.
+ * @returns The parser.
+ */
+const directionOf =
+  (name: string) =>
+  (args: string): Parsed<Direction> => {
+    const direction = directions.get(args.trim().toLowerCase());
+
+    return direction === undefined
+      ? invalid(`Use /${name} left, right, up, or down.`)
+      : parsed(direction);
+  };
+
+/**
+ * What `/split` was given: `h`, side by side, as tmux and i3 mean it, the default, or `v`,
+ * one above another. The new Pane opens the Timeline calling for the Owner most that no
+ * Pane shows, as `/next-unread` would choose, or is empty when none does.
+ * @param args - The text after `/split`.
+ * @param context - The context.
+ * @returns The change, or why there is none.
+ */
+const splitArguments = (args: string, context: CommandContext): Parsed<PaneChange> => {
+  const what = args.trim().toLowerCase();
+  let axis: Axis | undefined;
+
+  if (what === "" || what === "h") {
+    axis = "Horizontal";
+  } else if (what === "v") {
+    axis = "Vertical";
+  }
+
+  return axis === undefined
+    ? invalid("Use /split h for side by side, or /split v for one above another.")
+    : parsed({
+        _tag: "Split",
+        axis,
+        timeline: calling(context, (timeline) => context.shown.includes(timeline)),
+      });
+};
+
+/**
+ * The parser of a change to the Panes that takes nothing after its name.
+ * @param name - Its name, to say so.
+ * @param change - The change.
+ * @returns Its parser.
+ */
+const ofPanes =
+  (name: string, change: PaneChange) =>
+  (args: string): Parsed<PaneChange> =>
+    args.trim() === "" ? parsed(change) : invalid(`/${name} takes nothing after it.`);
+
+/**
+ * The parser of a change to the Panes in a direction.
+ * @param name - Its name, to say how it is typed.
+ * @param change - The change in a direction.
+ * @returns Its parser.
+ */
+const towards =
+  (name: string, change: (direction: Direction) => PaneChange) =>
+  (args: string): Parsed<PaneChange> => {
+    const direction = directionOf(name)(args);
+
+    return direction._tag === "Parsed" ? parsed(change(direction.value)) : direction;
+  };
+
+/** Needs more than one Pane. */
+const panesNeeded: readonly Condition[] = [{ _tag: "Panes" }];
+
+/**
+ * A command that changes the Panes.
+ * @param spec - The command, with its parser.
+ * @returns The command.
+ */
+const paneCommand = (
+  spec: Omit<Command, "run"> & {
+    readonly parse: (args: string, context: CommandContext) => Parsed<PaneChange>;
+  }
+): Command => unfocused({ ...spec, intents: (change: PaneChange) => [{ _tag: "Pane", change }] });
 
 /**
  * What `/notify` was given: `on` or `off`.
@@ -770,6 +882,87 @@ export const commands: readonly Command[] = [
     usage: "/palette",
     when: [],
   }),
+  paneCommand({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Split the focused Pane, side by side or one above another, opening what calls for you most.",
+    id: "pane.split",
+    name: "split",
+    parse: splitArguments,
+    usage: "/split [h|v]",
+    when: [],
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "None",
+    description: "Close the focused Pane, the Pane beside it taking its place.",
+    id: "pane.close",
+    name: "close",
+    parse: ofPanes("close", { _tag: "Close" }),
+    usage: "/close",
+    when: panesNeeded,
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "Required",
+    description: "Focus the Pane to the left, right, above, or below.",
+    id: "pane.focus",
+    name: "pane",
+    parse: towards("pane", (direction) => ({ _tag: "Move", direction })),
+    usage: "/pane left|right|up|down",
+    when: panesNeeded,
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "Required",
+    description: "Swap what the focused Pane shows with the Pane in a direction, and follow it.",
+    id: "pane.swap",
+    name: "swap",
+    parse: towards("swap", (direction) => ({ _tag: "Swap", direction })),
+    usage: "/swap left|right|up|down",
+    when: panesNeeded,
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "None",
+    description: "Give every Pane an equal share of the space it splits.",
+    id: "pane.equalize",
+    name: "equalize",
+    parse: ofPanes("equalize", { _tag: "Equalize" }),
+    usage: "/equalize",
+    when: panesNeeded,
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "None",
+    description: "Show the focused Pane alone, or every Pane again.",
+    id: "pane.zoom",
+    name: "zoom",
+    parse: ofPanes("zoom", { _tag: "Zoom" }),
+    usage: "/zoom",
+    when: panesNeeded,
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "None",
+    description: "Make the focused Pane larger, by a step.",
+    id: "pane.grow",
+    name: "grow",
+    parse: ofPanes("grow", { _tag: "Grow" }),
+    usage: "/grow",
+    when: panesNeeded,
+  }),
+  paneCommand({
+    aliases: [],
+    arguments: "None",
+    description: "Make the focused Pane smaller, by a step.",
+    id: "pane.shrink",
+    name: "shrink",
+    parse: ofPanes("shrink", { _tag: "Shrink" }),
+    usage: "/shrink",
+    when: panesNeeded,
+  }),
   unfocused({
     aliases: [],
     arguments: "None",
@@ -861,6 +1054,14 @@ export const unmet = (when: readonly Condition[], context: CommandContext): stri
       case "Session": {
         if (!context.session) {
           return `${focus?.network ?? "The Network"} is not connected, so nothing can be said there now.`;
+        }
+
+        break;
+      }
+
+      case "Panes": {
+        if (context.panes < 2) {
+          return "There is only one Pane. /split makes another.";
         }
 
         break;

@@ -14,7 +14,7 @@ import { commands } from "./commands.ts";
 import type { Place } from "./composer.ts";
 import { fields, optionName } from "./options.ts";
 import type { Option } from "./options.ts";
-import { opened, resolve } from "./timelines.ts";
+import { resolve } from "./timelines.ts";
 import type { NetworkView, Timelines } from "./timelines.ts";
 
 /** What follows a nick completed at the start of a line, as IRC clients address someone. */
@@ -741,18 +741,18 @@ export const sourcesOf = (
     .flatMap((one) => (one.kind === "Channel" ? [one.name] : []))
     .toSorted(byCodeUnits);
 
-  const shown = opened(state);
+  const window = state.windows.get(timeline);
 
   const recent =
-    shown._tag === "Shown" && shown.timeline === timeline
-      ? shown.window.items
+    window === undefined
+      ? []
+      : window.items
           .toReversed()
           .flatMap((item) =>
             item.content._tag === "Message" && item.content.ours === null
               ? [item.content.sender]
               : []
-          )
-      : [];
+          );
 
   const connection = network?.connection;
   const self = connection?._tag === "Connected" ? connection.nick : undefined;

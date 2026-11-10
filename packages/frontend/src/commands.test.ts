@@ -17,7 +17,7 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   timeline,
 });
 
-const around = { open: undefined, timelines: [], unread: [] };
+const around = { open: undefined, panes: 1, shown: [], timelines: [], unread: [] };
 const inChannel: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: true };
 const inDirect: CommandContext = { ...around, focus: focus("Direct", "peer"), session: true };
 const inNetwork: CommandContext = { ...around, focus: focus("Network", "libera"), session: true };
@@ -216,6 +216,14 @@ describe("reading a line", () => {
       "options.set": "Optional",
       "options.unset": "Required",
       "palette.open": "None",
+      "pane.close": "None",
+      "pane.equalize": "None",
+      "pane.focus": "Required",
+      "pane.grow": "None",
+      "pane.shrink": "None",
+      "pane.split": "Optional",
+      "pane.swap": "Required",
+      "pane.zoom": "None",
       "say.action": "Required",
       "say.notice": "Required",
       "say.privmsg": "Required",
@@ -321,5 +329,71 @@ describe("what is unread", () => {
       { _tag: "Parsed", value: [{ _tag: "Notify", on: false }] },
       "Use /notify on or /notify off.",
     ]);
+  });
+});
+
+/**
+ * What a line typed with two Panes changes of them, or why it does not.
+ * @param line - The line.
+ * @returns The changes, or the words.
+ */
+const pane = (line: string) => {
+  const read = interpret(line, { ...inChannel, panes: 2 });
+
+  return read._tag === "Parsed"
+    ? read.value.map((intent) => (intent._tag === "Pane" ? intent.change : intent))
+    : read.message;
+};
+
+describe("the Panes", () => {
+  const idOf = Schema.decodeSync(TimelineId);
+  const calling = idOf("00000000000004-00000000-00000000");
+  const shown = idOf("00000000000005-00000000-00000000");
+
+  it("splits side by side, or one above another, opening what calls most that no Pane shows", () => {
+    const unread: readonly Unseen[] = [
+      unseen(shown, "Highlight", "#shown"),
+      unseen(calling, "Direct", "peer"),
+    ];
+
+    const context = { ...inChannel, shown: [timeline, shown], unread };
+
+    expect({
+      bad: outcome("/split x", context),
+      h: outcome("/split", context),
+      nothing: outcome("/split v", { ...inChannel, shown: [timeline, shown] }),
+      v: outcome("/split V", context),
+    }).toStrictEqual({
+      bad: "Use /split h for side by side, or /split v for one above another.",
+      h: [{ _tag: "Pane", change: { _tag: "Split", axis: "Horizontal", timeline: calling } }],
+      nothing: [{ _tag: "Pane", change: { _tag: "Split", axis: "Vertical", timeline: undefined } }],
+      v: [{ _tag: "Pane", change: { _tag: "Split", axis: "Vertical", timeline: calling } }],
+    });
+  });
+
+  it("closes, moves, swaps, equalizes, zooms, grows, and shrinks, with more than one Pane", () => {
+    expect({
+      bad: pane("/pane over"),
+      close: pane("/close"),
+      equalize: pane("/equalize"),
+      grow: pane("/grow"),
+      move: pane("/pane LEFT"),
+      oneOnly: outcome("/close", inChannel),
+      shrink: pane("/shrink"),
+      swap: pane("/swap down"),
+      trailing: pane("/zoom in"),
+      zoom: pane("/zoom"),
+    }).toStrictEqual({
+      bad: "Use /pane left, right, up, or down.",
+      close: [{ _tag: "Close" }],
+      equalize: [{ _tag: "Equalize" }],
+      grow: [{ _tag: "Grow" }],
+      move: [{ _tag: "Move", direction: "Left" }],
+      oneOnly: "There is only one Pane. /split makes another.",
+      shrink: [{ _tag: "Shrink" }],
+      swap: [{ _tag: "Swap", direction: "Down" }],
+      trailing: "/zoom takes nothing after it.",
+      zoom: [{ _tag: "Zoom" }],
+    });
   });
 });

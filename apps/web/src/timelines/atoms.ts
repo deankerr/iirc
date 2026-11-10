@@ -12,12 +12,15 @@ import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import {
   followFrom,
   initialTimelines,
+  keptLayout,
+  layoutKeptText,
   opened,
+  openOf,
   reduceTimelines,
   sidebar,
   wanted,
 } from "@iirc/frontend/timelines";
-import type { Read, Timelines, TimelinesEvent } from "@iirc/frontend/timelines";
+import type { PaneChange, Read, Timelines, TimelinesEvent } from "@iirc/frontend/timelines";
 import { Context, Duration, Effect, FiberSet, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -29,6 +32,7 @@ import { forgetChantypes } from "../composer/chantypes-state.ts";
 import { cancelCompletion } from "../composer/completion-state.ts";
 import { notifyAll } from "../notifications/notifier.ts";
 import { pageState } from "../page/atoms.ts";
+import { readChoice, writeChoice } from "../page/device.ts";
 import { signedIn, signInState } from "../sign-in/atoms.ts";
 
 /** Everything the Frontend holds of the Timelines, as the core folds it. */
@@ -37,8 +41,13 @@ export const timelinesState = Atom.make<Timelines>(initialTimelines).pipe(Atom.k
 /** The Networks and their Timelines, in sidebar order. */
 export const sidebarNetworks = Atom.make((get) => sidebar(get(timelinesState)));
 
-/** The open Timeline, as shown. */
+/** The focused Pane's open Timeline, as shown. */
 export const openTimeline = Atom.make((get) => opened(get(timelinesState)));
+
+/** Each Pane's open Timeline, as shown, by the Pane's id. */
+export const paneTimeline = Atom.family((pane: string) =>
+  Atom.make((get) => opened(get(timelinesState), pane))
+);
 
 /** How long the runtime waits, each a duration. */
 export interface WaitTimes {
@@ -352,6 +361,54 @@ const follower = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Ti
     );
   });
 
+/** Where this device keeps its layout. */
+export const layoutKey = "iirc.layout";
+
+/** The layout as this device keeps it, as JSON text, or none while one kept waits. */
+const layoutKept = Atom.make((get) => {
+  const kept = keptLayout(get(timelinesState));
+
+  return kept === undefined ? undefined : JSON.stringify(kept);
+});
+
+/**
+ * Restores the layout this device kept, if it reads as one within the core's bounds: the
+ * core sets it aside until the Timelines are read, and drops the Panes whose Timeline is gone.
+ * @param registry - The registry.
+ */
+const restore = (registry: AtomRegistry.AtomRegistry) => {
+  const text = readChoice(layoutKey);
+
+  // Whatever was kept, the page starts: a layout that cannot be taken leaves the one it
+  // starts with, which the core bounds and refuses safely, and this guards past it.
+  try {
+    const layout = text === undefined ? undefined : layoutKeptText(text);
+
+    if (layout !== undefined) {
+      happened(registry, { _tag: "Restore", layout });
+    }
+  } catch {
+    // The layout the page starts with stands.
+  }
+};
+
+/**
+ * Keeps the layout on this device as it changes, as best it can.
+ * @param kept - The layout as JSON text, each time it changes.
+ * @returns The keeper, which runs until it is interrupted.
+ */
+const keeper = (kept: Stream.Stream<string | undefined>) =>
+  kept.pipe(
+    Stream.changes,
+    Stream.runForEach((text) =>
+      Effect.sync(() => {
+        if (text !== undefined) {
+          writeChoice(layoutKey, text);
+        }
+      })
+    )
+  );
+
 /**
  * While the browser is signed in, the Timelines are read and followed, from nothing each
  * time it signs in. Mounted once for the page.
@@ -367,20 +424,39 @@ export const sync = runtime
         return;
       }
 
+      restore(registry);
+
       const changes = get.stream(timelinesState);
 
-      yield* Effect.all([reader(registry, changes), follower(registry, changes)], {
-        concurrency: "unbounded",
-        discard: true,
-      });
+      yield* Effect.all(
+        [reader(registry, changes), follower(registry, changes), keeper(get.stream(layoutKept))],
+        { concurrency: "unbounded", discard: true }
+      );
     })
   )
   .pipe(Atom.keepAlive);
 
-/** Opens a Timeline in the main view, letting go of what was being completed. */
+/**
+ * Opens a Timeline in the focused Pane, or focuses the Pane it is open in, letting go of
+ * what was being completed.
+ */
 export const open = Atom.fnSync((timeline: TimelineId, get) => {
   cancelCompletion(get.registry);
   happened(get.registry, { _tag: "Opened", timeline });
+}).pipe(Atom.keepAlive);
+
+/**
+ * Changes the Panes, letting go of what was being completed when the composer then stands
+ * under another Timeline.
+ */
+export const paned = Atom.fnSync((change: PaneChange, get) => {
+  const before = openOf(get.registry.get(timelinesState));
+
+  happened(get.registry, { _tag: "Pane", change });
+
+  if (openOf(get.registry.get(timelinesState)) !== before) {
+    cancelCompletion(get.registry);
+  }
 }).pipe(Atom.keepAlive);
 
 /** Asks for what lies before the open Timeline's first item. */

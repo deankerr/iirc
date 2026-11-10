@@ -10,6 +10,7 @@
  */
 import { CredentialPathName } from "@iirc/api";
 import type { NetworkId } from "@iirc/api";
+import { panesOf } from "@iirc/frontend/layout";
 import type { Edit, Naming, OptionsEvent, Path, Configuration } from "@iirc/frontend/options";
 import {
   apply,
@@ -21,7 +22,7 @@ import {
   unknownNaming,
 } from "@iirc/frontend/options";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
-import { reduceTimelines } from "@iirc/frontend/timelines";
+import { reduceTimelines, mainOf } from "@iirc/frontend/timelines";
 import type { TimelinesEvent } from "@iirc/frontend/timelines";
 import { Effect, Option, Redacted, Schema } from "effect";
 import { Atom } from "effect/reactivity";
@@ -35,15 +36,20 @@ import { timelinesState } from "../timelines/atoms.ts";
 /** The options view, as the core folds it. */
 export const optionsState = Atom.make(initialOptions).pipe(Atom.keepAlive);
 
-/** What the main view shows: the open Timeline, or the options with their filter. */
-export const mainView = Atom.make((get) => get(timelinesState).main);
+/** What the focused Pane shows: its open Timeline, or the options with their filter. */
+export const mainView = Atom.make((get) => mainOf(get(timelinesState)));
 
-/** The options the view lists, filtered as the main view says. */
-export const optionRows = Atom.make((get) => {
-  const main = get(mainView);
+/** The options' filter, as the Pane they show in has it, or none while they show nowhere. */
+export const optionsFilter = Atom.make((get) => {
+  const main = panesOf(get(timelinesState).layout.root)
+    .map((pane) => pane.view.main)
+    .find((one) => one._tag === "Options");
 
-  return listed(get(optionsState), main._tag === "Options" ? main.filter : "");
+  return main?._tag === "Options" ? main.filter : undefined;
 });
+
+/** The options the view lists, filtered as the Pane they show in says. */
+export const optionRows = Atom.make((get) => listed(get(optionsState), get(optionsFilter) ?? ""));
 
 /**
  * Folds one event into the options view.

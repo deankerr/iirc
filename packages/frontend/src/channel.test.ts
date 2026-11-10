@@ -15,18 +15,23 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  channelIn,
   channelReads,
+  channelsReads,
   headerOf,
   initialChannel,
+  initialChannels,
   memberRow,
   openChannel,
+  openChannels,
   queried,
   reduceChannel,
+  reduceChannels,
   refreshDelay,
   rosterOf,
   touches,
 } from "./channel.ts";
-import type { Channel, ChannelEvent, ChannelRead, OpenChannel } from "./channel.ts";
+import type { Channel, ChannelEvent, ChannelRead, ChannelsEvent, OpenChannel } from "./channel.ts";
 import { formatted } from "./render.ts";
 import { initialTimelines, reduceTimelines } from "./timelines.ts";
 import type { Timelines, TimelinesEvent } from "./timelines.ts";
@@ -777,6 +782,72 @@ describe("/query", () => {
       folded: [{ _tag: "Open", timeline: bob }],
       found: [{ _tag: "Open", timeline: peer }],
       missing: [{ _tag: "FocusComposer", text: "/msg stranger " }],
+    });
+  });
+});
+
+/**
+ * Events folded into the Channels in turn.
+ * @param events - The events.
+ * @returns The Channels.
+ */
+const fold = (events: readonly ChannelsEvent[]) => {
+  let state = initialChannels;
+
+  for (const event of events) {
+    state = reduceChannels(state, event);
+  }
+
+  return state;
+};
+
+describe("the Channels the Panes show", () => {
+  const inOther: OpenChannel = { network, timeline: timelineId(other) };
+
+  const twoPanes = () =>
+    reduceTimelines(world(iirc), {
+      _tag: "Pane",
+      change: { _tag: "Split", axis: "Horizontal", timeline: timelineId(other) },
+    });
+
+  it("lists each Channel a Pane shows, the focused Pane's first, and each Pane's header", () => {
+    const state = twoPanes();
+
+    // The new Pane's window is not read yet, so its header waits.
+    expect({
+      headers: ["p0", "p1"].map((pane) => headerOf(state, initialChannel, pane)?.name),
+      open: openChannels(state).map((one) => one.timeline),
+    }).toStrictEqual({ headers: ["#iirc", undefined], open: [other, iirc] });
+  });
+
+  it("reads each Channel's head, keeps each apart, and lets go of one no Pane shows", () => {
+    const reads = channelsReads(initialChannels, [inIirc, inOther], false);
+    const started = reads.map((read): ChannelsEvent => ({ _tag: "ReadStarted", at: 0, read }));
+    const [forIirc, forOther] = reads;
+
+    const answered = fold([
+      ...started,
+      ...head(forIirc, "Joined"),
+      ...head(forOther, "Joined"),
+      // A join in `#other` reads it again, and not `#iirc`.
+      changed({ items: [joined(11, other)] }),
+    ]);
+
+    const kept = reduceChannels(answered, { _tag: "Kept", timelines: [timelineId(iirc)] });
+
+    expect({
+      again: channelsReads(answered, [inIirc, inOther], false).map((read) => [
+        read.timeline,
+        read.wait,
+      ]),
+      heads: [forIirc?.timeline, forOther?.timeline],
+      kept: [...kept.keys()],
+      read: channelIn(answered, timelineId(iirc)).head.header?.name,
+    }).toStrictEqual({
+      again: [[other, true]],
+      heads: [iirc, other],
+      kept: [iirc],
+      read: "#iirc",
     });
   });
 });

@@ -11,6 +11,7 @@ import type { Level, ReadRequest, Timeline, Unread } from "@iirc/api";
 import { unreadCap } from "@iirc/timelines";
 
 import type { MarkRead } from "./commands.ts";
+import { panesOf, shownPanes } from "./layout.ts";
 import { opened } from "./timelines.ts";
 import type { SidebarNetwork, Timelines } from "./timelines.ts";
 
@@ -212,40 +213,57 @@ export const markOf = (timeline: Timeline, read: Instant): MarkRead | undefined 
 export const markLatest = (timeline: Timeline): MarkRead | undefined =>
   timeline.latest === null ? undefined : markOf(timeline, timeline.latest.at);
 
-/** Whether the Owner can see the page: it is shown, and it has the focus. */
+/**
+ * Whether the Owner can see the page: it is shown, and it has the focus, and whether its
+ * screen is compact, as a phone's is, showing only the focused Pane.
+ */
 export interface Page {
   readonly visible: boolean;
   readonly focused: boolean;
+  readonly compact: boolean;
 }
 
 /**
- * How far the Owner has seen the open Timeline: the page is visible and focused, the main
- * view shows the Timeline, its window is current with nothing beyond its last item, and
- * the view said it is at the latest, with the last item it shows.
+ * The Panes the Owner can see: those shown, as the layout and the screen say, while the
+ * page is visible and focused, and none otherwise.
  * @param state - The Timelines.
  * @param page - The page.
- * @returns The open Timeline's description and the instant of the last item the view
- * showed, when the Owner sees it.
+ * @returns The Panes' ids, the focused Pane's first.
  */
-const seen = (
-  state: Timelines,
-  page: Page
-): { readonly at: Instant; readonly timeline: Timeline } | undefined => {
-  const shown = opened(state);
+const seenPanes = (state: Timelines, page: Page): readonly string[] => {
+  if (!page.visible || !page.focused) {
+    return [];
+  }
 
-  if (shown._tag !== "Shown" || shown.description === undefined) {
+  const shown = shownPanes(state.layout, page.compact).map((pane) => pane.id);
+  const { focused } = state.layout;
+
+  return shown.includes(focused) ? [focused, ...shown.filter((id) => id !== focused)] : shown;
+};
+
+/**
+ * How far the Owner has seen a Pane's Timeline: the page is visible and focused, the Pane
+ * is shown with its Timeline in it, not the options, its window is current with nothing
+ * beyond its last item, and the view said it is at the latest, with the last item it shows.
+ * @param state - The Timelines.
+ * @param pane - The Pane.
+ * @returns The Timeline's description and the instant of the last item the view showed,
+ * when the Owner sees it.
+ */
+const seenIn = (
+  state: Timelines,
+  pane: string
+): { readonly at: Instant; readonly timeline: Timeline } | undefined => {
+  const shown = opened(state, pane);
+  const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
+
+  if (shown._tag !== "Shown" || shown.description === undefined || view === undefined) {
     return undefined;
   }
 
   const { window } = shown;
 
-  const sees =
-    page.visible &&
-    page.focused &&
-    state.main._tag === "Timeline" &&
-    window.fresh &&
-    window.following &&
-    !window.later;
+  const sees = view.main._tag === "Timeline" && window.fresh && window.following && !window.later;
 
   return sees && window.seen !== undefined
     ? { at: window.seen.at, timeline: shown.description }
@@ -253,36 +271,40 @@ const seen = (
 };
 
 /**
- * Whether the open Timeline is due to be marked read, and up to what: when the view said
- * the Owner sees its latest, up to the instant of the last item the view showed, which is
- * never past what was shown and never before its Read Marker. The runtime waits a moment before it
- * carries this out, and asks again then.
+ * Whether a Timeline the Owner sees is due to be marked read, and up to what: when the view
+ * said the Owner sees its latest, up to the instant of the last item the view showed, which
+ * is never past what was shown and never before its Read Marker. Of several Panes, the
+ * focused one's comes first, and the next once that is marked. The runtime waits a moment
+ * before it carries this out, and asks again then.
  * @param state - The Timelines.
  * @param page - The page.
  * @returns The intent, or none.
  */
 export const markDue = (state: Timelines, page: Page): MarkRead | undefined => {
-  const latest = seen(state, page);
+  for (const pane of seenPanes(state, page)) {
+    const latest = seenIn(state, pane);
+    const mark = latest === undefined ? undefined : markOf(latest.timeline, latest.at);
 
-  return latest === undefined ? undefined : markOf(latest.timeline, latest.at);
+    if (mark !== undefined) {
+      return mark;
+    }
+  }
+
+  return undefined;
 };
 
 /**
- * Whether the Owner is looking at a Timeline now: it is open in the main view, and the page
- * is visible and focused.
+ * Whether the Owner is looking at a Timeline now: a Pane they can see shows it, not the
+ * options, and the page is visible and focused.
  * @param state - The Timelines.
  * @param page - The page.
  * @param timeline - The Timeline.
  * @returns Whether they are.
  */
-export const lookingAt = (state: Timelines, page: Page, timeline: Timeline["id"]): boolean => {
-  const shown = opened(state);
+export const lookingAt = (state: Timelines, page: Page, timeline: Timeline["id"]): boolean =>
+  seenPanes(state, page).some((pane) => {
+    const shown = opened(state, pane);
+    const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
 
-  return (
-    page.visible &&
-    page.focused &&
-    state.main._tag === "Timeline" &&
-    shown._tag !== "Closed" &&
-    shown.timeline === timeline
-  );
-};
+    return view?.main._tag === "Timeline" && shown._tag !== "Closed" && shown.timeline === timeline;
+  });
