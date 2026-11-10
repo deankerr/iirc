@@ -1,5 +1,6 @@
 /**
- * The composer under the open Timeline: a prompt naming the Timeline, and a textarea.
+ * The composer under the main view, the open Timeline's or, with none open, one where
+ * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
  * Enter sends and Shift+Enter starts a new line, Up and Down recall what was sent from
  * the first and last lines, and Escape lets go of an error or a confirmation. What it
  * says goes through the command registry in the core, and the runtime carries it out.
@@ -7,11 +8,13 @@
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import type { TimelineId } from "@iirc/api";
-import type { Offer } from "@iirc/frontend/composer";
+import { typesCredential } from "@iirc/frontend/commands";
+import { linesOf } from "@iirc/frontend/composer";
+import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
 import { useId } from "react";
 
+import { openTimeline } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import {
   commandContext,
@@ -40,17 +43,11 @@ const offerLabel = (offer: Offer) => {
 };
 
 /**
- * The composer of one Timeline.
- * @param props - The Timeline and its name.
+ * The composer of one Timeline, or the one under no Timeline.
+ * @param props - Where it is, and the name its prompt shows.
  * @returns The composer.
  */
-export const Composer = ({
-  name,
-  timeline,
-}: {
-  readonly timeline: TimelineId;
-  readonly name: string;
-}) => {
+const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name: string }) => {
   const draft = useAtomValue(draftAtom(timeline));
   const context = useAtomValue(commandContext);
   const setText = useAtomSet(edit);
@@ -81,6 +78,12 @@ export const Composer = ({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+
+      // A Credential's value typed here is refused, and let go of at once, the input's own
+      // value and React DOM's tracker of it included, before anything else reads it.
+      if (linesOf(value).some((line) => typesCredential(line))) {
+        element.value = "";
+      }
 
       if (confirming === undefined) {
         sendNow(timeline);
@@ -165,4 +168,21 @@ export const Composer = ({
       </div>
     </div>
   );
+};
+
+/**
+ * The composer under the main view: the open Timeline's, or, with none open, the one
+ * where commands that need no Timeline, such as `/network add` and `/set`, are typed.
+ * @returns The composer.
+ */
+export const MainComposer = () => {
+  const shown = useAtomValue(openTimeline);
+
+  if (shown._tag === "Shown") {
+    const name = shown.description?.name ?? "Timeline";
+
+    return <Composer key={shown.timeline} name={name} timeline={shown.timeline} />;
+  }
+
+  return <Composer key="Nowhere" name="iirc" timeline="Nowhere" />;
 };

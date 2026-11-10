@@ -19,6 +19,8 @@ export interface ScriptedState {
 const knowsNothing: Knowledge = {
   casemapping: "rfc1459",
   channels: new Map(),
+  chantypes: undefined,
+  declared: undefined,
   self: undefined,
   session: { _tag: "Offline", since: undefined },
   users: new Map(),

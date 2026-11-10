@@ -9,6 +9,7 @@ declare const styles: {
   readonly name: string;
   readonly network: string;
   readonly offline: string;
+  readonly options: string;
   readonly sidebar: string;
   readonly tree: string;
 };

@@ -1,13 +1,17 @@
 /**
- * What a signed-in browser sees: the Networks and their Timelines, the open Timeline, and
- * signing out.
+ * What a signed-in browser sees: the Networks and their Timelines, the open Timeline or
+ * the options, the composer under them, and signing out.
  *
  * @packageDocumentation
  */
-import { useAtomSet } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 
+import { MainComposer } from "../composer/composer.tsx";
+import { mainView } from "../options/atoms.ts";
+import { CredentialPrompt } from "../options/credential-prompt.tsx";
+import { OptionsView } from "../options/options-view.tsx";
 import { signOut } from "../sign-in/atoms.ts";
 import { Sidebar } from "../timelines/sidebar.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
@@ -22,6 +26,7 @@ import styles from "./shell.module.css";
  */
 export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
   const signOutNow = useAtomSet(signOut);
+  const main = useAtomValue(mainView);
 
   return (
     <div className={styles.shell}>
@@ -44,7 +49,11 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
       <div className={styles.body}>
         <Sidebar />
         <main className={styles.main}>
-          <TimelineView />
+          <div className={styles.view}>
+            {main._tag === "Options" ? <OptionsView /> : <TimelineView />}
+          </div>
+          <CredentialPrompt />
+          <MainComposer />
         </main>
       </div>
     </div>

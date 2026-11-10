@@ -14,8 +14,13 @@ interface PasswordFieldProps {
   readonly label: string;
   /** The name the form submits it under. */
   readonly name: string;
-  /** `current-password` lets a password manager fill in and save what the Owner holds. */
-  readonly autoComplete: "current-password" | "off";
+  /**
+   * `current-password` lets a password manager fill in and save what the Owner holds, and
+   * `new-password` offers to save a value given for the first time.
+   */
+  readonly autoComplete: "current-password" | "new-password" | "off";
+  /** Whether it takes focus as it appears, as a prompt the Owner asked for does. */
+  readonly autoFocus?: boolean | undefined;
   /** The id of the text that says what is wrong with it, while something is. */
   readonly errorId?: string | undefined;
 }
@@ -25,7 +30,13 @@ interface PasswordFieldProps {
  * @param props - Its label, name, autocomplete, and error.
  * @returns The field.
  */
-export const PasswordField = ({ autoComplete, errorId, label, name }: PasswordFieldProps) => {
+export const PasswordField = ({
+  autoComplete,
+  autoFocus,
+  errorId,
+  label,
+  name,
+}: PasswordFieldProps) => {
   const id = useId();
 
   return (
@@ -38,6 +49,9 @@ export const PasswordField = ({ autoComplete, errorId, label, name }: PasswordFi
         aria-invalid={errorId === undefined ? undefined : true}
         autoCapitalize="off"
         autoComplete={autoComplete}
+        // Only a prompt the Owner opened asks for it.
+        // oxlint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus={autoFocus}
         className={styles.input}
         id={id}
         name={name}

@@ -108,11 +108,12 @@
       "version": "0.0.0",
       "dependencies": {
         "@iirc/api": "workspace:*",
+        "@iirc/client": "workspace:*",
         "@iirc/protocol": "workspace:*",
         "@iirc/timelines": "workspace:*",
+        "effect": "catalog:",
       },
       "devDependencies": {
-        "effect": "catalog:",
         "fast-check": "4.10.2",
         "vitest": "catalog:",
       },

@@ -1519,6 +1519,42 @@ describe("the Timelines' state", () => {
     }).toStrictEqual({ navigation: [1, 2], open: idOf(2), pending: undefined });
   });
 
+  it("shows the Timeline a placement opens, though the options were showing when it was said", () => {
+    const listed = reduceTimelines(
+      following(),
+      changed(6, { timelines: [direct(idOf(6), "bob")] })
+    );
+
+    // The options shown, then `/msg bob hello` submitted there, at that navigation.
+    const options = reduceTimelines(listed, { _tag: "OptionsShown", filter: "" });
+    const filtered = reduceTimelines(options, { _tag: "OptionsFiltered", filter: "*nick*" });
+
+    const placed = reduceTimelines(filtered, {
+      _tag: "Located",
+      navigation: filtered.navigation,
+      timeline: timelineId(idOf(6)),
+    });
+
+    // A placement from before the options were shown is let go, and they stay.
+    const before = reduceTimelines(filtered, {
+      _tag: "Located",
+      navigation: listed.navigation,
+      timeline: timelineId(idOf(6)),
+    });
+
+    expect({
+      before: [before.main, before.open],
+      filtered: filtered.main,
+      placed: [placed.main, placed.open],
+      start: listed.main,
+    }).toStrictEqual({
+      before: [{ _tag: "Options", filter: "*nick*" }, three],
+      filtered: { _tag: "Options", filter: "*nick*" },
+      placed: [{ _tag: "Timeline" }, idOf(6)],
+      start: { _tag: "Timeline" },
+    });
+  });
+
   it("keeps an item outside what a window loaded out of it", () => {
     let state = following();
 

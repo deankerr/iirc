@@ -18,6 +18,7 @@ import {
   Instant,
   IntentId,
   MessageId as ClientMessageId,
+  NetworkConfiguration,
   SayKind,
   TimerId,
 } from "@iirc/client";
@@ -155,6 +156,23 @@ export const CredentialNames = Schema.Struct({ names: Schema.Array(CredentialNam
 
 /** The sequence an Owner input was journaled at. */
 export const Journaled = Schema.Struct({ sequence: Sequence });
+
+/**
+ * The Configuration a `PUT` was made from, as text in a query: the sequence of the
+ * `Configured` in force when it was read, or `0` for a Network not configured yet.
+ */
+export const IfSequence = Schema.String.check(
+  Schema.isPattern(/^(?:0|[1-9]\d{0,14})$/u, { message: "must be a sequence, or 0 for none" })
+).pipe(Schema.decodeTo(Schema.Int, SchemaTransformation.numberFromString));
+
+/**
+ * A Network's Configuration in force, and the sequence of the `Configured` that set it,
+ * to send back as `ifSequence` with a change made from it.
+ */
+export const ConfigurationInForce = Schema.Struct({
+  configuration: NetworkConfiguration,
+  sequence: Sequence,
+});
 
 /**
  * Why the Client refused a `say` in the step that took it: `Offline`, with no Session, or
@@ -862,8 +880,16 @@ export type ChannelKnowledge = typeof ChannelKnowledge.Type;
 
 /** Everything a Client knows of its Network. Keys are folded by the Network's casemapping. */
 export const Knowledge = Schema.Struct({
+  /** How this Connection folds names: `rfc1459` until its Ircd says otherwise. */
   casemapping: Casemapping,
   channels: Schema.Array(ChannelKnowledge),
+  /** `CHANTYPES`, what a Channel's name starts with, while a Session has said, else `null`. */
+  chantypes: Schema.NullOr(Untrusted),
+  /**
+   * How the Network folds names as an Ircd last declared it, on any Connection, which folds
+   * the keys of Timelines, or `null` until one has, when they are folded by `rfc1459`.
+   */
+  declared: Schema.NullOr(Casemapping),
   self: Schema.NullOr(UserKnowledge),
   session: SessionKnowledge,
   users: Schema.Array(KeyedUser),

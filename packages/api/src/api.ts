@@ -18,6 +18,7 @@ import {
 } from "effect/http-api";
 
 import {
+  ConfigurationChanged,
   CrossOrigin,
   InvalidRequest,
   JournalFailed,
@@ -32,9 +33,11 @@ import {
 import {
   After,
   CallerIntent,
+  ConfigurationInForce,
   CredentialNames,
   CredentialPathName,
   CredentialValue,
+  IfSequence,
   Journaled,
   Knowledge,
   ListQuery,
@@ -105,10 +108,16 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
   .add(
     HttpApiEndpoint.get("list", "/networks", { success: Schema.Array(NetworkEntry) }),
     HttpApiEndpoint.put("configure", "/networks/:network", {
-      error: NetworkStopped,
+      error: [NetworkStopped, ConfigurationChanged],
       params: NetworkPath,
       payload: NetworkConfiguration,
+      query: { ifSequence: Schema.optionalKey(IfSequence) },
       success: Journaled,
+    }),
+    HttpApiEndpoint.get("configuration", "/networks/:network/configuration", {
+      error: UnknownNetwork,
+      params: NetworkPath,
+      success: ConfigurationInForce,
     }),
     HttpApiEndpoint.post("say", "/networks/:network/say", {
       error: [UnknownNetwork, NetworkStopped],

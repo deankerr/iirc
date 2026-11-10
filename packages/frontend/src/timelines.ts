@@ -143,8 +143,18 @@ type Follow =
       readonly recentFrom: number;
     };
 
+/**
+ * What the main view shows: the open Timeline, or the options with what filters them.
+ * Opening a Timeline, a placement included, shows it, and only showing the options leaves it.
+ */
+export type MainView =
+  | { readonly _tag: "Timeline" }
+  | { readonly _tag: "Options"; readonly filter: string };
+
 /** Everything the Frontend holds of the Timelines. */
 export interface Timelines {
+  /** What the main view shows. */
+  readonly main: MainView;
   readonly follow: Follow;
   /** `GET /api/networks`, with the stream's place when it was read. */
   readonly entries: StatusLoad;
@@ -165,8 +175,8 @@ export interface Timelines {
    */
   readonly located: TimelineId | undefined;
   /**
-   * How many times the Owner opened a Timeline. A placement captures it when its Say is
-   * submitted, and one from before the Owner opened another is ignored.
+   * How many times the Owner opened a Timeline or showed the options. A placement captures
+   * it when its Say is submitted, and one from before the Owner went elsewhere is ignored.
    */
   readonly navigation: number;
   /** The most items a window holds. */
@@ -245,8 +255,11 @@ export type WindowRequest =
  * - `Located`: the Daemon placed a Message the Owner said, as `/msg` does, in this Timeline,
  *   with the `navigation` its Say was submitted at, ignored once the Owner opened another,
  *   which opens once its Network lists it, if it is a Direct Message Timeline.
- * - `Opened`: the Owner opened a Timeline. `OlderWanted` and `NewerWanted`: they want what
- *   lies before or after what is held. `Following`: whether they are at the latest.
+ * - `Opened`: the Owner opened a Timeline, which the main view then shows. `OlderWanted` and
+ *   `NewerWanted`: they want what lies before or after what is held. `Following`: whether
+ *   they are at the latest.
+ * - `OptionsShown`: the main view shows the options, filtered as given, which counts as
+ *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter.
  */
 export type TimelinesEvent =
   | { readonly _tag: "ReadStarted"; readonly read: Read }
@@ -273,7 +286,9 @@ export type TimelinesEvent =
   | { readonly _tag: "Located"; readonly timeline: TimelineId; readonly navigation: number }
   | { readonly _tag: "OlderWanted"; readonly timeline: TimelineId }
   | { readonly _tag: "NewerWanted"; readonly timeline: TimelineId }
-  | { readonly _tag: "Following"; readonly timeline: TimelineId; readonly following: boolean };
+  | { readonly _tag: "Following"; readonly timeline: TimelineId; readonly following: boolean }
+  | { readonly _tag: "OptionsShown"; readonly filter: string }
+  | { readonly _tag: "OptionsFiltered"; readonly filter: string };
 
 const unread: Load = { attempt: 0, fresh: false, reading: false };
 const unreadList: ListLoad = { ...unread, next: undefined, through: undefined };
@@ -292,6 +307,7 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   follow: { _tag: "Waiting", version: undefined },
   kept,
   located: undefined,
+  main: { _tag: "Timeline" },
   merged: new Map(),
   navigation: 0,
   networks: new Map(),
@@ -1712,7 +1728,7 @@ const opening = (state: Timelines, timeline: TimelineId): Timelines => {
     windows.set(id, { ...window, following: true, fresh: window.fresh && !window.later });
   }
 
-  return { ...state, closed, open: timeline, windows };
+  return { ...state, closed, main: { _tag: "Timeline" }, open: timeline, windows };
 };
 
 /**
@@ -1797,7 +1813,67 @@ interface Applied {
   readonly recorded?: Recorded;
 }
 
+/** An event of where the Owner went. */
+type Navigation = Extract<
+  TimelinesEvent,
+  { readonly _tag: "Opened" | "Located" | "OptionsShown" | "OptionsFiltered" }
+>;
+
+const navigations: ReadonlySet<string> = new Set([
+  "Opened",
+  "Located",
+  "OptionsShown",
+  "OptionsFiltered",
+]);
+
+const isNavigation = (event: TimelinesEvent): event is Navigation => navigations.has(event._tag);
+
+/**
+ * Where the Owner went: a Timeline opened, a placement to open, or the options shown or
+ * filtered in the main view.
+ * @param state - The state.
+ * @param event - Where they went.
+ * @returns The state.
+ */
+const navigated = (state: Timelines, event: Navigation): Timelines => {
+  switch (event._tag) {
+    case "Opened": {
+      return opening(
+        { ...state, located: undefined, navigation: state.navigation + 1 },
+        event.timeline
+      );
+    }
+
+    case "Located": {
+      return event.navigation === state.navigation ? { ...state, located: event.timeline } : state;
+    }
+
+    case "OptionsShown": {
+      return {
+        ...state,
+        located: undefined,
+        main: { _tag: "Options", filter: event.filter },
+        navigation: state.navigation + 1,
+      };
+    }
+
+    case "OptionsFiltered": {
+      return state.main._tag === "Options"
+        ? { ...state, main: { _tag: "Options", filter: event.filter } }
+        : state;
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
 const apply = (state: Timelines, event: TimelinesEvent): Applied => {
+  if (isNavigation(event)) {
+    return { state: navigated(state, event) };
+  }
+
   switch (event._tag) {
     case "ReadStarted": {
       return { state: started(state, event.read) };
@@ -1863,22 +1939,6 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 
     case "Reset": {
       return { state: applyReset(state, event.reset) };
-    }
-
-    case "Opened": {
-      return {
-        state: opening(
-          { ...state, located: undefined, navigation: state.navigation + 1 },
-          event.timeline
-        ),
-      };
-    }
-
-    case "Located": {
-      return {
-        state:
-          event.navigation === state.navigation ? { ...state, located: event.timeline } : state,
-      };
     }
 
     case "OlderWanted":

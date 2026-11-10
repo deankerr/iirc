@@ -8,6 +8,9 @@
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
 
+import { channelsOf, networkIdOf, parseIrcd, parseText, resolve, starting } from "./options.ts";
+import type { Configuration, Edit, Path } from "./options.ts";
+
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
 export type SayKind = "Privmsg" | "Notice" | "Action";
 
@@ -19,6 +22,8 @@ export interface Focus {
   readonly name: string;
   /** A Direct Message Timeline that no longer follows its partner, so has no Target. */
   readonly detached: boolean;
+  /** Its key, its name as the Daemon folded it, or none for the Network's own or a detached one. */
+  readonly key: string | undefined;
 }
 
 /** What a command's `when` and its arguments are judged against. */
@@ -30,13 +35,11 @@ export interface CommandContext {
 }
 
 /**
- * What a command asks for, which the runtime carries out, in order.
- *
- * - `Say`: say a Message to a Target on a Network. With `opens`, once it is said, open the
- *   Direct Message Timeline the Daemon placed it in, if it placed it in one. Which Timeline
- *   that is, the Daemon's routing decides, never a name the Frontend folds.
+ * Say a Message to a Target on a Network. With `opens`, once it is said, open the Direct
+ * Message Timeline the Daemon placed it in, if it placed it in one. Which Timeline that
+ * is, the Daemon's routing decides, never a name the Frontend folds.
  */
-export interface Intent {
+export interface Say {
   readonly _tag: "Say";
   readonly network: NetworkId;
   readonly target: string;
@@ -44,6 +47,30 @@ export interface Intent {
   readonly text: string;
   readonly opens: boolean;
 }
+
+/**
+ * What a command asks for, which the runtime carries out, in order.
+ *
+ * - `Say`: say a Message, above.
+ * - `OpenOptions`: show the options view, filtered as given.
+ * - `Configure`: read the Network's Configuration, apply the edit to it, and send the whole
+ *   of it back, made from the one read. On a conflict, read it again and apply the same
+ *   edit once more, since an edit is a pure function of the Configuration.
+ * - `AddNetwork`: configure a Network that must not exist yet, as a new one starts.
+ * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
+ *   gives it to the Vault and points the option at it. A value never goes through the
+ *   composer, nor through an intent.
+ */
+export type Intent =
+  | Say
+  | { readonly _tag: "OpenOptions"; readonly filter: string }
+  | { readonly _tag: "Configure"; readonly network: NetworkId; readonly edit: Edit }
+  | {
+      readonly _tag: "AddNetwork";
+      readonly network: NetworkId;
+      readonly configuration: Configuration;
+    }
+  | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -92,7 +119,7 @@ const invalid = <A>(message: string): Parsed<A> => ({ _tag: "Invalid", message }
  */
 const command = <A>(
   spec: Omit<Command, "run"> & {
-    readonly parse: (args: string) => Parsed<A>;
+    readonly parse: (args: string, focus: Focus) => Parsed<A>;
     readonly intents: (value: A, focus: Focus) => readonly Intent[];
   }
 ): Command => {
@@ -107,7 +134,7 @@ const command = <A>(
         return invalid("Open a Timeline first.");
       }
 
-      const value = parse(args);
+      const value = parse(args, focus);
 
       return value._tag === "Parsed" ? parsed(intents(value.value, focus)) : value;
     },
@@ -148,7 +175,152 @@ const targetAndText =
     return text === "" ? invalid(`Say what? ${usage}`) : parsed({ target, text });
   };
 
-const say = (focus: Focus, kind: SayKind, text: string): Intent => ({
+/**
+ * A command that needs no Timeline in focus.
+ * @param spec - The command, with its parser and what it gives for a parsed value.
+ * @returns The command.
+ */
+const unfocused = <A>(
+  spec: Omit<Command, "run"> & {
+    readonly parse: (args: string, context: CommandContext) => Parsed<A>;
+    readonly intents: (value: A) => readonly Intent[];
+  }
+): Command => {
+  const { intents, parse, ...rest } = spec;
+
+  return {
+    ...rest,
+    run: (args, context) => {
+      const value = parse(args, context);
+
+      return value._tag === "Parsed" ? parsed(intents(value.value)) : value;
+    },
+  };
+};
+
+/**
+ * Why a Credential's value typed after `/set` is refused, in words.
+ * @param name - The option's name.
+ * @returns The words.
+ */
+const credentialRefused = (name: string) =>
+  `A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set ${name} alone, which asks for it in a password prompt.`;
+
+/**
+ * What `/set` was given: nothing or a pattern, to open the options view filtered, or an
+ * option's name and a value, to set it.
+ * @param args - The text after `/set`.
+ * @returns The intent, or why there is none.
+ */
+const setArguments = (args: string): Parsed<Intent> => {
+  const space = args.indexOf(" ");
+  const alone = space === -1 ? resolve(args) : undefined;
+
+  if (alone?._tag === "Parsed" && alone.value.field.kind._tag === "Credential") {
+    return parsed({
+      _tag: "PromptCredential",
+      network: alone.value.network,
+      path: alone.value.path,
+    });
+  }
+
+  if (space === -1) {
+    return parsed({ _tag: "OpenOptions", filter: args });
+  }
+
+  const name = args.slice(0, space);
+  const text = args.slice(space + 1);
+  const found = resolve(name);
+
+  if (found._tag === "Invalid") {
+    return found;
+  }
+
+  const { field, network, path } = found.value;
+
+  if (field.kind._tag === "Credential") {
+    return invalid(credentialRefused(name));
+  }
+
+  // Text and lists take the rest of the line as it is, empty included.
+  if (
+    text === "" &&
+    field.kind._tag !== "Text" &&
+    field.kind._tag !== "Texts" &&
+    field.kind._tag !== "Names"
+  ) {
+    return invalid(`Give ${name} a value, or use /unset ${name}.`);
+  }
+
+  const value = parseText(field.kind, text);
+
+  return value._tag === "Invalid"
+    ? invalid(`${name}: ${value.message}`)
+    : parsed({ _tag: "Configure", edit: { _tag: "Set", path, text }, network });
+};
+
+const networkUsage = "/network add <id> <host>[/port] [-tls] <nick>";
+
+/**
+ * What `/network add` was given: an id, an Ircd, and a nick.
+ * @param args - The text after `/network`.
+ * @returns The intent, or why there is none.
+ */
+const networkArguments = (args: string): Parsed<Intent> => {
+  const [verb, id = "", ...rest] = args.split(/\s+/u).filter((one) => one !== "");
+  const nick = rest.at(-1);
+  const ircdText = rest.slice(0, -1).join(" ");
+
+  if (verb !== "add") {
+    return invalid(`Use ${networkUsage}.`);
+  }
+
+  const network = networkIdOf(id);
+
+  if (network === undefined) {
+    return invalid(
+      `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${id}". ${networkUsage}`
+    );
+  }
+
+  if (nick === undefined || ircdText === "") {
+    return invalid(`Give an Ircd and a nick. ${networkUsage}`);
+  }
+
+  const ircd = parseIrcd(ircdText);
+
+  if (ircd._tag === "Invalid") {
+    return ircd;
+  }
+
+  const configuration = starting(network, { ircds: [ircd.value], nicks: [nick] });
+
+  return configuration._tag === "Invalid"
+    ? configuration
+    : parsed({ _tag: "AddNetwork", configuration: configuration.value, network });
+};
+
+/**
+ * The Channels `/part` was given, or the one in focus.
+ * @param args - The text after `/part`.
+ * @param focus - The Timeline in focus.
+ * @returns The Channels, or why there are none.
+ */
+const partArguments = (args: string, focus: Focus): Parsed<Edit> => {
+  if (args.trim() !== "") {
+    const channels = channelsOf(args);
+
+    return channels._tag === "Invalid"
+      ? channels
+      : parsed({ _tag: "Part", channels: channels.value });
+  }
+
+  return focus.kind === "Channel" && focus.key !== undefined
+    ? parsed({ _tag: "PartTimeline", key: focus.key, name: focus.name })
+    : invalid("Name a Channel to part, such as /part #iirc, or open the Channel.");
+};
+
+const say = (focus: Focus, kind: SayKind, text: string): Say => ({
   _tag: "Say",
   kind,
   network: focus.network,
@@ -159,6 +331,7 @@ const say = (focus: Focus, kind: SayKind, text: string): Intent => ({
 
 const target: readonly Condition[] = [{ _tag: "Target" }, { _tag: "Session" }];
 const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Session" }];
+const focused: readonly Condition[] = [{ _tag: "Focused" }];
 
 /** Saying text to the open Timeline, which plain text does too. */
 const sayCommand = command({
@@ -170,6 +343,19 @@ const sayCommand = command({
   parse: textOf("/say <text>"),
   usage: "/say <text>",
   when: target,
+});
+
+/** Opening the options, setting an option, or asking for a Credential option's value. */
+const setCommand = unfocused({
+  aliases: [],
+  description:
+    "Open the options, filtered by a pattern such as network.libera.* or *nick*, set an option to a value, or ask for a Credential's value in a password prompt.",
+  id: "options.set",
+  intents: (intent: Intent) => [intent],
+  name: "set",
+  parse: setArguments,
+  usage: "/set [<pattern> | <option> [<value>]]",
+  when: [],
 });
 
 /** Every command, in the order a list of them shows. */
@@ -209,6 +395,66 @@ export const commands: readonly Command[] = [
     usage: "/notice <target> <text>",
     when: anywhere,
   }),
+  command({
+    aliases: [],
+    description:
+      "Join Channels on the open Timeline's Network, by adding them to its Configuration.",
+    id: "channels.join",
+    intents: (channels: readonly string[], focus) => [
+      { _tag: "Configure", edit: { _tag: "Join", channels }, network: focus.network },
+    ],
+    name: "join",
+    parse: (args) =>
+      args.trim().includes(" ")
+        ? invalid(
+            "Give Channels comma-separated. A key is a Credential: set it with /set network.<id>.channels.<channel>.key <key>."
+          )
+        : channelsOf(args),
+    usage: "/join <#channel>[,<#channel>…]",
+    when: focused,
+  }),
+  command({
+    aliases: ["leave"],
+    description: "Part Channels, or the open one, by taking them from its Network's Configuration.",
+    id: "channels.part",
+    intents: (edit: Edit, focus) => [{ _tag: "Configure", edit, network: focus.network }],
+    name: "part",
+    parse: partArguments,
+    usage: "/part [#channel[,#channel…]]",
+    when: focused,
+  }),
+  setCommand,
+  unfocused({
+    aliases: [],
+    description: "Return an option to what a new Network starts with, or leave it unset.",
+    id: "options.unset",
+    intents: (intent: Intent) => [intent],
+    name: "unset",
+    parse: (args) => {
+      const found = resolve(args.trim());
+
+      return found._tag === "Invalid"
+        ? found
+        : parsed<Intent>({
+            _tag: "Configure",
+            edit: { _tag: "Unset", path: found.value.path },
+            network: found.value.network,
+          });
+    },
+    usage: "/unset <option>",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    description:
+      "Add a Network, enabled, with one Ircd and one nick, and everything else as a new Network starts.",
+    id: "network.add",
+    intents: (intent: Intent) => [intent],
+    name: "network",
+    parse: networkArguments,
+    usage: networkUsage,
+    when: [],
+  }),
 ];
 
 const byName: ReadonlyMap<string, Command> = new Map(
@@ -222,6 +468,25 @@ const byName: ReadonlyMap<string, Command> = new Map(
  */
 export const commandNamed = (name: string): Command | undefined =>
   byName.get(name.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase()));
+
+/**
+ * Whether a line types a Credential's value after `/set`, which the composer refuses and
+ * clears at once, so it is not kept as the draft.
+ * @param line - The line.
+ * @returns Whether it does.
+ */
+export const typesCredential = (line: string): boolean => {
+  const [command = "", name = "", ...rest] = line.split(" ");
+  const found = resolve(name);
+
+  return (
+    commandNamed(command.slice(1)) === setCommand &&
+    command.startsWith("/") &&
+    rest.join(" ") !== "" &&
+    found._tag === "Parsed" &&
+    found.value.field.kind._tag === "Credential"
+  );
+};
 
 /**
  * Why a command cannot run in a context, in words, or nothing when it can.

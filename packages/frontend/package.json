@@ -6,6 +6,7 @@
   "exports": {
     "./commands": "./src/commands.ts",
     "./composer": "./src/composer.ts",
+    "./options": "./src/options.ts",
     "./render": "./src/render.ts",
     "./sign-in": "./src/sign-in.ts",
     "./timelines": "./src/timelines.ts"
@@ -15,11 +16,12 @@
   },
   "dependencies": {
     "@iirc/api": "workspace:*",
+    "@iirc/client": "workspace:*",
     "@iirc/protocol": "workspace:*",
-    "@iirc/timelines": "workspace:*"
+    "@iirc/timelines": "workspace:*",
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "effect": "catalog:",
     "fast-check": "4.10.2",
     "vitest": "catalog:"
   }

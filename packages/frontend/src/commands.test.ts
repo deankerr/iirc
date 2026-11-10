@@ -10,6 +10,7 @@ const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000
 
 const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   detached,
+  key: kind === "Network" || detached ? undefined : name.toLowerCase(),
   kind,
   name,
   network,

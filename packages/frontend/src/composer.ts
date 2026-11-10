@@ -9,11 +9,18 @@
  */
 import type { CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api";
 
-import { interpret } from "./commands.ts";
+import { interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
 import { contained } from "./render.ts";
 import { opened } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
+
+/**
+ * Where a composer is: under a Timeline, or `Nowhere`, under the main view while no
+ * Timeline is open, where commands that need none, such as `/network add`, are typed. A
+ * Timeline's id is hex and `-`, so it is never `Nowhere`.
+ */
+export type Place = TimelineId | "Nowhere";
 
 /** The id a Say is made under, which the runtime names. */
 export type IntentId = typeof CallerIntent.Type;
@@ -73,9 +80,9 @@ export interface Draft {
   readonly notice: Notice | undefined;
 }
 
-/** Every Timeline's composer. */
+/** Every Timeline's composer, and the one under no Timeline. */
 export interface Composers {
-  readonly drafts: ReadonlyMap<TimelineId, Draft>;
+  readonly drafts: ReadonlyMap<Place, Draft>;
 }
 
 /**
@@ -109,22 +116,25 @@ export type SayFailure =
  * - `Recalled`: Up or Down through the history.
  * - `Dismissed`: Escape, which lets go of a notice and a confirmation.
  * - `Failed`: a Say failed; `intents` are it and those after it, none carried out after it.
+ * - `Noticed`: an intent other than a Say did not go as asked, such as a change of
+ *   Configuration, in words. Nothing after it was carried out.
  */
 export type ComposerEvent =
-  | { readonly _tag: "Edited"; readonly timeline: TimelineId; readonly text: string }
+  | { readonly _tag: "Edited"; readonly timeline: Place; readonly text: string }
   | {
       readonly _tag: "Recalled";
-      readonly timeline: TimelineId;
+      readonly timeline: Place;
       readonly direction: "Older" | "Newer";
     }
-  | { readonly _tag: "Dismissed"; readonly timeline: TimelineId }
+  | { readonly _tag: "Dismissed"; readonly timeline: Place }
   | {
       readonly _tag: "Failed";
-      readonly timeline: TimelineId;
+      readonly timeline: Place;
       readonly intent: IntentId;
       readonly failure: SayFailure;
       readonly intents: readonly Intent[];
-    };
+    }
+  | { readonly _tag: "Noticed"; readonly timeline: Place; readonly message: string };
 
 /** A composer's next state, and the intents it asks the runtime to carry out. */
 export interface Submitted {
@@ -151,19 +161,19 @@ export const emptyDraft: Draft = {
  * @param timeline - The Timeline.
  * @returns Its composer, or an empty one.
  */
-export const draftOf = (state: Composers, timeline: TimelineId): Draft =>
+export const draftOf = (state: Composers, timeline: Place): Draft =>
   state.drafts.get(timeline) ?? emptyDraft;
 
 const withDraft = (
   state: Composers,
-  timeline: TimelineId,
+  timeline: Place,
   change: (draft: Draft) => Draft
 ): Composers => ({
   ...state,
   drafts: new Map(state.drafts).set(timeline, change(draftOf(state, timeline))),
 });
 
-const noticed = (state: Composers, timeline: TimelineId, notice: Notice): Composers =>
+const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =>
   withDraft(state, timeline, (draft) => ({ ...draft, notice }));
 
 /**
@@ -184,6 +194,7 @@ export const contextOf = (timelines: Timelines): CommandContext => {
 
   const focus: Focus = {
     detached: description.detached,
+    key: description.key ?? undefined,
     kind: description.kind,
     name: description.name,
     network: description.network,
@@ -227,11 +238,7 @@ const sent = (draft: Draft): Draft => ({
  * @param context - The context commands are judged in.
  * @returns The state after, and the intents to carry out.
  */
-export const submit = (
-  state: Composers,
-  timeline: TimelineId,
-  context: CommandContext
-): Submitted => {
+export const submit = (state: Composers, timeline: Place, context: CommandContext): Submitted => {
   const draft = draftOf(state, timeline);
   const lines = linesOf(draft.text);
 
@@ -243,6 +250,23 @@ export const submit = (
     intents: [],
     state: noticed(state, timeline, { message, offer: undefined }),
   });
+
+  // A Credential's value typed here is let go of at once: the draft, what was kept while
+  // recalling, and what waits to be confirmed, and none of it enters the history.
+  const credential = lines.find((line) => typesCredential(line));
+
+  if (credential !== undefined) {
+    const read = interpret(credential, context);
+
+    return {
+      intents: [],
+      state: withDraft(state, timeline, (one) => ({
+        ...emptyDraft,
+        history: one.history,
+        notice: { message: read._tag === "Invalid" ? read.message : "", offer: undefined },
+      })),
+    };
+  }
 
   if (draft.text.includes("\0")) {
     return refuse("It holds a NUL character, which no IRC Line can carry. Nothing was sent.");
@@ -280,12 +304,15 @@ export const submit = (
  * @param timeline - The Timeline.
  * @returns The state after, and the intents to carry out.
  */
-export const confirm = (state: Composers, timeline: TimelineId): Submitted => {
+export const confirm = (state: Composers, timeline: Place): Submitted => {
   const { confirming } = draftOf(state, timeline);
 
   return confirming === undefined
     ? { intents: [], state }
-    : { intents: confirming.intents, state: withDraft(state, timeline, sent) };
+    : {
+        intents: confirming.intents,
+        state: withDraft(state, timeline, sent),
+      };
 };
 
 /**
@@ -296,7 +323,7 @@ export const confirm = (state: Composers, timeline: TimelineId): Submitted => {
  */
 export const takeOffer = (
   state: Composers,
-  timeline: TimelineId
+  timeline: Place
 ): { readonly state: Composers; readonly offer: Offer | undefined } => {
   const offered = draftOf(state, timeline).notice?.offer;
 
@@ -475,6 +502,10 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
 
     case "Failed": {
       return noticed(state, event.timeline, failed(event.failure, event.intent, event.intents));
+    }
+
+    case "Noticed": {
+      return noticed(state, event.timeline, { message: event.message, offer: undefined });
     }
 
     default: {

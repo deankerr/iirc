@@ -10,6 +10,7 @@ import type {
   Client,
   ConnectionId,
   Input,
+  NetworkConfiguration,
   News,
   Output,
   TimerId,
@@ -37,10 +38,10 @@ import {
 } from "effect";
 
 import { now, sleepUntil } from "./clock.ts";
-import { JournalFailed } from "./journal.ts";
-import type { JournalService, NetworkId, Sequence } from "./journal.ts";
+import { JournalFailed, Sequence } from "./journal.ts";
+import type { JournalService, NetworkId } from "./journal.ts";
 import { ClientThrew, stepContained } from "./replay.ts";
-import type { Folded } from "./replay.ts";
+import type { Folded, InForce } from "./replay.ts";
 import type { Link, LinkEvent, TransportService } from "./transport.ts";
 import type { VaultService } from "./vault.ts";
 
@@ -54,6 +55,39 @@ export class NetworkStopped extends Schema.TaggedError<
   NetworkStopped,
   { readonly brand: unique symbol }
 >()("NetworkStopped", { network: Schema.String, reason: Schema.String }) {}
+
+/**
+ * A `configure` said which Configuration it was made from, by the sequence of the
+ * `Configured` in force then, or `0` for none, and the one in force when its turn came is
+ * another: `sequence`, or `null` when the Network was never configured. Nothing was
+ * journaled.
+ */
+export class ConfigurationChanged extends Schema.TaggedError<
+  ConfigurationChanged,
+  { readonly brand: unique symbol }
+>()("ConfigurationChanged", { network: Schema.String, sequence: Schema.NullOr(Sequence) }) {}
+
+/**
+ * The Configuration a `configure` was made from: the sequence of the `Configured` in
+ * force, or `0` for a Network never configured.
+ */
+export type ConfiguredAt = Sequence | 0;
+
+/**
+ * Whether a precondition holds of the Configuration in force.
+ * @param network - The Network.
+ * @param configured - The Configuration in force, if any.
+ * @param ifSequence - The precondition, if any.
+ * @returns Why it does not hold, or nothing when it does.
+ */
+export const changedSince = (
+  network: NetworkId,
+  configured: InForce | undefined,
+  ifSequence: ConfiguredAt | undefined
+): ConfigurationChanged | undefined =>
+  ifSequence === undefined || (configured?.sequence ?? 0) === ifSequence
+    ? undefined
+    : new ConfigurationChanged({ network, sequence: configured?.sequence ?? null });
 
 /** Why every Network stops when the Runtime's Scope closes. */
 export const runtimeClosed = "The Runtime closed";
@@ -77,6 +111,17 @@ type Pending =
       readonly _tag: "Owner";
       readonly input: (at: Instant) => Input;
       readonly done: Deferred.Deferred<Stepped>;
+    }
+  /**
+   * A whole Configuration from the Owner, stepped only if the one in force is still the
+   * one it was made from, when `ifSequence` says which. The check and the append are one
+   * turn of the Network's fiber, so no other input comes between them.
+   */
+  | {
+      readonly _tag: "Configure";
+      readonly configuration: NetworkConfiguration;
+      readonly ifSequence: ConfiguredAt | undefined;
+      readonly done: Deferred.Deferred<Stepped, ConfigurationChanged>;
     }
   | { readonly _tag: "Link"; readonly connection: ConnectionId; readonly event: LinkEvent }
   | { readonly _tag: "Due"; readonly timer: TimerId; readonly due: Instant }
@@ -133,8 +178,8 @@ interface Timing {
 export interface Network<S> {
   readonly id: NetworkId;
   readonly queue: Queue.Queue<Pending>;
-  /** The Client's state, and the timer table projected from every step. */
-  readonly current: Ref.Ref<{ readonly state: S; readonly table: TimerTable }>;
+  /** The Client's state, the timer table projected from every step, and the Configuration in force. */
+  readonly current: Ref.Ref<Current<S>>;
   readonly links: Ref.Ref<ReadonlyMap<ConnectionId, Live>>;
   readonly status: Ref.Ref<NetworkStatus>;
   /** Fails once the Network stops, so an Owner input waiting on it does not hang. */
@@ -145,6 +190,13 @@ export interface Network<S> {
   readonly drained: Latch.Latch;
   /** The driver's fiber, once it is forked, so shutdown can stop it. */
   readonly driver: Ref.Ref<Fiber.Fiber<unknown, unknown> | undefined>;
+}
+
+/** A Network as stepped so far. */
+interface Current<S> {
+  readonly state: S;
+  readonly table: TimerTable;
+  readonly configured: InForce | undefined;
 }
 
 /** The ports and the Client a driver uses. */
@@ -184,7 +236,7 @@ const linkInput = (connection: ConnectionId, event: LinkEvent, at: Instant): Inp
 
 // Each Pending but an Owner's, a `Stopping`, and a `Dropped`, as the input it becomes.
 const toInput = (
-  pending: Exclude<Pending, { _tag: "Owner" | "Stopping" | "Dropped" }>,
+  pending: Exclude<Pending, { _tag: "Owner" | "Configure" | "Stopping" | "Dropped" }>,
   at: Instant
 ): Input => {
   switch (pending._tag) {
@@ -302,7 +354,11 @@ const waitUntil = (held: Pumped, until: number, deadline: Instant | undefined) =
 const makeNetwork = <S>(id: NetworkId, folded: Folded<S>) =>
   Effect.gen(function* () {
     const network: Network<S> = {
-      current: yield* Ref.make({ state: folded.state, table: folded.table }),
+      current: yield* Ref.make<Current<S>>({
+        configured: folded.configured,
+        state: folded.state,
+        table: folded.table,
+      }),
       drained: yield* Latch.make(),
       driver: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
       id,
@@ -670,6 +726,10 @@ const drive = <S>(
         const refused: UnsentLine[] = [];
 
         yield* Ref.set(current, {
+          configured:
+            input._tag === "Configured"
+              ? { configuration: input.configuration, sequence }
+              : before.configured,
           state: step.state,
           table: timers(before.table, input, step.outputs),
         });
@@ -784,6 +844,33 @@ const drive = <S>(
           );
         }
 
+        // The precondition is checked in the same turn that steps it, so two `configure`s
+        // made from the same Configuration cannot both pass.
+        case "Configure": {
+          return Effect.gen(function* () {
+            if (yield* Ref.get(network.stopping)) {
+              return;
+            }
+
+            const changed = changedSince(
+              id,
+              (yield* Ref.get(current)).configured,
+              pending.ifSequence
+            );
+
+            if (changed !== undefined) {
+              yield* Deferred.fail(pending.done, changed);
+
+              return;
+            }
+
+            const { configuration } = pending;
+            const stepped = yield* advance((at) => ({ _tag: "Configured", at, configuration }));
+
+            yield* Deferred.succeed(pending.done, stepped);
+          });
+        }
+
         case "Stopping": {
           return Effect.andThen(
             Ref.set(network.stopping, true),
@@ -892,6 +979,30 @@ export const tell = <S>(
     Effect.raceFirst(
       Effect.andThen(
         Queue.offer(network.queue, { _tag: "Owner", done, input }),
+        Deferred.await(done)
+      ),
+      Deferred.await(network.stopped)
+    )
+  );
+
+/**
+ * Gives a Network a whole Configuration, and waits until it is journaled and stepped. With
+ * `ifSequence`, it is stepped only if the Configuration in force is still the one it was
+ * made from, checked in the same turn of the Network's fiber that steps it.
+ * @param network - The Network.
+ * @param configuration - The Configuration.
+ * @param ifSequence - The Configuration it was made from, if it matters.
+ * @returns The `Configured`'s sequence and its step's News, or why it was not stepped.
+ */
+export const tellConfiguration = <S>(
+  network: Network<S>,
+  configuration: NetworkConfiguration,
+  ifSequence: ConfiguredAt | undefined
+): Effect.Effect<Stepped, NetworkStopped | ConfigurationChanged> =>
+  Effect.flatMap(Deferred.make<Stepped, ConfigurationChanged>(), (done) =>
+    Effect.raceFirst(
+      Effect.andThen(
+        Queue.offer(network.queue, { _tag: "Configure", configuration, done, ifSequence }),
         Deferred.await(done)
       ),
       Deferred.await(network.stopped)

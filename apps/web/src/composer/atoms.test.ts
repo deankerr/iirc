@@ -5,6 +5,7 @@ import { followFrom } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { mainView, openOptions } from "../options/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
 import { open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
@@ -323,6 +324,25 @@ describe("saying", () => {
       after: [10],
       before: [],
       says: [said("{bob}", "hello", "web-1")],
+    });
+  });
+
+  it("shows the Direct Message `/msg` opens, though the options were showing when it was said", async () => {
+    const { daemon, registry, send: sendChange } = await placing();
+
+    await run(registry, openOptions, "");
+    const before = registry.get(mainView);
+
+    registry.set(edit, { text: "/msg {bob} hello", timeline: channel });
+    registry.set(send, channel);
+    await eventually(() => daemon.says.length === 1);
+    placeAt10(daemon);
+    sendChange(foldedThrough(10));
+    await until(registry, timelinesState, (state) => state.open === idOf(4));
+
+    expect({ after: registry.get(mainView), before }).toStrictEqual({
+      after: { _tag: "Timeline" },
+      before: { _tag: "Options", filter: "" },
     });
   });
 

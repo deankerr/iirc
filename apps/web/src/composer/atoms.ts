@@ -11,8 +11,8 @@
  * @packageDocumentation
  */
 import { CallerIntent } from "@iirc/api";
-import type { Sequence, TimelineId } from "@iirc/api";
-import type { Intent } from "@iirc/frontend/commands";
+import type { Sequence } from "@iirc/api";
+import type { Intent, Say } from "@iirc/frontend/commands";
 import {
   confirm,
   contextOf,
@@ -22,8 +22,13 @@ import {
   submit,
   takeOffer,
 } from "@iirc/frontend/composer";
-import type { ComposerEvent, Composers, IntentId, SayFailure } from "@iirc/frontend/composer";
-import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
+import type {
+  ComposerEvent,
+  Composers,
+  IntentId,
+  Place,
+  SayFailure,
+} from "@iirc/frontend/composer";
 import { followFrom, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Timelines } from "@iirc/frontend/timelines";
 import { Context, Effect, Option, Schedule, Schema, Semaphore, Stream } from "effect";
@@ -31,7 +36,15 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
-import { signedIn, signInState } from "../sign-in/atoms.ts";
+import {
+  addNetwork,
+  configure,
+  openOptions,
+  promptCredential,
+  signedOut,
+} from "../options/atoms.ts";
+import type { Outcome as Changed } from "../options/atoms.ts";
+import { signedIn } from "../sign-in/atoms.ts";
 import { timelinesState, Waits } from "../timelines/atoms.ts";
 
 /** Every Timeline's composer, as the core folds it. */
@@ -40,8 +53,8 @@ export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.ke
 /** The context commands are judged in, derived from the Timelines. */
 export const commandContext = Atom.make((get) => contextOf(get(timelinesState)));
 
-/** One Timeline's composer. */
-export const draft = Atom.family((timeline: TimelineId) =>
+/** One Timeline's composer, or the one under no Timeline. */
+export const draft = Atom.family((timeline: Place) =>
   Atom.make((get) => draftOf(get(composerState), timeline))
 );
 
@@ -76,7 +89,7 @@ type Outcome =
  * @param network - The Say's Network.
  * @returns The failure.
  */
-const failureOf = (tag: string, network: Intent["network"]): SayFailure => {
+const failureOf = (tag: string, network: Say["network"]): SayFailure => {
   if (tag === "UnknownNetwork") {
     return { _tag: "UnknownNetwork", network };
   }
@@ -93,7 +106,7 @@ const oneAtATime = Semaphore.makeUnsafe(1);
  * @param intent - Its intent.
  * @returns What became of it.
  */
-const askSaid = (network: Intent["network"], intent: IntentId) =>
+const askSaid = (network: Say["network"], intent: IntentId) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const answer = yield* client.networks.said({ params: { intent, network } });
@@ -108,7 +121,7 @@ const askSaid = (network: Intent["network"], intent: IntentId) =>
  * @param intent - Its intent.
  * @returns What became of it.
  */
-const checked = (network: Intent["network"], intent: IntentId) =>
+const checked = (network: Say["network"], intent: IntentId) =>
   askSaid(network, intent).pipe(
     Effect.map((answer): Outcome =>
       answer._tag === "Journaled"
@@ -120,7 +133,7 @@ const checked = (network: Intent["network"], intent: IntentId) =>
 
 /** A Say said with `opens`, whose Direct Message is to be opened once it is placed. */
 interface Placed {
-  readonly network: Intent["network"];
+  readonly network: Say["network"];
   readonly sequence: Sequence;
   readonly intent: IntentId;
   /** The core's navigation when its Say was submitted: opening another lets it go. */
@@ -128,10 +141,110 @@ interface Placed {
 }
 
 /**
- * Carries out intents in order. A Say that fails stops those after it, and the composer it
- * came from says why, offering what is safe to do next.
+ * Says one Message under an intent id, and finds out what became of it.
+ * @param intent - The Say.
+ * @param id - Its intent id.
+ * @returns What became of it.
+ */
+const sayOne = (intent: Say, id: IntentId) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+
+    return yield* client.networks
+      .say({
+        params: { network: intent.network },
+        payload: { intent: id, kind: intent.kind, target: intent.target, text: intent.text },
+      })
+      .pipe(
+        Effect.map((answer): Outcome =>
+          answer._tag === "Said"
+            ? { _tag: "Said", sequence: answer.sequence }
+            : {
+                _tag: "Failed",
+                failure: { _tag: "Refused", reason: answer.reason, target: intent.target },
+              }
+        ),
+        Effect.catch((error): Effect.Effect<Outcome, never, DaemonClient> => {
+          if (error._tag === "Unauthorized") {
+            return Effect.succeed<Outcome>({ _tag: "SignedOut" });
+          }
+
+          // The Network stopped, so its append has settled: `said` answers for good.
+          if (error._tag === "NetworkStopped") {
+            return askSaid(intent.network, id).pipe(
+              Effect.map((answer): Outcome => ({
+                _tag: "Failed",
+                failure: { _tag: answer._tag === "Journaled" ? "Journaled" : "NotJournaled" },
+              })),
+              Effect.orElseSucceed((): Outcome => ({
+                _tag: "Failed",
+                failure: { _tag: "Unknown", network: intent.network },
+              }))
+            );
+          }
+
+          // No answer came, so the request may still be queued or appending: `said` can
+          // settle it only by answering `Journaled`, and it is never sent again from here.
+          const lost =
+            error._tag === "HttpClientError" &&
+            (error.reason._tag === "TransportError" ||
+              (error.response !== undefined && gatewayStatuses.has(error.response.status)));
+
+          if (lost) {
+            return checked(intent.network, id);
+          }
+
+          return Effect.succeed<Outcome>({
+            _tag: "Failed",
+            failure: failureOf(error._tag, intent.network),
+          });
+        })
+      );
+  });
+
+/**
+ * Carries out an intent that changes Configuration, holds a Credential, or opens the
+ * options view.
  * @param registry - The registry.
- * @param timeline - The Timeline they were sent from.
+ * @param intent - The intent.
+ * @returns What it came to.
+ */
+const changeOne = (
+  registry: AtomRegistry.AtomRegistry,
+  intent: Exclude<Intent, Say>
+): Effect.Effect<Changed, never, DaemonClient> => {
+  switch (intent._tag) {
+    case "OpenOptions": {
+      registry.set(openOptions, intent.filter);
+
+      return Effect.succeed({ _tag: "Done" });
+    }
+
+    case "Configure": {
+      return configure(registry, intent.network, intent.edit);
+    }
+
+    case "AddNetwork": {
+      return addNetwork(registry, intent.network, intent.configuration);
+    }
+
+    case "PromptCredential": {
+      registry.set(promptCredential, { network: intent.network, path: intent.path });
+
+      return Effect.succeed({ _tag: "Done" });
+    }
+
+    default: {
+      return intent satisfies never;
+    }
+  }
+};
+
+/**
+ * Carries out intents in order. One that fails stops those after it, and the composer it
+ * came from says why, offering what is safe to do next after a Say.
+ * @param registry - The registry.
+ * @param timeline - Where they were sent from.
  * @param intents - The intents.
  * @param first - The intent id the first Say keeps, when it is sent again.
  * @param navigation - The core's navigation when they were submitted.
@@ -139,72 +252,39 @@ interface Placed {
  */
 const carryOut = (
   registry: AtomRegistry.AtomRegistry,
-  timeline: TimelineId,
+  timeline: Place,
   intents: readonly Intent[],
   first: IntentId | undefined,
   navigation: number
 ) =>
   Effect.gen(function* () {
-    const client = yield* DaemonClient;
     const name = yield* IntentNames;
     const placed: Placed[] = [];
 
     for (const [index, intent] of intents.entries()) {
+      if (intent._tag !== "Say") {
+        const changed = yield* changeOne(registry, intent);
+
+        if (changed._tag === "SignedOut") {
+          signedOut(registry);
+
+          return placed;
+        }
+
+        if (changed._tag === "NotDone") {
+          happened(registry, { _tag: "Noticed", message: changed.message, timeline });
+
+          return placed;
+        }
+
+        continue;
+      }
+
       const id = index === 0 && first !== undefined ? first : decodeIntent(name());
-
-      const outcome = yield* client.networks
-        .say({
-          params: { network: intent.network },
-          payload: { intent: id, kind: intent.kind, target: intent.target, text: intent.text },
-        })
-        .pipe(
-          Effect.map((answer): Outcome =>
-            answer._tag === "Said"
-              ? { _tag: "Said", sequence: answer.sequence }
-              : {
-                  _tag: "Failed",
-                  failure: { _tag: "Refused", reason: answer.reason, target: intent.target },
-                }
-          ),
-          Effect.catch((error): Effect.Effect<Outcome, never, DaemonClient> => {
-            if (error._tag === "Unauthorized") {
-              return Effect.succeed<Outcome>({ _tag: "SignedOut" });
-            }
-
-            // The Network stopped, so its append has settled: `said` answers for good.
-            if (error._tag === "NetworkStopped") {
-              return askSaid(intent.network, id).pipe(
-                Effect.map((answer): Outcome => ({
-                  _tag: "Failed",
-                  failure: { _tag: answer._tag === "Journaled" ? "Journaled" : "NotJournaled" },
-                })),
-                Effect.orElseSucceed((): Outcome => ({
-                  _tag: "Failed",
-                  failure: { _tag: "Unknown", network: intent.network },
-                }))
-              );
-            }
-
-            // No answer came, so the request may still be queued or appending: `said` can
-            // settle it only by answering `Journaled`, and it is never sent again from here.
-            const lost =
-              error._tag === "HttpClientError" &&
-              (error.reason._tag === "TransportError" ||
-                (error.response !== undefined && gatewayStatuses.has(error.response.status)));
-
-            if (lost) {
-              return checked(intent.network, id);
-            }
-
-            return Effect.succeed<Outcome>({
-              _tag: "Failed",
-              failure: failureOf(error._tag, intent.network),
-            });
-          })
-        );
+      const outcome = yield* sayOne(intent, id);
 
       if (outcome._tag === "SignedOut") {
-        registry.set(signInState, reduceSignIn(registry.get(signInState), { _tag: "Refused" }));
+        signedOut(registry);
 
         return placed;
       }
@@ -342,7 +422,7 @@ const openPlaced = (registry: AtomRegistry.AtomRegistry, placed: Placed) =>
  */
 const sendAll = (
   registry: AtomRegistry.AtomRegistry,
-  timeline: TimelineId,
+  timeline: Place,
   intents: readonly Intent[],
   first: IntentId | undefined
 ) =>
@@ -357,7 +437,7 @@ const sendAll = (
 
 /** Edits a Timeline's draft. */
 export const edit = Atom.fnSync(
-  ({ text, timeline }: { readonly timeline: TimelineId; readonly text: string }, get) => {
+  ({ text, timeline }: { readonly timeline: Place; readonly text: string }, get) => {
     happened(get.registry, { _tag: "Edited", text, timeline });
   }
 ).pipe(Atom.keepAlive);
@@ -365,10 +445,7 @@ export const edit = Atom.fnSync(
 /** Recalls what was sent from a Timeline, older or newer. */
 export const recall = Atom.fnSync(
   (
-    {
-      direction,
-      timeline,
-    }: { readonly timeline: TimelineId; readonly direction: "Older" | "Newer" },
+    { direction, timeline }: { readonly timeline: Place; readonly direction: "Older" | "Newer" },
     get
   ) => {
     happened(get.registry, { _tag: "Recalled", direction, timeline });
@@ -376,19 +453,32 @@ export const recall = Atom.fnSync(
 ).pipe(Atom.keepAlive);
 
 /** Lets go of a Timeline's notice and confirmation. */
-export const dismiss = Atom.fnSync((timeline: TimelineId, get) => {
+export const dismiss = Atom.fnSync((timeline: Place, get) => {
   happened(get.registry, { _tag: "Dismissed", timeline });
 }).pipe(Atom.keepAlive);
+
+/**
+ * Once a draft was sent and cleared, `edit` lets go of the text it was last given, which
+ * it would otherwise keep as its argument, a Credential's value among it.
+ * @param registry - The registry.
+ * @param timeline - Where the draft was sent from.
+ */
+const letGoOfTyped = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
+  if (draftOf(registry.get(composerState), timeline).text === "") {
+    registry.set(edit, { text: "", timeline });
+  }
+};
 
 /** Submits a Timeline's draft, and carries out what it asks. */
 export const send = runtime
   .fn(
-    (timeline: TimelineId, get) =>
+    (timeline: Place, get) =>
       Effect.gen(function* () {
         const { registry } = get;
         const step = submit(registry.get(composerState), timeline, registry.get(commandContext));
 
         registry.set(composerState, step.state);
+        letGoOfTyped(registry, timeline);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
     { concurrent: true }
@@ -398,7 +488,7 @@ export const send = runtime
 /** Sends the lines a Timeline's composer is waiting to have confirmed. */
 export const confirmSend = runtime
   .fn(
-    (timeline: TimelineId, get) =>
+    (timeline: Place, get) =>
       Effect.gen(function* () {
         const { registry } = get;
         const step = confirm(registry.get(composerState), timeline);
@@ -416,7 +506,7 @@ export const confirmSend = runtime
  */
 export const takeUp = runtime
   .fn(
-    (timeline: TimelineId, get) =>
+    (timeline: Place, get) =>
       Effect.gen(function* () {
         const { registry } = get;
         const taken = takeOffer(registry.get(composerState), timeline);

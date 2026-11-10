@@ -25,7 +25,14 @@ const channel = timelineId("00000000000002-00000000-00000000");
 const other = timelineId("00000000000003-00000000-00000000");
 
 const context: CommandContext = {
-  focus: { detached: false, kind: "Channel", name: "#iirc", network, timeline: channel },
+  focus: {
+    detached: false,
+    key: "#iirc",
+    kind: "Channel",
+    name: "#iirc",
+    network,
+    timeline: channel,
+  },
   session: true,
 };
 

@@ -8,6 +8,7 @@
 import {
   Authorization,
   Caller,
+  ConfigurationChanged,
   CrossOrigin,
   DaemonApi,
   InvalidRequest,
@@ -308,11 +309,28 @@ const networks = HttpApiBuilder.group(
           )
         )
       )
-      .handle("configure", ({ params, payload }) =>
-        runtime.configure(NetworkId.make(params.network), payload).pipe(
-          Effect.map((sequence) => ({ sequence })),
-          Effect.mapError((error) => networkStopped(params.network, error))
-        )
+      .handle("configure", ({ params, payload, query }) =>
+        runtime
+          .configure(
+            NetworkId.make(params.network),
+            payload,
+            query.ifSequence === undefined || query.ifSequence === 0
+              ? query.ifSequence
+              : Sequence.make(query.ifSequence)
+          )
+          .pipe(
+            Effect.map((sequence) => ({ sequence })),
+            Effect.catchTags({
+              ConfigurationChanged: (error) =>
+                Effect.fail(
+                  new ConfigurationChanged({ network: params.network, sequence: error.sequence })
+                ),
+              NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
+            })
+          )
+      )
+      .handle("configuration", ({ params }) =>
+        runtime.configuration(NetworkId.make(params.network)).pipe(Effect.mapError(unknownNetwork))
       )
       .handle("say", ({ params, payload }) =>
         Effect.gen(function* () {

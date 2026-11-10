@@ -7,7 +7,7 @@
  *
  * @packageDocumentation
  */
-import { casefold } from "@iirc/protocol/casemapping";
+import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Source } from "@iirc/protocol/line";
 
 import { isSelf, namingNow, serverName } from "./meaning.ts";
@@ -30,7 +30,7 @@ const network: Where = { _tag: "Network" };
  * @returns The name and its key.
  */
 const named = (run: Run, name: string): Named => ({
-  key: casefold(run.state.declared, name),
+  key: casefold(run.state.declared ?? defaultCasemapping, name),
   name,
 });
 

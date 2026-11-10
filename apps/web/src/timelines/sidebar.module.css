@@ -77,3 +77,23 @@
 .muted {
   color: var(--color-muted);
 }
+
+.options {
+  margin: 0 var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.options[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+.options[aria-current="page"] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}

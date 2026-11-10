@@ -19,6 +19,7 @@ export {
 } from "./api.ts";
 
 export {
+  ConfigurationChanged,
   CrossOrigin,
   InvalidRequest,
   JournalFailed,
@@ -37,6 +38,7 @@ export {
   CallerIntent,
   ChannelKnowledge,
   ClientInspection,
+  ConfigurationInForce,
   CredentialNames,
   CredentialPathName,
   CredentialValue,
@@ -45,6 +47,7 @@ export {
   EndReason,
   Gap,
   Happened,
+  IfSequence,
   IgnoredReason,
   ItemAfter,
   ItemContent,

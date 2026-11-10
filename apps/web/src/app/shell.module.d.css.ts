@@ -6,6 +6,7 @@ declare const styles: {
   readonly main: string;
   readonly shell: string;
   readonly title: string;
+  readonly view: string;
 };
 
 export default styles;

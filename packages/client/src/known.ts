@@ -116,6 +116,13 @@ export interface ChannelKnowledge {
 export interface Knowledge {
   readonly session: SessionKnowledge;
   readonly casemapping: Casemapping;
+  /**
+   * How the Network folds names as an Ircd last declared it, on any Connection, which
+   * outlives Connections and folds the keys of `where`, or `undefined` until one has.
+   */
+  readonly declared: Casemapping | undefined;
+  /** `CHANTYPES`, what a Channel's name starts with, while a Session has said, or `undefined`. */
+  readonly chantypes: string | undefined;
   readonly self: UserKnowledge | undefined;
   readonly channels: ReadonlyMap<string, ChannelKnowledge>;
   readonly users: ReadonlyMap<string, UserKnowledge>;

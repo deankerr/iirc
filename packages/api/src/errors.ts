@@ -6,7 +6,7 @@
 import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
-import { CallerIntent, NetworkId } from "./schemas.ts";
+import { CallerIntent, NetworkId, Sequence } from "./schemas.ts";
 
 /** No Network by this id has been configured. */
 export class UnknownNetwork extends Schema.TaggedError<
@@ -54,6 +54,21 @@ export class NetworkStopped extends Schema.TaggedError<
     reason: Schema.String,
   },
   { httpApiStatus: 503 }
+) {}
+
+/**
+ * A `PUT` of Configuration named, with `ifSequence`, the Configuration it was made from,
+ * and another is in force: `sequence`, or `null` when the Network was never configured.
+ * Nothing was journaled. Read the Configuration again, make the change to it, and send it
+ * with the new sequence: a 409.
+ */
+export class ConfigurationChanged extends Schema.TaggedError<
+  ConfigurationChanged,
+  { readonly brand: unique symbol }
+>()(
+  "ConfigurationChanged",
+  { network: NetworkId, sequence: Schema.NullOr(Sequence) },
+  { httpApiStatus: 409 }
 ) {}
 
 /**

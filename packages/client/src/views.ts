@@ -4,6 +4,8 @@
  *
  * @packageDocumentation
  */
+import { chantypesOf } from "@iirc/protocol/isupport";
+
 import type { Inspection } from "./client.ts";
 import type { CapName } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
@@ -168,6 +170,8 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
   return {
     casemapping: state.casemapping,
     channels,
+    chantypes: session === undefined ? undefined : chantypesOf(open?.isupport.get("CHANTYPES")),
+    declared: state.declared,
     self,
     session: sessionKnowledge(state.network),
     users,

@@ -14,7 +14,6 @@ import type { Row, Window } from "@iirc/frontend/timelines";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
-import { Composer } from "../composer/composer.tsx";
 import { following, newer, older, openTimeline } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
@@ -193,7 +192,13 @@ export const TimelineView = () => {
 
   switch (shown._tag) {
     case "Closed": {
-      return <p className={styles.placeholder}>Choose a Timeline.</p>;
+      return (
+        <p className={styles.placeholder}>
+          {
+            "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [-tls] <nick>. /set opens the options."
+          }
+        </p>
+      );
     }
 
     case "Vanished": {
@@ -218,7 +223,6 @@ export const TimelineView = () => {
             timeline={shown.timeline}
             window={shown.window}
           />
-          <Composer key={`composer-${shown.timeline}`} name={label} timeline={shown.timeline} />
         </section>
       );
     }

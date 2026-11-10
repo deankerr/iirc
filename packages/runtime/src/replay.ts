@@ -6,22 +6,42 @@
  * @packageDocumentation
  */
 import { timers } from "@iirc/client";
-import type { Client, Input, Instant, News, Step, TimerTable } from "@iirc/client";
+import type {
+  Client,
+  Input,
+  Instant,
+  NetworkConfiguration,
+  News,
+  Step,
+  TimerTable,
+} from "@iirc/client";
 import { Effect, Schema, Stream } from "effect";
 
 import type { JournalFailed, JournalService, NetworkId, Sequence } from "./journal.ts";
 
+/** The Configuration in force for a Network: the last `Configured` stepped, and its sequence. */
+export interface InForce {
+  readonly configuration: NetworkConfiguration;
+  readonly sequence: Sequence;
+}
+
 /**
- * One Network's Client, as far as its Inputs have been folded. A Client that threw is
- * `Broken`, and keeps the state from before the input that broke it, so one Network's
- * defect never stops another's fold.
+ * One Network's Client, as far as its Inputs have been folded, and the Configuration in
+ * force. A Client that threw is `Broken`, and keeps the state from before the input that
+ * broke it, so one Network's defect never stops another's fold.
  */
 export type Folded<S> =
-  | { readonly _tag: "Folded"; readonly state: S; readonly table: TimerTable }
+  | {
+      readonly _tag: "Folded";
+      readonly state: S;
+      readonly table: TimerTable;
+      readonly configured: InForce | undefined;
+    }
   | {
       readonly _tag: "Broken";
       readonly state: S;
       readonly table: TimerTable;
+      readonly configured: InForce | undefined;
       readonly reason: string;
     };
 
@@ -72,21 +92,25 @@ export const stepContained = <S>(
  */
 export const fresh = <S>(client: Client<S>): Folded<S> => ({
   _tag: "Folded",
+  configured: undefined,
   state: client.initial,
   table: new Map(),
 });
 
 /**
- * Folds one more Input. A `Broken` Network stays broken.
+ * Folds one more Input. A `Broken` Network stays broken. A `Configured` stepped is the
+ * Configuration in force from its sequence on.
  * @param client - The Client.
  * @param folded - The Network so far.
  * @param input - The next Input.
+ * @param sequence - The Input's sequence.
  * @returns The Network after it, and the News of the step.
  */
 const foldOne = <S>(
   client: Client<S>,
   folded: Folded<S>,
-  input: Input
+  input: Input,
+  sequence: Sequence
 ): Effect.Effect<readonly [Folded<S>, readonly News[]]> => {
   if (folded._tag === "Broken") {
     return Effect.succeed([folded, []] as const);
@@ -98,6 +122,10 @@ const foldOne = <S>(
         [
           {
             _tag: "Folded",
+            configured:
+              input._tag === "Configured"
+                ? { configuration: input.configuration, sequence }
+                : folded.configured,
             state: step.state,
             table: timers(folded.table, input, step.outputs),
           },
@@ -133,7 +161,7 @@ export const refold = <S>(
 
         const { input, network } = entry.record;
 
-        return foldOne(client, networks.get(network) ?? fresh(client), input).pipe(
+        return foldOne(client, networks.get(network) ?? fresh(client), input, entry.sequence).pipe(
           Effect.map(([folded]) => networks.set(network, folded))
         );
       }
@@ -164,7 +192,7 @@ export const newsAfter = <S>(
 
         const { input, network } = entry.record;
 
-        return foldOne(client, networks.get(network) ?? fresh(client), input).pipe(
+        return foldOne(client, networks.get(network) ?? fresh(client), input, entry.sequence).pipe(
           Effect.map(([folded, news]) => {
             networks.set(network, folded);
 

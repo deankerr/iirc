@@ -70,6 +70,19 @@ const decodeKnown = Schema.decodeUnknownSync(
   )
 );
 
+/** What the end-to-end run reads of a Configuration: its Channels and nicks. */
+const decodeInForce = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      configuration: Schema.Struct({
+        channels: Schema.Array(Schema.Struct({ name: Schema.String })),
+        nicks: Schema.Array(Schema.String),
+      }),
+      sequence: Schema.Finite,
+    })
+  )
+);
+
 /**
  * The first Network's row in the sidebar, once its connection is known.
  * @param page - The page.
@@ -591,6 +604,132 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: [],
           recalled: "/msg peer hi",
           rows: 1,
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "adds a Network from nothing, joins and parts a Channel, and changes an option in place",
+    { timeout: 90_000 },
+    async () => {
+      const dataDir = path.join(directory, "options");
+      const ngircd: Ircd = await startNgircd();
+      const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
+      const key = created.stdout.trim();
+      const { base, child } = await startDaemon(dataDir);
+      const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+
+      const configurationOf = async () => {
+        const answer = await fetch(`${base}/api/networks/test/configuration`, {
+          headers: { authorization: `Bearer ${key}` },
+        });
+
+        return decodeInForce(await answer.text());
+      };
+
+      try {
+        peer.send("JOIN #iirc");
+        await peer.waitFor((line) => line.command === "JOIN", "the peer's own JOIN");
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByText("No Networks are configured yet.").waitFor();
+
+        // With no Timeline open, the composer takes commands that need none.
+        const nowhere = page.getByRole("textbox", { name: "iirc" });
+
+        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} -tls iirc`);
+        await nowhere.press("Enter");
+
+        const row = page.getByRole("row").first();
+
+        await row.getByText("connected", { exact: true }).waitFor({ timeout: 20_000 });
+
+        // The Network's own Timeline, under the Network's row of the same name, then /join there.
+        await page.getByRole("row", { exact: true, name: "test" }).last().click();
+        const composer = page.getByRole("textbox", { name: "test" });
+
+        await composer.fill("/join #iirc");
+        await composer.press("Enter");
+
+        const joined = await peer.waitFor(
+          (line) => line.command === "JOIN" && line.source?.startsWith("iirc!") === true,
+          "Self's JOIN"
+        );
+
+        // The options, filtered, and nicks changed in place.
+        await page.getByRole("button", { exact: true, name: "Options" }).click();
+        await page.getByRole("searchbox", { name: "Filter options" }).fill("*.nicks");
+
+        const nicks = page.getByRole("row", { name: "network.test.nicks" });
+
+        await nicks.getByText("iirc", { exact: true }).waitFor();
+        await nicks.focus();
+        await page.keyboard.press("Enter");
+
+        const editor = page.getByRole("textbox", { name: "Value of network.test.nicks" });
+
+        await editor.fill("iirc,iirc_");
+        await editor.press("Enter");
+        await nicks.getByText("iirc,iirc_", { exact: true }).waitFor();
+        const afterNicks = await configurationOf();
+
+        // Delete asks first, then sets an option back to what a new Network starts with.
+        await page.getByRole("searchbox", { name: "Filter options" }).fill("*.realname");
+        const realname = page.getByRole("row", { name: "network.test.realname" });
+
+        await realname.focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("textbox", { name: "Value of network.test.realname" }).fill("Someone");
+        await page.keyboard.press("Enter");
+        await realname.getByText("Someone", { exact: true }).waitFor();
+        await realname.focus();
+        await page.keyboard.press("Delete");
+        await page.getByRole("alertdialog").getByRole("button", { name: "Unset" }).waitFor();
+        await page.keyboard.press("Enter");
+        await realname.getByText("iirc", { exact: true }).waitFor();
+
+        // Back to the Channel, and /part with no argument parts it.
+        await page.getByRole("row", { name: "#iirc" }).click();
+        const inChannel = page.getByRole("textbox", { name: "#iirc" });
+
+        await inChannel.fill("/part");
+        await inChannel.press("Enter");
+
+        const parted = await peer.waitFor(
+          (line) => line.command === "PART" && line.source?.startsWith("iirc!") === true,
+          "Self's PART"
+        );
+
+        const afterPart = await configurationOf();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          channels: afterPart.configuration.channels,
+          joined: joined.params[0],
+          nicks: afterNicks.configuration.nicks,
+          parted: parted.params[0],
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          violations,
+        }).toStrictEqual({
+          channels: [],
+          joined: "#iirc",
+          nicks: ["iirc", "iirc_"],
+          parted: "#iirc",
+          problems: [],
           violations: "",
         });
       } finally {

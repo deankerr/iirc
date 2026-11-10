@@ -1,6 +1,7 @@
 /**
  * The sidebar: a tree of the Networks, each with how its connection stands, and their
- * Timelines under them. Choosing a Timeline opens it in the main view. React Aria's Tree
+ * Timelines under them, and the options. Choosing a Timeline opens it in the main view, and
+ * Options opens the options view there. React Aria's Tree
  * gives it its keyboard: arrows move and expand, Enter or Space opens, and typing a name
  * finds it.
  *
@@ -14,6 +15,7 @@ import { Atom } from "effect/reactivity";
 import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
 import type { Key, Selection } from "react-aria-components";
 
+import { mainView, openOptions } from "../options/atoms.ts";
 import { open, sidebarNetworks, timelinesState } from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
@@ -98,6 +100,8 @@ export const Sidebar = () => {
   const chosen = useAtomValue(selected);
   const setCollapsed = useAtomSet(collapsed);
   const choose = useAtomSet(open);
+  const showOptions = useAtomSet(openOptions);
+  const optionsShown = useAtomValue(mainView)._tag === "Options";
 
   // A key is read back as the Timeline it names, never cast: a key that names none, such
   // as a Network's row, opens nothing.
@@ -121,6 +125,15 @@ export const Sidebar = () => {
 
   return (
     <nav aria-label="Networks" className={styles.sidebar}>
+      <Button
+        aria-current={optionsShown ? "page" : false}
+        className={styles.options}
+        onPress={() => {
+          showOptions("");
+        }}
+      >
+        Options
+      </Button>
       <h2 className={styles.heading}>Networks</h2>
       {networks.length === 0 ? (
         <p className={styles.muted}>No Networks are configured yet.</p>

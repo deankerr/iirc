@@ -34,8 +34,15 @@
 }
 
 .main {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 640px) {

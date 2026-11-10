@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { ConfigurationInForce } from "@iirc/api";
 import type {
   Knowledge,
   Located,
@@ -43,7 +44,16 @@ type Answer =
       readonly sequence: number;
       readonly reason: { readonly _tag: "Offline" | "Unsendable" };
     }
-  | { readonly _tag: "Journaled"; readonly sequence: number };
+  | { readonly _tag: "Journaled"; readonly sequence: number }
+  | typeof ConfigurationInForce.Encoded
+  | { readonly sequence: number }
+  | { readonly names: readonly string[] }
+  | {
+      readonly _tag: "ConfigurationChanged";
+      readonly network: string;
+      readonly sequence: number | null;
+    }
+  | { readonly _tag: "UnknownNetwork"; readonly network: string };
 
 const json = (status: number, body: Answer) => Response.json(body, { status });
 
@@ -107,6 +117,28 @@ const SayBody = Schema.fromJsonString(
   })
 );
 
+/** A Network's Configuration, as the wire carries it. */
+type ConfigurationOnWire = (typeof ConfigurationInForce.Encoded)["configuration"];
+
+const ConfigurationBody = Schema.fromJsonString(
+  Schema.toEncoded(ConfigurationInForce.fields.configuration)
+);
+
+const CredentialBody = Schema.fromJsonString(Schema.Struct({ value: Schema.String }));
+
+/** The Configuration the fake's Network `libera` starts with. */
+export const liberaConfiguration: ConfigurationOnWire = {
+  channels: [{ name: "#iirc" }],
+  declined: [],
+  enabled: true,
+  fallbackEncoding: "windows-1252",
+  ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
+  login: { _tag: "None" },
+  nicks: ["iirc"],
+  realname: "iirc",
+  username: "iirc",
+};
+
 /** A `say` the fake was asked for, as its body said it. */
 type SaidToFake = typeof SayBody.Type;
 
@@ -158,10 +190,17 @@ export const fakeDaemon = () => {
   const windowsRead: string[] = [];
   const hung: string[] = [];
   const networksHeld: (() => void)[] = [];
+  const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
 
   const daemon = {
     /** How many requests that never began their answer were given up. */
     abandoned: 0,
+    /** Each Network's Configuration in force, and the sequence that set it. */
+    configurations: new Map<string, { configuration: ConfigurationOnWire; sequence: number }>([
+      ["libera", { configuration: liberaConfiguration, sequence: 1 }],
+    ]),
+    /** The Credentials held, with their values, as a Vault would hold them. */
+    credentials: new Map<string, string>(),
     down: false,
     followers,
     gatewayOnly: false,
@@ -173,9 +212,22 @@ export const fakeDaemon = () => {
     holdNetworks: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
+    /**
+     * How many of the next `PUT`s of Configuration find that another Frontend changed the
+     * Network's `realname` just before their turn.
+     */
+    interject: 0,
     /** Each intent journaled, and its sequence, which `said` answers from. */
     journaled,
     keysSent,
+    /** What each Network's Ircd declared, as `known` gives it: none until a test says. */
+    known: new Map<
+      string,
+      {
+        readonly chantypes: string | null;
+        readonly declared: (typeof Knowledge.Encoded)["declared"];
+      }
+    >(),
     /** Says whose request got no answer, journaled only after the next `said`. */
     late,
     /** How many of the next `at/{sequence}` reads get no answer. */
@@ -190,6 +242,8 @@ export const fakeDaemon = () => {
     nextSequence: 10,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
+    /** Each `PUT` of Configuration, with the sequence it was made from. */
+    puts,
     /** Whether `said` answers at all. */
     saidDown: false,
     /** How the next `say`s are answered, first to last; past them, each is said. */
@@ -312,6 +366,103 @@ export const fakeDaemon = () => {
     return undefined;
   };
 
+  /**
+   * A `PUT` of Configuration, refused when made from another than the one in force.
+   * @param network - The Network.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const put = async (network: string, url: URL, init: RequestInit) => {
+    const configuration = Schema.decodeSync(ConfigurationBody)(
+      await new Response(init.body).text()
+    );
+
+    const ifSequence = url.searchParams.get("ifSequence");
+    const before = daemon.configurations.get(network);
+
+    daemon.puts.push({ ifSequence, network });
+
+    if (daemon.interject > 0 && before !== undefined) {
+      daemon.interject -= 1;
+      daemon.configurations.set(network, {
+        configuration: { ...before.configuration, realname: "changed elsewhere" },
+        sequence: daemon.nextSequence,
+      });
+      daemon.nextSequence += 1;
+    }
+
+    const inForce = daemon.configurations.get(network);
+
+    if (ifSequence !== null && Number(ifSequence) !== (inForce?.sequence ?? 0)) {
+      return json(409, {
+        _tag: "ConfigurationChanged",
+        network,
+        sequence: inForce?.sequence ?? null,
+      });
+    }
+
+    const sequence = daemon.nextSequence;
+
+    daemon.nextSequence += 1;
+    daemon.configurations.set(network, { configuration, sequence });
+
+    if (!daemon.timelines.has(network)) {
+      daemon.timelines.set(network, []);
+    }
+
+    return json(200, { sequence });
+  };
+
+  /**
+   * A Network's Configuration and the Credentials, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const configurationRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const method = init.method ?? "GET";
+    const read = /^\/api\/networks\/(?<network>[^/]+)\/configuration$/u.exec(url.pathname)?.groups;
+    const whole = /^\/api\/networks\/(?<network>[^/]+)$/u.exec(url.pathname)?.groups;
+    const credential = /^\/api\/credentials\/(?<name>[^/]+)$/u.exec(url.pathname)?.groups;
+
+    const ours =
+      read !== undefined ||
+      whole !== undefined ||
+      credential !== undefined ||
+      url.pathname === "/api/credentials";
+
+    if (!daemon.signedIn && ours) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    if (read?.network !== undefined) {
+      const inForce = daemon.configurations.get(read.network);
+
+      return inForce === undefined
+        ? json(404, { _tag: "UnknownNetwork", network: read.network })
+        : json(200, inForce);
+    }
+
+    if (method === "PUT" && whole?.network !== undefined) {
+      return await put(whole.network, url, init);
+    }
+
+    if (url.pathname === "/api/credentials") {
+      return json(200, { names: [...daemon.credentials.keys()].toSorted() });
+    }
+
+    if (method === "PUT" && credential?.name !== undefined) {
+      const { value } = Schema.decodeSync(CredentialBody)(await new Response(init.body).text());
+
+      daemon.credentials.set(credential.name, value);
+
+      return new Response(null, { status: 204 });
+    }
+
+    return undefined;
+  };
+
   const timelineRoute = (url: URL, init: RequestInit): Response | undefined => {
     const headers = new Headers(init.headers);
 
@@ -346,8 +497,21 @@ export const fakeDaemon = () => {
     if (known?.network !== undefined) {
       const session = daemon.sessions.get(known.network) ?? { _tag: "Offline", since: null };
 
+      const { chantypes, declared } = daemon.known.get(known.network) ?? {
+        chantypes: null,
+        declared: null,
+      };
+
       return signedInOnly(() =>
-        json(200, { casemapping: "rfc1459", channels: [], self: null, session, users: [] })
+        json(200, {
+          casemapping: declared ?? "rfc1459",
+          channels: [],
+          chantypes,
+          declared,
+          self: null,
+          session,
+          users: [],
+        })
       );
     }
 
@@ -366,6 +530,11 @@ export const fakeDaemon = () => {
 
     return undefined;
   };
+
+  const elsewhere = async (url: URL, init: RequestInit) =>
+    (await configurationRoute(url, init)) ??
+    timelineRoute(url, init) ??
+    new Response(null, { status: 404 });
 
   const answer = async (url: URL, init: RequestInit = {}): Promise<Response> => {
     const route = `${init.method ?? "GET"} ${url.pathname}`;
@@ -460,7 +629,7 @@ export const fakeDaemon = () => {
       }
 
       default: {
-        return timelineRoute(url, init) ?? new Response(null, { status: 404 });
+        return await elsewhere(url, init);
       }
     }
   };

@@ -8,6 +8,7 @@ import { DaemonApi, requestParseOptions } from "./api.ts";
 import {
   CallerIntent,
   Cursor,
+  IfSequence,
   ItemAfter,
   NetworkId,
   NewsEvent,
@@ -40,6 +41,7 @@ describe("the contract", () => {
       "GET /api/credentials",
       "GET /api/networks",
       "GET /api/networks/{network}/at/{sequence}",
+      "GET /api/networks/{network}/configuration",
       "GET /api/networks/{network}/inspect",
       "GET /api/networks/{network}/known",
       "GET /api/networks/{network}/said/{intent}",
@@ -151,6 +153,19 @@ describe("the contract", () => {
         { after: "nope" },
       ].map((each) => Option.isSome(query(each)))
     ).toStrictEqual([true, true, true, false, false, false, false, false]);
+  });
+
+  it("takes the Configuration a PUT was made from as a sequence, or 0 for none, and says 409 when it changed", () => {
+    const parse = Schema.decodeUnknownOption(IfSequence);
+    const put = document.paths["/api/networks/{network}"]?.put;
+
+    expect({
+      parsed: ["0", "12", "-1", "1.5", "x", ""].map((each) => Option.getOrNull(parse(each))),
+      statuses: Object.keys(put?.responses ?? {}).toSorted(),
+    }).toStrictEqual({
+      parsed: [0, 12, null, null, null, null],
+      statuses: ["200", "400", "401", "403", "409", "503"],
+    });
   });
 
   it("takes a Timeline's id as the fold gives it, and nothing else", () => {
