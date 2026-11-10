@@ -758,6 +758,15 @@ const delivery = (source: Delivery): WireDelivery => {
       return wire;
     }
 
+    case "Rejected": {
+      const wire: Case<Delivery, WireDelivery, "Rejected"> = {
+        _tag: "Rejected",
+        reply: source.reply,
+      };
+
+      return wire;
+    }
+
     default: {
       return source satisfies never;
     }

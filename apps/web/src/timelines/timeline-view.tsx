@@ -14,6 +14,7 @@ import type { Row, Window } from "@iirc/frontend/timelines";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
+import { Composer } from "../composer/composer.tsx";
 import { following, newer, older, openTimeline } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
@@ -217,6 +218,7 @@ export const TimelineView = () => {
             timeline={shown.timeline}
             window={shown.window}
           />
+          <Composer key={`composer-${shown.timeline}`} name={label} timeline={shown.timeline} />
         </section>
       );
     }

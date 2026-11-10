@@ -334,6 +334,7 @@ describe("lines", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
       _tag: "Message",
       colour: nickColour("peer"),
+      delivered: undefined,
       delivery: undefined,
       kind: "Privmsg",
       nick: "peer",
@@ -348,10 +349,32 @@ describe("lines", () => {
       message("iirc", "hello", { _tag: "Confirmed", at: unknown, id: unknown, text: "hello!" })
     );
 
+    const others = [
+      { _tag: "Unconfirmed" },
+      { _tag: "Unsent" },
+      { _tag: "Rejected", reply: "404\u202E" },
+    ] as const;
+
     expect({
-      confirmed: confirmed._tag === "Message" && [confirmed.delivery, texts(confirmed.text)],
-      pending: pending._tag === "Message" && pending.delivery,
-    }).toStrictEqual({ confirmed: ["Confirmed", "hello!"], pending: "Pending" });
+      confirmed: confirmed._tag === "Message" && [
+        confirmed.delivery,
+        confirmed.delivered,
+        texts(confirmed.text),
+      ],
+      others: others
+        .map((delivery) => lineOf(message("iirc", "hello", delivery)))
+        .map((line) => line._tag === "Message" && [line.delivery, line.delivered]),
+      pending: pending._tag === "Message" && [pending.delivery, pending.delivered],
+    }).toStrictEqual({
+      confirmed: ["Confirmed", undefined, "hello!"],
+      others: [
+        ["Unconfirmed", "unconfirmed"],
+        ["Unsent", "not sent"],
+        // The Ircd's code is contained, as any text it sends is.
+        ["Rejected", "refused: 404\u202E\u202C"],
+      ],
+      pending: ["Pending", "sending"],
+    });
   });
 
   it("keeps a hostile nick from reordering the line", () => {

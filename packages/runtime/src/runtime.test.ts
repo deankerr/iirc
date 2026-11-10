@@ -623,6 +623,49 @@ describe("`said`", () => {
   });
 });
 
+describe("`say`", () => {
+  it("answers with a refusal of its own Say in its step, and Said for anything else", async () => {
+    const offline = IntentId.make("offline");
+    const later = IntentId.make("later");
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(
+          world,
+          scripted([
+            {
+              news: [{ _tag: "Refused", intent: offline, reason: { _tag: "Offline" } }],
+              when: "Say",
+            },
+            // A refusal of another intent, or one only an Ircd's reply gives, is not its own.
+            {
+              news: [
+                { _tag: "Refused", intent: offline, reason: { _tag: "Unsendable" } },
+                { _tag: "Refused", intent: later, reason: { _tag: "Rejected", reply: "404" } },
+              ],
+              when: "Say",
+            },
+          ])
+        );
+
+        yield* runtime.configure(libera, configuration);
+
+        const saying = { kind: "Privmsg", target: "#iirc", text: "hi" } as const;
+
+        return [
+          yield* runtime.say(libera, { ...saying, intent: offline }),
+          yield* runtime.say(libera, { ...saying, intent: later }),
+        ];
+      })
+    );
+
+    expect(result).toStrictEqual([
+      { _tag: "Refused", intent: offline, reason: { _tag: "Offline" }, sequence: 2 },
+      { _tag: "Said", intent: later, sequence: 3 },
+    ]);
+  });
+});
+
 describe("the News stream", () => {
   it("gives every Network's News from a sequence, in order, then live", async () => {
     const result = await runTest((world) =>

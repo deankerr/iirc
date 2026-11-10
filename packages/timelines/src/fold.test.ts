@@ -7,6 +7,7 @@ import type { News, Where } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { describe, expect, it } from "vitest";
 
+import { delivered } from "./change.ts";
 import type { Change } from "./change.ts";
 import { emptyDirectory, step } from "./fold.ts";
 import type { Directory, Happened } from "./fold.ts";
@@ -260,7 +261,7 @@ describe("our Messages' fate", () => {
     ]);
   });
 
-  it("is Unsent only for a Refused Unsent, and nothing else changes anything", () => {
+  it("is Unsent for a Refused Unsent, Rejected with its reply for a Refused Rejected, and nothing else changes anything", () => {
     const intent = IntentId.make("i1");
 
     const { changes } = fold([
@@ -275,6 +276,44 @@ describe("our Messages' fate", () => {
 
     expect(changes.filter(({ sequence }) => sequence === 2)).toStrictEqual([
       { _tag: "Unsent", intent, network: "libera", sequence: 2 },
+      { _tag: "Rejected", intent, network: "libera", reply: "404", sequence: 2 },
+    ]);
+  });
+
+  it("delivers as every store does: confirmed stays confirmed, a repeat changes nothing, and the latest wins", () => {
+    const intent = IntentId.make("i1");
+    const base = { intent, network: "libera", sequence: 3 };
+    const rejected = { ...base, _tag: "Rejected", reply: "FAIL CANNOT_SEND" } as const;
+    const unsent = { ...base, _tag: "Unsent" } as const;
+
+    const confirmed = {
+      ...base,
+      _tag: "Confirmed",
+      at: { _tag: "Unknown" },
+      id: { _tag: "Unknown" },
+      messageId: undefined,
+      text: "hi",
+    } as const;
+
+    expect([
+      delivered({ _tag: "Pending" }, rejected),
+      delivered({ _tag: "Rejected", reply: "FAIL CANNOT_SEND" }, rejected),
+      delivered({ _tag: "Unsent" }, rejected),
+      delivered({ _tag: "Rejected", reply: "404" }, unsent),
+      delivered({ _tag: "Unsent" }, unsent),
+      delivered({ _tag: "Pending" }, confirmed),
+      delivered(
+        { _tag: "Confirmed", at: { _tag: "Unknown" }, id: { _tag: "Unknown" }, text: "x" },
+        rejected
+      ),
+    ]).toStrictEqual([
+      { _tag: "Rejected", reply: "FAIL CANNOT_SEND" },
+      undefined,
+      { _tag: "Rejected", reply: "FAIL CANNOT_SEND" },
+      { _tag: "Unsent" },
+      undefined,
+      { _tag: "Confirmed", at: { _tag: "Unknown" }, id: { _tag: "Unknown" }, text: "hi" },
+      undefined,
     ]);
   });
 });

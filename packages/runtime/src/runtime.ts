@@ -5,7 +5,15 @@
  * @packageDocumentation
  */
 import { IntentId } from "@iirc/client";
-import type { Client, Inspection, NetworkConfiguration, SayKind, TimerTable } from "@iirc/client";
+import type {
+  Client,
+  Inspection,
+  NetworkConfiguration,
+  News,
+  RefusedReason,
+  SayKind,
+  TimerTable,
+} from "@iirc/client";
 import type { Knowledge } from "@iirc/client/known";
 import { defaultCapacity, defaultPacing } from "@iirc/outbox";
 import type { Pacing } from "@iirc/outbox";
@@ -78,6 +86,43 @@ export interface Saying {
   readonly intent?: IntentId | undefined;
 }
 
+/** Why the Client refused a `Say` in the step that took it: no Session, or no Line can carry it. */
+export type StepRefusal = Extract<RefusedReason, { readonly _tag: "Offline" | "Unsendable" }>;
+
+/**
+ * What a `say` answers: the `Say` stepped and its Message reported, or refused by the
+ * Client in that same step. Either way it was journaled at `sequence`. A refusal that
+ * comes later, `Rejected` or `Unsent`, comes as News.
+ */
+export type SayOutcome =
+  | { readonly _tag: "Said"; readonly intent: IntentId; readonly sequence: Sequence }
+  | {
+      readonly _tag: "Refused";
+      readonly intent: IntentId;
+      readonly sequence: Sequence;
+      readonly reason: StepRefusal;
+    };
+
+/**
+ * The refusal of a `Say` in its own step's News, if any.
+ * @param news - The step's News.
+ * @param intent - The `Say`'s intent.
+ * @returns Its refusal, or none.
+ */
+const refusalIn = (news: readonly News[], intent: IntentId): StepRefusal | undefined => {
+  for (const one of news) {
+    if (
+      one._tag === "Refused" &&
+      one.intent === intent &&
+      (one.reason._tag === "Offline" || one.reason._tag === "Unsendable")
+    ) {
+      return one.reason;
+    }
+  }
+
+  return undefined;
+};
+
 /** A Network as the Runtime holds it, for agents and debugging. */
 export interface NetworkInspection {
   readonly status: NetworkStatus;
@@ -117,14 +162,15 @@ export interface RuntimeService {
     network: NetworkId,
     configuration: NetworkConfiguration
   ) => Effect.Effect<Sequence, NetworkStopped>;
-  /** Journals a `Say`, under the caller's intent id or one the Runtime names, and waits until it is stepped. */
+  /**
+   * Journals a `Say`, under the caller's intent id or one the Runtime names, and waits
+   * until it is stepped. It answers with what that step already knew: `Said`, or `Refused`
+   * when the Client refused it in the same step, as `Offline` or `Unsendable`.
+   */
   readonly say: (
     network: NetworkId,
     saying: Saying
-  ) => Effect.Effect<
-    { readonly intent: IntentId; readonly sequence: Sequence },
-    UnknownNetwork | NetworkStopped
-  >;
+  ) => Effect.Effect<SayOutcome, UnknownNetwork | NetworkStopped>;
   /**
    * Whether a `Say` under this intent was journaled for the Network, by its sequence.
    * It reads the Network's Inputs once, to the Journal's end as it stood, and ends. A
@@ -263,7 +309,10 @@ export const makeRuntime = <S>(
     const service: RuntimeService = {
       configure: (id, configuration) =>
         Effect.flatMap(findOrAdd(id), (network) =>
-          tell(network, (at) => ({ _tag: "Configured", at, configuration }))
+          Effect.map(
+            tell(network, (at) => ({ _tag: "Configured", at, configuration })),
+            ({ sequence }) => sequence
+          )
         ),
       inspect: (id) =>
         Effect.gen(function* () {
@@ -294,7 +343,12 @@ export const makeRuntime = <S>(
       ),
       news: (from = {}) => newsAfter(client, ports.journal, from.after),
       retry: (id) =>
-        Effect.flatMap(find(id), (network) => tell(network, (at) => ({ _tag: "Retry", at }))),
+        Effect.flatMap(find(id), (network) =>
+          Effect.map(
+            tell(network, (at) => ({ _tag: "Retry", at })),
+            ({ sequence }) => sequence
+          )
+        ),
       said: (id, intent) =>
         ports.journal.read({ network: id }).pipe(
           Stream.filter(
@@ -312,7 +366,7 @@ export const makeRuntime = <S>(
           const intent = saying.intent ?? (yield* intentId);
           const { kind, target, text } = saying;
 
-          const sequence = yield* tell(network, (at) => ({
+          const { news, sequence } = yield* tell(network, (at) => ({
             _tag: "Say",
             at,
             intent,
@@ -321,7 +375,11 @@ export const makeRuntime = <S>(
             text,
           }));
 
-          return { intent, sequence };
+          const reason = refusalIn(news, intent);
+
+          return reason === undefined
+            ? ({ _tag: "Said", intent, sequence } as const)
+            : ({ _tag: "Refused", intent, reason, sequence } as const);
         }),
     };
 

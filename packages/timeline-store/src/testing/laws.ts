@@ -923,6 +923,74 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
       Effect.gen(function* () {
         yield* apply(store, 2, [
           ...opened(2),
+          added(2, channel, position(0, 2), said("refused", "Pending")),
+          added(2, channel, position(1, 2, 1), said("echoed", "Pending")),
+        ]);
+        yield* apply(store, 3, [
+          {
+            _tag: "Confirmed",
+            at: known(at(4)),
+            id: { _tag: "Unknown" },
+            intent: IntentId.make("intent-echoed"),
+            messageId: undefined,
+            network: libera,
+            sequence: 3,
+            text: "echoed",
+          },
+        ]);
+        yield* apply(store, 4, [
+          {
+            _tag: "Rejected",
+            intent: IntentId.make("intent-refused"),
+            network: libera,
+            reply: "404",
+            sequence: 4,
+          },
+          {
+            _tag: "Rejected",
+            intent: IntentId.make("intent-echoed"),
+            network: libera,
+            reply: "404",
+            sequence: 4,
+          },
+        ]);
+        // The same again changes nothing, so the item keeps the step that last changed it.
+        yield* apply(store, 5, [
+          {
+            _tag: "Rejected",
+            intent: IntentId.make("intent-refused"),
+            network: libera,
+            reply: "404",
+            sequence: 5,
+          },
+        ]);
+
+        const items = yield* store.locate(libera, 2);
+
+        yield* same(
+          "deliveries",
+          items.map((item) => {
+            const delivery = deliveryOf(item);
+
+            return [
+              textOf(item),
+              delivery?._tag === "Rejected" ? `Rejected ${delivery.reply}` : delivery?._tag,
+              item.changed,
+            ];
+          }),
+          [
+            ["refused", "Rejected 404", 4],
+            ["echoed", "Confirmed", 3],
+          ]
+        );
+      }),
+    name: "marks our Message Rejected in place with the Ircd's reply, unless it was confirmed",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
           described(2, third, "Channel", "#c", "#c"),
           added(2, channel, position(0, 2), said("a-first"), "m1"),
           added(2, channel, position(2, 2, 1), said("a-second")),

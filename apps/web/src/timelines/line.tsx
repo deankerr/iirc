@@ -66,12 +66,8 @@ const Nick = ({ colour, nick }: { readonly colour: number; readonly nick: string
   <bdi className={nickClasses[colour]}>{nick}</bdi>
 );
 
-const deliveries: Readonly<Record<Delivery, string | undefined>> = {
-  Confirmed: undefined,
-  Pending: "sending",
-  Unconfirmed: "unconfirmed",
-  Unsent: "not sent",
-};
+// Delivery that failed, drawn as not sent.
+const failed: ReadonlySet<Delivery> = new Set(["Unsent", "Rejected"]);
 
 /**
  * A piece of a description.
@@ -156,11 +152,15 @@ export const Line = ({ row }: { readonly row: Row }) => {
     );
   }
 
-  const delivery = line.delivery === undefined ? undefined : deliveries[line.delivery];
+  const delivery = line.delivered;
   const nick = <Nick colour={line.colour} nick={line.nick} />;
 
   return (
-    <div className={line.delivery === "Unsent" ? styles.unsent : styles.message}>
+    <div
+      className={
+        line.delivery !== undefined && failed.has(line.delivery) ? styles.unsent : styles.message
+      }
+    >
       {time}
       <span className={styles.sender}>
         {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}

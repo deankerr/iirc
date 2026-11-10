@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./commands": "./src/commands.ts",
+    "./composer": "./src/composer.ts",
     "./render": "./src/render.ts",
     "./sign-in": "./src/sign-in.ts",
     "./timelines": "./src/timelines.ts"

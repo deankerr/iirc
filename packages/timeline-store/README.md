@@ -46,10 +46,11 @@ Gap = { network, from, to: Position | undefined, changed }
 - **`Added`** keeps an item at its position in its Timeline, with **one item per message id per Timeline**. When an item with the same message id, or at the same position, is already in that Timeline, the first is kept and the new one dropped. An item with no message id is always kept. The same message id may stand in many Timelines.
 - **`Confirmed`** confirms every item of ours for that intent in that Network, wherever it stands, with the Ircd's time, id, and text. Its **position does not move**. From then on the item is kept under the Ircd's message id too, unless another item in its Timeline already has that id, so the same Message arriving again from history is dropped. An item already confirmed stays as it was.
 - **`Unsent`** marks every item of ours for that intent in that Network as `Unsent`, in place, unless it was confirmed.
+- **`Rejected`** marks every item of ours for that intent in that Network as `Rejected` with the Ircd's `reply`, in place, unless it was confirmed. Every store applies `Confirmed`, `Unsent`, and `Rejected` by `delivered` from `@iirc/timelines`, and one that leaves an item as it was does not change it.
 - **`Merged`** moves every item of `from` into `into`, by the same rule as `Added`, so an item whose message id or position `into` already has is dropped. `from` is gone from `timelines` and leaves a **tombstone** naming `into`. A tombstone always names a Timeline that exists: a tombstone that named `from` is moved on to `into`.
 - **`Gap`** keeps a Network's Gap by where it began, so the one that says where it ended replaces the one that did not.
 
-Each Timeline, item, tombstone, and Gap records `changed`, the last sequence that changed it. A Timeline's counts any change to its items too: one added, confirmed, marked unsent, or moved in.
+Each Timeline, item, tombstone, and Gap records `changed`, the last sequence that changed it. A Timeline's counts any change to its items too: one added, confirmed, marked unsent or rejected, or moved in.
 
 ## Reading
 

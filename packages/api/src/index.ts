@@ -67,6 +67,7 @@ export {
   RefusedReason,
   Resume,
   Said,
+  StepRefusal,
   SaidAnswer,
   SayRequest,
   Sequence,

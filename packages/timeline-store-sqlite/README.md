@@ -39,7 +39,7 @@ PRAGMA user_version = 1;  -- the layout's version
 | --- | --- |
 | `window` | the primary key `(timeline, cursor)`, from the position in either direction, with the Timeline and any tombstone found by id |
 | one item per message id, as `Added` and `Merged` keep it | `items_by_message_id`, unique on `(timeline, message_id)` where there is one |
-| `Confirmed` and `Unsent` | `items_by_intent` on `(network, intent)` |
+| `Confirmed`, `Unsent`, and `Rejected` | `items_by_intent` on `(network, intent)` |
 | `locate` | `items_by_step` on `(network, step, cursor, timeline)`, from the page's `after` by the row value `(cursor, timeline)`, covered by the index |
 | `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and the primary key of `items` for each one's latest position |
 | `gaps`, and each run of `collapsedGaps` | the primary key `(network, from_cursor)`, bounded below. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended, so one seek finds the last Gap that began strictly before the range's start, which is kept if it reaches the start, and every Gap that began at or after the start is in. Every other condition is on the key, except for a page read before a cursor, which keeps only the Gaps that ended before it: that run is bounded above on the key too, by the cursor, since a Gap that ended before it began before it, and only then filtered on `to_cursor` for which Gaps are the page's, so it never reads the Gaps after the cursor. A run is one statement that counts its Gaps from the index alone, and takes the first's start and the last's end from either end of the key's range |

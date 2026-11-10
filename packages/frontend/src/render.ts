@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import type { Activity, EndReason, ItemContent } from "@iirc/api";
+import type { Activity, Delivery as WireDelivery, EndReason, ItemContent } from "@iirc/api";
 import { casefold } from "@iirc/protocol/casemapping";
 import { parseFormatting } from "@iirc/protocol/format";
 import type { Style } from "@iirc/protocol/format";
@@ -246,7 +246,7 @@ export type Part =
   | { readonly _tag: "Said"; readonly inlines: readonly Inline[] };
 
 /** Where one of our Messages stands with the Ircd, as shown. */
-export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent";
+export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rejected";
 
 /**
  * One item as a line: a Message, by its sender, with its text and, for one of ours, its
@@ -260,6 +260,8 @@ export type Line =
       readonly colour: number;
       readonly text: readonly Inline[];
       readonly delivery: Delivery | undefined;
+      /** How its delivery stands in a few words, or none when there is nothing to say. */
+      readonly delivered: string | undefined;
     }
   | {
       readonly _tag: "Description";
@@ -422,6 +424,40 @@ export const endReason = (reason: EndReason): string => {
 };
 
 /**
+ * How one of our Messages stands, in a few words: nothing once the Ircd confirmed it, and
+ * a refusal with the Ircd's numeric or code, contained, never its text.
+ * @param delivery - How it stands.
+ * @returns The words, or none.
+ */
+const deliveryWords = (delivery: WireDelivery): string | undefined => {
+  switch (delivery._tag) {
+    case "Pending": {
+      return "sending";
+    }
+
+    case "Unconfirmed": {
+      return "unconfirmed";
+    }
+
+    case "Unsent": {
+      return "not sent";
+    }
+
+    case "Rejected": {
+      return `refused: ${contained(delivery.reply)}`;
+    }
+
+    case "Confirmed": {
+      return undefined;
+    }
+
+    default: {
+      return delivery satisfies never;
+    }
+  }
+};
+
+/**
  * An item as a line.
  * @param content - What the item shows.
  * @returns The line.
@@ -437,6 +473,7 @@ export const lineOf = (content: ItemContent): Line => {
       return {
         _tag: "Message",
         colour: nickColour(content.sender),
+        delivered: delivery === undefined ? undefined : deliveryWords(delivery),
         delivery: delivery?._tag,
         kind: content.kind,
         nick: contained(content.sender),

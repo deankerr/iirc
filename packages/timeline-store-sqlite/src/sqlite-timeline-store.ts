@@ -17,8 +17,8 @@ import type {
   Overflowed,
   TimelineStoreService,
 } from "@iirc/timeline-store";
-import { TimelineId, cursorOf, emptyDirectory } from "@iirc/timelines";
-import type { Change, Content, Directory, Position } from "@iirc/timelines";
+import { TimelineId, cursorOf, delivered, emptyDirectory } from "@iirc/timelines";
+import type { Change, Content, DeliveryChange, Directory, Position } from "@iirc/timelines";
 import { Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
 import type { Duration, Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
@@ -264,30 +264,19 @@ const cursorOrNull = (position: Position | undefined) =>
   position === undefined ? null : cursorOf(position);
 
 /**
- * The content a confirmation or an `Unsent` leaves of one of ours.
+ * The content a delivery change leaves of one of ours.
  * @param content - The item's content.
  * @param change - The confirmation, or the news that it never left.
  * @returns The content after it, or `undefined` when it changes nothing.
  */
-const delivered = (
-  content: Content,
-  change: Extract<Change, { readonly _tag: "Confirmed" | "Unsent" }>
-): Content | undefined => {
-  if (
-    content._tag !== "Message" ||
-    content.ours === undefined ||
-    content.ours.delivery._tag === "Confirmed" ||
-    (change._tag === "Unsent" && content.ours.delivery._tag === "Unsent")
-  ) {
+const deliveredContent = (content: Content, change: DeliveryChange): Content | undefined => {
+  if (content._tag !== "Message" || content.ours === undefined) {
     return undefined;
   }
 
-  const delivery =
-    change._tag === "Confirmed"
-      ? { _tag: "Confirmed" as const, at: change.at, id: change.id, text: change.text }
-      : { _tag: "Unsent" as const };
+  const delivery = delivered(content.ours.delivery, change);
 
-  return { ...content, ours: { ...content.ours, delivery } };
+  return delivery === undefined ? undefined : { ...content, ours: { ...content.ours, delivery } };
 };
 
 // Rows are decoded in one go, as one operation, since the Schemas need no services.
@@ -567,7 +556,7 @@ export const makeSqliteTimelineStore = (
     const touch = (timeline: TimelineId, sequence: number) =>
       sql`UPDATE timelines SET changed = ${sequence} WHERE id = ${timeline}`;
 
-    const deliver = (change: Extract<Change, { readonly _tag: "Confirmed" | "Unsent" }>) =>
+    const deliver = (change: DeliveryChange) =>
       Effect.gen(function* () {
         const rows = yield* sql`
           SELECT timeline, cursor, message_id AS messageId, content FROM items
@@ -576,7 +565,7 @@ export const makeSqliteTimelineStore = (
         `.pipe(Effect.flatMap(decodeOurs));
 
         for (const row of rows) {
-          const content = delivered(row.content, change);
+          const content = deliveredContent(row.content, change);
 
           if (content === undefined) {
             continue;
@@ -646,7 +635,8 @@ export const makeSqliteTimelineStore = (
           }
 
           case "Confirmed":
-          case "Unsent": {
+          case "Unsent":
+          case "Rejected": {
             yield* deliver(change);
             break;
           }

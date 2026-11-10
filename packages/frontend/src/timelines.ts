@@ -159,6 +159,16 @@ export interface Timelines {
   readonly open: TimelineId | undefined;
   /** The Timelines closed most recently, latest first, whose windows are kept. */
   readonly closed: readonly TimelineId[];
+  /**
+   * The Timeline the Daemon placed a Message the Owner said in, to open once its Network
+   * lists it, if it is a Direct Message Timeline.
+   */
+  readonly located: TimelineId | undefined;
+  /**
+   * How many times the Owner opened a Timeline. A placement captures it when its Say is
+   * submitted, and one from before the Owner opened another is ignored.
+   */
+  readonly navigation: number;
   /** The most items a window holds. */
   readonly windowCap: number;
   /** How many windows of closed Timelines are kept. */
@@ -232,6 +242,9 @@ export type WindowRequest =
  * - `NetworksRead`, `ListRead`, `StatusRead`, `WindowRead`: what a read answered.
  * - `Vanished`: a window's read was `UnknownTimeline`. `NetworkVanished`: `UnknownNetwork`.
  * - `Changed`, `Overflowed`, `Reset`: the changes stream's events, with the place each left.
+ * - `Located`: the Daemon placed a Message the Owner said, as `/msg` does, in this Timeline,
+ *   with the `navigation` its Say was submitted at, ignored once the Owner opened another,
+ *   which opens once its Network lists it, if it is a Direct Message Timeline.
  * - `Opened`: the Owner opened a Timeline. `OlderWanted` and `NewerWanted`: they want what
  *   lies before or after what is held. `Following`: whether they are at the latest.
  */
@@ -257,6 +270,7 @@ export type TimelinesEvent =
   | { readonly _tag: "Overflowed"; readonly place: Place; readonly overflow: TimelineOverflow }
   | { readonly _tag: "Reset"; readonly reset: TimelineReset }
   | { readonly _tag: "Opened"; readonly timeline: TimelineId }
+  | { readonly _tag: "Located"; readonly timeline: TimelineId; readonly navigation: number }
   | { readonly _tag: "OlderWanted"; readonly timeline: TimelineId }
   | { readonly _tag: "NewerWanted"; readonly timeline: TimelineId }
   | { readonly _tag: "Following"; readonly timeline: TimelineId; readonly following: boolean };
@@ -277,7 +291,9 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   entries: unreadStatus,
   follow: { _tag: "Waiting", version: undefined },
   kept,
+  located: undefined,
   merged: new Map(),
+  navigation: 0,
   networks: new Map(),
   nextGeneration: 0,
   open: undefined,
@@ -1742,6 +1758,34 @@ const marked = (
 // The reducer.
 
 /**
+ * Opens the Timeline a Message the Owner said was placed in, once its Network lists it:
+ * a Direct Message Timeline that still follows its partner. Any other kind is let go, so a
+ * Message to a Channel opens nothing. The Daemon's routing chose it, so the Frontend never
+ * matches a name itself.
+ * @param state - The state.
+ * @returns The state, with the Timeline open once it is listed.
+ */
+const found = (state: Timelines): Timelines => {
+  const { located } = state;
+
+  if (located === undefined) {
+    return state;
+  }
+
+  for (const network of state.networks.values()) {
+    const timeline = network.timelines.get(located);
+
+    if (timeline !== undefined) {
+      return timeline.kind === "Direct" && !timeline.detached
+        ? opening({ ...state, located: undefined }, timeline.id)
+        : { ...state, located: undefined };
+    }
+  }
+
+  return state;
+};
+
+/**
  * The state after an event.
  * @param state - The state before.
  * @param event - What happened.
@@ -1822,7 +1866,19 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
     }
 
     case "Opened": {
-      return { state: opening(state, event.timeline) };
+      return {
+        state: opening(
+          { ...state, located: undefined, navigation: state.navigation + 1 },
+          event.timeline
+        ),
+      };
+    }
+
+    case "Located": {
+      return {
+        state:
+          event.navigation === state.navigation ? { ...state, located: event.timeline } : state,
+      };
     }
 
     case "OlderWanted":
@@ -1846,7 +1902,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 export const reduceTimelines = (state: Timelines, event: TimelinesEvent): Timelines => {
   const { recorded, state: after } = apply(state, event);
 
-  return record(after, recorded);
+  return found(record(after, recorded));
 };
 
 // What to read.

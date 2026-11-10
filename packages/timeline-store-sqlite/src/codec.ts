@@ -116,6 +116,7 @@ const EndReason = Schema.TaggedUnion({
 const Delivery = Schema.TaggedUnion({
   Confirmed: { at: Fact(Instant), id: Fact(MessageId), text: Schema.String },
   Pending: {},
+  Rejected: { reply: Schema.String },
   Unconfirmed: {},
   Unsent: {},
 });

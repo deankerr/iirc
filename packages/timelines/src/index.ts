@@ -4,7 +4,9 @@
  *
  * @packageDocumentation
  */
-export type { Change } from "./change.ts";
+export { delivered } from "./change.ts";
+
+export type { Change, DeliveryChange } from "./change.ts";
 
 export type { Content, Delivery, OursItem } from "./content.ts";
 

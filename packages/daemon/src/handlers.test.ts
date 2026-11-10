@@ -328,7 +328,7 @@ describe("the handlers", () => {
             channel.members.map((member) => member.nick),
           ]),
           messages,
-          said: said.intent.length,
+          said: [said._tag, said.intent.length],
           session: known.session._tag,
         };
       })
@@ -348,8 +348,62 @@ describe("the handlers", () => {
       listed: [{ network: "libera", status: { _tag: "Running" } }],
       members: [["#iirc", ["iirc", "peer"]]],
       messages: ["iirc #iirc :hello", "peer #iirc :hi there"],
-      said: 32,
+      said: ["Said", 32],
       session: "Registered",
+    });
+  });
+
+  it("answers a Say the Client refused as it took it: Offline with no Session, Unsendable when no Line can carry it", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor });
+        yield* settle;
+
+        const offline = yield* api.networks.say({
+          params: { network: libera },
+          payload: {
+            intent: CallerIntent.make("early"),
+            kind: "Privmsg",
+            target: "#iirc",
+            text: "hi",
+          },
+        });
+
+        yield* registerOnFloor(world.memory);
+        yield* settle;
+
+        // A list of Targets is never one, so no Line carries it.
+        const unsendable = yield* api.networks.say({
+          params: { network: libera },
+          payload: {
+            intent: CallerIntent.make("listed"),
+            kind: "Privmsg",
+            target: "#a,#b",
+            text: "hi",
+          },
+        });
+
+        const said = yield* api.networks.said({
+          params: { intent: CallerIntent.make("early"), network: libera },
+        });
+
+        return {
+          offline: [offline._tag, offline.intent, "reason" in offline ? offline.reason : undefined],
+          said: said._tag,
+          unsendable: [
+            unsendable._tag,
+            unsendable.intent,
+            "reason" in unsendable ? unsendable.reason : undefined,
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      offline: ["Refused", "early", { _tag: "Offline" }],
+      // Refused, and journaled all the same, at the sequence it answered with.
+      said: "Journaled",
+      unsendable: ["Refused", "listed", { _tag: "Unsendable" }],
     });
   });
 

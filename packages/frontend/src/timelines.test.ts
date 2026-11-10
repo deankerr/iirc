@@ -1342,6 +1342,20 @@ const numberedWindow = (from: number, to: number, earlier: boolean, later: boole
     version: 1,
   });
 
+const direct = (id: string, name: string, detached = false) =>
+  Schema.encodeSync(Timeline)(
+    decodeTimeline({
+      changed: 6,
+      detached,
+      id,
+      key: detached ? null : name.toLowerCase(),
+      kind: "Direct",
+      latest: null,
+      name,
+      network: "alpha",
+    })
+  );
+
 describe("the Timelines' state", () => {
   it("follows the stream after the smallest `through` it read", () => {
     let state = initialTimelines;
@@ -1433,6 +1447,76 @@ describe("the Timelines' state", () => {
           : 0,
       items: shownItems(state),
     }).toStrictEqual({ changedOfSix: 8, items: [3, 7, 4, 6] });
+  });
+
+  it("opens the Direct Message Timeline the Daemon placed a Message in, by id, never by name", () => {
+    // Under CASEMAPPING=ascii these are two Users, though rfc1459 folds them together.
+    const square = timelineId(idOf(6));
+    const curly = timelineId(idOf(7));
+
+    let state = reduceTimelines(following(), changed(6, { timelines: [direct(idOf(6), "[bob]")] }));
+
+    // Placed in `{bob}`'s, which is not listed yet: it opens once it is.
+    state = reduceTimelines(state, { _tag: "Located", navigation: 1, timeline: curly });
+    const waiting = [state.open, state.located];
+
+    state = reduceTimelines(state, changed(7, { timelines: [direct(idOf(7), "{bob}")] }));
+    const opens = [state.open, state.located];
+
+    // Already listed: opened at once.
+    const atOnce = reduceTimelines(state, {
+      _tag: "Located",
+      navigation: 1,
+      timeline: square,
+    }).open;
+
+    // A Channel's, or a detached one, opens nothing.
+    const channel = reduceTimelines(following(), {
+      _tag: "Located",
+      navigation: 1,
+      timeline: timelineId(idOf(2)),
+    });
+
+    const detached = reduceTimelines(
+      reduceTimelines(following(), changed(8, { timelines: [direct(idOf(8), "gone", true)] })),
+      { _tag: "Located", navigation: 1, timeline: timelineId(idOf(8)) }
+    );
+
+    expect({
+      atOnce,
+      channel: [channel.open, channel.located],
+      detached: [detached.open, detached.located],
+      opens,
+      waiting,
+    }).toStrictEqual({
+      atOnce: square,
+      channel: [three, undefined],
+      detached: [three, undefined],
+      opens: [curly, undefined],
+      waiting: [three, curly],
+    });
+  });
+
+  it("ignores a placement from before the Owner opened another Timeline", () => {
+    const listed = reduceTimelines(
+      following(),
+      changed(6, { timelines: [direct(idOf(6), "bob")] })
+    );
+
+    // Submitted at navigation 1, then the Owner opened the Channel `#b`.
+    const elsewhere = reduceTimelines(listed, { _tag: "Opened", timeline: timelineId(idOf(2)) });
+
+    const late = reduceTimelines(elsewhere, {
+      _tag: "Located",
+      navigation: 1,
+      timeline: timelineId(idOf(6)),
+    });
+
+    expect({
+      navigation: [listed.navigation, elsewhere.navigation],
+      open: late.open,
+      pending: late.located,
+    }).toStrictEqual({ navigation: [1, 2], open: idOf(2), pending: undefined });
   });
 
   it("keeps an item outside what a window loaded out of it", () => {

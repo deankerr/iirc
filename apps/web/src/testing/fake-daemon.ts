@@ -6,6 +6,7 @@
  */
 import type {
   Knowledge,
+  Located,
   NetworkEntry,
   Timeline,
   TimelineChangesEvent,
@@ -21,6 +22,7 @@ import type { Atom } from "effect/reactivity";
 
 import { layerDaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { IntentNames } from "../composer/atoms.ts";
 import { Waits } from "../timelines/atoms.ts";
 import type { WaitTimes } from "../timelines/atoms.ts";
 
@@ -32,7 +34,16 @@ type Answer =
   | (typeof NetworkEntry.Encoded)[]
   | typeof Knowledge.Encoded
   | typeof TimelineList.Encoded
-  | typeof TimelineWindow.Encoded;
+  | typeof TimelineWindow.Encoded
+  | typeof Located.Encoded
+  | { readonly _tag: "Said"; readonly intent: string; readonly sequence: number }
+  | {
+      readonly _tag: "Refused";
+      readonly intent: string;
+      readonly sequence: number;
+      readonly reason: { readonly _tag: "Offline" | "Unsendable" };
+    }
+  | { readonly _tag: "Journaled"; readonly sequence: number };
 
 const json = (status: number, body: Answer) => Response.json(body, { status });
 
@@ -87,6 +98,32 @@ const windowOf = (
 
 const SignInBody = Schema.fromJsonString(Schema.Struct({ key: Schema.String }));
 
+const SayBody = Schema.fromJsonString(
+  Schema.Struct({
+    intent: Schema.String,
+    kind: Schema.String,
+    target: Schema.String,
+    text: Schema.String,
+  })
+);
+
+/** A `say` the fake was asked for, as its body said it. */
+type SaidToFake = typeof SayBody.Type;
+
+/**
+ * How the fake answers a `say`: journaled at the next step, said or refused there as
+ * `Offline`, one of the API's errors, no answer and never journaled (`Down`), or no answer
+ * and journaled late, only after the next `said` has answered (`Lost`).
+ */
+type SayAnswer =
+  | "Said"
+  | "Offline"
+  | "NetworkStopped"
+  | "NetworkStoppedJournaled"
+  | "UnknownNetwork"
+  | "Down"
+  | "Lost";
+
 /**
  * Whether a redacted value still holds its value.
  * @param redacted - The value.
@@ -112,6 +149,12 @@ export const fakeDaemon = () => {
   const keysSent: string[] = [];
 
   const followers: Follower[] = [];
+  const says: SaidToFake[] = [];
+  const journaled = new Map<string, number>();
+  const answers: SayAnswer[] = [];
+  const late: string[] = [];
+  const locatesRead: number[] = [];
+  const locatesHeld: (() => void)[] = [];
   const windowsRead: string[] = [];
   const hung: string[] = [];
   const networksHeld: (() => void)[] = [];
@@ -124,13 +167,35 @@ export const fakeDaemon = () => {
     gatewayOnly: false,
     /** Whether a request to follow the changes never begins its answer. */
     hangChanges: false,
+    /** Whether each `at/{sequence}` read waits until released. */
+    holdLocates: false,
     /** Whether each request for the Network list waits until released. */
     holdNetworks: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
+    /** Each intent journaled, and its sequence, which `said` answers from. */
+    journaled,
     keysSent,
+    /** Says whose request got no answer, journaled only after the next `said`. */
+    late,
+    /** How many of the next `at/{sequence}` reads get no answer. */
+    locateFailures: 0,
+    /** Releases each `at/{sequence}` read held, in the order they came. */
+    locatesHeld,
+    /** Each `at/{sequence}` read, by its sequence, failed or held ones included. */
+    locatesRead,
     /** Releases each request for the Network list held, in the order they came. */
     networksHeld,
+    /** The sequence the next `say` is journaled at. */
+    nextSequence: 10,
+    /** The items each step placed, which `at/{sequence}` answers with. */
+    placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
+    /** Whether `said` answers at all. */
+    saidDown: false,
+    /** How the next `say`s are answered, first to last; past them, each is said. */
+    sayAnswers: answers,
+    /** Each `say` asked for, in order, refused or not. */
+    says,
     /** Each Network's connection, as `known` gives it. */
     sessions: new Map<string, (typeof Knowledge.Encoded)["session"]>([
       ["libera", { _tag: "Registered", ircd: "ircd.test", since: 1 }],
@@ -143,6 +208,35 @@ export const fakeDaemon = () => {
     timelines: new Map<string, FakeTimeline[]>([["libera", []]]),
     /** Each read of a window, by its query, for a test to look at. */
     windowsRead,
+  };
+
+  /**
+   * A stream of Server-Sent Events, kept in a list of followers while it is open.
+   * @param list - The followers.
+   * @param url - The request's URL.
+   * @param headers - Its headers.
+   * @param init - The request.
+   * @returns The response.
+   */
+  const following = (list: Follower[], url: URL, headers: Headers, init: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        const follower = {
+          after: url.searchParams.get("after") ?? undefined,
+          controller,
+          lastEventId: headers.get("last-event-id") ?? undefined,
+        };
+
+        list.push(follower);
+
+        // A follower that stops following is gone, as its connection would be.
+        init.signal?.addEventListener("abort", () => {
+          list.splice(list.indexOf(follower), 1);
+        });
+      },
+    });
+
+    return new Response(body, { headers: { "content-type": "text/event-stream" } });
   };
 
   /**
@@ -168,6 +262,56 @@ export const fakeDaemon = () => {
   const signedInOnly = (answer: () => Response) =>
     daemon.signedIn ? answer() : json(401, { _tag: "Unauthorized" });
 
+  /**
+   * `said`, and the items a step placed, or nothing for any other route.
+   * @param url - The request's URL.
+   * @returns The answer, or nothing.
+   */
+  const stepRoute = (url: URL): Response | undefined => {
+    const said = /^\/api\/networks\/(?<network>[^/]+)\/said\/(?<intent>[^/]+)$/u.exec(
+      url.pathname
+    )?.groups;
+
+    if (said?.intent !== undefined) {
+      const { intent } = said;
+      const sequence = daemon.journaled.get(intent);
+
+      if (daemon.saidDown) {
+        throw new TypeError("fetch failed");
+      }
+
+      // A request that got no answer was still appending, and commits only now, after
+      // this answer: the race that makes `NotJournaled` unknown after a lost response.
+      for (const late of daemon.late.splice(0)) {
+        daemon.journaled.set(late, daemon.nextSequence);
+        daemon.nextSequence += 1;
+      }
+
+      return signedInOnly(() =>
+        json(
+          200,
+          sequence === undefined ? { _tag: "NotJournaled" } : { _tag: "Journaled", sequence }
+        )
+      );
+    }
+
+    const at = /^\/api\/networks\/(?<network>[^/]+)\/at\/(?<sequence>\d+)$/u.exec(
+      url.pathname
+    )?.groups;
+
+    if (at?.sequence !== undefined) {
+      const items = daemon.placed.get(Number(at.sequence)) ?? [];
+
+      daemon.locatesRead.push(Number(at.sequence));
+
+      return signedInOnly(() =>
+        json(200, { items, more: false, next: null, through: daemon.through, version: 1 })
+      );
+    }
+
+    return undefined;
+  };
+
   const timelineRoute = (url: URL, init: RequestInit): Response | undefined => {
     const headers = new Headers(init.headers);
 
@@ -175,27 +319,14 @@ export const fakeDaemon = () => {
     const known = /^\/api\/networks\/(?<network>[^/]+)\/known$/u.exec(url.pathname)?.groups;
     const window = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)$/u.exec(url.pathname)?.groups;
 
+    const stepped = stepRoute(url);
+
+    if (stepped !== undefined) {
+      return stepped;
+    }
+
     if (url.pathname === "/api/timelines/changes") {
-      return signedInOnly(() => {
-        const body = new ReadableStream<Uint8Array>({
-          start: (controller) => {
-            const follower = {
-              after: url.searchParams.get("after") ?? undefined,
-              controller,
-              lastEventId: headers.get("last-event-id") ?? undefined,
-            };
-
-            followers.push(follower);
-
-            // A follower that stops following is gone, as its connection would be.
-            init.signal?.addEventListener("abort", () => {
-              followers.splice(followers.indexOf(follower), 1);
-            });
-          },
-        });
-
-        return new Response(body, { headers: { "content-type": "text/event-stream" } });
-      });
+      return signedInOnly(() => following(followers, url, headers, init));
     }
 
     if (list?.network !== undefined) {
@@ -280,6 +411,54 @@ export const fakeDaemon = () => {
         );
       }
 
+      case "POST /api/networks/libera/say": {
+        if (!daemon.signedIn) {
+          return json(401, { _tag: "Unauthorized" });
+        }
+
+        const body = Schema.decodeSync(SayBody)(await new Response(init.body).text());
+        const answer = daemon.sayAnswers.shift() ?? "Said";
+
+        daemon.says.push(body);
+
+        if (answer === "Down") {
+          throw new TypeError("fetch failed");
+        }
+
+        if (answer === "Lost") {
+          daemon.late.push(body.intent);
+          throw new TypeError("fetch failed");
+        }
+
+        if (answer === "UnknownNetwork") {
+          return json(404, { _tag: "UnknownNetwork", network: "libera" });
+        }
+
+        if (answer !== "NetworkStopped") {
+          daemon.journaled.set(body.intent, daemon.nextSequence);
+          daemon.nextSequence += 1;
+        }
+
+        if (answer === "Said" || answer === "Offline") {
+          const sequence = daemon.nextSequence - 1;
+
+          return json(
+            200,
+            answer === "Said"
+              ? { _tag: "Said", intent: body.intent, sequence }
+              : { _tag: "Refused", intent: body.intent, reason: { _tag: "Offline" }, sequence }
+          );
+        }
+
+        return json(503, {
+          _tag: "NetworkStopped",
+          intent: body.intent,
+          network: "libera",
+          outcome: "Uncertain",
+          reason: "stopped",
+        });
+      }
+
       default: {
         return timelineRoute(url, init) ?? new Response(null, { status: 404 });
       }
@@ -292,6 +471,26 @@ export const fakeDaemon = () => {
     }
 
     const url = new URL(input instanceof Request ? input.url : input);
+
+    const isLocate = /\/at\/\d+$/u.test(url.pathname);
+
+    if (isLocate && daemon.locateFailures > 0) {
+      daemon.locateFailures -= 1;
+      daemon.locatesRead.push(Number(url.pathname.split("/").at(-1)));
+      throw new TypeError("fetch failed");
+    }
+
+    // A Daemon that holds each read of a step's items until a test releases it.
+    if (isLocate && daemon.holdLocates) {
+      const { promise, resolve } = Promise.withResolvers<undefined>();
+
+      daemon.locatesHeld.push(() => {
+        resolve(undefined);
+      });
+      await promise;
+
+      return await answer(url, init);
+    }
 
     // A Daemon that holds each request for the Network list until a test releases it, and
     // then answers with the Networks it holds by then.
@@ -333,8 +532,10 @@ export const fakeDaemon = () => {
  * may give nothing before it is followed again.
  * @returns The registry.
  */
-export const registryFor = (fetch: typeof globalThis.fetch, waits: Partial<WaitTimes> = {}) =>
-  AtomRegistry.make({
+export const registryFor = (fetch: typeof globalThis.fetch, waits: Partial<WaitTimes> = {}) => {
+  let named = 0;
+
+  return AtomRegistry.make({
     initialValues: [
       [
         runtime.layer,
@@ -348,11 +549,18 @@ export const registryFor = (fetch: typeof globalThis.fetch, waits: Partial<WaitT
             reconnect: "10 millis",
             retry: "10 millis",
             ...waits,
+          }),
+          // Intents named in order, web-1, web-2, and on, so a test can name them.
+          Layer.succeed(IntentNames, () => {
+            named += 1;
+
+            return `web-${named}`;
           })
         ),
       ],
     ],
   });
+};
 
 /**
  * Sets a command and waits until it has finished.

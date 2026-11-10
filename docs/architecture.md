@@ -111,7 +111,7 @@ flowchart TB
 | [`@iirc/timeline-store-sqlite`](../packages/timeline-store-sqlite/README.md) | no | The Timelines in SQLite, each step applied whole, made again from the Journal when it cannot be used. |
 | [`@iirc/api`](../packages/api/README.md) | contract | The HTTP API every Frontend uses, as Schemas and typed errors. |
 | [`@iirc/daemon`](../packages/daemon/README.md) | no | Wires the Layers together, implements the API, and serves it. |
-| [`@iirc/frontend`](../packages/frontend/README.md) | yes | The web frontend's core: what it shows, as plain data and reducers, such as whether the browser is signed in, and the Timelines it follows and how each item is drawn. |
+| [`@iirc/frontend`](../packages/frontend/README.md) | yes | The web frontend's core: what it shows, as plain data and reducers, such as whether the browser is signed in, the Timelines it follows and how each item is drawn, and the commands and the composer. |
 | [`apps/iirc`](../apps/iirc/README.md) | no | The `iirc` executable, whose arguments choose what it runs ([ADR 0007](adr/0007-one-binary-shapes-by-argument.md)). |
 | [`apps/web`](../apps/web/README.md) | no | The web frontend: React over its core, reaching the Daemon only through the API ([ADR 0010](adr/0010-the-web-frontend-is-a-pure-core-under-react.md)). |
 
@@ -262,7 +262,7 @@ sequenceDiagram
 - **Four laws hold across caps.** For every set of caps the kit's `across` gives, a Feature that is off changes nothing, more caps only sharpen facts, replay is exact, and after `CAP DEL` behaviour matches never having had the cap.
 - **Recorded Ircds replay in the suite.** The [fixtures](../fixtures/transcripts/README.md) are real Sessions on Ergo and ngircd, and the Client must follow each with nothing ignored.
 - **Each port has laws** that its memory adapter and its production adapter both pass.
-- **End-to-end runs are deliberate.** `bun run e2e` drives a real Daemon through its API against a private ngircd and Ergo on loopback ports, covering the floor, a restart, pacing, a graceful `QUIT`, and SASL over TLS. It then drives the web frontend in Chromium on a real `iirc daemon --web`, signing in, reloading, and signing out, and reading a Channel's Timeline on a private ngircd: live, formatted, and older on scrolling up.
+- **End-to-end runs are deliberate.** `bun run e2e` drives a real Daemon through its API against a private ngircd and Ergo on loopback ports, covering the floor, a restart, pacing, a graceful `QUIT`, and SASL over TLS. It then drives the web frontend in Chromium on a real `iirc daemon --web`, signing in, reloading, and signing out, and reading a Channel's Timeline on a private ngircd: live, formatted, and older on scrolling up, and saying Messages from the composer there, to the Channel, as an action, and to a nick.
 
 ## Extending it
 

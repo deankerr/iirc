@@ -10,7 +10,7 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, sequence, at, news }        // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 1
+projectionVersion: number                         // 2
 comparePositions(left, right): number
 cursorOf(position): string
 parseCursor(text): Position | undefined
@@ -49,12 +49,13 @@ Every change carries `sequence`, the step that made it, so the store records for
 | A Network's first step | `Described` for its own Timeline, named by the Network's id, with no key. |
 | `Message`, `Activity` | `Described` for each Timeline it opens, renames, or detaches, then one `Added` for each Timeline its `where` touches, once each however often `where` names it. |
 | `Confirmed` | `Confirmed` for its intent in the Network, with the Ircd's time, id, and text. |
-| `Refused` `Unsent` | `Unsent` for its intent in the Network. Other reasons place nothing, so they change nothing. |
+| `Refused` `Unsent` | `Unsent` for its intent in the Network. |
+| `Refused` `Rejected` | `Rejected` for its intent in the Network, with the Ircd's `reply`: its numeric or standard reply's code, never text. `Offline` and `Unsendable` refuse a `Say` in its own step, before any Message is reported, so they place nothing and change nothing. |
 | `SessionBegan`, `SessionEnded`, `ConnectionFailed` | `Added` to the Network's Timeline, and a `Gap` as below. |
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it. |
 | `Ignored` | Nothing. |
 
-An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, `live`, and its `at` and `id` facts, and for an Activity the Activity itself. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not.
+An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, `live`, and its `at` and `id` facts, and for an Activity the Activity itself. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
 
 A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed`, while the Network is not already in one, and ends at the next `SessionBegan`. Each is reported as `Gap { from, to }`, once with `to` left out when it begins, and again with `to` when it ends. A Session that a restart ended began its Gap at the last step folded for the Network before it, since the Daemon may have been gone since then and the fold cannot tell.
 

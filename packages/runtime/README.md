@@ -11,7 +11,7 @@ layerRuntime(client, options?): Layer<Runtime, DecodersMissing | JournalFailed, 
 RuntimeOptions = { pacing?, outboxCapacity?, hangupDrain?, stopTimeout? }
 
 configure(network, configuration): Effect<Sequence, NetworkStopped>      // the first one adds the Network
-say(network, { kind, target, text, intent? }): Effect<{ intent, sequence }, UnknownNetwork | NetworkStopped>
+say(network, { kind, target, text, intent? }): Effect<Said { intent, sequence } | Refused { intent, sequence, reason }, UnknownNetwork | NetworkStopped>
 said(network, intent): Effect<Option<Sequence>, JournalFailed>          // was a Say under this intent journaled?
 retry(network): Effect<Sequence, UnknownNetwork | NetworkStopped>
 known(network): Effect<Knowledge, UnknownNetwork>
@@ -29,7 +29,7 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
 | `hangupDrain` | 5 s | How long a `Hangup` lets queued Lines leave at pace before it hangs up anyway |
 | `stopTimeout` | 5 s | How long shutdown waits for each Network's Connections to close |
 
-- **Owner inputs wait until they are stepped.** `configure`, `say`, and `retry` give the Input's sequence once it is journaled, stepped, and its outputs carried out. `say` names the intent, so its `Refused`, `Message`, and `Confirmed` News can be matched to it. A Network that has stopped fails them with `NetworkStopped`, at once or as it stops, so none waits forever. Closing the Runtime stops every Network with the reason `The Runtime closed`, and fails every call made after, including a `configure` that would add a Network.
+- **Owner inputs wait until they are stepped.** `configure`, `say`, and `retry` give the Input's sequence once it is journaled, stepped, and its outputs carried out. `say` names the intent, so its `Refused`, `Message`, and `Confirmed` News can be matched to it, and answers with what its own step already knew: `Refused` with `Offline` or `Unsendable` when the Client refused it in that step, and `Said` otherwise. It reads this from the News the step gave, which the Network's fiber hands back with the sequence, so no second reader of the Journal is needed. A refusal that comes later, `Unsent` or `Rejected`, is News of a later step. A Network that has stopped fails them with `NetworkStopped`, at once or as it stops, so none waits forever. Closing the Runtime stops every Network with the reason `The Runtime closed`, and fails every call made after, including a `configure` that would add a Network.
 - **`NetworkStopped` does not mean the input was refused.** The Network may have stopped, by a failure or by shutdown, after the Input was durably appended and before the caller heard back. Then the Input is in the Journal, a restart folds it, and some of its outputs may already have been carried out, so a `say` may have been sent. A restart rebuilds state from the journaled Inputs and never carries out a past step's outputs again, so it may equally not have been sent. The outcome is uncertain, and saying it again can send a Message twice. `configure` and `retry` can be given again freely: a `Configured` is the whole Configuration, and a second `Retry` changes nothing a first did not.
 - **Recovering a `say`.** A caller that must not say a Message twice:
   1. Names the intent itself, passing `intent` to `say`.

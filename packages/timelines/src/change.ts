@@ -7,7 +7,7 @@
 import type { Instant, IntentId, MessageId } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 
-import type { Content } from "./content.ts";
+import type { Content, Delivery } from "./content.ts";
 import type { Position } from "./position.ts";
 import type { Descriptor, TimelineId } from "./timeline.ts";
 
@@ -24,6 +24,8 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  *   confirmed in place, with the Ircd's time, id, and text, and never move.
  * - `Unsent`: the Message for `intent` never left. Its items in `network` are marked so,
  *   unless already confirmed.
+ * - `Rejected`: the Ircd refused the Message for `intent`, with `reply`, its numeric or
+ *   standard reply's code. Its items in `network` are marked so, unless already confirmed.
  * - `Merged`: two Timelines' keys met when the Network's casemapping changed. `from`'s
  *   items move into `into`, by the same rule as `Added`, and `from` is left as a tombstone
  *   that says where it went.
@@ -61,6 +63,13 @@ export type Change =
       readonly intent: IntentId;
     }
   | {
+      readonly _tag: "Rejected";
+      readonly sequence: number;
+      readonly network: string;
+      readonly intent: IntentId;
+      readonly reply: string;
+    }
+  | {
       readonly _tag: "Merged";
       readonly sequence: number;
       readonly network: string;
@@ -74,3 +83,43 @@ export type Change =
       readonly from: Position;
       readonly to: Position | undefined;
     };
+
+/** A change to how one of our Messages stands with the Ircd. */
+export type DeliveryChange = Extract<
+  Change,
+  { readonly _tag: "Confirmed" | "Unsent" | "Rejected" }
+>;
+
+/**
+ * How one of our Messages stands after a delivery change, which every store applies alike:
+ * a confirmed Message stays confirmed, and a change that would leave it as it is changes
+ * nothing. Otherwise the latest wins.
+ * @param before - How it stood.
+ * @param change - The change.
+ * @returns How it stands after, or `undefined` when the change changes nothing.
+ */
+export const delivered = (before: Delivery, change: DeliveryChange): Delivery | undefined => {
+  if (before._tag === "Confirmed") {
+    return undefined;
+  }
+
+  switch (change._tag) {
+    case "Confirmed": {
+      return { _tag: "Confirmed", at: change.at, id: change.id, text: change.text };
+    }
+
+    case "Unsent": {
+      return before._tag === "Unsent" ? undefined : { _tag: "Unsent" };
+    }
+
+    case "Rejected": {
+      return before._tag === "Rejected" && before.reply === change.reply
+        ? undefined
+        : { _tag: "Rejected", reply: change.reply };
+    }
+
+    default: {
+      return change satisfies never;
+    }
+  }
+};

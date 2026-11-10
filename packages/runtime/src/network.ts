@@ -10,6 +10,7 @@ import type {
   Client,
   ConnectionId,
   Input,
+  News,
   Output,
   TimerId,
   TimerTable,
@@ -64,12 +65,18 @@ interface Unfilled {
   readonly reason: UnfilledReason;
 }
 
+/** An Owner input once stepped: its sequence, and the News its own step gave. */
+export interface Stepped {
+  readonly sequence: Sequence;
+  readonly news: readonly News[];
+}
+
 /** What waits in a Network's queue, before it is given its `at` and journaled. */
 type Pending =
   | {
       readonly _tag: "Owner";
       readonly input: (at: Instant) => Input;
-      readonly done: Deferred.Deferred<Sequence>;
+      readonly done: Deferred.Deferred<Stepped>;
     }
   | { readonly _tag: "Link"; readonly connection: ConnectionId; readonly event: LinkEvent }
   | { readonly _tag: "Due"; readonly timer: TimerId; readonly due: Instant }
@@ -689,6 +696,7 @@ const drive = <S>(
             connection,
             outputs,
           })),
+          news: step.news,
           sequence,
         };
       });
@@ -702,7 +710,7 @@ const drive = <S>(
           work.push(...(yield* once(next)).more);
         }
 
-        return stepped.sequence;
+        return { news: stepped.news, sequence: stepped.sequence };
       });
 
     // Once a `Stopping` has been stepped, the Network is drained when it holds no
@@ -770,8 +778,8 @@ const drive = <S>(
           return Effect.flatMap(Ref.get(network.stopping), (stopping) =>
             stopping
               ? Effect.void
-              : Effect.flatMap(advance(pending.input), (sequence) =>
-                  Deferred.succeed(pending.done, sequence)
+              : Effect.flatMap(advance(pending.input), (stepped) =>
+                  Deferred.succeed(pending.done, stepped)
                 )
           );
         }
@@ -874,13 +882,13 @@ export const startNetwork = <S>(
  * Gives a Network an Owner input, and waits until it is journaled and stepped.
  * @param network - The Network.
  * @param input - The input, given its `at` when its turn comes.
- * @returns The input's sequence, or `NetworkStopped`.
+ * @returns The input's sequence and its own step's News, or `NetworkStopped`.
  */
 export const tell = <S>(
   network: Network<S>,
   input: (at: Instant) => Input
-): Effect.Effect<Sequence, NetworkStopped> =>
-  Effect.flatMap(Deferred.make<Sequence>(), (done) =>
+): Effect.Effect<Stepped, NetworkStopped> =>
+  Effect.flatMap(Deferred.make<Stepped>(), (done) =>
     Effect.raceFirst(
       Effect.andThen(
         Queue.offer(network.queue, { _tag: "Owner", done, input }),

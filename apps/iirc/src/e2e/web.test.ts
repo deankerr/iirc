@@ -138,6 +138,90 @@ const tracked = (
   }
 ) => input._valueTracker?.getValue() ?? null;
 
+/**
+ * A private ngircd on a loopback port the kernel picks, a real `iirc daemon --web` with a
+ * key, a Network configured through the API to join a Channel there, joined as the Client
+ * knows it, and a raw IRC connection as the other User, `peer`, in the Channel.
+ * @param dataDir - The Daemon's data directory.
+ * @param channel - The Channel.
+ * @returns Everything, for the test to stop.
+ */
+const privateNetwork = async (dataDir: string, channel: string) => {
+  const ngircd: Ircd = await startNgircd();
+  const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
+  const key = created.stdout.trim();
+  const { base, child } = await startDaemon(dataDir);
+  const authorization = { authorization: `Bearer ${key}`, "content-type": "application/json" };
+
+  const api = async (method: string, route: string, body: string | null = null) =>
+    await fetch(`${base}/api${route}`, { body, headers: authorization, method });
+
+  const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+
+  peer.send(`JOIN ${channel}`);
+
+  const configured = await api(
+    "PUT",
+    "/networks/private",
+    JSON.stringify({
+      channels: [{ name: channel }],
+      declined: [],
+      enabled: true,
+      fallbackEncoding: "windows-1252",
+      ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+      login: { _tag: "None" },
+      nicks: ["iirc"],
+      realname: "iirc",
+      username: "iirc",
+    })
+  );
+
+  expect(configured.status).toBe(200);
+
+  // Joined, as the Client knows it, decided from its Knowledge's structure.
+  await expect
+    .poll(
+      async () => {
+        const answer = await api("GET", "/networks/private/known");
+        const known = decodeKnown(await answer.text());
+
+        return known.channels.some((one) => one.name === channel && one.standing === "Joined");
+      },
+      { interval: 100, timeout: 20_000 }
+    )
+    .toBe(true);
+
+  return { api, base, channel, child, key, ngircd, peer };
+};
+
+/**
+ * A page that keeps every Content Security Policy violation it meets where the test can
+ * read it, and every error the console shows.
+ * @param browser - The browser.
+ * @returns The page, and the errors.
+ */
+const watchedPage = async (browser: Browser) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const problems: string[] = [];
+
+  await page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      const root = document.documentElement;
+
+      root.dataset.cspViolations = `${root.dataset.cspViolations ?? ""}${event.violatedDirective} ${event.blockedURI};`;
+    });
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      problems.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => problems.push(error.message));
+
+  return { page, problems };
+};
+
 describe("the web frontend on iirc daemon --web", () => {
   let browser: Browser;
   let directory: string;
@@ -265,53 +349,12 @@ describe("the web frontend on iirc daemon --web", () => {
     "reads a Network's Timelines on a real Ircd, live, with formatting, and older history on scrolling up",
     { timeout: 90_000 },
     async () => {
-      const ngircd: Ircd = await startNgircd();
-      const dataDir = path.join(directory, "timelines");
-      const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
-      const key = created.stdout.trim();
-      const { base, child } = await startDaemon(dataDir);
-      const channel = "#iirc-web";
-      const authorization = { authorization: `Bearer ${key}`, "content-type": "application/json" };
-
-      const api = async (method: string, route: string, body: string | null = null) =>
-        await fetch(`${base}/api${route}`, { body, headers: authorization, method });
-
-      const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "timelines"),
+        "#iirc-web"
+      );
 
       try {
-        peer.send(`JOIN ${channel}`);
-
-        const configured = await api(
-          "PUT",
-          "/networks/private",
-          JSON.stringify({
-            channels: [{ name: channel }],
-            declined: [],
-            enabled: true,
-            fallbackEncoding: "windows-1252",
-            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
-            login: { _tag: "None" },
-            nicks: ["iirc"],
-            realname: "iirc",
-            username: "iirc",
-          })
-        );
-
-        // Joined, as the Client knows it, decided from its Knowledge's structure.
-        await expect
-          .poll(
-            async () => {
-              const answer = await api("GET", "/networks/private/known");
-              const known = decodeKnown(await answer.text());
-
-              return known.channels.some(
-                (one) => one.name === channel && one.standing === "Joined"
-              );
-            },
-            { interval: 100, timeout: 20_000 }
-          )
-          .toBe(true);
-
         // History: more than a window holds, so the oldest comes only on scrolling up.
         for (let index = 1; index <= 130; index += 1) {
           // oxlint-disable-next-line no-await-in-loop -- said in order
@@ -322,25 +365,7 @@ describe("the web frontend on iirc daemon --web", () => {
           );
         }
 
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        const problems: string[] = [];
-
-        await page.addInitScript(() => {
-          // Every Content Security Policy violation the page meets, kept where the test
-          // can read it.
-          document.addEventListener("securitypolicyviolation", (event) => {
-            const root = document.documentElement;
-
-            root.dataset.cspViolations = `${root.dataset.cspViolations ?? ""}${event.violatedDirective} ${event.blockedURI};`;
-          });
-        });
-        page.on("console", (message) => {
-          if (message.type() === "error") {
-            problems.push(message.text());
-          }
-        });
-        page.on("pageerror", (error) => problems.push(error.message));
+        const { page, problems } = await watchedPage(browser);
 
         await page.goto(base);
         await page.getByLabel("Key").fill(key);
@@ -456,7 +481,6 @@ describe("the web frontend on iirc daemon --web", () => {
         );
 
         expect({
-          configured: configured.status,
           formatting,
           kept,
           linked,
@@ -465,13 +489,108 @@ describe("the web frontend on iirc daemon --web", () => {
           status,
           violations,
         }).toStrictEqual({
-          configured: 200,
           formatting: { bold: "700", red: "rgb(255, 0, 0)" },
           kept: true,
           linked: { href: "https://example.com/x", rel: "noopener noreferrer", target: "_blank" },
           pinned: true,
           problems: [],
           status: "\u25BEprivateconnected",
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "says Messages from the composer to a real Ircd, as actions and to a nick, and recalls them",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "composer"),
+        "#iirc-say"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        // Plain text, said to the Channel, which the other User hears.
+        await composer.fill("hello from the web");
+        await composer.press("Enter");
+
+        const heard = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "hello from the web",
+          "the Message"
+        );
+
+        // Ours, in the Timeline, once: ngircd has no echo-message, so it stays unconfirmed.
+        const ourRow = log.locator("[data-index]", { hasText: "hello from the web" });
+
+        await ourRow.getByText("unconfirmed").waitFor();
+        const rows = await ourRow.count();
+        const cleared = await composer.inputValue();
+
+        // An action, as a CTCP ACTION.
+        await composer.fill("/me waves");
+        await composer.press("Enter");
+
+        const action = await peer.waitFor(
+          (line) =>
+            line.command === "PRIVMSG" && line.params[1]?.startsWith("\u0001ACTION") === true,
+          "the action"
+        );
+
+        // To a nick: the other User hears it, and its Direct Message opens.
+        await composer.fill("/msg peer hi");
+        await composer.press("Enter");
+
+        const direct = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[0] === "peer",
+          "the Direct Message"
+        );
+
+        await page.getByRole("log", { name: "peer" }).getByText("hi", { exact: true }).waitFor();
+
+        // Back in the Channel, Up recalls the last line sent from it.
+        await page.getByRole("row", { name: channel }).click();
+        await composer.click();
+        await composer.press("ArrowUp");
+        const recalled = await composer.inputValue();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          action: action.params,
+          cleared,
+          direct: direct.params,
+          heard: heard.params,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          recalled,
+          rows,
+          violations,
+        }).toStrictEqual({
+          action: [channel, "\u0001ACTION waves\u0001"],
+          cleared: "",
+          direct: ["peer", "hi"],
+          heard: [channel, "hello from the web"],
+          problems: [],
+          recalled: "/msg peer hi",
+          rows: 1,
           violations: "",
         });
       } finally {

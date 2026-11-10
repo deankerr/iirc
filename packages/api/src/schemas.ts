@@ -156,8 +156,27 @@ export const CredentialNames = Schema.Struct({ names: Schema.Array(CredentialNam
 /** The sequence an Owner input was journaled at. */
 export const Journaled = Schema.Struct({ sequence: Sequence });
 
-/** A `say` journaled and stepped, under its intent. */
-export const Said = Schema.Struct({ intent: IntentId, sequence: Sequence });
+/**
+ * Why the Client refused a `say` in the step that took it: `Offline`, with no Session, or
+ * `Unsendable`, when no Line can carry it.
+ */
+export const StepRefusal = Schema.TaggedUnion({ Offline: {}, Unsendable: {} });
+
+/** The decoded form of {@link StepRefusal}. */
+export type StepRefusal = typeof StepRefusal.Type;
+
+/**
+ * What a `say` answers, once it is journaled and stepped under its intent: `Said`, its
+ * Message reported, or `Refused`, by the Client in that same step. A refusal that comes
+ * later, `Rejected` or `Unsent`, is the delivery of the Message's Timeline item.
+ */
+export const Said = Schema.Union([
+  Schema.TaggedStruct("Said", { intent: IntentId, sequence: Sequence }),
+  Schema.TaggedStruct("Refused", { intent: IntentId, reason: StepRefusal, sequence: Sequence }),
+]);
+
+/** The decoded form of {@link Said}. */
+export type Said = typeof Said.Type;
 
 /**
  * Whether a `say` under an intent was journaled. `Journaled` means it is stepped on every
@@ -550,6 +569,8 @@ export const Delivery = Schema.TaggedUnion({
   Confirmed: { at: Fact(Instant), id: Fact(MessageId), text: Untrusted },
   /** Sent, and the Ircd will echo it, which has not come yet. */
   Pending: {},
+  /** The Ircd refused it, with `reply`: its numeric or standard reply's code, never its text. */
+  Rejected: { reply: Untrusted },
   /** Sent, and the Ircd will not echo it, so delivery is unknown. */
   Unconfirmed: {},
   /** At least part of it never left, because its Connection ended first. */
