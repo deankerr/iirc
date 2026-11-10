@@ -1,144 +1,89 @@
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { parseFallbackEncoding } from "./decode.ts";
-import { parseFrame, parseLine, pingToken } from "./line.ts";
+import { CredentialName, OutboundLine, SecretLine } from "./line.ts";
 
-const Vectors = Schema.Struct({
-  tests: Schema.Array(
-    Schema.Struct({
-      atoms: Schema.Struct({
-        params: Schema.optional(Schema.Array(Schema.String)),
-        source: Schema.optional(Schema.NullOr(Schema.String)),
-        tags: Schema.optional(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
-        verb: Schema.String,
-      }),
-      input: Schema.String,
-    })
-  ),
-});
+const json = Schema.toCodecJson(SecretLine);
 
-const vectorsFile = new URL("testdata/msg-split.yaml", import.meta.url);
+describe("a secret Line", () => {
+  it("is recorded with its Credential's name, and decodes back", () => {
+    const line: SecretLine = {
+      _tag: "AuthenticatePlain",
+      authcid: "iirc",
+      authzid: "",
+      credential: CredentialName.make("libera"),
+    };
 
-const { tests: vectors } = Schema.decodeUnknownSync(Vectors)(
-  Bun.YAML.parse(await Bun.file(vectorsFile).text())
-);
+    const recorded = JSON.stringify(Schema.encodeSync(json)(line));
 
-const lineOf = (text: string) => {
-  const parsed = parseLine(text);
-
-  if (parsed._tag === "Unparseable") {
-    throw new Error(`Expected a Line from ${text}`);
-  }
-
-  return parsed.line;
-};
-
-describe("ircdocs parser tests", () => {
-  it.each(vectors)("parses $input", ({ atoms, input }) => {
-    const line = lineOf(input);
-
-    expect(Object.fromEntries(line.tags)).toStrictEqual(
-      Object.fromEntries(Object.entries(atoms.tags ?? {}).map(([key, value]) => [key, value ?? ""]))
-    );
-    expect(line.source).toBe(atoms.source ?? undefined);
-    expect(line.command).toBe(atoms.verb.toUpperCase());
-    expect(line.params).toStrictEqual(atoms.params ?? []);
-  });
-});
-
-describe(parseLine, () => {
-  it.each(["", "   "])("reports %j as empty", (text) => {
-    expect(parseLine(text)).toMatchObject({ _tag: "Unparseable", reason: "Empty" });
-  });
-
-  it.each([":irc.example", "@a=b", "@a=b :irc.example"])("reports %j as commandless", (text) => {
-    expect(parseLine(text)).toMatchObject({ _tag: "Unparseable", reason: "NoCommand" });
-  });
-
-  it.each([0x20_28, 0x20_29])("keeps U+%x inside a message", (codePoint) => {
-    const separator = String.fromCodePoint(codePoint);
-
-    expect(lineOf(`:a PRIVMSG #c :before${separator}after`).params).toStrictEqual([
-      "#c",
-      `before${separator}after`,
-    ]);
-  });
-
-  it("keeps a tag named __proto__", () => {
-    expect(lineOf("@__proto__=x;a=b PING").tags.get("__proto__")).toBe("x");
-  });
-});
-
-describe(parseFrame, () => {
-  const encoder = new TextEncoder();
-
-  it("MSG-4: falls back to ISO-8859-1 when the bytes are not UTF-8", () => {
-    const frame = new Uint8Array([...encoder.encode("PRIVMSG #a :caf"), 0xe9]);
-
-    expect(parseFrame(frame)).toMatchObject({ line: { params: ["#a", "café"] } });
-  });
-
-  it("MSG-4: reads 0x80 to 0x9f as the C1 controls, not as windows-1252 would", () => {
-    const frame = new Uint8Array([...encoder.encode("PRIVMSG #a :"), 0x80, 0x9f]);
-
-    expect(parseFrame(frame)).toMatchObject({ line: { params: ["#a", "\u0080\u009F"] } });
-  });
-
-  it("MSG-4: tries the fallback encoding before ISO-8859-1", () => {
-    const cp1251 = parseFallbackEncoding("windows-1251");
-
-    // "Привет" in windows-1251, which is not UTF-8.
-    const frame = new Uint8Array([
-      ...encoder.encode("PRIVMSG #a :"),
-      0xcf,
-      0xf0,
-      0xe8,
-      0xe2,
-      0xe5,
-      0xf2,
-    ]);
-
-    expect(parseFrame(frame, cp1251)).toMatchObject({ line: { params: ["#a", "Привет"] } });
-    expect(parseFrame(frame)).toMatchObject({ line: { params: ["#a", "Ïðèâåò"] } });
-  });
-
-  it("MSG-4: reads UTF-8 as UTF-8 whatever the fallback", () => {
-    const frame = encoder.encode("PRIVMSG #a :Привет");
-
-    expect(parseFrame(frame, parseFallbackEncoding("windows-1251"))).toMatchObject({
-      line: { params: ["#a", "Привет"] },
+    expect(JSON.parse(recorded)).toStrictEqual({
+      _tag: "AuthenticatePlain",
+      authcid: "iirc",
+      authzid: "",
+      credential: "libera",
     });
+    expect(Schema.decodeUnknownSync(json)(JSON.parse(recorded))).toStrictEqual(line);
   });
 
-  it("survives invalid UTF-8 in tags", () => {
-    const frame = new Uint8Array([0x40, 0x61, 0x3d, 0xff, 0x20, 0x50, 0x49, 0x4e, 0x47]);
-
-    expect(parseFrame(frame)).toMatchObject({ _tag: "Line", line: { command: "PING" } });
+  it("names only the places a Credential can go", () => {
+    expect(Object.keys(SecretLine.cases)).toStrictEqual([
+      "AuthenticatePlain",
+      "JoinWithKey",
+      "Pass",
+    ]);
   });
 });
 
-describe(pingToken, () => {
-  const encoder = new TextEncoder();
+// A Line as the Journal would hold it, before it is checked.
+interface Recorded {
+  readonly command: string;
+  readonly params: readonly string[];
+  readonly tags: Readonly<Record<string, string>>;
+}
 
-  it("LIVE-1: finds the token as bytes, past tags and a source", () => {
-    const frame = Uint8Array.of(...encoder.encode("@t=1 :irc.test PING :"), 0xff, 0x20, 0x41);
+describe("an outbound Line", () => {
+  const json = Schema.toCodecJson(OutboundLine);
 
-    expect(pingToken(frame)).toStrictEqual(Uint8Array.of(0xff, 0x20, 0x41));
+  const safe = (line: Recorded) => {
+    const recorded = JSON.stringify(line);
+
+    return Result.isSuccess(Schema.decodeUnknownResult(json)(JSON.parse(recorded)));
+  };
+
+  const ok = { command: "PRIVMSG", params: ["#iirc", "hello: world"], tags: {} };
+
+  it("decodes a recorded Line that is safe to send", () => {
+    expect(safe(ok)).toBeTruthy();
+    expect(safe({ ...ok, params: ["#iirc", ""] })).toBeTruthy();
+    expect(safe({ ...ok, tags: { "+draft/reply": "abc; def" } })).toBeTruthy();
+    expect(safe({ command: "001", params: [], tags: {} })).toBeTruthy();
   });
 
-  it("LIVE-1: has no token for a bare PING", () => {
-    expect(pingToken(encoder.encode("PING"))).toBeUndefined();
+  it("decodes the tags without + that a client may send", () => {
+    expect(safe({ ...ok, tags: { label: "a1" } })).toBeTruthy();
+    expect(safe({ ...ok, tags: { batch: "ml", "draft/multiline-concat": "" } })).toBeTruthy();
   });
 
-  it.each(["", "   ", ":source-only"])("has no token for %j, which is not a Line", (text) => {
-    expect(pingToken(encoder.encode(text))).toBeUndefined();
+  it.each([
+    ["a second Line in a parameter", { ...ok, params: ["#iirc", "hi\r\nOPER root bad"] }],
+    ["NUL in a parameter", { ...ok, params: ["#iirc", "hi\0"] }],
+    ["a space in a middle parameter", { ...ok, params: ["#a b", "hi"] }],
+    ["an empty middle parameter", { ...ok, params: ["", "hi"] }],
+    ["a middle parameter starting with a colon", { ...ok, params: [":x", "hi"] }],
+    ["a command that is not one", { ...ok, command: "PRIV MSG" }],
+    ["a lower-case command, which would not parse back the same", { ...ok, command: "privmsg" }],
+    ["a lone surrogate, which UTF-8 cannot carry", { ...ok, params: ["#iirc", "\uD800"] }],
+    ["more than 15 parameters", { ...ok, params: Array.from({ length: 16 }, () => "x") }],
+    ["more than 510 bytes", { ...ok, params: ["#iirc", "é".repeat(250)] }],
+    ["a tag that is not client-only", { ...ok, tags: { time: "2026-11-08T00:00:00Z" } }],
+    ["tags over 4094 bytes", { ...ok, tags: { "+big": ";".repeat(2100) } }],
+  ])("refuses %s", (_, line) => {
+    expect(safe(line)).toBeFalsy();
   });
 
-  it("LIVE-1: agrees with parseFrame on where a valid token starts and ends", () => {
-    const parsed = parseFrame(encoder.encode(":a PING   ☃  second"));
-
-    expect(parsed).toMatchObject({ line: { params: ["☃", "second"] } });
-    expect(new TextDecoder().decode(pingToken(encoder.encode(":a PING   ☃  second")))).toBe("☃");
+  it("cannot be made unsafe", () => {
+    expect(() => OutboundLine.make({ ...ok, params: ["#iirc", "hi\r\nQUIT"] })).toThrow(
+      "Schema validation failed"
+    );
   });
 });

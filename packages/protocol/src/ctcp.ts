@@ -1,13 +1,16 @@
-import { upperCaseAscii } from "./line.ts";
-import { isNick } from "./nick.ts";
-import { notice } from "./outbound.ts";
-import type { Outbound } from "./outbound.ts";
-
 /**
- * What the text of a `PRIVMSG` or `NOTICE` holds, as CTCP sees it. Nothing here acts on
- * anything: whether a request is answered is for the Daemon to decide (PROT-3), and a
- * `DCC` is only ever recorded (PROT-5).
+ * CTCP: what the text of a `PRIVMSG` or `NOTICE` holds, and the text and Lines to send
+ * one. Nothing here acts on anything: whether to answer a request is the caller's choice,
+ * and a `DCC` is only ever read.
+ *
+ * @packageDocumentation
  */
+import { Schema } from "effect";
+
+import { notice, privmsg, upperCaseAscii } from "./line.ts";
+import type { OutboundLine, Rejected } from "./line.ts";
+
+/** What the text of a `PRIVMSG` or `NOTICE` holds, as CTCP sees it. */
 export type Ctcp =
   | { readonly _tag: "NotCtcp" }
   | { readonly _tag: "Action"; readonly text: string }
@@ -18,17 +21,15 @@ const delimiter = "\u0001";
 const notCtcp: Ctcp = { _tag: "NotCtcp" };
 
 /**
- * Reads CTCP out of the text of a `PRIVMSG` or `NOTICE`, without ever throwing (PROT-2).
+ * Reads CTCP out of the text of a `PRIVMSG` or `NOTICE`, and never throws.
  *
- * CTCP is `\u0001COMMAND args\u0001`. The closing `\u0001` is optional, because many IRC
- * clients leave it out, and anything after it is ignored. The command is made upper-case
+ * CTCP is `\x01COMMAND args\x01`. The closing `\x01` is optional, because many IRC
+ * clients leave it out, and anything after it is ignored. The command is upper-cased,
  * and the arguments are everything after the one space that follows it, spaces and all.
- * A `\u0001` with no command is not CTCP. Low-level CTCP quoting (`\u0010`) is not undone.
- *
- * Whether it is a request or a reply is the carrying command's to say, and is not
- * decided here.
+ * A `\x01` with no command is not CTCP. Low-level quoting (`\x10`) is not undone.
+ * Whether it is a request or a reply is for the carrying command to say.
  * @param text - The last parameter of the Line.
- * @returns What it holds. `ACTION` has its text, which may be empty, and `DCC` has its
+ * @returns What it holds. `ACTION` has its text, which may be empty, and `DCC` its
  * subcommand and raw arguments. A `DCC` with no subcommand is `Other`.
  */
 export const parseCtcp = (text: string): Ctcp => {
@@ -62,48 +63,51 @@ export const parseCtcp = (text: string): Ctcp => {
   return { _tag: "Other", args, command };
 };
 
-class Payload {
-  // Private, so that nothing but this module can make one that was not checked.
-  readonly #text: string;
+const forbidden = ["\0", "\r", "\n", delimiter];
+const hasForbidden = (text: string) => forbidden.some((char) => text.includes(char));
 
-  constructor(text: string) {
-    this.#text = text;
-  }
+// `\x01`, a command with no space, then a space and arguments if there are any, and the
+// closing `\x01`, with no other `\x01`, CR, LF, or NUL.
+const isCtcpText = (text: string) => {
+  const body = text.slice(1, -1);
+  const space = body.indexOf(" ");
+  const command = space === -1 ? body : body.slice(0, space);
 
-  /**
-   * @returns The text, `\u0001` and all, ready to be the last parameter of a `NOTICE`.
-   */
-  toString() {
-    return this.#text;
-  }
-}
+  return (
+    text.length >= 3 &&
+    text.startsWith(delimiter) &&
+    text.endsWith(delimiter) &&
+    !hasForbidden(body) &&
+    command !== ""
+  );
+};
 
 /**
- * The text of a CTCP message that is safe to send: `\u0001`, a command, and arguments,
- * with the closing `\u0001`, and no other `\u0001`, CR, LF, or NUL. The only way to get
- * one is {@link ctcpText}.
+ * The text of a CTCP message that is safe to send: `\x01`, a command, its arguments, and
+ * the closing `\x01`, with no other `\x01`, CR, LF, or NUL. Built by {@link ctcpText}.
  */
-export type CtcpText = Payload;
+export const CtcpText = Schema.String.pipe(
+  Schema.check(Schema.makeFilter(isCtcpText, { expected: "CTCP text that is safe to send" })),
+  Schema.brand("CtcpText")
+);
+
+/** The decoded form of {@link CtcpText}. */
+export type CtcpText = typeof CtcpText.Type;
 
 /** Why some CTCP text cannot be built. */
 export type CtcpRejection = "InvalidCommand" | "InvalidArguments";
 
-/** Either a {@link CtcpText}, or the reason it can't exist. */
-export type CtcpTextResult =
-  | { readonly _tag: "Safe"; readonly text: CtcpText }
-  | { readonly _tag: "Rejected"; readonly reason: CtcpRejection };
-
-const forbidden = ["\0", "\r", "\n", delimiter];
-const hasForbidden = (text: string) => forbidden.some((char) => text.includes(char));
-
 /**
- * Builds the text of a CTCP message, such as the argument of a `VERSION` reply. It
- * takes the command as it is given, so pass the one {@link parseCtcp} returned.
+ * Builds the text of a CTCP message, such as an `ACTION` or a `VERSION` reply. The
+ * command goes as it is given.
  * @param command - The CTCP command, which has no space and is not empty.
  * @param args - What follows it, which may be empty.
- * @returns The safe text, or why it can't be built.
+ * @returns The text, or why it cannot be built.
  */
-export const ctcpText = (command: string, args: string): CtcpTextResult => {
+export const ctcpText = (
+  command: string,
+  args: string
+): CtcpText | { readonly _tag: "Rejected"; readonly reason: CtcpRejection } => {
   if (command === "" || command.includes(" ") || hasForbidden(command)) {
     return { _tag: "Rejected", reason: "InvalidCommand" };
   }
@@ -114,32 +118,33 @@ export const ctcpText = (command: string, args: string): CtcpTextResult => {
 
   const body = args === "" ? command : `${command} ${args}`;
 
-  return { _tag: "Safe", text: new Payload(`${delimiter}${body}${delimiter}`) };
+  return CtcpText.make(`${delimiter}${body}${delimiter}`, { disableChecks: true });
 };
 
-class Nick {
-  // Private, so that nothing but this module can make one that was not checked.
-  readonly #nick: string;
+/**
+ * A CTCP `ACTION`, as a `PRIVMSG` to one Target.
+ * @param target - A Channel or User, one only.
+ * @param text - What Self does. An empty action is allowed, as `/me` alone sends one.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const action = (target: string, text: string): OutboundLine | Rejected => {
+  const built = ctcpText("ACTION", text);
 
-  constructor(nick: string) {
-    this.#nick = nick;
-  }
-
-  /**
-   * @returns The nick, as the Line named it.
-   */
-  toString() {
-    return this.#nick;
-  }
-}
+  return Schema.is(CtcpText)(built)
+    ? privmsg(target, built)
+    : { _tag: "Rejected", reason: "InvalidParameter" };
+};
 
 /**
- * A User's nick that an automatic reply can be addressed to, and never a Channel or a mask
- * (HOST-3). The only way to get one is {@link parseReplyTarget}.
+ * A User's nick that an automatic reply may be addressed to, and never a Channel, a
+ * `STATUSMSG` Target, or a mask. Read by {@link parseReplyTarget}.
  */
-export type ReplyTarget = Nick;
+export const ReplyTarget = Schema.String.pipe(Schema.brand("ReplyTarget"));
 
-/** What the Network says marks a Channel or a `STATUSMSG` Target, as in force. */
+/** The decoded form of {@link ReplyTarget}. */
+export type ReplyTarget = typeof ReplyTarget.Type;
+
+/** What marks a Channel or a `STATUSMSG` Target on a Network, from ISUPPORT. */
 export interface TargetPrefixes {
   /** `CHANTYPES`, such as `#&`. */
   readonly chantypes: string;
@@ -147,12 +152,20 @@ export interface TargetPrefixes {
   readonly statusmsg: string;
 }
 
+// Anywhere in a nick, these mean something else: a space or a comma ends it, `!` and `@`
+// split a source, and `*` and `?` are masks.
+const notInNicks = /[\0\r\n ,*?!@]/u;
+
+// Nor can a nick start with a digit or `-` (RFC 2812), `$` for a server mask, `:` for the
+// last parameter, or a membership prefix, whatever the Network says.
+const notFirstInNicks = /^[\d\-~%@&+$:#]/u;
+
 /**
- * Reads the nick of a request's sender as a User to reply to (HOST-3). A source is whatever
- * the Ircd relayed, so a forged `#victims!u@h` or `$*.test!u@h` would turn a reply into a
- * `NOTICE` to a Channel or a mask. Only a nick can be one: nothing that is not a nick, as
- * `isNick` has it, which refuses a space, `,`, `*`, `?`, `!`, `@`, and `$` or a digit first,
- * and nothing that starts with a Channel or `STATUSMSG` prefix the Network has in force.
+ * Reads the nick of a request's sender as a User to reply to. A source is whatever the
+ * Ircd relayed, so a forged `#victims!u@h` or `$*.test!u@h` would turn a reply into a
+ * `NOTICE` to a Channel or a mask. Only a nick passes: nothing holding a space, `,`, `*`,
+ * `?`, `!`, or `@`, and nothing starting with a digit, `-`, `$`, `:`, a common prefix,
+ * or a Channel or `STATUSMSG` prefix the Network has in force.
  * @param nick - The sender's nick, from its source.
  * @param prefixes - What marks a Channel or a `STATUSMSG` Target on the Network now.
  * @returns The Target, or `undefined` if the nick could name anything but a User.
@@ -163,16 +176,20 @@ export const parseReplyTarget = (
 ): ReplyTarget | undefined => {
   const first = nick.charAt(0);
 
-  return isNick(nick) && !chantypes.includes(first) && !statusmsg.includes(first)
-    ? new Nick(nick)
-    : undefined;
+  return nick === "" ||
+    notInNicks.test(nick) ||
+    notFirstInNicks.test(nick) ||
+    chantypes.includes(first) ||
+    statusmsg.includes(first)
+    ? undefined
+    : ReplyTarget.make(nick);
 };
 
 /**
- * Builds the `NOTICE` that carries a CTCP reply (PROT-4), to a User and nothing else.
+ * The `NOTICE` that carries a CTCP reply, to a User and nothing else.
  * @param target - The User to answer, from {@link parseReplyTarget}.
  * @param text - The reply, from {@link ctcpText}.
- * @returns The safe Line, or why it can't be built, such as a reply too long to fit.
+ * @returns The Line, or why it cannot be sent, such as a reply too long to fit.
  */
-export const ctcpReply = (target: ReplyTarget, text: CtcpText): Outbound =>
-  notice(target.toString(), text.toString());
+export const ctcpReply = (target: ReplyTarget, text: CtcpText): OutboundLine | Rejected =>
+  notice(target, text);

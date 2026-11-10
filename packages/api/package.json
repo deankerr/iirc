@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/api.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@iirc/lifecycle": "workspace:*",
+    "@iirc/client": "workspace:*",
     "@iirc/protocol": "workspace:*",
     "effect": "catalog:"
   },

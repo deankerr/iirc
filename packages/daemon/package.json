@@ -4,25 +4,24 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/daemon.ts",
-    "./routes": "./src/routes.ts",
-    "./tuning": "./src/tuning.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "bun --bun vitest run"
+    "test": "bun --bun vitest run --exclude 'src/e2e/**'",
+    "e2e": "bun --bun vitest run src/e2e"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@iirc/api": "workspace:*",
-    "@iirc/lifecycle": "workspace:*",
-    "@iirc/log": "workspace:*",
-    "@iirc/protocol": "workspace:*",
-    "@iirc/session": "workspace:*",
-    "@iirc/state": "workspace:*",
+    "@iirc/client": "workspace:*",
+    "@iirc/journal-sqlite": "workspace:*",
+    "@iirc/outbox": "workspace:*",
+    "@iirc/runtime": "workspace:*",
+    "@iirc/transport-bun": "workspace:*",
+    "@iirc/vault-file": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
     "vitest": "catalog:"
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@iirc/app",
+  "name": "iirc",
   "version": "0.0.0",
   "private": true,
   "bin": {
@@ -7,19 +7,14 @@
   },
   "type": "module",
   "scripts": {
-    "build": "bun build --compile --minify --sourcemap --no-compile-autoload-dotenv --no-compile-autoload-bunfig --compile-exec-argv=\"--disallow-code-generation-from-strings=strict\" --root ../../packages/log/src src/main.ts ../../packages/log/src/reader-worker.ts --outfile dist/iirc",
     "test": "bun --bun vitest run"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@iirc/api": "workspace:*",
     "@iirc/daemon": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "@iirc/lifecycle": "workspace:*",
-    "@iirc/session": "workspace:*",
     "vitest": "catalog:"
   }
 }

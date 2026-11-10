@@ -1,9 +1,11 @@
 import { Schema } from "effect";
+import { Yaml } from "effect/encoding";
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { parseFormatting, plainStyle, stripFormatting } from "./format.ts";
 import type { Colour, Span, Style } from "./format.ts";
-import { randomText, seededRandom } from "./random.fixture.ts";
+import formatting from "./testdata/formatting.yaml?raw";
 
 const VectorColour = Schema.Union([
   Schema.Struct({ palette: Schema.Finite }),
@@ -33,11 +35,7 @@ const Vectors = Schema.Struct({
   ),
 });
 
-const vectorsFile = new URL("testdata/formatting.yaml", import.meta.url);
-
-const { tests: vectors } = Schema.decodeUnknownSync(Vectors)(
-  Bun.YAML.parse(await Bun.file(vectorsFile).text())
-);
+const { tests: vectors } = Schema.decodeUnknownSync(Vectors)(Yaml.parse(formatting));
 
 type VectorColourValue = typeof VectorColour.Type;
 
@@ -66,7 +64,7 @@ const expectedSpans = (spans: (typeof vectors)[number]["spans"]): Span[] =>
     text: span.text,
   }));
 
-describe("MSG-3 formatting vectors", () => {
+describe("formatting vectors", () => {
   it.each(vectors)("parses $name", ({ input, plain, spans }) => {
     expect(parseFormatting(input)).toStrictEqual(expectedSpans(spans));
     expect(stripFormatting(input)).toBe(plain);
@@ -111,7 +109,7 @@ const colourIsValid = (colour: Colour | undefined) => {
 
 const joined = (spans: readonly Span[]) => spans.map((span) => span.text).join("");
 
-describe("MSG-3 formatting, on text with no code", () => {
+describe("formatting, on text with no code", () => {
   it("is one span in the plain style", () => {
     const [span, ...rest] = parseFormatting("hello");
 
@@ -120,69 +118,58 @@ describe("MSG-3 formatting, on text with no code", () => {
   });
 });
 
-describe("MSG-3 formatting, on random text", () => {
-  const random = seededRandom(2026);
-  const samples = Array.from({ length: 3000 }, () => randomText(random, alphabet, random(40)));
+describe("formatting, on random text", () => {
+  const samples = fc
+    .array(fc.constantFrom(...alphabet), { maxLength: 40 })
+    .map((pieces) => pieces.join(""));
 
-  // A generator stuck in a short cycle repeats its samples, and proves far less. Short
-  // samples repeat whatever the generator does.
-  it("draws samples that are nearly all different", () => {
-    expect(new Set(samples).size).toBeGreaterThan(2800);
-  });
+  it("never throws, and strips to exactly the text of the spans, which hold no code", () => {
+    expect(() => {
+      fc.assert(
+        fc.property(samples, (sample) => {
+          const stripped = stripFormatting(sample);
 
-  it("never throws, and reads every string", () => {
-    const failures = samples.filter((sample) => {
-      try {
-        parseFormatting(sample);
-        stripFormatting(sample);
-
-        return false;
-      } catch {
-        return true;
-      }
-    });
-
-    expect(failures).toStrictEqual([]);
-  });
-
-  it("strips to exactly the text of the spans, which hold no code", () => {
-    const failures = samples.filter((sample) => {
-      const stripped = stripFormatting(sample);
-
-      return (
-        joined(parseFormatting(sample)) !== stripped ||
-        hasCode(stripped) ||
-        stripFormatting(stripped) !== stripped
+          return (
+            joined(parseFormatting(sample)) === stripped &&
+            !hasCode(stripped) &&
+            stripFormatting(stripped) === stripped
+          );
+        }),
+        { numRuns: 3000 }
       );
-    });
-
-    expect(failures).toStrictEqual([]);
+    }).not.toThrow();
   });
 
   it("makes no empty span, and never the same style twice in a row", () => {
-    const failures = samples.filter((sample) =>
-      parseFormatting(sample).some(
-        (span, index, spans) =>
-          span.text === "" ||
-          (index > 0 && sameStyle(span.style, spans[index - 1]?.style ?? span.style))
-      )
-    );
-
-    expect(failures).toStrictEqual([]);
+    expect(() => {
+      fc.assert(
+        fc.property(samples, (sample) =>
+          parseFormatting(sample).every(
+            (span, index, spans) =>
+              span.text !== "" &&
+              (index === 0 || !sameStyle(span.style, spans[index - 1]?.style ?? plainStyle))
+          )
+        ),
+        { numRuns: 3000 }
+      );
+    }).not.toThrow();
   });
 
   it("only ever makes colours that exist", () => {
-    const failures = samples.filter((sample) =>
-      parseFormatting(sample).some(
-        ({ style }) => !colourIsValid(style.foreground) || !colourIsValid(style.background)
-      )
-    );
-
-    expect(failures).toStrictEqual([]);
+    expect(() => {
+      fc.assert(
+        fc.property(samples, (sample) =>
+          parseFormatting(sample).every(
+            ({ style }) => colourIsValid(style.foreground) && colourIsValid(style.background)
+          )
+        ),
+        { numRuns: 3000 }
+      );
+    }).not.toThrow();
   });
 });
 
-describe("MSG-3 formatting, on long text", () => {
+describe("formatting, on long text", () => {
   it("reads a hundred thousand codes without trouble", () => {
     const text = "\u0002a\u000304,12b".repeat(50_000);
 

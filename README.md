@@ -1,14 +1,16 @@
 # iirc
 
-iirc is an always-on IRC client you can build on. A headless Daemon stays on your IRC Networks, records every Line in an append-only Log, and exposes everything through a typed HTTP API, so a browser, a script, or an agent can drive it. It is built from a modular library, a pure protocol core with Effect runtime pieces on top, that other projects can use alone. Bun, TypeScript, and Effect. MIT licensed. [`VISION.md`](VISION.md) says where it is going.
+iirc is an always-on IRC client you can build on. A headless Daemon stays on your IRC Networks, records every Line in an append-only Journal, and exposes everything through a typed HTTP API, so a browser, a script, or an agent can drive it. It is built from a modular library, a pure protocol core with Effect runtime pieces on top, that other projects can use alone. Bun, TypeScript, and Effect. MIT licensed. [`VISION.md`](VISION.md) says what it is for.
 
-## Status
+## What works today
 
-- **Milestone 1, "Stays on", is built:** the durable Log, Configuration, Credentials, reconnecting with backoff, flood control, multiple Networks, API keys, and a systemd service.
-- **The 30-day soak test (PROOF-5) is running** since 2026-11-04.
-- **Next:** milestone 2, "Knows the Network". There is no web frontend yet.
+- **The Daemon** stays on any number of Networks, redials with backoff, rejoins Channels, and answers the keepalive. It paces what it sends, and stops gracefully with a `QUIT`.
+- **The RFC floor,** on any Ircd that speaks RFC 1459 and 2812, with or without cap negotiation.
+- **IRCv3:** `cap-notify`, SASL PLAIN, `message-tags`, `server-time`, `batch`, `echo-message` with `labeled-response`, `multi-prefix`, `away-notify`, `UTF8ONLY`, and STS.
+- **The Journal** in SQLite. A restart rebuilds every Network from it, and News resumes from any point in it.
+- **The API:** configure Networks, say things, hold Credentials, read what the Client knows and its machines' states, and follow News as Server-Sent Events.
 
-[`docs/roadmap.md`](docs/roadmap.md) has the milestones, and [`docs/requirements.md`](docs/requirements.md) has the status of every requirement.
+Not built yet: the web frontend and Views. Each module's README ends with what it does not do yet.
 
 ## Quick start
 
@@ -16,36 +18,61 @@ Needs Bun 1.4.4.
 
 ```sh
 bun install
-bun run test          # every workspace's tests
 bun run check         # lint and format (Ultracite)
-bun run build         # apps/iirc/dist/iirc and apps/soak/dist/iirc-soak
-bun run proof:floor   # the floor proof against private ngircds
+bun run knip          # unused files and dependencies
+bun run test          # every workspace's tests, with no network
+bun run e2e           # a real Daemon against a private ngircd and Ergo
 ```
 
-To run a Daemon, make its first key, and add a Network, follow [the running guide](docs/guides/running.md). In short:
+`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, and fetches Ergo itself. [The Daemon's README](packages/daemon/README.md#end-to-end) says what it covers.
+
+## Run a Daemon
 
 ```sh
-export IIRC_DATA_DIR=/tmp/iirc
-KEY=$(apps/iirc/dist/iirc key create --name owner)   # shown only this once
-apps/iirc/dist/iirc daemon --http-port 7667 &
-curl -H "Authorization: Bearer $KEY" http://127.0.0.1:7667/api/status
+KEY=$(bun run iirc key create demo --data-dir ~/.local/share/iirc)   # prints the key once
+bun run iirc daemon --data-dir ~/.local/share/iirc                    # serves on 127.0.0.1:7667
 ```
+
+Then, from another shell, add a Network and watch it:
+
+```sh
+API=http://127.0.0.1:7667/api
+AUTH="Authorization: Bearer $KEY"
+
+curl -X PUT "$API/networks/libera" -H "$AUTH" -H 'content-type: application/json' -d '{
+  "enabled": true,
+  "ircds": [{ "host": "irc.libera.chat", "port": 6697, "tls": true }],
+  "nicks": ["my-nick"], "username": "iirc", "realname": "iirc",
+  "login": { "_tag": "None" },
+  "channels": [{ "name": "#my-channel" }],
+  "declined": [], "fallbackEncoding": "windows-1252"
+}'
+
+curl -N "$API/news" -H "$AUTH"                         # News as Server-Sent Events
+curl "$API/networks/libera/known" -H "$AUTH"           # Session, Self, Channels, members
+curl "$API/networks/libera/inspect" -H "$AUTH"         # machine states, caps, timers, queues
+curl -X POST "$API/networks/libera/say" -H "$AUTH" -H 'content-type: application/json' \
+  -d '{ "kind": "Privmsg", "target": "#my-channel", "text": "hello from iirc" }'
+```
+
+Configuration always goes whole, so joining or parting a Channel is another `PUT`. [The API's README](packages/api/README.md) lists every route.
 
 ## Repository
 
 | Path | What |
 | --- | --- |
-| [`packages/protocol`](packages/protocol/README.md) | Bytes to Lines and back, safely. Pure |
-| [`packages/state`](packages/state/README.md) | What an Ircd's Lines mean for one Session. Pure |
-| [`packages/lifecycle`](packages/lifecycle/README.md) | The Network machine as a pure fold |
-| [`packages/session`](packages/session/README.md) | Hosts one Network with Effect, recording before acting |
-| [`packages/log`](packages/log/README.md) | The durable Log in SQLite |
-| [`packages/api`](packages/api/README.md) | The HTTP API's contract |
-| [`packages/daemon`](packages/daemon/README.md) | Configuration, Credentials, keys, and Network supervision |
-| [`apps/iirc`](apps/iirc/README.md) | The `iirc` executable and its command-line Frontends |
-| [`apps/soak`](apps/soak/README.md) | `iirc-soak`, the soak test's harness |
-| [`packaging/systemd`](packaging/systemd) | The `iirc@.service` template and the soak's units |
-| [`docs`](docs) | Everything below |
+| [`packages/protocol`](packages/protocol) | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, and formatting |
+| [`packages/client`](packages/client) | The pure IRC client for one Network, and its transcript test kit |
+| [`packages/outbox`](packages/outbox) | Pacing: which Line leaves next, and when |
+| [`packages/runtime`](packages/runtime) | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
+| [`packages/transport-bun`](packages/transport-bun) | The production Transport: TCP and TLS on Bun, verified, framed, and bounded |
+| [`packages/journal-sqlite`](packages/journal-sqlite) | The production Journal: Entries in SQLite, durable before `append` returns |
+| [`packages/vault-file`](packages/vault-file) | The production Vault: Credentials in a `0600` file, written atomically |
+| [`packages/api`](packages/api) | The HTTP API's contract, which every Frontend uses |
+| [`packages/daemon`](packages/daemon) | The Daemon: wires it all together and serves the API |
+| [`apps/iirc`](apps/iirc) | The `iirc` executable |
+| [`fixtures/transcripts`](fixtures/transcripts) | Real Sessions on Ergo and ngircd, replayed in the tests |
+| [`docs`](docs) | Architecture, decisions, and the IRC specifications |
 
 ## Documentation
 
@@ -53,11 +80,8 @@ curl -H "Authorization: Bearer $KEY" http://127.0.0.1:7667/api/status
 | --- | --- |
 | [`VISION.md`](VISION.md) | Goals and principles |
 | [`GLOSSARY.md`](GLOSSARY.md) | What our words mean. Capitalised terms, such as Line and Entry, are defined there |
-| [`docs/architecture.md`](docs/architecture.md) | How the packages fit together, with diagrams |
-| [`docs/requirements.md`](docs/requirements.md) | Every requirement, by ID, and its status |
-| [`docs/roadmap.md`](docs/roadmap.md) | Milestones, the soak test, IRCv3 plans, risks |
+| [`docs/architecture.md`](docs/architecture.md) | How the pieces fit together, and where to extend them |
 | [`docs/adr/`](docs/adr/) | Decisions and why |
-| [`docs/guides/running.md`](docs/guides/running.md) | Installing and running a Daemon |
-| [`docs/guides/soak.md`](docs/guides/soak.md) | Running the soak test |
+| Each package's README | Its written interface: what it does, guarantees, and does not do yet |
 | [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) | The IRC protocol documents we work from |
 | [`AGENTS.md`](AGENTS.md) | Instructions for coding agents |

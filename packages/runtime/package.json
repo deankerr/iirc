@@ -1,0 +1,26 @@
+{
+  "name": "@iirc/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./clock": "./src/clock.ts",
+    "./journal": "./src/journal.ts",
+    ".": "./src/runtime.ts",
+    "./testing": "./src/testing/index.ts",
+    "./transport": "./src/transport.ts",
+    "./vault": "./src/vault.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/client": "workspace:*",
+    "@iirc/outbox": "workspace:*",
+    "@iirc/protocol": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

@@ -1,78 +1,134 @@
 #!/usr/bin/env bun
-import { BunHttpServer, BunRuntime, BunServices } from "@effect/platform-bun";
-import { KeyName, KeyScope } from "@iirc/api";
-import { createLocalKey, Daemon, DaemonCore, frontendWaitMillis } from "@iirc/daemon";
-import { ApiRoutes } from "@iirc/daemon/routes";
-import { Cause, Config, Console, Duration, Effect, Exit, Layer, Runtime, Schema } from "effect";
-import { Command, Flag } from "effect/cli";
-import { HttpRouter } from "effect/http";
+/**
+ * `iirc`: one executable whose arguments choose what it runs (ADR 0007).
+ *
+ * @packageDocumentation
+ */
+import { BunRuntime, BunServices } from "@effect/platform-bun";
+import {
+  createKey,
+  DataDirectoryFailed,
+  defaultListen,
+  holdDataDirectory,
+  KeyName,
+  layerDaemon,
+  layerLogger,
+} from "@iirc/daemon";
+import type { Listen } from "@iirc/daemon";
+import {
+  Cause,
+  Console,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Redacted,
+  Runtime,
+  Schema,
+  SchemaGetter,
+} from "effect";
+import { Argument, Command, Flag } from "effect/cli";
+import { Digest, SecureRandom } from "effect/crypto";
 
-import { version } from "../package.json";
-import { described, failed, reportedOnStderr } from "./command-failed.ts";
-import { config } from "./config-command.ts";
-import { backup, credential } from "./credential-command.ts";
+import { failed, reportedOnStderr } from "./command-failed.ts";
 
-// AUTH-5: the API listens on loopback, and remote access goes through a proxy.
-const apiHost = "127.0.0.1";
+/** `host:port`, with an IPv6 host in brackets, such as `[::1]:7667`. */
+const ListenAddress = Schema.String.check(
+  Schema.isPattern(/^(?:\[[0-9A-Fa-f:.]+\]|[^\s:[\]]+):\d{1,5}$/u, {
+    message: "must be host:port, such as 127.0.0.1:7667 or [::1]:7667",
+  })
+).pipe(
+  Schema.decodeTo(
+    Schema.Struct({
+      host: Schema.String,
+      port: Schema.Int.check(Schema.isBetween({ maximum: 65_535, minimum: 0 })),
+    }),
+    {
+      decode: SchemaGetter.transform((text: string) => {
+        const colon = text.lastIndexOf(":");
 
-const Port = Schema.Int.check(Schema.isBetween({ maximum: 65_535, minimum: 1 }));
-
-// CONF-4: the process needs only somewhere to keep the Log and somewhere to listen.
-const dataDir = Flag.String("data-dir").pipe(
-  Flag.withDescription("Directory holding the Log"),
-  Flag.withFallbackConfig(Config.String("IIRC_DATA_DIR"))
+        return {
+          host: text.slice(0, colon).replace(/^\[(?<inner>.*)\]$/u, "$<inner>"),
+          port: Number(text.slice(colon + 1)),
+        };
+      }),
+      encode: SchemaGetter.transform(({ host, port }: Listen) =>
+        host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`
+      ),
+    }
+  )
 );
+
+const dataDir = Flag.String("data-dir").pipe(
+  Flag.withDescription("Directory holding the Journal, the Credentials, and the API keys")
+);
+
+/**
+ * Makes the data directory if it is missing, owner-only.
+ * @param directory - The data directory.
+ * @returns An Effect that makes it.
+ */
+const makeDataDirectory = (directory: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+
+    yield* fs
+      .makeDirectory(directory, { mode: 0o700, recursive: true })
+      .pipe(
+        Effect.mapError(
+          (error) => new DataDirectoryFailed({ dataDir: directory, reason: error.message })
+        )
+      );
+  });
 
 const daemon = Command.make(
   "daemon",
   {
     dataDir,
-    httpPort: Flag.Int("http-port").pipe(
-      Flag.withFallbackConfig(Config.Int("IIRC_HTTP_PORT")),
-      Flag.withSchema(Port),
-      Flag.withDescription("Loopback port the API listens on (IIRC_HTTP_PORT)"),
-      Flag.withDefault(7667)
+    listen: Flag.String("listen").pipe(
+      Flag.withSchema(ListenAddress),
+      Flag.withDescription("Where the API listens, loopback unless a proxy fronts it"),
+      Flag.withDefault(defaultListen)
     ),
   },
-  ({ dataDir: directory, httpPort }) =>
-    Daemon.stopsFirst.pipe(
-      Layer.provide(
-        HttpRouter.serve(ApiRoutes, { disableLogger: true }).pipe(
-          Layer.provide(
-            BunHttpServer.layer({
-              gracefulShutdownTimeout: Duration.millis(frontendWaitMillis),
-              hostname: apiHost,
-              port: httpPort,
-            })
-          )
-        )
-      ),
-      // Outside `serve`, which forks the MemoMap.
-      Layer.provide(DaemonCore({ dataDir: directory, version })),
-      Layer.launch,
-      // A refusal to start is one line on stderr, and an exit that says it failed.
+  ({ dataDir: directory, listen }) =>
+    Layer.launch(layerDaemon({ dataDir: directory }, listen)).pipe(
       Effect.mapError((error) => {
         switch (error._tag) {
           case "DataDirectoryLocked": {
-            return failed(`${error.message}, most likely another Daemon. Only one may run on it.`);
-          }
-
-          case "StorageFailed": {
             return failed(
-              `The Log in ${directory} could not be opened or read: ${described(error.cause)}`
+              `The data directory ${directory} is held by another process, most likely another Daemon. Only one may run on it.`
             );
           }
 
-          case "CredentialsUnreadable":
-          case "LogTooNew":
-          case "UndecodableChange": {
-            return failed(described(error));
+          case "DataDirectoryFailed": {
+            return failed(`The data directory ${directory} could not be used: ${error.reason}`);
+          }
+
+          case "KeysUnreadable": {
+            return failed(`The API keys in ${error.path} could not be read: ${error.reason}`);
+          }
+
+          case "JournalFailed": {
+            return failed(
+              `The Journal in ${directory} could not be opened or read: ${error.reason}`
+            );
+          }
+
+          case "JournalVersionMismatch": {
+            return failed(
+              `The Journal in ${directory} is version ${error.found}, and this iirc reads version ${error.expected}. Nothing was changed.`
+            );
+          }
+
+          case "DecodersMissing": {
+            return failed(
+              `This runtime cannot decode ${error.missing.join(", ")}, so it would read the Journal wrongly. Run iirc on the Bun it was built for.`
+            );
           }
 
           case "ServeError": {
-            return failed(
-              `The API could not listen on ${apiHost}:${httpPort}: ${described(error.cause ?? error)}`
-            );
+            return failed(`The API could not listen on ${listen.host}:${listen.port}.`);
           }
 
           default: {
@@ -81,56 +137,58 @@ const daemon = Command.make(
         }
       }),
       // Bun's server throws when it cannot listen, such as on a port in use.
-      Effect.catchDefect((defect) =>
-        Effect.fail(failed(`The Daemon failed: ${described(defect)}`))
+      Effect.catchDefect(() =>
+        Effect.fail(failed(`The API could not listen on ${listen.host}:${listen.port}.`))
       ),
       reportedOnStderr
     )
-).pipe(Command.withDescription("Stay on every configured Network and expose them over the API"));
+).pipe(Command.withDescription("Stay on every configured Network, and serve the API"));
 
 const keyCreate = Command.make(
   "create",
   {
     dataDir,
-    name: Flag.String("name").pipe(
-      Flag.withSchema(KeyName),
-      Flag.withDescription("Name the key's actions are recorded under, such as `phone`")
-    ),
-    scope: Flag.Literals("scope", KeyScope.literals).pipe(
-      Flag.withDescription("What the key may do: read, chat, or admin"),
-      Flag.withDefault("admin")
+    name: Argument.String("name").pipe(
+      Argument.withSchema(KeyName),
+      Argument.withDescription("Whose key it is, such as `phone` or `agent`")
     ),
   },
-  ({ dataDir: directory, name, scope }) =>
-    createLocalKey({ dataDir: directory, name, scope }).pipe(
+  ({ dataDir: directory, name }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* makeDataDirectory(directory);
+        yield* holdDataDirectory(directory);
+
+        return yield* createKey(directory, name);
+      })
+    ).pipe(
+      Effect.provide(Layer.mergeAll(Digest.layerWebCrypto, SecureRandom.layerWebCrypto)),
       // Every refusal goes to stderr, so `KEY=$(iirc key create …)` never holds one.
       Effect.mapError((error) => {
         switch (error._tag) {
           case "DataDirectoryLocked": {
             return failed(
-              `The data directory ${directory} is locked, most likely by a running Daemon. Stop the Daemon first, or create the key through the API with an admin key.`
+              `The data directory ${directory} is held, most likely by a running Daemon. Stop it first: keys are created only while it is stopped.`
             );
+          }
+
+          case "DataDirectoryFailed": {
+            return failed(`The data directory ${directory} could not be used: ${error.reason}`);
           }
 
           case "KeyExists": {
+            return failed(`A key named ${error.key} already exists. Choose another name.`);
+          }
+
+          case "KeysUnreadable": {
             return failed(
-              `A key named ${name} already exists. Choose another name, or revoke that key through the API first.`
+              `The API keys in ${error.path} could not be read, so no key was made: ${error.reason}`
             );
           }
 
-          case "LogTooNew": {
-            return failed(`${error.message} No key was made.`);
-          }
-
-          case "StorageFailed": {
+          case "KeysUnwritable": {
             return failed(
-              `The Log in ${directory} could not be read or written, so no key was made: ${described(error.cause)}`
-            );
-          }
-
-          case "UndecodableChange": {
-            return failed(
-              `The Log in ${directory} holds a Change at sequence ${error.sequence} that this iirc cannot read, so no key was made: ${described(error.reason)}`
+              `The API keys in ${error.path} could not be written, so no key was made: ${error.reason}`
             );
           }
 
@@ -139,15 +197,11 @@ const keyCreate = Command.make(
           }
         }
       }),
-      // The key itself, alone on stdout, because nothing will ever show it again (AUTH-2).
-      Effect.flatMap((key) => Console.log(key)),
+      // The key alone on stdout, because nothing will show it again.
+      Effect.flatMap((key) => Console.log(Redacted.value(key))),
       reportedOnStderr
     )
-).pipe(
-  Command.withDescription(
-    "Create an API key straight into the Log, which needs the Daemon stopped (AUTH-4)"
-  )
-);
+).pipe(Command.withDescription("Create an API key and print it once. The Daemon must be stopped."));
 
 const key = Command.make("key").pipe(
   Command.withDescription("Manage API keys"),
@@ -156,11 +210,11 @@ const key = Command.make("key").pipe(
 
 const iirc = Command.make("iirc").pipe(
   Command.withDescription("An always-on IRC client"),
-  Command.withSubcommands([backup, config, credential, daemon, key])
+  Command.withSubcommands([daemon, key])
 );
 
 // `runMain` interrupts main on SIGINT and SIGTERM, which is how a Daemon is asked to stop,
-// so here an interrupt is a clean exit, and the default would call it 130.
+// so an interrupt is a clean exit, where the default would say 130.
 const teardown: Runtime.Teardown = (exit, onExit) => {
   if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) {
     onExit(0);
@@ -169,7 +223,7 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
   }
 };
 
-Command.run(iirc, { version }).pipe(
-  Effect.provide(BunServices.layer),
+Command.run(iirc, { version: "0.0.0" }).pipe(
+  Effect.provide(Layer.merge(BunServices.layer, layerLogger)),
   BunRuntime.runMain({ teardown })
 );

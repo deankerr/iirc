@@ -1,52 +1,30 @@
+/**
+ * Bytes to text, for the parser. Internal: `parse` is the interface.
+ *
+ * @packageDocumentation
+ */
+
 const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-// A decoder can refuse bytes by throwing, which is turned into a value here and nowhere else.
-type Attempt = { readonly _tag: "Read"; readonly text: string } | { readonly _tag: "Unreadable" };
-
-const attempt = (decoder: TextDecoder, bytes: Uint8Array): Attempt => {
-  try {
-    return { _tag: "Read", text: decoder.decode(bytes) };
-  } catch {
-    return { _tag: "Unreadable" };
-  }
-};
-
-class Encoding {
-  /** The encoding's canonical WHATWG name, such as `shift_jis`, to store and to show. */
-  readonly name: string;
-  readonly #decoder: TextDecoder;
-
-  constructor(decoder: TextDecoder) {
-    this.name = decoder.encoding;
-    this.#decoder = decoder;
-  }
-
-  /**
-   * @param bytes - The bytes to read.
-   * @returns The text, or that the bytes are not valid in this encoding.
-   */
-  read(bytes: Uint8Array) {
-    return attempt(this.#decoder, bytes);
-  }
-}
+const lossyUtf8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /**
- * An encoding to try when bytes are not UTF-8: a WHATWG `TextDecoder` label that this
- * runtime knows, so it can always be used. The only way to get one is
- * {@link parseFallbackEncoding}.
+ * Encodings a fallback may not be. UTF-16 reads every space and colon as half a
+ * character, so no Line would split. `x-user-defined` drops bytes above 0x7f in Bun, and
+ * `replacement` reads everything as one U+FFFD.
  */
-export type FallbackEncoding = Encoding;
+const refused: ReadonlySet<string> = new Set([
+  "replacement",
+  "utf-16be",
+  "utf-16le",
+  "x-user-defined",
+]);
 
-/**
- * Turns a label into a {@link FallbackEncoding} (MSG-4). Any WHATWG `TextDecoder` label
- * will do, in any case and with spaces around it, such as `Shift_JIS` or `windows-1251`.
- * Labels are aliases, so `latin1` is `windows-1252`, which is not the Latin-1 that
- * {@link decodeBytes} falls back to last.
- * @param label - What the Owner configured.
- * @returns The encoding, or `undefined` if this runtime does not know the label, or
- * cannot be trusted with it (`x-user-defined` drops every byte above 0x7f in Bun).
- */
-export const parseFallbackEncoding = (label: string): FallbackEncoding | undefined => {
+/** The most labels remembered. A label comes from Configuration, so few are ever seen. */
+const rememberedLabels = 64;
+
+const decoders = new Map<string, TextDecoder | undefined>();
+
+const construct = (label: string): TextDecoder | undefined => {
   try {
     // Reflect, because Bun's types list a few labels, while any WHATWG label works and an
     // unknown one throws a RangeError, which is the answer wanted here.
@@ -55,43 +33,83 @@ export const parseFallbackEncoding = (label: string): FallbackEncoding | undefin
       { fatal: true, ignoreBOM: true },
     ]);
 
-    return decoder instanceof TextDecoder && decoder.encoding !== "x-user-defined"
-      ? new Encoding(decoder)
-      : undefined;
+    return decoder instanceof TextDecoder && !refused.has(decoder.encoding) ? decoder : undefined;
   } catch {
     return undefined;
   }
 };
 
-/** The text of some bytes, and the decoder that read them. */
-export type Decoded =
-  | { readonly _tag: "utf-8"; readonly text: string }
-  | { readonly _tag: "Fallback"; readonly text: string; readonly encoding: string }
-  | { readonly _tag: "Latin1"; readonly text: string };
-
-// One character per byte, so the text maps back to the same bytes. Not WHATWG's
-// "latin1", which is windows-1252 and maps 0x80 to 0x9f elsewhere.
-const latin1 = (bytes: Uint8Array) =>
-  Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("");
-
 /**
- * Reads bytes from an Ircd as text (MSG-4): as UTF-8 if they are valid UTF-8, else through
- * the fallback encoding if they are valid in it, else as ISO-8859-1. Decoding never fails,
- * and the last step reads any bytes. A byte order mark is kept, as U+FEFF.
- * @param bytes - The bytes, such as a frame without its line ending.
- * @param fallback - The Network's configured encoding, if it has one.
- * @returns The text, and which decoder produced it.
+ * The strict decoder for a WHATWG label, or `undefined` if this runtime does not know it
+ * or it is refused. The same label always gives the same answer, so remembering it
+ * changes nothing but speed.
+ * @param label - A WHATWG encoding label, such as `latin1` or `Shift_JIS`.
+ * @returns The decoder, which throws on bytes it cannot read.
  */
-export const decodeBytes = (bytes: Uint8Array, fallback?: FallbackEncoding): Decoded => {
-  const utf8 = attempt(strictUtf8, bytes);
-
-  if (utf8._tag === "Read") {
-    return { _tag: "utf-8", text: utf8.text };
+export const fallbackDecoder = (label: string): TextDecoder | undefined => {
+  if (decoders.has(label)) {
+    return decoders.get(label);
   }
 
-  const other = fallback?.read(bytes);
+  const decoder = construct(label);
 
-  return fallback !== undefined && other?._tag === "Read"
-    ? { _tag: "Fallback", encoding: fallback.name, text: other.text }
-    : { _tag: "Latin1", text: latin1(bytes) };
+  if (decoders.size < rememberedLabels) {
+    decoders.set(label, decoder);
+  }
+
+  return decoder;
+};
+
+const attempt = (decoder: TextDecoder, bytes: Uint8Array): string | undefined => {
+  try {
+    return decoder.decode(bytes);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * One character per byte, as ISO-8859-1, which reads any bytes. Not WHATWG's `latin1`,
+ * which is windows-1252. It is also how a raw parameter holds its bytes.
+ * @param bytes - The bytes.
+ * @returns A string with one code unit per byte, of the same value.
+ */
+export const binaryString = (bytes: Uint8Array): string => {
+  let text = "";
+
+  for (const byte of bytes) {
+    text += String.fromCodePoint(byte);
+  }
+
+  return text;
+};
+
+const isAscii = (bytes: Uint8Array) => bytes.every((byte) => byte < 0x80);
+
+/**
+ * Reads bytes as UTF-8, replacing what is not UTF-8 with U+FFFD. For what a Network
+ * promises is UTF-8, such as tag values, and everything under `UTF8ONLY`.
+ * @param bytes - The bytes.
+ * @returns The text.
+ */
+export const utf8Lossy = (bytes: Uint8Array): string =>
+  isAscii(bytes) ? binaryString(bytes) : lossyUtf8.decode(bytes);
+
+/**
+ * Reads bytes as UTF-8 if they are UTF-8, else in the fallback if they are valid in it,
+ * else as ISO-8859-1, so it never fails.
+ * @param bytes - The bytes.
+ * @param fallback - The fallback's decoder, if its label is one this runtime knows.
+ * @returns The text.
+ */
+export const utf8OrElse = (bytes: Uint8Array, fallback: TextDecoder | undefined): string => {
+  if (isAscii(bytes)) {
+    return binaryString(bytes);
+  }
+
+  return (
+    attempt(strictUtf8, bytes) ??
+    (fallback === undefined ? undefined : attempt(fallback, bytes)) ??
+    binaryString(bytes)
+  );
 };

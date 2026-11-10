@@ -1,0 +1,22 @@
+{
+  "name": "@iirc/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./known": "./src/known.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/protocol": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "vitest": "catalog:"
+  }
+}

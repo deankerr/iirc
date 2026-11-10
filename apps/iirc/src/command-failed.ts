@@ -1,10 +1,12 @@
-import { Console, Data, Effect, Predicate, Runtime } from "effect";
-
 /**
- * Why a command did not do what it was asked, already in words for the Owner. It carries
- * its own exit code, and is printed once, on stderr, rather than logged with a trace, so
- * that stdout holds only what a command was asked for, such as a key (AUTH-4).
+ * Refusals in words for the Owner, printed once on stderr, so stdout holds only what a
+ * command was asked for, such as a key.
+ *
+ * @packageDocumentation
  */
+import { Console, Data, Effect, Runtime } from "effect";
+
+/** Why a command did not do what it was asked, already in words, with its exit code. */
 export class CommandFailed extends Data.TaggedError("CommandFailed")<{
   readonly exitCode: number;
   readonly message: string;
@@ -23,26 +25,9 @@ export class CommandFailed extends Data.TaggedError("CommandFailed")<{
 /**
  * A refusal, in words that say what to do about it.
  * @param message - What went wrong.
- * @param exitCode - 1, or 2 for a command run wrongly.
- * @returns The refusal.
+ * @returns The refusal, which exits 1.
  */
-export const failed = (message: string, exitCode = 1) => new CommandFailed({ exitCode, message });
-
-/**
- * What a cause says of itself, on one line.
- * @param cause - Anything thrown or failed with.
- * @returns Its message if it has one, or else how it prints.
- */
-export const described = (cause: unknown): string => {
-  const text =
-    Predicate.hasProperty(cause, "message") &&
-    Predicate.isString(cause.message) &&
-    cause.message !== ""
-      ? cause.message
-      : String(cause);
-
-  return text.replaceAll(/\s*\n\s*/gu, " ").trim();
-};
+export const failed = (message: string) => new CommandFailed({ exitCode: 1, message });
 
 /**
  * Prints a refusal once, plainly, on stderr, and lets its exit code follow.

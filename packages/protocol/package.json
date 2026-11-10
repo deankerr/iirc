@@ -4,24 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./casemapping": "./src/casemapping.ts",
     "./ctcp": "./src/ctcp.ts",
-    "./decode": "./src/decode.ts",
-    "./flood": "./src/flood.ts",
     "./format": "./src/format.ts",
-    "./frame": "./src/frame.ts",
-    "./join": "./src/join.ts",
-    "./line": "./src/line.ts",
-    "./login": "./src/login.ts",
-    "./nick": "./src/nick.ts",
-    "./outbound": "./src/outbound.ts",
-    "./replies": "./src/replies.ts",
-    "./template": "./src/template.ts"
+    "./isupport": "./src/isupport.ts",
+    "./line": "./src/line.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"
   },
+  "dependencies": {
+    "effect": "catalog:"
+  },
   "devDependencies": {
-    "effect": "catalog:",
+    "fast-check": "4.10.2",
     "vitest": "catalog:"
   }
 }

@@ -1,1231 +1,167 @@
-import {
-  apiVersion,
-  BackupFailed,
-  ChannelNotFound,
-  CredentialNotFound,
-  CursorStale,
-  EntryAlreadyRedacted,
-  EntryNotFound,
-  EntryNotRedactable,
-  InvalidMessage,
-  InvalidRequest,
-  KeyExists,
-  KeyNotFound,
-  LaneFull,
-  LineDropped,
-  LogUnavailable,
-  NetworkExists,
-  NetworkNotFound,
-  NotAChannel,
-  NotInSession,
-  ReaderBusy,
-  ReadTimedOut,
-  Stopping,
-  TargetNotFound,
-  WriteFailed,
-} from "@iirc/api";
-import type {
-  ActivityCursor,
-  ChannelDetails,
-  CredentialsUnavailable,
-  LoggedActivity,
-  NetworkKnowledge,
-  KeyScope,
-  LoggedMessage,
-  NetworkSettings,
-  NetworkStatus as NetworkState,
-  PlaceFilter,
-  Status,
-} from "@iirc/api";
-import { Log, LogReader, longestReadMillis, StorageFailed } from "@iirc/log";
-import type {
-  Backup,
-  DataDirectoryLocked,
-  LogTooNew,
-  EntryQuery,
-  Gap,
-  NetworkPage,
-  ReaderBusy as ReaderQueueFull,
-  ReadTimedOut as ReaderTimedOut,
-} from "@iirc/log";
-import { parseFallbackEncoding } from "@iirc/protocol/decode";
-import type { FallbackEncoding } from "@iirc/protocol/decode";
-import { part as partLine, privmsg } from "@iirc/protocol/outbound";
-import type { Outbound, OutboundLine } from "@iirc/protocol/outbound";
-import { joinSensitive, keyedJoins } from "@iirc/session/credentials";
-import type { Entry, NetworkId } from "@iirc/session/entry";
-import { hostNetwork } from "@iirc/session/network";
-import type {
-  NetworkHost,
-  NetworkOptions,
-  NetworkSettings as HostSettings,
-  NetworkStatus,
-  Secrets,
-  Sensitive,
-  Sent,
-} from "@iirc/session/network";
-import { Recorder } from "@iirc/session/recorder";
-import { channelKey } from "@iirc/session/standing";
-import { Transport } from "@iirc/session/transport";
-import {
-  Context,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  FiberMap,
-  Layer,
-  Predicate,
-  Ref,
-  Scope,
-  Semaphore,
-  Stream,
-  SubscriptionRef,
-} from "effect";
-import type { Duration, Redacted } from "effect";
-import type { Digest, SecureRandom } from "effect/crypto";
-import { constVoid } from "effect/Function";
-
-import type { Change } from "./change.ts";
-import { keyNameFor } from "./channel-keys.ts";
-import { droppedChannels } from "./configuration.ts";
-import type { Configuration, ConfiguredNetwork } from "./configuration.ts";
-import { Credentials } from "./credentials.ts";
-import type { CredentialsUnreadable, CredentialStore, Keyring } from "./credentials.ts";
-import { findKey, hashKey, keyCrypto, newKey } from "./keys.ts";
-import { readConfiguration, recordChange, recordRedaction } from "./recorded.ts";
-import type { UndecodableChange } from "./recorded.ts";
-import { tuningOf } from "./tuning.ts";
-import { activityPage, knownOf, targetRead } from "./views.ts";
-import type { MembersPage } from "./views.ts";
-
-export { createLocalKey } from "./local-key.ts";
-
-export type { LocalKeyOptions } from "./local-key.ts";
-
-export { UndecodableChange } from "./recorded.ts";
-
 /**
- * How long serving may wait for the requests still in flight once the Daemon has stopped.
- * The Networks stop before serving does ({@link Daemon.stopsFirst}), which answers every
- * Send, and a stopped Daemon refuses every Change at once, so only a read can still be
- * waiting, and a read gives up within {@link longestReadMillis}. No Network's Tuning
- * changes this, because by then every `QUIT` wait is over.
+ * The composition root: the data directory, the production adapters, the Runtime driving
+ * the real Client, the keys, and the API served over HTTP.
+ *
+ * @packageDocumentation
  */
-export const frontendWaitMillis = longestReadMillis + 500;
+import { BunFileSystem, BunHttpServer, BunPath } from "@effect/platform-bun";
+import { client } from "@iirc/client";
+import { layerSqliteJournal } from "@iirc/journal-sqlite";
+import type { Pacing } from "@iirc/outbox";
+import { layerRuntime } from "@iirc/runtime";
+import { layer as layerTransport } from "@iirc/transport-bun";
+import type { BunTransportOptions } from "@iirc/transport-bun";
+import { layerBun as layerVault } from "@iirc/vault-file";
+import { Context, Duration, Effect, Exit, FileSystem, Layer, Logger, Scope } from "effect";
+import { Digest } from "effect/crypto";
+import { HttpRouter } from "effect/http";
 
-/** What the Daemon needs to start. Everything else is in the Log (CONF-4). */
-export interface DaemonConfig {
+import { ApiRoutes, Heartbeat } from "./handlers.ts";
+import { ApiKeys } from "./keys.ts";
+import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
+
+/** What a Daemon needs besides where to listen. */
+export interface DaemonOptions {
+  /** Where the Journal, the Credentials, and the keys live. Made, owner-only, if missing. */
   readonly dataDir: string;
-  readonly version: string;
+  /** The Transport's options, such as extra roots to `trust`. */
+  readonly transport?: BunTransportOptions | undefined;
+  /** How often the News stream sends a heartbeat. 15 seconds unless given. */
+  readonly heartbeat?: Duration.Input | undefined;
+  /** How fast Lines may leave each Connection. A burst of 5, then one every 2 s, unless given. */
+  readonly pacing?: Pacing | undefined;
+  /** How long a hang-up lets queued Lines leave at pace before it hangs up anyway. 5 seconds unless given. */
+  readonly hangupDrain?: Duration.Input | undefined;
+  /** How long stopping waits for each Network's Connections to close. 5 seconds unless given. */
+  readonly stopTimeout?: Duration.Input | undefined;
 }
+
+/** Where the API listens. */
+export interface Listen {
+  readonly host: string;
+  readonly port: number;
+}
+
+/** Loopback only, as ADR 0006 says: remote access goes through a proxy. */
+export const defaultListen: Listen = { host: "127.0.0.1", port: 7667 };
 
 /**
- * Which Activity to read (MSG-5): after `after`, from every Network unless `network` names
- * one, and from every place on it unless `place` names one, which only a Network can hold.
+ * How long serving waits for requests in flight once asked to stop. By then the Runtime
+ * has stopped, so this only covers reads and News streams, which are cut.
  */
-export type ActivityRead =
-  | {
-      readonly after: ActivityCursor;
-      readonly limit: number;
-      readonly network: NetworkId;
-      readonly place: PlaceFilter;
-    }
-  | { readonly after: ActivityCursor; readonly limit: number; readonly network?: NetworkId };
+const gracefulShutdownTimeout = Duration.millis(500);
 
-type Reading = LogUnavailable | ReaderBusy | ReadTimedOut;
-
-/** What a Line a Frontend asked for came to, in the API's words (API-9). */
-type SendResult =
-  | { readonly sequence: number; readonly status: "written" }
-  | { readonly status: "queued" };
-
-type SendRefusal =
-  | InvalidMessage
-  | LaneFull
-  | LineDropped
-  | LogUnavailable
-  | NotInSession
-  | WriteFailed;
-
-type Recording = LogUnavailable | Stopping;
-
-/** The sequence of the Change an operation recorded. */
-interface Changed {
-  readonly change: number;
-}
+/** Closes the Runtime's Scope. Closing it again does nothing. */
+class StopRuntime extends Context.Service<StopRuntime, Effect.Effect<void>>()(
+  "@iirc/daemon/StopRuntime"
+) {}
 
 /**
- * What a Join produced (API-9): its Change if remembered, or else its `JOIN`, which is
- * skipped when Self is already in the Channel, so that nothing sends a duplicate (LOG-5).
+ * Makes the data directory if it is missing, owner-only, and holds it for as long as the
+ * Layer lives.
+ * @param dataDir - The data directory.
+ * @returns The Layer.
  */
-type Joined =
-  | Changed
-  | { readonly line: SendResult }
-  | { readonly line: { readonly reason: "AlreadyJoined"; readonly status: "skipped" } };
-
-/**
- * What a Part produced (API-9). Once its Change is recorded, a `PART` that fails is part
- * of the answer, because the Change stands.
- */
-type Parted =
-  | (Changed & {
-      readonly line?: SendResult | { readonly error: LineFailure; readonly status: "failed" };
-    })
-  | { readonly line: SendResult };
-
-/** Why a Line that was valid did not leave. */
-type LineFailure = Exclude<SendRefusal, InvalidMessage>;
-
-/** A Network's Configuration beside what is true of it now. */
-interface NetworkView {
-  readonly settings: NetworkSettings;
-  readonly status: NetworkState;
-}
-
-/** Who asked, which every Change and every Line sent on their behalf names (LOG-5). */
-type By = string;
-
-// LOG-5: the cause of a Line a Frontend asked for.
-const causeOf = (by: By) => `key:${by}`;
-
-// A read past its budget says so, because the remedy is to ask for less, a read that
-// never left the queue says so, because the remedy is to wait, and any other failure is
-// the Log's (LOG-11).
-const fromReader = <A>(read: Effect.Effect<A, ReaderQueueFull | ReaderTimedOut | StorageFailed>) =>
-  Effect.catchTags(read, {
-    ReadTimedOut: ({ budgetMillis }) => Effect.fail(new ReadTimedOut({ budgetMillis })),
-    ReaderBusy: ({ waitedMillis }) => Effect.fail(new ReaderBusy({ waitedMillis })),
-    StorageFailed: () => Effect.fail(new LogUnavailable()),
-  });
-
-/** A page of Entries, and how to decode each Connection's bytes among them (MSG-4). */
-export interface EntryPage {
-  readonly entries: readonly Entry[];
-  /** By the sequence of a Connection's `attempt`. A Connection not here has no fallback. */
-  readonly fallbacks: ReadonlyMap<number, FallbackEncoding>;
-}
-
-// The Connections whose bytes a page holds.
-const connectionsIn = (entries: readonly Entry[]) =>
-  entries.flatMap((entry) =>
-    entry._tag === "Line" || entry._tag === "Dropped" ? [entry.connection] : []
-  );
-
-// Each label as this runtime decodes with it. One it cannot, which only a Log written by
-// another runtime could hold, gives no fallback, as it gave Standing none.
-const fallbacksOf = (
-  encodings: readonly { readonly connection: number; readonly encoding: string }[]
-) =>
-  new Map(
-    encodings.flatMap(({ connection, encoding }) => {
-      const fallback = parseFallbackEncoding(encoding);
-
-      return fallback === undefined ? [] : [[connection, fallback] as const];
-    })
-  );
-
-// What a failure says of itself, as the reason a Frontend is given.
-const reasonOf = (cause: unknown) =>
-  Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message)
-    ? cause.message
-    : String(cause);
-
-const toSendResult = (sent: Sent): SendResult =>
-  sent._tag === "Written" ? { sequence: sent.sequence, status: "written" } : { status: "queued" };
-
-// A Join with no key has nothing to build in.
-const noSecrets: Secrets = new Map();
-
-const byId = (configuration: Configuration) =>
-  [...configuration.networks.values()].toSorted((one, other) =>
-    one.settings.id < other.settings.id ? -1 : 1
-  );
-
-// What a host runs with: the Channels wanted, which are those with autojoin on, each with
-// its key by name and the Change that last wanted it, the whole Tuning, and every
-// Credential, as the same Map until one changes (CONF-2, LIVE-8, LOG-6).
-const hostSettings = (
-  { retrySince, settings, wantedSince }: ConfiguredNetwork,
-  secrets: Secrets
-): HostSettings => ({
-  channels: settings.channels.flatMap(({ autojoin, key, name, rejoinOnKick }) => {
-    const since = wantedSince.get(channelKey(name));
-
-    return autojoin
-      ? [
-          {
-            name,
-            rejoinOnKick,
-            ...(key !== undefined && { key }),
-            ...(since !== undefined && { since }),
-          },
-        ]
-      : [];
-  }),
-  connectCommands: settings.connectCommands,
-  credentials: settings.credentials,
-  enabled: settings.enabled,
-  identity: settings.identity,
-  ircds: settings.ircds,
-  quitReason: settings.quitReason,
-  retrySince,
-  secrets,
-  services: settings.services,
-  tuning: tuningOf(settings.tuning),
-});
-
-const toNetworkState = ({ id, name }: NetworkSettings, status: NetworkStatus): NetworkState => ({
-  casemapping:
-    status.casemapping === undefined
-      ? null
-      : { ...status.casemapping, unrecognised: status.casemapping.unrecognised ?? null },
-  closeReason: status.closeReason ?? null,
-  consecutiveFailures: status.consecutiveFailures,
-  enabled: status.enabled,
-  id,
-  joinFailures: status.joinFailures.map(({ connection, ...failure }) => ({
-    ...failure,
-    connection: connection ?? null,
-  })),
-  joined: status.joined,
-  kicked: status.kicked,
-  lagMillis: status.lagMillis ?? null,
-  lanes: status.lanes,
-  logFault: status.logFault ?? null,
-  login: { state: status.login.state, text: status.login.text ?? null },
-  missingCredentials: status.missingCredentials,
-  name,
-  nextAttemptAt: status.nextAttemptAt ?? null,
-  phase: status.phase,
-  rejectedChannels: status.rejectedChannels.map(({ channel, reason }) => ({
-    channel: channel.name,
-    reason,
-  })),
-  self: status.self ?? null,
-});
-
-// A Network whose host has not started yet, which only a read that races its Change sees.
-const unhosted = ({ enabled, id, name }: NetworkSettings): NetworkState => ({
-  casemapping: null,
-  closeReason: null,
-  consecutiveFailures: 0,
-  enabled,
-  id,
-  joinFailures: [],
-  joined: [],
-  kicked: [],
-  lagMillis: null,
-  lanes: { background: 0, control: 0, interactive: 0 },
-  logFault: null,
-  login: { state: "none", text: null },
-  missingCredentials: [],
-  name,
-  nextAttemptAt: null,
-  phase: "idle",
-  rejectedChannels: [],
-  self: null,
-});
-
-const without = <A>(held: ReadonlyMap<NetworkId, A>, id: NetworkId) => {
-  const remaining = new Map(held);
-
-  remaining.delete(id);
-
-  return remaining;
-};
-
-const requireNetwork = (current: Configuration, id: NetworkId) => {
-  const network = current.networks.get(id);
-
-  return network === undefined
-    ? Effect.fail(new NetworkNotFound({ network: id }))
-    : Effect.succeed(network);
-};
-
-const sendThrough = (
-  host: NetworkHost,
-  line: OutboundLine,
-  by: By,
-  sensitive?: Sensitive
-): Effect.Effect<SendResult, LineFailure> =>
-  host.send(line, causeOf(by), sensitive).pipe(
-    Effect.map(toSendResult),
-    Effect.catchTags({
-      LaneFull: ({ lane }) => Effect.fail(new LaneFull({ lane })),
-      LineDropped: ({ reason }) => Effect.fail(new LineDropped({ reason })),
-      NotInSession: ({ phase }) => Effect.fail(new NotInSession({ phase })),
-      RecordFailed: () => Effect.fail(new LogUnavailable()),
-      WriteFailed: ({ reason }) => Effect.fail(new WriteFailed({ reason })),
-    })
-  );
-
-const built = (outbound: Outbound) =>
-  outbound._tag === "Rejected"
-    ? Effect.fail(new InvalidMessage({ reason: outbound.reason }))
-    : Effect.succeed(outbound.line);
-
-/** What the Daemon can do for a Frontend, each on behalf of a key. */
-export class Daemon extends Context.Service<
-  Daemon,
-  {
-    /**
-     * Activity by cursor (MSG-5), with the cursor that resumes after the page. A place's
-     * name finds each row it names under the mapping that row was keyed under (KNOW-3).
-     */
-    readonly activity: (query: ActivityRead) => Effect.Effect<
-      {
-        readonly activity: readonly LoggedActivity[];
-        readonly next: ActivityCursor;
-      },
-      Reading
-    >;
-    /** Adds a Network, which is hosted at once (CONF-3). */
-    readonly addNetwork: (
-      by: By,
-      settings: NetworkSettings
-    ) => Effect.Effect<Changed, InvalidRequest | NetworkExists | Recording>;
-    /** Whose key was presented, if anyone's (AUTH-2). */
-    readonly authorize: (
-      presented: string
-    ) => Effect.Effect<{ readonly name: string; readonly scope: KeyScope } | undefined>;
-    /** Backs up the Log into `backups/` in the data directory, while it runs (RUN-2). */
-    readonly backup: Effect.Effect<Backup, BackupFailed>;
-    /** Replaces a Network's settings whole. Ircds, Identity, and Tuning apply next time. */
-    readonly changeNetwork: (
-      by: By,
-      id: NetworkId,
-      settings: NetworkSettings
-    ) => Effect.Effect<Changed, InvalidRequest | NetworkNotFound | Recording>;
-    /** All of Configuration, ordered by ID (CONF-6). */
-    readonly configuration: Effect.Effect<{ readonly networks: readonly NetworkSettings[] }>;
-    /** Enables a Network and retries now (LIVE-4). */
-    readonly connect: (
-      by: By,
-      id: NetworkId
-    ) => Effect.Effect<Changed, NetworkNotFound | Recording>;
-    /** Every Credential's name and when it was set, and where they are kept (CRED-2). */
-    readonly credentials: Effect.Effect<{
-      readonly credentials: readonly { readonly name: string; readonly set: number }[];
-      readonly store: CredentialStore;
-    }>;
-    /**
-     * Deletes a Credential, and then records that it did (CRED-1). A Credential the Log
-     * says is set and the store does not hold is deleted too, which only a crash between
-     * the two writes leaves, so that asking again brings them back in line.
-     */
-    readonly deleteCredential: (
-      by: By,
-      name: string
-    ) => Effect.Effect<Changed, CredentialNotFound | CredentialsUnavailable | Recording>;
-    /** Creates a key, which is returned once and never again (AUTH-2). */
-    readonly createKey: (
-      by: By,
-      key: { readonly name: string; readonly scope: KeyScope }
-    ) => Effect.Effect<
-      Changed & { readonly key: string; readonly name: string; readonly scope: KeyScope },
-      KeyExists | Recording
-    >;
-    /** Disables a Network, which leaves by choice (LIVE-9). */
-    readonly disconnect: (
-      by: By,
-      id: NetworkId
-    ) => Effect.Effect<Changed, NetworkNotFound | Recording>;
-    /**
-     * Entries by cursor, from every Network and of every kind unless the query narrows it,
-     * with the fallback encoding of each Connection among them that recorded one, which is
-     * what its bytes decode with (MSG-4).
-     */
-    readonly entries: (
-      query: EntryQuery
-    ) => Effect.Effect<EntryPage, LogUnavailable | ReaderBusy | ReadTimedOut>;
-    /** Gaps by cursor, from every Network unless `network` names one (LIVE-10). */
-    readonly gaps: (
-      query: NetworkPage
-    ) => Effect.Effect<readonly Gap[], LogUnavailable | ReaderBusy | ReadTimedOut>;
-    /**
-     * Joins a Channel (CONF-5). Remembered, it records the Channel as wanted, which a host
-     * joins with or without a Session. Not remembered, it sends `JOIN` now, which needs one.
-     */
-    readonly join: (
-      by: By,
-      id: NetworkId,
-      join: {
-        readonly channel: string;
-        readonly key?: Redacted.Redacted;
-        readonly remember: boolean;
-      }
-    ) => Effect.Effect<Joined, CredentialsUnavailable | NetworkNotFound | Recording | SendRefusal>;
-    /** The keys there are, never the keys themselves. */
-    readonly keys: Effect.Effect<
-      readonly { readonly created: number; readonly name: string; readonly scope: KeyScope }[]
-    >;
-    /** Messages by cursor, from every Network unless `network` names one. */
-    readonly messages: (
-      query: NetworkPage
-    ) => Effect.Effect<readonly LoggedMessage[], LogUnavailable | ReaderBusy | ReadTimedOut>;
-    /**
-     * One Network's Configuration and status, and what its Session knows of Self and of
-     * its Ircd, from its Standing with the sequence it reflects (KNOW-1, KNOW-2, API-6).
-     */
-    readonly network: (
-      id: NetworkId
-    ) => Effect.Effect<NetworkView & { readonly known: NetworkKnowledge }, NetworkNotFound>;
-    /** Every Network's Configuration and status, ordered by ID. */
-    readonly networks: Effect.Effect<readonly NetworkView[]>;
-    /**
-     * Parts a Channel (CONF-5): takes it out of Configuration if it is there, and sends
-     * `PART` if Self is in it now. Once the Change is recorded, a `PART` that fails is in
-     * the answer, not a refusal.
-     */
-    readonly part: (
-      by: By,
-      id: NetworkId,
-      part: { readonly channel: string; readonly reason?: string }
-    ) => Effect.Effect<Parted, ChannelNotFound | NetworkNotFound | Recording | SendRefusal>;
-    /**
-     * Removes a Network, which says `QUIT` and stays off (LIVE-9). It answers once the
-     * host has gone, and holds up no other Change while it goes.
-     */
-    readonly removeNetwork: (
-      by: By,
-      id: NetworkId
-    ) => Effect.Effect<Changed, NetworkNotFound | Recording>;
-    /**
-     * Empties the bytes of the Line or Dropped Entry at `sequence`, recording who did in
-     * the same transaction, and derives every table again (LOG-7).
-     */
-    readonly redact: (
-      by: By,
-      sequence: number
-    ) => Effect.Effect<
-      Changed,
-      EntryAlreadyRedacted | EntryNotFound | EntryNotRedactable | Recording
-    >;
-    /** Replaces all of Configuration as one Change, as an import does (CONF-6). */
-    readonly replaceConfiguration: (
-      by: By,
-      networks: readonly NetworkSettings[]
-    ) => Effect.Effect<Changed, InvalidRequest | Recording>;
-    /** Revokes a key, which stops working on its next request (AUTH-2). */
-    readonly revokeKey: (by: By, name: string) => Effect.Effect<Changed, KeyNotFound | Recording>;
-    /**
-     * Sets or replaces a Credential, and then records that it did, by name alone (CRED-1).
-     * Kept first, because a value with no Change is harmless, and a Change that claims a
-     * value which was never kept would mislead.
-     */
-    readonly setCredential: (
-      by: By,
-      name: string,
-      value: Redacted.Redacted
-    ) => Effect.Effect<Changed, CredentialsUnavailable | Recording>;
-    /** Sends one `PRIVMSG` (API-9). */
-    readonly send: (
-      by: By,
-      message: { readonly network: NetworkId; readonly target: string; readonly text: string }
-    ) => Effect.Effect<SendResult, NetworkNotFound | SendRefusal>;
-    readonly status: Effect.Effect<Status>;
-    /**
-     * A Channel Self is in, with a page of its members, from the Network's Standing as of
-     * its last commit, and `at`, that commit's sequence, from the same snapshot (KNOW-4,
-     * API-6). It reads memory, not the Log, so it waits for no commit and holds none up.
-     */
-    readonly target: (
-      id: NetworkId,
-      target: string,
-      page: MembersPage
-    ) => Effect.Effect<
-      ChannelDetails,
-      CursorStale | NetworkNotFound | NotAChannel | TargetNotFound
-    >;
-    /**
-     * Leaves every Network at once and records that the Daemon stopped (LIVE-9, RUN-3).
-     * Each waits as long as its `quitWaitMillis` allows, and only the first call does
-     * anything.
-     */
-    readonly stop: Effect.Effect<void>;
-  }
->()("@iirc/daemon/Daemon") {
-  /**
-   * Records this start, reads Configuration from the Log, and hosts every Network in it
-   * for as long as the Layer lives. Closing the Layer stops it, if nothing has yet, so the
-   * Log outlasts the Daemon's last Entry.
-   * @param config - Where the Log is, and the Daemon's version.
-   * @returns The Daemon, already connecting.
-   */
-  static readonly layer = (
-    config: DaemonConfig
-  ): Layer.Layer<
-    Daemon,
-    StorageFailed | UndecodableChange,
-    Credentials | Digest.Digest | Log | LogReader | Recorder | SecureRandom.SecureRandom | Transport
-  > =>
-    Layer.effect(
-      Daemon,
-      Effect.gen(function* () {
-        const log = yield* Log;
-        const reader = yield* LogReader;
-        const credentials = yield* Credentials;
-        const { record } = yield* Recorder;
-        const { version } = config;
-
-        // CONF-1: what the Log says, or nothing at all. Nothing else appends yet, so this
-        // reads on the writer, with no budget to run out of however long the history.
-        const configuration = yield* SubscriptionRef.make(yield* readConfiguration(log));
-
-        yield* record([{ _tag: "Daemon", phase: "started", version }], constVoid).pipe(
-          Effect.mapError(({ cause }) => new StorageFailed({ cause }))
-        );
-
-        // Only the Daemon appends Changes, one at a time, so an operation that checks itself
-        // against Configuration, records, and folds under this permit cannot be overtaken.
-        const changing = yield* Semaphore.make(1);
-        const stopping = yield* Ref.make(false);
-        const hostsScope = yield* Scope.fork(yield* Effect.scope);
-        const fibers = yield* Scope.provide(FiberMap.make<NetworkId>(), hostsScope);
-        const hosts = yield* Ref.make<ReadonlyMap<NetworkId, NetworkHost>>(new Map());
-
-        // The hosts of removed Networks that are still saying `QUIT`, each done once gone.
-        const leaving = yield* Ref.make<ReadonlyMap<NetworkId, Deferred.Deferred<undefined>>>(
-          new Map()
-        );
-
-        // A host is started by whichever operation added its Network, and runs on what the
-        // Daemon was built with.
-        const hostContext = yield* Effect.context<Recorder | Transport>();
-        const keyContext = yield* Effect.context<Digest.Digest | SecureRandom.SecureRandom>();
-
-        // A host reads its settings whenever it decides something, and wakes only for a
-        // Change to its own Network, which the fold gives a new object. A Credential it
-        // refers to changing is one of those (CRED-1).
-        const optionsFor = (network: ConfiguredNetwork): NetworkOptions => {
-          const { id } = network.settings;
-          let last: HostSettings | undefined;
-
-          return {
-            changes: SubscriptionRef.changes(configuration).pipe(
-              Stream.map(({ networks }) => networks.get(id)),
-              Stream.changesWith((one, other) => one === other)
-            ),
-            id,
-            // A removed Network's host stops once Configuration has dropped it, and until it
-            // has gone it finds its Network as it last was, but disabled, so it acts on
-            // nothing the Owner removed.
-            settings: Effect.gen(function* () {
-              const found = (yield* SubscriptionRef.get(configuration)).networks.get(id);
-              const secrets = yield* credentials.all;
-
-              last =
-                found === undefined
-                  ? { ...(last ?? hostSettings(network, secrets)), enabled: false, secrets }
-                  : hostSettings(found, secrets);
-
-              return last;
-            }),
-          };
-        };
-
-        const startHost = Effect.fnUntraced(function* (network: ConfiguredNetwork) {
-          const { id } = network.settings;
-          const ready = yield* Deferred.make<undefined>();
-
-          // `hostNetwork` waits for its `QUIT` in a finalizer that can be cut short, which on
-          // a fiber being interrupted it would be at once. So its Scope is closed on a fiber
-          // of its own, which nothing interrupts, and the host's fiber waits for that.
-          const fiber = yield* FiberMap.run(
-            fibers,
-            id,
-            Effect.gen(function* () {
-              const scope = yield* Scope.make();
-
-              return yield* Effect.gen(function* () {
-                const host = yield* Scope.provide(hostNetwork(optionsFor(network)), scope);
-
-                yield* Ref.update(hosts, (held) => new Map(held).set(id, host));
-                yield* Deferred.succeed(ready, undefined);
-
-                return yield* Effect.never;
-              }).pipe(
-                Effect.onExit(() =>
-                  Effect.flatMap(Effect.forkDetach(Scope.close(scope, Exit.void)), Fiber.await)
-                )
-              );
-            }).pipe(Effect.provideContext(hostContext))
-          );
-
-          yield* Effect.raceFirst(Deferred.await(ready), Fiber.await(fiber));
-        });
-
-        // Closing a host's Scope says `QUIT` and waits for it (LIVE-9). That runs on a fiber
-        // of its own, so the Change that removed the Network holds the permit no longer
-        // than it takes to record. Nothing interrupts it, so a stopping Daemon, which
-        // closes `hostsScope`, waits for it too.
-        const stopHost = Effect.fnUntraced(function* (id: NetworkId) {
-          const gone = yield* Deferred.make<undefined>();
-
-          yield* Ref.update(hosts, (held) => without(held, id));
-          yield* Ref.update(leaving, (held) => new Map(held).set(id, gone));
-          yield* FiberMap.remove(fibers, id).pipe(
-            Effect.ensuring(
-              Effect.andThen(
-                Deferred.succeed(gone, undefined),
-                Ref.update(leaving, (held) => (held.get(id) === gone ? without(held, id) : held))
-              )
-            ),
-            Effect.forkIn(hostsScope, { uninterruptible: true })
-          );
-
-          return gone;
-        });
-
-        // A Network added again under an ID whose old host is still leaving waits for it,
-        // so that two hosts never share an ID.
-        const untilLeft = (id: NetworkId) =>
-          Effect.flatMap(Ref.get(leaving), (held) => {
-            const gone = held.get(id);
-
-            return gone === undefined ? Effect.void : Deferred.await(gone);
-          });
-
-        yield* Effect.forEach(
-          byId(yield* SubscriptionRef.get(configuration)),
-          (network) => startHost(network),
-          { discard: true }
-        );
-
-        // Recorded, folded, and published under the permit. Hosts that are gone start to
-        // stop once Configuration has dropped them, and new ones start once it has them,
-        // so a host always finds its own Network. The operation answers once the gone
-        // hosts have said `QUIT`, but the permit is free by then (LIVE-9). `decide` may
-        // write elsewhere before it names its Change, as a Credential does, so that what
-        // it wrote and the Change that records it are in the same order as every other.
-        // `write` records the Change, which is an append unless the Change edits the Log
-        // too, as a redaction does.
-        //
-        // From `decide` to the last host started, nothing can interrupt it. A Change that
-        // was recorded and never published would leave Configuration behind the Log, and
-        // a Credential that was kept and never recorded would leave a value no Change
-        // names. Only waiting for the permit can be cancelled, and every wait inside is
-        // bounded: a Credential's write, and an old host's `QUIT`.
-        const commitWith = <E, C extends Change, W>(
-          by: By,
-          decide: (current: Configuration) => Effect.Effect<C, E>,
-          write: (
-            before: Configuration,
-            by: By,
-            change: C
-          ) => Effect.Effect<{ readonly after: Configuration; readonly sequence: number }, W>
-        ) =>
-          Effect.gen(function* () {
-            const committed = yield* changing.withPermit(
-              Effect.uninterruptible(
-                Effect.gen(function* () {
-                  if (yield* Ref.get(stopping)) {
-                    return yield* new Stopping();
-                  }
-
-                  const before = yield* SubscriptionRef.get(configuration);
-                  const change = yield* decide(before);
-
-                  const { after, sequence } = yield* write(before, by, change);
-
-                  yield* SubscriptionRef.set(configuration, after);
-
-                  const gone = yield* Effect.forEach(
-                    [...before.networks.keys()].filter((id) => !after.networks.has(id)),
-                    stopHost
-                  );
-
-                  yield* Effect.forEach(
-                    [...after.networks.values()].filter(
-                      ({ settings }) => !before.networks.has(settings.id)
-                    ),
-                    (network) => Effect.andThen(untilLeft(network.settings.id), startHost(network)),
-                    { discard: true }
-                  );
-
-                  return { after, before, gone, sequence };
-                })
-              )
-            );
-
-            yield* Effect.forEach(committed.gone, Deferred.await, { discard: true });
-
-            return committed;
-          });
-
-        const appendChange = (before: Configuration, by: By, change: Change) =>
-          recordChange(record, before, by, change).pipe(
-            Effect.mapError(() => new LogUnavailable())
-          );
-
-        const commit = <E>(by: By, decide: (current: Configuration) => Effect.Effect<Change, E>) =>
-          commitWith(by, decide, appendChange);
-
-        // Stores a Credential, then records that it did, by name alone (CRED-1). Kept first,
-        // because a value with no Change is harmless, and a Change that claims a value which
-        // was never kept would mislead. A store that did not answer in time has failed, so
-        // nothing is recorded, and its late answer is undone by the Credentials service.
-        const storeCredential = (by: By, name: string, value: Redacted.Redacted) =>
-          commit(by, () =>
-            Effect.as(credentials.set(name, value), {
-              _tag: "CredentialSet",
-              name,
-            } satisfies Change)
-          );
-
-        // A configured Network's host, which only a stopping Daemon lacks.
-        const hostOf = Effect.fnUntraced(function* (id: NetworkId) {
-          yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);
-
-          const host = (yield* Ref.get(hosts)).get(id);
-
-          return host ?? (yield* new NotInSession({ phase: "closed" }));
-        });
-
-        const isIn = Effect.fnUntraced(function* (host: NetworkHost, channel: string) {
-          const { joined, phase } = yield* host.status;
-          const key = channelKey(channel);
-
-          return phase === "session" && joined.some((name) => channelKey(name) === key);
-        });
-
-        const sendPart = Effect.fnUntraced(function* (
-          host: NetworkHost,
-          by: By,
-          channel: string,
-          reason?: string
-        ) {
-          return yield* sendThrough(host, yield* built(partLine(channel, reason)), by);
-        });
-
-        // A Channel no longer on a Network's list is left, if Self is in it (CONF-2). The
-        // Change is already recorded, so a `PART` that cannot go now is not its failure, and
-        // the next Session does not join it again anyway.
-        const partDropped = (by: By, before: Configuration, after: Configuration) =>
-          Effect.forEach(
-            droppedChannels(before, after),
-            ({ channels, id }) =>
-              Effect.gen(function* () {
-                const host = (yield* Ref.get(hosts)).get(id);
-
-                if (host !== undefined) {
-                  for (const channel of channels) {
-                    if (yield* isIn(host, channel)) {
-                      yield* Effect.ignore(sendPart(host, by, channel));
-                    }
-                  }
-                }
-              }),
-            { discard: true }
-          );
-
-        const viewOf = Effect.fnUntraced(function* ({ settings }: ConfiguredNetwork) {
-          const host = (yield* Ref.get(hosts)).get(settings.id);
-
-          return {
-            settings,
-            status:
-              host === undefined
-                ? unhosted(settings)
-                : toNetworkState(settings, yield* host.status),
-          };
-        });
-
-        const toggled = (
-          by: By,
-          id: NetworkId,
-          change: (id: NetworkId) => Extract<Change, { readonly id: NetworkId }>
-        ) =>
-          commit(by, (current) => Effect.as(requireNetwork(current, id), change(id))).pipe(
-            Effect.map(({ sequence }) => ({ change: sequence }))
-          );
-
-        const stop = yield* Effect.cached(
-          changing
-            .withPermit(
-              Ref.set(stopping, true).pipe(Effect.andThen(Scope.close(hostsScope, Exit.void)))
-            )
-            .pipe(
-              Effect.andThen(record([{ _tag: "Daemon", phase: "stopped", version }], constVoid)),
-              Effect.catchTag("RecordFailed", (failed) =>
-                Effect.logError("The Daemon's stop could not be recorded", failed)
-              )
-            )
-        );
-
-        yield* Effect.addFinalizer(() => stop);
-
-        return {
-          // A place is found by name under each row's own mapping, on the Worker (KNOW-3).
-          activity: (query) =>
-            fromReader(
-              Effect.map(reader.activity(query), (rows) => activityPage(rows, query.after))
-            ),
-          addNetwork: Effect.fnUntraced(function* (by, settings) {
-            const { sequence } = yield* commit(by, (current) =>
-              current.networks.has(settings.id)
-                ? Effect.fail(new NetworkExists({ network: settings.id }))
-                : Effect.succeed<Change>({ _tag: "NetworkAdded", settings })
-            );
-
-            return { change: sequence };
-          }),
-          authorize: (presented) =>
-            SubscriptionRef.get(configuration).pipe(
-              Effect.flatMap(({ keys }) => findKey(keys, presented)),
-              Effect.provideContext(keyContext)
-            ),
-          // Not a Change, so it takes no permit, and runs on a Worker of its own (RUN-2).
-          backup: Effect.mapError(
-            reader.backup,
-            ({ cause }) => new BackupFailed({ reason: reasonOf(cause) })
-          ),
-          changeNetwork: Effect.fnUntraced(function* (by, id, settings) {
-            if (settings.id !== id) {
-              return yield* new InvalidRequest({
-                issues: [
-                  {
-                    message: "must be the Network's ID, which cannot change",
-                    path: ["payload", "id"],
-                  },
-                ],
-              });
-            }
-
-            const { after, before, sequence } = yield* commit(by, (current) =>
-              Effect.as(requireNetwork(current, id), {
-                _tag: "NetworkChanged",
-                settings,
-              } satisfies Change)
-            );
-
-            yield* partDropped(by, before, after);
-
-            return { change: sequence };
-          }),
-          configuration: Effect.map(SubscriptionRef.get(configuration), (current) => ({
-            networks: byId(current).map(({ settings }) => settings),
-          })),
-          connect: (by, id) =>
-            toggled(by, id, (network) => ({ _tag: "NetworkConnected", id: network })),
-          createKey: Effect.fnUntraced(function* (by, { name, scope }) {
-            const key = yield* Effect.provideContext(newKey, keyContext);
-            const hash = yield* Effect.provideContext(hashKey(key), keyContext);
-
-            const { sequence } = yield* commit(by, (current) =>
-              current.keys.has(name)
-                ? Effect.fail(new KeyExists({ keyName: name }))
-                : Effect.succeed<Change>({ _tag: "KeyCreated", hash, name, scope })
-            );
-
-            return { change: sequence, key, name, scope };
-          }),
-          credentials: credentials.names.pipe(
-            Effect.map((names) => ({ credentials: names, store: credentials.store }))
-          ),
-          deleteCredential: (by, name) =>
-            commit(by, (current) =>
-              Effect.gen(function* () {
-                const deleted = yield* credentials.delete(name);
-
-                if (!deleted && current.credentials.get(name)?.set !== true) {
-                  return yield* new CredentialNotFound({ credential: name });
-                }
-
-                return { _tag: "CredentialDeleted", name } satisfies Change;
-              })
-            ).pipe(Effect.map(({ sequence }) => ({ change: sequence }))),
-          disconnect: (by, id) =>
-            toggled(by, id, (network) => ({ _tag: "NetworkDisconnected", id: network })),
-          // Every read goes to the reader, so none can delay an append (LOG-11).
-          entries: (query) =>
-            fromReader(
-              Effect.gen(function* () {
-                const entries = yield* reader.entries(query);
-                const connections = connectionsIn(entries);
-
-                const encodings =
-                  connections.length === 0 ? [] : yield* reader.encodings(connections);
-
-                return { entries, fallbacks: fallbacksOf(encodings) } satisfies EntryPage;
-              })
-            ),
-          gaps: (query) => fromReader(reader.gaps(query)),
-          join: Effect.fnUntraced(function* (by, id, { channel, key, remember }) {
-            const network = yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);
-            // The name the Channel's key is kept under, or would be (CRED-4).
-            const keyName = keyNameFor(network.settings, channel);
-
-            if (remember) {
-              // The key is a Credential first, recorded as one, and only then named by the
-              // Channel, so that no Change names a key that was never kept (CRED-4).
-              if (key !== undefined) {
-                yield* storeCredential(by, keyName, key);
-              }
-
-              // The reconciler reads what is wanted on every plan, so it sends the `JOIN`,
-              // and nothing here can send a second one.
-              const { sequence } = yield* commit(by, (current) =>
-                Effect.as(requireNetwork(current, id), {
-                  _tag: "ChannelJoined",
-                  channel: { name: channel, ...(key !== undefined && { key: keyName }) },
-                  network: id,
-                } satisfies Change)
-              );
-
-              return { change: sequence };
-            }
-
-            const host = yield* hostOf(id);
-
-            // A key that is not to be remembered is built in as a Credential's would be, so
-            // the Log has `<redacted>` in its place, under the name it would have (LOG-6).
-            const [batch] = keyedJoins(
-              [{ name: channel, ...(key !== undefined && { key: keyName }) }],
-              key === undefined ? noSecrets : new Map([[keyName, key]])
-            ).batches;
-
-            if (batch === undefined) {
-              return yield* new InvalidMessage({ reason: "InvalidTarget" });
-            }
-
-            // Nothing sends a duplicate `JOIN` (LOG-5).
-            if (yield* isIn(host, channel)) {
-              return { line: { reason: "AlreadyJoined", status: "skipped" } } as const;
-            }
-
-            return { line: yield* sendThrough(host, batch.line, by, joinSensitive(batch)) };
-          }),
-          keys: Effect.map(SubscriptionRef.get(configuration), ({ keys }) =>
-            [...keys]
-              .map(([name, { created, scope }]) => ({ created, name, scope }))
-              .toSorted((one, other) => (one.name < other.name ? -1 : 1))
-          ),
-          // Spans come from the Worker, which counts them toward its page bound (MSG-3).
-          messages: (query) => fromReader(reader.messages(query)),
-          network: Effect.fnUntraced(function* (id) {
-            const view = yield* viewOf(
-              yield* requireNetwork(yield* SubscriptionRef.get(configuration), id)
-            );
-
-            return { ...view, known: knownOf(yield* log.standingAt(id)) };
-          }),
-          networks: Effect.flatMap(SubscriptionRef.get(configuration), (current) =>
-            Effect.forEach(byId(current), viewOf)
-          ),
-          part: Effect.fnUntraced(function* (
-            by,
-            id,
-            { channel, reason }
-          ): Effect.fn.Return<Parted, ChannelNotFound | NetworkNotFound | Recording | SendRefusal> {
-            const network = yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);
-            const key = channelKey(channel);
-            const host = (yield* Ref.get(hosts)).get(id);
-            // The host, if Self is in the Channel now.
-            const within = host !== undefined && (yield* isIn(host, channel)) ? host : undefined;
-
-            const configured = network.settings.channels.some(
-              ({ name }) => channelKey(name) === key
-            );
-
-            // Built first, so that a `PART` that cannot be sent refuses the Part whole.
-            const line = yield* built(partLine(channel, reason));
-
-            if (!configured) {
-              return within === undefined
-                ? yield* new ChannelNotFound({ channel, network: id })
-                : { line: yield* sendThrough(within, line, by) };
-            }
-
-            // Recorded first, so that no reconciler joins it again after the `PART`.
-            const { sequence } = yield* commit(by, (current) =>
-              Effect.as(requireNetwork(current, id), {
-                _tag: "ChannelParted",
-                channel,
-                network: id,
-              } satisfies Change)
-            );
-
-            if (within === undefined) {
-              return { change: sequence };
-            }
-
-            // The Change stands whatever becomes of the `PART`, so its failure is reported
-            // beside it rather than in its place (API-9).
-            const sent = yield* sendThrough(within, line, by).pipe(
-              Effect.catch((error) => Effect.succeed({ error, status: "failed" as const }))
-            );
-
-            return { change: sequence, line: sent };
-          }),
-          redact: (by, sequence) =>
-            commitWith(
-              by,
-              () => Effect.succeed({ _tag: "EntryRedacted", sequence } as const),
-              (before, who, change) =>
-                recordRedaction(log.redact, before, who, change).pipe(
-                  Effect.catchTags({
-                    EntryAlreadyRedacted: ({ change: taken }) =>
-                      Effect.fail(new EntryAlreadyRedacted({ change: taken, sequence })),
-                    EntryNotFound: () => Effect.fail(new EntryNotFound({ sequence })),
-                    EntryNotRedactable: ({ kind }) =>
-                      Effect.fail(new EntryNotRedactable({ kind, sequence })),
-                    StorageFailed: () => Effect.fail(new LogUnavailable()),
-                  })
-                )
-            ).pipe(Effect.map(({ sequence: change }) => ({ change }))),
-          removeNetwork: (by, id) =>
-            commit(by, (current) =>
-              Effect.as(requireNetwork(current, id), {
-                _tag: "NetworkRemoved",
-                id,
-              } satisfies Change)
-            ).pipe(Effect.map(({ sequence }) => ({ change: sequence }))),
-          replaceConfiguration: Effect.fnUntraced(function* (by, networks) {
-            const { after, before, sequence } = yield* commit(by, () =>
-              Effect.succeed<Change>({ _tag: "ConfigurationReplaced", networks })
-            );
-
-            yield* partDropped(by, before, after);
-
-            return { change: sequence };
-          }),
-          revokeKey: (by, name) =>
-            commit(by, (current) => {
-              const revoked = current.keys.get(name);
-
-              // Its name, scope, and SHA-256, as creating it recorded (AUTH-2).
-              return revoked === undefined
-                ? Effect.fail(new KeyNotFound({ keyName: name }))
-                : Effect.succeed<Change>({
-                    _tag: "KeyRevoked",
-                    hash: revoked.hash,
-                    name,
-                    scope: revoked.scope,
-                  });
-            }).pipe(Effect.map(({ sequence }) => ({ change: sequence }))),
-          send: Effect.fnUntraced(function* (by, { network, target, text }) {
-            const host = yield* hostOf(network);
-
-            return yield* sendThrough(host, yield* built(privmsg(target, text)), by);
-          }),
-          setCredential: (by, name, value) =>
-            storeCredential(by, name, value).pipe(
-              Effect.map(({ sequence }) => ({ change: sequence }))
-            ),
-          // It is how a Frontend hears of a fault in the Log, so a fault must not stop it.
-          // `head` stays on the writer, where it costs one lookup in the primary key.
-          status: Effect.gen(function* () {
-            const current = yield* SubscriptionRef.get(configuration);
-            const networks = yield* Effect.forEach(byId(current), viewOf);
-            const head = yield* Effect.orElseSucceed(log.head, () => null);
-
-            return {
-              apiVersion,
-              credentials: { store: credentials.store },
-              head,
-              networks: networks.map(({ status }) => status),
-              version,
-            };
-          }),
-          stop,
-          target: Effect.fnUntraced(function* (id, target, page) {
-            yield* requireNetwork(yield* SubscriptionRef.get(configuration), id);
-
-            const read = targetRead(yield* log.standingAt(id), id, target, page);
-
-            switch (read._tag) {
-              case "Channel": {
-                return read.details;
-              }
-
-              case "CursorStale": {
-                const { casemapping, inForce } = read;
-
-                return yield* new CursorStale({ casemapping, inForce });
-              }
-
-              case "NotAChannel": {
-                return yield* new NotAChannel({ network: id, target });
-              }
-
-              case "NotHeld": {
-                return yield* new TargetNotFound({ network: id, target });
-              }
-
-              default: {
-                return read satisfies never;
-              }
-            }
-          }),
-        };
-      })
-    );
-
-  /**
-   * Makes the Networks the first thing to stop. Everything that serves a Frontend depends
-   * on the Daemon, so closing in reverse order would stop those first, and a Send on a
-   * stalled socket would then hold up `QUIT`. Stopped first, that Send is answered at
-   * once. Provide what serves Frontends to this, so that it is built after them.
-   */
-  static readonly stopsFirst: Layer.Layer<never, never, Daemon> = Layer.effectDiscard(
+const dataDirectory = (dataDir: string) =>
+  Layer.effectDiscard(
     Effect.gen(function* () {
-      const { stop } = yield* Daemon;
+      const fs = yield* FileSystem.FileSystem;
 
-      yield* Effect.addFinalizer(() => stop);
+      yield* fs
+        .makeDirectory(dataDir, { mode: 0o700, recursive: true })
+        .pipe(
+          Effect.mapError((error) => new DataDirectoryFailed({ dataDir, reason: error.message }))
+        );
+
+      yield* holdDataDirectory(dataDir);
     })
-  );
-}
-
-/** What {@link DaemonCore} builds the Daemon on by default, any of which a test can replace. */
-export interface DaemonParts {
-  /** How to reach an Ircd. */
-  readonly transport?: Layer.Layer<Transport>;
-  /** The system keyring to try for Credentials. */
-  readonly keyring?: Keyring;
-  /** How long a Credential's write is waited for. */
-  readonly writeTimeout?: Duration.Input;
-  /**
-   * The Log's reader, on its Worker unless a test gives it one that reads in process, to
-   * spare the Worker's start.
-   */
-  readonly reader?: Layer.Layer<LogReader, StorageFailed, Log>;
-}
+  ).pipe(Layer.provide(BunFileSystem.layer));
 
 /**
- * The Daemon and everything under it, with no HTTP and no argv. Provide it outside
- * `HttpRouter.serve`, which forks the MemoMap, or the Log is built twice and locks
- * itself out.
- * @param config - Where the Log lives, and the Daemon's version.
- * @param parts - What to build it on in place of the real thing, which only a test gives.
- * @returns The Daemon, holding the data directory for as long as it lives.
+ * The Runtime in a Scope of its own, which {@link StopRuntime} closes, so the Daemon can
+ * stop it before serving stops.
+ * @param options - The pacing, and how long endings may take.
+ * @returns The Layer.
  */
-export const DaemonCore = (
-  config: DaemonConfig,
-  {
-    keyring = Bun.secrets,
-    reader = LogReader.layer({ dataDir: config.dataDir }),
-    transport = Transport.layer,
-    writeTimeout,
-  }: DaemonParts = {}
-): Layer.Layer<
-  Daemon,
-  CredentialsUnreadable | DataDirectoryLocked | LogTooNew | StorageFailed | UndecodableChange
-> =>
-  Daemon.layer(config).pipe(
-    // The reader and Credentials start once the Log holds the data directory, and stop
-    // before it lets go.
-    Layer.provide(
-      Layer.mergeAll(
-        reader,
-        Credentials.layer({
-          dataDir: config.dataDir,
-          keyring,
-          ...(writeTimeout !== undefined && { writeTimeout }),
-        })
-      ).pipe(Layer.provideMerge(Log.layer({ dataDir: config.dataDir })))
-    ),
-    Layer.provide(transport),
-    Layer.provide(keyCrypto)
+const runtimeFirstToStop = (options: DaemonOptions) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const close = Scope.close(scope, Exit.void);
+
+      yield* Effect.addFinalizer(() => close);
+
+      const runtime = layerRuntime(client, {
+        hangupDrain: options.hangupDrain,
+        pacing: options.pacing,
+        stopTimeout: options.stopTimeout,
+      });
+
+      const built = yield* Layer.buildWithScope(runtime, scope);
+
+      return Context.add(built, StopRuntime, close);
+    })
   );
+
+/**
+ * Everything but HTTP: the data directory held, the Journal, the Vault, the Transport,
+ * the Runtime, and the keys. Each is opened only once the directory is held.
+ * @param options - The data directory and the Transport's options.
+ * @returns The core.
+ */
+const layerCore = (options: DaemonOptions) => {
+  const { dataDir } = options;
+
+  const ports = Layer.mergeAll(
+    layerSqliteJournal(`${dataDir}/journal.sqlite`),
+    layerVault(`${dataDir}/credentials.json`),
+    layerTransport(options.transport)
+  );
+
+  const keys = ApiKeys.layer(dataDir).pipe(
+    Layer.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer, Digest.layerWebCrypto))
+  );
+
+  const heartbeat =
+    options.heartbeat === undefined
+      ? Layer.empty
+      : Layer.succeed(Heartbeat, Duration.fromInputUnsafe(options.heartbeat));
+
+  return Layer.mergeAll(
+    runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)),
+    keys,
+    heartbeat
+  ).pipe(Layer.provide(dataDirectory(dataDir)));
+};
+
+// Built after serving, so it closes first: the Runtime stops, every Owner input still
+// waiting fails with `NetworkStopped`, and only then does serving stop.
+const stopsFirst = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const stop = yield* StopRuntime;
+
+    yield* Effect.addFinalizer(() => stop);
+  })
+);
+
+/**
+ * The Daemon: the core, provided outside `HttpRouter.serve`, which forks the MemoMap and
+ * would build anything shared inside it twice, and the API served on `listen`.
+ * @param options - The data directory and the Transport's options.
+ * @param listen - Where to listen.
+ * @returns The Daemon, which runs for as long as the Layer lives, and its `HttpServer`.
+ */
+export const layerDaemon = (options: DaemonOptions, listen: Listen = defaultListen) =>
+  stopsFirst.pipe(
+    Layer.provideMerge(
+      HttpRouter.serve(ApiRoutes, { disableLogger: true }).pipe(
+        Layer.provideMerge(
+          BunHttpServer.layer({ gracefulShutdownTimeout, hostname: listen.host, port: listen.port })
+        )
+      )
+    ),
+    Layer.provide(layerCore(options))
+  );
+
+/** Logs as logfmt to stderr, so stdout holds only what a command was asked for. */
+export const layerLogger = Logger.layer([Logger.withConsoleError(Logger.formatLogFmt)]);

@@ -212,7 +212,7 @@ const apply = (style: Style, token: Token): Style => {
 };
 
 /**
- * Reads the mIRC formatting codes in some text (MSG-3), without ever throwing. Any string
+ * Reads the mIRC formatting codes in some text, without ever throwing. Any string
  * is valid. The result is data for a Frontend to draw, and is never markup.
  *
  * Codes that change nothing leave one Span, so the same style never appears twice in a
@@ -243,7 +243,7 @@ export const parseFormatting = (text: string): readonly Span[] => {
 
 /**
  * Removes every formatting code, keeping the text. Highlights and search run on this
- * (MSG-3). It reads the codes exactly as {@link parseFormatting} does.
+ *. It reads the codes exactly as {@link parseFormatting} does.
  * @param text - The text to strip.
  * @returns The text a reader would see, which no longer holds a formatting code.
  */
