@@ -3,8 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { connectPeer, startNgircd } from "@iirc/daemon/testing";
+import type { Ircd } from "@iirc/daemon/testing";
+import { Schema } from "effect";
 import { chromium } from "playwright";
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const main = path.join(import.meta.dirname, "..", "main.ts");
@@ -57,6 +60,28 @@ const startDaemon = async (dataDir: string) => {
 };
 
 const wrongKey = "iirc_not-the-key-but-close";
+
+/** What the end-to-end run reads of `known`: which Channels the Client has joined. */
+const decodeKnown = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      channels: Schema.Array(Schema.Struct({ name: Schema.String, standing: Schema.String })),
+    })
+  )
+);
+
+/**
+ * The first Network's row in the sidebar, once its connection is known.
+ * @param page - The page.
+ * @returns The row's text: its chevron, its id, and its connection.
+ */
+const networkRow = async (page: Page) => {
+  const row = page.getByRole("row").first();
+
+  await row.getByText(/^(?:connected|offline|stopped)$/u).waitFor();
+
+  return await row.textContent();
+};
 
 /**
  * Whether anything React keeps for the page, its state and its props, holds a secret. It
@@ -183,12 +208,10 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await field.fill(key);
         await page.getByRole("button", { name: "Sign in" }).click();
-        await page.getByRole("heading", { name: "Networks" }).waitFor();
-        const listed = await page.getByRole("listitem").allTextContents();
+        const listed = await networkRow(page);
 
         await page.reload();
-        await page.getByRole("heading", { name: "Networks" }).waitFor();
-        const afterReload = await page.getByRole("listitem").allTextContents();
+        const afterReload = await networkRow(page);
 
         const held = await page.evaluate(() => ({
           cookie: document.cookie,
@@ -220,13 +243,13 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: problems.filter((problem) => !problem.includes("401")),
           wrong,
         }).toStrictEqual({
-          afterReload: ["examplerunning"],
+          afterReload: "exampleoffline",
           afterWrong: { describedBy: true, field: "", inPage: false, tracker: "" },
           configured: 200,
           cookies: [{ holdsKey: false, httpOnly: true, name: "iirc_sign_in", sameSite: "Strict" }],
           cookiesAfter: [],
           held: { cookie: "", local: 0, session: 0 },
-          listed: ["examplerunning"],
+          listed: "exampleoffline",
           problems: [],
           wrong:
             "That key matches none the Daemon holds. Check it, or make one with iirc key create.",
@@ -234,6 +257,228 @@ describe("the web frontend on iirc daemon --web", () => {
       } finally {
         child.kill("SIGTERM");
         await child.exited;
+      }
+    }
+  );
+
+  it(
+    "reads a Network's Timelines on a real Ircd, live, with formatting, and older history on scrolling up",
+    { timeout: 90_000 },
+    async () => {
+      const ngircd: Ircd = await startNgircd();
+      const dataDir = path.join(directory, "timelines");
+      const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
+      const key = created.stdout.trim();
+      const { base, child } = await startDaemon(dataDir);
+      const channel = "#iirc-web";
+      const authorization = { authorization: `Bearer ${key}`, "content-type": "application/json" };
+
+      const api = async (method: string, route: string, body: string | null = null) =>
+        await fetch(`${base}/api${route}`, { body, headers: authorization, method });
+
+      const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+
+      try {
+        peer.send(`JOIN ${channel}`);
+
+        const configured = await api(
+          "PUT",
+          "/networks/private",
+          JSON.stringify({
+            channels: [{ name: channel }],
+            declined: [],
+            enabled: true,
+            fallbackEncoding: "windows-1252",
+            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+            login: { _tag: "None" },
+            nicks: ["iirc"],
+            realname: "iirc",
+            username: "iirc",
+          })
+        );
+
+        // Joined, as the Client knows it, decided from its Knowledge's structure.
+        await expect
+          .poll(
+            async () => {
+              const answer = await api("GET", "/networks/private/known");
+              const known = decodeKnown(await answer.text());
+
+              return known.channels.some(
+                (one) => one.name === channel && one.standing === "Joined"
+              );
+            },
+            { interval: 100, timeout: 20_000 }
+          )
+          .toBe(true);
+
+        // History: more than a window holds, so the oldest comes only on scrolling up.
+        for (let index = 1; index <= 130; index += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- said in order
+          await api(
+            "POST",
+            "/networks/private/say",
+            JSON.stringify({ kind: "Privmsg", target: channel, text: `history ${index}` })
+          );
+        }
+
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        const problems: string[] = [];
+
+        await page.addInitScript(() => {
+          // Every Content Security Policy violation the page meets, kept where the test
+          // can read it.
+          document.addEventListener("securitypolicyviolation", (event) => {
+            const root = document.documentElement;
+
+            root.dataset.cspViolations = `${root.dataset.cspViolations ?? ""}${event.violatedDirective} ${event.blockedURI};`;
+          });
+        });
+        page.on("console", (message) => {
+          if (message.type() === "error") {
+            problems.push(message.text());
+          }
+        });
+        page.on("pageerror", (error) => problems.push(error.message));
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+
+        const status = await networkRow(page);
+
+        await page.getByRole("row", { name: channel }).click();
+        const log = page.getByRole("log", { name: channel });
+
+        await log.getByText("history 130", { exact: true }).waitFor();
+
+        peer.send(
+          `PRIVMSG ${channel} :\u0002bold\u0002 and \u000304red\u0003 https://example.com/x`
+        );
+        const red = log.getByText("red", { exact: true });
+
+        await red.waitFor();
+
+        // A live item arriving at the bottom keeps the view there.
+        const pinned = await log.evaluate(
+          (element) => element.scrollHeight - element.scrollTop - element.clientHeight < 8
+        );
+
+        const formatting = {
+          bold: await log
+            .getByText("bold", { exact: true })
+            .evaluate((element) => getComputedStyle(element).fontWeight),
+          red: await red.evaluate((element) => getComputedStyle(element).color),
+        };
+
+        const link = log.getByRole("link", { name: "https://example.com/x" });
+
+        const linked = {
+          href: await link.getAttribute("href"),
+          rel: await link.getAttribute("rel"),
+          target: await link.getAttribute("target"),
+        };
+
+        // Where a row stands in the view, by its text, or `null` while it is not drawn.
+        const offsetOf = async (text: string) =>
+          await log.evaluate((element, wanted) => {
+            const row = [...element.querySelectorAll("[data-index]")].find(
+              (one) => one.textContent === wanted
+            );
+
+            return row === undefined
+              ? null
+              : row.getBoundingClientRect().top - element.getBoundingClientRect().top;
+          }, text);
+
+        // Near the top, but not near enough to ask for more: the row at the top, once drawn.
+        await log.evaluate((element) => {
+          element.scrollTop = 300;
+        });
+
+        const rowAtTop = async () =>
+          await log.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+
+            return (
+              document.elementFromPoint(box.left + 80, box.top + 4)?.closest("[data-index]")
+                ?.textContent ?? ""
+            );
+          });
+
+        await expect.poll(rowAtTop).not.toBe("");
+        const anchored = await rowAtTop();
+
+        const before = await offsetOf(anchored);
+
+        // Nearer: older items are asked for, and go in above without moving that row.
+        const olderRead = page.waitForResponse((response) => response.url().includes("before="));
+
+        await log.evaluate((element) => {
+          element.scrollTop = 200;
+        });
+        await olderRead;
+        await log.getByText("history 1", { exact: true }).waitFor({ state: "attached" });
+
+        // Moved down by the 100 pixels scrolled, and by nothing the older items added.
+        const offsetKept = async () => {
+          const after = await offsetOf(anchored);
+
+          return before !== null && after !== null && Math.abs(after - (before + 100)) < 4;
+        };
+
+        await expect.poll(offsetKept).toBe(true);
+        const kept = await offsetKept();
+
+        const scrollToTop = async () => {
+          await log.evaluate((element) => {
+            element.scrollTop = 0;
+          });
+        };
+
+        // Scrolling up loads what lies before, until the oldest is shown.
+        const oldest = log.getByText("history 1", { exact: true });
+
+        await expect
+          .poll(
+            async () => {
+              await scrollToTop();
+
+              return await oldest.count();
+            },
+            { interval: 200, timeout: 15_000 }
+          )
+          .toBe(1);
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          configured: configured.status,
+          formatting,
+          kept,
+          linked,
+          pinned,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          status,
+          violations,
+        }).toStrictEqual({
+          configured: 200,
+          formatting: { bold: "700", red: "rgb(255, 0, 0)" },
+          kept: true,
+          linked: { href: "https://example.com/x", rel: "noopener noreferrer", target: "_blank" },
+          pinned: true,
+          problems: [],
+          status: "\u25BEprivateconnected",
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
       }
     }
   );

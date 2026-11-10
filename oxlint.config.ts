@@ -18,6 +18,7 @@ const jsPlugins = selectJsPlugins(["jsdoc-js", "tsdoc"]);
 interface Pattern {
   readonly group: string[];
   readonly message: string;
+  readonly allowTypeImports?: boolean;
 }
 
 type Imports = NonNullable<DummyRuleMap["no-restricted-imports"]>;
@@ -168,7 +169,19 @@ const noView: Pattern = {
   message: viewless,
 };
 
-const frontendToNothing = ours([], "`@iirc/frontend` depends on no other package of ours.");
+// The core reads mIRC formatting and casemapping from the protocol, and positions from the
+// fold, which are pure. It takes the API's types for what the runtime parsed, and never its
+// values, which are the HTTP contract.
+const frontendToPure = ours(
+  ["@iirc/protocol/format", "@iirc/protocol/casemapping", "@iirc/timelines", "@iirc/api"],
+  "`@iirc/frontend` depends only on `@iirc/protocol`'s formatting and casemapping, `@iirc/timelines`, and `@iirc/api`'s types."
+);
+
+const apiTypesOnly: Pattern = {
+  allowTypeImports: true,
+  group: ["@iirc/api"],
+  message: "The web frontend's core takes the API's types, never its values: `import type`.",
+};
 
 const webToApi = ours(
   ["@iirc/api", "@iirc/frontend/*"],
@@ -207,7 +220,12 @@ const coreFence: OxlintOverride[] = [
   })),
   ...layer(["packages/frontend/src/**"], (production) => ({
     "no-restricted-globals": globals(viewless, browser),
-    "no-restricted-imports": coreImports(production, frontendToNothing, noView),
+    "no-restricted-imports": coreImports(
+      production,
+      frontendToPure,
+      noView,
+      ...(production ? [apiTypesOnly] : [])
+    ),
     "no-restricted-properties": noMathRandom(viewless),
   })),
   ...layer(["apps/web/src/**"], (production) => ({

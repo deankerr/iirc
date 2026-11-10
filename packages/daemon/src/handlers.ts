@@ -427,15 +427,41 @@ const anchorOf = (query: WindowQuery): Anchor => {
 /**
  * The positions a window spans, open on a side with nothing more beyond it, so the Gaps
  * read with it include one before its first item or after its last, split at its items.
+ * A window read before or after a cursor reaches the cursor on that side, so it gives the
+ * run of Gaps between its items and the cursor too: those that ended before the cursor, or
+ * began after it, since one that reaches the cursor is the window's holding the cursor's
+ * item.
  * @param window - The window.
  * @param anchor - Where it was read from.
- * @returns The range of positions to find Gaps in, and the items' positions.
+ * @returns The range of positions to find Gaps in, the items' positions, and the cursor.
  */
-const spanOf = (window: Window, anchor: Anchor) => ({
-  at: window.items.map((item) => item.position),
-  from: window.earlier ? (window.items[0]?.position ?? anchor.position) : undefined,
-  to: window.later ? (window.items.at(-1)?.position ?? anchor.position) : undefined,
-});
+const spanOf = (window: Window, anchor: Anchor) => {
+  const at = window.items.map((item) => item.position);
+  const first = window.items[0]?.position;
+  const last = window.items.at(-1)?.position;
+
+  if (anchor._tag === "Before" && anchor.position !== undefined && window.later) {
+    return {
+      at,
+      endedBefore: anchor.position,
+      from: window.earlier ? (first ?? anchor.position) : undefined,
+    };
+  }
+
+  if (anchor._tag === "After" && window.earlier) {
+    return {
+      at,
+      beganAfter: anchor.position,
+      to: window.later ? (last ?? anchor.position) : undefined,
+    };
+  }
+
+  return {
+    at,
+    from: window.earlier ? (first ?? anchor.position) : undefined,
+    to: window.later ? (last ?? anchor.position) : undefined,
+  };
+};
 
 /**
  * Whether something was last changed by a step.

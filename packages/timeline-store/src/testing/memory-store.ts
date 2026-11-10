@@ -477,11 +477,22 @@ const collapse = (
     readonly from?: Position | undefined;
     readonly to?: Position | undefined;
     readonly at: readonly Position[];
+    readonly beganAfter?: Position | undefined;
+    readonly endedBefore?: Position | undefined;
   }
 ): readonly CollapsedGap[] => {
   const runs = new Map<number, Gap[]>();
+  const { beganAfter, endedBefore } = range;
 
-  for (const gap of overlapping(gaps, range.from, range.to)) {
+  // At a cursor, a Gap that reaches it is the window's that holds the cursor's item.
+  const kept = overlapping(gaps, range.from, range.to).filter(
+    (gap) =>
+      (beganAfter === undefined || textOrder(cursorOf(gap.from), cursorOf(beganAfter)) > 0) &&
+      (endedBefore === undefined ||
+        (gap.to !== undefined && textOrder(cursorOf(gap.to), cursorOf(endedBefore)) < 0))
+  );
+
+  for (const gap of kept) {
     // The run is how many positions come before where the Gap began.
     const run = range.at.filter(
       (position) => textOrder(cursorOf(position), cursorOf(gap.from)) < 0

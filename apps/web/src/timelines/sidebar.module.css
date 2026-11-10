@@ -1,0 +1,79 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-2) 0;
+  overflow-y: auto;
+}
+
+.heading {
+  padding: 0 var(--space-3);
+  color: var(--color-muted);
+}
+
+.tree {
+  outline: none;
+}
+
+.network,
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  outline: none;
+  cursor: default;
+}
+
+.item {
+  padding-left: calc(var(--space-3) + 2ch);
+}
+
+.network[data-focus-visible],
+.item[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+.item[data-hovered] {
+  background: var(--color-surface);
+}
+
+.item[data-selected] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.item[data-selected] .muted {
+  color: inherit;
+}
+
+.chevron {
+  width: 2ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+}
+
+.name {
+  margin-right: auto;
+}
+
+.connected {
+  color: var(--color-ok);
+}
+
+.connecting {
+  color: var(--color-muted);
+}
+
+.offline {
+  color: var(--color-danger);
+}
+
+.muted {
+  color: var(--color-muted);
+}

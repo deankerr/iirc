@@ -1,7 +1,7 @@
 .shell {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100%;
 }
 
 .bar {
@@ -22,6 +22,30 @@
   color: var(--color-danger);
 }
 
+.body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.body > nav {
+  border-right: var(--border-width) solid var(--color-border);
+}
+
 .main {
-  padding: var(--space-3);
+  min-height: 0;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 35%) minmax(0, 1fr);
+  }
+
+  .body > nav {
+    border-right: 0;
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
 }

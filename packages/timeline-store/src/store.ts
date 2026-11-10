@@ -201,6 +201,11 @@ export interface TimelineStoreService {
    * most one more than there are positions. A run is the Gaps that began after one
    * position and at or before the next, the first run those that began at or before the
    * first, and the last those that began after the last. A run with none is left out.
+   *
+   * A page read at a cursor fits against the window that holds the cursor's item, which
+   * keeps every Gap that reaches that item. So `beganAfter` keeps only the Gaps that began
+   * after it, for a page read after a cursor, and `endedBefore` only those that ended before
+   * it, for a page read before one: a Gap that reaches the cursor is the other side's.
    */
   readonly collapsedGaps: (
     network: string,
@@ -208,6 +213,8 @@ export interface TimelineStoreService {
       readonly from?: Position | undefined;
       readonly to?: Position | undefined;
       readonly at: readonly Position[];
+      readonly beganAfter?: Position | undefined;
+      readonly endedBefore?: Position | undefined;
     }
   ) => Effect.Effect<readonly CollapsedGap[], TimelineStoreFailed>;
   /**

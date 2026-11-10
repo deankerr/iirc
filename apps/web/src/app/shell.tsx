@@ -1,5 +1,6 @@
 /**
- * What a signed-in browser sees: the Networks, and signing out.
+ * What a signed-in browser sees: the Networks and their Timelines, the open Timeline, and
+ * signing out.
  *
  * @packageDocumentation
  */
@@ -7,8 +8,9 @@ import { useAtomSet } from "@effect/atom-react";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 
-import { NetworkList } from "../networks/network-list.tsx";
 import { signOut } from "../sign-in/atoms.ts";
+import { Sidebar } from "../timelines/sidebar.tsx";
+import { TimelineView } from "../timelines/timeline-view.tsx";
 import { Button } from "../ui/button.tsx";
 
 import styles from "./shell.module.css";
@@ -39,9 +41,12 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
           Sign out
         </Button>
       </header>
-      <main className={styles.main}>
-        <NetworkList />
-      </main>
+      <div className={styles.body}>
+        <Sidebar />
+        <main className={styles.main}>
+          <TimelineView />
+        </main>
+      </div>
     </div>
   );
 };

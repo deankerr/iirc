@@ -878,18 +878,33 @@ export const makeSqliteTimelineStore = (
     // One run of Gaps: those of the Network from `start` that began after `after` and at or
     // before `upTo` and the range's end, counted, with where the first began and the last
     // ended. Every condition is on the key, so it reads only the run.
+    /** At a cursor, which Gaps a page keeps: those that began after it, or ended before it. */
+    interface Cursor {
+      readonly beganAfter?: Position | undefined;
+      readonly endedBefore?: Position | undefined;
+    }
+
     const run = (
       network: string,
       start: Fragment,
       to: Position | undefined,
       after: Position | undefined,
-      upTo: Position | undefined
+      upTo: Position | undefined,
+      cursor: Cursor
     ) => {
       const where = sql`
         WHERE network = ${network} ${start}
           ${after === undefined ? sql`` : sql`AND from_cursor > ${cursorOf(after)}`}
           ${upTo === undefined ? sql`` : sql`AND from_cursor <= ${cursorOf(upTo)}`}
           ${to === undefined ? sql`` : sql`AND from_cursor <= ${cursorOf(to)}`}
+          ${cursor.beganAfter === undefined ? sql`` : sql`AND from_cursor > ${cursorOf(cursor.beganAfter)}`}
+          ${
+            // A Gap that ended before the cursor began before it, which bounds the run on the
+            // key, so it never reads the Gaps after the cursor. `to_cursor` decides ownership.
+            cursor.endedBefore === undefined
+              ? sql``
+              : sql`AND from_cursor < ${cursorOf(cursor.endedBefore)} AND to_cursor IS NOT NULL AND to_cursor < ${cursorOf(cursor.endedBefore)}`
+          }
       `;
 
       return sql`
@@ -906,12 +921,14 @@ export const makeSqliteTimelineStore = (
         readonly from?: Position | undefined;
         readonly to?: Position | undefined;
         readonly at: readonly Position[];
+        readonly beganAfter?: Position | undefined;
+        readonly endedBefore?: Position | undefined;
       }
     ) =>
       Effect.flatMap(startOf(network, range.from), (start) =>
         // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
         Effect.forEach([undefined, ...range.at], (after, index) =>
-          run(network, start, range.to, after, range.at[index])
+          run(network, start, range.to, after, range.at[index], range)
         )
       ).pipe(
         Effect.map((runs) =>

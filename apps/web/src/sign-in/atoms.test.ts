@@ -1,9 +1,8 @@
-import { Effect, Redacted } from "effect";
-import { AtomRegistry } from "effect/reactivity";
+import { Redacted } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { networks } from "../networks/atoms.ts";
-import { fakeDaemon, hasValue, registryFor, run, theKey } from "../testing/fake-daemon.ts";
+import { fakeDaemon, hasValue, registryFor, run, theKey, until } from "../testing/fake-daemon.ts";
+import { sidebarNetworks, sync } from "../timelines/atoms.ts";
 import { check, signInState, signInWithKey, signOut } from "./atoms.ts";
 
 const signedOut = { _tag: "SignedOut", signIn: { _tag: "Idle" } };
@@ -27,7 +26,10 @@ describe("signing in", () => {
     await run(registry, check, undefined);
     await run(registry, signInWithKey, key);
 
-    const listed = await Effect.runPromise(AtomRegistry.getResult(registry, networks));
+    registry.mount(sync);
+
+    const sidebar = await until(registry, sidebarNetworks, (held) => held.length > 0);
+    const listed = sidebar.map(({ network, running }) => ({ network, status: running }));
 
     expect({
       keysSent: daemon.keysSent,
@@ -97,7 +99,8 @@ describe("signing in", () => {
     daemon.signedIn = true;
     await run(registry, check, undefined);
     daemon.signedIn = false;
-    await Effect.runPromise(AtomRegistry.getResult(registry, networks).pipe(Effect.ignore));
+    registry.mount(sync);
+    await until(registry, signInState, (state) => state._tag === "SignedOut");
 
     expect(registry.get(signInState)).toStrictEqual(signedOut);
   });

@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./sign-in": "./src/sign-in.ts"
+    "./render": "./src/render.ts",
+    "./sign-in": "./src/sign-in.ts",
+    "./timelines": "./src/timelines.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"
   },
+  "dependencies": {
+    "@iirc/api": "workspace:*",
+    "@iirc/protocol": "workspace:*",
+    "@iirc/timelines": "workspace:*"
+  },
   "devDependencies": {
+    "effect": "catalog:",
     "fast-check": "4.10.2",
     "vitest": "catalog:"
   }

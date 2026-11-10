@@ -1,0 +1,133 @@
+.message,
+.unsent,
+.activity,
+.session {
+  display: grid;
+  grid-template-columns: 6ch minmax(0, 16ch) minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  padding: 0 var(--space-3);
+  line-height: var(--line-height);
+}
+
+.activity,
+.session {
+  grid-template-columns: 6ch minmax(0, 1fr);
+  color: var(--color-muted);
+}
+
+.session {
+  color: var(--color-accent);
+}
+
+.unsent {
+  color: var(--color-muted);
+}
+
+.time {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sender {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.delivery {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.unsent .delivery {
+  color: var(--color-danger);
+}
+
+.gap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  color: var(--color-danger);
+}
+
+.gap::before,
+.gap::after {
+  content: "";
+  flex: 1;
+  border-top: var(--border-width) dashed var(--color-border);
+}
+
+.gapText {
+  white-space: nowrap;
+}
+
+.nick0 {
+  color: var(--nick-0);
+}
+
+.nick1 {
+  color: var(--nick-1);
+}
+
+.nick2 {
+  color: var(--nick-2);
+}
+
+.nick3 {
+  color: var(--nick-3);
+}
+
+.nick4 {
+  color: var(--nick-4);
+}
+
+.nick5 {
+  color: var(--nick-5);
+}
+
+.nick6 {
+  color: var(--nick-6);
+}
+
+.nick7 {
+  color: var(--nick-7);
+}
+
+.nick8 {
+  color: var(--nick-8);
+}
+
+.nick9 {
+  color: var(--nick-9);
+}
+
+.nick10 {
+  color: var(--nick-10);
+}
+
+.nick11 {
+  color: var(--nick-11);
+}
+
+.nick12 {
+  color: var(--nick-12);
+}
+
+.nick13 {
+  color: var(--nick-13);
+}
+
+.nick14 {
+  color: var(--nick-14);
+}
+
+.nick15 {
+  color: var(--nick-15);
+}

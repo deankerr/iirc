@@ -12,8 +12,9 @@ import type { TimelineStoreService } from "@iirc/timeline-store";
 import { timelineStoreLaws } from "@iirc/timeline-store/testing";
 import { emptyDirectory, step, timelineIdOf } from "@iirc/timelines";
 import type { Change, Position } from "@iirc/timelines";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import type { Scope } from "effect";
+import { CurrentTransformer } from "effect/sql/Statement";
 import { describe, expect, it } from "vitest";
 
 import { layerSqliteTimelineStore, makeSqliteTimelineStore } from "./sqlite-timeline-store.ts";
@@ -321,86 +322,159 @@ describe("a store it cannot read now", () => {
   });
 });
 
-// A run of Gaps is bounded below by the key, so it never reaches older Gaps. Its count
-// reads the index alone, never a row to filter on `to_cursor`, and its end reads one row.
-const keyed = (found: string) =>
-  /SEARCH gaps USING (?:COVERING )?INDEX sqlite_autoindex_gaps_1 \(network=\? AND from_cursor>\?/u.test(
-    found
+// What a statement the store emitted searches, line by line, as SQLite plans it.
+const searches = (plan: string) => plan.split("\n").filter((line) => line.includes("gaps"));
+
+// A run of Gaps is bounded below by the key, so it never reaches older Gaps, and its count
+// reads the index alone, never a row to filter on `to_cursor`.
+const keyedBelow = (line: string) =>
+  /SEARCH gaps USING (?:COVERING )?INDEX sqlite_autoindex_gaps_1 \(network=\? AND from_cursor>=?\?/u.test(
+    line
   );
 
-const covered = (found: string) => found.includes("USING COVERING INDEX");
+// A run before a cursor is bounded above by the key too, so it never reads the Gaps after.
+const keyedBothSides = (line: string) =>
+  /SEARCH gaps USING (?:COVERING )?INDEX sqlite_autoindex_gaps_1 \(network=\? AND from_cursor>=?\? AND from_cursor<=?\?\)/u.test(
+    line
+  );
+
+const Bindings = Schema.Array(Schema.Union([Schema.String, Schema.Finite, Schema.Null]));
+
+/**
+ * Runs a read of the store, and gives each statement it emitted, as the SQL client compiled
+ * it, with its parameters: the store's own SQL, never a copy of it.
+ * @param read - The read.
+ * @returns The statements, in order.
+ */
+const emitted = <A, E>(read: Effect.Effect<A, E>) =>
+  Effect.gen(function* () {
+    const statements: { readonly sql: string; readonly params: readonly unknown[] }[] = [];
+
+    yield* read.pipe(
+      Effect.provideService(CurrentTransformer, (statement) =>
+        Effect.sync(() => {
+          const [sql, params] = statement.compile();
+
+          statements.push({ params, sql });
+
+          return statement;
+        })
+      )
+    );
+
+    return statements;
+  });
 
 describe("the file", () => {
-  it("is in WAL mode, and answers each read through an index", async () => {
+  it("is in WAL mode, and answers each read through an index, as the store emits it", async () => {
     await run(
       Effect.gen(function* () {
         const file = yield* temporaryFile;
 
-        yield* using(file, applyAll);
+        const reads = yield* using(file, (store) =>
+          Effect.gen(function* () {
+            yield* applyAll(store);
+
+            const at = position(3, 3);
+            const run = { at: [position(2, 2)], from: position(1, 1) };
+
+            return {
+              // A step that confirms by intent and keeps one item per message id.
+              apply: yield* emitted(
+                store.apply({
+                  changes: [said(5, "three", "m1"), said(6, "four", "m3")],
+                  directory: directoryAt(6),
+                  through: 6,
+                })
+              ),
+              changedAfter: yield* emitted(store.changedAfter(1, 2)),
+              collapsedGaps: yield* emitted(store.collapsedGaps(libera, run)),
+              collapsedGapsAfter: yield* emitted(
+                store.collapsedGaps(libera, { ...run, beganAfter: position(1, 1) })
+              ),
+              collapsedGapsBefore: yield* emitted(
+                store.collapsedGaps(libera, { ...run, endedBefore: at })
+              ),
+              gaps: yield* emitted(store.gaps(libera, { from: position(1, 1), to: at })),
+              locate: yield* emitted(
+                store.locate(libera, 3, { after: { position: at, timeline: channel }, limit: 1 })
+              ),
+              overflowed: yield* emitted(store.changedAfter(3, 1)),
+              timelines: yield* emitted(store.timelines(libera, { after: network, limit: 1 })),
+              windowAfter: yield* emitted(
+                store.window(channel, { _tag: "After", position: at }, 1)
+              ),
+              windowAround: yield* emitted(
+                store.window(channel, { _tag: "Around", position: at }, 1)
+              ),
+              windowBefore: yield* emitted(
+                store.window(channel, { _tag: "Before", position: at }, 1)
+              ),
+            };
+          })
+        );
+
         const database = new Database(file, { readonly: true });
         const mode = database.query("PRAGMA journal_mode").get();
 
-        const plan = (statement: string) =>
-          JSON.stringify(database.query(`EXPLAIN QUERY PLAN ${statement}`).all());
+        const planOf = (statement: { readonly sql: string; readonly params: readonly unknown[] }) =>
+          database
+            .query<{ readonly detail: string }, (string | number | null)[]>(
+              `EXPLAIN QUERY PLAN ${statement.sql}`
+            )
+            .all(...Schema.decodeUnknownSync(Bindings)(statement.params))
+            .map((row) => row.detail)
+            .join("\n");
 
-        // A page of what changed is found by seeks and capped counts, never by reading it,
-        // and a window's Gaps one run at a time.
-        const reads = {
-          byChanged: plan(
-            "SELECT * FROM items WHERE changed > 1 AND changed <= 3 ORDER BY changed, timeline, cursor"
-          ),
-          byIntent: plan("SELECT * FROM items WHERE network = 'libera' AND intent = 'x'"),
-          byMessageId: plan("SELECT 1 FROM items WHERE timeline = 'a' AND message_id = 'm'"),
-          byStep: plan(
-            "SELECT * FROM items WHERE network = 'libera' AND step = 3 AND (cursor, timeline) > ('a', 'b') ORDER BY cursor, timeline LIMIT 101"
-          ),
-          countAt: plan("SELECT count(*) FROM (SELECT 1 FROM items WHERE changed = 3 LIMIT 11)"),
-          gapRun: plan(
-            "SELECT count(*), min(from_cursor) FROM gaps WHERE network = 'libera' AND from_cursor >= 'a' AND from_cursor <= 'b'"
-          ),
-          gapRunEnd: plan(
-            "SELECT to_cursor FROM gaps WHERE network = 'libera' AND from_cursor >= 'a' AND from_cursor <= 'b' ORDER BY from_cursor DESC LIMIT 1"
-          ),
-          gapStart: plan(
-            "SELECT from_cursor, to_cursor FROM gaps WHERE network = 'libera' AND from_cursor < 'a' ORDER BY from_cursor DESC LIMIT 1"
-          ),
-          gapsByChanged: plan(
-            "SELECT * FROM gaps WHERE changed > 1 ORDER BY changed, network, from_cursor"
-          ),
-          nextSequence: plan("SELECT min(changed) FROM items WHERE changed > 3"),
-          timelinesByNetwork: plan("SELECT * FROM timelines WHERE network = 'libera' ORDER BY id"),
-          timelinesPage: plan(
-            "SELECT * FROM timelines WHERE network = 'libera' AND id > 'a' ORDER BY id LIMIT 10"
-          ),
-          tombstonesByChanged: plan(
-            "SELECT * FROM tombstones WHERE changed > 1 ORDER BY changed, id"
-          ),
-          touched: plan(
-            "SELECT timeline FROM items WHERE changed = 3 AND timeline > 'a' ORDER BY timeline LIMIT 1"
-          ),
-          window: plan(
-            "SELECT * FROM items WHERE timeline = 'a' AND cursor < 'b' ORDER BY cursor DESC LIMIT 5"
-          ),
-        };
-
-        // The filter a run once had, on `to_cursor`, which no key bounds.
-        const unkeyed = plan(
-          "SELECT count(*) FROM gaps WHERE network = 'libera' AND from_cursor <= 'b' AND (to_cursor IS NULL OR to_cursor >= 'a')"
+        // Every statement that reads, or finds what it changes, with its plan.
+        const planned = Object.entries(reads).flatMap(([read, statements]) =>
+          statements
+            .filter(({ sql }) => /^\s*(?:SELECT|UPDATE|DELETE|WITH)/iu.test(sql))
+            .map((statement) => ({ plan: planOf(statement), read, sql: statement.sql }))
         );
 
-        database.close();
-        expect(mode).toStrictEqual({ journal_mode: "wal" });
-        expect([
-          keyed(reads.gapRun),
-          covered(reads.gapRun),
-          keyed(reads.gapRunEnd),
-          keyed(unkeyed),
-          covered(unkeyed),
-        ]).toStrictEqual([true, true, true, false, false]);
+        // The runs of Gaps: one statement each, counted with where the first began and the
+        // last ended.
+        const runs = (read: keyof typeof reads) =>
+          planned.filter((each) => each.read === read && each.sql.includes("count(*)"));
 
-        for (const [read, found] of Object.entries(reads)) {
-          expect([read, found]).not.toStrictEqual([
+        // The filter a run once had, on `to_cursor`, which no key bounds: the checks below
+        // must tell it from a run.
+        const unkeyed = planOf({
+          params: [],
+          sql: "SELECT count(*) FROM gaps WHERE network = 'libera' AND from_cursor <= 'b' AND (to_cursor IS NULL OR to_cursor >= 'a')",
+        });
+
+        database.close();
+
+        expect(mode).toStrictEqual({ journal_mode: "wal" });
+
+        expect({
+          after: runs("collapsedGapsAfter").flatMap(({ plan }) => searches(plan).map(keyedBelow)),
+          before: runs("collapsedGapsBefore").flatMap(({ plan }) =>
+            searches(plan).map(keyedBothSides)
+          ),
+          covered: runs("collapsedGaps").every(({ plan }) => plan.includes("COVERING INDEX")),
+          keyed: runs("collapsedGaps").flatMap(({ plan }) => searches(plan).map(keyedBelow)),
+          unkeyed: [keyedBelow(unkeyed), unkeyed.includes("COVERING INDEX")],
+        }).toStrictEqual({
+          // Two runs, around the one item, each a count and a search for its end.
+          after: [true, true, true, true],
+          before: [true, true, true, true],
+          covered: true,
+          keyed: [true, true, true, true],
+          unkeyed: [false, false],
+        });
+
+        // Every read was emitted, and none scans a table or sorts.
+        expect(
+          Object.entries(reads).filter(([, statements]) => statements.length === 0)
+        ).toStrictEqual([]);
+
+        for (const { plan, read, sql } of planned) {
+          expect([read, sql, plan]).not.toStrictEqual([
             read,
+            sql,
             expect.stringMatching(
               /SCAN items|SCAN timelines|SCAN gaps|SCAN tombstones|TEMP B-TREE/u
             ),

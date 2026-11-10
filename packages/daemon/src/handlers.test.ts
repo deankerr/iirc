@@ -1122,7 +1122,7 @@ describe("the handlers", () => {
     });
   });
 
-  it("collapses the Gaps a quiet Timeline's window spans, even with a limit of one", async () => {
+  it("collapses the Gaps a quiet Timeline's window spans, even with a limit of one, and up to a cursor", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
         let call = yield* directly(world, api, ["hello"]);
@@ -1149,6 +1149,18 @@ describe("the handlers", () => {
         const both = yield* api.timelines.window({ params: { timeline }, query: { limit: 2 } });
         const latest = yield* api.timelines.window({ params: { timeline }, query: { limit: 1 } });
 
+        // The page before the latest item fits against it: the run between them comes with
+        // the page, since it ended before the cursor.
+        const [back] = latest.items;
+
+        const before =
+          back === undefined
+            ? latest
+            : yield* api.timelines.window({
+                params: { timeline },
+                query: { before: back.position, limit: 1 },
+              });
+
         const network = yield* api.timelines.window({
           params: { timeline: yield* timelineNamed(api, "libera") },
           query: { limit: 1 },
@@ -1160,6 +1172,7 @@ describe("the handlers", () => {
         });
 
         return {
+          before: shown(before),
           both: shown(both),
           latest: shown(latest),
           network: network.gaps.length,
@@ -1169,6 +1182,7 @@ describe("the handlers", () => {
     );
 
     expect(result).toStrictEqual({
+      before: { gaps: [[4, true]], items: ["hello"] },
       both: { gaps: [[4, true]], items: ["hello", "back"] },
       latest: { gaps: [], items: ["back"] },
       // The Network's own Timeline has an item at each Session's start and end, so Gaps

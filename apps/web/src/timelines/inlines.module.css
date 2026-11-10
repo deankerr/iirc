@@ -1,0 +1,40 @@
+.bold {
+  font-weight: 700;
+}
+
+.italic {
+  font-style: italic;
+}
+
+.underline {
+  text-decoration: underline;
+}
+
+.strikethrough {
+  text-decoration: line-through;
+}
+
+.underline.strikethrough {
+  text-decoration: underline line-through;
+}
+
+.monospace {
+  font-family: var(--font-mono);
+  background: var(--color-surface);
+}
+
+.reverse {
+  color: var(--color-background);
+  background: var(--color-text);
+}
+
+.link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  unicode-bidi: isolate;
+}
+
+.link:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+}
