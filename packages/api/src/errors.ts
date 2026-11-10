@@ -67,9 +67,9 @@ export class TimelinesFailed extends Schema.TaggedError<
  * The Network stopped, so it took no more input. This does not mean the input was
  * refused: it may have been journaled before the Network stopped, and a restart steps
  * it. The outcome is `Uncertain`. Configuration and a retry can be given again freely. A
- * `say` must not be: ask `GET /api/networks/{network}/said/{intent}` with the `intent`
- * here, on this Daemon or the one started after it, and say it again only if the answer
- * is `NotJournaled`.
+ * `say` or an `act` must not be: ask `GET /api/networks/{network}/said/{intent}` with the
+ * `intent` here, on this Daemon or the one started after it, and give it again only if
+ * the answer is `NotJournaled`.
  */
 export class NetworkStopped extends Schema.TaggedError<
   NetworkStopped,
@@ -77,7 +77,7 @@ export class NetworkStopped extends Schema.TaggedError<
 >()(
   "NetworkStopped",
   {
-    /** The intent a `say` was given under, to ask `said` about. */
+    /** The intent a `say` or an `act` was given under, to ask `said` about. */
     intent: Schema.optionalKey(CallerIntent),
     network: NetworkId,
     outcome: Schema.Literal("Uncertain"),

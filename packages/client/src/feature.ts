@@ -125,11 +125,15 @@ export interface Departure {
   readonly line: OutboundLine;
   readonly for:
     | { readonly _tag: "Said"; readonly intent: IntentId }
+    /** A Line of an Owner's action, such as a `KICK` or a `/quote`d Line. */
+    | { readonly _tag: "Acted"; readonly intent: IntentId }
     | { readonly _tag: "Protocol" };
   /**
    * Whether the Ircd will echo this Line back, tied to its intent. It starts false, and
    * only a Feature that can tie the echo to the intent sets it, as `labeled-response`
-   * with `echo-message` does. A `Said` Line's Message reports it as `ours.echo`.
+   * with `echo-message` does. A `Said` Line's Message reports it as `ours.echo`. For an
+   * `Acted` Line it says the Ircd's answer is tied to the intent by label, so the core
+   * need not tie it by the answer's parameters.
    */
   readonly echo: boolean;
 }

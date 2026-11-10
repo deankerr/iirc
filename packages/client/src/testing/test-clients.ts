@@ -488,6 +488,7 @@ const step =
         return started(state, input.at);
       }
 
+      case "Act":
       case "Read":
       case "Retry":
       case "Stopping":

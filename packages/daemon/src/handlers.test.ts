@@ -472,6 +472,113 @@ describe("the handlers", () => {
     });
   });
 
+  it("acts on a Network, answers as its step knew, and gives the Ircd's error tied to it as News", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+        yield* settle;
+
+        const offline = yield* api.networks.act({
+          params: { network: libera },
+          payload: {
+            action: { _tag: "Topic", channel: "#iirc", text: "early" },
+            intent: CallerIntent.make("early"),
+          },
+        });
+
+        const call = yield* registerOnFloor(world.memory);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
+        yield* settle;
+
+        const unsendable = yield* api.networks.act({
+          params: { network: libera },
+          payload: { action: { _tag: "Topic", channel: "#a,#b", text: "hi" } },
+        });
+
+        const acted = yield* api.networks.act({
+          params: { network: libera },
+          payload: {
+            action: { _tag: "Topic", channel: "#iirc", text: "a new topic" },
+            intent: CallerIntent.make("topic"),
+          },
+        });
+
+        const away = yield* api.networks.act({
+          params: { network: libera },
+          payload: { action: { _tag: "Away", message: "gone fishing" } },
+        });
+
+        // Registration and the join spent the burst, so they wait their turn.
+        yield* TestClock.adjust(4000);
+        const lines = [yield* heard(call), yield* heard(call)];
+
+        yield* say(call, ":irc.test 482 iirc #iirc :You're not channel operator");
+        yield* say(call, ":irc.test 306 iirc :You have been marked as being away");
+        yield* settle;
+
+        const stream = yield* api.news.follow({ headers: {}, query: {} });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) =>
+              event.event === "happened" &&
+              event.data.news.some((one) => one._tag === "Refused" && one.intent === "topic")
+          ),
+          Stream.runCollect
+        );
+
+        const refused = happenings(events).flatMap((event) =>
+          event.data.news.flatMap((one) =>
+            one._tag === "Refused" ? [[one.intent, one.reason]] : []
+          )
+        );
+
+        const known = yield* api.networks.known({ params: { network: libera } });
+
+        return {
+          acted,
+          away: away._tag,
+          lines,
+          offline: [offline._tag, "reason" in offline ? offline.reason : undefined],
+          refused,
+          said: yield* api.networks.said({
+            params: { intent: CallerIntent.make("topic"), network: libera },
+          }),
+          self: known.self?.away,
+          unknown: yield* api.networks
+            .act({
+              params: { network: NetworkId.make("nowhere") },
+              payload: { action: { _tag: "Nick", nick: "other" } },
+            })
+            .pipe(
+              Effect.flip,
+              Effect.map((error) => error._tag)
+            ),
+          unsendable: [unsendable._tag, "reason" in unsendable ? unsendable.reason : undefined],
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      acted: { _tag: "Acted", intent: "topic" },
+      away: "Acted",
+      lines: ["TOPIC #iirc :a new topic", "AWAY :gone fishing"],
+      offline: ["Refused", { _tag: "Offline" }],
+      refused: [
+        ["early", { _tag: "Offline" }],
+        [expect.any(String), { _tag: "Unsendable" }],
+        ["topic", { _tag: "Rejected", reply: "482" }],
+      ],
+      said: { _tag: "Journaled", sequence: result.acted.sequence },
+      self: { _tag: "Known", from: "ircd", value: { message: "gone fishing" } },
+      unknown: "UnknownNetwork",
+    });
+    expect(result.unsendable).toStrictEqual(["Refused", { _tag: "Unsendable" }]);
+  });
+
   it("resumes the News after a sequence, from the query or Last-Event-ID", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

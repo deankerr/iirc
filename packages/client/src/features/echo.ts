@@ -6,11 +6,16 @@
  *
  * - **Egress.** While both are enabled, each `Say` is sent with the next label of the
  *   Connection, `l1`, `l2`, and on, and its Message reports that the Ircd will echo it.
+ *   Each Line of an Owner's action is labelled the same way, so the Ircd's answer to it
+ *   is tied to its intent.
  * - **Answers.** The answer is one Line with the label, or a batch whose `BATCH +` carries
  *   it, with batches opened inside that one. Its first `PRIVMSG` or `NOTICE` is the echo,
  *   which the core reports as `Confirmed`. Its first `FAIL`, `ACK`, or error numeric
  *   rejects the intent, and the core reports it `Refused`. A Line in it that is neither,
- *   such as a `WARN`, answers nothing.
+ *   such as a `WARN`, answers nothing. An action's answer is only ever its first `FAIL`
+ *   or error numeric, which rejects it: an `ACK` ends it with nothing to report, and what
+ *   the Ircd relays of it, such as a `TOPIC`, is read as any Line is. An action split over
+ *   several labelled Lines is refused once, and each later rejection only uses up its label.
  * - **Never one without the other.** `labeled-response` depends on `batch`, which must be
  *   negotiated to use it, so labels need all three. The Feature is on while
  *   `echo-message` is enabled, and uses `labeled-response` and `batch`, asked for only
@@ -46,12 +51,22 @@ interface Answering {
   readonly top: boolean;
 }
 
+/**
+ * What a label was sent for: the intent, whether it said a Message or acted, and whether
+ * another Line of the same action was already refused, so its intent is not refused twice.
+ */
+interface Awaited {
+  readonly intent: IntentId;
+  readonly said: boolean;
+  readonly reported: boolean;
+}
+
 /** What the Feature holds for one Connection. */
 interface Echoes {
   /** The number of the next label. */
   readonly next: number;
-  /** Labels awaiting an answer, oldest first, with the intent each was sent for. */
-  readonly pending: ReadonlyMap<string, IntentId>;
+  /** Labels awaiting an answer, oldest first, with what each was sent for. */
+  readonly pending: ReadonlyMap<string, Awaited>;
   /** Open batches of answers, by reference. */
   readonly batches: ReadonlyMap<string, Answering>;
 }
@@ -79,13 +94,16 @@ const bySelf = (meant: Meant, context: Context<Echoes>): boolean => {
   );
 };
 
-// A Line that settles an intent: its echo, or a rejection.
-const settles = ({ command }: Line): boolean =>
-  command === "PRIVMSG" ||
-  command === "NOTICE" ||
-  command === "FAIL" ||
-  command === "ACK" ||
-  /^[45]\d\d$/u.test(command);
+// A Line that rejects an intent: an error numeric, or a `FAIL`.
+const rejects = ({ command }: Line): boolean => command === "FAIL" || /^[45]\d\d$/u.test(command);
+
+// A Line that settles an intent: a Message's echo, its rejection, or an `ACK`, which says
+// the Ircd did nothing it would echo. An action is settled only by its rejection: what
+// the Ircd says of its success, such as the `TOPIC` it relays, is read as any Line is.
+const settles = (line: Line, awaited: Awaited): boolean =>
+  rejects(line) ||
+  (awaited.said &&
+    (line.command === "PRIVMSG" || line.command === "NOTICE" || line.command === "ACK"));
 
 const without = <K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> => {
   const next = new Map(map);
@@ -132,6 +150,18 @@ const batchLine = (own: Echoes, line: Line): Echoes => {
   };
 };
 
+// Marks every label awaited for an intent as refused already.
+const reportedFor = (
+  pending: ReadonlyMap<string, Awaited>,
+  intent: IntentId
+): ReadonlyMap<string, Awaited> =>
+  new Map(
+    [...pending].map(([label, awaited]) => [
+      label,
+      awaited.intent === intent ? { ...awaited, reported: true } : awaited,
+    ])
+  );
+
 /** The `labeled-response` and `echo-message` Feature. */
 export const echo: Feature<Echoes> = {
   // Only `labeled-response` is left: give it up.
@@ -140,7 +170,7 @@ export const echo: Feature<Echoes> = {
       ? { drop: [labeledResponse] }
       : {},
   egress: (departure, context) => {
-    if (departure.for._tag !== "Said" || !labelling(context)) {
+    if (departure.for._tag === "Protocol" || !labelling(context)) {
       return { value: departure };
     }
 
@@ -151,7 +181,11 @@ export const echo: Feature<Echoes> = {
       return { value: departure };
     }
 
-    const pending = new Map(context.own.pending).set(label, departure.for.intent);
+    const pending = new Map(context.own.pending).set(label, {
+      intent: departure.for.intent,
+      reported: false,
+      said: departure.for._tag === "Said",
+    });
 
     for (const oldest of pending.keys()) {
       if (pending.size <= maxPending) {
@@ -181,18 +215,26 @@ export const echo: Feature<Echoes> = {
     const label = line.tags.get("label");
     const parent = line.tags.get("batch");
     const answers = label ?? (parent === undefined ? undefined : own.batches.get(parent)?.label);
-    const intent = answers === undefined ? undefined : own.pending.get(answers);
+    const awaited = answers === undefined ? undefined : own.pending.get(answers);
 
-    if (answers === undefined || intent === undefined) {
+    if (answers === undefined || awaited === undefined) {
       return { value: arrival };
     }
 
     // The first Line that settles the intent answers it. A labelled Line on its own is
-    // the whole answer, whatever it is.
-    if (settles(line)) {
+    // the whole answer, whatever it is, so an action's `ACK` ends it with nothing to tie.
+    if (settles(line, awaited)) {
+      const pending = without(own.pending, answers);
+
+      // An action split over several Lines is refused once: the first rejection answers
+      // its intent, and the rest only use up their labels.
+      if (awaited.reported) {
+        return { own: { ...own, pending }, value: arrival };
+      }
+
       return {
-        own: { ...own, pending: without(own.pending, answers) },
-        value: { ...arrival, answers: intent },
+        own: { ...own, pending: rejects(line) ? reportedFor(pending, awaited.intent) : pending },
+        value: { ...arrival, answers: awaited.intent },
       };
     }
 

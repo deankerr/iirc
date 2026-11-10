@@ -164,8 +164,8 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
 /**
  * Sends a Line on the Connection, through each Feature's `egress`. A Line that cannot be
  * built is not sent, and is recorded as `Malformed` with its command. One a Feature
- * refuses is not sent either: a `Said` one is `Refused` as `Unsendable`, and any other
- * is `Ignored` as `Unsendable`, with its command.
+ * refuses is not sent either: a `Said` or `Acted` one is `Refused` as `Unsendable`, and
+ * any other is `Ignored` as `Unsendable`, with its command.
  * @param run - The step.
  * @param line - The Line, or why it cannot be built.
  * @param command - Its command, to report if it cannot be built.
@@ -196,8 +196,9 @@ export const send = (
   const reading = features.length === 0 ? undefined : readingOf(run);
   const open = openOf(run.state);
 
-  // Every Line of a `Say` names its intent, so an `Unsent` can be tied back to it.
-  const intent = departure.for._tag === "Said" ? { intent: departure.for.intent } : {};
+  // Every Line of a `Say` or an action names its intent, so an `Unsent` can be tied back
+  // to it.
+  const intent = departure.for._tag === "Protocol" ? {} : { intent: departure.for.intent };
 
   if (reading === undefined || open === undefined) {
     run.outputs.push({ _tag: "Send", connection: id, line, ...intent });
@@ -217,14 +218,14 @@ export const send = (
   reportFailed(run, ran.failed);
 
   if (isRefusal(ran.value)) {
-    if (departure.for._tag === "Said") {
+    if (departure.for._tag === "Protocol") {
+      ignore(run, { _tag: "Unsendable", command: line.command });
+    } else {
       run.news.push({
         _tag: "Refused",
         intent: departure.for.intent,
         reason: { _tag: "Unsendable" },
       });
-    } else {
-      ignore(run, { _tag: "Unsendable", command: line.command });
     }
 
     return undefined;

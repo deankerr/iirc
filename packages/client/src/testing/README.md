@@ -42,6 +42,7 @@ A transcript is one item per line, and ends with a newline. `print(parse(text))`
 | `== connection` | `== connection 1` | Later Transport inputs come from Connection 1, until the next dial. Use it to write input from an old Connection. |
 | `!! configure` | `!! configure +#iirc -#old` | The Owner's Configuration, whole, after these changes to it. With no changes, the scenario's Configuration as it stands. |
 | `!! say` | `!! say #iirc :hello` | A `Say`. `notice` and `action` say the other kinds. Intent ids are `i1`, `i2`, … in order. |
+| `!! topic`, `!! kick`, `!! mode`, `!! invite`, `!! nick`, `!! away`, `!! quote` | `!! topic #iirc :text`, `!! kick #iirc a,b :reason`, `!! mode #iirc +o=peer -l`, `!! invite peer #iirc`, `!! nick new`, `!! away :brb`, `!! away`, `!! quote WHOIS peer` | An `Act`: a topic, `""` after the ` :` to clear it; nicks to kick, with a reason or none; each mode change as a sign, the mode, and `=` its parameter; an invite; a nick; away with a message, or back with none; and a Line written as text, everything after `quote `. Intent ids are given in order with a `Say`'s. |
 | `!! retry` | `!! retry` | A `Retry`. |
 | `!! read` | `!! read #iirc t+5s`, `!! read t+5s` | A `Read` up to an instant, of a Target, or with none, of the Network's own Timeline. |
 | `+Ns` | `+60s`, `+250ms`, `+2m` | The fake clock moves on. Each timer that falls due fires in order, at its own `due`, and its outputs are expected next. |

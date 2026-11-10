@@ -33,7 +33,7 @@ describe("a Session", () => {
     expect(known.session).toMatchObject({ _tag: "Registered", ircd: "irc.test" });
     expect(known.self).toMatchObject({
       account: { _tag: "Unknown" },
-      away: { _tag: "Unknown" },
+      away: { _tag: "Known", from: "receipt", value: null },
       mask: { _tag: "Unknown" },
       nick: "iirc",
       realname: { _tag: "Known", from: "ours", value: "iirc" },

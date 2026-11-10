@@ -222,6 +222,60 @@ describe("Lines that never left", () => {
   });
 });
 
+describe("an action", () => {
+  it("is sent, answered Acted, and refused by the Ircd's error as News", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const base = configured({ channels: [{ name: "#iirc" }] });
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, base);
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        yield* converse(call, opening(base, []));
+        yield* converse(call, joined(base, "#iirc", ["@peer"]));
+
+        const acted = yield* runtime.act(libera, {
+          action: { _tag: "Topic", channel: "#iirc", text: "a topic" },
+        });
+
+        const unsendable = yield* runtime.act(libera, {
+          action: { _tag: "Kick", channel: "nobody", nicks: ["peer"], reason: null },
+        });
+
+        const heard = yield* heardText(call);
+
+        yield* call.say(encoder.encode(":irc.test 482 iirc #iirc :You're not channel operator"));
+
+        const news = yield* Stream.runCollect(
+          Stream.takeUntil(runtime.news(), (happened) =>
+            happened.news.some((one) => one._tag === "Refused" && one.intent === acted.intent)
+          )
+        );
+
+        return {
+          acted: acted._tag,
+          heard,
+          refused: news.flatMap((happened) =>
+            happened.news.flatMap((one) =>
+              one._tag === "Refused" && one.intent === acted.intent ? [one.reason] : []
+            )
+          ),
+          unsendable,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      acted: "Acted",
+      heard: "TOPIC #iirc :a topic\r\n",
+      refused: [{ _tag: "Rejected", reply: "482" }],
+      unsendable: { _tag: "Refused", reason: { _tag: "Unsendable" } },
+    });
+  });
+});
+
 // What a single uninterrupted run would show: the fold of the same inputs.
 const uninterrupted = (state: ClientState) => ({
   client: client.inspect(state),

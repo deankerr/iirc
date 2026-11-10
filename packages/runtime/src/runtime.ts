@@ -6,6 +6,7 @@
  */
 import { IntentId } from "@iirc/client";
 import type {
+  Action,
   Client,
   Inspection,
   Instant,
@@ -96,6 +97,31 @@ export interface Saying {
   readonly intent?: IntentId | undefined;
 }
 
+/** What the Owner does on a Network besides saying something. */
+export interface Acting {
+  readonly action: Action;
+  /**
+   * The intent id to act under. Left out, the Runtime names one. It is the caller's to
+   * keep unique for the Network across its whole Journal, as a `say`'s is, and `said`
+   * finds it the same way.
+   */
+  readonly intent?: IntentId | undefined;
+}
+
+/**
+ * What an `act` answers: the `Act` stepped and its Lines sent, or refused by the Client
+ * in that same step. Either way it was journaled at `sequence`. What comes later, the
+ * Ircd's error tied to it as `Rejected`, or `Unsent`, comes as News.
+ */
+export type ActOutcome =
+  | { readonly _tag: "Acted"; readonly intent: IntentId; readonly sequence: Sequence }
+  | {
+      readonly _tag: "Refused";
+      readonly intent: IntentId;
+      readonly sequence: Sequence;
+      readonly reason: StepRefusal;
+    };
+
 /** How far the Owner has read a Timeline. */
 export interface Reading {
   /** The Channel or Direct Message partner, named as a `Say`'s Target is, or `null` for the Network's own. */
@@ -104,7 +130,7 @@ export interface Reading {
   readonly read: Instant;
 }
 
-/** Why the Client refused a `Say` in the step that took it: no Session, or no Line can carry it. */
+/** Why the Client refused a `Say` or an `Act` in the step that took it: no Session, or no Line can carry it. */
 export type StepRefusal = Extract<RefusedReason, { readonly _tag: "Offline" | "Unsendable" }>;
 
 /**
@@ -199,9 +225,18 @@ export interface RuntimeService {
     saying: Saying
   ) => Effect.Effect<SayOutcome, UnknownNetwork | NetworkStopped>;
   /**
-   * Whether a `Say` under this intent was journaled for the Network, by its sequence.
-   * It reads the Network's Inputs once, to the Journal's end as it stood, and ends. A
-   * `Say` journaled is stepped on restart, but its Line may not have been sent.
+   * Journals an `Act`, under the caller's intent id or one the Runtime names, and waits
+   * until it is stepped. It answers with what that step already knew: `Acted`, or
+   * `Refused` when the Client refused it in the same step, as `Offline` or `Unsendable`.
+   */
+  readonly act: (
+    network: NetworkId,
+    acting: Acting
+  ) => Effect.Effect<ActOutcome, UnknownNetwork | NetworkStopped>;
+  /**
+   * Whether a `Say` or an `Act` under this intent was journaled for the Network, by its
+   * sequence. It reads the Network's Inputs once, to the Journal's end as it stood, and
+   * ends. One journaled is stepped on restart, but its Lines may not have been sent.
    */
   readonly said: (
     network: NetworkId,
@@ -363,6 +398,25 @@ export const makeRuntime = <S>(
       );
 
     const service: RuntimeService = {
+      act: (id, acting) =>
+        Effect.gen(function* () {
+          const network = yield* find(id);
+          const intent = acting.intent ?? (yield* intentId);
+          const { action } = acting;
+
+          const { news, sequence } = yield* tell(network, (at) => ({
+            _tag: "Act",
+            action,
+            at,
+            intent,
+          }));
+
+          const reason = refusalIn(news, intent);
+
+          return reason === undefined
+            ? ({ _tag: "Acted", intent, sequence } as const)
+            : ({ _tag: "Refused", intent, reason, sequence } as const);
+        }),
       channel: (id, name) =>
         Effect.map(
           Effect.flatMap(find(id), (network) => Ref.get(network.current)),
@@ -435,7 +489,7 @@ export const makeRuntime = <S>(
           Stream.filter(
             ({ record }) =>
               record._tag === "Input" &&
-              record.input._tag === "Say" &&
+              (record.input._tag === "Say" || record.input._tag === "Act") &&
               record.input.intent === intent
           ),
           Stream.runHead,

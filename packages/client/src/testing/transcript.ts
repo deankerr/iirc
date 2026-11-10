@@ -12,7 +12,7 @@ import { Result, Schema } from "effect";
 import type { Login } from "../configuration.ts";
 import { FeatureName } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
-import type { SayKind } from "../input.ts";
+import type { Action, ModeRequest, SayKind } from "../input.ts";
 import type { News } from "../news.ts";
 
 /** The instant a transcript's clock starts at: 2026-01-01T00:00:00.000Z. */
@@ -50,6 +50,12 @@ export type Owner =
   | { readonly _tag: "Configure"; readonly changes: readonly Change[] }
   /** `!! say #iirc :hello`, `!! notice …`, or `!! action …`. Intent ids are given in order. */
   | { readonly _tag: "Say"; readonly kind: SayKind; readonly target: string; readonly text: string }
+  /**
+   * An action: `!! topic #iirc :text`, `!! kick #iirc a,b :reason`, `!! mode #iirc +o=peer -l`,
+   * `!! invite peer #iirc`, `!! nick new`, `!! away :brb` or `!! away`, or `!! quote <Line>`.
+   * Its intent id is given in order with a `Say`'s.
+   */
+  | { readonly _tag: "Act"; readonly action: Action }
   /** `!! retry`. */
   | { readonly _tag: "Retry" }
   /** `!! read #iirc t+5s`, or `!! read t+5s` for the Network's own Timeline. */
@@ -527,7 +533,142 @@ const writeChange = (change: Change): string => {
   }
 };
 
+// `<text>` or `<text> :<trailing>`: the words before a ` :`, and what follows it, if any.
+const wordsAndTrailing = (text: string): readonly [readonly string[], string | null] => {
+  const colon = text.indexOf(" :");
+
+  return colon === -1
+    ? [text.split(" "), null]
+    : [text.slice(0, colon).split(" "), text.slice(colon + 2)];
+};
+
+// `+o=peer` or `-l`.
+const readChange = (token: string): ModeRequest | undefined => {
+  const sign = token.charAt(0);
+  const equals = token.indexOf("=");
+  const letter = token.slice(1, equals === -1 ? undefined : equals);
+
+  return (sign === "+" || sign === "-") && letter !== ""
+    ? { mode: letter, param: equals === -1 ? null : token.slice(equals + 1), set: sign === "+" }
+    : undefined;
+};
+
+const writeChangeOfMode = (change: ModeRequest): string =>
+  `${change.set ? "+" : "-"}${change.mode}${change.param === null ? "" : `=${change.param}`}`;
+
+/** What an action's verb is followed by: its words before a ` :`, what follows it, and all of it. */
+interface ActionText {
+  readonly words: readonly string[];
+  readonly trailing: string | null;
+  readonly rest: string;
+}
+
+const readAway = ({ rest }: ActionText): Action | undefined => {
+  if (rest === "") {
+    return { _tag: "Away", message: null };
+  }
+
+  return rest.startsWith(":") ? { _tag: "Away", message: rest.slice(1) } : undefined;
+};
+
+const readKick = ({ words: [channel = "", nicks, ...more], trailing }: ActionText) => {
+  const [nick, ...others] = (nicks ?? "").split(",");
+
+  return nicks === undefined || more.length > 0 || nick === undefined || nick === ""
+    ? undefined
+    : ({ _tag: "Kick", channel, nicks: [nick, ...others], reason: trailing } as const);
+};
+
+const readMode = ({ words: [target = "", ...tokens], trailing }: ActionText) => {
+  const [head, ...tail] = tokens.map(readChange);
+  const changes = tail.filter((change) => change !== undefined);
+
+  return trailing !== null || head === undefined || changes.length !== tail.length
+    ? undefined
+    : ({ _tag: "Mode", changes: [head, ...changes], target } as const);
+};
+
+const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefined> = new Map<
+  string,
+  (text: ActionText) => Action | undefined
+>([
+  ["away", readAway],
+  [
+    "invite",
+    ({ words: [nick = "", channel, ...more], trailing }) =>
+      channel === undefined || more.length > 0 || trailing !== null
+        ? undefined
+        : { _tag: "Invite", channel, nick },
+  ],
+  ["kick", readKick],
+  ["mode", readMode],
+  [
+    "nick",
+    ({ words: [nick = "", ...more], trailing }) =>
+      more.length > 0 || trailing !== null || nick === "" ? undefined : { _tag: "Nick", nick },
+  ],
+  ["quote", ({ rest }) => (rest === "" ? undefined : { _tag: "Raw", line: rest })],
+  [
+    "topic",
+    ({ words: [channel = "", ...more], trailing }) =>
+      trailing === null || more.length > 0 ? undefined : { _tag: "Topic", channel, text: trailing },
+  ],
+]);
+
+const writeAction = (action: Action): string => {
+  switch (action._tag) {
+    case "Raw": {
+      return `quote ${action.line}`;
+    }
+
+    case "Away": {
+      return action.message === null ? "away" : `away :${action.message}`;
+    }
+
+    case "Topic": {
+      return `topic ${action.channel} :${action.text}`;
+    }
+
+    case "Kick": {
+      const kicked = `kick ${action.channel} ${action.nicks.join(",")}`;
+
+      return action.reason === null ? kicked : `${kicked} :${action.reason}`;
+    }
+
+    case "Invite": {
+      return `invite ${action.nick} ${action.channel}`;
+    }
+
+    case "Nick": {
+      return `nick ${action.nick}`;
+    }
+
+    case "Mode": {
+      return ["mode", action.target, ...action.changes.map(writeChangeOfMode)].join(" ");
+    }
+
+    default: {
+      return action satisfies never;
+    }
+  }
+};
+
 const readOwner = (text: string): Result.Result<Owner, string> => {
+  const space = text.indexOf(" ");
+  const actionVerb = space === -1 ? text : text.slice(0, space);
+
+  const readAction = actionReaders.get(actionVerb);
+
+  if (readAction !== undefined) {
+    const rest = space === -1 ? "" : text.slice(space + 1);
+    const [words, trailing] = wordsAndTrailing(rest);
+    const action = readAction({ rest, trailing, words });
+
+    return action === undefined
+      ? Result.fail(`not a well-formed \`${actionVerb}\``)
+      : Result.succeed({ _tag: "Act", action });
+  }
+
   if (text === "retry") {
     return Result.succeed({ _tag: "Retry" });
   }
@@ -584,6 +725,10 @@ const writeOwner = (owner: Owner): string => {
 
     case "Retry": {
       return "retry";
+    }
+
+    case "Act": {
+      return writeAction(owner.action);
     }
 
     case "Read": {

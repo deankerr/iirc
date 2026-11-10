@@ -133,7 +133,7 @@ const selfOf = (session: InSession | undefined): UserKnowledge | undefined =>
     ? undefined
     : {
         account: session.account,
-        away: unknown,
+        away: session.away,
         mask: session.mask,
         nick: session.nick,
         realname: session.realname,

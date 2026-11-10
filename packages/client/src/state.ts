@@ -83,6 +83,8 @@ type Presence =
       readonly account: Fact<string | null>;
       /** Self's realname, as registration sent it. */
       readonly realname: Fact<string>;
+      /** Whether Self is away, as the Ircd confirmed it: not away as the Session begins. */
+      readonly away: Fact<{ readonly message: string } | null>;
       readonly keepalive: Keepalive;
     };
 
@@ -117,7 +119,50 @@ type LinkPhase =
        * {@link maxConfirmed}. An `Unsent` for one of them refuses nothing.
        */
       readonly confirmed: readonly IntentId[];
+      /**
+       * The Owner's actions sent on this Connection that an error numeric could still be
+       * tied to by its parameters, oldest first, at most {@link maxActing}.
+       */
+      readonly acting: readonly Acting[];
+      /**
+       * The message of the last `AWAY` sent on this Connection, `null` for one that came
+       * back, or `undefined` before any, which a `306` confirms.
+       */
+      readonly asked: string | null | undefined;
     };
+
+/**
+ * One target of a Line of an action, awaiting its own answer: a nick of a `KICK`, or a
+ * change of a `MODE`, by its sign and letter, such as `+o`, and its parameter, if any.
+ * Names are kept as said, and folded by the Connection's casemapping when compared, so a
+ * casemapping declared since still matches them.
+ */
+export interface Awaiting {
+  readonly name: string | undefined;
+  readonly mode: string | undefined;
+}
+
+/**
+ * One Line of an Owner's action, awaiting what the Ircd says of it, so an error numeric
+ * that names what it names can be tied to its intent.
+ */
+export interface Acting {
+  readonly intent: IntentId;
+  /** Its command, such as `KICK`, which `421` and `461` name. */
+  readonly command: string;
+  /** What the whole Line is about, such as a `KICK`'s Channel or a `MODE`'s target, as said. */
+  readonly names: readonly string[];
+  /**
+   * The Line's targets the Ircd has not yet answered, each answered by its own success or
+   * failure, one occurrence at a time. The Line is awaited until every one is.
+   */
+  readonly targets: readonly Awaiting[];
+  /** Whether a refusal was already reported for its intent, by another of its Lines. */
+  readonly reported: boolean;
+}
+
+/** How many Lines of actions a Connection keeps awaiting an answer. */
+export const maxActing = 64;
 
 /** How many confirmed intents a Connection remembers. */
 export const maxConfirmed = 64;
@@ -250,11 +295,17 @@ export interface State {
   readonly stopping: boolean;
   /** How far the Owner has read each Timeline. They outlive Connections. */
   readonly markers: ReadMarkers;
+  /**
+   * The Owner's away message, or `undefined` while the Owner is not away. It outlives
+   * Sessions, and each Session begins by sending it again.
+   */
+  readonly away: string | undefined;
 }
 
 /** Before anything has happened. */
 export const initialState: State = {
   attempt: 0,
+  away: undefined,
   casemapping: "rfc1459",
   channels: new Map(),
   configuration: undefined,
