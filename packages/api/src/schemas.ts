@@ -450,7 +450,14 @@ export type ClientInspection = typeof ClientInspection.Type;
 /** A Network as the Runtime holds it, for agents and debugging. */
 export const NetworkInspection = Schema.Struct({
   client: ClientInspection,
-  connections: Schema.Array(ConnectionId),
+  /** The Connections the Runtime holds, each with how many Lines wait to leave, and when the next may. */
+  connections: Schema.Array(
+    Schema.Struct({
+      connection: ConnectionId,
+      nextAt: Schema.NullOr(Instant),
+      queued: Schema.Int,
+    })
+  ),
   status: NetworkStatus,
   timers: Schema.Array(Timer),
 });

@@ -616,7 +616,11 @@ export const networkInspection = (
   source: NetworkInspection
 ): Fields<NetworkInspection, WireNetworkInspection> => ({
   client: clientInspection(source.client),
-  connections: [...source.connections],
+  connections: source.connections.map(({ connection, nextAt, queued }) => ({
+    connection,
+    nextAt: nextAt ?? null,
+    queued,
+  })),
   status: networkStatus(source.status),
   timers: timerList(source.timers),
 });

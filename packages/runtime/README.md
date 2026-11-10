@@ -7,19 +7,27 @@ This README is the written interface of both. The types are in `src/`, the in-me
 ## The Runtime
 
 ```ts
-layerRuntime(client): Layer<Runtime, DecodersMissing | JournalFailed, Journal | Transport | Vault>
+layerRuntime(client, options?): Layer<Runtime, DecodersMissing | JournalFailed, Journal | Transport | Vault>
+RuntimeOptions = { pacing?, outboxCapacity?, hangupDrain?, stopTimeout? }
 
 configure(network, configuration): Effect<Sequence, NetworkStopped>      // the first one adds the Network
 say(network, { kind, target, text, intent? }): Effect<{ intent, sequence }, UnknownNetwork | NetworkStopped>
 said(network, intent): Effect<Option<Sequence>, JournalFailed>          // was a Say under this intent journaled?
 retry(network): Effect<Sequence, UnknownNetwork | NetworkStopped>
 known(network): Effect<Knowledge, UnknownNetwork>
-inspect(network): Effect<NetworkInspection, UnknownNetwork>             // { status, client, connections, timers }
+inspect(network): Effect<NetworkInspection, UnknownNetwork>             // { status, client, connections: [{ connection, queued, nextAt }], timers }
 networks: Effect<ReadonlyMap<NetworkId, NetworkStatus>>                 // Running | Stopped { reason }
 news({ after? }): Stream<Happened, JournalFailed>                        // { network, sequence, at, news }, never ends
 ```
 
 `Runtime` is an Effect service, imported from `@iirc/runtime`. `layerRuntime` takes the Client to drive, which is `client` from `@iirc/client` in the Daemon and a scripted Client in tests, and needs the Transport, the Journal, and the Vault. It reads time from Effect's `Clock`, and names intents with Effect's `Random`. Closing the Layer's Scope is shutdown.
+
+| Option | Default | What it sets |
+| --- | --- | --- |
+| `pacing` | a burst of 5, then one Line every 2 s | How fast Lines may leave each Connection, as `@iirc/outbox`'s `Pacing` |
+| `outboxCapacity` | 1,000 | How many Lines may wait for one Connection |
+| `hangupDrain` | 5 s | How long a `Hangup` lets queued Lines leave at pace before it hangs up anyway |
+| `stopTimeout` | 5 s | How long shutdown waits for each Network's Connections to close |
 
 - **Owner inputs wait until they are stepped.** `configure`, `say`, and `retry` give the Input's sequence once it is journaled, stepped, and its outputs carried out. `say` names the intent, so its `Refused`, `Message`, and `Confirmed` News can be matched to it. A Network that has stopped fails them with `NetworkStopped`, at once or as it stops, so none waits forever. Closing the Runtime stops every Network with the reason `The Runtime closed`, and fails every call made after, including a `configure` that would add a Network.
 - **`NetworkStopped` does not mean the input was refused.** The Network may have stopped, by a failure or by shutdown, after the Input was durably appended and before the caller heard back. Then the Input is in the Journal, a restart folds it, and some of its outputs may already have been carried out, so a `say` may have been sent. A restart rebuilds state from the journaled Inputs and never carries out a past step's outputs again, so it may equally not have been sent. The outcome is uncertain, and saying it again can send a Message twice. `configure` and `retry` can be given again freely: a `Configured` is the whole Configuration, and a second `Retry` changes nothing a first did not.
@@ -28,19 +36,28 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
   2. On `NetworkStopped`, asks `said(network, intent)`, on this Runtime or the one started after it. Once `NetworkStopped` is seen, the append has settled either way: an append is whole or absent, and the Network stops only after its driver has ended. `said` reads that Network's Inputs once, to the Journal's end, and ends.
   3. `Some(sequence)` means the `Say` was journaled, and is stepped on every restart, so it must not be said again. It does not mean its Line reached the Ircd: shutdown may have come before it was sent. `None` means it was never journaled, and saying it again under the same intent is safe.
 - **Intents correlate; they do not deduplicate.** A caller-chosen intent must be unique for its Network across the whole Journal, calls in flight included. That is the caller's obligation. The Runtime journals and steps two `Say`s under one intent as two, and `said` and the News cannot tell them apart, so recovery would be ambiguous. Refusing duplicates exactly would mean holding every intent the Network was ever given, so the Runtime does not.
-- **`known` and `inspect` read the Client as it is now.** `inspect` adds what the Runtime holds: whether the Network is running, the Connections it holds a Link for, and the timers it has set.
+- **`known` and `inspect` read the Client as it is now.** `inspect` adds what the Runtime holds: whether the Network is running, the Connections it holds a Link for, each with how many Lines wait in its Outbox and when the next may leave, and the timers it has set.
 - **News is derived from the Journal.** `news` follows the Journal from the start, folds each Network's Inputs from `initial`, and gives each step's News with its Network, the sequence of its Input, and its `at`, for steps after `after`, and then live. A reader that resumes after the last sequence it has misses nothing, and sees exactly what the Runtime's own fold saw. Each reader folds from the start, which is simple and costs time on a long Journal. Snapshots or a shared projection can come when one is slow.
 
 ### Driving a Network
 
-Each Network has one fiber, which takes its inputs one at a time from one queue: Owner inputs, Transport events, and timer firings. The queue is bounded, so a flooding Ircd waits on its own socket rather than growing memory. For each input, in order:
+Each Network has one fiber, which takes its inputs one at a time from one queue: Owner inputs, Transport events, timer firings, and what each Connection's pump reports. The queue is bounded, so a flooding Ircd waits on its own socket rather than growing memory. For each input, in order:
 
 1. Give it its `at`, from the Clock, sampled when processing of the input begins.
 2. Append the `Input`.
 3. Step the Client.
 4. Append its `Outputs` with `of` set to the Input's sequence. A step with no outputs appends none.
 5. Carry out the outputs, in order.
-6. Step each `SendSecret` that could not be filled as an `Unfilled`, in order, the same way.
+6. Step the Lines an Outbox refused as full as an `Unsent`, one for each Connection, the same way.
+
+### Pacing
+
+Each Connection the Runtime holds has its own Outbox, from [`@iirc/outbox`](../outbox/README.md), and one pump fiber, both in that Connection's Scope. A `Send` or `SendSecret` is queued, and the pump is woken without the Network's fiber waiting for it. The pump takes the next Line when the Outbox says it may leave, waiting on the Clock until then, and sends it. Every Line keeps the order the Client emitted it, except that `PING` and `PONG` go ahead of the Lines waiting. Every Connection is paced alike, by `pacing`, tuned for no Ircd.
+
+- **A Credential is revealed at its Line's turn,** not when it is queued, so it is held for as short a time as it can be. One that cannot be filled is queued as an `Unfilled` input then, as before.
+- **A full Outbox refuses at once.** A Line it refuses is stepped as `Unsent` after the step that output it, and nothing waits for room.
+- **A Line that never leaves comes back as `Unsent`.** The Client refuses a `Say` among them as `Unsent`. A `Send` counts as sent unless an `Unsent` says otherwise. A Line the pump has taken counts as sent, even if the Connection ended as it was written.
+- **The Outbox is never journaled.** It holds only what is in flight on a Connection, and a restart begins with none, since every Connection has ended.
 
 The sequence alone orders the Journal. Networks run side by side, so one may sample its `at` before another and append after it, and a Clock may move backwards, so `at` is not ordered by sequence. A Timeline orders by `at` within its Network, as [the Client's README](../client/README.md#news) says.
 
@@ -48,10 +65,10 @@ Carrying out each output:
 
 | Output | What the Runtime does |
 | --- | --- |
-| `Dial` | Opens a Scope for the Connection and `dial`s in it. Its events become `Opened`, `Received`, and `Closed` inputs with that Connection's id. Once its `Closed` is stepped, the Scope is closed. |
-| `Send` | `encode`s the Line and sends it. A `Rejected` is a bug upstream: it is logged, and nothing is sent. A Line for a Connection the Runtime holds no Link for is dropped, because the Client is authoritative and judges stale Connections itself. |
-| `SendSecret` | `reveal`s the Credential, `fillSecret`s the Line, `encode`s each Line, and sends them. Nothing is sent if any step fails, and the input that follows is `Unfilled`: `Missing` for `CredentialMissing`, `Unavailable` for `VaultFailed`, `Unsendable` when `fillSecret` or `encode` refuses. The value is never logged or journaled. |
-| `Hangup` | Calls `hangup` on the Link. The `Closed` that follows is stepped like any other. |
+| `Dial` | Opens a Scope for the Connection and `dial`s in it, and starts its Outbox and pump there. Its events become `Opened`, `Received`, and `Closed` inputs with that Connection's id. A `Closed` the Runtime did not ask for, such as the Ircd's end, a reset, or a timeout, stops the pump first: whatever is still queued is stepped as one `Unsent` while the Connection is still current, and then the `Closed`. Once the `Closed` is stepped, the Scope is closed. |
+| `Send` | Queues the Line in its Connection's Outbox. At its turn, the pump `encode`s it and sends it. A `Rejected` is a bug upstream: it is logged, and nothing is sent. A Line for a Connection the Runtime holds no Link for is dropped, because the Client is authoritative and judges stale Connections itself. |
+| `SendSecret` | Queues it the same way. At its turn, the pump `reveal`s the Credential, `fillSecret`s the Line, `encode`s each Line, and sends them. Nothing is sent if any step fails, and an `Unfilled` input is queued: `Missing` for `CredentialMissing`, `Unavailable` for `VaultFailed`, `Unsendable` when `fillSecret` or `encode` refuses. The value is never logged or journaled. |
+| `Hangup` | Drains, then calls `hangup` on the Link. The Lines queued before it, the `QUIT` that precedes it included, still leave at pace, for up to `hangupDrain`. When that runs out, every Line still queued is dropped but a `QUIT`, which is the last Line and is sent at once, past the bucket, since leaving is what was asked. What was dropped is stepped as `Unsent`, and then the Link hangs up. An empty Outbox hangs up at once. The `Closed` that follows is stepped like any other. |
 | `Wake` | Sets one timer per `TimerId`, replacing the earlier one, with `sleepUntil`, or cancels it for `null`. When it is due, `Fired { at, due, timer }` is queued, with `due` as the `Wake` set it. A firing that went stale while it waited is stepped all the same, and the Client ignores it. |
 
 The timer table `inspect` shows is projected with `timers` from every step's input and outputs, the same projection a restart folds.
@@ -60,21 +77,20 @@ The timer table `inspect` shows is projected with `timers` from every step's inp
 
 On start, the Runtime refuses with `DecodersMissing` unless `missingDecoders()` is empty. Then it reads every Entry once. For each Network, it folds the Inputs from `initial`, keeping only the state and the timer table that `timers` projects from each step. Journaled Outputs are never read back: the outputs come from the refold, so a parser fix repairs history (ADR 0002), and a fixed Client asks for what it would have asked for. It then sets every timer in the table, appends and steps a `Started`, and drives the Network as before. A timer already due fires at once.
 
-A Connection open at shutdown is over, and the `Started` says so to the Client. It does not get a `Closed`, as closing a Connection's Scope gives none.
+A Connection still open when shutdown's bound ran out is over, and the `Started` says so to the Client. It does not get a `Closed`, as closing a Connection's Scope gives none. A `Stopping` in the Journal is folded like any input: it shut the Client's gate, and the `Started` opens it again, so the Client dials as it would after any restart.
 
 ### Failure
 
 - **A `JournalFailed` stops its Network.** The Runtime does not step an input it did not keep, or carry out outputs it did not keep. The Network's Connections are hung up and its timers stopped, it reports `Stopped` with the reason, the failure is logged, and other Networks carry on. It stays stopped until the Runtime starts again.
 - **A defect stops only its Network.** The Client is total, so one that throws has a bug. That Network stops as above. On restart its refold stops at the same input, so it stays stopped, with the state from before that input, and the other Networks start.
 - **An Ircd reaches only its own Network.** Its bytes go to its own Client through its own queue.
-- **Shutdown** stops every Network's fiber, hangs up every Connection, and stops every timer. Nothing that happens after is journaled. Each Network reports `Stopped` with `The Runtime closed`, which is not logged as an error, and an Owner input still waiting fails with `NetworkStopped`. A graceful `QUIT` on shutdown can come later, as an input the Client answers.
+- **Shutdown is graceful, within a bound.** Closing the Runtime refuses every new Network, then each running Network, all at once, appends and steps a `Stopping`, which is journaled like any input. The Client answers it with a `QUIT` and a `Hangup` on its Connection. The Network then waits for every Connection's `Closed`, or for `stopTimeout` to run out. While it stops, a `Hangup` drains for at most half of `stopTimeout`, so the `QUIT` and the Transport's own bounded close fit in the rest. The inputs that arrive within the bound, such as `Unsent`, `Closed`, a Line from the Ircd, or a timer, are journaled and stepped as usual, but an Owner input queued after the `Stopping` is never stepped. Then every Network's fiber stops, its Connections' Scopes close, which hangs up any still open, and its timers stop. Nothing that happens after is journaled. Each Network reports `Stopped` with `The Runtime closed`, which is not logged as an error, and an Owner input still waiting fails with `NetworkStopped`. A Network already stopped by a failure gets no `Stopping`. A Connection cut off at the bound is logged as a warning.
 
 Every log goes through `Effect.log*`, annotated with the Network.
 
 ### Not yet
 
-- **Flood pacing.** The Runtime sends each Line as soon as it is carried out. A burst, such as many joins or a long `say`, can get the Connection killed for flooding. Pacing belongs to the Outbox, a later module that sits between the Runtime and the Transport.
-- **A graceful `QUIT` on shutdown.** Closing the Runtime hangs up every Connection without one. It can come as an input the Client answers.
+- **Expiry, and pacing per Network.** A Line waits in its Outbox until it leaves or its Connection ends, and every Connection is paced alike. [The Outbox's README](../outbox/README.md#not-yet) says what could come.
 
 The Owner API is [`@iirc/api`](../api/README.md), and the composition root that wires the production adapters to the Runtime is [`@iirc/daemon`](../daemon/README.md), whose end-to-end runs drive it against private Ircds. This package's tests run the real Client on the in-memory ports, on a `TestClock`.
 

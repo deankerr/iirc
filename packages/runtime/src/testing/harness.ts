@@ -7,14 +7,14 @@
  */
 import type { Client } from "@iirc/client";
 import type { FallbackEncoding } from "@iirc/protocol/line";
-import { Effect, Exit, Layer, Logger, Option, Scope, Stream } from "effect";
+import { Duration, Effect, Exit, Fiber, Layer, Logger, Option, Scope, Stream } from "effect";
 import type { LogLevel } from "effect";
 import { TestClock } from "effect/testing";
 
 import { Journal } from "../journal.ts";
 import type { Entry, JournalRecord, JournalService, JournalFailed } from "../journal.ts";
-import { makeRuntime } from "../runtime.ts";
-import type { DecodersMissing, RuntimeService } from "../runtime.ts";
+import { defaultStopTimeout, makeRuntime } from "../runtime.ts";
+import type { DecodersMissing, RuntimeOptions, RuntimeService } from "../runtime.ts";
 import { Transport } from "../transport.ts";
 import { Vault } from "../vault.ts";
 import type { VaultService } from "../vault.ts";
@@ -56,16 +56,30 @@ const makeWorld = (journal?: JournalService): Effect.Effect<World> =>
   });
 
 /**
+ * Lets every other fiber run until nothing is left to do, which in-memory ports reach
+ * quickly, as nothing they do waits on the outside world.
+ */
+export const settle: Effect.Effect<void> = Effect.gen(function* () {
+  for (let turn = 0; turn < 200; turn += 1) {
+    yield* Effect.yieldNow;
+  }
+});
+
+/**
  * Starts a Runtime on a world's ports, in its own Scope, so a test can close it and
- * start another on the same Journal.
+ * start another on the same Journal. Closing it lets shutdown run: if it is still
+ * waiting for Connections once every other fiber has run, the TestClock moves past the
+ * stop's bound, so a test never hangs on a Connection that never closes.
  * @param world - The ports.
  * @param client - The Client to drive.
+ * @param options - The Runtime's options.
  * @param missing - The decoders to report missing.
  * @returns The Runtime, and a way to close it.
  */
 export const startRuntime = <S>(
   world: World,
   client: Client<S>,
+  options: RuntimeOptions = {},
   missing?: () => readonly FallbackEncoding[]
 ): Effect.Effect<
   { readonly runtime: RuntimeService; readonly close: Effect.Effect<void> },
@@ -74,7 +88,7 @@ export const startRuntime = <S>(
   Effect.gen(function* () {
     const scope = yield* Scope.make();
 
-    const runtime = yield* makeRuntime(client, missing).pipe(
+    const runtime = yield* makeRuntime(client, options, missing).pipe(
       Scope.provide(scope),
       Effect.provideService(Journal, world.journal),
       Effect.provideService(Transport, world.memory.transport),
@@ -82,7 +96,21 @@ export const startRuntime = <S>(
       Effect.onError(() => Scope.close(scope, Exit.void))
     );
 
-    return { close: Scope.close(scope, Exit.void), runtime };
+    const bound = Duration.fromInputUnsafe(options.stopTimeout ?? defaultStopTimeout);
+
+    const close = Effect.gen(function* () {
+      const closing = yield* Effect.forkDetach(Scope.close(scope, Exit.void));
+
+      yield* settle;
+
+      if (closing.pollUnsafe() === undefined) {
+        yield* TestClock.adjust(bound);
+      }
+
+      yield* Fiber.join(closing);
+    });
+
+    return { close, runtime };
   });
 
 /**
@@ -103,16 +131,6 @@ export const runTest = async <A, E>(test: (world: World) => Effect.Effect<A, E>)
     )
   );
 };
-
-/**
- * Lets every other fiber run until nothing is left to do, which in-memory ports reach
- * quickly, as nothing they do waits on the outside world.
- */
-export const settle: Effect.Effect<void> = Effect.gen(function* () {
-  for (let turn = 0; turn < 200; turn += 1) {
-    yield* Effect.yieldNow;
-  }
-});
 
 /**
  * Every Entry in the Journal now.

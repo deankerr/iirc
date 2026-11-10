@@ -114,6 +114,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@iirc/client": "workspace:*",
+        "@iirc/outbox": "workspace:*",
         "@iirc/protocol": "workspace:*",
         "effect": "catalog:",
       },

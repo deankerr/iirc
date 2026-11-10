@@ -160,6 +160,8 @@ describe("the handlers", () => {
           payload: { kind: "Privmsg", target: "#iirc", text: "hello" },
         });
 
+        // Registration and the join spent the burst, so it waits its turn.
+        yield* TestClock.adjust(2000);
         const line = yield* heard(call);
 
         yield* say(call, ":peer!u@h PRIVMSG #iirc :hi there");
