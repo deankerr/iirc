@@ -9,7 +9,7 @@ import { Instant, IntentId, MessageId } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { LawBroken } from "@iirc/runtime/testing";
 import type { Law } from "@iirc/runtime/testing";
-import { comparePositions, emptyDirectory, step, timelineIdOf } from "@iirc/timelines";
+import { comparePositions, cursorOf, emptyDirectory, step, timelineIdOf } from "@iirc/timelines";
 import type {
   Change,
   Content,
@@ -19,7 +19,7 @@ import type {
   Position,
   TimelineId,
 } from "@iirc/timelines";
-import { Effect, Equal, Fiber, Option, Scheduler } from "effect";
+import { Deferred, Effect, Equal, Fiber, Option, Scheduler } from "effect";
 
 import type {
   Anchor,
@@ -235,7 +235,11 @@ const project = (model: Model): Snapshot => {
     ),
     timelines,
     windows: timelines.map(
-      ({ id }) => [id, { earlier: false, items: itemsIn(id), later: false, timeline: id }] as const
+      ({ id, network: on }) =>
+        [
+          id,
+          { earlier: false, items: itemsIn(id), later: false, network: on, timeline: id },
+        ] as const
     ),
   };
 };
@@ -559,11 +563,17 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("directory", yield* store.directory, emptyDirectory);
         yield* same("timelines", yield* store.timelines(libera), []);
         yield* same("window", yield* texts(store, channel, all), "none");
+        yield* same("read together", yield* store.consistent(store.timelines(libera)), {
+          through: undefined,
+          value: [],
+          version: undefined,
+        });
         yield* same("changed", yield* store.changedAfter(undefined), {
           gaps: [],
           items: [],
           merged: [],
           more: false,
+          overflowed: undefined,
           through: undefined,
           timelines: [],
         });
@@ -667,6 +677,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           items: [],
           merged: [],
           more: false,
+          overflowed: undefined,
           through: undefined,
           timelines: [],
         });
@@ -1085,7 +1096,16 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           timelines: [channel, other],
         });
         // A page holds whole sequences, ordered the same way.
-        yield* same("first page", (yield* brief(undefined, 1)).timelines, [
+        const everything = yield* store.changedAfter(undefined);
+
+        const atTwo = [
+          ...everything.timelines,
+          ...everything.items,
+          ...everything.merged,
+          ...everything.gaps,
+        ].filter(({ changed }) => changed === 2).length;
+
+        yield* same("first page", (yield* brief(undefined, atTwo)).timelines, [
           network,
           third,
           oftcNetwork,
@@ -1160,8 +1180,31 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           ]
         );
         yield* same("another Network", yield* store.locate(oftc, 2), []);
+
+        // A page at a time, in the same order, from just after the last item seen.
+        const first = yield* store.locate(libera, 2, { limit: 2 });
+        const last = first.at(-1);
+
+        yield* same(
+          "first page",
+          first.map((item) => [textOf(item), item.timeline]),
+          [
+            ["early", network],
+            ["late", channel],
+          ]
+        );
+        yield* same(
+          "next page",
+          last === undefined
+            ? []
+            : (yield* store.locate(libera, 2, {
+                after: { position: last.position, timeline: last.timeline },
+                limit: 2,
+              })).map((item) => [textOf(item), item.timeline]),
+          [["late", other]]
+        );
       }),
-    name: "locates the items a step made",
+    name: "locates the items a step made, a page at a time",
   },
   {
     check: (store) =>
@@ -1192,6 +1235,18 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
 
         yield* apply(store, 4, [gap(4, position(30, 3), position(40, 4))]);
         yield* same("closed", yield* found(position(35, 9)), [[30, 40]]);
+        // Found from the last that began before the range, never from older ones.
+        yield* same("ending where it begins", yield* found(position(20, 2)), [
+          [10, 20],
+          [30, 40],
+        ]);
+        yield* same("ending just before it", yield* found(position(21, 2)), [[30, 40]]);
+        // Gaps may touch: one may begin exactly where the one before it ended.
+        yield* apply(store, 5, [gap(5, position(40, 4), position(45, 5))]);
+        yield* same("touching, read from where they meet", yield* found(position(40, 4)), [
+          [30, 40],
+          [40, 45],
+        ]);
         yield* same("another Network", yield* store.gaps(oftc, {}), []);
       }),
     name: "finds the Gaps that overlap a range, and closes one in place",
@@ -1228,6 +1283,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
               items: changed.items.map((item) => [textOf(item), item.changed]),
               merged: changed.merged.length,
               more: changed.more,
+              overflowed: changed.overflowed,
               through: changed.through,
               timelines: changed.timelines.map(({ name, changed: when }) => [name, when]),
             }))
@@ -1241,6 +1297,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           ],
           merged: 0,
           more: false,
+          overflowed: undefined,
           through: 6,
           timelines: [
             ["libera", 2],
@@ -1252,6 +1309,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           items: [["a", 4]],
           merged: 0,
           more: false,
+          overflowed: undefined,
           through: 6,
           timelines: [["#a", 4]],
         });
@@ -1261,6 +1319,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           items: [],
           merged: 0,
           more: true,
+          overflowed: undefined,
           through: 2,
           timelines: [["libera", 2]],
         });
@@ -1269,14 +1328,26 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           items: [["b", 3]],
           merged: 0,
           more: true,
+          overflowed: undefined,
           through: 3,
           timelines: [],
         });
-        yield* same("third page", yield* brief(3, 1), {
+        // A step that alone is more than the page is given as overflowed, and nothing of it.
+        yield* same("third page, overflowed", yield* brief(3, 1), {
+          gaps: [],
+          items: [],
+          merged: 0,
+          more: true,
+          overflowed: { sequence: 4, timelines: [channel] },
+          through: 4,
+          timelines: [],
+        });
+        yield* same("third page, whole", yield* brief(3, 2), {
           gaps: [],
           items: [["a", 4]],
           merged: 0,
           more: true,
+          overflowed: undefined,
           through: 4,
           timelines: [["#a", 4]],
         });
@@ -1285,6 +1356,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           items: [],
           merged: 0,
           more: false,
+          overflowed: undefined,
           through: 6,
           timelines: [],
         });
@@ -1314,6 +1386,285 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("still readable", yield* texts(store, channel, all), "| x |");
       }),
     name: "describes each Timeline as last told, a detached one with no key",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* store.reset(7);
+        yield* apply(store, 2, [...opened(2), added(2, channel, position(0, 2), said("x"))]);
+        yield* apply(store, 3, [
+          described(3, oftcNetwork, "Network", oftc, null, oftc),
+          added(3, oftcNetwork, position(0, 3), said("y"), undefined, oftc),
+        ]);
+        yield* apply(store, 4, []);
+
+        const read = yield* store.consistent(
+          Effect.all({
+            located: Effect.map(store.locate(libera, 2), (items) => items.map(textOf)),
+            timelines: Effect.map(store.timelines(libera), (each) => each.map(({ id }) => id)),
+            window: texts(store, channel, all),
+          })
+        );
+
+        yield* same("read together", read, {
+          through: 4,
+          value: {
+            located: ["x"],
+            timelines: [network, channel, other],
+            window: "| x |",
+          },
+          version: 7,
+        });
+
+        const window = yield* store.window(channel, all, 10);
+
+        yield* same(
+          "a window's Network",
+          window.pipe(Option.map(({ network: on, timeline }) => [on, timeline])),
+          Option.some([libera, channel])
+        );
+      }),
+    name: "reads together, with the last step folded and its version, and says a window's Network",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [...opened(2), added(2, channel, position(0, 2), said("x"))]);
+
+        // The step is forked outside the reads, and let go once they have begun, so it can
+        // only wait for them, never join them.
+        const begun = yield* Deferred.make<boolean>();
+
+        const applying = yield* Effect.forkChild(
+          Deferred.await(begun).pipe(
+            Effect.andThen(apply(store, 3, [added(3, channel, position(1, 3), said("y"))]))
+          )
+        );
+
+        const read = yield* store.consistent(
+          Effect.gen(function* () {
+            const first = yield* texts(store, channel, all);
+
+            yield* Deferred.succeed(begun, true);
+
+            for (let yielded = 0; yielded < 20; yielded += 1) {
+              yield* Effect.yieldNow;
+            }
+
+            return {
+              first,
+              folded: (yield* store.folded).through,
+              second: yield* texts(store, channel, all),
+            };
+          })
+        );
+
+        yield* same("while reading together", read, {
+          through: 2,
+          value: { first: "| x |", folded: 2, second: "| x |" },
+          version: undefined,
+        });
+        yield* Fiber.join(applying);
+        yield* same("afterwards", yield* store.consistent(texts(store, channel, all)), {
+          through: 3,
+          value: "| x y |",
+          version: undefined,
+        });
+      }),
+    name: "holds a step back while reads made together run",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // Two Timelines with many items each, merged in one step, which then changes every
+        // item it moves.
+        const many = 30;
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          ...Array.from({ length: many }, (_, n) =>
+            added(2, channel, position(n, 2, n), said(`a${n}`))
+          ),
+          ...Array.from({ length: many }, (_, n) =>
+            added(2, other, position(n, 2, many + n), said(`b${n}`))
+          ),
+        ]);
+        yield* apply(store, 3, [
+          { _tag: "Merged", from: other, into: channel, network: libera, sequence: 3 },
+        ]);
+        yield* apply(store, 4, [added(4, channel, position(99, 4), said("after"))]);
+
+        const page = (after: number, limit: number) =>
+          store.changedAfter(after, limit).pipe(
+            Effect.map((changed) => ({
+              items: changed.items.map(textOf),
+              more: changed.more,
+              overflowed: changed.overflowed,
+              through: changed.through,
+              timelines: changed.timelines.map(({ id }) => id),
+            }))
+          );
+
+        yield* same("the merge, overflowed", yield* page(2, 10), {
+          items: [],
+          more: true,
+          overflowed: { sequence: 3, timelines: [channel, other] },
+          through: 3,
+          timelines: [],
+        });
+        yield* same("its Timelines, more than the page", yield* page(2, 1), {
+          items: [],
+          more: true,
+          overflowed: { sequence: 3, timelines: undefined },
+          through: 3,
+          timelines: [],
+        });
+        yield* same("the step after it", yield* page(3, 10), {
+          items: ["after"],
+          more: false,
+          overflowed: undefined,
+          through: 4,
+          timelines: [channel],
+        });
+        // A page that holds it gives it whole: every item it moved.
+        yield* same(
+          "the merge, whole, and the step after it",
+          (yield* page(2, 1000)).items.length,
+          many + 1
+        );
+      }),
+    name: "gives a step bigger than the page as overflowed, with the Timelines it touched",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, opened(2));
+        yield* apply(store, 3, [described(3, oftcNetwork, "Network", oftc, null, oftc)]);
+
+        const ids = (page?: { readonly after?: TimelineId; readonly limit?: number }) =>
+          Effect.map(store.timelines(libera, page), (each) => each.map(({ id }) => id));
+
+        yield* same("all", yield* ids(), [network, channel, other]);
+        yield* same("first page", yield* ids({ limit: 2 }), [network, channel]);
+        yield* same("next page", yield* ids({ after: channel, limit: 2 }), [other]);
+        yield* same("past the last", yield* ids({ after: other, limit: 2 }), []);
+      }),
+    name: "pages a Network's Timelines by id",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // A quiet Timeline, with items at 5 and 100, across many Gaps.
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(5, 2), said("early")),
+          added(2, channel, position(100, 2, 1), said("late")),
+          gap(2, position(1, 2, 2), position(2, 2, 3)),
+          ...[10, 30, 50, 70].map((ms, n) =>
+            gap(2, position(ms, 2, 4 + n), position(ms + 10, 2, 8 + n))
+          ),
+          gap(2, position(120, 2, 12), undefined),
+          gap(2, position(130, 2, 13), position(131, 2, 14), oftc),
+        ]);
+
+        const runs = (range: {
+          readonly from?: Position;
+          readonly to?: Position;
+          readonly at: readonly Position[];
+        }) =>
+          Effect.map(store.collapsedGaps(libera, range), (each) =>
+            each.map(({ count, from, to }) => [
+              count,
+              from.at - t0,
+              to === undefined ? null : to.at - t0,
+            ])
+          );
+
+        const early = position(5, 2);
+        const late = position(100, 2, 1);
+
+        yield* same("every run, open at both ends", yield* runs({ at: [early, late] }), [
+          [1, 1, 2],
+          [4, 10, 80],
+          [1, 120, null],
+        ]);
+        yield* same(
+          "closed at both ends",
+          yield* runs({ at: [early, late], from: early, to: late }),
+          [[4, 10, 80]]
+        );
+        yield* same("one item", yield* runs({ at: [late] }), [
+          [5, 1, 80],
+          [1, 120, null],
+        ]);
+        yield* same("no item", yield* runs({ at: [] }), [[6, 1, null]]);
+        yield* same(
+          "between two Gaps",
+          yield* runs({ at: [], from: position(21, 9), to: position(29, 9) }),
+          []
+        );
+      }),
+    name: "collapses the Gaps between a Timeline's items, one run for each span",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // A failed Connection opens a Gap, a Session closes it at P, and a restart before any
+        // more News opens the next Gap at the last step folded, which is P too.
+        const steps = [
+          [{ _tag: "ConnectionFailed", at: at(10), reason: { _tag: "Closed", reason: "Reset" } }],
+          [{ _tag: "SessionBegan", at: at(20), nick: "iirc" }],
+          [{ _tag: "SessionEnded", at: at(30), reason: { _tag: "Restarted" } }],
+        ] as const;
+
+        yield* inOrder(steps.entries(), ([index, news]) =>
+          Effect.gen(function* () {
+            const sequence = index + 2;
+
+            const stepped = step(yield* store.directory, {
+              at: news[0].at,
+              network: libera,
+              news,
+              sequence,
+            });
+
+            yield* store.apply({
+              changes: stepped.changes,
+              directory: stepped.directory,
+              through: sequence,
+            });
+          })
+        );
+
+        const all = yield* store.gaps(libera, {});
+        const [first, second] = all;
+        const shared = first?.to;
+
+        yield* same("two Gaps", all.length, 2);
+        yield* same(
+          "the second begins where the first ended",
+          shared !== undefined &&
+            second !== undefined &&
+            cursorOf(second.from) === cursorOf(shared),
+          true
+        );
+
+        if (shared === undefined) {
+          return;
+        }
+
+        yield* same(
+          "read from that point",
+          (yield* store.gaps(libera, { from: shared })).length,
+          2
+        );
+        yield* same(
+          "collapsed from that point",
+          (yield* store.collapsedGaps(libera, { at: [], from: shared })).map(({ count }) => count),
+          [2]
+        );
+      }),
+    name: "keeps a Gap that ends where the next began, after a restart, read from that point",
   },
   {
     check: interrupting(additions),

@@ -1,7 +1,7 @@
 /**
- * What the Daemon's tests share: the Runtime on the in-memory ports, a key made in a
- * temporary data directory, a Logger that keeps what was logged, and the Ircd's side of
- * a floor registration.
+ * What the Daemon's tests share: the Runtime on the in-memory ports, the projector on a
+ * Timeline store, a key made in a temporary data directory, a Logger that keeps what was
+ * logged, and the Ircd's side of a floor registration.
  *
  * @packageDocumentation
  */
@@ -20,12 +20,16 @@ import type { MemoryTransport, TestCall } from "@iirc/runtime/testing";
 import { Transport } from "@iirc/runtime/transport";
 import { Vault } from "@iirc/runtime/vault";
 import type { VaultService } from "@iirc/runtime/vault";
+import { TimelineStore } from "@iirc/timeline-store";
+import type { TimelineStoreService } from "@iirc/timeline-store";
+import { makeMemoryTimelineStore } from "@iirc/timeline-store/testing";
 import { Effect, Layer, Logger, Redacted, Schema } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { HttpClientRequest } from "effect/http";
 import { HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys, createKey } from "../keys.ts";
+import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
 
 const encoder = new TextEncoder();
@@ -84,39 +88,50 @@ export interface World {
   readonly journal: JournalService;
   readonly memory: MemoryTransport;
   readonly vault: VaultService;
+  readonly store: TimelineStoreService;
   readonly logged: string[];
 }
 
 /**
  * Fresh in-memory ports, and somewhere to keep what is logged.
  * @param journal - A Journal to use instead of a fresh one.
+ * @param store - A Timeline store to use instead of a fresh one in memory.
  * @returns The world.
  */
-export const makeWorld = (journal?: JournalService): Effect.Effect<World> =>
+export const makeWorld = (
+  journal?: JournalService,
+  store?: TimelineStoreService
+): Effect.Effect<World> =>
   Effect.gen(function* () {
     return {
       journal: journal ?? (yield* makeMemoryJournal),
       logged: [],
       memory: yield* makeMemoryTransport,
+      store: store ?? (yield* makeMemoryTimelineStore),
       vault: yield* makeMemoryVault,
     };
   });
 
 /**
- * The Runtime, on the world's ports, with the real Client, and the keys and browser
- * sign-ins of a data directory.
+ * The Runtime, on the world's ports, with the real Client, the projector folding its News
+ * into the world's Timeline store, and the keys and browser sign-ins of a data directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
  * @returns The Layer.
  */
 export const layerWorld = (world: World, dataDir: string) =>
   Layer.mergeAll(
-    layerRuntime(client).pipe(
+    layerProjector.pipe(
+      Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
-        Layer.mergeAll(
-          Layer.succeed(Journal, world.journal),
-          Layer.succeed(Transport, world.memory.transport),
-          Layer.succeed(Vault, world.vault)
+        layerRuntime(client).pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(
+              Layer.succeed(Journal, world.journal),
+              Layer.succeed(Transport, world.memory.transport),
+              Layer.succeed(Vault, world.vault)
+            )
+          )
         )
       )
     ),

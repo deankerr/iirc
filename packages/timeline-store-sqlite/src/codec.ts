@@ -215,6 +215,18 @@ export const GapRow = Schema.toCodecJson(
   })
 );
 
+/**
+ * A run of Gaps collapsed: how many, where the first began, and where the last ended, each
+ * `undefined` when there were none, or when the last goes on.
+ */
+export const CollapsedGapRow = Schema.toCodecJson(
+  Schema.Struct({
+    count: Int,
+    from: Schema.UndefinedOr(Cursor),
+    to: Schema.UndefinedOr(Cursor),
+  })
+);
+
 /** An item. */
 export const ItemRow = Schema.toCodecJson(
   Schema.Struct({

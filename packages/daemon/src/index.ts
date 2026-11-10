@@ -8,7 +8,7 @@ export { defaultListen, layerDaemon, layerLogger } from "./daemon.ts";
 
 export type { DaemonOptions, Listen } from "./daemon.ts";
 
-export { ApiHandlers, ApiRoutes, Heartbeat, maxBodySize } from "./handlers.ts";
+export { ApiHandlers, ApiRoutes, ChangesPage, Heartbeat, maxBodySize } from "./handlers.ts";
 
 export { ApiKeys, createKey, KeyExists, KeyName, KeysUnreadable, KeysUnwritable } from "./keys.ts";
 
@@ -18,6 +18,6 @@ export { SignIns, SignInsUnreadable, SignInsUnwritable } from "./sign-ins.ts";
 
 export { Projector, layerProjector } from "./projector.ts";
 
-export type { ProjectorStatus } from "./projector.ts";
+export type { Progress, ProjectorStatus } from "./projector.ts";
 
 export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./lock.ts";

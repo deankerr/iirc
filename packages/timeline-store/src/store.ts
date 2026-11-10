@@ -77,9 +77,21 @@ export type Anchor =
 export interface Window {
   /** The Timeline read, which is the one a merged id went to. */
   readonly timeline: TimelineId;
+  /** The Network the Timeline is one of. */
+  readonly network: string;
   readonly items: readonly Item[];
   readonly earlier: boolean;
   readonly later: boolean;
+}
+
+/**
+ * A step that changed more than a page holds, given without what it changed: its sequence,
+ * and the ids of the Timelines it touched or merged, in id order, or `undefined` when even
+ * they are more than the page holds, which says to read everything again.
+ */
+export interface Overflowed {
+  readonly sequence: number;
+  readonly timelines: readonly TimelineId[] | undefined;
 }
 
 /**
@@ -90,7 +102,8 @@ export interface Window {
  * - `items` by their Timeline's id, then by position.
  * - `gaps` by Network id, compared by code point, then by where they began.
  *
- * Each order is total, so every adapter gives the same lists. Each sequence is given whole.
+ * Each order is total, so every adapter gives the same lists. Each sequence is given whole,
+ * or, when it alone is more than the page holds, as `overflowed` with every list empty.
  * A reader resumes after `through`.
  */
 export interface Changed {
@@ -98,10 +111,35 @@ export interface Changed {
   readonly items: readonly Item[];
   readonly merged: readonly Tombstone[];
   readonly gaps: readonly Gap[];
+  /** The one step this page gives, when it changed more than the page holds. */
+  readonly overflowed: Overflowed | undefined;
   /** Everything changed through this sequence has been given. */
   readonly through: number | undefined;
   /** Whether more changed after `through`. */
   readonly more: boolean;
+}
+
+/**
+ * Consecutive Gaps of a Network with no item of the Timeline read between them, as one:
+ * from where the first began to where the last ended, or `undefined` while it goes on, and
+ * how many there were.
+ */
+export interface CollapsedGap {
+  readonly from: Position;
+  readonly to: Position | undefined;
+  readonly count: number;
+}
+
+/**
+ * Reads made against one state of the store, with the last sequence folded into that state
+ * and the projection version it was folded by.
+ */
+export interface Consistent<A> {
+  readonly value: A;
+  /** The last sequence folded when the reads were made, or `undefined` before any was. */
+  readonly through: number | undefined;
+  /** The projection version the state was folded by, or `undefined` for a store never reset. */
+  readonly version: number | undefined;
 }
 
 /** The store could not be written or read. */
@@ -122,38 +160,77 @@ export interface TimelineStoreService {
   /** The directory as of the last step folded, to restore the fold without folding again. */
   readonly directory: Effect.Effect<Directory, TimelineStoreFailed>;
   /**
-   * Every Timeline of a Network, merged ones aside, in the order they were opened, which is
-   * by id.
+   * A Network's Timelines, merged ones aside, in the order they were opened, which is by id:
+   * those after `after`, up to `limit` of them, or every one without a page.
    */
-  readonly timelines: (network: string) => Effect.Effect<readonly Summary[], TimelineStoreFailed>;
+  readonly timelines: (
+    network: string,
+    page?: { readonly after?: TimelineId | undefined; readonly limit?: number | undefined }
+  ) => Effect.Effect<readonly Summary[], TimelineStoreFailed>;
   /** A window of a Timeline's items, following a merged id to where it went. */
   readonly window: (
     timeline: TimelineId,
     anchor: Anchor,
     limit: number
   ) => Effect.Effect<Option.Option<Window>, TimelineStoreFailed>;
-  /** The items a step made, in position order, and at one position by Timeline id. */
+  /**
+   * The items a step made, in position order, and at one position by Timeline id: those
+   * after the item `after` names in that order, up to `limit`, or every one without a page.
+   */
   readonly locate: (
     network: string,
-    sequence: number
+    sequence: number,
+    page?: {
+      readonly after?: { readonly position: Position; readonly timeline: TimelineId } | undefined;
+      readonly limit?: number | undefined;
+    }
   ) => Effect.Effect<readonly Item[], TimelineStoreFailed>;
   /**
    * A Network's Gaps that overlap a range of positions, either end of which may be open, in
-   * the order they began.
+   * the order they began. A Network's Gaps do not overlap, except that one may begin exactly
+   * where the one before it ended, so of those that began before `from`, only the last can
+   * reach it, and every one that began at or after `from` is in.
    */
   readonly gaps: (
     network: string,
     range: { readonly from?: Position | undefined; readonly to?: Position | undefined }
   ) => Effect.Effect<readonly Gap[], TimelineStoreFailed>;
   /**
+   * A Network's Gaps that overlap a range, split at each of a Timeline's item positions,
+   * `at`, in order, and each run between two of them collapsed into one, so there are at
+   * most one more than there are positions. A run is the Gaps that began after one
+   * position and at or before the next, the first run those that began at or before the
+   * first, and the last those that began after the last. A run with none is left out.
+   */
+  readonly collapsedGaps: (
+    network: string,
+    range: {
+      readonly from?: Position | undefined;
+      readonly to?: Position | undefined;
+      readonly at: readonly Position[];
+    }
+  ) => Effect.Effect<readonly CollapsedGap[], TimelineStoreFailed>;
+  /**
    * The Timelines, items, tombstones, and Gaps changed after a sequence, as they stand now,
    * each list ordered by `changed` and then as {@link Changed} says. With a limit, whole
-   * sequences are given until at least `limit` things have been.
+   * sequences are given while they come to at most `limit` things together, and a first
+   * sequence that alone is more is given as `overflowed`, so a page never holds more than
+   * `limit` things, and is found without reading more than that. Without one, everything.
    */
   readonly changedAfter: (
     after: number | undefined,
     limit?: number
   ) => Effect.Effect<Changed, TimelineStoreFailed>;
+  /**
+   * Runs reads of this store against one state of it, which no `apply` or `reset` changes
+   * while they run, and gives what they read with the last sequence folded into that state,
+   * and the projection version it was folded by. A reader that follows `changedAfter` from
+   * that `through` misses nothing the reads did not show. It is for this store's own reads:
+   * a write inside it waits on itself.
+   */
+  readonly consistent: <A>(
+    reads: Effect.Effect<A, TimelineStoreFailed>
+  ) => Effect.Effect<Consistent<A>, TimelineStoreFailed>;
   /** Empties the store, to be folded again from the start by a projection version. */
   readonly reset: (version: number) => Effect.Effect<void, TimelineStoreFailed>;
 }

@@ -1,12 +1,13 @@
 import type { IntentId, MessageId } from "@iirc/client";
 import { cursorOf, emptyDirectory } from "@iirc/timelines";
 import type { Change, Descriptor, Directory, Position, TimelineId } from "@iirc/timelines";
-import { Effect, Option, Ref } from "effect";
+import { Effect, Option, Ref, Semaphore } from "effect";
 
 import type {
   Anchor,
   Applied,
   Changed,
+  CollapsedGap,
   Gap,
   Item,
   Summary,
@@ -350,23 +351,45 @@ const changedAfter = (
     ...new Set([...timelines, ...items, ...merged, ...gaps].map(({ changed }) => changed)),
   ].toSorted((left, right) => left - right);
 
-  // Whole sequences, until at least `limit` things have been given.
+  const countOf = (sequence: number) =>
+    [...timelines, ...items, ...merged, ...gaps].filter(({ changed }) => changed === sequence)
+      .length;
+
+  // Whole sequences, while they come to at most `limit` things, and a first one that alone
+  // is more given as overflowed.
   let through: number | undefined;
+  let overflowed: number | undefined;
   let given = 0;
 
   for (const sequence of sequences) {
-    if (limit !== undefined && given >= limit) {
+    const count = countOf(sequence);
+
+    if (limit !== undefined && given + count > limit) {
+      if (given === 0) {
+        overflowed = sequence;
+        through = sequence;
+      }
+
       break;
     }
 
     through = sequence;
-    given += [...timelines, ...items, ...merged, ...gaps].filter(
-      ({ changed }) => changed === sequence
-    ).length;
+    given += count;
   }
 
   const more = sequences.some((sequence) => through === undefined || sequence > through);
-  const last = through;
+  const last = overflowed === undefined ? through : undefined;
+
+  const touched =
+    overflowed === undefined
+      ? []
+      : [
+          ...new Set([
+            ...timelines.flatMap(({ changed, id }) => (changed === overflowed ? [id] : [])),
+            ...items.flatMap(({ changed, timeline }) => (changed === overflowed ? [timeline] : [])),
+            ...merged.flatMap(({ changed, id }) => (changed === overflowed ? [id] : [])),
+          ]),
+        ].toSorted(textOrder);
 
   const within = <T extends { readonly changed: number }>(all: readonly T[]) =>
     all.filter(({ changed }) => last !== undefined && changed <= last);
@@ -389,6 +412,13 @@ const changedAfter = (
       (left, right) => left.changed - right.changed || textOrder(left.id, right.id)
     ),
     more,
+    overflowed:
+      overflowed === undefined
+        ? undefined
+        : {
+            sequence: overflowed,
+            timelines: limit !== undefined && touched.length > limit ? undefined : touched,
+          },
     through: upTo,
     timelines: within(timelines).toSorted(
       (left, right) => left.changed - right.changed || textOrder(left.id, right.id)
@@ -396,18 +426,91 @@ const changedAfter = (
   };
 };
 
-const overlaps = (gap: Gap, from: Position | undefined, to: Position | undefined) =>
-  (to === undefined || textOrder(cursorOf(gap.from), cursorOf(to)) <= 0) &&
-  (from === undefined || gap.to === undefined || textOrder(cursorOf(gap.to), cursorOf(from)) >= 0);
+const gapsOf = (memory: Memory, network: string) =>
+  [...(memory.gaps.get(network)?.values() ?? [])].toSorted((left, right) =>
+    textOrder(cursorOf(left.from), cursorOf(right.from))
+  );
+
+/**
+ * A Network's Gaps over a range, as the SQLite adapter finds them by its key: a Network's
+ * Gaps follow one another, one at most beginning where the one before it ended, so of those
+ * that began before `from`, only the last can reach it, and it is kept when it does. Every
+ * Gap that began at or after `from` is in.
+ * @param gaps - The Network's Gaps, in the order they began.
+ * @param from - Where the range begins, or `undefined` for its start.
+ * @param to - Where the range ends, or `undefined` for its end.
+ * @returns The Gaps over the range, in the order they began.
+ */
+const overlapping = (
+  gaps: readonly Gap[],
+  from: Position | undefined,
+  to: Position | undefined
+): readonly Gap[] => {
+  const before =
+    from === undefined
+      ? undefined
+      : gaps.findLast((gap) => textOrder(cursorOf(gap.from), cursorOf(from)) < 0);
+
+  const startsAt =
+    before !== undefined &&
+    from !== undefined &&
+    (before.to === undefined || textOrder(cursorOf(before.to), cursorOf(from)) >= 0)
+      ? before
+      : undefined;
+
+  return gaps.filter(
+    (gap) =>
+      (to === undefined || textOrder(cursorOf(gap.from), cursorOf(to)) <= 0) &&
+      (from === undefined || gap === startsAt || textOrder(cursorOf(gap.from), cursorOf(from)) >= 0)
+  );
+};
+
+/**
+ * A Network's Gaps over a range, each run between two positions collapsed into one.
+ * @param gaps - The Network's Gaps, in the order they began.
+ * @param range - The range, and the positions that split it.
+ * @returns One collapsed Gap for each run that has any.
+ */
+const collapse = (
+  gaps: readonly Gap[],
+  range: {
+    readonly from?: Position | undefined;
+    readonly to?: Position | undefined;
+    readonly at: readonly Position[];
+  }
+): readonly CollapsedGap[] => {
+  const runs = new Map<number, Gap[]>();
+
+  for (const gap of overlapping(gaps, range.from, range.to)) {
+    // The run is how many positions come before where the Gap began.
+    const run = range.at.filter(
+      (position) => textOrder(cursorOf(position), cursorOf(gap.from)) < 0
+    ).length;
+
+    runs.set(run, [...(runs.get(run) ?? []), gap]);
+  }
+
+  return [...runs.entries()]
+    .toSorted(([left], [right]) => left - right)
+    .flatMap(([, run]) => {
+      const [first] = run;
+      const last = run.at(-1);
+
+      return first === undefined || last === undefined
+        ? []
+        : [{ count: run.length, from: first.from, to: last.to }];
+    });
+};
 
 /**
  * A Timeline store in memory. Each step is applied to a copy and swapped in at once, so
- * an apply is whole or absent.
+ * an apply is whole or absent. A write and reads made together take turns.
  * @returns A fresh, empty store, built by no projection version.
  */
 export const makeMemoryTimelineStore: Effect.Effect<TimelineStoreService> = Effect.gen(
   function* () {
     const memory = yield* Ref.make(empty(undefined));
+    const turn = yield* Semaphore.make(1);
     const read = <A>(f: (now: Memory) => A) => Ref.get(memory).pipe(Effect.map(f));
 
     return {
@@ -427,38 +530,63 @@ export const makeMemoryTimelineStore: Effect.Effect<TimelineStoreService> = Effe
           next.directory = applied.directory;
 
           return next;
-        }),
+        }).pipe(turn.withPermits(1)),
       changedAfter: (after, limit) => read((now) => changedAfter(now, after, limit)),
+      collapsedGaps: (network, range) => read((now) => collapse(gapsOf(now, network), range)),
+      consistent: (reads) =>
+        Effect.all({
+          through: read((now) => now.through),
+          value: reads,
+          version: read((now) => now.version),
+        }).pipe(turn.withPermits(1)),
       directory: read((now) => now.directory),
       folded: read((now) => ({ through: now.through, version: now.version })),
       gaps: (network, range) =>
-        read((now) =>
-          [...(now.gaps.get(network)?.values() ?? [])]
-            .filter((gap) => overlaps(gap, range.from, range.to))
-            .toSorted((left, right) => textOrder(cursorOf(left.from), cursorOf(right.from)))
-        ),
-      locate: (network, sequence) =>
-        read((now) =>
-          allItems(now)
-            .filter((item) => item.network === network && item.position.sequence === sequence)
+        read((now) => overlapping(gapsOf(now, network), range.from, range.to)),
+      locate: (network, sequence, page = {}) =>
+        read((now) => {
+          const { after } = page;
+
+          return allItems(now)
+            .filter(
+              (item) =>
+                item.network === network &&
+                item.position.sequence === sequence &&
+                (after === undefined ||
+                  byPosition(item, {
+                    ...item,
+                    position: after.position,
+                    timeline: after.timeline,
+                  }) > 0)
+            )
             .toSorted(byPosition)
-        ),
-      reset: (version) => Ref.set(memory, empty(version)),
-      timelines: (network) =>
+            .slice(0, page.limit);
+        }),
+      reset: (version) => Ref.set(memory, empty(version)).pipe(turn.withPermits(1)),
+      timelines: (network, page = {}) =>
         read((now) =>
           [...now.timelines.values()]
             .flatMap((entry) =>
-              entry.descriptor.network === network ? [summaryOf(now, entry)] : []
+              entry.descriptor.network === network &&
+              (page.after === undefined || textOrder(entry.descriptor.id, page.after) > 0)
+                ? [summaryOf(now, entry)]
+                : []
             )
             .toSorted((left, right) => textOrder(left.id, right.id))
+            .slice(0, page.limit)
         ),
       window: (timeline, anchor, limit) =>
         read((now) => {
           const id = now.timelines.has(timeline) ? timeline : now.merged.get(timeline)?.into;
+          const found = id === undefined ? undefined : now.timelines.get(id);
 
-          return id === undefined
+          return id === undefined || found === undefined
             ? Option.none<Window>()
-            : Option.some({ timeline: id, ...windowOf(sortedItems(now, id), anchor, limit) });
+            : Option.some({
+                network: found.descriptor.network,
+                timeline: id,
+                ...windowOf(sortedItems(now, id), anchor, limit),
+              });
         }),
     };
   }

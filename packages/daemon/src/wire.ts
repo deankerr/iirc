@@ -6,8 +6,17 @@
  *
  * @packageDocumentation
  */
+import { NetworkId as WireNetworkId, Sequence as WireSequence } from "@iirc/api";
 import type {
   Activity as WireActivity,
+  Delivery as WireDelivery,
+  Gap as WireGap,
+  ItemContent as WireItemContent,
+  Projection as WireProjection,
+  Timeline as WireTimeline,
+  TimelineItem as WireTimelineItem,
+  Tombstone as WireTombstone,
+  WindowGap as WireWindowGap,
   ChannelKnowledge as WireChannelKnowledge,
   MemberKnowledge as WireMemberKnowledge,
   ModeChange as WireModeChange,
@@ -48,6 +57,10 @@ import type {
   UserKnowledge,
 } from "@iirc/client/known";
 import type { Happened, NetworkInspection, NetworkStatus } from "@iirc/runtime";
+import type { CollapsedGap, Gap, Item, Summary, Tombstone } from "@iirc/timeline-store";
+import type { Content, Delivery } from "@iirc/timelines";
+
+import type { ProjectorStatus } from "./projector.ts";
 
 /**
  * `Wire` when it has exactly the fields of `Source`, by name, and no others but those in
@@ -682,4 +695,205 @@ export const networkInspection = (
   })),
   status: networkStatus(source.status),
   timers: timerList(source.timers),
+});
+
+/**
+ * Whether the Timelines are being folded.
+ * @param source - The projector's status.
+ * @returns Its wire form.
+ */
+export const projection = (source: ProjectorStatus): WireProjection => {
+  switch (source._tag) {
+    case "Running": {
+      const wire: Case<ProjectorStatus, WireProjection, "Running"> = { _tag: "Running" };
+
+      return wire;
+    }
+
+    case "Stopped": {
+      const wire: Case<ProjectorStatus, WireProjection, "Stopped"> = {
+        _tag: "Stopped",
+        reason: source.reason,
+      };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+// The store keeps a Network's id and a sequence as it was given them, by the Runtime from
+// a Journal the API wrote, so each is one the contract's brand accepts.
+const networkOf = (network: string) => WireNetworkId.make(network);
+
+/**
+ * A sequence the store kept, or none.
+ * @param through - The last sequence folded, or `undefined` before any.
+ * @returns Its wire form.
+ */
+export const throughOf = (through: number | undefined) =>
+  through === undefined ? null : WireSequence.make(through);
+
+const delivery = (source: Delivery): WireDelivery => {
+  switch (source._tag) {
+    case "Confirmed": {
+      const wire: Case<Delivery, WireDelivery, "Confirmed"> = {
+        _tag: "Confirmed",
+        at: fact(source.at, same),
+        id: fact(source.id, same),
+        text: source.text,
+      };
+
+      return wire;
+    }
+
+    case "Pending":
+    case "Unconfirmed":
+    case "Unsent": {
+      const wire: Case<Delivery, WireDelivery, typeof source._tag> = { _tag: source._tag };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+const itemContent = (source: Content): WireItemContent => {
+  switch (source._tag) {
+    case "Activity": {
+      const wire: Case<Content, WireItemContent, "Activity"> = {
+        _tag: "Activity",
+        activity: activity(source.activity),
+        at: fact(source.at, same),
+        id: fact(source.id, same),
+        live: source.live,
+      };
+
+      return wire;
+    }
+
+    case "ConnectionFailed":
+    case "SessionEnded": {
+      const wire: Case<Content, WireItemContent, typeof source._tag> = {
+        _tag: source._tag,
+        at: source.at,
+        reason: endReason(source.reason),
+      };
+
+      return wire;
+    }
+
+    case "Message": {
+      const wire: Case<Content, WireItemContent, "Message"> = {
+        _tag: "Message",
+        at: fact(source.at, same),
+        id: fact(source.id, same),
+        kind: source.kind,
+        live: source.live,
+        ours:
+          source.ours === undefined
+            ? null
+            : { delivery: delivery(source.ours.delivery), intent: source.ours.intent },
+        sender: source.sender,
+        tags: source.tags.map(([key, value]) => ({ key, value })),
+        target: source.target,
+        text: source.text,
+      };
+
+      return wire;
+    }
+
+    case "SessionBegan": {
+      const wire: Case<Content, WireItemContent, "SessionBegan"> = {
+        _tag: "SessionBegan",
+        at: source.at,
+        nick: source.nick,
+      };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+/**
+ * An item of a Timeline, with the step that made it.
+ * @param source - The item as the store keeps it.
+ * @returns Its wire form.
+ */
+export const timelineItem = (source: Item): Fields<Item, WireTimelineItem, "sequence"> => ({
+  changed: WireSequence.make(source.changed),
+  content: itemContent(source.content),
+  network: networkOf(source.network),
+  position: source.position,
+  sequence: WireSequence.make(source.position.sequence),
+  timeline: source.timeline,
+});
+
+/**
+ * A Timeline, and whether it is detached: a Channel's or a Direct Message partner's with no
+ * key, which receives nothing more.
+ * @param source - The Timeline as the store keeps it.
+ * @returns Its wire form.
+ */
+export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detached"> => ({
+  changed: WireSequence.make(source.changed),
+  detached: source.kind !== "Network" && source.key === null,
+  id: source.id,
+  key: source.key,
+  kind: source.kind,
+  latest: orNull(source.latest),
+  name: source.name,
+  network: networkOf(source.network),
+});
+
+/**
+ * A Gap.
+ * @param source - The Gap as the store keeps it.
+ * @returns Its wire form.
+ */
+export const gap = (source: Gap): Fields<Gap, WireGap> => ({
+  changed: WireSequence.make(source.changed),
+  from: source.from,
+  network: networkOf(source.network),
+  to: orNull(source.to),
+});
+
+/**
+ * A Timeline merged into another.
+ * @param source - The tombstone as the store keeps it.
+ * @returns Its wire form.
+ */
+export const tombstone = (source: Tombstone): Fields<Tombstone, WireTombstone> => ({
+  changed: WireSequence.make(source.changed),
+  id: source.id,
+  into: source.into,
+  network: networkOf(source.network),
+});
+
+/**
+ * The projection version a read was folded by.
+ * @param version - The store's version, or `undefined` for one no version has folded.
+ * @returns Its wire form, `0` for none.
+ */
+export const versionOf = (version: number | undefined) => version ?? 0;
+
+/**
+ * Consecutive Gaps between two of a window's items, as one.
+ * @param source - The run, as the store collapsed it.
+ * @returns Its wire form.
+ */
+export const windowGap = (source: CollapsedGap): Fields<CollapsedGap, WireWindowGap> => ({
+  count: source.count,
+  from: source.from,
+  to: orNull(source.to),
 });

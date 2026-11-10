@@ -39,6 +39,7 @@
       "dependencies": {
         "@iirc/client": "workspace:*",
         "@iirc/protocol": "workspace:*",
+        "@iirc/timelines": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

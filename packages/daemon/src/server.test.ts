@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync } from "node:fs";
 
-import { BunHttpServer } from "@effect/platform-bun";
-import { Happened, SaidAnswer } from "@iirc/api";
+import { BunFileSystem, BunHttpServer } from "@effect/platform-bun";
+import { Happened, SaidAnswer, TimelineChange, TimelineList, TimelineWindow } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { makeSqliteJournal } from "@iirc/journal-sqlite";
+import { makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { Context, Duration, Effect, Layer, Schema } from "effect";
 import type { Scope } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
@@ -37,8 +38,8 @@ interface Served {
 
 /**
  * Serves the API over a real Bun server on an ephemeral loopback port, on the SQLite
- * Journal in a data directory, the in-memory Transport and Vault, and the live clock,
- * with heartbeats every 50 ms.
+ * Journal and Timeline store in a data directory, the in-memory Transport and Vault, and
+ * the live clock, with heartbeats every 50 ms.
  * @param dataDir - The data directory, which holds the keys and the sign-ins.
  * @param key - The key requests present unless told otherwise.
  * @returns The server, which stops when the Scope closes.
@@ -46,7 +47,12 @@ interface Served {
 const serveOn = (dataDir: string, key: string) =>
   Effect.gen(function* () {
     const journal = yield* makeSqliteJournal(`${dataDir}/journal.sqlite`);
-    const world = yield* makeWorld(journal);
+
+    const store = yield* makeSqliteTimelineStore(`${dataDir}/views.sqlite`).pipe(
+      Effect.provide(BunFileSystem.layer)
+    );
+
+    const world = yield* makeWorld(journal, store);
 
     const server = HttpRouter.serve(ApiRoutes, {
       disableListenLog: true,
@@ -200,6 +206,40 @@ const talk = (served: Served, texts: readonly string[]) =>
 const decodeHappened = Schema.decodeUnknownSync(Schema.fromJsonString(Happened));
 
 const decodeSaid = Schema.decodeUnknownSync(Schema.fromJsonString(SaidAnswer));
+
+const decodeChange = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineChange));
+
+const decodeList = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineList));
+
+const decodeWindow = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineWindow));
+
+// What an error's body says: its tag, and for an `InvalidRequest`, where each issue was.
+const decodeError = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      _tag: Schema.String,
+      issues: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({ path: Schema.Array(Schema.Union([Schema.String, Schema.Int])) })
+        )
+      ),
+    })
+  )
+);
+
+const changed = (events: readonly Sse[]) => events.filter((event) => event.event === "changed");
+
+/**
+ * What the Messages in `changed` events said.
+ * @param events - The events.
+ * @returns The texts of the Messages they carry, in order.
+ */
+const changedTexts = (events: readonly Sse[]) =>
+  changed(events).flatMap((event) =>
+    decodeChange(event.data).items.flatMap((item) =>
+      item.content._tag === "Message" ? [item.content.text] : []
+    )
+  );
 
 const messagesOf = (events: readonly Sse[]) =>
   happened(events).flatMap((event) =>
@@ -370,6 +410,116 @@ describe("the API over a real server", () => {
     expect(result.line).toBe("PRIVMSG peer :still here\r\n");
     expect(result.messages).toStrictEqual([...texts, "still here"]);
   }, 30_000);
+
+  it("reads a Message in its Timeline's window, and carries it on the changes with its step's id", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        const following = yield* served.request("/api/timelines/changes");
+
+        yield* talk(served, ["hello there"]);
+
+        const events = yield* readEvents(following, (read) =>
+          changedTexts(read).includes("hello there")
+        );
+
+        const carrying = changed(events).find((event) =>
+          changedTexts([event]).includes("hello there")
+        );
+
+        const listed = decodeList(
+          yield* bodyOf(yield* served.request("/api/networks/libera/timelines"))
+        );
+
+        const direct = listed.timelines.find((each) => each.kind === "Direct");
+
+        const window = decodeWindow(
+          yield* bodyOf(yield* served.request(`/api/timelines/${direct?.id ?? "none"}?limit=10`))
+        );
+
+        const [item] = window.items;
+
+        const located = yield* served.request(`/api/networks/libera/at/${item?.sequence ?? 0}`);
+
+        return {
+          direct: direct === undefined ? undefined : [direct.name, direct.key],
+          id: carrying?.id === `${window.version}.${item?.sequence}`,
+          ids: changed(events).every(
+            (event) => event.id === `${listed.version}.${decodeChange(event.data).sequence}`
+          ),
+          items: window.items.map((one) =>
+            one.content._tag === "Message" ? [one.content.sender, one.content.text] : []
+          ),
+          located: located.status,
+          projection: listed.projection,
+          through:
+            listed.through !== null && window.through !== null && window.through >= listed.through,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      direct: ["peer", "peer"],
+      id: true,
+      ids: true,
+      items: [["peer", "hello there"]],
+      located: 200,
+      projection: { _tag: "Running" },
+      through: true,
+    });
+  });
+
+  it("refuses a cursor that is not one with 400, and a Timeline never given with 404", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        const never = "00000000000fff-00000000-00000000";
+
+        const statuses = [
+          `/api/timelines/${never}?before=nope`,
+          `/api/timelines/${never}?before=0020000000000000-00000000000001-00000000&after=0020000000000000-00000000000001-00000000`,
+          `/api/timelines/${never}?limit=501`,
+          `/api/timelines/${never}`,
+          "/api/timelines/not-an-id",
+          "/api/networks/libera/at/0",
+          "/api/networks/libera/at/1?after=nope",
+          "/api/networks/libera/at/1?limit=501",
+          "/api/timelines/changes?after=7",
+          "/api/networks/libera/timelines?limit=0",
+          "/api/networks/libera/timelines?after=nope",
+          "/api/networks/libera/timelines",
+        ];
+
+        const answered = [];
+
+        for (const path of statuses) {
+          const response = yield* served.request(path);
+
+          answered.push([response.status, decodeError(yield* bodyOf(response))._tag]);
+        }
+
+        const issue = yield* bodyOf(yield* served.request(`/api/timelines/${never}?after=nope`));
+
+        return { answered, issue: decodeError(issue).issues?.[0]?.path };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      answered: [
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [404, "UnknownTimeline"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [404, "UnknownNetwork"],
+      ],
+      issue: ["query", "after"],
+    });
+  });
 
   it("refuses a request without a good key, before anything else", async () => {
     const result = await run((served) =>

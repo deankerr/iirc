@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { NetworkConfiguration } from "@iirc/client";
+import { TimelineId } from "@iirc/timelines";
 import { Context, Schema } from "effect";
 import {
   HttpApi,
@@ -22,8 +23,10 @@ import {
   JournalFailed,
   NetworkStopped,
   SignInsFailed,
+  TimelinesFailed,
   Unauthorized,
   UnknownNetwork,
+  UnknownTimeline,
   VaultFailed,
 } from "./errors.ts";
 import {
@@ -34,14 +37,23 @@ import {
   CredentialValue,
   Journaled,
   Knowledge,
+  ListQuery,
+  LocateQuery,
+  Located,
   NetworkEntry,
   NetworkId,
   NetworkInspection,
   NewsEvent,
+  Resume,
   Said,
   SaidAnswer,
   SayRequest,
+  SequenceFromString,
   SignInRequest,
+  TimelineChangesEvent,
+  TimelineList,
+  TimelineWindow,
+  WindowQuery,
 } from "./schemas.ts";
 
 /**
@@ -141,6 +153,41 @@ export class NewsGroup extends HttpApiGroup.make("news")
   )
   .middleware(Authorization) {}
 
+/**
+ * Timelines, as the Daemon folds them from News, so a Frontend never folds News itself:
+ * a Network's Timelines, a page at a time, a window of one, the items a step made, and what
+ * changed, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
+ * Each read says the projection version and the last step folded into what it gave, to
+ * follow the changes after.
+ */
+export class TimelinesGroup extends HttpApiGroup.make("timelines")
+  .add(
+    HttpApiEndpoint.get("list", "/networks/:network/timelines", {
+      error: [UnknownNetwork, TimelinesFailed],
+      params: NetworkPath,
+      query: ListQuery,
+      success: TimelineList,
+    }),
+    HttpApiEndpoint.get("changes", "/timelines/changes", {
+      headers: { "last-event-id": Schema.optionalKey(Resume) },
+      query: { after: Schema.optionalKey(Resume) },
+      success: HttpApiSchema.StreamSse({ error: TimelinesFailed, events: TimelineChangesEvent }),
+    }),
+    HttpApiEndpoint.get("window", "/timelines/:timeline", {
+      error: [UnknownTimeline, TimelinesFailed],
+      params: { timeline: TimelineId },
+      query: WindowQuery,
+      success: TimelineWindow,
+    }),
+    HttpApiEndpoint.get("locate", "/networks/:network/at/:sequence", {
+      error: [UnknownNetwork, TimelinesFailed],
+      params: { network: NetworkId, sequence: SequenceFromString },
+      query: LocateQuery,
+      success: Located,
+    })
+  )
+  .middleware(Authorization) {}
+
 /** Credentials, by name. A value goes in, and only names come out. */
 export class CredentialsGroup extends HttpApiGroup.make("credentials")
   .add(
@@ -182,6 +229,7 @@ export class DaemonApi extends HttpApi.make("iirc")
   .add(SignInGroup)
   .add(NetworksGroup)
   .add(NewsGroup)
+  .add(TimelinesGroup)
   .add(CredentialsGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)

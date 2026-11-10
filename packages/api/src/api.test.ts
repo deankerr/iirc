@@ -1,9 +1,22 @@
+import { Instant } from "@iirc/client";
+import { TimelineId, cursorOf, timelineIdOf } from "@iirc/timelines";
 import { Option, Redacted, Schema } from "effect";
 import { OpenApi } from "effect/http-api";
 import { describe, expect, it } from "vitest";
 
 import { DaemonApi, requestParseOptions } from "./api.ts";
-import { CallerIntent, NetworkId, NewsEvent, SayRequest, SignInRequest } from "./schemas.ts";
+import {
+  CallerIntent,
+  Cursor,
+  ItemAfter,
+  NetworkId,
+  NewsEvent,
+  Resume,
+  SayRequest,
+  SignInRequest,
+  TimelineChangesEvent,
+  WindowQuery,
+} from "./schemas.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
 
@@ -26,10 +39,14 @@ describe("the contract", () => {
       "DELETE /api/sign-in",
       "GET /api/credentials",
       "GET /api/networks",
+      "GET /api/networks/{network}/at/{sequence}",
       "GET /api/networks/{network}/inspect",
       "GET /api/networks/{network}/known",
       "GET /api/networks/{network}/said/{intent}",
+      "GET /api/networks/{network}/timelines",
       "GET /api/news",
+      "GET /api/timelines/changes",
+      "GET /api/timelines/{timeline}",
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
       "POST /api/sign-in",
@@ -102,5 +119,133 @@ describe("the contract", () => {
       decoded.map((event) => (event.event === "happened" ? event.id : undefined))
     ).toStrictEqual([7, undefined]);
     expect(decoded.map((event) => Schema.encodeSync(NewsEvent)(event))).toStrictEqual(wire);
+  });
+
+  it("parses a cursor into its position, and refuses text that is not one", () => {
+    const position = { at: Instant.make(1_762_560_000_000), n: 2, sequence: 7 };
+    const cursor = cursorOf(position);
+    const decode = Schema.decodeUnknownOption(Cursor);
+
+    expect([
+      decode(cursor),
+      decode(cursor.toUpperCase()),
+      decode(`${cursor}0`),
+      decode(cursorOf({ ...position, sequence: 0 })),
+      Schema.encodeSync(Cursor)(position),
+    ]).toStrictEqual([Option.some(position), Option.none(), Option.none(), Option.none(), cursor]);
+  });
+
+  it("takes at most one place to read a window from, and a limit within bounds", () => {
+    const cursor = cursorOf({ at: Instant.make(0), n: 0, sequence: 1 });
+    const query = Schema.decodeUnknownOption(WindowQuery);
+
+    expect(
+      [
+        {},
+        { before: cursor, limit: "50" },
+        { around: cursor },
+        { after: cursor, before: cursor },
+        { limit: "0" },
+        { limit: "501" },
+        { limit: "1.5" },
+        { after: "nope" },
+      ].map((each) => Option.isSome(query(each)))
+    ).toStrictEqual([true, true, true, false, false, false, false, false]);
+  });
+
+  it("takes a Timeline's id as the fold gives it, and nothing else", () => {
+    const id = Schema.is(TimelineId);
+
+    expect([id(timelineIdOf(42, 3, 1)), id("../x"), id("changes"), id("")]).toStrictEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("carries where a folded step leaves a follower as its event id, and a reset or heartbeat with none", () => {
+    const data = { gaps: [], items: [], merged: [], sequence: 9, timelines: [] };
+
+    const wire = [
+      { data: JSON.stringify(data), event: "changed", id: "1.9" },
+      { data: JSON.stringify({ sequence: 10, timelines: null }), event: "overflowed", id: "1.10" },
+      { data: JSON.stringify({ through: 10, version: 2 }), event: "reset" },
+      { data: "{}", event: "heartbeat" },
+    ];
+
+    const decoded = wire.map((event) => Schema.decodeUnknownSync(TimelineChangesEvent)(event));
+
+    expect(decoded.map((event) => ("id" in event ? event.id : undefined))).toStrictEqual([
+      { sequence: 9, version: 1 },
+      { sequence: 10, version: 1 },
+      undefined,
+      undefined,
+    ]);
+    expect(decoded.map((event) => Schema.encodeSync(TimelineChangesEvent)(event))).toStrictEqual(
+      wire
+    );
+  });
+
+  it("parses where to resume the changes, and refuses anything else", () => {
+    const resume = Schema.decodeUnknownOption(Resume);
+
+    expect(
+      [
+        "1.0",
+        "1.100",
+        "0.0",
+        "1",
+        "1.",
+        ".1",
+        "01.1",
+        "1.01",
+        "-1.1",
+        "1.1.1",
+        "1.99999999999999999",
+      ].map((each) => resume(each))
+    ).toStrictEqual([
+      Option.some({ sequence: 0, version: 1 }),
+      Option.some({ sequence: 100, version: 1 }),
+      Option.some({ sequence: 0, version: 0 }),
+      ...Array.from({ length: 8 }, () => Option.none()),
+    ]);
+    expect(Schema.encodeSync(Resume)({ sequence: 100, version: 1 })).toBe("1.100");
+  });
+
+  it("marks every message id a Network gave as Untrusted", () => {
+    // A fact's value or what it was, when it is a string with no name of its own, is text
+    // the document does not mark. Every message id is the named, Untrusted one instead.
+    const text = JSON.stringify(document);
+    const marked = '{"$ref":"#/components/schemas/UntrustedMessageId"}';
+
+    expect([
+      text.includes('"value":{"type":"string"}'),
+      text.includes('"was":{"type":"string"}'),
+      text.split(`"value":${marked}`).length - 1 >= 5,
+      text.split(`"was":${marked}`).length - 1 >= 5,
+      text.includes('"UntrustedMessageId":{"type":"string","description":"Untrusted: '),
+    ]).toStrictEqual([false, false, true, true, true]);
+  });
+
+  it("parses where the next page of a step's items begins, and refuses anything else", () => {
+    const position = { at: Instant.make(1_762_560_000_000), n: 1, sequence: 7 };
+    const timeline = timelineIdOf(3, 0, 1);
+    const text = `${cursorOf(position)}.${timeline}`;
+    const after = Schema.decodeUnknownOption(ItemAfter);
+
+    expect([
+      after(text),
+      after(cursorOf(position)),
+      after(`${cursorOf(position)}.nope`),
+      after(`${text}.${timeline}`),
+      Schema.encodeSync(ItemAfter)({ position, timeline }),
+    ]).toStrictEqual([
+      Option.some({ position, timeline }),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      text,
+    ]);
   });
 });

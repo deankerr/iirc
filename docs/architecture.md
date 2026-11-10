@@ -41,6 +41,7 @@ flowchart LR
   web & agent & cli --> api
   runtime --> transport & journal & vault & clock
   projector --> timelines
+  api -->|"Timeline reads"| timelines
   transport --- ircd[("Ircds")]
   journal --- sqlite[("journal.sqlite")]
   vault --- store[("credentials.json")]
@@ -85,7 +86,7 @@ flowchart TB
   store --> timelines
   tbun & jsql & vfile --> runtime
   tsql --> store
-  api --> client
+  api --> client & timelines
   daemon --> api & runtime & store & adapters
   app --> daemon
 ```
@@ -242,7 +243,7 @@ sequenceDiagram
 
 ## The Daemon and its API
 
-`iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal, the Vault, and the Timeline store in it, starts the Runtime with the real Client and the projector beside it, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`, or a sign-in, which a browser gets for its key once and holds in an `HttpOnly` cookie. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
+`iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal, the Vault, and the Timeline store in it, starts the Runtime with the real Client and the projector beside it, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`, or a sign-in, which a browser gets for its key once and holds in an `HttpOnly` cookie. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. It reads Timelines rather than folding News: a Network's Timelines a page at a time, a window of one, and the items a step made, each with the projection version and the last step folded into what it read, and then the changes from that place as Server-Sent Events, which wait on the projector rather than poll the store, hold a bounded number of things each, and reset a place a new projection version cannot resume. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
 
 ## Testing
 

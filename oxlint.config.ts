@@ -174,7 +174,7 @@ const coreFence: OxlintOverride[] = [
       production,
       adapters,
       ours(
-        ["@iirc/client", "@iirc/protocol/*"],
+        ["@iirc/client", "@iirc/protocol/*", "@iirc/timelines"],
         "`@iirc/api` is the contract alone: it never imports the Runtime or an adapter."
       )
     ),

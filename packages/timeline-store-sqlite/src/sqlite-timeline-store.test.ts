@@ -321,6 +321,15 @@ describe("a store it cannot read now", () => {
   });
 });
 
+// A run of Gaps is bounded below by the key, so it never reaches older Gaps. Its count
+// reads the index alone, never a row to filter on `to_cursor`, and its end reads one row.
+const keyed = (found: string) =>
+  /SEARCH gaps USING (?:COVERING )?INDEX sqlite_autoindex_gaps_1 \(network=\? AND from_cursor>\?/u.test(
+    found
+  );
+
+const covered = (found: string) => found.includes("USING COVERING INDEX");
+
 describe("the file", () => {
   it("is in WAL mode, and answers each read through an index", async () => {
     await run(
@@ -334,6 +343,8 @@ describe("the file", () => {
         const plan = (statement: string) =>
           JSON.stringify(database.query(`EXPLAIN QUERY PLAN ${statement}`).all());
 
+        // A page of what changed is found by seeks and capped counts, never by reading it,
+        // and a window's Gaps one run at a time.
         const reads = {
           byChanged: plan(
             "SELECT * FROM items WHERE changed > 1 AND changed <= 3 ORDER BY changed, timeline, cursor"
@@ -341,22 +352,51 @@ describe("the file", () => {
           byIntent: plan("SELECT * FROM items WHERE network = 'libera' AND intent = 'x'"),
           byMessageId: plan("SELECT 1 FROM items WHERE timeline = 'a' AND message_id = 'm'"),
           byStep: plan(
-            "SELECT * FROM items WHERE network = 'libera' AND step = 3 ORDER BY cursor, timeline"
+            "SELECT * FROM items WHERE network = 'libera' AND step = 3 AND (cursor, timeline) > ('a', 'b') ORDER BY cursor, timeline LIMIT 101"
+          ),
+          countAt: plan("SELECT count(*) FROM (SELECT 1 FROM items WHERE changed = 3 LIMIT 11)"),
+          gapRun: plan(
+            "SELECT count(*), min(from_cursor) FROM gaps WHERE network = 'libera' AND from_cursor >= 'a' AND from_cursor <= 'b'"
+          ),
+          gapRunEnd: plan(
+            "SELECT to_cursor FROM gaps WHERE network = 'libera' AND from_cursor >= 'a' AND from_cursor <= 'b' ORDER BY from_cursor DESC LIMIT 1"
+          ),
+          gapStart: plan(
+            "SELECT from_cursor, to_cursor FROM gaps WHERE network = 'libera' AND from_cursor < 'a' ORDER BY from_cursor DESC LIMIT 1"
           ),
           gapsByChanged: plan(
             "SELECT * FROM gaps WHERE changed > 1 ORDER BY changed, network, from_cursor"
           ),
+          nextSequence: plan("SELECT min(changed) FROM items WHERE changed > 3"),
           timelinesByNetwork: plan("SELECT * FROM timelines WHERE network = 'libera' ORDER BY id"),
+          timelinesPage: plan(
+            "SELECT * FROM timelines WHERE network = 'libera' AND id > 'a' ORDER BY id LIMIT 10"
+          ),
           tombstonesByChanged: plan(
             "SELECT * FROM tombstones WHERE changed > 1 ORDER BY changed, id"
+          ),
+          touched: plan(
+            "SELECT timeline FROM items WHERE changed = 3 AND timeline > 'a' ORDER BY timeline LIMIT 1"
           ),
           window: plan(
             "SELECT * FROM items WHERE timeline = 'a' AND cursor < 'b' ORDER BY cursor DESC LIMIT 5"
           ),
         };
 
+        // The filter a run once had, on `to_cursor`, which no key bounds.
+        const unkeyed = plan(
+          "SELECT count(*) FROM gaps WHERE network = 'libera' AND from_cursor <= 'b' AND (to_cursor IS NULL OR to_cursor >= 'a')"
+        );
+
         database.close();
         expect(mode).toStrictEqual({ journal_mode: "wal" });
+        expect([
+          keyed(reads.gapRun),
+          covered(reads.gapRun),
+          keyed(reads.gapRunEnd),
+          keyed(unkeyed),
+          covered(unkeyed),
+        ]).toStrictEqual([true, true, true, false, false]);
 
         for (const [read, found] of Object.entries(reads)) {
           expect([read, found]).not.toStrictEqual([

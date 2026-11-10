@@ -8,7 +8,15 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import type { MessageId } from "@iirc/client";
 import { TimelineStore, TimelineStoreFailed } from "@iirc/timeline-store";
-import type { Anchor, Applied, Changed, Folded, TimelineStoreService } from "@iirc/timeline-store";
+import type {
+  Anchor,
+  Applied,
+  Changed,
+  CollapsedGap,
+  Folded,
+  Overflowed,
+  TimelineStoreService,
+} from "@iirc/timeline-store";
 import { TimelineId, cursorOf, emptyDirectory } from "@iirc/timelines";
 import type { Change, Content, Directory, Position } from "@iirc/timelines";
 import { Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
@@ -19,6 +27,7 @@ import { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 
 import {
+  CollapsedGapRow,
   ContentText,
   DirectoryRow,
   DirectoryText,
@@ -296,18 +305,28 @@ const decodeSummaries = decodeAll(SummaryRow, "a Timeline");
 const decodeDirectory = decodeAll(DirectoryRow, "the directory");
 const decodeTombstones = decodeAll(TombstoneRow, "a tombstone");
 const decodeGaps = decodeAll(GapRow, "a Gap");
+const decodeCollapsed = decodeAll(CollapsedGapRow, "a run of Gaps");
+const decodeIds = decodeAll(Schema.Struct({ id: TimelineId }), "a Timeline's id");
 
 const decodeHead = Schema.decodeUnknownExit(
-  Schema.Struct({ beyond: Schema.Literals([0, 1]), timeline: Schema.NullOr(TimelineId) })
+  Schema.Struct({
+    beyond: Schema.Literals([0, 1]),
+    network: Schema.NullOr(Schema.String),
+    timeline: Schema.NullOr(TimelineId),
+  })
 );
 
 const decodeInto = Schema.decodeUnknownExit(Schema.Struct({ into: Schema.NullOr(TimelineId) }));
 
-/** A row of a window: its first names the Timeline, and the rest are items on a side. */
+/**
+ * A row of a window: its first names the Timeline and its Network, and the rest are items
+ * on a side.
+ */
 interface WindowText {
   readonly side: unknown;
   readonly beyond: unknown;
   readonly timeline: unknown;
+  readonly network: unknown;
 }
 
 /** Which items of a Timeline a read takes, by cursor. */
@@ -675,27 +694,29 @@ export const makeSqliteTimelineStore = (
         }
       });
 
-    // The first `count` sequences after `since` that changed anything, in order.
-    const sequencesAfter = (since: number, count: number) =>
-      sql<{ readonly changed: number }>`
-        SELECT changed FROM (
-          SELECT * FROM (SELECT DISTINCT changed FROM timelines WHERE changed > ${since} ORDER BY changed LIMIT ${count})
-          UNION SELECT * FROM (SELECT DISTINCT changed FROM items WHERE changed > ${since} ORDER BY changed LIMIT ${count})
-          UNION SELECT * FROM (SELECT DISTINCT changed FROM tombstones WHERE changed > ${since} ORDER BY changed LIMIT ${count})
-          UNION SELECT * FROM (SELECT DISTINCT changed FROM gaps WHERE changed > ${since} ORDER BY changed LIMIT ${count})
-        ) ORDER BY changed LIMIT ${count}
-      `.pipe(Effect.map((rows) => rows.map(({ changed }) => changed)));
+    // The first sequence after one that changed anything: one seek of an index per table,
+    // however much that sequence changed.
+    const nextSequence = (since: number) =>
+      sql<{ readonly next: number | null }>`
+        SELECT min(next) AS next FROM (
+          SELECT min(changed) AS next FROM timelines WHERE changed > ${since}
+          UNION ALL SELECT min(changed) FROM items WHERE changed > ${since}
+          UNION ALL SELECT min(changed) FROM tombstones WHERE changed > ${since}
+          UNION ALL SELECT min(changed) FROM gaps WHERE changed > ${since}
+        )
+      `.pipe(Effect.map((rows) => rows[0]?.next ?? undefined));
 
-    // How many things each sequence in `(since, upTo]` changed.
-    const countsUpTo = (since: number, upTo: number) =>
-      sql<{ readonly changed: number; readonly count: number }>`
-        SELECT changed, count(*) AS count FROM (
-          SELECT changed FROM timelines WHERE changed > ${since} AND changed <= ${upTo}
-          UNION ALL SELECT changed FROM items WHERE changed > ${since} AND changed <= ${upTo}
-          UNION ALL SELECT changed FROM tombstones WHERE changed > ${since} AND changed <= ${upTo}
-          UNION ALL SELECT changed FROM gaps WHERE changed > ${since} AND changed <= ${upTo}
-        ) GROUP BY changed
-      `.pipe(Effect.map((rows) => new Map(rows.map(({ changed, count }) => [changed, count]))));
+    // How many things a sequence changed, counting no more than `cap` in each table, so a
+    // step that changed a great deal costs no more to count than one that fits.
+    const countAt = (sequence: number, cap: number) =>
+      sql<{ readonly count: number }>`
+        SELECT
+          (SELECT count(*) FROM (SELECT 1 FROM timelines WHERE changed = ${sequence} LIMIT ${cap}))
+          + (SELECT count(*) FROM (SELECT 1 FROM items WHERE changed = ${sequence} LIMIT ${cap}))
+          + (SELECT count(*) FROM (SELECT 1 FROM tombstones WHERE changed = ${sequence} LIMIT ${cap}))
+          + (SELECT count(*) FROM (SELECT 1 FROM gaps WHERE changed = ${sequence} LIMIT ${cap}))
+          AS count
+      `.pipe(Effect.map((rows) => rows[0]?.count ?? 0));
 
     const lastChanged = (since: number) =>
       sql<{ readonly last: number | null }>`
@@ -707,45 +728,92 @@ export const makeSqliteTimelineStore = (
         )
       `.pipe(Effect.map((rows) => rows[0]?.last ?? undefined));
 
-    // The last sequence a page gives: whole sequences, until at least `limit` things.
-    const pageThrough = (since: number, limit: number | undefined) =>
+    // Where a page ends: whole sequences while they come to at most `limit` things, or a
+    // first one that alone is more, as overflowed. Each sequence takes one seek and one
+    // capped count, and there are at most `limit + 1` of them.
+    const pageEnd = (since: number, limit: number) =>
       Effect.gen(function* () {
-        if (limit === undefined || Number.isNaN(limit)) {
-          return yield* lastChanged(since);
-        }
-
-        const sequences = yield* sequencesAfter(since, Math.max(0, Math.ceil(limit)));
-        const upTo = sequences.at(-1);
-
-        if (upTo === undefined) {
-          return upTo;
-        }
-
-        const counts = yield* countsUpTo(since, upTo);
         let through: number | undefined;
         let given = 0;
+        let at = since;
 
-        for (const sequence of sequences) {
-          if (given >= limit) {
+        for (;;) {
+          const next = yield* nextSequence(at);
+
+          if (next === undefined) {
+            return { overflowed: false, through };
+          }
+
+          const count = yield* countAt(next, limit - given + 1);
+
+          if (given + count > limit) {
+            return given === 0
+              ? { overflowed: true, through: next }
+              : { overflowed: false, through };
+          }
+
+          given += count;
+          through = next;
+          at = next;
+        }
+      });
+
+    // The Timelines a step touched or merged, by id, or `undefined` when they are more than
+    // `limit`. The items' Timelines are found one seek at a time, never by reading the items.
+    const touchedAt = (sequence: number, limit: number) =>
+      Effect.gen(function* () {
+        const ids = new Set<TimelineId>();
+
+        const listed = yield* sql`
+          SELECT id FROM timelines WHERE changed = ${sequence} ORDER BY id LIMIT ${limit + 1}
+        `.pipe(Effect.flatMap(decodeIds));
+
+        const merged = yield* sql`
+          SELECT id FROM tombstones WHERE changed = ${sequence} ORDER BY id LIMIT ${limit + 1}
+        `.pipe(Effect.flatMap(decodeIds));
+
+        for (const { id } of [...listed, ...merged]) {
+          ids.add(id);
+        }
+
+        let after = "";
+
+        while (ids.size <= limit) {
+          const [found] = yield* sql`
+            SELECT timeline AS id FROM items WHERE changed = ${sequence} AND timeline > ${after}
+            ORDER BY timeline LIMIT 1
+          `.pipe(Effect.flatMap(decodeIds));
+
+          if (found === undefined) {
             break;
           }
 
-          through = sequence;
-          given += counts.get(sequence) ?? 0;
+          ids.add(found.id);
+          after = found.id;
         }
 
-        return through;
+        return ids.size > limit ? undefined : [...ids].toSorted();
       });
 
     const changedAfter = (after: number | undefined, limit: number | undefined) =>
       Effect.gen(function* () {
         const since = after ?? 0;
-        const through = yield* pageThrough(since, limit);
-        const upTo = through ?? since;
+        const bounded = limit !== undefined && !Number.isNaN(limit);
+        const size = bounded ? Math.max(0, Math.floor(limit)) : 0;
 
-        // Without a limit, a page gives everything, so nothing more is left.
-        const more =
-          limit !== undefined && !Number.isNaN(limit) && (yield* lastChanged(upTo)) !== undefined;
+        const end = bounded
+          ? yield* pageEnd(since, size)
+          : { overflowed: false, through: yield* lastChanged(since) };
+
+        const { through } = end;
+        // An overflowed step gives none of what it changed.
+        const upTo = end.overflowed ? since : (through ?? since);
+        const more = through !== undefined && (yield* nextSequence(through)) !== undefined;
+
+        const overflowed: Overflowed | undefined =
+          end.overflowed && through !== undefined
+            ? { sequence: through, timelines: yield* touchedAt(through, size) }
+            : undefined;
 
         const timelines = yield* summaries(
           sql`WHERE changed > ${since} AND changed <= ${upTo}`,
@@ -778,10 +846,84 @@ export const makeSqliteTimelineStore = (
           items,
           merged,
           more,
+          overflowed,
           through: more || folded.length === 0 ? through : Math.max(...folded),
           timelines,
         } satisfies Changed;
       });
+
+    // Where the Gaps over a range begin, as a bound on the key. A Network's Gaps follow one
+    // another, one at most beginning where the one before it ended, so of those that began
+    // before `from`, only the last can still reach it: one seek finds it, and nothing older
+    // is read. Every Gap that began at or after `from` is in. Without `from`, it is open.
+    const startOf = (network: string, from: Position | undefined) =>
+      Effect.gen(function* () {
+        if (from === undefined) {
+          return sql``;
+        }
+
+        const at = cursorOf(from);
+
+        const [last] = yield* sql<{ readonly start: string; readonly end: string | null }>`
+          SELECT from_cursor AS start, to_cursor AS "end" FROM gaps
+          WHERE network = ${network} AND from_cursor < ${at}
+          ORDER BY from_cursor DESC LIMIT 1
+        `;
+
+        return last !== undefined && (last.end === null || last.end >= at)
+          ? sql`AND from_cursor >= ${last.start}`
+          : sql`AND from_cursor >= ${at}`;
+      });
+
+    // One run of Gaps: those of the Network from `start` that began after `after` and at or
+    // before `upTo` and the range's end, counted, with where the first began and the last
+    // ended. Every condition is on the key, so it reads only the run.
+    const run = (
+      network: string,
+      start: Fragment,
+      to: Position | undefined,
+      after: Position | undefined,
+      upTo: Position | undefined
+    ) => {
+      const where = sql`
+        WHERE network = ${network} ${start}
+          ${after === undefined ? sql`` : sql`AND from_cursor > ${cursorOf(after)}`}
+          ${upTo === undefined ? sql`` : sql`AND from_cursor <= ${cursorOf(upTo)}`}
+          ${to === undefined ? sql`` : sql`AND from_cursor <= ${cursorOf(to)}`}
+      `;
+
+      return sql`
+        SELECT count(*) AS count, min(from_cursor) AS "from",
+          (SELECT to_cursor FROM gaps ${where} ORDER BY from_cursor DESC LIMIT 1) AS "to"
+        FROM gaps ${where}
+      `.pipe(Effect.flatMap(decodeCollapsed));
+    };
+
+    // One statement for each run, at most one more than there are positions.
+    const collapsedGaps = (
+      network: string,
+      range: {
+        readonly from?: Position | undefined;
+        readonly to?: Position | undefined;
+        readonly at: readonly Position[];
+      }
+    ) =>
+      Effect.flatMap(startOf(network, range.from), (start) =>
+        // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
+        Effect.forEach([undefined, ...range.at], (after, index) =>
+          run(network, start, range.to, after, range.at[index])
+        )
+      ).pipe(
+        Effect.map((runs) =>
+          runs.flatMap((rows): CollapsedGap[] => {
+            const [row] = rows;
+
+            return row === undefined || row.count === 0 || row.from === undefined
+              ? []
+              : [{ count: row.count, from: row.from, to: row.to }];
+          })
+        )
+      );
 
     const bound = (each: Bound) => {
       switch (each._tag) {
@@ -820,8 +962,8 @@ export const makeSqliteTimelineStore = (
     `;
 
     // A window of a Timeline is one statement, so it reads one state without a transaction.
-    // Its first row says whether the Timeline exists, and whether any items lie on the side
-    // it does not show. The rows after it are each side's items, nearest first.
+    // Its first row says whether the Timeline exists, its Network, and whether any items lie
+    // on the side it does not show. The rows after it are each side's items, nearest first.
     const windowRows = (timeline: TimelineId, plan: Plan) => {
       const other =
         plan._tag === "OneSide" && plan.other !== undefined
@@ -836,7 +978,8 @@ export const makeSqliteTimelineStore = (
       return sql<WindowText>`
         SELECT 'head' AS side, ${other} AS beyond,
           (SELECT id FROM timelines WHERE id = ${timeline}) AS timeline,
-          NULL AS position, NULL AS network, NULL AS content, NULL AS changed
+          NULL AS position, (SELECT network FROM timelines WHERE id = ${timeline}) AS network,
+          NULL AS content, NULL AS changed
         ${sides}
       `;
     };
@@ -851,7 +994,7 @@ export const makeSqliteTimelineStore = (
           decodeHead(rows.find((row) => row.side === "head"))
         ).pipe(Effect.mapError(failed("cannot decode a window")));
 
-        if (head.timeline === null) {
+        if (head.timeline === null || head.network === null) {
           return Option.none();
         }
 
@@ -862,7 +1005,7 @@ export const makeSqliteTimelineStore = (
             ? oneSide(plan.anchor, size, yield* on("shown"), head.beyond === 1)
             : bothSides(size, yield* on("before"), yield* on("from"));
 
-        return Option.some({ timeline: head.timeline, ...read });
+        return Option.some({ network: head.network, timeline: head.timeline, ...read });
       });
 
     // A merged id reads the Timeline its tombstone names, in one transaction with finding it.
@@ -930,6 +1073,19 @@ export const makeSqliteTimelineStore = (
           })
         ),
       changedAfter: (after, limit) => reading("what changed", changedAfter(after, limit)),
+      collapsedGaps: (network, range) => reading("the Gaps", collapsedGaps(network, range)),
+      // One transaction holds the one connection, so no apply runs until the reads end.
+      consistent: (reads) =>
+        reading(
+          "reads together",
+          Effect.all({ folded: foldedRow, value: reads }).pipe(
+            Effect.map(({ folded, value }) => ({
+              through: folded.through,
+              value,
+              version: folded.version,
+            }))
+          )
+        ),
       directory: query(
         "the directory",
         sql`SELECT directory FROM folded WHERE only = 1`.pipe(Effect.flatMap(decodeDirectory))
@@ -942,22 +1098,31 @@ export const makeSqliteTimelineStore = (
       ),
       folded: foldedRow.pipe(Effect.map(({ through, version }): Folded => ({ through, version }))),
       gaps: (network, range) =>
-        query(
+        reading(
           "the Gaps",
-          sql`
-          SELECT network, from_cursor AS "from", to_cursor AS "to", changed FROM gaps
-          WHERE network = ${network}
-            ${range.to === undefined ? sql`` : sql`AND from_cursor <= ${cursorOf(range.to)}`}
-            ${range.from === undefined ? sql`` : sql`AND (to_cursor IS NULL OR to_cursor >= ${cursorOf(range.from)})`}
-          ORDER BY from_cursor
-        `
-        ).pipe(Effect.flatMap(decodeGaps)),
-      locate: (network, sequence) =>
+          Effect.flatMap(
+            startOf(network, range.from),
+            (start) => sql`
+              SELECT network, from_cursor AS "from", to_cursor AS "to", changed FROM gaps
+              WHERE network = ${network} ${start}
+                ${range.to === undefined ? sql`` : sql`AND from_cursor <= ${cursorOf(range.to)}`}
+              ORDER BY from_cursor
+            `
+          ).pipe(Effect.flatMap(decodeGaps))
+        ),
+      // In the order `items_by_step` keeps, from just after the item `after` names.
+      locate: (network, sequence, page = {}) =>
         query(
           "a step's items",
           sql`
           SELECT ${itemColumns} FROM items WHERE network = ${network} AND step = ${sequence}
+            ${
+              page.after === undefined
+                ? sql``
+                : sql`AND (cursor, timeline) > (${cursorOf(page.after.position)}, ${page.after.timeline})`
+            }
           ORDER BY cursor, timeline
+          ${page.limit === undefined ? sql`` : sql`LIMIT ${Math.max(0, Math.floor(page.limit))}`}
         `
         ).pipe(Effect.flatMap(decodeItems)),
       reset: (version) =>
@@ -976,10 +1141,18 @@ export const makeSqliteTimelineStore = (
             })
           )
         ).pipe(Effect.mapError(failed("cannot reset"))),
-      timelines: (network) =>
-        query("the Timelines", summaries(sql`WHERE network = ${network}`, sql`ORDER BY id`)).pipe(
-          Effect.flatMap(decodeSummaries)
-        ),
+      timelines: (network, page = {}) =>
+        query(
+          "the Timelines",
+          summaries(
+            page.after === undefined
+              ? sql`WHERE network = ${network}`
+              : sql`WHERE network = ${network} AND id > ${page.after}`,
+            page.limit === undefined
+              ? sql`ORDER BY id`
+              : sql`ORDER BY id LIMIT ${Math.max(0, Math.floor(page.limit))}`
+          )
+        ).pipe(Effect.flatMap(decodeSummaries)),
       window,
     } satisfies TimelineStoreService;
   });
