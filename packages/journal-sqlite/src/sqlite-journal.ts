@@ -20,7 +20,7 @@ import { Effect, Layer, Option, PubSub, Schema, Semaphore, Stream } from "effect
 import type { Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
 import type { SqlClient } from "effect/sql/SqlClient";
-import type { SqlError } from "effect/sql/SqlError";
+import { SqlError } from "effect/sql/SqlError";
 
 /** How many Entries one statement reads. A bound on memory, not on what a stream gives. */
 const pageSize = 500;
@@ -30,8 +30,17 @@ const pageSize = 500;
 const recordText = Schema.fromJsonString(Schema.toCodecJson(JournalRecord));
 const rowSchema = Schema.Struct({ record: recordText, sequence: Sequence });
 
-const failed = (what: string) => (cause: { readonly message: string }) =>
-  new JournalFailed({ reason: `${what}: ${cause.message}` });
+// What SQLite itself said, when the error carries it. An SQL error's own message is
+// generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
+// its cause. The text is only carried into the reason to be read, never decided from.
+const failed =
+  (what: string) => (error: { readonly message: string; readonly cause?: unknown }) => {
+    const native = error instanceof SqlError ? error.reason.cause : error.cause;
+
+    return new JournalFailed({
+      reason: `${what}: ${native instanceof Error ? native.message : error.message}`,
+    });
+  };
 
 // The one place the table is created. `network` is derived from the record, so it cannot
 // disagree with it, and the index makes reading one Network cheap.
@@ -114,9 +123,7 @@ export const openSqliteJournal = (
     // survives a crash of the process and of the machine. This is per connection.
     yield* sql`PRAGMA synchronous = FULL`.pipe(Effect.mapError(failed("cannot configure")));
     yield* openJournal(sql).pipe(
-      Effect.catchTag("SqlError", (error: SqlError) =>
-        Effect.fail(failed("cannot open the Journal")(error))
-      )
+      Effect.catchTag("SqlError", (error) => Effect.fail(failed("cannot open the Journal")(error)))
     );
     yield* sql`PRAGMA journal_mode = WAL`.pipe(Effect.mapError(failed("cannot configure")));
 

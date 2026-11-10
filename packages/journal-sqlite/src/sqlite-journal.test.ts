@@ -293,6 +293,25 @@ describe("a Journal that cannot be read or written", () => {
     );
   });
 
+  it("names SQLite's own reason when a path cannot be opened", async () => {
+    await run(
+      Effect.gen(function* () {
+        const directory = yield* temporaryDirectory;
+
+        const failure = yield* using(
+          path.join(directory, "missing", "journal.db"),
+          () => Effect.void
+        ).pipe(Effect.flip);
+
+        expect(failure._tag).toBe("JournalFailed");
+        expect(failure).toHaveProperty(
+          "reason",
+          expect.stringContaining("unable to open database file")
+        );
+      })
+    );
+  });
+
   it("gives the Entries before a record that does not decode, then fails with JournalFailed", async () => {
     await run(
       Effect.gen(function* () {
