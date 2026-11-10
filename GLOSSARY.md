@@ -52,7 +52,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Target**: The Channel or User a Message is addressed to. _Avoid_: Conversation, query, buffer
 
-**Direct Message**: A Message whose Target is a User. Grouping these by the other participant is a Frontend's concern. _Avoid_: Query, private message, PM
+**Direct Message**: A Message whose Target is a User. The Direct Messages between Self and one other User make up one Timeline. _Avoid_: Query, private message, PM
 
 **Activity**: Something that changed on a Network rather than something said, such as a join, a quit, or a topic change. _Avoid_: Event, notice, status
 
