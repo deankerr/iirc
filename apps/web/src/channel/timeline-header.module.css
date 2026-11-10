@@ -1,0 +1,58 @@
+/* The open Timeline's head: its name and a few dim words on one line, and the topic under. */
+.header {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+}
+
+.name {
+  color: var(--color-accent);
+}
+
+.dim {
+  color: var(--color-muted);
+}
+
+.note {
+  color: var(--color-level-highlight);
+}
+
+/* The topic wraps up to three lines, then is cut. */
+.topic {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.toggle {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  cursor: default;
+}
+
+.toggle[data-hovered] {
+  border-color: var(--color-muted);
+}
+
+.toggle[data-selected] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.toggle[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}

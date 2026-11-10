@@ -1,6 +1,6 @@
 import type { CapName, ConnectionId, FeatureName, Instant } from "./ids.ts";
 import type { Input } from "./input.ts";
-import type { Knowledge } from "./known.ts";
+import type { ChannelView, Knowledge } from "./known.ts";
 import type { News } from "./news.ts";
 import type { Output, TimerTable } from "./output.ts";
 
@@ -57,6 +57,12 @@ export interface Client<State> {
   readonly step: (state: State, input: Input) => Step<State>;
   /** What is known, for Views. */
   readonly known: (state: State) => Knowledge;
+  /**
+   * What is known of one Channel, found by its name folded with the Connection's
+   * casemapping, as Knowledge keys it, or `undefined` when the Client holds no such
+   * Channel. It costs what that Channel holds, not what the Network does.
+   */
+  readonly channel: (state: State, name: string) => ChannelView | undefined;
   /** Everything else, for agents and debugging. */
   readonly inspect: (state: State) => Inspection;
 }

@@ -157,6 +157,7 @@ describe("the palette's entries", () => {
         "command:timeline.unread",
         "command:timeline.read",
         "command:notify.set",
+        "command:members.toggle",
         "command:composer.focus",
       ],
       here: [
@@ -174,6 +175,8 @@ describe("the palette's entries", () => {
         "command:timeline.unread",
         "command:timeline.read",
         "command:notify.set",
+        "command:timeline.query",
+        "command:members.toggle",
         "command:composer.focus",
       ],
       timelines: 3,

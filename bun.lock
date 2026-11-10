@@ -91,6 +91,7 @@
         "@iirc/client": "workspace:*",
         "@iirc/journal-sqlite": "workspace:*",
         "@iirc/outbox": "workspace:*",
+        "@iirc/protocol": "workspace:*",
         "@iirc/runtime": "workspace:*",
         "@iirc/timeline-store": "workspace:*",
         "@iirc/timeline-store-sqlite": "workspace:*",

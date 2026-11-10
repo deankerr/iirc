@@ -619,6 +619,13 @@ export const makeMemoryTimelineStore: Effect.Effect<TimelineStoreService> = Effe
             .slice(0, page.limit);
         }),
       reset: (version) => Ref.set(memory, empty(version)).pipe(turn.withPermits(1)),
+      timeline: (timeline) =>
+        read((now) => {
+          const id = now.timelines.has(timeline) ? timeline : now.merged.get(timeline)?.into;
+          const found = id === undefined ? undefined : now.timelines.get(id);
+
+          return found === undefined ? Option.none<Summary>() : Option.some(summaryOf(now, found));
+        }),
       timelines: (network, page = {}) =>
         read((now) =>
           [...now.timelines.values()]

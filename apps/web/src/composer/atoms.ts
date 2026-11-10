@@ -37,6 +37,8 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { query } from "../channel/atoms.ts";
+import { showMembers } from "../channel/state.ts";
 import { notifying } from "../notifications/notifier.ts";
 import {
   addNetwork,
@@ -50,6 +52,7 @@ import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { open, timelinesState, Waits } from "../timelines/atoms.ts";
+import { cancelCompletion } from "./completion-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
 export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
@@ -73,7 +76,7 @@ export const composerFocus = Atom.make(0).pipe(Atom.keepAlive);
  * @param registry - The registry.
  * @returns Its place.
  */
-const placeOf = (registry: AtomRegistry.AtomRegistry): Place => {
+export const placeOf = (registry: AtomRegistry.AtomRegistry): Place => {
   const shown = opened(registry.get(timelinesState));
 
   return shown._tag === "Shown" ? shown.timeline : "Nowhere";
@@ -92,7 +95,22 @@ const decodeIntent = Schema.decodeSync(CallerIntent);
  * @param event - What happened.
  */
 const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent) => {
+  if (event._tag === "Edited" || event._tag === "Recalled") {
+    cancelCompletion(registry);
+  }
+
   registry.set(composerState, reduceComposers(registry.get(composerState), event));
+};
+
+/**
+ * Replaces the composers' state, as sending, confirming, taking an offer, or the palette
+ * starting a draft does, which lets go of what was being completed.
+ * @param registry - The registry.
+ * @param state - The state.
+ */
+const replaced = (registry: AtomRegistry.AtomRegistry, state: Composers) => {
+  cancelCompletion(registry);
+  registry.set(composerState, state);
 };
 
 // A gateway in front of the Daemon answers these when it could not reach it.
@@ -226,7 +244,15 @@ const sayOne = (intent: Say, id: IntentId) =>
 /** An intent carried out in the page at once, which waits on nothing the Daemon says. */
 type Local = Extract<
   Intent,
-  { readonly _tag: "OpenOptions" | "PromptCredential" | "Open" | "OpenPalette" | "FocusComposer" }
+  {
+    readonly _tag:
+      | "OpenOptions"
+      | "PromptCredential"
+      | "Open"
+      | "OpenPalette"
+      | "FocusComposer"
+      | "ShowMembers";
+  }
 >;
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
@@ -235,6 +261,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "OpenOptions",
   "OpenPalette",
   "PromptCredential",
+  "ShowMembers",
 ]);
 
 /**
@@ -246,7 +273,8 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
  * Carries out an intent in the page: shows the options or a Timeline, opens the password
- * prompt or the palette, or focuses the composer, starting an empty draft with text.
+ * prompt or the palette, focuses the composer, starting an empty draft with text, or shows
+ * or hides the members.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -274,9 +302,14 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
     }
 
     case "FocusComposer": {
-      registry.set(composerState, started(registry.get(composerState), place, intent.text));
+      replaced(registry, started(registry.get(composerState), place, intent.text));
 
       registry.set(composerFocus, registry.get(composerFocus) + 1);
+      break;
+    }
+
+    case "ShowMembers": {
+      showMembers(registry, intent.shown);
       break;
     }
 
@@ -288,16 +321,19 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
 /**
  * Carries out an intent other than a Say: in the page, by changing Configuration, by
- * marking a Timeline read, or by turning notifications on or off.
+ * marking a Timeline read, by turning notifications on or off, or by opening a Timeline by
+ * name, which reads how the Network folds names first.
  * @param registry - The registry.
  * @param place - Where the intents came from.
  * @param intent - The intent.
+ * @param navigation - The core's navigation when the intents were submitted.
  * @returns What it came to.
  */
 const changeOne = (
   registry: AtomRegistry.AtomRegistry,
   place: Place,
-  intent: Exclude<Intent, Say>
+  intent: Exclude<Intent, Say>,
+  navigation: number
 ): Effect.Effect<Changed, never, DaemonClient> => {
   if (isLocal(intent)) {
     carryOutHere(registry, place, intent);
@@ -320,6 +356,26 @@ const changeOne = (
 
     case "Notify": {
       return notifying(intent.on);
+    }
+
+    case "Query": {
+      return query(registry, intent.network, intent.name, navigation).pipe(
+        Effect.map((queried): Changed => {
+          if (queried._tag === "NotDone" || queried._tag === "SignedOut") {
+            return queried;
+          }
+
+          const intents = queried._tag === "Intents" ? queried.intents : [];
+
+          for (const one of intents) {
+            if (isLocal(one)) {
+              carryOutHere(registry, place, one);
+            }
+          }
+
+          return { _tag: "Done" };
+        })
+      );
     }
 
     default: {
@@ -351,7 +407,7 @@ const carryOut = (
 
     for (const [index, intent] of intents.entries()) {
       if (intent._tag !== "Say") {
-        const changed = yield* changeOne(registry, timeline, intent);
+        const changed = yield* changeOne(registry, timeline, intent, navigation);
 
         if (changed._tag === "SignedOut") {
           signedOut(registry);
@@ -565,7 +621,7 @@ export const send = runtime
         const { registry } = get;
         const step = submit(registry.get(composerState), timeline, registry.get(commandContext));
 
-        registry.set(composerState, step.state);
+        replaced(registry, step.state);
         letGoOfTyped(registry, timeline);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
@@ -581,7 +637,7 @@ export const confirmSend = runtime
         const { registry } = get;
         const step = confirm(registry.get(composerState), timeline);
 
-        registry.set(composerState, step.state);
+        replaced(registry, step.state);
         yield* sendAll(registry, timeline, step.intents, undefined);
       }),
     { concurrent: true }
@@ -599,7 +655,7 @@ export const takeUp = runtime
         const { registry } = get;
         const taken = takeOffer(registry.get(composerState), timeline);
 
-        registry.set(composerState, taken.state);
+        replaced(registry, taken.state);
 
         const { offer } = taken;
 

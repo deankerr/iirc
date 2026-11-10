@@ -23,6 +23,8 @@ import {
   InvalidRequest,
   JournalFailed,
   NetworkStopped,
+  NotAChannel,
+  NotInChannel,
   SignInsFailed,
   TimelinesFailed,
   Unauthorized,
@@ -33,6 +35,7 @@ import {
 import {
   After,
   CallerIntent,
+  ChannelHeader,
   ConfigurationInForce,
   CredentialNames,
   CredentialPathName,
@@ -43,6 +46,8 @@ import {
   ListQuery,
   LocateQuery,
   Located,
+  MemberPage,
+  MembersQuery,
   NetworkEntry,
   NetworkId,
   NetworkInspection,
@@ -174,7 +179,8 @@ export class NewsGroup extends HttpApiGroup.make("news")
  * a Network's Timelines, a page at a time, a window of one, the items a step made, and what
  * changed, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
  * Each read says the projection version and the last step folded into what it gave, to
- * follow the changes after.
+ * follow the changes after. A Channel's Timeline also gives its head and its members, a
+ * page at a time, as the Client knows them now.
  */
 export class TimelinesGroup extends HttpApiGroup.make("timelines")
   .add(
@@ -194,6 +200,17 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
       params: { timeline: TimelineId },
       query: WindowQuery,
       success: TimelineWindow,
+    }),
+    HttpApiEndpoint.get("channel", "/timelines/:timeline/channel", {
+      error: [UnknownTimeline, NotAChannel, TimelinesFailed],
+      params: { timeline: TimelineId },
+      success: ChannelHeader,
+    }),
+    HttpApiEndpoint.get("members", "/timelines/:timeline/members", {
+      error: [UnknownTimeline, NotAChannel, NotInChannel, TimelinesFailed],
+      params: { timeline: TimelineId },
+      query: MembersQuery,
+      success: MemberPage,
     }),
     HttpApiEndpoint.get("locate", "/networks/:network/at/:sequence", {
       error: [UnknownNetwork, TimelinesFailed],

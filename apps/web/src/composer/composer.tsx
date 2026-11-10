@@ -9,10 +9,11 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
+import { active, announced, completes, cycled } from "@iirc/frontend/completion";
 import { linesOf } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
 import { openTimeline } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
@@ -22,11 +23,12 @@ import {
   confirmSend,
   dismiss,
   draft as draftAtom,
-  edit,
   recall,
   send,
   takeUp,
 } from "./atoms.ts";
+import { completionState } from "./completion-state.ts";
+import { escapeCompletion, tab, typed } from "./completion.ts";
 
 import styles from "./composer.module.css";
 
@@ -51,7 +53,10 @@ const offerLabel = (offer: Offer) => {
 const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name: string }) => {
   const draft = useAtomValue(draftAtom(timeline));
   const context = useAtomValue(commandContext);
-  const setText = useAtomSet(edit);
+  const completion = useAtomValue(completionState);
+  const setText = useAtomSet(typed);
+  const complete = useAtomSet(tab);
+  const restore = useAtomSet(escapeCompletion);
   const recallOne = useAtomSet(recall);
   const dismissNow = useAtomSet(dismiss);
   const sendNow = useAtomSet(send);
@@ -60,10 +65,12 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
   const focusAsked = useAtomValue(composerFocus);
   const input = useRef<HTMLTextAreaElement>(null);
   const focusSeen = useRef(focusAsked);
+  const appliedSeen = useRef(completion.applied);
   const id = useId();
   const noticeId = `${id}-notice`;
   const hintId = `${id}-hint`;
   const { confirming, notice } = draft;
+  const candidates = cycled(completion, timeline, draft.text);
 
   // Each time the composer is asked to take focus, after it mounted, the caret goes to the
   // end of its draft, which may have just been replaced.
@@ -79,10 +86,57 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
     element?.setSelectionRange(element.value.length, element.value.length);
   }, [focusAsked]);
 
+  // Each time completion changes the text, the caret goes where it says, once the new text
+  // is in the textarea: after the candidate, or back where it was on Escape.
+  useLayoutEffect(() => {
+    const { applied, caret } = completion;
+
+    if (applied === appliedSeen.current) {
+      return;
+    }
+
+    appliedSeen.current = applied;
+    input.current?.setSelectionRange(caret, caret);
+  }, [completion]);
+
   const offline =
     context.focus !== undefined && !context.session
       ? `${context.focus.network} is not connected: nothing can be said there until it is.`
       : undefined;
+
+  /**
+   * Tab completes the word at the caret, Shift+Tab backwards, and Escape gives back what
+   * was typed while completing. With no word there, and nothing being completed, Tab moves
+   * focus on, as it does anywhere.
+   * @param event - The key.
+   * @returns Whether completion took it.
+   */
+  const completionKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const { selectionEnd, selectionStart, value } = event.currentTarget;
+    const completing = active(completion, timeline, { caret: selectionStart, text: value });
+    const bare = !event.altKey && !event.ctrlKey && !event.metaKey;
+
+    if (
+      event.key === "Tab" &&
+      bare &&
+      selectionStart === selectionEnd &&
+      (completing || completes(value, selectionStart))
+    ) {
+      event.preventDefault();
+      complete({ backwards: event.shiftKey, caret: selectionStart, place: timeline, text: value });
+
+      return true;
+    }
+
+    if (event.key === "Escape" && completing) {
+      event.preventDefault();
+      restore(timeline);
+
+      return true;
+    }
+
+    return false;
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const element = event.currentTarget;
@@ -93,6 +147,10 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
 
     // Composing text in an input method keeps its own keys.
     if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (completionKey(event)) {
       return;
     }
 
@@ -176,6 +234,24 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
           {offline}
         </p>
       )}
+      {candidates === undefined ? null : (
+        <p aria-hidden className={styles.candidates}>
+          {candidates.candidates.map((candidate, index) => (
+            <bdi
+              className={index === candidates.index ? styles.chosen : styles.candidate}
+              // A candidate's place in the list is what tells two apart, and it never moves.
+              // oxlint-disable-next-line react/no-array-index-key
+              key={index}
+            >
+              {candidate}
+            </bdi>
+          ))}
+        </p>
+      )}
+      {/* A status, polite, present while the composer is, so each candidate is announced. */}
+      <output aria-live="polite" className={styles.status}>
+        {announced(completion, timeline, draft.text)}
+      </output>
       <div className={styles.line}>
         <label className={styles.prompt} htmlFor={id}>
           <bdi>{name}</bdi>

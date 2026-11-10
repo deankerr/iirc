@@ -1,6 +1,7 @@
 /**
  * What a signed-in browser sees: the Networks and their Timelines, the open Timeline or
- * the options, the composer under them, the command palette and the keys, and signing out.
+ * the options, the composer under them, the open Channel's members beside them when shown,
+ * the command palette and the keys, and signing out.
  *
  * @packageDocumentation
  */
@@ -8,6 +9,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
 
+import { MembersPanel } from "../channel/members-panel.tsx";
 import { MainComposer } from "../composer/composer.tsx";
 import { mainView } from "../options/atoms.ts";
 import { CredentialPrompt } from "../options/credential-prompt.tsx";
@@ -57,6 +59,7 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
           <CredentialPrompt />
           <MainComposer />
         </main>
+        <MembersPanel />
       </div>
       <Palette />
       <Keys />

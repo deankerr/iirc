@@ -1,5 +1,6 @@
 import { CredentialName } from "@iirc/protocol/line";
 import { HashSet } from "effect";
+import { constUndefined } from "effect/Function";
 import { describe, expect, it } from "vitest";
 
 import ergoFeatures from "../../../../fixtures/transcripts/ergo/first-features.irc?raw";
@@ -22,6 +23,7 @@ const base = configured();
 const keeping = <State>(
   make: (previous: State | undefined) => State
 ): Client<State | undefined> => ({
+  channel: constUndefined,
   initial: undefined,
   inspect: () => toy().inspect(toy().initial),
   known: () => toy().known(toy().initial),
@@ -66,6 +68,7 @@ describe("exact replay, after every play", () => {
     let calls = 0;
 
     const counting: Client<number> = {
+      channel: constUndefined,
       initial: 0,
       inspect: () => toy().inspect(toy().initial),
       known: () => toy().known(toy().initial),
@@ -242,6 +245,7 @@ describe("exact replay against snapshots", () => {
     let calls = 0;
 
     const reusing: Client<number> = {
+      channel: constUndefined,
       initial: 0,
       inspect: () => toy().inspect(toy().initial),
       known: () => toy().known(toy().initial),
@@ -437,6 +441,7 @@ describe("the diff rebuilt on a mismatch", () => {
     let first: { n: number } | undefined;
 
     const reaching: Client<{ n: number } | undefined> = {
+      channel: constUndefined,
       initial: undefined,
       inspect: () => toy().inspect(toy().initial),
       known: () => toy().known(toy().initial),
@@ -471,6 +476,7 @@ describe("the diff rebuilt on a mismatch", () => {
     let first: Cyclic | undefined;
 
     const cycling: Client<Cyclic | undefined> = {
+      channel: constUndefined,
       initial: undefined,
       inspect: () => toy().inspect(toy().initial),
       known: () => toy().known(toy().initial),

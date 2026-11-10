@@ -5,7 +5,6 @@ declare const styles: {
   readonly rows: string;
   readonly scroller: string;
   readonly start: string;
-  readonly title: string;
   readonly view: string;
 };
 

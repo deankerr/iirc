@@ -97,6 +97,11 @@ export interface Say {
  * - `MarkRead`: mark a Timeline read, above.
  * - `Notify`: turn notifications on or off on this device, asking the browser's permission
  *   to turn them on.
+ * - `ShowMembers`: show or hide the open Channel's members on this device, or turn them
+ *   over when `shown` is none.
+ * - `Query`: open the Timeline of a name on a Network, as the Daemon keyed it, such as a
+ *   Direct Message's. A Timeline exists only once something was said in it, so with none,
+ *   the composer starts `/msg <name> ` to say the first Message, which opens it.
  */
 export type Intent =
   | Say
@@ -112,7 +117,9 @@ export type Intent =
   | { readonly _tag: "OpenPalette" }
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
-  | { readonly _tag: "Notify"; readonly on: boolean };
+  | { readonly _tag: "Notify"; readonly on: boolean }
+  | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
+  | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -486,6 +493,44 @@ const notifyArguments = (args: string): Parsed<boolean> => {
   return invalid("Use /notify on or /notify off.");
 };
 
+/**
+ * What `/members` was given: nothing, to turn the members over, or `on` or `off`.
+ * @param args - The text after `/members`.
+ * @returns Whether to show them, none to turn them over, or why it cannot tell.
+ */
+const membersArguments = (args: string): Parsed<boolean | undefined> => {
+  const what = args.trim().toLowerCase();
+
+  if (what === "") {
+    return parsed(undefined);
+  }
+
+  if (what === "on" || what === "off") {
+    return parsed(what === "on");
+  }
+
+  return invalid("Use /members to show or hide them, or /members on or /members off.");
+};
+
+/**
+ * What `/query` was given: one name, with no space or `,`.
+ * @param args - The text after `/query`.
+ * @returns The name, or why it is not one.
+ */
+const queryArguments = (args: string): Parsed<string> => {
+  const name = args.trim();
+
+  if (name === "") {
+    return invalid("With whom? /query <nick>");
+  }
+
+  if (/[\s,]/u.test(name)) {
+    return invalid("Give one nick. To say something to them, use /msg <nick> <text>.");
+  }
+
+  return parsed(name);
+};
+
 const say = (focus: Focus, kind: SayKind, text: string): Say => ({
   _tag: "Say",
   kind,
@@ -689,6 +734,29 @@ export const commands: readonly Command[] = [
     name: "notify",
     parse: notifyArguments,
     usage: "/notify on|off",
+    when: [],
+  }),
+  command({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Open the Direct Message with a nick, or start /msg to them when nothing was said yet.",
+    id: "timeline.query",
+    intents: (name: string, focus) => [{ _tag: "Query", name, network: focus.network }],
+    name: "query",
+    parse: queryArguments,
+    usage: "/query <nick>",
+    when: focused,
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description: "Show or hide the open Channel's members, on this device.",
+    id: "members.toggle",
+    intents: (shown: boolean | undefined) => [{ _tag: "ShowMembers", shown }],
+    name: "members",
+    parse: membersArguments,
+    usage: "/members [on|off]",
     when: [],
   }),
   unfocused({

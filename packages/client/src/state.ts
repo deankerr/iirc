@@ -149,6 +149,18 @@ export interface Member {
   readonly complete: boolean;
 }
 
+/**
+ * A `NAMES` listing that has begun and not yet ended. Each `353` adds its part to
+ * `parts`, and the parts are folded into `members` only every so often, so a `353` costs
+ * what it lists rather than all the listing holds. A change to a member folds them first.
+ */
+export interface Listing {
+  /** The members listed, as of the last fold. Keyed by folded nick. */
+  readonly members: ReadonlyMap<string, Member>;
+  /** Each part listed since, oldest first, as members keyed by folded nick. */
+  readonly parts: readonly (readonly (readonly [string, Member])[])[];
+}
+
 /** What is known of a Channel Self is in. */
 export interface Joined {
   readonly _tag: "Joined";
@@ -156,7 +168,7 @@ export interface Joined {
   /** Keyed by folded nick. */
   readonly members: ReadonlyMap<string, Member>;
   /** A `NAMES` listing that has begun and not yet ended. */
-  readonly listing: ReadonlyMap<string, Member> | undefined;
+  readonly listing: Listing | undefined;
   readonly topic: Fact<Topic | null>;
   readonly modes: Fact<ReadonlyMap<string, string | null>>;
   /** Whether the replies to our `JOIN` are still arriving: no topic by their end means none. */

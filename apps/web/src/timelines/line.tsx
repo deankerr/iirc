@@ -62,7 +62,7 @@ const nickClasses: readonly string[] = [
  * @param props - The nick and its colour slot.
  * @returns The nick.
  */
-const Nick = ({ colour, nick }: { readonly colour: number; readonly nick: string }) => (
+export const Nick = ({ colour, nick }: { readonly colour: number; readonly nick: string }) => (
   <bdi className={nickClasses[colour]}>{nick}</bdi>
 );
 

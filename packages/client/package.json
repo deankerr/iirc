@@ -10,6 +10,7 @@
     "./testing": "./src/testing/index.ts"
   },
   "scripts": {
+    "bench:scale": "bun scripts/scale.ts",
     "generate:word-characters": "bun scripts/word-characters.ts",
     "test": "bun --bun vitest run"
   },

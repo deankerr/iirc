@@ -12,6 +12,7 @@ import type { Source } from "@iirc/protocol/line";
 
 import { isHighlight } from "./highlight.ts";
 import { isSelf, namingNow, serverName } from "./meaning.ts";
+import { inListing } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
@@ -84,7 +85,8 @@ const sharedChannels = (run: Run, nick: string): readonly Where[] => {
   const folded = folder(run.state)(nick);
 
   return [...run.state.channels.values()].flatMap(({ name, phase }) =>
-    phase._tag === "Joined" && (phase.members.has(folded) || phase.listing?.has(folded) === true)
+    phase._tag === "Joined" &&
+    (phase.members.has(folded) || (phase.listing !== undefined && inListing(phase.listing, folded)))
       ? [channel(run, name)]
       : []
   );

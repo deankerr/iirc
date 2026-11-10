@@ -111,6 +111,38 @@ describe("reading a line", () => {
     });
   });
 
+  it("opens a Timeline by name with `/query`, from any Timeline of the Network", () => {
+    expect({
+      channel: interpret("/query peer", inChannel),
+      list: message("/query a,b", inChannel),
+      network: interpret("/QUERY  {bob} ", inNetwork),
+      none: message("/query", inChannel),
+      nowhere: message("/query peer", nowhere),
+      text: message("/query peer hi", inChannel),
+    }).toStrictEqual({
+      channel: { _tag: "Parsed", value: [{ _tag: "Query", name: "peer", network }] },
+      list: "Give one nick. To say something to them, use /msg <nick> <text>.",
+      network: { _tag: "Parsed", value: [{ _tag: "Query", name: "{bob}", network }] },
+      none: "With whom? /query <nick>",
+      nowhere: "Open a Timeline first.",
+      text: "Give one nick. To say something to them, use /msg <nick> <text>.",
+    });
+  });
+
+  it("shows, hides, or turns over the members with `/members`, from anywhere", () => {
+    expect([
+      interpret("/members", nowhere),
+      interpret("/members ON", inChannel),
+      interpret("/members off", inDirect),
+      message("/members maybe", inChannel),
+    ]).toStrictEqual([
+      { _tag: "Parsed", value: [{ _tag: "ShowMembers", shown: undefined }] },
+      { _tag: "Parsed", value: [{ _tag: "ShowMembers", shown: true }] },
+      { _tag: "Parsed", value: [{ _tag: "ShowMembers", shown: false }] },
+      "Use /members to show or hide them, or /members on or /members off.",
+    ]);
+  });
+
   it("refuses an unknown command, and a bare `/`, sending nothing", () => {
     expect([message("/frobnicate x", inChannel), message("/ x", inChannel)]).toStrictEqual([
       "There is no command /frobnicate. Start with // to say text that begins with /.",
@@ -178,6 +210,7 @@ describe("reading a line", () => {
       "channels.join": "Required",
       "channels.part": "Optional",
       "composer.focus": "None",
+      "members.toggle": "Optional",
       "network.add": "Required",
       "notify.set": "Required",
       "options.set": "Optional",
@@ -189,6 +222,7 @@ describe("reading a line", () => {
       "say.to": "Required",
       "timeline.next": "None",
       "timeline.previous": "None",
+      "timeline.query": "Required",
       "timeline.read": "Optional",
       "timeline.unread": "None",
     });

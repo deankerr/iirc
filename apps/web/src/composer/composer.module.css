@@ -65,3 +65,33 @@
 .line:focus-within {
   box-shadow: inset var(--space-1) 0 0 var(--color-focus);
 }
+
+/* The candidates a Tab cycles through, the one in place accented. */
+.candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  max-height: calc(2 * var(--line-height) * 1em);
+  overflow: hidden;
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--color-muted);
+}
+
+.candidate {
+  white-space: nowrap;
+}
+
+.chosen {
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+/* Heard, not seen. */
+.status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

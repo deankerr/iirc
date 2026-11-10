@@ -8,6 +8,7 @@
 import type { Kept } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import type { Fact } from "./known.ts";
+import { changeListing } from "./members.ts";
 import type { Run } from "./run.ts";
 import { updateOpen } from "./run.ts";
 import type { Joined, Member, Seen } from "./state.ts";
@@ -53,7 +54,10 @@ const membersStaled = (
 
 const joinedStaled = (joined: Joined, since: Instant): Joined => ({
   ...joined,
-  listing: joined.listing === undefined ? undefined : membersStaled(joined.listing, since),
+  listing:
+    joined.listing === undefined
+      ? undefined
+      : changeListing(joined.listing, (members) => membersStaled(members, since)),
   members: membersStaled(joined.members, since),
 });
 

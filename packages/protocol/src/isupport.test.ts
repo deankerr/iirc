@@ -186,6 +186,15 @@ describe("token values", () => {
     expect(prefixOf("(ov)@+")).toStrictEqual(defaultPrefix);
   });
 
+  it("reads a PREFIX that repeats a mode or a symbol as unusable", () => {
+    expect([
+      prefixOf("(oov)@%+"),
+      prefixOf("(ohv)@@+"),
+      prefixOf("(oo)@@"),
+      prefixOf("(qaohv)~&@%+"),
+    ]).toStrictEqual([undefined, undefined, undefined, qaohv]);
+  });
+
   it("reads CHANMODES short of groups, or with more than four", () => {
     expect(channelModesOf("b,k")).toStrictEqual({ always: "k", flags: "", list: "b", whenSet: "" });
     expect(channelModesOf("b,k,l,imnt,XYZ")).toStrictEqual({

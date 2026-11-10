@@ -1155,6 +1155,25 @@ export const makeSqliteTimelineStore = (
         );
       });
 
+    // One Timeline, or the one a merged id went to, in one transaction with finding it.
+    const timeline = (id: TimelineId) =>
+      reading(
+        "a Timeline",
+        Effect.gen(function* () {
+          const into = yield* sql`SELECT into_id AS "into" FROM tombstones WHERE id = ${id}`;
+
+          const merged = yield* Effect.suspend(() => decodeInto(into[0] ?? { into: null })).pipe(
+            Effect.mapError(failed("cannot decode a tombstone"))
+          );
+
+          const found = yield* summaries(sql`WHERE id = ${merged.into ?? id}`, sql``).pipe(
+            Effect.flatMap(decodeSummaries)
+          );
+
+          return Option.fromUndefinedOr(found[0]);
+        })
+      );
+
     return {
       // Once begun, an apply runs to its end, encoding included, and an interruption waits
       // for it. A failure rolls the transaction back, so nothing of it is kept.
@@ -1261,6 +1280,7 @@ export const makeSqliteTimelineStore = (
             })
           )
         ).pipe(Effect.mapError(failed("cannot reset"))),
+      timeline,
       timelines: (network, page = {}) =>
         query(
           "the Timelines",

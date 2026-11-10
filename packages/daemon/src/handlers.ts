@@ -15,6 +15,8 @@ import {
   JournalFailed,
   NetworkId as WireNetworkId,
   NetworkStopped,
+  NotAChannel,
+  NotInChannel,
   RequestValidation,
   Sequence as WireSequence,
   SignInsFailed,
@@ -36,6 +38,7 @@ import { Vault } from "@iirc/runtime/vault";
 import type { VaultFailed as RuntimeVaultFailed } from "@iirc/runtime/vault";
 import { TimelineStore } from "@iirc/timeline-store";
 import type { Anchor, Changed, TimelineStoreFailed, Window } from "@iirc/timeline-store";
+import type { TimelineId } from "@iirc/timelines";
 import {
   ByteSize,
   Context,
@@ -61,14 +64,17 @@ import {
 import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys } from "./keys.ts";
+import { membersPage, rankOrder } from "./members.ts";
 import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import type { SignInsUnwritable } from "./sign-ins.ts";
 import {
+  channelHeader,
   gap,
   happened,
   knowledge,
+  member,
   networkInspection,
   networkStatus,
   projection,
@@ -573,6 +579,30 @@ const timelines = HttpApiBuilder.group(
         )
       );
 
+    // A Channel's Timeline, and the Channel as the Client knows it now, found by the
+    // Timeline's name folded with the Connection's casemapping, or none when the Client
+    // holds no such Channel.
+    const channelOf = (id: TimelineId) =>
+      Effect.gen(function* () {
+        const found = yield* store.timeline(id).pipe(Effect.mapError(timelinesFailed));
+
+        if (Option.isNone(found)) {
+          return yield* new UnknownTimeline({ timeline: id });
+        }
+
+        const timeline = found.value;
+
+        if (timeline.kind !== "Channel") {
+          return yield* new NotAChannel({ kind: timeline.kind, timeline: timeline.id });
+        }
+
+        const view = yield* runtime
+          .channel(NetworkId.make(timeline.network), timeline.name)
+          .pipe(Effect.catchTag("UnknownNetwork", () => Effect.succeedNone));
+
+        return { timeline, view };
+      });
+
     // Waits until the projector says anything other than what was last seen: a step folded,
     // or the store reset to a version, whatever its sequence. It never polls the store.
     const progressSince = (seen: Progress | undefined) =>
@@ -679,6 +709,40 @@ const timelines = HttpApiBuilder.group(
             through: throughOf(read.through),
             timeline: window.timeline,
             version: versionOf(read.version),
+          };
+        })
+      )
+      .handle("channel", ({ params }) =>
+        Effect.map(channelOf(params.timeline), ({ timeline, view }) =>
+          channelHeader(timeline, Option.getOrUndefined(view))
+        )
+      )
+      .handle("members", ({ params, query }) =>
+        Effect.gen(function* () {
+          const { timeline, view } = yield* channelOf(params.timeline);
+          const known = Option.getOrUndefined(view);
+
+          if (known?.channel.standing !== "Joined") {
+            return yield* new NotInChannel({
+              standing: known?.channel.standing ?? null,
+              timeline: timeline.id,
+            });
+          }
+
+          const page = membersPage(known, {
+            after: query.after,
+            limit: query.limit ?? windowLimit.default,
+            prefix: query.prefix,
+          });
+
+          const order = rankOrder(known);
+
+          return {
+            members: page.members.map((one) => member(one, order)),
+            more: page.next !== undefined,
+            network: WireNetworkId.make(timeline.network),
+            next: page.next ?? null,
+            timeline: timeline.id,
           };
         })
       )

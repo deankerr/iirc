@@ -9,7 +9,14 @@ import {
   Sequence as WireSequence,
   TimelineId,
 } from "@iirc/api";
-import type { NewsEvent, Resume, TimelineChangesEvent, TimelineItem } from "@iirc/api";
+import type {
+  Member,
+  MembersAfter,
+  NewsEvent,
+  Resume,
+  TimelineChangesEvent,
+  TimelineItem,
+} from "@iirc/api";
 import { Instant } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { Entry } from "@iirc/runtime/journal";
@@ -1572,6 +1579,422 @@ describe("the handlers", () => {
       resets: 1,
       through: undefined,
       versions: true,
+    });
+  });
+});
+
+/**
+ * Configures `libera` wanting `#iirc`, registers it on the floor with the ISUPPORT given,
+ * and has Self join `#iirc` with the members listed, a `353` to every 50 of them.
+ * @param world - The ports.
+ * @param api - The client.
+ * @param names - The members, with their prefixes, as a `NAMES` listing gives them.
+ * @param isupport - The ISUPPORT tokens the Ircd sends.
+ * @returns The Connection, and the Channel's Timeline.
+ */
+const inChannel = (
+  world: World,
+  api: Effect.Success<typeof makeClient>,
+  names: readonly string[],
+  isupport = "CASEMAPPING=rfc1459 PREFIX=(qov)~@+"
+) =>
+  Effect.gen(function* () {
+    yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+    const call = yield* registerOnFloor(world.memory);
+
+    yield* say(call, `:irc.test 005 iirc ${isupport} :are supported by this server`);
+    expect(yield* heard(call)).toBe("JOIN #iirc");
+    yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+
+    for (let first = 0; first < names.length; first += 50) {
+      yield* say(call, `:irc.test 353 iirc = #iirc :${names.slice(first, first + 50).join(" ")}`);
+    }
+
+    yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
+    yield* settle;
+
+    return { call, timeline: yield* timelineNamed(api, "#iirc") };
+  });
+
+// The prefixes a member holds, as far as anything says.
+const heldBy = (one: Member): readonly string[] => {
+  switch (one.prefixes._tag) {
+    case "Known": {
+      return one.prefixes.value;
+    }
+
+    case "Partial": {
+      return one.prefixes.atLeast;
+    }
+
+    case "Stale": {
+      return one.prefixes.was;
+    }
+
+    case "Unknown": {
+      return [];
+    }
+
+    default: {
+      return one.prefixes satisfies never;
+    }
+  }
+};
+
+const shownMember = (one: Member) => {
+  const held = heldBy(one);
+
+  return held.length === 0 ? one.nick : `${one.nick} ${held.join("")}`;
+};
+
+// A `NAMES` listing's name for the nth of many members: some ops, some voiced.
+const listedAs = (n: number) => {
+  if (n % 50 === 0) {
+    return `@user${n}`;
+  }
+
+  return n % 7 === 0 ? `+user${n}` : `user${n}`;
+};
+
+// Where a listed name stands: ops, then voiced, then the rest.
+const listedRank = (name: string) => {
+  const rank = ["@", "+"].indexOf(name[0] ?? "");
+
+  return rank === -1 ? 2 : rank;
+};
+
+const listedNick = (name: string) => name.replace(/^[@+]/u, "");
+
+/**
+ * Every page of a Channel's members, from the first, as `<nick> <prefixes>`.
+ * @param api - The client.
+ * @param timeline - The Channel's Timeline.
+ * @param query - The page's size, and the start of the nicks wanted.
+ * @returns Each page's members.
+ */
+const everyPage = (
+  api: Effect.Success<typeof makeClient>,
+  timeline: TimelineId,
+  query: { readonly limit: number; readonly prefix?: string }
+) =>
+  Effect.gen(function* () {
+    const pages: string[][] = [];
+    let after: MembersAfter | undefined;
+
+    do {
+      const page = yield* api.timelines.members({
+        params: { timeline },
+        query: after === undefined ? query : { ...query, after },
+      });
+
+      pages.push(page.members.map(shownMember));
+      expect(page.more).toBe(page.next !== null);
+      after = page.next ?? undefined;
+    } while (after !== undefined && pages.length < 100);
+
+    return pages;
+  });
+
+describe("a Channel's head and members", () => {
+  it("gives a Channel's head: its name, topic, modes, Self's standing, how many, and PREFIX", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call, timeline } = yield* inChannel(world, api, ["iirc", "~@owner", "+voiced"]);
+
+        yield* say(call, ":irc.test 332 iirc #iirc :the topic");
+        yield* say(call, ":irc.test 333 iirc #iirc setter!u@h 1767225600");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
+        yield* settle;
+
+        return yield* api.timelines.channel({ params: { timeline } });
+      })
+    );
+
+    expect(result).toMatchObject({
+      members: 3,
+      modes: { _tag: "Known", value: [{ mode: "n" }, { mode: "t" }] },
+      name: "#iirc",
+      network: libera,
+      ranks: [
+        { mode: "q", symbol: "~" },
+        { mode: "o", symbol: "@" },
+        { mode: "v", symbol: "+" },
+      ],
+      standing: "Joined",
+      topic: { _tag: "Known", value: { setBy: "setter", text: "the topic" } },
+    });
+  });
+
+  it("pages the members by rank, the highest first, then by nick, each with whether they are away", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call, timeline } = yield* inChannel(world, api, [
+          "zed",
+          "+voiced",
+          "@op",
+          "iirc",
+          "~owner",
+          "@Alpha",
+          "bob",
+        ]);
+
+        yield* say(call, ":bob!u@h AWAY :gone fishing");
+        yield* settle;
+
+        const first = yield* api.timelines.members({ params: { timeline }, query: {} });
+
+        return {
+          away: first.members.map(({ away, nick }) => [
+            nick,
+            away._tag === "Known" ? away.value : away._tag,
+          ]),
+          pages: yield* everyPage(api, timeline, { limit: 3 }),
+        };
+      })
+    );
+
+    expect(result.pages).toStrictEqual([
+      ["owner q", "Alpha o", "op o"],
+      ["voiced v", "bob", "iirc"],
+      ["zed"],
+    ]);
+    expect(result.away).toContainEqual(["bob", { message: "gone fishing" }]);
+    expect(result.away).toContainEqual(["zed", "Unknown"]);
+  });
+
+  it("filters the members by the start of a nick, under the Network's casemapping, still in order and paged", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { timeline } = yield* inChannel(world, api, [
+          "iirc",
+          "[a]",
+          "+{A}b",
+          "@{a}c",
+          "[b]",
+          "a",
+        ]);
+
+        return {
+          ascii: yield* everyPage(api, timeline, { limit: 10, prefix: "[" }),
+          brace: yield* everyPage(api, timeline, { limit: 10, prefix: "{a}" }),
+          bracket: yield* everyPage(api, timeline, { limit: 1, prefix: "[A" }),
+          none: yield* everyPage(api, timeline, { limit: 10, prefix: "zz" }),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      ascii: [["{a}c o", "{A}b v", "[a]", "[b]"]],
+      brace: [["{a}c o", "{A}b v", "[a]"]],
+      bracket: [["{a}c o"], ["{A}b v"], ["[a]"]],
+      none: [[]],
+    });
+  });
+
+  it("ranks by the default PREFIX when the Ircd's repeats a mode, so no unprivileged member sorts ahead", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { timeline } = yield* inChannel(
+          world,
+          api,
+          ["iirc", "alice", "+zed", "%half", "@op", "+bob"],
+          "CASEMAPPING=rfc1459 PREFIX=(oov)@%+"
+        );
+
+        const head = yield* api.timelines.channel({ params: { timeline } });
+
+        return {
+          pages: yield* everyPage(api, timeline, { limit: 10 }),
+          ranks: head.ranks.map(({ symbol }) => symbol),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      pages: [["op o", "bob v", "zed v", "alice", "half", "iirc"]],
+      ranks: ["@", "+"],
+    });
+  });
+
+  it("goes on after a page whose members left, repeating none, and leaving out one that left", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call, timeline } = yield* inChannel(world, api, ["iirc", "@a", "b", "c", "d"]);
+
+        const first = yield* api.timelines.members({ params: { timeline }, query: { limit: 2 } });
+
+        // `b` was on the first page, and `c` would have begun the next.
+        yield* say(call, ":b!u@h PART #iirc");
+        yield* say(call, ":c!u@h QUIT :gone");
+        yield* settle;
+
+        const next = first.next ?? undefined;
+
+        const rest = yield* api.timelines.members({
+          params: { timeline },
+          query: next === undefined ? {} : { after: next },
+        });
+
+        return [first.members.map(shownMember), rest.members.map(shownMember), rest.next];
+      })
+    );
+
+    expect(result).toStrictEqual([["a o", "b"], ["d", "iirc"], null]);
+  });
+
+  it("refuses a Timeline that is not a Channel's, and an id never given", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* directly(world, api, ["hi"]);
+
+        const never = TimelineId.make("0000000000ffff-00000000-00000001");
+
+        const both = (timeline: TimelineId) =>
+          Effect.all([
+            outcome(api.timelines.channel({ params: { timeline } })),
+            outcome(api.timelines.members({ params: { timeline }, query: {} })),
+          ]);
+
+        const kind = (timeline: TimelineId) =>
+          api.timelines.channel({ params: { timeline } }).pipe(
+            Effect.match({
+              onFailure: (error) => (error._tag === "NotAChannel" ? error.kind : error._tag),
+              onSuccess: () => "ok",
+            })
+          );
+
+        return {
+          direct: yield* both(yield* timelineNamed(api, "peer")),
+          directKind: yield* kind(yield* timelineNamed(api, "peer")),
+          network: yield* both(yield* timelineNamed(api, "libera")),
+          networkKind: yield* kind(yield* timelineNamed(api, "libera")),
+          never: yield* both(never),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      direct: ["NotAChannel", "NotAChannel"],
+      directKind: "Direct",
+      network: ["NotAChannel", "NotAChannel"],
+      networkKind: "Network",
+      never: ["UnknownTimeline", "UnknownTimeline"],
+    });
+  });
+
+  it("gives the head of a Channel Self is not in, and refuses its members", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call, timeline } = yield* inChannel(world, api, ["iirc", "@op"]);
+
+        yield* say(call, ":op!u@h KICK #iirc iirc :out");
+        yield* settle;
+
+        const kicked = yield* api.timelines.channel({ params: { timeline } });
+
+        const refused = yield* api.timelines
+          .members({ params: { timeline }, query: {} })
+          .pipe(Effect.flip);
+
+        // No longer wanted, and parted, so the Client holds no such Channel.
+        yield* api.networks.configure({
+          params: { network: libera },
+          payload: { ...floor, channels: [] },
+          query: {},
+        });
+        yield* settle;
+
+        const gone = yield* api.timelines.channel({ params: { timeline } });
+
+        const unheld = yield* api.timelines
+          .members({ params: { timeline }, query: {} })
+          .pipe(Effect.flip);
+
+        return {
+          gone: [gone.name, gone.standing, gone.members, gone.topic._tag],
+          kicked: [kicked.standing, kicked.members, kicked.topic._tag],
+          refused: refused._tag === "NotInChannel" ? refused.standing : refused._tag,
+          unheld: unheld._tag === "NotInChannel" ? unheld.standing : unheld._tag,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      gone: ["#iirc", null, 0, "Unknown"],
+      kicked: ["Kicked", 0, "Unknown"],
+      refused: "Kicked",
+      unheld: null,
+    });
+  });
+
+  it("reads a page of a Channel of 10,000 members quickly", async () => {
+    const names = Array.from({ length: 10_000 }, (_, n) => listedAs(n));
+
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { timeline } = yield* inChannel(world, api, ["iirc", ...names]);
+        const timings: number[] = [];
+
+        // Ten thousand Lines take more than one settling to step.
+        for (let turn = 0; turn < 1000; turn += 1) {
+          const { members } = yield* api.timelines.channel({ params: { timeline } });
+
+          if (members === names.length + 1) {
+            break;
+          }
+
+          yield* settle;
+        }
+
+        const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.gen(function* () {
+            const started = performance.now();
+            const value = yield* effect;
+
+            timings.push(performance.now() - started);
+
+            return value;
+          });
+
+        const first = yield* timed(api.timelines.members({ params: { timeline }, query: {} }));
+        const next = first.next ?? undefined;
+
+        const second = yield* timed(
+          api.timelines.members({
+            params: { timeline },
+            query: next === undefined ? { limit: 500 } : { after: next, limit: 500 },
+          })
+        );
+
+        const completing = yield* timed(
+          api.timelines.members({ params: { timeline }, query: { prefix: "user99" } })
+        );
+
+        const head = yield* timed(api.timelines.channel({ params: { timeline } }));
+
+        return {
+          completing: [completing.members.map(({ nick }) => nick), completing.more],
+          head: head.members,
+          pages: [...first.members, ...second.members].map(({ nick }) => nick),
+          timings,
+        };
+      })
+    );
+
+    // Ops, then voiced, then the rest, each by nick, which here sorts as it folds.
+    const ordered = ["iirc", ...names]
+      .toSorted(
+        (left, right) =>
+          listedRank(left) - listedRank(right) || (listedNick(left) < listedNick(right) ? -1 : 1)
+      )
+      .map(listedNick);
+
+    // A generous bound, for a loaded machine: each read sorts the one Channel's members.
+    expect(Math.max(...result.timings)).toBeLessThan(500);
+    expect(result).toMatchObject({
+      completing: [ordered.filter((nick) => nick.startsWith("user99")).slice(0, 100), true],
+      head: 10_001,
+      pages: ordered.slice(0, 600),
     });
   });
 });
