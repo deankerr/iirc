@@ -17,6 +17,7 @@ said(network, intent): Effect<Option<Sequence>, JournalFailed>          // was a
 read(network, { target, read }): Effect<Sequence, UnknownNetwork | NetworkStopped>   // target null for the Network's own
 retry(network): Effect<Sequence, UnknownNetwork | NetworkStopped>
 known(network): Effect<Knowledge, UnknownNetwork>
+channel(network, name): Effect<Option<ChannelView>, UnknownNetwork>    // one Channel, by name, folded as the Connection folds
 inspect(network): Effect<NetworkInspection, UnknownNetwork>             // { status, client, connections: [{ connection, queued, nextAt }], timers }
 networks: Effect<ReadonlyMap<NetworkId, NetworkStatus>>                 // Running | Stopped { reason }
 news({ after? }): Stream<Happened, JournalFailed>                        // { network, sequence, at, news }, never ends
@@ -39,7 +40,7 @@ news({ after? }): Stream<Happened, JournalFailed>                        // { ne
   2. On `NetworkStopped`, asks `said(network, intent)`, on this Runtime or the one started after it. Once `NetworkStopped` is seen, the append has settled either way: an append is whole or absent, and the Network stops only after its driver has ended. `said` reads that Network's Inputs once, to the Journal's end, and ends.
   3. `Some(sequence)` means the `Say` was journaled, and is stepped on every restart, so it must not be said again. It does not mean its Line reached the Ircd: shutdown may have come before it was sent. `None` means it was never journaled, and saying it again under the same intent is safe.
 - **Intents correlate; they do not deduplicate.** A caller-chosen intent must be unique for its Network across the whole Journal, calls in flight included. That is the caller's obligation. The Runtime journals and steps two `Say`s under one intent as two, and `said` and the News cannot tell them apart, so recovery would be ambiguous. Refusing duplicates exactly would mean holding every intent the Network was ever given, so the Runtime does not.
-- **`known` and `inspect` read the Client as it is now.** `inspect` adds what the Runtime holds: whether the Network is running, the Connections it holds a Link for, each with how many Lines wait in its Outbox and when the next may leave, and the timers it has set.
+- **`known`, `channel`, and `inspect` read the Client as it is now.** `channel` is the Client's `channel`: one Channel, found by its name folded with the Connection's casemapping, or `None` when the Client holds no such Channel, and it costs what that Channel holds, where `known` builds everything the Network knows. `inspect` adds what the Runtime holds: whether the Network is running, the Connections it holds a Link for, each with how many Lines wait in its Outbox and when the next may leave, and the timers it has set.
 - **News is derived from the Journal.** `news` follows the Journal from the start, folds each Network's Inputs from `initial`, and gives each step's News with its Network, the sequence of its Input, and its `at`, for steps after `after`, and then live. A reader that resumes after the last sequence it has misses nothing, and sees exactly what the Runtime's own fold saw. Each reader folds from the start, which is simple and costs time on a long Journal. Snapshots or a shared projection can come when one is slow.
 
 ### Driving a Network

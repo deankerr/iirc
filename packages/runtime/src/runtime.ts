@@ -15,7 +15,7 @@ import type {
   SayKind,
   TimerTable,
 } from "@iirc/client";
-import type { Knowledge } from "@iirc/client/known";
+import type { ChannelView, Knowledge } from "@iirc/client/known";
 import { defaultCapacity, defaultPacing } from "@iirc/outbox";
 import type { Pacing } from "@iirc/outbox";
 import { FallbackEncoding, missingDecoders } from "@iirc/protocol/line";
@@ -220,6 +220,15 @@ export interface RuntimeService {
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
   readonly known: (network: NetworkId) => Effect.Effect<Knowledge, UnknownNetwork>;
+  /**
+   * What the Network's Client knows now of one Channel, by its name as the Connection's
+   * casemapping folds it, or `None` when it holds no such Channel. It reads that Channel
+   * alone, so it costs what the Channel holds, not what the Network does.
+   */
+  readonly channel: (
+    network: NetworkId,
+    name: string
+  ) => Effect.Effect<Option.Option<ChannelView>, UnknownNetwork>;
   /** The Network's Client and the Runtime's hold on it. */
   readonly inspect: (network: NetworkId) => Effect.Effect<NetworkInspection, UnknownNetwork>;
   /** Every Network, in the order it was added, with whether it is running. */
@@ -354,6 +363,11 @@ export const makeRuntime = <S>(
       );
 
     const service: RuntimeService = {
+      channel: (id, name) =>
+        Effect.map(
+          Effect.flatMap(find(id), (network) => Ref.get(network.current)),
+          ({ state }) => Option.fromUndefinedOr(client.channel(state, name))
+        ),
       configuration: (id) =>
         Effect.flatMap(find(id), (network) =>
           Effect.flatMap(Ref.get(network.current), ({ configured }) =>

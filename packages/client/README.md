@@ -9,7 +9,7 @@ This README is the module's written interface. The types are in `src/`, and [the
 | Caller | Uses | Imports |
 | --- | --- | --- |
 | The Runtime | `client.step` for each input, then carries out the outputs and journals both | `@iirc/client` |
-| Views | `known` for what is known, and News for Timelines | `@iirc/client/known`, and News from `@iirc/client` |
+| Views | `known` for what is known, `channel` for one Channel alone, and News for Timelines | `@iirc/client/known`, and News from `@iirc/client` |
 | Scenario tests | inputs in, outputs and News out, with a fake clock | `@iirc/client/testing` |
 | Agents and debugging | `inspect` for machine states, caps, Features, and timers | `@iirc/client` |
 
@@ -18,6 +18,7 @@ interface Client<State> {
   readonly initial: State;
   readonly step: (state: State, input: Input) => Step<State>; // { state, outputs, news }
   readonly known: (state: State) => Knowledge;
+  readonly channel: (state: State, name: string) => ChannelView | undefined;
   readonly inspect: (state: State) => Inspection;
 }
 ```
@@ -149,6 +150,12 @@ A `ReadMarker` carries one `where`, worked out from its Target as a `Say`'s is: 
 | `Unknown` | Nothing has told us                                          |
 
 A fact's source is `ircd` (said as it happened), `replied` (said in reply to a Lookup), `receipt` (inferred from when a Line arrived), or `ours` (we said or set it). Nothing in Knowledge names a cap or a Feature. A View learns how a fact is known, never why, so a new Feature changes which case a fact lands in and not the View's code. `@iirc/client/known` imports nothing from the rest of the Client, and the lint fence holds it to that.
+
+### One Channel
+
+`channel(state, name)` gives what Knowledge knows of one Channel, for a View that shows that Channel alone, such as its member list: `{ key, casemapping, ranks, channel, users }`. It folds `name` with the Connection's casemapping and finds the Channel Knowledge keys by it, so any spelling that mapping folds alike finds it, and gives `undefined` when the Client holds no such Channel, as for one Self parted and the Owner no longer wants. `channel` is exactly the `ChannelKnowledge` that `known` gives for that key, `users` is each of its members as `known` gives them as Users, Self included, under the members' keys, so a member's `away` is there, and `ranks` is `PREFIX`, most privileged first, as each `{ mode, symbol }`, or the protocol's default `(ov)@+` until an Ircd says. It reads that Channel and its members and nothing else of the Network, so it costs what the Channel holds: `known` builds every Channel and User, about 4 ms for three Channels of 10,000 members each, where `channel` builds one. `src/views.test.ts` checks it against `known`, across spellings, and for a Channel Self is still joining.
+
+A Timeline is keyed by the casemapping the Network last declared, and `channel` by the Connection's, so a View that finds a Channel from its Timeline passes the Timeline's name, not its key. The two mappings differ only from the start of a Connection to a Network that declared a mapping other than `rfc1459` until its Ircd's `005` says that mapping again. Self joins no Channel before `001`, and Ircds send `005` with registration, so a Channel is rarely joined in that window. A name looked up then folds by `rfc1459`, as every key of Knowledge then does, so where the two mappings fold a name differently, it can find a Channel whose name only `rfc1459` folds alike to it, or none, until the `005` comes.
 
 ## Inspection
 
@@ -408,6 +415,7 @@ Each feature is built from the floor up: what it needs, what it changes, and whe
 ### Member prefixes
 
 - Needs: `multi-prefix`. Without it, a member's prefixes are partial.
+- A `PREFIX` that is malformed, such as one that repeats a mode or a symbol, as `(oov)@%+` does, reads as the default `(ov)@+`, as `@iirc/protocol/isupport` says, so a symbol only it named, such as `%`, is a prefix that cannot be named.
 - Changes: a `NAMES` listing shows every prefix, in any order, so a member's prefixes are known, not partial. A symbol `PREFIX` does not name still stands for a prefix that cannot be named, so that member's stay partial. A set is known only while a Feature that makes it complete is on: when the cap is deleted, prefixes a listing made known go stale at once, and stay stale if it comes back, until something says them again. A `MODE` on stale prefixes gives what the floor would, partial: what they were, with the change. So does the next listing without the cap, and with it, they are known again. What the floor knew in full, a member listed with no prefix, stays known.
 - Scenarios: `prefixes.test.ts`
 

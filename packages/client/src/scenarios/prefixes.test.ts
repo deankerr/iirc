@@ -173,3 +173,34 @@ describe("completed prefixes, with inputs at one instant", () => {
     ).toMatchObject({ _tag: "Partial", atLeast: new Set(["o"]) });
   });
 });
+
+describe("a PREFIX that repeats a mode or a symbol", () => {
+  // `(oov)@%+` names `o` twice, so no rank is clear. The protocol's default `(ov)@+` holds,
+  // and `%`, which only the malformed value named, is a prefix that cannot be named.
+  const listed = [
+    registered(base, {
+      isupport: ["CASEMAPPING=rfc1459", "CHANTYPES=#", "PREFIX=(oov)@%+"],
+      offered: ["multi-prefix"],
+    }),
+    joined(base, "#iirc", ["@op", "%half", "+voiced"]),
+  ];
+
+  it("reads the members by the default PREFIX", () => {
+    const { state } = play(client, { configuration: base, transcript: listed });
+
+    expect([
+      prefixesOf(listed, "op"),
+      prefixesOf(listed, "half"),
+      prefixesOf(listed, "voiced"),
+      client.channel(state, "#iirc")?.ranks,
+    ]).toMatchObject([
+      { _tag: "Known", value: new Set(["o"]) },
+      { _tag: "Partial", atLeast: new Set() },
+      { _tag: "Known", value: new Set(["v"]) },
+      [
+        { mode: "o", symbol: "@" },
+        { mode: "v", symbol: "+" },
+      ],
+    ]);
+  });
+});

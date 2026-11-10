@@ -112,6 +112,28 @@ export interface ChannelKnowledge {
   readonly members: ReadonlyMap<string, MemberKnowledge>;
 }
 
+/** A membership prefix from `PREFIX`: the mode a member holds, and the symbol shown before a nick. */
+export interface Rank {
+  readonly mode: string;
+  readonly symbol: string;
+}
+
+/**
+ * One Channel as known, for a View that shows it alone, built from that Channel without
+ * the rest of the Network.
+ */
+export interface ChannelView {
+  /** The Channel's key, its name folded with `casemapping`. */
+  readonly key: string;
+  /** How the Connection folds names, which folds `key` and the members' keys. */
+  readonly casemapping: Casemapping;
+  /** The membership prefixes, from `PREFIX`, most privileged first. */
+  readonly ranks: readonly Rank[];
+  readonly channel: ChannelKnowledge;
+  /** Each member as a User, Self included, keyed as the members are. */
+  readonly users: ReadonlyMap<string, UserKnowledge>;
+}
+
 /** Everything a Client knows of its Network. Keys are folded by the Network's casemapping. */
 export interface Knowledge {
   readonly session: SessionKnowledge;

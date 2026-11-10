@@ -27,7 +27,8 @@ import { CredentialName } from "@iirc/protocol/line";
 import type { UnparseableReason } from "@iirc/protocol/line";
 import { TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
-import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Effect, Result, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Base64Url } from "effect/encoding";
 
 /**
  * Text a Network or someone on it chose, rather than the Owner or the Daemon: what was
@@ -904,6 +905,9 @@ export type TimelineChangesEvent = typeof TimelineChangesEvent.Type;
 
 // Knowledge.
 
+/** Where Self stands with a Channel: wanted, joining, in it, refused, or kicked. */
+const Standing = Schema.Literals(["Wanted", "Joining", "Joined", "Refused", "Kicked"]);
+
 /** Where the Client is with the Network. */
 export const SessionKnowledge = Schema.TaggedUnion({
   Connecting: { since: Instant },
@@ -949,7 +953,7 @@ export const ChannelKnowledge = Schema.Struct({
   members: Schema.Array(MemberKnowledge),
   modes: Fact(Schema.Array(ChannelMode)),
   name: Untrusted,
-  standing: Schema.Literals(["Wanted", "Joining", "Joined", "Refused", "Kicked"]),
+  standing: Standing,
   topic: Fact(Schema.NullOr(Topic)),
   wanted: Schema.Boolean,
 });
@@ -976,6 +980,130 @@ export const Knowledge = Schema.Struct({
 
 /** The decoded form of {@link Knowledge}. */
 export type Knowledge = typeof Knowledge.Type;
+
+// One Channel.
+
+/** A membership prefix, from `PREFIX`: the mode a member holds, and the symbol shown before a nick. */
+export const Rank = Schema.Struct({ mode: Untrusted, symbol: Untrusted });
+
+/** The decoded form of {@link Rank}. */
+export type Rank = typeof Rank.Type;
+
+/**
+ * What a Channel's Timeline shows at its head: the Channel's name, its topic and modes,
+ * where Self stands with it, how many members it has, and the membership prefixes, most
+ * privileged first, so a Frontend shows `@` and `+` as the Network does. `standing` is
+ * `null` when the Client holds no Channel by the Timeline's name, as after Self parted
+ * one the Owner no longer wants. A Channel Self is not in has no members, and its topic
+ * and modes are `Unknown`.
+ */
+export const ChannelHeader = Schema.Struct({
+  /** How many members it has. */
+  members: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  modes: Fact(Schema.Array(ChannelMode)),
+  name: Untrusted,
+  network: NetworkId,
+  ranks: Schema.Array(Rank),
+  standing: Schema.NullOr(Standing),
+  /** The Timeline read, which for a merged id is the Timeline it went to. */
+  timeline: TimelineId,
+  topic: Fact(Schema.NullOr(Topic)),
+});
+
+/** The decoded form of {@link ChannelHeader}. */
+export type ChannelHeader = typeof ChannelHeader.Type;
+
+/**
+ * A member of a Channel: their nick, the prefix modes they hold, such as `o` and `v`,
+ * listed in the order of `PREFIX`, and whether they are away, as their User is known.
+ */
+export const Member = Schema.Struct({
+  away: Fact(Schema.NullOr(Schema.Struct({ message: Untrusted }))),
+  nick: Untrusted,
+  prefixes: SetFact(Schema.Array(Untrusted)),
+});
+
+/** The decoded form of {@link Member}. */
+export type Member = typeof Member.Type;
+
+/**
+ * Where a page of members ends: the rank of its last member, which is the index in
+ * `PREFIX` of the highest prefix they hold, or the count of prefixes for none, and their
+ * nick folded with the Connection's casemapping.
+ */
+interface MemberPlace {
+  readonly rank: number;
+  readonly key: string;
+}
+
+const memberPlaceText = /^(?<rank>0|[1-9]\d{0,2})\.(?<key>[A-Za-z0-9_-]+)$/u;
+
+/**
+ * Where the next page of members begins: just after a member, by rank and then folded
+ * nick, as one opaque text that a page gives as `next`. It is parsed at the boundary, and
+ * text the Daemon could not have given is refused.
+ */
+export const MembersAfter = Schema.String.annotate({
+  description: "Where the next page of members begins, as a page gave it in `next`.",
+  identifier: "MembersAfter",
+}).pipe(
+  Schema.decodeTo(
+    Schema.toType(Schema.Struct({ key: Schema.String, rank: Schema.Int })),
+    SchemaTransformation.transformEffect<MemberPlace, string>({
+      decode: (text, options) => {
+        const groups = memberPlaceText.exec(text)?.groups;
+        const encoded = groups?.key ?? "";
+        const key = Result.getOrUndefined(Base64Url.decodeString(encoded));
+
+        return groups === undefined ||
+          key === undefined ||
+          key === "" ||
+          Base64Url.encode(key) !== encoded
+          ? Effect.fail(
+              new SchemaIssue.InvalidValue({ expected: "a page's `next`" }, text, options)
+            )
+          : Effect.succeed({ key, rank: Number(groups.rank) });
+      },
+      encode: ({ key, rank }) => Effect.succeed(`${rank}.${Base64Url.encode(key)}`),
+    })
+  )
+);
+
+/** The decoded form of {@link MembersAfter}. */
+export type MembersAfter = typeof MembersAfter.Type;
+
+/** The start of a nick to complete, which no nick longer than a Line could hold. */
+const NickPrefix = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(510));
+
+/**
+ * A page of a Channel's members: those after `after`, up to `limit`, and with `prefix`,
+ * only those whose nick starts with it under the Connection's casemapping.
+ */
+export const MembersQuery = Schema.Struct({
+  after: Schema.optionalKey(MembersAfter),
+  limit: Schema.optionalKey(Limit),
+  prefix: Schema.optionalKey(NickPrefix),
+});
+
+/** The decoded form of {@link MembersQuery}. */
+export type MembersQuery = typeof MembersQuery.Type;
+
+/**
+ * A page of a Channel's members, the most privileged first and then by nick folded with
+ * the Connection's casemapping, and whether more follow.
+ */
+export const MemberPage = Schema.Struct({
+  members: Schema.Array(Member),
+  more: Schema.Boolean,
+  network: NetworkId,
+  /** Where the next page begins, to give as `after`, or `null` when no more follow. */
+  next: Schema.NullOr(MembersAfter),
+  /** The Timeline read, which for a merged id is the Timeline it went to. */
+  timeline: TimelineId,
+});
+
+/** The decoded form of {@link MemberPage}. */
+export type MemberPage = typeof MemberPage.Type;
 
 // Status and inspection.
 

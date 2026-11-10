@@ -10,6 +10,9 @@ import {
   Cursor,
   IfSequence,
   ItemAfter,
+  MemberPage,
+  MembersAfter,
+  MembersQuery,
   NetworkId,
   NewsEvent,
   Resume,
@@ -50,6 +53,8 @@ describe("the contract", () => {
       "GET /api/news",
       "GET /api/timelines/changes",
       "GET /api/timelines/{timeline}",
+      "GET /api/timelines/{timeline}/channel",
+      "GET /api/timelines/{timeline}/members",
       "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
@@ -279,5 +284,87 @@ describe("the contract", () => {
       Option.none(),
       text,
     ]);
+  });
+
+  it("parses where the next page of members begins, and refuses anything the Daemon could not give", () => {
+    const after = Schema.decodeUnknownOption(MembersAfter);
+    const place = { key: "{a}|b^", rank: 2 };
+    const text = Schema.encodeSync(MembersAfter)(place);
+    const wide = { key: "nick\u{1F600}é", rank: 0 };
+
+    expect([
+      text,
+      after(text),
+      after(Schema.encodeSync(MembersAfter)(wide)),
+      after("2"),
+      after("2."),
+      after("02.YQ"),
+      after("1000.YQ"),
+      after("-1.YQ"),
+      after("2.YQ=="),
+      after("2.Y+"),
+      after("2.YR"),
+      after("2./w"),
+    ]).toStrictEqual([
+      "2.e2F9fGJe",
+      Option.some(place),
+      Option.some(wide),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+      Option.none(),
+    ]);
+  });
+
+  it("takes a page of members after a place, of up to 500, starting with some text", () => {
+    const after = Schema.encodeSync(MembersAfter)({ key: "a", rank: 0 });
+    const query = Schema.decodeUnknownOption(MembersQuery);
+
+    expect(
+      [
+        {},
+        { after, limit: "500", prefix: "[a" },
+        { prefix: "" },
+        { prefix: "x".repeat(511) },
+        { limit: "0" },
+        { limit: "501" },
+        { after: "nope" },
+      ].map((each) => Option.isSome(query(each)))
+    ).toStrictEqual([true, true, false, false, false, false, false]);
+  });
+
+  it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {
+    const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
+    const head = JSON.stringify(document.paths["/api/timelines/{timeline}/channel"]);
+    const members = JSON.stringify(document.paths["/api/timelines/{timeline}/members"]);
+
+    const page = Schema.encodeSync(MemberPage)({
+      members: [
+        {
+          away: { _tag: "Unknown" },
+          nick: "__proto__",
+          prefixes: { _tag: "Partial", at: Instant.make(0), atLeast: ["o"], from: "ircd" },
+        },
+      ],
+      more: false,
+      network: NetworkId.make("libera"),
+      next: null,
+      timeline: timelineIdOf(1, 0, 1),
+    });
+
+    expect([
+      head.includes(
+        `"ranks":{"type":"array","items":{"type":"object","properties":{"mode":${untrusted},"symbol":${untrusted}}`
+      ),
+      head.includes(`"name":${untrusted}`),
+      members.includes(`"nick":${untrusted}`),
+      members.includes(`"atLeast":{"type":"array","items":${untrusted}}`),
+      page.members.map((one) => [Object.keys(one).toSorted(), one.nick]),
+    ]).toStrictEqual([true, true, true, true, [[["away", "nick", "prefixes"], "__proto__"]]]);
   });
 });

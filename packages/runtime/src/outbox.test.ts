@@ -477,6 +477,9 @@ describe("shutdown", () => {
     const outlined = await runTest((world) =>
       Effect.gen(function* () {
         const throws: Client<null> = {
+          channel: () => {
+            throw new Error("not read");
+          },
           initial: null,
           inspect: () => {
             throw new Error("not inspected");

@@ -1,11 +1,3 @@
-/**
- * Clients for the kit's own tests: a tiny hand-written Client that registers, negotiates
- * caps, keeps NAMES, and sets a timer, so strict play, timers, and the laws have
- * something real to run against, and Clients that break replay on purpose. None of this
- * is the Client.
- *
- * @packageDocumentation
- */
 import {
   cap,
   isRejected,
@@ -19,6 +11,15 @@ import {
   user,
 } from "@iirc/protocol/line";
 import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
+/**
+ * Clients for the kit's own tests: a tiny hand-written Client that registers, negotiates
+ * caps, keeps NAMES, and sets a timer, so strict play, timers, and the laws have
+ * something real to run against, and Clients that break replay on purpose. None of this
+ * is the Client.
+ *
+ * @packageDocumentation
+ */
+import { constUndefined } from "effect/Function";
 
 import type { Client, Inspection, Step } from "../client.ts";
 import type { NetworkConfiguration } from "../configuration.ts";
@@ -586,6 +587,7 @@ const inspectWith =
  * @returns The Client.
  */
 export const toy = (flaws: Flaws = {}): Client<ToyState> => ({
+  channel: constUndefined,
   initial,
   inspect: inspectWith(flaws),
   known: known(flaws),
@@ -619,6 +621,7 @@ const seed = Math.random();
  * first Connection from a value seeded when its module loads.
  */
 export const seededClient: Client<{ readonly dialled: boolean }> = {
+  channel: constUndefined,
   initial: { dialled: false },
   inspect: () => inspect(initial),
   known: () => known({})(initial),

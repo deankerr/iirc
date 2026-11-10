@@ -77,7 +77,7 @@ A builder that names a Target, a Channel, or a nick refuses a list, a space, a l
 ```ts
 isupportTokens(params: readonly string[]): readonly IsupportToken[]   // Set { name, value } | Removed { name }
 unescapeValue(value: string): string
-prefixOf(value?): readonly Membership[] | undefined    // (ov)@+ when not sent, [] when empty
+prefixOf(value?): readonly Membership[] | undefined    // (ov)@+ when not sent, [] when empty, undefined when malformed
 channelModesOf(value?): ChannelModes                   // { list, always, whenSet, flags }
 chantypesOf(value?): string                            // #& when not sent
 statusmsgOf(value?): string                            // "" (none) when not sent
@@ -86,6 +86,8 @@ limitOf(value?): number | undefined                    // NICKLEN, TOPICLEN, and
 limitsOf(value?): readonly Limit[]                     // CHANLIMIT and MAXLIST pairs
 targetLimitsOf(value?): ReadonlyMap<string, number | undefined>   // TARGMAX
 ```
+
+`prefixOf` reads `PREFIX` as its membership prefixes, most privileged first, and gives `undefined` for a value that is malformed: one not of the form `(modes)symbols`, one whose modes and symbols do not pair one to one, or one that repeats a mode or a symbol, such as `(oov)@%+`, since each names one rank and a repeat leaves the order unclear. A caller then uses `defaultPrefix`, `(ov)@+`, as the Client does, so a symbol only the malformed value named reads as a prefix that cannot be named.
 
 `isupportTokens` takes all of a `005`'s parameters. The first is Self and the last is text for people, so neither is read. Which tokens a Session holds is the caller's to keep, and to bound.
 

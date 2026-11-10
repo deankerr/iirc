@@ -11,15 +11,27 @@ import type { CapName } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
 import type {
   ChannelKnowledge,
+  ChannelView,
   Knowledge,
   MemberKnowledge,
   SessionKnowledge,
   Standing,
   UserKnowledge,
 } from "./known.ts";
+import { rulesOf } from "./modes.ts";
 import type { Registered } from "./registry.ts";
 import { featuresOn } from "./seam.ts";
-import type { Caps, ChannelPhase, InSession, Link, Member, Network, Open, State } from "./state.ts";
+import type {
+  Caps,
+  Channel,
+  ChannelPhase,
+  InSession,
+  Link,
+  Member,
+  Network,
+  Open,
+  State,
+} from "./state.ts";
 import { tableOf } from "./timers.ts";
 
 /**
@@ -126,6 +138,31 @@ const selfOf = (session: InSession | undefined): UserKnowledge | undefined =>
         realname: session.realname,
       };
 
+// A Channel as Views see it, and each of its members as a User.
+const channelKnowledgeOf = (
+  channel: Channel,
+  open: Open | undefined,
+  users: Map<string, UserKnowledge>
+): ChannelKnowledge => {
+  const { phase } = channel;
+  const joined = phase._tag === "Joined" ? phase : undefined;
+
+  if (joined !== undefined && open !== undefined) {
+    for (const [nick, member] of joined.members) {
+      users.set(nick, userOf(member.nick, open, nick));
+    }
+  }
+
+  return {
+    members: membersOf(joined?.members),
+    modes: joined?.modes ?? unknown,
+    name: channel.name,
+    standing: standingOf(phase),
+    topic: joined?.topic ?? unknown,
+    wanted: channel.wanted,
+  };
+};
+
 /**
  * What is known, for Views.
  * @param state - The State.
@@ -139,28 +176,10 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
   const users = new Map<string, UserKnowledge>();
 
   const channels = new Map(
-    [...state.channels].map(([key, channel]): [string, ChannelKnowledge] => {
-      const { phase } = channel;
-      const joined = phase._tag === "Joined" ? phase : undefined;
-
-      if (joined !== undefined && open !== undefined) {
-        for (const [nick, member] of joined.members) {
-          users.set(nick, userOf(member.nick, open, nick));
-        }
-      }
-
-      return [
-        key,
-        {
-          members: membersOf(joined?.members),
-          modes: joined?.modes ?? unknown,
-          name: channel.name,
-          standing: standingOf(phase),
-          topic: joined?.topic ?? unknown,
-          wanted: channel.wanted,
-        },
-      ];
-    })
+    [...state.channels].map(([key, channel]): [string, ChannelKnowledge] => [
+      key,
+      channelKnowledgeOf(channel, open, users),
+    ])
   );
 
   if (self !== undefined) {
@@ -174,6 +193,45 @@ export const knowledgeOf = (state: State, fold: (name: string) => string): Knowl
     declared: state.declared,
     self,
     session: sessionKnowledge(state.network),
+    users,
+  };
+};
+
+/**
+ * What is known of one Channel, for a View that shows it alone. It reads that Channel and
+ * its members, never the rest of the Network.
+ * @param state - The State.
+ * @param fold - Folds a name by the casemapping in force.
+ * @param name - The Channel's name, in any spelling the Connection's casemapping folds alike.
+ * @returns The Channel, or `undefined` when the Client holds none by that name.
+ */
+export const channelViewOf = (
+  state: State,
+  fold: (name: string) => string,
+  name: string
+): ChannelView | undefined => {
+  const key = fold(name);
+  const channel = state.channels.get(key);
+
+  if (channel === undefined) {
+    return undefined;
+  }
+
+  const open = openOf(state);
+  const self = selfOf(sessionOf(state));
+  const users = new Map<string, UserKnowledge>();
+  const known = channelKnowledgeOf(channel, open, users);
+  const selfKey = self === undefined ? undefined : fold(self.nick);
+
+  if (self !== undefined && selfKey !== undefined && users.has(selfKey)) {
+    users.set(selfKey, self);
+  }
+
+  return {
+    casemapping: state.casemapping,
+    channel: known,
+    key,
+    ranks: rulesOf(open?.isupport ?? new Map()).prefix,
     users,
   };
 };

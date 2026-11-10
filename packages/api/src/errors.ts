@@ -24,6 +24,36 @@ export class UnknownTimeline extends Schema.TaggedError<
 >()("UnknownTimeline", { timeline: TimelineId }, { httpApiStatus: 404 }) {}
 
 /**
+ * The Timeline is the Network's own or a Direct Message partner's, not a Channel's, so it
+ * has no Channel to read. A Timeline's kind never changes: a 404.
+ */
+export class NotAChannel extends Schema.TaggedError<
+  NotAChannel,
+  { readonly brand: unique symbol }
+>()(
+  "NotAChannel",
+  { kind: Schema.Literals(["Network", "Direct"]), timeline: TimelineId },
+  { httpApiStatus: 404 }
+) {}
+
+/**
+ * Self is not in the Channel now, so it has no members to list: `standing` says where Self
+ * stands with it, or `null` when the Client holds no such Channel. Asking again once Self
+ * is in it succeeds: a 409.
+ */
+export class NotInChannel extends Schema.TaggedError<
+  NotInChannel,
+  { readonly brand: unique symbol }
+>()(
+  "NotInChannel",
+  {
+    standing: Schema.NullOr(Schema.Literals(["Wanted", "Joining", "Refused", "Kicked"])),
+    timeline: TimelineId,
+  },
+  { httpApiStatus: 409 }
+) {}
+
+/**
  * The Timelines could not be read. They are derived from the Journal, and a read may
  * succeed when asked again, as one that waited on a lock does, while a store that is
  * damaged is made again when the Daemon restarts: a 503.

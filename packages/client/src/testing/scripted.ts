@@ -1,3 +1,5 @@
+import { constUndefined } from "effect/Function";
+
 import type { Client, Inspection } from "../client.ts";
 import type { Input } from "../input.ts";
 import type { Knowledge } from "../known.ts";
@@ -44,6 +46,7 @@ const inspection: Inspection = {
  * @returns A Client that follows the script.
  */
 export const scripted = (script: readonly Scripted[]): Client<ScriptedState> => ({
+  channel: constUndefined,
   initial: { next: 0 },
   inspect: () => inspection,
   known: () => knowsNothing,

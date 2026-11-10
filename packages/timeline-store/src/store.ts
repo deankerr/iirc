@@ -208,6 +208,13 @@ export interface TimelineStoreService {
     network: string,
     page?: { readonly after?: TimelineId | undefined; readonly limit?: number | undefined }
   ) => Effect.Effect<readonly Summary[], TimelineStoreFailed>;
+  /**
+   * One Timeline, following a merged id to the Timeline it went to, or `None` when no
+   * Timeline ever had the id.
+   */
+  readonly timeline: (
+    timeline: TimelineId
+  ) => Effect.Effect<Option.Option<Summary>, TimelineStoreFailed>;
   /** A window of a Timeline's items, following a merged id to where it went. */
   readonly window: (
     timeline: TimelineId,

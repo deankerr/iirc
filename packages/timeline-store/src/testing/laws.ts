@@ -1231,6 +1231,11 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           [network, channel]
         );
         yield* same(
+          "one Timeline read through a merged id",
+          yield* store.timeline(third),
+          Option.fromUndefinedOr((yield* store.timelines(libera)).find(({ id }) => id === channel))
+        );
+        yield* same(
           "tombstones name a Timeline that exists",
           changed.merged.map(({ id, into, changed: when }) => [id, into, when]),
           [
@@ -1247,7 +1252,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           ]
         );
       }),
-    name: "merges a Timeline's items into the one kept, and leaves a tombstone",
+    name: "merges a Timeline's items into the one kept, and leaves a tombstone its id reads through",
   },
   {
     check: (store) =>
@@ -1659,8 +1664,14 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           ]
         );
         yield* same("still readable", yield* texts(store, channel, all), "| x |");
+        yield* same(
+          "one Timeline as listed",
+          [yield* store.timeline(channel), yield* store.timeline(other)],
+          listed.map((summary) => Option.some(summary)).slice(1)
+        );
+        yield* same("an id never given", yield* store.timeline(third), Option.none());
       }),
-    name: "describes each Timeline as last told, a detached one with no key",
+    name: "describes each Timeline as last told, a detached one with no key, and reads one by id",
   },
   {
     check: (store) =>

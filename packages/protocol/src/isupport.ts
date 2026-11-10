@@ -154,7 +154,8 @@ const prefixGrammar = /^\((?<modes>[^)]*)\)(?<symbols>.*)$/su;
  * Reads `PREFIX`: the membership prefixes, from most privileged to least.
  * @param value - The token's value, or `undefined` if it was not sent.
  * @returns The prefixes, {@link defaultPrefix} if it was not sent, none for an empty
- * value, or `undefined` if the value does not pair each mode with one symbol.
+ * value, or `undefined` if the value does not pair each mode with one symbol, or repeats a
+ * mode or a symbol, such as `(oov)@%+`.
  */
 export const prefixOf = (value: string | undefined): readonly Membership[] | undefined => {
   if (value === undefined) {
@@ -169,7 +170,13 @@ export const prefixOf = (value: string | undefined): readonly Membership[] | und
   const modes = characters(parts?.modes ?? "");
   const symbols = characters(parts?.symbols ?? "");
 
-  if (parts === undefined || modes.length !== symbols.length) {
+  // Each mode and each symbol names one rank, so one said twice leaves the order unclear.
+  if (
+    parts === undefined ||
+    modes.length !== symbols.length ||
+    new Set(modes).size !== modes.length ||
+    new Set(symbols).size !== symbols.length
+  ) {
     return undefined;
   }
 

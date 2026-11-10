@@ -477,6 +477,9 @@ describe("the file", () => {
                 )
               ),
               overflowed: yield* emitted(store.changedAfter(3, 1)),
+              // One Timeline by its id, and by an id merged into it.
+              timeline: yield* emitted(store.timeline(channel)),
+              timelineMerged: yield* emitted(store.timeline(third)),
               timelines: yield* emitted(store.timelines(libera, { after: network, limit: 1 })),
               windowAfter: yield* emitted(
                 store.window(channel, { _tag: "After", position: at }, 1)

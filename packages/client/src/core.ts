@@ -52,7 +52,7 @@ import { initialState } from "./state.ts";
 import { addressFor, pruned, rescheduled } from "./sts.ts";
 import { lagAfter, silentAfter, tableOf, timersOf, wakes } from "./timers.ts";
 import type { Purpose } from "./timers.ts";
-import { inspectionOf, knowledgeOf, onNow, openOf, sessionOf } from "./views.ts";
+import { channelViewOf, inspectionOf, knowledgeOf, onNow, openOf, sessionOf } from "./views.ts";
 import { routeOurs } from "./where.ts";
 
 /** The token of the `PING` the Client sends to hear from a quiet Ircd. */
@@ -755,6 +755,7 @@ const dispatch = (run: Run, input: Input): void => {
  * @returns The Client.
  */
 export const makeClient = (features: readonly Registered[]): Client<State> => ({
+  channel: (state, name) => channelViewOf(state, folder(state), name),
   initial: initialState,
   inspect: (state) => inspectionOf(features, state),
   known: (state) => knowledgeOf(state, folder(state)),

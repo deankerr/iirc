@@ -18,7 +18,9 @@ import type {
   TimelineItem as WireTimelineItem,
   Tombstone as WireTombstone,
   WindowGap as WireWindowGap,
+  ChannelHeader as WireChannelHeader,
   ChannelKnowledge as WireChannelKnowledge,
+  Member as WireMember,
   MemberKnowledge as WireMemberKnowledge,
   ModeChange as WireModeChange,
   SessionKnowledge as WireSessionKnowledge,
@@ -50,6 +52,7 @@ import type {
 } from "@iirc/client";
 import type {
   ChannelKnowledge,
+  ChannelView,
   Fact,
   Knowledge,
   KnownFact,
@@ -63,6 +66,8 @@ import type { Happened, NetworkInspection, NetworkStatus } from "@iirc/runtime";
 import type { CollapsedGap, Gap, Item, Summary, Tombstone, Unread } from "@iirc/timeline-store";
 import type { Content, Delivery } from "@iirc/timelines";
 
+import { inRankOrder } from "./members.ts";
+import type { Placed } from "./members.ts";
 import type { ProjectorStatus } from "./projector.ts";
 
 /**
@@ -110,14 +115,18 @@ const fact = <T, W>(source: SingleFact<T>, map: (value: T) => W) => {
   }
 };
 
-const setFact = <T>(source: Fact<ReadonlySet<T>>) => {
+// A set's fact, its members listed as `list` orders them, or as the set holds them.
+const setFact = <T>(
+  source: Fact<ReadonlySet<T>>,
+  list: (set: ReadonlySet<T>) => readonly T[] = (set) => [...set]
+) => {
   switch (source._tag) {
     case "Known": {
       return {
         _tag: "Known",
         at: source.at,
         from: source.from,
-        value: [...source.value],
+        value: list(source.value),
       } as const;
     }
 
@@ -125,13 +134,13 @@ const setFact = <T>(source: Fact<ReadonlySet<T>>) => {
       return {
         _tag: "Partial",
         at: source.at,
-        atLeast: [...source.atLeast],
+        atLeast: list(source.atLeast),
         from: source.from,
       } as const;
     }
 
     case "Stale": {
-      return { _tag: "Stale", since: source.since, was: [...source.was] } as const;
+      return { _tag: "Stale", since: source.since, was: list(source.was) } as const;
     }
 
     case "Unknown": {
@@ -613,7 +622,7 @@ const user = (source: UserKnowledge): Fields<UserKnowledge, WireUserKnowledge> =
   realname: fact(source.realname, same),
 });
 
-const member = (
+const memberKnowledge = (
   key: string,
   source: MemberKnowledge
 ): Fields<MemberKnowledge, WireMemberKnowledge, "key"> => ({
@@ -627,7 +636,7 @@ const channel = (
   source: ChannelKnowledge
 ): Fields<ChannelKnowledge, WireChannelKnowledge, "key"> => ({
   key,
-  members: [...source.members].map(([nick, one]) => member(nick, one)),
+  members: [...source.members].map(([nick, one]) => memberKnowledge(nick, one)),
   modes: fact(source.modes, (modes) => [...modes].map(([mode, param]) => ({ mode, param }))),
   name: source.name,
   standing: source.standing,
@@ -673,6 +682,49 @@ const sessionKnowledge = (source: Knowledge["session"]): WireSessionKnowledge =>
     }
   }
 };
+
+/**
+ * A Channel's head, as the contract says it: the Channel as the Client knows it now, or,
+ * when it holds none by the Timeline's name, the Timeline's name with nothing known.
+ * @param timeline - The Timeline read, which for a merged id is the one it went to.
+ * @param view - The Channel, or `undefined` when the Client holds none by that name.
+ * @returns Its wire form.
+ */
+export const channelHeader = (
+  timeline: Summary,
+  view: ChannelView | undefined
+): WireChannelHeader => ({
+  members: view?.channel.members.size ?? 0,
+  modes:
+    view === undefined
+      ? { _tag: "Unknown" }
+      : fact(view.channel.modes, (modes) => [...modes].map(([mode, param]) => ({ mode, param }))),
+  name: view?.channel.name ?? timeline.name,
+  network: WireNetworkId.make(timeline.network),
+  ranks: (view?.ranks ?? []).map(({ mode, symbol }) => ({ mode, symbol })),
+  standing: view?.channel.standing ?? null,
+  timeline: timeline.id,
+  topic:
+    view === undefined
+      ? { _tag: "Unknown" }
+      : fact(view.channel.topic, (one) => (one === null ? null : topic(one))),
+});
+
+/**
+ * A member, as the contract says it, with the prefix modes they hold in the order of
+ * `PREFIX`.
+ * @param placed - The member, and whether their User is away.
+ * @param order - Each prefix mode's index in `PREFIX`.
+ * @returns Its wire form.
+ */
+export const member = (
+  placed: Placed,
+  order: ReadonlyMap<string, number>
+): Fields<MemberKnowledge, WireMember, "away"> => ({
+  away: fact(placed.away, (away) => (away === null ? null : { message: away.message })),
+  nick: placed.member.nick,
+  prefixes: setFact(placed.member.prefixes, (held) => inRankOrder(held, order)),
+});
 
 /**
  * What a Client knows, as the contract says it.
