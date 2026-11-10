@@ -8,9 +8,10 @@ iirc is an always-on IRC client you can build on. A headless Daemon stays on you
 - **The RFC floor,** on any Ircd that speaks RFC 1459 and 2812, with or without cap negotiation.
 - **IRCv3:** `cap-notify`, SASL PLAIN, `message-tags`, `server-time`, `batch`, `echo-message` with `labeled-response`, `multi-prefix`, `away-notify`, `UTF8ONLY`, and STS.
 - **The Journal** in SQLite. A restart rebuilds every Network from it, and News resumes from any point in it.
-- **The API:** configure Networks, say things, hold Credentials, read what the Client knows and its machines' states, and follow News as Server-Sent Events.
+- **The API:** configure Networks, say things, hold Credentials, read what the Client knows and its machines' states, follow News as Server-Sent Events, and read Timelines.
+- **The web frontend,** so far signing in with a key and listing the Networks, served by `iirc daemon --web` on the API's own origin.
 
-Not built yet: the web frontend and Views. Each module's README ends with what it does not do yet.
+Not built yet: most of the web frontend. Each module's README ends with what it does not do yet.
 
 ## Quick start
 
@@ -21,16 +22,24 @@ bun install
 bun run check         # lint and format (Ultracite)
 bun run knip          # unused files and dependencies
 bun run test          # every workspace's tests, with no network
-bun run e2e           # a real Daemon against a private ngircd and Ergo
+bun run e2e           # a real Daemon against a private ngircd and Ergo, and in Chromium
+bun run build:web     # the web frontend, into apps/web/dist
 ```
 
-`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, and fetches Ergo itself. [The Daemon's README](packages/daemon/README.md#end-to-end) says what it covers.
+`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches. [The Daemon's README](packages/daemon/README.md#end-to-end) and [the executable's](apps/iirc/README.md#tests) say what it covers.
 
 ## Run a Daemon
 
 ```sh
 KEY=$(bun run iirc key create demo --data-dir ~/.local/share/iirc)   # prints the key once
 bun run iirc daemon --data-dir ~/.local/share/iirc                    # serves on 127.0.0.1:7667
+```
+
+To use the web frontend, build it and serve it with the Daemon, then open `http://127.0.0.1:7667` and sign in with the key:
+
+```sh
+bun run build:web
+bun run iirc daemon --data-dir ~/.local/share/iirc --web apps/web/dist
 ```
 
 Then, from another shell, add a Network and watch it:
@@ -69,8 +78,10 @@ Configuration always goes whole, so joining or parting a Channel is another `PUT
 | [`packages/journal-sqlite`](packages/journal-sqlite) | The production Journal: Entries in SQLite, durable before `append` returns |
 | [`packages/vault-file`](packages/vault-file) | The production Vault: Credentials in a `0600` file, written atomically |
 | [`packages/api`](packages/api) | The HTTP API's contract, which every Frontend uses |
+| [`packages/frontend`](packages/frontend) | The web frontend's pure core: what it shows, as plain data and reducers |
 | [`packages/daemon`](packages/daemon) | The Daemon: wires it all together and serves the API |
 | [`apps/iirc`](apps/iirc) | The `iirc` executable |
+| [`apps/web`](apps/web) | The web frontend: React over the pure core, built with Vite |
 | [`fixtures/transcripts`](fixtures/transcripts) | Real Sessions on Ergo and ngircd, replayed in the tests |
 | [`docs`](docs) | Architecture, decisions, and the IRC specifications |
 

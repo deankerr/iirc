@@ -72,6 +72,8 @@ flowchart TB
   api["@iirc/api<br/>HttpApi contract"]
   daemon["@iirc/daemon<br/>composition root"]
   app["apps/iirc<br/>the executable"]
+  frontend["@iirc/frontend<br/>the web frontend's pure core"]
+  web["apps/web<br/>the web frontend"]
 
   subgraph adapters["Adapters"]
     tbun["transport-bun"]
@@ -89,6 +91,8 @@ flowchart TB
   api --> client & timelines
   daemon --> api & runtime & store & adapters
   app --> daemon
+  web --> api & frontend
+  app -.->|"serves its build"| web
 ```
 
 | Package | Pure | Its job |
@@ -105,9 +109,11 @@ flowchart TB
 | [`@iirc/timeline-store-sqlite`](../packages/timeline-store-sqlite/README.md) | no | The Timelines in SQLite, each step applied whole, made again from the Journal when it cannot be used. |
 | [`@iirc/api`](../packages/api/README.md) | contract | The HTTP API every Frontend uses, as Schemas and typed errors. |
 | [`@iirc/daemon`](../packages/daemon/README.md) | no | Wires the Layers together, implements the API, and serves it. |
+| [`@iirc/frontend`](../packages/frontend/README.md) | yes | The web frontend's core: what it shows, as plain data and reducers, such as whether the browser is signed in. |
 | [`apps/iirc`](../apps/iirc/README.md) | no | The `iirc` executable, whose arguments choose what it runs ([ADR 0007](adr/0007-one-binary-shapes-by-argument.md)). |
+| [`apps/web`](../apps/web/README.md) | no | The web frontend: React over its core, reaching the Daemon only through the API ([ADR 0010](adr/0010-the-web-frontend-is-a-pure-core-under-react.md)). |
 
-The lint fence in `oxlint.config.ts` keeps the dependencies pointing this way. The pure packages may not import Effect's services, Bun, Node, an adapter, or a test kit, and [`AGENTS.md`](../AGENTS.md) states the rule the fence approximates.
+The lint fence in `oxlint.config.ts` keeps the dependencies pointing this way. The pure packages may not import Effect's services, Bun, Node, an adapter, or a test kit, the web frontend's core may not import React or reach the DOM, and the web frontend reaches the Daemon only through `@iirc/api`. [`AGENTS.md`](../AGENTS.md) states the rule the fence approximates.
 
 ## Inside the Client
 
@@ -245,6 +251,8 @@ sequenceDiagram
 
 `iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal, the Vault, and the Timeline store in it, starts the Runtime with the real Client and the projector beside it, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`, or a sign-in, which a browser gets for its key once and holds in an `HttpOnly` cookie. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. It reads Timelines rather than folding News: a Network's Timelines a page at a time, a window of one, and the items a step made, each with the projection version and the last step folded into what it read, and then the changes from that place as Server-Sent Events, which wait on the projector rather than poll the store, hold a bounded number of things each, and reset a place a new projection version cannot resume. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
 
+`iirc daemon --web <dir>` also serves a built web frontend from a directory, on the API's own origin. Its routes are a Layer that only `apps/iirc` knows, which the Daemon serves beside the API without knowing what it is, and nothing under `/api` ever reaches them.
+
 ## Testing
 
 - **The everyday suite opens no socket to an Ircd.** `bun run test` runs every package's tests.
@@ -252,7 +260,7 @@ sequenceDiagram
 - **Four laws hold across caps.** For every set of caps the kit's `across` gives, a Feature that is off changes nothing, more caps only sharpen facts, replay is exact, and after `CAP DEL` behaviour matches never having had the cap.
 - **Recorded Ircds replay in the suite.** The [fixtures](../fixtures/transcripts/README.md) are real Sessions on Ergo and ngircd, and the Client must follow each with nothing ignored.
 - **Each port has laws** that its memory adapter and its production adapter both pass.
-- **End-to-end runs are deliberate.** `bun run e2e` drives a real Daemon through its API against a private ngircd and Ergo on loopback ports, covering the floor, a restart, pacing, a graceful `QUIT`, and SASL over TLS.
+- **End-to-end runs are deliberate.** `bun run e2e` drives a real Daemon through its API against a private ngircd and Ergo on loopback ports, covering the floor, a restart, pacing, a graceful `QUIT`, and SASL over TLS. It then drives the web frontend in Chromium on a real `iirc daemon --web`, signing in, reloading, and signing out.
 
 ## Extending it
 

@@ -7,7 +7,7 @@ iirc ships as one executable, `iirc`, and its arguments choose what it runs: a D
 | Shape | Command | Runs | Exists |
 | --- | --- | --- | --- |
 | Stand-alone Daemon | `iirc daemon` | The Daemon and its API | Yes |
-| Daemon with web frontend | `iirc daemon --web` | The same, plus static routes on one origin | Not yet |
+| Daemon with web frontend | `iirc daemon --web <dir>` | The same, plus static routes on one origin | Yes, from a directory |
 | Stand-alone web frontend | `iirc web --daemon-url <url>` | Static routes, and a proxy to a Daemon's `/api` | Not yet |
 | Static files | `dist/` behind any reverse proxy | Nothing of ours at run time | Not yet |
 

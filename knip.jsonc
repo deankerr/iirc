@@ -2,4 +2,6 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // The tsconfig plugin name is served by @effect/tsgo, not its own package.
   "ignoreDependencies": ["@effect/language-service"],
+  // TypeScript reads these for the class names each CSS Module exports; nothing imports them.
+  "ignore": ["apps/web/src/**/*.module.d.css.ts"],
 }

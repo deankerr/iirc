@@ -7,6 +7,7 @@
       "packages/*"
     ],
     "catalog": {
+      "@effect/atom-react": "4.1.1",
       "@effect/platform-bun": "4.1.1",
       "@effect/sql-sqlite-bun": "4.1.1",
       "effect": "4.1.1",
@@ -21,7 +22,8 @@
     "knip": "knip",
     "prepare": "effect-tsgo patch --oxlint && if git rev-parse --git-dir >/dev/null 2>&1; then lefthook install; fi",
     "test": "bun run --parallel --filter '*' test",
-    "e2e": "bun run --filter @iirc/daemon e2e"
+    "e2e": "bun run --filter @iirc/daemon e2e && bun run --filter iirc e2e",
+    "build:web": "bun run --filter @iirc/web build"
   },
   "devDependencies": {
     "@effect/tsgo": "0.63.0",

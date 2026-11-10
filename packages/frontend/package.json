@@ -1,0 +1,16 @@
+{
+  "name": "@iirc/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./sign-in": "./src/sign-in.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "vitest": "catalog:"
+  }
+}

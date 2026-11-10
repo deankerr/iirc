@@ -14,8 +14,10 @@ import { layer as layerTransport } from "@iirc/transport-bun";
 import type { BunTransportOptions } from "@iirc/transport-bun";
 import { layerBun as layerVault } from "@iirc/vault-file";
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Logger, Scope } from "effect";
+import type { Path } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { HttpRouter } from "effect/http";
+import type { HttpPlatform } from "effect/http";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
@@ -165,16 +167,31 @@ const stopsFirst = Layer.effectDiscard(
 );
 
 /**
+ * Routes served beside the API on its origin, which the Daemon knows nothing of. They may
+ * use the server's file system and file responses.
+ */
+export type Beside<E> = Layer.Layer<
+  never,
+  E,
+  HttpRouter.HttpRouter | HttpPlatform.HttpPlatform | FileSystem.FileSystem | Path.Path
+>;
+
+/**
  * The Daemon: the core, provided outside `HttpRouter.serve`, which forks the MemoMap and
  * would build anything shared inside it twice, and the API served on `listen`.
  * @param options - The data directory and the Transport's options.
  * @param listen - Where to listen.
+ * @param beside - Routes to serve beside the API, none unless given.
  * @returns The Daemon, which runs for as long as the Layer lives, and its `HttpServer`.
  */
-export const layerDaemon = (options: DaemonOptions, listen: Listen = defaultListen) =>
+export const layerDaemon = <E = never>(
+  options: DaemonOptions,
+  listen: Listen = defaultListen,
+  beside: Beside<E> = Layer.empty
+) =>
   stopsFirst.pipe(
     Layer.provideMerge(
-      HttpRouter.serve(ApiRoutes, { disableLogger: true }).pipe(
+      HttpRouter.serve(Layer.merge(ApiRoutes, beside), { disableLogger: true }).pipe(
         Layer.provideMerge(
           BunHttpServer.layer({ gracefulShutdownTimeout, hostname: listen.host, port: listen.port })
         )

@@ -1,0 +1,26 @@
+.screen {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: var(--space-4);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: var(--measure);
+}
+
+.title {
+  color: var(--color-accent);
+}
+
+.hint {
+  color: var(--color-muted);
+}
+
+.failure {
+  color: var(--color-danger);
+}

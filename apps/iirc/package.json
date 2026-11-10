@@ -7,7 +7,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "bun --bun vitest run"
+    "test": "bun --bun vitest run --exclude 'src/e2e/**'",
+    "e2e": "bun run --filter @iirc/web build && bun --bun vitest run src/e2e"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
@@ -15,6 +16,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "playwright": "1.65.0",
     "vitest": "catalog:"
   }
 }

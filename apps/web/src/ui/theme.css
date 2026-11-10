@@ -1,0 +1,81 @@
+/*
+ * The theme: every colour, size, and font the Frontend uses, as CSS variables. Modules
+ * read these and never name a colour of their own.
+ */
+:root {
+  color-scheme: light dark;
+
+  --font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --font-size: 13px;
+  --line-height: 1.45;
+
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 16px;
+  --space-5: 32px;
+
+  --radius: 2px;
+  --border-width: 1px;
+  --measure: 44ch;
+
+  --color-background: #f6f5f1;
+  --color-surface: #ecebe6;
+  --color-text: #24292e;
+  --color-muted: #6a737d;
+  --color-border: #d1d0ca;
+  --color-accent: #0b6e6e;
+  --color-on-accent: #f6f5f1;
+  --color-danger: #b3261e;
+  --color-ok: #2e7d32;
+  --color-focus: #0b6e6e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #111314;
+    --color-surface: #1a1d1f;
+    --color-text: #d4d7d6;
+    --color-muted: #7d8588;
+    --color-border: #2c3134;
+    --color-accent: #5fb3b3;
+    --color-on-accent: #111314;
+    --color-danger: #f28b82;
+    --color-ok: #8bc48a;
+    --color-focus: #5fb3b3;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
