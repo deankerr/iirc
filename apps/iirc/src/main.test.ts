@@ -137,9 +137,7 @@ const startDaemon = async (directory: string, ...args: readonly string[]) => {
   }
 };
 
-// Each test runs `iirc` as several Bun processes in turn, which the default 5 s does not
-// always cover while every workspace's tests run at once.
-describe("iirc", { timeout: 20_000 }, () => {
+describe("iirc", () => {
   afterEach(() => {
     for (const directory of directories.splice(0)) {
       rmSync(directory, { force: true, recursive: true });

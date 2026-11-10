@@ -255,7 +255,7 @@ sequenceDiagram
 
 ## Testing
 
-- **The everyday suite opens no socket to an Ircd.** `bun run test` runs every package's tests.
+- **The everyday suite opens no socket to an Ircd.** `bun run test` runs every package's tests in one Vitest run, with each package a project in the root `vitest.config.ts`, so one worker pool serves them all. A package's own `bun run test` runs just its tests.
 - **Client scenarios are transcripts of IRC.** The [test kit](../packages/client/src/testing/README.md) plays a transcript through the Client on a fake clock, matches every Line it sends, and fails with a transcript diff. After every scenario it replays the whole Journal and checks the result is the same, and that State is plain data.
 - **Four laws hold across caps.** For every set of caps the kit's `across` gives, a Feature that is off changes nothing, more caps only sharpen facts, replay is exact, and after `CAP DEL` behaviour matches never having had the cap.
 - **Recorded Ircds replay in the suite.** The [fixtures](../fixtures/transcripts/README.md) are real Sessions on Ergo and ngircd, and the Client must follow each with nothing ignored.

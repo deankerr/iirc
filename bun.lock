@@ -16,6 +16,7 @@
         "oxlint-tsgolint": "7.0.2005",
         "typescript": "7.0.2",
         "ultracite": "8.1.0",
+        "vitest": "catalog:",
       },
     },
     "apps/iirc": {

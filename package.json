@@ -21,7 +21,7 @@
     "fix": "ultracite fix",
     "knip": "knip",
     "prepare": "effect-tsgo patch --oxlint && if git rev-parse --git-dir >/dev/null 2>&1; then lefthook install; fi",
-    "test": "bun run --parallel --filter '*' test",
+    "test": "bun --bun vitest run",
     "e2e": "bun run --filter @iirc/daemon e2e && bun run --filter iirc e2e",
     "build:web": "bun run --filter @iirc/web build"
   },
@@ -36,7 +36,8 @@
     "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "typescript": "7.0.2",
-    "ultracite": "8.1.0"
+    "ultracite": "8.1.0",
+    "vitest": "catalog:"
   },
   "engines": {
     "bun": "1.4.4",
