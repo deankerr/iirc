@@ -7,6 +7,7 @@
 import { chantypesOf } from "@iirc/protocol/isupport";
 
 import type { Inspection } from "./client.ts";
+import type { KnownBefore } from "./feature.ts";
 import type { CapName } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
 import type {
@@ -162,6 +163,18 @@ const channelKnowledgeOf = (
     wanted: channel.wanted,
   };
 };
+
+/**
+ * What was known of the Session and Self, for Feature hooks. It reads neither Channels
+ * nor members, so it costs the same on any Network.
+ * @param state - The State.
+ * @returns Where the Session is, how names fold, and Self.
+ */
+export const knownBeforeOf = (state: State): KnownBefore => ({
+  casemapping: state.casemapping,
+  self: selfOf(sessionOf(state)),
+  session: sessionKnowledge(state.network),
+});
 
 /**
  * What is known, for Views.

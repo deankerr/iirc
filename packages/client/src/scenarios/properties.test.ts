@@ -13,6 +13,7 @@ import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
 import type { Input, UnsentLine } from "../input.ts";
+import { listedMembers } from "../members.ts";
 import type { News } from "../news.ts";
 import { timers } from "../output.ts";
 import type { TimerTable } from "../output.ts";
@@ -487,7 +488,12 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
   // Users kept are never more than the members kept: membership churn cannot grow them.
   const members = new Set(
     [...step.state.channels.values()].flatMap(({ phase }) =>
-      phase._tag === "Joined" ? [...phase.members.keys(), ...(phase.listing?.keys() ?? [])] : []
+      phase._tag === "Joined"
+        ? [
+            ...phase.members.keys(),
+            ...(phase.listing === undefined ? [] : listedMembers(phase.listing).keys()),
+          ]
+        : []
     )
   );
 

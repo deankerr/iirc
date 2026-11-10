@@ -9,17 +9,16 @@ import { casefold } from "@iirc/protocol/casemapping";
 import { isRejected } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected, SecretLine } from "@iirc/protocol/line";
 
-import type { Departure, Refusal, Sendable } from "./feature.ts";
+import type { Departure, KnownBefore, Refusal, Sendable } from "./feature.ts";
 import type { Instant } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
-import type { Knowledge } from "./known.ts";
 import type { EndReason, IgnoredReason, News } from "./news.ts";
 import type { Output } from "./output.ts";
 import type { Registered } from "./registry.ts";
 import type { Reading } from "./seam.ts";
 import { runStage } from "./seam.ts";
 import type { Link, Open, State } from "./state.ts";
-import { knowledgeOf, negotiated, onNow, openOf } from "./views.ts";
+import { knownBeforeOf, negotiated, onNow, openOf } from "./views.ts";
 
 /** A step in progress. */
 export interface Run {
@@ -29,8 +28,8 @@ export interface Run {
   readonly registry: readonly Registered[];
   readonly outputs: Output[];
   readonly news: News[];
-  /** What was known before the step, worked out only if a Feature reads it. */
-  known: Knowledge | undefined;
+  /** What was known of the Session and Self before the step, worked out once a Feature runs. */
+  known: KnownBefore | undefined;
 }
 
 /**
@@ -95,7 +94,7 @@ export const readingOf = (run: Run): Reading | undefined => {
     return undefined;
   }
 
-  run.known ??= knowledgeOf(run.before, folder(run.before));
+  run.known ??= knownBeforeOf(run.before);
 
   return {
     at: run.at,

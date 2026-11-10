@@ -6,9 +6,16 @@
  * @packageDocumentation
  */
 import type { NetworkConfiguration } from "./configuration.ts";
-import type { Context, Effects, Kept, Refined, Registration, Sendable } from "./feature.ts";
+import type {
+  Context,
+  Effects,
+  Kept,
+  KnownBefore,
+  Refined,
+  Registration,
+  Sendable,
+} from "./feature.ts";
 import type { CapName, FeatureName, Instant } from "./ids.ts";
-import type { Knowledge } from "./known.ts";
 import type { Registered } from "./registry.ts";
 
 /** What one Connection holds for its Features. Plain data. */
@@ -125,7 +132,7 @@ export interface Reading {
   readonly at: Instant;
   readonly offer: Offer;
   readonly configuration: NetworkConfiguration;
-  readonly known: Knowledge;
+  readonly known: KnownBefore;
 }
 
 /** The effects of running one stage over the Features on. */

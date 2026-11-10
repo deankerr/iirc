@@ -12,16 +12,22 @@ import { backoff } from "./backoff.ts";
 import type { WantedChannel } from "./configuration.ts";
 import { Instant } from "./ids.ts";
 import type { Casemapping, Fact } from "./known.ts";
+import {
+  changeListing,
+  inListing,
+  listedMembers,
+  listMore,
+  withMember,
+  withoutListed,
+  withoutMember,
+} from "./members.ts";
 import type { Listed, ModeRules } from "./modes.ts";
 import { applyModes, changePrefix } from "./modes.ts";
 import type { Activity, ModeChange } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, send, sendSecret, updateOpen } from "./run.ts";
-import type { Channel, ChannelPhase, Joined, Member, Seen, State } from "./state.ts";
+import type { Channel, Joined, Member, Seen, State } from "./state.ts";
 import { openOf, sessionOf } from "./views.ts";
-
-/** The most members kept for one Channel, so a hostile Ircd cannot grow the State without bound. */
-const maxMembers = 100_000;
 
 const setChannel = (run: Run, key: string, channel: Channel): void => {
   run.state = { ...run.state, channels: new Map(run.state.channels).set(key, channel) };
@@ -38,31 +44,41 @@ const changeChannel = (run: Run, key: string, change: (channel: Channel) => Chan
 const retryAt = (run: Run, channel: Channel): Instant =>
   Instant.make(run.at + backoff(channel.attempt));
 
-const membersOf = (phase: ChannelPhase): readonly string[] =>
-  phase._tag === "Joined" ? [...phase.members.keys(), ...(phase.listing?.keys() ?? [])] : [];
+// Whether a User shares a Channel with Self, counting a listing still being read.
+const shares = (state: State, folded: string): boolean =>
+  [...state.channels.values()].some(
+    ({ phase }) =>
+      phase._tag === "Joined" &&
+      (phase.members.has(folded) ||
+        (phase.listing !== undefined && inListing(phase.listing, folded)))
+  );
 
 /**
  * Forgets what was seen of every User who no longer shares a Channel with Self, so the
  * Users kept are never more than the members kept. It runs wherever membership is
  * replaced or removed.
  * @param run - The step.
+ * @param left - The only Users who may have left, by folded nick, when it is known, such
+ * as the one who parted. Left out, every User seen.
  */
-const pruneUsers = (run: Run): void => {
+const pruneUsers = (run: Run, left?: readonly string[]): void => {
   const users = openOf(run.state)?.users;
 
   if (users === undefined || users.size === 0) {
     return;
   }
 
-  const shared = new Set(
-    [...run.state.channels.values()].flatMap((channel) => membersOf(channel.phase))
+  const gone = new Set(
+    (left ?? [...users.keys()]).filter((folded) => users.has(folded) && !shares(run.state, folded))
   );
 
-  const kept = [...users].filter(([nick]) => shared.has(nick));
-
-  if (kept.length < users.size) {
-    updateOpen(run, (open) => ({ ...open, users: new Map(kept) }));
+  if (gone.size === 0) {
+    return;
   }
+
+  const kept = [...users].filter(([nick]) => !gone.has(nick));
+
+  updateOpen(run, (open) => ({ ...open, users: new Map(kept) }));
 };
 
 /**
@@ -255,29 +271,6 @@ export const changeJoined = (run: Run, name: string, change: (joined: Joined) =>
   }
 };
 
-const withMember = (
-  members: ReadonlyMap<string, Member>,
-  folded: string,
-  member: Member
-): ReadonlyMap<string, Member> =>
-  members.size >= maxMembers && !members.has(folded)
-    ? members
-    : new Map(members).set(folded, member);
-
-const withoutMember = (
-  members: ReadonlyMap<string, Member>,
-  folded: string
-): ReadonlyMap<string, Member> => {
-  if (!members.has(folded)) {
-    return members;
-  }
-
-  const next = new Map(members);
-  next.delete(folded);
-
-  return next;
-};
-
 const none: ReadonlySet<string> = new Set();
 
 const fresh = (run: Run, nick: string): Member => ({
@@ -348,10 +341,10 @@ const kickedOrParted = (run: Run, channel: string, nick: string): void => {
 
   changeJoined(run, channel, (joined) => ({
     ...joined,
-    listing: joined.listing === undefined ? undefined : withoutMember(joined.listing, fold(nick)),
+    listing: joined.listing === undefined ? undefined : withoutListed(joined.listing, fold(nick)),
     members: withoutMember(joined.members, fold(nick)),
   }));
-  pruneUsers(run);
+  pruneUsers(run, [fold(nick)]);
 };
 
 const renamed = (
@@ -492,7 +485,9 @@ export const foldActivity = (
       changeJoined(run, activity.channel, (joined) => ({
         ...joined,
         listing:
-          joined.listing === undefined ? undefined : withMember(joined.listing, folded, member),
+          joined.listing === undefined
+            ? undefined
+            : changeListing(joined.listing, (listed) => withMember(listed, folded, member)),
         members: withMember(joined.members, folded, member),
       }));
 
@@ -512,12 +507,12 @@ export const foldActivity = (
       for (const channel of run.state.channels.values()) {
         changeJoined(run, channel.name, (joined) => ({
           ...joined,
-          listing: joined.listing === undefined ? undefined : withoutMember(joined.listing, folded),
+          listing: joined.listing === undefined ? undefined : withoutListed(joined.listing, folded),
           members: withoutMember(joined.members, folded),
         }));
       }
 
-      pruneUsers(run);
+      pruneUsers(run, [folded]);
 
       return;
     }
@@ -530,9 +525,9 @@ export const foldActivity = (
         changeJoined(run, channel.name, (joined) => ({
           ...joined,
           listing:
-            joined.listing === undefined
-              ? undefined
-              : renamed(joined.listing, from, to, activity.to),
+            joined.listing === undefined || !inListing(joined.listing, from)
+              ? joined.listing
+              : changeListing(joined.listing, (listed) => renamed(listed, from, to, activity.to)),
           members: renamed(joined.members, from, to, activity.to),
         }));
       }
@@ -565,7 +560,9 @@ export const foldActivity = (
         const listing =
           joined.listing === undefined
             ? undefined
-            : prefixed(joined.listing, activity.changes, rules, run.at, fold);
+            : changeListing(joined.listing, (listed) =>
+                prefixed(listed, activity.changes, rules, run.at, fold)
+              );
 
         const modes: Fact<ReadonlyMap<string, string | null>> =
           joined.modes._tag === "Known"
@@ -623,19 +620,15 @@ export const foldListed = (
 ): void => {
   const fold = folder(run.state);
 
-  changeJoined(run, channel, (joined) => {
-    let listing = joined.listing ?? new Map<string, Member>();
+  const part = members.map(
+    (member) =>
+      [
+        fold(member.nick),
+        { complete: complete(member.nick), nick: member.nick, prefixes: member.prefixes },
+      ] as const
+  );
 
-    for (const member of members) {
-      listing = withMember(listing, fold(member.nick), {
-        complete: complete(member.nick),
-        nick: member.nick,
-        prefixes: member.prefixes,
-      });
-    }
-
-    return { ...joined, listing };
-  });
+  changeJoined(run, channel, (joined) => ({ ...joined, listing: listMore(joined.listing, part) }));
 };
 
 /**
@@ -649,7 +642,7 @@ export const endOfNames = (run: Run, channel: string): void => {
     ...joined,
     burst: false,
     listing: undefined,
-    members: joined.listing ?? joined.members,
+    members: joined.listing === undefined ? joined.members : listedMembers(joined.listing),
     synced: true,
     topic:
       joined.burst && joined.topic._tag === "Unknown"
@@ -696,7 +689,10 @@ const refold = (run: Run): void => {
                 ...channel,
                 phase: {
                   ...phase,
-                  listing: phase.listing === undefined ? undefined : members(phase.listing),
+                  listing:
+                    phase.listing === undefined
+                      ? undefined
+                      : { members: members(listedMembers(phase.listing)), parts: [] },
                   members: members(phase.members),
                 },
               }

@@ -24,6 +24,14 @@ export type Kept =
   /** Each member's prefixes in each Channel, as a complete listing made them known. */
   | "member.prefixes";
 
+/**
+ * What a hook may read of what the Client knew before this step: where the Session is,
+ * how names fold, and Self. It is the part of Knowledge a hook needs, read from State in
+ * constant time, so a step costs the same however many Channels and members the Network
+ * has.
+ */
+export type KnownBefore = Pick<Knowledge, "session" | "casemapping" | "self">;
+
 /** A Line to send, or one that carries a Credential. */
 export type Sendable =
   | { readonly _tag: "Line"; readonly line: OutboundLine }
@@ -70,8 +78,8 @@ export interface Context<Own> {
   /** An ISUPPORT token's value, or `undefined` if the Ircd did not send it. */
   readonly token: (name: string) => string | undefined;
   readonly configuration: NetworkConfiguration;
-  /** What the Client knew before this step. */
-  readonly known: Knowledge;
+  /** What the Client knew of the Session and Self before this step. */
+  readonly known: KnownBefore;
 }
 
 /** One received Line as it moves through ingress. */
