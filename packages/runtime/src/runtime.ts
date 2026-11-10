@@ -28,6 +28,7 @@ import {
 import { Journal, NetworkId } from "./journal.ts";
 import type { JournalFailed, Sequence } from "./journal.ts";
 import {
+  halt,
   heldConnections,
   NetworkStopped,
   runtimeClosed,
@@ -204,13 +205,16 @@ export const makeRuntime = <S>(
     // Layer's other finalizers run in.
     const drivers = yield* Scope.make();
 
-    // Each running Network steps a `Stopping` and waits, within the bound, for its
-    // Connections to close, all at once. Then every driver stops.
+    // Every running Network stops at once: it steps a `Stopping` and waits, within the
+    // bound, for its Connections to close, and then its driver stops, which closes any
+    // Connection left without waiting on it. So the whole stop takes the bound, and no
+    // more than the time to close Scopes after it.
     const stopAll = Effect.gen(function* () {
       yield* Ref.set(closed, true);
       yield* Effect.forEach(
         (yield* Ref.get(held)).values(),
-        (network) => stopGracefully(network, ports.timing.stopTimeout),
+        (network) =>
+          Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
         { concurrency: "unbounded", discard: true }
       ).pipe(Effect.interruptible);
       yield* Scope.close(drivers, Exit.void);

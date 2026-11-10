@@ -16,7 +16,7 @@ import type {
   UnfilledReason,
   UnsentLine,
 } from "@iirc/client";
-import { depth, makeOutbox, nextAt, offer, take as takeLine, takeAll } from "@iirc/outbox";
+import { depth, makeOutbox, nextAt, offer, spend, take as takeLine, takeAll } from "@iirc/outbox";
 import type { Outbox, Pacing } from "@iirc/outbox";
 import { encode, fillSecret, isRejected } from "@iirc/protocol/line";
 import type { OutboundLine, SecretLine } from "@iirc/protocol/line";
@@ -75,12 +75,11 @@ type Pending =
   | { readonly _tag: "Due"; readonly timer: TimerId; readonly due: Instant }
   /** A pump could not fill a `SendSecret` when its turn came. */
   | ({ readonly _tag: "Unfilled" } & Unfilled)
-  /** A pump dropped Lines when a hang-up ran out of time. */
-  | {
-      readonly _tag: "Unsent";
-      readonly connection: ConnectionId;
-      readonly outputs: readonly UnsentLine[];
-    }
+  /**
+   * A pump dropped Lines when a hang-up ran out of time. They wait in the Connection's
+   * `dropped` until the Network's fiber steps them, here or with its `Closed`.
+   */
+  | { readonly _tag: "Dropped"; readonly connection: ConnectionId }
   /** The Runtime is closing. */
   | { readonly _tag: "Stopping" };
 
@@ -94,14 +93,28 @@ interface Live {
   readonly hangup: Ref.Ref<Instant | undefined>;
   /** Wakes the pump when there may be something new to do. It holds one signal at most. */
   readonly wake: Queue.Queue<true>;
+  /**
+   * A `SendSecret` the pump has taken and not yet written in full: it is revealing its
+   * Credential, or pacing its filled Lines, which only the pump holds.
+   */
+  readonly unfinished: Ref.Ref<UnsentLine | undefined>;
+  /**
+   * Lines the pump dropped at a hang-up's cutoff, until the Network's fiber steps them as
+   * `Unsent`. Whichever of a `Dropped` and the `Closed` comes first takes them, so they
+   * are stepped once, and before the `Closed`.
+   */
+  readonly dropped: Ref.Ref<readonly UnsentLine[]>;
   /** The fiber that carries this Connection's Lines out at pace. */
   readonly pump: Fiber.Fiber<void>;
 }
 
+/** What a pump works with: the Connection as held, before its pump and Scope exist. */
+type Pumped = Omit<Live, "pump" | "scope">;
+
 /** How a Network paces its Connections, and how long its endings may take. */
 interface Timing {
   readonly pacing: Pacing;
-  /** How many Lines may wait for one Connection. */
+  /** How many ordinary Lines may wait for one Connection. */
   readonly capacity: number;
   /** How long a `Hangup` lets queued Lines leave at pace before it hangs up anyway, in milliseconds. */
   readonly hangupDrain: number;
@@ -123,6 +136,8 @@ export interface Network<S> {
   readonly stopping: Ref.Ref<boolean>;
   /** Succeeds once a `Stopping` has been stepped and every Connection's `Closed` with it. */
   readonly drained: Latch.Latch;
+  /** The driver's fiber, once it is forked, so shutdown can stop it. */
+  readonly driver: Ref.Ref<Fiber.Fiber<unknown, unknown> | undefined>;
 }
 
 /** The ports and the Client a driver uses. */
@@ -160,8 +175,11 @@ const linkInput = (connection: ConnectionId, event: LinkEvent, at: Instant): Inp
   }
 };
 
-// Each Pending but an Owner's and a `Stopping`, as the input it becomes.
-const toInput = (pending: Exclude<Pending, { _tag: "Owner" | "Stopping" }>, at: Instant): Input => {
+// Each Pending but an Owner's, a `Stopping`, and a `Dropped`, as the input it becomes.
+const toInput = (
+  pending: Exclude<Pending, { _tag: "Owner" | "Stopping" | "Dropped" }>,
+  at: Instant
+): Input => {
   switch (pending._tag) {
     case "Due": {
       return { _tag: "Fired", at, due: pending.due, timer: pending.timer };
@@ -175,10 +193,6 @@ const toInput = (pending: Exclude<Pending, { _tag: "Owner" | "Stopping" }>, at: 
       const { connection, line, reason } = pending;
 
       return { _tag: "Unfilled", at, connection, line, reason };
-    }
-
-    case "Unsent": {
-      return { _tag: "Unsent", at, connection: pending.connection, outputs: pending.outputs };
     }
 
     default: {
@@ -246,6 +260,32 @@ const stoppedReason = (cause: Cause.Cause<JournalFailed | ClientThrew>): string 
   return `A defect: ${Cause.pretty(cause)}`;
 };
 
+// Takes the next Line. A secret taken is unfinished from the moment it leaves the Outbox.
+const takeNext = (held: Pumped, at: Instant) =>
+  Effect.uninterruptible(
+    Effect.gen(function* () {
+      const next = yield* Ref.modify(held.outbox, (waiting) => {
+        const taken = takeLine(waiting, at);
+
+        return [taken, taken.outbox];
+      });
+
+      if (next._tag === "Taken" && next.item._tag === "SendSecret") {
+        yield* Ref.set(held.unfinished, next.item);
+      }
+
+      return next;
+    })
+  );
+
+// Waits until a token is free or the drain runs out. Woken early by a new Line or a
+// `Hangup`'s deadline, the pump looks again.
+const waitUntil = (held: Pumped, until: number, deadline: Instant | undefined) =>
+  Effect.raceFirst(
+    sleepUntil(Instant.make(deadline === undefined ? until : Math.min(until, deadline))),
+    Queue.take(held.wake)
+  );
+
 /**
  * Makes a Network's handle, stopped or ready to drive.
  * @param id - The Network.
@@ -257,6 +297,7 @@ const makeNetwork = <S>(id: NetworkId, folded: Folded<S>) =>
     const network: Network<S> = {
       current: yield* Ref.make({ state: folded.state, table: folded.table }),
       drained: yield* Latch.make(),
+      driver: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
       id,
       links: yield* Ref.make<ReadonlyMap<ConnectionId, Live>>(new Map()),
       queue: yield* Queue.bounded<Pending>(queueCapacity),
@@ -311,19 +352,26 @@ const drive = <S>(
     const live = (connection: ConnectionId) =>
       Effect.map(Ref.get(links), (held) => held.get(connection));
 
-    // The value is revealed when the Line's turn comes, filled, sent, and let go of.
-    // Nothing here logs or journals it, and a refusal names only the reason, and is
-    // queued to be stepped as `Unfilled`.
-    const sendSecret = (connection: ConnectionId, link: Link, line: SecretLine) =>
+    // The value is revealed when the Line's turn comes, and filled. The filled Lines stay
+    // with the pump, which paces them and lets go of them once sent. Nothing here logs or
+    // journals them, and a refusal names only the reason, and is queued to be stepped as
+    // `Unfilled`.
+    const fill = (
+      connection: ConnectionId,
+      line: SecretLine
+    ): Effect.Effect<readonly Uint8Array[] | undefined> =>
       Effect.gen(function* () {
         const refuse = (reason: UnfilledReason) =>
-          Effect.andThen(
-            Effect.logWarning("A Credential could not be filled", {
-              connection,
-              credential: line.credential,
-              reason,
-            }),
-            Queue.offer(queue, { _tag: "Unfilled", connection, line, reason })
+          Effect.as(
+            Effect.andThen(
+              Effect.logWarning("A Credential could not be filled", {
+                connection,
+                credential: line.credential,
+                reason,
+              }),
+              Queue.offer(queue, { _tag: "Unfilled", connection, line, reason })
+            ),
+            undefined
           );
 
         const revealed = yield* vault.reveal(line.credential).pipe(
@@ -346,82 +394,123 @@ const drive = <S>(
         const filled = fillSecret(line, revealed.value);
         const encoded = isRejected(filled) ? undefined : encodeAll(filled);
 
-        if (encoded === undefined) {
-          return yield* refuse("Unsendable");
-        }
-
-        return yield* Effect.forEach(encoded, (bytes) => link.send(bytes), { discard: true });
+        return encoded ?? (yield* refuse("Unsendable"));
       });
 
-    // One Line, as the pump carries it out when its turn comes.
-    const carryLine = (link: Link, line: UnsentLine) =>
-      line._tag === "Send"
-        ? sendLine(line.connection, link, line.line)
-        : sendSecret(line.connection, link, line.line);
-
     // The drain has run out: every Line still waiting is dropped, but a `QUIT`, which is
-    // what leaving asked for, and goes even past the bucket. What was dropped is queued
-    // as `Unsent` before the hang-up, so it is stepped before the `Closed` that follows.
-    const cutOff = (
-      connection: ConnectionId,
-      link: Link,
-      outbox: Ref.Ref<Outbox<UnsentLine>>
-    ): Effect.Effect<void> =>
+    // what leaving asked for, and goes even past the bucket. A `SendSecret` not yet
+    // written in full is dropped with them, as the Output it was. What was dropped moves
+    // to `dropped` at once, so the `Closed` that follows finds it even if the `Dropped`
+    // cannot be queued, and the `Dropped` is queued without waiting for room.
+    const cutOff = (connection: ConnectionId, held: Pumped): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const left = yield* Ref.modify(outbox, (waiting) => {
-          const emptied = takeAll(waiting);
+        const cut = yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const unfinished = yield* Ref.getAndSet(held.unfinished, undefined);
 
-          return [emptied.items, emptied.outbox];
-        });
+            const left = yield* Ref.modify(held.outbox, (waiting) => {
+              const emptied = takeAll(waiting);
 
-        const dropped = left.filter((line) => !isQuit(line));
+              return [emptied.items, emptied.outbox];
+            });
 
-        if (dropped.length > 0) {
+            const dropped = [
+              ...(unfinished === undefined ? [] : [unfinished]),
+              ...left.filter((line) => !isQuit(line)),
+            ];
+
+            yield* Ref.update(held.dropped, (already) => [...already, ...dropped]);
+
+            return { dropped: dropped.length, quits: left.filter(isQuit) };
+          })
+        );
+
+        if (cut.dropped > 0) {
           yield* Effect.logWarning("Lines dropped at hang-up", {
             connection,
-            dropped: dropped.length,
+            dropped: cut.dropped,
           });
-          yield* Queue.offer(queue, { _tag: "Unsent", connection, outputs: dropped });
+          yield* Effect.sync(() => Queue.offerUnsafe(queue, { _tag: "Dropped", connection }));
         }
 
-        for (const line of left.filter(isQuit)) {
-          yield* carryLine(link, line);
+        for (const line of cut.quits) {
+          if (line._tag === "Send") {
+            yield* sendLine(connection, held.link, line.line);
+          }
         }
 
-        yield* link.hangup;
+        yield* held.link.hangup;
       });
 
     // Carries one Connection's Lines out at pace, waiting on the Clock until each may
-    // leave. After a `Hangup`, it drains what is waiting, then hangs up.
-    const pump = (
-      connection: ConnectionId,
-      held: Omit<Live, "pump" | "scope">
-    ): Effect.Effect<void> =>
+    // leave, or until it is woken. Each wire Line spends a token, so a `SendSecret` filled
+    // to several Lines is paced like any others. After a `Hangup`, it drains what is
+    // waiting, then hangs up.
+    const pump = (connection: ConnectionId, held: Pumped): Effect.Effect<void> =>
       Effect.gen(function* () {
+        // The filled Lines of the `SendSecret` being written, held only here.
+        let filled: readonly Uint8Array[] = [];
+
+        // Writes the next filled Line. Before the last, the `SendSecret` stops being
+        // unfinished: a Line being written counts as sent.
+        const writeFilled = Effect.gen(function* () {
+          const [bytes, ...rest] = filled;
+
+          filled = rest;
+
+          if (rest.length === 0) {
+            yield* Ref.set(held.unfinished, undefined);
+          }
+
+          if (bytes !== undefined) {
+            yield* held.link.send(bytes);
+          }
+        });
+
         for (;;) {
           const at = yield* now;
           const deadline = yield* Ref.get(held.hangup);
 
           if (deadline !== undefined && at >= deadline) {
-            return yield* cutOff(connection, held.link, held.outbox);
+            return yield* cutOff(connection, held);
           }
 
-          const next = yield* Ref.modify(held.outbox, (waiting) => {
-            const taken = takeLine(waiting, at);
+          if (filled.length > 0) {
+            const spent = yield* Ref.modify(held.outbox, (waiting) => {
+              const result = spend(waiting, at);
 
-            return [taken, taken.outbox];
-          });
+              return [result, result.outbox];
+            });
+
+            yield* spent._tag === "Spent" ? writeFilled : waitUntil(held, spent.until, deadline);
+            continue;
+          }
+
+          const next = yield* takeNext(held, at);
 
           switch (next._tag) {
             case "Taken": {
-              yield* carryLine(held.link, next.item);
+              const { item } = next;
+
+              if (item._tag === "Send") {
+                yield* sendLine(connection, held.link, item.line);
+                break;
+              }
+
+              const encoded = yield* fill(connection, item.line);
+
+              if (encoded === undefined || encoded.length === 0) {
+                yield* Ref.set(held.unfinished, undefined);
+                break;
+              }
+
+              filled = encoded;
+              yield* writeFilled;
               break;
             }
 
             case "Wait": {
-              const until = deadline === undefined ? next.until : Math.min(next.until, deadline);
-
-              yield* sleepUntil(Instant.make(until));
+              yield* waitUntil(held, next.until, deadline);
               break;
             }
 
@@ -446,8 +535,8 @@ const drive = <S>(
         const own = yield* Scope.fork(scope);
         const link = yield* transport.dial(output.ircd).pipe(Scope.provide(own));
 
-        // Added after the dial, so it runs before the Transport lets go: shutdown hangs up.
-        yield* Scope.addFinalizer(own, link.hangup);
+        // Closing the Scope ends the Connection at once, with no hang-up to wait for: a
+        // graceful end comes before it, from the Client's `Hangup`.
         yield* Effect.forkIn(
           Stream.runForEach(link.events, (event) =>
             Queue.offer(queue, { _tag: "Link", connection, event })
@@ -455,12 +544,14 @@ const drive = <S>(
           own
         );
 
-        const held = {
+        const held: Pumped = {
+          dropped: yield* Ref.make<readonly UnsentLine[]>([]),
           hangup: yield* Ref.make<Instant | undefined>(undefined),
           link,
           outbox: yield* Ref.make(
             makeOutbox<UnsentLine>({ capacity: timing.capacity, pacing: timing.pacing })
           ),
+          unfinished: yield* Ref.make<UnsentLine | undefined>(undefined),
           wake: yield* Queue.dropping<true>(1),
         };
 
@@ -632,11 +723,21 @@ const drive = <S>(
         if (held !== undefined) {
           yield* Fiber.interrupt(held.pump);
 
-          const left = yield* Ref.modify(held.outbox, (waiting) => {
-            const emptied = takeAll(waiting);
+          // What the cutoff dropped, the secret half written, and what still waits, at once.
+          const left = yield* Effect.uninterruptible(
+            Effect.gen(function* () {
+              const cut = yield* Ref.getAndSet(held.dropped, []);
+              const unfinished = yield* Ref.getAndSet(held.unfinished, undefined);
 
-            return [emptied.items, emptied.outbox];
-          });
+              const waiting = yield* Ref.modify(held.outbox, (outbox) => {
+                const emptied = takeAll(outbox);
+
+                return [emptied.items, emptied.outbox];
+              });
+
+              return [...cut, ...(unfinished === undefined ? [] : [unfinished]), ...waiting];
+            })
+          );
 
           if (left.length > 0) {
             yield* advance((at) => ({ _tag: "Unsent", at, connection, outputs: left }));
@@ -646,6 +747,17 @@ const drive = <S>(
         yield* advance((at) => linkInput(connection, event, at));
         yield* forget(connection);
         yield* checkDrained;
+      });
+
+    // What a cutoff dropped, stepped as `Unsent`, unless the `Closed` took it first.
+    const dropped = (connection: ConnectionId) =>
+      Effect.gen(function* () {
+        const held = yield* live(connection);
+        const left = held === undefined ? [] : yield* Ref.getAndSet(held.dropped, []);
+
+        if (left.length > 0) {
+          yield* advance((at) => ({ _tag: "Unsent", at, connection, outputs: left }));
+        }
       });
 
     const take = (pending: Pending) => {
@@ -678,9 +790,12 @@ const drive = <S>(
             : advance((at) => toInput(pending, at));
         }
 
+        case "Dropped": {
+          return dropped(pending.connection);
+        }
+
         case "Due":
-        case "Unfilled":
-        case "Unsent": {
+        case "Unfilled": {
           return advance((at) => toInput(pending, at));
         }
 
@@ -741,6 +856,8 @@ export const startNetwork = <S>(
       Effect.annotateLogs({ network: id }),
       Effect.forkScoped
     );
+
+    yield* Ref.set(network.driver, driver);
 
     // A driver forked into a Scope already closing is interrupted before it starts, so
     // its `onInterrupt` never runs. A driver that has ended by now has stopped either way.
@@ -806,6 +923,17 @@ export const stopGracefully = <S>(network: Network<S>, stopTimeout: number): Eff
       });
     }
   });
+
+/**
+ * Stops a Network's driver: its pumps and timers stop, and its Connections' Scopes close,
+ * which ends each Connection at once, with no hang-up to wait for.
+ * @param network - The Network.
+ * @returns An Effect that completes once the driver has stopped.
+ */
+export const halt = <S>(network: Network<S>): Effect.Effect<void> =>
+  Effect.flatMap(Ref.get(network.driver), (driver) =>
+    driver === undefined ? Effect.void : Fiber.interrupt(driver)
+  );
 
 /** One Connection the Runtime holds, and how its queue stands. */
 export interface HeldConnection {

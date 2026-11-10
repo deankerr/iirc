@@ -9,13 +9,22 @@ import { configured, scripted } from "@iirc/client/testing";
 import type { Scripted } from "@iirc/client/testing";
 import { CredentialName, encode, isRejected, ping, pong, privmsg, quit } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected } from "@iirc/protocol/line";
-import { Clock, Effect, Redacted } from "effect";
+import { Clock, Effect, Latch, Redacted } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { NetworkId } from "./journal.ts";
 import type { Entry } from "./journal.ts";
-import { entries, epoch, outline, runTest, settle, startRuntime } from "./testing/harness.ts";
+import {
+  awaitRecord,
+  entries,
+  epoch,
+  outline,
+  runTest,
+  settle,
+  startRuntime,
+  wrapJournal,
+} from "./testing/harness.ts";
 import type { World } from "./testing/harness.ts";
 import type { TestCall } from "./testing/memory-transport.ts";
 
@@ -490,5 +499,280 @@ describe("shutdown", () => {
     );
 
     expect(outlined).toStrictEqual(["1 libera Configured"]);
+  });
+});
+
+describe("review round 1", () => {
+  it("bounds shutdown across Networks even when the Transport's hangup never returns", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        // Every hangup hangs: only closing the Connection's Scope can end it.
+        const stuck: World = {
+          ...world,
+          memory: {
+            ...world.memory,
+            transport: {
+              dial: (address) =>
+                Effect.map(world.memory.transport.dial(address), (link) => ({
+                  ...link,
+                  hangup: Effect.never,
+                })),
+            },
+          },
+        };
+
+        const networks = ["one", "two", "three"].map((name) => NetworkId.make(name));
+
+        const { close, runtime } = yield* startRuntime(
+          stuck,
+          scripted(script({ when: "Opened" }, { outputs: [sendQuit, hangup], when: "Stopping" })),
+          { stopTimeout: 1000 }
+        );
+
+        const calls: TestCall[] = [];
+
+        for (const each of networks) {
+          yield* runtime.configure(each, configuration);
+          const call = yield* world.memory.ircd.accept;
+
+          yield* call.open;
+          calls.push(call);
+        }
+
+        yield* settle;
+        const before = yield* Clock.currentTimeMillis;
+
+        // The harness moves the TestClock by the bound once, so a stop that took longer,
+        // or stopped the Networks one after another, would never finish.
+        yield* close;
+
+        const ended: string[] = [];
+
+        for (const call of calls) {
+          ended.push((yield* Effect.exit(call.say(new TextEncoder().encode("hi"))))._tag);
+        }
+
+        return { elapsed: (yield* Clock.currentTimeMillis) - before, ended };
+      })
+    );
+
+    expect(result).toStrictEqual({ elapsed: 1000, ended: ["Failure", "Failure", "Failure"] });
+  });
+
+  it("steps what a cutoff dropped once, before the Closed, when the Network's queue is full", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const gate = yield* Latch.make(false);
+
+        // Appends of what the Ircd says wait at the gate, so its Lines fill the queue.
+        const journal = wrapJournal(world.journal, {
+          before: (record) =>
+            record._tag === "Input" && record.input._tag === "Received" ? gate.await : Effect.void,
+        });
+
+        const { call } = yield* opened(
+          { ...world, journal },
+          scripted(script({ outputs: [...says(8), hangup], when: "Opened" })),
+          { hangupDrain: 1000 }
+        );
+
+        yield* heardNow(call);
+
+        // More than the Network's queue holds, so the cutoff's report cannot be queued.
+        yield* Effect.forkChild(
+          Effect.forEach(
+            Array.from({ length: 1100 }, (_, index) => index),
+            (index) => call.say(new TextEncoder().encode(`PING :${index}`)),
+            { discard: true }
+          )
+        );
+        yield* settle;
+        yield* TestClock.adjust(1000);
+        yield* settle;
+        yield* gate.open;
+        yield* awaitRecord(
+          world.journal,
+          (record) => record._tag === "Input" && record.input._tag === "Closed"
+        );
+        yield* settle;
+
+        const all = inputs(yield* entries(world.journal));
+        const closedAt = all.findIndex((input) => input._tag === "Closed");
+
+        return {
+          beforeClosed: all
+            .slice(0, closedAt)
+            .flatMap((input) => (input._tag === "Unsent" ? [input.outputs.length] : [])),
+          unsent: unsentOf(yield* entries(world.journal)),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      beforeClosed: [3],
+      unsent: [["PRIVMSG #iirc :line 6", "PRIVMSG #iirc :line 7", "PRIVMSG #iirc :line 8"]],
+    });
+  });
+
+  it("admits a QUIT and a PONG to a full queue, and they leave", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const ponged: Output = { _tag: "Send", connection: first, line: line(pong("keep")) };
+
+        const { call } = yield* opened(
+          world,
+          scripted(
+            script({ outputs: [...says(4), ponged, sendQuit], when: "Opened" }, { when: "Unsent" })
+          ),
+          { outboxCapacity: 2, pacing: { burst: 1, interval: 1000 } }
+        );
+
+        yield* TestClock.adjust(3000);
+
+        return {
+          heard: yield* heardNow(call),
+          unsent: unsentOf(yield* entries(world.journal)),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      heard: ["PONG keep", "PRIVMSG #iirc :line 1", "PRIVMSG #iirc :line 2", "QUIT"],
+      unsent: [["PRIVMSG #iirc :line 3", "PRIVMSG #iirc :line 4"]],
+    });
+  });
+
+  it("wakes a pump asleep on a long interval at a Hangup's deadline", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { call, close } = yield* opened(
+          world,
+          scripted(
+            script(
+              { outputs: says(3), when: "Opened" },
+              { outputs: [sendQuit, hangup], when: "Stopping" },
+              { when: "Unsent" },
+              { when: "Closed" }
+            )
+          ),
+          { pacing: { burst: 1, interval: 10_000 }, stopTimeout: 2000 }
+        );
+
+        yield* heardNow(call);
+        yield* TestClock.adjust(100);
+        const before = yield* Clock.currentTimeMillis;
+
+        yield* close;
+        const all = yield* entries(world.journal);
+        const closed = inputs(all).find((input) => input._tag === "Closed");
+
+        return {
+          closedAfter: (closed?.at ?? 0) - before,
+          heard: yield* heardNow(call),
+          outline: (yield* outline(world.journal)).slice(4),
+          unsent: unsentOf(all),
+        };
+      })
+    );
+
+    // The drain while stopping is half the bound: 1 s, far short of the 10 s interval.
+    expect(result).toStrictEqual({
+      closedAfter: 1000,
+      heard: ["QUIT"],
+      outline: [
+        "5 libera Stopping",
+        "6 libera of 5: Send Hangup",
+        "7 libera Unsent",
+        "8 libera Closed",
+      ],
+      unsent: [["PRIVMSG #iirc :line 2", "PRIVMSG #iirc :line 3"]],
+    });
+  });
+
+  it("paces the Lines a long SASL response fills to, one token each, and gives it back unsent at a cutoff", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const credential = CredentialName.make("account");
+
+        const response: Output = {
+          _tag: "SendSecret",
+          connection: first,
+          line: { _tag: "AuthenticatePlain", authcid: "iirc", authzid: "iirc", credential },
+        };
+
+        yield* world.vault.hold(credential, Redacted.make("p".repeat(900)));
+
+        const { call } = yield* opened(
+          world,
+          scripted(script({ outputs: [response, hangup], when: "Opened" }, { when: "Unsent" })),
+          { hangupDrain: 1500, pacing: { burst: 1, interval: 1000 } }
+        );
+
+        const counts: number[] = [];
+
+        for (let step = 0; step < 3; step += 1) {
+          counts.push((yield* heardNow(call)).length);
+          yield* TestClock.adjust(500);
+          counts.push((yield* heardNow(call)).length);
+          yield* TestClock.adjust(500);
+        }
+
+        const all = yield* entries(world.journal);
+
+        return {
+          counts,
+          // The response, as the Output it was, and never its filled Lines.
+          unsent: inputs(all).flatMap((input) =>
+            input._tag === "Unsent" ? input.outputs.map((output) => output._tag) : []
+          ),
+          withValue: JSON.stringify(all).includes("ppp"),
+        };
+      })
+    );
+
+    // A Line at 0 ms and at 1000 ms, then the cutoff at 1500 ms drops the rest.
+    expect(result).toStrictEqual({
+      counts: [1, 0, 1, 0, 0, 0],
+      unsent: ["SendSecret"],
+      withValue: false,
+    });
+  });
+
+  it("leaves a long SASL response one interval apart, every Line of it", async () => {
+    const heard = await runTest((world) =>
+      Effect.gen(function* () {
+        const credential = CredentialName.make("account");
+
+        const response: Output = {
+          _tag: "SendSecret",
+          connection: first,
+          line: { _tag: "AuthenticatePlain", authcid: "iirc", authzid: "iirc", credential },
+        };
+
+        yield* world.vault.hold(credential, Redacted.make("p".repeat(900)));
+
+        const { call } = yield* opened(
+          world,
+          scripted(script({ outputs: [response], when: "Opened" })),
+          { pacing: { burst: 1, interval: 1000 } }
+        );
+
+        const counts: number[] = [];
+
+        for (let step = 0; step < 4; step += 1) {
+          counts.push(
+            (yield* heardNow(call)).filter((each) => each.startsWith("AUTHENTICATE")).length
+          );
+          yield* TestClock.adjust(999);
+          counts.push((yield* heardNow(call)).length);
+          yield* TestClock.adjust(1);
+        }
+
+        return counts;
+      })
+    );
+
+    // 900 bytes of password make 3 Lines of 400 base64 bytes, then one shorter.
+    expect(heard).toStrictEqual([1, 0, 1, 0, 1, 0, 1, 0]);
   });
 });
