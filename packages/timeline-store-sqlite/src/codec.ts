@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 import { CloseReason, Instant, IntentId, MessageId, SayKind } from "@iirc/client";
-import { TimelineId, cursorOf, parseCursor } from "@iirc/timelines";
+import { TimelineId, cursorOf, levels, parseCursor } from "@iirc/timelines";
 import type { Content, Directory, Position } from "@iirc/timelines";
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
 
@@ -163,9 +163,11 @@ const NetworkDirectory = Schema.Struct({
       key: Schema.String,
       kind: Schema.Literals(["Channel", "Direct"]),
       name: Schema.String,
+      read: Schema.UndefinedOr(Instant),
     })
   ),
   last: Cursor,
+  read: Schema.UndefinedOr(Instant),
   timeline: TimelineId,
 });
 
@@ -188,16 +190,23 @@ export const FoldedRow = Schema.toCodecJson(
 /** The directory as of the last step folded. */
 export const DirectoryRow = Schema.Struct({ directory: DirectoryText });
 
-/** A Timeline, with its latest item's position. */
+const Count = Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
+
+/** A Timeline, with its latest item's position, its Read Marker, and its counts, flat. */
 export const SummaryRow = Schema.toCodecJson(
   Schema.Struct({
+    activity: Count,
     changed: Int,
+    direct: Count,
+    highlights: Count,
     id: TimelineId,
     key: Schema.NullOr(Schema.String),
     kind: Kind,
     latest: Schema.UndefinedOr(Cursor),
+    messages: Count,
     name: Schema.String,
     network: Schema.String,
+    read: Schema.UndefinedOr(Instant),
   })
 );
 
@@ -233,6 +242,7 @@ export const ItemRow = Schema.toCodecJson(
   Schema.Struct({
     changed: Int,
     content: ContentText,
+    level: Schema.UndefinedOr(Schema.Literals(levels)),
     network: Schema.String,
     position: Cursor,
     timeline: TimelineId,

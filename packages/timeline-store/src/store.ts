@@ -5,7 +5,16 @@
  *
  * @packageDocumentation
  */
-import type { Change, Content, Descriptor, Directory, Position, TimelineId } from "@iirc/timelines";
+import type { Instant } from "@iirc/client";
+import type {
+  Change,
+  Content,
+  Descriptor,
+  Directory,
+  Level,
+  Position,
+  TimelineId,
+} from "@iirc/timelines";
 import { Context, Schema } from "effect";
 import type { Effect, Option } from "effect";
 
@@ -26,11 +35,41 @@ export interface Folded {
   readonly through: number | undefined;
 }
 
-/** A Timeline as a store holds it, with its latest item's position and the last sequence that changed it. */
+/**
+ * How many items of each level stand after a Timeline's Read Marker, or in it at all when
+ * it has none, each at most `unreadCap + 1` from `@iirc/timelines`, which means more than
+ * `unreadCap`.
+ */
+export interface Unread {
+  readonly highlights: number;
+  readonly direct: number;
+  readonly messages: number;
+  readonly activity: number;
+}
+
+/** Which count of {@link Unread} each level is counted in. */
+export const unreadOf = {
+  Activity: "activity",
+  Direct: "direct",
+  Highlight: "highlights",
+  Message: "messages",
+} as const satisfies { readonly [L in Level]: keyof Unread };
+
+/** No items unread. */
+export const noneUnread: Unread = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+
+/**
+ * A Timeline as a store holds it, with its latest item's position, its Read Marker, what
+ * stands after it, and the last sequence that changed it.
+ */
 export interface Summary extends Descriptor {
   /** The position of its last item, or `undefined` while it has none. */
   readonly latest: Position | undefined;
-  /** The last sequence that changed it or any of its items. */
+  /** How far the Owner has read it, or `undefined` before any Read Marker. */
+  readonly read: Instant | undefined;
+  /** How many items of each level stand after `read`, capped. */
+  readonly unread: Unread;
+  /** The last sequence that changed it, its Read Marker, or any of its items. */
   readonly changed: number;
 }
 
@@ -40,6 +79,8 @@ export interface Item {
   readonly timeline: TimelineId;
   readonly position: Position;
   readonly content: Content;
+  /** How much it calls for the Owner, or `undefined` for a Message Self said. */
+  readonly level: Level | undefined;
   /** The last sequence that changed it: added, confirmed, marked unsent, or moved. */
   readonly changed: number;
 }

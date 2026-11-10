@@ -363,6 +363,17 @@ const networks = HttpApiBuilder.group(
           Effect.mapError(journalFailed)
         )
       )
+      .handle("read", ({ params, payload }) =>
+        runtime
+          .read(NetworkId.make(params.network), { read: payload.read, target: payload.target })
+          .pipe(
+            Effect.map((sequence) => ({ sequence })),
+            Effect.catchTags({
+              NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
+              UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
+            })
+          )
+      )
       .handle("retry", ({ params }) =>
         runtime.retry(NetworkId.make(params.network)).pipe(
           Effect.map((sequence) => ({ sequence })),

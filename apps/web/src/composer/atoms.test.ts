@@ -29,6 +29,8 @@ const describeTimeline = (
   latest: null,
   name,
   network: "libera",
+  read: null,
+  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 /**
@@ -144,6 +146,7 @@ const placeAt10 = (daemon: ReturnType<typeof fakeDaemon>["daemon"]) => {
         target: "{bob}",
         text: "hello",
       },
+      level: null,
       network: "libera",
       position: `${hex(2 ** 53 + 10_000, 14)}-${hex(10, 14)}-${hex(0, 8)}`,
       sequence: 10,

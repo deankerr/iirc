@@ -26,7 +26,7 @@ import {
   timelinesWith,
   wanted,
 } from "./timelines.ts";
-import type { Place, Read, Timelines, TimelinesEvent, WindowRequest } from "./timelines.ts";
+import type { Place, Read, Row, Timelines, TimelinesEvent, WindowRequest } from "./timelines.ts";
 
 // Wire forms, parsed as the API parses them, so every value here is one the runtime could
 // hand the reducer.
@@ -339,6 +339,7 @@ const wireItem = (item: ModelItem) =>
   decodeItem({
     changed: item.changed,
     content: wireContent(item),
+    level: null,
     network: item.network,
     position: cursor(item.spot.at, item.spot.sequence),
     sequence: item.spot.sequence,
@@ -356,6 +357,8 @@ const wireTimeline = (timeline: ModelTimeline) =>
       timeline.latest === undefined ? null : cursor(timeline.latest.at, timeline.latest.sequence),
     name: timeline.kind === "Network" ? timeline.network : `#${timeline.id}`,
     network: timeline.network,
+    read: null,
+    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const wireGap = (gap: ModelGap) => ({
@@ -952,7 +955,7 @@ const simulate = (played: Scenario) => {
     if (action === "Older" || action === "Newer") {
       dispatch({ _tag: action === "Older" ? "OlderWanted" : "NewerWanted", timeline });
     } else {
-      dispatch({ _tag: "Following", following: action === "Return", timeline });
+      dispatch({ _tag: "Following", following: action === "Return", seen: undefined, timeline });
     }
   };
 
@@ -1172,6 +1175,8 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
     latest: null,
     name,
     network: "alpha",
+    read: null,
+    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const listOf = (through: number, ...timelines: readonly ReturnType<typeof timelineOf>[]) =>
@@ -1198,6 +1203,7 @@ const message = (timeline: string, at: number, sequence: number, changed = seque
       target: "#c",
       text: `m${sequence}`,
     },
+    level: "Message",
     network: "alpha",
     position: cursor(at, sequence),
     sequence,
@@ -1271,6 +1277,19 @@ const shownItems = (state: Timelines) => {
   return shown._tag === "Shown" ? shown.window.items.map((item) => item.sequence) : [];
 };
 
+/**
+ * A row as a test compares it: an item's sequence, a Gap's count, or the divider.
+ * @param row - The row.
+ * @returns What it shows.
+ */
+const rowText = (row: Row) => {
+  if (row._tag === "Item") {
+    return row.item.sequence;
+  }
+
+  return row._tag === "Gap" ? `gap ${row.gap.count}` : "new";
+};
+
 // The page before the first item held carries the Gaps up to it, as the API gives them.
 const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.Encoded)[]) => {
   let state = reduceTimelines(following(), {
@@ -1310,12 +1329,7 @@ const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.E
 
   return {
     before: read?._tag === "Older" ? read.before.sequence : undefined,
-    rows:
-      shown._tag === "Shown"
-        ? rowsOf(shown.window).map((row) =>
-            row._tag === "Item" ? row.item.sequence : `gap ${row.gap.count}`
-          )
-        : [],
+    rows: shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : [],
   };
 };
 
@@ -1353,6 +1367,8 @@ const direct = (id: string, name: string, detached = false) =>
       latest: null,
       name,
       network: "alpha",
+      read: null,
+      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
     })
   );
 
@@ -2017,11 +2033,7 @@ describe("the Timelines' state", () => {
     const shown = opened(state);
 
     expect(
-      shown._tag === "Shown"
-        ? rowsOf(shown.window).map((row) =>
-            row._tag === "Item" ? row.item.sequence : `gap ${row.gap.count}`
-          )
-        : []
+      shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : []
     ).toStrictEqual([3, "gap 1", 4, "gap 3"]);
   });
 });

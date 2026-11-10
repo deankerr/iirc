@@ -37,6 +37,8 @@ const describeTimeline = (
   latest: null,
   name,
   network: "libera",
+  read: null,
+  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 /**
@@ -195,6 +197,7 @@ describe("the options", () => {
         declined: [],
         enabled: true,
         fallbackEncoding: "windows-1252",
+        highlights: [],
         ircds: [{ host: "irc.oftc.net", port: 6697, tls: true }],
         login: { _tag: "None" },
         nicks: ["bot"],

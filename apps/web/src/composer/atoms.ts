@@ -37,6 +37,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { notifying } from "../notifications/notifier.ts";
 import {
   addNetwork,
   configure,
@@ -46,6 +47,7 @@ import {
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
 import { openPalette } from "../palette/state.ts";
+import { markRead } from "../reading/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { open, timelinesState, Waits } from "../timelines/atoms.ts";
 
@@ -285,7 +287,8 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 };
 
 /**
- * Carries out an intent other than a Say: in the page, or by changing Configuration.
+ * Carries out an intent other than a Say: in the page, by changing Configuration, by
+ * marking a Timeline read, or by turning notifications on or off.
  * @param registry - The registry.
  * @param place - Where the intents came from.
  * @param intent - The intent.
@@ -309,6 +312,14 @@ const changeOne = (
 
     case "AddNetwork": {
       return addNetwork(registry, intent.network, intent.configuration);
+    }
+
+    case "MarkRead": {
+      return markRead(intent);
+    }
+
+    case "Notify": {
+      return notifying(intent.on);
     }
 
     default: {

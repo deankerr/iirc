@@ -425,10 +425,12 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
         {
           _tag: "Message",
           at: { _tag: "Known", at: input.at, from: "ours", value: input.at },
+          highlight: false,
           id: { _tag: "Unknown" },
           kind: input.kind,
           live: true,
           ours: { echo: false, intent: input.intent },
+          self: true,
           sender: state.self,
           tags: new Map(),
           target: input.target,
@@ -485,6 +487,7 @@ const step =
         return started(state, input.at);
       }
 
+      case "Read":
       case "Retry":
       case "Stopping":
       case "Unfilled":

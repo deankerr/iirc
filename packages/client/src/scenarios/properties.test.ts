@@ -13,6 +13,7 @@ import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
 import type { Input, UnsentLine } from "../input.ts";
+import type { News } from "../news.ts";
 import { timers } from "../output.ts";
 import type { TimerTable } from "../output.ts";
 import type { State } from "../state.ts";
@@ -32,6 +33,7 @@ const configurations = [
     password: CredentialName.make("pass"),
   }),
   configured({ enabled: false }),
+  configured({ highlights: ["text", "Peer"] }),
 ];
 
 const nicks = ["iirc", "iirc_", "peer", "Peer", "op", "[x]", "{x}", ""];
@@ -120,6 +122,8 @@ const line = fc.oneof(
         "",
         ":text",
         ":\u0001ACTION waves\u0001",
+        ":hi iirc",
+        ":\u0001ACTION pokes Peer\u0001",
         ":\u0001VERSION\u0001",
         "+o-v+k",
         "-k+l 5"
@@ -159,6 +163,7 @@ type Move =
   | { readonly _tag: "Fire"; readonly which: number; readonly early: boolean }
   | { readonly _tag: "Wait"; readonly millis: number }
   | { readonly _tag: "Say"; readonly target: string; readonly text: string }
+  | { readonly _tag: "Read"; readonly target: string | null; readonly read: number }
   | { readonly _tag: "Unfilled"; readonly line: number }
   | { readonly _tag: "Stopping" }
   | { readonly _tag: "Unsent"; readonly count: number; readonly stale: boolean };
@@ -203,10 +208,16 @@ const running: fc.Arbitrary<Move> = fc.oneof(
   { arbitrary: fc.nat(2).map((which) => ({ _tag: "Unfilled", line: which }) as const), weight: 1 }
 );
 
-// And shutting down: a `Stopping` shuts the gate until the next `Started`, and Lines the
+// And marking Timelines read, and shutting down: a `Stopping` shuts the gate until the next `Started`, and Lines the
 // Runtime dropped come back as `Unsent`. Each is rare, so a run still meets the rest.
 const move: fc.Arbitrary<Move> = fc.oneof(
   { arbitrary: running, weight: 30 },
+  {
+    arbitrary: fc
+      .tuple(fc.constantFrom(null, ...channels, ...nicks, "#a,#b"), fc.nat(200_000))
+      .map(([target, read]) => ({ _tag: "Read", read, target }) as const),
+    weight: 2,
+  },
   { arbitrary: fc.constant({ _tag: "Stopping" } as const), weight: 1 },
   {
     arbitrary: fc
@@ -278,7 +289,7 @@ const secrets = [
 ] as const;
 
 // The input a move makes in the state it meets.
-const inputOf = (fold: Fold, next: Move): Input => {
+const inputOf = (fold: Fold, next: Exclude<Move, { readonly _tag: "Read" }>): Input => {
   const at = Instant.make(fold.now);
   const current = client.inspect(fold.state).connection ?? ConnectionId.make(1);
 
@@ -372,6 +383,14 @@ const inputOf = (fold: Fold, next: Move): Input => {
 // the same, and a Quit or a nick change lists only Channels Self knew.
 const declared = (state: State) => state.declared ?? defaultCasemapping;
 
+// Ours is Self's, and Self is never a Highlight.
+const checkSelf = (news: News): void => {
+  if (news._tag === "Message") {
+    expect(news.ours === undefined || news.self).toBeTruthy();
+    expect(news.self && news.highlight).toBeFalsy();
+  }
+};
+
 const checkWhere = (step: Step<State>, before: State): void => {
   const known = client.known(before);
   const fold = (name: string) => casefold(declared(before), name);
@@ -387,6 +406,24 @@ const checkWhere = (step: Step<State>, before: State): void => {
   );
 
   for (const news of step.news) {
+    // A Highlight is said live, by someone other than Self.
+    if (news._tag === "Message" && news.highlight) {
+      expect(news.live).toBeTruthy();
+      expect(news.ours).toBeUndefined();
+      expect(
+        known.self === undefined || knownFold(news.sender) !== knownFold(known.self.nick)
+      ).toBeTruthy();
+    }
+
+    checkSelf(news);
+
+    // A Read Marker is keyed as `where` is, and only by the Owner's `Read`.
+    if (news._tag === "ReadMarker") {
+      expect(
+        news.where._tag === "Network" || news.where.key === fold(news.where.name)
+      ).toBeTruthy();
+    }
+
     if (news._tag !== "Message" && news._tag !== "Activity") {
       continue;
     }
@@ -458,6 +495,13 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
 
   expect(users.filter((nick) => !members.has(nick))).toStrictEqual([]);
 
+  // Only the Owner's `Read` moves a Read Marker, to the instant it gives.
+  for (const news of step.news) {
+    if (news._tag === "ReadMarker") {
+      expect(input._tag === "Read" && news.read === input.read).toBeTruthy();
+    }
+  }
+
   checkWhere(step, before);
 };
 
@@ -480,7 +524,16 @@ const runMoves = (moves: readonly Move[]): Fold => {
       continue;
     }
 
-    const input = inputOf(fold, next);
+    const input: Input =
+      next._tag === "Read"
+        ? {
+            _tag: "Read",
+            at: Instant.make(fold.now),
+            read: Instant.make(epoch + next.read),
+            target: next.target,
+          }
+        : inputOf(fold, next);
+
     const before = fold.state;
     const step = client.step(before, input);
 

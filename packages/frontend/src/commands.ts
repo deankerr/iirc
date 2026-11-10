@@ -6,8 +6,10 @@
  *
  * @packageDocumentation
  */
-import type { NetworkId, TimelineId } from "@iirc/api";
+import type { Level, NetworkId, TimelineId } from "@iirc/api";
 
+import { rank } from "./activity.ts";
+import type { Instant } from "./activity.ts";
 import { channelsOf, networkIdOf, parseIrcd, parseText, resolve, starting } from "./options.ts";
 import type { Configuration, Edit, Path } from "./options.ts";
 
@@ -36,6 +38,29 @@ export interface CommandContext {
   readonly timelines: readonly TimelineId[];
   /** The Timeline the Owner opened, as a merge resolves it, even while it is still read. */
   readonly open: TimelineId | undefined;
+  /** Every Timeline with something unread, in the sidebar's order. */
+  readonly unread: readonly Unseen[];
+}
+
+/** A Timeline with something unread, as a command sees it. */
+export interface Unseen {
+  readonly timeline: TimelineId;
+  /** The highest level unread in it. */
+  readonly level: Level;
+  /** Marking it read up to its latest item, unless that would change nothing. */
+  readonly mark: MarkRead | undefined;
+}
+
+/**
+ * Mark a Timeline read up to an instant: the Daemon's `read`, with `target` the Timeline's
+ * name, or `null` for the Network's own.
+ */
+export interface MarkRead {
+  readonly _tag: "MarkRead";
+  readonly network: NetworkId;
+  readonly timeline: TimelineId;
+  readonly target: string | null;
+  readonly read: Instant;
 }
 
 /**
@@ -69,6 +94,9 @@ export interface Say {
  * - `FocusComposer`: focus the composer under the main view, starting it with `text` when
  *   there is one, as the palette starts a command that needs arguments. A draft with text
  *   in it is never replaced: the composer says what was not put in.
+ * - `MarkRead`: mark a Timeline read, above.
+ * - `Notify`: turn notifications on or off on this device, asking the browser's permission
+ *   to turn them on.
  */
 export type Intent =
   | Say
@@ -82,7 +110,9 @@ export type Intent =
   | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path }
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "OpenPalette" }
-  | { readonly _tag: "FocusComposer"; readonly text: string | undefined };
+  | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
+  | MarkRead
+  | { readonly _tag: "Notify"; readonly on: boolean };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -375,6 +405,87 @@ const nothingAfter =
   (args: string): Parsed<undefined> =>
     args.trim() === "" ? parsed(undefined) : invalid(`/${name} takes nothing after it.`);
 
+/**
+ * The marks of Timelines with something unread, skipping any that would change nothing.
+ * @param unseen - The Timelines.
+ * @returns Their marks.
+ */
+const marksOf = (unseen: readonly Unseen[]): readonly MarkRead[] =>
+  unseen.flatMap((one) => (one.mark === undefined ? [] : [one.mark]));
+
+/**
+ * What `/read` was given: nothing, to mark the open Timeline read, or `all`, to mark every
+ * Timeline read, each up to its latest item.
+ * @param args - The text after `/read`.
+ * @param context - The context.
+ * @returns The marks, none when nothing is unread, or why there are none.
+ */
+const readArguments = (args: string, context: CommandContext): Parsed<readonly MarkRead[]> => {
+  const what = args.trim().toLowerCase();
+
+  if (what === "all") {
+    return parsed(marksOf(context.unread));
+  }
+
+  if (what !== "") {
+    return invalid("Use /read for the open Timeline, or /read all for every Timeline.");
+  }
+
+  const { focus } = context;
+
+  return focus === undefined
+    ? invalid("Open a Timeline first, or use /read all.")
+    : parsed(marksOf(context.unread.filter((one) => one.timeline === focus.timeline)));
+};
+
+/** The least a Timeline's highest level must be for `/next-unread` to go to it. */
+const worthJumping = rank("Message");
+
+/**
+ * The Timeline with the most calling for the Owner, other than the open one: the highest
+ * level unread, Highlights first, then Direct Messages, then Messages, and ties by the
+ * sidebar's order. Activity alone is not enough, since joins and quits pile up everywhere.
+ * @param args - The text after `/next-unread`.
+ * @param context - The context.
+ * @returns The Timeline to open, or none when nothing else calls.
+ */
+const nextUnread = (args: string, context: CommandContext): Parsed<TimelineId | undefined> => {
+  if (args.trim() !== "") {
+    return invalid("/next-unread takes nothing after it.");
+  }
+
+  let best: Unseen | undefined;
+
+  for (const one of context.unread) {
+    const ranked = rank(one.level);
+
+    if (
+      one.timeline !== context.open &&
+      ranked >= worthJumping &&
+      (best === undefined || ranked > rank(best.level))
+    ) {
+      best = one;
+    }
+  }
+
+  return parsed(best?.timeline);
+};
+
+/**
+ * What `/notify` was given: `on` or `off`.
+ * @param args - The text after `/notify`.
+ * @returns Whether to turn notifications on, or why it cannot tell.
+ */
+const notifyArguments = (args: string): Parsed<boolean> => {
+  const what = args.trim().toLowerCase();
+
+  if (what === "on" || what === "off") {
+    return parsed(what === "on");
+  }
+
+  return invalid("Use /notify on or /notify off.");
+};
+
 const say = (focus: Focus, kind: SayKind, text: string): Say => ({
   _tag: "Say",
   kind,
@@ -541,6 +652,43 @@ export const commands: readonly Command[] = [
     name: "previous",
     parse: stepped("Previous"),
     usage: "/previous",
+    when: [],
+  }),
+  unfocused({
+    aliases: ["jump"],
+    arguments: "None",
+    description:
+      "Open the Timeline with the most calling for you: Highlights, then Direct Messages, then Messages.",
+    id: "timeline.unread",
+    intents: (to: TimelineId | undefined) =>
+      to === undefined ? [] : [{ _tag: "Open", timeline: to }],
+    name: "next-unread",
+    parse: nextUnread,
+    usage: "/next-unread",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Mark the open Timeline read up to its latest, or every Timeline with /read all, for every Frontend.",
+    id: "timeline.read",
+    intents: (marks: readonly MarkRead[]) => marks,
+    name: "read",
+    parse: readArguments,
+    usage: "/read [all]",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Notify on this device of Highlights and Direct Messages you are not looking at, or stop.",
+    id: "notify.set",
+    intents: (on: boolean) => [{ _tag: "Notify", on }],
+    name: "notify",
+    parse: notifyArguments,
+    usage: "/notify on|off",
     when: [],
   }),
   unfocused({

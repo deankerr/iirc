@@ -37,6 +37,7 @@ const inChannel: CommandContext = {
   open: channel,
   session: true,
   timelines: [own, channel, direct],
+  unread: [],
 };
 
 const at = (
@@ -245,6 +246,35 @@ describe("the keymap", () => {
       open: undefined,
       p: opened,
       typing: opened,
+    });
+  });
+
+  it("jumps to the Timeline calling most with Alt+A, Option+A on a Mac, while typing too", () => {
+    const calling: CommandContext = {
+      ...inChannel,
+      unread: [
+        { level: "Message", mark: undefined, timeline: own },
+        { level: "Direct", mark: undefined, timeline: direct },
+      ],
+    };
+
+    expect({
+      mac: resolve(
+        defaultKeymap,
+        at({ editing: true, platform: "Mac" }, calling),
+        press("\u00E5", "KeyA", { alt: true })
+      ),
+      none: resolve(defaultKeymap, at({}, inChannel), press("a", "KeyA", { alt: true })),
+      other: resolve(
+        defaultKeymap,
+        at({ editing: true }, calling),
+        press("a", "KeyA", { alt: true })
+      ),
+    }).toStrictEqual({
+      mac: [{ _tag: "Open", timeline: direct }],
+      // Nothing calls: the key is still the binding's, so Option+A types nothing.
+      none: [],
+      other: [{ _tag: "Open", timeline: direct }],
     });
   });
 

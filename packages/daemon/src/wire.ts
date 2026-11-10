@@ -14,6 +14,7 @@ import type {
   ItemContent as WireItemContent,
   Projection as WireProjection,
   Timeline as WireTimeline,
+  Unread as WireUnread,
   TimelineItem as WireTimelineItem,
   Tombstone as WireTombstone,
   WindowGap as WireWindowGap,
@@ -28,6 +29,7 @@ import type {
   Happened as WireHappened,
   IgnoredReason as WireIgnoredReason,
   Knowledge as WireKnowledge,
+  Marked as WireMarked,
   NetworkInspection as WireNetworkInspection,
   NetworkStatus as WireNetworkStatus,
   News as WireNews,
@@ -39,6 +41,7 @@ import type {
   EndReason,
   IgnoredReason,
   Inspection,
+  Marked,
   ModeChange,
   News,
   RefusedReason,
@@ -57,7 +60,7 @@ import type {
   UserKnowledge,
 } from "@iirc/client/known";
 import type { Happened, NetworkInspection, NetworkStatus } from "@iirc/runtime";
-import type { CollapsedGap, Gap, Item, Summary, Tombstone } from "@iirc/timeline-store";
+import type { CollapsedGap, Gap, Item, Summary, Tombstone, Unread } from "@iirc/timeline-store";
 import type { Content, Delivery } from "@iirc/timelines";
 
 import type { ProjectorStatus } from "./projector.ts";
@@ -379,6 +382,12 @@ const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
       return wire;
     }
 
+    case "NoTimeline": {
+      const wire: Case<IgnoredReason, WireIgnoredReason, "NoTimeline"> = { _tag: "NoTimeline" };
+
+      return wire;
+    }
+
     default: {
       return source satisfies never;
     }
@@ -421,6 +430,41 @@ const where = (source: Where): WireWhere => {
 
     case "Network": {
       const wire: Case<Where, WireWhere, "Network"> = { _tag: "Network" };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+const marked = (source: Marked): WireMarked => {
+  switch (source._tag) {
+    case "Channel": {
+      const wire: Case<Marked, WireMarked, "Channel"> = {
+        _tag: "Channel",
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "Direct": {
+      const wire: Case<Marked, WireMarked, "Direct"> = {
+        _tag: "Direct",
+        existing: source.existing,
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "Network": {
+      const wire: Case<Marked, WireMarked, "Network"> = { _tag: "Network" };
 
       return wire;
     }
@@ -496,16 +540,28 @@ const news = (source: News): WireNews => {
       const wire: Case<News, WireNews, "Message"> = {
         _tag: "Message",
         at: fact(source.at, same),
+        highlight: source.highlight,
         id: fact(source.id, same),
         kind: source.kind,
         live: source.live,
         ours:
           source.ours === undefined ? null : { echo: source.ours.echo, intent: source.ours.intent },
+        self: source.self,
         sender: source.sender,
         tags: [...source.tags].map(([key, value]) => ({ key, value })),
         target: source.target,
         text: source.text,
         where: source.where.map(where),
+      };
+
+      return wire;
+    }
+
+    case "ReadMarker": {
+      const wire: Case<News, WireNews, "ReadMarker"> = {
+        _tag: "ReadMarker",
+        read: source.read,
+        where: marked(source.where),
       };
 
       return wire;
@@ -844,10 +900,23 @@ const itemContent = (source: Content): WireItemContent => {
 export const timelineItem = (source: Item): Fields<Item, WireTimelineItem, "sequence"> => ({
   changed: WireSequence.make(source.changed),
   content: itemContent(source.content),
+  level: orNull(source.level),
   network: networkOf(source.network),
   position: source.position,
   sequence: WireSequence.make(source.position.sequence),
   timeline: source.timeline,
+});
+
+/**
+ * How much stands after a Timeline's Read Marker, by level, as the store counted it.
+ * @param source - The counts.
+ * @returns Their wire form.
+ */
+const unread = (source: Unread): Fields<Unread, WireUnread> => ({
+  activity: source.activity,
+  direct: source.direct,
+  highlights: source.highlights,
+  messages: source.messages,
 });
 
 /**
@@ -865,6 +934,8 @@ export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detach
   latest: orNull(source.latest),
   name: source.name,
   network: networkOf(source.network),
+  read: orNull(source.read),
+  unread: unread(source.unread),
 });
 
 /**

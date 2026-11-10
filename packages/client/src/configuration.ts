@@ -1,5 +1,5 @@
 import { CredentialName, FallbackEncoding } from "@iirc/protocol/line";
-import { Schema } from "effect";
+import { Option, Schema, SchemaGetter } from "effect";
 
 import { FeatureName } from "./ids.ts";
 
@@ -56,6 +56,19 @@ export const WantedChannel = Schema.Struct({
 /** The decoded form of {@link WantedChannel}. */
 export type WantedChannel = typeof WantedChannel.Type;
 
+/** How many highlight words a Network may have, and how long each may be. */
+const maxHighlights = 64;
+
+/**
+ * Words that make a Message a Highlight: at most 64, of at most 64 characters each, since
+ * every Message is searched for each, in time linear in its length.
+ */
+const Highlights = Schema.Array(
+  Schema.String.check(Schema.isMaxLength(maxHighlights)).annotate({
+    description: "A word that makes a Message a Highlight, of at most 64 characters.",
+  })
+).check(Schema.isMaxLength(maxHighlights));
+
 /**
  * What the Owner wants to be true of one Network. It always arrives whole, and the
  * Client works out what changed, so joining, parting, and quitting are all a change of
@@ -81,6 +94,22 @@ export const NetworkConfiguration = Schema.Struct({
     default: "windows-1252",
     description: "The encoding to read text that is not UTF-8 in, until the Ircd says UTF8ONLY.",
   }),
+  /**
+   * Words that make a Message a Highlight, as Self's nick does. A Journal written before
+   * the field existed holds `Configured` inputs without it, which decode as none.
+   */
+  highlights: Schema.optionalKey(Highlights)
+    .pipe(
+      Schema.decodeTo(Highlights, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => [])),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: [],
+      description:
+        "Words that make a Message a Highlight, as Self's nick does, matched as whole words in any case: at most 64, of at most 64 characters each.",
+    }),
   ircds: Schema.NonEmptyArray(IrcdAddress).annotate({
     description: "The Ircds to connect to, tried in turn.",
   }),

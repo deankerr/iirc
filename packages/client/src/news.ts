@@ -79,6 +79,9 @@ export type Where =
   | ({ readonly _tag: "Direct"; readonly existing: boolean } & Named)
   | ({ readonly _tag: "DirectRenamed"; readonly to: Named } & Named);
 
+/** A Timeline a Read Marker belongs to: the Network's own, a Channel's, or a Direct Message partner's. */
+export type Marked = Exclude<Where, { readonly _tag: "DirectRenamed" }>;
+
 /** One mode set or unset. A key's parameter is never shown. */
 export interface ModeChange {
   readonly set: boolean;
@@ -130,7 +133,9 @@ export type IgnoredReason =
   /** An answer spread over more Lines than the Client reads, taken as a refusal. */
   | { readonly _tag: "Endless"; readonly command: string }
   /** An echo of what Self said that nothing can tie to what we sent, while `echo-message` is being given up. */
-  | { readonly _tag: "UnmatchedEcho" };
+  | { readonly _tag: "UnmatchedEcho" }
+  /** A `Read` whose Target names no one Timeline, such as a list or a mask. */
+  | { readonly _tag: "NoTimeline" };
 
 /**
  * What happened in one step, in order.
@@ -158,6 +163,16 @@ export type News =
       readonly tags: ReadonlyMap<string, string>;
       /** Set when we said it, as the Owner's intent. A Message from Self said elsewhere has none. */
       readonly ours: Ours | undefined;
+      /**
+       * Whether it calls for the Owner: said live by a User other than Self, naming Self's
+       * nick or one of the Configuration's `highlights` as a whole word.
+       */
+      readonly highlight: boolean;
+      /**
+       * Whether Self said it, by the source: ours, Self's echo, or Self said elsewhere, as
+       * from another IRC client. A projection counts none of these as unread.
+       */
+      readonly self: boolean;
       /** The Timelines it belongs to. Never empty. */
       readonly where: readonly Where[];
     }
@@ -192,9 +207,17 @@ export type News =
    * Client does not know folds as `ascii`, and is reported as `ascii`.
    */
   | { readonly _tag: "Refolded"; readonly casemapping: Casemapping }
+  /**
+   * The Owner's Read Marker of a Timeline moved forward, to `read`. `where` is keyed as
+   * a Message's is, and a `Direct` is `existing`, since marking read starts no Timeline.
+   */
+  | { readonly _tag: "ReadMarker"; readonly where: Marked; readonly read: Instant }
   | { readonly _tag: "Ignored"; readonly reason: IgnoredReason };
 
-/** News as the core reads it from a Line, before the step works out where it belongs. */
+/**
+ * News as the core reads it from a Line, before the step works out where it belongs,
+ * whether a Message is a Highlight, and whether Self said it.
+ */
 export type Unrouted<T extends News = News> = T extends { readonly where: readonly Where[] }
-  ? Omit<T, "where">
+  ? Omit<T, "where" | "highlight" | "self">
   : T;

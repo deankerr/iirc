@@ -56,6 +56,7 @@ export {
   ListQuery,
   LocateQuery,
   Located,
+  Marked,
   MemberKnowledge,
   ModeChange,
   NetworkEntry,
@@ -67,6 +68,7 @@ export {
   MessageId,
   Projection,
   ProjectionVersion,
+  ReadRequest,
   RefusedReason,
   Resume,
   Said,
@@ -78,6 +80,7 @@ export {
   SignInRequest,
   SessionKnowledge,
   Tag,
+  Level,
   Timeline,
   TimelineChange,
   TimelineChangesEvent,
@@ -89,6 +92,7 @@ export {
   Tombstone,
   Topic,
   Untrusted,
+  Unread,
   UserKnowledge,
   Where,
   WindowGap,
@@ -96,4 +100,4 @@ export {
   windowLimit,
 } from "./schemas.ts";
 
-export { TimelineId } from "@iirc/timelines";
+export { TimelineId, unreadCap } from "@iirc/timelines";

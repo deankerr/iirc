@@ -34,6 +34,7 @@ export type {
   Activity,
   EndReason,
   IgnoredReason,
+  Marked,
   ModeChange,
   Named,
   News,

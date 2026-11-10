@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { Change } from "./change.ts";
 import { emptyDirectory, step } from "./fold.ts";
 import type { Directory, Happened } from "./fold.ts";
-import { comparePositions, cursorOf, parseCursor } from "./position.ts";
+import { comparePositions, cursorOf, cursorsAfter, parseCursor } from "./position.ts";
 import type { Position } from "./position.ts";
 import type { TimelineId } from "./timeline.ts";
 
@@ -60,6 +60,22 @@ describe("positions", () => {
       fc.property(nearPosition, nearPosition, nearPosition, (a, b, c) => {
         fc.pre(comparePositions(a, b) <= 0 && comparePositions(b, c) <= 0);
         expect(comparePositions(a, c)).toBeLessThanOrEqual(0);
+      })
+    );
+  });
+
+  it("are after an instant exactly when their cursors are above its bound", () => {
+    const instant = fc.oneof(
+      position.map(({ at }) => at),
+      nearPosition.map(({ at }) => at),
+      fc
+        .constantFrom(Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER)
+        .map((at) => Instant.make(at))
+    );
+
+    fc.assert(
+      fc.property(fc.oneof(position, nearPosition), instant, (each, at) => {
+        expect(textOrder(cursorOf(each), cursorsAfter(at)) > 0).toBe(each.at > at);
       })
     );
   });
@@ -132,10 +148,12 @@ const news: fc.Arbitrary<News> = fc.oneof(
   fc.record({
     _tag: fc.constant("Message"),
     at: fact(at),
+    highlight: fc.boolean(),
     id: fact(messageId),
     kind: fc.constant("Privmsg"),
     live: fc.boolean(),
     ours: fc.option(fc.record({ echo: fc.boolean(), intent }), { nil: undefined }),
+    self: fc.boolean(),
     sender: fc.constant("peer"),
     tags: fc.constant(new Map<string, string>()),
     target: fc.constant("#a"),
@@ -168,6 +186,11 @@ const news: fc.Arbitrary<News> = fc.oneof(
     _tag: fc.constantFrom("SessionEnded", "ConnectionFailed"),
     at,
     reason: fc.constantFrom({ _tag: "Silent" } as const, { _tag: "Restarted" } as const),
+  }),
+  fc.record({
+    _tag: fc.constant("ReadMarker"),
+    read: at,
+    where: where.filter((each) => each._tag !== "DirectRenamed"),
   }),
   fc.constant<News>({ _tag: "Ignored", reason: { _tag: "UnmatchedEcho" } })
 );
@@ -299,6 +322,63 @@ describe("the fold", () => {
 
           for (const [kind, key, id] of byKey) {
             expect(each.keyed.get(id)).toMatchObject({ id, key, kind });
+          }
+        }
+      })
+    );
+  });
+
+  it("moves each Timeline's Read Marker only forward, and only on an open Timeline", () => {
+    fc.assert(
+      fc.property(steps, (all) => {
+        const live = new Map<TimelineId, boolean>();
+        const read = new Map<TimelineId, number>();
+        const broken: string[] = [];
+
+        for (const change of foldAll(all).changes.flat()) {
+          if (change._tag === "Described") {
+            live.set(
+              change.timeline.id,
+              change.timeline.key !== null || change.timeline.kind === "Network"
+            );
+          } else if (change._tag === "Merged") {
+            live.set(change.from, false);
+          } else if (change._tag === "ReadMarker") {
+            const before = read.get(change.timeline);
+
+            if (
+              live.get(change.timeline) !== true ||
+              (before !== undefined && change.read <= before)
+            ) {
+              broken.push(`marked ${change.timeline} at ${change.read}`);
+            }
+
+            read.set(change.timeline, change.read);
+          }
+        }
+
+        expect(broken).toStrictEqual([]);
+      })
+    );
+  });
+
+  it("gives a Message Self said no level, and every other item one", () => {
+    fc.assert(
+      fc.property(steps, (all) => {
+        const { changes } = foldAll(all);
+
+        for (const [index, each] of changes.entries()) {
+          const told = all[index]?.news ?? [];
+
+          for (const change of each) {
+            if (change._tag !== "Added") {
+              continue;
+            }
+
+            const said = told[change.position.n];
+            const ours = said?._tag === "Message" && (said.self || said.ours !== undefined);
+
+            expect(change.level === undefined).toBe(ours);
           }
         }
       })

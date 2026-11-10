@@ -29,6 +29,8 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
     latest: null,
     name,
     network: "libera",
+    read: null,
+    unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
 const sidebar: readonly SidebarNetwork[] = [
@@ -70,6 +72,7 @@ const inChannel: CommandContext = {
   open: channel,
   session: true,
   timelines: [own, channel, direct],
+  unread: [],
 };
 
 const nowhere: CommandContext = { ...inChannel, focus: undefined, open: undefined, session: false };
@@ -151,6 +154,9 @@ describe("the palette's entries", () => {
         "command:network.add",
         "command:timeline.next",
         "command:timeline.previous",
+        "command:timeline.unread",
+        "command:timeline.read",
+        "command:notify.set",
         "command:composer.focus",
       ],
       here: [
@@ -165,6 +171,9 @@ describe("the palette's entries", () => {
         "command:network.add",
         "command:timeline.next",
         "command:timeline.previous",
+        "command:timeline.unread",
+        "command:timeline.read",
+        "command:notify.set",
         "command:composer.focus",
       ],
       timelines: 3,

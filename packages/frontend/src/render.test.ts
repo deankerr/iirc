@@ -5,7 +5,16 @@ import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { contained, formatted, lineOf, linkSchemes, nickColour, nickSlots } from "./render.ts";
+import {
+  contained,
+  formatted,
+  lineOf,
+  linkSchemes,
+  nickColour,
+  nickSlots,
+  plainLimit,
+  plainText,
+} from "./render.ts";
 import type { Inline, Line } from "./render.ts";
 
 const bold = { ...plainStyle, bold: true };
@@ -440,5 +449,77 @@ describe("lines", () => {
       ["Session", "Disconnected: the connection was reset"],
       ["Session", "Could not connect: the connection was refused"],
     ]);
+  });
+});
+
+/**
+ * What plain text holds inside its isolate.
+ * @param text - The plain text.
+ * @returns Its body.
+ */
+const inside = (text: string) => text.slice(1, -1);
+
+/**
+ * Text's characters, one per code point, as plain text counts them.
+ * @param text - The text.
+ * @returns Its characters.
+ */
+// oxlint-disable-next-line typescript/no-misused-spread -- plain text is cut by code point, so the test counts by code point.
+const characters = (text: string): readonly string[] => [...text];
+
+describe("plain text, for a notification", () => {
+  it("strips formatting and controls, drops bidi formatting, and isolates the whole", () => {
+    expect([
+      plainText("\u0002bold\u0002 \u000304,12red\u0003 \u001Ditalic\u000F"),
+      plainText("a\u0000b\u0007c\u007Fd\u0085e\nf\rg"),
+      plainText("\u202Eevil\u202C \u2067rtl\u2069 \u200Fmark \u061Calm"),
+      plainText("one\u2028two\u2029three"),
+      plainText("lone \uD800 surrogate"),
+    ]).toStrictEqual([
+      "\u2068bold red italic\u2069",
+      "\u2068abcdefg\u2069",
+      "\u2068evil rtl mark alm\u2069",
+      "\u2068one two three\u2069",
+      "\u2068lone  surrogate\u2069",
+    ]);
+  });
+
+  it("cuts long text with an ellipsis, never through a character", () => {
+    const emoji = "\u{1F600}".repeat(plainLimit + 5);
+    const cut = characters(inside(plainText(emoji)));
+
+    expect({
+      exact: inside(plainText("x".repeat(plainLimit))).length,
+      last: cut.at(-1),
+      length: cut.length,
+      long: inside(plainText("x".repeat(70_000))).length,
+      whole: cut.slice(0, -1).every((character) => character === "\u{1F600}"),
+    }).toStrictEqual({
+      exact: plainLimit,
+      last: "\u2026",
+      length: plainLimit,
+      long: plainLimit,
+      whole: true,
+    });
+  });
+
+  it("holds no control, bidi formatting, or lone surrogate inside its isolate, for any text", () => {
+    const unsafe =
+      // oxlint-disable-next-line no-control-regex -- the controls are what must never be there
+      /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
+
+    fc.assert(
+      fc.property(hostile, (text) => {
+        const shown = plainText(text);
+        const body = inside(shown);
+
+        expect({
+          isolated: shown.startsWith("\u2068") && shown.endsWith("\u2069"),
+          safe: !unsafe.test(body) && body.isWellFormed(),
+          short: characters(body).length <= plainLimit,
+        }).toStrictEqual({ isolated: true, safe: true, short: true });
+      }),
+      { numRuns: 2000 }
+    );
   });
 });

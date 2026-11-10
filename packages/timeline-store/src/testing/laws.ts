@@ -9,13 +9,22 @@ import { Instant, IntentId, MessageId } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { LawBroken } from "@iirc/runtime/testing";
 import type { Law } from "@iirc/runtime/testing";
-import { comparePositions, cursorOf, emptyDirectory, step, timelineIdOf } from "@iirc/timelines";
+import {
+  comparePositions,
+  cursorOf,
+  emptyDirectory,
+  levels,
+  step,
+  timelineIdOf,
+  unreadCap,
+} from "@iirc/timelines";
 import type {
   Change,
   Content,
   Delivery,
   Directory,
   Kind,
+  Level,
   Position,
   TimelineId,
 } from "@iirc/timelines";
@@ -29,7 +38,9 @@ import type {
   TimelineStoreFailed,
   TimelineStoreService,
   Tombstone,
+  Unread,
 } from "../store.ts";
+import { noneUnread, unreadOf } from "../store.ts";
 
 // Maps are shown as their entries, so a failure says what each held.
 const entries = (_key: string, each: unknown) => (each instanceof Map ? [...each] : each);
@@ -101,17 +112,28 @@ const said = (text: string, delivery?: "Pending" | "Unconfirmed"): Content => ({
   text,
 });
 
+// A Message of ours has no level, and anything else said is a Message, as in a Channel.
+const levelOf = (content: Content): Level | undefined => {
+  if (content._tag !== "Message") {
+    return "Activity";
+  }
+
+  return content.ours === undefined ? "Message" : undefined;
+};
+
 const added = (
   sequence: number,
   timeline: TimelineId,
   where: Position,
   content: Content,
   messageId?: string,
-  on = libera
-): Change => ({
+  on = libera,
+  level = levelOf(content)
+): Extract<Change, { readonly _tag: "Added" }> => ({
   _tag: "Added",
   content,
   intent: content._tag === "Message" ? content.ours?.intent : undefined,
+  level,
   messageId: messageId === undefined ? undefined : MessageId.make(messageId),
   network: on,
   position: where,
@@ -199,6 +221,21 @@ const modelOf = (shown: Snapshot): Model => ({
   timelines: shown.timelines,
 });
 
+// How many items of each level stand after a Read Marker, counted one by one and capped.
+const countUnread = (items: readonly Item[], read: Instant | undefined): Unread => {
+  const counts = { ...noneUnread };
+
+  for (const { level, position: where } of items) {
+    if (level !== undefined && (read === undefined || where.at > read)) {
+      const field = unreadOf[level];
+
+      counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
+    }
+  }
+
+  return counts;
+};
+
 const project = (model: Model): Snapshot => {
   const itemsIn = (timeline: TimelineId) =>
     model.items
@@ -206,7 +243,11 @@ const project = (model: Model): Snapshot => {
       .toSorted((left, right) => comparePositions(left.position, right.position));
 
   const timelines = model.timelines
-    .map((each) => ({ ...each, latest: itemsIn(each.id).at(-1)?.position }))
+    .map((each) => ({
+      ...each,
+      latest: itemsIn(each.id).at(-1)?.position,
+      unread: countUnread(itemsIn(each.id), each.read),
+    }))
     .toSorted((left, right) => compareText(left.id, right.id));
 
   return {
@@ -362,6 +403,8 @@ const additions: Interruption = {
       latest: undefined,
       name: `#new-${sequence}`,
       network: libera,
+      read: undefined,
+      unread: noneUnread,
     };
 
     return {
@@ -371,6 +414,7 @@ const additions: Interruption = {
         ...Array.from({ length: 5 }, (_, n) => ({
           changed: sequence,
           content: said(`${sequence}.${n}`),
+          level: "Message" as const,
           network: libera,
           position: position(n, sequence, n),
           timeline: channel,
@@ -552,6 +596,169 @@ const merging: Interruption = {
       sequence,
     },
   ],
+};
+
+const marker = (sequence: number, timeline: TimelineId, read: Instant, on = libera): Change => ({
+  _tag: "ReadMarker",
+  network: on,
+  read,
+  sequence,
+  timeline,
+});
+
+// A step that moves two Read Markers, one past items of every level, and one that moves
+// the first time and is moved back after, which changes nothing, and adds an item after
+// the first, so a recount half done is seen.
+const marking: Interruption = {
+  edit: (before, sequence) => ({
+    ...before,
+    items: [
+      ...before.items,
+      {
+        changed: sequence,
+        content: said(`late${sequence}`),
+        level: "Highlight",
+        network: libera,
+        position: position(sequence * 10 + 9, sequence),
+        timeline: channel,
+      },
+    ],
+    timelines: before.timelines.map((each) => {
+      if (each.id === channel) {
+        return { ...each, changed: sequence, read: at(sequence * 10 + 4) };
+      }
+
+      // The Network's moves the first time, and never back after.
+      return each.id === network && each.read === undefined
+        ? { ...each, changed: sequence, read: at(-1) }
+        : each;
+    }),
+  }),
+  seed: (sequence) =>
+    levels.flatMap((level, n) => [
+      added(
+        sequence,
+        channel,
+        position(sequence * 10 + n, sequence, n),
+        said(`${level}${sequence}`),
+        undefined,
+        libera,
+        level
+      ),
+      added(
+        sequence,
+        channel,
+        position(sequence * 10 + 5 + n, sequence, n + 4),
+        said(`${level}+${sequence}`),
+        undefined,
+        libera,
+        level
+      ),
+    ]),
+  step: (sequence) => [
+    marker(sequence, channel, at(sequence * 10 + 4)),
+    marker(sequence, network, at(-1)),
+    marker(sequence, network, at(-2)),
+    added(
+      sequence,
+      channel,
+      position(sequence * 10 + 9, sequence),
+      said(`late${sequence}`),
+      undefined,
+      libera,
+      "Highlight"
+    ),
+  ],
+};
+
+// Park and Miller's generator, exact in a double, so a law that walks random steps walks
+// the same ones on every adapter and every run.
+const modulus = 2_147_483_647;
+
+const random = (seed: number) => {
+  let state = (seed % (modulus - 1)) + 1;
+
+  return (below: number) => {
+    state = (state * 48_271) % modulus;
+
+    return Math.floor((state / modulus) * below);
+  };
+};
+
+/**
+ * Random steps over a Network's Timelines: items of every level, at any time, some sharing
+ * a message id or a position with one already there, Read Markers moved either way, Messages
+ * of ours confirmed or marked Unsent, and merges, each as the fold would send them: nothing
+ * is told of a Timeline once it has been merged.
+ * @param seed - Which steps.
+ * @returns Each step's changes, from sequence 2.
+ */
+const randomSteps = (seed: number): readonly (readonly Change[])[] => {
+  const pick = random(seed);
+  const open = [network, channel, other, third];
+  const steps: Change[][] = [];
+
+  for (let sequence = 2; sequence < 26; sequence += 1) {
+    const changes: Change[] = [];
+
+    const count = 1 + pick(4);
+
+    for (let n = 0; n < count; n += 1) {
+      const timeline = open[pick(open.length)] ?? channel;
+      const roll = pick(10);
+
+      if (roll < 6) {
+        const level = [...levels, undefined][pick(levels.length + 1)];
+        const ours = level === undefined && pick(2) === 0;
+        const messageId = pick(3) === 0 ? `m${pick(4)}` : undefined;
+
+        // The level is set as chosen: with none and not ours, a Message Self said elsewhere.
+        changes.push({
+          ...added(
+            sequence,
+            timeline,
+            position(pick(40), sequence, pick(3)),
+            said(`r${sequence}.${n}`, ours ? "Pending" : undefined),
+            messageId
+          ),
+          level,
+        });
+      } else if (roll < 8) {
+        changes.push(marker(sequence, timeline, at(pick(40))));
+      } else if (roll < 9) {
+        changes.push(
+          pick(2) === 0
+            ? {
+                _tag: "Unsent",
+                intent: IntentId.make(`intent-r${pick(sequence)}.0`),
+                network: libera,
+                sequence,
+              }
+            : {
+                _tag: "Confirmed",
+                at: known(at(1)),
+                id: known(MessageId.make(`m${pick(4)}`)),
+                intent: IntentId.make(`intent-r${pick(sequence)}.0`),
+                messageId: MessageId.make(`m${pick(4)}`),
+                network: libera,
+                sequence,
+                text: "confirmed",
+              }
+        );
+      } else {
+        const from = open.findLast((each) => each !== channel && each !== network);
+
+        if (from !== undefined) {
+          open.splice(open.indexOf(from), 1);
+          changes.push({ _tag: "Merged", from, into: channel, network: libera, sequence });
+        }
+      }
+    }
+
+    steps.push(changes);
+  }
+
+  return steps;
 };
 
 /** The laws every Timeline store adapter keeps, starting from a fresh, empty store. */
@@ -1818,6 +2025,286 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
     name: "keeps a Gap that ends where the next began, after a restart, read from that point",
   },
   {
+    check: (store) =>
+      Effect.gen(function* () {
+        const unread = (timeline: TimelineId) =>
+          Effect.map(store.timelines(libera), (each) => {
+            const found = each.find(({ id }) => id === timeline);
+
+            return { changed: found?.changed, read: found?.read, unread: found?.unread };
+          });
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          ...levels.map((level, n) =>
+            added(2, channel, position(10 + n, 2, n), said(level), undefined, libera, level)
+          ),
+          added(2, channel, position(20, 2, 4), said("ours", "Pending")),
+          added(
+            2,
+            channel,
+            position(21, 2, 5),
+            said("Activity, later"),
+            undefined,
+            libera,
+            "Activity"
+          ),
+        ]);
+        yield* same("everything, before any Read Marker", yield* unread(channel), {
+          changed: 2,
+          read: undefined,
+          unread: { activity: 2, direct: 1, highlights: 1, messages: 1 },
+        });
+
+        yield* apply(store, 3, [marker(3, channel, at(11))]);
+        yield* same("what lies after the Read Marker", yield* unread(channel), {
+          changed: 3,
+          read: at(11),
+          unread: { activity: 2, direct: 0, highlights: 0, messages: 1 },
+        });
+
+        yield* apply(store, 4, [marker(4, channel, at(11)), marker(4, channel, at(5))]);
+        yield* same("a Read Marker never moves back", yield* unread(channel), {
+          changed: 3,
+          read: at(11),
+          unread: { activity: 2, direct: 0, highlights: 0, messages: 1 },
+        });
+
+        yield* apply(store, 5, [
+          // History from before the Read Marker is read, and from after it is not.
+          added(5, channel, position(1, 5), said("early"), undefined, libera, "Highlight"),
+          added(5, channel, position(15, 5), said("late"), "m1", libera, "Highlight"),
+          // A duplicate is dropped, and never counts.
+          added(5, channel, position(16, 5), said("again"), "m1", libera, "Highlight"),
+          added(5, channel, position(21, 2, 5), said("same place"), undefined, libera, "Direct"),
+        ]);
+        yield* same("late history, and duplicates", yield* unread(channel), {
+          changed: 5,
+          read: at(11),
+          unread: { activity: 2, direct: 0, highlights: 1, messages: 1 },
+        });
+
+        yield* apply(store, 6, [
+          {
+            _tag: "Confirmed",
+            at: known(at(30)),
+            id: known(MessageId.make("m9")),
+            intent: IntentId.make("intent-ours"),
+            messageId: MessageId.make("m9"),
+            network: libera,
+            sequence: 6,
+            text: "ours!",
+          },
+          described(6, channel, "Channel", "#a", "#a"),
+        ]);
+        yield* same("delivery and a new description leave the counts", yield* unread(channel), {
+          changed: 6,
+          read: at(11),
+          unread: { activity: 2, direct: 0, highlights: 1, messages: 1 },
+        });
+
+        yield* apply(store, 7, [marker(7, channel, at(100))]);
+        yield* same("all read", yield* unread(channel), {
+          changed: 7,
+          read: at(100),
+          unread: noneUnread,
+        });
+        yield* same(
+          "the changes carry it",
+          (yield* store.changedAfter(6)).timelines.map(({ id, read, unread: counts }) => [
+            id,
+            read,
+            counts,
+          ]),
+          [[channel, at(100), noneUnread]]
+        );
+      }),
+    name: "keeps a Read Marker that moves only forward, and counts what lies after it by level",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const counts = (timeline: TimelineId) =>
+          Effect.map(
+            store.timelines(libera),
+            (each) => each.find(({ id }) => id === timeline)?.unread
+          );
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          ...Array.from({ length: unreadCap + 2 }, (_, n) =>
+            added(2, channel, position(n, 2, n), said(`${n}`), undefined, libera, "Message")
+          ),
+        ]);
+        yield* same("more than the cap", yield* counts(channel), {
+          ...noneUnread,
+          messages: unreadCap + 1,
+        });
+
+        yield* apply(store, 3, [
+          added(3, channel, position(5000, 3), said("more"), undefined, libera, "Message"),
+        ]);
+        yield* same("still more than the cap", yield* counts(channel), {
+          ...noneUnread,
+          messages: unreadCap + 1,
+        });
+
+        yield* apply(store, 4, [marker(4, channel, at(2))]);
+        yield* same("exactly the cap", yield* counts(channel), {
+          ...noneUnread,
+          messages: unreadCap,
+        });
+
+        yield* apply(store, 5, [marker(5, channel, at(unreadCap - 2))]);
+        yield* same("a few", yield* counts(channel), { ...noneUnread, messages: 4 });
+      }),
+    name: "caps each count, one past the cap meaning more",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const largest = Instant.make(Number.MAX_SAFE_INTEGER);
+        const least = Instant.make(Number.MIN_SAFE_INTEGER);
+
+        const summary = Effect.map(store.timelines(libera), (each) =>
+          each.flatMap(({ id, read, unread }) => (id === channel ? [{ read, unread }] : []))
+        );
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, { at: least, n: 0, sequence: 2 }, said("first"), undefined, libera),
+          added(2, channel, position(1, 2, 1), said("now"), undefined, libera),
+          added(2, channel, { at: largest, n: 2, sequence: 2 }, said("last"), undefined, libera),
+        ]);
+        yield* apply(store, 3, [marker(3, channel, least)]);
+        yield* same("all but the first after the least instant", yield* summary, [
+          { read: least, unread: { ...noneUnread, messages: 2 } },
+        ]);
+
+        yield* apply(store, 4, [marker(4, channel, largest)]);
+        yield* same("nothing after the largest instant", yield* summary, [
+          { read: largest, unread: noneUnread },
+        ]);
+
+        yield* apply(store, 5, [
+          added(
+            5,
+            channel,
+            { at: largest, n: 0, sequence: 5 },
+            said("at the last"),
+            undefined,
+            libera
+          ),
+        ]);
+        yield* same("nor at it", yield* summary, [{ read: largest, unread: noneUnread }]);
+        yield* same("applied", (yield* store.folded).through, 5);
+      }),
+    name: "counts nothing after the largest instant, and everything after the least",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(1, 2, 0), said("kept, read"), "k", libera, "Message"),
+          added(2, channel, position(9, 2, 1), said("kept"), undefined, libera, "Message"),
+          added(2, other, position(2, 2, 2), said("moved, read"), undefined, libera, "Highlight"),
+          added(2, other, position(8, 2, 3), said("moved"), undefined, libera, "Highlight"),
+          added(2, other, position(9, 2, 4), said("same id"), "k", libera, "Highlight"),
+          added(2, other, position(9, 2, 1), said("same place"), undefined, libera, "Direct"),
+          marker(2, channel, at(5)),
+        ]);
+        yield* apply(store, 3, [
+          { _tag: "Merged", from: other, into: channel, network: libera, sequence: 3 },
+        ]);
+
+        const kept = (yield* store.timelines(libera)).find(({ id }) => id === channel);
+
+        yield* same(
+          "the kept Timeline, counted again",
+          kept && [kept.read, kept.unread, kept.changed],
+          [at(5), { ...noneUnread, highlights: 1, messages: 1 }, 3]
+        );
+      }),
+    name: "counts the kept Timeline again on a merge, by its own Read Marker",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const seeds = Array.from({ length: 12 }, (_, seed) => seed);
+
+        // The runs hold a Message Self said elsewhere, with no level and not ours.
+        yield* same(
+          "a Message Self said elsewhere among the runs",
+          seeds
+            .flatMap((seed) => randomSteps(seed).flat())
+            .some(
+              (change) =>
+                change._tag === "Added" &&
+                change.level === undefined &&
+                change.content._tag === "Message" &&
+                change.content.ours === undefined
+            ),
+          true
+        );
+
+        yield* inOrder(seeds, (seed) =>
+          Effect.gen(function* () {
+            yield* store.reset(3);
+            yield* apply(store, 1, opened(1));
+
+            const marked = new Map<TimelineId, Instant>();
+            let before = yield* store.timelines(libera);
+
+            for (const [index, changes] of randomSteps(seed).entries()) {
+              const sequence = index + 2;
+
+              yield* apply(store, sequence, changes);
+
+              for (const change of changes) {
+                const was = change._tag === "ReadMarker" ? marked.get(change.timeline) : undefined;
+
+                if (change._tag === "ReadMarker" && (was === undefined || change.read > was)) {
+                  marked.set(change.timeline, change.read);
+                }
+              }
+
+              const after = yield* store.timelines(libera);
+
+              for (const summary of after) {
+                const where = `seed ${seed}, step ${sequence}, ${summary.id}`;
+                const window = yield* store.window(summary.id, all, 100_000);
+
+                const items = Option.match(window, {
+                  onNone: () => [],
+                  onSome: ({ items: each }) => each,
+                });
+
+                const was = before.find(({ id }) => id === summary.id);
+
+                yield* same(`${where}: its Read Marker`, summary.read, marked.get(summary.id));
+                yield* same(
+                  `${where}: what lies after it`,
+                  summary.unread,
+                  countUnread(items, summary.read)
+                );
+
+                if (
+                  was !== undefined &&
+                  (was.read !== summary.read || !Equal.equals(was.unread, summary.unread))
+                ) {
+                  yield* same(`${where}: changed`, summary.changed, sequence);
+                }
+              }
+
+              before = after;
+            }
+          })
+        );
+      }),
+    name: "counts what lies after each Read Marker as counting one by one does, after any steps",
+  },
+  {
     check: interrupting(additions),
     name: "applies a step whole, or not at all",
   },
@@ -1832,5 +2319,9 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: interrupting(merging),
     name: "applies a step that merges Timelines whole, or not at all",
+  },
+  {
+    check: interrupting(marking),
+    name: "applies a step that moves Read Markers whole, or not at all",
   },
 ];

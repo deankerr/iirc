@@ -57,6 +57,59 @@ const decodeInForce = Schema.decodeUnknownSync(
   )
 );
 
+/** What the end-to-end run reads of a Network's Timelines: each one's name and Read Marker. */
+const decodeTimelines = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      timelines: Schema.Array(
+        Schema.Struct({ name: Schema.String, read: Schema.NullOr(Schema.Finite) })
+      ),
+    })
+  )
+);
+
+/** A notification the stand-in kept: its title, body, and tag. */
+const decodeNotified = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ body: Schema.String, tag: Schema.String, title: Schema.String })
+  )
+);
+
+/**
+ * Stands in for the browser's notifications, granting them when asked, and keeps each one
+ * shown on the page's root, where the test reads it. It runs in the page before its scripts.
+ */
+const stubNotifications = () => {
+  // oxlint-disable-next-line typescript/no-extraneous-class -- the Notification API is a class, and this stands in for it.
+  class Shown {
+    static permission: NotificationPermission = "default";
+
+    // oxlint-disable-next-line typescript/require-await -- the API answers with a promise.
+    static async requestPermission() {
+      Shown.permission = "granted";
+
+      return Shown.permission;
+    }
+
+    constructor(title: string, options?: NotificationOptions) {
+      const root = document.documentElement;
+      const shown = { body: options?.body, tag: options?.tag, title };
+
+      root.dataset.notified = `${root.dataset.notified ?? ""}${JSON.stringify(shown)}\n`;
+    }
+
+    addEventListener() {
+      return this;
+    }
+
+    close() {
+      return this;
+    }
+  }
+
+  Object.defineProperty(window, "Notification", { configurable: true, value: Shown });
+};
+
 /**
  * The first Network's row in the sidebar, once its connection is known.
  * @param page - The page.
@@ -772,6 +825,127 @@ describe("the web frontend on iirc daemon --web", () => {
           joined: "#iirc",
           nicks: ["iirc", "iirc_"],
           parted: "#iirc",
+          problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "shows a Highlight where it was said, jumps to it with Alt+A, marks it read, and every Frontend sees it",
+    { timeout: 90_000 },
+    async () => {
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "reading"),
+        "#iirc-new"
+      );
+
+      const readOf = async (name: string) => {
+        const answer = await api("GET", "/networks/private/timelines");
+
+        return decodeTimelines(await answer.text()).timelines.find((one) => one.name === name)
+          ?.read;
+      };
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.addInitScript(stubNotifications);
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        // Seen once, the Channel is marked read up to its latest by the Daemon.
+        await page.getByRole("row", { name: channel }).click();
+        await expect
+          .poll(async () => await readOf(channel), { interval: 100, timeout: 10_000 })
+          .not.toBeNull();
+
+        // Away in the Network's own Timeline, with notifications on for this device.
+        await page.keyboard.press("Alt+ArrowUp");
+        await page.getByRole("log", { name: "private" }).waitFor();
+        const composer = page.getByRole("textbox", { name: "private" });
+
+        await composer.fill("/notify on");
+        await composer.press("Enter");
+
+        // Another Frontend, open on nothing.
+        const other = await page.context().newPage();
+
+        await other.goto(base);
+        await networkRow(other);
+
+        peer.send(`PRIVMSG ${channel} :iirc: look here`);
+
+        const highlighted = `${channel}, 1 unread, 1 highlight`;
+
+        await page.getByRole("row", { exact: true, name: highlighted }).waitFor();
+        await other.getByRole("row", { exact: true, name: highlighted }).waitFor();
+        await expect.poll(async () => await page.title()).toBe("(1) iirc");
+        await expect.poll(async () => await other.title()).toBe("(1) iirc");
+
+        const notified = await page.evaluate(() => document.documentElement.dataset.notified ?? "");
+
+        // Alt+A opens it, with the "new" divider right before the Highlight.
+        await page.keyboard.press("Alt+a");
+        const log = page.getByRole("log", { name: channel });
+
+        await log.getByText("look here", { exact: false }).waitFor();
+
+        const divided = await log.evaluate((element) => {
+          const rows = [...element.querySelectorAll<HTMLElement>("[data-index]")].toSorted(
+            (left, right) => Number(left.dataset.index) - Number(right.dataset.index)
+          );
+
+          const at = rows.findIndex((row) => row.textContent === "new");
+
+          return rows[at + 1]?.textContent?.includes("look here") === true;
+        });
+
+        // Seen for a moment, it is read, here and in the other Frontend.
+        await page.getByRole("row", { exact: true, name: channel }).waitFor();
+        await other.getByRole("row", { exact: true, name: channel }).waitFor();
+        await expect.poll(async () => await page.title()).toBe("iirc");
+        await expect.poll(async () => await other.title()).toBe("iirc");
+
+        // The divider stays while the Channel stays open.
+        const kept = await log.getByText("new", { exact: true }).count();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          divided,
+          kept,
+          notified: notified
+            .split("\n")
+            .filter((line) => line !== "")
+            .map((line) => {
+              const one = decodeNotified(line);
+
+              // Tagged by its Timeline, whose id the Daemon chose.
+              return { ...one, tag: one.tag.startsWith("iirc:") };
+            }),
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          violations,
+        }).toStrictEqual({
+          divided: true,
+          kept: 1,
+          notified: [
+            {
+              body: "<\u2068peer\u2069> \u2068iirc: look here\u2069",
+              tag: true,
+              title: `\u2068${channel}\u2069 \u00B7 private`,
+            },
+          ],
           problems: [],
           violations: "",
         });

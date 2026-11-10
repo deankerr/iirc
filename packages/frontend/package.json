@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./activity": "./src/activity.ts",
     "./commands": "./src/commands.ts",
     "./composer": "./src/composer.ts",
     "./keymap": "./src/keymap.ts",
+    "./notifications": "./src/notifications.ts",
     "./options": "./src/options.ts",
     "./palette": "./src/palette.ts",
     "./render": "./src/render.ts",

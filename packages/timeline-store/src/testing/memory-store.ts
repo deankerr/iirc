@@ -1,5 +1,5 @@
-import type { IntentId, MessageId } from "@iirc/client";
-import { cursorOf, delivered, emptyDirectory } from "@iirc/timelines";
+import type { Instant, IntentId, MessageId } from "@iirc/client";
+import { cursorOf, delivered, emptyDirectory, unreadCap } from "@iirc/timelines";
 import type {
   Change,
   DeliveryChange,
@@ -20,8 +20,10 @@ import type {
   Summary,
   TimelineStoreService,
   Tombstone,
+  Unread,
   Window,
 } from "../store.ts";
+import { noneUnread, unreadOf } from "../store.ts";
 
 /** An item and what it is found by. */
 interface Stored {
@@ -30,11 +32,18 @@ interface Stored {
   readonly intent: IntentId | undefined;
 }
 
+/** A Timeline, its Read Marker, and the last sequence that changed it. */
+interface Entry {
+  descriptor: Descriptor;
+  changed: number;
+  read: Instant | undefined;
+}
+
 interface Memory {
   version: number | undefined;
   through: number | undefined;
   directory: Directory;
-  readonly timelines: Map<TimelineId, { descriptor: Descriptor; changed: number }>;
+  readonly timelines: Map<TimelineId, Entry>;
   /** Each Timeline's items, by cursor. */
   readonly items: Map<TimelineId, Map<string, Stored>>;
   readonly merged: Map<TimelineId, Tombstone>;
@@ -204,7 +213,20 @@ const applyChange = (memory: Memory, change: Change) => {
       memory.timelines.set(change.timeline.id, {
         changed: change.sequence,
         descriptor: change.timeline,
+        read: memory.timelines.get(change.timeline.id)?.read,
       });
+      break;
+    }
+
+    case "ReadMarker": {
+      const found = memory.timelines.get(change.timeline);
+
+      // Only forward, whatever the change says.
+      if (found !== undefined && (found.read === undefined || change.read > found.read)) {
+        found.read = change.read;
+        found.changed = change.sequence;
+      }
+
       break;
     }
 
@@ -214,6 +236,7 @@ const applyChange = (memory: Memory, change: Change) => {
         item: {
           changed: change.sequence,
           content: change.content,
+          level: change.level,
           network: change.network,
           position: change.position,
           timeline: change.timeline,
@@ -260,14 +283,32 @@ const sortedItems = (memory: Memory, timeline: TimelineId): readonly Item[] =>
     .toSorted(([left], [right]) => textOrder(left, right))
     .map(([, { item }]) => item);
 
-const summaryOf = (
-  memory: Memory,
-  { descriptor, changed }: { descriptor: Descriptor; changed: number }
-): Summary => ({
-  ...descriptor,
-  changed,
-  latest: sortedItems(memory, descriptor.id).at(-1)?.position,
-});
+// Counted by walking every item, as no adapter that must stay bounded may.
+const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => {
+  const counts = { ...noneUnread };
+
+  for (const { level, position } of items) {
+    if (level !== undefined && (read === undefined || position.at > read)) {
+      const field = unreadOf[level];
+
+      counts[field] = Math.min(counts[field] + 1, unreadCap + 1);
+    }
+  }
+
+  return counts;
+};
+
+const summaryOf = (memory: Memory, { descriptor, changed, read }: Entry): Summary => {
+  const items = sortedItems(memory, descriptor.id);
+
+  return {
+    ...descriptor,
+    changed,
+    latest: items.at(-1)?.position,
+    read,
+    unread: unreadIn(items, read),
+  };
+};
 
 const allItems = (memory: Memory): readonly Item[] =>
   [...memory.items.values()].flatMap((items) => [...items.values()].map(({ item }) => item));

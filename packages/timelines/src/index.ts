@@ -8,13 +8,15 @@ export { delivered } from "./change.ts";
 
 export type { Change, DeliveryChange } from "./change.ts";
 
-export type { Content, Delivery, OursItem } from "./content.ts";
+export { levels, unreadCap } from "./content.ts";
+
+export type { Content, Delivery, Level, OursItem } from "./content.ts";
 
 export { emptyDirectory, projectionVersion, step } from "./fold.ts";
 
 export type { Directory, Happened, Keyed, NetworkDirectory, Stepped } from "./fold.ts";
 
-export { comparePositions, cursorOf, parseCursor } from "./position.ts";
+export { comparePositions, cursorOf, cursorsAfter, parseCursor } from "./position.ts";
 
 export type { Position } from "./position.ts";
 

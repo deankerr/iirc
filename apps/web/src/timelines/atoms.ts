@@ -6,7 +6,8 @@
  *
  * @packageDocumentation
  */
-import type { TimelineChangesEvent, TimelineId } from "@iirc/api";
+import type { TimelineChangesEvent, TimelineId, TimelineItem } from "@iirc/api";
+import { notificationsOf } from "@iirc/frontend/notifications";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import {
   followFrom,
@@ -23,6 +24,8 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { notifyAll } from "../notifications/notifier.ts";
+import { pageState } from "../page/atoms.ts";
 import { signedIn, signInState } from "../sign-in/atoms.ts";
 
 /** Everything the Frontend holds of the Timelines, as the core folds it. */
@@ -44,6 +47,11 @@ export interface WaitTimes {
   readonly longest: Duration.Input;
   /** The wait before following again after the stream ended. */
   readonly reconnect: Duration.Input;
+  /**
+   * How long the Owner must have seen the latest of the open Timeline before it is marked
+   * read, so passing through a Timeline marks nothing.
+   */
+  readonly settle: Duration.Input;
 }
 
 /** How long the runtime waits: a test makes these short. */
@@ -53,6 +61,7 @@ export class Waits extends Context.Reference<WaitTimes>("@iirc/web/Waits", {
     longest: "15 seconds",
     reconnect: "1 second",
     retry: "500 millis",
+    settle: "1 second",
   }),
 }) {}
 
@@ -225,34 +234,49 @@ const reader = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Time
   });
 
 /**
- * Folds one event of the changes stream into the core. A heartbeat only says the stream
- * is alive.
+ * Folds one event of the changes stream into the core, and shows the notifications the core
+ * says a change calls for. A heartbeat only says the stream is alive.
  * @param registry - The registry.
  * @param event - The event.
+ * @returns Once folded and shown.
  */
 const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEvent) => {
   switch (event.event) {
     case "changed": {
+      const before = registry.get(timelinesState);
+
       happened(registry, { _tag: "Changed", change: event.data, place: event.id });
-      break;
+
+      const notifies = notificationsOf(
+        before,
+        registry.get(timelinesState),
+        event.data,
+        registry.get(pageState)
+      );
+
+      return notifyAll(notifies, (notify) => {
+        happened(registry, { _tag: "Opened", timeline: notify.timeline });
+      });
     }
 
     case "overflowed": {
       happened(registry, { _tag: "Overflowed", overflow: event.data, place: event.id });
-      break;
+
+      return Effect.void;
     }
 
     case "reset": {
       happened(registry, { _tag: "Reset", reset: event.data });
-      break;
+
+      return Effect.void;
     }
 
     case "heartbeat": {
-      break;
+      return Effect.void;
     }
 
     default: {
-      event satisfies never;
+      return event satisfies never;
     }
   }
 };
@@ -293,11 +317,7 @@ const follower = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Ti
 
       yield* events.pipe(
         Stream.timeout(idle),
-        Stream.runForEach((event) =>
-          Effect.sync(() => {
-            changed(registry, event);
-          })
-        )
+        Stream.runForEach((event) => Effect.suspend(() => changed(registry, event)))
       );
     });
 
@@ -352,12 +372,23 @@ export const newer = Atom.fnSync((timeline: TimelineId, get) => {
   happened(get.registry, { _tag: "NewerWanted", timeline });
 }).pipe(Atom.keepAlive);
 
-/** Says whether the Owner is at the latest of the open Timeline. */
+/**
+ * Says whether the Owner is at the latest of the open Timeline, and the last item in view
+ * there. Only the view says it, once it has laid out.
+ */
 export const following = Atom.fnSync(
   (
-    { following: at, timeline }: { readonly timeline: TimelineId; readonly following: boolean },
+    {
+      following: at,
+      seen,
+      timeline,
+    }: {
+      readonly timeline: TimelineId;
+      readonly following: boolean;
+      readonly seen: TimelineItem["position"] | undefined;
+    },
     get
   ) => {
-    happened(get.registry, { _tag: "Following", following: at, timeline });
+    happened(get.registry, { _tag: "Following", following: at, seen, timeline });
   }
 ).pipe(Atom.keepAlive);

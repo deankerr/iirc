@@ -137,7 +137,7 @@ describe("a Direct Message", () => {
           "?? message Privmsg iirc Peer at=ours:t+0s in=direct:peer:Peer ours=i1 :psst back",
           // Self, said from another IRC client of the same account.
           "<< :iirc!u@h PRIVMSG stranger :from my phone",
-          "?? message Privmsg iirc stranger in=direct:stranger :from my phone",
+          "?? message Privmsg iirc stranger self in=direct:stranger :from my phone",
           // A User with no mask in the source is still a User.
           "<< :NickServ NOTICE iirc :identify",
           "?? message Notice NickServ iirc in=direct:nickserv:NickServ :identify"
@@ -158,7 +158,7 @@ describe("a Direct Message", () => {
           ">> PRIVMSG iirc :note to self",
           "?? message Privmsg iirc iirc at=ours:t+0s in=direct:iirc ours=i1 :note to self",
           "<< :iirc!u@h PRIVMSG iirc :note to self",
-          "?? message Privmsg iirc iirc in=direct:iirc :note to self"
+          "?? message Privmsg iirc iirc self in=direct:iirc :note to self"
         ),
       ],
     });

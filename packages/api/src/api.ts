@@ -47,6 +47,7 @@ import {
   NetworkId,
   NetworkInspection,
   NewsEvent,
+  ReadRequest,
   Resume,
   Said,
   SaidAnswer,
@@ -103,7 +104,7 @@ export class RequestValidation extends HttpApiMiddleware.Service<RequestValidati
 
 const NetworkPath = { network: NetworkId };
 
-/** Networks: their Configuration, what they are told to say, and what they know. */
+/** Networks: their Configuration, what they are told to say and have read, and what they know. */
 export class NetworksGroup extends HttpApiGroup.make("networks")
   .add(
     HttpApiEndpoint.get("list", "/networks", { success: Schema.Array(NetworkEntry) }),
@@ -129,6 +130,12 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
       error: JournalFailed,
       params: { intent: CallerIntent, network: NetworkId },
       success: SaidAnswer,
+    }),
+    HttpApiEndpoint.post("read", "/networks/:network/read", {
+      error: [UnknownNetwork, NetworkStopped],
+      params: NetworkPath,
+      payload: ReadRequest,
+      success: Journaled,
     }),
     HttpApiEndpoint.post("retry", "/networks/:network/retry", {
       error: [UnknownNetwork, NetworkStopped],

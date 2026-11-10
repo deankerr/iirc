@@ -70,6 +70,7 @@ const inChannel: CommandContext = {
   open: timeline,
   session: false,
   timelines: [timeline],
+  unread: [],
 };
 
 const nowhere: CommandContext = {
@@ -77,6 +78,7 @@ const nowhere: CommandContext = {
   open: undefined,
   session: false,
   timelines: [],
+  unread: [],
 };
 
 const read = (line: string, context: CommandContext = nowhere) => interpret(line, context);
@@ -97,6 +99,7 @@ describe("the options, derived from the Schema", () => {
         declined: "Texts",
         enabled: "Toggle",
         fallbackEncoding: "Choice",
+        highlights: "Texts",
         ircds: "Ircds",
         login: "Tagged",
         nicks: "Texts",
@@ -122,6 +125,7 @@ describe("the options, derived from the Schema", () => {
         "network.libera.declined",
         "network.libera.enabled",
         "network.libera.fallbackEncoding",
+        "network.libera.highlights",
         "network.libera.ircds",
         "network.libera.login",
         "network.libera.login.account",
@@ -157,6 +161,7 @@ describe("the options, derived from the Schema", () => {
         starts: "windows-1252",
         value: { _tag: "Shown", text: "windows-1252" },
       },
+      highlights: { starts: "", value: { _tag: "Shown", text: "" } },
       ircds: { starts: undefined, value: { _tag: "Shown", text: "irc.libera.chat/6697" } },
       login: { starts: "none", value: { _tag: "Shown", text: "sasl" } },
       "login.account": { starts: "the first nick", value: { _tag: "Shown", text: "dean" } },
@@ -295,6 +300,7 @@ const values: readonly (readonly [string, fc.Arbitrary<readonly [Json, Json]>])[
   ["realname", same(anyText)],
   ["fallbackEncoding", same(fc.constantFrom(...choices("fallbackEncoding")))],
   ["declined", same(fc.array(anyText, { maxLength: 4 }))],
+  ["highlights", same(fc.array(anyText, { maxLength: 4 }))],
   ["nicks", same(fc.array(anyText, { maxLength: 4, minLength: 1 }))],
   ["ircds", same(fc.array(ircd, { maxLength: 3, minLength: 1 }))],
   [

@@ -8,13 +8,15 @@ import { epoch } from "./transcript.ts";
 const now = Instant.make(epoch + 1000);
 const earlier = Instant.make(epoch);
 
-const message: News = {
+const message: Extract<News, { readonly _tag: "Message" }> = {
   _tag: "Message",
   at: { _tag: "Known", at: now, from: "receipt", value: now },
+  highlight: false,
   id: { _tag: "Unknown" },
   kind: "Privmsg",
   live: true,
   ours: undefined,
+  self: false,
   sender: "peer",
   tags: new Map(),
   target: "#iirc",
@@ -25,6 +27,21 @@ const message: News = {
 describe(describeNews, () => {
   it.each<readonly [News, string]>([
     [message, "message Privmsg peer #iirc in=channel:#iirc :hi there"],
+    [
+      { ...message, highlight: true },
+      "message Privmsg peer #iirc highlight in=channel:#iirc :hi there",
+    ],
+    [{ ...message, self: true }, "message Privmsg peer #iirc self in=channel:#iirc :hi there"],
+    [
+      {
+        _tag: "ReadMarker",
+        read: earlier,
+        where: { _tag: "Direct", existing: true, key: "peer", name: "Peer" },
+      },
+      "read-marker t+0s in=existing-direct:peer:Peer",
+    ],
+    [{ _tag: "ReadMarker", read: now, where: { _tag: "Network" } }, "read-marker t+1s in=network"],
+    [{ _tag: "Ignored", reason: { _tag: "NoTimeline" } }, "ignored NoTimeline"],
     [
       {
         ...message,

@@ -13,6 +13,7 @@ import {
   NetworkId,
   NewsEvent,
   Resume,
+  ReadRequest,
   SayRequest,
   SignInRequest,
   TimelineChangesEvent,
@@ -49,6 +50,7 @@ describe("the contract", () => {
       "GET /api/news",
       "GET /api/timelines/changes",
       "GET /api/timelines/{timeline}",
+      "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
       "POST /api/sign-in",
@@ -107,6 +109,21 @@ describe("the contract", () => {
       say({ kind: "Privmsg", target: "#iirc", text: "two\r\nlines" }),
       say({ kind: "Privmsg", target: "", text: "no target" }),
     ]).toStrictEqual([true, false, false]);
+  });
+
+  it("takes a read up to an instant, of a Target or, with null, the Network's own", () => {
+    const read = Schema.decodeUnknownResult(ReadRequest);
+
+    expect(
+      [
+        { read: 1_762_560_000_000, target: "#iirc" },
+        { read: 1_762_560_000_000, target: null },
+        { read: 1_762_560_000_000 },
+        { read: 1.5, target: "#iirc" },
+        { read: 1, target: "" },
+        { read: 1, target: "#a\r\nb" },
+      ].map((payload) => read(payload)._tag)
+    ).toStrictEqual(["Success", "Success", "Failure", "Failure", "Failure", "Failure"]);
   });
 
   it("carries a step's sequence as its event id, and a heartbeat with none", () => {

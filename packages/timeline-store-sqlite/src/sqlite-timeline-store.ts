@@ -6,8 +6,9 @@
 // directory with the rows they describe. `@effect/sql-sqlite-bun` runs every statement on
 // one connection, and a transaction holds it, so a read never sees part of an apply.
 import { SqliteClient } from "@effect/sql-sqlite-bun";
+import { Instant } from "@iirc/client";
 import type { MessageId } from "@iirc/client";
-import { TimelineStore, TimelineStoreFailed } from "@iirc/timeline-store";
+import { TimelineStore, TimelineStoreFailed, unreadOf } from "@iirc/timeline-store";
 import type {
   Anchor,
   Applied,
@@ -15,10 +16,20 @@ import type {
   CollapsedGap,
   Folded,
   Overflowed,
+  Summary,
   TimelineStoreService,
+  Unread,
 } from "@iirc/timeline-store";
-import { TimelineId, cursorOf, delivered, emptyDirectory } from "@iirc/timelines";
-import type { Change, Content, DeliveryChange, Directory, Position } from "@iirc/timelines";
+import {
+  TimelineId,
+  cursorOf,
+  cursorsAfter,
+  delivered,
+  emptyDirectory,
+  levels,
+  unreadCap,
+} from "@iirc/timelines";
+import type { Change, Content, DeliveryChange, Directory, Level, Position } from "@iirc/timelines";
 import { Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
 import type { Duration, Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
@@ -43,7 +54,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 1;
+const layoutVersion = 2;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -90,7 +101,12 @@ const layout = [
     kind TEXT NOT NULL,
     name TEXT NOT NULL,
     key TEXT,
-    changed INTEGER NOT NULL
+    changed INTEGER NOT NULL,
+    read INTEGER,
+    unread_highlights INTEGER NOT NULL,
+    unread_direct INTEGER NOT NULL,
+    unread_messages INTEGER NOT NULL,
+    unread_activity INTEGER NOT NULL
   ) STRICT`,
   "CREATE INDEX timelines_by_network ON timelines (network, id)",
   "CREATE INDEX timelines_by_changed ON timelines (changed, id)",
@@ -103,12 +119,14 @@ const layout = [
     intent TEXT,
     content TEXT NOT NULL,
     changed INTEGER NOT NULL,
+    level TEXT,
     PRIMARY KEY (timeline, cursor)
   ) STRICT`,
   "CREATE UNIQUE INDEX items_by_message_id ON items (timeline, message_id) WHERE message_id IS NOT NULL",
   "CREATE INDEX items_by_intent ON items (network, intent) WHERE intent IS NOT NULL",
   "CREATE INDEX items_by_step ON items (network, step, cursor, timeline)",
   "CREATE INDEX items_by_changed ON items (changed, timeline, cursor)",
+  "CREATE INDEX items_by_level ON items (timeline, level, cursor) WHERE level IS NOT NULL",
   `CREATE TABLE tombstones (
     id TEXT PRIMARY KEY,
     network TEXT NOT NULL,
@@ -163,12 +181,18 @@ const columns = [
   "items.intent TEXT",
   "items.content TEXT",
   "items.changed INTEGER",
+  "items.level TEXT",
   "timelines.id TEXT",
   "timelines.network TEXT",
   "timelines.kind TEXT",
   "timelines.name TEXT",
   "timelines.key TEXT",
   "timelines.changed INTEGER",
+  "timelines.read INTEGER",
+  "timelines.unread_highlights INTEGER",
+  "timelines.unread_direct INTEGER",
+  "timelines.unread_messages INTEGER",
+  "timelines.unread_activity INTEGER",
   "tombstones.id TEXT",
   "tombstones.network TEXT",
   "tombstones.into_id TEXT",
@@ -290,11 +314,32 @@ const decodeAll = <S extends Schema.Codec<unknown, unknown>>(schema: S, what: st
 // Each decoder is made once, since making one compiles its Schema.
 const decodeOurs = decodeAll(OursRow, "one of ours");
 const decodeItems = decodeAll(ItemRow, "an item");
-const decodeSummaries = decodeAll(SummaryRow, "a Timeline");
+const decodeSummaryRows = decodeAll(SummaryRow, "a Timeline");
+
+/** The column each level is counted in. */
+const unreadColumn = {
+  activity: "unread_activity",
+  direct: "unread_direct",
+  highlights: "unread_highlights",
+  messages: "unread_messages",
+} as const satisfies { readonly [K in keyof Unread]: string };
+
+// A Timeline's row keeps its counts flat, as columns.
+const decodeSummaries = (rows: readonly unknown[]) =>
+  decodeSummaryRows(rows).pipe(
+    Effect.map((decoded) =>
+      decoded.map(({ highlights, direct, messages, activity, ...summary }): Summary => ({
+        ...summary,
+        unread: { activity, direct, highlights, messages },
+      }))
+    )
+  );
+
 const decodeDirectory = decodeAll(DirectoryRow, "the directory");
 const decodeTombstones = decodeAll(TombstoneRow, "a tombstone");
 const decodeGaps = decodeAll(GapRow, "a Gap");
 const decodeCollapsed = decodeAll(CollapsedGapRow, "a run of Gaps");
+const decodeRead = decodeAll(Schema.Struct({ read: Schema.NullOr(Instant) }), "a Read Marker");
 const decodeIds = decodeAll(Schema.Struct({ id: TimelineId }), "a Timeline's id");
 
 const decodeHead = Schema.decodeUnknownExit(
@@ -546,15 +591,49 @@ export const makeSqliteTimelineStore = (
 
     // Timelines, each with the position of its last item, which the primary key finds.
     const summaries = (where: Fragment, order: Fragment) => sql`
-      SELECT id, network, kind, name, key, changed,
+      SELECT id, network, kind, name, key, changed, read,
+        unread_highlights AS highlights, unread_direct AS direct,
+        unread_messages AS messages, unread_activity AS activity,
         (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest
       FROM timelines ${where} ${order}
     `;
 
-    const itemColumns = sql`timeline, cursor AS position, network, content, changed`;
+    const itemColumns = sql`timeline, cursor AS position, network, content, changed, level`;
 
     const touch = (timeline: TimelineId, sequence: number) =>
       sql`UPDATE timelines SET changed = ${sequence} WHERE id = ${timeline}`;
+
+    // How many items of a level stand after a Read Marker, or at all without one, counting
+    // no more than one past the cap, on `items_by_level`, so a long Timeline costs no more to
+    // count than a short one. Strictly after, by `cursorsAfter`, so the largest instant has
+    // nothing after it, and no instant after it is ever made.
+    const counted = (timeline: TimelineId, level: Level, read: Instant | null) => sql`
+      (SELECT count(*) FROM (
+        SELECT 1 FROM items WHERE timeline = ${timeline} AND level = ${level}
+          ${read === null ? sql`` : sql`AND cursor > ${cursorsAfter(read)}`}
+        LIMIT ${unreadCap + 1}
+      ))
+    `;
+
+    // Counts a Timeline's unread again, from its Read Marker, or from its start without one.
+    const recount = (timeline: TimelineId) =>
+      Effect.gen(function* () {
+        const rows = yield* sql`SELECT read FROM timelines WHERE id = ${timeline}`.pipe(
+          Effect.flatMap(decodeRead)
+        );
+
+        const read = rows[0]?.read ?? null;
+
+        yield* sql`
+          UPDATE timelines SET ${sql.csv(
+            levels.map(
+              (level) =>
+                sql`${sql(unreadColumn[unreadOf[level]])} = ${counted(timeline, level, read)}`
+            )
+          )}
+          WHERE id = ${timeline}
+        `;
+      });
 
     const deliver = (change: DeliveryChange) =>
       Effect.gen(function* () {
@@ -597,16 +676,30 @@ export const makeSqliteTimelineStore = (
     const added = (change: Extract<Change, { readonly _tag: "Added" }>, content: string) =>
       Effect.gen(function* () {
         const kept = yield* sql`
-          INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed)
+          INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
+            level)
           VALUES (${change.timeline}, ${cursorOf(change.position)}, ${change.network},
             ${change.position.sequence}, ${textOrNull(change.messageId)},
-            ${textOrNull(change.intent)}, ${content}, ${change.sequence})
+            ${textOrNull(change.intent)}, ${content}, ${change.sequence},
+            ${textOrNull(change.level)})
           ON CONFLICT DO NOTHING
           RETURNING 1 AS kept
         `;
 
-        if (kept.length > 0) {
-          yield* touch(change.timeline, change.sequence);
+        if (kept.length === 0) {
+          return;
+        }
+
+        yield* touch(change.timeline, change.sequence);
+
+        // One more of its level, when it stands after the Read Marker, up to one past the cap.
+        if (change.level !== undefined) {
+          const column = sql(unreadColumn[unreadOf[change.level]]);
+
+          yield* sql`
+            UPDATE timelines SET ${column} = min(${column} + 1, ${unreadCap + 1})
+            WHERE id = ${change.timeline} AND (read IS NULL OR read < ${change.position.at})
+          `;
         }
       });
 
@@ -624,13 +717,30 @@ export const makeSqliteTimelineStore = (
           case "Described": {
             const { timeline } = change;
 
+            // A Timeline described again keeps its Read Marker and counts.
             yield* sql`
-              INSERT INTO timelines (id, network, kind, name, key, changed)
+              INSERT INTO timelines (id, network, kind, name, key, changed, read,
+                unread_highlights, unread_direct, unread_messages, unread_activity)
               VALUES (${timeline.id}, ${timeline.network}, ${timeline.kind}, ${timeline.name},
-                ${timeline.key}, ${change.sequence})
+                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0)
               ON CONFLICT (id) DO UPDATE SET network = excluded.network, kind = excluded.kind,
                 name = excluded.name, key = excluded.key, changed = excluded.changed
             `;
+            break;
+          }
+
+          case "ReadMarker": {
+            // Only forward, whatever the change says, and counted again only when it moved.
+            const moved = yield* sql`
+              UPDATE timelines SET read = ${change.read}, changed = ${change.sequence}
+              WHERE id = ${change.timeline} AND (read IS NULL OR read < ${change.read})
+              RETURNING 1 AS moved
+            `;
+
+            if (moved.length > 0) {
+              yield* recount(change.timeline);
+            }
+
             break;
           }
 
@@ -645,8 +755,10 @@ export const makeSqliteTimelineStore = (
             // Each item moves by the rule `Added` keeps: one whose position or message id
             // `into` already has is dropped. `from`'s items share neither among themselves.
             yield* sql`
-              INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed)
-              SELECT ${change.into}, cursor, network, step, message_id, intent, content, ${change.sequence}
+              INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
+                level)
+              SELECT ${change.into}, cursor, network, step, message_id, intent, content,
+                ${change.sequence}, level
               FROM items WHERE timeline = ${change.from}
               ON CONFLICT DO NOTHING
             `;
@@ -663,6 +775,7 @@ export const makeSqliteTimelineStore = (
                 into_id = excluded.into_id, changed = excluded.changed
             `;
             yield* touch(change.into, change.sequence);
+            yield* recount(change.into);
             break;
           }
 
@@ -986,7 +1099,7 @@ export const makeSqliteTimelineStore = (
         SELECT 'head' AS side, ${other} AS beyond,
           (SELECT id FROM timelines WHERE id = ${timeline}) AS timeline,
           NULL AS position, (SELECT network FROM timelines WHERE id = ${timeline}) AS network,
-          NULL AS content, NULL AS changed
+          NULL AS content, NULL AS changed, NULL AS level
         ${sides}
       `;
     };

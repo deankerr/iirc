@@ -40,6 +40,8 @@ const describeTimeline = (
   latest: null,
   name,
   network: "libera",
+  read: null,
+  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
 const message = (sequence: number, text = `line ${sequence}`): typeof TimelineItem.Encoded => ({
@@ -56,6 +58,7 @@ const message = (sequence: number, text = `line ${sequence}`): typeof TimelineIt
     target: "#iirc",
     text,
   },
+  level: "Message",
   network: "libera",
   position: cursor(sequence * 1000, sequence),
   sequence,

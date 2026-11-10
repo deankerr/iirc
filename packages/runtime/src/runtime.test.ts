@@ -671,6 +671,49 @@ describe("`say`", () => {
   });
 });
 
+describe("marking read", () => {
+  it("journals a Read at the Clock's time, steps it, and answers with its sequence", async () => {
+    const marker: News = {
+      _tag: "ReadMarker",
+      read: at(500),
+      where: { _tag: "Channel", key: "#iirc", name: "#iirc" },
+    };
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([{ when: "Configured" }, { news: [marker], when: "Read" }]);
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+        yield* TestClock.adjust(1000);
+
+        const channel = yield* runtime.read(libera, { read: at(500), target: "#iirc" });
+        const own = yield* runtime.read(libera, { read: at(700), target: null });
+        const unknown = yield* Effect.flip(runtime.read(oftc, { read: at(1), target: null }));
+
+        const news = yield* Stream.runCollect(
+          Stream.take(runtime.news({ after: Sequence.make(1) }), 1)
+        );
+
+        return {
+          answers: [channel, own],
+          inputs: inputs(yield* entries(world.journal)),
+          news: news.map((happened) => happened.news),
+          unknown,
+        };
+      })
+    );
+
+    expect(result.answers).toStrictEqual([2, 3]);
+    expect(result.inputs.slice(1)).toStrictEqual([
+      { _tag: "Read", at: at(1000), read: at(500), target: "#iirc" },
+      { _tag: "Read", at: at(1000), read: at(700), target: null },
+    ]);
+    expect(result.news).toStrictEqual([[marker]]);
+    expect(result.unknown).toBeInstanceOf(UnknownNetwork);
+  });
+});
+
 describe("the News stream", () => {
   it("gives every Network's News from a sequence, in order, then live", async () => {
     const result = await runTest((world) =>

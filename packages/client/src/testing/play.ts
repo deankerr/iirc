@@ -267,6 +267,10 @@ const apply = (configuration: NetworkConfiguration, change: Change): NetworkConf
       return { ...configuration, nicks: change.nicks };
     }
 
+    case "Highlights": {
+      return { ...configuration, highlights: change.words };
+    }
+
     default: {
       return change satisfies never;
     }
@@ -425,6 +429,10 @@ const ownerInput = <State>(at: Driver<State>, owner: Owner): Input => {
 
     case "Retry": {
       return { _tag: "Retry", at: at.now };
+    }
+
+    case "Read": {
+      return { _tag: "Read", at: at.now, read: Instant.make(owner.read), target: owner.target };
     }
 
     default: {

@@ -22,6 +22,7 @@ import {
 } from "./channels.ts";
 import type { Arrival, Meant } from "./feature.ts";
 import { Instant } from "./ids.ts";
+import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { applyModes, readModes } from "./modes.ts";
 import {
@@ -126,7 +127,10 @@ const fold = (
   if (meant._tag === "Message") {
     run.news.push(routeMessage(run, meant, source));
   } else if (meant._tag === "Activity") {
-    run.news.push(routeActivity(run, meant));
+    const routed = routeActivity(run, meant);
+
+    run.news.push(routed);
+    followRenames(run, routed.where);
   } else {
     run.news.push(meant);
   }
@@ -291,6 +295,7 @@ const isupport = (run: Run, line: Line): void => {
 
     if (mapping !== before) {
       run.news.push({ _tag: "Refolded", casemapping: mapping });
+      refoldMarkers(run, mapping);
     }
   }
 

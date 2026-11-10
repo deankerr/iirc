@@ -8,6 +8,7 @@ import { IntentId } from "@iirc/client";
 import type {
   Client,
   Inspection,
+  Instant,
   NetworkConfiguration,
   News,
   RefusedReason,
@@ -93,6 +94,14 @@ export interface Saying {
    * deduplicates.
    */
   readonly intent?: IntentId | undefined;
+}
+
+/** How far the Owner has read a Timeline. */
+export interface Reading {
+  /** The Channel or Direct Message partner, named as a `Say`'s Target is, or `null` for the Network's own. */
+  readonly target: string | null;
+  /** The instant read up to. */
+  readonly read: Instant;
 }
 
 /** Why the Client refused a `Say` in the step that took it: no Session, or no Line can carry it. */
@@ -198,6 +207,15 @@ export interface RuntimeService {
     network: NetworkId,
     intent: IntentId
   ) => Effect.Effect<Option.Option<Sequence>, JournalFailed>;
+  /**
+   * Journals a `Read`: the Owner has read a Timeline up to the instant `read`, of a
+   * Target, or with `target` null, the Network's own. It waits until it is stepped. The
+   * Client moves the Read Marker only forward, and reports it as News when it moves.
+   */
+  readonly read: (
+    network: NetworkId,
+    reading: Reading
+  ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
@@ -379,6 +397,18 @@ export const makeRuntime = <S>(
         )
       ),
       news: (from = {}) => newsAfter(client, ports.journal, from.after),
+      read: (id, reading) =>
+        Effect.flatMap(find(id), (network) =>
+          Effect.map(
+            tell(network, (at) => ({
+              _tag: "Read",
+              at,
+              read: reading.read,
+              target: reading.target,
+            })),
+            ({ sequence }) => sequence
+          )
+        ),
       retry: (id) =>
         Effect.flatMap(find(id), (network) =>
           Effect.map(

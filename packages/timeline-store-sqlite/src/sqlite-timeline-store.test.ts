@@ -51,6 +51,7 @@ const position = (ms: number, sequence: number, n = 0): Position => ({ at: at(ms
 const network = timelineIdOf(1, 0, 0);
 const channel = timelineIdOf(1, 0, 1);
 const other = timelineIdOf(1, 0, 2);
+const third = timelineIdOf(1, 0, 3);
 
 const said = (sequence: number, text: string, id?: string): Change => ({
   _tag: "Added",
@@ -70,9 +71,42 @@ const said = (sequence: number, text: string, id?: string): Change => ({
     text,
   },
   intent: IntentId.make(`intent-${text}`),
+  level: undefined,
   messageId: id === undefined ? undefined : MessageId.make(id),
   network: libera,
   position: position(sequence, sequence),
+  sequence,
+  timeline: channel,
+});
+
+// Something someone else said, which counts as unread.
+const heard = (sequence: number, text: string, timeline = channel): Change => ({
+  _tag: "Added",
+  content: {
+    _tag: "Message",
+    at: { _tag: "Known", at: at(sequence), from: "ircd", value: at(sequence) },
+    id: { _tag: "Unknown" },
+    kind: "Privmsg",
+    live: true,
+    ours: undefined,
+    sender: "peer",
+    tags: [],
+    target: "#a",
+    text,
+  },
+  intent: undefined,
+  level: "Message",
+  messageId: undefined,
+  network: libera,
+  position: position(sequence, sequence, 1),
+  sequence,
+  timeline,
+});
+
+const marked = (sequence: number, read: number): Change => ({
+  _tag: "ReadMarker",
+  network: libera,
+  read: at(read),
   sequence,
   timeline: channel,
 });
@@ -100,7 +134,7 @@ const steps: readonly { readonly through: number; readonly changes: readonly Cha
     ],
     through: 1,
   },
-  { changes: [said(2, "one", "m1"), said(3, "two")], through: 3 },
+  { changes: [said(2, "one", "m1"), said(3, "two"), heard(3, "three")], through: 3 },
   {
     changes: [
       {
@@ -115,6 +149,7 @@ const steps: readonly { readonly through: number; readonly changes: readonly Cha
       },
       { _tag: "Gap", from: position(0, 1), network: libera, sequence: 4, to: position(4, 4) },
       { _tag: "Merged", from: other, into: channel, network: libera, sequence: 4 },
+      marked(4, 2),
     ],
     through: 4,
   },
@@ -338,6 +373,13 @@ const keyedBothSides = (line: string) =>
     line
   );
 
+// A count of one level's items after a Read Marker searches `items_by_level` by the key,
+// from the marker on, reading the index alone.
+const byLevel = (line: string) =>
+  /SEARCH items USING COVERING INDEX items_by_level \(timeline=\? AND level=\? AND cursor>=?\?\)/u.test(
+    line
+  );
+
 const Bindings = Schema.Array(Schema.Union([Schema.String, Schema.Finite, Schema.Null]));
 
 /**
@@ -379,10 +421,11 @@ describe("the file", () => {
             const run = { at: [position(2, 2)], from: position(1, 1) };
 
             return {
-              // A step that confirms by intent and keeps one item per message id.
+              // A step that confirms by intent, keeps one item per message id, and counts
+              // one more unread.
               apply: yield* emitted(
                 store.apply({
-                  changes: [said(5, "three", "m1"), said(6, "four", "m3")],
+                  changes: [said(5, "three", "m1"), said(6, "four", "m3"), heard(6, "five")],
                   directory: directoryAt(6),
                   through: 6,
                 })
@@ -398,6 +441,40 @@ describe("the file", () => {
               gaps: yield* emitted(store.gaps(libera, { from: position(1, 1), to: at })),
               locate: yield* emitted(
                 store.locate(libera, 3, { after: { position: at, timeline: channel }, limit: 1 })
+              ),
+              // A Read Marker moved, which counts the Timeline again.
+              mark: yield* emitted(
+                store.apply({ changes: [marked(7, 3)], directory: directoryAt(7), through: 7 })
+              ),
+              // A merge, which counts the kept Timeline again.
+              merge: yield* Effect.andThen(
+                store.apply({
+                  changes: [
+                    {
+                      _tag: "Described",
+                      sequence: 8,
+                      timeline: {
+                        id: third,
+                        key: "#c",
+                        kind: "Channel",
+                        name: "#c",
+                        network: libera,
+                      },
+                    },
+                    heard(8, "six", third),
+                  ],
+                  directory: directoryAt(8),
+                  through: 8,
+                }),
+                emitted(
+                  store.apply({
+                    changes: [
+                      { _tag: "Merged", from: third, into: channel, network: libera, sequence: 9 },
+                    ],
+                    directory: directoryAt(9),
+                    through: 9,
+                  })
+                )
               ),
               overflowed: yield* emitted(store.changedAfter(3, 1)),
               timelines: yield* emitted(store.timelines(libera, { after: network, limit: 1 })),
@@ -438,6 +515,19 @@ describe("the file", () => {
         const runs = (read: keyof typeof reads) =>
           planned.filter((each) => each.read === read && each.sql.includes("count(*)"));
 
+        // The counts of what lies after a Read Marker: one statement for a Timeline, a count
+        // for each level, each bounded by the key and a limit, never a walk of its history.
+        const recounts = planned.filter(
+          (each) => (each.read === "mark" || each.read === "merge") && each.sql.includes("count(*)")
+        );
+
+        // A count of a Timeline's items with no level, which walks them all: the check below
+        // must tell it from one.
+        const unbounded = planOf({
+          params: [],
+          sql: "SELECT count(*) FROM items WHERE timeline = 'x' AND cursor >= ''",
+        });
+
         // The filter a run once had, on `to_cursor`, which no key bounds: the checks below
         // must tell it from a run.
         const unkeyed = planOf({
@@ -448,6 +538,23 @@ describe("the file", () => {
         database.close();
 
         expect(mode).toStrictEqual({ journal_mode: "wal" });
+
+        expect({
+          bounded: recounts.map(({ plan, sql }) => ({
+            counts: plan
+              .split("\n")
+              .filter((line) => line.includes("items"))
+              .map(byLevel),
+            limited: (sql.match(/LIMIT/gu) ?? []).length,
+          })),
+          unbounded: byLevel(unbounded),
+        }).toStrictEqual({
+          bounded: [
+            { counts: [true, true, true, true], limited: 4 },
+            { counts: [true, true, true, true], limited: 4 },
+          ],
+          unbounded: false,
+        });
 
         expect({
           after: runs("collapsedGapsAfter").flatMap(({ plan }) => searches(plan).map(keyedBelow)),

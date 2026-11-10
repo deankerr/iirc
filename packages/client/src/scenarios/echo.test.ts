@@ -96,7 +96,7 @@ describe("our Message, echoed", () => {
           "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
           "?? confirmed i1 :hello",
           "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :hello",
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :hello",
           "<< :irc.test BATCH -r"
         ),
       ],
@@ -158,7 +158,7 @@ describe("our Message, echoed", () => {
           "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
           "?? confirmed i2 :hello",
           "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :hello"
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :hello"
         ),
       ],
     });
@@ -178,7 +178,7 @@ describe("our Message, echoed", () => {
         ...sayings,
         lines(
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :hello",
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :hello",
           "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
           "?? confirmed i2 :hello"
         ),
@@ -196,7 +196,7 @@ describe("our Message, echoed", () => {
         say(1, "note to self", "iirc"),
         lines(
           "<< :iirc!u@h PRIVMSG iirc :note to self",
-          "?? message Privmsg iirc iirc in=direct:iirc :note to self",
+          "?? message Privmsg iirc iirc self in=direct:iirc :note to self",
           "<< @label=l1 :iirc!u@h PRIVMSG iirc :note to self",
           "?? confirmed i1 :note to self"
         ),
@@ -237,7 +237,7 @@ describe("our Message, refused", () => {
           "<< @batch=r :irc.test 401 iirc nobody :No such nick",
           "?? refused i1 Rejected 401",
           "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :hello",
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :hello",
           "<< :irc.test BATCH -r"
         ),
       ],
@@ -255,7 +255,7 @@ describe("our Message, refused", () => {
         lines(
           "<< @label=l1 :irc.test WARN PRIVMSG INVALID_UTF8 :Modified",
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :hello"
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :hello"
         ),
       ],
     });
@@ -296,7 +296,7 @@ describe("without both caps", () => {
             ">> PRIVMSG #iirc hello",
             "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :hello",
             "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-            "?? message Privmsg iirc #iirc in=channel:#iirc :hello"
+            "?? message Privmsg iirc #iirc self in=channel:#iirc :hello"
           ),
         ],
       });
@@ -361,7 +361,7 @@ describe("the caps changing mid-Session", () => {
           "?? message Privmsg peer #iirc in=channel:#iirc :from someone else",
           "<< :irc.test CAP iirc ACK :-echo-message",
           "<< :iirc!u@elsewhere PRIVMSG #iirc :said elsewhere",
-          "?? message Privmsg iirc #iirc in=channel:#iirc :said elsewhere"
+          "?? message Privmsg iirc #iirc self in=channel:#iirc :said elsewhere"
         ),
       ],
     });

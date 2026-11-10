@@ -187,6 +187,27 @@ export interface Channel {
   readonly phase: ChannelPhase;
 }
 
+/** A Read Marker of a Channel or a Direct Message partner: the name it is folded from, and how far the Owner has read. */
+export interface Marker {
+  /**
+   * The name it was first marked by, or the nick a Direct Message partner took since,
+   * which a new casemapping folds again.
+   */
+  readonly name: string;
+  readonly read: Instant;
+}
+
+/**
+ * The Owner's Read Markers, by Timeline. Channels and Direct Message partners are keyed
+ * apart, by name folded with the casemapping the Network last declared, as `where` keys
+ * them. Only the Owner adds one, so they are bounded by what the Owner marks.
+ */
+export interface ReadMarkers {
+  readonly network: Instant | undefined;
+  readonly channels: ReadonlyMap<string, Marker>;
+  readonly directs: ReadonlyMap<string, Marker>;
+}
+
 /** The whole Client. */
 export interface State {
   readonly configuration: NetworkConfiguration | undefined;
@@ -215,6 +236,8 @@ export interface State {
   readonly policies: ReadonlyMap<string, StsPolicy>;
   /** Set by `Stopping`: nothing is dialled until the next `Started`. */
   readonly stopping: boolean;
+  /** How far the Owner has read each Timeline. They outlive Connections. */
+  readonly markers: ReadMarkers;
 }
 
 /** Before anything has happened. */
@@ -225,6 +248,7 @@ export const initialState: State = {
   configuration: undefined,
   declared: undefined,
   dialled: 0,
+  markers: { channels: new Map(), directs: new Map(), network: undefined },
   network: { _tag: "Unconfigured" },
   policies: new Map(),
   rotation: 0,

@@ -3,7 +3,7 @@
  * what a store is told.
  */
 import { Instant, IntentId, MessageId } from "@iirc/client";
-import type { News, Where } from "@iirc/client";
+import type { Marked, News, Where } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { describe, expect, it } from "vitest";
 
@@ -20,16 +20,20 @@ const known = <T>(value: T, at = t0): Fact<T> => ({ _tag: "Known", at, from: "ir
 
 const unknown = { _tag: "Unknown" } as const;
 
-const channel = (name: string, key = name.toLowerCase()): Where => ({ _tag: "Channel", key, name });
+const channel = (name: string, key = name.toLowerCase()): Marked => ({
+  _tag: "Channel",
+  key,
+  name,
+});
 
-const direct = (name: string, existing = false): Where => ({
+const direct = (name: string, existing = false): Marked => ({
   _tag: "Direct",
   existing,
   key: name.toLowerCase(),
   name,
 });
 
-const network: Where = { _tag: "Network" };
+const network: Marked = { _tag: "Network" };
 
 const message = (
   where: readonly Where[],
@@ -38,10 +42,13 @@ const message = (
     readonly id?: Fact<MessageId>;
     readonly text?: string;
     readonly ours?: { readonly intent: string; readonly echo: boolean };
+    readonly highlight?: boolean;
+    readonly self?: boolean;
   } = {}
 ): News => ({
   _tag: "Message",
   at: options.at ?? known(t0),
+  highlight: options.highlight ?? false,
   id: options.id ?? unknown,
   kind: "Privmsg",
   live: true,
@@ -49,6 +56,7 @@ const message = (
     options.ours === undefined
       ? undefined
       : { echo: options.ours.echo, intent: IntentId.make(options.ours.intent) },
+  self: options.self ?? options.ours !== undefined,
   sender: "peer",
   tags: new Map([["+draft/reply", "abc"]]),
   target: "#iirc",
@@ -64,6 +72,8 @@ const nickChanged = (where: readonly Where[]): News => ({
   live: true,
   where,
 });
+
+const began = (at: Instant): News => ({ _tag: "SessionBegan", at, nick: "iirc" });
 
 const happened = (sequence: number, news: readonly News[], at = t0): Happened => ({
   at,
@@ -229,6 +239,181 @@ describe("items", () => {
       ["i1", "Pending"],
       ["i2", "Unconfirmed"],
     ]);
+  });
+});
+
+describe("levels", () => {
+  it("rank each item by how much it calls for the Owner in its Timeline", () => {
+    const { changes } = fold([
+      happened(1, [
+        message([channel("#a"), direct("peer"), network]),
+        message([channel("#a"), direct("peer"), network], { highlight: true }),
+        message([channel("#a"), direct("peer")], { ours: { echo: false, intent: "i1" } }),
+        message([channel("#a"), direct("peer")], { self: true }),
+        nickChanged([channel("#a"), direct("peer")]),
+        began(t0),
+      ]),
+    ]);
+
+    expect(ofTag(changes, "Added").map(({ level, timeline }) => [timeline, level])).toStrictEqual([
+      [timelineIdOf(1, 0, 1), "Message"],
+      [timelineIdOf(1, 0, 2), "Direct"],
+      [timelineIdOf(1, 0, 0), "Activity"],
+      [timelineIdOf(1, 0, 1), "Highlight"],
+      [timelineIdOf(1, 0, 2), "Highlight"],
+      [timelineIdOf(1, 0, 0), "Highlight"],
+      [timelineIdOf(1, 0, 1), undefined],
+      [timelineIdOf(1, 0, 2), undefined],
+      [timelineIdOf(1, 0, 1), undefined],
+      [timelineIdOf(1, 0, 2), undefined],
+      [timelineIdOf(1, 0, 1), "Activity"],
+      [timelineIdOf(1, 0, 2), "Activity"],
+      [timelineIdOf(1, 0, 0), "Activity"],
+    ]);
+  });
+});
+
+const readMarker = (where: Marked, read: Instant): News => ({
+  _tag: "ReadMarker",
+  read,
+  where,
+});
+
+describe("Read Markers", () => {
+  it("move a Timeline's forward, and only forward, whatever the News says", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#a"), direct("peer")])]),
+      happened(2, [
+        readMarker(channel("#a"), later(10)),
+        readMarker(channel("#a"), later(10)),
+        readMarker(channel("#a"), later(5)),
+        readMarker(direct("peer", true), later(3)),
+        readMarker(network, later(7)),
+        readMarker(network, later(6)),
+        readMarker(channel("#a"), later(11)),
+      ]),
+    ]);
+
+    expect(ofTag(changes, "ReadMarker")).toStrictEqual([
+      {
+        _tag: "ReadMarker",
+        network: "libera",
+        read: later(10),
+        sequence: 2,
+        timeline: timelineIdOf(1, 0, 1),
+      },
+      {
+        _tag: "ReadMarker",
+        network: "libera",
+        read: later(3),
+        sequence: 2,
+        timeline: timelineIdOf(1, 0, 2),
+      },
+      {
+        _tag: "ReadMarker",
+        network: "libera",
+        read: later(7),
+        sequence: 2,
+        timeline: timelineIdOf(1, 0, 0),
+      },
+      {
+        _tag: "ReadMarker",
+        network: "libera",
+        read: later(11),
+        sequence: 2,
+        timeline: timelineIdOf(1, 0, 1),
+      },
+    ]);
+    expect(net(directory).read).toBe(later(7));
+    expect(net(directory).keyed.get(timelineIdOf(1, 0, 1))?.read).toBe(later(11));
+  });
+
+  it("reach the largest instant, which nothing passes", () => {
+    const largest = Instant.make(Number.MAX_SAFE_INTEGER);
+
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#a")])]),
+      happened(2, [readMarker(channel("#a"), largest), readMarker(network, largest)]),
+      happened(3, [readMarker(channel("#a"), largest), readMarker(network, largest)]),
+    ]);
+
+    expect(
+      ofTag(changes, "ReadMarker").map(({ read, sequence }) => [sequence, read])
+    ).toStrictEqual([
+      [2, largest],
+      [2, largest],
+    ]);
+    expect(net(directory).read).toBe(largest);
+    expect(net(directory).keyed.get(timelineIdOf(1, 0, 1))?.read).toBe(largest);
+  });
+
+  it("open no Timeline", () => {
+    const { changes } = fold([
+      happened(1, [
+        readMarker(channel("#a"), later(1)),
+        readMarker(direct("peer", true), later(1)),
+      ]),
+    ]);
+
+    expect(changes.map(({ _tag }) => _tag)).toStrictEqual(["Described"]);
+  });
+
+  it("follow a Direct Message partner's rename, and stay with a detached Timeline", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([direct("peer")]), message([direct("Peer2")])]),
+      happened(2, [readMarker(direct("peer", true), later(4))]),
+      happened(3, [
+        nickChanged([
+          { _tag: "DirectRenamed", key: "peer", name: "peer", to: { key: "peer2", name: "Peer2" } },
+        ]),
+      ]),
+      happened(4, [readMarker(direct("Peer2", true), later(2))]),
+    ]);
+
+    expect(
+      ofTag(changes, "ReadMarker").map(({ read, timeline }) => [timeline, read])
+    ).toStrictEqual([[timelineIdOf(1, 0, 1), later(4)]]);
+    expect(net(directory).keyed.get(timelineIdOf(1, 0, 1))?.read).toBe(later(4));
+  });
+
+  it("of Timelines merged by a new casemapping are the later of the two", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#a[", "#a[")]), message([channel("#a{", "#a{")])]),
+      happened(2, [
+        readMarker(channel("#a[", "#a["), later(1)),
+        readMarker(channel("#a{", "#a{"), later(9)),
+      ]),
+      happened(3, [{ _tag: "Refolded", casemapping: "rfc1459" }]),
+    ]);
+
+    const first = timelineIdOf(1, 0, 1);
+
+    expect(changes.filter(({ sequence }) => sequence === 3).map(({ _tag }) => _tag)).toStrictEqual([
+      "Described",
+      "Merged",
+      "ReadMarker",
+    ]);
+    expect(ofTag(changes, "ReadMarker").at(-1)).toStrictEqual({
+      _tag: "ReadMarker",
+      network: "libera",
+      read: later(9),
+      sequence: 3,
+      timeline: first,
+    });
+    expect(net(directory).keyed.get(first)?.read).toBe(later(9));
+  });
+
+  it("of the kept Timeline stay when the merged one was read less far", () => {
+    const { changes } = fold([
+      happened(1, [message([channel("#a[", "#a[")]), message([channel("#a{", "#a{")])]),
+      happened(2, [
+        readMarker(channel("#a[", "#a["), later(9)),
+        readMarker(channel("#a{", "#a{"), later(1)),
+      ]),
+      happened(3, [{ _tag: "Refolded", casemapping: "rfc1459" }]),
+    ]);
+
+    expect(ofTag(changes, "ReadMarker").filter(({ sequence }) => sequence === 3)).toStrictEqual([]);
   });
 });
 
@@ -455,8 +640,6 @@ describe("a new casemapping", () => {
     expect(changes.filter(({ sequence }) => sequence === 2)).toStrictEqual([]);
   });
 });
-
-const began = (at: Instant): News => ({ _tag: "SessionBegan", at, nick: "iirc" });
 
 const ended = (at: Instant, restarted = false): News => ({
   _tag: "SessionEnded",

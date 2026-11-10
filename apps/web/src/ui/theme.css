@@ -18,6 +18,7 @@
 
   --radius: 2px;
   --border-width: 1px;
+  --edge-width: 2px;
   --measure: 44ch;
 
   --color-background: #f6f5f1;
@@ -32,6 +33,15 @@
   --color-focus: #0b6e6e;
   --color-scrim: rgb(36 41 46 / 35%);
   --color-shadow: rgb(36 41 46 / 25%);
+
+  /* What is unread, by its highest level: read and Activity dim, Messages as text, and
+     Direct Messages and Highlights accented. */
+  --color-level-none: var(--color-muted);
+  --color-level-activity: var(--color-muted);
+  --color-level-message: var(--color-text);
+  --color-level-direct: var(--color-accent);
+  --color-level-highlight: #b5560b;
+  --color-highlight-surface: rgb(181 86 11 / 8%);
 
   /* The colour slots nicks are spread over, by a hash of the folded nick. */
   --nick-0: #b3261e;
@@ -84,6 +94,8 @@
     --color-focus: #5fb3b3;
     --color-scrim: rgb(0 0 0 / 55%);
     --color-shadow: rgb(0 0 0 / 60%);
+    --color-level-highlight: #f0a35e;
+    --color-highlight-surface: rgb(240 163 94 / 9%);
 
     --nick-0: #f28b82;
     --nick-1: #fbae6a;

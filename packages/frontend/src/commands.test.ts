@@ -1,9 +1,9 @@
-import { NetworkId, TimelineId } from "@iirc/api";
+import { NetworkId, ReadRequest, TimelineId } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { commandNamed, commands, interpret, unmet } from "./commands.ts";
-import type { CommandContext, Focus } from "./commands.ts";
+import type { CommandContext, Focus, MarkRead, Unseen } from "./commands.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
@@ -17,7 +17,7 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   timeline,
 });
 
-const around = { open: undefined, timelines: [] };
+const around = { open: undefined, timelines: [], unread: [] };
 const inChannel: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: true };
 const inDirect: CommandContext = { ...around, focus: focus("Direct", "peer"), session: true };
 const inNetwork: CommandContext = { ...around, focus: focus("Network", "libera"), session: true };
@@ -179,6 +179,7 @@ describe("reading a line", () => {
       "channels.part": "Optional",
       "composer.focus": "None",
       "network.add": "Required",
+      "notify.set": "Required",
       "options.set": "Optional",
       "options.unset": "Required",
       "palette.open": "None",
@@ -188,6 +189,103 @@ describe("reading a line", () => {
       "say.to": "Required",
       "timeline.next": "None",
       "timeline.previous": "None",
+      "timeline.read": "Optional",
+      "timeline.unread": "None",
     });
+  });
+});
+
+const mark = (id: TimelineId, target: string | null): MarkRead => ({
+  _tag: "MarkRead",
+  network,
+  read: Schema.decodeSync(ReadRequest)({ read: 1000, target: null }).read,
+  target,
+  timeline: id,
+});
+
+const unseen = (id: TimelineId, level: Unseen["level"], target: string | null): Unseen => ({
+  level,
+  mark: mark(id, target),
+  timeline: id,
+});
+
+const outcome = (line: string, context: CommandContext) => {
+  const read = interpret(line, context);
+
+  return read._tag === "Parsed" ? read.value : read.message;
+};
+
+describe("what is unread", () => {
+  const idOf = Schema.decodeSync(TimelineId);
+  const own = idOf("00000000000001-00000000-00000000");
+  const first = idOf("00000000000004-00000000-00000000");
+  const second = idOf("00000000000005-00000000-00000000");
+  const dm = idOf("00000000000006-00000000-00000000");
+
+  // In the sidebar's order: the Network's own, two Channels, and a Direct Message.
+  const unread: readonly Unseen[] = [
+    unseen(own, "Activity", null),
+    unseen(timeline, "Message", "#iirc"),
+    unseen(first, "Highlight", "#a"),
+    unseen(second, "Highlight", "#b"),
+    unseen(dm, "Direct", "peer"),
+  ];
+
+  const opened = (open: TimelineId | undefined, more: readonly Unseen[] = unread) => ({
+    ...inChannel,
+    open,
+    timelines: [own, timeline, first, second, dm],
+    unread: more,
+  });
+
+  it("jumps to the highest level, ties by the sidebar's order, skipping the open one", () => {
+    expect({
+      fromFirst: outcome("/next-unread", opened(first)),
+      fromNone: outcome("/next-unread", opened(undefined)),
+      lower: outcome(
+        "/next-unread",
+        opened(
+          timeline,
+          unread.filter((one) => one.level !== "Highlight")
+        )
+      ),
+      onlyActivity: outcome("/next-unread", opened(timeline, [unseen(own, "Activity", null)])),
+      onlyOpen: outcome("/next-unread", opened(dm, [unseen(dm, "Direct", "peer")])),
+    }).toStrictEqual({
+      fromFirst: [{ _tag: "Open", timeline: second }],
+      fromNone: [{ _tag: "Open", timeline: first }],
+      lower: [{ _tag: "Open", timeline: dm }],
+      // Activity alone is not worth a jump, and nothing to jump to takes the key quietly.
+      onlyActivity: [],
+      onlyOpen: [],
+    });
+  });
+
+  it("marks the open Timeline read with /read, every one with /read all, and nothing when read", () => {
+    expect({
+      all: outcome("/read all", opened(timeline)),
+      nothing: outcome("/read", opened(timeline, [])),
+      nowhere: outcome("/read", { ...nowhere, unread }),
+      open: outcome("/read", opened(timeline)),
+      other: outcome("/read everything", opened(timeline)),
+    }).toStrictEqual({
+      all: unread.map((one) => one.mark),
+      nothing: [],
+      nowhere: "Open a Timeline first, or use /read all.",
+      open: [mark(timeline, "#iirc")],
+      other: "Use /read for the open Timeline, or /read all for every Timeline.",
+    });
+  });
+
+  it("turns notifications on or off, and says how otherwise", () => {
+    expect([
+      interpret("/notify on", nowhere),
+      interpret("/notify OFF", nowhere),
+      message("/notify", nowhere),
+    ]).toStrictEqual([
+      { _tag: "Parsed", value: [{ _tag: "Notify", on: true }] },
+      { _tag: "Parsed", value: [{ _tag: "Notify", on: false }] },
+      "Use /notify on or /notify off.",
+    ]);
   });
 });
