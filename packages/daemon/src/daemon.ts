@@ -9,6 +9,7 @@ import { client } from "@iirc/client";
 import { layerSqliteJournal } from "@iirc/journal-sqlite";
 import type { Pacing } from "@iirc/outbox";
 import { layerRuntime } from "@iirc/runtime";
+import { layerSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { layer as layerTransport } from "@iirc/transport-bun";
 import type { BunTransportOptions } from "@iirc/transport-bun";
 import { layerBun as layerVault } from "@iirc/vault-file";
@@ -19,11 +20,12 @@ import { HttpRouter } from "effect/http";
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
+import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 
 /** What a Daemon needs besides where to listen. */
 export interface DaemonOptions {
-  /** Where the Journal, the Credentials, the keys, and the sign-ins live. Made, owner-only, if missing. */
+  /** Where the Journal, the Timelines, the Credentials, the keys, and the sign-ins live. Made, owner-only, if missing. */
   readonly dataDir: string;
   /** The Transport's options, such as extra roots to `trust`. */
   readonly transport?: BunTransportOptions | undefined;
@@ -106,7 +108,8 @@ const runtimeFirstToStop = (options: DaemonOptions) =>
 
 /**
  * Everything but HTTP: the data directory held, the Journal, the Vault, the Transport,
- * the Runtime, the keys, and the sign-ins. Each is opened only once the directory is held.
+ * the Runtime, the Timeline store and its projector, the keys, and the sign-ins. Each is
+ * opened only once the directory is held.
  * @param options - The data directory and the Transport's options.
  * @returns The core.
  */
@@ -136,8 +139,16 @@ const layerCore = (options: DaemonOptions) => {
       ? Layer.empty
       : Layer.succeed(Heartbeat, Duration.fromInputUnsafe(options.heartbeat));
 
+  // The projector is built after the Runtime and the store, so it is interrupted before
+  // either closes, and the Journal closes after all three.
+  const timelines = layerProjector.pipe(
+    Layer.provideMerge(
+      layerSqliteTimelineStore(`${dataDir}/views.sqlite`).pipe(Layer.provide(BunFileSystem.layer))
+    )
+  );
+
   return Layer.mergeAll(
-    runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)),
+    timelines.pipe(Layer.provideMerge(runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)))),
     access,
     heartbeat
   ).pipe(Layer.provide(dataDirectory(dataDir)));

@@ -16,4 +16,8 @@ export type { HeldKey } from "./keys.ts";
 
 export { SignIns, SignInsUnreadable, SignInsUnwritable } from "./sign-ins.ts";
 
+export { Projector, layerProjector } from "./projector.ts";
+
+export type { ProjectorStatus } from "./projector.ts";
+
 export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./lock.ts";

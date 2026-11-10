@@ -22,20 +22,33 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `ApiKeys` | Checks a presented key against `keys.json`, read once at start. |
 | `SignIns` | Makes, checks, and ends sign-ins, kept in `sign-ins.json`. |
 | `holdDataDirectory(dataDir)` | Holds a data directory exclusively for the enclosing Scope, or fails with `DataDirectoryLocked`. |
+| `Projector`, `ProjectorStatus` | Whether the Timelines are being folded: `Running`, or `Stopped { reason }` once a failure stopped it. |
+| `layerProjector` | The projector alone, given a `Runtime` and a `TimelineStore`. |
 
 ## The data directory
 
-| File               | What                             | Written by                       |
-| ------------------ | -------------------------------- | -------------------------------- |
-| `journal.sqlite`   | The Journal                      | `@iirc/journal-sqlite`           |
-| `credentials.json` | The Credentials, mode `0600`     | `@iirc/vault-file`               |
-| `keys.json`        | The API keys as SHA-256 hashes   | `iirc key create`                |
-| `sign-ins.json`    | The sign-ins as SHA-256 hashes   | the Daemon                       |
-| `daemon.lock`      | The lock below. It holds nothing | the Daemon and `iirc key create` |
+| File | What | Written by |
+| --- | --- | --- |
+| `journal.sqlite` | The Journal | `@iirc/journal-sqlite` |
+| `views.sqlite` | The Timelines, derived from the Journal | `@iirc/timeline-store-sqlite`, by the projector |
+| `credentials.json` | The Credentials, mode `0600` | `@iirc/vault-file` |
+| `keys.json` | The API keys as SHA-256 hashes | `iirc key create` |
+| `sign-ins.json` | The sign-ins as SHA-256 hashes | the Daemon |
+| `daemon.lock` | The lock below. It holds nothing | the Daemon and `iirc key create` |
 
-The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is read at start: there is no configuration file ([ADR 0004](../../docs/adr/0004-configuration-lives-in-the-journal.md)).
+The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is read at start: there is no configuration file ([ADR 0004](../../docs/adr/0004-configuration-lives-in-the-journal.md)). `views.sqlite` is derived: removing it while the Daemon is stopped rebuilds it on the next start.
 
 **One Daemon to a directory.** Neither the Journal nor the Vault refuses a second owner of its file, so the Daemon holds the directory before it opens either: an open `BEGIN EXCLUSIVE` on `daemon.lock`, a SQLite database of its own. SQLite takes it with a POSIX lock, which the kernel frees however the process dies, so a crash never leaves the directory locked. SQLite tracks it per file within one process too, so a second Daemon in the same process is refused as well. A second Daemon, or `iirc key create` while one runs, fails with `DataDirectoryLocked`.
+
+## Timelines
+
+The projector keeps `views.sqlite` folded up to the Journal, with the fold of [`@iirc/timelines`](../timelines/README.md) and the store of [`@iirc/timeline-store-sqlite`](../timeline-store-sqlite/README.md) ([ADR 0011](../../docs/adr/0011-timelines-are-a-projection-the-client-routes.md)).
+
+- **On start, it resumes or rebuilds.** It reads how far the store has folded. When the store was built by the same projection version as `projectionVersion`, it takes the directory the store kept and follows the Runtime's `news` after the last sequence folded. Otherwise, a new or emptied store included, it resets the store to `projectionVersion`, logs that it is folding again, and folds from the start of the Journal.
+- **Each step is applied whole.** For each `Happened`, it steps the fold and applies the changes, with the step's sequence as `through` and the directory after it, in one transaction. A step at or before the last one folded changes nothing, so resuming never folds a step twice.
+- **It never holds up the Runtime or a Network.** It reads News as any reader does, following the Journal on its own, so a slow or stopped projector holds back only itself.
+- **A failure stops it, and nothing else.** A store that cannot be written or read, or a Journal that cannot be followed, stops the projector. It is logged as an error with its reason, `Projector`'s status becomes `Stopped` with that reason, and the Daemon and every Network go on. A restart tries again. A store that cannot be opened at start is a refusal, as a Journal that cannot be opened is.
+- **The store may lag the Journal, never lead it.** After a crash, what the store lost of the last steps is folded again on start.
 
 ## API keys
 
@@ -78,7 +91,8 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 ## Composition
 
 - **The core is provided outside `HttpRouter.serve`.** `serve` forks the MemoMap, so anything shared built inside it would be built twice, and the Journal and the lock would each be opened again.
-- **The Runtime stops first, gracefully.** It lives in a Scope of its own, which a Layer built after serving closes. Layers close in reverse, so on SIGINT or SIGTERM the Runtime stops: each Network steps a `Stopping`, the Client says `QUIT` and hangs up, and the Runtime waits for each Connection's `Closed` within `stopTimeout`. Every Owner input still waiting fails with `NetworkStopped`, and only then does serving stop, and then the Journal, the Vault, and the lock.
+- **The Runtime stops first, gracefully.** It lives in a Scope of its own, which a Layer built after serving closes. Layers close in reverse, so on SIGINT or SIGTERM the Runtime stops: each Network steps a `Stopping`, the Client says `QUIT` and hangs up, and the Runtime waits for each Connection's `Closed` within `stopTimeout`. Every Owner input still waiting fails with `NetworkStopped`, and only then does serving stop, then the projector, then the Timeline store, and then the Journal, the Vault, and the lock.
+- **The projector stops before what it reads and writes.** It is built after the Runtime, the Journal, and the store, so it is interrupted before any of them closes. It goes on folding while the Runtime stops, since it follows the Journal rather than the Runtime, and an apply in flight when it is interrupted is kept whole or not at all.
 - **`gracefulShutdownTimeout` is 500 ms.** By then the Runtime has stopped, so it covers only reads and News streams in flight, which are cut.
 - **A stop is bounded, well inside a service manager's.** The Runtime waits on Ircds for at most `stopTimeout`, 5 s by default, however many Networks there are, since they stop side by side. It then lets a Journal append already in flight settle, which on a healthy disk is a few milliseconds but which the Journal port does not bound, and closes the Connections still open at once, without waiting on the Ircd. Serving then takes at most `gracefulShutdownTimeout`, 500 ms, for requests in flight. So with storage that answers promptly, a stop takes about 5.5 s, far inside systemd's default of 90 s. That is the usual time, not a guarantee: the total also includes settling an append already in flight, which nothing bounds, so a slow or stalled disk lengthens it, and so does the case "Not yet" names, where Effect's Bun server waits on a client still sending a body. Within the Runtime's bound, a hang-up drains for at most half of it, 2.5 s, and the Transport's own close takes at most its `hangupTimeout`, 2 s, so the `QUIT` fits. Raising `stopTimeout` raises the stop with it, and the service's stop timeout must stay above it plus 500 ms.
 - **Every log goes through `Effect.log*`,** annotated with the Network where there is one, to the Logger built here. A Credential is logged by name only, when it is held or forgotten. HTTP requests are not logged.
@@ -99,6 +113,7 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 `bun run test` runs, with no network:
 
 - `src/handlers.test.ts`: the handlers through an in-process client (`HttpApiTest`), on the Runtime's in-memory ports and a `TestClock`, with a key made in a temporary data directory. It covers refusing a missing or wrong key, configuring, registering on the floor, joining, saying, hearing a Message as News, `known`, `inspect`, resuming News after a sequence from the query and from `Last-Event-ID`, heartbeats, `UnknownNetwork`, `NetworkStopped` with `said` answering `NotJournaled` when the `Say` failed to append and `Journaled` when only its outputs did, and holding, using as `PASS`, and forgetting a Credential, whose value appears in no response, log, or Journal Entry. It covers a sign-in's cookie authorizing a read and a same-origin write, and refusing a write that is cross-site, same-site, from a foreign `Origin`, or says nothing of its origin, while a key needs no origin, and signing in and out refused when the request says nothing of its origin.
+- `src/projector.test.ts`: the projector on the Runtime's in-memory ports, the in-memory Timeline store, and a `TestClock`. It covers a Message heard in a Channel landing in that Channel's Timeline as it arrives, a restart that resumes after the last step folded, applying no step twice and keeping each Message once, a store built by another projection version folded again from the start into exactly what a store folded from nothing holds, and a store that fails, which stops the projector with its reason in the status and the log while the Network goes on and answers a `PING`. It also runs on the SQLite Journal and `views.sqlite` in a data directory, where a restart reads the same Timeline, and so does a start after `views.sqlite` was removed.
 - `src/sign-ins.test.ts`: the sign-ins service alone, on a file system whose rename is held. It covers a sign-out and a sign-in each interrupted during their write, after which memory and file agree: the signed-out token is refused, the abandoned sign-in is kept, and a later write brings back nothing old.
 - `src/server.test.ts`: the routes over a real Bun server on an ephemeral loopback port, on the SQLite Journal. It covers SSE as the wire carries it, with the sequence as each event's id, resuming with `after` and `Last-Event-ID`, heartbeats with no id, a reader that reads nothing while 300 Messages and a `say` go through and then misses none of them, 401 before anything else, 400 with the issue's path and no quoting of the body, and 413 with the Connection closed. For sign-ins, it covers signing in for a cookie with the right attributes, `Secure` only with `X-Forwarded-Proto: https`, a wrong key refused with 401 and no cookie, a sign-in from another origin refused with 403, the cookie alone authorizing a read and the News stream, a write by cookie refused from another origin and allowed from the same one, by `Sec-Fetch-Site` or `Origin`, a key needing no `Origin`, signing out so the cookie authorizes nothing and is cleared, signing out with no sign-in still clearing it, a sign-in surviving a restart on the same data directory and refused once its key is gone, even under a key made again with the same name, a sign-in and a sign-out that cannot be written, which answer 503 with no `Set-Cookie`, leave the authorization and `sign-ins.json` as they were, and succeed on a retry once the write works again, and no key appearing in any response, log, or `sign-ins.json`, nor the token anywhere but its cookie.
 
@@ -118,4 +133,5 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
 - **Key scopes, keys through the API, ending sign-ins other than by signing out, Views, and removing a Network,** as the API's README lists.
+- **Timelines through the API.** The Daemon holds the Timeline store and the projector's status, and no route reads either yet.
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.

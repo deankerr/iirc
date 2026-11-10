@@ -17,6 +17,9 @@
     "@iirc/journal-sqlite": "workspace:*",
     "@iirc/outbox": "workspace:*",
     "@iirc/runtime": "workspace:*",
+    "@iirc/timeline-store": "workspace:*",
+    "@iirc/timeline-store-sqlite": "workspace:*",
+    "@iirc/timelines": "workspace:*",
     "@iirc/transport-bun": "workspace:*",
     "@iirc/vault-file": "workspace:*",
     "effect": "catalog:"

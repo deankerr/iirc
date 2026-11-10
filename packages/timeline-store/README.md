@@ -26,7 +26,7 @@ Tombstone = { network, id, into, changed }
 Gap = { network, from, to: Position | undefined, changed }
 ```
 
-`TimelineStore` is an Effect service. An adapter provides it as a Layer from its own package.
+`TimelineStore` is an Effect service. An adapter provides it as a Layer from its own package: [`@iirc/timeline-store-sqlite`](../timeline-store-sqlite/README.md) in production, which the Daemon keeps in `views.sqlite`.
 
 ## Writing
 
@@ -75,5 +75,4 @@ The memory adapter applies each step to a copy and swaps it in at once. Producti
 
 ## Not yet
 
-- **A durable adapter.** The store is kept in memory only. A SQLite adapter, `views.sqlite` beside the Journal, comes with the Daemon's wiring, and passes the same laws.
 - **Search.** Items are read by position and by step, not by what they say.

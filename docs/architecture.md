@@ -23,9 +23,11 @@ flowchart LR
     runtime["Runtime<br/>one driver per Network"]
     client["Client<br/>pure IRC core"]
     outbox["Outbox<br/>pacing per Connection"]
+    projector["Projector<br/>folds News into Timelines"]
     api -->|"commands and reads"| runtime
     runtime <-->|"step: input to state, outputs, News"| client
     runtime --> outbox
+    runtime -->|"News"| projector
   end
 
   subgraph driven["Driven side"]
@@ -33,13 +35,16 @@ flowchart LR
     journal["Journal port"]
     vault["Vault port"]
     clock["Clock port"]
+    timelines["Timeline store port"]
   end
 
   web & agent & cli --> api
   runtime --> transport & journal & vault & clock
+  projector --> timelines
   transport --- ircd[("Ircds")]
-  journal --- sqlite[("SQLite")]
+  journal --- sqlite[("journal.sqlite")]
   vault --- store[("credentials.json")]
+  timelines --- views[("views.sqlite")]
 ```
 
 | Port | Its job | Production adapter | Test adapter |
@@ -49,7 +54,7 @@ flowchart LR
 | Journal | Append durably, read back, and follow the tail | [`@iirc/journal-sqlite`](../packages/journal-sqlite/README.md) | the memory Journal |
 | Vault | Hold Credentials, and give a value at the last moment | [`@iirc/vault-file`](../packages/vault-file/README.md) | the memory Vault |
 | Clock | Tell the time, and wait until a time | Effect's `Clock` | Effect's `TestClock` |
-| Timeline store | Keep the Timelines folded from News, and answer windows and changes | not yet | the memory store in `@iirc/timeline-store/testing` |
+| Timeline store | Keep the Timelines folded from News, and answer windows and changes | [`@iirc/timeline-store-sqlite`](../packages/timeline-store-sqlite/README.md) | the memory store in `@iirc/timeline-store/testing` |
 
 Ports are named for the job, not the technology behind them. Each port has laws that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake: the Runtime's in `@iirc/runtime/testing`, and the Timeline store's in `@iirc/timeline-store/testing`.
 
@@ -71,15 +76,17 @@ flowchart TB
     tbun["transport-bun"]
     jsql["journal-sqlite"]
     vfile["vault-file"]
+    tsql["timeline-store-sqlite"]
   end
 
   client --> protocol
   runtime --> client & outbox
   timelines --> client
   store --> timelines
-  adapters --> runtime
+  tbun & jsql & vfile --> runtime
+  tsql --> store
   api --> client
-  daemon --> api & runtime & adapters
+  daemon --> api & runtime & store & adapters
   app --> daemon
 ```
 
@@ -94,6 +101,7 @@ flowchart TB
 | [`@iirc/transport-bun`](../packages/transport-bun/README.md) | no | Sockets, TLS, and framing bytes into Lines. |
 | [`@iirc/journal-sqlite`](../packages/journal-sqlite/README.md) | no | Durable appends, reads, and following, in SQLite. |
 | [`@iirc/vault-file`](../packages/vault-file/README.md) | no | Credentials in a `0600` file, written atomically. |
+| [`@iirc/timeline-store-sqlite`](../packages/timeline-store-sqlite/README.md) | no | The Timelines in SQLite, each step applied whole, made again from the Journal when it cannot be used. |
 | [`@iirc/api`](../packages/api/README.md) | contract | The HTTP API every Frontend uses, as Schemas and typed errors. |
 | [`@iirc/daemon`](../packages/daemon/README.md) | no | Wires the Layers together, implements the API, and serves it. |
 | [`apps/iirc`](../apps/iirc/README.md) | no | The `iirc` executable, whose arguments choose what it runs ([ADR 0007](adr/0007-one-binary-shapes-by-argument.md)). |
@@ -227,13 +235,14 @@ sequenceDiagram
 
 - **Restart is replay.** The Runtime folds each Network's Inputs from `initial` to rebuild its state and its timer table, never carries out a past step's outputs again, and steps `Started` so the Client knows any Connection it believed open is gone.
 - **News is derived.** It is never journaled. A reader folds the Journal from the start and resumes after a sequence, so a Frontend that reconnects misses nothing.
+- **Timelines are derived from News.** The Daemon's projector is one such reader: it folds each step into the Timeline store, `views.sqlite`, with the last sequence folded, and resumes after it on start. It never holds up the Runtime, and a store of another projection version, or none, is folded again from the start ([ADR 0011](adr/0011-timelines-are-a-projection-the-client-routes.md)).
 - **Outputs are the record of what we did.** Without `echo-message`, the output that sent a Message is the only record that we said it.
 - **The Journal is versioned and not frozen.** A Daemon that finds a Journal of another version refuses it. There are no migrations until the shape settles.
 - **Shutdown is graceful and bounded.** `Stopping` makes every Client say `QUIT` on its Connection, the Runtime waits up to `stopTimeout` for the Ircds, and then closes what is left.
 
 ## The Daemon and its API
 
-`iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal and the Vault in it, starts the Runtime with the real Client, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`, or a sign-in, which a browser gets for its key once and holds in an `HttpOnly` cookie. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
+`iirc daemon --data-dir <dir>` holds the data directory exclusively, opens the Journal, the Vault, and the Timeline store in it, starts the Runtime with the real Client and the projector beside it, and serves [`@iirc/api`](../packages/api/README.md) on loopback. Every route is under `/api` and needs a bearer key, made with `iirc key create`, or a sign-in, which a browser gets for its key once and holds in an `HttpOnly` cookie. A Frontend drives the Daemon through `HttpApiClient.make(DaemonApi)` or plain HTTP, and follows News as Server-Sent Events. Everything the Daemon knows, apart from Credentials, can be read through the API: `known` for Knowledge, and `inspect` for machine states, caps, timers, and each Connection's queue.
 
 ## Testing
 

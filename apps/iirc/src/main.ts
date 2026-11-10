@@ -129,6 +129,12 @@ const daemon = Command.make(
             );
           }
 
+          case "TimelineStoreFailed": {
+            return failed(
+              `The Timelines in ${directory}/views.sqlite could not be opened: ${error.reason}. They are derived from the Journal, so removing the file rebuilds them.`
+            );
+          }
+
           case "DecodersMissing": {
             return failed(
               `This runtime cannot decode ${error.missing.join(", ")}, so it would read the Journal wrongly. Run iirc on the Bun it was built for.`

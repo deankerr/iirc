@@ -68,6 +68,6 @@ A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed
 
 ## Not yet
 
-- **Encodings.** The directory, items, and changes are TypeScript types over plain data. A durable store will need Schemas for the parts it writes, and the wire forms belong to `@iirc/api`.
+- **Encodings.** The directory, items, and changes are TypeScript types over plain data. The SQLite store keeps its own Schemas of what it writes, checked against these types, and the wire forms belong to `@iirc/api`.
 - **Channel renames.** A Channel keeps the name it opened with. `channel-rename` would rename one in place, keeping its id, as `DirectRenamed` does.
 - **Highlights and unread counts.** Both are read from items and Read Markers, and neither is folded yet.

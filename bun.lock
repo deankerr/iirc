@@ -67,6 +67,9 @@
         "@iirc/journal-sqlite": "workspace:*",
         "@iirc/outbox": "workspace:*",
         "@iirc/runtime": "workspace:*",
+        "@iirc/timeline-store": "workspace:*",
+        "@iirc/timeline-store-sqlite": "workspace:*",
+        "@iirc/timelines": "workspace:*",
         "@iirc/transport-bun": "workspace:*",
         "@iirc/vault-file": "workspace:*",
         "effect": "catalog:",
@@ -133,6 +136,22 @@
         "effect": "catalog:",
       },
       "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
+    "packages/timeline-store-sqlite": {
+      "name": "@iirc/timeline-store-sqlite",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/sql-sqlite-bun": "catalog:",
+        "@iirc/client": "workspace:*",
+        "@iirc/timeline-store": "workspace:*",
+        "@iirc/timelines": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/runtime": "workspace:*",
         "vitest": "catalog:",
       },
     },
@@ -274,6 +293,8 @@
     "@iirc/runtime": ["@iirc/runtime@workspace:packages/runtime"],
 
     "@iirc/timeline-store": ["@iirc/timeline-store@workspace:packages/timeline-store"],
+
+    "@iirc/timeline-store-sqlite": ["@iirc/timeline-store-sqlite@workspace:packages/timeline-store-sqlite"],
 
     "@iirc/timelines": ["@iirc/timelines@workspace:packages/timelines"],
 
