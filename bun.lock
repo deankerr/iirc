@@ -123,6 +123,32 @@
         "vitest": "catalog:",
       },
     },
+    "packages/timeline-store": {
+      "name": "@iirc/timeline-store",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/client": "workspace:*",
+        "@iirc/runtime": "workspace:*",
+        "@iirc/timelines": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
+    "packages/timelines": {
+      "name": "@iirc/timelines",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/client": "workspace:*",
+        "@iirc/protocol": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "fast-check": "4.10.2",
+        "vitest": "catalog:",
+      },
+    },
     "packages/transport-bun": {
       "name": "@iirc/transport-bun",
       "version": "0.0.0",
@@ -246,6 +272,10 @@
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 
     "@iirc/runtime": ["@iirc/runtime@workspace:packages/runtime"],
+
+    "@iirc/timeline-store": ["@iirc/timeline-store@workspace:packages/timeline-store"],
+
+    "@iirc/timelines": ["@iirc/timelines@workspace:packages/timelines"],
 
     "@iirc/transport-bun": ["@iirc/transport-bun@workspace:packages/transport-bun"],
 

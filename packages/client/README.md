@@ -93,7 +93,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `Refused` | An Owner intent that was not carried out, with its intent id: `Offline`, `Unsendable`, `Rejected` by the Ircd's reply, or `Unsent`: at least part of the Message never left, because its Connection ended first. |
 | `Ignored` | An input that changed nothing, and why. |
 
-Three rules for Timelines:
+Three rules for Timelines, which [`@iirc/timelines`](../timelines/README.md) folds News by:
 
 - **Our own Messages.** A Message we say appears as News when we send it. If `ours.echo` is set, a `Confirmed` for its intent follows when the Ircd echoes it, and the echo is not a second Message. With no echo, it stays unconfirmed: sent, with delivery unknown. If its Line never left, a `Refused` `Unsent` for its intent follows instead, unless the Ircd had already confirmed it on that Connection, so a Timeline marks the Message as not sent.
 - **Order by time.** History arrives late, with `live` false. A Timeline orders by `at`, not by when the News came.

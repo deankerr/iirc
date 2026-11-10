@@ -49,8 +49,9 @@ flowchart LR
 | Journal | Append durably, read back, and follow the tail | [`@iirc/journal-sqlite`](../packages/journal-sqlite/README.md) | the memory Journal |
 | Vault | Hold Credentials, and give a value at the last moment | [`@iirc/vault-file`](../packages/vault-file/README.md) | the memory Vault |
 | Clock | Tell the time, and wait until a time | Effect's `Clock` | Effect's `TestClock` |
+| Timeline store | Keep the Timelines folded from News, and answer windows and changes | not yet | the memory store in `@iirc/timeline-store/testing` |
 
-Ports are named for the job, not the technology behind them. Each port has laws in `@iirc/runtime/testing` that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake.
+Ports are named for the job, not the technology behind them. Each port has laws that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake: the Runtime's in `@iirc/runtime/testing`, and the Timeline store's in `@iirc/timeline-store/testing`.
 
 ## Packages
 
@@ -59,6 +60,8 @@ flowchart TB
   protocol["@iirc/protocol<br/>Lines, ISUPPORT, casemapping,<br/>CTCP, formatting"]
   client["@iirc/client<br/>machines, Features, Knowledge"]
   outbox["@iirc/outbox<br/>pacing"]
+  timelines["@iirc/timelines<br/>Timelines folded from News"]
+  store["@iirc/timeline-store<br/>the Timeline store port"]
   runtime["@iirc/runtime<br/>the ports, drives Clients"]
   api["@iirc/api<br/>HttpApi contract"]
   daemon["@iirc/daemon<br/>composition root"]
@@ -72,6 +75,8 @@ flowchart TB
 
   client --> protocol
   runtime --> client & outbox
+  timelines --> client
+  store --> timelines
   adapters --> runtime
   api --> client
   daemon --> api & runtime & adapters
@@ -83,6 +88,8 @@ flowchart TB
 | [`@iirc/protocol`](../packages/protocol/README.md) | yes | The grammar of a Line and the protocol's vocabulary. A Line that cannot be sent safely cannot be built. |
 | [`@iirc/client`](../packages/client/README.md) | yes | The IRC client for one Network: its machines, its Features, and what it knows. Also the transcript test kit. |
 | [`@iirc/outbox`](../packages/outbox/README.md) | yes | Which Line leaves next, and when: a token bucket, with `PING` and `PONG` first. |
+| [`@iirc/timelines`](../packages/timelines/README.md) | yes | Timelines as a fold over News: which Timeline each item goes to, its position, and the changes a store applies. |
+| [`@iirc/timeline-store`](../packages/timeline-store/README.md) | no | The Timeline store port, its in-memory adapter, and the laws its adapters keep. |
 | [`@iirc/runtime`](../packages/runtime/README.md) | no | The ports, and the Runtime that journals each input, steps the Client, and carries out its outputs. |
 | [`@iirc/transport-bun`](../packages/transport-bun/README.md) | no | Sockets, TLS, and framing bytes into Lines. |
 | [`@iirc/journal-sqlite`](../packages/journal-sqlite/README.md) | no | Durable appends, reads, and following, in SQLite. |
@@ -240,7 +247,7 @@ sequenceDiagram
 ## Extending it
 
 - **A new Feature** is a module in `packages/client/src/features/`, added to the registry in `src/registry.ts`, with scenarios in `src/scenarios/` that play through `step`. The laws pick it up from the registry. Its entry in the Client's README says what it needs, what it changes, and where its scenarios are. A Feature exists when its scenarios pass.
-- **A new adapter** implements a port from `@iirc/runtime` and passes that port's laws.
+- **A new adapter** implements a port from `@iirc/runtime` or `@iirc/timeline-store` and passes that port's laws.
 - **A new API route** is added to the contract in `@iirc/api` first, with its Schemas and errors, then handled in `@iirc/daemon`.
 - **A new Ircd behaviour** is handled from the protocol's structure: commands, numerics, parameters, and tags. Nothing is decided from an Ircd's free text, and Ergo and ngircd are examples of what the protocol allows, not the cases to code for.
 
