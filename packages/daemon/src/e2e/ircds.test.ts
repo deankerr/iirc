@@ -35,6 +35,72 @@ const joined = (api: Api) =>
     known.channels.some((one) => one.name === channel && one.standing === "Joined")
   );
 
+// The Session that ended, and why, from News: the stopped Daemon's Journal, as one
+// started after it on the same data directory reads it.
+const endings = (happened: readonly Happened[]) =>
+  happened.flatMap(({ news }) =>
+    news.flatMap((one) => (one._tag === "SessionEnded" ? [one.reason] : []))
+  );
+
+/** How long a stop may take: the Runtime's 5 s bound, and serving's 500 ms. */
+const stopBound = 6000;
+
+/**
+ * Stops a Daemon in a Channel with a Peer, and reads back how its Session ended. The Peer
+ * must hear a `QUIT` from our nick, decided by the Line's command and source alone.
+ * @param ircd - The Ircd, by its plaintext port.
+ * @param nick - The Peer's nick.
+ * @returns What the Peer heard, how long the stop took, and how the Session ended.
+ */
+const stopGracefully = (ircd: Ircd, nick: string) =>
+  Effect.gen(function* () {
+    const dataDir = yield* temporaryDirectory;
+    const key = yield* makeKey(dataDir);
+
+    const configuration = configured({
+      channels: [{ name: channel }],
+      ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
+      nicks: ["iirc"],
+    });
+
+    const peer = yield* Effect.promise(
+      async () => await connectPeer({ host: ircd.host, nick, port: ircd.plainPort })
+    );
+
+    peer.send(`JOIN ${channel}`);
+
+    const daemon = yield* startDaemon({ dataDir }, key);
+
+    yield* daemon.api.networks.configure({ params: { network }, payload: configuration });
+    yield* joined(daemon.api);
+
+    const quitting = Effect.promise(
+      async () =>
+        await peer.waitFor(
+          (line) => line.command === "QUIT" && line.source?.split("!")[0] === "iirc",
+          "the Daemon's QUIT"
+        )
+    );
+
+    const started = performance.now();
+
+    yield* daemon.stop;
+    const took = performance.now() - started;
+    const quit = yield* quitting;
+
+    // Another Daemon on the same data directory reads the first's Journal.
+    const again = yield* startDaemon({ dataDir }, key);
+    const happened = yield* followNews(again.api, 0, (all) => endings(all).length > 0);
+
+    yield* again.stop;
+    peer.close();
+
+    // Printed so a run shows how long the stop took.
+    console.log(`${ircd.kind}: the stop took ${Math.round(took)} ms`);
+
+    return { ended: endings(happened)[0], quit: quit.command, within: took < stopBound };
+  });
+
 describe("ngircd, on the floor", () => {
   let ngircd: Ircd;
 
@@ -200,6 +266,129 @@ describe("ngircd, on the floor", () => {
   }, 90_000);
 });
 
+describe("ngircd, paced and stopped gracefully", () => {
+  let ngircd: Ircd;
+
+  beforeAll(async () => {
+    ngircd = await startNgircd();
+  });
+
+  afterAll(async () => {
+    await ngircd.stop();
+  });
+
+  it("paces 20 Lines said in a row: all heard in order, a burst, then one about every 2 s", async () => {
+    const lines = 20;
+
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        const peer = yield* Effect.promise(
+          async () =>
+            await connectPeer({ host: ngircd.host, nick: "counter", port: ngircd.plainPort })
+        );
+
+        peer.send(`JOIN ${channel}`);
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: channel }],
+            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+            nicks: ["iirc"],
+          }),
+        });
+        yield* joined(api);
+
+        // Long enough idle for the bucket to fill again after registering and joining.
+        yield* Effect.sleep("10 seconds");
+
+        const started = performance.now();
+
+        for (let index = 1; index <= lines; index += 1) {
+          yield* api.networks.say({
+            params: { network },
+            payload: { kind: "Privmsg", target: channel, text: `paced ${index}` },
+          });
+        }
+
+        // Each must be the next Message from us, in turn: one out of order fails.
+        const heard = yield* Effect.forEach(
+          Array.from({ length: lines }, (_, index) => index + 1),
+          (index) =>
+            Effect.promise(
+              async () =>
+                await peer.waitFor(
+                  (each) => each.command === "PRIVMSG" && each.source?.split("!")[0] === "iirc",
+                  `paced ${index}`,
+                  10_000
+                )
+            ).pipe(Effect.map((line) => ({ at: line.at - started, text: line.params[1] })))
+        );
+
+        const known = yield* api.networks.known({ params: { network } });
+
+        const happened = yield* followNews(api, 0, (all) =>
+          all.some(({ news }) =>
+            news.some((one) => one._tag === "Message" && one.text === `paced ${lines}`)
+          )
+        );
+
+        peer.close();
+        yield* daemon.stop;
+
+        const gaps = heard.slice(1).map((each, index) => each.at - (heard[index]?.at ?? 0));
+
+        return {
+          ended: endings(happened),
+          gaps,
+          heard,
+          session: known.session._tag,
+        };
+      })
+    );
+
+    // Printed so a run shows the timing it checked.
+    console.log(result.heard.map(({ at, text }) => `${Math.round(at)} ms ${text}`).join("\n"));
+
+    const [first, ...rest] = result.heard;
+    const quick = result.gaps.filter((gap) => gap < 1000).length;
+    const paced = result.gaps.slice(5).every((gap) => gap > 1500 && gap < 3000);
+
+    expect({
+      ended: result.ended,
+      firstSoon: (first?.at ?? Number.POSITIVE_INFINITY) < 1500,
+      order: result.heard.map(({ text }) => text),
+      paced,
+      // The burst: at most 4 quick gaps between its 5 Lines, then the steady pace.
+      quickAtMostBurst: quick <= 4,
+      session: result.session,
+      tookPaced: (rest.at(-1)?.at ?? 0) > 25_000,
+    }).toStrictEqual({
+      ended: [],
+      firstSoon: true,
+      order: Array.from({ length: lines }, (_, index) => `paced ${index + 1}`),
+      paced: true,
+      quickAtMostBurst: true,
+      session: "Registered",
+      tookPaced: true,
+    });
+  }, 120_000);
+
+  it("says QUIT on stopping, hangs up, and stops within the bound", async () => {
+    const result = await run(stopGracefully(ngircd, "watcher"));
+
+    expect(result).toStrictEqual({
+      ended: { _tag: "Closed", reason: "HungUp" },
+      quit: "QUIT",
+      within: true,
+    });
+  }, 90_000);
+});
+
 describe("Ergo, over TLS with SASL PLAIN", () => {
   let ergo: Ircd;
 
@@ -307,6 +496,16 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       shown: false,
     });
   }, 120_000);
+
+  it("says QUIT on stopping, hangs up, and stops within the bound", async () => {
+    const result = await run(stopGracefully(ergo, "watcher"));
+
+    expect(result).toStrictEqual({
+      ended: { _tag: "Closed", reason: "HungUp" },
+      quit: "QUIT",
+      within: true,
+    });
+  }, 90_000);
 
   it("refuses Ergo's certificate without its root, and never falls back to plaintext", async () => {
     const result = await run(

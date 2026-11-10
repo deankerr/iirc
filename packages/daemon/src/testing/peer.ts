@@ -5,19 +5,22 @@
  *
  * @packageDocumentation
  */
-/** A Line split into its parts. */
+/** A Line split into its parts, and when it arrived. */
 interface Parsed {
   readonly source: string | undefined;
   readonly command: string;
   readonly params: readonly string[];
+  /** When the Peer read it, in milliseconds by the monotonic clock. */
+  readonly at: number;
 }
 
 /**
  * Splits a Line's text into its parts. Tags are dropped.
  * @param text - The Line, without its line ending.
+ * @param at - When it arrived.
  * @returns Its parts.
  */
-const parseLine = (text: string): Parsed => {
+const parseLine = (text: string, at: number): Parsed => {
   let rest = text.startsWith("@") ? text.slice(text.indexOf(" ") + 1) : text;
   let source: string | undefined;
 
@@ -33,6 +36,7 @@ const parseLine = (text: string): Parsed => {
   const [command = "", ...params] = words;
 
   return {
+    at,
     command: command.toUpperCase(),
     params: trailing === -1 ? params : [...params, rest.slice(trailing + 2)],
     source,
@@ -78,8 +82,10 @@ export const connectPeer = async (options: {
 
         buffered = parts.pop() ?? "";
 
+        const at = performance.now();
+
         for (const text of parts.filter(Boolean)) {
-          const parsed = parseLine(text);
+          const parsed = parseLine(text, at);
 
           // Every Ircd PINGs, and a Peer that never answers is dropped.
           if (parsed.command === "PING") {

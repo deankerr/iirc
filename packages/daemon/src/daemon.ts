@@ -7,6 +7,7 @@
 import { BunFileSystem, BunHttpServer, BunPath } from "@effect/platform-bun";
 import { client } from "@iirc/client";
 import { layerSqliteJournal } from "@iirc/journal-sqlite";
+import type { Pacing } from "@iirc/outbox";
 import { layerRuntime } from "@iirc/runtime";
 import { layer as layerTransport } from "@iirc/transport-bun";
 import type { BunTransportOptions } from "@iirc/transport-bun";
@@ -27,6 +28,12 @@ export interface DaemonOptions {
   readonly transport?: BunTransportOptions | undefined;
   /** How often the News stream sends a heartbeat. 15 seconds unless given. */
   readonly heartbeat?: Duration.Input | undefined;
+  /** How fast Lines may leave each Connection. A burst of 5, then one every 2 s, unless given. */
+  readonly pacing?: Pacing | undefined;
+  /** How long a hang-up lets queued Lines leave at pace before it hangs up anyway. 5 seconds unless given. */
+  readonly hangupDrain?: Duration.Input | undefined;
+  /** How long stopping waits for each Network's Connections to close. 5 seconds unless given. */
+  readonly stopTimeout?: Duration.Input | undefined;
 }
 
 /** Where the API listens. */
@@ -73,19 +80,28 @@ const dataDirectory = (dataDir: string) =>
 /**
  * The Runtime in a Scope of its own, which {@link StopRuntime} closes, so the Daemon can
  * stop it before serving stops.
+ * @param options - The pacing, and how long endings may take.
+ * @returns The Layer.
  */
-const runtimeFirstToStop = Layer.effectContext(
-  Effect.gen(function* () {
-    const scope = yield* Scope.make();
-    const close = Scope.close(scope, Exit.void);
+const runtimeFirstToStop = (options: DaemonOptions) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const close = Scope.close(scope, Exit.void);
 
-    yield* Effect.addFinalizer(() => close);
+      yield* Effect.addFinalizer(() => close);
 
-    const built = yield* Layer.buildWithScope(layerRuntime(client), scope);
+      const runtime = layerRuntime(client, {
+        hangupDrain: options.hangupDrain,
+        pacing: options.pacing,
+        stopTimeout: options.stopTimeout,
+      });
 
-    return Context.add(built, StopRuntime, close);
-  })
-);
+      const built = yield* Layer.buildWithScope(runtime, scope);
+
+      return Context.add(built, StopRuntime, close);
+    })
+  );
 
 /**
  * Everything but HTTP: the data directory held, the Journal, the Vault, the Transport,
@@ -111,9 +127,11 @@ const layerCore = (options: DaemonOptions) => {
       ? Layer.empty
       : Layer.succeed(Heartbeat, Duration.fromInputUnsafe(options.heartbeat));
 
-  return Layer.mergeAll(runtimeFirstToStop.pipe(Layer.provideMerge(ports)), keys, heartbeat).pipe(
-    Layer.provide(dataDirectory(dataDir))
-  );
+  return Layer.mergeAll(
+    runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)),
+    keys,
+    heartbeat
+  ).pipe(Layer.provide(dataDirectory(dataDir)));
 };
 
 // Built after serving, so it closes first: the Runtime stops, every Owner input still

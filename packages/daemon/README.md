@@ -15,7 +15,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | Export | Role |
 | --- | --- |
 | `layerDaemon(options, listen?)` | The Daemon, serving the API on `listen` (`127.0.0.1:7667` unless given), for as long as the Layer lives. It also provides its `HttpServer`, so a test can find an ephemeral port. |
-| `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), and the News `heartbeat` (15 s). |
+| `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s), as [the Runtime's README](../runtime/README.md#the-runtime) describes them. |
 | `layerLogger` | logfmt on stderr, so stdout holds only what a command was asked for. |
 | `ApiRoutes`, `ApiHandlers` | The API's routes with the key check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, and `ApiKeys`. |
 | `createKey(dataDir, name)` | `iirc key create`: makes a key, stores its hash, and gives the key once. Call it with the data directory held. |
@@ -54,8 +54,9 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 ## Composition
 
 - **The core is provided outside `HttpRouter.serve`.** `serve` forks the MemoMap, so anything shared built inside it would be built twice, and the Journal and the lock would each be opened again.
-- **The Runtime stops first.** It lives in a Scope of its own, which a Layer built after serving closes. Layers close in reverse, so on SIGINT or SIGTERM the Runtime stops, every Owner input still waiting fails with `NetworkStopped`, and only then does serving stop, and then the Journal, the Vault, and the lock.
+- **The Runtime stops first, gracefully.** It lives in a Scope of its own, which a Layer built after serving closes. Layers close in reverse, so on SIGINT or SIGTERM the Runtime stops: each Network steps a `Stopping`, the Client says `QUIT` and hangs up, and the Runtime waits for each Connection's `Closed` within `stopTimeout`. Every Owner input still waiting fails with `NetworkStopped`, and only then does serving stop, and then the Journal, the Vault, and the lock.
 - **`gracefulShutdownTimeout` is 500 ms.** By then the Runtime has stopped, so it covers only reads and News streams in flight, which are cut.
+- **A stop is bounded, well inside a service manager's.** The Runtime takes at most `stopTimeout`, 5 s by default, with every Network stopping at once, and serving 500 ms more, so a stop takes about 5.5 s at worst, far inside systemd's default of 90 s. Within the Runtime's bound, a hang-up drains for at most half of it, 2.5 s, and the Transport's own close takes at most its `hangupTimeout`, 2 s, so the `QUIT` fits. Raising `hangupDrain` or `stopTimeout` raises the stop with it, and the service's stop timeout must stay above the sum.
 - **Every log goes through `Effect.log*`,** annotated with the Network where there is one, to the Logger built here. A Credential is logged by name only, when it is held or forgotten. HTTP requests are not logged.
 
 ## The handlers
@@ -80,11 +81,12 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 
 - **ngircd, on the floor:** configure, register, join, say, and hear the other User's Message as News. ngircd is `~/.local/opt/ngircd/ngircd`, or `IIRC_NGIRCD`, with a configuration of its own in a temporary directory.
 - **Restart:** stop the Daemon, start another on the same data directory, and see the Network come back. The second folds the first's News Entry for Entry, News resumed after the last sequence the first showed is exactly what came after, and `said` finds a `say` made just before the stop.
+- **Pacing, on ngircd:** `say` 20 Lines in a row through the API. The raw peer hears all 20 in order, the Daemon's Session survives with no flood kill, and the timing is checked loosely: the burst, then about 2 s apart. The run prints when each Line arrived.
+- **A graceful `QUIT`, on ngircd and on Ergo:** stop the Daemon while it is in a Channel with the raw peer. The peer hears a `QUIT` from our nick, decided from the Line's command and source alone, never its text. A Daemon started after on the same data directory reads that the Session ended `Closed` `HungUp`, and the stop finished within 6 s. The run prints how long it took.
 - **Ergo over TLS with SASL PLAIN:** register an account, set the Credential through the API, and log in, with the Daemon dialling `ergo.test`, routed to loopback, and trusting Ergo's self-signed root through the Transport's `trust`, never by turning verification off. A second run without the root fails with a TLS close and never tries plaintext. Ergo 2.19.1 is fetched into the gitignored `.cache/ergo/` and checked against its checksums file and a pinned SHA-256 before it runs.
 
 ## Not yet
 
-- **A graceful `QUIT` on shutdown.** Stopping hangs up every Connection without one. It belongs to the Client, as an input it answers.
 - **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser, as the [transcript spike](../../docs/notes/2026-11-09-transcript-spike.md) found.
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
