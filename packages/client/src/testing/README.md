@@ -15,7 +15,7 @@ play(client, {
     registered(base, { offered: ["multi-prefix"] }),
     joined(base, "#iirc", ["@peer"]),
     "<< :peer!u@h PRIVMSG #iirc :hi\n",
-    "?? message Privmsg peer #iirc :hi\n",
+    "?? message Privmsg peer #iirc in=channel:#iirc :hi\n",
   ],
 });
 ```
@@ -74,13 +74,23 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
-| `Message` | `?? message Privmsg peer #iirc id=ircd:m1 at=ircd:t+1s history tags=+draft/reply="m0" ours=i1 echo :hi` |
-| `Confirmed` | `?? confirmed i1 id=ircd:m4 at=ircd:t+1s :hello` |
-| `Activity` | `?? activity Joined #iirc peer`, `?? activity Kicked #iirc peer by=op :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k`, `?? activity TopicChanged #iirc by=op setBy=op :topic`, `?? activity AwayChanged peer back` |
+| `Refolded` | `?? refolded ascii` |
+| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi` |
+| `Confirmed` | `?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello` |
+| `Activity` | `?? activity Joined #iirc peer in=channel:#iirc`, `?? activity Kicked #iirc peer by=op in=channel:#iirc :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc`, `?? activity TopicChanged #iirc by=op setBy=op in=channel:#iirc :topic`, `?? activity AwayChanged peer back in=existing-direct:peer` |
+
+A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, and `history`.
+
+| `where` | Written |
+| --- | --- |
+| `Network` | `in=network` |
+| `Channel` | `in=channel:#iirc`, or `in=channel:#foo{:#Foo[` when the key and the name as said differ |
+| `Direct` | `in=direct:peer`, or `in=existing-direct:peer` with `existing`, the key and name written as for a Channel |
+| `DirectRenamed` | `in=renamed:peer>pal`, or `in=renamed:pal>pal:Pal`, the old key and name, then the new |
 
 A fact is `unknown`, `<from>:<value>` when known as of now, with `@<instant>` when known as of another time, `partial:<from>:<value>`, or `stale:<was>@<since>`.
 
-A string from News, such as a nick, a Channel, an id, or a command, is written bare when it holds no space, `"`, `=`, `@`, `:`, or `;`, and otherwise quoted as JSON, so no value can imitate an instant or an attribute: an id `m1` known as of `t+0s` is `id=ircd:m1@t+0s`, and an id `m1@t+0s` is `id=ircd:"m1@t+0s"`. `atom(text)` writes one. The trailing text after ` :` is written as it is, since nothing follows it.
+A string from News, such as a nick, a Channel, an id, or a command, is written bare when it holds no space, `"`, `=`, `@`, `:`, `;`, or `>`, and otherwise quoted as JSON, so no value can imitate an instant or an attribute: an id `m1` known as of `t+0s` is `id=ircd:m1@t+0s`, and an id `m1@t+0s` is `id=ircd:"m1@t+0s"`. `atom(text)` writes one. The trailing text after ` :` is written as it is, since nothing follows it.
 
 ## Playing
 

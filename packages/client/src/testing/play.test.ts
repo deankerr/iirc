@@ -57,7 +57,7 @@ describe("strict play", () => {
   it("feeds Owner inputs with intent ids in order", () => {
     const played = play(client, {
       configuration: base,
-      transcript: `${floor}!! say #iirc :one\n>> PRIVMSG #iirc one\n!! notice peer :two words\n>> PRIVMSG peer :two words\n?? message Notice iirc peer at=ours:t+0s ours=i2 :two words\n`,
+      transcript: `${floor}!! say #iirc :one\n>> PRIVMSG #iirc one\n!! notice peer :two words\n>> PRIVMSG peer :two words\n?? message Notice iirc peer at=ours:t+0s in=network ours=i2 :two words\n`,
     });
 
     expect(

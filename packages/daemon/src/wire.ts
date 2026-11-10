@@ -23,6 +23,7 @@ import type {
   NetworkStatus as WireNetworkStatus,
   News as WireNews,
   RefusedReason as WireRefusedReason,
+  Where as WireWhere,
 } from "@iirc/api";
 import type {
   Activity,
@@ -33,6 +34,7 @@ import type {
   News,
   RefusedReason,
   TimerTable,
+  Where,
 } from "@iirc/client";
 import type {
   ChannelKnowledge,
@@ -370,6 +372,52 @@ const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
   }
 };
 
+const where = (source: Where): WireWhere => {
+  switch (source._tag) {
+    case "Channel": {
+      const wire: Case<Where, WireWhere, "Channel"> = {
+        _tag: "Channel",
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "Direct": {
+      const wire: Case<Where, WireWhere, "Direct"> = {
+        _tag: "Direct",
+        existing: source.existing,
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "DirectRenamed": {
+      const wire: Case<Where, WireWhere, "DirectRenamed"> = {
+        _tag: "DirectRenamed",
+        key: source.key,
+        name: source.name,
+        to: { key: source.to.key, name: source.to.name },
+      };
+
+      return wire;
+    }
+
+    case "Network": {
+      const wire: Case<Where, WireWhere, "Network"> = { _tag: "Network" };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
 /**
  * One piece of News, as the contract says it.
  * @param source - The Client's News.
@@ -384,6 +432,7 @@ const news = (source: News): WireNews => {
         at: fact(source.at, same),
         id: fact(source.id, same),
         live: source.live,
+        where: source.where.map(where),
       };
 
       return wire;
@@ -412,6 +461,15 @@ const news = (source: News): WireNews => {
       return wire;
     }
 
+    case "Refolded": {
+      const wire: Case<News, WireNews, "Refolded"> = {
+        _tag: "Refolded",
+        casemapping: source.casemapping,
+      };
+
+      return wire;
+    }
+
     case "Ignored": {
       const wire: Case<News, WireNews, "Ignored"> = {
         _tag: "Ignored",
@@ -434,6 +492,7 @@ const news = (source: News): WireNews => {
         tags: [...source.tags].map(([key, value]) => ({ key, value })),
         target: source.target,
         text: source.text,
+        where: source.where.map(where),
       };
 
       return wire;

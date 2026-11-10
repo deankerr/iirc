@@ -12,6 +12,7 @@ import {
   limitsOf,
   modesOf,
   prefixOf,
+  statusmsgOf,
   targetLimitsOf,
   unescapeValue,
 } from "./isupport.ts";
@@ -171,6 +172,11 @@ describe("token values", () => {
     expect(chantypesOf(undefined)).toBe("#&");
     expect(modesOf(undefined)).toBe(3);
     expect(casemappingOf(undefined, undefined)).toBe("rfc1459");
+  });
+
+  it("reads STATUSMSG as the prefixes it lists, and none when not sent", () => {
+    expect(statusmsgOf(undefined)).toBe("");
+    expect(statusmsgOf("@+")).toBe("@+");
   });
 
   it("reads an empty PREFIX as none, and one that does not pair up as unusable", () => {

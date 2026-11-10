@@ -60,6 +60,7 @@ const describeNews = (happened: readonly Happened[]) =>
 
         case "Confirmed":
         case "Ignored":
+        case "Refolded":
         case "Refused": {
           return [];
         }

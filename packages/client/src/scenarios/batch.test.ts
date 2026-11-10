@@ -43,12 +43,12 @@ describe("batches", () => {
         lines(
           "<< :irc.test BATCH +b1 example.com/unknown-type a b",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :in it",
-          "?? message Privmsg peer #iirc history :in it",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :in it",
           "<< :peer!u@h PRIVMSG #iirc :not in it",
-          "?? message Privmsg peer #iirc :not in it",
+          "?? message Privmsg peer #iirc in=channel:#iirc :not in it",
           "<< :irc.test BATCH -b1",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :after it",
-          "?? message Privmsg peer #iirc :after it"
+          "?? message Privmsg peer #iirc in=channel:#iirc :after it"
         ),
       ],
     });
@@ -65,16 +65,16 @@ describe("batches", () => {
           "<< :irc.test BATCH +outer example.com/foo",
           "<< @batch=outer :irc.test BATCH +inner example.com/bar",
           "<< @batch=inner :peer!u@h PRIVMSG #iirc :inner",
-          "?? message Privmsg peer #iirc history :inner",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :inner",
           "<< @batch=outer :irc.test BATCH -inner",
           "<< @batch=inner :peer!u@h PRIVMSG #iirc :inner closed",
-          "?? message Privmsg peer #iirc :inner closed",
+          "?? message Privmsg peer #iirc in=channel:#iirc :inner closed",
           "<< @batch=outer :peer!u@h PRIVMSG #iirc :outer",
-          "?? message Privmsg peer #iirc history :outer",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :outer",
           "<< @batch=outer :irc.test BATCH +left example.com/bar",
           "<< :irc.test BATCH -outer",
           "<< @batch=left :peer!u@h PRIVMSG #iirc :closed with its outer",
-          "?? message Privmsg peer #iirc :closed with its outer"
+          "?? message Privmsg peer #iirc in=channel:#iirc :closed with its outer"
         ),
       ],
     });
@@ -91,10 +91,10 @@ describe("batches", () => {
           "<< :irc.test BATCH +1 example.com/foo",
           "<< :irc.test BATCH +2 example.com/foo",
           "<< @batch=1 :peer!u@h PRIVMSG #iirc :one",
-          "?? message Privmsg peer #iirc history :one",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :one",
           "<< :irc.test BATCH -1",
           "<< @batch=2 :peer!u@h PRIVMSG #iirc :two",
-          "?? message Privmsg peer #iirc history :two",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :two",
           "<< :irc.test BATCH -2"
         ),
       ],
@@ -110,10 +110,10 @@ describe("batches", () => {
         ...inChannel("batch"),
         lines(
           "<< @batch=nope :peer!u@h PRIVMSG #iirc :unknown",
-          "?? message Privmsg peer #iirc :unknown",
+          "?? message Privmsg peer #iirc in=channel:#iirc :unknown",
           "<< :irc.test BATCH +typeless",
           "<< @batch=typeless :peer!u@h PRIVMSG #iirc :typeless",
-          "?? message Privmsg peer #iirc :typeless",
+          "?? message Privmsg peer #iirc in=channel:#iirc :typeless",
           "<< :irc.test BATCH +",
           "<< :irc.test BATCH -never-opened",
           "<< :irc.test BATCH"
@@ -137,9 +137,9 @@ describe("batches", () => {
         lines(
           ...opening,
           `<< @batch=b${maxOpen - 1} :peer!u@h PRIVMSG #iirc :last kept`,
-          "?? message Privmsg peer #iirc history :last kept",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :last kept",
           `<< @batch=b${maxOpen} :peer!u@h PRIVMSG #iirc :one too many`,
-          "?? message Privmsg peer #iirc :one too many",
+          "?? message Privmsg peer #iirc in=channel:#iirc :one too many",
           "== closed Reset",
           "?? session-ended Closed Reset",
           "+2s",
@@ -155,7 +155,7 @@ describe("batches", () => {
           "<< :irc.test 001 iirc :Welcome",
           ">> JOIN #iirc",
           "<< @batch=b0 :peer!u@h PRIVMSG iirc :from the last Connection",
-          "?? message Privmsg peer iirc :from the last Connection"
+          "?? message Privmsg peer iirc in=direct:peer :from the last Connection"
         ),
       ],
     });
@@ -171,7 +171,7 @@ describe("batches", () => {
         lines(
           "<< :irc.test BATCH +b1 netsplit",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :hi",
-          "?? message Privmsg peer #iirc :hi"
+          "?? message Privmsg peer #iirc in=channel:#iirc :hi"
         ),
       ],
     });
@@ -187,7 +187,7 @@ describe("batches", () => {
         lines(
           "<< :irc.test BATCH +split netsplit irc.hub other.host",
           "<< @batch=split :peer!u@h QUIT :irc.hub other.host",
-          "?? activity Quit peer :irc.hub other.host"
+          "?? activity Quit peer in=channel:#iirc in=existing-direct:peer :irc.hub other.host"
         ),
       ],
     });
@@ -205,10 +205,10 @@ describe("batches", () => {
         lines(
           "<< :irc.test BATCH +b1 netsplit",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :in it",
-          "?? message Privmsg peer #iirc history :in it",
+          "?? message Privmsg peer #iirc history in=channel:#iirc :in it",
           "<< :irc.test CAP iirc DEL :batch",
           "<< @batch=b1 :peer!u@h PRIVMSG #iirc :after DEL",
-          "?? message Privmsg peer #iirc :after DEL",
+          "?? message Privmsg peer #iirc in=channel:#iirc :after DEL",
           "<< :irc.test BATCH -b1"
         ),
       ],
@@ -219,6 +219,32 @@ describe("batches", () => {
 });
 
 describe("history", () => {
+  it("never renames a Direct Message Timeline, so a nick someone new took keeps theirs", () => {
+    play(withHistory, {
+      configuration: base,
+      transcript: [
+        ...inChannel("batch"),
+        lines(
+          "<< :peer!u@h PRIVMSG iirc :psst",
+          "?? message Privmsg peer iirc in=direct:peer :psst",
+          "<< :peer!u@h NICK pal",
+          "?? activity NickChanged peer pal in=channel:#iirc in=renamed:peer>pal",
+          // Someone new has the nick `peer`, and starts a Timeline of their own.
+          "<< :peer!v@elsewhere PRIVMSG iirc :I am new",
+          "?? message Privmsg peer iirc in=direct:peer :I am new",
+          // The first rename, told again from history, is shown where `peer` talked and
+          // moves nothing: `peer` is not `pal` now.
+          "<< :irc.test BATCH +h chathistory iirc",
+          "<< @batch=h :peer!u@h NICK pal",
+          "?? activity NickChanged peer pal history in=existing-direct:peer",
+          "<< :irc.test BATCH -h"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
   it("is reported, and never changes membership, nicks, topics, or modes", () => {
     const now = play(withHistory, {
       configuration: base,
@@ -229,21 +255,21 @@ describe("history", () => {
           "<< :irc.test 324 iirc #iirc +nt",
           "<< :irc.test BATCH +h chathistory #iirc",
           "<< @batch=h :new!u@h JOIN #iirc",
-          "?? activity Joined #iirc new history",
+          "?? activity Joined #iirc new history in=channel:#iirc",
           "<< @batch=h :peer!u@h PART #iirc :gone",
-          "?? activity Parted #iirc peer history :gone",
+          "?? activity Parted #iirc peer history in=channel:#iirc :gone",
           "<< @batch=h :op!u@h NICK renamed",
-          "?? activity NickChanged op renamed history",
+          "?? activity NickChanged op renamed history in=channel:#iirc in=existing-direct:op",
           "<< @batch=h :op!u@h TOPIC #iirc :old topic",
-          "?? activity TopicChanged #iirc by=op setBy=op setAt=t+0s history :old topic",
+          "?? activity TopicChanged #iirc by=op setBy=op setAt=t+0s history in=channel:#iirc :old topic",
           "<< @batch=h :op!u@h MODE #iirc +m-t",
-          "?? activity ModeChanged #iirc by=op +m -t history",
+          "?? activity ModeChanged #iirc by=op +m -t history in=channel:#iirc",
           "<< @batch=h :op!u@h MODE #iirc -o op",
-          "?? activity ModeChanged #iirc by=op -o=op history",
+          "?? activity ModeChanged #iirc by=op -o=op history in=channel:#iirc",
           "<< @batch=h :peer!u@h AWAY :out",
-          "?? activity AwayChanged peer history :out",
+          "?? activity AwayChanged peer history in=existing-direct:peer :out",
           "<< @batch=h :iirc!u@elsewhere KICK #iirc iirc :old kick",
-          "?? activity Kicked #iirc iirc by=iirc history :old kick",
+          "?? activity Kicked #iirc iirc by=iirc history in=channel:#iirc :old kick",
           "<< @batch=h :irc.test 353 iirc = #iirc :nobody",
           "<< @batch=h :irc.test 366 iirc #iirc :End",
           "<< @batch=h :irc.test 332 iirc #iirc :replied in history",
@@ -274,10 +300,10 @@ describe("history", () => {
         ...inChannel("message-tags", "batch"),
         lines(
           "<< @msgid=m1 :peer!u@h PRIVMSG #iirc :hi",
-          "?? message Privmsg peer #iirc id=ircd:m1 :hi",
+          "?? message Privmsg peer #iirc id=ircd:m1 in=channel:#iirc :hi",
           "<< :irc.test BATCH +h chathistory #iirc",
           "<< @batch=h;msgid=m1 :peer!u@h PRIVMSG #iirc :hi",
-          "?? message Privmsg peer #iirc id=ircd:m1 history :hi",
+          "?? message Privmsg peer #iirc id=ircd:m1 history in=channel:#iirc :hi",
           "<< :irc.test BATCH -h"
         ),
       ],

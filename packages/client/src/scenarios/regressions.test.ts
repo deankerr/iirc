@@ -23,7 +23,7 @@ describe("1. Users who share no Channel are forgotten", () => {
     const churn = Array.from({ length: 5 }, (_unused, index) =>
       lines(
         `<< :peer${index}!u@h JOIN #a`,
-        `?? activity Joined #a peer${index}`,
+        `?? activity Joined #a peer${index} in=channel:#a`,
         "<< :irc.test 353 iirc = #a :iirc",
         "<< :irc.test 366 iirc #a :End"
       )
@@ -93,7 +93,7 @@ describe("3. Each Connection starts from the protocol's casemapping", () => {
           "-> dial irc.test:6697 tls"
         ),
         again(base, ">> JOIN #X["),
-        lines("<< :iirc!~iirc@h JOIN #x{", "?? activity Joined #x{ iirc"),
+        lines("<< :iirc!~iirc@h JOIN #x{", "?? activity Joined #x{ iirc in=channel:#x{"),
       ],
     });
 
@@ -234,7 +234,7 @@ describe("6. Nothing is sent after QUIT and Hangup", () => {
 describe("7. A Channel Self is put in without asking is modelled, and not undone", () => {
   const forced = lines(
     "<< :iirc!~iirc@h JOIN #forced",
-    "?? activity Joined #forced iirc",
+    "?? activity Joined #forced iirc in=channel:#forced",
     "<< :irc.test 332 iirc #forced :an oper put you here",
     "<< :irc.test 353 iirc = #forced :iirc @oper",
     "<< :irc.test 366 iirc #forced :End"
@@ -297,7 +297,7 @@ describe("7. A Channel Self is put in without asking is modelled, and not undone
           "<< :iirc!~iirc@h JOIN #one",
           "<< :iirc!~iirc@h JOIN #two",
           "<< :iirc!~iirc@h JOIN #three",
-          "?? activity Joined #three iirc",
+          "?? activity Joined #three iirc in=channel:#three",
           "?? ignored NotNow Received"
         ),
       ],

@@ -27,7 +27,7 @@ const say = (intent: number, text = "hello", target = "#iirc") =>
   lines(
     `!! say ${target} :${text}`,
     `>> @label=l${intent} PRIVMSG ${target} ${text.includes(" ") ? ":" : ""}${text}`,
-    `?? message Privmsg iirc ${target} at=ours:t+0s ours=i${intent} echo :${text}`
+    `?? message Privmsg iirc ${target} at=ours:t+0s in=${target.startsWith("#") ? "channel" : "direct"}:${target} ours=i${intent} echo :${text}`
   );
 
 describe("our Message, echoed", () => {
@@ -69,12 +69,12 @@ describe("our Message, echoed", () => {
         lines(
           "!! action #iirc :waves",
           ">>\\ @label=l1 PRIVMSG #iirc :\\x01ACTION waves\\x01",
-          "?? message Action iirc #iirc at=ours:t+0s ours=i1 echo :waves",
+          "?? message Action iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 echo :waves",
           "<<\\ @label=l1 :iirc!u@h PRIVMSG #iirc :\\x01ACTION waves\\x01",
           "?? confirmed i1 :waves",
           "!! notice #iirc :heads up",
           ">> @label=l2 NOTICE #iirc :heads up",
-          "?? message Notice iirc #iirc at=ours:t+0s ours=i2 echo :heads up",
+          "?? message Notice iirc #iirc at=ours:t+0s in=channel:#iirc ours=i2 echo :heads up",
           "<< @label=l2 :iirc!u@h NOTICE #iirc :heads up",
           "?? confirmed i2 :heads up"
         ),
@@ -96,7 +96,7 @@ describe("our Message, echoed", () => {
           "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
           "?? confirmed i1 :hello",
           "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello",
+          "?? message Privmsg iirc #iirc in=channel:#iirc :hello",
           "<< :irc.test BATCH -r"
         ),
       ],
@@ -158,7 +158,7 @@ describe("our Message, echoed", () => {
           "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
           "?? confirmed i2 :hello",
           "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello"
+          "?? message Privmsg iirc #iirc in=channel:#iirc :hello"
         ),
       ],
     });
@@ -178,7 +178,7 @@ describe("our Message, echoed", () => {
         ...sayings,
         lines(
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello",
+          "?? message Privmsg iirc #iirc in=channel:#iirc :hello",
           "<< @label=l2 :iirc!u@h PRIVMSG #iirc :hello",
           "?? confirmed i2 :hello"
         ),
@@ -196,7 +196,7 @@ describe("our Message, echoed", () => {
         say(1, "note to self", "iirc"),
         lines(
           "<< :iirc!u@h PRIVMSG iirc :note to self",
-          "?? message Privmsg iirc iirc :note to self",
+          "?? message Privmsg iirc iirc in=direct:iirc :note to self",
           "<< @label=l1 :iirc!u@h PRIVMSG iirc :note to self",
           "?? confirmed i1 :note to self"
         ),
@@ -237,7 +237,7 @@ describe("our Message, refused", () => {
           "<< @batch=r :irc.test 401 iirc nobody :No such nick",
           "?? refused i1 Rejected 401",
           "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello",
+          "?? message Privmsg iirc #iirc in=channel:#iirc :hello",
           "<< :irc.test BATCH -r"
         ),
       ],
@@ -255,7 +255,7 @@ describe("our Message, refused", () => {
         lines(
           "<< @label=l1 :irc.test WARN PRIVMSG INVALID_UTF8 :Modified",
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-          "?? message Privmsg iirc #iirc :hello"
+          "?? message Privmsg iirc #iirc in=channel:#iirc :hello"
         ),
       ],
     });
@@ -273,7 +273,7 @@ describe("our Message, refused", () => {
         say(1),
         lines(
           "<< @label=l1 :irc.test NOTICE iirc :Your message was rejected",
-          "?? message Notice irc.test iirc :Your message was rejected"
+          "?? message Notice irc.test iirc in=network :Your message was rejected"
         ),
       ],
     });
@@ -294,9 +294,9 @@ describe("without both caps", () => {
           lines(
             "!! say #iirc :hello",
             ">> PRIVMSG #iirc hello",
-            "?? message Privmsg iirc #iirc at=ours:t+0s ours=i1 :hello",
+            "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :hello",
             "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
-            "?? message Privmsg iirc #iirc :hello"
+            "?? message Privmsg iirc #iirc in=channel:#iirc :hello"
           ),
         ],
       });
@@ -333,7 +333,7 @@ describe("the caps changing mid-Session", () => {
           "<< :irc.test CAP iirc ACK :-labeled-response",
           "!! say #iirc :again",
           ">> PRIVMSG #iirc again",
-          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i2 :again"
+          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i2 :again"
         ),
       ],
     });
@@ -354,14 +354,14 @@ describe("the caps changing mid-Session", () => {
           "?? ignored UnmatchedEcho",
           "!! say #iirc :again",
           ">> PRIVMSG #iirc again",
-          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i2 :again",
+          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i2 :again",
           "<< :iirc!u@h PRIVMSG #iirc :again",
           "?? ignored UnmatchedEcho",
           "<< :peer!u@h PRIVMSG #iirc :from someone else",
-          "?? message Privmsg peer #iirc :from someone else",
+          "?? message Privmsg peer #iirc in=channel:#iirc :from someone else",
           "<< :irc.test CAP iirc ACK :-echo-message",
           "<< :iirc!u@elsewhere PRIVMSG #iirc :said elsewhere",
-          "?? message Privmsg iirc #iirc :said elsewhere"
+          "?? message Privmsg iirc #iirc in=channel:#iirc :said elsewhere"
         ),
       ],
     });
@@ -538,7 +538,7 @@ describe("labels need batch", () => {
           "?? ignored UnmatchedEcho",
           "!! say #iirc :again",
           ">> PRIVMSG #iirc again",
-          "?? message Privmsg iirc #iirc at=ours:t+0s ours=i2 :again",
+          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i2 :again",
           "<< :irc.test CAP iirc ACK :-echo-message",
           ">> CAP REQ -labeled-response",
           "<< :irc.test CAP iirc ACK :-labeled-response"

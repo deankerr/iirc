@@ -29,9 +29,11 @@ export type {
   EndReason,
   IgnoredReason,
   ModeChange,
+  Named,
   News,
   Ours,
   RefusedReason,
+  Where,
 } from "./news.ts";
 
 export { Output, timers } from "./output.ts";

@@ -117,6 +117,14 @@ export const defaultChantypes = "#&";
  */
 export const chantypesOf = (value: string | undefined): string => value ?? defaultChantypes;
 
+/**
+ * Reads `STATUSMSG`: the prefixes a Message's Target may carry before a Channel's name,
+ * such as `@` in `@#iirc`, to reach only the members holding that status or higher.
+ * @param value - The token's value, or `undefined` if it was not sent.
+ * @returns The characters, where `""`, as when it is not sent, means none.
+ */
+export const statusmsgOf = (value: string | undefined): string => value ?? "";
+
 /** One membership prefix: the mode letter, and the symbol shown before a nick. */
 export interface Membership {
   readonly mode: string;

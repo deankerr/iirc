@@ -283,6 +283,31 @@ export const IgnoredReason = Schema.TaggedUnion({
 /** The decoded form of {@link IgnoredReason}. */
 export type IgnoredReason = typeof IgnoredReason.Type;
 
+/** How a Network folds names, as `@iirc/protocol/casemapping` names it. */
+const Casemapping = Schema.Literals(["ascii", "rfc1459", "rfc1459-strict", "rfc8265"]);
+
+/**
+ * A name a Network chose, as it was said, and its key: the name folded by the casemapping
+ * the Network last declared.
+ */
+const Named = Schema.Struct({ key: Untrusted, name: Untrusted });
+
+/**
+ * A Timeline a Message or an Activity touches, as the Client worked it out: the Network's
+ * own, a Channel's, or a Direct Message partner's. A `Direct` with `existing` touches
+ * only a Timeline that already exists, and `DirectRenamed` moves an existing one from
+ * `key` to `to`.
+ */
+export const Where = Schema.TaggedUnion({
+  Channel: Named.fields,
+  Direct: { ...Named.fields, existing: Schema.Boolean },
+  DirectRenamed: { ...Named.fields, to: Named },
+  Network: {},
+});
+
+/** The decoded form of {@link Where}. */
+export type Where = typeof Where.Type;
+
 /** A client-only tag on a Message, such as `+draft/reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
@@ -293,6 +318,7 @@ export const News = Schema.TaggedUnion({
     at: Fact(Instant),
     id: Fact(MessageId),
     live: Schema.Boolean,
+    where: Schema.Array(Where),
   },
   Confirmed: { at: Fact(Instant), id: Fact(MessageId), intent: IntentId, text: Untrusted },
   ConnectionFailed: { at: Instant, reason: EndReason },
@@ -307,7 +333,9 @@ export const News = Schema.TaggedUnion({
     tags: Schema.Array(Tag),
     target: Untrusted,
     text: Untrusted,
+    where: Schema.Array(Where),
   },
+  Refolded: { casemapping: Casemapping },
   Refused: { intent: IntentId, reason: RefusedReason },
   SessionBegan: { at: Instant, nick: Untrusted },
   SessionEnded: { at: Instant, reason: EndReason },
@@ -348,8 +376,6 @@ export const NewsEvent = Schema.Union([
 export type NewsEvent = typeof NewsEvent.Type;
 
 // Knowledge.
-
-const Casemapping = Schema.Literals(["ascii", "rfc1459", "rfc1459-strict", "rfc8265"]);
 
 /** Where the Client is with the Network. */
 export const SessionKnowledge = Schema.TaggedUnion({

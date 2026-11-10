@@ -8,7 +8,7 @@ import type { UnparseableReason } from "@iirc/protocol/line";
 
 import type { ConnectionId, Instant, IntentId, MessageId, TimerId } from "./ids.ts";
 import type { CloseReason, Input, SayKind } from "./input.ts";
-import type { Fact, Topic } from "./known.ts";
+import type { Casemapping, Fact, Topic } from "./known.ts";
 
 /** Something that changed on the Network, rather than something said. */
 export type Activity =
@@ -45,6 +45,39 @@ export type Activity =
       readonly nick: string;
       readonly away: { readonly message: string } | null;
     };
+
+/**
+ * A name as it was said, and its key: the name folded by the casemapping the Network last
+ * declared, which `Refolded` reports.
+ */
+export interface Named {
+  /** The name folded, as Knowledge keys Channels and Users. */
+  readonly key: string;
+  /** The name as it was said, to show. */
+  readonly name: string;
+}
+
+/**
+ * A Timeline a Message or an Activity touches. The Client works it out from what it
+ * knows at that step, before the step changes anything, so a projection can fold News
+ * into Timelines without knowing the casemapping, Self's nick, or who shares a Channel.
+ *
+ * - `Network`: the Network's own Timeline.
+ * - `Channel`: a Channel's.
+ * - `Direct`: a Direct Message partner's: the other participant, and Self only for a
+ *   Message Self sent to itself. With `existing` set, it touches only a Timeline that
+ *   already exists, and never starts one: a Quit or an away change is worth showing
+ *   where Self and the User talked, and is no reason to start a Timeline.
+ * - `DirectRenamed`: a Direct Message partner changed nick. It touches only a Timeline
+ *   that already exists, keyed `key`, which takes this item and is keyed and named by `to`
+ *   from then on. Only a live rename carries it, since a rename read from history may name
+ *   a nick someone else has now.
+ */
+export type Where =
+  | { readonly _tag: "Network" }
+  | ({ readonly _tag: "Channel" } & Named)
+  | ({ readonly _tag: "Direct"; readonly existing: boolean } & Named)
+  | ({ readonly _tag: "DirectRenamed"; readonly to: Named } & Named);
 
 /** One mode set or unset. A key's parameter is never shown. */
 export interface ModeChange {
@@ -105,6 +138,10 @@ export type IgnoredReason =
  * A Message or Activity can arrive twice: live, and again later from the Ircd's history.
  * `live` tells them apart, and a Timeline keeps one per id and orders by `at`, not by
  * when the News came.
+ *
+ * A Message or Activity carries `where`, the Timelines it belongs to, and nothing else
+ * does: a `Confirmed` or a `Refused` names the intent of a Message already placed, and
+ * the rest belongs to the Network.
  */
 export type News =
   | {
@@ -121,6 +158,8 @@ export type News =
       readonly tags: ReadonlyMap<string, string>;
       /** Set when we said it, as the Owner's intent. A Message from Self said elsewhere has none. */
       readonly ours: Ours | undefined;
+      /** The Timelines it belongs to. Never empty. */
+      readonly where: readonly Where[];
     }
   | {
       /**
@@ -139,9 +178,23 @@ export type News =
       readonly id: Fact<MessageId>;
       readonly live: boolean;
       readonly activity: Activity;
+      /** The Timelines it touches. Never empty. */
+      readonly where: readonly Where[];
     }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
   | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }
   | { readonly _tag: "Refused"; readonly intent: IntentId; readonly reason: RefusedReason }
+  /**
+   * An Ircd declared a casemapping other than the one the Network last declared, so keys
+   * in `where` are folded by `casemapping` from here on. A projection folds each Timeline's
+   * name again by it, and of Timelines whose keys now meet, keeps the first. A mapping the
+   * Client does not know folds as `ascii`, and is reported as `ascii`.
+   */
+  | { readonly _tag: "Refolded"; readonly casemapping: Casemapping }
   | { readonly _tag: "Ignored"; readonly reason: IgnoredReason };
+
+/** News as the core reads it from a Line, before the step works out where it belongs. */
+export type Unrouted<T extends News = News> = T extends { readonly where: readonly Where[] }
+  ? Omit<T, "where">
+  : T;

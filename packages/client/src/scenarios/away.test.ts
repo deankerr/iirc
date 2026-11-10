@@ -20,10 +20,10 @@ describe("away-notify", () => {
     joined(base, "#iirc", ["peer", "other"]),
     lines(
       "<< :peer!u@h AWAY :gone fishing",
-      "?? activity AwayChanged peer :gone fishing",
+      "?? activity AwayChanged peer in=existing-direct:peer :gone fishing",
       "<< :other!u@h AWAY :lunch",
       "<< :other!u@h AWAY",
-      "?? activity AwayChanged other back"
+      "?? activity AwayChanged other back in=existing-direct:other"
     ),
   ];
 

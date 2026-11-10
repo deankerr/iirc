@@ -273,14 +273,20 @@ describe("the other stages", () => {
       configuration: base,
       transcript: [
         registered(base, { isupport: ["UTF8ONLY"] }),
-        lines("<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9", "?? message Privmsg peer iirc :caf�"),
+        lines(
+          "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
+          "?? message Privmsg peer iirc in=direct:peer :caf�"
+        ),
       ],
     });
     play(client, {
       configuration: base,
       transcript: [
         registered(base),
-        lines("<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9", "?? message Privmsg peer iirc :café"),
+        lines(
+          "<<\\ :peer!u@h PRIVMSG iirc :caf\\xe9",
+          "?? message Privmsg peer iirc in=direct:peer :café"
+        ),
       ],
     });
 

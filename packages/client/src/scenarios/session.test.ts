@@ -147,11 +147,11 @@ describe("casemapping", () => {
           "!! configure +#Dev[Ops]",
           ">> JOIN #Dev[Ops]",
           "<< :iirc!~iirc@h JOIN #dev{ops}",
-          "?? activity Joined #dev{ops} iirc",
+          "?? activity Joined #dev{ops} iirc in=channel:#dev{ops}",
           "<< :irc.test 353 iirc = #DEV{OPS} :iirc @Peer[1]",
           "<< :irc.test 366 iirc #dev[ops] :End",
           "<< :peer{1}!u@h PRIVMSG #dev{ops} :hi",
-          "?? message Privmsg peer{1} #dev{ops} :hi"
+          "?? message Privmsg peer{1} #dev{ops} in=channel:#dev{ops} :hi"
         ),
       ],
     });

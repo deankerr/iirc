@@ -84,11 +84,12 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 
 | News | Meaning |
 | --- | --- |
-| `Message` | Something said, with its time, id, client-only tags, and whether it is `live`. One we said carries `ours`: its intent id, and whether the Ircd will echo it. |
+| `Message` | Something said, with its time, id, client-only tags, whether it is `live`, and `where` it belongs. One we said carries `ours`: its intent id, and whether the Ircd will echo it. |
 | `Confirmed` | The Ircd echoed back the Message for an intent, with its own time, id, and final text. |
-| `Activity` | Something that changed, with its time, id, and whether it is `live`. |
+| `Activity` | Something that changed, with its time, id, whether it is `live`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
 | `ConnectionFailed` | A Connection that ended before registration, and why. |
+| `Refolded` | An Ircd declared a casemapping other than the one the Network last declared, so keys in `where` fold by it from here on. |
 | `Refused` | An Owner intent that was not carried out, with its intent id: `Offline`, `Unsendable`, `Rejected` by the Ircd's reply, or `Unsent`: at least part of the Message never left, because its Connection ended first. |
 | `Ignored` | An input that changed nothing, and why. |
 
@@ -98,9 +99,40 @@ Three rules for Timelines:
 - **Order by time.** History arrives late, with `live` false. A Timeline orders by `at`, not by when the News came.
 - **One per id.** A Message can arrive live and again from history. A Timeline keeps one per id. One with an unknown id is kept as it came.
 
+### Where News belongs
+
+Each Message and Activity carries `where`: the Timelines it touches, never none, in a fixed order ([ADR 0011](../../docs/adr/0011-timelines-are-a-projection-the-client-routes.md)). The Client works it out from what it knows as the step begins, before the step changes anything, so a projection can fold News into Timelines without knowing the casemapping, Self's nick, or who shares which Channel. Keys are names folded with the casemapping the Network last declared, and each comes with the name as it was said, to show.
+
+| `where` | The Timeline |
+| --- | --- |
+| `Network` | The Network's own. |
+| `Channel { key, name }` | A Channel's. |
+| `Direct { key, name, existing }` | A Direct Message partner's, the other participant, never Self unless Self is both. With `existing`, it touches only a Timeline that already exists and never starts one. |
+| `DirectRenamed { key, name, to }` | A Direct Message partner changed nick. It touches only a Timeline that already exists, keyed `key`, which takes the item and is keyed and named by `to` from then on. |
+
+The rules, each decided from commands, parameters, `CHANTYPES`, `PREFIX`, and `STATUSMSG`, never from text. Names are read by one parser, in `src/names.ts`, whichever way a Line goes, so both directions of a Direct Message always agree:
+
+- A **Channel's name** starts with a character of `CHANTYPES`, and holds no space, BELL, or `,`.
+- A **nick** holds no space, `,`, `*`, `?`, `!`, or `@`, and does not start with `$`, `:`, a character of `CHANTYPES`, or a membership prefix of `PREFIX` or `STATUSMSG`. Anything else may appear inside one, so `a$b`, `a#b`, and `first.last` are nicks, and with `PREFIX=(ov)@+`, `+peer` is not. Modern IRC says a nick should not hold a `.`, and does not forbid it, so a name alone is a nick with one. Telling a User from a server is done with the source, below.
+- **A Target may be a list**, such as `#a,#b`. Each item is placed by itself, empty items name nothing, and each Timeline is listed once, the first kept. A list is never one Timeline. An Owner's `Say` names one Target, since `@iirc/protocol` builds no `PRIVMSG` or `NOTICE` to a list, so a `Say` to one is `Refused` as `Unsendable`.
+- **A Message to a Channel** belongs to the Channel, whoever said it, the Ircd included. A Target is a Channel by its name, or after any `STATUSMSG` prefixes it starts with, so `@#iirc` belongs to `#iirc`. A name that is already a Channel's is one, and prefixes are stripped only while what is left is not, so with `CHANTYPES=#&` and `STATUSMSG=~&@%+`, `&local` and `&#other` are those Channels, and `@&local` is `&local`. With no `STATUSMSG`, `@#iirc` names no Channel.
+- **A Direct Message** belongs to the other participant: to Self from a User, the sender's; from Self to a User, the Target's, whether we said it, its echo, or Self said it from elsewhere. A Message from Self to Self is Self's. The Target must be a nick, and so must the sender's name. A source is a User when it has a user or a host, whatever its name holds, or a bare name that is not the Ircd's and has no `.`. A bare name with a `.`, or the Ircd's own name from `001` in any ASCII case, since it is a host name, is a server.
+- **Any other Message** belongs to the Network: one from the Ircd or another server that is not to a Channel, one to a mask such as `$*`, one to `*` before registration, one to a User other than Self from someone other than Self, or one whose sender or Target is not a nick.
+- **`Joined`, `Parted`, `Kicked`, and `TopicChanged`** belong to their Channel. A `JOIN`, `PART`, `KICK`, or `TOPIC` whose Channel parameter is not a Channel's name, or a `JOIN` or `PART` with any item of its list not one, is `Ignored` as `Malformed`, and nothing is placed or folded in. **`ModeChanged`** belongs to its Channel when the target is a Channel's name, and to the Network for a user mode.
+- **Another User's `Quit`** belongs to every Channel they shared with Self as the step began, counting a `NAMES` listing still being read, and to their Direct Messages, `existing`. **Another User's `NickChanged`** belongs to the same Channels, and, when it is live, moves their Direct Messages with `DirectRenamed`, as a Timeline follows its partner's nick ([ADR 0011](../../docs/adr/0011-timelines-are-a-projection-the-client-routes.md)). The Client does not know whether a Direct Message Timeline exists, so it names one, and the projection applies it only to one that does. One from history never renames anything, since the old nick may be someone else's by now: it belongs to the old nick's Direct Messages, `existing`, and the same Channels. A User whose nick, old or new, is not a nick by the rule above has no Direct Messages to touch, and what touches nothing else belongs to the Network.
+- **Self's `NickChanged` or `Quit`** belongs to the Network and every Channel Self is in.
+- **Another User's `AwayChanged`** belongs to their Direct Messages, `existing`. Self's belongs to the Network.
+- **History** is placed by what is known as it arrives, as the present is, since a Line from history never changes what is known. It moves no Timeline either, so only a live `NickChanged` carries `DirectRenamed`.
+
+The casemapping the keys fold with is the Network's, not the Connection's. It is the one an Ircd last declared, by a `005` that names `CASEMAPPING` or `UTF8MAPPING`, set or taken back, on any Connection, and `rfc1459` until one has. A `005` that names neither leaves it as it is, and so does a new Connection, so a Timeline keeps its key across Connections while the Network keeps its mapping. Knowledge folds by the Connection's mapping, which starts from `rfc1459` on each Connection, so on a Network that declared another, its keys and those in `where` differ from a Connection's start until its Ircd declares the mapping again. A mapping the Client does not know folds as `ascii`, as in Knowledge.
+
+When an Ircd declares a mapping other than the Network's, it becomes the Network's, and a `Refolded` reports it at that step, before any News keyed by it. `Refolded` carries the mapping keys now fold with, so a mapping the Client does not know is reported as `ascii`, and a change from one unknown mapping to another, which changes no key, reports nothing. A projection then folds the name of each Timeline it holds again, with `casefold` from `@iirc/protocol/casemapping` under the new mapping, and of Timelines whose keys now meet, keeps the one it saw first, as Knowledge keeps the first of Channels a new mapping merges. Its later News is keyed the same way, so a Message or a `DirectRenamed` finds the Timeline again.
+
+`Confirmed` and `Refused` carry no `where`: each names the intent of a Message already placed. `Refolded` carries none either, since it re-keys every Timeline. Session and Connection News belong to the Network.
+
 ## Knowledge
 
-`known(state)` gives Channels, members, Users, Self, and where the Session is. Channels and Users are keyed by name folded with the casemapping in force, named as `@iirc/protocol/casemapping` names it: `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`. Until the Ircd says, it is `rfc1459`, and a mapping the Client does not know folds as `ascii`. Each Connection starts from `rfc1459`, whatever the last Ircd said. When the casemapping changes, every key is folded again, and the Channels are reconciled with the Configuration: a wanted Channel the new mapping tells apart from another gets its own machine, and of Channels it merges, the first is kept. Users are those who share a Channel with Self, and Self: what was seen of a User is forgotten once they share none. A Channel's `wanted` says whether the Owner wants Self in it, which is false for one Self was put in without asking. Every fact is a `Fact<T>`:
+`known(state)` gives Channels, members, Users, Self, and where the Session is. Channels and Users are keyed by name folded with the casemapping in force, named as `@iirc/protocol/casemapping` names it: `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`. Until the Ircd says, it is `rfc1459`, and a mapping the Client does not know folds as `ascii`. Each Connection starts from `rfc1459`, whatever the last Ircd said. When the casemapping changes, every key is folded again, and the Channels are reconciled with the Configuration: a wanted Channel the new mapping tells apart from another gets its own machine, and of Channels it merges, the first is kept. The keys in News's `where` fold by the mapping the Network last declared, which can differ from a Connection's until its Ircd declares one ([Where News belongs](#where-news-belongs)). Users are those who share a Channel with Self, and Self: what was seen of a User is forgotten once they share none. A Channel's `wanted` says whether the Owner wants Self in it, which is false for one Self was put in without asking. Every fact is a `Fact<T>`:
 
 | Case      | Means                                                        |
 | --------- | ------------------------------------------------------------ |
@@ -157,7 +189,7 @@ A machine that is not running, such as `caps` with no Connection open, is left o
 | Input | What happens |
 | --- | --- |
 | Bytes that do not parse | `Ignored` with `Unparseable`. The bytes stay in the Journal, and the Connection stays up. |
-| A Line whose parameters do not fit its command | `Ignored` with `Malformed`. |
+| A Line whose parameters do not fit its command, such as a `TOPIC` whose Channel is not a Channel's name | `Ignored` with `Malformed`. |
 | A tag value that does not parse, such as `time=yesterday` | The fact keeps its default, such as the time of receipt. |
 | An `sts` value whose `duration` or `port` is malformed, such as `duration=abc` | That part is taken as not given. A value missing its required part changes nothing, and a policy already held stays. |
 | Input from an old Connection | `Ignored` with `StaleConnection`. |
@@ -179,6 +211,7 @@ A Feature brings one IRCv3 cap or ISUPPORT token, or a tight group of them, to t
 - **Order.** Ingress runs `tags`, then `batch`, then `label`, then `react`, then `meaning`. Egress runs `egress`. Within a stage, Features run in the order of one registry array in one file.
 - **Refining, then acting.** `tags`, `batch`, `label`, and `meaning` only refine: the core keeps what they return and their own state, and discards any Lines they ask to send, say over registration, or caps to drop. Only `react` acts on what arrived, and the core calls it only for a live Arrival, after `label` has told history apart. So nothing from history sends a Line or decides registration, whatever a Feature does. A Feature must still not let history change own state that later decides what it sends: SASL keeps all of its exchange in `react`.
 - **Refining, not branching.** A hook takes what the core derived and returns it refined, in the core's own vocabulary. The model reads the result and never asks which Feature produced it.
+- **Placing.** `meaning` sees Messages and Activity without `where`. The core works out [where each belongs](#where-news-belongs) as it folds it in, so no Feature places News.
 - **Effects.** A hook returns `{ value }`, with optional effects: its new `own` state, Lines to `send`, caps to `drop`, and a say over `registration`: `Hold` it open before `CAP END`, as SASL does, then `Continue`, or `Abandon` it with a reason, which ends the Connection. A cap to `drop` that is still enabled is given up with `CAP REQ :-cap`, and its answer is awaited as for any request, so negotiation is not over, and `CAP END` waits, until it comes.
 - **Configuration.** `configured` runs for each Feature that is on when a `Configured` arrives while negotiation is still open before `CAP END`, so SASL can begin a login the Configuration now names.
 - **Starting and absence.** `start` runs as a Feature turns on, and again while it is on when a cap it `uses` is enabled or disabled. `absent` runs for each Feature that is off when it could matter: as negotiation settles, before `CAP END` and after a later answer, when an Ircd answers `CAP` with `421`, at `001`, and as the Feature turns off. SASL gives up the Connection there when a login is required and none was made.
@@ -264,7 +297,7 @@ Each feature is built from the floor up: what it needs, what it changes, and whe
 ### The Session and ISUPPORT
 
 - Needs: nothing.
-- Changes: `001` begins a Session, and Self's nick is its first parameter, or with none, the nick `NICK` offered. Self's realname is the one `USER` sent. Both are what registration sent, whatever a `Configured` since says. Self's mask is never read from `001`, whose text is for people. It stays unknown until a structured source gives it, which on the floor is the echo of Self's own `JOIN`, and until then a `Say` keeps the conservative allowance for the source an Ircd adds when it relays. `900` and `901` give Self's account. ISUPPORT accumulates over every `005`, a negated token is taken back, and at most 256 tokens are kept. `CASEMAPPING`, `UTF8MAPPING`, `PREFIX`, `CHANTYPES`, `CHANMODES`, and `TARGMAX` are read with `@iirc/protocol/isupport` and `@iirc/protocol/casemapping`, with the protocol's defaults until they are sent. `SessionBegan` and `SessionEnded` report it.
+- Changes: `001` begins a Session, and Self's nick is its first parameter, or with none, the nick `NICK` offered. Self's realname is the one `USER` sent. Both are what registration sent, whatever a `Configured` since says. Self's mask is never read from `001`, whose text is for people. It stays unknown until a structured source gives it, which on the floor is the echo of Self's own `JOIN`, and until then a `Say` keeps the conservative allowance for the source an Ircd adds when it relays. `900` and `901` give Self's account. ISUPPORT accumulates over every `005`, a negated token is taken back, and at most 256 tokens are kept. `CASEMAPPING`, `UTF8MAPPING`, `PREFIX`, `CHANTYPES`, `STATUSMSG`, `CHANMODES`, and `TARGMAX` are read with `@iirc/protocol/isupport` and `@iirc/protocol/casemapping`, with the protocol's defaults until they are sent. `SessionBegan` and `SessionEnded` report it.
 - Scenarios: `session.test.ts`
 
 ### Keepalive
@@ -285,8 +318,8 @@ Each feature is built from the floor up: what it needs, what it changes, and whe
 ### Messages and Activity
 
 - Needs: nothing. Without `server-time`, a time is when the Line arrived, and says so. Without `labeled-response` and `echo-message`, our own Messages are reported when we send them, and stay unconfirmed.
-- Changes: `PRIVMSG` and `NOTICE` are a `Message` with sender, Target, and kind, and a CTCP `ACTION` is an `Action`. Other CTCP is a request between IRC clients, not something said, and is neither reported nor answered. A Line with no source names the Ircd as its sender. Client-only tags are kept as data. `JOIN`, `PART`, `QUIT`, `NICK` (Self's included), `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and fold into what is known of Channels, members, and Users. A `Say` is sent, and reported as a `Message` that is `ours`, at the time we said it. It is `Refused` with `Offline` outside a Session or while hanging up, and `Unsendable` when no Line can carry it, or when the Ircd would cut it short relaying it with our source.
-- Scenarios: `messages.test.ts`
+- Changes: `PRIVMSG` and `NOTICE` are a `Message` with sender, Target, and kind, and a CTCP `ACTION` is an `Action`. Other CTCP is a request between IRC clients, not something said, and is neither reported nor answered. A Line with no source names the Ircd as its sender. Client-only tags are kept as data. `JOIN`, `PART`, `QUIT`, `NICK` (Self's included), `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and fold into what is known of Channels, members, and Users. Each Message and Activity names the Timelines it belongs to, by [the rules above](#where-news-belongs), and an Ircd that declares another casemapping is reported with `Refolded`. A `Say` is sent, and reported as a `Message` that is `ours`, at the time we said it. It is `Refused` with `Offline` outside a Session or while hanging up, and `Unsendable` when no Line can carry it, or when the Ircd would cut it short relaying it with our source.
+- Scenarios: `messages.test.ts`, and `where.test.ts` for where each belongs, with a property test in `properties.test.ts` that every Message and Activity belongs somewhere, keyed by the mapping the Network last declared, which is the one Knowledge keys by whenever the Connection's mapping is the same.
 
 ### What is ignored
 

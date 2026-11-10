@@ -197,8 +197,17 @@ export interface State {
   readonly rotation: number;
   /** How many Connections in a row have failed, for the backoff. */
   readonly attempt: number;
-  /** How the Network folds names, as last announced. Channel and member keys are folded by it. */
+  /**
+   * How this Connection folds names: `rfc1459` until its Ircd says otherwise. Channel,
+   * member, and User keys are folded by it.
+   */
   readonly casemapping: Casemapping;
+  /**
+   * How the Network folds names, as an Ircd last declared it, on any Connection, and
+   * `rfc1459` until one has. It outlives Connections, and the keys of `where` are folded
+   * by it, so a Timeline keeps one key while the Network keeps one mapping.
+   */
+  readonly declared: Casemapping;
   /** Keyed by folded name. */
   readonly channels: ReadonlyMap<string, Channel>;
   /** STS policies, keyed by host as `hostKey` folds it. They outlive Connections. */
@@ -213,6 +222,7 @@ export const initialState: State = {
   casemapping: "rfc1459",
   channels: new Map(),
   configuration: undefined,
+  declared: "rfc1459",
   dialled: 0,
   network: { _tag: "Unconfigured" },
   policies: new Map(),

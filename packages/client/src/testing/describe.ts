@@ -10,19 +10,28 @@ import { encode, isRejected } from "@iirc/protocol/line";
 
 import type { Instant } from "../ids.ts";
 import type { Fact } from "../known.ts";
-import type { Activity, EndReason, IgnoredReason, News, Ours, RefusedReason } from "../news.ts";
+import type {
+  Activity,
+  EndReason,
+  IgnoredReason,
+  Named,
+  News,
+  Ours,
+  RefusedReason,
+  Where,
+} from "../news.ts";
 import type { Output } from "../output.ts";
 import { printItem, writeInstant } from "./transcript.ts";
 
 /**
  * Writes a string from News as one token, bare when it holds nothing a description uses
- * as syntax (a space, `"`, `=`, `@`, `:`, or `;`), and otherwise quoted as JSON, so no value can imitate an instant, an
+ * as syntax (a space, `"`, `=`, `@`, `:`, `;`, or `>`), and otherwise quoted as JSON, so no value can imitate an instant, an
  * attribute, or the trailing text: an id `m1@t+0s` is written `"m1@t+0s"`.
  * @param text - The string, such as a nick, a Channel, an id, or a command.
  * @returns The token.
  */
 export const atom = (text: string): string =>
-  /^[^\s"=@:;]+$/u.test(text) ? text : JSON.stringify(text);
+  /^[^\s"=@:;>]+$/u.test(text) ? text : JSON.stringify(text);
 
 const isAt = (fact: Fact<Instant>, now: Instant): boolean =>
   fact._tag === "Known" && fact.from === "receipt" && fact.value === now && fact.at === now;
@@ -80,6 +89,36 @@ const writeTags = (tags: ReadonlyMap<string, string>): readonly string[] =>
 
 const writeOurs = (ours: Ours | undefined): readonly string[] =>
   ours === undefined ? [] : [`ours=${atom(ours.intent)}`, ...(ours.echo ? ["echo"] : [])];
+
+// A key, with the name as said after it when the two differ: `#iirc`, or `#foo{:#Foo[`.
+const writeNamed = ({ key, name }: Named): string =>
+  key === name ? atom(key) : `${atom(key)}:${atom(name)}`;
+
+// Each Timeline a Message or Activity touches, in order, as `in=` attributes.
+const writeWhere = (where: readonly Where[]): readonly string[] =>
+  where.map((each) => {
+    switch (each._tag) {
+      case "Network": {
+        return "in=network";
+      }
+
+      case "Channel": {
+        return `in=channel:${writeNamed(each)}`;
+      }
+
+      case "Direct": {
+        return `in=${each.existing ? "existing-direct" : "direct"}:${writeNamed(each)}`;
+      }
+
+      case "DirectRenamed": {
+        return `in=renamed:${writeNamed(each)}>${writeNamed(each.to)}`;
+      }
+
+      default: {
+        return each satisfies never;
+      }
+    }
+  });
 
 const writeEnd = (reason: EndReason): string => {
   switch (reason._tag) {
@@ -275,6 +314,10 @@ export const describeNews = (news: News, now: Instant): string => {
       return words(["connection-failed", writeEnd(news.reason), ...sessionAt(news.at, now)]);
     }
 
+    case "Refolded": {
+      return `refolded ${news.casemapping}`;
+    }
+
     case "Message": {
       return words([
         "message",
@@ -282,6 +325,7 @@ export const describeNews = (news: News, now: Instant): string => {
         atom(news.sender),
         atom(news.target),
         ...attributes(news, now),
+        ...writeWhere(news.where),
         ...writeTags(news.tags),
         ...writeOurs(news.ours),
         `:${news.text}`,
@@ -295,7 +339,14 @@ export const describeNews = (news: News, now: Instant): string => {
     case "Activity": {
       const { head, tail } = writeActivity(news.activity);
 
-      return words(["activity", news.activity._tag, ...head, ...attributes(news, now), ...tail]);
+      return words([
+        "activity",
+        news.activity._tag,
+        ...head,
+        ...attributes(news, now),
+        ...writeWhere(news.where),
+        ...tail,
+      ]);
     }
 
     default: {

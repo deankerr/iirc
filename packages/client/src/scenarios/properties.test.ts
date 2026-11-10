@@ -4,6 +4,7 @@
  * reaches every machine, mangling them, and firing the timers the Client set, and checks
  * the invariants after every step.
  */
+import { casefold } from "@iirc/protocol/casemapping";
 import { encode, isRejected, CredentialName } from "@iirc/protocol/line";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -366,6 +367,54 @@ const inputOf = (fold: Fold, next: Move): Input => {
   }
 };
 
+// Every Message and Activity belongs somewhere, keyed by the mapping the Network last
+// declared when the step began, which is Knowledge's whenever the Connection's mapping is
+// the same, and a Quit or a nick change lists only Channels Self knew.
+const checkWhere = (step: Step<State>, before: State): void => {
+  const known = client.known(before);
+  const fold = (name: string) => casefold(before.declared, name);
+  const knownFold = (name: string) => casefold(known.casemapping, name);
+
+  // The Network's mapping changes only with a `Refolded` that reports it, once.
+  const refolded = step.news.flatMap((news) =>
+    news._tag === "Refolded" ? [news.casemapping] : []
+  );
+
+  expect(refolded).toStrictEqual(
+    step.state.declared === before.declared ? [] : [step.state.declared]
+  );
+
+  for (const news of step.news) {
+    if (news._tag !== "Message" && news._tag !== "Activity") {
+      continue;
+    }
+
+    expect(news.where.length).toBeGreaterThan(0);
+
+    for (const each of news.where) {
+      if (each._tag !== "Network") {
+        expect(each.key).toBe(fold(each.name));
+
+        if (known.casemapping === before.declared) {
+          expect(each.key).toBe(knownFold(each.name));
+        }
+      }
+
+      if (each._tag === "DirectRenamed") {
+        expect(each.to.key).toBe(fold(each.to.name));
+      }
+
+      if (
+        each._tag === "Channel" &&
+        news._tag === "Activity" &&
+        (news.activity._tag === "Quit" || news.activity._tag === "NickChanged")
+      ) {
+        expect(known.channels.get(knownFold(each.name))?.standing).toBe("Joined");
+      }
+    }
+  }
+};
+
 // Every invariant one step must keep.
 const check = (fold: Fold, input: Input, step: Step<State>, before: State): void => {
   const inspection = client.inspect(step.state);
@@ -406,6 +455,8 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
   const users = [...(openOf(step.state)?.users.keys() ?? [])];
 
   expect(users.filter((nick) => !members.has(nick))).toStrictEqual([]);
+
+  checkWhere(step, before);
 };
 
 const runMoves = (moves: readonly Move[]): Fold => {

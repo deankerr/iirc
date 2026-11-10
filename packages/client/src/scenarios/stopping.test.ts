@@ -22,7 +22,7 @@ const said = (intent: number, text = "hello") =>
   lines(
     `!! say #iirc :${text}`,
     `>> PRIVMSG #iirc ${text}`,
-    `?? message Privmsg iirc #iirc at=ours:t+0s ours=i${intent} :${text}`
+    `?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i${intent} :${text}`
   );
 
 // Every `Refused` the last step reported.

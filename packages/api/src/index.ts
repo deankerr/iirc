@@ -61,4 +61,5 @@ export {
   Topic,
   Untrusted,
   UserKnowledge,
+  Where,
 } from "./schemas.ts";

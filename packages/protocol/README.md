@@ -23,7 +23,7 @@ The floor is RFC 1459 and 2812 as [Modern IRC](../../docs/irc-docs-2026-10-26/mo
 5. **Credentials.** `fillSecret` fills `PASS` and a `JOIN` with a key on the floor, and the SASL `PLAIN` response above it.
 6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, and `ctcpReply` build CTCP that is safe to send, and a reply only ever to a User.
 7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, and `stripFormatting` removes exactly the codes it reads. Spans are data for a Frontend to draw, never markup.
-8. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `chantypesOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
+8. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
 9. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
 10. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
 
@@ -80,6 +80,7 @@ unescapeValue(value: string): string
 prefixOf(value?): readonly Membership[] | undefined    // (ov)@+ when not sent, [] when empty
 channelModesOf(value?): ChannelModes                   // { list, always, whenSet, flags }
 chantypesOf(value?): string                            // #& when not sent
+statusmsgOf(value?): string                            // "" (none) when not sent
 modesOf(value?): number | undefined                    // 3 when not sent, undefined for no limit
 limitOf(value?): number | undefined                    // NICKLEN, TOPICLEN, and the other lengths
 limitsOf(value?): readonly Limit[]                     // CHANLIMIT and MAXLIST pairs

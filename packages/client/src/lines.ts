@@ -40,6 +40,7 @@ import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf } from "./views.ts";
+import { routeActivity, routeMessage } from "./where.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
 const refusals: ReadonlySet<string> = new Set([
@@ -118,7 +119,17 @@ const fold = (
     return;
   }
 
-  run.news.push(meant);
+  const source = line.source === undefined ? undefined : parseSource(line.source);
+
+  // Where it belongs is worked out before it changes what is known, so a Quit lists the
+  // Channels the User was in.
+  if (meant._tag === "Message") {
+    run.news.push(routeMessage(run, meant, source));
+  } else if (meant._tag === "Activity") {
+    run.news.push(routeActivity(run, meant));
+  } else {
+    run.news.push(meant);
+  }
 
   if (meant._tag === "Confirmed") {
     const { intent } = meant;
@@ -146,7 +157,6 @@ const fold = (
     );
   }
 
-  const source = line.source === undefined ? undefined : parseSource(line.source);
   const { user, host } = source ?? {};
 
   if (source === undefined || user === undefined || host === undefined) {
@@ -267,6 +277,15 @@ const isupport = (run: Run, line: Line): void => {
 
   const mapping =
     casemappingOf(tokensNow.get("CASEMAPPING"), tokensNow.get("UTF8MAPPING")) ?? "ascii";
+
+  // The Network declares its mapping only by a Line that names it, set or taken back, so
+  // a `005` without it leaves the one the Network last declared, on any Connection.
+  const declares = tokens.some(({ name }) => name === "CASEMAPPING" || name === "UTF8MAPPING");
+
+  if (declares && mapping !== run.state.declared) {
+    run.state = { ...run.state, declared: mapping };
+    run.news.push({ _tag: "Refolded", casemapping: mapping });
+  }
 
   if (mapping !== run.state.casemapping) {
     remap(run, mapping);
