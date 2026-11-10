@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { defaultPacing, depth, makeOutbox, nextAt, offer, take, takeAll } from "./outbox.ts";
+import { defaultPacing, depth, makeOutbox, nextAt, offer, spend, take, takeAll } from "./outbox.ts";
 import type { Outbox, Pacing } from "./outbox.ts";
 
 /** A Line as the tests queue it: its command, and its place in the order offered. */
@@ -218,6 +218,30 @@ describe("pacing", () => {
   });
 });
 
+describe("spending a token for a Line not queued", () => {
+  it("paces the extra Lines of one item as any others, and the queue behind them", () => {
+    const outbox = queued(makeOutbox({ pacing: { burst: 1, interval: 1000 } }), [
+      "AUTHENTICATE",
+      "JOIN",
+    ]);
+
+    const taken = take(outbox, 0);
+    const early = spend(taken.outbox, 500);
+    const spent = spend(early.outbox, 1000);
+    const next = take(spent.outbox, 1000);
+
+    expect([taken._tag, early._tag, spent._tag, next._tag]).toStrictEqual([
+      "Taken",
+      "Wait",
+      "Spent",
+      "Wait",
+    ]);
+    expect(early._tag === "Wait" ? early.until : undefined).toBe(1000);
+    expect(next._tag === "Wait" ? next.until : undefined).toBe(2000);
+    expect(depth(spent.outbox)).toBe(1);
+  });
+});
+
 describe("a clock set back", () => {
   it("stalls the next Line for at most one interval, however far it moved", () => {
     fc.assert(
@@ -254,20 +278,74 @@ describe("a clock set back", () => {
 });
 
 describe("the bound", () => {
-  it("refuses an offer to a full Outbox, PING included, and keeps what it holds", () => {
+  it("refuses an ordinary Line to a full Outbox, and keeps what it holds", () => {
     fc.assert(
-      fc.property(fc.integer({ max: 50, min: 0 }), command, (capacity, name) => {
-        const full = queued(
-          makeOutbox({ capacity }),
-          Array.from({ length: capacity }, () => "PRIVMSG")
-        );
+      fc.property(
+        fc.integer({ max: 50, min: 0 }),
+        fc.constantFrom("PRIVMSG", "JOIN", "PART", "NICK"),
+        (capacity, name) => {
+          const full = queued(
+            makeOutbox({ capacity }),
+            Array.from({ length: capacity }, () => "PRIVMSG")
+          );
 
-        expect(depth(full)).toBe(capacity);
-        expect(offer(full, { command: name, index: capacity }, name)).toStrictEqual({
-          _tag: "Full",
-        });
-      })
+          expect(depth(full)).toBe(capacity);
+          expect(offer(full, { command: name, index: capacity }, name)).toStrictEqual({
+            _tag: "Full",
+          });
+        }
+      )
     );
+  });
+
+  it("admits a QUIT, a PING, and a PONG past a full queue of ordinary Lines, and they leave", () => {
+    const full = queued(makeOutbox({ capacity: 3 }), [
+      "PRIVMSG",
+      "PRIVMSG",
+      "PRIVMSG",
+      "PRIVMSG",
+      "PONG",
+      "PING",
+      "QUIT",
+    ]);
+
+    expect(drain(full, 0).map(({ item }) => item.command)).toStrictEqual([
+      "PONG",
+      "PING",
+      "PRIVMSG",
+      "PRIVMSG",
+      "PRIVMSG",
+      "QUIT",
+    ]);
+  });
+
+  it("bounds PING and PONG on their own, so a flood of them cannot grow the queue", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ max: 100, min: 0 }),
+        fc.integer({ max: 300, min: 0 }),
+        (bound, flood) => {
+          const outbox = queued(makeOutbox({ capacity: 5, firstCapacity: bound }), [
+            ...Array.from({ length: flood }, () => "PING"),
+            "PRIVMSG",
+          ]);
+
+          expect(outbox.ahead).toHaveLength(Math.min(bound, flood));
+          expect(outbox.behind).toHaveLength(1);
+        }
+      )
+    );
+  });
+
+  it("holds 64 PING and PONG by default", () => {
+    expect(
+      depth(
+        queued(
+          makeOutbox(),
+          Array.from({ length: 100 }, () => "PONG")
+        )
+      )
+    ).toBe(64);
   });
 
   it("holds 1,000 Lines by default", () => {

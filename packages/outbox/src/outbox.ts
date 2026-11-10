@@ -26,8 +26,11 @@ export type Pacing = typeof Pacing.Type;
  */
 export const defaultPacing: Pacing = { burst: 5, interval: 2000 };
 
-/** How many Lines may wait in one Outbox. */
+/** How many ordinary Lines may wait in one Outbox. */
 export const defaultCapacity = 1000;
+
+/** How many `PING` and `PONG` Lines may wait in one Outbox, apart from the ordinary ones. */
+export const defaultFirstCapacity = 64;
 
 /** One Line waiting, wrapped so that what is queued may be anything, `undefined` included. */
 export interface Waiting<A> {
@@ -35,14 +38,15 @@ export interface Waiting<A> {
 }
 
 /**
- * One Connection's queue. Lines that go first, `PING` and `PONG`, wait in `ahead`, and
- * every other Line in `behind`, each in the order it was offered. The token bucket is
- * held as `fullAt`, the time it is next full, so there is no fraction of a token to
- * round.
+ * One Connection's queue. Lines that go first, `PING` and `PONG`, wait in `ahead`, at
+ * most `firstCapacity` of them, and every other Line in `behind`, at most `capacity` of
+ * them but for a `QUIT`, each in the order it was offered. The token bucket is held as
+ * `fullAt`, the time it is next full, so there is no fraction of a token to round.
  */
 export interface Outbox<A> {
   readonly pacing: Pacing;
   readonly capacity: number;
+  readonly firstCapacity: number;
   readonly ahead: readonly Waiting<A>[];
   readonly behind: readonly Waiting<A>[];
   readonly fullAt: number;
@@ -65,16 +69,22 @@ export type Take<A> =
 
 /**
  * An empty Outbox, with a full bucket.
- * @param options - The pacing, by default {@link defaultPacing}, and how many Lines may
- * wait, by default {@link defaultCapacity}.
+ * @param options - The pacing, by default {@link defaultPacing}, how many ordinary Lines
+ * may wait, by default {@link defaultCapacity}, and how many `PING` and `PONG`, by default
+ * {@link defaultFirstCapacity}.
  * @returns The Outbox.
  */
 export const makeOutbox = <A>(
-  options: { readonly pacing?: Pacing | undefined; readonly capacity?: number | undefined } = {}
+  options: {
+    readonly pacing?: Pacing | undefined;
+    readonly capacity?: number | undefined;
+    readonly firstCapacity?: number | undefined;
+  } = {}
 ): Outbox<A> => ({
   ahead: [],
   behind: [],
   capacity: Math.max(0, Math.floor(options.capacity ?? defaultCapacity)),
+  firstCapacity: Math.max(0, Math.floor(options.firstCapacity ?? defaultFirstCapacity)),
   fullAt: Number.NEGATIVE_INFINITY,
   pacing: options.pacing ?? defaultPacing,
 });
@@ -92,6 +102,14 @@ export const goesFirst = (command: string): boolean => {
 };
 
 /**
+ * Whether a Line with this command is admitted past a full queue. Only `QUIT` is: it is
+ * the last Line, and leaving is what was asked.
+ * @param command - The Line's command.
+ * @returns Whether it is always admitted.
+ */
+export const alwaysAdmitted = (command: string): boolean => command.toUpperCase() === "QUIT";
+
+/**
  * How many Lines are waiting.
  * @param outbox - The Outbox.
  * @returns Their count.
@@ -100,23 +118,25 @@ export const depth = <A>(outbox: Outbox<A>): number => outbox.ahead.length + out
 
 /**
  * Queues a Line behind every other Line, or, for `PING` and `PONG`, behind only each
- * other. A full Outbox refuses it, and never waits for room.
+ * other. `PING` and `PONG` have their own bound, so a full queue of ordinary Lines never
+ * refuses a keepalive, and a flood of them never grows the queue past it. A `QUIT` is
+ * always admitted. Any other Line is refused once `capacity` ordinary Lines wait. A
+ * refused Line is not queued, and nothing waits for room.
  * @param outbox - The Outbox.
  * @param item - What to queue.
- * @param command - The Line's command, which decides whether it goes first.
+ * @param command - The Line's command, which decides where it waits.
  * @returns The Outbox with it queued, or `Full`.
  */
 export const offer = <A>(outbox: Outbox<A>, item: A, command: string): Offered<A> => {
-  if (depth(outbox) >= outbox.capacity) {
-    return { _tag: "Full" };
+  if (goesFirst(command)) {
+    return outbox.ahead.length >= outbox.firstCapacity
+      ? { _tag: "Full" }
+      : { _tag: "Queued", outbox: { ...outbox, ahead: [...outbox.ahead, { item }] } };
   }
 
-  return {
-    _tag: "Queued",
-    outbox: goesFirst(command)
-      ? { ...outbox, ahead: [...outbox.ahead, { item }] }
-      : { ...outbox, behind: [...outbox.behind, { item }] },
-  };
+  return outbox.behind.length >= outbox.capacity && !alwaysAdmitted(command)
+    ? { _tag: "Full" }
+    : { _tag: "Queued", outbox: { ...outbox, behind: [...outbox.behind, { item }] } };
 };
 
 // With a clock that only moves forward, `fullAt` is never more than a whole bucket ahead
@@ -181,6 +201,31 @@ export interface Emptied<A> {
   readonly items: readonly A[];
   readonly outbox: Outbox<A>;
 }
+
+/** What came of spending a token: it was `Spent`, or it must `Wait` until a later time. */
+export type Spend<A> =
+  | { readonly _tag: "Spent"; readonly outbox: Outbox<A> }
+  | { readonly _tag: "Wait"; readonly until: number; readonly outbox: Outbox<A> };
+
+/**
+ * Spends a token for a Line that is not in the queue, if one is free now: the second and
+ * later wire Lines of one item taken, such as a SASL response filled to several
+ * `AUTHENTICATE` Lines. Otherwise it says how long to wait, as {@link take} does.
+ * @param outbox - The Outbox.
+ * @param now - The time, in milliseconds.
+ * @returns The Outbox after the token, or the time to wait until.
+ */
+export const spend = <A>(outbox: Outbox<A>, now: number): Spend<A> => {
+  const current = seen(outbox, now);
+  const until = tokenAt(current, now);
+
+  return until > now
+    ? { _tag: "Wait", outbox: current, until }
+    : {
+        _tag: "Spent",
+        outbox: { ...current, fullAt: Math.max(current.fullAt, now) + current.pacing.interval },
+      };
+};
 
 /**
  * Takes every Line waiting, in the order they would have left, and spends no token.
