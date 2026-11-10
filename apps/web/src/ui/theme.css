@@ -30,6 +30,8 @@
   --color-danger: #b3261e;
   --color-ok: #2e7d32;
   --color-focus: #0b6e6e;
+  --color-scrim: rgb(36 41 46 / 35%);
+  --color-shadow: rgb(36 41 46 / 25%);
 
   /* The colour slots nicks are spread over, by a hash of the folded nick. */
   --nick-0: #b3261e;
@@ -80,6 +82,8 @@
     --color-danger: #f28b82;
     --color-ok: #8bc48a;
     --color-focus: #5fb3b3;
+    --color-scrim: rgb(0 0 0 / 55%);
+    --color-shadow: rgb(0 0 0 / 60%);
 
     --nick-0: #f28b82;
     --nick-1: #fbae6a;

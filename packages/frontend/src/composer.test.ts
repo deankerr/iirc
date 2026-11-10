@@ -33,7 +33,9 @@ const context: CommandContext = {
     network,
     timeline: channel,
   },
+  open: channel,
   session: true,
+  timelines: [channel],
 };
 
 const fold = (events: readonly ComposerEvent[], from: Composers = initialComposers) => {

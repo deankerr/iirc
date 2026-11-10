@@ -12,7 +12,7 @@ import type { CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api
 import { interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
 import { contained } from "./render.ts";
-import { opened } from "./timelines.ts";
+import { opened, resolve, sidebar } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
 
 /**
@@ -177,16 +177,21 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
   withDraft(state, timeline, (draft) => ({ ...draft, notice }));
 
 /**
- * The context commands are judged in: the open Timeline as its Network lists it, and
- * whether that Network has a Session.
+ * The context commands are judged in: the open Timeline as its Network lists it, whether
+ * that Network has a Session, and every Timeline in the sidebar's order.
  * @param timelines - The Timelines.
  * @returns The context.
  */
 export const contextOf = (timelines: Timelines): CommandContext => {
   const shown = opened(timelines);
 
+  const around = {
+    open: timelines.open === undefined ? undefined : resolve(timelines, timelines.open),
+    timelines: sidebar(timelines).flatMap((one) => one.timelines.map((timeline) => timeline.id)),
+  };
+
   if (shown._tag !== "Shown" || shown.description === undefined) {
-    return { focus: undefined, session: false };
+    return { ...around, focus: undefined, session: false };
   }
 
   const { description } = shown;
@@ -202,6 +207,7 @@ export const contextOf = (timelines: Timelines): CommandContext => {
   };
 
   return {
+    ...around,
     focus,
     session: network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
   };
@@ -512,4 +518,30 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
       return event satisfies never;
     }
   }
+};
+
+/**
+ * Starts a composer with text, as the palette does for a command that needs arguments. A
+ * draft with more than whitespace in it is never replaced: it is kept as it is, and the
+ * composer says what was not put in, so the Owner can clear it and choose again.
+ * @param state - The composers.
+ * @param timeline - The composer's place.
+ * @param text - What to start it with, or nothing, only to focus it.
+ * @returns The composers after.
+ */
+export const started = (state: Composers, timeline: Place, text: string | undefined): Composers => {
+  if (text === undefined) {
+    return state;
+  }
+
+  const draft = draftOf(state, timeline);
+
+  if (draft.text.trim() === "") {
+    return reduceComposers(state, { _tag: "Edited", text, timeline });
+  }
+
+  return noticed(state, timeline, {
+    message: `${contained(text.trim())} was not put in, since the composer has text. Clear it and choose again.`,
+    offer: undefined,
+  });
 };

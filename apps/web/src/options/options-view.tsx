@@ -8,13 +8,14 @@
  *
  * @packageDocumentation
  */
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Option, Value } from "@iirc/frontend/options";
 import type { KeyboardEvent } from "react";
-import { useId, useRef } from "react";
+import { useContext, useId, useRef } from "react";
 import { GridList, GridListItem, Input, SearchField } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
+import { pressed } from "../palette/press.ts";
 import { Button } from "../ui/button.tsx";
 import {
   change,
@@ -79,9 +80,17 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
   const changeNow = useAtomSet(change);
   const stopEditing = useAtomSet(editingAtom);
 
+  const registry = useContext(RegistryContext);
+
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    // The GridList around it would take arrows, typing, and Enter as its own.
+    // The GridList around it would take arrows, typing, and Enter as its own, so no key
+    // leaves the editor. A key the keymap binds, such as Mod+K, is carried out here, as the
+    // document's listener would, and changes nothing in the editor.
     event.stopPropagation();
+
+    if (pressed(registry, event.nativeEvent)) {
+      return;
+    }
 
     const input = event.currentTarget;
 

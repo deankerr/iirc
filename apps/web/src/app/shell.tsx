@@ -1,6 +1,6 @@
 /**
  * What a signed-in browser sees: the Networks and their Timelines, the open Timeline or
- * the options, the composer under them, and signing out.
+ * the options, the composer under them, the command palette and the keys, and signing out.
  *
  * @packageDocumentation
  */
@@ -12,6 +12,8 @@ import { MainComposer } from "../composer/composer.tsx";
 import { mainView } from "../options/atoms.ts";
 import { CredentialPrompt } from "../options/credential-prompt.tsx";
 import { OptionsView } from "../options/options-view.tsx";
+import { Keys } from "../palette/keys.tsx";
+import { Palette } from "../palette/palette.tsx";
 import { signOut } from "../sign-in/atoms.ts";
 import { Sidebar } from "../timelines/sidebar.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
@@ -56,6 +58,8 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
           <MainComposer />
         </main>
       </div>
+      <Palette />
+      <Keys />
     </div>
   );
 };

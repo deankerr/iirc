@@ -12,12 +12,13 @@ import { typesCredential } from "@iirc/frontend/commands";
 import { linesOf } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import { openTimeline } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import {
   commandContext,
+  composerFocus,
   confirmSend,
   dismiss,
   draft as draftAtom,
@@ -56,10 +57,27 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
   const sendNow = useAtomSet(send);
   const confirmNow = useAtomSet(confirmSend);
   const again = useAtomSet(takeUp);
+  const focusAsked = useAtomValue(composerFocus);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const focusSeen = useRef(focusAsked);
   const id = useId();
   const noticeId = `${id}-notice`;
   const hintId = `${id}-hint`;
   const { confirming, notice } = draft;
+
+  // Each time the composer is asked to take focus, after it mounted, the caret goes to the
+  // end of its draft, which may have just been replaced.
+  useEffect(() => {
+    if (focusAsked === focusSeen.current) {
+      return;
+    }
+
+    focusSeen.current = focusAsked;
+    const element = input.current;
+
+    element?.focus();
+    element?.setSelectionRange(element.value.length, element.value.length);
+  }, [focusAsked]);
 
   const offline =
     context.focus !== undefined && !context.session
@@ -70,6 +88,8 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
     const element = event.currentTarget;
     const { selectionEnd, selectionStart, value } = element;
     const caret = selectionStart === selectionEnd;
+    // An arrow with a modifier is the keymap's, such as Alt+ArrowUp to the previous Timeline.
+    const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 
     // Composing text in an input method keeps its own keys.
     if (event.nativeEvent.isComposing) {
@@ -93,10 +113,20 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
     } else if (event.key === "Escape") {
       event.preventDefault();
       dismissNow(timeline);
-    } else if (event.key === "ArrowUp" && caret && !value.slice(0, selectionStart).includes("\n")) {
+    } else if (
+      event.key === "ArrowUp" &&
+      plain &&
+      caret &&
+      !value.slice(0, selectionStart).includes("\n")
+    ) {
       event.preventDefault();
       recallOne({ direction: "Older", timeline });
-    } else if (event.key === "ArrowDown" && caret && !value.slice(selectionEnd).includes("\n")) {
+    } else if (
+      event.key === "ArrowDown" &&
+      plain &&
+      caret &&
+      !value.slice(selectionEnd).includes("\n")
+    ) {
       event.preventDefault();
       recallOne({ direction: "Newer", timeline });
     }
@@ -161,6 +191,7 @@ const Composer = ({ name, timeline }: { readonly timeline: Place; readonly name:
             setText({ text: event.currentTarget.value, timeline });
           }}
           onKeyDown={onKeyDown}
+          ref={input}
           rows={1}
           spellCheck
           value={draft.text}
@@ -181,8 +212,9 @@ export const MainComposer = () => {
   if (shown._tag === "Shown") {
     const name = shown.description?.name ?? "Timeline";
 
-    return <Composer key={shown.timeline} name={name} timeline={shown.timeline} />;
+    return <Composer name={name} timeline={shown.timeline} />;
   }
 
-  return <Composer key="Nowhere" name="iirc" timeline="Nowhere" />;
+  // One composer element under every Timeline, so focus stays in it as Timelines open.
+  return <Composer name="iirc" timeline="Nowhere" />;
 };

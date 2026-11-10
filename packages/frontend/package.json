@@ -6,7 +6,9 @@
   "exports": {
     "./commands": "./src/commands.ts",
     "./composer": "./src/composer.ts",
+    "./keymap": "./src/keymap.ts",
     "./options": "./src/options.ts",
+    "./palette": "./src/palette.ts",
     "./render": "./src/render.ts",
     "./sign-in": "./src/sign-in.ts",
     "./timelines": "./src/timelines.ts"

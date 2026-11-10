@@ -107,18 +107,21 @@ Read = Networks | List { network, after } | Status { network }
 
 ## Commands
 
-`@iirc/frontend/commands`: the one registry of commands ([ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md)), as data, behind the composer's `/commands` and, later, the palette, keybindings, and agents. A command never does anything: it gives intents, plain data the runtime carries out.
+`@iirc/frontend/commands`: the one registry of commands ([ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md)), as data, behind the composer's `/commands`, the palette, the keymap, and, later, agents. A command never does anything: it gives intents, plain data the runtime carries out.
 
 ```ts
 commands: readonly Command[]                      // in the order a list shows them
 commandNamed(name): Command | undefined           // by name or alias, in any ASCII case
+commandWithId(id): Command | undefined            // by id, as a keybinding names it
 unmet(when, context): string | undefined          // the first condition that does not hold, in words
+runIn(command, args, context): Parsed<readonly Intent[]>   // once its conditions hold
 interpret(line, context): Parsed<readonly Intent[]>
 
 typesCredential(line): boolean                    // a line that types a Credential's value after /set
 
-Command = { id, name, aliases, usage, description, when: readonly Condition[], run(args, context) }
-CommandContext = { focus: Focus | undefined, session: boolean }
+Command = { id, name, aliases, usage, arguments: "None" | "Optional" | "Required", description, when: readonly Condition[], run(args, context) }
+CommandContext = { focus: Focus | undefined, session: boolean, timelines: readonly TimelineId[], open: TimelineId | undefined }
+// timelines: every one in the sidebar's order; open: the one opened, even while it is read
 Focus = { network, timeline, kind: "Network" | "Channel" | "Direct", name, detached, key }   // key: as the Daemon folded it
 Condition = Focused | Target | Session
 Parsed<A> = Parsed { value: A } | Invalid { message }
@@ -127,6 +130,9 @@ Intent = Say { network, target, kind: "Privmsg" | "Notice" | "Action", text, ope
        | Configure { network, edit: Edit }        // read, apply the edit, send it whole
        | AddNetwork { network, configuration }    // configure a Network that must not exist yet
        | PromptCredential { network, path }      // ask for a Credential option's value in a password prompt
+       | Open { timeline }                        // open a Timeline in the main view
+       | OpenPalette                              // open the command palette
+       | FocusComposer { text }                   // focus the composer, starting an empty draft with text
 // `opens`: once said, open the Direct Message Timeline the Daemon placed it in
 ```
 
@@ -144,13 +150,77 @@ Intent = Say { network, target, kind: "Privmsg" | "Notice" | "Action", text, ope
 | `/set <option> <value>` |  |  | `Configure` with `Set`, the value being the rest of the line, exactly, checked in its syntax first. Empty text, or an empty list, is a value. A Credential option is refused here |
 | `/unset <option>` |  |  | `Configure` with `Unset` |
 | `/network add <id> <host>[/port] [-tls] <nick>` |  |  | `AddNetwork`, enabled, with that Ircd and nick and every other field as a new Network starts |
+| `/next` |  |  | `Open` of the Timeline after the open one in the sidebar's order, wrapping to the first, or the first when none is open. Nothing when it is the only one, and `Invalid` when there are none |
+| `/previous` | `/prev` |  | `Open` of the Timeline before, wrapping to the last, or the last when none is open |
+| `/palette` |  |  | `OpenPalette` |
+| `/focus` |  |  | `FocusComposer`, its draft kept |
 
 - **A line is read one way.** Plain text is `/say` to the open Timeline. `//text` says `/text`. `/name args` runs the command named, once its conditions hold. A bare `/`, or a name no command has, is `Invalid`, and nothing is sent.
 - **Arguments are parsed, not validated.** A command's parser gives typed arguments or says why it cannot, in words that name its usage: no text, no Target, or a list of Targets, since a list is never one Timeline and the Client sends no `PRIVMSG` to one. The text after a Target is kept exactly, spaces included.
 - **Each unmet condition says why.** Plain text in the Network's own Timeline has no Target to say it to, and the words say to open a Channel or a Direct Message, or use `/msg`. A detached Direct Message no longer follows its partner. A Network with no Session can be told nothing, though a command that needs none would still run.
-- **A new command is one entry.** `/set`, `/join`, and `/network add` are entries like the rest, and the palette will add none of its own.
+- **A new command is one entry.** `/set`, `/join`, `/network add`, and `/next` are entries like the rest, and the palette and the keymap add none of their own: moving between Timelines and opening the palette are commands that `/` reaches too.
+- **Each command says whether it takes arguments.** `None`, `Optional`, or `Required`, so the palette runs one that needs none, and starts one that does in the composer.
 - **Configuration is changed by intents, never in place.** `/join`, `/part`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration it reads, so a change made while another Frontend changed the Network applies to what is there then.
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone asks for it in a password prompt, which gives it to the Vault itself. A value typed after it is refused, and the composer clears at once, below.
+
+## Keymap
+
+`@iirc/frontend/keymap`: keybindings as data over the registry. A binding names a chord, a command by its id, the text it is given as arguments, and a `when`, and a key pressed resolves to that command's intents, or to nothing, so a key no binding takes is never swallowed.
+
+```ts
+parseChord(text): Parsed<Chord>, formatChord(chord): string, showChord(chord, platform): string
+chordOf(event: KeyEvent, platform): Chord | undefined
+parseWhen(text): Parsed<When>, parseBinding(text: BindingText): Parsed<Binding>
+keymapOf(texts): Keymap                           // drops each binding that does not parse
+defaultBindings, defaultKeymap
+resolve(keymap, context: KeyContext, event: KeyEvent): readonly Intent[] | undefined
+chordsFor(keymap, command): readonly Chord[]     // to show beside a command
+
+Chord = { mod, ctrl, meta, alt, shift, key: KeyName }
+KeyEvent = { key, code, ctrl, meta, alt, shift, altGraph }   // the browser's, as plain data
+KeyContext = { command: CommandContext, editing, palette, platform: "Mac" | "Other" }
+Binding = { keys: Chord, command, args, when: readonly { key: "editing" | "palette", is }[] }
+```
+
+| Keys | Command | When |  |
+| --- | --- | --- | --- |
+| `mod+k`, `mod+shift+p` | `palette.open` | `!palette` | Open the palette, from the composer too |
+| `alt+arrowdown`, `alt+arrowup` | `timeline.next`, `timeline.previous` | `!palette` | Move through the sidebar's order, from the composer too, as an IRC client's keys do |
+| `mod+,` | `options.set` | `!palette` | Show the options |
+| `i` | `composer.focus` | `!editing && !palette` | Focus the composer, from outside a field |
+
+- **A chord is parsed, not validated.** Its text is modifiers, each once, then one key, joined by `+`, in any ASCII case: `mod`, `ctrl`, `meta`, `alt`, and `shift`, with `cmd`, `command`, `control`, `opt`, and `option` read as theirs, and a named key, such as `arrowup`, `enter`, `escape`, `space`, `tab`, `f1` to `f12`, or `plus` for `+`, or one printable character. A `KeyName` exists only once parsed. `formatChord` writes a chord so that it parses back to the same one.
+- **`mod` is Cmd on a Mac and Ctrl elsewhere,** as the runtime says. `ctrl` and `meta` name those keys on every platform, so `ctrl+k` elsewhere is `mod+k`. `showChord` writes a chord as the platform does: `Ctrl+Shift+P`, or `⇧⌘P` on a Mac.
+- **A key event is the layout's character,** ASCII letters lower-cased, with no modifier or Shift alone, so an AZERTY `é` binds as `é`, not as the `2` its physical key is on QWERTY. The physical key, a letter or digit, names it only where that character says less: a dead key or a key with no character; with Alt, as Option and AltGr are, a character other than the physical key's; and with Ctrl or Cmd, a character outside ASCII. A key an input method is processing is no chord.
+- **AltGr in a field is typing.** A key event says whether AltGr is held, as the browser's `getModifierState("AltGraph")` does, since some platforms report AltGr as Ctrl and Alt too. While editing, a printable character typed with AltGraph, such as German AltGr+Q for `@`, resolves to nothing and is typed. Ctrl+Alt without AltGraph is a chord, so a US `ctrl+alt+k` binding works in a field. Outside a field AltGr is a chord like any other.
+- **A `when` is parsed into clauses,** each `editing` or `palette`, perhaps negated with `!`, joined by `&&`. A binding whose chord or `when` does not parse, or whose command the registry lacks, is dropped by `keymapOf`, so a keymap holds only bindings that can fire.
+- **`resolve` takes the last binding that applies:** its chord is the key, its `when` holds, its command's own conditions hold, and its command gives intents for its arguments. Otherwise it looks at the binding before, and with none left the key is not the keymap's. A later binding overrides an earlier one, so overrides go after the defaults.
+- **A binding fires while typing in a field only when its `when` allows it.** Most of the defaults do, as an IRC client keeps the caret in its input. `i` does not, so it is typed into a field. Ctrl+L and Cmd+L would focus the composer from anywhere, but browsers use them for the address bar, and a letter outside a field has no browser default.
+
+## Palette
+
+`@iirc/frontend/palette`: what the command palette lists for a query, ranked, and what choosing an entry asks for. It adds no action of its own: choosing gives the intents the registry does.
+
+```ts
+sections(listing: Listing, query, recent): readonly Section[]   // none empty
+choose(entry, context): readonly Intent[]
+initialPalette, reducePalette(state, event), remember(recent, key), recentCap: 20
+
+Listing = { context: CommandContext, sidebar: readonly SidebarNetwork[], options: readonly Option[], keymap }
+Section = { title: "Recent" | "Commands" | "Timelines" | "Options", entries: readonly Entry[] }
+Entry = Command { key, id, name, usage, description, chords }
+      | Timeline { key, timeline, network, kind, name }
+      | Option { key, name, description, credential }
+Palette = { open, query, recent: readonly string[] }   // recent: entries' keys, newest first
+PaletteEvent = Opened | Closed | Queried { query } | Chosen { key }
+```
+
+- **It lists what can be done here:** each command whose conditions hold, with its usage, description, and the chords bound to it, but not `/palette`; every Timeline, in the sidebar's order; and every option read.
+- **A query ranks entries in four tiers:** the query begins a name, it begins a word of a name, it begins a word of the description, or its characters appear in a name in order. Within a tier, a shorter name, an earlier word, or characters closer together come first, and then the section's own order. A word begins after anything that is not a letter or a digit, so `iirc` finds `#iirc` and `nick` finds `network.libera.nicks`. A command's names are its name and its aliases, the name ranked first, and a Timeline's are its name and its Network and name. A leading `/` is ignored. Sections are ordered by their best entry, and matching nothing lists nothing. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own rather than uFuzzy, whose sort uses `Intl.Collator`, and whose own ranking would still need these tiers put over it, for lists of tens to hundreds.
+- **With no query, the entries chosen recently come first,** newest first, in a section of their own, and each section follows without them. A choice is remembered once, at most `recentCap`, the oldest going first.
+- **Choosing a command that needs no arguments runs it,** as typing its name alone does. One that needs them, or that cannot run with none, such as `/part` outside a Channel, starts in the composer as `/<name> `, with the caret after it. A Timeline opens. An option starts `/set <name> ` in the composer, and a Credential option asks for its value in the password prompt, as `/set <name>` alone does, since its value is never typed into the composer.
+- **A choice never replaces a draft with text in it.** What a choice starts the composer with goes in only when its draft is empty or only whitespace. Otherwise the draft is kept as it is, the composer is focused, and its notice says which command was not put in, so the Owner can clear it and choose again. `started` decides it, from the composers' state.
+- **Plain data.** The palette's state survives `structuredClone`.
 
 ## Composer
 
@@ -164,7 +234,8 @@ submit(state, place, context): { state, intents }   // the draft, read through t
 confirm(state, timeline): { state, intents }           // the lines waiting to be confirmed
 takeOffer(state, timeline): { state, offer }           // what a notice offers: SendAgain or CheckAgain
 draftOf(state, timeline): Draft                        // { text, history, recalled, kept, confirming, notice }
-contextOf(timelines): CommandContext                   // the open Timeline, and whether its Network has a Session
+contextOf(timelines): CommandContext                   // the open Timeline, whether its Network has a Session, and every Timeline in order
+started(state, place, text): Composers                // FocusComposer's text: put in an empty draft, never over one with text
 refusal(reason, target), failed(failure, intent, intents)   // in words
 ```
 
@@ -250,11 +321,15 @@ Part = Words { text } | Nick { nick, colour } | Name { text } | Said { inlines }
 
 ## Tests
 
-`bun run test` runs six files. `src/sign-in.test.ts` covers each transition, checking again after a failed check, keeping a failure until the next attempt, signing out failing while staying signed in, `Refused` from signed in and while signing out, ignoring an answer that does not belong, and two properties over any sequence of events: `SignedIn` is entered only after a check or a sign-in said so, and every state survives `structuredClone` unchanged.
+`bun run test` runs eight files. `src/sign-in.test.ts` covers each transition, checking again after a failed check, keeping a failure until the next attempt, signing out failing while staying signed in, `Refused` from signed in and while signing out, ignoring an answer that does not belong, and two properties over any sequence of events: `SignedIn` is entered only after a check or a sign-in said so, and every state survives `structuredClone` unchanged.
 
 `src/timelines.test.ts` plays a model Daemon: random steps folded into Timelines, items, late history, deliveries, Sessions and their Gaps, and a second Network configured later, sometimes never heard from again, read a page at a time and a window at a time as the API reads them, before and after a cursor included, and changes given as it gives them. The reducer and a runtime in miniature read what `wanted` asks, at fold points the Daemon has reached, answered later in any order, while the stream lags the Daemon, some steps come as overflows, naming what they touched or everything, the Daemon may take a new projection version, which the stream resets, every event may come twice, and the Owner opens Timelines, goes back to the one before, opens another while older items are read and comes back, has the Daemon fold steps that come as overflows touching everything while the Network list is read, scrolls up and down, and leaves and returns to the latest at random, with windows of at most 4 items, pages of 2, and no closed window kept, so windows are dropped and read again with answers for them still in flight, which the runtime may answer newest first. After every action, a current window holds every item the Daemon had folded by its `through` between its first and last items, so a page merged into the wrong window, which leaves a hole, is caught as it happens. Once everything settles, the Networks are exactly the Daemon's, and each Network's Timelines and connection are exactly its, a Network that only a reset reaches included, and every current window is exactly what a read now would give between its first and last items, Gaps included, with `earlier` and `later` true exactly when something lies beyond. No window ever holds more than the cap, nor is any window kept but the open one's. Every state survives `structuredClone`. Examples cover opening the Direct Message Timeline a Message was placed in, by id, at once or once listed, the right one of `[bob]` and `{bob}`, never a Channel's or a detached one, a placement from before the Owner opened another ignored, a placement made while the options showed showing its Timeline in their place, and one from before they were shown let go, following after the smallest `through`, each read asked once, sidebar order, a live item, late history, an update in place, an item outside a window, a merge followed and learnt from a window read, overflows, a reset, a read of another version dropped, a read brought up to date from what the stream gave, reading older items before the first with the Gaps up to it, a page that lands after its window was dropped and read again ignored, the Network list kept stale when an overflow that touched everything came while it was read, and current from where the stream was when it was asked, not when it was taken on, joining a run the cursor split, the Network list read again on a reset and a pre-reset read of it landing late, collapsing Gaps, and a connection from `known` then from Session items.
 
-`src/commands.test.ts` covers each command's name and aliases, unique and in lower case, finding one in any case, `when` for each kind of Timeline and with no Session, plain text, `/me`, `/say`, `//`, `/msg` from the Network's Timeline opening the Direct Message, `/notice`, an unknown command and a bare `/`, missing arguments and a list of Targets, and why plain text cannot go to the Network's own Timeline.
+`src/commands.test.ts` covers each command's name and aliases, unique and in lower case, finding one in any case, `when` for each kind of Timeline and with no Session, plain text, `/me`, `/say`, `//`, `/msg` from the Network's Timeline opening the Direct Message, `/notice`, an unknown command and a bare `/`, missing arguments and a list of Targets, why plain text cannot go to the Network's own Timeline, `/next`, `/prev`, `/palette`, and `/focus`, and whether each command takes arguments.
+
+`src/keymap.test.ts` checks, as a property, that any chord reads back from the text it formats as the same chord, and that text writes the same way again. It covers parsing in any case and with aliases, refusing text that is no chord, AZERTY's `é` and German's `ö` kept as typed and a binding of `é` resolving outside a field, Shift alone and Ctrl on the same key, German AltGr+Q, with AltGraph, typed in a field and a chord outside one, the same Ctrl+Alt without AltGraph a chord in a field, and a US Ctrl+Alt+K resolving in a field, and Alt+arrows still moving between Timelines on those layouts, showing chords as each platform does, chords from key events with Mod as Cmd or Ctrl, a Mac's Option and dead keys read from the physical key, a layout's own letter kept, and a key an input method holds; every default binding parsed, and one that does not parse dropped; `when`; and `resolve`: the palette from the composer but not while it is open, Cmd on a Mac and not Ctrl there, the next and previous Timeline wrapping and from none, nothing with no Timelines, `i` focusing the composer outside a field and typed inside one, `mod+,` opening the options, a bound command's own conditions, and a later binding winning.
+
+`src/palette.test.ts` covers what is listed in a Channel and from no Timeline, never `/palette`, a command's chords beside it, ranking by prefix, then a word's start, then characters in order, an alias, a leading `/`, nothing for no match, sections ordered by their best entry, recent choices first and only once with no query, and ignored with one, and what choosing gives: a command run, or started in the composer when it needs arguments or cannot run with none, a Timeline opened, an option's `/set` started, and a Credential option's prompt; an empty or blank draft started, and one with text kept with a notice. As properties, no choice ever changes a draft with text in it, and `remember` keeps at most the cap, newest first, each once, for any choices, and the state survives `structuredClone`.
 
 `src/composer.test.ts` covers a line sent and kept in the history, one Say per non-empty line in order, whitespace sending nothing, a NUL and a bad line refusing everything with the text kept, the confirmation threshold, confirming and dismissing, drafts kept per Timeline, and recall in order back to the draft. A property over any sends, draft, and number of Ups checks the history is bounded and newest first, Up that many times and Down as many returns to the draft, another Timeline's draft is untouched, and the state survives `structuredClone`. A recall while lines wait to be confirmed lets them go, and a property over any typing, recalls, submits, confirms, and dismissals checks that what waits to be confirmed is always exactly what is shown. It also covers a refusal in words, with nothing after it sent, its Target contained, what is offered after `NotJournaled` and `Journaled`, the latter promising no delivery, and only `CheckAgain` after no answer.
 
@@ -264,6 +339,8 @@ Part = Words { text } | Nick { nick, colour } | Name { text } | Said { inlines }
 
 ## Not yet
 
-- **The palette, the keymap, and the pane layout,** which [ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md) and [ADR 0012](../../docs/adr/0012-the-web-frontend-builds-on-react-aria-and-resizable-panels.md) describe.
-- **Options under `ui`,** for Frontends, such as the theme and the keymap, which [ADR 0013](../../docs/adr/0013-configuration-is-an-option-tree.md) puts in the same tree, and options of the Daemon's own.
+- **The pane layout,** which [ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md) and [ADR 0012](../../docs/adr/0012-the-web-frontend-builds-on-react-aria-and-resizable-panels.md) describe.
+- **Options under `ui`,** for Frontends, such as the theme and overrides of the keymap, which [ADR 0013](../../docs/adr/0013-configuration-is-an-option-tree.md) puts in the same tree, and options of the Daemon's own. `keymapOf` is ready to read them, dropping what does not parse.
+- **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone opens the palette, so a sequence beginning with it would make the palette wait.
+- **The next Timeline with something unread,** which waits on Read Markers.
 - **Removing a Network,** which the API cannot do yet. `/network add` only adds.

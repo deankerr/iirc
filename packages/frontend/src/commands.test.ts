@@ -17,11 +17,12 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   timeline,
 });
 
-const inChannel: CommandContext = { focus: focus("Channel", "#iirc"), session: true };
-const inDirect: CommandContext = { focus: focus("Direct", "peer"), session: true };
-const inNetwork: CommandContext = { focus: focus("Network", "libera"), session: true };
-const offline: CommandContext = { focus: focus("Channel", "#iirc"), session: false };
-const nowhere: CommandContext = { focus: undefined, session: false };
+const around = { open: undefined, timelines: [] };
+const inChannel: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: true };
+const inDirect: CommandContext = { ...around, focus: focus("Direct", "peer"), session: true };
+const inNetwork: CommandContext = { ...around, focus: focus("Network", "libera"), session: true };
+const offline: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: false };
+const nowhere: CommandContext = { ...around, focus: undefined, session: false };
 
 const say = (target: string, text: string, kind = "Privmsg", opens = false) => ({
   _tag: "Say",
@@ -147,5 +148,46 @@ describe("reading a line", () => {
       "libera is not connected, so nothing can be said there now.",
       "libera is not connected, so nothing can be said there now.",
     ]);
+  });
+
+  it("moves to the next and previous Timeline, opens the palette, and focuses the composer, from anywhere", () => {
+    const other = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
+    const listed: CommandContext = { ...nowhere, open: timeline, timelines: [timeline, other] };
+
+    expect({
+      focus: interpret("/focus", nowhere),
+      next: interpret("/next", listed),
+      none: message("/next", nowhere),
+      palette: interpret("/palette", nowhere),
+      prev: interpret("/PREV", listed),
+      trailing: message("/next 2", listed),
+    }).toStrictEqual({
+      focus: { _tag: "Parsed", value: [{ _tag: "FocusComposer", text: undefined }] },
+      next: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
+      none: "There are no Timelines yet. Add a Network with /network add.",
+      palette: { _tag: "Parsed", value: [{ _tag: "OpenPalette" }] },
+      prev: { _tag: "Parsed", value: [{ _tag: "Open", timeline: other }] },
+      trailing: "/next takes nothing after it.",
+    });
+  });
+
+  it("says which commands take arguments, for the palette", () => {
+    expect(
+      Object.fromEntries(commands.map((one) => [one.id, one.arguments] as const))
+    ).toStrictEqual({
+      "channels.join": "Required",
+      "channels.part": "Optional",
+      "composer.focus": "None",
+      "network.add": "Required",
+      "options.set": "Optional",
+      "options.unset": "Required",
+      "palette.open": "None",
+      "say.action": "Required",
+      "say.notice": "Required",
+      "say.privmsg": "Required",
+      "say.to": "Required",
+      "timeline.next": "None",
+      "timeline.previous": "None",
+    });
   });
 });

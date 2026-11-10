@@ -67,10 +67,17 @@ const inChannel: CommandContext = {
     network: libera,
     timeline,
   },
+  open: timeline,
   session: false,
+  timelines: [timeline],
 };
 
-const nowhere: CommandContext = { focus: undefined, session: false };
+const nowhere: CommandContext = {
+  focus: undefined,
+  open: undefined,
+  session: false,
+  timelines: [],
+};
 
 const read = (line: string, context: CommandContext = nowhere) => interpret(line, context);
 

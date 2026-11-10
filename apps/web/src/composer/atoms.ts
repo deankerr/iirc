@@ -19,6 +19,7 @@ import {
   draftOf,
   initialComposers,
   reduceComposers,
+  started,
   submit,
   takeOffer,
 } from "@iirc/frontend/composer";
@@ -29,7 +30,7 @@ import type {
   Place,
   SayFailure,
 } from "@iirc/frontend/composer";
-import { followFrom, reduceTimelines } from "@iirc/frontend/timelines";
+import { followFrom, opened, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Timelines } from "@iirc/frontend/timelines";
 import { Context, Effect, Option, Schedule, Schema, Semaphore, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -44,8 +45,9 @@ import {
   signedOut,
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
+import { openPalette } from "../palette/state.ts";
 import { signedIn } from "../sign-in/atoms.ts";
-import { timelinesState, Waits } from "../timelines/atoms.ts";
+import { open, timelinesState, Waits } from "../timelines/atoms.ts";
 
 /** Every Timeline's composer, as the core folds it. */
 export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
@@ -57,6 +59,23 @@ export const commandContext = Atom.make((get) => contextOf(get(timelinesState)))
 export const draft = Atom.family((timeline: Place) =>
   Atom.make((get) => draftOf(get(composerState), timeline))
 );
+
+/**
+ * How many times the composer was asked to take focus. The composer focuses its textarea
+ * each time this changes, never as it mounts.
+ */
+export const composerFocus = Atom.make(0).pipe(Atom.keepAlive);
+
+/**
+ * Where the composer under the main view is: the open Timeline's, or the one under none.
+ * @param registry - The registry.
+ * @returns Its place.
+ */
+const placeOf = (registry: AtomRegistry.AtomRegistry): Place => {
+  const shown = opened(registry.get(timelinesState));
+
+  return shown._tag === "Shown" ? shown.timeline : "Nowhere";
+};
 
 /** Names each Say's intent, unique across the whole Journal: a test makes them predictable. */
 export class IntentNames extends Context.Reference<() => string>("@iirc/web/IntentNames", {
@@ -202,36 +221,94 @@ const sayOne = (intent: Say, id: IntentId) =>
       );
   });
 
+/** An intent carried out in the page at once, which waits on nothing the Daemon says. */
+type Local = Extract<
+  Intent,
+  { readonly _tag: "OpenOptions" | "PromptCredential" | "Open" | "OpenPalette" | "FocusComposer" }
+>;
+
+const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
+  "FocusComposer",
+  "Open",
+  "OpenOptions",
+  "OpenPalette",
+  "PromptCredential",
+]);
+
 /**
- * Carries out an intent that changes Configuration, holds a Credential, or opens the
- * options view.
+ * Whether an intent is carried out in the page.
+ * @param intent - The intent.
+ * @returns Whether it is.
+ */
+const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
+
+/**
+ * Carries out an intent in the page: shows the options or a Timeline, opens the password
+ * prompt or the palette, or focuses the composer, starting an empty draft with text.
  * @param registry - The registry.
+ * @param place - Where the composer under the main view is.
+ * @param intent - The intent.
+ */
+const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent: Local): void => {
+  switch (intent._tag) {
+    case "OpenOptions": {
+      registry.set(openOptions, intent.filter);
+      break;
+    }
+
+    case "PromptCredential": {
+      registry.set(promptCredential, { network: intent.network, path: intent.path });
+      break;
+    }
+
+    case "Open": {
+      registry.set(open, intent.timeline);
+      break;
+    }
+
+    case "OpenPalette": {
+      registry.set(openPalette, undefined);
+      break;
+    }
+
+    case "FocusComposer": {
+      registry.set(composerState, started(registry.get(composerState), place, intent.text));
+
+      registry.set(composerFocus, registry.get(composerFocus) + 1);
+      break;
+    }
+
+    default: {
+      intent satisfies never;
+    }
+  }
+};
+
+/**
+ * Carries out an intent other than a Say: in the page, or by changing Configuration.
+ * @param registry - The registry.
+ * @param place - Where the intents came from.
  * @param intent - The intent.
  * @returns What it came to.
  */
 const changeOne = (
   registry: AtomRegistry.AtomRegistry,
+  place: Place,
   intent: Exclude<Intent, Say>
 ): Effect.Effect<Changed, never, DaemonClient> => {
+  if (isLocal(intent)) {
+    carryOutHere(registry, place, intent);
+
+    return Effect.succeed({ _tag: "Done" });
+  }
+
   switch (intent._tag) {
-    case "OpenOptions": {
-      registry.set(openOptions, intent.filter);
-
-      return Effect.succeed({ _tag: "Done" });
-    }
-
     case "Configure": {
       return configure(registry, intent.network, intent.edit);
     }
 
     case "AddNetwork": {
       return addNetwork(registry, intent.network, intent.configuration);
-    }
-
-    case "PromptCredential": {
-      registry.set(promptCredential, { network: intent.network, path: intent.path });
-
-      return Effect.succeed({ _tag: "Done" });
     }
 
     default: {
@@ -263,7 +340,7 @@ const carryOut = (
 
     for (const [index, intent] of intents.entries()) {
       if (intent._tag !== "Say") {
-        const changed = yield* changeOne(registry, intent);
+        const changed = yield* changeOne(registry, timeline, intent);
 
         if (changed._tag === "SignedOut") {
           signedOut(registry);
@@ -540,3 +617,40 @@ export const takeUp = runtime
     { concurrent: true }
   )
   .pipe(Atom.keepAlive);
+
+/** Carries out intents from the palette or a key, as the composer under the main view's. */
+const performQueued = runtime
+  .fn(
+    (intents: readonly Intent[], get) =>
+      Effect.gen(function* () {
+        const { registry } = get;
+
+        yield* sendAll(registry, placeOf(registry), intents, undefined);
+      }),
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
+
+/**
+ * Carries out intents that came from the palette or a key, not the composer. When every one
+ * is carried out in the page, as opening a Timeline is, it is done at once, so a key that
+ * moves between Timelines never waits behind a Say in flight. Otherwise they wait their
+ * turn with every other submission, and a failure is said under the composer.
+ */
+export const perform = Atom.fnSync((intents: readonly Intent[], get) => {
+  const { registry } = get;
+
+  if (intents.every((intent) => isLocal(intent))) {
+    const place = placeOf(registry);
+
+    for (const intent of intents) {
+      if (isLocal(intent)) {
+        carryOutHere(registry, place, intent);
+      }
+    }
+
+    return;
+  }
+
+  registry.set(performQueued, intents);
+}).pipe(Atom.keepAlive);

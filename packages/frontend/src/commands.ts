@@ -1,6 +1,6 @@
 /**
- * The commands, as data: one registry behind the composer's `/commands`, and later the
- * palette, keybindings, and agents, since each is a way of naming the same action. A
+ * The commands, as data: one registry behind the composer's `/commands`, the palette, the
+ * keymap, and later agents, since each is a way of naming the same action. A
  * command parses its arguments into typed values or says in words why it cannot, and
  * gives intents, plain data the runtime carries out. It never does anything itself.
  *
@@ -32,6 +32,10 @@ export interface CommandContext {
   readonly focus: Focus | undefined;
   /** Whether the focused Timeline's Network has a Session. */
   readonly session: boolean;
+  /** Every Timeline, in the sidebar's order. */
+  readonly timelines: readonly TimelineId[];
+  /** The Timeline the Owner opened, as a merge resolves it, even while it is still read. */
+  readonly open: TimelineId | undefined;
 }
 
 /**
@@ -60,6 +64,11 @@ export interface Say {
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it. A value never goes through the
  *   composer, nor through an intent.
+ * - `Open`: open a Timeline in the main view.
+ * - `OpenPalette`: open the command palette.
+ * - `FocusComposer`: focus the composer under the main view, starting it with `text` when
+ *   there is one, as the palette starts a command that needs arguments. A draft with text
+ *   in it is never replaced: the composer says what was not put in.
  */
 export type Intent =
   | Say
@@ -70,7 +79,10 @@ export type Intent =
       readonly network: NetworkId;
       readonly configuration: Configuration;
     }
-  | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path };
+  | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path }
+  | { readonly _tag: "Open"; readonly timeline: TimelineId }
+  | { readonly _tag: "OpenPalette" }
+  | { readonly _tag: "FocusComposer"; readonly text: string | undefined };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -100,6 +112,11 @@ export interface Command {
   readonly aliases: readonly string[];
   /** How it is typed, such as `/me <text>`. */
   readonly usage: string;
+  /**
+   * Whether it takes arguments: `None`, `Optional`, or `Required`. The palette runs one that
+   * needs none, and starts one that does in the composer.
+   */
+  readonly arguments: "None" | "Optional" | "Required";
   /** What it does, in one line. */
   readonly description: string;
   /** Every condition that must hold for it to run. */
@@ -320,6 +337,44 @@ const partArguments = (args: string, focus: Focus): Parsed<Edit> => {
     : invalid("Name a Channel to part, such as /part #iirc, or open the Channel.");
 };
 
+/**
+ * The Timeline next to the open one in the sidebar's order, wrapping around at either end,
+ * or the first or the last when none is open.
+ * @param direction - `Next` or `Previous`.
+ * @returns The command's parser: the Timeline to open, or none when it is already open.
+ */
+const stepped =
+  (direction: "Next" | "Previous") =>
+  (args: string, context: CommandContext): Parsed<TimelineId | undefined> => {
+    const { open, timelines } = context;
+    const count = timelines.length;
+
+    if (args.trim() !== "") {
+      return invalid(`/${direction === "Next" ? "next" : "previous"} takes nothing after it.`);
+    }
+
+    if (count === 0) {
+      return invalid("There are no Timelines yet. Add a Network with /network add.");
+    }
+
+    const at = open === undefined ? -1 : timelines.indexOf(open);
+    const step = direction === "Next" ? 1 : -1;
+    const from = at === -1 && direction === "Previous" ? 0 : at;
+    const to = timelines[(((from + step) % count) + count) % count];
+
+    return parsed(to === open ? undefined : to);
+  };
+
+/**
+ * The parser of a command that takes nothing after its name.
+ * @param name - Its name, to say so.
+ * @returns Its parser.
+ */
+const nothingAfter =
+  (name: string) =>
+  (args: string): Parsed<undefined> =>
+    args.trim() === "" ? parsed(undefined) : invalid(`/${name} takes nothing after it.`);
+
 const say = (focus: Focus, kind: SayKind, text: string): Say => ({
   _tag: "Say",
   kind,
@@ -336,6 +391,7 @@ const focused: readonly Condition[] = [{ _tag: "Focused" }];
 /** Saying text to the open Timeline, which plain text does too. */
 const sayCommand = command({
   aliases: [],
+  arguments: "Required",
   description: "Say a Message to the open Channel or Direct Message.",
   id: "say.privmsg",
   intents: (text: string, focus) => [say(focus, "Privmsg", text)],
@@ -348,6 +404,7 @@ const sayCommand = command({
 /** Opening the options, setting an option, or asking for a Credential option's value. */
 const setCommand = unfocused({
   aliases: [],
+  arguments: "Optional",
   description:
     "Open the options, filtered by a pattern such as network.libera.* or *nick*, set an option to a value, or ask for a Credential's value in a password prompt.",
   id: "options.set",
@@ -363,6 +420,7 @@ export const commands: readonly Command[] = [
   sayCommand,
   command({
     aliases: ["action"],
+    arguments: "Required",
     description: "Say what you are doing, as a CTCP ACTION, to the open Channel or Direct Message.",
     id: "say.action",
     intents: (text: string, focus) => [say(focus, "Action", text)],
@@ -373,6 +431,7 @@ export const commands: readonly Command[] = [
   }),
   command({
     aliases: ["privmsg"],
+    arguments: "Required",
     description: "Say a Message to any Target, and open the Direct Message with a nick.",
     id: "say.to",
     intents: ({ target: to, text }, focus) => [
@@ -385,6 +444,7 @@ export const commands: readonly Command[] = [
   }),
   command({
     aliases: [],
+    arguments: "Required",
     description: "Send a NOTICE to any Target.",
     id: "say.notice",
     intents: ({ target: to, text }, focus) => [
@@ -397,6 +457,7 @@ export const commands: readonly Command[] = [
   }),
   command({
     aliases: [],
+    arguments: "Required",
     description:
       "Join Channels on the open Timeline's Network, by adding them to its Configuration.",
     id: "channels.join",
@@ -415,6 +476,7 @@ export const commands: readonly Command[] = [
   }),
   command({
     aliases: ["leave"],
+    arguments: "Optional",
     description: "Part Channels, or the open one, by taking them from its Network's Configuration.",
     id: "channels.part",
     intents: (edit: Edit, focus) => [{ _tag: "Configure", edit, network: focus.network }],
@@ -426,6 +488,7 @@ export const commands: readonly Command[] = [
   setCommand,
   unfocused({
     aliases: [],
+    arguments: "Required",
     description: "Return an option to what a new Network starts with, or leave it unset.",
     id: "options.unset",
     intents: (intent: Intent) => [intent],
@@ -446,6 +509,7 @@ export const commands: readonly Command[] = [
   }),
   unfocused({
     aliases: [],
+    arguments: "Required",
     description:
       "Add a Network, enabled, with one Ircd and one nick, and everything else as a new Network starts.",
     id: "network.add",
@@ -455,11 +519,66 @@ export const commands: readonly Command[] = [
     usage: networkUsage,
     when: [],
   }),
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description: "Open the next Timeline in the sidebar.",
+    id: "timeline.next",
+    intents: (to: TimelineId | undefined) =>
+      to === undefined ? [] : [{ _tag: "Open", timeline: to }],
+    name: "next",
+    parse: stepped("Next"),
+    usage: "/next",
+    when: [],
+  }),
+  unfocused({
+    aliases: ["prev"],
+    arguments: "None",
+    description: "Open the previous Timeline in the sidebar.",
+    id: "timeline.previous",
+    intents: (to: TimelineId | undefined) =>
+      to === undefined ? [] : [{ _tag: "Open", timeline: to }],
+    name: "previous",
+    parse: stepped("Previous"),
+    usage: "/previous",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description: "Open the command palette, to run a command, open a Timeline, or set an option.",
+    id: "palette.open",
+    intents: () => [{ _tag: "OpenPalette" }],
+    name: "palette",
+    parse: nothingAfter("palette"),
+    usage: "/palette",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "None",
+    description: "Put the caret in the composer, to type into it.",
+    id: "composer.focus",
+    intents: () => [{ _tag: "FocusComposer", text: undefined }],
+    name: "focus",
+    parse: nothingAfter("focus"),
+    usage: "/focus",
+    when: [],
+  }),
 ];
 
 const byName: ReadonlyMap<string, Command> = new Map(
   commands.flatMap((one) => [one.name, ...one.aliases].map((name) => [name, one] as const))
 );
+
+const byId: ReadonlyMap<string, Command> = new Map(commands.map((one) => [one.id, one] as const));
+
+/**
+ * The command with an id, as a keybinding names it.
+ * @param id - Its id, such as `timeline.next`.
+ * @returns The command, or none.
+ */
+export const commandWithId = (id: string): Command | undefined => byId.get(id);
 
 /**
  * The command a name stands for, in any ASCII case.
@@ -547,7 +666,11 @@ export const unmet = (when: readonly Condition[], context: CommandContext): stri
  * @param context - The context.
  * @returns Its intents, or why there are none.
  */
-const runIn = (found: Command, args: string, context: CommandContext) => {
+export const runIn = (
+  found: Command,
+  args: string,
+  context: CommandContext
+): Parsed<readonly Intent[]> => {
   const reason = unmet(found.when, context);
 
   return reason === undefined ? found.run(args, context) : invalid<readonly Intent[]>(reason);

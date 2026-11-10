@@ -616,6 +616,103 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "opens the palette with the keyboard, jumps to a Channel, runs commands from it, and moves between Timelines",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "palette"),
+        "#iirc-palette"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        const palette = page.getByRole("dialog", { name: "Command palette" });
+        const search = palette.getByRole("searchbox", { name: "Command, Timeline, or option" });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        const hasFocus = async (locator: typeof search) =>
+          await locator.evaluate((element) => element === document.activeElement);
+
+        // Mod+K opens it, with the caret in its search field, and the Channel is found by name.
+        await page.keyboard.press("Control+k");
+        await palette.waitFor();
+        await expect.poll(async () => await hasFocus(search)).toBe(true);
+        await page.keyboard.type(channel);
+        await palette.getByRole("menuitem").first().getByText(channel).waitFor();
+        await page.keyboard.press("Enter");
+        await palette.waitFor({ state: "detached" });
+
+        const log = page.getByRole("log", { name: channel });
+
+        await log.waitFor();
+
+        // A command that needs arguments starts in the composer, focused, and is said from there.
+        await page.keyboard.press("Control+k");
+        await palette.waitFor();
+        await page.keyboard.type("/me");
+        await page.keyboard.press("Enter");
+        await palette.waitFor({ state: "detached" });
+        await expect.poll(async () => await composer.inputValue()).toBe("/me ");
+        const prefilled = await hasFocus(composer);
+
+        await page.keyboard.type("waves");
+        await page.keyboard.press("Enter");
+
+        const action = await peer.waitFor(
+          (line) =>
+            line.command === "PRIVMSG" && line.params[1]?.startsWith("\u0001ACTION") === true,
+          "the action"
+        );
+
+        // Escape closes it, choosing nothing, and focus goes back to the composer.
+        await page.keyboard.press("Control+Shift+P");
+        await palette.waitFor();
+        await page.keyboard.press("Escape");
+        await palette.waitFor({ state: "detached" });
+        await expect.poll(async () => await hasFocus(composer)).toBe(true);
+
+        // One that needs none runs: /set shows the options.
+        await page.keyboard.press("Control+k");
+        await palette.waitFor();
+        await page.keyboard.type("set");
+        await page.keyboard.press("Enter");
+        await page.getByRole("searchbox", { name: "Filter options" }).waitFor();
+
+        // Alt+ArrowUp opens the Timeline before the Channel in the sidebar: the Network's own.
+        await page.keyboard.press("Alt+ArrowUp");
+        await page.getByRole("log", { name: "private" }).waitFor();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          action: action.params,
+          prefilled,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          violations,
+        }).toStrictEqual({
+          action: [channel, "\u0001ACTION waves\u0001"],
+          prefilled: true,
+          problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "adds a Network from nothing, joins and parts a Channel, and changes an option in place",
     { timeout: 90_000 },
     async () => {

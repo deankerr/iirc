@@ -147,7 +147,7 @@ const readHeld = (registry: AtomRegistry.AtomRegistry) =>
  * @param registry - The registry.
  * @returns Once read.
  */
-const refresh = (registry: AtomRegistry.AtomRegistry) =>
+export const refresh = (registry: AtomRegistry.AtomRegistry) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const entries = yield* client.networks.list();
