@@ -42,6 +42,7 @@ const message = (
 ): News => ({
   _tag: "Message",
   at: options.at ?? known(t0),
+  highlight: false,
   id: options.id ?? unknown,
   kind: "Privmsg",
   live: true,
@@ -271,6 +272,8 @@ describe("our Messages' fate", () => {
         { _tag: "Refused", intent, reason: { _tag: "Offline" } },
         { _tag: "Refused", intent, reason: { _tag: "Rejected", reply: "404" } },
         { _tag: "Ignored", reason: { _tag: "UnmatchedEcho" } },
+        // Read Markers are not folded yet.
+        { _tag: "ReadMarker", read: t0, where: { _tag: "Network" } },
       ]),
     ]);
 

@@ -195,6 +195,7 @@ describe("the options", () => {
         declined: [],
         enabled: true,
         fallbackEncoding: "windows-1252",
+        highlights: [],
         ircds: [{ host: "irc.oftc.net", port: 6697, tls: true }],
         login: { _tag: "None" },
         nicks: ["bot"],

@@ -78,6 +78,10 @@ describe("the format", () => {
       "!! notice peer :hi there",
       "!! action #iirc :waves",
       "!! retry",
+      "!! read #iirc t+5s",
+      "!! read t-1s",
+      "!! configure highlights=release,iirc highlights=",
+      "?? read-marker t+5s in=channel:#iirc",
       "+60s",
       "+250ms",
       "+2m",
@@ -111,6 +115,10 @@ describe("the format", () => {
       "Owner",
       "Owner",
       "Owner",
+      "Owner",
+      "Owner",
+      "Owner",
+      "Expect",
       "Advance",
       "Advance",
       "Advance",
@@ -124,6 +132,13 @@ describe("the format", () => {
       "Closed",
     ]);
     expect(print(items(text))).toBe(text.replace("+2m", "+120s"));
+  });
+
+  it("reads a Read, with its Target or the Network's own", () => {
+    expect(items("!! read #iirc t+5s\n!! read t-1s\n")).toStrictEqual([
+      { _tag: "Owner", owner: { _tag: "Read", read: epoch + 5000, target: "#iirc" } },
+      { _tag: "Owner", owner: { _tag: "Read", read: epoch - 1000, target: null } },
+    ]);
   });
 
   it("reads Owner inputs into what they mean", () => {
@@ -230,6 +245,11 @@ describe("the format", () => {
     "!! shout #iirc :hi",
     "!! configure +#a  -#b",
     "!! configure ~#a",
+    "!! read",
+    "!! read #iirc",
+    "!! read #iirc 5s",
+    "!! read #a #b t+5s",
+    "!! read  t+5s",
     "?? exploded",
     "== fired ping 30s",
     "== opened now",

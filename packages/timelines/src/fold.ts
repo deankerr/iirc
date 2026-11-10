@@ -444,6 +444,8 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       break;
     }
 
+    // Read Markers are not folded yet.
+    case "ReadMarker":
     case "Ignored": {
       break;
     }

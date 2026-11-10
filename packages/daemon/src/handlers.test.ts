@@ -10,6 +10,7 @@ import {
   TimelineId,
 } from "@iirc/api";
 import type { NewsEvent, Resume, TimelineChangesEvent, TimelineItem } from "@iirc/api";
+import { Instant } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
 import { Entry } from "@iirc/runtime/journal";
 import type { JournalRecord } from "@iirc/runtime/journal";
@@ -527,6 +528,80 @@ describe("the handlers", () => {
       { data: {}, event: "heartbeat" },
       { data: {}, event: "heartbeat" },
     ]);
+  });
+
+  it("marks a Timeline read, and gives Read Markers and Highlights as News", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+
+        const call = yield* registerOnFloor(world.memory);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* say(call, ":peer!u@h PRIVMSG #iirc :iirc: look");
+        yield* settle;
+
+        const read = (target: string | null, millis: number) =>
+          api.networks.read({
+            params: { network: libera },
+            payload: { read: Instant.make(epoch + millis), target },
+          });
+
+        const channel = yield* read("#IIRC", 5000);
+        const behind = yield* read("#iirc", 4000);
+        const own = yield* read(null, 1000);
+        const listed = yield* read("#a,#b", 1000);
+        const stream = yield* api.news.follow({ headers: {}, query: {} });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) => event.event === "happened" && event.data.sequence === listed.sequence
+          ),
+          Stream.runCollect
+        );
+
+        const unknown = yield* api.networks
+          .read({
+            params: { network: NetworkId.make("oftc") },
+            payload: { read: Instant.make(0), target: null },
+          })
+          .pipe(Effect.flip);
+
+        return {
+          answers: [channel, behind, own, listed].map(({ sequence }) => sequence),
+          news: happenings(events).flatMap((event) =>
+            event.data.news.flatMap((one): readonly unknown[] => {
+              if (one._tag === "Message") {
+                return [`${one.sender} :${one.text}${one.highlight ? " (highlight)" : ""}`];
+              }
+
+              if (one._tag === "Ignored") {
+                return [one.reason._tag];
+              }
+
+              return one._tag === "ReadMarker" ? [one] : [];
+            })
+          ),
+          unknown: unknown._tag,
+        };
+      })
+    );
+
+    // Each was journaled and stepped, the one behind and the one that marks nothing too.
+    expect(result.answers).toStrictEqual(result.answers.toSorted((left, right) => left - right));
+    expect(new Set(result.answers).size).toBe(4);
+    expect(result.news).toStrictEqual([
+      "peer :iirc: look (highlight)",
+      {
+        _tag: "ReadMarker",
+        read: epoch + 5000,
+        where: { _tag: "Channel", key: "#iirc", name: "#IIRC" },
+      },
+      { _tag: "ReadMarker", read: epoch + 1000, where: { _tag: "Network" } },
+      "NoTimeline",
+    ]);
+    expect(result.unknown).toBe("UnknownNetwork");
   });
 
   it("refuses a Network it does not know", async () => {

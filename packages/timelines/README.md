@@ -53,6 +53,7 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `Refused` `Rejected` | `Rejected` for its intent in the Network, with the Ircd's `reply`: its numeric or standard reply's code, never text. `Offline` and `Unsendable` refuse a `Say` in its own step, before any Message is reported, so they place nothing and change nothing. |
 | `SessionBegan`, `SessionEnded`, `ConnectionFailed` | `Added` to the Network's Timeline, and a `Gap` as below. |
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it. |
+| `ReadMarker` | Nothing yet. |
 | `Ignored` | Nothing. |
 
 An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, `live`, and its `at` and `id` facts, and for an Activity the Activity itself. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
@@ -71,4 +72,4 @@ A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed
 
 - **Encodings.** The directory, items, and changes are TypeScript types over plain data. The SQLite store keeps its own Schemas of what it writes, checked against these types, and the wire forms belong to `@iirc/api`.
 - **Channel renames.** A Channel keeps the name it opened with. `channel-rename` would rename one in place, keeping its id, as `DirectRenamed` does.
-- **Highlights and unread counts.** Both are read from items and Read Markers, and neither is folded yet.
+- **Read Markers, Highlights, and unread counts.** The Client reports each Read Marker as `ReadMarker` News and each Highlight as a Message's `highlight` ([ADR 0014](../../docs/adr/0014-read-markers-and-highlights-belong-to-the-client.md)). The fold does not keep either yet, nor count what lies after a Read Marker, so neither changes the projection version. When it keeps Read Markers, it keeps one per Timeline and moves it only forward, since after a casemapping change the Client's marker for a key can follow another spelling than the Timeline's, as [the Client's README](../client/README.md#read-markers) explains.

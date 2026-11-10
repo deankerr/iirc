@@ -138,6 +138,19 @@ export const SayRequest = Schema.Struct({
 /** The decoded form of {@link SayRequest}. */
 export type SayRequest = typeof SayRequest.Type;
 
+/**
+ * How far the Owner has read a Timeline: up to the instant `read`, in milliseconds since
+ * the Unix epoch, of a Target, a Channel or a Direct Message partner named as a `say`
+ * names one, or with `target` null, the Network's own.
+ */
+export const ReadRequest = Schema.Struct({
+  read: Instant,
+  target: Schema.NullOr(SayText.check(Schema.isNonEmpty())),
+});
+
+/** The decoded form of {@link ReadRequest}. */
+export type ReadRequest = typeof ReadRequest.Type;
+
 /** A Credential's value, `Redacted` from the moment it is decoded, and never sent back. */
 export const CredentialValue = Schema.Struct({
   value: Schema.RedactedFromValue(Schema.String.check(Schema.isNonEmpty())),
@@ -309,6 +322,7 @@ const inputTags = everyOf<Input["_tag"]>()([
   "Configured",
   "Fired",
   "Opened",
+  "Read",
   "Received",
   "Retry",
   "Say",
@@ -323,6 +337,8 @@ export const IgnoredReason = Schema.TaggedUnion({
   Endless: { command: Untrusted },
   FeatureFailed: { feature: Schema.String },
   Malformed: { command: Untrusted },
+  /** A `read` whose Target names no one Timeline, such as a list or a mask. */
+  NoTimeline: {},
   NotNow: { input: Schema.Literals(inputTags) },
   StaleConnection: { connection: ConnectionId },
   StaleTimer: { timer: TimerId },
@@ -359,6 +375,19 @@ export const Where = Schema.TaggedUnion({
 /** The decoded form of {@link Where}. */
 export type Where = typeof Where.Type;
 
+/**
+ * A Timeline a Read Marker belongs to: the Network's own, a Channel's, or a Direct Message
+ * partner's, which is always `existing`, since marking read starts no Timeline.
+ */
+export const Marked = Schema.TaggedUnion({
+  Channel: Named.fields,
+  Direct: { ...Named.fields, existing: Schema.Boolean },
+  Network: {},
+});
+
+/** The decoded form of {@link Marked}. */
+export type Marked = typeof Marked.Type;
+
 /** A client-only tag on a Message, such as `+draft/reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
@@ -376,6 +405,11 @@ export const News = Schema.TaggedUnion({
   Ignored: { reason: IgnoredReason },
   Message: {
     at: Fact(Instant),
+    /**
+     * Whether it calls for the Owner: said live by a User other than Self, naming Self's
+     * nick or a highlight word as a whole word.
+     */
+    highlight: Schema.Boolean,
     id: Fact(MessageId),
     kind: SayKind,
     live: Schema.Boolean,
@@ -386,6 +420,11 @@ export const News = Schema.TaggedUnion({
     text: Untrusted,
     where: Schema.Array(Where),
   },
+  /**
+   * The Owner's Read Marker of a Timeline moved forward, to `read`: the Network's own, a
+   * Channel's, or a Direct Message partner's, keyed as `where` keys it.
+   */
+  ReadMarker: { read: Instant, where: Marked },
   Refolded: { casemapping: Casemapping },
   Refused: { intent: IntentId, reason: RefusedReason },
   SessionBegan: { at: Instant, nick: Untrusted },

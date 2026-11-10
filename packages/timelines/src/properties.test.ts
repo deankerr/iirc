@@ -132,6 +132,7 @@ const news: fc.Arbitrary<News> = fc.oneof(
   fc.record({
     _tag: fc.constant("Message"),
     at: fact(at),
+    highlight: fc.boolean(),
     id: fact(messageId),
     kind: fc.constant("Privmsg"),
     live: fc.boolean(),
@@ -168,6 +169,11 @@ const news: fc.Arbitrary<News> = fc.oneof(
     _tag: fc.constantFrom("SessionEnded", "ConnectionFailed"),
     at,
     reason: fc.constantFrom({ _tag: "Silent" } as const, { _tag: "Restarted" } as const),
+  }),
+  fc.record({
+    _tag: fc.constant("ReadMarker"),
+    read: at,
+    where: where.filter((each) => each._tag !== "DirectRenamed"),
   }),
   fc.constant<News>({ _tag: "Ignored", reason: { _tag: "UnmatchedEcho" } })
 );

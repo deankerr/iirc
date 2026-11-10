@@ -70,6 +70,13 @@ export const Input = Schema.TaggedUnion({
   Fired: { at: Instant, due: Instant, timer: TimerId },
   /** A Connection the Client dialled is open. */
   Opened: { at: Instant, connection: ConnectionId },
+  /**
+   * The Owner has read a Timeline up to the instant `read`: a Target's, a Channel or a
+   * Direct Message partner named as `Say` names one, or with `target` null, the Network's
+   * own. A Read Marker only moves forward, so an instant no later than the one held
+   * changes nothing.
+   */
+  Read: { at: Instant, read: Instant, target: Schema.NullOr(Schema.String) },
   /** One Line's bytes, without its line ending, framed by the Transport. */
   Received: { at: Instant, bytes: Schema.Uint8Array, connection: ConnectionId },
   /** The Owner wants to try connecting now, cutting a wait short. */

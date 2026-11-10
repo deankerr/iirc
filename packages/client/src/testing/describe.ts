@@ -182,6 +182,10 @@ const writeIgnored = (reason: IgnoredReason): string => {
       return "UnmatchedEcho";
     }
 
+    case "NoTimeline": {
+      return "NoTimeline";
+    }
+
     default: {
       return reason satisfies never;
     }
@@ -318,6 +322,10 @@ export const describeNews = (news: News, now: Instant): string => {
       return `refolded ${news.casemapping}`;
     }
 
+    case "ReadMarker": {
+      return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
+    }
+
     case "Message": {
       return words([
         "message",
@@ -325,6 +333,7 @@ export const describeNews = (news: News, now: Instant): string => {
         atom(news.sender),
         atom(news.target),
         ...attributes(news, now),
+        ...(news.highlight ? ["highlight"] : []),
         ...writeWhere(news.where),
         ...writeTags(news.tags),
         ...writeOurs(news.ours),

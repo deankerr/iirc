@@ -129,7 +129,7 @@ interface Client<State> {
 }
 ```
 
-Every input carries `at`, the time it happened, so the Client never reads a clock. Inputs come from the Owner (`Configured`, `Say`, `Retry`), the Transport (`Opened`, `Received`, `Closed`), the Clock (`Fired`), and the Runtime (`Started`, `Stopping`, `Unfilled`, `Unsent`). Outputs are `Dial`, `Send`, `SendSecret`, `Hangup`, and `Wake`. Configuration always arrives whole, so joining, parting, and quitting are changes to it, not commands.
+Every input carries `at`, the time it happened, so the Client never reads a clock. Inputs come from the Owner (`Configured`, `Say`, `Read`, `Retry`), the Transport (`Opened`, `Received`, `Closed`), the Clock (`Fired`), and the Runtime (`Started`, `Stopping`, `Unfilled`, `Unsent`). Outputs are `Dial`, `Send`, `SendSecret`, `Hangup`, and `Wake`. Configuration always arrives whole, so joining, parting, and quitting are changes to it, not commands.
 
 **A Line counts as sent once the Client emits it,** unless an `Unsent` input later says it never left. The Client never waits on a write.
 

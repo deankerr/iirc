@@ -425,6 +425,7 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
         {
           _tag: "Message",
           at: { _tag: "Known", at: input.at, from: "ours", value: input.at },
+          highlight: false,
           id: { _tag: "Unknown" },
           kind: input.kind,
           live: true,
@@ -485,6 +486,7 @@ const step =
         return started(state, input.at);
       }
 
+      case "Read":
       case "Retry":
       case "Stopping":
       case "Unfilled":

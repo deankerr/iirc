@@ -10,10 +10,11 @@
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Source } from "@iirc/protocol/line";
 
+import { isHighlight } from "./highlight.ts";
 import { isSelf, namingNow, serverName } from "./meaning.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
-import type { Activity, Named, News, Unrouted, Where } from "./news.ts";
+import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder } from "./run.ts";
 
@@ -256,10 +257,15 @@ export const routeMessage = (
   run: Run,
   message: Unrouted<MessageNews>,
   source: Source | undefined
-): MessageNews => ({
-  ...message,
-  where: messageWhere(run, message.sender, isUser(run, source), message.target),
-});
+): MessageNews => {
+  const fromUser = isUser(run, source);
+
+  return {
+    ...message,
+    highlight: isHighlight(run, message, fromUser),
+    where: messageWhere(run, message.sender, fromUser, message.target),
+  };
+};
 
 /**
  * A Message Self said, as the Owner's intent, with where it belongs.
@@ -269,8 +275,39 @@ export const routeMessage = (
  */
 export const routeOurs = (run: Run, message: Unrouted<MessageNews>): MessageNews => ({
   ...message,
+  highlight: false,
   where: messageWhere(run, message.sender, true, message.target),
 });
+
+/**
+ * The Timeline an Owner's `Read` marks: the Network's own for no Target, else the one
+ * Target's, read as a `Say`'s is, with a Direct Message partner's `existing`, since
+ * marking read starts no Timeline. A list, a mask, or anything else that names no one
+ * Timeline marks none. Any `,` makes a list, before any item is read, so `#a,`, `,#a`,
+ * and `#a,,` name no one Timeline, though only `#a` is in each.
+ * @param run - The step.
+ * @param target - The Target, as the Owner named it, or `null` for the Network's own.
+ * @returns The Timeline, or `undefined` for none.
+ */
+export const markedBy = (run: Run, target: string | null): Marked | undefined => {
+  if (target === null) {
+    return { _tag: "Network" };
+  }
+
+  if (target.includes(",")) {
+    return undefined;
+  }
+
+  const [only] = parseTargets(namingNow(run), target);
+
+  if (only === undefined || only._tag === "Other") {
+    return undefined;
+  }
+
+  return only._tag === "Channel"
+    ? { _tag: "Channel", ...named(run, only.name) }
+    : { _tag: "Direct", existing: true, ...named(run, only.nick) };
+};
 
 /**
  * An Activity, with where it belongs.

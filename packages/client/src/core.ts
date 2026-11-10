@@ -29,6 +29,7 @@ import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
+import { read } from "./markers.ts";
 import type { EndReason } from "./news.ts";
 import {
   before,
@@ -715,6 +716,11 @@ const dispatch = (run: Run, input: Input): void => {
 
     case "Say": {
       say(run, input);
+      break;
+    }
+
+    case "Read": {
+      read(run, input);
       break;
     }
 

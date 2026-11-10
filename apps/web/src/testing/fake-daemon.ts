@@ -132,6 +132,7 @@ export const liberaConfiguration: ConfigurationOnWire = {
   declined: [],
   enabled: true,
   fallbackEncoding: "windows-1252",
+  highlights: [],
   ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
   login: { _tag: "None" },
   nicks: ["iirc"],

@@ -28,6 +28,7 @@ import type {
   Happened as WireHappened,
   IgnoredReason as WireIgnoredReason,
   Knowledge as WireKnowledge,
+  Marked as WireMarked,
   NetworkInspection as WireNetworkInspection,
   NetworkStatus as WireNetworkStatus,
   News as WireNews,
@@ -39,6 +40,7 @@ import type {
   EndReason,
   IgnoredReason,
   Inspection,
+  Marked,
   ModeChange,
   News,
   RefusedReason,
@@ -379,6 +381,12 @@ const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
       return wire;
     }
 
+    case "NoTimeline": {
+      const wire: Case<IgnoredReason, WireIgnoredReason, "NoTimeline"> = { _tag: "NoTimeline" };
+
+      return wire;
+    }
+
     default: {
       return source satisfies never;
     }
@@ -421,6 +429,41 @@ const where = (source: Where): WireWhere => {
 
     case "Network": {
       const wire: Case<Where, WireWhere, "Network"> = { _tag: "Network" };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+const marked = (source: Marked): WireMarked => {
+  switch (source._tag) {
+    case "Channel": {
+      const wire: Case<Marked, WireMarked, "Channel"> = {
+        _tag: "Channel",
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "Direct": {
+      const wire: Case<Marked, WireMarked, "Direct"> = {
+        _tag: "Direct",
+        existing: source.existing,
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "Network": {
+      const wire: Case<Marked, WireMarked, "Network"> = { _tag: "Network" };
 
       return wire;
     }
@@ -496,6 +539,7 @@ const news = (source: News): WireNews => {
       const wire: Case<News, WireNews, "Message"> = {
         _tag: "Message",
         at: fact(source.at, same),
+        highlight: source.highlight,
         id: fact(source.id, same),
         kind: source.kind,
         live: source.live,
@@ -506,6 +550,16 @@ const news = (source: News): WireNews => {
         target: source.target,
         text: source.text,
         where: source.where.map(where),
+      };
+
+      return wire;
+    }
+
+    case "ReadMarker": {
+      const wire: Case<News, WireNews, "ReadMarker"> = {
+        _tag: "ReadMarker",
+        read: source.read,
+        where: marked(source.where),
       };
 
       return wire;

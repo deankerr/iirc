@@ -43,6 +43,7 @@ A transcript is one item per line, and ends with a newline. `print(parse(text))`
 | `!! configure` | `!! configure +#iirc -#old` | The Owner's Configuration, whole, after these changes to it. With no changes, the scenario's Configuration as it stands. |
 | `!! say` | `!! say #iirc :hello` | A `Say`. `notice` and `action` say the other kinds. Intent ids are `i1`, `i2`, … in order. |
 | `!! retry` | `!! retry` | A `Retry`. |
+| `!! read` | `!! read #iirc t+5s`, `!! read t+5s` | A `Read` up to an instant, of a Target, or with none, of the Network's own Timeline. |
 | `+Ns` | `+60s`, `+250ms`, `+2m` | The fake clock moves on. Each timer that falls due fires in order, at its own `due`, and its outputs are expected next. |
 | `??` | `?? ignored Malformed MODE` | A News of this step, written as `describeNews` writes it. |
 | `...` | `...` | Any outputs and News, up to the next expectation. |
@@ -59,27 +60,29 @@ The changes `!! configure` takes, separated by one space:
 | `enable`, `disable` | Turn the Network on or off. |
 | `decline=multi-prefix`, `accept=multi-prefix` | Decline a Feature, or stop declining it. |
 | `realname=new`, `nicks=one,two` | The realname registration sends, with no space, or the nicks it offers, in order. |
+| `highlights=release,iirc`, `highlights=` | The words that make a Message a Highlight, or none. |
 | `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw` | How Self logs in: not at all, or with SASL to an account, with its Credential's name, required or optional. |
 
 Instants are written against the clock, which starts at the epoch, 2026-01-01T00:00:00.000Z: `t+13s`, `t+1500ms`, `t-5s`.
 
 ## News, as `??` writes it
 
-A `??` matches a News when its text is exactly what `describeNews(news, at)` writes, with `at` the time of the input that made it. Defaults are left out, so the common case is short: a time known by `receipt` at the input's time, an unknown id, live, no client-only tags, and not ours.
+A `??` matches a News when its text is exactly what `describeNews(news, at)` writes, with `at` the time of the input that made it. Defaults are left out, so the common case is short: a time known by `receipt` at the input's time, an unknown id, live, not a Highlight, no client-only tags, and not ours.
 
 | News | Example |
 | --- | --- |
-| `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl`, `?? ignored Unsendable PONG`, `?? ignored UnmatchedEcho` |
+| `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl`, `?? ignored Unsendable PONG`, `?? ignored UnmatchedEcho`, `?? ignored NoTimeline` |
 | `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404`, `?? refused i3 Unsent` |
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
 | `Refolded` | `?? refolded ascii` |
-| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi` |
+| `ReadMarker` | `?? read-marker t+5s in=channel:#iirc`, `?? read-marker t+1s in=network` |
+| `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi`, and `highlight` after the time, id, and `history` for a Highlight: `?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hi` |
 | `Confirmed` | `?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello` |
 | `Activity` | `?? activity Joined #iirc peer in=channel:#iirc`, `?? activity Kicked #iirc peer by=op in=channel:#iirc :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc`, `?? activity TopicChanged #iirc by=op setBy=op in=channel:#iirc :topic`, `?? activity AwayChanged peer back in=existing-direct:peer` |
 
-A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, and `history`.
+A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, `history`, and `highlight`. A Read Marker's one `where` is written the same way, after its instant.
 
 | `where` | Written |
 | --- | --- |

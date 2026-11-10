@@ -40,7 +40,9 @@ export type Change =
   /** `realname=new`: the realname registration sends, with no space in it. */
   | { readonly _tag: "Realname"; readonly realname: string }
   /** `nicks=one,two`: the nicks registration offers, in order. */
-  | { readonly _tag: "Nicks"; readonly nicks: readonly [string, ...string[]] };
+  | { readonly _tag: "Nicks"; readonly nicks: readonly [string, ...string[]] }
+  /** `highlights=one,two`: the words that make a Message a Highlight, or none with `highlights=`. */
+  | { readonly _tag: "Highlights"; readonly words: readonly string[] };
 
 /** What the Owner does, written after `!!`. */
 export type Owner =
@@ -49,7 +51,9 @@ export type Owner =
   /** `!! say #iirc :hello`, `!! notice …`, or `!! action …`. Intent ids are given in order. */
   | { readonly _tag: "Say"; readonly kind: SayKind; readonly target: string; readonly text: string }
   /** `!! retry`. */
-  | { readonly _tag: "Retry" };
+  | { readonly _tag: "Retry" }
+  /** `!! read #iirc t+5s`, or `!! read t+5s` for the Network's own Timeline. */
+  | { readonly _tag: "Read"; readonly target: string | null; readonly read: number };
 
 /** One line of a transcript. */
 export type Item =
@@ -421,6 +425,12 @@ const readSetting = (token: string): Change | undefined => {
     return { _tag: "Realname", realname: token.slice(9) };
   }
 
+  if (token.startsWith("highlights=")) {
+    const words = token.slice(11);
+
+    return { _tag: "Highlights", words: words === "" ? [] : words.split(",") };
+  }
+
   const [first, ...rest] = token.startsWith("nicks=") ? token.slice(6).split(",") : [];
 
   if (first !== undefined && first !== "" && rest.every((each) => each !== "")) {
@@ -499,6 +509,10 @@ const writeChange = (change: Change): string => {
       return `nicks=${change.nicks.join(",")}`;
     }
 
+    case "Highlights": {
+      return `highlights=${change.words.join(",")}`;
+    }
+
     case "Login": {
       const { login } = change;
 
@@ -518,6 +532,19 @@ const readOwner = (text: string): Result.Result<Owner, string> => {
     return Result.succeed({ _tag: "Retry" });
   }
 
+  if (text.startsWith("read ")) {
+    const [first, second, ...rest] = text.slice(5).split(" ");
+    const read = readInstant(second ?? first ?? "");
+
+    return read === undefined || rest.length > 0 || first === ""
+      ? Result.fail("not `read [<target>] <instant>`")
+      : Result.succeed({
+          _tag: "Read",
+          read,
+          target: second === undefined ? null : (first ?? null),
+        });
+  }
+
   if (text === "configure" || text.startsWith("configure ")) {
     const tokens = text.split(" ").slice(1);
 
@@ -532,7 +559,9 @@ const readOwner = (text: string): Result.Result<Owner, string> => {
   const colon = rest.indexOf(" :");
 
   if (kind === undefined || colon <= 0 || rest.slice(0, colon).includes(" ")) {
-    return Result.fail("not `configure …`, `say|notice|action <target> :<text>`, or `retry`");
+    return Result.fail(
+      "not `configure …`, `say|notice|action <target> :<text>`, `read [<target>] <instant>`, or `retry`"
+    );
   }
 
   return Result.succeed({
@@ -557,6 +586,14 @@ const writeOwner = (owner: Owner): string => {
       return "retry";
     }
 
+    case "Read": {
+      return [
+        "read",
+        ...(owner.target === null ? [] : [owner.target]),
+        writeInstant(owner.read),
+      ].join(" ");
+    }
+
     default: {
       return owner satisfies never;
     }
@@ -571,6 +608,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["connection-failed", "ConnectionFailed"],
   ["ignored", "Ignored"],
   ["message", "Message"],
+  ["read-marker", "ReadMarker"],
   ["refolded", "Refolded"],
   ["refused", "Refused"],
   ["session-began", "SessionBegan"],
