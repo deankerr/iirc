@@ -87,6 +87,17 @@
         "vitest": "catalog:",
       },
     },
+    "packages/outbox": {
+      "name": "@iirc/outbox",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "fast-check": "4.10.2",
+        "vitest": "catalog:",
+      },
+    },
     "packages/protocol": {
       "name": "@iirc/protocol",
       "version": "0.0.0",
@@ -227,6 +238,8 @@
     "@iirc/daemon": ["@iirc/daemon@workspace:packages/daemon"],
 
     "@iirc/journal-sqlite": ["@iirc/journal-sqlite@workspace:packages/journal-sqlite"],
+
+    "@iirc/outbox": ["@iirc/outbox@workspace:packages/outbox"],
 
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 

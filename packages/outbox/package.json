@@ -1,0 +1,19 @@
+{
+  "name": "@iirc/outbox",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/outbox.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "vitest": "catalog:"
+  }
+}
