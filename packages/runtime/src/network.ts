@@ -475,7 +475,9 @@ const drive = <S>(
             return yield* cutOff(connection, held);
           }
 
-          if (filled.length > 0) {
+          // A `PING` or `PONG` waiting goes before the next filled Line, as it would before
+          // any other: a long SASL response must not hold a keepalive past its timeout.
+          if (filled.length > 0 && (yield* Ref.get(held.outbox)).ahead.length === 0) {
             const spent = yield* Ref.modify(held.outbox, (waiting) => {
               const result = spend(waiting, at);
 

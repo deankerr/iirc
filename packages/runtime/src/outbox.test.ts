@@ -738,6 +738,40 @@ describe("review round 1", () => {
     });
   });
 
+  it("lets a PONG go between the Lines of a long SASL response", async () => {
+    const heard = await runTest((world) =>
+      Effect.gen(function* () {
+        const credential = CredentialName.make("account");
+        const ponged: Output = { _tag: "Send", connection: first, line: line(pong("keep")) };
+
+        const response: Output = {
+          _tag: "SendSecret",
+          connection: first,
+          line: { _tag: "AuthenticatePlain", authcid: "iirc", authzid: "iirc", credential },
+        };
+
+        yield* world.vault.hold(credential, Redacted.make("p".repeat(900)));
+
+        const { call } = yield* opened(
+          world,
+          scripted(
+            script({ outputs: [response], when: "Opened" }, { outputs: [ponged], when: "Received" })
+          ),
+          { pacing: { burst: 1, interval: 1000 } }
+        );
+
+        yield* heardNow(call);
+        yield* call.say(new TextEncoder().encode("PING :keep"));
+        yield* TestClock.adjust(10_000);
+
+        return (yield* heardNow(call)).map((each) => each.split(" ")[0]);
+      })
+    );
+
+    // The first AUTHENTICATE left at once; the PONG takes the next token.
+    expect(heard).toStrictEqual(["PONG", "AUTHENTICATE", "AUTHENTICATE", "AUTHENTICATE"]);
+  });
+
   it("leaves a long SASL response one interval apart, every Line of it", async () => {
     const heard = await runTest((world) =>
       Effect.gen(function* () {
