@@ -547,6 +547,8 @@ const known =
         },
       ])
     ),
+    chantypes: undefined,
+    declared: undefined,
     self: undefined,
     session: { _tag: "Offline", since: undefined },
     users: new Map(),

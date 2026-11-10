@@ -626,6 +626,8 @@ const sessionKnowledge = (source: Knowledge["session"]): WireSessionKnowledge =>
 export const knowledge = (source: Knowledge): Fields<Knowledge, WireKnowledge> => ({
   casemapping: source.casemapping,
   channels: [...source.channels].map(([key, one]) => channel(key, one)),
+  chantypes: source.chantypes ?? null,
+  declared: source.declared ?? null,
   self: source.self === undefined ? null : user(source.self),
   session: sessionKnowledge(source.session),
   users: [...source.users].map(([key, one]) => ({ ...user(one), key })),
@@ -754,6 +756,15 @@ const delivery = (source: Delivery): WireDelivery => {
     case "Unconfirmed":
     case "Unsent": {
       const wire: Case<Delivery, WireDelivery, typeof source._tag> = { _tag: source._tag };
+
+      return wire;
+    }
+
+    case "Rejected": {
+      const wire: Case<Delivery, WireDelivery, "Rejected"> = {
+        _tag: "Rejected",
+        reply: source.reply,
+      };
 
       return wire;
     }

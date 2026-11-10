@@ -6,7 +6,7 @@
  */
 export { defaultListen, layerDaemon, layerLogger } from "./daemon.ts";
 
-export type { DaemonOptions, Listen } from "./daemon.ts";
+export type { Beside, DaemonOptions, Listen } from "./daemon.ts";
 
 export { ApiHandlers, ApiRoutes, ChangesPage, Heartbeat, maxBodySize } from "./handlers.ts";
 

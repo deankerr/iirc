@@ -74,7 +74,11 @@ const stopGracefully = (ircd: Ircd, nick: string) =>
 
     const daemon = yield* startDaemon({ dataDir }, key);
 
-    yield* daemon.api.networks.configure({ params: { network }, payload: configuration });
+    yield* daemon.api.networks.configure({
+      params: { network },
+      payload: configuration,
+      query: {},
+    });
     yield* joined(daemon.api);
 
     const quitting = Effect.promise(
@@ -135,7 +139,7 @@ describe("ngircd, on the floor", () => {
         );
 
         peer.send(`JOIN ${channel}`);
-        yield* api.networks.configure({ params: { network }, payload: floor() });
+        yield* api.networks.configure({ params: { network }, payload: floor(), query: {} });
         const known = yield* joined(api);
 
         const saying = yield* api.networks.say({
@@ -242,7 +246,7 @@ describe("ngircd, on the floor", () => {
         // The first Daemon: on, joined, and told something.
         const first = yield* startDaemon({ dataDir }, key);
 
-        yield* first.api.networks.configure({ params: { network }, payload: floor() });
+        yield* first.api.networks.configure({ params: { network }, payload: floor(), query: {} });
         yield* joined(first.api);
         peer.send(`PRIVMSG ${channel} :before the restart`);
 
@@ -347,6 +351,7 @@ describe("ngircd, paced and stopped gracefully", () => {
             ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
             nicks: ["iirc"],
           }),
+          query: {},
         });
         yield* joined(api);
 
@@ -499,6 +504,7 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
             login: { _tag: "Sasl", account: "iirc", credential, required: true },
             nicks: ["iirc"],
           }),
+          query: {},
         });
         const known = yield* joined(api);
 
@@ -572,6 +578,7 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
         yield* daemon.api.networks.configure({
           params: { network },
           payload: configured({ ircds: [{ host: "ergo.test", port: tlsPort, tls: true }] }),
+          query: {},
         });
 
         const happened = yield* followNews(daemon.api, 0, (all) =>

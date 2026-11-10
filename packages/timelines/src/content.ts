@@ -14,6 +14,8 @@ import type { Fact } from "@iirc/client/known";
  * - `Unconfirmed`: sent, and the Ircd will not echo it, so delivery is unknown.
  * - `Confirmed`: the Ircd echoed it, with its own time, id, and final text, which may differ from ours.
  * - `Unsent`: at least part of it never left, because its Connection ended first.
+ * - `Rejected`: the Ircd refused it, with `reply`, the numeric or standard reply's code,
+ *   never the reply's text.
  */
 export type Delivery =
   | { readonly _tag: "Pending" }
@@ -24,7 +26,8 @@ export type Delivery =
       readonly id: Fact<MessageId>;
       readonly text: string;
     }
-  | { readonly _tag: "Unsent" };
+  | { readonly _tag: "Unsent" }
+  | { readonly _tag: "Rejected"; readonly reply: string };
 
 /** That we said a Message, as the Owner's intent, and where it stands. */
 export interface OursItem {

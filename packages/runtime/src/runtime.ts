@@ -5,7 +5,15 @@
  * @packageDocumentation
  */
 import { IntentId } from "@iirc/client";
-import type { Client, Inspection, NetworkConfiguration, SayKind, TimerTable } from "@iirc/client";
+import type {
+  Client,
+  Inspection,
+  NetworkConfiguration,
+  News,
+  RefusedReason,
+  SayKind,
+  TimerTable,
+} from "@iirc/client";
 import type { Knowledge } from "@iirc/client/known";
 import { defaultCapacity, defaultPacing } from "@iirc/outbox";
 import type { Pacing } from "@iirc/outbox";
@@ -28,6 +36,7 @@ import {
 import { Journal, NetworkId } from "./journal.ts";
 import type { JournalFailed, Sequence } from "./journal.ts";
 import {
+  changedSince,
   halt,
   heldConnections,
   NetworkStopped,
@@ -35,18 +44,26 @@ import {
   startNetwork,
   stopGracefully,
   tell,
+  tellConfiguration,
 } from "./network.ts";
-import type { HeldConnection, Network, NetworkStatus, Ports } from "./network.ts";
+import type {
+  ConfiguredAt,
+  HeldConnection,
+  Network,
+  NetworkStatus,
+  Ports,
+  ConfigurationChanged,
+} from "./network.ts";
 import { fresh, newsAfter, refold } from "./replay.ts";
-import type { Happened } from "./replay.ts";
+import type { Happened, InForce } from "./replay.ts";
 import { Transport } from "./transport.ts";
 import { Vault } from "./vault.ts";
 
-export { NetworkStopped } from "./network.ts";
+export { ConfigurationChanged, NetworkStopped } from "./network.ts";
 
-export type { HeldConnection, NetworkStatus } from "./network.ts";
+export type { ConfiguredAt, HeldConnection, NetworkStatus } from "./network.ts";
 
-export type { Happened } from "./replay.ts";
+export type { Happened, InForce } from "./replay.ts";
 
 /** No Network by this id has been configured. */
 export class UnknownNetwork extends Schema.TaggedError<
@@ -77,6 +94,43 @@ export interface Saying {
    */
   readonly intent?: IntentId | undefined;
 }
+
+/** Why the Client refused a `Say` in the step that took it: no Session, or no Line can carry it. */
+export type StepRefusal = Extract<RefusedReason, { readonly _tag: "Offline" | "Unsendable" }>;
+
+/**
+ * What a `say` answers: the `Say` stepped and its Message reported, or refused by the
+ * Client in that same step. Either way it was journaled at `sequence`. A refusal that
+ * comes later, `Rejected` or `Unsent`, comes as News.
+ */
+export type SayOutcome =
+  | { readonly _tag: "Said"; readonly intent: IntentId; readonly sequence: Sequence }
+  | {
+      readonly _tag: "Refused";
+      readonly intent: IntentId;
+      readonly sequence: Sequence;
+      readonly reason: StepRefusal;
+    };
+
+/**
+ * The refusal of a `Say` in its own step's News, if any.
+ * @param news - The step's News.
+ * @param intent - The `Say`'s intent.
+ * @returns Its refusal, or none.
+ */
+const refusalIn = (news: readonly News[], intent: IntentId): StepRefusal | undefined => {
+  for (const one of news) {
+    if (
+      one._tag === "Refused" &&
+      one.intent === intent &&
+      (one.reason._tag === "Offline" || one.reason._tag === "Unsendable")
+    ) {
+      return one.reason;
+    }
+  }
+
+  return undefined;
+};
 
 /** A Network as the Runtime holds it, for agents and debugging. */
 export interface NetworkInspection {
@@ -112,19 +166,29 @@ const millisOf = (input: Duration.Input | undefined, fallback: Duration.Duration
 
 /** What the Runtime offers. */
 export interface RuntimeService {
-  /** Journals a `Configured`, and waits until it is stepped. The first one for an id adds the Network. */
+  /**
+   * Journals a `Configured`, and waits until it is stepped. The first one for an id adds
+   * the Network. With `ifSequence`, the sequence of the `Configured` it was made from, or
+   * `0` for none, it is journaled only if that is still the one in force when its turn
+   * comes, and is otherwise `ConfigurationChanged`, with nothing journaled and no Network
+   * added.
+   */
   readonly configure: (
     network: NetworkId,
-    configuration: NetworkConfiguration
-  ) => Effect.Effect<Sequence, NetworkStopped>;
-  /** Journals a `Say`, under the caller's intent id or one the Runtime names, and waits until it is stepped. */
+    configuration: NetworkConfiguration,
+    ifSequence?: ConfiguredAt
+  ) => Effect.Effect<Sequence, NetworkStopped | ConfigurationChanged>;
+  /** The Configuration in force, and the sequence of the `Configured` that set it. */
+  readonly configuration: (network: NetworkId) => Effect.Effect<InForce, UnknownNetwork>;
+  /**
+   * Journals a `Say`, under the caller's intent id or one the Runtime names, and waits
+   * until it is stepped. It answers with what that step already knew: `Said`, or `Refused`
+   * when the Client refused it in the same step, as `Offline` or `Unsendable`.
+   */
   readonly say: (
     network: NetworkId,
     saying: Saying
-  ) => Effect.Effect<
-    { readonly intent: IntentId; readonly sequence: Sequence },
-    UnknownNetwork | NetworkStopped
-  >;
+  ) => Effect.Effect<SayOutcome, UnknownNetwork | NetworkStopped>;
   /**
    * Whether a `Say` under this intent was journaled for the Network, by its sequence.
    * It reads the Network's Inputs once, to the Journal's end as it stood, and ends. A
@@ -239,31 +303,53 @@ export const makeRuntime = <S>(
           : Effect.succeed(network);
       });
 
-    const findOrAdd = (id: NetworkId) =>
+    // A Network that does not exist is added only by a `configure` made from none, so a
+    // refused precondition adds nothing.
+    const findOrAdd = (id: NetworkId, ifSequence: ConfiguredAt | undefined) =>
       adding.withPermit(
-        Effect.flatMap(Effect.all([Ref.get(held), Ref.get(closed)]), ([networks, over]) => {
-          const network = networks.get(id);
+        Effect.flatMap(
+          Effect.all([Ref.get(held), Ref.get(closed)]),
+          ([networks, over]): Effect.Effect<Network<S>, NetworkStopped | ConfigurationChanged> => {
+            const network = networks.get(id);
 
-          if (network !== undefined) {
-            return Effect.succeed(network);
+            if (network !== undefined) {
+              return Effect.succeed(network);
+            }
+
+            if (over) {
+              return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
+            }
+
+            const changed = changedSince(id, undefined, ifSequence);
+
+            if (changed !== undefined) {
+              return Effect.fail(changed);
+            }
+
+            return startNetwork(ports, id, fresh(client), false).pipe(
+              Scope.provide(drivers),
+              Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
+              Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
+            );
           }
-
-          if (over) {
-            return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
-          }
-
-          return startNetwork(ports, id, fresh(client), false).pipe(
-            Scope.provide(drivers),
-            Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
-            Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
-          );
-        })
+        )
       );
 
     const service: RuntimeService = {
-      configure: (id, configuration) =>
-        Effect.flatMap(findOrAdd(id), (network) =>
-          tell(network, (at) => ({ _tag: "Configured", at, configuration }))
+      configuration: (id) =>
+        Effect.flatMap(find(id), (network) =>
+          Effect.flatMap(Ref.get(network.current), ({ configured }) =>
+            configured === undefined
+              ? Effect.fail(new UnknownNetwork({ network: id }))
+              : Effect.succeed(configured)
+          )
+        ),
+      configure: (id, configuration, ifSequence) =>
+        Effect.flatMap(findOrAdd(id, ifSequence), (network) =>
+          Effect.map(
+            tellConfiguration(network, configuration, ifSequence),
+            ({ sequence }) => sequence
+          )
         ),
       inspect: (id) =>
         Effect.gen(function* () {
@@ -294,7 +380,12 @@ export const makeRuntime = <S>(
       ),
       news: (from = {}) => newsAfter(client, ports.journal, from.after),
       retry: (id) =>
-        Effect.flatMap(find(id), (network) => tell(network, (at) => ({ _tag: "Retry", at }))),
+        Effect.flatMap(find(id), (network) =>
+          Effect.map(
+            tell(network, (at) => ({ _tag: "Retry", at })),
+            ({ sequence }) => sequence
+          )
+        ),
       said: (id, intent) =>
         ports.journal.read({ network: id }).pipe(
           Stream.filter(
@@ -312,7 +403,7 @@ export const makeRuntime = <S>(
           const intent = saying.intent ?? (yield* intentId);
           const { kind, target, text } = saying;
 
-          const sequence = yield* tell(network, (at) => ({
+          const { news, sequence } = yield* tell(network, (at) => ({
             _tag: "Say",
             at,
             intent,
@@ -321,7 +412,11 @@ export const makeRuntime = <S>(
             text,
           }));
 
-          return { intent, sequence };
+          const reason = refusalIn(news, intent);
+
+          return reason === undefined
+            ? ({ _tag: "Said", intent, sequence } as const)
+            : ({ _tag: "Refused", intent, reason, sequence } as const);
         }),
     };
 

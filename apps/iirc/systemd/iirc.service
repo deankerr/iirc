@@ -1,0 +1,38 @@
+# iirc as a systemd user service: the Daemon with the web frontend built in, on 127.0.0.1:7667.
+# apps/iirc/README.md#install says how to install it. It holds no secret: the API keys and
+# Credentials live in the data directory.
+
+[Unit]
+Description=iirc, an always-on IRC client
+Documentation=https://github.com/deankerr/iirc/blob/main/apps/iirc/README.md#install
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/iirc daemon --data-dir %h/.local/share/iirc --web
+Restart=on-failure
+RestartSec=5s
+# A stop takes about 5.5 s with storage that answers promptly (packages/daemon/README.md),
+# and SIGTERM is how the Daemon is asked to stop. This leaves room for a slow disk.
+TimeoutStopSec=30s
+# Logs are logfmt on stderr, which the journal keeps: journalctl --user -u iirc
+SyslogIdentifier=iirc
+
+# Hardening that a user service can have, each tested to leave the Daemon working. The file
+# system is read-only to it, and the home directory is an empty one, but for the executable
+# and the data directory, which is all it can write. The data directory must exist before the
+# first start, which `iirc key create` sees to: without it the unit fails to start, with
+# status 226/NAMESPACE, rather than writing to a home directory that vanishes on stop. The JIT
+# needs memory both writable and executable, so MemoryDenyWriteExecute stays off.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=%h/.local/bin/iirc
+BindPaths=%h/.local/share/iirc
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target

@@ -8,9 +8,14 @@ import { Effect, Exit, Fiber, Latch, Option, Redacted, References, Schema, Strea
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
-import { Entry, JournalFailed, NetworkId } from "./journal.ts";
+import { Entry, JournalFailed, NetworkId, Sequence } from "./journal.ts";
 import type { JournalRecord } from "./journal.ts";
-import { DecodersMissing, NetworkStopped } from "./runtime.ts";
+import {
+  ConfigurationChanged,
+  DecodersMissing,
+  NetworkStopped,
+  UnknownNetwork,
+} from "./runtime.ts";
 import type { Happened, NetworkStatus } from "./runtime.ts";
 import {
   awaitRecord,
@@ -623,6 +628,49 @@ describe("`said`", () => {
   });
 });
 
+describe("`say`", () => {
+  it("answers with a refusal of its own Say in its step, and Said for anything else", async () => {
+    const offline = IntentId.make("offline");
+    const later = IntentId.make("later");
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(
+          world,
+          scripted([
+            {
+              news: [{ _tag: "Refused", intent: offline, reason: { _tag: "Offline" } }],
+              when: "Say",
+            },
+            // A refusal of another intent, or one only an Ircd's reply gives, is not its own.
+            {
+              news: [
+                { _tag: "Refused", intent: offline, reason: { _tag: "Unsendable" } },
+                { _tag: "Refused", intent: later, reason: { _tag: "Rejected", reply: "404" } },
+              ],
+              when: "Say",
+            },
+          ])
+        );
+
+        yield* runtime.configure(libera, configuration);
+
+        const saying = { kind: "Privmsg", target: "#iirc", text: "hi" } as const;
+
+        return [
+          yield* runtime.say(libera, { ...saying, intent: offline }),
+          yield* runtime.say(libera, { ...saying, intent: later }),
+        ];
+      })
+    );
+
+    expect(result).toStrictEqual([
+      { _tag: "Refused", intent: offline, reason: { _tag: "Offline" }, sequence: 2 },
+      { _tag: "Said", intent: later, sequence: 3 },
+    ]);
+  });
+});
+
 describe("the News stream", () => {
   it("gives every Network's News from a sequence, in order, then live", async () => {
     const result = await runTest((world) =>
@@ -933,5 +981,152 @@ describe("restarting", () => {
       ],
       pending: new Map([[TimerId.make("pending"), at(5000)]]),
     });
+  });
+});
+
+const changed = (sequence: number | null) =>
+  new ConfigurationChanged({
+    network: libera,
+    sequence: sequence === null ? null : Sequence.make(sequence),
+  });
+
+describe("the Configuration in force", () => {
+  const renamed = configured({ nicks: ["renamed"] });
+
+  it("is read with the sequence that set it, and again after a restart", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const first = yield* startRuntime(world, scripted([]));
+        const before = yield* Effect.flip(first.runtime.configuration(libera));
+
+        yield* first.runtime.configure(libera, configuration);
+        yield* first.runtime.retry(libera);
+        const sequence = yield* first.runtime.configure(libera, renamed);
+        const read = yield* first.runtime.configuration(libera);
+
+        yield* first.close;
+        const second = yield* startRuntime(world, scripted([]));
+
+        return {
+          before,
+          read,
+          restarted: yield* second.runtime.configuration(libera),
+          sequence,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      before: new UnknownNetwork({ network: libera }),
+      read: { configuration: renamed, sequence: 3 },
+      restarted: { configuration: renamed, sequence: 3 },
+      sequence: 3,
+    });
+  });
+
+  it("is replaced only when a precondition still holds, and nothing is journaled when not", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, scripted([]));
+
+        const absent = yield* Effect.flip(
+          runtime.configure(libera, configuration, Sequence.make(1))
+        );
+
+        const listed = yield* runtime.networks;
+        const added = yield* runtime.configure(libera, configuration, 0);
+        const again = yield* Effect.flip(runtime.configure(libera, configuration, 0));
+        const kept = yield* runtime.configure(libera, renamed, added);
+        const stale = yield* Effect.flip(runtime.configure(libera, configuration, added));
+        const plain = yield* runtime.configure(libera, configuration);
+
+        return {
+          absent,
+          added,
+          again,
+          kept,
+          listed: listed.size,
+          outline: yield* outline(world.journal),
+          plain,
+          stale,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      absent: changed(null),
+      added: 1,
+      again: changed(1),
+      kept: 2,
+      listed: 0,
+      outline: ["1 libera Configured", "2 libera Configured", "3 libera Configured"],
+      plain: 3,
+      stale: changed(2),
+    });
+  });
+
+  it("lets exactly one of two racing configures made from the same one through", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, scripted([]));
+        const from = yield* runtime.configure(libera, configuration);
+
+        const both = yield* Effect.all(
+          [
+            Effect.result(runtime.configure(libera, configured({ nicks: ["one"] }), from)),
+            Effect.result(runtime.configure(libera, configured({ nicks: ["two"] }), from)),
+          ],
+          { concurrency: "unbounded" }
+        );
+
+        const won = both.filter((one) => one._tag === "Success");
+        const lost = both.filter((one) => one._tag === "Failure");
+        const inForce = yield* runtime.configuration(libera);
+
+        return {
+          inForce: inForce.sequence,
+          lost: lost.map((one) => one.failure),
+          outline: yield* outline(world.journal),
+          won: won.map((one) => one.success),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      inForce: 2,
+      lost: [changed(2)],
+      outline: ["1 libera Configured", "2 libera Configured"],
+      won: [2],
+    });
+  });
+
+  // A loop of racing pairs, to catch a check made outside the Network's turn.
+  it("never lets two through, however the race falls", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, scripted([]));
+        let from = yield* runtime.configure(libera, configuration);
+        let winners = 0;
+
+        for (let round = 0; round < 25; round += 1) {
+          const both = yield* Effect.all(
+            [
+              Effect.result(runtime.configure(libera, configured({ nicks: ["a"] }), from)),
+              Effect.result(runtime.configure(libera, configured({ nicks: ["b"] }), from)),
+            ],
+            { concurrency: "unbounded" }
+          );
+
+          const won = both.flatMap((one) => (one._tag === "Success" ? [one.success] : []));
+
+          winners += won.length === 1 ? 1 : 0;
+          from = won[0] ?? from;
+        }
+
+        return winners;
+      })
+    );
+
+    expect(result).toBe(25);
   });
 });

@@ -1,0 +1,363 @@
+/**
+ * The Timelines, as atoms: the state the pure core folds, the reads it calls for, and the
+ * one changes stream for the whole page, which feeds it. While the browser is signed in,
+ * `sync` makes every read the core asks for and follows the stream from the place the
+ * core says, and the core decides everything else.
+ *
+ * @packageDocumentation
+ */
+import type { TimelineChangesEvent, TimelineId } from "@iirc/api";
+import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
+import {
+  followFrom,
+  initialTimelines,
+  opened,
+  reduceTimelines,
+  sidebar,
+  wanted,
+} from "@iirc/frontend/timelines";
+import type { Read, Timelines, TimelinesEvent } from "@iirc/frontend/timelines";
+import { Context, Duration, Effect, FiberSet, Schedule, Stream } from "effect";
+import { Atom } from "effect/reactivity";
+import type { AtomRegistry } from "effect/reactivity";
+
+import { DaemonClient } from "../app/daemon-client.ts";
+import { runtime } from "../app/runtime.ts";
+import { signedIn, signInState } from "../sign-in/atoms.ts";
+
+/** Everything the Frontend holds of the Timelines, as the core folds it. */
+export const timelinesState = Atom.make<Timelines>(initialTimelines).pipe(Atom.keepAlive);
+
+/** The Networks and their Timelines, in sidebar order. */
+export const sidebarNetworks = Atom.make((get) => sidebar(get(timelinesState)));
+
+/** The open Timeline, as shown. */
+export const openTimeline = Atom.make((get) => opened(get(timelinesState)));
+
+/** How long the runtime waits, each a duration. */
+export interface WaitTimes {
+  /** A stream that gives nothing for this long, heartbeats included, is gone. */
+  readonly idle: Duration.Input;
+  /** The first wait before asking again after a failure, doubling each time. */
+  readonly retry: Duration.Input;
+  /** The longest wait before asking again. */
+  readonly longest: Duration.Input;
+  /** The wait before following again after the stream ended. */
+  readonly reconnect: Duration.Input;
+}
+
+/** How long the runtime waits: a test makes these short. */
+export class Waits extends Context.Reference<WaitTimes>("@iirc/web/Waits", {
+  defaultValue: () => ({
+    idle: "45 seconds",
+    longest: "15 seconds",
+    reconnect: "1 second",
+    retry: "500 millis",
+  }),
+}) {}
+
+/**
+ * Folds one event into the Timelines' state.
+ * @param registry - The registry the state is in.
+ * @param event - What happened.
+ */
+const happened = (registry: AtomRegistry.AtomRegistry, event: TimelinesEvent) => {
+  registry.set(timelinesState, reduceTimelines(registry.get(timelinesState), event));
+};
+
+/**
+ * Signs the page out: a read was `Unauthorized`, so the sign-in is gone.
+ * @param registry - The registry.
+ */
+const refused = (registry: AtomRegistry.AtomRegistry) => {
+  registry.set(signInState, reduceSignIn(registry.get(signInState), { _tag: "Refused" }));
+};
+
+/** The errors a read gives up on: the Daemon said it has no such thing, or no sign-in. */
+const final: ReadonlySet<string> = new Set(["Unauthorized", "UnknownTimeline", "UnknownNetwork"]);
+
+/**
+ * Asks again after a failure: soon at first, then less often, up to the longest wait.
+ * @returns The schedule.
+ */
+const retrying = Effect.gen(function* () {
+  const { longest, retry } = yield* Waits;
+
+  return Schedule.min([Schedule.exponential(retry), Schedule.spaced(longest)]);
+});
+
+/**
+ * The request a read makes, and the event its answer is.
+ * @param read - The read.
+ * @returns The request.
+ */
+const request = (read: Read) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+
+    switch (read._tag) {
+      case "Networks": {
+        const entries = yield* client.networks.list();
+
+        return { _tag: "NetworksRead", entries } as const;
+      }
+
+      case "List": {
+        const page = yield* client.timelines.list({
+          params: { network: read.network },
+          query: read.after === undefined ? {} : { after: read.after },
+        });
+
+        return { _tag: "ListRead", after: read.after, network: read.network, page } as const;
+      }
+
+      case "Status": {
+        const known = yield* client.networks.known({ params: { network: read.network } });
+
+        return { _tag: "StatusRead", network: read.network, session: known.session } as const;
+      }
+
+      case "Latest": {
+        const window = yield* client.timelines.window({
+          params: { timeline: read.timeline },
+          query: { limit: read.limit },
+        });
+
+        return { _tag: "WindowRead", read, window } as const;
+      }
+
+      case "Older": {
+        const window = yield* client.timelines.window({
+          params: { timeline: read.timeline },
+          query: { before: read.before, limit: read.limit },
+        });
+
+        return { _tag: "WindowRead", read, window } as const;
+      }
+
+      case "Newer": {
+        const window = yield* client.timelines.window({
+          params: { timeline: read.timeline },
+          query: { after: read.after, limit: read.limit },
+        });
+
+        return { _tag: "WindowRead", read, window } as const;
+      }
+
+      default: {
+        return read satisfies never;
+      }
+    }
+  });
+
+/**
+ * Makes one read and folds in its answer. A read the core asked for again, because the
+ * last came back too old to use, waits first, longer each time, and the core is told as
+ * each attempt begins. A failure is asked again
+ * until it succeeds, except a refusal, which signs the page out, and a Timeline or Network
+ * the Daemon says it never had.
+ * @param registry - The registry.
+ * @param read - The read.
+ * @returns The read, which never fails.
+ */
+const perform = (registry: AtomRegistry.AtomRegistry, read: Read) =>
+  Effect.gen(function* () {
+    const { longest, retry } = yield* Waits;
+
+    if (read.attempt > 0) {
+      yield* Effect.sleep(
+        Duration.min(
+          Duration.times(Duration.fromInputUnsafe(retry), 2 ** (read.attempt - 1)),
+          Duration.fromInputUnsafe(longest)
+        )
+      );
+    }
+
+    const schedule = yield* retrying;
+
+    // Each attempt is marked as it begins, after any wait, so the answer is current from
+    // where the stream is when the Daemon is asked, not from when the read was taken on.
+    const attempt = Effect.sync(() => {
+      happened(registry, { _tag: "Requesting", read });
+    }).pipe(Effect.andThen(request(read)));
+
+    yield* attempt.pipe(
+      Effect.retry({ schedule, while: (error) => !final.has(error._tag) }),
+      Effect.match({
+        onFailure: (error) => {
+          if (error._tag === "Unauthorized") {
+            refused(registry);
+          } else if (error._tag === "UnknownTimeline" && "timeline" in read) {
+            happened(registry, { _tag: "Vanished", timeline: read.timeline });
+          } else if (error._tag === "UnknownNetwork" && "network" in read) {
+            happened(registry, { _tag: "NetworkVanished", network: read.network });
+          }
+        },
+        onSuccess: (event) => {
+          happened(registry, event);
+        },
+      })
+    );
+  });
+
+/**
+ * Makes every read the core calls for, each once, as the state changes.
+ * @param registry - The registry.
+ * @param changes - The state, each time it changes.
+ * @returns The reader, which runs until it is interrupted.
+ */
+const reader = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Timelines>) =>
+  Effect.gen(function* () {
+    const reads = yield* FiberSet.make();
+
+    yield* changes.pipe(
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          // The state as it is now, not as it was when this change was queued, so a read
+          // started since is not started again.
+          for (const read of wanted(registry.get(timelinesState))) {
+            happened(registry, { _tag: "ReadStarted", read });
+            yield* FiberSet.run(reads, perform(registry, read));
+          }
+        })
+      )
+    );
+  });
+
+/**
+ * Folds one event of the changes stream into the core. A heartbeat only says the stream
+ * is alive.
+ * @param registry - The registry.
+ * @param event - The event.
+ */
+const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEvent) => {
+  switch (event.event) {
+    case "changed": {
+      happened(registry, { _tag: "Changed", change: event.data, place: event.id });
+      break;
+    }
+
+    case "overflowed": {
+      happened(registry, { _tag: "Overflowed", overflow: event.data, place: event.id });
+      break;
+    }
+
+    case "reset": {
+      happened(registry, { _tag: "Reset", reset: event.data });
+      break;
+    }
+
+    case "heartbeat": {
+      break;
+    }
+
+    default: {
+      event satisfies never;
+    }
+  }
+};
+
+/**
+ * Follows the changes stream for the whole page, from the place the core holds, once the
+ * first reads are in. The place moves with every event, so whenever the stream ends, or
+ * gives nothing for longer than three heartbeats, it is followed again from where it left
+ * off, and so it is when opening it gives no answer for as long. A refusal signs the page
+ * out.
+ * @param registry - The registry.
+ * @param changes - The state, each time it changes.
+ * @returns The follower, which runs until it is interrupted.
+ */
+const follower = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Timelines>) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    const { idle, reconnect } = yield* Waits;
+    const schedule = yield* retrying;
+
+    yield* changes.pipe(
+      Stream.filter((state) => followFrom(state) !== undefined),
+      Stream.take(1),
+      Stream.runDrain
+    );
+
+    const follow = Effect.gen(function* () {
+      const from = followFrom(registry.get(timelinesState));
+
+      // Opening the stream is bounded as its silence is: a request whose answer never
+      // begins is given up, which aborts it, and followed again.
+      const events = yield* client.timelines
+        .changes({
+          headers: {},
+          query: from === null || from === undefined ? {} : { after: from },
+        })
+        .pipe(Effect.timeout(idle));
+
+      yield* events.pipe(
+        Stream.timeout(idle),
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            changed(registry, event);
+          })
+        )
+      );
+    });
+
+    yield* follow.pipe(
+      Effect.retry({ schedule, while: (error) => error._tag !== "Unauthorized" }),
+      Effect.repeat(Schedule.spaced(reconnect)),
+      Effect.catchTag("Unauthorized", () =>
+        Effect.sync(() => {
+          refused(registry);
+        })
+      )
+    );
+  });
+
+/**
+ * While the browser is signed in, the Timelines are read and followed, from nothing each
+ * time it signs in. Mounted once for the page.
+ */
+export const sync = runtime
+  .atom((get) =>
+    Effect.gen(function* () {
+      const { registry } = get;
+
+      registry.set(timelinesState, initialTimelines);
+
+      if (!get(signedIn)) {
+        return;
+      }
+
+      const changes = get.stream(timelinesState);
+
+      yield* Effect.all([reader(registry, changes), follower(registry, changes)], {
+        concurrency: "unbounded",
+        discard: true,
+      });
+    })
+  )
+  .pipe(Atom.keepAlive);
+
+/** Opens a Timeline in the main view. */
+export const open = Atom.fnSync((timeline: TimelineId, get) => {
+  happened(get.registry, { _tag: "Opened", timeline });
+}).pipe(Atom.keepAlive);
+
+/** Asks for what lies before the open Timeline's first item. */
+export const older = Atom.fnSync((timeline: TimelineId, get) => {
+  happened(get.registry, { _tag: "OlderWanted", timeline });
+}).pipe(Atom.keepAlive);
+
+/** Asks for what lies after the open Timeline's last item, when the Owner scrolled back. */
+export const newer = Atom.fnSync((timeline: TimelineId, get) => {
+  happened(get.registry, { _tag: "NewerWanted", timeline });
+}).pipe(Atom.keepAlive);
+
+/** Says whether the Owner is at the latest of the open Timeline. */
+export const following = Atom.fnSync(
+  (
+    { following: at, timeline }: { readonly timeline: TimelineId; readonly following: boolean },
+    get
+  ) => {
+    happened(get.registry, { _tag: "Following", following: at, timeline });
+  }
+).pipe(Atom.keepAlive);

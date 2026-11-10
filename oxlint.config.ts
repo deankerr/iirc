@@ -4,6 +4,7 @@ import type { DummyRuleMap, OxlintOverride } from "oxlint";
 import antiSlop from "ultracite/oxlint/anti-slop";
 import core from "ultracite/oxlint/core";
 import { selectJsPlugins } from "ultracite/oxlint/js-plugins";
+import react from "ultracite/oxlint/react";
 import vitest from "ultracite/oxlint/vitest";
 
 const jsPlugins = selectJsPlugins(["jsdoc-js", "tsdoc"]);
@@ -17,6 +18,7 @@ const jsPlugins = selectJsPlugins(["jsdoc-js", "tsdoc"]);
 interface Pattern {
   readonly group: string[];
   readonly message: string;
+  readonly allowTypeImports?: boolean;
 }
 
 type Imports = NonNullable<DummyRuleMap["no-restricted-imports"]>;
@@ -67,7 +69,10 @@ const coreImports = (production: boolean, ...patterns: readonly Pattern[]): Impo
   },
 ];
 
-const globals = (message: string): NonNullable<DummyRuleMap["no-restricted-globals"]> => [
+const globals = (
+  message: string,
+  more: readonly string[] = []
+): NonNullable<DummyRuleMap["no-restricted-globals"]> => [
   "error",
   ...[
     "Date",
@@ -80,7 +85,24 @@ const globals = (message: string): NonNullable<DummyRuleMap["no-restricted-globa
     "process",
     "Bun",
     "console",
+    ...more,
   ].map((name) => ({ message, name })),
+];
+
+// What a browser page reaches, which the web frontend's core never does.
+const browser = [
+  "window",
+  "document",
+  "location",
+  "history",
+  "navigator",
+  "localStorage",
+  "sessionStorage",
+  "indexedDB",
+  "EventSource",
+  "WebSocket",
+  "XMLHttpRequest",
+  "requestAnimationFrame",
 ];
 
 const noMathRandom = (message: string): NonNullable<DummyRuleMap["no-restricted-properties"]> => [
@@ -139,7 +161,41 @@ const toTimelineStore = (production: boolean) =>
 
 const storeAlone = "A Timeline store reaches the world only through an adapter of its own.";
 
-const tests = ["**/*.test.ts", "**/testing/**"];
+const viewless =
+  "The web frontend's core is pure: no React, no DOM, no Effect services, and no clock. Its state is plain data, and React renders it from `apps/web`.";
+
+const noView: Pattern = {
+  group: ["react", "react/**", "react-dom", "react-dom/**", "react-aria-components"],
+  message: viewless,
+};
+
+// The core reads mIRC formatting and casemapping from the protocol, positions from the
+// fold, and the Configuration's Schema from the Client, to derive its options, which are
+// pure. It takes the API's types for what the runtime parsed, and never its values, which
+// are the HTTP contract.
+const frontendToPure = ours(
+  [
+    "@iirc/protocol/format",
+    "@iirc/protocol/casemapping",
+    "@iirc/client/configuration",
+    "@iirc/timelines",
+    "@iirc/api",
+  ],
+  "`@iirc/frontend` depends only on `@iirc/protocol`'s formatting and casemapping, the Client's Configuration Schema, `@iirc/timelines`, and `@iirc/api`'s types."
+);
+
+const apiTypesOnly: Pattern = {
+  allowTypeImports: true,
+  group: ["@iirc/api"],
+  message: "The web frontend's core takes the API's types, never its values: `import type`.",
+};
+
+const webToApi = ours(
+  ["@iirc/api", "@iirc/frontend/*"],
+  "The web frontend reaches the Daemon only through `@iirc/api`, as every Frontend does, and its core through `@iirc/frontend`."
+);
+
+const tests = ["**/*.test.ts", "**/*.test.tsx", "**/testing/**"];
 
 // Each layer's rules, once for every file and once more, with the test kits refused, for
 // production code.
@@ -168,6 +224,19 @@ const coreFence: OxlintOverride[] = [
     "no-restricted-globals": globals(storeAlone),
     "no-restricted-imports": imports(production, adapters, toTimelineStore(production)),
     "no-restricted-properties": noMathRandom(storeAlone),
+  })),
+  ...layer(["packages/frontend/src/**"], (production) => ({
+    "no-restricted-globals": globals(viewless, browser),
+    "no-restricted-imports": coreImports(
+      production,
+      frontendToPure,
+      noView,
+      ...(production ? [apiTypesOnly] : [])
+    ),
+    "no-restricted-properties": noMathRandom(viewless),
+  })),
+  ...layer(["apps/web/src/**"], (production) => ({
+    "no-restricted-imports": imports(production, webToApi),
   })),
   ...layer(["packages/api/src/**"], (production) => ({
     "no-restricted-imports": imports(
@@ -203,13 +272,20 @@ const coreFence: OxlintOverride[] = [
   },
 ];
 
+// React's rules, for the one package that renders with it.
+const reactRules: OxlintOverride = {
+  files: ["apps/web/**"],
+  ...(react.plugins && { plugins: react.plugins }),
+  ...(react.rules && { rules: react.rules }),
+};
+
 export default defineConfig({
   ...(core.env && { env: core.env }),
   extends: [core, antiSlop, jsPlugins, vitest, effect],
   ignorePatterns: core.ignorePatterns ?? [],
   jsPlugins: jsPlugins.jsPlugins,
   options: { typeAware: true, typeCheck: true },
-  overrides: coreFence,
+  overrides: [reactRules, ...coreFence],
   rules: {
     // `effect/cli` and the platform runtimes are still marked unstable, and we
     // use them on purpose.

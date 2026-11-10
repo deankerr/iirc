@@ -1,0 +1,67 @@
+.composer {
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.failure {
+  color: var(--color-danger);
+}
+
+.hint {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-muted);
+}
+
+.line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+
+.prompt {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  max-width: 16ch;
+  overflow: hidden;
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+.prompt bdi {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* It grows with what is typed, up to six lines, then scrolls. */
+.input {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(6 * var(--line-height) * 1em);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  resize: none;
+  field-sizing: content;
+  caret-color: var(--color-accent);
+}
+
+.input:focus-visible {
+  outline: none;
+}
+
+.line:focus-within {
+  box-shadow: inset var(--space-1) 0 0 var(--color-focus);
+}

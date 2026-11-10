@@ -923,6 +923,74 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
       Effect.gen(function* () {
         yield* apply(store, 2, [
           ...opened(2),
+          added(2, channel, position(0, 2), said("refused", "Pending")),
+          added(2, channel, position(1, 2, 1), said("echoed", "Pending")),
+        ]);
+        yield* apply(store, 3, [
+          {
+            _tag: "Confirmed",
+            at: known(at(4)),
+            id: { _tag: "Unknown" },
+            intent: IntentId.make("intent-echoed"),
+            messageId: undefined,
+            network: libera,
+            sequence: 3,
+            text: "echoed",
+          },
+        ]);
+        yield* apply(store, 4, [
+          {
+            _tag: "Rejected",
+            intent: IntentId.make("intent-refused"),
+            network: libera,
+            reply: "404",
+            sequence: 4,
+          },
+          {
+            _tag: "Rejected",
+            intent: IntentId.make("intent-echoed"),
+            network: libera,
+            reply: "404",
+            sequence: 4,
+          },
+        ]);
+        // The same again changes nothing, so the item keeps the step that last changed it.
+        yield* apply(store, 5, [
+          {
+            _tag: "Rejected",
+            intent: IntentId.make("intent-refused"),
+            network: libera,
+            reply: "404",
+            sequence: 5,
+          },
+        ]);
+
+        const items = yield* store.locate(libera, 2);
+
+        yield* same(
+          "deliveries",
+          items.map((item) => {
+            const delivery = deliveryOf(item);
+
+            return [
+              textOf(item),
+              delivery?._tag === "Rejected" ? `Rejected ${delivery.reply}` : delivery?._tag,
+              item.changed,
+            ];
+          }),
+          [
+            ["refused", "Rejected 404", 4],
+            ["echoed", "Confirmed", 3],
+          ]
+        );
+      }),
+    name: "marks our Message Rejected in place with the Ircd's reply, unless it was confirmed",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
           described(2, third, "Channel", "#c", "#c"),
           added(2, channel, position(0, 2), said("a-first"), "m1"),
           added(2, channel, position(2, 2, 1), said("a-second")),
@@ -1605,6 +1673,89 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         );
       }),
     name: "collapses the Gaps between a Timeline's items, one run for each span",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // The same quiet Timeline, read as pages fitted together at a cursor: every Gap is
+        // in exactly one page, and one that reaches the cursor is the window's holding it.
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(5, 2), said("early")),
+          added(2, channel, position(100, 2, 1), said("late")),
+          gap(2, position(1, 2, 2), position(2, 2, 3)),
+          ...[10, 30, 50, 70].map((ms, n) =>
+            gap(2, position(ms, 2, 4 + n), position(ms + 10, 2, 8 + n))
+          ),
+          gap(2, position(120, 2, 12), undefined),
+        ]);
+
+        const runs = (range: {
+          readonly from?: Position;
+          readonly to?: Position;
+          readonly at: readonly Position[];
+          readonly beganAfter?: Position;
+          readonly endedBefore?: Position;
+        }) =>
+          Effect.map(store.collapsedGaps(libera, range), (each) =>
+            each.map(({ count, from, to }) => [
+              count,
+              from.at - t0,
+              to === undefined ? null : to.at - t0,
+            ])
+          );
+
+        const early = position(5, 2);
+        const late = position(100, 2, 1);
+        // Inside the Gap from 50 to 60, which reaches it.
+        const inside = position(55, 2, 20);
+
+        yield* same(
+          "before the late item, the runs that ended before it",
+          yield* runs({ at: [early], endedBefore: late }),
+          [
+            [1, 1, 2],
+            [4, 10, 80],
+          ]
+        );
+        yield* same("the window holding the late item", yield* runs({ at: [late], from: late }), [
+          [1, 120, null],
+        ]);
+        yield* same(
+          "before a cursor a Gap reaches, without that Gap",
+          yield* runs({ at: [early], endedBefore: inside }),
+          [
+            [1, 1, 2],
+            [2, 10, 40],
+          ]
+        );
+        yield* same(
+          "the window holding the cursor, with it",
+          yield* runs({ at: [inside, late], from: inside }),
+          [
+            [1, 50, 60],
+            [1, 70, 80],
+            [1, 120, null],
+          ]
+        );
+        yield* same(
+          "after a cursor a Gap reaches, without that Gap",
+          yield* runs({ at: [late], beganAfter: inside }),
+          [
+            [1, 70, 80],
+            [1, 120, null],
+          ]
+        );
+        yield* same(
+          "the window ending at the cursor, with it",
+          yield* runs({ at: [early, inside], to: inside }),
+          [
+            [1, 1, 2],
+            [3, 10, 60],
+          ]
+        );
+      }),
+    name: "splits the runs at a cursor, so pages fitted together give each Gap once",
   },
   {
     check: (store) =>

@@ -1,6 +1,13 @@
 import type { IntentId, MessageId } from "@iirc/client";
-import { cursorOf, emptyDirectory } from "@iirc/timelines";
-import type { Change, Descriptor, Directory, Position, TimelineId } from "@iirc/timelines";
+import { cursorOf, delivered, emptyDirectory } from "@iirc/timelines";
+import type {
+  Change,
+  DeliveryChange,
+  Descriptor,
+  Directory,
+  Position,
+  TimelineId,
+} from "@iirc/timelines";
 import { Effect, Option, Ref, Semaphore } from "effect";
 
 import type {
@@ -120,10 +127,7 @@ const keep = (memory: Memory, stored: Stored) => {
  * @param memory - The store.
  * @param change - The confirmation or the news that it never left.
  */
-const deliver = (
-  memory: Memory,
-  change: Extract<Change, { readonly _tag: "Confirmed" | "Unsent" }>
-) => {
+const deliver = (memory: Memory, change: DeliveryChange) => {
   for (const [timeline, items] of memory.items) {
     for (const [cursor, stored] of items) {
       const { content } = stored.item;
@@ -132,17 +136,16 @@ const deliver = (
         stored.item.network !== change.network ||
         stored.intent !== change.intent ||
         content._tag !== "Message" ||
-        content.ours === undefined ||
-        content.ours.delivery._tag === "Confirmed" ||
-        (change._tag === "Unsent" && content.ours.delivery._tag === "Unsent")
+        content.ours === undefined
       ) {
         continue;
       }
 
-      const delivery =
-        change._tag === "Confirmed"
-          ? { _tag: "Confirmed" as const, at: change.at, id: change.id, text: change.text }
-          : { _tag: "Unsent" as const };
+      const delivery = delivered(content.ours.delivery, change);
+
+      if (delivery === undefined) {
+        continue;
+      }
 
       const idTaken =
         change._tag === "Confirmed" &&
@@ -221,7 +224,8 @@ const applyChange = (memory: Memory, change: Change) => {
     }
 
     case "Confirmed":
-    case "Unsent": {
+    case "Unsent":
+    case "Rejected": {
       deliver(memory, change);
       break;
     }
@@ -477,11 +481,22 @@ const collapse = (
     readonly from?: Position | undefined;
     readonly to?: Position | undefined;
     readonly at: readonly Position[];
+    readonly beganAfter?: Position | undefined;
+    readonly endedBefore?: Position | undefined;
   }
 ): readonly CollapsedGap[] => {
   const runs = new Map<number, Gap[]>();
+  const { beganAfter, endedBefore } = range;
 
-  for (const gap of overlapping(gaps, range.from, range.to)) {
+  // At a cursor, a Gap that reaches it is the window's that holds the cursor's item.
+  const kept = overlapping(gaps, range.from, range.to).filter(
+    (gap) =>
+      (beganAfter === undefined || textOrder(cursorOf(gap.from), cursorOf(beganAfter)) > 0) &&
+      (endedBefore === undefined ||
+        (gap.to !== undefined && textOrder(cursorOf(gap.to), cursorOf(endedBefore)) < 0))
+  );
+
+  for (const gap of kept) {
     // The run is how many positions come before where the Gap began.
     const run = range.at.filter(
       (position) => textOrder(cursorOf(position), cursorOf(gap.from)) < 0

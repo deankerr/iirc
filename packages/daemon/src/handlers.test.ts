@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 
 import {
   CallerIntent,
+  ConfigurationChanged,
   CredentialPathName,
   DaemonApi,
   NetworkId,
@@ -167,7 +168,7 @@ const briefly = (events: readonly TimelineChangesEvent[]) =>
  */
 const directly = (world: World, api: Effect.Success<typeof makeClient>, texts: readonly string[]) =>
   Effect.gen(function* () {
-    yield* api.networks.configure({ params: { network: libera }, payload: floor });
+    yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
     const call = yield* registerOnFloor(world.memory);
 
     for (const text of texts) {
@@ -222,7 +223,7 @@ const stoppedSaying = async (named: "lost" | "kept") =>
       Effect.gen(function* () {
         const intent = CallerIntent.make(named);
 
-        yield* api.networks.configure({ params: { network: libera }, payload: floor });
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
         yield* registerOnFloor(world.memory);
         yield* settle;
 
@@ -251,6 +252,61 @@ const stoppedSaying = async (named: "lost" | "kept") =>
   );
 
 describe("the handlers", () => {
+  it("reads the Configuration in force, and refuses a PUT made from another, with 409", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        const unknown = yield* outcome(api.networks.configuration({ params: { network: libera } }));
+        const params = { network: libera };
+
+        const absent = yield* api.networks
+          .configure({ params, payload: floor, query: { ifSequence: 7 } })
+          .pipe(Effect.flip);
+
+        const added = yield* api.networks.configure({
+          params,
+          payload: floor,
+          query: { ifSequence: 0 },
+        });
+
+        const read = yield* api.networks.configuration({ params });
+        const renamed = { ...floor, nicks: ["renamed"] } as const;
+
+        const kept = yield* api.networks.configure({
+          params,
+          payload: renamed,
+          query: { ifSequence: read.sequence },
+        });
+
+        const stale = yield* api.networks
+          .configure({ params, payload: floor, query: { ifSequence: read.sequence } })
+          .pipe(Effect.flip);
+
+        const after = yield* api.networks.configuration({ params });
+
+        return {
+          absent,
+          added: added.sequence,
+          after: { nicks: after.configuration.nicks, sequence: after.sequence },
+          kept: kept.sequence,
+          read: read.sequence,
+          stale,
+          unknown,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      absent: new ConfigurationChanged({ network: libera, sequence: null }),
+      added: 1,
+      // The first `Configured` dials, so its Outputs take sequence 2.
+      after: { nicks: ["renamed"], sequence: 3 },
+      kept: 3,
+      read: 1,
+      stale: new ConfigurationChanged({ network: libera, sequence: WireSequence.make(3) }),
+      unknown: "UnknownNetwork",
+    });
+  });
+
   it("refuses a request with no key, or a key it does not hold", async () => {
     const result = await run((_, api) =>
       Effect.gen(function* () {
@@ -274,6 +330,7 @@ describe("the handlers", () => {
         const configuredAt = yield* api.networks.configure({
           params: { network: libera },
           payload: floor,
+          query: {},
         });
 
         const call = yield* registerOnFloor(world.memory);
@@ -328,7 +385,7 @@ describe("the handlers", () => {
             channel.members.map((member) => member.nick),
           ]),
           messages,
-          said: said.intent.length,
+          said: [said._tag, said.intent.length],
           session: known.session._tag,
         };
       })
@@ -348,15 +405,69 @@ describe("the handlers", () => {
       listed: [{ network: "libera", status: { _tag: "Running" } }],
       members: [["#iirc", ["iirc", "peer"]]],
       messages: ["iirc #iirc :hello", "peer #iirc :hi there"],
-      said: 32,
+      said: ["Said", 32],
       session: "Registered",
+    });
+  });
+
+  it("answers a Say the Client refused as it took it: Offline with no Session, Unsendable when no Line can carry it", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+        yield* settle;
+
+        const offline = yield* api.networks.say({
+          params: { network: libera },
+          payload: {
+            intent: CallerIntent.make("early"),
+            kind: "Privmsg",
+            target: "#iirc",
+            text: "hi",
+          },
+        });
+
+        yield* registerOnFloor(world.memory);
+        yield* settle;
+
+        // A list of Targets is never one, so no Line carries it.
+        const unsendable = yield* api.networks.say({
+          params: { network: libera },
+          payload: {
+            intent: CallerIntent.make("listed"),
+            kind: "Privmsg",
+            target: "#a,#b",
+            text: "hi",
+          },
+        });
+
+        const said = yield* api.networks.said({
+          params: { intent: CallerIntent.make("early"), network: libera },
+        });
+
+        return {
+          offline: [offline._tag, offline.intent, "reason" in offline ? offline.reason : undefined],
+          said: said._tag,
+          unsendable: [
+            unsendable._tag,
+            unsendable.intent,
+            "reason" in unsendable ? unsendable.reason : undefined,
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      offline: ["Refused", "early", { _tag: "Offline" }],
+      // Refused, and journaled all the same, at the sequence it answered with.
+      said: "Journaled",
+      unsendable: ["Refused", "listed", { _tag: "Unsendable" }],
     });
   });
 
   it("resumes the News after a sequence, from the query or Last-Event-ID", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
-        yield* api.networks.configure({ params: { network: libera }, payload: floor });
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
         const call = yield* registerOnFloor(world.memory);
 
         for (const text of ["one", "two", "three"]) {
@@ -472,6 +583,7 @@ describe("the handlers", () => {
         yield* api.networks.configure({
           params: { network: libera },
           payload: configured({ ...floor, password: name }),
+          query: {},
         });
         const call = yield* world.memory.ircd.accept;
 
@@ -1122,7 +1234,7 @@ describe("the handlers", () => {
     });
   });
 
-  it("collapses the Gaps a quiet Timeline's window spans, even with a limit of one", async () => {
+  it("collapses the Gaps a quiet Timeline's window spans, even with a limit of one, and up to a cursor", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
         let call = yield* directly(world, api, ["hello"]);
@@ -1149,6 +1261,18 @@ describe("the handlers", () => {
         const both = yield* api.timelines.window({ params: { timeline }, query: { limit: 2 } });
         const latest = yield* api.timelines.window({ params: { timeline }, query: { limit: 1 } });
 
+        // The page before the latest item fits against it: the run between them comes with
+        // the page, since it ended before the cursor.
+        const [back] = latest.items;
+
+        const before =
+          back === undefined
+            ? latest
+            : yield* api.timelines.window({
+                params: { timeline },
+                query: { before: back.position, limit: 1 },
+              });
+
         const network = yield* api.timelines.window({
           params: { timeline: yield* timelineNamed(api, "libera") },
           query: { limit: 1 },
@@ -1160,6 +1284,7 @@ describe("the handlers", () => {
         });
 
         return {
+          before: shown(before),
           both: shown(both),
           latest: shown(latest),
           network: network.gaps.length,
@@ -1169,6 +1294,7 @@ describe("the handlers", () => {
     );
 
     expect(result).toStrictEqual({
+      before: { gaps: [[4, true]], items: ["hello"] },
       both: { gaps: [[4, true]], items: ["hello", "back"] },
       latest: { gaps: [], items: ["back"] },
       // The Network's own Timeline has an item at each Session's start and end, so Gaps
@@ -1190,6 +1316,7 @@ describe("the handlers", () => {
             channels: channels.map((name) => ({ name })),
             ircds: [{ host: "irc.test", port: 6667, tls: false }],
           }),
+          query: {},
         });
 
         const call = yield* registerOnFloor(world.memory);

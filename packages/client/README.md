@@ -42,6 +42,8 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Unsent` | Runtime | `Send` and `SendSecret` outputs on a Connection that never left, as they were output and in that order: the Runtime's queue dropped them because the Connection ended, or its hang-up ran out of time. |
 | `Stopping` | Runtime | The Runtime is shutting down. |
 
+`NetworkConfiguration` is the Schema of what `Configured` carries, exported from `@iirc/client` and alone from `@iirc/client/configuration`, which is pure data a Frontend may import. Each field has a `description`, and says what a new Network starts with: Effect's `default` annotation for a fixed value (`channels` and `declined` none, `enabled` on, `login` `None`, `fallbackEncoding` `windows-1252`, a SASL login's `required` off), `startsAsFirstNick` for `realname`, `username`, and a SASL `account`, and nothing for `ircds` and `nicks`, which must be given. `IrcdAddress` carries that identifier, and every field typed `CredentialName`, `password`, a SASL login's `credential`, and a Channel's `key`, carries `CredentialName`'s. So a Frontend derives every option from the Schema alone ([ADR 0013](../../docs/adr/0013-configuration-is-an-option-tree.md)), and a field added here is an option there with no other work.
+
 When the Client dials:
 
 - A `Configured` or `Started` with the Network enabled dials at once, if no Connection is open and none is waiting to be redialled. There is no backoff before a first dial.
@@ -89,7 +91,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `Activity` | Something that changed, with its time, id, whether it is `live`, and `where` it belongs. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
 | `ConnectionFailed` | A Connection that ended before registration, and why. |
-| `Refolded` | An Ircd declared a casemapping other than the one the Network last declared, so keys in `where` fold by it from here on. |
+| `Refolded` | An Ircd declared a casemapping other than the one the Network last declared, or other than `rfc1459` when none was, so keys in `where` fold by it from here on. |
 | `Refused` | An Owner intent that was not carried out, with its intent id: `Offline`, `Unsendable`, `Rejected` by the Ircd's reply, or `Unsent`: at least part of the Message never left, because its Connection ended first. |
 | `Ignored` | An input that changed nothing, and why. |
 
@@ -132,7 +134,7 @@ When an Ircd declares a mapping other than the Network's, it becomes the Network
 
 ## Knowledge
 
-`known(state)` gives Channels, members, Users, Self, and where the Session is. Channels and Users are keyed by name folded with the casemapping in force, named as `@iirc/protocol/casemapping` names it: `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`. Until the Ircd says, it is `rfc1459`, and a mapping the Client does not know folds as `ascii`. Each Connection starts from `rfc1459`, whatever the last Ircd said. When the casemapping changes, every key is folded again, and the Channels are reconciled with the Configuration: a wanted Channel the new mapping tells apart from another gets its own machine, and of Channels it merges, the first is kept. The keys in News's `where` fold by the mapping the Network last declared, which can differ from a Connection's until its Ircd declares one ([Where News belongs](#where-news-belongs)). Users are those who share a Channel with Self, and Self: what was seen of a User is forgotten once they share none. A Channel's `wanted` says whether the Owner wants Self in it, which is false for one Self was put in without asking. Every fact is a `Fact<T>`:
+`known(state)` gives Channels, members, Users, Self, and where the Session is. Channels and Users are keyed by name folded with the casemapping in force, named as `@iirc/protocol/casemapping` names it: `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`. Until the Ircd says, it is `rfc1459`, and a mapping the Client does not know folds as `ascii`. Each Connection starts from `rfc1459`, whatever the last Ircd said. When the casemapping changes, every key is folded again, and the Channels are reconciled with the Configuration: a wanted Channel the new mapping tells apart from another gets its own machine, and of Channels it merges, the first is kept. The keys in News's `where` fold by the mapping the Network last declared, which can differ from a Connection's until its Ircd declares one ([Where News belongs](#where-news-belongs)). Users are those who share a Channel with Self, and Self: what was seen of a User is forgotten once they share none. Knowledge also says `declared`, the casemapping an Ircd last declared on any Connection, which folds the keys of `where`, or `undefined` until one has, while keys fold by `rfc1459`, and `chantypes`, the Session's `CHANTYPES`, or `undefined` with no Session, so a Frontend compares and prefixes Channels' names as the Network does. A Channel's `wanted` says whether the Owner wants Self in it, which is false for one Self was put in without asking. Every fact is a `Fact<T>`:
 
 | Case      | Means                                                        |
 | --------- | ------------------------------------------------------------ |

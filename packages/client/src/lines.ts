@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { casemappingOf } from "@iirc/protocol/casemapping";
+import { casemappingOf, defaultCasemapping } from "@iirc/protocol/casemapping";
 import { isupportTokens } from "@iirc/protocol/isupport";
 import { parseSource, pong } from "@iirc/protocol/line";
 import type { Line, RawParam } from "@iirc/protocol/line";
@@ -282,9 +282,16 @@ const isupport = (run: Run, line: Line): void => {
   // a `005` without it leaves the one the Network last declared, on any Connection.
   const declares = tokens.some(({ name }) => name === "CASEMAPPING" || name === "UTF8MAPPING");
 
+  // Keys were folded by `rfc1459` until a mapping was declared, so declaring that one
+  // changes no key and reports nothing.
   if (declares && mapping !== run.state.declared) {
+    const before = run.state.declared ?? defaultCasemapping;
+
     run.state = { ...run.state, declared: mapping };
-    run.news.push({ _tag: "Refolded", casemapping: mapping });
+
+    if (mapping !== before) {
+      run.news.push({ _tag: "Refolded", casemapping: mapping });
+    }
   }
 
   if (mapping !== run.state.casemapping) {

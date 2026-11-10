@@ -891,8 +891,14 @@ export const away = (reason?: string): OutboundLine | Rejected =>
 
 // Credentials
 
-/** The name of a Credential. The value is held by the Vault and never by a Line. */
-export const CredentialName = Schema.String.pipe(Schema.brand("CredentialName"));
+/**
+ * The name of a Credential. The value is held by the Vault and never by a Line. Its
+ * identifier marks every field it types as a Credential, so a Frontend that walks a
+ * Schema shows such a field by name, and never asks for its value back.
+ */
+export const CredentialName = Schema.String.annotate({ identifier: "CredentialName" }).pipe(
+  Schema.brand("CredentialName")
+);
 
 /** The decoded form of {@link CredentialName}. */
 export type CredentialName = typeof CredentialName.Type;

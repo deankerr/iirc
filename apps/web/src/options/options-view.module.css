@@ -1,0 +1,130 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.title {
+  margin-right: auto;
+  color: var(--color-accent);
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.filterInput {
+  width: 28ch;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.filterInput:focus-visible,
+.editor:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+.notice {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  color: var(--color-danger);
+}
+
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.list {
+  outline: none;
+}
+
+/* Name, value, what a new Network starts with, and what it is. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(16ch, 2fr) minmax(12ch, 2fr) minmax(8ch, 1fr) minmax(0, 3fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-1) var(--space-3);
+  outline: none;
+  cursor: default;
+}
+
+.row[data-hovered] {
+  background: var(--color-surface);
+}
+
+.row[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+.name,
+.value,
+.starts {
+  overflow-wrap: anywhere;
+}
+
+.name {
+  color: var(--color-accent);
+}
+
+.starts,
+.description,
+.muted {
+  color: var(--color-muted);
+}
+
+.held {
+  color: var(--color-ok);
+}
+
+.missing {
+  color: var(--color-danger);
+}
+
+.editor {
+  width: 100%;
+  padding: 0 var(--space-1);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-border);
+  }
+}

@@ -203,11 +203,12 @@ export interface State {
    */
   readonly casemapping: Casemapping;
   /**
-   * How the Network folds names, as an Ircd last declared it, on any Connection, and
-   * `rfc1459` until one has. It outlives Connections, and the keys of `where` are folded
-   * by it, so a Timeline keeps one key while the Network keeps one mapping.
+   * How the Network folds names, as an Ircd last declared it, on any Connection, or
+   * `undefined` until one has, when `where` folds by `rfc1459`. It outlives Connections,
+   * and the keys of `where` are folded by it, so a Timeline keeps one key while the
+   * Network keeps one mapping.
    */
-  readonly declared: Casemapping;
+  readonly declared: Casemapping | undefined;
   /** Keyed by folded name. */
   readonly channels: ReadonlyMap<string, Channel>;
   /** STS policies, keyed by host as `hostKey` folds it. They outlive Connections. */
@@ -222,7 +223,7 @@ export const initialState: State = {
   casemapping: "rfc1459",
   channels: new Map(),
   configuration: undefined,
-  declared: "rfc1459",
+  declared: undefined,
   dialled: 0,
   network: { _tag: "Unconfigured" },
   policies: new Map(),

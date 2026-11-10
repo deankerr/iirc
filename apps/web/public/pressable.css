@@ -1,0 +1,11 @@
+/*
+ * React Aria gives every pressable element this rule, so a double tap to zoom adds no
+ * delay to a press. It would inject it as an inline <style>, which the Content Security
+ * Policy refuses, so the page links it from its own origin instead, under the id React
+ * Aria looks for before injecting.
+ */
+@layer {
+  [data-react-aria-pressable] {
+    touch-action: pan-x pan-y pinch-zoom;
+  }
+}

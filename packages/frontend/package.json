@@ -1,0 +1,30 @@
+{
+  "name": "@iirc/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./commands": "./src/commands.ts",
+    "./composer": "./src/composer.ts",
+    "./keymap": "./src/keymap.ts",
+    "./options": "./src/options.ts",
+    "./palette": "./src/palette.ts",
+    "./render": "./src/render.ts",
+    "./sign-in": "./src/sign-in.ts",
+    "./timelines": "./src/timelines.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/api": "workspace:*",
+    "@iirc/client": "workspace:*",
+    "@iirc/protocol": "workspace:*",
+    "@iirc/timelines": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "vitest": "catalog:"
+  }
+}
