@@ -6,7 +6,10 @@
  */
 import { ConfigurationInForce } from "@iirc/api";
 import type {
+  ChannelHeader,
   Knowledge,
+  Member,
+  MemberPage,
   Located,
   NetworkEntry,
   Timeline,
@@ -16,7 +19,8 @@ import type {
   TimelineWindow,
   WindowGap,
 } from "@iirc/api";
-import { Effect, Layer, Redacted, Schema } from "effect";
+import { Effect, Layer, Redacted, Result, Schema } from "effect";
+import { Base64Url } from "effect/encoding";
 import { FetchHttpClient } from "effect/http";
 import { AtomRegistry } from "effect/reactivity";
 import type { Atom } from "effect/reactivity";
@@ -40,6 +44,9 @@ type Answer =
   | typeof TimelineList.Encoded
   | typeof TimelineWindow.Encoded
   | typeof Located.Encoded
+  | typeof ChannelHeader.Encoded
+  | typeof MemberPage.Encoded
+  | { readonly _tag: "NotInChannel"; readonly standing: string | null; readonly timeline: string }
   | { readonly _tag: "Said"; readonly intent: string; readonly sequence: number }
   | {
       readonly _tag: "Refused";
@@ -59,6 +66,61 @@ type Answer =
   | { readonly _tag: "UnknownNetwork"; readonly network: string };
 
 const json = (status: number, body: Answer) => Response.json(body, { status });
+
+/** A Channel the fake holds behind a Channel Timeline: its head, and its members in rank order. */
+export interface FakeChannel {
+  header: typeof ChannelHeader.Encoded;
+  members: (typeof Member.Encoded)[];
+}
+
+/**
+ * Text in lower case, as the fake compares nicks.
+ * @param text - The text.
+ * @returns It, in lower case.
+ */
+const lower = (text: string) => text.toLowerCase();
+
+/**
+ * A page of a Channel's members, as the Daemon would give it: those after `after`, whose
+ * nick starts with `prefix` in any ASCII case, up to `limit`, with where the next begins.
+ * @param held - The Channel.
+ * @param query - The query.
+ * @param timeline - The Timeline it was read by.
+ * @returns The page.
+ */
+const membersOf = (
+  held: FakeChannel,
+  query: URLSearchParams,
+  timeline: string
+): typeof MemberPage.Encoded => {
+  const prefix = lower(query.get("prefix") ?? "");
+  const limit = Number(query.get("limit") ?? "100");
+  const after = query.get("after");
+
+  const afterKey =
+    after === null
+      ? undefined
+      : Result.getOrUndefined(Base64Url.decodeString(after.slice(after.indexOf(".") + 1)));
+
+  const matching = held.members.filter((member) => lower(member.nick).startsWith(prefix));
+
+  const from =
+    afterKey === undefined
+      ? 0
+      : matching.findIndex((member) => lower(member.nick) === afterKey) + 1;
+
+  const members = matching.slice(from, from + limit);
+  const last = members.at(-1);
+  const more = from + limit < matching.length;
+
+  return {
+    members,
+    more,
+    network: held.header.network,
+    next: more && last !== undefined ? `0.${Base64Url.encode(lower(last.nick))}` : null,
+    timeline,
+  };
+};
 
 /** A Timeline the fake holds: its description, and its items in position order. */
 export interface FakeTimeline {
@@ -200,10 +262,19 @@ export const fakeDaemon = () => {
   const networksHeld: (() => void)[] = [];
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
   const reads: (typeof ReadBody.Type)[] = [];
+  const channelsRead: string[] = [];
+  const channelsHeld: (() => void)[] = [];
+  const membersHeld: (() => void)[] = [];
+  const knownHeld: (() => void)[] = [];
+  const membersRead: string[] = [];
 
   const daemon = {
     /** How many requests that never began their answer were given up. */
     abandoned: 0,
+    /** Each Channel behind a Channel Timeline, by its id, which `channel` and `members` read. */
+    channels: new Map<string, FakeChannel>(),
+    /** Each read of a Channel's head, by its Timeline. */
+    channelsRead,
     /** Each Network's Configuration in force, and the sequence that set it. */
     configurations: new Map<string, { configuration: ConfigurationOnWire; sequence: number }>([
       ["libera", { configuration: liberaConfiguration, sequence: 1 }],
@@ -215,8 +286,16 @@ export const fakeDaemon = () => {
     gatewayOnly: false,
     /** Whether a request to follow the changes never begins its answer. */
     hangChanges: false,
+    /** Releases each read held: of a Channel's head, of its members, or of `known`. */
+    held: { channel: channelsHeld, known: knownHeld, members: membersHeld },
+    /** Whether each read of a Channel's head waits until released. */
+    holdChannels: false,
+    /** Whether each read of `known` waits until released. */
+    holdKnown: false,
     /** Whether each `at/{sequence}` read waits until released. */
     holdLocates: false,
+    /** Whether each read of a Channel's members waits until released. */
+    holdMembers: false,
     /** Whether each request for the Network list waits until released. */
     holdNetworks: false,
     /** Where each request that never began its answer asked to follow from. */
@@ -237,6 +316,8 @@ export const fakeDaemon = () => {
         readonly declared: (typeof Knowledge.Encoded)["declared"];
       }
     >(),
+    /** Whether `known` gets no answer. */
+    knownDown: false,
     /** Says whose request got no answer, journaled only after the next `said`. */
     late,
     /** How many of the next `at/{sequence}` reads get no answer. */
@@ -245,6 +326,8 @@ export const fakeDaemon = () => {
     locatesHeld,
     /** Each `at/{sequence}` read, by its sequence, failed or held ones included. */
     locatesRead,
+    /** Each read of a Channel's members, by its query. */
+    membersRead,
     /** Releases each request for the Network list held, in the order they came. */
     networksHeld,
     /** The sequence the next `say` is journaled at. */
@@ -476,12 +559,53 @@ export const fakeDaemon = () => {
     return undefined;
   };
 
+  /**
+   * A Channel's head, or a page of its members, as the Daemon answers them.
+   * @param timeline - The Timeline's id.
+   * @param what - `channel` or `members`.
+   * @param url - The request's URL.
+   * @returns The answer.
+   */
+  const channelRoute = (timeline: string, what: string | undefined, url: URL) => {
+    const held = daemon.channels.get(timeline);
+
+    const listed = [...daemon.timelines.values()]
+      .flat()
+      .find((one) => one.timeline.id === timeline);
+
+    if (listed === undefined) {
+      return json(404, { _tag: "UnknownTimeline", timeline });
+    }
+
+    if (held === undefined) {
+      return json(404, { _tag: "NotAChannel", kind: listed.timeline.kind, timeline });
+    }
+
+    if (what === "channel") {
+      daemon.channelsRead.push(timeline);
+
+      return json(200, held.header);
+    }
+
+    daemon.membersRead.push(url.search);
+
+    const { standing } = held.header;
+
+    return standing === "Joined"
+      ? json(200, membersOf(held, url.searchParams, timeline))
+      : json(409, { _tag: "NotInChannel", standing, timeline });
+  };
+
   const timelineRoute = (url: URL, init: RequestInit): Response | undefined => {
     const headers = new Headers(init.headers);
 
     const list = /^\/api\/networks\/(?<network>[^/]+)\/timelines$/u.exec(url.pathname)?.groups;
     const known = /^\/api\/networks\/(?<network>[^/]+)\/known$/u.exec(url.pathname)?.groups;
     const window = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)$/u.exec(url.pathname)?.groups;
+
+    const channel = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)\/(?<what>channel|members)$/u.exec(
+      url.pathname
+    )?.groups;
 
     const stepped = stepRoute(url);
 
@@ -526,6 +650,10 @@ export const fakeDaemon = () => {
           users: [],
         })
       );
+    }
+
+    if (channel?.timeline !== undefined) {
+      return signedInOnly(() => channelRoute(channel.timeline ?? "", channel.what, url));
     }
 
     if (window?.timeline !== undefined) {
@@ -672,6 +800,41 @@ export const fakeDaemon = () => {
     }
   };
 
+  /**
+   * A read of a Channel's head, its members, or `known`, which gets no answer or waits
+   * until a test releases it, as the test asks, or nothing for any other.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const held = (url: URL, init: RequestInit | undefined): Promise<Response> | undefined => {
+    const kind = /\/(?<what>channel|members|known)$/u.exec(url.pathname)?.groups?.what;
+
+    if (kind === "known" && daemon.knownDown) {
+      return Promise.reject(new TypeError("fetch failed"));
+    }
+
+    const lists = new Map([
+      ["channel", { holding: daemon.holdChannels, list: channelsHeld }],
+      ["known", { holding: daemon.holdKnown, list: knownHeld }],
+      ["members", { holding: daemon.holdMembers, list: membersHeld }],
+    ]);
+
+    const holding = kind === undefined ? undefined : lists.get(kind);
+
+    if (holding === undefined || !holding.holding) {
+      return undefined;
+    }
+
+    const { promise, resolve } = Promise.withResolvers<undefined>();
+
+    holding.list.push(() => {
+      resolve(undefined);
+    });
+
+    return promise.then(async () => await answer(url, init));
+  };
+
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     if (daemon.down) {
       throw new TypeError("fetch failed");
@@ -697,6 +860,12 @@ export const fakeDaemon = () => {
       await promise;
 
       return await answer(url, init);
+    }
+
+    const read = held(url, init);
+
+    if (read !== undefined) {
+      return await read;
     }
 
     // A Daemon that holds each request for the Network list until a test releases it, and
@@ -756,7 +925,10 @@ export const registryFor = (
           Layer.succeed(FetchHttpClient.Fetch, fetch),
           // Waits short enough for a test to see a retry or a reconnect.
           Layer.succeed(Waits, {
+            complete: "10 millis",
+            debounce: "30 millis",
             idle: "2 seconds",
+            interval: "100 millis",
             longest: "50 millis",
             reconnect: "10 millis",
             retry: "10 millis",

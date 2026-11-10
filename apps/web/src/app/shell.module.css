@@ -25,7 +25,8 @@
 .body {
   display: grid;
   flex: 1;
-  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+  /* The sidebar, the main view, and the members, when they show. */
+  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr) auto;
   min-height: 0;
 }
 

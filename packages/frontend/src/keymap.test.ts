@@ -278,6 +278,20 @@ describe("the keymap", () => {
     });
   });
 
+  it("shows or hides the members with Alt+M, Option+M on a Mac, while typing too", () => {
+    const turned = [{ _tag: "ShowMembers", shown: undefined }];
+
+    expect({
+      mac: resolve(
+        defaultKeymap,
+        at({ editing: true, platform: "Mac" }),
+        press("\u00B5", "KeyM", { alt: true })
+      ),
+      open: resolve(defaultKeymap, at({ palette: true }), press("m", "KeyM", { alt: true })),
+      other: resolve(defaultKeymap, at({ editing: true }), press("m", "KeyM", { alt: true })),
+    }).toStrictEqual({ mac: turned, open: undefined, other: turned });
+  });
+
   it("moves to the next and previous Timeline in the sidebar's order, wrapping, while typing too", () => {
     const down = press("ArrowDown", "ArrowDown", { alt: true });
     const up = press("ArrowUp", "ArrowUp", { alt: true });

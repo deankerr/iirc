@@ -14,6 +14,7 @@ import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
+import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { following, newer, older, openTimeline } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
@@ -266,9 +267,7 @@ export const TimelineView = () => {
 
       return (
         <section aria-label={label} className={styles.view}>
-          <h2 className={styles.title}>
-            <bdi>{label}</bdi>
-          </h2>
+          <TimelineHeader name={label} />
           <Lines
             divider={shown.divider}
             key={shown.timeline}

@@ -24,6 +24,9 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { channelHappened } from "../channel/state.ts";
+import { forgetChantypes } from "../composer/chantypes-state.ts";
+import { cancelCompletion } from "../composer/completion-state.ts";
 import { notifyAll } from "../notifications/notifier.ts";
 import { pageState } from "../page/atoms.ts";
 import { signedIn, signInState } from "../sign-in/atoms.ts";
@@ -52,12 +55,24 @@ export interface WaitTimes {
    * read, so passing through a Timeline marks nothing.
    */
   readonly settle: Duration.Input;
+  /**
+   * How long a read again of the open Channel waits after the first change after quiet
+   * that may have changed it, so a burst of joins or quits is read once.
+   */
+  readonly debounce: Duration.Input;
+  /** While such changes keep coming, the open Channel is read again at most once this often. */
+  readonly interval: Duration.Input;
+  /** How long completing a nick waits before asking the Daemon, superseded by another Tab. */
+  readonly complete: Duration.Input;
 }
 
 /** How long the runtime waits: a test makes these short. */
 export class Waits extends Context.Reference<WaitTimes>("@iirc/web/Waits", {
   defaultValue: () => ({
+    complete: "60 millis",
+    debounce: "250 millis",
     idle: "45 seconds",
+    interval: "1 second",
     longest: "15 seconds",
     reconnect: "1 second",
     retry: "500 millis",
@@ -89,7 +104,7 @@ const final: ReadonlySet<string> = new Set(["Unauthorized", "UnknownTimeline", "
  * Asks again after a failure: soon at first, then less often, up to the longest wait.
  * @returns The schedule.
  */
-const retrying = Effect.gen(function* () {
+export const retrying = Effect.gen(function* () {
   const { longest, retry } = yield* Waits;
 
   return Schedule.min([Schedule.exponential(retry), Schedule.spaced(longest)]);
@@ -234,8 +249,9 @@ const reader = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Time
   });
 
 /**
- * Folds one event of the changes stream into the core, and shows the notifications the core
- * says a change calls for. A heartbeat only says the stream is alive.
+ * Folds one event of the changes stream into the core, the Timelines and the open Channel,
+ * and shows the notifications the core says a change calls for. A heartbeat only says the
+ * stream is alive.
  * @param registry - The registry.
  * @param event - The event.
  * @returns Once folded and shown.
@@ -246,6 +262,7 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
       const before = registry.get(timelinesState);
 
       happened(registry, { _tag: "Changed", change: event.data, place: event.id });
+      channelHappened(registry, { _tag: "Changed", change: event.data });
 
       const notifies = notificationsOf(
         before,
@@ -261,12 +278,15 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
 
     case "overflowed": {
       happened(registry, { _tag: "Overflowed", overflow: event.data, place: event.id });
+      channelHappened(registry, { _tag: "Overflowed", overflow: event.data });
 
       return Effect.void;
     }
 
     case "reset": {
       happened(registry, { _tag: "Reset", reset: event.data });
+      channelHappened(registry, { _tag: "Reset" });
+      forgetChantypes(registry);
 
       return Effect.void;
     }
@@ -357,8 +377,9 @@ export const sync = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** Opens a Timeline in the main view. */
+/** Opens a Timeline in the main view, letting go of what was being completed. */
 export const open = Atom.fnSync((timeline: TimelineId, get) => {
+  cancelCompletion(get.registry);
   happened(get.registry, { _tag: "Opened", timeline });
 }).pipe(Atom.keepAlive);
 

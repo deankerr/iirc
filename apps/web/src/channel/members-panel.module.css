@@ -1,0 +1,107 @@
+/* The members, a column beside the Timeline, or over it on a phone's width. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 18ch;
+  min-height: 0;
+  border-left: var(--border-width) solid var(--color-border);
+  background: var(--color-background);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.heading {
+  color: var(--color-muted);
+}
+
+.head > :last-child {
+  margin-left: auto;
+}
+
+.dim {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-muted);
+}
+
+.head > .dim {
+  padding: 0;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  outline: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  outline: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.item[data-hovered] {
+  background: var(--color-surface);
+}
+
+.item[data-selected] {
+  background: var(--color-surface);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+}
+
+.item[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+.member,
+.away {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Away: dimmed, the nick's colour kept underneath. */
+.away {
+  opacity: 0.5;
+}
+
+.symbol {
+  flex-shrink: 0;
+  width: 1ch;
+  margin-right: var(--space-1);
+  color: var(--color-muted);
+}
+
+.loading {
+  padding: 0 var(--space-3);
+  color: var(--color-muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  .panel {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 5;
+    width: min(32ch, 85vw);
+    box-shadow: 0 0 var(--space-5) var(--color-shadow);
+  }
+}

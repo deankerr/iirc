@@ -615,6 +615,98 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "shows who is here: the header's topic, the members with their rank, nick completion, and /query",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "who"),
+        "#iirc-who"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const view = page.getByRole("region", { name: channel });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        await page.getByRole("log", { name: channel }).waitFor();
+
+        // The peer sets the topic: the header reads the Channel again and shows it, formatted.
+        peer.send(`TOPIC ${channel} :the \u0002plan\u0002 for today`);
+        const head = view.locator("header");
+
+        await head.getByText("set by peer", { exact: false }).waitFor();
+
+        const topic = await head
+          .getByText("plan", { exact: true })
+          .evaluate((element) => getComputedStyle(element).fontWeight);
+
+        // Alt+M shows the members: the peer made the Channel, so holds its operator rank.
+        await composer.click();
+        await page.keyboard.press("Alt+m");
+        const members = page.getByRole("region", { name: "members" });
+        const peerRow = members.getByRole("row", { name: "peer, operator" });
+
+        await peerRow.waitFor();
+        const symbol = await peerRow.textContent();
+
+        // The peer ops Self, which the list reads again and shows.
+        peer.send(`MODE ${channel} +o iirc`);
+        await members.getByRole("row", { name: "iirc, operator" }).waitFor();
+
+        // The start of the peer's nick and Tab, at the start of the line: their nick and `: `.
+        await composer.click();
+        await composer.fill("pe");
+        await composer.press("Tab");
+        await expect.poll(async () => await composer.inputValue()).toBe("peer: ");
+        const completed = await composer.inputValue();
+
+        // The peer says something to Self, which makes their Direct Message; /query opens it.
+        peer.send("PRIVMSG iirc :hello there");
+        await page
+          .getByRole("treegrid")
+          .getByRole("row", { name: /^peer\b/u })
+          .waitFor();
+        await composer.fill("/query peer");
+        await composer.press("Enter");
+        await page
+          .getByRole("log", { name: "peer" })
+          .getByText("hello there", { exact: true })
+          .waitFor();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          completed,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          symbol,
+          topic,
+          violations,
+        }).toStrictEqual({
+          completed: "peer: ",
+          problems: [],
+          symbol: "@peer",
+          topic: "700",
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "opens the palette with the keyboard, jumps to a Channel, runs commands from it, and moves between Timelines",
     { timeout: 90_000 },
     async () => {

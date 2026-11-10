@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     "./activity": "./src/activity.ts",
+    "./channel": "./src/channel.ts",
     "./commands": "./src/commands.ts",
+    "./completion": "./src/completion.ts",
     "./composer": "./src/composer.ts",
     "./keymap": "./src/keymap.ts",
     "./notifications": "./src/notifications.ts",
