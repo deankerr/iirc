@@ -1,9 +1,8 @@
 /**
  * The transcript format: one item per line. `parse` turns text into items, and `print`
  * turns items back into text, so `print(parse(text))` is `text` for any text `print`
- * wrote. Ported on purpose from the transcript spike, with ` tls` on a dial, an escaped
- * form for bytes that are not text, whole-item `SecretLine` placeholders, and named
- * Owner, Runtime, and expectation items.
+ * wrote. It has ` tls` on a dial, an escaped form for bytes that are not text,
+ * whole-item `SecretLine` placeholders, and named Owner, Runtime, and expectation items.
  *
  * @packageDocumentation
  */

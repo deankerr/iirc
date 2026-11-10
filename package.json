@@ -15,6 +15,7 @@
   },
   "type": "module",
   "scripts": {
+    "iirc": "bun apps/iirc/src/main.ts",
     "check": "ultracite check",
     "fix": "ultracite fix",
     "knip": "knip",

@@ -502,7 +502,7 @@ describe("shutdown", () => {
   });
 });
 
-describe("review round 1", () => {
+describe("at the edges: shutdown, a full queue, and long SASL responses", () => {
   it("bounds shutdown across Networks even when the Transport's hangup never returns", async () => {
     const result = await runTest((world) =>
       Effect.gen(function* () {

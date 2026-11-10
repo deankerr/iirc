@@ -437,7 +437,7 @@ describe("caps a declined Feature needs, on every path that asks", () => {
   const noBatch = configured({ declined: [FeatureName.make("batch")] });
 
   it("asks for nothing a CAP NEW would complete with a declined batch", () => {
-    // The reviewer's interleaving: `batch` declined, then `echo-message` new.
+    // The interleaving: `batch` declined, then `echo-message` new.
     const played = play(client, {
       configuration: noBatch,
       transcript: [

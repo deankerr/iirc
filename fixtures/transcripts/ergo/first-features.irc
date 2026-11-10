@@ -1,5 +1,5 @@
 # ergo first-features: the first Features, with SASL PLAIN over TLS.
-# Recorded by `bun run record:transcripts`. Do not edit by hand; re-record instead.
+# Recorded, then normalised as fixtures/transcripts/README.md says. Re-record rather than edit by hand.
 
 -> dial ergo.test:6697 tls
 == opened

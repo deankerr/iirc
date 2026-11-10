@@ -46,4 +46,4 @@ These are not rejections. They wait until something real needs them:
 
 ## Keeping this document
 
-This document holds goals and principles. Each module's README describes its features, from the floor up. Decisions live in [`docs/adr/`](docs/adr/), and proposals and surveys in [`docs/notes/`](docs/notes/). Change it when the direction changes, and keep it short enough to reread.
+This document holds goals and principles. Each module's README describes its features, from the floor up. Decisions live in [`docs/adr/`](docs/adr/), and how the pieces fit together in [`docs/architecture.md`](docs/architecture.md). Change it when the direction changes, and keep it short enough to reread.

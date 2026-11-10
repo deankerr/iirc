@@ -1,5 +1,5 @@
 /**
- * Private Ircds for the end-to-end runs, ported from the transcript spike: an Ergo fetched
+ * Private Ircds for the end-to-end runs: an Ergo fetched
  * from its release and checked against a pinned SHA-256, and the machine's ngircd binary.
  * Each runs on loopback ports the kernel just said were free, from a temporary directory,
  * in the foreground, as a child of this process, and is killed and cleaned up by `stop`.

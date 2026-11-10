@@ -1,6 +1,6 @@
 # The transcript test kit
 
-`@iirc/client/testing` is how a Client is tested: a scenario is a transcript of IRC, and the kit plays it through the Client on a fake clock. It holds the scripted Client too. Production code never imports it, and the lint fence holds it to that. [The design note](../../../../docs/notes/2026-11-08-client-interface.md#the-transcript-test-kit) says why it has this shape, and [the transcript spike](../../../../docs/notes/2026-11-09-transcript-spike.md) says where the format came from.
+`@iirc/client/testing` is how a Client is tested: a scenario is a transcript of IRC, and the kit plays it through the Client on a fake clock. It holds the scripted Client too. Production code never imports it, and the lint fence holds it to that. [The recorded fixtures](../../../../fixtures/transcripts/README.md) are written in the same format.
 
 The kit catches the bugs a Client plausibly has, and does not defend against a Client written to fool it, such as one that hides a Proxy in its State.
 

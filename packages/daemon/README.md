@@ -49,7 +49,7 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 - **A key is 256 random bits,** from Effect's `SecureRandom`, written `iirc_` and base64url. It is shown once, by `iirc key create`, and kept only as its SHA-256. A random key needs no password hash ([ADR 0006](../../docs/adr/0006-proportionate-security.md)).
 - **A request's key is compared against every stored hash,** each with `timingSafeEqual`, so the time taken says nothing of which key matched, or how much of one.
 - **Keys are made only while the Daemon is stopped.** `iirc key create` holds the data directory, so the Daemon reads `keys.json` once at start, and nothing changes it under a running Daemon. A Daemon with no keys warns, and refuses every request.
-- **Keys live in a file, not the Journal.** That is deliberate for now. The Journal's records are each a Network's, `Input` or `Outputs`, and this module may not change that substrate. A key is the Daemon's, not a Network's, and is checked rather than replayed. When the Journal can hold Changes that are not a Network's, keys can move there, as m2's did.
+- **Keys live in a file, not the Journal.** That is deliberate for now. The Journal's records are each a Network's, `Input` or `Outputs`, and this module may not change that substrate. A key is the Daemon's, not a Network's, and is checked rather than replayed. When the Journal can hold Changes that are not a Network's, keys can move there.
 
 ## Composition
 
@@ -87,7 +87,7 @@ The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is r
 
 ## Not yet
 
-- **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser, as the [transcript spike](../../docs/notes/2026-11-09-transcript-spike.md) found.
+- **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser that follows [the fixtures' rules](../../fixtures/transcripts/README.md#normalising).
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
 - **Key scopes, keys through the API, Views, and removing a Network,** as the API's README lists.

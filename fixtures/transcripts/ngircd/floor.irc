@@ -1,5 +1,5 @@
 # ngircd floor: no CAP at all.
-# Recorded by `bun run record:transcripts`. Do not edit by hand; re-record instead.
+# Recorded, then normalised as fixtures/transcripts/README.md says. Re-record rather than edit by hand.
 
 -> dial ngircd.test:6667
 == opened

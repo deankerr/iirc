@@ -1,8 +1,7 @@
 /**
  * The Channel machines: a keyed `Map` of reducer states, one per Channel the Owner
  * wants, keyed by its name folded by the casemapping in force. Wanted, Joining, Joined
- * (Syncing, Synced), Refused, and Kicked, as the statechart in the architecture
- * proposal has them, with one backoff for every wait.
+ * (Syncing, Synced), Refused, and Kicked, with one backoff for every wait.
  *
  * @packageDocumentation
  */

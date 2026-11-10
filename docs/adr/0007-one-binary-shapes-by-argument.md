@@ -16,4 +16,4 @@ iirc ships as one executable, `iirc`, and its arguments choose what it runs: a D
 - The Daemon never knows a web frontend exists. A web frontend is a Layer that adds routes, and only `apps/iirc` knows both.
 - A build without web assets refuses `--web` and `iirc web` with a clear error. Only a guarded `import()` removes assets, because a static import stays in the binary with the feature off.
 - `iirc key create`, `iirc config`, `iirc credential`, and `iirc backup` live in the same executable. All but the first are Frontends of the API.
-- A test harness, such as the soak test's `iirc-soak` was, is a separate executable, because it tests the Daemon and isn't a shape of it.
+- A test harness is a separate executable, because it tests the Daemon and isn't a shape of it.

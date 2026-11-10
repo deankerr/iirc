@@ -2,7 +2,7 @@
 
 The pure IRC client for one Network. It does no I/O and reads no clock. Every input carries its time, and every effect leaves as an output, so the same inputs always give the same states and outputs.
 
-This README is the module's written interface. The types are in `src/`, and [the design note](../../docs/notes/2026-11-08-client-interface.md) says why it has this shape. The Client is `client`, exported from `@iirc/client`. Its machines are reducers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)): the Network and its Connection, cap negotiation, Presence, the keepalive, and a keyed `Map` of Channels, as the statecharts in [the architecture proposal](../../docs/notes/2026-11-07-architecture-proposal.md) §3 draw them. [Features](#features) lists what it does, from the floor up.
+This README is the module's written interface. The types are in `src/`, and [the architecture](../../docs/architecture.md#inside-the-client) says where it fits. The Client is `client`, exported from `@iirc/client`. Its machines are reducers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)): the Network and its Connection, cap negotiation, Presence, the keepalive, and a keyed `Map` of Channels, as [the statecharts](../../docs/architecture.md#machines) draw them. [Features](#features) lists what it does, from the floor up.
 
 ## Callers
 
@@ -247,7 +247,7 @@ export const awayNotify: Feature = {
 
 ## Features
 
-Each feature is built from the floor up ([the architecture proposal](../../docs/notes/2026-11-07-architecture-proposal.md) §10): what it needs, what it changes, and where its scenarios are. A feature exists when its scenarios pass. Every scenario plays strictly through `step`, in `src/scenarios/`.
+Each feature is built from the floor up: what it needs, what it changes, and where its scenarios are. A feature exists when its scenarios pass. Every scenario plays strictly through `step`, in `src/scenarios/`.
 
 ### Connecting and redialling
 

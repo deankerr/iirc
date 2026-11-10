@@ -36,7 +36,7 @@ const began = (transcript: string): boolean =>
 
 describe("a Configured that requires a login", () => {
   it("gives up when it comes after CAP END and before 001, and takes up no Session", () => {
-    // The reviewer's interleaving: SASL negotiated with no login, `CAP END`, then a
+    // The interleaving: SASL negotiated with no login, `CAP END`, then a
     // login required, then `001`.
     const played = play(client, {
       configuration: none,

@@ -2,7 +2,7 @@
 
 One Connection's queue of Lines waiting to leave: which goes next, and when. It is pure. It holds plain data, reads no clock, and depends on no other package of ours, so time arrives as an argument and the caller does the waiting. The Runtime keeps one Outbox for each Connection it holds, and its pump carries the Lines out.
 
-This README is the module's written interface. The types are in `src/outbox.ts`, and [the architecture proposal](../../docs/notes/2026-11-07-architecture-proposal.md) §8.2 asked the question it answers: priority stays out of the Client, and pacing is one safe default for every Ircd.
+This README is the module's written interface. The types are in `src/outbox.ts`. Priority stays out of the Client, and pacing is one safe default for every Ircd.
 
 ```ts
 makeOutbox<A>({ pacing?, capacity?, firstCapacity? }): Outbox<A>  // empty, with a full bucket

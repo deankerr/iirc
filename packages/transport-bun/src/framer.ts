@@ -5,8 +5,7 @@
  * than the limit is cut to it, and the rest of it, up to its ending, is dropped. An
  * unfinished Line when the stream ends is dropped, which here means it is never given.
  *
- * Ported on purpose from the transcript spike's framer, which pushed byte by byte. This
- * one copies runs between line endings, and holds at most `limit` bytes of an unfinished
+ * It copies runs between line endings, rather than pushing byte by byte, and holds at most `limit` bytes of an unfinished
  * Line however the bytes arrive, so a hostile Ircd cannot grow it.
  *
  * @packageDocumentation

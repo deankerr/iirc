@@ -1,6 +1,6 @@
 /**
- * The Feature seam, driven through `step` with Features made for these tests. The real
- * registry is empty on the floor, so these show the seam works before stage 2 fills it.
+ * The Feature seam, driven through `step` with Features made for these tests, so each
+ * stage is shown working apart from what the real registry's Features do.
  */
 import { CredentialName, isRejected, withTags } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";

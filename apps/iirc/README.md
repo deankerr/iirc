@@ -26,4 +26,4 @@ Either makes the data directory, mode `0700`, if it is missing.
 - `iirc daemon --web` and `iirc web`, the shapes with the web frontend.
 - `iirc config`, `iirc credential`, and `iirc backup`, which will be Frontends of the API.
 - A flag for extra TLS roots to trust, which `DaemonOptions` already takes.
-- A compiled single-file binary. It runs with `bun src/main.ts` for now.
+- A compiled single-file binary. It runs with `bun run iirc` from the repository's root.

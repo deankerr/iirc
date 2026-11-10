@@ -1,5 +1,5 @@
 /**
- * Regressions from the review of stage 1. Each scenario failed before its fix. Where the
+ * Regressions found in review. Each scenario failed before its fix. Where the
  * bug lived in State that Knowledge hides, the test reads State directly.
  */
 import { describe, expect, it } from "vitest";
@@ -339,7 +339,7 @@ describe("8. Self's mask is never read from 001's text", () => {
   });
 });
 
-describe("re-review 1. Generated nicks fit even a small NICKLEN", () => {
+describe("9. Generated nicks fit even a small NICKLEN", () => {
   const opening = lines(
     "!! configure",
     "-> dial irc.test:6697 tls",
@@ -414,7 +414,7 @@ describe("re-review 1. Generated nicks fit even a small NICKLEN", () => {
 const forced = (...names: readonly string[]) =>
   lines(...names.map((name) => `<< :iirc!~iirc@h JOIN ${name}`));
 
-describe("re-review 2. Forced Channels count within their own CHANLIMIT group", () => {
+describe("10. Forced Channels count within their own CHANLIMIT group", () => {
   it("keeps separate groups independent", () => {
     const played = play(client, {
       configuration: base,

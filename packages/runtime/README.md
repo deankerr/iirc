@@ -2,7 +2,7 @@
 
 The Runtime drives one Client per Network. It journals each input, steps the Client, journals the outputs, and carries them out through its ports. This package holds the Runtime and the ports it drives through.
 
-This README is the written interface of both. The types are in `src/`, the in-memory adapters and the laws are in `src/testing/`, and [the proposal](../../docs/notes/2026-11-07-architecture-proposal.md#1-the-system-as-a-hexagon) says why the hexagon has this shape.
+This README is the written interface of both. The types are in `src/`, the in-memory adapters and the laws are in `src/testing/`, and [the architecture](../../docs/architecture.md#the-shape) says why the hexagon has this shape.
 
 ## The Runtime
 

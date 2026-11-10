@@ -18,7 +18,7 @@ This project uses Ultracite with Oxlint + Oxfmt and Lefthook to enforce strict c
 
 `@iirc/protocol` and `@iirc/client` are pure functions of their inputs. They never read the clock, randomness, the locale, the time zone, the environment, or the world, and Client state holds only plain data: strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. The Runtime reaches the world only through its ports, reads time only through Effect's `Clock`, and takes randomness only from Effect's `Random`.
 
-The lint fence in `oxlint.config.ts` catches the obvious slips by name, such as `Date.now()`, `console`, or an import of an adapter or a test kit. It is deliberately small. Review catches the rest, and the replay law, once the transcript test kit is built, proves it. A gap the fence misses is fixed in the code and named in review, not added to the fence.
+The lint fence in `oxlint.config.ts` catches the obvious slips by name, such as `Date.now()`, `console`, or an import of an adapter or a test kit. It is deliberately small. Review catches the rest, and the transcript test kit's replay law proves it. A gap the fence misses is fixed in the code and named in review, not added to the fence.
 
 # Reference Repos
 
@@ -30,6 +30,9 @@ Additional examples/patterns:
 - Rat Stack `~/code/ref/rat-stack`
 - IRC clients to compare approaches with: WeeChat `~/code/ref/weechat` (C), Halloy `~/code/ref/halloy` (Rust)
 
-# Milestone 2's code
+# Working in this repository
 
-The code from milestone 2 was retired on 2026-11-08 and is kept only at the git tag `m2` (read it with `git show m2:<path>`). It is not an interface new work must stay compatible with. Port from it on purpose, with new tests at the new module's interface, and never import it. [The architecture proposal](docs/notes/2026-11-07-architecture-proposal.md) describes the shape we are building.
+- [`docs/architecture.md`](docs/architecture.md) is the map, and says where to extend each part. Each package's README is its written interface: read it before changing the package, and change it in the same commit.
+- A feature exists when its scenarios pass. Write it down in the module's README, from the floor up, as the existing entries are.
+- Decide from the protocol's structure, never from an Ircd's free text. Ergo and ngircd are examples of what the protocol allows, not the cases to code for.
+- Before finishing, run `bun run check`, `bun run knip`, and `bun run test`. Run `bun run e2e` as well after changing the Transport, the Runtime, pacing, or the Daemon. Its Ircds are private, on loopback ports the kernel picks, and never on port 6667.
