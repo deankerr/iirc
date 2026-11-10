@@ -214,8 +214,18 @@ describe("the format", () => {
     });
   });
 
+  it("reads the Runtime's shutdown items, and prints them back", () => {
+    const text = "== stopping\n== unsent 2\n";
+
+    expect(items(text)).toStrictEqual([{ _tag: "Stopping" }, { _tag: "Unsent", count: 2 }]);
+    expect(print(items(text))).toBe(text);
+  });
+
   it.each([
     ">> {Secret credential=a}",
+    "== unsent 0",
+    "== unsent",
+    "== stopping now",
     ">> {Pass credential=a",
     "!! shout #iirc :hi",
     "!! configure +#a  -#b",

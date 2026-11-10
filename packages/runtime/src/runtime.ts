@@ -5,18 +5,14 @@
  * @packageDocumentation
  */
 import { IntentId } from "@iirc/client";
-import type {
-  Client,
-  ConnectionId,
-  Inspection,
-  NetworkConfiguration,
-  SayKind,
-  TimerTable,
-} from "@iirc/client";
+import type { Client, Inspection, NetworkConfiguration, SayKind, TimerTable } from "@iirc/client";
 import type { Knowledge } from "@iirc/client/known";
+import { defaultCapacity, defaultPacing } from "@iirc/outbox";
+import type { Pacing } from "@iirc/outbox";
 import { FallbackEncoding, missingDecoders } from "@iirc/protocol/line";
 import {
   Context,
+  Duration,
   Effect,
   Exit,
   Layer,
@@ -31,8 +27,16 @@ import {
 
 import { Journal, NetworkId } from "./journal.ts";
 import type { JournalFailed, Sequence } from "./journal.ts";
-import { NetworkStopped, runtimeClosed, startNetwork, tell } from "./network.ts";
-import type { Network, NetworkStatus, Ports } from "./network.ts";
+import {
+  halt,
+  heldConnections,
+  NetworkStopped,
+  runtimeClosed,
+  startNetwork,
+  stopGracefully,
+  tell,
+} from "./network.ts";
+import type { HeldConnection, Network, NetworkStatus, Ports } from "./network.ts";
 import { fresh, newsAfter, refold } from "./replay.ts";
 import type { Happened } from "./replay.ts";
 import { Transport } from "./transport.ts";
@@ -40,7 +44,7 @@ import { Vault } from "./vault.ts";
 
 export { NetworkStopped } from "./network.ts";
 
-export type { NetworkStatus } from "./network.ts";
+export type { HeldConnection, NetworkStatus } from "./network.ts";
 
 export type { Happened } from "./replay.ts";
 
@@ -79,11 +83,32 @@ export interface NetworkInspection {
   readonly status: NetworkStatus;
   /** The Client's own inspection. */
   readonly client: Inspection;
-  /** The Connections the Runtime holds a Link for. */
-  readonly connections: readonly ConnectionId[];
+  /** The Connections the Runtime holds a Link for, each with how many Lines wait to leave, and when the next may. */
+  readonly connections: readonly HeldConnection[];
   /** The timers the Runtime has set, projected with `timers` from every step. */
   readonly timers: TimerTable;
 }
+
+/** How the Runtime paces Lines, and how long endings may take. Each has a default. */
+export interface RuntimeOptions {
+  /** How fast Lines may leave each Connection. By default a burst of 5, then one every 2 s. */
+  readonly pacing?: Pacing | undefined;
+  /** How many Lines may wait for one Connection. By default 1,000. */
+  readonly outboxCapacity?: number | undefined;
+  /** How long a `Hangup` lets queued Lines leave at pace before it hangs up anyway. By default 5 s. */
+  readonly hangupDrain?: Duration.Input | undefined;
+  /** How long shutdown waits for each Network's Connections to close. By default 5 s. */
+  readonly stopTimeout?: Duration.Input | undefined;
+}
+
+/** How long a `Hangup` drains by default. */
+export const defaultHangupDrain: Duration.Duration = Duration.seconds(5);
+
+/** How long shutdown waits for Connections to close by default. */
+export const defaultStopTimeout: Duration.Duration = Duration.seconds(5);
+
+const millisOf = (input: Duration.Input | undefined, fallback: Duration.Duration): number =>
+  Duration.toMillis(input === undefined ? fallback : Duration.fromInputUnsafe(input));
 
 /** What the Runtime offers. */
 export interface RuntimeService {
@@ -142,11 +167,13 @@ const intentId = Effect.map(
  * its timers, steps a `Started`, and drives it. Closing the Scope hangs up every
  * Connection and stops every timer.
  * @param client - The Client to drive, one per Network.
+ * @param options - Pacing, and how long endings may take.
  * @param missing - The fallback encodings this runtime cannot decode. A seam for tests.
  * @returns The Runtime's service.
  */
 export const makeRuntime = <S>(
   client: Client<S>,
+  options: RuntimeOptions = {},
   missing: () => readonly FallbackEncoding[] = missingDecoders
 ) =>
   Effect.gen(function* () {
@@ -159,6 +186,12 @@ export const makeRuntime = <S>(
     const ports: Ports<S> = {
       client,
       journal: yield* Journal,
+      timing: {
+        capacity: options.outboxCapacity ?? defaultCapacity,
+        hangupDrain: millisOf(options.hangupDrain, defaultHangupDrain),
+        pacing: options.pacing ?? defaultPacing,
+        stopTimeout: millisOf(options.stopTimeout, defaultStopTimeout),
+      },
       transport: yield* Transport,
       vault: yield* Vault,
     };
@@ -172,9 +205,22 @@ export const makeRuntime = <S>(
     // Layer's other finalizers run in.
     const drivers = yield* Scope.make();
 
-    yield* Effect.addFinalizer(() =>
-      adding.withPermit(Effect.andThen(Ref.set(closed, true), Scope.close(drivers, Exit.void)))
-    );
+    // Every running Network stops at once: it steps a `Stopping` and waits, within the
+    // bound, for its Connections to close, and then its driver stops, which closes any
+    // Connection left without waiting on it. So the whole stop takes the bound, and no
+    // more than the time to close Scopes after it.
+    const stopAll = Effect.gen(function* () {
+      yield* Ref.set(closed, true);
+      yield* Effect.forEach(
+        (yield* Ref.get(held)).values(),
+        (network) =>
+          Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
+        { concurrency: "unbounded", discard: true }
+      ).pipe(Effect.interruptible);
+      yield* Scope.close(drivers, Exit.void);
+    });
+
+    yield* Effect.addFinalizer(() => adding.withPermit(stopAll));
 
     const folded = yield* refold(client, ports.journal);
 
@@ -227,7 +273,7 @@ export const makeRuntime = <S>(
 
           return {
             client: client.inspect(state),
-            connections: [...(yield* Ref.get(network.links)).keys()],
+            connections: yield* heldConnections(network),
             status,
             // A stopped Network's timers were stopped with it.
             timers: status._tag === "Running" ? table : new Map(),
@@ -286,9 +332,11 @@ export const makeRuntime = <S>(
  * The Runtime as a Layer, which needs the Transport, the Journal, and the Vault, and
  * takes time from Effect's `Clock`.
  * @param client - The Client to drive, one per Network.
+ * @param options - Pacing, and how long endings may take.
  * @returns The Layer.
  */
 export const layerRuntime = <S>(
-  client: Client<S>
+  client: Client<S>,
+  options: RuntimeOptions = {}
 ): Layer.Layer<Runtime, DecodersMissing | JournalFailed, Journal | Transport | Vault> =>
-  Layer.effect(Runtime, makeRuntime(client));
+  Layer.effect(Runtime, makeRuntime(client, options));

@@ -37,6 +37,7 @@ import {
 import type { Run } from "./run.ts";
 import { ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
 import { runStage } from "./seam.ts";
+import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf } from "./views.ts";
 
@@ -118,6 +119,15 @@ const fold = (
   }
 
   run.news.push(meant);
+
+  if (meant._tag === "Confirmed") {
+    const { intent } = meant;
+
+    updateOpen(run, (open) => ({
+      ...open,
+      confirmed: [...open.confirmed, intent].slice(-maxConfirmed),
+    }));
+  }
 
   if (meant._tag !== "Activity" || !live) {
     return;

@@ -1,5 +1,5 @@
 import { client } from "@iirc/client";
-import type { ClientState, News, NetworkConfiguration } from "@iirc/client";
+import type { ClientState, IntentId, News, NetworkConfiguration } from "@iirc/client";
 import { configured, joined, parse, registered } from "@iirc/client/testing";
 import { Effect, Fiber, Result, Stream } from "effect";
 import { TestClock } from "effect/testing";
@@ -106,6 +106,8 @@ describe("the real Client on the in-memory ports", () => {
           text: "hello",
         });
 
+        // The Lines of registration and the join spent the burst, so it waits its turn.
+        yield* TestClock.adjust(2000);
         expect(yield* heardText(secure)).toBe("PRIVMSG #iirc hello\r\n");
         yield* secure.say(encoder.encode(":peer!u@h PRIVMSG #iirc :hi there"));
         yield* settle;
@@ -159,6 +161,65 @@ describe("the real Client on the in-memory ports", () => {
   });
 });
 
+describe("Lines that never left", () => {
+  it("are refused as Unsent when the Ircd ends the Connection first", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const base = configured({ channels: [{ name: "#iirc" }] });
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, base);
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        yield* converse(call, opening(base, []));
+        yield* converse(call, joined(base, "#iirc", ["@peer"]));
+
+        // Registration and the join spent all but one Line of the burst, so the first
+        // leaves at once, and the others wait their turn.
+        const intents: IntentId[] = [];
+
+        for (const words of ["one", "two", "three"]) {
+          const said = yield* runtime.say(libera, {
+            kind: "Privmsg",
+            target: "#iirc",
+            text: words,
+          });
+
+          intents.push(said.intent);
+        }
+
+        const heard = yield* heardText(call);
+
+        yield* call.close("Reset");
+
+        const news = yield* Stream.runCollect(
+          Stream.takeUntil(runtime.news(), (happened) =>
+            happened.news.some((one) => one._tag === "SessionEnded")
+          )
+        );
+
+        return {
+          heard,
+          refused: news.flatMap((happened) =>
+            happened.news.flatMap((one) =>
+              one._tag === "Refused" ? [[intents.indexOf(one.intent), one.reason._tag]] : []
+            )
+          ),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      heard: "PRIVMSG #iirc one\r\n",
+      refused: [
+        [1, "Unsent"],
+        [2, "Unsent"],
+      ],
+    });
+  });
+});
+
 // What a single uninterrupted run would show: the fold of the same inputs.
 const uninterrupted = (state: ClientState) => ({
   client: client.inspect(state),
@@ -187,8 +248,11 @@ describe("a restart", () => {
           known: yield* first.runtime.known(libera),
         };
 
+        const running = (yield* entries(world.journal)).length;
+
+        // Shutdown steps a Stopping: the Client says QUIT and hangs up, and the Ircd's
+        // side ends.
         yield* first.close;
-        yield* TestClock.adjust(5000);
         const kept = (yield* entries(world.journal)).length;
         const second = yield* startRuntime(world, client);
         const redial = yield* Effect.forkChild(world.memory.ircd.accept);
@@ -216,10 +280,13 @@ describe("a restart", () => {
           },
           before,
           foldedAfter: folded(all.length),
-          foldedBefore: folded(kept),
+          foldedBefore: folded(running),
           redialled: (yield* Fiber.join(redial)).address,
           stepped: all
             .slice(kept)
+            .map(({ record }) => (record._tag === "Input" ? record.input._tag : "Outputs")),
+          stopped: all
+            .slice(running, kept)
             .map(({ record }) => (record._tag === "Input" ? record.input._tag : "Outputs")),
         };
       })
@@ -240,11 +307,13 @@ describe("a restart", () => {
       redialled: result.redialled,
       status: result.after.inspected.status,
       stepped: result.stepped,
+      stopped: result.stopped,
     }).toStrictEqual({
       pending: ["keepalive"],
       redialled: { host: "irc.test", port: 6697, tls: true },
       status: { _tag: "Running" },
       stepped: ["Started", "Outputs"],
+      stopped: ["Stopping", "Outputs", "Closed"],
     });
   });
 });

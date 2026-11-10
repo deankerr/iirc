@@ -485,7 +485,9 @@ const step =
       }
 
       case "Retry":
-      case "Unfilled": {
+      case "Stopping":
+      case "Unfilled":
+      case "Unsent": {
         return ignore(state, { _tag: "NotNow", input: input._tag });
       }
 

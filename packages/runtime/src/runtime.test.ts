@@ -454,7 +454,7 @@ describe("a Line `encode` rejects", () => {
 describe("starting", () => {
   it("refuses when this runtime is missing a decoder", async () => {
     const exit = await runTest((world) =>
-      Effect.exit(startRuntime(world, scripted([]), () => ["big5"]))
+      Effect.exit(startRuntime(world, scripted([]), {}, () => ["big5"]))
     );
 
     expect(exit).toStrictEqual(Exit.fail(new DecodersMissing({ missing: ["big5"] })));
@@ -851,7 +851,7 @@ describe("closing the Runtime", () => {
     ]);
   });
 
-  it("hangs up every Connection and stops every timer", async () => {
+  it("cuts off a Connection the Client never hangs up at the bound, and stops every timer", async () => {
     const result = await runTest((world) =>
       Effect.gen(function* () {
         const client = scripted([
@@ -878,9 +878,16 @@ describe("closing the Runtime", () => {
       })
     );
 
+    // Inputs within the bound are journaled and stepped, and nothing after it.
     expect(result).toStrictEqual({
       ended: true,
-      outline: ["1 libera Configured", "2 libera of 1: Dial Wake", "3 libera Opened"],
+      outline: [
+        "1 libera Configured",
+        "2 libera of 1: Dial Wake",
+        "3 libera Opened",
+        "4 libera Stopping",
+        "5 libera Fired",
+      ],
     });
   });
 });
@@ -920,8 +927,9 @@ describe("restarting", () => {
         "1 libera Configured",
         "2 libera of 1: Wake Wake",
         "3 libera Fired",
-        "4 libera Started",
-        "5 libera Fired",
+        "4 libera Stopping",
+        "5 libera Started",
+        "6 libera Fired",
       ],
       pending: new Map([[TimerId.make("pending"), at(5000)]]),
     });

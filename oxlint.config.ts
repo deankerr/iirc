@@ -94,6 +94,11 @@ const throughPorts =
 const toNothing = ours([], "`@iirc/protocol` depends on no other package of ours.");
 const toProtocol = ours(["@iirc/protocol/*"], "`@iirc/client` depends only on `@iirc/protocol`.");
 
+const outboxToProtocol = ours(
+  ["@iirc/protocol/*"],
+  "`@iirc/outbox` depends only on `@iirc/protocol`."
+);
+
 // A negation un-blocks every group, so the Runtime's allowed subpaths are listed exactly,
 // and only its tests may import the scripted Client.
 const toClient = (production: boolean) =>
@@ -101,10 +106,11 @@ const toClient = (production: boolean) =>
     [
       "@iirc/client",
       "@iirc/client/known",
+      "@iirc/outbox",
       "@iirc/protocol/*",
       ...(production ? [] : ["@iirc/client/testing"]),
     ],
-    "`@iirc/runtime` depends only on `@iirc/client` and `@iirc/protocol`."
+    "`@iirc/runtime` depends only on `@iirc/client`, `@iirc/outbox`, and `@iirc/protocol`."
   );
 
 const tests = ["**/*.test.ts", "**/testing/**"];
@@ -128,6 +134,7 @@ const coreFence: OxlintOverride[] = [
   })),
   ...layer(["packages/protocol/src/**"], coreRules(toNothing)),
   ...layer(["packages/client/src/**"], coreRules(toProtocol)),
+  ...layer(["packages/outbox/src/**"], coreRules(outboxToProtocol)),
   ...layer(["packages/api/src/**"], (production) => ({
     "no-restricted-imports": imports(
       production,

@@ -13,7 +13,7 @@ import { Result } from "effect";
 import type { Client, Step } from "../client.ts";
 import type { NetworkConfiguration } from "../configuration.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
-import type { Input } from "../input.ts";
+import type { Input, UnfilledReason, UnsentLine } from "../input.ts";
 import type { News } from "../news.ts";
 import type { Output, TimerTable } from "../output.ts";
 import { timers } from "../output.ts";
@@ -285,6 +285,8 @@ interface Driver<State> {
   connection: ConnectionId;
   intents: number;
   secret: SecretLine | undefined;
+  /** Every `Send` and `SendSecret` output so far, for `== unsent`. */
+  readonly lines: UnsentLine[];
   readonly inputs: Input[];
   readonly steps: Step<State>[];
   /** Each step written down at once, to replay against, and to catch a step that changes an earlier state. */
@@ -301,6 +303,7 @@ const driver = <State>(
   dialled: 0,
   inputs: [],
   intents: 0,
+  lines: [],
   now: Instant.make(epoch),
   secret: undefined,
   snapshots: [],
@@ -386,6 +389,11 @@ const stepInput = <State>(at: Driver<State>, fed: Input): Step<State> => {
 
   at.inputs.push(input);
   at.steps.push(step);
+  at.lines.push(
+    ...step.outputs.filter(
+      (output): output is UnsentLine => output._tag === "Send" || output._tag === "SendSecret"
+    )
+  );
   at.state = step.state;
   at.table = timers(at.table, input, step.outputs);
 
@@ -454,6 +462,30 @@ const advance = <State>(at: Driver<State>, millis: number): Step<State>[] => {
   return fired;
 };
 
+// The last `count` Lines sent on the current Connection, given back as never sent.
+const unsentInput = <State>(at: Driver<State>, count: number): Input => {
+  const sent = at.lines.filter((line) => line.connection === at.connection);
+
+  if (sent.length < count) {
+    throw new ScenarioError(
+      `\`== unsent ${count}\` needs ${count} Lines sent on Connection ${at.connection}, and ${sent.length} were`
+    );
+  }
+
+  return { _tag: "Unsent", at: at.now, connection: at.connection, outputs: sent.slice(-count) };
+};
+
+// The last `SecretLine` written, which could not be filled.
+const unfilledInput = <State>(at: Driver<State>, reason: UnfilledReason): Input => {
+  if (at.secret === undefined) {
+    throw new ScenarioError(
+      "`== unfilled` comes after a `>> {…}` placeholder, and none came before it"
+    );
+  }
+
+  return { _tag: "Unfilled", at: at.now, connection: at.connection, line: at.secret, reason };
+};
+
 // The steps an item feeds, if it feeds any, after any bookkeeping it does.
 const feedSteps = <State>(at: Driver<State>, item: Item): Step<State>[] => {
   switch (item._tag) {
@@ -487,22 +519,16 @@ const feedSteps = <State>(at: Driver<State>, item: Item): Step<State>[] => {
       return [stepInput(at, { _tag: "Started", at: at.now })];
     }
 
-    case "Unfilled": {
-      if (at.secret === undefined) {
-        throw new ScenarioError(
-          "`== unfilled` comes after a `>> {…}` placeholder, and none came before it"
-        );
-      }
+    case "Stopping": {
+      return [stepInput(at, { _tag: "Stopping", at: at.now })];
+    }
 
-      return [
-        stepInput(at, {
-          _tag: "Unfilled",
-          at: at.now,
-          connection: at.connection,
-          line: at.secret,
-          reason: item.reason,
-        }),
-      ];
+    case "Unsent": {
+      return [stepInput(at, unsentInput(at, item.count))];
+    }
+
+    case "Unfilled": {
+      return [stepInput(at, unfilledInput(at, item.reason))];
     }
 
     case "Fired": {
@@ -580,7 +606,9 @@ type InputItem = Extract<
       | "Opened"
       | "Closed"
       | "Started"
+      | "Stopping"
       | "Unfilled"
+      | "Unsent"
       | "Fired"
       | "Owner"
       | "Advance";
@@ -592,7 +620,9 @@ const inputTags: ReadonlySet<Item["_tag"]> = new Set([
   "Opened",
   "Closed",
   "Started",
+  "Stopping",
   "Unfilled",
+  "Unsent",
   "Fired",
   "Owner",
   "Advance",

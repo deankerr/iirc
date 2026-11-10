@@ -26,7 +26,7 @@ import type { Client, Step } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import type { Arrival, Refined } from "./feature.ts";
 import { ConnectionId, Instant } from "./ids.ts";
-import type { TimerId } from "./ids.ts";
+import type { IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
 import type { EndReason } from "./news.ts";
@@ -66,6 +66,13 @@ const dial = (run: Run, upgrade?: IrcdAddress): void => {
   const { configuration } = run.state;
 
   if (configuration === undefined) {
+    return;
+  }
+
+  // Shutting down: nothing is dialled until the next `Started`, which dials again.
+  if (run.state.stopping) {
+    run.state = { ...run.state, network: { _tag: "Idle", since: run.at } };
+
     return;
   }
 
@@ -175,7 +182,7 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
 
   run.state = allWanted(run.state);
 
-  if (configuration?.enabled !== true) {
+  if (configuration?.enabled !== true || run.state.stopping) {
     run.state = { ...run.state, attempt, network: { _tag: "Idle", since: run.at } };
 
     return;
@@ -205,13 +212,54 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
   };
 };
 
+// A `Started` opens the gate a `Stopping` shut. A Network left idle while enabled was
+// stopped, not disabled, so it dials again.
 const started = (run: Run): void => {
   const link = linkOf(run);
+  const { network, configuration } = run.state;
+
+  run.state = { ...run.state, stopping: false };
 
   if (link !== undefined) {
     ended(run, link, { _tag: "Restarted" });
-  } else if (run.state.network._tag === "Waiting") {
+  } else if (
+    network._tag === "Waiting" ||
+    (network._tag === "Idle" && configuration?.enabled === true)
+  ) {
     dial(run);
+  }
+};
+
+// The Runtime is shutting down: say `QUIT` and hang up, and shut the gate, so nothing is
+// dialled until the next `Started`. A wait to redial ends.
+const stopping = (run: Run): void => {
+  const { network } = run.state;
+
+  run.state = { ...run.state, stopping: true };
+
+  switch (network._tag) {
+    case "Waiting": {
+      run.state = { ...run.state, network: { _tag: "Idle", since: network.since } };
+      break;
+    }
+
+    case "Connection": {
+      if (network.link.closing === undefined && network.link.phase._tag === "Open") {
+        send(run, quit(), "QUIT");
+      }
+
+      hangup(run, { _tag: "Closed", reason: "HungUp" });
+      break;
+    }
+
+    case "Unconfigured":
+    case "Idle": {
+      break;
+    }
+
+    default: {
+      network satisfies never;
+    }
   }
 };
 
@@ -391,7 +439,7 @@ const relayed = (run: Run): number => {
 const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   const session = sessionOf(run.state);
 
-  if (session === undefined || linkOf(run)?.closing !== undefined) {
+  if (session === undefined || linkOf(run)?.closing !== undefined || run.state.stopping) {
     run.news.push({ _tag: "Refused", intent: input.intent, reason: { _tag: "Offline" } });
 
     return;
@@ -546,6 +594,24 @@ const unfilledHeld = (run: Run, line: SecretLine): void => {
   settle(run);
 };
 
+// Lines that never left. A `Say` with one among them is refused, once, unless the Ircd
+// already confirmed it. Any other Line changes nothing: its Connection is ending.
+const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
+  const link = linkOf(run);
+  const open = link?.id === input.connection ? openOf(run.state) : undefined;
+  const confirmed = new Set(open?.confirmed);
+  const refused = new Set<IntentId>();
+
+  for (const output of input.outputs) {
+    const intent = output._tag === "Send" ? output.intent : undefined;
+
+    if (intent !== undefined && !confirmed.has(intent) && !refused.has(intent)) {
+      refused.add(intent);
+      run.news.push({ _tag: "Refused", intent, reason: { _tag: "Unsent" } });
+    }
+  }
+};
+
 // Inputs from the Transport name their Connection: one from another is stale.
 const current = (run: Run, connection: ConnectionId): Link | undefined => {
   const link = linkOf(run);
@@ -610,6 +676,13 @@ const transport = (run: Run, input: FromTransport): void => {
 };
 
 const dispatch = (run: Run, input: Input): void => {
+  // The gate shuts whatever else has happened, so a `Configured` after it dials nothing.
+  if (input._tag === "Stopping") {
+    stopping(run);
+
+    return;
+  }
+
   if (input._tag !== "Configured" && run.state.configuration === undefined) {
     ignore(run, { _tag: "NotNow", input: input._tag });
 
@@ -639,6 +712,11 @@ const dispatch = (run: Run, input: Input): void => {
 
     case "Say": {
       say(run, input);
+      break;
+    }
+
+    case "Unsent": {
+      unsent(run, input);
       break;
     }
 

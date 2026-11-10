@@ -283,7 +283,8 @@ const refusedReason = (source: RefusedReason): WireRefusedReason => {
     }
 
     case "Offline":
-    case "Unsendable": {
+    case "Unsendable":
+    case "Unsent": {
       const wire: Case<RefusedReason, WireRefusedReason, typeof source._tag> = {
         _tag: source._tag,
       };
@@ -615,7 +616,11 @@ export const networkInspection = (
   source: NetworkInspection
 ): Fields<NetworkInspection, WireNetworkInspection> => ({
   client: clientInspection(source.client),
-  connections: [...source.connections],
+  connections: source.connections.map(({ connection, nextAt, queued }) => ({
+    connection,
+    nextAt: nextAt ?? null,
+    queued,
+  })),
   status: networkStatus(source.status),
   timers: timerList(source.timers),
 });

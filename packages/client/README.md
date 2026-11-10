@@ -39,6 +39,8 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Closed` | Transport | A Connection is over, and how. |
 | `Fired` | Clock | A timer the Client set is due, with the instant its `Wake` set. It consumes the timer. |
 | `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent: the Credential is `Missing`, the Vault is `Unavailable`, or the value is `Unsendable` in that Line, such as a password with a line break. |
+| `Unsent` | Runtime | `Send` and `SendSecret` outputs on a Connection that never left, as they were output and in that order: the Runtime's queue dropped them because the Connection ended, or its hang-up ran out of time. |
+| `Stopping` | Runtime | The Runtime is shutting down. |
 
 When the Client dials:
 
@@ -46,6 +48,7 @@ When the Client dials:
 - Backoff applies only to redialling after a `Closed`. A `Configured` while waiting keeps waiting, and `Retry` cuts the wait short.
 - A `Configured` that disables the Network while a Connection is open sends `QUIT` if registration has begun, hangs up, and the Client waits for its `Closed`. Enabled again before that `Closed`, it dials as soon as the `Closed` arrives.
 - A `Started` ends the Connection the Client believed open, with `Restarted`, and dials at once.
+- A `Stopping` shuts the gate: the Client says `QUIT` on its Connection if registration has begun, hangs it up, and its Session ends `Closed` `HungUp` when the `Closed` comes. A wait to redial ends. Until the next `Started`, it dials nothing, whatever a `Configured`, `Retry`, or `Fired` asks, and refuses every `Say` with `Offline`. With no Connection, a `Stopping` only shuts the gate. The next `Started` dials at once if the Network is enabled.
 - Each dial takes the next Ircd in `ircds`, round and round, except an STS upgrade, which dials the same host again over TLS, at once.
 - While an STS policy holds for a dial's host, the dial is TLS on the policy's port, whatever Configuration says.
 
@@ -54,7 +57,7 @@ When the Client dials:
 | Output | Meaning |
 | --- | --- |
 | `Dial` | Open a Connection to an Ircd, numbered by the Client. While an STS policy holds for the host, the address is TLS on the policy's port, whatever Configuration says. |
-| `Send` | Send an `OutboundLine`. It counts as sent once it is output. |
+| `Send` | Send an `OutboundLine`. It counts as sent unless an `Unsent` input says otherwise. Every Line of a `Say` carries its `intent`, and no other Line does. |
 | `SendSecret` | Send a `SecretLine`. The Runtime fills in the Credential with `fillSecret` from `@iirc/protocol`. |
 | `Hangup` | End a Connection. The Client still waits for its `Closed`. |
 | `Wake` | Set a timer to an instant, or cancel it with `null`. The same id replaces the earlier one. |
@@ -86,12 +89,12 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `Activity` | Something that changed, with its time, id, and whether it is `live`. |
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
 | `ConnectionFailed` | A Connection that ended before registration, and why. |
-| `Refused` | An Owner intent that was not carried out, with its intent id: `Offline`, `Unsendable`, or `Rejected` by the Ircd's reply. |
+| `Refused` | An Owner intent that was not carried out, with its intent id: `Offline`, `Unsendable`, `Rejected` by the Ircd's reply, or `Unsent`: at least part of the Message never left, because its Connection ended first. |
 | `Ignored` | An input that changed nothing, and why. |
 
 Three rules for Timelines:
 
-- **Our own Messages.** A Message we say appears as News when we send it. If `ours.echo` is set, a `Confirmed` for its intent follows when the Ircd echoes it, and the echo is not a second Message. With no echo, it stays unconfirmed: sent, with delivery unknown.
+- **Our own Messages.** A Message we say appears as News when we send it. If `ours.echo` is set, a `Confirmed` for its intent follows when the Ircd echoes it, and the echo is not a second Message. With no echo, it stays unconfirmed: sent, with delivery unknown. If its Line never left, a `Refused` `Unsent` for its intent follows instead, unless the Ircd had already confirmed it on that Connection, so a Timeline marks the Message as not sent.
 - **Order by time.** History arrives late, with `live` false. A Timeline orders by `at`, not by when the News came.
 - **One per id.** A Message can arrive live and again from history. A Timeline keeps one per id. One with an unknown id is kept as it came.
 
@@ -130,7 +133,7 @@ A machine that is not running, such as `caps` with no Connection open, is left o
 - **Hardened, not tuned.** The Client accepts anything the protocol allows, from any Ircd: a reply at any point it may legally come, tags and names in any order, and optional parts present or absent, such as a trailing colon or a `time` tag. The Ircds we record, such as Ergo and ngircd, show where Ircds differ. They are examples, never the cases to code for, so an Ircd we have never seen still works. What it cannot read is `Ignored`, never fatal.
 - **Exact replay.** Folding the Journal's inputs from `initial` gives the same states, outputs, and News. The Client never reads its outputs back.
 - **Time comes from inputs.** Every `Wake` instant is computed from the `at` of an input: the one being stepped, or, for the keepalive, the one that last brought a Line, which is never later. A `Fired` carries the `due` instant its `Wake` set, so a firing from an earlier setting of a timer that was reset or cancelled since is stale and ignored. Timers are one-shot: once the Client has stepped a `Fired` whose `due` matches, the timer is gone, and the Client sets it again with a fresh `Wake` if it still wants it. The Runtime gives `due` back unchanged. `Fired` names only the timer, so State keeps which machine each timer belongs to and what it means. Each machine's timers are derived from its state, and a step outputs a `Wake` for each difference, so leaving a state cancels its timers ([ADR 0009](../../docs/adr/0009-client-machines-are-reducers.md)).
-- **One Connection at a time.** The Client dials only when no Connection is open: after the previous Connection's `Closed`, or after `Started`, which ends any it believed open. A `Configured` or `Started` with the Network enabled dials at once, unless a redial is pending: only a redial after a `Closed` waits for backoff, a `Configured` leaves that wait as it is, and `Started` or `Retry` cuts it short. A `Configured` that disables the Network while connected hangs up. Once the Client has begun to hang up, it sends nothing more on that Connection.
+- **One Connection at a time.** The Client dials only when no Connection is open: after the previous Connection's `Closed`, or after `Started`, which ends any it believed open. A `Configured` or `Started` with the Network enabled dials at once, unless a redial is pending: only a redial after a `Closed` waits for backoff, a `Configured` leaves that wait as it is, and `Started` or `Retry` cuts it short. A `Configured` that disables the Network while connected hangs up, and so does a `Stopping`, after which nothing is dialled until the next `Started`. Once the Client has begun to hang up, it sends nothing more on that Connection.
 - **Credentials appear only by name.** No input or output holds a Credential's value.
 - **Never insecure under STS.** Once an Ircd has given a policy over TLS, the Client dials that host only over TLS, on the policy's port, until the policy expires, and never falls back to plaintext. [Strict Transport Security](#strict-transport-security) has the details.
   - A policy is learnt only over TLS, from `duration`, on the port of the Connection it arrived on. A `port` key sent over TLS is ignored.
@@ -162,6 +165,7 @@ A machine that is not running, such as `caps` with no Connection open, is left o
 | An input that makes no sense now, such as `Opened` twice | `Ignored` with `NotNow`. A Line that makes no sense now, such as a `CAP ACK` when nothing was asked or a second `001`, is `NotNow` with `Received`. A Line the Client does not read, such as most numerics, is not ignored: it changes nothing, and that is no error. |
 | An Owner intent that cannot be carried out, such as `Say` while offline | `Refused` with the intent id. It is not queued. |
 | A Line a Feature refuses at egress | A `Say` is `Refused` with `Unsendable`. Any other Line is `Ignored` with `Unsendable` and its command, such as a `PONG` that is not UTF-8 under `UTF8ONLY`. Nothing is sent. |
+| `Unsent` | A `Say` whose Line is among them is `Refused` with `Unsent`, once, unless the Ircd confirmed it on that Connection, of which the last 64 are remembered. This holds whether or not the Connection is still current. Any other Line changes nothing, and no `Ignored` is reported: its Connection is ending. |
 | `Unfilled` | SASL sends `AUTHENTICATE *` and counts as a failed login, so a required login abandons the Connection. A Channel whose key is unfilled is `Refused` until the next Session or the next `Configured`. Registration goes on without `PASS`, and the Ircd decides. With no Feature holding registration to hear it, such as on the floor, an unfilled `AuthenticatePlain` is `NotNow`. |
 | A Feature hook that throws | That Feature is off for the rest of the Connection, and `Ignored` with `FeatureFailed` records it. |
 

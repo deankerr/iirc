@@ -70,6 +70,10 @@ export type Item =
   | { readonly _tag: "Closed"; readonly reason: CloseReason }
   /** `== started`: the Runtime has started. */
   | { readonly _tag: "Started" }
+  /** `== stopping`: the Runtime is shutting down. */
+  | { readonly _tag: "Stopping" }
+  /** `== unsent 2`: the last n Lines sent on the current Connection never left. */
+  | { readonly _tag: "Unsent"; readonly count: number }
   /** `== unfilled Missing`: the last SecretLine written could not be filled. */
   | { readonly _tag: "Unfilled"; readonly reason: UnfilledReason }
   /** `== fired ping t+30s`: a timer fires now, with the instant its `Wake` set, stale or not. */
@@ -643,12 +647,20 @@ const parseOutput = (rest: string): Result.Result<Item, string> => {
 };
 
 const runtimeHelp =
-  "not `== opened`, `== closed <CloseReason>`, `== started`, `== unfilled <UnfilledReason>`, `== fired <timer> t+<n>s`, or `== connection <n>`";
+  "not `== opened`, `== closed <CloseReason>`, `== started`, `== stopping`, `== unfilled <UnfilledReason>`, `== unsent <n>`, `== fired <timer> t+<n>s`, or `== connection <n>`";
 
 // Each `==` verb, reading its arguments into an item, or `undefined` if they do not fit.
 const runtimeVerbs = new Map<string, (args: readonly string[]) => Item | undefined>([
   ["opened", (args) => (args.length === 0 ? { _tag: "Opened" } : undefined)],
   ["started", (args) => (args.length === 0 ? { _tag: "Started" } : undefined)],
+  ["stopping", (args) => (args.length === 0 ? { _tag: "Stopping" } : undefined)],
+  [
+    "unsent",
+    ([count, ...extra]) =>
+      extra.length === 0 && /^[1-9]\d*$/u.test(count ?? "")
+        ? { _tag: "Unsent", count: Number(count) }
+        : undefined,
+  ],
   [
     "closed",
     ([reason, ...extra]) =>
@@ -781,8 +793,31 @@ export const parse = (text: string): Result.Result<readonly Item[], ParseError> 
 
 type RuntimeItem = Extract<
   Item,
-  { readonly _tag: "Opened" | "Closed" | "Started" | "Unfilled" | "Fired" | "Connection" }
+  {
+    readonly _tag:
+      | "Opened"
+      | "Closed"
+      | "Started"
+      | "Stopping"
+      | "Unfilled"
+      | "Unsent"
+      | "Fired"
+      | "Connection";
+  }
 >;
+
+const runtimeTags: ReadonlySet<Item["_tag"]> = new Set([
+  "Opened",
+  "Closed",
+  "Started",
+  "Stopping",
+  "Unfilled",
+  "Unsent",
+  "Fired",
+  "Connection",
+] satisfies RuntimeItem["_tag"][]);
+
+const isRuntimeItem = (item: Item): item is RuntimeItem => runtimeTags.has(item._tag);
 
 const printRuntime = (item: RuntimeItem): string => {
   switch (item._tag) {
@@ -796,6 +831,14 @@ const printRuntime = (item: RuntimeItem): string => {
 
     case "Started": {
       return "started";
+    }
+
+    case "Stopping": {
+      return "stopping";
+    }
+
+    case "Unsent": {
+      return `unsent ${item.count}`;
     }
 
     case "Unfilled": {
@@ -822,6 +865,10 @@ const printRuntime = (item: RuntimeItem): string => {
  * @returns Its line, without a newline.
  */
 export const printItem = (item: Item): string => {
+  if (isRuntimeItem(item)) {
+    return `== ${printRuntime(item)}`;
+  }
+
   switch (item._tag) {
     case "Received": {
       return writeBytes("<<", item.bytes);
@@ -865,15 +912,6 @@ export const printItem = (item: Item): string => {
 
     case "Blank": {
       return "";
-    }
-
-    case "Opened":
-    case "Closed":
-    case "Started":
-    case "Unfilled":
-    case "Fired":
-    case "Connection": {
-      return `== ${printRuntime(item)}`;
     }
 
     default: {

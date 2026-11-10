@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@iirc/client": "workspace:*",
+    "@iirc/outbox": "workspace:*",
     "@iirc/protocol": "workspace:*",
     "effect": "catalog:"
   },

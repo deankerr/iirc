@@ -35,6 +35,8 @@ A transcript is one item per line, and ends with a newline. `print(parse(text))`
 | `== opened` | `== opened` | The current Connection is open. |
 | `== closed` | `== closed Reset` | The current Connection is over, with a `CloseReason`. |
 | `== started` | `== started` | The Runtime has started. |
+| `== stopping` | `== stopping` | The Runtime is shutting down. |
+| `== unsent` | `== unsent 2` | The last n `Send` and `SendSecret` outputs on the current Connection never left, in the order they were output. |
 | `== unfilled` | `== unfilled Missing` | The last `>> {…}` written could not be filled, with an `UnfilledReason`. |
 | `== fired` | `== fired ping t+30s` | A timer fires now, with the `due` its `Wake` set. Use it to write a stale firing. |
 | `== connection` | `== connection 1` | Later Transport inputs come from Connection 1, until the next dial. Use it to write input from an old Connection. |
@@ -68,7 +70,7 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | News | Example |
 | --- | --- |
 | `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl`, `?? ignored Unsendable PONG`, `?? ignored UnmatchedEcho` |
-| `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404` |
+| `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404`, `?? refused i3 Unsent` |
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
