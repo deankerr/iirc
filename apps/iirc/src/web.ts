@@ -1,7 +1,8 @@
 /**
  * The web frontend's built files, served beside the API on its origin by
- * `iirc daemon --web` (ADR 0007). Only this executable knows both: the Daemon serves these
- * routes without knowing what they are.
+ * `iirc daemon --web` (ADR 0007), from a directory or from the build compiled into this
+ * executable. Only this executable knows both: the Daemon serves these routes without knowing
+ * what they are.
  *
  * @packageDocumentation
  */
@@ -14,6 +15,23 @@ class WebFrontendUnusable extends Data.TaggedError("WebFrontendUnusable")<{
   readonly directory: string;
   readonly reason: string;
 }> {}
+
+/** This executable carries no web frontend, so `--web` needs a directory. */
+class WebFrontendNotEmbedded extends Data.TaggedError("WebFrontendNotEmbedded") {}
+
+/** Where the web frontend's built files come from. */
+export type WebSource =
+  /** The build compiled into this executable by `bun apps/iirc/build.ts`. */
+  | { readonly _tag: "Embedded" }
+  /** A directory on disk, such as `apps/web/dist`, for development. */
+  | { readonly _tag: "Directory"; readonly directory: string };
+
+/**
+ * Where an executable compiled with the web frontend finds it: Bun embeds a directory under
+ * its own name, beside the program, so `apps/web/dist` is `dist` here. `build.ts` says the
+ * same from its side.
+ */
+const embeddedName = "dist";
 
 /**
  * What the page may load, and from where: its own origin only, never a frame of another
@@ -112,19 +130,30 @@ const isNavigation = (request: HttpServerRequest.HttpServerRequest, segments: re
 const notFound = HttpServerResponse.empty({ status: 404 });
 
 /**
- * The routes that serve the web frontend from a directory, once the directory is known to
- * hold an `index.html` that can be read.
- *
- * Every request target is read once, as a path, and that one path decides everything:
- * whether it is the API's, which file answers it, and how long that file may be kept.
- * Nothing under `/api` is ever served from here, so a mistyped API path stays the API's own
- * empty 404. A file is served only when its canonical path, every symbolic link followed,
- * lies inside the directory's canonical path, checked on every request, since the files
- * may change while the Daemon runs. A navigation to a path with no file gets `index.html`.
- * @param directory - The built web frontend, such as `apps/web/dist`.
- * @returns The routes, or why the directory cannot be served.
+ * What a source of files answers: the file a path names, as a path the platform can serve.
  */
-export const layerWeb = Effect.fnUntraced(function* (directory: string) {
+interface Files {
+  /**
+   * The file a path names, if the source has one there.
+   * @param segments - The path, already normalised by `pathOf`.
+   * @returns A path to serve it from, or nothing.
+   */
+  readonly fileAt: (segments: readonly string[]) => Effect.Effect<Option.Option<string>>;
+  /**
+   * Whether its files have a modification time. An embedded file's is the epoch, so an
+   * `etag` or `last-modified` from it would say two builds' files of one size are the same.
+   */
+  readonly dated: boolean;
+}
+
+/**
+ * Files from a directory on disk. A file is found only when its canonical path, every
+ * symbolic link followed, lies inside the directory's canonical path, checked on every
+ * request, since the files may change while the Daemon runs.
+ * @param directory - The built web frontend, such as `apps/web/dist`.
+ * @returns Its files, or why it cannot be served.
+ */
+const directoryFiles = Effect.fnUntraced(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -138,11 +167,6 @@ export const layerWeb = Effect.fnUntraced(function* (directory: string) {
       )
     );
 
-  /**
-   * The canonical path of a file inside the directory, if it is one.
-   * @param segments - Its path under the directory.
-   * @returns The canonical path, or nothing when it is missing, not a file, or outside.
-   */
   const fileAt = (segments: readonly string[]) =>
     fs.realPath(path.join(root, ...segments)).pipe(
       Effect.flatMap((real) =>
@@ -167,6 +191,75 @@ export const layerWeb = Effect.fnUntraced(function* (directory: string) {
     .access(index.value, { readable: true })
     .pipe(Effect.mapError((error) => unusable(error.message)));
 
+  const files: Files = { dated: true, fileAt };
+
+  return files;
+});
+
+/**
+ * The files compiled into this executable, listed once at start. Containment holds by
+ * construction: the list is every regular file Bun embedded, which it read at build time and
+ * which cannot change, holds no symbolic link, and names nothing outside, and a request is
+ * served only when its normalised path is exactly one of those names. The path served is
+ * built from the name in the list, never from the request.
+ * @returns Its files, or that it carries none.
+ */
+const embeddedFiles = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  // Run from source, `import.meta.dir` is a directory on disk, and nothing is embedded.
+  if (!Bun.isStandaloneExecutable) {
+    return yield* new WebFrontendNotEmbedded();
+  }
+
+  const root = path.join(import.meta.dir, embeddedName);
+
+  const listed = yield* fs
+    .readDirectory(root, { recursive: true })
+    .pipe(Effect.mapError(() => new WebFrontendNotEmbedded()));
+
+  const names = new Map<string, string>();
+
+  for (const name of listed) {
+    const info = yield* fs
+      .stat(path.join(root, name))
+      .pipe(Effect.mapError(() => new WebFrontendNotEmbedded()));
+
+    if (info.type === "File") {
+      names.set(name.split(path.sep).join("/"), path.join(root, name));
+    }
+  }
+
+  if (!names.has("index.html")) {
+    return yield* new WebFrontendNotEmbedded();
+  }
+
+  const files: Files = {
+    dated: false,
+    fileAt: (segments) => Effect.succeed(Option.fromUndefinedOr(names.get(segments.join("/")))),
+  };
+
+  return files;
+});
+
+/**
+ * The routes that serve the web frontend, once its source is known to hold an `index.html`
+ * that can be read.
+ *
+ * Every request target is read once, as a path, and that one path decides everything:
+ * whether it is the API's, which file answers it, and how long that file may be kept.
+ * Nothing under `/api` is ever served from here, so a mistyped API path stays the API's own
+ * empty 404. A navigation to a path with no file gets `index.html`.
+ * @param source - Where the files come from.
+ * @returns The routes, or why they cannot be served.
+ */
+export const layerWeb = Effect.fnUntraced(function* (source: WebSource) {
+  const path = yield* Path.Path;
+
+  const { dated, fileAt } =
+    source._tag === "Directory" ? yield* directoryFiles(source.directory) : yield* embeddedFiles;
+
   /**
    * A file as a response, with its type, its cache header, and the security headers.
    * @param file - Its canonical path.
@@ -179,10 +272,15 @@ export const layerWeb = Effect.fnUntraced(function* (directory: string) {
         contentTypes.get(path.extname(file).slice(1).toLowerCase()) ?? "application/octet-stream",
     }).pipe(
       Effect.map((response) =>
-        HttpServerResponse.setHeaders(response, {
-          ...securityHeaders,
-          "cache-control": cacheControl,
-        })
+        HttpServerResponse.setHeaders(
+          dated
+            ? response
+            : HttpServerResponse.removeHeader(
+                HttpServerResponse.removeHeader(response, "etag"),
+                "last-modified"
+              ),
+          { ...securityHeaders, "cache-control": cacheControl }
+        )
       ),
       Effect.orElseSucceed(() => notFound)
     );

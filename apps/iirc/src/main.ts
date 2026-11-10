@@ -33,6 +33,7 @@ import { Digest, SecureRandom } from "effect/crypto";
 
 import { failed, reportedOnStderr } from "./command-failed.ts";
 import { layerWeb } from "./web.ts";
+import type { WebSource } from "./web.ts";
 
 /** `host:port`, with an IPv6 host in brackets, such as `[::1]:7667`. */
 const ListenAddress = Schema.String.check(
@@ -93,8 +94,15 @@ const daemon = Command.make(
       Flag.withDefault(defaultListen)
     ),
     web: Flag.String("web").pipe(
+      // A bare `--web` reads as `--web=`, an empty path, which names no directory: the
+      // build compiled into this executable.
+      Flag.withOptionalValue(""),
+      Flag.map((value): WebSource =>
+        value === "" ? { _tag: "Embedded" } : { _tag: "Directory", directory: value }
+      ),
+      Flag.withMetavar("dir"),
       Flag.withDescription(
-        "Also serve the built web frontend in this directory, on the API's origin"
+        "Also serve the web frontend on the API's origin: the one built in, or the one built into =<dir>"
       ),
       Flag.optional
     ),
@@ -111,6 +119,12 @@ const daemon = Command.make(
           case "WebFrontendUnusable": {
             return failed(
               `The web frontend in ${error.directory} could not be served: ${error.reason}. Build it with bun run build:web.`
+            );
+          }
+
+          case "WebFrontendNotEmbedded": {
+            return failed(
+              "This iirc carries no web frontend of its own, so --web needs a directory, such as --web=apps/web/dist."
             );
           }
 

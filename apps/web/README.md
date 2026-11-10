@@ -4,7 +4,7 @@ The web frontend: a React 19 view over [`@iirc/frontend`](../../packages/fronten
 
 ```sh
 bun run build:web                                        # at the root: apps/web/dist
-bun run iirc daemon --data-dir ~/.local/share/iirc --web apps/web/dist
+bun run iirc daemon --data-dir ~/.local/share/iirc --web=apps/web/dist
 ```
 
 ## What it does

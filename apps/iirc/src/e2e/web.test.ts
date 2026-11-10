@@ -10,54 +10,28 @@ import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { run, startDaemon as startWith, watchedPage } from "./daemon.ts";
+
 const main = path.join(import.meta.dirname, "..", "main.ts");
 const web = path.join(import.meta.dirname, "..", "..", "..", "web", "dist");
 
+/** `iirc` run from source. */
+const source = ["bun", main];
+
 /**
- * Runs `iirc` to its end.
+ * Runs `iirc` from source to its end.
  * @param args - Its arguments.
  * @returns Its exit code and stdout.
  */
-const iirc = async (...args: readonly string[]) => {
-  const child = Bun.spawn(["bun", main, ...args], { stderr: "inherit", stdout: "pipe" });
-  const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-
-  return { code, stdout };
-};
+const iirc = async (...args: readonly string[]) => await run(source, ...args);
 
 /**
- * Starts `iirc daemon --web` on a port the kernel picks, and waits until it listens.
+ * Starts `iirc daemon --web` from source on a port the kernel picks, and waits until it
+ * listens.
  * @param dataDir - Its data directory.
  * @returns Where it listens, and the process.
  */
-const startDaemon = async (dataDir: string) => {
-  const child = Bun.spawn(
-    ["bun", main, "daemon", "--data-dir", dataDir, "--listen", "127.0.0.1:0", "--web", web],
-    { stderr: "pipe", stdout: "inherit" }
-  );
-
-  const reader = child.stderr.getReader();
-  const decoder = new TextDecoder();
-  let logged = "";
-
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- reading the log in order
-    const chunk = await reader.read();
-
-    if (chunk.done) {
-      throw new Error(`the Daemon ended before listening: ${logged}`);
-    }
-
-    logged += decoder.decode(chunk.value);
-    const port = /Listening on http:\/\/127\.0\.0\.1:(?<port>\d+)/u.exec(logged)?.groups?.port;
-
-    if (port !== undefined) {
-      reader.releaseLock();
-
-      return { base: `http://127.0.0.1:${port}`, child };
-    }
-  }
-};
+const startDaemon = async (dataDir: string) => await startWith(source, dataDir, `--web=${web}`);
 
 const wrongKey = "iirc_not-the-key-but-close";
 
@@ -205,34 +179,6 @@ const privateNetwork = async (dataDir: string, channel: string) => {
     .toBe(true);
 
   return { api, base, channel, child, key, ngircd, peer };
-};
-
-/**
- * A page that keeps every Content Security Policy violation it meets where the test can
- * read it, and every error the console shows.
- * @param browser - The browser.
- * @returns The page, and the errors.
- */
-const watchedPage = async (browser: Browser) => {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  const problems: string[] = [];
-
-  await page.addInitScript(() => {
-    document.addEventListener("securitypolicyviolation", (event) => {
-      const root = document.documentElement;
-
-      root.dataset.cspViolations = `${root.dataset.cspViolations ?? ""}${event.violatedDirective} ${event.blockedURI};`;
-    });
-  });
-  page.on("console", (message) => {
-    if (message.type() === "error") {
-      problems.push(message.text());
-    }
-  });
-  page.on("pageerror", (error) => problems.push(error.message));
-
-  return { page, problems };
 };
 
 describe("the web frontend on iirc daemon --web", () => {

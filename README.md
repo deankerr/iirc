@@ -24,6 +24,7 @@ bun run knip          # unused files and dependencies
 bun run test          # every workspace's tests, with no network
 bun run e2e           # a real Daemon against a private ngircd and Ergo, and in Chromium
 bun run build:web     # the web frontend, into apps/web/dist
+bun run build:iirc    # one executable, dist/iirc, with the web frontend inside
 ```
 
 `bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches. [The Daemon's README](packages/daemon/README.md#end-to-end) and [the executable's](apps/iirc/README.md#tests) say what it covers.
@@ -39,8 +40,10 @@ To use the web frontend, build it and serve it with the Daemon, then open `http:
 
 ```sh
 bun run build:web
-bun run iirc daemon --data-dir ~/.local/share/iirc --web apps/web/dist
+bun run iirc daemon --data-dir ~/.local/share/iirc --web=apps/web/dist
 ```
+
+To run it as a service instead, `bun run build:iirc` makes one executable with the web frontend inside, and [the executable's README](apps/iirc/README.md#install) installs it as a systemd user service.
 
 Then, from another shell, add a Network and watch it:
 

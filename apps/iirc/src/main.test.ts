@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -97,7 +97,7 @@ const iirc = async (...args: readonly string[]) => {
  * @returns Its exit code, stdout, and stderr.
  */
 const daemonWithWeb = async (web: string) =>
-  await iirc("daemon", "--data-dir", dataDir(), "--listen", "127.0.0.1:0", "--web", web);
+  await iirc("daemon", "--data-dir", dataDir(), "--listen", "127.0.0.1:0", `--web=${web}`);
 
 /**
  * Starts `iirc daemon` on an ephemeral port, and waits until it listens.
@@ -208,7 +208,7 @@ describe("iirc", () => {
     it("serves the web frontend beside the API, which keeps every path under /api", async () => {
       const directory = dataDir();
       const { stdout: key } = await iirc("key", "create", "phone", "--data-dir", directory);
-      const { base, child } = await startDaemon(directory, "--web", webDir());
+      const { base, child } = await startDaemon(directory, `--web=${webDir()}`);
 
       const get = async (target: string, init: RequestInit = navigate) => {
         const response = await fetch(`${base}${target}`, init);
@@ -371,6 +371,27 @@ describe("iirc", () => {
           1,
           `The web frontend in ${empty} could not be served: it holds no index.html. Build it with bun run build:web.\n`,
         ],
+      });
+    });
+
+    it("refuses a bare --web in one line when run from source, with nothing built in", async () => {
+      const dataDir = path.join(temporary(), "data");
+
+      const refused = await iirc(
+        "daemon",
+        "--data-dir",
+        dataDir,
+        "--listen",
+        "127.0.0.1:0",
+        "--web"
+      );
+
+      expect({ ...refused, made: existsSync(dataDir) }).toStrictEqual({
+        code: 1,
+        made: false,
+        stderr:
+          "This iirc carries no web frontend of its own, so --web needs a directory, such as --web=apps/web/dist.\n",
+        stdout: "",
       });
     });
   });
