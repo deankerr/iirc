@@ -12,8 +12,9 @@ import type { CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api
 import { levelOf, markLatest } from "./activity.ts";
 import { interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
+import { panesOf } from "./layout.ts";
 import { contained } from "./render.ts";
-import { opened, resolve, sidebar } from "./timelines.ts";
+import { opened, openOf, resolve, sidebar } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
 
 /**
@@ -178,19 +179,24 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
   withDraft(state, timeline, (draft) => ({ ...draft, notice }));
 
 /**
- * The context commands are judged in: the open Timeline as its Network lists it, whether
- * that Network has a Session, every Timeline in the sidebar's order, and those with
- * something unread.
+ * The context commands are judged in: the focused Pane's open Timeline as its Network lists
+ * it, whether that Network has a Session, every Timeline in the sidebar's order, those open
+ * in any Pane, and those with something unread.
  * @param timelines - The Timelines.
  * @returns The context.
  */
 export const contextOf = (timelines: Timelines): CommandContext => {
   const shown = opened(timelines);
+  const open = openOf(timelines);
 
   const listed = sidebar(timelines).flatMap((one) => one.timelines);
 
   const around = {
-    open: timelines.open === undefined ? undefined : resolve(timelines, timelines.open),
+    open: open === undefined ? undefined : resolve(timelines, open),
+    panes: panesOf(timelines.layout.root).length,
+    shown: panesOf(timelines.layout.root).flatMap((pane) =>
+      pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
+    ),
     timelines: listed.map((timeline) => timeline.id),
     unread: listed.flatMap((timeline) => {
       const level = levelOf(timeline.unread);

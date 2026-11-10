@@ -30,7 +30,8 @@ import { runtime } from "../app/runtime.ts";
 import { IntentNames } from "../composer/atoms.ts";
 import { Notifier } from "../notifications/notifier.ts";
 import type { NotifierPort } from "../notifications/notifier.ts";
-import { Waits } from "../timelines/atoms.ts";
+import { writeChoice } from "../page/device.ts";
+import { layoutKey, Waits } from "../timelines/atoms.ts";
 import type { WaitTimes } from "../timelines/atoms.ts";
 import { testNotifier } from "./notifier.ts";
 
@@ -915,6 +916,9 @@ export const registryFor = (
   notifier: NotifierPort = testNotifier().port
 ) => {
   let named = 0;
+
+  // A page on a device that kept no layout, whatever an earlier test's page kept.
+  writeChoice(layoutKey, undefined);
 
   return AtomRegistry.make({
     initialValues: [

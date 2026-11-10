@@ -1,5 +1,5 @@
 /**
- * The open Timeline, as a log anchored to the bottom like a chat: it opens on the latest,
+ * A Pane's open Timeline, as a log anchored to the bottom like a chat: it opens on the latest,
  * stays at the bottom while live items arrive there, keeps what is in view still when
  * older items are added above, and asks for older items as the Owner nears the top. Away
  * from the latest, it tells the core so, which then leaves new items to be read when the
@@ -15,7 +15,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { TimelineHeader } from "../channel/timeline-header.tsx";
-import { following, newer, older, openTimeline } from "./atoms.ts";
+import { movedEvent, paneNumber } from "../panes/atoms.ts";
+import { following, newer, older, paneTimeline } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
@@ -154,6 +155,62 @@ const Lines = ({
     }
   };
 
+  /**
+   * Puts the view back where it stood: at the bottom with nothing beyond, or the row that
+   * was in view where it was.
+   * @param element - The scroller.
+   * @param shifted - Whether rows were added above or dropped, moving every row.
+   */
+  const standBack = (element: HTMLDivElement, shifted: boolean) => {
+    const held = anchor.current;
+
+    // Pinned only with nothing more beyond the last row.
+    if (atBottom.current && !window.later) {
+      element.scrollTop = element.scrollHeight;
+    } else if (shifted && held !== undefined) {
+      const index = rows.findIndex((row) => row.key === held.key);
+      const start = virtualizer.measurementsCache[index]?.start;
+
+      if (start !== undefined) {
+        element.scrollTop = start - held.offset;
+      }
+    }
+  };
+
+  /**
+   * Puts the view back after its Pane moved, and tells the core what is in view there now,
+   * as a Pane shown again after a zoom shows what it did not while hidden.
+   * @param element - The scroller.
+   */
+  const shownAgain = (element: HTMLDivElement) => {
+    standBack(element, true);
+    tell(element);
+  };
+
+  // The latest way back, for the Pane's move, which happens between renders.
+  const back = useRef(shownAgain);
+
+  back.current = shownAgain;
+
+  // A Pane's node moved into another Panel loses its scroll position: put it back.
+  useLayoutEffect(() => {
+    const host = scroller.current?.closest("[data-pane-host]");
+
+    const moved = () => {
+      const element = scroller.current;
+
+      if (element !== null) {
+        back.current(element);
+      }
+    };
+
+    host?.addEventListener(movedEvent, moved);
+
+    return () => {
+      host?.removeEventListener(movedEvent, moved);
+    };
+  }, []);
+
   // After rows change: at the bottom, stay there; with rows added above, put the row that
   // was in view back where it was. A row above the view that changes height is kept still
   // by the virtualizer itself.
@@ -169,19 +226,7 @@ const Lines = ({
       return;
     }
 
-    const held = anchor.current;
-
-    // Pinned only with nothing more beyond the last row.
-    if (atBottom.current && !window.later) {
-      element.scrollTop = element.scrollHeight;
-    } else if (shifted && held !== undefined) {
-      const index = rows.findIndex((row) => row.key === held.key);
-      const start = virtualizer.measurementsCache[index]?.start;
-
-      if (start !== undefined) {
-        element.scrollTop = start - held.offset;
-      }
-    }
+    standBack(element, shifted);
 
     // Laid out: what is in view now is what the Owner can see.
     tell(element);
@@ -237,11 +282,13 @@ const Lines = ({
 };
 
 /**
- * The open Timeline, or what stands in for it.
+ * A Pane's open Timeline, or what stands in for it.
+ * @param props - The Pane.
  * @returns The view.
  */
-export const TimelineView = () => {
-  const shown = useAtomValue(openTimeline);
+export const TimelineView = ({ pane }: { readonly pane: string }) => {
+  const shown = useAtomValue(paneTimeline(pane));
+  const number = useAtomValue(paneNumber(pane));
 
   switch (shown._tag) {
     case "Closed": {
@@ -267,7 +314,7 @@ export const TimelineView = () => {
 
       return (
         <section aria-label={label} className={styles.view}>
-          <TimelineHeader name={label} />
+          <TimelineHeader name={label} number={number} pane={pane} />
           <Lines
             divider={shown.divider}
             key={shown.timeline}

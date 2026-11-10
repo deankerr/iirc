@@ -1,6 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import type { Member, Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
+import { openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -193,7 +194,7 @@ describe("the header", () => {
 
     const first = await until(
       registry,
-      timelineHeader,
+      timelineHeader("p0"),
       (header) => header?._tag === "Channel" && header.members === 2
     );
 
@@ -226,7 +227,7 @@ describe("the header", () => {
 
     const after = await until(
       registry,
-      timelineHeader,
+      timelineHeader("p0"),
       (header) => header?._tag === "Channel" && header.topic._tag === "Set"
     );
 
@@ -253,14 +254,24 @@ describe("the header", () => {
   it("reads no head for a Direct Message, and says the Network's connection for its own", async () => {
     const { daemon, registry } = await inChannel([]);
 
-    await until(registry, timelineHeader, (header) => header?._tag === "Channel");
+    await until(registry, timelineHeader("p0"), (header) => header?._tag === "Channel");
     const reads = daemon.channelsRead.length;
 
     registry.set(open, timelineId(peer));
-    const direct = await until(registry, timelineHeader, (header) => header?._tag === "Direct");
+
+    const direct = await until(
+      registry,
+      timelineHeader("p0"),
+      (header) => header?._tag === "Direct"
+    );
 
     registry.set(open, timelineId(own));
-    const network = await until(registry, timelineHeader, (header) => header?._tag === "Network");
+
+    const network = await until(
+      registry,
+      timelineHeader("p0"),
+      (header) => header?._tag === "Network"
+    );
 
     await wait(50);
 
@@ -280,18 +291,18 @@ describe("the members", () => {
 
     const { daemon, registry, send } = await inChannel(many);
 
-    await until(registry, timelineHeader, (header) => header?._tag === "Channel");
+    await until(registry, timelineHeader("p0"), (header) => header?._tag === "Channel");
     await wait(50);
     const hidden = daemon.membersRead.length;
 
     registry.set(perform, [{ _tag: "ShowMembers", shown: undefined }]);
-    const first = await until(registry, roster, (shown) => shown._tag === "Listed");
+    const first = await until(registry, roster("p0"), (shown) => shown._tag === "Listed");
 
-    registry.set(moreMembers, undefined);
+    registry.set(moreMembers, timelineId(idOf(2)));
 
     const all = await until(
       registry,
-      roster,
+      roster("p0"),
       (shown) => shown._tag === "Listed" && shown.rows.length === 130
     );
 
@@ -329,7 +340,7 @@ describe("the members", () => {
     const { daemon, registry, send } = await inChannel([member("op", ["o"])]);
 
     registry.set(perform, [{ _tag: "ShowMembers", shown: true }]);
-    await until(registry, roster, (shown) => shown._tag === "Listed");
+    await until(registry, roster("p0"), (shown) => shown._tag === "Listed");
 
     // Self is kicked, which comes as Activity in the Channel's Timeline.
     const held = daemon.channels.get(iirc);
@@ -344,11 +355,11 @@ describe("the members", () => {
       ])
     );
 
-    const out = await until(registry, roster, (shown) => shown._tag === "Out");
+    const out = await until(registry, roster("p0"), (shown) => shown._tag === "Out");
 
     const header = await until(
       registry,
-      timelineHeader,
+      timelineHeader("p0"),
       (shown) => shown?._tag === "Channel" && shown.note !== undefined
     );
 
@@ -368,7 +379,7 @@ describe("/query", () => {
 
     registry.set(edit, { text: "/query PEER", timeline: timelineId(iirc) });
     await run(registry, send, timelineId(iirc));
-    const opened = await until(registry, timelinesState, (state) => state.open === peer);
+    const opened = await until(registry, timelinesState, (state) => openOf(state) === peer);
 
     await until(
       registry,
@@ -380,7 +391,7 @@ describe("/query", () => {
 
     expect({
       draft: draftOf(registry.get(composerState), timelineId(peer)).text,
-      opened: opened.open,
+      opened: openOf(opened),
     }).toStrictEqual({ draft: "/msg stranger ", opened: peer });
   });
 });
@@ -498,7 +509,7 @@ describe("/query and how the Network folds names", () => {
     daemon.knownDown = true;
     registry.set(edit, { text: "/query [BOB]", timeline: place });
     await run(registry, send, place);
-    const failed = registry.get(timelinesState).open;
+    const failed = openOf(registry.get(timelinesState));
     const notice = draftOf(registry.get(composerState), place).notice?.message;
 
     daemon.knownDown = false;
@@ -508,7 +519,7 @@ describe("/query and how the Network folds names", () => {
     expect({
       failed,
       notice,
-      opened: registry.get(timelinesState).open,
+      opened: openOf(registry.get(timelinesState)),
     }).toStrictEqual({
       failed: iirc,
       notice:
@@ -531,7 +542,7 @@ describe("/query and how the Network folds names", () => {
     release(daemon.held.known);
     await wait(50);
 
-    expect(registry.get(timelinesState).open).toBe(own);
+    expect(openOf(registry.get(timelinesState))).toBe(own);
   });
 });
 
@@ -550,7 +561,7 @@ describe("re-reading under sustained Activity", () => {
 
       await until(
         registry,
-        timelineHeader,
+        timelineHeader("p0"),
         (header) => header?._tag === "Channel" && header.members === 1
       );
       const reads = daemon.channelsRead.length;
@@ -609,7 +620,7 @@ describe("re-reading under sustained Activity", () => {
       release(daemon.held.channel);
       await until(
         registry,
-        timelineHeader,
+        timelineHeader("p0"),
         (header) => header?._tag === "Channel" && header.members === 1
       );
       await eventually(() => daemon.channelsRead.length === 2);

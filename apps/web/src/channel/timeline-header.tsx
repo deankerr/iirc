@@ -1,5 +1,5 @@
 /**
- * What the open Timeline shows at its head: a Channel's name, its topic, formatted, with
+ * What a Pane's open Timeline shows at its head: a Channel's name, its topic, formatted, with
  * who set it and when, dim, how many members it has, its modes, and where Self stands when
  * not in it; a Direct Message's partner; or a Network's id and how its connection stands.
  * A Channel's header has the members' toggle beside it.
@@ -136,16 +136,30 @@ const Details = ({ header }: { readonly header: Header }) => {
 };
 
 /**
- * The open Timeline's header.
- * @param props - The name to show until the header is known.
+ * A Pane's open Timeline's header.
+ * @param props - The Pane, the name to show until the header is known, and its number
+ * among several Panes, if there are several.
  * @returns The header.
  */
-export const TimelineHeader = ({ name }: { readonly name: string }) => {
-  const header = useAtomValue(timelineHeader);
+export const TimelineHeader = ({
+  name,
+  number,
+  pane,
+}: {
+  readonly name: string;
+  readonly number: number | undefined;
+  readonly pane: string;
+}) => {
+  const header = useAtomValue(timelineHeader(pane));
 
   return (
     <header className={styles.header}>
       <div className={styles.line}>
+        {number === undefined ? null : (
+          <span className={styles.dim} title={`Pane ${number}`}>
+            {number}
+          </span>
+        )}
         <h2 className={styles.name}>
           <bdi>{header?.name ?? name}</bdi>
         </h2>

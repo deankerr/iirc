@@ -21,6 +21,7 @@ import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 
 import type { Intent } from "./commands.ts";
+import { panesOf } from "./layout.ts";
 import { endReason, formatted, nickColour } from "./render.ts";
 import type { Inline } from "./render.ts";
 import { opened, resolve } from "./timelines.ts";
@@ -188,17 +189,23 @@ const fresh = (open: OpenChannel): Channel => ({
 });
 
 /**
- * The Channel the main view shows: the open Timeline, as merges resolve it, when its
- * Network lists it as a Channel's and the options do not stand in its place.
+ * The Channel a Pane shows: its open Timeline, as merges resolve it, when its Network lists
+ * it as a Channel's and the options do not stand in its place.
  * @param state - The Timelines.
+ * @param pane - The Pane's id: the focused Pane unless another is named.
  * @returns The open Channel, or none.
  */
-export const openChannel = (state: Timelines): OpenChannel | undefined => {
-  if (state.open === undefined || state.main._tag !== "Timeline") {
+export const openChannel = (
+  state: Timelines,
+  pane = state.layout.focused
+): OpenChannel | undefined => {
+  const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
+
+  if (view?.open === undefined || view.main._tag !== "Timeline") {
     return undefined;
   }
 
-  const timeline = resolve(state, state.open);
+  const timeline = resolve(state, view.open);
 
   for (const network of state.networks.values()) {
     const listed = network.timelines.get(timeline);
@@ -505,6 +512,110 @@ export const reduceChannel = (state: Channel, event: ChannelEvent): Channel => {
   }
 };
 
+// Every Channel the Panes show.
+
+/** The Channels the Panes show, each as last read, by its Timeline. */
+export type Channels = ReadonlyMap<TimelineId, Channel>;
+
+/** Nothing read yet. */
+export const initialChannels: Channels = new Map();
+
+/**
+ * A Channel as held, or nothing read of it yet.
+ * @param state - The Channels.
+ * @param timeline - Its Timeline.
+ * @returns The Channel.
+ */
+export const channelIn = (state: Channels, timeline: TimelineId | undefined): Channel =>
+  (timeline === undefined ? undefined : state.get(timeline)) ?? initialChannel;
+
+/**
+ * Every Channel a Pane shows, each once, the focused Pane's first.
+ * @param state - The Timelines.
+ * @returns The Channels.
+ */
+export const openChannels = (state: Timelines): readonly OpenChannel[] => {
+  const { focused } = state.layout;
+  const panes = panesOf(state.layout.root).map((pane) => pane.id);
+  const channels: OpenChannel[] = [];
+
+  for (const pane of [focused, ...panes.filter((id) => id !== focused)]) {
+    const open = openChannel(state, pane);
+
+    if (open !== undefined && !channels.some((one) => one.timeline === open.timeline)) {
+      channels.push(open);
+    }
+  }
+
+  return channels;
+};
+
+/**
+ * The reads to make now, for every Channel the Panes show, as `channelReads` gives each.
+ * @param state - The Channels.
+ * @param open - The Channels shown.
+ * @param members - Whether the members show.
+ * @returns The reads.
+ */
+export const channelsReads = (
+  state: Channels,
+  open: readonly OpenChannel[],
+  members: boolean
+): readonly ChannelRead[] =>
+  open.flatMap((one) => channelReads(channelIn(state, one.timeline), one, members));
+
+/**
+ * What happened to the Channels: an event of one, which goes to the Channel it is of, or of
+ * the changes stream, which goes to each, or `Kept`, the Channels the Panes show, which
+ * lets go of every other.
+ */
+export type ChannelsEvent =
+  | ChannelEvent
+  | { readonly _tag: "Kept"; readonly timelines: readonly TimelineId[] };
+
+/**
+ * The Channels after an event.
+ * @param state - The Channels before.
+ * @param event - What happened.
+ * @returns The Channels after.
+ */
+export const reduceChannels = (state: Channels, event: ChannelsEvent): Channels => {
+  switch (event._tag) {
+    case "Kept": {
+      const kept = [...state].filter(([timeline]) => event.timelines.includes(timeline));
+
+      return kept.length === state.size ? state : new Map(kept);
+    }
+
+    case "Changed":
+    case "Overflowed":
+    case "Reset": {
+      return new Map([...state].map(([timeline, held]) => [timeline, reduceChannel(held, event)]));
+    }
+
+    case "ReadStarted": {
+      const { timeline } = event.read;
+
+      return new Map(state).set(timeline, reduceChannel(channelIn(state, timeline), event));
+    }
+
+    case "HeadRead":
+    case "MembersRead":
+    case "NotInChannel":
+    case "Failed":
+    case "MoreWanted": {
+      const timeline = "read" in event ? event.read.timeline : event.timeline;
+      const held = state.get(timeline);
+
+      return held === undefined ? state : new Map(state).set(timeline, reduceChannel(held, event));
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
 // The head, as a view shows it.
 
 /** A topic as shown: unknown, none set, or its text with who set it and when, if known. */
@@ -688,14 +799,19 @@ const topicShown = (topic: ChannelHeader["topic"]): TopicShown => {
 };
 
 /**
- * What the open Timeline shows at its head, from what its Network lists and, for a
+ * What a Pane's open Timeline shows at its head, from what its Network lists and, for a
  * Channel, its head as last read.
  * @param state - The Timelines.
  * @param channel - The Channel held.
+ * @param pane - The Pane's id: the focused Pane unless another is named.
  * @returns The header, or none while no Timeline is shown.
  */
-export const headerOf = (state: Timelines, channel: Channel): Header | undefined => {
-  const shown = opened(state);
+export const headerOf = (
+  state: Timelines,
+  channel: Channel,
+  pane = state.layout.focused
+): Header | undefined => {
+  const shown = opened(state, pane);
 
   if (shown._tag !== "Shown" || shown.description === undefined) {
     return undefined;
@@ -871,13 +987,18 @@ export type RosterShown =
     };
 
 /**
- * The open Channel's members as the list shows them.
+ * A Pane's Channel's members as the list shows them.
  * @param state - The Timelines.
  * @param channel - The Channel held.
+ * @param pane - The Pane's id: the focused Pane unless another is named.
  * @returns The members.
  */
-export const rosterOf = (state: Timelines, channel: Channel): RosterShown => {
-  const open = openChannel(state);
+export const rosterOf = (
+  state: Timelines,
+  channel: Channel,
+  pane = state.layout.focused
+): RosterShown => {
+  const open = openChannel(state, pane);
 
   if (open === undefined) {
     return { _tag: "None" };

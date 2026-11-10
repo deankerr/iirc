@@ -62,6 +62,8 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Timeline**: The ordered Messages and Activity of one Channel, Direct Message partner, or Network. _Avoid_: Buffer, window, scrollback, conversation
 
+**Pane**: One part of a Frontend's screen, showing a Timeline or the options, beside others it was split from. _Avoid_: Window, buffer, split
+
 **Read Marker**: How far through a Timeline the Owner has read, shared by every Frontend. _Avoid_: Unread pointer, last seen
 
 **Highlight**: A Message that calls for the Owner's attention, such as one that mentions Self. _Avoid_: Mention, ping, alert

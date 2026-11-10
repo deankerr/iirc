@@ -243,7 +243,7 @@ const changed = (
   place: { sequence, version: 1 },
 });
 
-const seeing: Page = { focused: true, visible: true };
+const seeing: Page = { compact: false, focused: true, visible: true };
 
 const dividerOf = (state: Timelines) => {
   const shown = opened(state);
@@ -399,9 +399,9 @@ describe("marking the open Timeline read", () => {
         }),
         seeing
       ),
-      hidden: markDue(state, { focused: true, visible: false }),
+      hidden: markDue(state, { compact: false, focused: true, visible: false }),
       options: markDue(reduceTimelines(state, { _tag: "OptionsShown", filter: "" }), seeing),
-      unfocused: markDue(state, { focused: false, visible: true }),
+      unfocused: markDue(state, { compact: false, focused: false, visible: true }),
     }).toStrictEqual({
       back: undefined,
       hidden: undefined,
@@ -473,7 +473,7 @@ describe("marking the open Timeline read", () => {
             });
           }
 
-          const due = markDue(state, { focused: true, visible });
+          const due = markDue(state, { compact: false, focused: true, visible });
           const expected = visible && !back && messages > 0 && (read === null || last > read);
 
           expect(due?.read).toBe(expected ? last : undefined);
@@ -541,7 +541,7 @@ describe("what the view saw", () => {
     expect({
       due: markDue(again, seeing),
       following: shown._tag === "Shown" ? shown.window.following : undefined,
-      same: again.windows === back.windows && again.divider === back.divider,
+      same: again.windows === back.windows && again.layout === back.layout,
     }).toStrictEqual({ due: undefined, following: false, same: true });
   });
 
@@ -660,8 +660,8 @@ describe("notifications", () => {
     expect({
       direct: notified(said({ at: 50, level: "Direct", sequence: 11, timeline: peer })),
       elsewhere: notified(highlight(other)),
-      hidden: notified(highlight(iirc), { focused: true, visible: false }),
-      unfocused: notified(highlight(iirc), { focused: false, visible: true }),
+      hidden: notified(highlight(iirc), { compact: false, focused: true, visible: false }),
+      unfocused: notified(highlight(iirc), { compact: false, focused: false, visible: true }),
     }).toStrictEqual({ direct: [peer], elsewhere: [other], hidden: [iirc], unfocused: [iirc] });
   });
 
@@ -776,5 +776,137 @@ describe("notifications", () => {
       },
       second: `iirc:${peer}`,
     });
+  });
+});
+
+/**
+ * A Channel with a Message unread, up to 40.
+ * @param id - Its id.
+ * @param name - Its name.
+ * @returns It, as the list gives it.
+ */
+const unreadIn = (id: string, name: string) =>
+  described({ id, latest: 40, name, read: 10, unread: { messages: 1 } });
+
+/**
+ * One Message, at 40.
+ * @param timeline - Its Timeline.
+ * @returns It.
+ */
+const saidAt40 = (timeline: string) => [said({ at: 40, sequence: 3, timeline })];
+
+/**
+ * The state, zoomed.
+ * @param state - The state.
+ * @returns It, zoomed.
+ */
+const zoomed = (state: Timelines) =>
+  reduceTimelines(state, { _tag: "Pane", change: { _tag: "Zoom" } });
+
+/**
+ * Which Timelines a Highlight in `#iirc` notifies of.
+ * @param before - The state.
+ * @param page - The page.
+ * @returns The Timelines.
+ */
+const notifiedOfIirc = (before: Timelines, page: Page) => {
+  const event = changed(11, {
+    items: [said({ at: 50, level: "Highlight", sequence: 11, text: "iirc: hi" })],
+  });
+
+  return notificationsOf(before, reduceTimelines(before, event), event.change, page).map(
+    (one) => one.timeline
+  );
+};
+
+/**
+ * `#iirc` open in a first Pane, seen at its latest, and `#other` split beside it, focused,
+ * read and seen at its latest too.
+ * @returns The state.
+ */
+const twoPanes = (): Timelines => {
+  const first = world([unreadIn(iirc, "#iirc"), unreadIn(other, "#other")], iirc, saidAt40(iirc));
+
+  const split = reduceTimelines(first, {
+    _tag: "Pane",
+    change: { _tag: "Split", axis: "Horizontal", timeline: timelineId(other) },
+  });
+
+  const read = {
+    _tag: "Latest",
+    attempt: 0,
+    generation: split.nextGeneration,
+    limit: 1000,
+    timeline: timelineId(other),
+  } as const;
+
+  const steps: TimelinesEvent[] = [
+    { _tag: "ReadStarted", read },
+    {
+      _tag: "WindowRead",
+      read,
+      window: Schema.decodeSync(TimelineWindow)({
+        earlier: false,
+        gaps: [],
+        items: saidAt40(other),
+        later: false,
+        network: "libera",
+        through: 10,
+        timeline: other,
+        version: 1,
+      }),
+    },
+  ];
+
+  let state = split;
+
+  for (const event of steps) {
+    state = reduceTimelines(state, event);
+  }
+
+  return shownToLatest(state);
+};
+
+describe("several Panes", () => {
+  it("marks the focused Pane's Timeline first, and the other Pane's once it is read", () => {
+    const state = twoPanes();
+    const first = markDue(state, seeing);
+
+    // Once the Daemon's marker for `#other` comes back, the other Pane's is due.
+    const marked = reduceTimelines(
+      state,
+      changed(11, {
+        timelines: [{ ...unreadIn(other, "#other"), changed: 11, read: 40, unread: nothing }],
+      })
+    );
+
+    expect({ first: first?.timeline, next: markDue(marked, seeing)?.timeline }).toStrictEqual({
+      first: other,
+      next: iirc,
+    });
+  });
+
+  it("marks only the focused Pane's while zoomed or on a compact screen, where the other is not seen", () => {
+    const marked = reduceTimelines(
+      twoPanes(),
+      changed(11, {
+        timelines: [{ ...unreadIn(other, "#other"), changed: 11, read: 40, unread: nothing }],
+      })
+    );
+
+    expect({
+      compact: markDue(marked, { ...seeing, compact: true }),
+      zoomed: markDue(zoomed(marked), seeing),
+    }).toStrictEqual({ compact: undefined, zoomed: undefined });
+  });
+
+  it("notifies of neither Pane's Timeline while both are seen, and of the hidden one when zoomed", () => {
+    const state = twoPanes();
+
+    expect({
+      compact: notifiedOfIirc(state, { ...seeing, compact: true }),
+      seen: notifiedOfIirc(state, seeing),
+      zoomed: notifiedOfIirc(zoomed(state), seeing),
+    }).toStrictEqual({ compact: [iirc], seen: [], zoomed: [iirc] });
   });
 });

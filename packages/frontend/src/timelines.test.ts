@@ -11,13 +11,22 @@ import {
   TimelineWindow,
   WindowGap,
 } from "@iirc/api";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { panesOf, single } from "./layout.ts";
 import {
+  emptyView,
   followFrom,
   initialTimelines,
+  keptLayout,
+  KeptLayoutSchema,
+  layoutKept,
+  layoutKeptText,
+  longestKept,
+  mainOf,
+  openOf,
   opened,
   reduceTimelines,
   resolve,
@@ -25,8 +34,17 @@ import {
   sidebar,
   timelinesWith,
   wanted,
+  windowCap,
 } from "./timelines.ts";
-import type { Place, Read, Row, Timelines, TimelinesEvent, WindowRequest } from "./timelines.ts";
+import type {
+  PaneChange,
+  Place,
+  Read,
+  Row,
+  Timelines,
+  TimelinesEvent,
+  WindowRequest,
+} from "./timelines.ts";
 
 // Wire forms, parsed as the API parses them, so every value here is one the runtime could
 // hand the reducer.
@@ -54,6 +72,14 @@ const decodeTimeline = Schema.decodeSync(Timeline);
 const decodeList = Schema.decodeSync(TimelineList);
 const decodeWindow = Schema.decodeSync(TimelineWindow);
 const decodeChange = Schema.decodeSync(TimelineChange);
+const decodeKeptOption = Schema.decodeUnknownOption(Schema.fromJsonString(KeptLayoutSchema));
+
+/**
+ * A layout kept, read back from its JSON as the runtime reads it.
+ * @param text - The JSON.
+ * @returns The layout as kept, or none when it is not one.
+ */
+const decodeKept = (text: string) => Option.getOrUndefined(decodeKeptOption(text));
 const decodeGap = Schema.decodeSync(WindowGap);
 const decodeEntries = Schema.decodeSync(Schema.Array(NetworkEntry));
 const decodeSession = Schema.decodeSync(SessionKnowledge);
@@ -585,7 +611,8 @@ type Action =
   | "Back"
   | "AnswerNewest"
   | "Detour"
-  | "BlackOut";
+  | "BlackOut"
+  | "Pane";
 
 interface Scenario {
   readonly choices: readonly Choice[];
@@ -622,7 +649,9 @@ const scenario: fc.Arbitrary<Scenario> = fc.record({
         "Back",
         "AnswerNewest",
         "Detour",
-        "BlackOut"
+        "BlackOut",
+        "Pane",
+        "Pane"
       ),
       pick: fc.nat(1000),
     }),
@@ -667,6 +696,39 @@ const holesIn = (state: Timelines, worlds: readonly World[]): readonly string[] 
         : []
     );
   });
+
+const directions = ["Left", "Right", "Up", "Down"] as const;
+
+/**
+ * What must hold of the Panes after anything: a Timeline open in one Pane at most, the
+ * focus on a Pane, and, with no closed window kept, a window only for a Timeline open in
+ * a Pane.
+ * @param state - The state.
+ * @returns What is wrong, none when nothing is.
+ */
+const paneFaults = (state: Timelines): readonly string[] => {
+  const open = panesOf(state.layout.root).flatMap((pane) =>
+    pane.view.open === undefined ? [] : [resolve(state, pane.view.open)]
+  );
+
+  const faults: string[] = [];
+
+  if (new Set(open).size !== open.length) {
+    faults.push(`a Timeline open twice: ${open.join(", ")}`);
+  }
+
+  if (!panesOf(state.layout.root).some((pane) => pane.id === state.layout.focused)) {
+    faults.push("the focus on no Pane");
+  }
+
+  for (const id of state.windows.keys()) {
+    if (!open.includes(id)) {
+      faults.push(`a window of ${id}, open in no Pane`);
+    }
+  }
+
+  return faults;
+};
 
 /**
  * Plays a scenario: the Daemon folds steps one at a time, the stream lags it, and reads are
@@ -864,7 +926,7 @@ const simulate = (played: Scenario) => {
   let previous: TimelineId | undefined;
 
   const openTimeline = (timeline: TimelineId) => {
-    previous = state.open;
+    previous = openOf(state);
     dispatch({ _tag: "Opened", timeline });
   };
 
@@ -880,7 +942,7 @@ const simulate = (played: Scenario) => {
   // The Owner asks for older items, and before they come, opens another Timeline and comes
   // back: the window is dropped and read again, with the page for the old one in flight.
   const detour = (pick: number) => {
-    const timeline = state.open;
+    const timeline = openOf(state);
 
     if (timeline === undefined) {
       return;
@@ -943,10 +1005,30 @@ const simulate = (played: Scenario) => {
     }
   };
 
+  // What the Owner does to the Panes: splits, opening a Timeline in the new Pane or none,
+  // closes, focuses, moves the focus, and swaps, so windows are kept and dropped as
+  // Timelines come into and leave the Panes.
+  const paneAct = (pick: number) => {
+    const timelines = sidebar(state).flatMap((network) => network.timelines);
+    const panes = panesOf(state.layout.root);
+    const towards = directions[pick % directions.length] ?? "Left";
+
+    const changes: readonly PaneChange[] = [
+      { _tag: "Split", axis: "Horizontal", timeline: timelines[pick % 7]?.id },
+      { _tag: "Split", axis: "Vertical", timeline: timelines[pick % 5]?.id },
+      { _tag: "Close" },
+      { _tag: "Focus", pane: panes[pick % panes.length]?.id ?? "p0" },
+      { _tag: "Move", direction: towards },
+      { _tag: "Swap", direction: towards },
+    ];
+
+    dispatch({ _tag: "Pane", change: changes[Math.floor(pick / 4) % 6] ?? { _tag: "Close" } });
+  };
+
   // What the Owner does in the open Timeline: scrolls to either end, or away from the latest
   // and back.
   const asOwner = (action: "Older" | "Newer" | "Leave" | "Return") => {
-    const timeline = state.open;
+    const timeline = openOf(state);
 
     if (timeline === undefined) {
       return;
@@ -998,6 +1080,11 @@ const simulate = (played: Scenario) => {
         break;
       }
 
+      case "Pane": {
+        paneAct(pick);
+        break;
+      }
+
       default: {
         action satisfies never;
       }
@@ -1005,8 +1092,14 @@ const simulate = (played: Scenario) => {
   };
 
   for (const { action, pick } of played.actions) {
+    const before = state.navigation;
+
     act(action, pick);
-    holes.push(...holesIn(state, worlds));
+    holes.push(...holesIn(state, worlds), ...paneFaults(state));
+
+    if (state.navigation < before) {
+      holes.push("navigation went back");
+    }
   }
 
   folded = last;
@@ -1053,7 +1146,7 @@ const compare = (state: Timelines, world: World) => {
     // closed most recently.
     within:
       [...state.windows.values()].every((window) => window.items.length <= modelCap) &&
-      state.windows.size <= 1,
+      state.windows.size <= panesOf(state.layout.root).length,
   };
 
   const expected = {
@@ -1474,17 +1567,19 @@ describe("the Timelines' state", () => {
 
     // Placed in `{bob}`'s, which is not listed yet: it opens once it is.
     state = reduceTimelines(state, { _tag: "Located", navigation: 1, timeline: curly });
-    const waiting = [state.open, state.located];
+    const waiting = [openOf(state), state.located];
 
     state = reduceTimelines(state, changed(7, { timelines: [direct(idOf(7), "{bob}")] }));
-    const opens = [state.open, state.located];
+    const opens = [openOf(state), state.located];
 
     // Already listed: opened at once.
-    const atOnce = reduceTimelines(state, {
-      _tag: "Located",
-      navigation: 1,
-      timeline: square,
-    }).open;
+    const atOnce = openOf(
+      reduceTimelines(state, {
+        _tag: "Located",
+        navigation: 1,
+        timeline: square,
+      })
+    );
 
     // A Channel's, or a detached one, opens nothing.
     const channel = reduceTimelines(following(), {
@@ -1500,8 +1595,8 @@ describe("the Timelines' state", () => {
 
     expect({
       atOnce,
-      channel: [channel.open, channel.located],
-      detached: [detached.open, detached.located],
+      channel: [openOf(channel), channel.located],
+      detached: [openOf(detached), detached.located],
       opens,
       waiting,
     }).toStrictEqual({
@@ -1530,7 +1625,7 @@ describe("the Timelines' state", () => {
 
     expect({
       navigation: [listed.navigation, elsewhere.navigation],
-      open: late.open,
+      open: openOf(late),
       pending: late.located,
     }).toStrictEqual({ navigation: [1, 2], open: idOf(2), pending: undefined });
   });
@@ -1559,10 +1654,10 @@ describe("the Timelines' state", () => {
     });
 
     expect({
-      before: [before.main, before.open],
-      filtered: filtered.main,
-      placed: [placed.main, placed.open],
-      start: listed.main,
+      before: [mainOf(before), openOf(before)],
+      filtered: mainOf(filtered),
+      placed: [mainOf(placed), openOf(placed)],
+      start: mainOf(listed),
     }).toStrictEqual({
       before: [{ _tag: "Options", filter: "*nick*" }, three],
       filtered: { _tag: "Options", filter: "*nick*" },
@@ -2035,5 +2130,474 @@ describe("the Timelines' state", () => {
     expect(
       shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : []
     ).toStrictEqual([3, "gap 1", 4, "gap 3"]);
+  });
+});
+
+/**
+ * Splits the focused Pane, opening a Timeline in the new one.
+ * @param state - The state.
+ * @param timeline - The Timeline, or none for an empty Pane.
+ * @param vertical - One above another, rather than side by side.
+ * @returns The state.
+ */
+const split = (state: Timelines, timeline: TimelineId | undefined, vertical = false) =>
+  reduceTimelines(state, {
+    _tag: "Pane",
+    change: { _tag: "Split", axis: vertical ? "Vertical" : "Horizontal", timeline },
+  });
+
+/**
+ * What each Pane has open, by its id.
+ * @param state - The state.
+ * @returns Each Pane's id and open Timeline.
+ */
+const opens = (state: Timelines) =>
+  panesOf(state.layout.root).map((pane) => [pane.id, pane.view.open]);
+
+/**
+ * Events folded in turn.
+ * @param state - The state.
+ * @param events - The events.
+ * @returns The state after them.
+ */
+const folded = (state: Timelines, events: readonly TimelinesEvent[]) => {
+  let after = state;
+
+  for (const event of events) {
+    after = reduceTimelines(after, event);
+  }
+
+  return after;
+};
+
+/**
+ * A Pane as a device keeps it, as JSON text.
+ * @param id - Its id.
+ * @param open - The Timeline it has open.
+ * @returns The JSON of the Pane, as a child of a Split.
+ */
+const keptPane = (id: string, open: string) =>
+  `{"node":{"_tag":"Pane","id":"${id}","view":{"open":"${open}","options":null}},"ratio":0.5}`;
+
+/**
+ * A layout of two Panes side by side as a device keeps it, as JSON text.
+ * @param left - The first, as `keptPane` writes it.
+ * @param right - The second.
+ * @returns The JSON.
+ */
+const keptOf = (left: string, right: string) =>
+  `{"focused":"p0","next":2,"zoomed":false,"root":{"_tag":"Split","axis":"Horizontal","id":"s1","children":[${left},${right}]}}`;
+
+describe("the Panes", () => {
+  it("opens a Timeline in a new Pane, focused, and reads the window of each Pane", () => {
+    const state = split(following(), two);
+
+    expect({
+      focused: state.layout.focused,
+      opens: opens(state),
+      reads: wanted(state).flatMap((read) => (read._tag === "Latest" ? [read.timeline] : [])),
+    }).toStrictEqual({
+      focused: "p1",
+      opens: [
+        ["p0", three],
+        ["p1", two],
+      ],
+      reads: [two],
+    });
+  });
+
+  it("splits into an empty Pane when the Timeline named is open in another already", () => {
+    const state = split(following(), three);
+
+    expect({ opened: opened(state)._tag, opens: opens(state) }).toStrictEqual({
+      opened: "Closed",
+      opens: [
+        ["p0", three],
+        ["p1", undefined],
+      ],
+    });
+  });
+
+  it("focuses the Pane a Timeline is open in rather than open it twice, keeping its window", () => {
+    const state = split(following(), undefined);
+    const window = state.windows.get(three);
+    const again = reduceTimelines(state, { _tag: "Opened", timeline: three });
+
+    expect({
+      focused: again.layout.focused,
+      navigation: again.navigation - state.navigation,
+      opens: opens(again),
+      same: again.windows.get(three) === window,
+    }).toStrictEqual({
+      focused: "p0",
+      navigation: 1,
+      opens: [
+        ["p0", three],
+        ["p1", undefined],
+      ],
+      same: true,
+    });
+  });
+
+  it("opens in the focused Pane, and keeps the window of the one it replaced among the closed", () => {
+    let state = split(following(), two);
+
+    // The new Pane opens the Network's own Timeline in place of `#b`.
+    state = reduceTimelines(state, { _tag: "Opened", timeline: one });
+
+    expect({ closed: state.closed, opens: opens(state) }).toStrictEqual({
+      closed: [two],
+      opens: [
+        ["p0", three],
+        ["p1", one],
+      ],
+    });
+  });
+
+  it("closes the focused Pane, its window joining the closed, and the last never", () => {
+    const state = split(following(), two);
+    const closed = reduceTimelines(state, { _tag: "Pane", change: { _tag: "Close" } });
+    const last = reduceTimelines(closed, { _tag: "Pane", change: { _tag: "Close" } });
+
+    expect({
+      closed: [closed.layout.focused, opens(closed), closed.closed, [...closed.windows.keys()]],
+      last: last.layout,
+    }).toStrictEqual({
+      closed: ["p0", [["p0", three]], [two], [three]],
+      last: closed.layout,
+    });
+  });
+
+  it("lets a placement go when the Owner moves to another Pane, but not when a view moves with them", () => {
+    const listed = reduceTimelines(
+      split(following(), two),
+      changed(6, { timelines: [direct(idOf(6), "bob")] })
+    );
+
+    const moved = reduceTimelines(listed, {
+      _tag: "Pane",
+      change: { _tag: "Move", direction: "Left" },
+    });
+
+    const swapped = reduceTimelines(listed, {
+      _tag: "Pane",
+      change: { _tag: "Swap", direction: "Left" },
+    });
+
+    const placed = (state: Timelines) =>
+      openOf(
+        reduceTimelines(state, {
+          _tag: "Located",
+          navigation: listed.navigation,
+          timeline: timelineId(idOf(6)),
+        })
+      );
+
+    expect({
+      moved: [moved.navigation - listed.navigation, placed(moved)],
+      swapped: [swapped.navigation - listed.navigation, swapped.layout.focused, opens(swapped)],
+      swappedPlaced: placed(swapped),
+    }).toStrictEqual({
+      moved: [1, three],
+      // The focused Pane itself moves to the left, its id, view, and focus with it.
+      swapped: [
+        0,
+        "p1",
+        [
+          ["p1", two],
+          ["p0", three],
+        ],
+      ],
+      swappedPlaced: idOf(6),
+    });
+  });
+
+  it("shows the options in one Pane, with its Timeline open behind them", () => {
+    let state = split(following(), two);
+
+    state = reduceTimelines(state, { _tag: "OptionsShown", filter: "a" });
+    state = reduceTimelines(state, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } });
+    // Shown again from the other Pane: the Pane that shows them takes the focus.
+    state = reduceTimelines(state, { _tag: "OptionsShown", filter: "b" });
+
+    const back = reduceTimelines(state, { _tag: "Opened", timeline: two });
+
+    expect({
+      back: [back.layout.focused, mainOf(back)],
+      state: [state.layout.focused, mainOf(state), openOf(state)],
+    }).toStrictEqual({
+      back: ["p1", { _tag: "Timeline" }],
+      state: ["p1", { _tag: "Options", filter: "b" }, two],
+    });
+  });
+
+  it("keeps the layout as JSON and restores it once the Timelines are read, without a Timeline gone", () => {
+    let state = split(following(), two, true);
+
+    state = split(state, one);
+    state = reduceTimelines(state, { _tag: "OptionsShown", filter: "x" });
+
+    const kept = keptLayout(state);
+    const decoded = decodeKept(JSON.stringify(kept));
+    const read = decoded === undefined ? undefined : layoutKept(decoded);
+
+    // A new page: the layout is set aside until every Network's Timelines are read, then
+    // taken without `#b`, which the Daemon no longer lists.
+    const fresh = reduceTimelines(timelinesWith(windowCap), {
+      _tag: "Restore",
+      layout: read ?? single(emptyView),
+    });
+
+    const waiting = [fresh.restoring !== undefined, keptLayout(fresh), opens(fresh)];
+
+    const events: TimelinesEvent[] = [
+      { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
+      {
+        _tag: "NetworksRead",
+        entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+      },
+      { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
+      {
+        _tag: "ListRead",
+        after: undefined,
+        network: alpha,
+        page: listOf(
+          5,
+          timelineOf(idOf(1), "Network", "alpha", 1),
+          timelineOf(idOf(3), "Channel", "#a", 4)
+        ),
+      },
+    ];
+
+    const restored = folded(fresh, events);
+
+    // The Owner opened a Timeline before the Timelines were read: the layout kept is let go.
+    const elsewhere = folded(fresh, [
+      ...events.slice(0, 2),
+      { _tag: "Opened", timeline: one },
+      ...events.slice(2),
+    ]);
+
+    expect({
+      elsewhere: [elsewhere.restoring, opens(elsewhere)],
+      kept,
+      restored: [opens(restored), restored.layout.focused, mainOf(restored), restored.restoring],
+      waiting,
+      wants: wanted(restored).filter((one) => one._tag === "Latest").length,
+    }).toStrictEqual({
+      elsewhere: [undefined, [["p0", one]]],
+      kept: {
+        focused: "p2",
+        next: 3,
+        root: {
+          _tag: "Split",
+          axis: "Vertical",
+          children: [
+            { node: { _tag: "Pane", id: "p0", view: { open: three, options: null } }, ratio: 0.5 },
+            {
+              node: {
+                _tag: "Split",
+                axis: "Horizontal",
+                children: [
+                  {
+                    node: { _tag: "Pane", id: "p1", view: { open: two, options: null } },
+                    ratio: 0.5,
+                  },
+                  {
+                    node: { _tag: "Pane", id: "p2", view: { open: one, options: "x" } },
+                    ratio: 0.5,
+                  },
+                ],
+                id: "s2",
+              },
+              ratio: 0.5,
+            },
+          ],
+          id: "s1",
+        },
+        zoomed: false,
+      },
+      restored: [
+        [
+          ["p0", three],
+          ["p2", one],
+        ],
+        "p2",
+        { _tag: "Options", filter: "x" },
+        undefined,
+      ],
+      waiting: [true, undefined, [["p0", undefined]]],
+      wants: 2,
+    });
+  });
+
+  it("refuses a kept layout that is not one, and opens a Timeline kept twice once", () => {
+    const twice = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(3))));
+    const twiceIds = decodeKept(keptOf(keptPane("p0", idOf(3)), keptPane("p0", idOf(2))));
+
+    // Restored before the Owner went anywhere.
+    const restored = reduceTimelines(
+      { ...following(), navigation: 0 },
+      { _tag: "Restore", layout: (twice && layoutKept(twice)) ?? single(emptyView) }
+    );
+
+    expect({
+      badId: decodeKept(keptOf(keptPane("p0", "not an id"), keptPane("p1", idOf(3)))),
+      notJson: decodeKept("{"),
+      restored: [opens(restored), restored.navigation],
+      twiceIds: twiceIds && layoutKept(twiceIds),
+    }).toStrictEqual({
+      badId: undefined,
+      notJson: undefined,
+      restored: [
+        [
+          ["p0", three],
+          ["p1", undefined],
+        ],
+        0,
+      ],
+      twiceIds: undefined,
+    });
+  });
+
+  it("empties the Pane not focused when a merge leaves two Panes on one Timeline", () => {
+    // `#a` in the first Pane, `#b` in the second, focused; `#b` goes into `#a`.
+    const both = split(following(), two);
+
+    const merged = reduceTimelines(
+      both,
+      changed(6, { merged: [{ changed: 6, id: idOf(2), into: idOf(3), network: "alpha" }] })
+    );
+
+    // The other way: the focused Pane's Timeline goes into the other's, which is emptied.
+    const other = reduceTimelines(
+      reduceTimelines(both, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } }),
+      changed(6, { merged: [{ changed: 6, id: idOf(2), into: idOf(3), network: "alpha" }] })
+    );
+
+    expect({
+      merged: [merged.layout.focused, opens(merged), opened(merged, "p0")._tag],
+      other: [other.layout.focused, opens(other)],
+    }).toStrictEqual({
+      merged: [
+        "p1",
+        [
+          ["p0", undefined],
+          ["p1", two],
+        ],
+        "Closed",
+      ],
+      other: [
+        "p0",
+        [
+          ["p0", three],
+          ["p1", undefined],
+        ],
+      ],
+    });
+  });
+
+  it("never has a Timeline open in two Panes, whatever the Owner does and whatever merges", () => {
+    const ids = [one, two, three];
+
+    const action = fc.oneof(
+      fc.record({ _tag: fc.constant("Open" as const), pick: fc.nat(2) }),
+      fc.record({ _tag: fc.constant("Split" as const), pick: fc.nat(3), vertical: fc.boolean() }),
+      fc.record({ _tag: fc.constant("Pane" as const), pick: fc.nat(20) }),
+      fc.record({ _tag: fc.constant("Merge" as const), from: fc.nat(2), into: fc.nat(2) })
+    );
+
+    fc.assert(
+      fc.property(fc.array(action, { maxLength: 30 }), (actions) => {
+        let state = following();
+        let sequence = 6;
+        const faults: string[] = [];
+
+        for (const one of actions) {
+          const panes = panesOf(state.layout.root);
+          const towards = directions[one._tag === "Pane" ? one.pick % 4 : 0] ?? "Left";
+          let event: TimelinesEvent;
+
+          if (one._tag === "Open") {
+            event = { _tag: "Opened", timeline: ids[one.pick] ?? two };
+          } else if (one._tag === "Split") {
+            event = {
+              _tag: "Pane",
+              change: {
+                _tag: "Split",
+                axis: one.vertical ? "Vertical" : "Horizontal",
+                timeline: ids[one.pick],
+              },
+            };
+          } else if (one._tag === "Pane") {
+            const changes: readonly PaneChange[] = [
+              { _tag: "Close" },
+              { _tag: "Focus", pane: panes[one.pick % panes.length]?.id ?? "p0" },
+              { _tag: "Move", direction: towards },
+              { _tag: "Swap", direction: towards },
+            ];
+
+            event = { _tag: "Pane", change: changes[one.pick % 4] ?? { _tag: "Close" } };
+          } else {
+            sequence += 1;
+            event = changed(sequence, {
+              merged:
+                one.from === one.into
+                  ? []
+                  : [
+                      {
+                        changed: sequence,
+                        id: ids[one.from] ?? two,
+                        into: ids[one.into] ?? three,
+                        network: "alpha",
+                      },
+                    ],
+            });
+          }
+
+          state = reduceTimelines(state, event);
+          faults.push(...paneFaults(state).filter((fault) => !fault.startsWith("a window")));
+        }
+
+        expect(faults).toStrictEqual([]);
+      }),
+      { numRuns: 300 }
+    );
+  });
+
+  it("refuses a kept layout's text that is too long, too deep, of too many Panes, or no JSON, without throwing", () => {
+    const deep = `${'{"a":'.repeat(5000)}1${"}".repeat(5000)}`;
+
+    const many = `{"focused":"p0","next":99,"zoomed":false,"root":{"_tag":"Split","axis":"Horizontal","id":"s0","children":[${Array.from(
+      { length: 65 },
+      (_, index) =>
+        `{"node":{"_tag":"Pane","id":"p${index}","view":{"open":null,"options":null}},"ratio":1}`
+    ).join(",")}]}}`;
+
+    const nested = (levels: number): string =>
+      levels === 0
+        ? keptPane("p0", idOf(3)).slice(8, -13)
+        : `{"_tag":"Split","axis":"${levels % 2 === 0 ? "Vertical" : "Horizontal"}","id":"s${levels}","children":[{"node":${nested(levels - 1)},"ratio":0.5},{"node":{"_tag":"Pane","id":"p${levels}","view":{"open":null,"options":null}},"ratio":0.5}]}`;
+
+    const layoutOf = (levels: number) =>
+      `{"focused":"p0","next":99,"zoomed":false,"root":${nested(levels)}}`;
+
+    expect({
+      deep: layoutKeptText(deep),
+      fine: layoutKeptText(keptOf(keptPane("p0", idOf(3)), keptPane("p1", idOf(2))))?.focused,
+      long: layoutKeptText(" ".repeat(longestKept + 1)),
+      many: layoutKeptText(many),
+      notJson: layoutKeptText("{"),
+      seventeen: layoutKeptText(layoutOf(17)),
+      sixteen: layoutKeptText(layoutOf(16)) === undefined,
+    }).toStrictEqual({
+      deep: undefined,
+      fine: "p0",
+      long: undefined,
+      many: undefined,
+      notJson: undefined,
+      seventeen: undefined,
+      sixteen: false,
+    });
   });
 });

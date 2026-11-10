@@ -68,6 +68,15 @@ const decodeTimelines = Schema.decodeUnknownSync(
   )
 );
 
+/** What the end-to-end run reads of a layout the page kept: its root Split's ratios. */
+const decodeKeptRatios = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      root: Schema.Struct({ children: Schema.Array(Schema.Struct({ ratio: Schema.Finite })) }),
+    })
+  )
+);
+
 /** A notification the stand-in kept: its title, body, and tag. */
 const decodeNotified = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -108,6 +117,25 @@ const stubNotifications = () => {
   }
 
   Object.defineProperty(window, "Notification", { configurable: true, value: Shown });
+};
+
+/**
+ * Counts each time the page keeps its layout, on the page's root, where the test reads it.
+ * It runs in the page before its scripts.
+ */
+const countLayoutWrites = () => {
+  // oxlint-disable-next-line typescript/unbound-method -- called with the Storage it was on, below.
+  const { setItem: keep } = Storage.prototype;
+
+  Storage.prototype.setItem = function setItem(this: Storage, key: string, value: string) {
+    if (key === "iirc.layout") {
+      const root = document.documentElement;
+
+      root.dataset.layoutWrites = String(Number(root.dataset.layoutWrites ?? "0") + 1);
+    }
+
+    keep.call(this, key, value);
+  };
 };
 
 /**
@@ -309,11 +337,19 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.reload();
         const afterReload = await networkRow(page);
 
-        const held = await page.evaluate(() => ({
-          cookie: document.cookie,
-          local: localStorage.length,
-          session: sessionStorage.length,
-        }));
+        // Only the layout this device keeps, which holds no key.
+        const held = await page.evaluate((secret) => {
+          const local = Object.keys(localStorage);
+
+          return {
+            cookie: document.cookie,
+            local,
+            localHoldsKey: local.some(
+              (one) => localStorage.getItem(one)?.includes(secret) === true
+            ),
+            session: sessionStorage.length,
+          };
+        }, key);
 
         const cookies = await context.cookies();
 
@@ -344,7 +380,7 @@ describe("the web frontend on iirc daemon --web", () => {
           configured: 200,
           cookies: [{ holdsKey: false, httpOnly: true, name: "iirc_sign_in", sameSite: "Strict" }],
           cookiesAfter: [],
-          held: { cookie: "", local: 0, session: 0 },
+          held: { cookie: "", local: ["iirc.layout"], localHoldsKey: false, session: 0 },
           listed: "exampleoffline",
           problems: [],
           wrong:
@@ -1039,6 +1075,168 @@ describe("the web frontend on iirc daemon --web", () => {
             },
           ],
           problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "splits into Panes, shows two Channels live, moves the focus by keys, sends from the focused Pane, and keeps the layout across a reload",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "panes"),
+        "#iirc-left"
+      );
+
+      const other = "#iirc-right";
+
+      try {
+        peer.send(`JOIN ${other}`);
+        await peer.waitFor((line) => line.command === "JOIN" && line.params[0] === other, "JOIN");
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.addInitScript(countLayoutWrites);
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        // The first Channel, then the second joined from it.
+        await page.getByRole("row", { name: channel }).click();
+        const first = page.getByRole("textbox", { name: channel });
+
+        await first.fill(`/join ${other}`);
+        await first.press("Enter");
+        await page.getByRole("row", { name: other }).waitFor();
+
+        // Split side by side: the new Pane has the focus, and the second Channel opens in it.
+        await page.keyboard.press("Alt+Shift+S");
+        await page.getByRole("separator").waitFor();
+        await page.getByRole("row", { name: other }).click();
+
+        const left = page.getByRole("log", { name: channel });
+        const right = page.getByRole("log", { name: other });
+
+        await right.waitFor();
+
+        // Both receive live Messages.
+        peer.send(`PRIVMSG ${channel} :to the left`);
+        peer.send(`PRIVMSG ${other} :to the right`);
+        await left.getByText("to the left", { exact: true }).waitFor();
+        await right.getByText("to the right", { exact: true }).waitFor();
+
+        const leftBox = await left.boundingBox();
+        const rightBox = await right.boundingBox();
+
+        const sideBySide =
+          leftBox !== null &&
+          rightBox !== null &&
+          leftBox.x + leftBox.width <= rightBox.x + 1 &&
+          leftBox.y === rightBox.y;
+
+        // A drag of the divider is one Resize, on release, however far it moves.
+        const separator = page.getByRole("separator");
+        const box = await separator.boundingBox();
+
+        const writes = async () =>
+          await page.evaluate(() => Number(document.documentElement.dataset.layoutWrites ?? "0"));
+
+        const beforeDrag = await writes();
+
+        await page.mouse.move((box?.x ?? 0) + 1, (box?.y ?? 0) + 200);
+        await page.mouse.down();
+        await page.mouse.move((box?.x ?? 0) + 151, (box?.y ?? 0) + 200, { steps: 20 });
+        await page.mouse.up();
+        await expect.poll(async () => (await writes()) - beforeDrag).toBe(1);
+
+        const dragged = decodeKeptRatios(
+          await page.evaluate(() => localStorage.getItem("iirc.layout") ?? "{}")
+        ).root.children[0]?.ratio;
+
+        // An arrow key on the focused divider is one Resize too.
+        await separator.focus();
+        await page.keyboard.press("ArrowLeft");
+        await expect.poll(async () => (await writes()) - beforeDrag).toBe(2);
+
+        // Alt+Shift+ArrowLeft, typed in the composer, focuses the left Pane, and the composer
+        // then writes there.
+        await page.getByRole("textbox", { name: `Pane 2: ${other}` }).focus();
+        await page.keyboard.press("Alt+Shift+ArrowLeft");
+        const composer = page.getByRole("textbox", { name: `Pane 1: ${channel}` });
+
+        await composer.fill("from the focused Pane");
+        await composer.press("Enter");
+
+        const said = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "from the focused Pane",
+          "the Message said from the left Pane"
+        );
+
+        // Splitting the Pane whose log has the focus moves its node into a nested Panel, and
+        // the new Pane takes the focus. The log stays at its latest. Closing the new Pane
+        // moves the node back, and the focus with it.
+        await left.focus();
+        await page.keyboard.press("Alt+Shift+D");
+        await page.getByRole("separator").nth(1).waitFor();
+
+        const kept = async () =>
+          await left.evaluate((element) => ({
+            focused: document.activeElement === element,
+            latest: element.scrollHeight - element.scrollTop - element.clientHeight < 8,
+          }));
+
+        const splitKept = await kept();
+
+        await page.keyboard.press("Alt+Shift+W");
+        await expect.poll(async () => await page.getByRole("separator").count()).toBe(1);
+        const closeKept = await kept();
+
+        // A reload brings the layout back, the focus with it.
+        await page.reload();
+        await left.getByText("to the left", { exact: true }).waitFor();
+        await right.getByText("to the right", { exact: true }).waitFor();
+        await page.getByRole("textbox", { name: `Pane 1: ${channel}` }).waitFor();
+
+        // Closing the focused Pane leaves the other in its place.
+        await page.keyboard.press("Alt+Shift+W");
+        await page.getByRole("textbox", { exact: true, name: other }).waitFor();
+
+        const after = {
+          logs: await page.getByRole("log").count(),
+          separators: await page.getByRole("separator").count(),
+        };
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          after,
+          dragged: dragged !== undefined && dragged > 0.6 && dragged < 0.7,
+          moved: [splitKept, closeKept],
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          said: said.params[0],
+          sideBySide,
+          violations,
+        }).toStrictEqual({
+          after: { logs: 1, separators: 0 },
+          dragged: true,
+          moved: [
+            { focused: false, latest: true },
+            { focused: true, latest: true },
+          ],
+          problems: [],
+          said: channel,
+          sideBySide: true,
           violations: "",
         });
       } finally {

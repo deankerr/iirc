@@ -35,7 +35,9 @@ const inChannel: CommandContext = {
     timeline: channel,
   },
   open: channel,
+  panes: 1,
   session: true,
+  shown: [],
   timelines: [own, channel, direct],
   unread: [],
 };
@@ -445,5 +447,54 @@ describe("keys from layouts other than QWERTY", () => {
       resolve(layoutKeymap, at({ editing: true }), up),
       resolve(layoutKeymap, at({ editing: true }), press("ArrowDown", "ArrowDown", { alt: true })),
     ]).toStrictEqual([[{ _tag: "Open", timeline: own }], [{ _tag: "Open", timeline: direct }]]);
+  });
+});
+
+describe("the Panes' keys", () => {
+  const twoPanes = { ...inChannel, panes: 2 };
+
+  const change = (event: KeyEvent, context: KeyContext = at({ editing: true }, twoPanes)) =>
+    resolve(defaultKeymap, context, event)?.map((intent) =>
+      intent._tag === "Pane" ? intent.change._tag : intent._tag
+    );
+
+  it("splits, closes, zooms, equalizes, grows, shrinks, and moves with Alt+Shift, in a field too", () => {
+    const shifted = (letter: string) =>
+      press(letter.toUpperCase(), `Key${letter.toUpperCase()}`, { alt: true, shift: true });
+
+    expect({
+      close: change(shifted("w")),
+      down: change(press("ArrowDown", "ArrowDown", { alt: true, shift: true })),
+      equalize: change(shifted("e")),
+      grow: change(shifted("g")),
+      // Option+Shift+S on a Mac types another character: the physical key names it.
+      mac: change(press("Í", "KeyS", { alt: true, shift: true }), {
+        ...at({ editing: true, platform: "Mac" }, twoPanes),
+      }),
+      shrink: change(shifted("r")),
+      sideBySide: change(shifted("s")),
+      stacked: change(shifted("d")),
+      zoom: change(shifted("z")),
+    }).toStrictEqual({
+      close: ["Close"],
+      down: ["Move"],
+      equalize: ["Equalize"],
+      grow: ["Grow"],
+      mac: ["Split"],
+      shrink: ["Shrink"],
+      sideBySide: ["Split"],
+      stacked: ["Split"],
+      zoom: ["Zoom"],
+    });
+  });
+
+  it("lets a Pane's key through with one Pane, but splits", () => {
+    const one = at({ editing: true });
+
+    expect({
+      close: change(press("W", "KeyW", { alt: true, shift: true }), one),
+      left: change(press("ArrowLeft", "ArrowLeft", { alt: true, shift: true }), one),
+      split: change(press("S", "KeyS", { alt: true, shift: true }), one),
+    }).toStrictEqual({ close: undefined, left: undefined, split: ["Split"] });
   });
 });

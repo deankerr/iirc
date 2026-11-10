@@ -1,15 +1,15 @@
 /**
- * The open Channel's members, beside it while the Owner shows them on this device: a
+ * A Pane's Channel's members, beside it while the Owner shows them on this device: a
  * labelled region holding a virtualized grid list, most privileged first, each member with
  * their rank's symbol, in their nick's colour, and dimmed while away, read a page at a
  * time as the Owner scrolls. Enter, or a double click, opens a member's Direct Message, as
  * `/query` does, and a member chosen offers that and mentioning them in the composer. On a
- * phone's width it lies over the Timeline, and its hide button, `/members`, or Alt+M
- * closes it.
+ * phone's width it lies over the Pane, and its hide button, `/members`, or Alt+M closes it.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import type { TimelineId } from "@iirc/api";
 import type { MemberRow } from "@iirc/frontend/channel";
 import { commandNamed, runIn } from "@iirc/frontend/commands";
 import type { Intent } from "@iirc/frontend/commands";
@@ -56,17 +56,21 @@ const Members = ({
   label,
   loading,
   more,
+  pane,
   rows,
+  timeline,
 }: {
   readonly label: string;
+  readonly pane: string;
   readonly rows: readonly MemberRow[];
   readonly more: boolean;
   readonly loading: boolean;
+  readonly timeline: TimelineId;
 }) => {
   const askMore = useAtomSet(moreMembers);
   const run = useAtomSet(perform);
   const context = useAtomValue(commandContext);
-  const chosen = useAtomValue(chosenMember);
+  const chosen = useAtomValue(chosenMember(pane));
   const choose = useAtomSet(chooseMember);
   const query = commandNamed("query");
 
@@ -76,7 +80,7 @@ const Members = ({
   const onSelectionChange = (selection: Selection) => {
     const [first] = selection === "all" ? [] : [...selection];
 
-    choose(first === undefined ? undefined : nickOf(first));
+    choose({ nick: first === undefined ? undefined : nickOf(first), pane });
   };
 
   return (
@@ -112,7 +116,7 @@ const Members = ({
             className={styles.loading}
             isLoading={loading}
             onLoadMore={() => {
-              askMore(undefined);
+              askMore(timeline);
             }}
           >
             reading more…
@@ -126,10 +130,11 @@ const Members = ({
 /**
  * What can be done with the member chosen, as commands: open their Direct Message, as
  * `/query` does, or mention them, starting the composer with their nick.
+ * @param props - The Pane.
  * @returns The actions, or nothing while none is chosen.
  */
-const Actions = () => {
-  const chosen = useAtomValue(chosenMember);
+const Actions = ({ pane }: { readonly pane: string }) => {
+  const chosen = useAtomValue(chosenMember(pane));
   const context = useAtomValue(commandContext);
   const run = useAtomSet(perform);
   const query = commandNamed("query");
@@ -164,13 +169,14 @@ const Actions = () => {
 };
 
 /**
- * The members of the open Channel, while the Owner shows them on this device.
+ * The members of a Pane's Channel, while the Owner shows them on this device.
+ * @param props - The Pane.
  * @returns The panel, or nothing.
  */
-export const MembersPanel = () => {
+export const MembersPanel = ({ pane }: { readonly pane: string }) => {
   const shown = useAtomValue(membersShown);
-  const open = useAtomValue(channelOpen);
-  const members = useAtomValue(roster);
+  const open = useAtomValue(channelOpen(pane));
+  const members = useAtomValue(roster(pane));
   const run = useAtomSet(perform);
   const headingId = useId();
 
@@ -208,7 +214,9 @@ export const MembersPanel = () => {
           label="Members"
           loading={members.loading}
           more={members.more}
+          pane={pane}
           rows={members.rows}
+          timeline={members.timeline}
         />
       );
       break;
@@ -235,7 +243,7 @@ export const MembersPanel = () => {
         </Button>
       </div>
       {body}
-      <Actions />
+      <Actions pane={pane} />
     </section>
   );
 };

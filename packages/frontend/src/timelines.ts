@@ -23,8 +23,22 @@ import type {
   TimelineWindow,
   WindowGap,
 } from "@iirc/api";
-import { comparePositions, cursorOf } from "@iirc/timelines";
+import { comparePositions, cursorOf, TimelineId as TimelineIdSchema } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
+import { Option, Schema } from "effect";
+
+import {
+  deepestSplits,
+  focusedPane,
+  keeping,
+  layoutFrom,
+  mapViews,
+  panesOf,
+  reduceLayout,
+  single,
+  withView,
+} from "./layout.ts";
+import type { Axis, Layout, LayoutChange, Node } from "./layout.ts";
 
 /** Where the changes stream stands: the projection version, and the last step it gave. */
 export interface Place {
@@ -149,15 +163,15 @@ type Follow =
     };
 
 /**
- * What the main view shows: the open Timeline, or the options with what filters them.
- * Opening a Timeline, a placement included, shows it, and only showing the options leaves it.
+ * What a Pane shows: its open Timeline, or the options with what filters them. Opening a
+ * Timeline, a placement included, shows it, and only showing the options leaves it.
  */
 export type MainView =
   | { readonly _tag: "Timeline" }
   | { readonly _tag: "Options"; readonly filter: string };
 
 /**
- * Where the "new" divider goes in the open Timeline: before the first item after `read`,
+ * Where the "new" divider goes in an open Timeline: before the first item after `read`,
  * the Read Marker the Timeline had when it opened with something unread, or before the
  * first item held when it had none. It stays while the Timeline stays open, so it does not
  * move as the Daemon's Read Marker does.
@@ -167,12 +181,33 @@ export interface Divider {
   readonly read: Timeline["read"];
 }
 
+/**
+ * What one Pane shows: its open Timeline, if any, as the Owner chose it, with its "new"
+ * divider, and whether the Timeline or the options show in its place. A Timeline is open in
+ * one Pane at most, so its window, where the Owner scrolled, and its divider are that Pane's.
+ */
+export interface PaneView {
+  readonly main: MainView;
+  readonly open: TimelineId | undefined;
+  readonly divider: Divider | undefined;
+}
+
+/** A Pane with no Timeline open. */
+export const emptyView: PaneView = {
+  divider: undefined,
+  main: { _tag: "Timeline" },
+  open: undefined,
+};
+
 /** Everything the Frontend holds of the Timelines. */
 export interface Timelines {
-  /** What the main view shows. */
-  readonly main: MainView;
-  /** The "new" divider of the open Timeline, if it opened with something unread. */
-  readonly divider: Divider | undefined;
+  /** The Panes, each showing a Timeline or the options, and the one with the focus. */
+  readonly layout: Layout<PaneView>;
+  /**
+   * A layout this device kept, set aside until every Network's Timelines are read, so a Pane
+   * whose Timeline no longer exists is dropped, and let go if the Owner went elsewhere first.
+   */
+  readonly restoring: Layout<PaneView> | undefined;
   /**
    * The highest step the stream gave that was considered for notifications, kept for the
    * page's life, through resets and overflows, so no step notifies twice. It is a Journal
@@ -189,8 +224,6 @@ export interface Timelines {
   readonly merged: ReadonlyMap<TimelineId, TimelineId>;
   /** Timelines the Daemon said it never had. */
   readonly vanished: ReadonlySet<TimelineId>;
-  /** The Timeline the Owner opened, as they chose it. A merge is followed when it is read. */
-  readonly open: TimelineId | undefined;
   /** The Timelines closed most recently, latest first, whose windows are kept. */
   readonly closed: readonly TimelineId[];
   /**
@@ -199,8 +232,9 @@ export interface Timelines {
    */
   readonly located: TimelineId | undefined;
   /**
-   * How many times the Owner opened a Timeline or showed the options. A placement captures
-   * it when its Say is submitted, and one from before the Owner went elsewhere is ignored.
+   * How many times the Owner opened a Timeline, showed the options, or moved to another
+   * Pane. A placement captures it when its Say is submitted, and one from before the Owner
+   * went elsewhere is ignored.
    */
   readonly navigation: number;
   /** The most items a window holds. */
@@ -218,7 +252,7 @@ const largestPage = 500;
 /** The most items a window holds: past it, the end furthest from the Owner is dropped. */
 export const windowCap = 1000;
 
-/** How many windows of closed Timelines are kept, besides the open one's. */
+/** How many windows of closed Timelines are kept, besides those open in a Pane. */
 export const keptClosed = 4;
 
 /** How many things the stream gave a read in flight may wait for, before it is read again. */
@@ -282,8 +316,10 @@ export type WindowRequest =
  * - `Opened`: the Owner opened a Timeline, which the main view then shows. `OlderWanted` and
  *   `NewerWanted`: they want what lies before or after what is held. `Following`: whether
  *   they are at the latest.
- * - `OptionsShown`: the main view shows the options, filtered as given, which counts as
+ * - `OptionsShown`: the focused Pane shows the options, filtered as given, which counts as
  *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter.
+ * - `Pane`: the Owner changed the Panes, as a command or a drag of a divider did.
+ * - `Restore`: the layout this device kept, read as the page starts.
  */
 export type TimelinesEvent =
   | { readonly _tag: "ReadStarted"; readonly read: Read }
@@ -317,7 +353,17 @@ export type TimelinesEvent =
       readonly seen: Position | undefined;
     }
   | { readonly _tag: "OptionsShown"; readonly filter: string }
-  | { readonly _tag: "OptionsFiltered"; readonly filter: string };
+  | { readonly _tag: "OptionsFiltered"; readonly filter: string }
+  | { readonly _tag: "Pane"; readonly change: PaneChange }
+  | { readonly _tag: "Restore"; readonly layout: Layout<PaneView> };
+
+/**
+ * A change to the Panes. A layout's own, but a split names the Timeline the new Pane
+ * opens, or none for an empty one, rather than a view.
+ */
+export type PaneChange =
+  | Exclude<LayoutChange<PaneView>, { readonly _tag: "Split" }>
+  | { readonly _tag: "Split"; readonly axis: Axis; readonly timeline: TimelineId | undefined };
 
 const unread: Load = { attempt: 0, fresh: false, reading: false };
 const unreadList: ListLoad = { ...unread, next: undefined, through: undefined };
@@ -333,17 +379,16 @@ const unreadStatus: StatusLoad = { ...unread, from: 0 };
 export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   closed: [],
   considered: 0,
-  divider: undefined,
   entries: unreadStatus,
   follow: { _tag: "Waiting", version: undefined },
   kept,
+  layout: single(emptyView),
   located: undefined,
-  main: { _tag: "Timeline" },
   merged: new Map(),
   navigation: 0,
   networks: new Map(),
   nextGeneration: 0,
-  open: undefined,
+  restoring: undefined,
   vanished: new Set(),
   windowCap: cap,
   windows: new Map(),
@@ -1771,48 +1816,142 @@ const dividerOf = (timeline: Timeline | undefined): Divider | undefined => {
 };
 
 /**
- * Opens a Timeline, on its latest. The one open before joins the most recently closed, and
- * only the open one's window and those of the few closed most recently are kept: any other
- * is read again when it is opened. Opened with something unread, it remembers where its
- * Read Marker was, for the "new" divider, until another opens. Opening the Timeline already
- * open changes nothing but showing it in the main view.
+ * The Timelines open in the Panes, as the Owner chose them, the focused Pane's first.
+ * @param layout - The layout.
+ * @returns Their ids.
+ */
+const openIn = (layout: Layout<PaneView>): readonly TimelineId[] => {
+  const focused = focusedPane(layout);
+
+  return [focused, ...panesOf(layout.root).filter((pane) => pane.id !== focused.id)].flatMap(
+    (pane) => (pane.view.open === undefined ? [] : [pane.view.open])
+  );
+};
+
+/**
+ * The Pane a Timeline is open in.
+ * @param state - The state.
+ * @param timeline - The Timeline.
+ * @returns The Pane's id, or none when no Pane has it open.
+ */
+export const paneOf = (state: Timelines, timeline: TimelineId): string | undefined => {
+  const id = resolve(state, timeline);
+
+  return panesOf(state.layout.root).find(
+    (pane) => pane.view.open !== undefined && resolve(state, pane.view.open) === id
+  )?.id;
+};
+
+/**
+ * What the focused Pane shows.
+ * @param state - The state.
+ * @returns Its view.
+ */
+export const focusedView = (state: Timelines): PaneView => focusedPane(state.layout).view;
+
+/**
+ * The Timeline open in the focused Pane, as the Owner chose it, even while the options show
+ * in its place. A merge is followed when it is read.
+ * @param state - The state.
+ * @returns Its id, or none.
+ */
+export const openOf = (state: Timelines): TimelineId | undefined => focusedView(state).open;
+
+/**
+ * What the focused Pane shows: its Timeline or the options.
+ * @param state - The state.
+ * @returns What it shows.
+ */
+export const mainOf = (state: Timelines): MainView => focusedView(state).main;
+
+/**
+ * Keeps the windows of what the Panes show, after they changed. A Timeline no Pane has open
+ * any more joins the most recently closed, and only the windows of those open and of the
+ * few closed most recently are kept: any other is read again when it opens. A Timeline
+ * newly open opens on its latest: its window follows again, one left behind the latest is
+ * read again, and what was seen of it, the view says again once it shows it.
+ * @param before - The state before the Panes changed.
+ * @param after - The state after.
+ * @returns The state after, with its windows kept.
+ */
+const retained = (before: Timelines, after: Timelines): Timelines => {
+  const was = new Set(openIn(before.layout).map((one) => resolve(after, one)));
+  const now = openIn(after.layout);
+  const shown = new Set(now.map((one) => resolve(after, one)));
+  const left = openIn(before.layout).filter((one) => !shown.has(resolve(after, one)));
+  const closed: TimelineId[] = [];
+
+  for (const one of [...left, ...after.closed]) {
+    const id = resolve(after, one);
+
+    if (!shown.has(id) && !closed.some((other) => resolve(after, other) === id)) {
+      closed.push(one);
+    }
+  }
+
+  const kept = closed.slice(0, after.kept);
+  const keep = new Set([...shown, ...kept.map((one) => resolve(after, one))]);
+  const windows = new Map([...after.windows].filter(([one]) => keep.has(one)));
+
+  for (const id of shown) {
+    const window = windows.get(id);
+
+    if (!was.has(id) && window !== undefined) {
+      windows.set(id, {
+        ...window,
+        following: true,
+        fresh: window.fresh && !window.later,
+        seen: undefined,
+      });
+    }
+  }
+
+  return { ...after, closed: kept, windows };
+};
+
+/**
+ * The view of a Pane a Timeline opens in: the Timeline, with the divider it opens with.
+ * @param state - The state.
+ * @param timeline - The Timeline.
+ * @returns The view.
+ */
+const viewOf = (state: Timelines, timeline: TimelineId): PaneView => ({
+  divider: dividerOf(listed(state, resolve(state, timeline))),
+  main: { _tag: "Timeline" },
+  open: timeline,
+});
+
+/**
+ * Opens a Timeline, on its latest, in the focused Pane, in place of what it showed. Opened
+ * with something unread, it remembers where its Read Marker was, for the "new" divider,
+ * until another opens there. A Timeline already open in a Pane is not opened twice: that
+ * Pane takes the focus and shows it again, changing nothing else, so where the Owner left it,
+ * scrolled back or not, and its divider stay.
  * @param state - The state.
  * @param timeline - The Timeline opened.
  * @returns The state.
  */
 const opening = (state: Timelines, timeline: TimelineId): Timelines => {
-  const before = state.open;
+  const at = paneOf(state, timeline);
+  const { layout } = state;
 
-  // The Timeline already open stays as the Owner left it, scrolled back or not: only the
-  // main view goes back to it.
-  if (before !== undefined && resolve(state, before) === resolve(state, timeline)) {
-    return { ...state, main: { _tag: "Timeline" } };
+  if (at === layout.focused && focusedView(state).main._tag === "Timeline") {
+    return state;
   }
 
-  const closed = [
-    ...(before === undefined || before === timeline ? [] : [before]),
-    ...state.closed.filter((one) => one !== timeline && one !== before),
-  ].slice(0, state.kept);
-
-  const id = resolve(state, timeline);
-  const kept = new Set([timeline, ...closed].map((one) => resolve(state, one)));
-  const windows = new Map([...state.windows].filter(([one]) => kept.has(one)));
-  const window = windows.get(id);
-
-  // A Timeline opens on its latest: its window follows again, and one left behind the
-  // latest is read again. What was seen of it, the view says again once it shows it.
-  if (window !== undefined) {
-    windows.set(id, {
-      ...window,
-      following: true,
-      fresh: window.fresh && !window.later,
-      seen: undefined,
-    });
+  if (at !== undefined) {
+    return {
+      ...state,
+      layout: mapViews({ ...layout, focused: at }, (pane): PaneView =>
+        pane.id === at ? { ...pane.view, main: { _tag: "Timeline" } } : pane.view
+      ),
+    };
   }
 
-  const divider = dividerOf(listed(state, id));
-
-  return { ...state, closed, divider, main: { _tag: "Timeline" }, open: timeline, windows };
+  return retained(state, {
+    ...state,
+    layout: withView(layout, layout.focused, viewOf(state, timeline)),
+  });
 };
 
 /**
@@ -1904,7 +2043,9 @@ interface Applied {
 /** An event of where the Owner went. */
 type Navigation = Extract<
   TimelinesEvent,
-  { readonly _tag: "Opened" | "Located" | "OptionsShown" | "OptionsFiltered" }
+  {
+    readonly _tag: "Opened" | "Located" | "OptionsShown" | "OptionsFiltered" | "Pane" | "Restore";
+  }
 >;
 
 const navigations: ReadonlySet<string> = new Set([
@@ -1912,13 +2053,147 @@ const navigations: ReadonlySet<string> = new Set([
   "Located",
   "OptionsShown",
   "OptionsFiltered",
+  "Pane",
+  "Restore",
 ]);
 
 const isNavigation = (event: TimelinesEvent): event is Navigation => navigations.has(event._tag);
 
 /**
- * Where the Owner went: a Timeline opened, a placement to open, or the options shown or
- * filtered in the main view.
+ * The state once the Owner went elsewhere: `navigation` bumped, so a placement from before
+ * is let go.
+ * @param state - The state.
+ * @returns The state.
+ */
+const elsewhere = (state: Timelines): Timelines => ({
+  ...state,
+  located: undefined,
+  navigation: state.navigation + 1,
+});
+
+/**
+ * The Pane the options show in, if any.
+ * @param layout - The layout.
+ * @returns Its id, or none.
+ */
+const optionsPane = (layout: Layout<PaneView>): string | undefined =>
+  panesOf(layout.root).find((pane) => pane.view.main._tag === "Options")?.id;
+
+/**
+ * Shows the options, filtered: in the Pane they show in already, which takes the focus, or
+ * else in the focused Pane, in place of its Timeline, which stays open behind them.
+ * @param state - The state.
+ * @param filter - The filter.
+ * @returns The state.
+ */
+const showingOptions = (state: Timelines, filter: string): Timelines => {
+  const { layout } = state;
+  const at = optionsPane(layout) ?? layout.focused;
+  const view = panesOf(layout.root).find((pane) => pane.id === at)?.view ?? emptyView;
+
+  return {
+    ...state,
+    layout: withView({ ...layout, focused: at }, at, {
+      ...view,
+      main: { _tag: "Options", filter },
+    }),
+  };
+};
+
+/**
+ * Changes the Panes. A split opens the Timeline it names in the new Pane, unless a Pane has
+ * it open already, when the new Pane is empty.
+ * @param state - The state.
+ * @param change - The change.
+ * @returns The state.
+ */
+const paned = (state: Timelines, change: PaneChange): Timelines => {
+  if (change._tag !== "Split") {
+    const layout = reduceLayout(state.layout, change);
+
+    return layout === state.layout ? state : retained(state, { ...state, layout });
+  }
+
+  const view =
+    change.timeline === undefined || paneOf(state, change.timeline) !== undefined
+      ? emptyView
+      : viewOf(state, change.timeline);
+
+  return retained(state, {
+    ...state,
+    layout: reduceLayout(state.layout, { _tag: "Split", axis: change.axis, view }),
+  });
+};
+
+/**
+ * Takes the layout this device kept, once every Network's Timelines are read, and only if
+ * the Owner went nowhere meanwhile. A Pane whose Timeline no Network lists any more is
+ * dropped, and with none left, the layout stays as it is. Each Timeline opens as opening
+ * it does, with its divider.
+ * @param state - The state.
+ * @returns The state.
+ */
+const restored = (state: Timelines): Timelines => {
+  const { restoring } = state;
+
+  if (restoring === undefined || state.follow._tag !== "Following") {
+    return state;
+  }
+
+  const unset = { ...state, restoring: undefined };
+
+  if (state.navigation > 0) {
+    return unset;
+  }
+
+  const kept = keeping(
+    restoring,
+    (pane) => pane.view.open === undefined || listed(state, pane.view.open) !== undefined
+  );
+
+  if (kept === undefined) {
+    return unset;
+  }
+
+  // A Timeline is open in one Pane at most, and the options show in one: a second is empty.
+  const open = new Set<TimelineId>();
+  let options = false;
+
+  const layout = mapViews(kept, ({ view }): PaneView => {
+    const main =
+      view.main._tag === "Options" && options ? { _tag: "Timeline" as const } : view.main;
+
+    options ||= main._tag === "Options";
+
+    if (view.open === undefined || open.has(resolve(state, view.open))) {
+      return { ...emptyView, main };
+    }
+
+    open.add(resolve(state, view.open));
+
+    return { ...viewOf(state, view.open), main };
+  });
+
+  return retained(unset, { ...unset, layout });
+};
+
+/**
+ * Whether the Owner went elsewhere: the focused Pane shows something else, as when another
+ * Pane takes the focus, but not when the view they were in moves with them, as a swap does.
+ * @param before - The state before.
+ * @param after - The state after.
+ * @returns Whether they did.
+ */
+const wentElsewhere = (before: Timelines, after: Timelines): boolean => {
+  const was = focusedView(before);
+  const now = focusedView(after);
+
+  return was.open !== now.open || was.main._tag !== now.main._tag;
+};
+
+/**
+ * Where the Owner went: a Timeline opened, a placement to open, the options shown or
+ * filtered, or the Panes changed.
  * @param state - The state.
  * @param event - Where they went.
  * @returns The state.
@@ -1926,10 +2201,7 @@ const isNavigation = (event: TimelinesEvent): event is Navigation => navigations
 const navigated = (state: Timelines, event: Navigation): Timelines => {
   switch (event._tag) {
     case "Opened": {
-      return opening(
-        { ...state, located: undefined, navigation: state.navigation + 1 },
-        event.timeline
-      );
+      return opening(elsewhere(state), event.timeline);
     }
 
     case "Located": {
@@ -1937,18 +2209,32 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
     }
 
     case "OptionsShown": {
-      return {
-        ...state,
-        located: undefined,
-        main: { _tag: "Options", filter: event.filter },
-        navigation: state.navigation + 1,
-      };
+      return showingOptions(elsewhere(state), event.filter);
     }
 
     case "OptionsFiltered": {
-      return state.main._tag === "Options"
-        ? { ...state, main: { _tag: "Options", filter: event.filter } }
-        : state;
+      const at = optionsPane(state.layout);
+      const view = panesOf(state.layout.root).find((pane) => pane.id === at)?.view;
+
+      return at === undefined || view === undefined
+        ? state
+        : {
+            ...state,
+            layout: withView(state.layout, at, {
+              ...view,
+              main: { _tag: "Options", filter: event.filter },
+            }),
+          };
+    }
+
+    case "Pane": {
+      const after = paned(state, event.change);
+
+      return wentElsewhere(state, after) ? elsewhere(after) : after;
+    }
+
+    case "Restore": {
+      return restored({ ...state, restoring: event.layout });
     }
 
     default: {
@@ -2051,6 +2337,43 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 };
 
 /**
+ * Keeps each Timeline open in one Pane at most, after anything, a merge included, which
+ * may resolve two Panes' Timelines to one: the focused Pane keeps it, or, with neither
+ * focused, the first in reading order, and the other is emptied, as a split with nothing
+ * to show is, its options kept if they show.
+ * @param state - The state.
+ * @returns The state, the same when no Timeline is open twice.
+ */
+const onePaneEach = (state: Timelines): Timelines => {
+  const { layout } = state;
+  const focused = focusedPane(layout);
+  const ordered = [focused, ...panesOf(layout.root).filter((pane) => pane.id !== focused.id)];
+  const keeper = new Map<TimelineId, string>();
+  const emptied = new Set<string>();
+
+  for (const pane of ordered) {
+    if (pane.view.open !== undefined) {
+      const id = resolve(state, pane.view.open);
+
+      if (keeper.has(id)) {
+        emptied.add(pane.id);
+      } else {
+        keeper.set(id, pane.id);
+      }
+    }
+  }
+
+  return emptied.size === 0
+    ? state
+    : {
+        ...state,
+        layout: mapViews(layout, ({ id, view }) =>
+          emptied.has(id) ? { ...view, divider: undefined, open: undefined } : view
+        ),
+      };
+};
+
+/**
  * The state after an event.
  * @param state - The state before.
  * @param event - What happened.
@@ -2059,25 +2382,26 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 export const reduceTimelines = (state: Timelines, event: TimelinesEvent): Timelines => {
   const { recorded, state: after } = apply(state, event);
 
-  return found(record(after, recorded));
+  return onePaneEach(restored(found(record(after, recorded))));
 };
 
 // What to read.
 
 /**
- * The read the open Timeline's window calls for, if any: the latest when it was never read
- * or missed something, or what lies before or after it when the Owner asked. A window is read only once
- * the stream is followed, so its `through` is never before the place the stream follows
- * from.
+ * The read an open Timeline's window calls for, if any: the latest when it was never read
+ * or missed something, or what lies before or after it when the Owner asked. A window is
+ * read only once the stream is followed, so its `through` is never before the place the
+ * stream follows from.
  * @param state - The state.
+ * @param open - The Timeline, as the Owner chose it.
  * @returns The read, or none.
  */
-const wantedWindow = (state: Timelines): readonly Read[] => {
-  if (state.open === undefined || state.follow._tag !== "Following") {
+const wantedWindow = (state: Timelines, open: TimelineId): readonly Read[] => {
+  if (state.follow._tag !== "Following") {
     return [];
   }
 
-  const id = resolve(state, state.open);
+  const id = resolve(state, open);
   const window = state.windows.get(id);
 
   if (state.vanished.has(id) || window?.reading === true) {
@@ -2130,7 +2454,8 @@ const wantedWindow = (state: Timelines): readonly Read[] => {
 /**
  * The reads the state calls for, none of them already in flight: the Network list, each
  * Network's Timelines and, once the stream is followed, its connection, and the window of
- * the open Timeline, latest first and older when asked, once the stream is followed.
+ * each Timeline open in a Pane, the focused Pane's first, latest first and older when
+ * asked, once the stream is followed.
  * @param state - The state.
  * @returns The reads.
  */
@@ -2156,7 +2481,9 @@ export const wanted = (state: Timelines): readonly Read[] => {
     }
   }
 
-  return [...reads, ...wantedWindow(state)];
+  const open = [...new Set(openIn(state.layout).map((one) => resolve(state, one)))];
+
+  return [...reads, ...open.flatMap((one) => wantedWindow(state, one))];
 };
 
 /**
@@ -2281,7 +2608,7 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
   return rows;
 };
 
-/** The open Timeline, as shown. */
+/** A Pane's open Timeline, as shown. */
 export type Opened =
   | { readonly _tag: "Closed" }
   | { readonly _tag: "Vanished"; readonly timeline: TimelineId }
@@ -2296,17 +2623,20 @@ export type Opened =
     };
 
 /**
- * The open Timeline: closed, gone, being read for the first time, or its window, with the
- * Timeline itself as its Network's list has it.
+ * A Pane's open Timeline: closed, gone, being read for the first time, or its window, with
+ * the Timeline itself as its Network's list has it.
  * @param state - The state.
+ * @param pane - The Pane's id: the focused Pane unless another is named.
  * @returns The open Timeline.
  */
-export const opened = (state: Timelines): Opened => {
-  if (state.open === undefined) {
+export const opened = (state: Timelines, pane = state.layout.focused): Opened => {
+  const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
+
+  if (view?.open === undefined) {
     return { _tag: "Closed" };
   }
 
-  const timeline = resolve(state, state.open);
+  const timeline = resolve(state, view.open);
   const window = state.windows.get(timeline);
 
   if (state.vanished.has(timeline)) {
@@ -2317,7 +2647,7 @@ export const opened = (state: Timelines): Opened => {
     return { _tag: "Reading", timeline };
   }
 
-  const { divider } = state;
+  const { divider } = view;
 
   return {
     _tag: "Shown",
@@ -2330,4 +2660,149 @@ export const opened = (state: Timelines): Opened => {
     timeline,
     window,
   };
+};
+
+// The layout this device keeps.
+
+/**
+ * What a device keeps of a Pane's view: its open Timeline, as the Owner chose it, and the
+ * options' filter while they show in its place. A divider is never kept: it is taken afresh
+ * as the Timeline opens again.
+ */
+export interface KeptView {
+  readonly open: TimelineId | null;
+  readonly options: string | null;
+}
+
+/** A layout as a device keeps it: plain JSON. */
+export type KeptLayout = Layout<KeptView>;
+
+/** A Pane's view as JSON writes it: a Timeline's id is text. */
+interface KeptViewJson {
+  readonly open: string | null;
+  readonly options: string | null;
+}
+
+const KeptViewSchema = Schema.Struct({
+  open: Schema.NullOr(TimelineIdSchema),
+  options: Schema.NullOr(Schema.String),
+});
+
+const KeptNode: Schema.Codec<Node<KeptView>, Node<KeptViewJson>> = Schema.Union([
+  Schema.TaggedStruct("Pane", { id: Schema.String, view: KeptViewSchema }),
+  Schema.TaggedStruct("Split", {
+    axis: Schema.Literals(["Horizontal", "Vertical"]),
+    children: Schema.Array(
+      Schema.Struct({
+        node: Schema.suspend((): Schema.Codec<Node<KeptView>, Node<KeptViewJson>> => KeptNode),
+        ratio: Schema.Finite,
+      })
+    ),
+    id: Schema.String,
+  }),
+]);
+
+/**
+ * The Schema of a layout as a device keeps it, which the runtime reads what it kept with,
+ * at the boundary. What it reads may still be no layout: `layoutKept` says.
+ */
+export const KeptLayoutSchema: Schema.Codec<KeptLayout, Layout<KeptViewJson>> = Schema.Struct({
+  focused: Schema.String,
+  next: Schema.Finite,
+  root: KeptNode,
+  zoomed: Schema.Boolean,
+});
+
+/**
+ * The layout as a device keeps it, or none while one it kept waits to be taken, so what it
+ * kept is never written over by the layout the page starts with.
+ * @param state - The state.
+ * @returns The layout to keep, or none.
+ */
+export const keptLayout = (state: Timelines): KeptLayout | undefined =>
+  state.restoring === undefined
+    ? mapViews(state.layout, ({ view }): KeptView => ({
+        open: view.open ?? null,
+        options: view.main._tag === "Options" ? view.main.filter : null,
+      }))
+    : undefined;
+
+/**
+ * A Pane's view, from what a device kept.
+ * @param kept - What it kept.
+ * @returns The view.
+ */
+const keptView = (kept: KeptView): PaneView => ({
+  divider: undefined,
+  main: kept.options === null ? { _tag: "Timeline" } : { _tag: "Options", filter: kept.options },
+  open: kept.open ?? undefined,
+});
+
+/**
+ * The layout a device kept, for `Restore`, or none when it is not one: ids that are not a
+ * Pane's or a Split's, or that two share.
+ * @param kept - The layout as kept.
+ * @returns The layout, or none.
+ */
+export const layoutKept = (kept: KeptLayout): Layout<PaneView> | undefined =>
+  layoutFrom(kept, keptView);
+
+/** The longest text a kept layout may be, 64 KB: anything longer is refused unread. */
+export const longestKept = 65_536;
+
+/**
+ * How deep a kept layout's JSON may nest: an object, an array, and an object for each
+ * Split, the layout's own, and a Pane's and its view's.
+ */
+const deepestKept = 3 * deepestSplits + 4;
+
+/**
+ * How deep a JSON text nests its objects and arrays, scanned without parsing it, so a text
+ * nested too deep is refused before anything recurses into it.
+ * @param text - The text.
+ * @returns The deepest nesting.
+ */
+const nesting = (text: string): number => {
+  let depth = 0;
+  let deepest = 0;
+  let quoted = false;
+  let escaped = false;
+
+  for (const character of text) {
+    if (escaped) {
+      escaped = false;
+    } else if (quoted) {
+      escaped = character === "\\";
+      quoted = character !== '"';
+    } else if (character === '"') {
+      quoted = true;
+    } else if (character === "{" || character === "[") {
+      depth += 1;
+      deepest = Math.max(deepest, depth);
+    } else if (character === "}" || character === "]") {
+      depth -= 1;
+    }
+  }
+
+  return deepest;
+};
+
+const decodeKept = Schema.decodeUnknownOption(Schema.fromJsonString(KeptLayoutSchema));
+
+/**
+ * The layout a device kept, from the text it kept it as, for `Restore`, or none when it is
+ * not one: longer than `longestKept`, nested deeper than a layout of `deepestSplits` could
+ * be, not JSON, not of the Schema, or not a layout `layoutKept` takes, with more than
+ * `mostPanes` Panes among what it refuses. Nothing it is given makes it throw.
+ * @param text - The text.
+ * @returns The layout, or none.
+ */
+export const layoutKeptText = (text: string): Layout<PaneView> | undefined => {
+  if (text.length > longestKept || nesting(text) > deepestKept) {
+    return undefined;
+  }
+
+  const kept = Option.getOrUndefined(decodeKept(text));
+
+  return kept === undefined ? undefined : layoutKept(kept);
 };

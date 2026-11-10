@@ -1,0 +1,27 @@
+/* A Pane: what it shows, and the members beside it. */
+.pane {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The focused Pane, among several shown: an accented edge along its top. */
+.pane[data-marked="true"]::before {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: var(--edge-width);
+  background: var(--color-accent);
+  content: "";
+  pointer-events: none;
+}
