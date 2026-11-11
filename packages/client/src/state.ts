@@ -10,8 +10,9 @@ import type { CredentialName } from "@iirc/protocol/line";
 import type { StsPolicy } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import type { CapName, Instant, IntentId } from "./ids.ts";
+import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
-import type { EndReason, RefusedAction } from "./news.ts";
+import type { EndReason, LookResult, Profile, RefusedAction } from "./news.ts";
 import type { Seam } from "./seam.ts";
 
 /** Cap negotiation, which runs for a whole Connection. */
@@ -125,6 +126,17 @@ type LinkPhase =
        */
       readonly acting: readonly Acting[];
       /**
+       * The Owner's Lookups sent on this Connection whose replies are still coming, oldest
+       * first, at most {@link maxLookups}.
+       */
+      readonly lookups: readonly Looking[];
+      /**
+       * How many of the Owner's Lines awaiting an answer by their parameters, actions' and
+       * Lookups' alike, have been sent on this Connection: each takes the next as its
+       * `order`, so a reply tied to neither by label goes to the one sent first.
+       */
+      readonly awaited: number;
+      /**
        * The message of the last `AWAY` sent on this Connection, `null` for one that came
        * back, or `undefined` before any, which a `306` confirms.
        */
@@ -148,6 +160,8 @@ export interface Awaiting {
  */
 export interface Acting {
   readonly intent: IntentId;
+  /** When it was sent among the Lines awaiting an answer on the Connection, from {@link Open}'s `awaited`. */
+  readonly order: number;
   /** Its command, such as `KICK`, which `421` and `461` name. */
   readonly command: string;
   /** What the whole Line is about, such as a `KICK`'s Channel or a `MODE`'s target, as said. */
@@ -160,6 +174,51 @@ export interface Acting {
   /** Whether a refusal was already reported for its intent, by another of its Lines. */
   readonly reported: boolean;
 }
+
+/**
+ * A Lookup whose reply is being collected: what it asked, how its reply is tied to it,
+ * and what has come so far.
+ */
+export interface Looking {
+  readonly intent: IntentId;
+  /** When it was sent among the Lines awaiting an answer on the Connection, as an action's `order` is. */
+  readonly order: number;
+  readonly lookup: Lookup;
+  /** Whether its Line was labelled, so its reply is collected by label alone, never by the names it holds. */
+  readonly labelled: boolean;
+  /** When it gives up waiting for the end, and reports what it has. */
+  readonly deadline: Instant;
+  /** How many Lines of its reply have come, counted up to {@link maxLookupLines}. */
+  readonly lines: number;
+  /** The Users the reply has described so far, in order. */
+  readonly profiles: readonly Profile[];
+  /** The error its reply held, which it reports at its end. */
+  readonly error: Extract<LookResult, { readonly _tag: "NotFound" | "Failed" }> | undefined;
+  /** Whether its end numeric came, inside a labelled answer, which ends only with that answer. */
+  readonly ended: boolean;
+  /** Whether its reply ran past {@link maxLookupLines}, so what came after was not kept. */
+  readonly bounded: boolean;
+  /**
+   * For each fact of Knowledge its reply spoke of, the time of the Line that said it, and
+   * the fact as Knowledge held it then, so it refreshes only a fact nothing changed since.
+   */
+  readonly heard: ReadonlyMap<Refreshed, Heard>;
+}
+
+/** A fact of a User's that a `WHOIS` refreshes. */
+export type Refreshed = "account" | "away" | "mask" | "realname";
+
+/** When a reply spoke of a fact, and what Knowledge held of it then. */
+interface Heard {
+  readonly at: Instant;
+  readonly was: Fact<unknown>;
+}
+
+/** How many Lookups may await their replies on a Connection at once. */
+export const maxLookups = 8;
+
+/** How many Lines of one Lookup's reply are kept. */
+export const maxLookupLines = 64;
 
 /** How many Lines of actions a Connection keeps awaiting an answer. */
 export const maxActing = 64;

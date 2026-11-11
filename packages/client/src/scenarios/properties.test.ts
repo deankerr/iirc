@@ -12,11 +12,12 @@ import { describe, expect, it } from "vitest";
 import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
-import type { Action, Input, UnsentLine } from "../input.ts";
+import type { Action, Input, Lookup, UnsentLine } from "../input.ts";
 import { listedMembers } from "../members.ts";
 import type { News } from "../news.ts";
 import { timers } from "../output.ts";
 import type { TimerTable } from "../output.ts";
+import { maxLookups } from "../state.ts";
 import type { State } from "../state.ts";
 import { configured, epoch, impurity, snapshot } from "../testing/index.ts";
 import { openOf } from "../views.ts";
@@ -136,6 +137,15 @@ const line = fc.oneof(
     )
 );
 
+// A Lookup's reply, whole or mangled.
+const replied = fc
+  .tuple(
+    fc.constantFrom("311", "312", "314", "317", "318", "319", "330", "369", "401", "406", "378"),
+    fc.constantFrom(...nicks),
+    fc.constantFrom("", "~u host * :Real", "5 1767225600 :idle", ":@#iirc +#other x", "acct :in")
+  )
+  .map(([numeric, nick, rest]) => `:irc.test ${numeric} iirc ${nick} ${rest}`);
+
 const utf8 = new TextEncoder();
 
 // Bytes a hostile Ircd might send: a pooled Line, mangled, or anything at all.
@@ -165,6 +175,7 @@ type Move =
   | { readonly _tag: "Wait"; readonly millis: number }
   | { readonly _tag: "Say"; readonly target: string; readonly text: string }
   | { readonly _tag: "Act"; readonly action: Action }
+  | { readonly _tag: "Look"; readonly lookup: Lookup }
   | { readonly _tag: "Read"; readonly target: string | null; readonly read: number }
   | { readonly _tag: "Unfilled"; readonly line: number }
   | { readonly _tag: "Stopping" }
@@ -255,7 +266,7 @@ const running: fc.Arbitrary<Move> = fc.oneof(
   { arbitrary: action.map((each) => ({ _tag: "Act", action: each }) as const), weight: 2 }
 );
 
-// And marking Timelines read, and shutting down: a `Stopping` shuts the gate until the next `Started`, and Lines the
+// And marking Timelines read, Lookups, and shutting down: a `Stopping` shuts the gate until the next `Started`, and Lines the
 // Runtime dropped come back as `Unsent`. Each is rare, so a run still meets the rest.
 const move: fc.Arbitrary<Move> = fc.oneof(
   { arbitrary: running, weight: 30 },
@@ -266,6 +277,21 @@ const move: fc.Arbitrary<Move> = fc.oneof(
     weight: 2,
   },
   { arbitrary: fc.constant({ _tag: "Stopping" } as const), weight: 1 },
+  {
+    arbitrary: fc
+      .tuple(fc.boolean(), names)
+      .map(
+        ([whois, nick]) =>
+          ({ _tag: "Look", lookup: { _tag: whois ? "Whois" : "Whowas", nick } }) as const
+      ),
+    weight: 2,
+  },
+  {
+    arbitrary: replied.map(
+      (text) => ({ _tag: "Received", bytes: utf8.encode(text), stale: false }) as const
+    ),
+    weight: 4,
+  },
   {
     arbitrary: fc
       .tuple(fc.nat(4), fc.boolean())
@@ -323,6 +349,8 @@ interface Fold {
   now: number;
   table: TimerTable;
   intents: number;
+  /** The intents of `Look`s not yet reported. */
+  readonly looking: Set<string>;
   /** Whether a `Stopping` has been stepped since the last `Started`. */
   stopping: boolean;
   readonly inputs: Input[];
@@ -339,10 +367,14 @@ const secrets = [
 const owned = (
   fold: Fold,
   at: Instant,
-  next: Extract<Move, { readonly _tag: "Say" | "Act" }>
+  next: Extract<Move, { readonly _tag: "Say" | "Act" | "Look" }>
 ): Input => {
   fold.intents += 1;
   const intent = IntentId.make(`i${fold.intents}`);
+
+  if (next._tag === "Look") {
+    return { _tag: "Look", at, intent, lookup: next.lookup };
+  }
 
   return next._tag === "Act"
     ? { _tag: "Act", action: next.action, at, intent }
@@ -350,7 +382,10 @@ const owned = (
 };
 
 // The input a move makes in the state it meets.
-const inputOf = (fold: Fold, next: Exclude<Move, { readonly _tag: "Read" | "Act" }>): Input => {
+const inputOf = (
+  fold: Fold,
+  next: Exclude<Move, { readonly _tag: "Read" | "Act" | "Look" }>
+): Input => {
   const at = Instant.make(fold.now);
   const current = client.inspect(fold.state).connection ?? ConnectionId.make(1);
 
@@ -506,6 +541,25 @@ const checkWhere = (step: Step<State>, before: State): void => {
   }
 };
 
+// Each Lookup is reported exactly once: after every step, the Looks not yet reported are
+// exactly the Lookups a Connection holds, so none is reported twice, reported unasked,
+// or dropped without a report. A Connection holds a bounded number.
+const checkLookups = (fold: Fold, input: Input, step: Step<State>): void => {
+  if (input._tag === "Look") {
+    fold.looking.add(input.intent);
+  }
+
+  const reported = step.news.flatMap((news) => (news._tag === "LookedUp" ? [news.intent] : []));
+  const unasked = reported.filter((intent) => !fold.looking.delete(intent));
+  const held = (openOf(step.state)?.lookups ?? []).map((looking) => looking.intent);
+
+  expect({
+    bounded: held.length <= maxLookups,
+    held: held.toSorted(),
+    unasked,
+  }).toStrictEqual({ bounded: true, held: [...fold.looking].toSorted(), unasked: [] });
+};
+
 // Every invariant one step must keep.
 const check = (fold: Fold, input: Input, step: Step<State>, before: State): void => {
   const inspection = client.inspect(step.state);
@@ -559,6 +613,7 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
     }
   }
 
+  checkLookups(fold, input, step);
   checkWhere(step, before);
 };
 
@@ -573,13 +628,16 @@ const inputFor = (fold: Fold, next: Exclude<Move, { readonly _tag: "Wait" }>): I
     };
   }
 
-  return next._tag === "Act" ? owned(fold, Instant.make(fold.now), next) : inputOf(fold, next);
+  return next._tag === "Act" || next._tag === "Look"
+    ? owned(fold, Instant.make(fold.now), next)
+    : inputOf(fold, next);
 };
 
 const runMoves = (moves: readonly Move[]): Fold => {
   const fold: Fold = {
     inputs: [],
     intents: 0,
+    looking: new Set(),
     now: epoch,
     state: client.initial,
     steps: [],

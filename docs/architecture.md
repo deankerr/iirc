@@ -130,7 +130,7 @@ interface Client<State> {
 }
 ```
 
-Every input carries `at`, the time it happened, so the Client never reads a clock. Inputs come from the Owner (`Configured`, `Say`, `Act`, `Read`, `Retry`), the Transport (`Opened`, `Received`, `Closed`), the Clock (`Fired`), and the Runtime (`Started`, `Stopping`, `Unfilled`, `Unsent`). Outputs are `Dial`, `Send`, `SendSecret`, `Hangup`, and `Wake`. Configuration always arrives whole, so joining, parting, and quitting are changes to it, not commands. What the Owner does in the moment, such as setting a topic, kicking, or sending a Line written as text, is an `Act`, and being away is one the Client keeps for every Session after.
+Every input carries `at`, the time it happened, so the Client never reads a clock. Inputs come from the Owner (`Configured`, `Say`, `Act`, `Look`, `Read`, `Retry`), the Transport (`Opened`, `Received`, `Closed`), the Clock (`Fired`), and the Runtime (`Started`, `Stopping`, `Unfilled`, `Unsent`). Outputs are `Dial`, `Send`, `SendSecret`, `Hangup`, and `Wake`. Configuration always arrives whole, so joining, parting, and quitting are changes to it, not commands. What the Owner does in the moment, such as setting a topic, kicking, or sending a Line written as text, is an `Act`, and being away is one the Client keeps for every Session after.
 
 **A Line counts as sent once the Client emits it,** unless an `Unsent` input later says it never left. The Client never waits on a write.
 
@@ -207,6 +207,8 @@ Starting from the caps, a cap's absence means less information, not a job to do 
 | **The base protocol gives it, less precisely** | Build it as ordinary parsing, and the fact says how precise it is | `NAMES` shows only the highest prefix, so prefixes are `Partial`. A Message's time is when it arrived. |
 | **The cap's absence leaves a hole in correctness** | Build it, because without it we are wrong | Without `echo-message`, our own Messages are recorded from our outputs. |
 | **Recovering the fact needs polling or guessing** | Leave it out until judged worth its cost, and the fact stays `Unknown` | `WHO` polling for away status. Re-reading `NAMES` after a mode change. Identifying to NickServ by reading its replies. |
+
+A Lookup the Owner asks for, such as a `WHOIS`, is not polling: it is one question, journaled as the Owner's input, whose reply is reported once. What it says of a fact the Client already models refreshes that fact as `replied`, true as of the reply, and nothing is asked again to keep it so.
 
 The Journal makes polling dearer for iirc than for most IRC clients: every reply is recorded and replayed for as long as history is kept, and a guess recorded as fact can't be taken back.
 

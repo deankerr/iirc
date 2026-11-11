@@ -15,6 +15,7 @@ import type {
   Attempted,
   EndReason,
   IgnoredReason,
+  LookResult,
   Named,
   News,
   Ours,
@@ -331,6 +332,41 @@ const writeActivity = (activity: Activity): ActivityParts => {
 
 const words = (parts: readonly string[]): string => parts.join(" ");
 
+// A Lookup's result in short: `found profiles=1`, `partial=TimedOut profiles=0`,
+// `not-found=401`, `failed=402`, `refused=Offline`, or `unsent`. A scenario reads what
+// was found from the News itself.
+const writeLookResult = (result: LookResult): string => {
+  switch (result._tag) {
+    case "Found": {
+      return `found profiles=${result.profiles.length}`;
+    }
+
+    case "Partial": {
+      return `partial=${result.reason} profiles=${result.profiles.length}`;
+    }
+
+    case "NotFound": {
+      return `not-found=${atom(result.reply)}`;
+    }
+
+    case "Failed": {
+      return `failed=${atom(result.reply)}`;
+    }
+
+    case "Refused": {
+      return `refused=${result.reason}`;
+    }
+
+    case "Unsent": {
+      return "unsent";
+    }
+
+    default: {
+      return result satisfies never;
+    }
+  }
+};
+
 const sessionAt = (at: Instant, now: Instant): readonly string[] =>
   at === now ? [] : [`at=${writeInstant(at)}`];
 
@@ -407,6 +443,15 @@ export const describeNews = (news: News, now: Instant): string => {
         ...attributes(news, now),
         ...writeWhere(news.where),
         ...tail,
+      ]);
+    }
+
+    case "LookedUp": {
+      return words([
+        "looked-up",
+        atom(news.intent),
+        `${news.lookup._tag.toLowerCase()}=${atom(news.lookup.nick)}`,
+        writeLookResult(news.result),
       ]);
     }
 

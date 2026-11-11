@@ -10,7 +10,7 @@ import { isupportTokens } from "@iirc/protocol/isupport";
 import { parseSource, pong } from "@iirc/protocol/line";
 import type { Line, RawParam } from "@iirc/protocol/line";
 
-import { answered, modeAnswer, nickAnswer, resendAway, tieRejection } from "./acts.ts";
+import { answered, modeAnswer, nickAnswer, resendAway, tiedAction, tieRejection } from "./acts.ts";
 import {
   changeJoined,
   endOfNames,
@@ -23,6 +23,7 @@ import {
 } from "./channels.ts";
 import type { Arrival, Meant } from "./feature.ts";
 import { Instant } from "./ids.ts";
+import { collectFloor, collectLabelled, floorLookup } from "./lookups.ts";
 import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { applyModes, readModes } from "./modes.ts";
@@ -639,6 +640,24 @@ const rejection = (line: Line): string | undefined => {
 };
 
 /**
+ * Gives a numeric tied to nothing by label to the oldest of what waits for it on the
+ * floor: a Lookup whose reply it can be part of, or an action's Line whose error it
+ * names, by the order they were sent.
+ * @param run - The step.
+ * @param line - The Line, live, outside any batch, and with no label.
+ */
+const floor = (run: Run, line: Line): void => {
+  const looking = floorLookup(run, line);
+  const tied = tiedAction(run, line);
+
+  if (looking !== undefined && (tied === undefined || looking.order < tied.order)) {
+    collectFloor(run, looking, line);
+  } else if (tied !== undefined) {
+    tieRejection(run, line, tied);
+  }
+};
+
+/**
  * Does what one Line says, once it has been through the Features' ingress stages.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
@@ -658,12 +677,23 @@ export const interpret = (
     refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
   }
 
+  // A Line of a labelled Lookup's reply is collected for it, whatever else it is, so a
+  // Message that ends one, such as a lone labelled `NOTICE`, ends it and is still read as
+  // a Message below.
+  const labelled = collectLabelled(run, arrival);
+
   if (hasMeaning(command)) {
     means(run, arrival);
   } else if (arrival.live) {
-    // An error numeric no label tied may name what an action of ours named.
-    if (arrival.answers === undefined && arrival.batch === undefined && !line.tags.has("label")) {
-      tieRejection(run, line);
+    // A numeric no label tied goes to whichever was sent first of the Lookup and the
+    // action's Line it names.
+    if (
+      !labelled &&
+      arrival.answers === undefined &&
+      arrival.batch === undefined &&
+      !line.tags.has("label")
+    ) {
+      floor(run, line);
     }
 
     // History is reported, and moves no machine: it says what was, not what is.

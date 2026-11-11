@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 import { Instant, TimerId } from "./ids.ts";
+import type { IntentId } from "./ids.ts";
 import type { Output, TimerTable } from "./output.ts";
 import type { State } from "./state.ts";
 
@@ -22,13 +23,17 @@ export const lagAfter = 60_000;
 /** Silence before the Connection is given up. */
 export const silentAfter = 90_000;
 
+/** How long a Lookup waits for the end of its reply, from when the Owner asked. */
+export const lookupTime = 30_000;
+
 /** What a timer is for, which decides what its `Fired` does. */
 export type Purpose =
   | { readonly _tag: "Redial" }
   | { readonly _tag: "Register" }
   | { readonly _tag: "Hold" }
   | { readonly _tag: "Keepalive" }
-  | { readonly _tag: "Rejoin"; readonly channel: string };
+  | { readonly _tag: "Rejoin"; readonly channel: string }
+  | { readonly _tag: "Lookup"; readonly intent: IntentId };
 
 /** A timer that is set: when it is due, and what it is for. */
 export interface Timer {
@@ -71,6 +76,13 @@ export const timersOf = (state: State): ReadonlyMap<TimerId, Timer> => {
         due: presence.keepalive.check,
         purpose: { _tag: "Keepalive" },
       });
+
+      for (const looking of phase.lookups) {
+        table.set(TimerId.make(`lookup ${looking.intent}`), {
+          due: looking.deadline,
+          purpose: { _tag: "Lookup", intent: looking.intent },
+        });
+      }
 
       for (const [key, channel] of state.channels) {
         const { phase: standing } = channel;

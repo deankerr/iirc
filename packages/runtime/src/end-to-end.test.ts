@@ -1,7 +1,7 @@
-import { client } from "@iirc/client";
-import type { ClientState, IntentId, News, NetworkConfiguration } from "@iirc/client";
+import { client, IntentId } from "@iirc/client";
+import type { ClientState, News, NetworkConfiguration } from "@iirc/client";
 import { configured, joined, parse, registered } from "@iirc/client/testing";
-import { Effect, Fiber, Result, Stream } from "effect";
+import { Effect, Fiber, Option, Result, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -60,6 +60,7 @@ const describeNews = (happened: readonly Happened[]) =>
 
         case "Confirmed":
         case "Ignored":
+        case "LookedUp":
         case "ReadMarker":
         case "Refolded":
         case "Refused": {
@@ -272,6 +273,126 @@ describe("an action", () => {
       heard: "TOPIC #iirc :a topic\r\n",
       refused: [{ _tag: "Rejected", reply: "482" }],
       unsendable: { _tag: "Refused", reason: { _tag: "Unsendable" } },
+    });
+  });
+});
+
+describe("a Lookup", () => {
+  const base = configured({ channels: [{ name: "#iirc" }] });
+
+  it("waits for its result, which `looked` then finds", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, client);
+
+        const unknownNetwork = yield* runtime
+          .look(libera, {
+            lookup: { _tag: "Whois", nick: "peer" },
+          })
+          .pipe(
+            Effect.flip,
+            Effect.map((error) => error._tag)
+          );
+
+        yield* runtime.configure(libera, base);
+
+        const refused = yield* runtime.look(libera, { lookup: { _tag: "Whois", nick: "peer" } });
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        yield* converse(call, opening(base, []));
+        yield* converse(call, joined(base, "#iirc", ["@peer"]));
+
+        const looking = yield* Effect.forkChild(
+          runtime.look(libera, {
+            intent: IntentId.make("who"),
+            lookup: { _tag: "Whois", nick: "peer" },
+          })
+        );
+
+        const heard = yield* heardText(call);
+
+        yield* call.say(encoder.encode(":irc.test 311 iirc peer ~u peer.test * :Peer"));
+        yield* call.say(encoder.encode(":irc.test 318 iirc peer :End of WHOIS"));
+
+        const looked = yield* Fiber.join(looking);
+
+        return {
+          heard,
+          looked,
+          refused,
+          stored: yield* runtime.looked(libera, IntentId.make("who")),
+          unknown: yield* runtime.looked(libera, IntentId.make("nobody")),
+          unknownNetwork,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      heard: "WHOIS peer\r\n",
+      looked: {
+        _tag: "LookedUp",
+        intent: "who",
+        result: { _tag: "Found", profiles: [{ host: "peer.test", nick: "peer", user: "~u" }] },
+      },
+      refused: { _tag: "LookedUp", result: { _tag: "Refused", reason: "Offline" } },
+      stored: { _tag: "Some", value: { _tag: "LookedUp", sequence: result.looked.sequence } },
+      unknown: { _tag: "None" },
+      unknownNetwork: "UnknownNetwork",
+    });
+    expect(result.stored).toStrictEqual(Option.some(result.looked));
+  });
+
+  it("answers Pending past its bound, and `looked` finds the result after a restart", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const first = yield* startRuntime(world, client, { lookTimeout: "5 seconds" });
+
+        yield* first.runtime.configure(libera, base);
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        yield* converse(call, opening(base, []));
+        yield* converse(call, joined(base, "#iirc", ["@peer"]));
+
+        const looking = yield* Effect.forkChild(
+          first.runtime.look(libera, { lookup: { _tag: "Whowas", nick: "gone" } })
+        );
+
+        const heard = yield* heardText(call);
+
+        yield* call.say(encoder.encode(":irc.test 314 iirc gone ~g gone.test * :Gone"));
+        yield* settle;
+        yield* TestClock.adjust("5 seconds");
+
+        const pending = yield* Fiber.join(looking);
+        const meanwhile = yield* first.runtime.looked(libera, pending.intent);
+
+        // Shutdown ends the Connection, so the Lookup reports what it had.
+        yield* first.close;
+
+        const second = yield* startRuntime(world, client);
+
+        return {
+          after: yield* second.runtime.looked(libera, pending.intent),
+          heard,
+          meanwhile,
+          pending,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      after: {
+        value: {
+          _tag: "LookedUp",
+          result: { _tag: "Partial", profiles: [{ nick: "gone", user: "~g" }], reason: "Ended" },
+          sequence: result.pending.sequence,
+        },
+      },
+      heard: "WHOWAS gone\r\n",
+      meanwhile: { value: { _tag: "Pending", sequence: result.pending.sequence } },
+      pending: { _tag: "Pending" },
     });
   });
 });

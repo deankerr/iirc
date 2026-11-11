@@ -12,7 +12,7 @@ import { Result, Schema } from "effect";
 import type { Login } from "../configuration.ts";
 import { FeatureName } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
-import type { Action, ModeRequest, SayKind } from "../input.ts";
+import type { Action, Lookup, ModeRequest, SayKind } from "../input.ts";
 import type { News } from "../news.ts";
 
 /** The instant a transcript's clock starts at: 2026-01-01T00:00:00.000Z. */
@@ -56,6 +56,8 @@ export type Owner =
    * Its intent id is given in order with a `Say`'s.
    */
   | { readonly _tag: "Act"; readonly action: Action }
+  /** `!! whois peer` or `!! whowas peer`: a Lookup. Its intent id is given in order with a `Say`'s. */
+  | { readonly _tag: "Look"; readonly lookup: Lookup }
   /** `!! retry`. */
   | { readonly _tag: "Retry" }
   /** `!! read #iirc t+5s`, or `!! read t+5s` for the Network's own Timeline. */
@@ -653,6 +655,22 @@ const writeAction = (action: Action): string => {
   }
 };
 
+// `retry`, `whois <nick>`, and `whowas <nick>`, which take no more than a word.
+const readSimple = (text: string): Owner | undefined => {
+  if (text === "retry") {
+    return { _tag: "Retry" };
+  }
+
+  const looked = /^(?<verb>whois|whowas) (?<nick>\S+)$/u.exec(text)?.groups;
+
+  return looked?.verb === undefined || looked.nick === undefined
+    ? undefined
+    : {
+        _tag: "Look",
+        lookup: { _tag: looked.verb === "whois" ? "Whois" : "Whowas", nick: looked.nick },
+      };
+};
+
 const readOwner = (text: string): Result.Result<Owner, string> => {
   const space = text.indexOf(" ");
   const actionVerb = space === -1 ? text : text.slice(0, space);
@@ -669,8 +687,10 @@ const readOwner = (text: string): Result.Result<Owner, string> => {
       : Result.succeed({ _tag: "Act", action });
   }
 
-  if (text === "retry") {
-    return Result.succeed({ _tag: "Retry" });
+  const simple = readSimple(text);
+
+  if (simple !== undefined) {
+    return Result.succeed(simple);
   }
 
   if (text.startsWith("read ")) {
@@ -727,6 +747,10 @@ const writeOwner = (owner: Owner): string => {
       return "retry";
     }
 
+    case "Look": {
+      return `${owner.lookup._tag.toLowerCase()} ${owner.lookup.nick}`;
+    }
+
     case "Act": {
       return writeAction(owner.action);
     }
@@ -752,6 +776,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["confirmed", "Confirmed"],
   ["connection-failed", "ConnectionFailed"],
   ["ignored", "Ignored"],
+  ["looked-up", "LookedUp"],
   ["message", "Message"],
   ["read-marker", "ReadMarker"],
   ["refolded", "Refolded"],

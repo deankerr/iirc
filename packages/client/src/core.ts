@@ -30,6 +30,7 @@ import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
+import { endLookups, expireLookup, look, unsentLookups } from "./lookups.ts";
 import { read } from "./markers.ts";
 import type { EndReason } from "./news.ts";
 import {
@@ -176,6 +177,7 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
   const { phase } = link;
 
   run.state = rescheduled(run.state, link, run.at);
+  endLookups(run, link);
 
   const session =
     phase._tag === "Open" && phase.presence._tag === "Session" ? phase.presence : undefined;
@@ -320,6 +322,7 @@ const arrivalOf = (run: Run, line: Line): Arrival => ({
   line,
   live: true,
   time: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+  within: undefined,
 });
 
 type Hook<V> = (
@@ -552,6 +555,11 @@ const fire = (run: Run, purpose: Purpose): void => {
       break;
     }
 
+    case "Lookup": {
+      expireLookup(run, purpose.intent);
+      break;
+    }
+
     default: {
       purpose satisfies never;
     }
@@ -596,13 +604,27 @@ const unfilledHeld = (run: Run, line: SecretLine): void => {
   settle(run);
 };
 
-// Lines that never left. A `Say` with one among them is refused, once, unless the Ircd
-// already confirmed it. Any other Line changes nothing: its Connection is ending.
+// Lines that never left. A `Say` or an `Act` with one among them is refused, once, unless
+// the Ircd already confirmed it, and a Lookup reports `Unsent`. Any other Line changes
+// nothing: its Connection is ending.
 const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
   const link = linkOf(run);
   const open = link?.id === input.connection ? openOf(run.state) : undefined;
   const confirmed = new Set(open?.confirmed);
-  const refused = new Set<IntentId>();
+
+  // A Lookup whose Line never left reports `Unsent` as its result, and no refusal.
+  const refused = new Set<IntentId>(
+    open === undefined
+      ? []
+      : unsentLookups(
+          run,
+          new Set(
+            input.outputs.flatMap((output) =>
+              output._tag === "Send" && output.intent !== undefined ? [output.intent] : []
+            )
+          )
+        )
+  );
 
   for (const output of input.outputs) {
     const intent = output._tag === "Send" ? output.intent : undefined;
@@ -685,6 +707,14 @@ const dispatch = (run: Run, input: Input): void => {
     return;
   }
 
+  // Every Lookup gets its one result, so one before any Configuration is refused, as with
+  // no Session, where anything else is ignored.
+  if (input._tag === "Look" && run.state.configuration === undefined) {
+    look(run, input);
+
+    return;
+  }
+
   if (input._tag !== "Configured" && run.state.configuration === undefined) {
     ignore(run, { _tag: "NotNow", input: input._tag });
 
@@ -719,6 +749,11 @@ const dispatch = (run: Run, input: Input): void => {
 
     case "Act": {
       act(run, input);
+      break;
+    }
+
+    case "Look": {
+      look(run, input);
       break;
     }
 

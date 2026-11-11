@@ -7,7 +7,7 @@
 import type { UnparseableReason } from "@iirc/protocol/line";
 
 import type { ConnectionId, Instant, IntentId, MessageId, TimerId } from "./ids.ts";
-import type { CloseReason, Input, SayKind } from "./input.ts";
+import type { CloseReason, Input, Lookup, SayKind } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
 
 /** Something that changed on the Network, rather than something said. */
@@ -156,6 +156,84 @@ export interface Ours {
   readonly echo: boolean;
 }
 
+/** A Channel a User is in, as a Lookup's reply named it, with the membership modes its prefixes stand for, by `PREFIX`. */
+export interface ProfileChannel {
+  readonly name: string;
+  /** The modes, such as `o` and `v`, in the order the prefixes came. Without `multi-prefix`, only the highest. */
+  readonly prefixes: readonly string[];
+}
+
+/** A reply numeric the Client does not model, kept as it came: its parameters after the first, which names Self. */
+export interface OtherReply {
+  readonly numeric: string;
+  readonly params: readonly string[];
+}
+
+/**
+ * One User as a Lookup's reply describes them: a `WHOIS`'s, or one entry of a `WHOWAS`'s.
+ * Every field is what the Network said, read by structure, and `undefined` or empty when
+ * it said nothing of it. Nothing is read from the Network's free text.
+ */
+export interface Profile {
+  /** The nick, as the reply named it. */
+  readonly nick: string;
+  /** From `311` or `314`. */
+  readonly user: string | undefined;
+  readonly host: string | undefined;
+  readonly realname: string | undefined;
+  /** From `312`: the server the User is on, or was, and the Network's text about it. */
+  readonly server: { readonly name: string; readonly info: string } | undefined;
+  /** From `313`. */
+  readonly operator: boolean;
+  /** Seconds idle, from `317`. */
+  readonly idle: number | undefined;
+  /** When the User signed on, from `317`, when the Ircd says. */
+  readonly signon: Instant | undefined;
+  /** From `319`, over as many Lines as it took. */
+  readonly channels: readonly ProfileChannel[];
+  /** The away message, from `301`, or `undefined` when none came. */
+  readonly away: string | undefined;
+  /** The account, from `330`'s third parameter. */
+  readonly account: string | undefined;
+  /** From `671`. */
+  readonly secure: boolean;
+  /** Every other numeric of the reply that named this User, in order, so nothing is lost. */
+  readonly other: readonly OtherReply[];
+}
+
+/**
+ * Why a Lookup ended with only part of its reply: no end came within its time limit
+ * (`TimedOut`), its Connection ended first (`Ended`), or the reply ran past the Lines
+ * one Lookup collects (`Bounded`).
+ */
+export type PartialReason = "TimedOut" | "Ended" | "Bounded";
+
+/**
+ * What a Lookup found.
+ *
+ * - `Found`: the whole reply, up to its end, `318` or `369`, or its labelled batch's end.
+ * - `Partial`: what had come when it stopped, and why.
+ * - `NotFound`: the Network has no such User, by `401` or `406`, or ended its reply with
+ *   no User in it, by the end numeric.
+ * - `Failed`: another error numeric, such as `402` or `431`, a `FAIL` by its code, or a
+ *   labelled answer that ended saying nothing the Client reads, such as a lone `NOTICE`,
+ *   by the command of the Line that ended it.
+ * - `Refused`: not sent: no Session (`Offline`), no Line can carry it (`Unsendable`), or
+ *   too many Lookups await their replies on the Connection (`Busy`).
+ * - `Unsent`: its Line never left, because its Connection ended first.
+ */
+export type LookResult =
+  | { readonly _tag: "Found"; readonly profiles: readonly Profile[] }
+  | {
+      readonly _tag: "Partial";
+      readonly profiles: readonly Profile[];
+      readonly reason: PartialReason;
+    }
+  | { readonly _tag: "NotFound"; readonly reply: string }
+  | { readonly _tag: "Failed"; readonly reply: string }
+  | { readonly _tag: "Refused"; readonly reason: "Offline" | "Unsendable" | "Busy" }
+  | { readonly _tag: "Unsent" };
+
 /** Why an input changed nothing. Each is recorded, and none ends a Connection. */
 export type IgnoredReason =
   | { readonly _tag: "Unparseable"; readonly reason: UnparseableReason }
@@ -259,6 +337,16 @@ export type News =
    * a Message's is, and a `Direct` is `existing`, since marking read starts no Timeline.
    */
   | { readonly _tag: "ReadMarker"; readonly where: Marked; readonly read: Instant }
+  /**
+   * A Lookup the Owner asked for, under its intent, is over, and this is all it found.
+   * Exactly one comes for each `Look`.
+   */
+  | {
+      readonly _tag: "LookedUp";
+      readonly intent: IntentId;
+      readonly lookup: Lookup;
+      readonly result: LookResult;
+    }
   | { readonly _tag: "Ignored"; readonly reason: IgnoredReason };
 
 /**

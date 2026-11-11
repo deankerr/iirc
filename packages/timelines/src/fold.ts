@@ -610,7 +610,9 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       break;
     }
 
-    case "Ignored": {
+    // A Lookup's result is the Owner's answer, read from the API, and places nothing.
+    case "Ignored":
+    case "LookedUp": {
       break;
     }
 

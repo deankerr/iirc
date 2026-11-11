@@ -146,11 +146,13 @@ export const begin = (run: Run): void => {
     _tag: "Open",
     acting: [],
     asked: undefined,
+    awaited: 0,
     caps: { _tag: "Listing", offered: new Map() },
     confirmed: [],
     error: false,
     isupport: new Map(),
     loggedIn: false,
+    lookups: [],
     opened: run.at,
     presence: {
       _tag: "Registering",

@@ -968,6 +968,24 @@ export const who = (mask: string, fields?: string): OutboundLine | Rejected =>
   toOne(mask, () => outbound("WHO", fields === undefined ? [mask] : [mask, fields]));
 
 /**
+ * `WHOIS` of one nick, to look up what the Network says of that User. It is sent with one
+ * parameter, so no server is named to ask. A name with a `.` is a nick as `nick` takes
+ * one, and goes as it is, for the Ircd to answer.
+ * @param name - The nick. It may not hold `,`, `*`, `?`, `!`, or `@`, so it is no mask or list.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const whois = (name: string): OutboundLine | Rejected =>
+  isOne(name) && !notInNicks.test(name) ? outbound("WHOIS", [name]) : rejected("InvalidTarget");
+
+/**
+ * `WHOWAS` of one nick, to look up who held it before.
+ * @param name - The nick, as {@link whois} takes one.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const whowas = (name: string): OutboundLine | Rejected =>
+  isOne(name) && !notInNicks.test(name) ? outbound("WHOWAS", [name]) : rejected("InvalidTarget");
+
+/**
  * `AWAY`, with a reason to be away, or none to come back.
  * @param reason - Why, or `undefined` to come back.
  * @returns The Line, or why it cannot be sent.

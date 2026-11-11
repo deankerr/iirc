@@ -191,8 +191,9 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
 /**
  * Sends a Line on the Connection, through each Feature's `egress`. A Line that cannot be
  * built is not sent, and is recorded as `Malformed` with its command. One a Feature
- * refuses is not sent either: a `Said` or `Acted` one is `Refused` as `Unsendable`, and
- * any other is `Ignored` as `Unsendable`, with its command.
+ * refuses is not sent either: a `Said` or `Acted` one is `Refused` as `Unsendable`, a
+ * `Looked` one is the caller's to report, and any other is `Ignored` as `Unsendable`,
+ * with its command.
  * @param run - The step.
  * @param line - The Line, or why it cannot be built.
  * @param command - Its command, to report if it cannot be built.
@@ -247,7 +248,7 @@ export const send = (
   if (isRefusal(ran.value)) {
     if (departure.for._tag === "Protocol") {
       ignore(run, { _tag: "Unsendable", command: line.command });
-    } else {
+    } else if (departure.for._tag !== "Looked") {
       refuseIntent(run, departure.for.intent, { _tag: "Unsendable" });
     }
 

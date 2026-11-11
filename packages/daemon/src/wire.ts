@@ -32,6 +32,9 @@ import type {
   Happened as WireHappened,
   IgnoredReason as WireIgnoredReason,
   Knowledge as WireKnowledge,
+  Looked as WireLooked,
+  LookResult as WireLookResult,
+  Profile as WireProfile,
   Marked as WireMarked,
   NetworkInspection as WireNetworkInspection,
   NetworkStatus as WireNetworkStatus,
@@ -45,9 +48,11 @@ import type {
   EndReason,
   IgnoredReason,
   Inspection,
+  LookResult,
   Marked,
   ModeChange,
   News,
+  Profile,
   RefusedAction,
   RefusedReason,
   TimerTable,
@@ -65,7 +70,7 @@ import type {
   Topic,
   UserKnowledge,
 } from "@iirc/client/known";
-import type { Happened, NetworkInspection, NetworkStatus } from "@iirc/runtime";
+import type { Happened, LookOutcome, NetworkInspection, NetworkStatus } from "@iirc/runtime";
 import type { CollapsedGap, Gap, Item, Summary, Tombstone, Unread } from "@iirc/timeline-store";
 import type { Content, Delivery } from "@iirc/timelines";
 
@@ -396,6 +401,109 @@ const attempted = (source: Attempted): WireAttempted => {
   }
 };
 
+const profile = (source: Profile): Fields<Profile, WireProfile> => ({
+  account: source.account ?? null,
+  away: source.away ?? null,
+  channels: source.channels.map(({ name, prefixes }) => ({ name, prefixes })),
+  host: source.host ?? null,
+  idle: source.idle ?? null,
+  nick: source.nick,
+  operator: source.operator,
+  other: source.other.map(({ numeric, params }) => ({ numeric, params })),
+  realname: source.realname ?? null,
+  secure: source.secure,
+  server:
+    source.server === undefined ? null : { info: source.server.info, name: source.server.name },
+  signon: source.signon ?? null,
+  user: source.user ?? null,
+});
+
+const lookResult = (source: LookResult): WireLookResult => {
+  switch (source._tag) {
+    case "Found": {
+      const wire: Case<LookResult, WireLookResult, "Found"> = {
+        _tag: "Found",
+        profiles: source.profiles.map(profile),
+      };
+
+      return wire;
+    }
+
+    case "Partial": {
+      const wire: Case<LookResult, WireLookResult, "Partial"> = {
+        _tag: "Partial",
+        profiles: source.profiles.map(profile),
+        reason: source.reason,
+      };
+
+      return wire;
+    }
+
+    case "NotFound":
+    case "Failed": {
+      const wire: Case<LookResult, WireLookResult, typeof source._tag> = {
+        _tag: source._tag,
+        reply: source.reply,
+      };
+
+      return wire;
+    }
+
+    case "Refused": {
+      const wire: Case<LookResult, WireLookResult, "Refused"> = {
+        _tag: "Refused",
+        reason: source.reason,
+      };
+
+      return wire;
+    }
+
+    case "Unsent": {
+      const wire: Case<LookResult, WireLookResult, "Unsent"> = { _tag: "Unsent" };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+/**
+ * What a `look` answers, or a Lookup found by its intent.
+ * @param source - What the Runtime gave.
+ * @returns Its wire form.
+ */
+export const looked = (source: LookOutcome): WireLooked => {
+  switch (source._tag) {
+    case "LookedUp": {
+      const wire: Case<LookOutcome, WireLooked, "LookedUp"> = {
+        _tag: "LookedUp",
+        intent: source.intent,
+        result: lookResult(source.result),
+        sequence: source.sequence,
+      };
+
+      return wire;
+    }
+
+    case "Pending": {
+      const wire: Case<LookOutcome, WireLooked, "Pending"> = {
+        _tag: "Pending",
+        intent: source.intent,
+        sequence: source.sequence,
+      };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
 type WireRefusedAction = NonNullable<Extract<WireNews, { readonly _tag: "Refused" }>["action"]>;
 
 const refusedAction = (source: RefusedAction): WireRefusedAction => ({
@@ -663,6 +771,20 @@ const news = (source: News): WireNews => {
         action: source.action === undefined ? null : refusedAction(source.action),
         intent: source.intent,
         reason: refusedReason(source.reason),
+      };
+
+      return wire;
+    }
+
+    case "LookedUp": {
+      const wire: Case<News, WireNews, "LookedUp"> = {
+        _tag: "LookedUp",
+        intent: source.intent,
+        lookup:
+          source.lookup._tag === "Whois"
+            ? { _tag: "Whois", nick: source.lookup.nick }
+            : { _tag: "Whowas", nick: source.lookup.nick },
+        result: lookResult(source.result),
       };
 
       return wire;
