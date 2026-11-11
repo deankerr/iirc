@@ -4,7 +4,7 @@
  * never in `bun run test`.
  */
 import { CallerIntent, CredentialPathName, NetworkId } from "@iirc/api";
-import type { Happened, TimelineItem } from "@iirc/api";
+import type { ActionRequest, Happened, TimelineItem } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { Effect, Fiber, Redacted } from "effect";
 import type { Scope } from "effect";
@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startErgo, startNgircd } from "../testing/ircd.ts";
 import type { Ircd } from "../testing/ircd.ts";
 import { connectPeer, registerAccount } from "../testing/peer.ts";
+import type { Parsed } from "../testing/peer.ts";
 import { eventually, followChanges, followNews, startDaemon } from "../testing/running.ts";
 import type { Api } from "../testing/running.ts";
 import { makeKey, temporaryDirectory } from "../testing/world.ts";
@@ -227,6 +228,118 @@ describe("ngircd, on the floor", () => {
         version: true,
       },
       wasSaid: true,
+    });
+  }, 60_000);
+
+  it("acts as a Channel operator: sets a topic, ops the other User, kicks them, and goes away", async () => {
+    const acting = "#iirc-acts";
+    const elsewhere = "#iirc-elsewhere";
+
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        // The Daemon joins first, so the Ircd makes it the Channel's operator.
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: acting }],
+            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+            nicks: ["iirc"],
+          }),
+          query: {},
+        });
+
+        yield* eventually(api.networks.known({ params: { network } }), (known) =>
+          known.channels.some((one) => one.name === acting && one.standing === "Joined")
+        );
+
+        const peer = yield* Effect.promise(
+          async () =>
+            await connectPeer({ host: ngircd.host, nick: "target", port: ngircd.plainPort })
+        );
+
+        peer.send(`JOIN ${elsewhere}`);
+        peer.send(`JOIN ${acting}`);
+
+        yield* eventually(api.networks.known({ params: { network } }), (known) =>
+          known.channels.some(
+            (one) => one.name === acting && one.members.some((member) => member.nick === "target")
+          )
+        );
+
+        const act = (action: ActionRequest, intent?: string) =>
+          api.networks.act({
+            params: { network },
+            payload:
+              intent === undefined ? { action } : { action, intent: CallerIntent.make(intent) },
+          });
+
+        const hear = (what: string, matches: (line: Parsed) => boolean) =>
+          Effect.promise(async () => await peer.waitFor(matches, what));
+
+        const topic = yield* act({ _tag: "Topic", channel: acting, text: "set by iirc" });
+        const topicLine = yield* hear("the topic", (line) => line.command === "TOPIC");
+
+        yield* act({
+          _tag: "Mode",
+          changes: [{ mode: "o", param: "target", set: true }],
+          target: acting,
+        });
+        const modeLine = yield* hear("the op", (line) => line.command === "MODE");
+
+        // A topic for a Channel the Daemon is not in is refused by the Ircd, tied by its name.
+        yield* act({ _tag: "Topic", channel: elsewhere, text: "not mine" }, "not-mine");
+
+        const refused = yield* followNews(api, 0, (all) =>
+          all.some(({ news }) =>
+            news.some((one) => one._tag === "Refused" && one.intent === "not-mine")
+          )
+        );
+
+        yield* act({ _tag: "Kick", channel: acting, nicks: ["target"], reason: "bye now" });
+        const kickLine = yield* hear("the kick", (line) => line.command === "KICK");
+
+        yield* act({ _tag: "Away", message: "gone fishing" });
+
+        const known = yield* eventually(
+          api.networks.known({ params: { network } }),
+          (now) => now.self?.away._tag === "Known" && now.self.away.value !== null
+        );
+
+        const channel = known.channels.find((one) => one.name === acting);
+
+        peer.close();
+        yield* daemon.stop;
+
+        return {
+          away: known.self?.away._tag === "Known" ? known.self.away.value : undefined,
+          kick: [kickLine.source?.split("!")[0], ...kickLine.params],
+          members: channel?.members.map((member) => member.nick),
+          mode: [modeLine.source?.split("!")[0], ...modeLine.params],
+          refused: refused.flatMap(({ news }) =>
+            news.flatMap((one) =>
+              one._tag === "Refused" && one.intent === "not-mine" ? [one.reason] : []
+            )
+          ),
+          topic: topic._tag,
+          topicLine: [topicLine.source?.split("!")[0], ...topicLine.params],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      away: { message: "gone fishing" },
+      kick: ["iirc", acting, "target", "bye now"],
+      members: ["iirc"],
+      mode: ["iirc", acting, "+o", "target"],
+      // ngircd answers a topic for a Channel Self is not in with 442 ERR_NOTONCHANNEL.
+      refused: [{ _tag: "Rejected", reply: "442" }],
+      topic: "Acted",
+      topicLine: ["iirc", acting, "set by iirc"],
     });
   }, 60_000);
 

@@ -37,6 +37,45 @@ export const SayKind = Schema.Literals(["Privmsg", "Notice", "Action"]);
 /** The decoded form of {@link SayKind}. */
 export type SayKind = typeof SayKind.Type;
 
+/** One mode to set or unset, with its parameter, or `null` for none. */
+export const ModeRequest = Schema.Struct({
+  mode: Schema.String,
+  param: Schema.NullOr(Schema.String),
+  set: Schema.Boolean,
+});
+
+/** The decoded form of {@link ModeRequest}. */
+export type ModeRequest = typeof ModeRequest.Type;
+
+/**
+ * What the Owner can do on a Network besides saying something. Each is built only
+ * through `@iirc/protocol`'s builders, and checked against what the Client knows of the
+ * Network before it is sent.
+ */
+export const Action = Schema.TaggedUnion({
+  /** Mark Self away with a message, or back with `null`. It outlives Sessions. */
+  Away: { message: Schema.NullOr(Schema.String) },
+  /** Invite a nick to a Channel. */
+  Invite: { channel: Schema.String, nick: Schema.String },
+  /** Kick one or more nicks from a Channel, with a reason or none. */
+  Kick: {
+    channel: Schema.String,
+    nicks: Schema.NonEmptyArray(Schema.String),
+    reason: Schema.NullOr(Schema.String),
+  },
+  /** Change a Channel's modes, or Self's. */
+  Mode: { changes: Schema.NonEmptyArray(ModeRequest), target: Schema.String },
+  /** Change Self's nick for this Session. */
+  Nick: { nick: Schema.String },
+  /** A Line written as text, sent as it reads, as `/quote` sends it. */
+  Raw: { line: Schema.String },
+  /** Set a Channel's topic, or clear it with `""`. */
+  Topic: { channel: Schema.String, text: Schema.String },
+});
+
+/** The decoded form of {@link Action}. */
+export type Action = typeof Action.Type;
+
 /**
  * A Line the Client output that never left: a `Send` or a `SendSecret`, as it was output.
  * It is the same shape as those outputs, so the Runtime gives back exactly what it was
@@ -59,6 +98,8 @@ export type UnsentLine = typeof UnsentLine.Type;
  * and carries the instant it happened as the Runtime saw it.
  */
 export const Input = Schema.TaggedUnion({
+  /** The Owner wants to act on the Network, with an intent id from the Runtime. */
+  Act: { action: Action, at: Instant, intent: IntentId },
   /** A Connection is over. */
   Closed: { at: Instant, connection: ConnectionId, reason: CloseReason },
   /** The Owner's Configuration for this Network, whole. */

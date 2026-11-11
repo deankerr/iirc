@@ -139,6 +139,55 @@ export const SayRequest = Schema.Struct({
 /** The decoded form of {@link SayRequest}. */
 export type SayRequest = typeof SayRequest.Type;
 
+/** A Channel's or a nick's name, or a mode, as the Owner gives one: one or more characters, no line break or NUL. */
+const OwnerName = SayText.check(Schema.isNonEmpty());
+
+/** One mode to set or unset, with its parameter, or `null` for none. */
+export const ModeRequest = Schema.Struct({
+  mode: OwnerName,
+  param: Schema.NullOr(OwnerName),
+  set: Schema.Boolean,
+});
+
+/**
+ * What the Owner does on a Network besides saying something. The Client checks each
+ * against what it knows of the Network, by ISUPPORT, before it sends anything, so the
+ * wire checks only that no line break or NUL is in it.
+ */
+export const ActionRequest = Schema.TaggedUnion({
+  /** Away with a message, or back with `null` or `""`. It outlives Sessions. */
+  Away: { message: Schema.NullOr(SayText) },
+  /** Invite a nick to a Channel. */
+  Invite: { channel: OwnerName, nick: OwnerName },
+  /** Kick one or more nicks from a Channel, split across Lines as `TARGMAX` allows. */
+  Kick: {
+    channel: OwnerName,
+    nicks: Schema.NonEmptyArray(OwnerName),
+    reason: Schema.NullOr(SayText),
+  },
+  /** Change a Channel's modes, or Self's, split across Lines as `MODES` allows. */
+  Mode: { changes: Schema.NonEmptyArray(ModeRequest), target: OwnerName },
+  /** Change Self's nick for this Session. */
+  Nick: { nick: OwnerName },
+  /** A Line written as text, sent as it reads, as `/quote` sends it. */
+  Raw: { line: OwnerName },
+  /** Set a Channel's topic, or clear it with `""`. */
+  Topic: { channel: OwnerName, text: SayText },
+});
+
+/** The decoded form of {@link ActionRequest}. */
+export type ActionRequest = typeof ActionRequest.Type;
+
+/** What the Owner does on a Network, and the intent to do it under. */
+export const ActRequest = Schema.Struct({
+  action: ActionRequest,
+  /** The intent to act under. Left out, the Daemon names one, and gives it back. */
+  intent: Schema.optionalKey(CallerIntent),
+});
+
+/** The decoded form of {@link ActRequest}. */
+export type ActRequest = typeof ActRequest.Type;
+
 /**
  * How far the Owner has read a Timeline: up to the instant `read`, in milliseconds since
  * the Unix epoch, of a Target, a Channel or a Direct Message partner named as a `say`
@@ -189,8 +238,8 @@ export const ConfigurationInForce = Schema.Struct({
 });
 
 /**
- * Why the Client refused a `say` in the step that took it: `Offline`, with no Session, or
- * `Unsendable`, when no Line can carry it.
+ * Why the Client refused a `say` or an `act` in the step that took it: `Offline`, with no
+ * Session, or `Unsendable`, when no Line can carry it.
  */
 export const StepRefusal = Schema.TaggedUnion({ Offline: {}, Unsendable: {} });
 
@@ -211,9 +260,23 @@ export const Said = Schema.Union([
 export type Said = typeof Said.Type;
 
 /**
- * Whether a `say` under an intent was journaled. `Journaled` means it is stepped on every
- * restart, so it must not be said again, though its Line may not have reached the Ircd.
- * `NotJournaled` means it never was, and saying it again under the same intent is safe.
+ * What an `act` answers, once it is journaled and stepped under its intent: `Acted`, its
+ * Lines sent, or `Refused`, by the Client in that same step. What the Ircd says of it
+ * later, an error tied to it as `Rejected`, or `Unsent`, comes as a `Refused` in News.
+ */
+export const Acted = Schema.Union([
+  Schema.TaggedStruct("Acted", { intent: IntentId, sequence: Sequence }),
+  Schema.TaggedStruct("Refused", { intent: IntentId, reason: StepRefusal, sequence: Sequence }),
+]);
+
+/** The decoded form of {@link Acted}. */
+export type Acted = typeof Acted.Type;
+
+/**
+ * Whether a `say` or an `act` under an intent was journaled. `Journaled` means it is
+ * stepped on every restart, so it must not be given again, though its Lines may not have
+ * reached the Ircd. `NotJournaled` means it never was, and giving it again under the same
+ * intent is safe.
  */
 export const SaidAnswer = Schema.Union([
   Schema.TaggedStruct("Journaled", { sequence: Sequence }),
@@ -319,6 +382,7 @@ export type RefusedReason = typeof RefusedReason.Type;
 const unparseableReasons = everyOf<UnparseableReason>()(["Empty", "NoCommand"]);
 
 const inputTags = everyOf<Input["_tag"]>()([
+  "Act",
   "Closed",
   "Configured",
   "Fired",
@@ -389,6 +453,34 @@ export const Marked = Schema.TaggedUnion({
 /** The decoded form of {@link Marked}. */
 export type Marked = typeof Marked.Type;
 
+/**
+ * What an action of the Owner's tried, in short: its kind and the names the Owner gave
+ * it, never a topic, a reason, an away message, a mode's parameter, or the rest of a raw
+ * Line. A `Mode` names each change by its sign and letter, as `+o-v`, and a `Raw` its
+ * command, or `null` when it did not parse.
+ */
+export const Attempted = Schema.TaggedUnion({
+  Away: { away: Schema.Boolean },
+  Invite: { channel: Untrusted, nick: Untrusted },
+  Kick: { channel: Untrusted, nicks: Schema.Array(Untrusted) },
+  Mode: { modes: Untrusted, target: Untrusted },
+  Nick: { nick: Untrusted },
+  Raw: { command: Schema.NullOr(Untrusted) },
+  Topic: { channel: Untrusted },
+});
+
+/** The decoded form of {@link Attempted}. */
+export type Attempted = typeof Attempted.Type;
+
+/**
+ * An action of the Owner's that was refused: what it tried, and the one Timeline its
+ * refusal belongs to, the Channel it was about when the Client held it, or the Network's.
+ */
+const RefusedAction = Schema.Struct({
+  attempted: Attempted,
+  where: Schema.TaggedUnion({ Channel: Named.fields, Network: {} }),
+});
+
 /** A client-only tag on a Message, such as `+draft/reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
@@ -429,7 +521,11 @@ export const News = Schema.TaggedUnion({
    */
   ReadMarker: { read: Instant, where: Marked },
   Refolded: { casemapping: Casemapping },
-  Refused: { intent: IntentId, reason: RefusedReason },
+  /**
+   * An Owner intent not carried out. One for an `act` carries `action`, what it tried and
+   * where it belongs, and one for a `say`, or an action too old to remember, `null`.
+   */
+  Refused: { action: Schema.NullOr(RefusedAction), intent: IntentId, reason: RefusedReason },
   SessionBegan: { at: Instant, nick: Untrusted },
   SessionEnded: { at: Instant, reason: EndReason },
 });
@@ -640,8 +736,22 @@ export const Delivery = Schema.TaggedUnion({
 /** The decoded form of {@link Delivery}. */
 export type Delivery = typeof Delivery.Type;
 
-/** What an item shows: a Message, an Activity, or a Session's start or end. */
+/**
+ * What an item shows: a Message, an Activity, a Session's start or end, or an action of
+ * ours refused after it left.
+ */
 export const ItemContent = Schema.TaggedUnion({
+  /**
+   * An action of the Owner's, such as a topic or a kick, that the Ircd refused with
+   * `reply`, its numeric or standard reply's code, never its text, or that never left
+   * (`Unsent`), at the time of the step that refused it. It has no level.
+   */
+  ActionRefused: {
+    at: Instant,
+    attempted: Attempted,
+    intent: IntentId,
+    reason: Schema.TaggedUnion({ Rejected: { reply: Untrusted }, Unsent: {} }),
+  },
   Activity: { activity: Activity, at: Fact(Instant), id: Fact(MessageId), live: Schema.Boolean },
   ConnectionFailed: { at: Instant, reason: EndReason },
   Message: {
@@ -998,6 +1108,16 @@ export type Rank = typeof Rank.Type;
  * and modes are `Unknown`.
  */
 export const ChannelHeader = Schema.Struct({
+  /**
+   * How the Network's Channel modes other than membership take a parameter, from
+   * `CHANMODES`: a `list` mode and an `always` mode whenever changed, a `whenSet` mode only
+   * when set, and a `flags` mode never. `null` when the Client holds no such Channel.
+   */
+  chanmodes: Schema.NullOr(
+    Schema.Struct({ always: Untrusted, flags: Untrusted, list: Untrusted, whenSet: Untrusted })
+  ),
+  /** What starts a Channel's name on the Network, from `CHANTYPES`, or `null` as `chanmodes` is. */
+  chantypes: Schema.NullOr(Untrusted),
   /** How many members it has. */
   members: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   modes: Fact(Schema.Array(ChannelMode)),

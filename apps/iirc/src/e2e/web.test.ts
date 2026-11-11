@@ -651,6 +651,99 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "acts on the Network from the composer: a refusal shown calmly, the topic, ranks, away, and a kick",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "act"),
+        "#iirc-act"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const view = page.getByRole("region", { name: channel });
+        const log = page.getByRole("log", { name: channel });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        await log.waitFor();
+
+        // Without the operator rank, the Ircd refuses a kick, which the Timeline says calmly.
+        await composer.fill("/kick peer");
+        await composer.press("Enter");
+        const refused = log.getByText(/^Your kick of peer from #iirc-act was refused \(482\)$/u);
+
+        await refused.waitFor();
+
+        const refusedStyle = await refused.evaluate(
+          (element) => getComputedStyle(element).fontStyle
+        );
+
+        // The peer made the Channel, so holds its operator rank, and ops Self.
+        await composer.click();
+        await page.keyboard.press("Alt+m");
+        const members = page.getByRole("region", { name: "members" });
+
+        peer.send(`MODE ${channel} +o iirc`);
+        await members.getByRole("row", { name: "iirc, operator" }).waitFor();
+
+        // A topic set from the composer shows in the header.
+        await composer.fill("/topic a plan for today");
+        await composer.press("Enter");
+        await view.locator("header").getByText("a plan for today", { exact: true }).waitFor();
+
+        // Taking the peer's rank and giving it back, by PREFIX's `o`.
+        await composer.fill("/deop peer");
+        await composer.press("Enter");
+        await members.getByRole("row", { exact: true, name: "peer" }).waitFor();
+        await composer.fill("/op peer");
+        await composer.press("Enter");
+        const opped = members.getByRole("row", { name: "peer, operator" });
+
+        await opped.waitFor();
+        const symbol = await opped.textContent();
+
+        // Away, as the Ircd confirmed it, beside the prompt, and back again.
+        const prompt = page.locator("label", { hasText: channel });
+
+        await composer.fill("/away gone fishing");
+        await composer.press("Enter");
+        await prompt.getByText("(away)", { exact: true }).waitFor();
+        await composer.fill("/back");
+        await composer.press("Enter");
+        await prompt.getByText("(away)", { exact: true }).waitFor({ state: "detached" });
+
+        // A kick with the rank removes the peer.
+        await composer.fill("/kick peer enough");
+        await composer.press("Enter");
+        await members.getByRole("row", { name: /^peer\b/u }).waitFor({ state: "detached" });
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          refusedStyle,
+          symbol,
+          violations,
+        }).toStrictEqual({ problems: [], refusedStyle: "italic", symbol: "@peer", violations: "" });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "shows who is here: the header's topic, the members with their rank, nick completion, and /query",
     { timeout: 90_000 },
     async () => {

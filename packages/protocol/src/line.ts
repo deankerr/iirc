@@ -430,7 +430,9 @@ export type RejectedReason =
   /** A Target, Channel, or nick that would name something else, such as a list. */
   | "InvalidTarget"
   /** A Message with nothing in it, which an Ircd refuses. */
-  | "EmptyText";
+  | "EmptyText"
+  /** Text that does not read as a Line a client may send: no command, or a source, which only an Ircd gives. */
+  | "Unparseable";
 
 /** A Line that cannot be sent safely, and why. */
 export interface Rejected {
@@ -593,6 +595,7 @@ const explanations: Readonly<Record<RejectedReason, string>> = {
   TagsTooLong: `tag data takes at most ${maxTagBytes} bytes`,
   TooLong: `a Line takes at most ${maxLineBytes} bytes`,
   TooManyParameters: "a Line has at most 15 parameters",
+  Unparseable: "text must read as a Line with a command and no source",
 };
 
 /**
@@ -864,13 +867,96 @@ export const names = (channel: string): OutboundLine | Rejected =>
   toOne(channel, () => outbound("NAMES", [channel]));
 
 /**
+ * Whether a parameter is one word: not empty, with no space, and not starting with a
+ * colon, so it reads as one parameter wherever it stands.
+ * @param word - The parameter.
+ * @returns Whether it is.
+ */
+const isWord = (word: string) => {
+  const read = Result.isSuccess(readCommand(word)) ? readParam(word) : undefined;
+
+  return read !== undefined && !breaksLines(read.bytes) && !needsTrailing(read.bytes);
+};
+
+/**
  * `MODE` of one Target, to read its modes, or with arguments to change them.
  * @param target - A Channel, or Self.
- * @param args - The mode string and its parameters, if any.
+ * @param args - The mode string and its parameters, if any, each one word.
  * @returns The Line, or why it cannot be sent.
  */
 export const mode = (target: string, args: readonly string[] = []): OutboundLine | Rejected =>
-  toOne(target, () => outbound("MODE", [target, ...args]));
+  toOne(target, () =>
+    args.every(isWord) ? outbound("MODE", [target, ...args]) : rejected("InvalidParameter")
+  );
+
+/**
+ * `TOPIC` of one Channel, to set it. An empty topic clears it, and is sent as an empty
+ * trailing parameter, since `TOPIC` with no topic asks for it instead.
+ * @param channel - The Channel.
+ * @param text - The topic, or `""` to clear it.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const topic = (channel: string, text: string): OutboundLine | Rejected =>
+  toOne(channel, () => outbound("TOPIC", [channel, text]));
+
+/**
+ * `KICK` of one or more nicks from one Channel, as one list. How many nicks share a Line,
+ * by `TARGMAX`, is the caller's to choose.
+ * @param channel - The Channel.
+ * @param nicks - The nicks, one or more.
+ * @param reason - Why, if anything.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const kick = (
+  channel: string,
+  nicks: readonly string[],
+  reason?: string
+): OutboundLine | Rejected =>
+  toOne(channel, () =>
+    nicks.length > 0 && nicks.every((one) => isOne(one) && !notInNicks.test(one))
+      ? outbound(
+          "KICK",
+          reason === undefined || reason === ""
+            ? [channel, nicks.join(",")]
+            : [channel, nicks.join(","), reason]
+        )
+      : rejected("InvalidTarget")
+  );
+
+/**
+ * `INVITE` of one nick to one Channel.
+ * @param name - The nick.
+ * @param channel - The Channel.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const invite = (name: string, channel: string): OutboundLine | Rejected =>
+  isOne(name) && !notInNicks.test(name)
+    ? toOne(channel, () => outbound("INVITE", [name, channel]))
+    : rejected("InvalidTarget");
+
+/**
+ * A Line written as text, as `/quote` takes it, read by {@link parse} and built again
+ * with {@link outbound}, so it is sent as it reads: its tags, command, and parameters. A
+ * source is refused, since only an Ircd gives one, and so is text with a CR, LF, or NUL,
+ * which would end the Line there.
+ * @param text - The Line, without its line ending.
+ * @returns The Line, or why it cannot be sent.
+ */
+export const quote = (text: string): OutboundLine | Rejected => {
+  if (!isText(text) || !text.isWellFormed() || /[\0\r\n]/u.test(text)) {
+    return rejected("InvalidParameter");
+  }
+
+  const parsed = parse(utf8.encode(text), { _tag: "Utf8Only" });
+
+  if (parsed._tag === "Unparseable" || parsed.line.source !== undefined) {
+    return rejected("Unparseable");
+  }
+
+  const { line } = parsed;
+
+  return outbound(line.command, line.params, Object.fromEntries(line.tags));
+};
 
 /**
  * `WHO` of a mask or a Channel.

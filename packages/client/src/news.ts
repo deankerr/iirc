@@ -113,6 +113,42 @@ export type RefusedReason =
   | { readonly _tag: "Unsent" }
   | { readonly _tag: "Rejected"; readonly reply: string };
 
+/**
+ * What the Owner tried to do with an `Act`, in short, to show beside its refusal: the kind
+ * of action and what it named, and nothing else. It never holds a topic, a reason, an
+ * away message, a mode's parameter, or the rest of a raw Line, so no Credential, such as a
+ * Channel key given with `+k`, and no text but names the Owner typed is ever in it.
+ *
+ * - `Topic`: a Channel's topic.
+ * - `Kick`: nicks from a Channel.
+ * - `Mode`: a Channel's or Self's modes, as each change's sign and letter, such as `+o-v`.
+ * - `Invite`: a nick to a Channel.
+ * - `Nick`: Self's nick.
+ * - `Away`: away, or back with `away` false.
+ * - `Raw`: a Line written as text, by its command, or `null` when it did not parse.
+ */
+export type Attempted =
+  | { readonly _tag: "Topic"; readonly channel: string }
+  | { readonly _tag: "Kick"; readonly channel: string; readonly nicks: readonly string[] }
+  | { readonly _tag: "Mode"; readonly target: string; readonly modes: string }
+  | { readonly _tag: "Invite"; readonly nick: string; readonly channel: string }
+  | { readonly _tag: "Nick"; readonly nick: string }
+  | { readonly _tag: "Away"; readonly away: boolean }
+  | { readonly _tag: "Raw"; readonly command: string | null };
+
+/**
+ * Where an action of the Owner's belongs, to show its refusal: the Channel it was about,
+ * when the Client held that Channel as it was asked for, and otherwise, and for a nick,
+ * away, a raw Line, and Self's own modes, the Network's own Timeline.
+ */
+export type ActionWhere = Extract<Where, { readonly _tag: "Network" | "Channel" }>;
+
+/** An action of the Owner's that was refused: what was tried, and where it belongs. */
+export interface RefusedAction {
+  readonly attempted: Attempted;
+  readonly where: ActionWhere;
+}
+
 /** That we said a Message ourselves, as the Owner's intent. */
 export interface Ours {
   readonly intent: IntentId;
@@ -146,7 +182,8 @@ export type IgnoredReason =
  *
  * A Message or Activity carries `where`, the Timelines it belongs to, and nothing else
  * does: a `Confirmed` or a `Refused` names the intent of a Message already placed, and
- * the rest belongs to the Network.
+ * the rest belongs to the Network. A `Refused` for an action says where it belongs in its
+ * `action` instead.
  */
 export type News =
   | {
@@ -199,7 +236,17 @@ export type News =
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
   | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }
-  | { readonly _tag: "Refused"; readonly intent: IntentId; readonly reason: RefusedReason }
+  | {
+      readonly _tag: "Refused";
+      readonly intent: IntentId;
+      readonly reason: RefusedReason;
+      /**
+       * For an `Act`, what it tried and where it belongs, so a projection can show its
+       * refusal there. `undefined` for a `Say`, whose Message already stands where it
+       * belongs, and for an action too old for the Client to remember.
+       */
+      readonly action: RefusedAction | undefined;
+    }
   /**
    * An Ircd declared a casemapping other than the one the Network last declared, so keys
    * in `where` are folded by `casemapping` from here on. A projection folds each Timeline's

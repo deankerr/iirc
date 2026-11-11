@@ -12,7 +12,7 @@
  */
 import { CallerIntent } from "@iirc/api";
 import type { Sequence } from "@iirc/api";
-import type { Intent, Say } from "@iirc/frontend/commands";
+import type { Act, Intent, Say } from "@iirc/frontend/commands";
 import {
   confirm,
   contextOf,
@@ -38,7 +38,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { query } from "../channel/atoms.ts";
-import { showMembers } from "../channel/state.ts";
+import { channelState, showMembers } from "../channel/state.ts";
 import { notifying } from "../notifications/notifier.ts";
 import {
   addNetwork,
@@ -58,7 +58,7 @@ import { cancelCompletion } from "./completion-state.ts";
 export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
 
 /** The context commands are judged in, derived from the Timelines. */
-export const commandContext = Atom.make((get) => contextOf(get(timelinesState)));
+export const commandContext = Atom.make((get) => contextOf(get(timelinesState), get(channelState)));
 
 /** One Timeline's composer, or the one under no Timeline. */
 export const draft = Atom.family((timeline: Place) =>
@@ -180,14 +180,39 @@ interface Placed {
 }
 
 /**
- * Says one Message under an intent id, and finds out what became of it.
- * @param intent - The Say.
+ * Asks the Daemon to say a Message or act, under an intent id, and reads its answer:
+ * `Said` or `Acted` with the sequence it was stepped at, or the Client's refusal in that
+ * step.
+ * @param intent - The Say or the Act.
  * @param id - Its intent id.
- * @returns What became of it.
+ * @returns The request, answered.
  */
-const sayOne = (intent: Say, id: IntentId) =>
+const ask = (intent: Say | Act, id: IntentId) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
+
+    if (intent._tag === "Act") {
+      return yield* client.networks
+        .act({
+          params: { network: intent.network },
+          payload: { action: intent.action, intent: id },
+        })
+        .pipe(
+          Effect.map((answer): Outcome =>
+            answer._tag === "Acted"
+              ? { _tag: "Said", sequence: answer.sequence }
+              : {
+                  _tag: "Failed",
+                  failure: {
+                    _tag: "Refused",
+                    action: intent.action,
+                    reason: answer.reason,
+                    target: "",
+                  },
+                }
+          )
+        );
+    }
 
     return yield* client.networks
       .say({
@@ -200,46 +225,62 @@ const sayOne = (intent: Say, id: IntentId) =>
             ? { _tag: "Said", sequence: answer.sequence }
             : {
                 _tag: "Failed",
-                failure: { _tag: "Refused", reason: answer.reason, target: intent.target },
+                failure: {
+                  _tag: "Refused",
+                  action: undefined,
+                  reason: answer.reason,
+                  target: intent.target,
+                },
               }
-        ),
-        Effect.catch((error): Effect.Effect<Outcome, never, DaemonClient> => {
-          if (error._tag === "Unauthorized") {
-            return Effect.succeed<Outcome>({ _tag: "SignedOut" });
-          }
-
-          // The Network stopped, so its append has settled: `said` answers for good.
-          if (error._tag === "NetworkStopped") {
-            return askSaid(intent.network, id).pipe(
-              Effect.map((answer): Outcome => ({
-                _tag: "Failed",
-                failure: { _tag: answer._tag === "Journaled" ? "Journaled" : "NotJournaled" },
-              })),
-              Effect.orElseSucceed((): Outcome => ({
-                _tag: "Failed",
-                failure: { _tag: "Unknown", network: intent.network },
-              }))
-            );
-          }
-
-          // No answer came, so the request may still be queued or appending: `said` can
-          // settle it only by answering `Journaled`, and it is never sent again from here.
-          const lost =
-            error._tag === "HttpClientError" &&
-            (error.reason._tag === "TransportError" ||
-              (error.response !== undefined && gatewayStatuses.has(error.response.status)));
-
-          if (lost) {
-            return checked(intent.network, id);
-          }
-
-          return Effect.succeed<Outcome>({
-            _tag: "Failed",
-            failure: failureOf(error._tag, intent.network),
-          });
-        })
+        )
       );
   });
+
+/**
+ * Says one Message, or acts, under an intent id, and finds out what became of it, as one
+ * for the other: an action is journaled and recovered by its intent as a Message is.
+ * @param intent - The Say or the Act.
+ * @param id - Its intent id.
+ * @returns What became of it.
+ */
+const sayOne = (intent: Say | Act, id: IntentId) =>
+  ask(intent, id).pipe(
+    Effect.catch((error): Effect.Effect<Outcome, never, DaemonClient> => {
+      if (error._tag === "Unauthorized") {
+        return Effect.succeed<Outcome>({ _tag: "SignedOut" });
+      }
+
+      // The Network stopped, so its append has settled: `said` answers for good.
+      if (error._tag === "NetworkStopped") {
+        return askSaid(intent.network, id).pipe(
+          Effect.map((answer): Outcome => ({
+            _tag: "Failed",
+            failure: { _tag: answer._tag === "Journaled" ? "Journaled" : "NotJournaled" },
+          })),
+          Effect.orElseSucceed((): Outcome => ({
+            _tag: "Failed",
+            failure: { _tag: "Unknown", network: intent.network },
+          }))
+        );
+      }
+
+      // No answer came, so the request may still be queued or appending: `said` can
+      // settle it only by answering `Journaled`, and it is never sent again from here.
+      const lost =
+        error._tag === "HttpClientError" &&
+        (error.reason._tag === "TransportError" ||
+          (error.response !== undefined && gatewayStatuses.has(error.response.status)));
+
+      if (lost) {
+        return checked(intent.network, id);
+      }
+
+      return Effect.succeed<Outcome>({
+        _tag: "Failed",
+        failure: failureOf(error._tag, intent.network),
+      });
+    })
+  );
 
 /** An intent carried out in the page at once, which waits on nothing the Daemon says. */
 type Local = Extract<
@@ -339,7 +380,7 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 const changeOne = (
   registry: AtomRegistry.AtomRegistry,
   place: Place,
-  intent: Exclude<Intent, Say>,
+  intent: Exclude<Intent, Say | Act>,
   navigation: number
 ): Effect.Effect<Changed, never, DaemonClient> => {
   if (isLocal(intent)) {
@@ -413,7 +454,7 @@ const carryOut = (
     const placed: Placed[] = [];
 
     for (const [index, intent] of intents.entries()) {
-      if (intent._tag !== "Say") {
+      if (intent._tag !== "Say" && intent._tag !== "Act") {
         const changed = yield* changeOne(registry, timeline, intent, navigation);
 
         if (changed._tag === "SignedOut") {
@@ -441,7 +482,7 @@ const carryOut = (
       }
 
       if (outcome._tag === "Said") {
-        if (intent.opens) {
+        if (intent._tag === "Say" && intent.opens) {
           placed.push({
             intent: id,
             navigation,

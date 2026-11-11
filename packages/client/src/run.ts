@@ -5,14 +5,14 @@
  *
  * @packageDocumentation
  */
-import { casefold } from "@iirc/protocol/casemapping";
+import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import { isRejected } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected, SecretLine } from "@iirc/protocol/line";
 
 import type { Departure, KnownBefore, Refusal, Sendable } from "./feature.ts";
-import type { Instant } from "./ids.ts";
+import type { Instant, IntentId } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
-import type { EndReason, IgnoredReason, News } from "./news.ts";
+import type { EndReason, IgnoredReason, News, RefusedReason } from "./news.ts";
 import type { Output } from "./output.ts";
 import type { Registered } from "./registry.ts";
 import type { Reading } from "./seam.ts";
@@ -49,6 +49,33 @@ export const folder =
  */
 export const ignore = (run: Run, reason: IgnoredReason): void => {
   run.news.push({ _tag: "Ignored", reason });
+};
+
+/**
+ * Reports an Owner intent not carried out. One of the actions the Client remembers says
+ * what it tried and where it belongs, so its refusal can be shown there. Its Channel's
+ * name is folded as the refusal is reported, by the casemapping the Network last declared
+ * then, so a mapping declared since the action began keys it as the projection keys that
+ * Channel's Timeline now, and it never opens a second one.
+ * @param run - The step.
+ * @param intent - The intent.
+ * @param reason - Why.
+ */
+export const refuseIntent = (run: Run, intent: IntentId, reason: RefusedReason): void => {
+  const remembered = run.state.actions.get(intent);
+
+  const action =
+    remembered?.where._tag === "Channel"
+      ? {
+          ...remembered,
+          where: {
+            ...remembered.where,
+            key: casefold(run.state.declared ?? defaultCasemapping, remembered.where.name),
+          },
+        }
+      : remembered;
+
+  run.news.push({ _tag: "Refused", action, intent, reason });
 };
 
 /**
@@ -164,8 +191,8 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
 /**
  * Sends a Line on the Connection, through each Feature's `egress`. A Line that cannot be
  * built is not sent, and is recorded as `Malformed` with its command. One a Feature
- * refuses is not sent either: a `Said` one is `Refused` as `Unsendable`, and any other
- * is `Ignored` as `Unsendable`, with its command.
+ * refuses is not sent either: a `Said` or `Acted` one is `Refused` as `Unsendable`, and
+ * any other is `Ignored` as `Unsendable`, with its command.
  * @param run - The step.
  * @param line - The Line, or why it cannot be built.
  * @param command - Its command, to report if it cannot be built.
@@ -196,8 +223,9 @@ export const send = (
   const reading = features.length === 0 ? undefined : readingOf(run);
   const open = openOf(run.state);
 
-  // Every Line of a `Say` names its intent, so an `Unsent` can be tied back to it.
-  const intent = departure.for._tag === "Said" ? { intent: departure.for.intent } : {};
+  // Every Line of a `Say` or an action names its intent, so an `Unsent` can be tied back
+  // to it.
+  const intent = departure.for._tag === "Protocol" ? {} : { intent: departure.for.intent };
 
   if (reading === undefined || open === undefined) {
     run.outputs.push({ _tag: "Send", connection: id, line, ...intent });
@@ -217,14 +245,10 @@ export const send = (
   reportFailed(run, ran.failed);
 
   if (isRefusal(ran.value)) {
-    if (departure.for._tag === "Said") {
-      run.news.push({
-        _tag: "Refused",
-        intent: departure.for.intent,
-        reason: { _tag: "Unsendable" },
-      });
-    } else {
+    if (departure.for._tag === "Protocol") {
       ignore(run, { _tag: "Unsendable", command: line.command });
+    } else {
+      refuseIntent(run, departure.for.intent, { _tag: "Unsendable" });
     }
 
     return undefined;

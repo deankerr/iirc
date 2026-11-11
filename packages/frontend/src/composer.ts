@@ -7,13 +7,15 @@
  *
  * @packageDocumentation
  */
-import type { CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api";
+import type { ActionRequest, CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api";
 
 import { levelOf, markLatest } from "./activity.ts";
-import { interpret, typesCredential } from "./commands.ts";
+import { channelIn, initialChannels } from "./channel.ts";
+import type { Channels } from "./channel.ts";
+import { credentialRefusal, interpret } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
 import { panesOf } from "./layout.ts";
-import { contained } from "./render.ts";
+import { attemptedText, contained, requested } from "./render.ts";
 import { opened, openOf, resolve, sidebar } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
 
@@ -24,7 +26,7 @@ import type { Timelines } from "./timelines.ts";
  */
 export type Place = TimelineId | "Nowhere";
 
-/** The id a Say is made under, which the runtime names. */
+/** The id a Say or an Act is made under, which the runtime names. */
 export type IntentId = typeof CallerIntent.Type;
 
 /** How many inputs a Timeline's history keeps, newest first. */
@@ -56,7 +58,7 @@ export type Offer =
       readonly intents: readonly Intent[];
     };
 
-/** Something to say under the composer: an error, or what became of a Say. */
+/** Something to say under the composer: an error, or what became of a Say or an Act. */
 export interface Notice {
   readonly message: string;
   /** What the Owner can do next, if anything. */
@@ -88,9 +90,10 @@ export interface Composers {
 }
 
 /**
- * Why a Say did not go as asked, as the runtime found it out.
+ * Why a Say or an Act did not go as asked, as the runtime found it out.
  *
- * - `Refused`: `say` answered that the Client refused it in the step that took it.
+ * - `Refused`: `say` or `act` answered that the Client refused it in the step that took it:
+ *   a Message to `target`, or with `action`, that action.
  * - `Journaled`: the Network stopped, or the Daemon did not answer, and `said` says it was
  *   journaled. Whether it reached the Ircd is unknown, since a restart never carries out a
  *   past step's outputs, and it must not be sent again.
@@ -103,7 +106,12 @@ export interface Composers {
  *   something the Frontend could not read.
  */
 export type SayFailure =
-  | { readonly _tag: "Refused"; readonly reason: StepRefusal; readonly target: string }
+  | {
+      readonly _tag: "Refused";
+      readonly reason: StepRefusal;
+      readonly target: string;
+      readonly action: ActionRequest | undefined;
+    }
   | { readonly _tag: "Journaled" }
   | { readonly _tag: "NotJournaled" }
   | { readonly _tag: "Unknown"; readonly network: NetworkId }
@@ -117,8 +125,8 @@ export type SayFailure =
  * - `Edited`: the Owner changed the text, which lets go of lines waiting to be confirmed.
  * - `Recalled`: Up or Down through the history.
  * - `Dismissed`: Escape, which lets go of a notice and a confirmation.
- * - `Failed`: a Say failed; `intents` are it and those after it, none carried out after it.
- * - `Noticed`: an intent other than a Say did not go as asked, such as a change of
+ * - `Failed`: a Say or an Act failed; `intents` are it and those after it, none carried out after it.
+ * - `Noticed`: an intent other than a Say or an Act did not go as asked, such as a change of
  *   Configuration, in words. Nothing after it was carried out.
  */
 export type ComposerEvent =
@@ -181,11 +189,15 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
 /**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
  * it, whether that Network has a Session, every Timeline in the sidebar's order, those open
- * in any Pane, and those with something unread.
+ * in any Pane, those with something unread, and the head of the Channel in focus, as read.
  * @param timelines - The Timelines.
+ * @param channels - The Channels the Panes show, as read.
  * @returns The context.
  */
-export const contextOf = (timelines: Timelines): CommandContext => {
+export const contextOf = (
+  timelines: Timelines,
+  channels: Channels = initialChannels
+): CommandContext => {
   const shown = opened(timelines);
   const open = openOf(timelines);
 
@@ -208,7 +220,7 @@ export const contextOf = (timelines: Timelines): CommandContext => {
   };
 
   if (shown._tag !== "Shown" || shown.description === undefined) {
-    return { ...around, focus: undefined, session: false };
+    return { ...around, focus: undefined, head: undefined, session: false };
   }
 
   const { description } = shown;
@@ -223,9 +235,13 @@ export const contextOf = (timelines: Timelines): CommandContext => {
     timeline: description.id,
   };
 
+  const { header } = channelIn(channels, description.id).head;
+
   return {
     ...around,
     focus,
+    head:
+      description.kind === "Channel" && header?.timeline === description.id ? header : undefined,
     session: network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
   };
 };
@@ -276,17 +292,17 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
 
   // A Credential's value typed here is let go of at once: the draft, what was kept while
   // recalling, and what waits to be confirmed, and none of it enters the history.
-  const credential = lines.find((line) => typesCredential(line));
+  const credential = lines
+    .map((line) => credentialRefusal(line))
+    .find((message) => message !== undefined);
 
   if (credential !== undefined) {
-    const read = interpret(credential, context);
-
     return {
       intents: [],
       state: withDraft(state, timeline, (one) => ({
         ...emptyDraft,
         history: one.history,
-        notice: { message: read._tag === "Invalid" ? read.message : "", offer: undefined },
+        notice: { message: credential, offer: undefined },
       })),
     };
   }
@@ -361,19 +377,25 @@ export const takeOffer = (
 /**
  * A refusal in words.
  * @param reason - Why the Client refused it in the step that took it.
- * @param target - Whom it was for.
+ * @param target - Whom a Message was for.
+ * @param action - The action, when it was one rather than a Message.
  * @returns The words.
  */
-export const refusal = (reason: StepRefusal, target: string): string => {
-  const to = contained(target);
+export const refusal = (reason: StepRefusal, target: string, action?: ActionRequest): string => {
+  const what =
+    action === undefined
+      ? `Not said to ${contained(target)}`
+      : `${attemptedText(requested(action))} was not sent`;
 
   switch (reason._tag) {
     case "Offline": {
-      return `Not said to ${to}: the Network had no Session when it arrived.`;
+      return `${what}: the Network had no Session when it arrived.`;
     }
 
     case "Unsendable": {
-      return `Not said to ${to}: no IRC Line can carry it there.`;
+      return action === undefined
+        ? `${what}: no IRC Line can carry it there.`
+        : `${what}: the Network cannot carry it whole, as its ISUPPORT says, or it is not one the Client sends.`;
     }
 
     default: {
@@ -395,21 +417,23 @@ export const failed = (
   intents: readonly Intent[]
 ): Notice => {
   const rest = intents.slice(1);
-  const more = rest.some((one) => one._tag === "Say");
+  const more = rest.some((one) => one._tag === "Say" || one._tag === "Act");
+  const acted = intents[0]?._tag === "Act";
 
   switch (failure._tag) {
     case "Refused": {
       return {
         message: more
-          ? `${refusal(failure.reason, failure.target)} Nothing after it was sent.`
-          : refusal(failure.reason, failure.target),
+          ? `${refusal(failure.reason, failure.target, failure.action)} Nothing after it was sent.`
+          : refusal(failure.reason, failure.target, failure.action),
         offer: undefined,
       };
     }
 
     case "Journaled": {
-      const journaled =
-        "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery.";
+      const journaled = acted
+        ? "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too."
+        : "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery.";
 
       return {
         message: more ? `${journaled} What came after it was not sent.` : journaled,
@@ -419,15 +443,14 @@ export const failed = (
 
     case "NotJournaled": {
       return {
-        message: "The Network stopped before this was journaled, so it was not said.",
+        message: `The Network stopped before this was journaled, so it was not ${acted ? "sent" : "said"}.`,
         offer: { _tag: "SendAgain", intent, intents },
       };
     }
 
     case "Unknown": {
       return {
-        message:
-          "The Daemon did not answer, so whether this was said is unknown. Nothing after it was sent.",
+        message: `The Daemon did not answer, so whether this was ${acted ? "sent" : "said"} is unknown. Nothing after it was sent.`,
         offer: { _tag: "CheckAgain", intent, intents, network: failure.network },
       };
     }
@@ -437,13 +460,15 @@ export const failed = (
     }
 
     case "Malformed": {
-      return { message: "The Daemon could not read this as something to say.", offer: undefined };
+      return {
+        message: `The Daemon could not read this as something to ${acted ? "do" : "say"}.`,
+        offer: undefined,
+      };
     }
 
     case "Unexpected": {
       return {
-        message:
-          "The Daemon answered in a way the Frontend could not read, so whether this was said is unknown.",
+        message: `The Daemon answered in a way the Frontend could not read, so whether this was ${acted ? "sent" : "said"} is unknown.`,
         offer: undefined,
       };
     }

@@ -33,6 +33,8 @@ import {
   VaultFailed,
 } from "./errors.ts";
 import {
+  Acted,
+  ActRequest,
   After,
   CallerIntent,
   ChannelHeader,
@@ -130,6 +132,12 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
       params: NetworkPath,
       payload: SayRequest,
       success: Said,
+    }),
+    HttpApiEndpoint.post("act", "/networks/:network/act", {
+      error: [UnknownNetwork, NetworkStopped],
+      params: NetworkPath,
+      payload: ActRequest,
+      success: Acted,
     }),
     HttpApiEndpoint.get("said", "/networks/:network/said/:intent", {
       error: JournalFailed,

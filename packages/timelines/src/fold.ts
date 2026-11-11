@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import type { Instant, Marked, MessageId, Named, News, Where } from "@iirc/client";
+import type { Instant, Marked, MessageId, Named, News, RefusedAction, Where } from "@iirc/client";
 import type { Casemapping, Fact } from "@iirc/client/known";
 import { casefold } from "@iirc/protocol/casemapping";
 
@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 3;
+export const projectionVersion = 4;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -453,6 +453,48 @@ const mark = (draft: Draft, where: Marked, read: Instant) => {
   }
 };
 
+/**
+ * Places an action's refusal that came after it left, `Rejected` or `Unsent`, in the
+ * Timeline it belongs to, at the step's time, with no level: it is ours, and never
+ * unread. One refused in the step that took it, `Offline` or `Unsendable`, places nothing,
+ * as a `Say`'s does: whoever acted heard so in the answer.
+ * @param draft - The step.
+ * @param news - The refusal.
+ * @param action - What it tried, and where it belongs.
+ * @param n - Its index in the step.
+ */
+const refuseAction = (
+  draft: Draft,
+  news: Extract<News, { readonly _tag: "Refused" }>,
+  action: RefusedAction,
+  n: number
+) => {
+  const { reason } = news;
+
+  if (reason._tag !== "Rejected" && reason._tag !== "Unsent") {
+    return;
+  }
+
+  const timeline = resolve(draft, action.where, n, 0);
+
+  if (timeline !== undefined) {
+    add(
+      draft,
+      timeline,
+      { at: draft.at, n, sequence: draft.sequence },
+      {
+        _tag: "ActionRefused",
+        at: draft.at,
+        attempted: action.attempted,
+        intent: news.intent,
+        reason,
+      },
+      undefined,
+      undefined
+    );
+  }
+};
+
 const gap = (draft: Draft, from: Position, to: Position | undefined) => {
   draft.changes.push({ _tag: "Gap", from, network: draft.network, sequence: draft.sequence, to });
 };
@@ -488,7 +530,9 @@ const foldNews = (draft: Draft, news: News, n: number) => {
     }
 
     case "Refused": {
-      if (news.reason._tag === "Unsent") {
+      if (news.action !== undefined) {
+        refuseAction(draft, news, news.action, n);
+      } else if (news.reason._tag === "Unsent") {
         draft.changes.push({
           _tag: "Unsent",
           intent: news.intent,

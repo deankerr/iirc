@@ -67,6 +67,7 @@ const inChannel: CommandContext = {
     network: libera,
     timeline,
   },
+  head: undefined,
   open: timeline,
   panes: 1,
   session: false,
@@ -77,6 +78,7 @@ const inChannel: CommandContext = {
 
 const nowhere: CommandContext = {
   focus: undefined,
+  head: undefined,
   open: undefined,
   panes: 1,
   session: false,

@@ -4,7 +4,15 @@
  *
  * @packageDocumentation
  */
-import type { Activity, EndReason, Instant, IntentId, MessageId, SayKind } from "@iirc/client";
+import type {
+  Activity,
+  Attempted,
+  EndReason,
+  Instant,
+  IntentId,
+  MessageId,
+  SayKind,
+} from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 
 /**
@@ -35,6 +43,15 @@ export interface OursItem {
   readonly delivery: Delivery;
 }
 
+/**
+ * Why an action of the Owner's was refused after it left: `Rejected` by the Ircd, with
+ * `reply`, its numeric or standard reply's code, never its text, or `Unsent`, when at least
+ * part of it never left, because its Connection ended first.
+ */
+export type ActionRefusal =
+  | { readonly _tag: "Rejected"; readonly reply: string }
+  | { readonly _tag: "Unsent" };
+
 /** What an item shows. */
 export type Content =
   | {
@@ -59,7 +76,18 @@ export type Content =
     }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
-  | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason };
+  | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }
+  /**
+   * An action of the Owner's, such as a topic or a kick, that the Ircd refused, or that
+   * never left: what it tried, in short, at the time of the step that refused it.
+   */
+  | {
+      readonly _tag: "ActionRefused";
+      readonly at: Instant;
+      readonly intent: IntentId;
+      readonly attempted: Attempted;
+      readonly reason: ActionRefusal;
+    };
 
 /**
  * How much an item calls for the Owner, as WeeChat ranks activity, which unread counts are
@@ -71,7 +99,8 @@ export type Content =
  * - `Activity`: an Activity, a Session's start or end, a failed Connection, or a Message
  *   in the Network's own Timeline.
  *
- * Our own Messages, and every Message Self said, have no level, and never count.
+ * Our own Messages, every Message Self said, and our refused actions have no level, and
+ * never count.
  */
 export type Level = "Highlight" | "Direct" | "Message" | "Activity";
 

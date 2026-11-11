@@ -639,14 +639,31 @@ describe("`say`", () => {
           world,
           scripted([
             {
-              news: [{ _tag: "Refused", intent: offline, reason: { _tag: "Offline" } }],
+              news: [
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: offline,
+                  reason: { _tag: "Offline" },
+                },
+              ],
               when: "Say",
             },
             // A refusal of another intent, or one only an Ircd's reply gives, is not its own.
             {
               news: [
-                { _tag: "Refused", intent: offline, reason: { _tag: "Unsendable" } },
-                { _tag: "Refused", intent: later, reason: { _tag: "Rejected", reply: "404" } },
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: offline,
+                  reason: { _tag: "Unsendable" },
+                },
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: later,
+                  reason: { _tag: "Rejected", reply: "404" },
+                },
               ],
               when: "Say",
             },
@@ -668,6 +685,85 @@ describe("`say`", () => {
       { _tag: "Refused", intent: offline, reason: { _tag: "Offline" }, sequence: 2 },
       { _tag: "Said", intent: later, sequence: 3 },
     ]);
+  });
+});
+
+describe("`act`", () => {
+  it("answers with a refusal of its own Act in its step, Acted for anything else, and `said` finds it", async () => {
+    const offline = IntentId.make("offline");
+    const later = IntentId.make("later");
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(
+          world,
+          scripted([
+            {
+              news: [
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: offline,
+                  reason: { _tag: "Unsendable" },
+                },
+              ],
+              when: "Act",
+            },
+            {
+              news: [
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: later,
+                  reason: { _tag: "Rejected", reply: "482" },
+                },
+              ],
+              when: "Act",
+            },
+          ])
+        );
+
+        yield* runtime.configure(libera, configuration);
+
+        const action = { _tag: "Topic", channel: "#iirc", text: "hi" } as const;
+
+        const answers = [
+          yield* runtime.act(libera, { action, intent: offline }),
+          yield* runtime.act(libera, { action, intent: later }),
+        ];
+
+        return {
+          answers,
+          found: yield* runtime.said(libera, later),
+          journaled: inputs(yield* entries(world.journal)).filter((input) => input._tag === "Act"),
+        };
+      })
+    );
+
+    expect(result.answers).toStrictEqual([
+      { _tag: "Refused", intent: offline, reason: { _tag: "Unsendable" }, sequence: 2 },
+      { _tag: "Acted", intent: later, sequence: 3 },
+    ]);
+    expect(result.found).toStrictEqual(Option.some(3));
+    expect(result.journaled).toMatchObject([
+      { action: { _tag: "Topic", channel: "#iirc", text: "hi" }, intent: offline },
+      { intent: later },
+    ]);
+  });
+
+  it("names an intent when the caller does not", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, scripted([]));
+
+        yield* runtime.configure(libera, configuration);
+
+        return yield* runtime.act(libera, { action: { _tag: "Nick", nick: "other" } });
+      })
+    );
+
+    expect(result).toMatchObject({ _tag: "Acted", sequence: 2 });
+    expect(result.intent).toMatch(/^[0-9a-f]{32}$/u);
   });
 });
 
@@ -844,7 +940,10 @@ describe("closing the Runtime", () => {
 
         const script: readonly Scripted[] = [
           { when: "Configured" },
-          { news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }], when: "Say" },
+          {
+            news: [{ _tag: "Refused", action: undefined, intent, reason: { _tag: "Offline" } }],
+            when: "Say",
+          },
           { news: [told("STARTED")], when: "Started" },
         ];
 
@@ -877,7 +976,10 @@ describe("closing the Runtime", () => {
     expect(result).toStrictEqual({
       // `said` finds the Say, which the restart folded before its Started.
       found: Option.some(2),
-      news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }, told("STARTED")],
+      news: [
+        { _tag: "Refused", action: undefined, intent, reason: { _tag: "Offline" } },
+        told("STARTED"),
+      ],
       outline: ["1 libera Configured", "2 libera Say", "3 libera Started"],
       said: Exit.fail(closedFor(libera)),
     });

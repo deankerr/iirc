@@ -36,6 +36,7 @@ export {
 
 export {
   Activity,
+  Attempted,
   After,
   CallerIntent,
   ChannelHeader,
@@ -66,6 +67,7 @@ export {
   MembersAfter,
   MembersQuery,
   ModeChange,
+  ModeRequest,
   NetworkEntry,
   NetworkId,
   NetworkInspection,
@@ -78,6 +80,9 @@ export {
   Rank,
   ReadRequest,
   RefusedReason,
+  Acted,
+  ActionRequest,
+  ActRequest,
   Resume,
   Said,
   StepRefusal,

@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 /** A Line split into its parts, and when it arrived. */
-interface Parsed {
+export interface Parsed {
   readonly source: string | undefined;
   readonly command: string;
   readonly params: readonly string[];

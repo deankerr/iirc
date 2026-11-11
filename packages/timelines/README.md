@@ -10,7 +10,7 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, sequence, at, news }        // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 3
+projectionVersion: number                         // 4
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
@@ -55,12 +55,13 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `Confirmed` | `Confirmed` for its intent in the Network, with the Ircd's time, id, and text. |
 | `Refused` `Unsent` | `Unsent` for its intent in the Network. |
 | `Refused` `Rejected` | `Rejected` for its intent in the Network, with the Ircd's `reply`: its numeric or standard reply's code, never text. `Offline` and `Unsendable` refuse a `Say` in its own step, before any Message is reported, so they place nothing and change nothing. |
+| `Refused` with `action`, `Rejected` or `Unsent` | An action of ours refused after it left. `Described` if it opens the Channel its `action.where` names, as a `where` entry does, then one `Added` there, an `ActionRefused` item standing at the step's own time, with what the action tried, its intent, and the reason. It changes no Message's delivery. `Offline` and `Unsendable` refuse an action in its own step, which the `act` answer already said to whoever acted, so they place nothing, as for a `Say`. |
 | `SessionBegan`, `SessionEnded`, `ConnectionFailed` | `Added` to the Network's Timeline, and a `Gap` as below. |
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it, followed by `ReadMarker` for the one kept when the merged one was read further. |
 | `ReadMarker` | `ReadMarker` for the Timeline its `where` names, when it moves that Timeline's Read Marker forward. |
 | `Ignored` | Nothing. |
 
-An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, `live`, and its `at` and `id` facts, and for an Activity the Activity itself. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again, and its **level** in that Timeline, below. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
+An `Added` item carries what a Frontend shows: for a Message its sender, Target, text, kind, client-only tags as `[name, value]` pairs, `live`, and its `at` and `id` facts, for an Activity the Activity itself, and for an `ActionRefused` what the action tried, as [the Client's README](../client/README.md#where-news-belongs) gives it, never its text or a mode's parameter, its intent, and the reason, `Rejected` with the `reply` or `Unsent`. It carries the message id, when its fact is `Known`, and the intent of one of ours, so the store can keep one per id and find ours again, and its **level** in that Timeline, below. One of ours starts `Pending` when `ours.echo` says the Ircd will echo it, and `Unconfirmed` when it will not. `delivered(before, change)` says how it stands after `Confirmed`, `Unsent`, or `Rejected`, the one rule every store applies: a confirmed Message stays confirmed, a change that would leave it as it is changes nothing, and otherwise the latest wins.
 
 A **Gap** begins at a `SessionEnded`, or the first of a run of `ConnectionFailed`, while the Network is not already in one, and ends at the next `SessionBegan`. Each is reported as `Gap { from, to }`, once with `to` left out when it begins, and again with `to` when it ends. A Session that a restart ended began its Gap at the last step folded for the Network before it, since the Daemon may have been gone since then and the fold cannot tell.
 
@@ -81,7 +82,7 @@ Each `Added` item has a **level**, how much it calls for the Owner in its Timeli
 | `Message` | Any other Message in a Channel's Timeline. |
 | `Activity` | An Activity, a Session's start or end, a failed Connection, and a Message in the Network's own Timeline. |
 
-A Message Self said, one with `ours` or `self`, has no level, and never counts. One News placed in many Timelines can have a different level in each. `unreadCap` is the most a store counts of one level after a Read Marker: a count of `unreadCap + 1` means more than that.
+A Message Self said, one with `ours` or `self`, has no level, and never counts, and neither does an `ActionRefused`, which is ours too. One News placed in many Timelines can have a different level in each. `unreadCap` is the most a store counts of one level after a Read Marker: a count of `unreadCap + 1` means more than that.
 
 ## The projection version
 
@@ -89,7 +90,7 @@ A Message Self said, one with `ours` or `self`, has no level, and never counts. 
 
 ## Tests
 
-`fold.test.ts` takes each rule above in turn, levels and Read Markers included: forward only, opening nothing, following a rename, staying with a detached Timeline, a merge keeping the later, and the largest instant, which a Read Marker reaches and nothing passes. `properties.test.ts` folds random steps, including renames, refolds, and Gaps, and checks that folding them again gives the same directory and changes, that the directory is plain data and a step leaves the one it was given as it was, that every change carries its step's sequence, that ids open in order, that items go only to open Timelines, once per News, that a Read Marker moves only forward and only on an open Timeline, that only a Message Self said has no level, that positions and their cursors order alike, and that a cursor is above `cursorsAfter` of an instant exactly when its position is later, the least and largest instants included. `client.test.ts` folds the News of a transcript played through the real Client.
+`fold.test.ts` takes each rule above in turn, levels, Read Markers, and refused actions included, placed in their Channel or the Network's own at the step's time with no level, opening a Channel, and nothing for one refused in its own step: forward only, opening nothing, following a rename, staying with a detached Timeline, a merge keeping the later, and the largest instant, which a Read Marker reaches and nothing passes. `properties.test.ts` folds random steps, including renames, refolds, and Gaps, and checks that folding them again gives the same directory and changes, that the directory is plain data and a step leaves the one it was given as it was, that every change carries its step's sequence, that ids open in order, that items go only to open Timelines, once per News, that a Read Marker moves only forward and only on an open Timeline, that only a Message Self said and a refused action have no level, that positions and their cursors order alike, and that a cursor is above `cursorsAfter` of an instant exactly when its position is later, the least and largest instants included. `client.test.ts` folds the News of a transcript played through the real Client, including an action on `#Foo[` under `ascii` refused after the Ircd declared `rfc1459`, which lands in the Channel's re-keyed Timeline rather than opening another.
 
 ## Not yet
 

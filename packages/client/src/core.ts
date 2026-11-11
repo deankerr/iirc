@@ -20,6 +20,7 @@ import {
 } from "@iirc/protocol/line";
 import type { Encoding, Line, RawParam, SecretLine } from "@iirc/protocol/line";
 
+import { act, online, relayed } from "./acts.ts";
 import { backoff, lasting } from "./backoff.ts";
 import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
 import type { Client, Step } from "./client.ts";
@@ -45,7 +46,16 @@ import {
 import type { Registered } from "./registry.ts";
 import { registry } from "./registry.ts";
 import type { Run } from "./run.ts";
-import { folder, hangup, ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
+import {
+  folder,
+  hangup,
+  ignore,
+  linkOf,
+  readingOf,
+  refuseIntent,
+  send,
+  updateOpen,
+} from "./run.ts";
 import { runEffects, runStage } from "./seam.ts";
 import type { Link, State } from "./state.ts";
 import { initialState } from "./state.ts";
@@ -57,8 +67,6 @@ import { routeOurs } from "./where.ts";
 
 /** The token of the `PING` the Client sends to hear from a quiet Ircd. */
 const lagToken = "iirc";
-
-const utf8 = new TextEncoder();
 
 // The Network
 
@@ -428,21 +436,11 @@ const received = (run: Run, link: Link, bytes: Uint8Array): void => {
 
 // The Owner
 
-// The room an Ircd takes for our source when it relays what we say: `:nick!user@host `,
-// guessing a username of 10 bytes and a host of 63 until Self's mask is known.
-const relayed = (run: Run): number => {
-  const session = sessionOf(run.state);
-  const mask = session?.mask._tag === "Known" ? session.mask.value : undefined;
-  const nick = utf8.encode(session?.nick ?? "").length;
-
-  return mask === undefined ? nick + 76 : 4 + nick + utf8.encode(`${mask.user}${mask.host}`).length;
-};
-
 const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   const session = sessionOf(run.state);
 
-  if (session === undefined || linkOf(run)?.closing !== undefined || run.state.stopping) {
-    run.news.push({ _tag: "Refused", intent: input.intent, reason: { _tag: "Offline" } });
+  if (session === undefined || !online(run)) {
+    refuseIntent(run, input.intent, { _tag: "Offline" });
 
     return;
   }
@@ -456,7 +454,7 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
 
   // A Line that would be cut short when the Ircd relays it is not sent.
   if (isRejected(line) || isRejected(bytes) || bytes.length + relayed(run) > 512) {
-    run.news.push({ _tag: "Refused", intent: input.intent, reason: { _tag: "Unsendable" } });
+    refuseIntent(run, input.intent, { _tag: "Unsendable" });
 
     return;
   }
@@ -611,7 +609,7 @@ const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
 
     if (intent !== undefined && !confirmed.has(intent) && !refused.has(intent)) {
       refused.add(intent);
-      run.news.push({ _tag: "Refused", intent, reason: { _tag: "Unsent" } });
+      refuseIntent(run, intent, { _tag: "Unsent" });
     }
   }
 };
@@ -716,6 +714,11 @@ const dispatch = (run: Run, input: Input): void => {
 
     case "Say": {
       say(run, input);
+      break;
+    }
+
+    case "Act": {
+      act(run, input);
       break;
     }
 

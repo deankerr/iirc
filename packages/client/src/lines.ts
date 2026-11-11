@@ -10,6 +10,7 @@ import { isupportTokens } from "@iirc/protocol/isupport";
 import { parseSource, pong } from "@iirc/protocol/line";
 import type { Line, RawParam } from "@iirc/protocol/line";
 
+import { answered, modeAnswer, nickAnswer, resendAway, tieRejection } from "./acts.ts";
 import {
   changeJoined,
   endOfNames,
@@ -25,6 +26,7 @@ import { Instant } from "./ids.ts";
 import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { applyModes, readModes } from "./modes.ts";
+import type { Activity, ModeChange } from "./news.ts";
 import {
   abandon,
   capLine,
@@ -36,11 +38,11 @@ import {
   welcomed,
 } from "./registration.ts";
 import type { Run } from "./run.ts";
-import { ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
+import { ignore, linkOf, readingOf, refuseIntent, send, updateOpen } from "./run.ts";
 import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
-import { onNow, openOf } from "./views.ts";
+import { onNow, openOf, sessionOf } from "./views.ts";
 import { routeActivity, routeMessage } from "./where.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
@@ -77,6 +79,116 @@ const ownMask = (run: Run, user: string, host: string): void => {
         }
       : open
   );
+};
+
+// Self's away status, as the Ircd says it.
+const selfAway = (run: Run, away: { readonly message: string } | null): void => {
+  updateOpen(run, (open) =>
+    open.presence._tag === "Session"
+      ? {
+          ...open,
+          presence: {
+            ...open.presence,
+            away: { _tag: "Known", at: run.at, from: "ircd", value: away },
+          },
+        }
+      : open
+  );
+};
+
+/**
+ * The Ircd confirmed Self away or back, with `306` or `305`, which says no source: it is
+ * known, and reported as Self's `AwayChanged`, which belongs to the Network's own
+ * Timeline, so a Frontend learns of it from the projection.
+ * @param run - The step.
+ * @param away - Away with the message last sent, or `null` for back.
+ */
+const confirmedAway = (run: Run, away: { readonly message: string } | null): void => {
+  const nick = sessionOf(run.state)?.nick;
+
+  if (nick === undefined) {
+    return;
+  }
+
+  run.news.push(
+    routeActivity(run, {
+      _tag: "Activity",
+      activity: { _tag: "AwayChanged", away, nick },
+      at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+      id: { _tag: "Unknown" },
+      live: true,
+    })
+  );
+  selfAway(run, away);
+};
+
+// A `MODE` from Self answers each change it made, by its sign and letter, and a
+// Channel's membership mode by its nick too.
+const modesAnswered = (run: Run, target: string, changes: readonly ModeChange[]): void => {
+  const { prefix } = rulesNow(run);
+  const onChannel = channelTest(run)(target);
+
+  for (const change of changes) {
+    const membership = onChannel && prefix.some(({ mode }) => mode === change.mode);
+
+    answered(run, "MODE", [target], modeAnswer(change, membership));
+  }
+};
+
+// What Self did, live, answers the Line of an action that asked for it, and Self's own
+// `AWAY` says whether Self is away.
+const settled = (run: Run, activity: Activity): void => {
+  switch (activity._tag) {
+    case "TopicChanged": {
+      if (isSelf(run, activity.by)) {
+        answered(run, "TOPIC", [activity.channel]);
+      }
+
+      break;
+    }
+
+    case "Kicked": {
+      if (isSelf(run, activity.by)) {
+        answered(run, "KICK", [activity.channel], nickAnswer(activity.nick));
+      }
+
+      break;
+    }
+
+    case "ModeChanged": {
+      if (isSelf(run, activity.by)) {
+        modesAnswered(run, activity.target, activity.changes);
+      }
+
+      break;
+    }
+
+    case "NickChanged": {
+      if (isSelf(run, activity.from)) {
+        answered(run, "NICK", [activity.to]);
+      }
+
+      break;
+    }
+
+    case "AwayChanged": {
+      if (isSelf(run, activity.nick)) {
+        selfAway(run, activity.away);
+      }
+
+      break;
+    }
+
+    case "Joined":
+    case "Parted":
+    case "Quit": {
+      break;
+    }
+
+    default: {
+      activity satisfies never;
+    }
+  }
 };
 
 const none: ReadonlySet<string> = new Set();
@@ -151,6 +263,7 @@ const fold = (
   const { activity } = meant;
   const selfRenamed = activity._tag === "NickChanged" && isSelf(run, activity.from);
 
+  settled(run, activity);
   foldActivity(run, activity, rulesNow(run), channelTest(run));
 
   if (selfRenamed) {
@@ -246,6 +359,8 @@ const welcome = (run: Run, line: Line): void => {
     presence: {
       _tag: "Session",
       account,
+      // A User who has just registered is not away, until an `AWAY` of ours says so.
+      away: { _tag: "Known", at: run.at, from: "receipt", value: null },
       began: run.at,
       keepalive: { check: Instant.make(run.at + lagAfter), heard: run.at, pinged: false },
       // `001`'s text is for people. Self's mask waits for a structured source, such as
@@ -257,6 +372,8 @@ const welcome = (run: Run, line: Line): void => {
     },
   }));
   run.news.push({ _tag: "SessionBegan", at: run.at, nick });
+  // The Owner's away outlives Sessions: each begins by saying it again.
+  resendAway(run);
   joinWanted(run);
 };
 
@@ -447,6 +564,32 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
       account(run, null);
     },
   ],
+  // `305` and `306` answer our `AWAY`: Self is back, or away with what it last sent.
+  [
+    "305",
+    (run) => {
+      confirmedAway(run, null);
+    },
+  ],
+  [
+    "306",
+    (run) => {
+      confirmedAway(run, { message: openOf(run.state)?.asked ?? "" });
+    },
+  ],
+  // `341 <client> <nick> <channel>`: an invite went out.
+  [
+    "341",
+    (run, line) => {
+      const [, nick, channel] = line.params;
+
+      if (nick === undefined || channel === undefined) {
+        malformed(run, line);
+      } else {
+        answered(run, "INVITE", [nick, channel]);
+      }
+    },
+  ],
   ["331", topicReply],
   ["332", topicReply],
   ["333", topicReply],
@@ -512,16 +655,17 @@ export const interpret = (
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
   if (arrival.answers !== undefined && reply !== undefined) {
-    run.news.push({
-      _tag: "Refused",
-      intent: arrival.answers,
-      reason: { _tag: "Rejected", reply },
-    });
+    refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
   }
 
   if (hasMeaning(command)) {
     means(run, arrival);
   } else if (arrival.live) {
+    // An error numeric no label tied may name what an action of ours named.
+    if (arrival.answers === undefined && arrival.batch === undefined && !line.tags.has("label")) {
+      tieRejection(run, line);
+    }
+
     // History is reported, and moves no machine: it says what was, not what is.
     protocolLine(run, line, raw);
   }

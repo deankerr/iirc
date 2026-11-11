@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "../ids.ts";
-import type { Input, UnsentLine } from "../input.ts";
+import type { Action, Input, UnsentLine } from "../input.ts";
 import { listedMembers } from "../members.ts";
 import type { News } from "../news.ts";
 import { timers } from "../output.ts";
@@ -164,10 +164,55 @@ type Move =
   | { readonly _tag: "Fire"; readonly which: number; readonly early: boolean }
   | { readonly _tag: "Wait"; readonly millis: number }
   | { readonly _tag: "Say"; readonly target: string; readonly text: string }
+  | { readonly _tag: "Act"; readonly action: Action }
   | { readonly _tag: "Read"; readonly target: string | null; readonly read: number }
   | { readonly _tag: "Unfilled"; readonly line: number }
   | { readonly _tag: "Stopping" }
   | { readonly _tag: "Unsent"; readonly count: number; readonly stale: boolean };
+
+const texts = fc.constantFrom("hi", "", "x".repeat(600), "a\r\nb", "two words");
+const names = fc.constantFrom(...channels, ...nicks, "#a b", "a,b", "");
+
+// The Owner's actions, well-formed and not.
+const action: fc.Arbitrary<Action> = fc.oneof(
+  fc.tuple(names, texts).map(([channel, text]) => ({ _tag: "Topic", channel, text }) as const),
+  fc
+    .tuple(names, fc.array(names, { maxLength: 4, minLength: 1 }), fc.option(texts))
+    .map(
+      ([channel, [first = "peer", ...rest], reason]) =>
+        ({ _tag: "Kick", channel, nicks: [first, ...rest], reason }) as const
+    ),
+  fc
+    .tuple(
+      names,
+      fc.array(
+        fc.record({
+          mode: fc.constantFrom("o", "v", "b", "k", "l", "m", "x", "+", ""),
+          param: fc.option(fc.constantFrom("peer", "*!*@h", "5", ":x", "")),
+          set: fc.boolean(),
+        }),
+        { maxLength: 8, minLength: 1 }
+      )
+    )
+    .map(([target, [first, ...rest]]) =>
+      first === undefined
+        ? ({ _tag: "Away", message: null } as const)
+        : ({ _tag: "Mode", changes: [first, ...rest], target } as const)
+    ),
+  fc.tuple(names, names).map(([nick, channel]) => ({ _tag: "Invite", channel, nick }) as const),
+  names.map((nick) => ({ _tag: "Nick", nick }) as const),
+  fc.option(texts).map((message) => ({ _tag: "Away", message }) as const),
+  fc
+    .constantFrom(
+      "WHOIS peer",
+      "CAP LS",
+      ":me PING x",
+      "PRIVMSG #iirc :hi",
+      "",
+      "@+a=b TAGMSG #iirc"
+    )
+    .map((line) => ({ _tag: "Raw", line }) as const)
+);
 
 // The moves of a running Network.
 const running: fc.Arbitrary<Move> = fc.oneof(
@@ -206,7 +251,8 @@ const running: fc.Arbitrary<Move> = fc.oneof(
       .map(([target, text]) => ({ _tag: "Say", target, text }) as const),
     weight: 2,
   },
-  { arbitrary: fc.nat(2).map((which) => ({ _tag: "Unfilled", line: which }) as const), weight: 1 }
+  { arbitrary: fc.nat(2).map((which) => ({ _tag: "Unfilled", line: which }) as const), weight: 1 },
+  { arbitrary: action.map((each) => ({ _tag: "Act", action: each }) as const), weight: 2 }
 );
 
 // And marking Timelines read, and shutting down: a `Stopping` shuts the gate until the next `Started`, and Lines the
@@ -289,8 +335,22 @@ const secrets = [
   { _tag: "AuthenticatePlain", authcid: "a", authzid: "a", credential: CredentialName.make("c") },
 ] as const;
 
+// What the Owner says or does, under the next intent.
+const owned = (
+  fold: Fold,
+  at: Instant,
+  next: Extract<Move, { readonly _tag: "Say" | "Act" }>
+): Input => {
+  fold.intents += 1;
+  const intent = IntentId.make(`i${fold.intents}`);
+
+  return next._tag === "Act"
+    ? { _tag: "Act", action: next.action, at, intent }
+    : { _tag: "Say", at, intent, kind: "Privmsg", target: next.target, text: next.text };
+};
+
 // The input a move makes in the state it meets.
-const inputOf = (fold: Fold, next: Exclude<Move, { readonly _tag: "Read" }>): Input => {
+const inputOf = (fold: Fold, next: Exclude<Move, { readonly _tag: "Read" | "Act" }>): Input => {
   const at = Instant.make(fold.now);
   const current = client.inspect(fold.state).connection ?? ConnectionId.make(1);
 
@@ -351,16 +411,7 @@ const inputOf = (fold: Fold, next: Exclude<Move, { readonly _tag: "Read" }>): In
     }
 
     case "Say": {
-      fold.intents += 1;
-
-      return {
-        _tag: "Say",
-        at,
-        intent: IntentId.make(`i${fold.intents}`),
-        kind: "Privmsg",
-        target: next.target,
-        text: next.text,
-      };
+      return owned(fold, at, next);
     }
 
     case "Unfilled": {
@@ -511,6 +562,20 @@ const check = (fold: Fold, input: Input, step: Step<State>, before: State): void
   checkWhere(step, before);
 };
 
+// The input any move makes in the state it meets.
+const inputFor = (fold: Fold, next: Exclude<Move, { readonly _tag: "Wait" }>): Input => {
+  if (next._tag === "Read") {
+    return {
+      _tag: "Read",
+      at: Instant.make(fold.now),
+      read: Instant.make(epoch + next.read),
+      target: next.target,
+    };
+  }
+
+  return next._tag === "Act" ? owned(fold, Instant.make(fold.now), next) : inputOf(fold, next);
+};
+
 const runMoves = (moves: readonly Move[]): Fold => {
   const fold: Fold = {
     inputs: [],
@@ -530,15 +595,7 @@ const runMoves = (moves: readonly Move[]): Fold => {
       continue;
     }
 
-    const input: Input =
-      next._tag === "Read"
-        ? {
-            _tag: "Read",
-            at: Instant.make(fold.now),
-            read: Instant.make(epoch + next.read),
-            target: next.target,
-          }
-        : inputOf(fold, next);
+    const input = inputFor(fold, next);
 
     const before = fold.state;
     const step = client.step(before, input);

@@ -20,7 +20,10 @@ const known = <T>(value: T, at = t0): Fact<T> => ({ _tag: "Known", at, from: "ir
 
 const unknown = { _tag: "Unknown" } as const;
 
-const channel = (name: string, key = name.toLowerCase()): Marked => ({
+const channel = (
+  name: string,
+  key = name.toLowerCase()
+): Extract<Marked, { readonly _tag: "Channel" }> => ({
   _tag: "Channel",
   key,
   name,
@@ -33,7 +36,7 @@ const direct = (name: string, existing = false): Marked => ({
   name,
 });
 
-const network: Marked = { _tag: "Network" };
+const network = { _tag: "Network" } as const;
 
 const message = (
   where: readonly Where[],
@@ -452,9 +455,9 @@ describe("our Messages' fate", () => {
     const { changes } = fold([
       happened(1, [message([network])]),
       happened(2, [
-        { _tag: "Refused", intent, reason: { _tag: "Unsent" } },
-        { _tag: "Refused", intent, reason: { _tag: "Offline" } },
-        { _tag: "Refused", intent, reason: { _tag: "Rejected", reply: "404" } },
+        { _tag: "Refused", action: undefined, intent, reason: { _tag: "Unsent" } },
+        { _tag: "Refused", action: undefined, intent, reason: { _tag: "Offline" } },
+        { _tag: "Refused", action: undefined, intent, reason: { _tag: "Rejected", reply: "404" } },
         { _tag: "Ignored", reason: { _tag: "UnmatchedEcho" } },
       ]),
     ]);
@@ -500,6 +503,93 @@ describe("our Messages' fate", () => {
       { _tag: "Confirmed", at: { _tag: "Unknown" }, id: { _tag: "Unknown" }, text: "hi" },
       undefined,
     ]);
+  });
+});
+
+describe("our actions' refusals", () => {
+  const topic = { _tag: "Topic", channel: "#iirc" } as const;
+
+  const refused = (
+    reason: Extract<News, { readonly _tag: "Refused" }>["reason"],
+    where: Extract<Where, { readonly _tag: "Network" | "Channel" }>,
+    intent = "a1"
+  ): News => ({
+    _tag: "Refused",
+    action: { attempted: topic, where },
+    intent: IntentId.make(intent),
+    reason,
+  });
+
+  it("places one refused later in the Timeline it belongs to, at the step's time, with no level", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [refused({ _tag: "Rejected", reply: "482" }, channel("#iirc"))], later(5)),
+      happened(3, [refused({ _tag: "Unsent" }, network, "a2")], later(9)),
+    ]);
+
+    const iirc = net(directory).channels.get("#iirc");
+
+    expect(ofTag(changes, "Added").slice(1)).toStrictEqual([
+      {
+        _tag: "Added",
+        content: {
+          _tag: "ActionRefused",
+          at: later(5),
+          attempted: topic,
+          intent: "a1",
+          reason: { _tag: "Rejected", reply: "482" },
+        },
+        intent: undefined,
+        level: undefined,
+        messageId: undefined,
+        network: "libera",
+        position: { at: later(5), n: 0, sequence: 2 },
+        sequence: 2,
+        timeline: iirc,
+      },
+      {
+        _tag: "Added",
+        content: {
+          _tag: "ActionRefused",
+          at: later(9),
+          attempted: topic,
+          intent: "a2",
+          reason: { _tag: "Unsent" },
+        },
+        intent: undefined,
+        level: undefined,
+        messageId: undefined,
+        network: "libera",
+        position: { at: later(9), n: 0, sequence: 3 },
+        sequence: 3,
+        timeline: net(directory).timeline,
+      },
+    ]);
+    expect(ofTag(changes, "Rejected")).toStrictEqual([]);
+    expect(ofTag(changes, "Unsent")).toStrictEqual([]);
+  });
+
+  it("places nothing for one refused in the step that took it, which its answer said", () => {
+    const { changes } = fold([
+      happened(1, [
+        refused({ _tag: "Offline" }, network),
+        refused({ _tag: "Unsendable" }, channel("#iirc")),
+      ]),
+    ]);
+
+    expect(changes.map((change) => change._tag)).toStrictEqual(["Described"]);
+  });
+
+  it("opens the Channel's Timeline when nothing else has yet", () => {
+    const { changes } = fold([
+      happened(1, [refused({ _tag: "Rejected", reply: "482" }, channel("#New", "#new"))]),
+    ]);
+
+    expect(ofTag(changes, "Described").map(({ timeline }) => timeline.name)).toStrictEqual([
+      "libera",
+      "#New",
+    ]);
+    expect(ofTag(changes, "Added")).toHaveLength(1);
   });
 });
 

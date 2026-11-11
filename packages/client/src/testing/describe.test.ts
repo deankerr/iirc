@@ -145,8 +145,34 @@ describe(describeNews, () => {
       "session-ended Upgrading 6697 at=t+0s",
     ],
     [
-      { _tag: "Refused", intent: IntentId.make("i3"), reason: { _tag: "Rejected", reply: "404" } },
+      {
+        _tag: "Refused",
+        action: undefined,
+        intent: IntentId.make("i3"),
+        reason: { _tag: "Rejected", reply: "404" },
+      },
       "refused i3 Rejected 404",
+    ],
+    [
+      {
+        _tag: "Refused",
+        action: {
+          attempted: { _tag: "Kick", channel: "#iirc", nicks: ["a", "b c"] },
+          where: { _tag: "Channel", key: "#iirc", name: "#IIRC" },
+        },
+        intent: IntentId.make("i4"),
+        reason: { _tag: "Unsent" },
+      },
+      'refused i4 Unsent kick=#iirc:a,"b c" in=channel:#iirc:#IIRC',
+    ],
+    [
+      {
+        _tag: "Refused",
+        action: { attempted: { _tag: "Away", away: false }, where: { _tag: "Network" } },
+        intent: IntentId.make("i5"),
+        reason: { _tag: "Offline" },
+      },
+      "refused i5 Offline back in=network",
     ],
   ])("writes %o as %j", (news, text) => {
     expect(describeNews(news, now)).toBe(text);

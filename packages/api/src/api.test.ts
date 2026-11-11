@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { DaemonApi, requestParseOptions } from "./api.ts";
 import {
+  ActRequest,
   CallerIntent,
   Cursor,
   IfSequence,
@@ -55,6 +56,7 @@ describe("the contract", () => {
       "GET /api/timelines/{timeline}",
       "GET /api/timelines/{timeline}/channel",
       "GET /api/timelines/{timeline}/members",
+      "POST /api/networks/{network}/act",
       "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
@@ -114,6 +116,42 @@ describe("the contract", () => {
       say({ kind: "Privmsg", target: "#iirc", text: "two\r\nlines" }),
       say({ kind: "Privmsg", target: "", text: "no target" }),
     ]).toStrictEqual([true, false, false]);
+  });
+
+  it("takes an action whole, and refuses one no Line could carry, or with a field nothing reads", () => {
+    const act = Schema.decodeUnknownResult(ActRequest);
+    const strict = Schema.decodeUnknownResult(ActRequest, requestParseOptions);
+
+    expect(
+      [
+        { action: { _tag: "Topic", channel: "#iirc", text: "" } },
+        { action: { _tag: "Kick", channel: "#iirc", nicks: ["a", "b"], reason: null } },
+        {
+          action: {
+            _tag: "Mode",
+            changes: [{ mode: "o", param: "peer", set: true }],
+            target: "#iirc",
+          },
+          intent: "mine",
+        },
+        { action: { _tag: "Invite", channel: "#iirc", nick: "peer" } },
+        { action: { _tag: "Nick", nick: "other" } },
+        { action: { _tag: "Away", message: null } },
+        { action: { _tag: "Raw", line: "WHOIS peer" } },
+      ].map((each) => act(each)._tag)
+    ).toStrictEqual(Array.from({ length: 7 }, () => "Success"));
+    expect(
+      [
+        { action: { _tag: "Topic", channel: "#iirc", text: "two\r\nlines" } },
+        { action: { _tag: "Kick", channel: "#iirc", nicks: [], reason: null } },
+        { action: { _tag: "Mode", changes: [], target: "#iirc" } },
+        { action: { _tag: "Nick", nick: "" } },
+        { action: { _tag: "Raw", line: "PING a\0" } },
+        { action: { _tag: "Away", message: "a\nb" } },
+        { action: { _tag: "Quit" } },
+      ].map((each) => act(each)._tag)
+    ).toStrictEqual(Array.from({ length: 7 }, () => "Failure"));
+    expect(strict({ action: { _tag: "Nick", extra: 1, nick: "a" } })._tag).toBe("Failure");
   });
 
   it("takes a read up to an instant, of a Target or, with null, the Network's own", () => {

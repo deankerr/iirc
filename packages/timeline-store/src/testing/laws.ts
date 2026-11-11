@@ -112,8 +112,13 @@ const said = (text: string, delivery?: "Pending" | "Unconfirmed"): Content => ({
   text,
 });
 
-// A Message of ours has no level, and anything else said is a Message, as in a Channel.
+// A Message of ours and a refused action of ours have no level, and anything else said
+// is a Message, as in a Channel.
 const levelOf = (content: Content): Level | undefined => {
+  if (content._tag === "ActionRefused") {
+    return undefined;
+  }
+
   if (content._tag !== "Message") {
     return "Activity";
   }
@@ -1124,6 +1129,37 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         );
       }),
     name: "marks our Message Unsent in place, unless it was confirmed",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const intent = IntentId.make("intent-topic");
+
+        const refused: Content = {
+          _tag: "ActionRefused",
+          at: at(3),
+          attempted: { _tag: "Kick", channel: "#a", nicks: ["peer", "other"] },
+          intent,
+          reason: { _tag: "Rejected", reply: "482" },
+        };
+
+        yield* apply(store, 2, [...opened(2), added(2, channel, position(3, 2), refused)]);
+        yield* apply(store, 3, [
+          { _tag: "Unsent", intent, network: libera, sequence: 3 },
+          { _tag: "Rejected", intent, network: libera, reply: "401", sequence: 3 },
+        ]);
+
+        const items = yield* store.locate(libera, 2);
+        const summary = (yield* store.timelines(libera)).find(({ id }) => id === channel);
+
+        yield* same(
+          "the item",
+          items.map((item) => [item.content, item.level, item.changed]),
+          [[refused, undefined, 2]]
+        );
+        yield* same("its Timeline's counts", summary?.unread, noneUnread);
+      }),
+    name: "keeps a refused action as told, with no level, never unread, and no delivery to change",
   },
   {
     check: (store) =>

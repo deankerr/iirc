@@ -28,10 +28,20 @@ export {
   TimerId,
 } from "./ids.ts";
 
-export { CloseReason, Input, SayKind, UnfilledReason, UnsentLine } from "./input.ts";
+export {
+  Action,
+  CloseReason,
+  Input,
+  ModeRequest,
+  SayKind,
+  UnfilledReason,
+  UnsentLine,
+} from "./input.ts";
 
 export type {
+  ActionWhere,
   Activity,
+  Attempted,
   EndReason,
   IgnoredReason,
   Marked,
@@ -39,6 +49,7 @@ export type {
   Named,
   News,
   Ours,
+  RefusedAction,
   RefusedReason,
   Where,
 } from "./news.ts";

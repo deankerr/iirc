@@ -12,11 +12,13 @@ import type { Instant } from "../ids.ts";
 import type { Fact } from "../known.ts";
 import type {
   Activity,
+  Attempted,
   EndReason,
   IgnoredReason,
   Named,
   News,
   Ours,
+  RefusedAction,
   RefusedReason,
   Where,
 } from "../news.ts";
@@ -195,6 +197,49 @@ const writeIgnored = (reason: IgnoredReason): string => {
 const writeRefused = (reason: RefusedReason): string =>
   reason._tag === "Rejected" ? `Rejected ${atom(reason.reply)}` : reason._tag;
 
+// What an action tried, as one attribute: `topic=#iirc`, `kick=#iirc:a,b`,
+// `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `raw=WHOIS`, or
+// `raw` for a Line that did not parse.
+const writeAttempted = (attempted: Attempted): string => {
+  switch (attempted._tag) {
+    case "Topic": {
+      return `topic=${atom(attempted.channel)}`;
+    }
+
+    case "Kick": {
+      return `kick=${atom(attempted.channel)}:${attempted.nicks.map(atom).join(",")}`;
+    }
+
+    case "Mode": {
+      return `mode=${atom(attempted.target)}:${atom(attempted.modes)}`;
+    }
+
+    case "Invite": {
+      return `invite=${atom(attempted.nick)}:${atom(attempted.channel)}`;
+    }
+
+    case "Nick": {
+      return `nick=${atom(attempted.nick)}`;
+    }
+
+    case "Away": {
+      return attempted.away ? "away" : "back";
+    }
+
+    case "Raw": {
+      return attempted.command === null ? "raw" : `raw=${atom(attempted.command)}`;
+    }
+
+    default: {
+      return attempted satisfies never;
+    }
+  }
+};
+
+// An action's refusal says what it tried, and where it belongs.
+const writeAction = (action: RefusedAction | undefined): readonly string[] =>
+  action === undefined ? [] : [writeAttempted(action.attempted), ...writeWhere([action.where])];
+
 const optional = (key: string, value: string | undefined, written = false): readonly string[] => {
   if (value === undefined) {
     return [];
@@ -303,7 +348,12 @@ export const describeNews = (news: News, now: Instant): string => {
     }
 
     case "Refused": {
-      return `refused ${atom(news.intent)} ${writeRefused(news.reason)}`;
+      return words([
+        "refused",
+        atom(news.intent),
+        writeRefused(news.reason),
+        ...writeAction(news.action),
+      ]);
     }
 
     case "SessionBegan": {

@@ -26,6 +26,7 @@ const channelOf = (
   members: readonly (readonly [string, Fact<ReadonlySet<string>>])[]
 ): ChannelView => ({
   casemapping: "rfc1459",
+  chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
   channel: {
     members: new Map(
       members.map(([nick, prefixes]): [string, MemberKnowledge] => [fold(nick), { nick, prefixes }])
@@ -36,6 +37,7 @@ const channelOf = (
     topic: { _tag: "Unknown" },
     wanted: true,
   },
+  chantypes: "#&",
   key: "#iirc",
   ranks: [
     { mode: "q", symbol: "~" },

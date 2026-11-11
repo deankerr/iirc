@@ -133,7 +133,7 @@ const selfOf = (session: InSession | undefined): UserKnowledge | undefined =>
     ? undefined
     : {
         account: session.account,
-        away: unknown,
+        away: session.away,
         mask: session.mask,
         nick: session.nick,
         realname: session.realname,
@@ -240,11 +240,16 @@ export const channelViewOf = (
     users.set(selfKey, self);
   }
 
+  const isupport = open?.isupport ?? new Map<string, string>();
+  const rules = rulesOf(isupport);
+
   return {
     casemapping: state.casemapping,
+    chanmodes: rules.channel,
     channel: known,
+    chantypes: chantypesOf(isupport.get("CHANTYPES")),
     key,
-    ranks: rulesOf(open?.isupport ?? new Map()).prefix,
+    ranks: rules.prefix,
     users,
   };
 };

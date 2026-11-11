@@ -7,8 +7,10 @@ import {
   away,
   cap,
   encode,
+  invite,
   isRejected,
   join,
+  kick,
   maxLineBytes,
   maxTagBytes,
   mode,
@@ -22,9 +24,11 @@ import {
   pong,
   privmsg,
   quit,
+  quote,
   RawParam,
   rawParams,
   tagmsg,
+  topic,
   user,
   who,
   withTags,
@@ -205,6 +209,17 @@ describe("the builders", () => {
     [who("#iirc", "%tcnuhra,1"), "WHO #iirc %tcnuhra,1"],
     [away("lunch"), "AWAY lunch"],
     [away(), "AWAY"],
+    [topic("#iirc", "a new topic"), "TOPIC #iirc :a new topic"],
+    [topic("#iirc", ""), "TOPIC #iirc :"],
+    [kick("#iirc", ["alice"]), "KICK #iirc alice"],
+    [kick("#iirc", ["alice", "bob"], "bye now"), "KICK #iirc alice,bob :bye now"],
+    [kick("#iirc", ["alice"], ""), "KICK #iirc alice"],
+    [invite("alice", "#iirc"), "INVITE alice #iirc"],
+    [mode("#iirc", ["+b", "*!*@a,b"]), "MODE #iirc +b *!*@a,b"],
+    [quote("privmsg #a :hi there"), "PRIVMSG #a :hi there"],
+    [quote("MODE   #a +o :peer"), "MODE #a +o peer"],
+    [quote("@+typing=active TAGMSG #a"), "@+typing=active TAGMSG #a"],
+    [quote("WHOIS peer"), "WHOIS peer"],
   ] as const)("build %#", (built, expected) => {
     expect(wire(built)).toBe(`${expected}\r\n`);
   });
@@ -223,6 +238,25 @@ describe("the builders", () => {
     ["a nick with a source in it", nick("a!b@c"), "InvalidTarget"],
     ["a mechanism with a space", authenticate("PLAIN X"), "InvalidTarget"],
     ["a MODE of two Targets", mode("#a,#b"), "InvalidTarget"],
+    ["a MODE parameter with a space", mode("#a", ["+o", "a b"]), "InvalidParameter"],
+    ["an empty MODE parameter", mode("#a", ["+k", ""]), "InvalidParameter"],
+    ["a MODE parameter starting with a colon", mode("#a", ["+k", ":x"]), "InvalidParameter"],
+    ["a topic with a line break", topic("#a", "hi\r\nQUIT"), "InvalidParameter"],
+    ["a topic of two Channels", topic("#a,#b", "hi"), "InvalidTarget"],
+    ["a KICK of nobody", kick("#a", []), "InvalidTarget"],
+    ["a KICK of a mask", kick("#a", ["a*"]), "InvalidTarget"],
+    ["a KICK of a list in one nick", kick("#a", ["a,b"]), "InvalidTarget"],
+    ["a KICK reason with a NUL", kick("#a", ["a"], "x\0y"), "InvalidParameter"],
+    ["an INVITE of a mask", invite("a!b@c", "#a"), "InvalidTarget"],
+    ["an INVITE to two Channels", invite("a", "#a,#b"), "InvalidTarget"],
+    ["a quoted Line with a line break", quote("PRIVMSG #a :hi\r\nQUIT"), "InvalidParameter"],
+    ["a quoted Line with a NUL", quote("PRIVMSG #a :hi\0"), "InvalidParameter"],
+    ["a quoted Line with a source", quote(":me PRIVMSG #a :hi"), "Unparseable"],
+    ["an empty quoted Line", quote(""), "Unparseable"],
+    ["a quoted Line with no command", quote("@+a=b"), "Unparseable"],
+    ["a quoted Line with a server tag", quote("@time=x PRIVMSG #a :hi"), "InvalidTag"],
+    ["a quoted Line that is not a command", quote("PRIVMSG2 #a :hi"), "InvalidCommand"],
+    ["a quoted Line too long", quote(`PRIVMSG #a :${"x".repeat(510)}`), "TooLong"],
   ] as const)("refuses %s", (_name, built, reason) => {
     expect(built).toStrictEqual({ _tag: "Rejected", reason });
   });
@@ -628,5 +662,33 @@ describe("outbound, given anything", () => {
         { numRuns: 3000 }
       );
     }).not.toThrow();
+  });
+});
+
+// What a quoted Line reads back as, once encoded, or why it does not.
+const readBack = (text: string) => {
+  const built = quote(text);
+  const bytes = isRejected(built) ? built : encode(built);
+
+  return isRejected(bytes)
+    ? bytes
+    : {
+        again: parse(bytes.subarray(0, -2), { _tag: "Utf8Only" }),
+        read: parse(new TextEncoder().encode(text), { _tag: "Utf8Only" }),
+      };
+};
+
+describe(quote, () => {
+  it("never throws, and what it builds reads back as the text read", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200, unit: "grapheme" }), (text) => {
+        const back = readBack(text);
+
+        expect("again" in back ? back.again : back.reason).toStrictEqual(
+          "again" in back ? back.read : back.reason
+        );
+      }),
+      { numRuns: 2000 }
+    );
   });
 });

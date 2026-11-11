@@ -3,7 +3,7 @@
  * directory and changes, ids keep their order, and cursors sort as positions do.
  */
 import { Instant, IntentId, MessageId } from "@iirc/client";
-import type { News, Where } from "@iirc/client";
+import type { ActionWhere, Attempted, News, Where } from "@iirc/client";
 import type { Casemapping } from "@iirc/client/known";
 import { impurity } from "@iirc/client/testing";
 import { casefold } from "@iirc/protocol/casemapping";
@@ -178,8 +178,25 @@ const news: fc.Arbitrary<News> = fc.oneof(
   }),
   fc.record({
     _tag: fc.constant("Refused"),
+    action: fc.option(
+      fc.record({
+        attempted: fc.constantFrom<Attempted>(
+          { _tag: "Topic", channel: "#a" },
+          { _tag: "Nick", nick: "new" },
+          { _tag: "Away", away: true }
+        ),
+        where: where.filter(
+          (each): each is ActionWhere => each._tag === "Network" || each._tag === "Channel"
+        ),
+      }),
+      { nil: undefined }
+    ),
     intent,
-    reason: fc.constantFrom({ _tag: "Unsent" } as const, { _tag: "Offline" } as const),
+    reason: fc.constantFrom(
+      { _tag: "Unsent" } as const,
+      { _tag: "Offline" } as const,
+      { _tag: "Rejected", reply: "482" } as const
+    ),
   }),
   fc.record({ _tag: fc.constant("SessionBegan"), at, nick: fc.constant("iirc") }),
   fc.record({
@@ -362,7 +379,7 @@ describe("the fold", () => {
     );
   });
 
-  it("gives a Message Self said no level, and every other item one", () => {
+  it("gives a Message Self said and a refused action no level, and every other item one", () => {
     fc.assert(
       fc.property(steps, (all) => {
         const { changes } = foldAll(all);
@@ -376,7 +393,10 @@ describe("the fold", () => {
             }
 
             const said = told[change.position.n];
-            const ours = said?._tag === "Message" && (said.self || said.ours !== undefined);
+
+            const ours =
+              (said?._tag === "Message" && (said.self || said.ours !== undefined)) ||
+              said?._tag === "Refused";
 
             expect(change.level === undefined).toBe(ours);
           }

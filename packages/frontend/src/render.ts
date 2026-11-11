@@ -6,7 +6,14 @@
  *
  * @packageDocumentation
  */
-import type { Activity, Delivery as WireDelivery, EndReason, ItemContent } from "@iirc/api";
+import type {
+  ActionRequest,
+  Activity,
+  Attempted,
+  Delivery as WireDelivery,
+  EndReason,
+  ItemContent,
+} from "@iirc/api";
 import { casefold } from "@iirc/protocol/casemapping";
 import { parseFormatting, stripFormatting } from "@iirc/protocol/format";
 import type { Style } from "@iirc/protocol/format";
@@ -307,7 +314,8 @@ export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rej
 
 /**
  * One item as a line: a Message, by its sender, with its text and, for one of ours, its
- * delivery, or a description of an Activity or a Session's start or end.
+ * delivery, or a description of an Activity, a Session's start or end, or an action of
+ * ours that was refused, whose tone is `Refused`.
  */
 export type Line =
   | {
@@ -322,7 +330,7 @@ export type Line =
     }
   | {
       readonly _tag: "Description";
-      readonly tone: "Activity" | "Session";
+      readonly tone: "Activity" | "Session" | "Refused";
       readonly parts: readonly Part[];
     };
 
@@ -428,6 +436,147 @@ const describeActivity = (activity: Activity): readonly Part[] => {
     }
   }
 };
+
+/**
+ * What an action asked for comes to, in short, as the Client says what an action tried:
+ * its kind and the names it was given, a mode change by its signs and letters.
+ * @param action - The action, as `act` takes it.
+ * @returns What it tried.
+ */
+export const requested = (action: ActionRequest): Attempted => {
+  switch (action._tag) {
+    case "Topic": {
+      return { _tag: "Topic", channel: action.channel };
+    }
+
+    case "Kick": {
+      return { _tag: "Kick", channel: action.channel, nicks: action.nicks };
+    }
+
+    case "Mode": {
+      let modes = "";
+      let sign: boolean | undefined;
+
+      for (const change of action.changes) {
+        modes += change.set === sign ? change.mode : `${change.set ? "+" : "-"}${change.mode}`;
+        sign = change.set;
+      }
+
+      return { _tag: "Mode", modes, target: action.target };
+    }
+
+    case "Invite": {
+      return { _tag: "Invite", channel: action.channel, nick: action.nick };
+    }
+
+    case "Nick": {
+      return { _tag: "Nick", nick: action.nick };
+    }
+
+    case "Away": {
+      return { _tag: "Away", away: action.message !== null && action.message !== "" };
+    }
+
+    case "Raw": {
+      const [command = ""] = action.line.replace(/^@\S*\s+/u, "").split(" ");
+
+      return { _tag: "Raw", command: command === "" ? null : command.toUpperCase() };
+    }
+
+    default: {
+      return action satisfies never;
+    }
+  }
+};
+
+/**
+ * What an action tried, as parts: `your topic change for #iirc`.
+ * @param attempted - What it tried.
+ * @returns Its parts.
+ */
+const attemptedParts = (attempted: Attempted): readonly Part[] => {
+  switch (attempted._tag) {
+    case "Topic": {
+      return [words("Your topic change for "), name(attempted.channel)];
+    }
+
+    case "Kick": {
+      return [
+        words("Your kick of "),
+        ...attempted.nicks.flatMap((nick, index) =>
+          index === 0 ? [nickPart(nick)] : [words(", "), nickPart(nick)]
+        ),
+        words(" from "),
+        name(attempted.channel),
+      ];
+    }
+
+    case "Mode": {
+      return [
+        words("Your mode change "),
+        name(attempted.modes),
+        words(" on "),
+        name(attempted.target),
+      ];
+    }
+
+    case "Invite": {
+      return [
+        words("Your invite of "),
+        nickPart(attempted.nick),
+        words(" to "),
+        name(attempted.channel),
+      ];
+    }
+
+    case "Nick": {
+      return [words("Your nick change to "), nickPart(attempted.nick)];
+    }
+
+    case "Away": {
+      return [words(attempted.away ? "Marking you away" : "Marking you back")];
+    }
+
+    case "Raw": {
+      return attempted.command === null
+        ? [words("Your raw line")]
+        : [words("Your raw "), name(attempted.command)];
+    }
+
+    default: {
+      return attempted satisfies never;
+    }
+  }
+};
+
+/**
+ * What an action tried, as plain text, its names contained: `Your topic change for #iirc`.
+ * @param attempted - What it tried.
+ * @returns The words.
+ */
+export const attemptedText = (attempted: Attempted): string =>
+  attemptedParts(attempted)
+    .map((part) => {
+      switch (part._tag) {
+        case "Words":
+        case "Name": {
+          return part.text;
+        }
+
+        case "Nick": {
+          return part.nick;
+        }
+
+        case "Said": {
+          return part.inlines.map((inline) => inline.text).join("");
+        }
+
+        default: {
+          return part satisfies never;
+        }
+      }
+    })
+    .join("");
 
 const closeReasons: Readonly<Record<Extract<EndReason, { _tag: "Closed" }>["reason"], string>> = {
   Ended: "the Ircd closed the connection",
@@ -563,6 +712,23 @@ export const lineOf = (content: ItemContent): Line => {
         _tag: "Description",
         parts: [words(`Could not connect: ${endReason(content.reason)}`)],
         tone: "Session",
+      };
+    }
+
+    case "ActionRefused": {
+      const { reason } = content;
+
+      return {
+        _tag: "Description",
+        parts: [
+          ...attemptedParts(content.attempted),
+          words(
+            reason._tag === "Rejected"
+              ? ` was refused (${contained(reason.reply)})`
+              : " was not sent: its connection ended first"
+          ),
+        ],
+        tone: "Refused",
       };
     }
 

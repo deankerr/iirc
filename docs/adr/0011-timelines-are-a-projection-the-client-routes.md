@@ -5,6 +5,7 @@ A Timeline is derived from News and kept in a derived store the Daemon can delet
 ## Consequences
 
 - Message and Activity News carries `where`: the folded keys of the Timelines it touches. A `Quit` or a `NickChanged` lists every Channel the User shared with Self, and their Direct Message Timeline if there is one.
+- A `Refused` for an Owner's action, which has no Message to mark, carries the one Timeline it belongs to and what it tried, so the projection shows the refusal there, and a Frontend never reads News for it.
 - The Daemon groups Direct Messages by the other participant, for every Frontend alike.
 - A Timeline has an opaque id, given when it is first seen and stable across rebuilds. No name a Network chose becomes a key or a path, and a later Channel rename keeps the id.
 - A Direct Message Timeline follows its partner's nick changes that Self can see, as WeeChat renames a private buffer. IRC's floor gives no better identity. Someone else who later takes the old nick starts a Timeline of their own.

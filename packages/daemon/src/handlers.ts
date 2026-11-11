@@ -358,6 +358,21 @@ const networks = HttpApiBuilder.group(
             );
         })
       )
+      .handle("act", ({ params, payload }) =>
+        Effect.gen(function* () {
+          const intent = payload.intent ?? (yield* intentId);
+
+          return yield* runtime
+            .act(NetworkId.make(params.network), { action: payload.action, intent })
+            .pipe(
+              Effect.catchTags({
+                NetworkStopped: (error) =>
+                  Effect.fail(networkStopped(params.network, error, intent)),
+                UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
+              })
+            );
+        })
+      )
       .handle("said", ({ params }) =>
         runtime.said(NetworkId.make(params.network), params.intent).pipe(
           Effect.map(

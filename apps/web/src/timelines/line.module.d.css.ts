@@ -24,6 +24,7 @@ declare const styles: {
   readonly nick7: string;
   readonly nick8: string;
   readonly nick9: string;
+  readonly refused: string;
   readonly sender: string;
   readonly session: string;
   readonly text: string;

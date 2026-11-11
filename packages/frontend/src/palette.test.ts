@@ -35,6 +35,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
 
 const sidebar: readonly SidebarNetwork[] = [
   {
+    away: { _tag: "Unknown" },
     connection: { _tag: "Connected", nick: "dean", since: 1 },
     network: libera,
     reading: false,
@@ -69,6 +70,7 @@ const inChannel: CommandContext = {
     network: libera,
     timeline: channel,
   },
+  head: undefined,
   open: channel,
   panes: 1,
   session: true,
@@ -170,6 +172,20 @@ describe("the palette's entries", () => {
         "command:say.notice",
         "command:channels.join",
         "command:channels.part",
+        "command:act.topic",
+        "command:act.kick",
+        "command:act.mode",
+        "command:act.op",
+        "command:act.deop",
+        "command:act.voice",
+        "command:act.devoice",
+        "command:act.ban",
+        "command:act.unban",
+        "command:act.invite",
+        "command:act.away",
+        "command:act.back",
+        "command:act.nick",
+        "command:act.quote",
         "command:options.set",
         "command:options.unset",
         "command:network.add",
@@ -205,8 +221,8 @@ describe("the palette's entries", () => {
       alias: first(sections(listing(), "prev", [])),
       // `iirc` starts no name, but starts a word of `#iirc`.
       iirc: first(sections(listing(), "iirc", [])),
-      // `nick` starts the last word of an option's name.
-      nick: first(sections(listing(), "nick", [])),
+      // `nicks` starts the last word of an option's name, and no command's.
+      nick: first(sections(listing(), "nicks", [])),
       // Matching nothing, nothing is listed.
       none: sections(listing(), "zzzz", []),
       // `nxt` is only in `next` as characters in order.

@@ -174,6 +174,10 @@ const windowOf = (
 
 const SignInBody = Schema.fromJsonString(Schema.Struct({ key: Schema.String }));
 
+const ActBody = Schema.fromJsonString(
+  Schema.Struct({ action: Schema.Unknown, intent: Schema.String })
+);
+
 const SayBody = Schema.fromJsonString(
   Schema.Struct({
     intent: Schema.String,
@@ -253,6 +257,7 @@ export const fakeDaemon = () => {
 
   const followers: Follower[] = [];
   const says: SaidToFake[] = [];
+  const acts: (typeof ActBody.Type)[] = [];
   const journaled = new Map<string, number>();
   const answers: SayAnswer[] = [];
   const late: string[] = [];
@@ -272,6 +277,8 @@ export const fakeDaemon = () => {
   const daemon = {
     /** How many requests that never began their answer were given up. */
     abandoned: 0,
+    /** Each `act` asked for, in order, refused or not, answered as `say`s are. */
+    acts,
     /** Each Channel behind a Channel Timeline, by its id, which `channel` and `members` read. */
     channels: new Map<string, FakeChannel>(),
     /** Each read of a Channel's head, by its Timeline. */
@@ -347,6 +354,8 @@ export const fakeDaemon = () => {
     sayAnswers: answers,
     /** Each `say` asked for, in order, refused or not. */
     says,
+    /** Self on each Network, as `known` gives it: none until a test says. */
+    selves: new Map<string, (typeof Knowledge.Encoded)["self"]>(),
     /** Each Network's connection, as `known` gives it. */
     sessions: new Map<string, (typeof Knowledge.Encoded)["session"]>([
       ["libera", { _tag: "Registered", ircd: "ircd.test", since: 1 }],
@@ -646,7 +655,7 @@ export const fakeDaemon = () => {
           channels: [],
           chantypes,
           declared,
-          self: null,
+          self: daemon.selves.get(known.network ?? "") ?? null,
           session,
           users: [],
         })
@@ -699,6 +708,52 @@ export const fakeDaemon = () => {
     timelineRoute(url, init) ??
     new Response(null, { status: 404 });
 
+  /**
+   * Answers a `say` or an `act` as the next of `sayAnswers` says: journaled at the next
+   * step and done there or refused as `Offline`, one of the API's errors, or no answer.
+   * @param intent - Its intent.
+   * @param done - What it answers when done: `Said` or `Acted`.
+   * @returns The answer.
+   */
+  const stepped = (intent: string, done: "Said" | "Acted"): Response => {
+    const answered = daemon.sayAnswers.shift() ?? "Said";
+
+    if (answered === "Down" || answered === "Lost") {
+      if (answered === "Lost") {
+        daemon.late.push(intent);
+      }
+
+      throw new TypeError("fetch failed");
+    }
+
+    if (answered === "UnknownNetwork") {
+      return json(404, { _tag: "UnknownNetwork", network: "libera" });
+    }
+
+    if (answered !== "NetworkStopped") {
+      daemon.journaled.set(intent, daemon.nextSequence);
+      daemon.nextSequence += 1;
+    }
+
+    const sequence = daemon.nextSequence - 1;
+
+    if (answered === "Said") {
+      return json(200, { _tag: done, intent, sequence });
+    }
+
+    if (answered === "Offline") {
+      return json(200, { _tag: "Refused", intent, reason: { _tag: "Offline" }, sequence });
+    }
+
+    return json(503, {
+      _tag: "NetworkStopped",
+      intent,
+      network: "libera",
+      outcome: "Uncertain",
+      reason: "stopped",
+    });
+  };
+
   const answer = async (url: URL, init: RequestInit = {}): Promise<Response> => {
     const route = `${init.method ?? "GET"} ${url.pathname}`;
 
@@ -747,52 +802,28 @@ export const fakeDaemon = () => {
         return await markRead(init);
       }
 
+      case "POST /api/networks/libera/act": {
+        if (!daemon.signedIn) {
+          return json(401, { _tag: "Unauthorized" });
+        }
+
+        const body = Schema.decodeSync(ActBody)(await new Response(init.body).text());
+
+        daemon.acts.push(body);
+
+        return stepped(body.intent, "Acted");
+      }
+
       case "POST /api/networks/libera/say": {
         if (!daemon.signedIn) {
           return json(401, { _tag: "Unauthorized" });
         }
 
         const body = Schema.decodeSync(SayBody)(await new Response(init.body).text());
-        const answer = daemon.sayAnswers.shift() ?? "Said";
 
         daemon.says.push(body);
 
-        if (answer === "Down") {
-          throw new TypeError("fetch failed");
-        }
-
-        if (answer === "Lost") {
-          daemon.late.push(body.intent);
-          throw new TypeError("fetch failed");
-        }
-
-        if (answer === "UnknownNetwork") {
-          return json(404, { _tag: "UnknownNetwork", network: "libera" });
-        }
-
-        if (answer !== "NetworkStopped") {
-          daemon.journaled.set(body.intent, daemon.nextSequence);
-          daemon.nextSequence += 1;
-        }
-
-        if (answer === "Said" || answer === "Offline") {
-          const sequence = daemon.nextSequence - 1;
-
-          return json(
-            200,
-            answer === "Said"
-              ? { _tag: "Said", intent: body.intent, sequence }
-              : { _tag: "Refused", intent: body.intent, reason: { _tag: "Offline" }, sequence }
-          );
-        }
-
-        return json(503, {
-          _tag: "NetworkStopped",
-          intent: body.intent,
-          network: "libera",
-          outcome: "Uncertain",
-          reason: "stopped",
-        });
+        return stepped(body.intent, "Said");
       }
 
       default: {

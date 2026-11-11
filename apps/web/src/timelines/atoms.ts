@@ -147,7 +147,12 @@ const request = (read: Read) =>
       case "Status": {
         const known = yield* client.networks.known({ params: { network: read.network } });
 
-        return { _tag: "StatusRead", network: read.network, session: known.session } as const;
+        return {
+          _tag: "StatusRead",
+          network: read.network,
+          self: known.self,
+          session: known.session,
+        } as const;
       }
 
       case "Latest": {

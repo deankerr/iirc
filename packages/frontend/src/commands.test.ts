@@ -1,8 +1,9 @@
-import { NetworkId, ReadRequest, TimelineId } from "@iirc/api";
+import { ChannelHeader, NetworkId, ReadRequest, TimelineId } from "@iirc/api";
+import type { ActionRequest } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { commandNamed, commands, interpret, unmet } from "./commands.ts";
+import { commandNamed, commands, interpret, typesCredential, unmet } from "./commands.ts";
 import type { CommandContext, Focus, MarkRead, Unseen } from "./commands.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
@@ -17,7 +18,7 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   timeline,
 });
 
-const around = { open: undefined, panes: 1, shown: [], timelines: [], unread: [] };
+const around = { head: undefined, open: undefined, panes: 1, shown: [], timelines: [], unread: [] };
 const inChannel: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: true };
 const inDirect: CommandContext = { ...around, focus: focus("Direct", "peer"), session: true };
 const inNetwork: CommandContext = { ...around, focus: focus("Network", "libera"), session: true };
@@ -207,6 +208,20 @@ describe("reading a line", () => {
     expect(
       Object.fromEntries(commands.map((one) => [one.id, one.arguments] as const))
     ).toStrictEqual({
+      "act.away": "Optional",
+      "act.back": "None",
+      "act.ban": "Required",
+      "act.deop": "Required",
+      "act.devoice": "Required",
+      "act.invite": "Required",
+      "act.kick": "Required",
+      "act.mode": "Required",
+      "act.nick": "Required",
+      "act.op": "Required",
+      "act.quote": "Required",
+      "act.topic": "Optional",
+      "act.unban": "Required",
+      "act.voice": "Required",
       "channels.join": "Required",
       "channels.part": "Optional",
       "composer.focus": "None",
@@ -394,6 +409,319 @@ describe("the Panes", () => {
       swap: [{ _tag: "Swap", direction: "Down" }],
       trailing: "/zoom takes nothing after it.",
       zoom: [{ _tag: "Zoom" }],
+    });
+  });
+});
+
+const headOf = (
+  options: {
+    readonly topic?: (typeof ChannelHeader.Encoded)["topic"];
+    readonly ranks?: (typeof ChannelHeader.Encoded)["ranks"];
+    readonly chanmodes?: (typeof ChannelHeader.Encoded)["chanmodes"];
+    readonly chantypes?: string;
+  } = {}
+) =>
+  Schema.decodeSync(ChannelHeader)({
+    chanmodes: options.chanmodes ?? { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
+    chantypes: options.chantypes ?? "#&",
+    members: 2,
+    modes: { _tag: "Unknown" },
+    name: "#iirc",
+    network: "libera",
+    ranks: options.ranks ?? [
+      { mode: "o", symbol: "@" },
+      { mode: "v", symbol: "+" },
+    ],
+    standing: "Joined",
+    timeline,
+    topic: options.topic ?? {
+      _tag: "Known",
+      at: 1,
+      from: "ircd",
+      value: { setAt: null, setBy: null, text: "the \u0002old\u0002 topic" },
+    },
+  });
+
+const acting: CommandContext = { ...inChannel, head: headOf() };
+
+const act = (action: ActionRequest) => ({
+  _tag: "Parsed",
+  value: [{ _tag: "Act", action, network }],
+});
+
+const words = (line: string, context = acting) => {
+  const read = interpret(line, context);
+
+  return read._tag === "Invalid" ? read.message : read.value;
+};
+
+describe("acting on a Network", () => {
+  it("sets the topic exactly, clears it with -delete, and with nothing starts it for editing", () => {
+    expect({
+      clear: interpret("/topic -delete", acting),
+      edit: interpret("/topic", acting),
+      none: interpret("/topic", {
+        ...acting,
+        head: headOf({ topic: { _tag: "Known", at: 1, from: "ircd", value: null } }),
+      }),
+      set: interpret("/topic  a  new topic ", acting),
+      stale: interpret("/topic", {
+        ...acting,
+        head: headOf({
+          topic: { _tag: "Stale", since: 1, was: { setAt: null, setBy: null, text: "was" } },
+        }),
+      }),
+      unknown: message("/topic", { ...acting, head: headOf({ topic: { _tag: "Unknown" } }) }),
+      unread: message("/topic", inChannel),
+    }).toStrictEqual({
+      clear: act({ _tag: "Topic", channel: "#iirc", text: "" }),
+      edit: {
+        _tag: "Parsed",
+        value: [{ _tag: "FocusComposer", text: "/topic the \u0002old\u0002 topic" }],
+      },
+      none: { _tag: "Parsed", value: [{ _tag: "FocusComposer", text: "/topic " }] },
+      set: act({ _tag: "Topic", channel: "#iirc", text: " a  new topic " }),
+      stale: { _tag: "Parsed", value: [{ _tag: "FocusComposer", text: "/topic was" }] },
+      unknown:
+        "The topic of #iirc is not known yet. Give the new topic: /topic [<text> | -delete].",
+      unread: "The topic of #iirc is not known yet. Give the new topic: /topic [<text> | -delete].",
+    });
+  });
+
+  it("kicks nicks, comma-separated, with the rest of the line as the reason", () => {
+    expect({
+      empty: words("/kick a,,b"),
+      none: words("/kick"),
+      one: interpret("/kick peer", acting),
+      reason: interpret("/kick a,b  go away", acting),
+    }).toStrictEqual({
+      empty: 'Give nicks separated by single commas, not "a,,b".',
+      none: "Kick whom? /kick <nick>[,<nick>…] [reason]",
+      one: act({ _tag: "Kick", channel: "#iirc", nicks: ["peer"], reason: null }),
+      reason: act({ _tag: "Kick", channel: "#iirc", nicks: ["a", "b"], reason: " go away" }),
+    });
+  });
+
+  it("parses modes into changes, each taking a parameter as PREFIX and CHANMODES say", () => {
+    expect({
+      ban: words("/mode +b"),
+      extra: words("/mode +m x"),
+      many: interpret("/mode +ov-l+k a b key", acting),
+      missing: words("/mode +o"),
+      named: interpret("/mode #other -k+l key 5", acting),
+      self: interpret("/mode iirc +i-w", acting),
+      selfParams: words("/mode iirc +i x"),
+      unknownLetter: words("/mode +q"),
+      unsigned: words("/mode #iirc o peer"),
+    }).toStrictEqual({
+      ban: "+b needs a parameter. /mode [target] <changes> [parameters…]",
+      extra: "Nothing takes x. /mode [target] <changes> [parameters…]",
+      many: act({
+        _tag: "Mode",
+        changes: [
+          { mode: "o", param: "a", set: true },
+          { mode: "v", param: "b", set: true },
+          { mode: "l", param: null, set: false },
+          { mode: "k", param: "key", set: true },
+        ],
+        target: "#iirc",
+      }),
+      missing: "+o needs a parameter. /mode [target] <changes> [parameters…]",
+      named: act({
+        _tag: "Mode",
+        changes: [
+          { mode: "k", param: "key", set: false },
+          { mode: "l", param: "5", set: true },
+        ],
+        target: "#other",
+      }),
+      self: act({
+        _tag: "Mode",
+        changes: [
+          { mode: "i", param: null, set: true },
+          { mode: "w", param: null, set: false },
+        ],
+        target: "iirc",
+      }),
+      selfParams: "Self's modes take no parameters here. Use /quote MODE iirc … for that.",
+      unknownLetter: "libera has no Channel mode q, as its CHANMODES and PREFIX say.",
+      unsigned: '"o" is not a mode change: give signs and letters, such as +o or -v+l.',
+    });
+  });
+
+  it("takes a first word as a `+` Channel only where CHANTYPES has `+` and changes follow", () => {
+    const plus = { ...acting, head: headOf({ chantypes: "#&+!" }) };
+
+    expect({
+      explicit: interpret("/mode +local +m", plus),
+      focused: interpret("/mode +m", plus),
+      focusedParam: interpret("/mode +l 5", plus),
+      noPlus: words("/mode +local +m"),
+    }).toStrictEqual({
+      explicit: act({
+        _tag: "Mode",
+        changes: [{ mode: "m", param: null, set: true }],
+        target: "+local",
+      }),
+      focused: act({
+        _tag: "Mode",
+        changes: [{ mode: "m", param: null, set: true }],
+        target: "#iirc",
+      }),
+      focusedParam: act({
+        _tag: "Mode",
+        changes: [{ mode: "l", param: "5", set: true }],
+        target: "#iirc",
+      }),
+      noPlus: "+o needs a parameter. /mode [target] <changes> [parameters…]",
+    });
+  });
+
+  it("refuses a raw PASS, AUTHENTICATE, or OPER, by either name, in any case", () => {
+    expect([
+      words("/quote PASS x", inNetwork),
+      words("/Raw authenticate PLAIN", inNetwork),
+      words("/quote OPER admin pw", inNetwork),
+      typesCredential("/rAw @+a=b oPeR admin pw"),
+      typesCredential("/QUOTE Pass x"),
+      typesCredential("/raw @+a=b :me AUTHENTICATE +"),
+      typesCredential("/quote PRIVMSG #a :pass"),
+      typesCredential("//quote PASS x"),
+    ]).toStrictEqual([
+      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("needs the Network's rules for a Channel's modes, and a target outside a Channel", () => {
+    expect({
+      fromNetwork: words("/mode +m", { ...inNetwork, head: undefined }),
+      unread: words("/mode +m", inChannel),
+    }).toStrictEqual({
+      fromNetwork:
+        "Name whose modes to change, or open the Channel. /mode [target] <changes> [parameters…]",
+      unread:
+        "The modes libera has are not known yet: open a Channel on it, wait for its head to be read, and try again.",
+    });
+  });
+
+  it("gives and takes ranks as Mode, and says when the Network's PREFIX has no such rank", () => {
+    const noVoice = { ...acting, head: headOf({ ranks: [{ mode: "o", symbol: "@" }] }) };
+
+    expect({
+      deop: interpret("/deop a", acting),
+      devoice: interpret("/devoice a", acting),
+      noVoice: words("/voice peer", noVoice),
+      none: words("/op"),
+      op: interpret("/op a b,c", acting),
+      voice: interpret("/voice peer", acting),
+    }).toStrictEqual({
+      deop: act({
+        _tag: "Mode",
+        changes: [{ mode: "o", param: "a", set: false }],
+        target: "#iirc",
+      }),
+      devoice: act({
+        _tag: "Mode",
+        changes: [{ mode: "v", param: "a", set: false }],
+        target: "#iirc",
+      }),
+      noVoice: "libera has no voice rank (v): its PREFIX gives @ (o).",
+      none: "Whom? /op <nick>…",
+      op: act({
+        _tag: "Mode",
+        changes: [
+          { mode: "o", param: "a", set: true },
+          { mode: "o", param: "b", set: true },
+          { mode: "o", param: "c", set: true },
+        ],
+        target: "#iirc",
+      }),
+      voice: act({
+        _tag: "Mode",
+        changes: [{ mode: "v", param: "peer", set: true }],
+        target: "#iirc",
+      }),
+    });
+  });
+
+  it("bans a bare nick as nick!*@*, and a mask as given", () => {
+    const noBans = {
+      ...acting,
+      head: headOf({ chanmodes: { always: "k", flags: "imnpst", list: "", whenSet: "l" } }),
+    };
+
+    expect({
+      ban: interpret("/ban peer *!*@bad.test", acting),
+      noBans: words("/ban peer", noBans),
+      unban: interpret("/unban *!*@bad.test", acting),
+    }).toStrictEqual({
+      ban: act({
+        _tag: "Mode",
+        changes: [
+          { mode: "b", param: "peer!*@*", set: true },
+          { mode: "b", param: "*!*@bad.test", set: true },
+        ],
+        target: "#iirc",
+      }),
+      noBans: "libera has no ban list (b) in its CHANMODES.",
+      unban: act({
+        _tag: "Mode",
+        changes: [{ mode: "b", param: "*!*@bad.test", set: false }],
+        target: "#iirc",
+      }),
+    });
+  });
+
+  it("invites to the open Channel or one named, sets away and back, a nick, and a raw Line", () => {
+    expect({
+      away: interpret("/away gone fishing", acting),
+      awayNone: interpret("/away", inNetwork),
+      back: interpret("/back", inNetwork),
+      backWords: words("/back now"),
+      invite: interpret("/invite peer", acting),
+      inviteFromNetwork: words("/invite peer", inNetwork),
+      inviteNamed: interpret("/invite peer #other", inNetwork),
+      nick: interpret("/nick other", inNetwork),
+      nickTwo: words("/nick a b"),
+      quote: interpret("/quote WHOIS peer", inNetwork),
+      quoteNone: words("/quote "),
+      raw: interpret("/raw PING x", inNetwork),
+    }).toStrictEqual({
+      away: act({ _tag: "Away", message: "gone fishing" }),
+      awayNone: act({ _tag: "Away", message: null }),
+      back: act({ _tag: "Away", message: null }),
+      backWords: "/back takes nothing after it. To be away with a message, use /away <message>.",
+      invite: act({ _tag: "Invite", channel: "#iirc", nick: "peer" }),
+      inviteFromNetwork: "To which Channel? /invite <nick> <channel>, or open the Channel.",
+      inviteNamed: act({ _tag: "Invite", channel: "#other", nick: "peer" }),
+      nick: act({ _tag: "Nick", nick: "other" }),
+      nickTwo: 'Give one nick, not "a b".',
+      quote: act({ _tag: "Raw", line: "WHOIS peer" }),
+      quoteNone: "Send what? /quote <raw line>",
+      raw: act({ _tag: "Raw", line: "PING x" }),
+    });
+  });
+
+  it("acts only where it can: a Channel's commands in a Channel, and with a Session but for away", () => {
+    expect({
+      awayOffline: interpret("/away brb", offline),
+      kickInDirect: message("/kick peer", inDirect),
+      kickOffline: message("/kick peer", offline),
+      nickOffline: message("/nick other", offline),
+      topicInNetwork: message("/topic hi", inNetwork),
+    }).toStrictEqual({
+      awayOffline: act({ _tag: "Away", message: "brb" }),
+      kickInDirect: "Open a Channel first.",
+      kickOffline: "libera is not connected, so nothing can be said there now.",
+      nickOffline: "libera is not connected, so nothing can be said there now.",
+      topicInNetwork: "Open a Channel first.",
     });
   });
 });
