@@ -24,6 +24,7 @@ import { ApiKeys } from "./keys.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
 import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
+import { layerUiConfiguration } from "./ui.ts";
 
 /** What a Daemon needs besides where to listen. */
 export interface DaemonOptions {
@@ -149,8 +150,11 @@ const layerCore = (options: DaemonOptions) => {
     )
   );
 
+  // The `ui` options are folded from the Journal's Changes, beside the Runtime.
+  const owned = Layer.merge(timelines, layerUiConfiguration);
+
   return Layer.mergeAll(
-    timelines.pipe(Layer.provideMerge(runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)))),
+    owned.pipe(Layer.provideMerge(runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)))),
     access,
     heartbeat
   ).pipe(Layer.provide(dataDirectory(dataDir)));

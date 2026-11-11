@@ -160,6 +160,13 @@ const readEvents = (response: Response, enough: (events: readonly Sse[]) => bool
     return events;
   });
 
+/**
+ * A response's body, as text.
+ * @param response - The response.
+ * @returns Its text.
+ */
+const textOf = (response: Response) => Effect.promise(async () => await response.text());
+
 const happened = (events: readonly Sse[]) => events.filter((event) => event.event === "happened");
 
 const json = (body: string): RequestInit => ({
@@ -592,6 +599,75 @@ describe("the API over a real server", () => {
     expect(
       [result.credential[1], result.notJson[1]].map((body) => String(body).includes(secret))
     ).toStrictEqual([false, false]);
+  });
+
+  it("sets a ui option over the wire, refuses an option it has not and a value it cannot take, and streams the options", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        const first = yield* Effect.flatMap(served.request("/api/ui/changes"), (response) =>
+          readEvents(response, (events) => events.some((event) => event.event === "changed"))
+        );
+
+        const set = yield* served.request("/api/ui/time?ifSequence=0", {
+          method: "PUT",
+          ...json('{"value":"HH:mm:ss"}'),
+        });
+
+        const stale = yield* served.request("/api/ui/time?ifSequence=0", { method: "DELETE" });
+
+        const unknown = yield* served.request("/api/ui/palette", {
+          method: "PUT",
+          ...json('{"value":"dusk"}'),
+        });
+
+        const badValue = yield* served.request("/api/ui/activity", {
+          method: "PUT",
+          ...json('{"value":"loud"}'),
+        });
+
+        const resumed = yield* Effect.flatMap(
+          served.request("/api/ui/changes", { headers: { "last-event-id": "0" } }),
+          (response) =>
+            readEvents(response, (events) => events.some((event) => event.event === "changed"))
+        );
+
+        return {
+          badValue: [badValue.status, yield* textOf(badValue)],
+          first: first.filter((event) => event.event === "changed"),
+          resumed: resumed.filter((event) => event.event === "changed"),
+          set: [set.status, yield* textOf(set)],
+          stale: [stale.status, yield* textOf(stale)],
+          unknown: [
+            unknown.status,
+            (yield* textOf(unknown)).includes('"path":["params","option"]'),
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      badValue: [
+        400,
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.activity","path":["payload","value"]}]}',
+      ],
+      first: [
+        {
+          data: '{"options":{"activity":"all","theme":"system","time":"HH:mm"},"sequence":0}',
+          event: "changed",
+          id: "0",
+        },
+      ],
+      resumed: [
+        {
+          data: '{"options":{"activity":"all","theme":"system","time":"HH:mm:ss"},"sequence":1}',
+          event: "changed",
+          id: "1",
+        },
+      ],
+      set: [200, '{"sequence":1}'],
+      stale: [409, '{"_tag":"UiChanged","sequence":1}'],
+      unknown: [400, true],
+    });
   });
 
   it("finds a dotted intent through `said`, and refuses the two that URL handling collapses", async () => {

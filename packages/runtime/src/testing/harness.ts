@@ -164,11 +164,25 @@ export const awaitRecord = (
  */
 export const outline = (journal: JournalService): Effect.Effect<readonly string[], JournalFailed> =>
   Effect.map(entries(journal), (all) =>
-    all.map(({ record, sequence }) =>
-      record._tag === "Input"
-        ? `${sequence} ${record.network} ${record.input._tag}`
-        : `${sequence} ${record.network} of ${record.of}: ${record.outputs.map((output) => output._tag).join(" ")}`
-    )
+    all.map(({ record, sequence }) => {
+      switch (record._tag) {
+        case "Change": {
+          return `${sequence} ${record.change._tag} ${record.change.option}`;
+        }
+
+        case "Input": {
+          return `${sequence} ${record.network} ${record.input._tag}`;
+        }
+
+        case "Outputs": {
+          return `${sequence} ${record.network} of ${record.of}: ${record.outputs.map((output) => output._tag).join(" ")}`;
+        }
+
+        default: {
+          return record satisfies never;
+        }
+      }
+    })
   );
 
 /** What a wrapped Journal does around each append. */

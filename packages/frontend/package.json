@@ -16,7 +16,8 @@
     "./palette": "./src/palette.ts",
     "./render": "./src/render.ts",
     "./sign-in": "./src/sign-in.ts",
-    "./timelines": "./src/timelines.ts"
+    "./timelines": "./src/timelines.ts",
+    "./ui": "./src/ui.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

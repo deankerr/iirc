@@ -85,6 +85,14 @@ const records: readonly JournalRecord[] = [
     }),
     network: oftc,
   }),
+  // A Change names no Network, and its value is any JSON.
+  JournalRecord.cases.Change.make({
+    change: {
+      _tag: "UiSet",
+      option: "palette",
+      value: { accent: "#0b6e6e", names: ["a", 1, null] },
+    },
+  }),
   JournalRecord.cases.Outputs.make({
     network: libera,
     of: Sequence.make(1),
@@ -108,7 +116,16 @@ const records: readonly JournalRecord[] = [
     }),
     network: libera,
   }),
+  JournalRecord.cases.Change.make({ change: { _tag: "UiUnset", option: "palette" } }),
 ];
+
+/**
+ * The records that belong to a Network, in order: every one but a Change.
+ * @param network - The Network.
+ * @returns Its records.
+ */
+const ofNetwork = (network: NetworkId) =>
+  records.filter((record) => record._tag !== "Change" && record.network === network);
 
 const inOrder = <A, B, E, R>(
   items: Iterable<A>,
@@ -219,7 +236,7 @@ export const journalLaws: readonly Law<JournalService, JournalFailed>[] = [
         yield* same(
           "for one Network",
           showRecords(forOftc.map((e) => e.record)),
-          showRecords(records.slice(1, 2))
+          showRecords(ofNetwork(oftc))
         );
       }),
     name: "reads after a position, and for one Network",
@@ -227,8 +244,36 @@ export const journalLaws: readonly Law<JournalService, JournalFailed>[] = [
   {
     check: (journal) =>
       Effect.gen(function* () {
+        yield* appendAll(journal, records);
+        const all = yield* collect(journal.read({}));
+        const forLibera = yield* collect(journal.read({ network: libera }));
+        const changes = all.filter((entry) => entry.record._tag === "Change");
+
+        yield* same(
+          "every Change, in order",
+          showRecords(changes.map((e) => e.record)),
+          showRecords(records.filter((record) => record._tag === "Change"))
+        );
+        yield* same(
+          "a Network's leaves out every Change",
+          showRecords(forLibera.map((e) => e.record)),
+          showRecords(ofNetwork(libera))
+        );
+      }),
+    name: "keeps a Change, which names no Network, and leaves it out of a Network's Entries",
+  },
+  {
+    check: (journal) =>
+      Effect.gen(function* () {
         const [first] = yield* appendAll(journal, records.slice(0, 2));
-        const positions: readonly Position[] = [{}, { network: oftc }, { after: first }];
+
+        const positions: readonly Position[] = [
+          {},
+          { network: oftc },
+          { network: libera },
+          { after: first },
+        ];
+
         const followers = yield* inOrder(positions, (from) => following(journal, from));
 
         // Every follower has had the past before anything new is appended. The new Entries

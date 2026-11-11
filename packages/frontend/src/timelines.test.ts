@@ -27,6 +27,7 @@ import {
   longestKept,
   mainOf,
   openOf,
+  olderUnasked,
   opened,
   reduceTimelines,
   resolve,
@@ -953,7 +954,8 @@ const simulate = (played: Scenario) => {
       return;
     }
 
-    dispatch({ _tag: "OlderWanted", timeline });
+    // A detour reads on its own, as a view scrolled near the top does.
+    dispatch({ _tag: "OlderWanted", mode: "Auto", timeline });
     const older = wanted(state).findIndex((read) => read._tag === "Older");
 
     if (older !== -1) {
@@ -1039,8 +1041,11 @@ const simulate = (played: Scenario) => {
       return;
     }
 
-    if (action === "Older" || action === "Newer") {
-      dispatch({ _tag: action === "Older" ? "OlderWanted" : "NewerWanted", timeline });
+    // The Owner asks for older items on purpose here, as "Load older" does.
+    if (action === "Older") {
+      dispatch({ _tag: "OlderWanted", mode: "Asked", timeline });
+    } else if (action === "Newer") {
+      dispatch({ _tag: "NewerWanted", timeline });
     } else {
       dispatch({ _tag: "Following", following: action === "Return", seen: undefined, timeline });
     }
@@ -1405,7 +1410,7 @@ const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.E
     }),
   });
 
-  state = reduceTimelines(state, { _tag: "OlderWanted", timeline: three });
+  state = reduceTimelines(state, { _tag: "OlderWanted", mode: "Asked", timeline: three });
   const read = wanted(state).find((one) => one._tag === "Older");
 
   state = reduceTimelines(state, {
@@ -1842,7 +1847,7 @@ describe("the Timelines' state", () => {
       window: numberedWindow(100, 199, true, false),
     });
 
-    state = reduceTimelines(state, { _tag: "OlderWanted", timeline: three });
+    state = reduceTimelines(state, { _tag: "OlderWanted", mode: "Asked", timeline: three });
     const older = wanted(state).find((one) => one._tag === "Older");
 
     if (older === undefined || older._tag !== "Older") {
@@ -2605,5 +2610,155 @@ describe("the Panes", () => {
       seventeen: undefined,
       sixteen: false,
     });
+  });
+});
+
+/**
+ * A window as `olderUnasked` reads it.
+ * @param length - How many items it holds.
+ * @param earlier - Whether more lie before.
+ * @param later - Whether more lie after.
+ * @returns The window.
+ */
+const held = (length: number, earlier: boolean, later: boolean) => ({
+  earlier,
+  items: Array.from({ length }),
+  later,
+});
+
+describe("reading without asking, and jumping to the latest", () => {
+  it("reads the page before without asking only where it cannot push the latest past the cap", () => {
+    expect([
+      olderUnasked(held(100, true, false), windowCap),
+      olderUnasked(held(windowCap - 100, true, false), windowCap),
+      olderUnasked(held(windowCap - 99, true, false), windowCap),
+      olderUnasked(held(windowCap, true, true), windowCap),
+      olderUnasked(held(100, false, false), windowCap),
+    ]).toStrictEqual([true, true, false, true, false]);
+  });
+
+  it("reads the latest again, whole, and follows it, from a window with newer items beyond it", () => {
+    let state = reduceTimelines(following(), {
+      _tag: "WindowRead",
+      read: latestOf(three, 0),
+      window: decodeWindow({
+        earlier: false,
+        gaps: [],
+        items: encodedItems([message(idOf(3), 30, 3)]),
+        later: true,
+        network: "alpha",
+        through: 5,
+        timeline: idOf(3),
+        version: 1,
+      }),
+    });
+
+    state = reduceTimelines(state, {
+      _tag: "Following",
+      following: false,
+      seen: undefined,
+      timeline: three,
+    });
+    state = reduceTimelines(state, { _tag: "LatestWanted", timeline: three });
+    const shown = opened(state);
+
+    expect({
+      following: shown._tag === "Shown" ? shown.window.following : undefined,
+      latest: wanted(state).some((one) => one._tag === "Latest" && one.timeline === three),
+    }).toStrictEqual({ following: true, latest: true });
+  });
+});
+
+describe("a page read on its own before a window that holds the latest", () => {
+  it("keeps the latest, a live item that arrived while it was read included, and drops its own oldest", () => {
+    // The window holds 950 items up to the latest, at step 1950, and follows it.
+    let state = reduceTimelines(following(), {
+      _tag: "WindowRead",
+      read: latestOf(three, 0),
+      window: numberedWindow(1000, 1949, true, false),
+    });
+
+    state = reduceTimelines(state, {
+      _tag: "Following",
+      following: true,
+      seen: undefined,
+      timeline: three,
+    });
+
+    // Read on its own, as scrolling near the top does.
+    state = reduceTimelines(state, { _tag: "OlderWanted", mode: "Auto", timeline: three });
+    const older = wanted(state).find((one) => one._tag === "Older");
+
+    if (older === undefined || older._tag !== "Older") {
+      throw new Error("no read of older items");
+    }
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: older });
+
+    // A live item arrives between the request and its answer.
+    state = reduceTimelines(
+      state,
+      changed(6, { items: encodedItems([message(idOf(3), 19_500, 1951)]) })
+    );
+
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: older,
+      window: numberedWindow(900, 999, true, true),
+    });
+
+    const shown = opened(state);
+    const items = shownItems(state);
+
+    expect({
+      earlier: shown._tag === "Shown" ? shown.window.earlier : undefined,
+      first: items[0],
+      last: items.at(-1),
+      later: shown._tag === "Shown" ? shown.window.later : undefined,
+      length: items.length,
+      mode: older.mode,
+    }).toStrictEqual({
+      earlier: true,
+      first: 952,
+      last: 1951,
+      later: false,
+      length: windowCap,
+      mode: "Auto",
+    });
+  });
+
+  it("drops the newest instead when the Owner asked for it", () => {
+    let state = reduceTimelines(following(), {
+      _tag: "WindowRead",
+      read: latestOf(three, 0),
+      window: numberedWindow(1000, 1949, true, false),
+    });
+
+    state = reduceTimelines(state, { _tag: "OlderWanted", mode: "Auto", timeline: three });
+    // Asked on purpose meanwhile, which stays asked.
+    state = reduceTimelines(state, { _tag: "OlderWanted", mode: "Asked", timeline: three });
+    state = reduceTimelines(state, { _tag: "OlderWanted", mode: "Auto", timeline: three });
+    const older = wanted(state).find((one) => one._tag === "Older");
+
+    if (older === undefined || older._tag !== "Older") {
+      throw new Error("no read of older items");
+    }
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: older });
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: older,
+      window: numberedWindow(900, 999, true, true),
+    });
+
+    const shown = opened(state);
+    const items = shownItems(state);
+
+    expect({
+      first: items[0],
+      last: items.at(-1),
+      later: shown._tag === "Shown" ? shown.window.later : undefined,
+      mode: older.mode,
+    }).toStrictEqual({ first: 901, last: 1900, later: true, mode: "Asked" });
   });
 });

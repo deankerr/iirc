@@ -1,6 +1,7 @@
 /**
- * The options view: every option of every Network, as the core derives them from the
- * Configuration's Schema, filtered as the Owner types. React Aria's GridList gives it its
+ * The options view: every option of every Network, and every option under `ui`, as the
+ * core derives them from the Schemas, filtered as the Owner types. An option under `ui`
+ * this device overrides says so, beside the value every device shares. React Aria's GridList gives it its
  * keyboard: arrows move, Enter edits the focused value in place as its raw text, turns a
  * toggle over, or opens the password prompt for a Credential, Escape lets an edit go, and
  * Delete or Backspace asks to unset it. An edit is a plain, uncontrolled input read once
@@ -9,6 +10,7 @@
  * @packageDocumentation
  */
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
+import { parseUiText } from "@iirc/frontend/options";
 import type { Option, Value } from "@iirc/frontend/options";
 import type { KeyboardEvent } from "react";
 import { useContext, useId, useRef } from "react";
@@ -22,11 +24,13 @@ import {
   confirming as confirmingAtom,
   editing as editingAtom,
   filterOptions,
+  notice as noticeAtom,
   optionsFilter,
   optionRows,
   optionsState,
   promptCredential,
 } from "./atoms.ts";
+import { changeUiOption } from "./ui.ts";
 
 import styles from "./options-view.module.css";
 
@@ -64,6 +68,69 @@ const Shown = ({ value }: { readonly value: Value }) => {
 };
 
 /**
+ * Sets an option to a value in its text syntax: a Network's through its Configuration, and
+ * one under `ui` for every device, or for this device alone while it overrides it here.
+ * @returns How to set one.
+ */
+const useSetTo = () => {
+  const configure = useAtomSet(change);
+  const changeUi = useAtomSet(changeUiOption);
+  const notice = useAtomSet(noticeAtom);
+
+  return (option: Option, text: string) => {
+    if (option._tag === "Network") {
+      configure({ edit: { _tag: "Set", path: option.path, text }, network: option.network });
+
+      return;
+    }
+
+    const value = parseUiText(option.option, text);
+
+    if (value._tag === "Invalid") {
+      notice(value.message);
+
+      return;
+    }
+
+    changeUi({ device: option.device !== undefined, option: option.option, value: value.value });
+  };
+};
+
+/**
+ * Unsets an option: a Network's back to what a new Network starts with, and one under `ui`
+ * back to its default for every device, or, while this device overrides it, back to the
+ * value every device shares.
+ * @returns How to unset one.
+ */
+const useUnset = () => {
+  const configure = useAtomSet(change);
+  const changeUi = useAtomSet(changeUiOption);
+
+  return (option: Option) => {
+    if (option._tag === "Network") {
+      configure({ edit: { _tag: "Unset", path: option.path }, network: option.network });
+    } else {
+      changeUi({ device: option.device !== undefined, option: option.option, value: undefined });
+    }
+  };
+};
+
+/**
+ * What unsetting an option goes back to, in words.
+ * @param option - The option.
+ * @returns The question.
+ */
+const unsetQuestion = (option: Option): string => {
+  if (option._tag === "Ui" && option.device !== undefined) {
+    return `Stop overriding ${option.name} on this device?`;
+  }
+
+  return option.starts === "unset" || option.starts === undefined
+    ? `Unset ${option.name}?`
+    : `Unset ${option.name}, back to ${option.starts}?`;
+};
+
+/**
  * The text an editor starts with: the value in its syntax, or nothing.
  * @param option - The option.
  * @returns The text.
@@ -77,7 +144,7 @@ const startingText = (option: Option) => (option.value._tag === "Shown" ? option
  * @returns The editor.
  */
 const Editor = ({ option, done }: { readonly option: Option; readonly done: () => void }) => {
-  const changeNow = useAtomSet(change);
+  const setTo = useSetTo();
   const stopEditing = useAtomSet(editingAtom);
 
   const registry = useContext(RegistryContext);
@@ -100,10 +167,7 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
       done();
     } else if (event.key === "Enter") {
       event.preventDefault();
-      changeNow({
-        edit: { _tag: "Set", path: option.path, text: input.value },
-        network: option.network,
-      });
+      setTo(option, input.value);
       stopEditing(undefined);
       done();
     }
@@ -132,7 +196,7 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
  * @returns The bar.
  */
 const Confirm = ({ option, done }: { readonly option: Option; readonly done: () => void }) => {
-  const changeNow = useAtomSet(change);
+  const unset = useUnset();
   const ask = useAtomSet(confirmingAtom);
   const id = useId();
 
@@ -150,11 +214,7 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
 
   return (
     <div aria-labelledby={id} className={styles.confirm} role="alertdialog">
-      <p id={id}>
-        {option.starts === "unset" || option.starts === undefined
-          ? `Unset ${option.name}?`
-          : `Unset ${option.name}, back to ${option.starts}?`}
-      </p>
+      <p id={id}>{unsetQuestion(option)}</p>
       <Button
         // The question is the Owner's own, so its answer takes focus.
         // oxlint-disable-next-line jsx-a11y/no-autofocus
@@ -162,7 +222,7 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
         onKeyDown={escape}
         onPress={() => {
           ask(undefined);
-          changeNow({ edit: { _tag: "Unset", path: option.path }, network: option.network });
+          unset(option);
           done();
         }}
         variant="primary"
@@ -187,7 +247,7 @@ export const OptionsView = () => {
   const setFilter = useAtomSet(filterOptions);
   const edit = useAtomSet(editingAtom);
   const ask = useAtomSet(confirmingAtom);
-  const changeNow = useAtomSet(change);
+  const setTo = useSetTo();
   const prompt = useAtomSet(promptCredential);
   const list = useRef<HTMLDivElement>(null);
   const noticeId = useId();
@@ -213,11 +273,8 @@ export const OptionsView = () => {
     if (option.kind._tag === "Toggle") {
       const on = option.value._tag === "Shown" && option.value.text === "on";
 
-      changeNow({
-        edit: { _tag: "Set", path: option.path, text: on ? "off" : "on" },
-        network: option.network,
-      });
-    } else if (option.kind._tag === "Credential") {
+      setTo(option, on ? "off" : "on");
+    } else if (option._tag === "Network" && option.kind._tag === "Credential") {
       prompt({ network: option.network, path: option.path });
     } else {
       edit(option.name);
@@ -270,13 +327,7 @@ export const OptionsView = () => {
           className={styles.list}
           items={rows}
           onAction={onAction}
-          renderEmptyState={() => (
-            <p className={styles.muted}>
-              {filter === ""
-                ? "No Network is configured yet. Add one with /network add."
-                : "No option matches."}
-            </p>
-          )}
+          renderEmptyState={() => <p className={styles.muted}>No option matches.</p>}
         >
           {(option) => (
             <GridListItem className={styles.row} id={option.name} textValue={option.name}>
@@ -289,6 +340,12 @@ export const OptionsView = () => {
                 ) : (
                   <Shown value={option.value} />
                 )}
+                {option._tag === "Ui" && option.device !== undefined ? (
+                  <span className={styles.device}>
+                    {" "}
+                    on this device, over <Shown value={option.shared} />
+                  </span>
+                ) : null}
               </span>
               <span className={styles.starts}>
                 {option.starts === undefined ? "must be given" : <bdi>{option.starts}</bdi>}

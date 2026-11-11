@@ -32,6 +32,7 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { signInState } from "../sign-in/atoms.ts";
 import { timelinesState } from "../timelines/atoms.ts";
+import { deviceUi } from "./device.ts";
 
 /** The options view, as the core folds it. */
 export const optionsState = Atom.make(initialOptions).pipe(Atom.keepAlive);
@@ -48,8 +49,13 @@ export const optionsFilter = Atom.make((get) => {
   return main?._tag === "Options" ? main.filter : undefined;
 });
 
-/** The options the view lists, filtered as the Pane they show in says. */
-export const optionRows = Atom.make((get) => listed(get(optionsState), get(optionsFilter) ?? ""));
+/**
+ * The options the view lists, filtered as the Pane they show in says, those under `ui` as
+ * they take effect on this device.
+ */
+export const optionRows = Atom.make((get) =>
+  listed(get(optionsState), get(optionsFilter) ?? "", get(deviceUi))
+);
 
 /**
  * Folds one event into the options view.
@@ -366,7 +372,7 @@ export const signedOut = (registry: AtomRegistry.AtomRegistry) => {
  * @param registry - The registry.
  * @param outcome - What it came to.
  */
-const told = (registry: AtomRegistry.AtomRegistry, outcome: Outcome) => {
+export const told = (registry: AtomRegistry.AtomRegistry, outcome: Outcome) => {
   if (outcome._tag === "SignedOut") {
     signedOut(registry);
 
@@ -406,6 +412,11 @@ export const openOptions = runtime
 /** Filters the options view as the Owner types. */
 export const filterOptions = Atom.fnSync((filter: string, get) => {
   navigated(get.registry, { _tag: "OptionsFiltered", filter });
+}).pipe(Atom.keepAlive);
+
+/** Says in the view why something asked of it was not done, or lets go of what it said. */
+export const notice = Atom.fnSync((message: string | undefined, get) => {
+  happened(get.registry, { _tag: "Noticed", message });
 }).pipe(Atom.keepAlive);
 
 /** Starts or stops editing an option in place, by its name. */

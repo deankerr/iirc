@@ -21,8 +21,11 @@ import {
   SayRequest,
   SignInRequest,
   TimelineChangesEvent,
+  UiEvent,
+  UiValue,
   WindowQuery,
 } from "./schemas.ts";
+import { UiInForce, UiOptionName, UiOptions, uiDefaults, uiOptionNames } from "./ui.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
 
@@ -43,6 +46,7 @@ describe("the contract", () => {
     expect(routes.map(({ route }) => route).toSorted()).toStrictEqual([
       "DELETE /api/credentials/{name}",
       "DELETE /api/sign-in",
+      "DELETE /api/ui/{option}",
       "GET /api/credentials",
       "GET /api/networks",
       "GET /api/networks/{network}/at/{sequence}",
@@ -56,6 +60,8 @@ describe("the contract", () => {
       "GET /api/timelines/{timeline}",
       "GET /api/timelines/{timeline}/channel",
       "GET /api/timelines/{timeline}/members",
+      "GET /api/ui",
+      "GET /api/ui/changes",
       "POST /api/networks/{network}/act",
       "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",
@@ -63,6 +69,7 @@ describe("the contract", () => {
       "POST /api/sign-in",
       "PUT /api/credentials/{name}",
       "PUT /api/networks/{network}",
+      "PUT /api/ui/{option}",
     ]);
     expect(new Set(guarded.map(({ security }) => JSON.stringify(security)))).toStrictEqual(
       new Set(['[{"bearer":[]},{"signIn":[]}]'])
@@ -226,6 +233,62 @@ describe("the contract", () => {
       parsed: [0, 12, null, null, null, null],
       statuses: ["200", "400", "401", "403", "409", "503"],
     });
+  });
+
+  it("says what each ui option is and starts as, and takes only an option it has", () => {
+    const option = Schema.decodeUnknownOption(UiOptionName);
+    const options = Schema.decodeUnknownOption(UiOptions);
+    const set = document.paths["/api/ui/{option}"]?.put;
+
+    expect({
+      defaults: uiDefaults,
+      names: uiOptionNames,
+      option: ["time", "theme", "activity", "nope", "TIME", ""].map((each) =>
+        Option.getOrNull(option(each))
+      ),
+      options: [
+        { activity: "quiet", theme: "dark", time: "HH:mm:ss" },
+        { activity: "loud", theme: "dark", time: "HH:mm" },
+        { theme: "dark", time: "HH:mm" },
+      ].map((each) => Option.isSome(options(each))),
+      statuses: Object.keys(set?.responses ?? {}).toSorted(),
+      value: [{ value: "dark" }, { value: { any: ["json", 1] } }, {}, { other: 2, value: 1 }].map(
+        (each) => Option.isSome(Schema.decodeUnknownOption(UiValue, requestParseOptions)(each))
+      ),
+    }).toStrictEqual({
+      defaults: { activity: "all", theme: "system", time: "HH:mm" },
+      names: ["activity", "theme", "time"],
+      option: ["time", "theme", "activity", null, null, null],
+      options: [true, false, false],
+      statuses: ["200", "400", "401", "403", "409", "500"],
+      value: [true, true, false, false],
+    });
+  });
+
+  it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
+    const wire = [
+      {
+        data: '{"options":{"activity":"all","theme":"system","time":"HH:mm"},"sequence":0}',
+        event: "changed",
+        id: "0",
+      },
+      {
+        data: '{"options":{"activity":"quiet","theme":"dark","time":"HH:mm:ss"},"sequence":9}',
+        event: "changed",
+        id: "9",
+      },
+      { data: "{}", event: "heartbeat" },
+    ];
+
+    const decoded = wire.map((event) => Schema.decodeUnknownSync(UiEvent)(event));
+
+    expect({
+      encoded: decoded.map((event) => Schema.encodeSync(UiEvent)(event)),
+      ids: decoded.map((event) => (event.event === "changed" ? event.id : undefined)),
+      negative: Option.isSome(
+        Schema.decodeOption(UiInForce)({ options: uiDefaults, sequence: -1 })
+      ),
+    }).toStrictEqual({ encoded: wire, ids: [0, 9, undefined], negative: false });
   });
 
   it("takes a Timeline's id as the fold gives it, and nothing else", () => {

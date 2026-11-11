@@ -19,7 +19,7 @@ One table and one index, in a file of its own. Nothing else lives in it.
 CREATE TABLE journal (
   sequence INTEGER PRIMARY KEY AUTOINCREMENT,
   record   TEXT NOT NULL CHECK (json_valid(record)),
-  network  TEXT NOT NULL GENERATED ALWAYS AS (json_extract(record, '$.network')) VIRTUAL
+  network  TEXT GENERATED ALWAYS AS (json_extract(record, '$.network')) VIRTUAL
 ) STRICT;
 CREATE INDEX journal_by_network ON journal (network);
 PRAGMA user_version = 1;  -- journalVersion
@@ -27,7 +27,8 @@ PRAGMA user_version = 1;  -- journalVersion
 
 - **`sequence`** is the Entry's `Sequence`. The database numbers it, `AUTOINCREMENT` never reuses a number, and one append at a time runs from its insert to its return, so sequences increase in the order appends complete. The port allows skipped numbers, and this adapter has none unless the file is changed by hand.
 - **`record`** is the JSON text of the `JournalRecord`'s Schema encoding (`Schema.toCodecJson`), so the Journal can be read with `sqlite3` or anything else that reads JSON, and Credentials appear only as names (a `SendSecret` holds a `CredentialName`). Bytes are in whatever form that encoding gives them. It is written as given and never rewritten.
-- **`network`** is derived from `record`, so it cannot disagree with it. It exists for `journal_by_network`, which serves reading one Network after a sequence. Nothing writes it.
+- **`network`** is derived from `record`, so it cannot disagree with it. It exists for `journal_by_network`, which serves reading one Network after a sequence. Nothing writes it. A `Change` names no Network, so its `network` is `NULL`, which `network = ?` never matches, and reading one Network leaves it out.
+- **A Journal made before `Change` existed** has `network` as `NOT NULL`. It still opens and reads under version 1, as nothing it holds changed, but its table refuses a `Change`, whose append fails with `JournalFailed`. No Daemon has written a Journal in earnest yet, so such a file is one a test or a trial made, and is made again.
 
 Reading is filtered in SQL: `read` and `follow` ask for `sequence > after`, and `network = ?` when a Network is named, in sequence order, a page of 500 at a time. A stream's memory is a page, not the Journal, and a follower's is a page and one wake-up (see below).
 

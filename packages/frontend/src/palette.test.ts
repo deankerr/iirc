@@ -189,6 +189,7 @@ describe("the palette's entries", () => {
         "command:options.set",
         "command:options.unset",
         "command:network.add",
+        "command:timeline.latest",
         "command:timeline.next",
         "command:timeline.previous",
         "command:timeline.unread",

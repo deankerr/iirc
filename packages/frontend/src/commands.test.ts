@@ -204,6 +204,16 @@ describe("reading a line", () => {
     });
   });
 
+  it("jumps to the open Timeline's latest with /latest, and takes nothing after it", () => {
+    const run = (line: string) => interpret(line, inChannel);
+
+    expect([run("/latest"), run("/latest now"), interpret("/latest", nowhere)]).toStrictEqual([
+      { _tag: "Parsed", value: [{ _tag: "Latest", timeline: inChannel.focus?.timeline }] },
+      { _tag: "Invalid", message: "/latest takes nothing after it." },
+      { _tag: "Invalid", message: "Open a Timeline first." },
+    ]);
+  });
+
   it("says which commands take arguments, for the palette", () => {
     expect(
       Object.fromEntries(commands.map((one) => [one.id, one.arguments] as const))
@@ -243,6 +253,7 @@ describe("reading a line", () => {
       "say.notice": "Required",
       "say.privmsg": "Required",
       "say.to": "Required",
+      "timeline.latest": "None",
       "timeline.next": "None",
       "timeline.previous": "None",
       "timeline.query": "Required",

@@ -1,5 +1,6 @@
 // The class names in timeline-view.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly jump: string;
   readonly placeholder: string;
   readonly row: string;
   readonly rows: string;

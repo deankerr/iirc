@@ -30,6 +30,8 @@ import type { Position } from "@iirc/timelines";
 import { Effect, Result, Schema, SchemaIssue, SchemaTransformation } from "effect";
 import { Base64Url } from "effect/encoding";
 
+import { UiInForce } from "./ui.ts";
+
 /**
  * Text a Network or someone on it chose, rather than the Owner or the Daemon: what was
  * said, nicks, Channel names, topics, reasons, and an Ircd's own words. Anyone on a
@@ -563,6 +565,32 @@ export const NewsEvent = Schema.Union([
 
 /** The decoded form of {@link NewsEvent}. */
 export type NewsEvent = typeof NewsEvent.Type;
+
+// The options under `ui`.
+
+/** A value for one `ui` option, as JSON, which the Daemon parses by that option's Schema. */
+export const UiValue = Schema.Struct({ value: Schema.Json });
+
+/**
+ * One event of the `ui` options' stream. `changed` carries the options in force, whole,
+ * and the sequence of the last Change as its id, so a Frontend resumes after it and misses
+ * nothing: each Change is the whole value of one option, so the latest options say all.
+ * `heartbeat` says the stream is alive, and carries no id.
+ */
+export const UiEvent = Schema.Union([
+  Schema.Struct({
+    data: Schema.fromJsonString(UiInForce),
+    event: Schema.Literal("changed"),
+    id: After,
+  }),
+  Schema.Struct({
+    data: Schema.fromJsonString(Schema.Struct({})),
+    event: Schema.Literal("heartbeat"),
+  }),
+]);
+
+/** The decoded form of {@link UiEvent}. */
+export type UiEvent = typeof UiEvent.Type;
 
 // Timelines.
 

@@ -48,10 +48,11 @@ import {
   signedOut,
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
+import { changeUi } from "../options/ui.ts";
 import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
-import { open, paned, timelinesState, Waits } from "../timelines/atoms.ts";
+import { latest, open, paned, timelinesState, Waits } from "../timelines/atoms.ts";
 import { cancelCompletion } from "./completion-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
@@ -290,6 +291,7 @@ type Local = Extract<
       | "OpenOptions"
       | "PromptCredential"
       | "Open"
+      | "Latest"
       | "OpenPalette"
       | "FocusComposer"
       | "ShowMembers"
@@ -299,6 +301,7 @@ type Local = Extract<
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "FocusComposer",
+  "Latest",
   "Open",
   "OpenOptions",
   "OpenPalette",
@@ -315,7 +318,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
 const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
- * Carries out an intent in the page: shows the options or a Timeline, opens the password
+ * Carries out an intent in the page: shows the options or a Timeline, jumps to a Timeline's latest, opens the password
  * prompt or the palette, focuses the composer, starting an empty draft with text, shows
  * or hides the members, or changes the Panes.
  * @param registry - The registry.
@@ -341,6 +344,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "OpenPalette": {
       registry.set(openPalette, undefined);
+      break;
+    }
+
+    case "Latest": {
+      registry.set(latest, intent.timeline);
       break;
     }
 
@@ -396,6 +404,10 @@ const changeOne = (
 
     case "AddNetwork": {
       return addNetwork(registry, intent.network, intent.configuration);
+    }
+
+    case "ChangeUi": {
+      return changeUi(registry, intent);
     }
 
     case "MarkRead": {

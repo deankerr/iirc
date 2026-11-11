@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { ConfigurationInForce } from "@iirc/api";
+import { ConfigurationInForce, UiOptionName, UiOptions, uiDefaults } from "@iirc/api";
 import type {
   ChannelHeader,
   Knowledge,
@@ -18,6 +18,7 @@ import type {
   TimelineList,
   TimelineWindow,
   WindowGap,
+  UiInForce,
 } from "@iirc/api";
 import { Effect, Layer, Redacted, Result, Schema } from "effect";
 import { Base64Url } from "effect/encoding";
@@ -64,7 +65,9 @@ type Answer =
       readonly network: string;
       readonly sequence: number | null;
     }
-  | { readonly _tag: "UnknownNetwork"; readonly network: string };
+  | { readonly _tag: "UnknownNetwork"; readonly network: string }
+  | typeof UiInForce.Encoded
+  | { readonly _tag: "UiChanged"; readonly sequence: number };
 
 const json = (status: number, body: Answer) => Response.json(body, { status });
 
@@ -196,6 +199,12 @@ const ConfigurationBody = Schema.fromJsonString(
 
 const CredentialBody = Schema.fromJsonString(Schema.Struct({ value: Schema.String }));
 
+/** The `ui` options before any Change: each at its default. */
+const noUiChange: typeof UiInForce.Encoded = { options: uiDefaults, sequence: 0 };
+
+/** A value for one `ui` option, as the fake takes it: whatever the options' Schema does. */
+const UiBody = Schema.fromJsonString(Schema.Struct({ value: Schema.Json }));
+
 const ReadBody = Schema.fromJsonString(
   Schema.Struct({ read: Schema.Finite, target: Schema.NullOr(Schema.String) })
 );
@@ -273,6 +282,8 @@ export const fakeDaemon = () => {
   const membersHeld: (() => void)[] = [];
   const knownHeld: (() => void)[] = [];
   const membersRead: string[] = [];
+  const uiFollowers: Follower[] = [];
+  const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
 
   const daemon = {
     /** How many requests that never began their answer were given up. */
@@ -366,6 +377,12 @@ export const fakeDaemon = () => {
     through: 1,
     /** The Timelines of each Network, in the order they opened. */
     timelines: new Map<string, FakeTimeline[]>([["libera", []]]),
+    /** The `ui` options in force, as the wire carries them, and the sequence of the last Change. */
+    ui: noUiChange,
+    /** Each change of a `ui` option asked for, as `PUT` or `DELETE` and its option, and its `ifSequence`. */
+    uiChanges,
+    /** Each follower of the `ui` options. */
+    uiFollowers,
     /** Each read of a window, by its query, for a test to look at. */
     windowsRead,
   };
@@ -703,7 +720,73 @@ export const fakeDaemon = () => {
     return json(200, { sequence: daemon.nextSequence - 1 });
   };
 
+  /**
+   * Sends the `ui` options in force to every follower of them, as one `changed` event.
+   */
+  const sendUi = () => {
+    const text = `event: changed\nid: ${daemon.ui.sequence}\ndata: ${JSON.stringify(daemon.ui)}\n\n`;
+
+    for (const follower of uiFollowers) {
+      follower.controller.enqueue(encoder.encode(text));
+    }
+  };
+
+  /**
+   * The `ui` options: read, changed one at a time made from a sequence, and followed, the
+   * options in force first, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const uiRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const method = init.method ?? "GET";
+    const one = /^\/api\/ui\/(?<option>activity|theme|time)$/u.exec(url.pathname)?.groups;
+
+    if (url.pathname === "/api/ui" && method === "GET") {
+      return signedInOnly(() => json(200, daemon.ui));
+    }
+
+    if (url.pathname === "/api/ui/changes") {
+      return signedInOnly(() => {
+        const response = following(uiFollowers, url, new Headers(init.headers), init);
+
+        queueMicrotask(sendUi);
+
+        return response;
+      });
+    }
+
+    if (one?.option === undefined || !daemon.signedIn) {
+      return one === undefined ? undefined : json(401, { _tag: "Unauthorized" });
+    }
+
+    const ifSequence = url.searchParams.get("ifSequence");
+
+    uiChanges.push({ ifSequence, route: `${method} ${one.option}` });
+
+    if (ifSequence !== null && Number(ifSequence) !== daemon.ui.sequence) {
+      return json(409, { _tag: "UiChanged", sequence: daemon.ui.sequence });
+    }
+
+    const option = Schema.decodeUnknownSync(UiOptionName)(one.option);
+
+    const { value } =
+      method === "PUT"
+        ? Schema.decodeSync(UiBody)(await new Response(init.body).text())
+        : { value: uiDefaults[option] };
+
+    daemon.ui = {
+      options: Schema.decodeSync(UiOptions)({ ...daemon.ui.options, [option]: value }),
+      sequence: daemon.nextSequence,
+    };
+    daemon.nextSequence += 1;
+    sendUi();
+
+    return json(200, { sequence: daemon.ui.sequence });
+  };
+
   const elsewhere = async (url: URL, init: RequestInit) =>
+    (await uiRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??
     new Response(null, { status: 404 });
@@ -930,7 +1013,7 @@ export const fakeDaemon = () => {
     return daemon.gatewayOnly ? new Response(null, { status: 502 }) : await answer(url, init);
   };
 
-  return { daemon, endStreams, fetch, send };
+  return { daemon, endStreams, fetch, send, sendUi };
 };
 
 /**

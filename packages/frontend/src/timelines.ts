@@ -58,6 +58,15 @@ interface Load {
   readonly attempt: number;
 }
 
+/**
+ * How a page before a window was wanted: `Asked`, by the Owner on purpose, as "Load older"
+ * does, or `Auto`, by the view on its own, as scrolling near the top or a view that cannot
+ * be scrolled does. An `Auto` page merged into a window that holds the latest never drops
+ * its newest past the cap: it drops its own oldest instead, and `earlier` says more lie
+ * before. An `Asked` page may drop the newest, and `later` then says more lie after.
+ */
+export type OlderMode = "Auto" | "Asked";
+
 /** A Network's list of Timelines, read a page at a time. */
 interface ListLoad extends Load {
   /** The Timeline the next page follows, while a round of pages is not finished. */
@@ -139,8 +148,8 @@ export interface Window extends Load {
   readonly earlier: boolean;
   readonly later: boolean;
   readonly through: number;
-  /** The Owner asked for what lies before the first item. */
-  readonly older: boolean;
+  /** What lies before the first item is wanted, and how, or it is not. */
+  readonly older: OlderMode | undefined;
   /** The Owner asked for what lies after the last item. */
   readonly newer: boolean;
   /**
@@ -268,6 +277,24 @@ const largestPage = 500;
 /** The most items a window holds: past it, the end furthest from the Owner is dropped. */
 export const windowCap = 1000;
 
+/**
+ * Whether a page before a window can be read without asking, as `Auto`, as a view does
+ * near its top or while what it draws cannot be scrolled: only when there is one, and one
+ * more page fits a window that holds the latest, since an `Auto` page never drops its
+ * newest, so past that it would add nothing. Reading one on purpose, `Asked`, may.
+ * @param window - The window, as shown.
+ * @param cap - The most items a window holds.
+ * @returns Whether it can.
+ */
+export const olderUnasked = (
+  window: {
+    readonly earlier: boolean;
+    readonly later: boolean;
+    readonly items: readonly unknown[];
+  },
+  cap: number
+): boolean => window.earlier && (window.later || window.items.length + pageSize <= cap);
+
 /** How many windows of closed Timelines are kept, besides those open in a Pane. */
 export const keptClosed = 4;
 
@@ -306,6 +333,8 @@ export type WindowRequest =
       readonly before: Position;
       readonly limit: number;
       readonly attempt: number;
+      /** How it was wanted, which says what a merge past the cap drops. */
+      readonly mode: OlderMode;
     }
   | {
       readonly _tag: "Newer";
@@ -330,8 +359,9 @@ export type WindowRequest =
  *   with the `navigation` its Say was submitted at, ignored once the Owner opened another,
  *   which opens once its Network lists it, if it is a Direct Message Timeline.
  * - `Opened`: the Owner opened a Timeline, which the main view then shows. `OlderWanted` and
- *   `NewerWanted`: they want what lies before or after what is held. `Following`: whether
- *   they are at the latest.
+ *   `NewerWanted`: they want what lies before or after what is held. `LatestWanted`: they
+ *   want the latest, read again whole, and to follow it. `Following`: whether they are at
+ *   the latest.
  * - `OptionsShown`: the focused Pane shows the options, filtered as given, which counts as
  *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter.
  * - `Pane`: the Owner changed the Panes, as a command or a drag of a divider did.
@@ -365,8 +395,9 @@ export type TimelinesEvent =
   | { readonly _tag: "Reset"; readonly reset: TimelineReset }
   | { readonly _tag: "Opened"; readonly timeline: TimelineId }
   | { readonly _tag: "Located"; readonly timeline: TimelineId; readonly navigation: number }
-  | { readonly _tag: "OlderWanted"; readonly timeline: TimelineId }
+  | { readonly _tag: "OlderWanted"; readonly timeline: TimelineId; readonly mode: OlderMode }
   | { readonly _tag: "NewerWanted"; readonly timeline: TimelineId }
+  | { readonly _tag: "LatestWanted"; readonly timeline: TimelineId }
   | {
       readonly _tag: "Following";
       readonly timeline: TimelineId;
@@ -1229,7 +1260,7 @@ const applyReset = (state: Timelines, reset: TimelineReset): Timelines => {
       items: [],
       later: false,
       newer: false,
-      older: false,
+      older: undefined,
     })),
   };
 };
@@ -1354,7 +1385,7 @@ const started = (state: Timelines, read: Read): Timelines => {
         later: false,
         network: undefined,
         newer: false,
-        older: false,
+        older: undefined,
         seen: undefined,
         through: 0,
         timeline: read.timeline,
@@ -1698,14 +1729,24 @@ const joinRuns = (
 /**
  * Merges a page read before or after a window into it: each item kept by its position,
  * the one changed last winning, the page's Gaps with the window's, a run the cursor split
- * joined again, and the end furthest from where the page went dropped past the cap.
+ * joined again, and past the cap, the end furthest from where the page went dropped, but
+ * for a page the view read on its own before a window that holds the latest, which drops
+ * its own oldest instead, so the latest is never lost to a read the Owner did not ask for.
  * @param window - The window.
  * @param read - The page, brought up to date on its own.
- * @param side - Whether it was read before or after the window.
+ * @param request - How it was read: before or after the window, and how it was wanted.
  * @param cap - The most items a window holds.
  * @returns The window.
  */
-const mergePage = (window: Window, read: Window, side: "Older" | "Newer", cap: number): Window => {
+const mergePage = (
+  window: Window,
+  read: Window,
+  request: Extract<WindowRequest, { readonly _tag: "Older" | "Newer" }>,
+  cap: number
+): Window => {
+  const side = request._tag;
+  const keepsLatest = request._tag === "Older" && request.mode === "Auto" && !window.later;
+
   let merged: Window =
     side === "Older" ? { ...window, earlier: false } : { ...window, later: false };
 
@@ -1725,7 +1766,7 @@ const mergePage = (window: Window, read: Window, side: "Older" | "Newer", cap: n
       later: side === "Newer" ? read.later : window.later,
     },
     cap,
-    side === "Newer"
+    side === "Newer" || keepsLatest
   );
 };
 
@@ -1834,13 +1875,13 @@ const windowRead = (
 
     if (answer.timeline === requested && held.fresh) {
       merged = page.fresh
-        ? mergePage(done, page, read._tag, state.windowCap)
+        ? mergePage(done, page, read, state.windowCap)
         : { ...done, fresh: false };
     }
 
     return {
       ...state,
-      windows: setIn(state.windows, requested, { ...merged, newer: false, older: false }),
+      windows: setIn(state.windows, requested, { ...merged, newer: false, older: undefined }),
     };
   }
 
@@ -1855,7 +1896,7 @@ const windowRead = (
     later: answer.later,
     network: answer.network,
     newer: false,
-    older: false,
+    older: undefined,
     reading: false,
     seen: held.seen,
     through,
@@ -2060,7 +2101,10 @@ const opening = (state: Timelines, timeline: TimelineId): Timelines => {
  */
 const marked = (
   state: Timelines,
-  event: Extract<TimelinesEvent, { readonly _tag: "OlderWanted" | "NewerWanted" | "Following" }>
+  event: Extract<
+    TimelinesEvent,
+    { readonly _tag: "OlderWanted" | "NewerWanted" | "LatestWanted" | "Following" }
+  >
 ): Timelines => {
   const id = resolve(state, event.timeline);
   const window = state.windows.get(id);
@@ -2070,12 +2114,32 @@ const marked = (
   }
 
   switch (event._tag) {
+    // Asked once, it stays asked until read, whatever else wants it meanwhile.
     case "OlderWanted": {
-      return { ...state, windows: setIn(state.windows, id, { ...window, older: window.earlier }) };
+      const mode = window.older === "Asked" ? "Asked" : event.mode;
+
+      return {
+        ...state,
+        windows: setIn(state.windows, id, { ...window, older: window.earlier ? mode : undefined }),
+      };
     }
 
     case "NewerWanted": {
       return { ...state, windows: setIn(state.windows, id, { ...window, newer: window.later }) };
+    }
+
+    // Read again from the latest, which replaces what is held, followed from there.
+    case "LatestWanted": {
+      return {
+        ...state,
+        windows: setIn(state.windows, id, {
+          ...window,
+          following: true,
+          fresh: false,
+          newer: false,
+          older: undefined,
+        }),
+      };
     }
 
     case "Following": {
@@ -2423,6 +2487,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 
     case "OlderWanted":
     case "NewerWanted":
+    case "LatestWanted":
     case "Following": {
       return { state: marked(state, event) };
     }
@@ -2521,7 +2586,7 @@ const wantedWindow = (state: Timelines, open: TimelineId): readonly Read[] => {
   const last = window.items.at(-1);
   const limit = Math.min(pageSize, state.windowCap);
 
-  if (window.older && window.earlier && first !== undefined) {
+  if (window.older !== undefined && window.earlier && first !== undefined) {
     return [
       {
         _tag: "Older",
@@ -2529,6 +2594,7 @@ const wantedWindow = (state: Timelines, open: TimelineId): readonly Read[] => {
         before: first.position,
         generation: window.generation,
         limit,
+        mode: window.older,
         timeline: id,
       },
     ];

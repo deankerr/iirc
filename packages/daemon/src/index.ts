@@ -18,6 +18,8 @@ export { SignIns, SignInsUnreadable, SignInsUnwritable } from "./sign-ins.ts";
 
 export { Projector, layerProjector } from "./projector.ts";
 
+export { UiChangedSince, UiConfiguration, layerUiConfiguration } from "./ui.ts";
+
 export type { Progress, ProjectorStatus } from "./projector.ts";
 
 export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./lock.ts";

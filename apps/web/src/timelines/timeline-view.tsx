@@ -1,22 +1,26 @@
 /**
  * A Pane's open Timeline, as a log anchored to the bottom like a chat: it opens on the latest,
  * stays at the bottom while live items arrive there, keeps what is in view still when
- * older items are added above, and asks for older items as the Owner nears the top. Away
- * from the latest, it tells the core so, which then leaves new items to be read when the
- * Owner scrolls back down.
+ * older items are added above, and asks for older items as the Owner nears the top, or
+ * while what it draws cannot be scrolled at all. Away from the latest, it tells the core
+ * so, which then leaves new items to be read when the Owner scrolls back down, and with
+ * newer items beyond what it holds, it offers to jump to the latest.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
-import { rowsOf } from "@iirc/frontend/timelines";
+import { olderUnasked, rowsOf } from "@iirc/frontend/timelines";
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
+import { showsItem } from "@iirc/frontend/ui";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { TimelineHeader } from "../channel/timeline-header.tsx";
+import { activityShown } from "../options/ui.ts";
 import { movedEvent, paneNumber } from "../panes/atoms.ts";
-import { following, newer, older, paneTimeline } from "./atoms.ts";
+import { Button } from "../ui/button.tsx";
+import { following, latest, newer, older, paneTimeline, windowCapOf } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
 import styles from "./timeline-view.module.css";
@@ -27,10 +31,31 @@ const nearTop = 240;
 /** How near the bottom counts as at it, in pixels. */
 const nearBottom = 8;
 
-/** A row as the view shows it: one of the window's, or the start of the Timeline. */
-type Shown = Row | { readonly _tag: "Start"; readonly key: string };
+/**
+ * A row as the view shows it: one of the window's, the start of the Timeline, or, where
+ * the page before is no longer read without asking, a way to read it on purpose, which
+ * says whether every item the window holds is hidden.
+ */
+type Shown =
+  | Row
+  | { readonly _tag: "Start"; readonly key: string }
+  | { readonly _tag: "Held"; readonly key: string; readonly hidden: boolean };
 
 const start: Shown = { _tag: "Start", key: "start" };
+
+/** A row as it was last laid out: its key, and where it started. */
+interface LaidOut {
+  readonly key: string;
+  readonly start: number;
+}
+
+/**
+ * Whether a scroller is in the page and has a height, so what it draws can be seen: a
+ * Pane zoomed out or hidden on a compact screen is neither, and asks for nothing.
+ * @param element - The scroller.
+ * @returns Whether it is.
+ */
+const visible = (element: HTMLDivElement) => element.isConnected && element.clientHeight > 0;
 
 /** Where an item stands. */
 type Position = TimelineItem["position"];
@@ -42,27 +67,111 @@ interface Anchor {
 }
 
 /**
+ * A row of the log: the start of the Timeline, a way to read the page before on purpose,
+ * or one of the window's.
+ * @param props - The row, and its Timeline.
+ * @returns The row.
+ */
+const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: TimelineId }) => {
+  const askOlder = useAtomSet(older);
+
+  switch (row._tag) {
+    case "Start": {
+      return <p className={styles.start}>The start of this Timeline</p>;
+    }
+
+    case "Held": {
+      return (
+        <p className={styles.start}>
+          {row.hidden
+            ? "Older history here is hidden activity."
+            : "Older history lies beyond what this view holds."}{" "}
+          <Button
+            onPress={() => {
+              askOlder({ mode: "Asked", timeline });
+            }}
+          >
+            Load older
+          </Button>
+        </p>
+      );
+    }
+
+    case "Item":
+    case "Gap":
+    case "New": {
+      return <Line row={row} />;
+    }
+
+    default: {
+      return row satisfies never;
+    }
+  }
+};
+
+/**
+ * Jumps to the latest of a Timeline whose window has newer items beyond it.
+ * @param props - The Timeline.
+ * @returns The control.
+ */
+const JumpToLatest = ({ timeline }: { readonly timeline: TimelineId }) => {
+  const jump = useAtomSet(latest);
+
+  return (
+    <div className={styles.jump}>
+      <Button
+        onPress={() => {
+          jump(timeline);
+        }}
+      >
+        Jump to latest
+      </Button>
+    </div>
+  );
+};
+
+/**
  * The rows of a window, virtualized, with the "new" divider where the core puts it.
  * @param props - The window, its Timeline, and its divider.
  * @returns The log.
  */
 const Lines = ({
   divider,
+  kind,
   label,
   timeline,
   window,
 }: {
   readonly divider: Divider | undefined;
+  readonly kind: "Network" | "Channel" | "Direct" | undefined;
   readonly label: string;
   readonly timeline: TimelineId;
   readonly window: Window;
 }) => {
+  const activity = useAtomValue(activityShown);
+  const cap = useAtomValue(windowCapOf);
+  // Whether the page before can be read without asking, as scrolling near the top, or a
+  // view that cannot be scrolled, reads it. Where it cannot, the view offers to read it on
+  // purpose, at the top.
+  const unasked = olderUnasked(window, cap);
+
   // With nothing earlier, the first row says so, inside the list, so it is anchored and
-  // measured as every row is.
-  const rows: readonly Shown[] = useMemo(
-    () => (window.earlier ? rowsOf(window, divider) : [start, ...rowsOf(window, divider)]),
-    [divider, window]
-  );
+  // measured as every row is. The items `ui.activity` leaves out are not drawn, and are
+  // counted all the same.
+  const rows: readonly Shown[] = useMemo(() => {
+    const drawn = {
+      ...window,
+      items: window.items.filter((item) => showsItem(activity, kind, item.content)),
+    };
+
+    if (!window.earlier) {
+      return [start, ...rowsOf(drawn, divider)];
+    }
+
+    const held: Shown = { _tag: "Held", hidden: drawn.items.length === 0, key: "held" };
+
+    return unasked ? rowsOf(drawn, divider) : [held, ...rowsOf(drawn, divider)];
+  }, [activity, divider, kind, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);
   const askOlder = useAtomSet(older);
@@ -74,6 +183,10 @@ const Lines = ({
   const atBottom = useRef(true);
   const anchor = useRef<Anchor | undefined>(undefined);
   const firstKey = useRef<string | undefined>(undefined);
+  // The rows as they were last laid out, and which Activity they showed, so a row hidden by
+  // `ui.activity` is found among the rows around it.
+  const laidOut = useRef<readonly LaidOut[]>([]);
+  const shownActivity = useRef(activity);
   // What the core was last told: at the latest with the last item in view, or away. Nothing
   // yet, so the view says so once it has first laid out.
   const told = useRef<string | undefined>(undefined);
@@ -156,24 +269,96 @@ const Lines = ({
   };
 
   /**
-   * Puts the view back where it stood: at the bottom with nothing beyond, or the row that
-   * was in view where it was.
+   * Where a row the view was anchored to stands now, and how far below the top of the view
+   * it should: its own place at its offset, or, when it is no longer drawn, as when
+   * `ui.activity` hides it, the nearest row before it that still is, at the same offset,
+   * or with none before, the nearest after it, where that one stood.
+   * @param anchored - The row, and its offset.
+   * @returns The index and offset, or none when no row it was laid out with is drawn.
+   */
+  const survivorOf = (anchored: Anchor): Anchor | undefined => {
+    const now = new Map(rows.map((row, index) => [row.key, index]));
+    const before = laidOut.current;
+    const at = before.findIndex((row) => row.key === anchored.key);
+    const own = now.get(anchored.key);
+
+    if (own !== undefined) {
+      return { key: anchored.key, offset: anchored.offset };
+    }
+
+    if (at === -1) {
+      return undefined;
+    }
+
+    for (let index = at - 1; index >= 0; index -= 1) {
+      const key = before[index]?.key ?? "";
+
+      if (now.has(key)) {
+        return { key, offset: anchored.offset };
+      }
+    }
+
+    const from = before[at]?.start ?? 0;
+
+    for (let index = at + 1; index < before.length; index += 1) {
+      const row = before[index];
+
+      if (row !== undefined && now.has(row.key)) {
+        return { key: row.key, offset: anchored.offset + row.start - from };
+      }
+    }
+
+    return undefined;
+  };
+
+  /**
+   * Puts the view back where it stood: at the bottom with nothing beyond, as when it was
+   * there or the Owner jumped to the latest, or the row that was in view where it was, or
+   * the row nearest it still drawn, within what can be scrolled.
    * @param element - The scroller.
-   * @param shifted - Whether rows were added above or dropped, moving every row.
+   * @param shifted - Whether rows were added above, dropped, or hidden, moving every row.
    */
   const standBack = (element: HTMLDivElement, shifted: boolean) => {
-    const held = anchor.current;
+    const kept = anchor.current;
+    const survivor = shifted && kept !== undefined ? survivorOf(kept) : undefined;
 
     // Pinned only with nothing more beyond the last row.
-    if (atBottom.current && !window.later) {
+    if ((atBottom.current || window.following) && !window.later) {
+      atBottom.current = true;
       element.scrollTop = element.scrollHeight;
-    } else if (shifted && held !== undefined) {
-      const index = rows.findIndex((row) => row.key === held.key);
-      const start = virtualizer.measurementsCache[index]?.start;
+    } else if (survivor !== undefined) {
+      const index = rows.findIndex((row) => row.key === survivor.key);
+      const begins = virtualizer.measurementsCache[index]?.start;
+      const furthest = Math.max(0, element.scrollHeight - element.clientHeight);
 
-      if (start !== undefined) {
-        element.scrollTop = start - held.offset;
+      if (begins !== undefined) {
+        element.scrollTop = Math.min(furthest, Math.max(0, begins - survivor.offset));
       }
+    }
+  };
+
+  /**
+   * Reads the page before without asking, one at a time, as `Auto`, so the latest of a
+   * window that holds it is never dropped for it, and only while `olderUnasked` says it
+   * can: the view offers the rest on purpose.
+   */
+  const readOlder = () => {
+    if (unasked && window.older === undefined && !window.reading) {
+      askOlder({ mode: "Auto", timeline });
+    }
+  };
+
+  /**
+   * Reads the page before without asking while what is drawn cannot be scrolled to reach
+   * it: no item drawn, or less than fills the view, as when `ui.activity` hides a whole
+   * page. Only in a view that can be seen, in the page and with a height.
+   * @param element - The scroller.
+   */
+  const fill = (element: HTMLDivElement) => {
+    const drawsNoItem = !rows.some((row) => row._tag === "Item");
+
+    if (visible(element) && (drawsNoItem || total < element.clientHeight)) {
+      readOlder();
     }
   };
 
@@ -185,12 +370,37 @@ const Lines = ({
   const shownAgain = (element: HTMLDivElement) => {
     standBack(element, true);
     tell(element);
+    fill(element);
   };
 
-  // The latest way back, for the Pane's move, which happens between renders.
+  // The latest way back, for the Pane's move, and the latest fill, for a change of the
+  // scroller's size, each of which happens between renders.
   const back = useRef(shownAgain);
+  const refill = useRef(fill);
 
   back.current = shownAgain;
+  refill.current = fill;
+
+  // A change of the scroller's size alone, as a Pane shown again or a window made taller,
+  // may leave what is drawn short of filling it, so it checks again.
+  useLayoutEffect(() => {
+    const element = scroller.current;
+
+    const observer =
+      element === null || typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(() => {
+            refill.current(element);
+          });
+
+    if (element !== null) {
+      observer?.observe(element);
+    }
+
+    return () => {
+      observer?.disconnect();
+    };
+  }, []);
 
   // A Pane's node moved into another Panel loses its scroll position: put it back.
   useLayoutEffect(() => {
@@ -211,25 +421,34 @@ const Lines = ({
     };
   }, []);
 
-  // After rows change: at the bottom, stay there; with rows added above, put the row that
-  // was in view back where it was. A row above the view that changes height is kept still
-  // by the virtualizer itself.
+  // After rows change: at the bottom, stay there; with rows added above, or hidden or shown
+  // again by `ui.activity`, put the row that was in view back where it was. A row above the
+  // view that changes height is kept still by the virtualizer itself.
   useLayoutEffect(() => {
     const element = scroller.current;
     const first = rows[0]?.key;
-    // Rows added above, or the oldest dropped past the cap, move every row.
-    const shifted = firstKey.current !== undefined && first !== firstKey.current;
+
+    // Rows added above, the oldest dropped past the cap, or rows hidden or shown again move
+    // every row.
+    const shifted =
+      (firstKey.current !== undefined && first !== firstKey.current) ||
+      shownActivity.current !== activity;
 
     firstKey.current = first;
+    shownActivity.current = activity;
 
-    if (element === null) {
-      return;
+    if (element !== null) {
+      standBack(element, shifted);
+
+      // Laid out: what is in view now is what the Owner can see.
+      tell(element);
+      fill(element);
     }
 
-    standBack(element, shifted);
-
-    // Laid out: what is in view now is what the Owner can see.
-    tell(element);
+    laidOut.current = rows.map((row, index) => ({
+      key: row.key,
+      start: virtualizer.measurementsCache[index]?.start ?? 0,
+    }));
   });
 
   return (
@@ -244,8 +463,8 @@ const Lines = ({
 
         const nearEnd = element.scrollHeight - element.scrollTop - element.clientHeight < nearTop;
 
-        if (element.scrollTop < nearTop && window.earlier && !window.reading) {
-          askOlder(timeline);
+        if (element.scrollTop < nearTop && window.earlier) {
+          readOlder();
         } else if (nearEnd && window.later && !window.reading) {
           askNewer(timeline);
         }
@@ -268,11 +487,7 @@ const Lines = ({
               ref={virtualizer.measureElement}
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              {row._tag === "Start" ? (
-                <p className={styles.start}>The start of this Timeline</p>
-              ) : (
-                <Line row={row} />
-              )}
+              <ShownRow row={row} timeline={timeline} />
             </div>
           );
         })}
@@ -318,10 +533,12 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
           <Lines
             divider={shown.divider}
             key={shown.timeline}
+            kind={shown.description?.kind}
             label={label}
             timeline={shown.timeline}
             window={shown.window}
           />
+          {shown.window.later ? <JumpToLatest timeline={shown.timeline} /> : null}
         </section>
       );
     }

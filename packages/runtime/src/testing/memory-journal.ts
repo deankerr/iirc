@@ -1,6 +1,6 @@
 import { Effect, PubSub, Ref, Schema, Semaphore, Stream } from "effect";
 
-import { Entry, Sequence } from "../journal.ts";
+import { Entry, Sequence, networkOf } from "../journal.ts";
 import type { JournalService, Position } from "../journal.ts";
 
 const codec = Schema.fromJsonString(Schema.toCodecJson(Entry));
@@ -9,7 +9,7 @@ const decode = Schema.decodeSync(codec);
 
 const matches = (from: Position) => (entry: Entry) =>
   entry.sequence > (from.after ?? 0) &&
-  (from.network === undefined || entry.record.network === from.network);
+  (from.network === undefined || networkOf(entry.record) === from.network);
 
 /**
  * A Journal in memory. It stores each Entry's JSON encoding, as a durable adapter does,

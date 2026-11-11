@@ -1,6 +1,6 @@
 # @iirc/frontend
 
-The pure core of the web frontend ([ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md)). It holds what a Frontend shows as plain data and reducers, and React in [`apps/web`](../../apps/web/README.md) only renders it. It is pure, as `@iirc/client` is: it reads no clock, no randomness, no locale, and no time zone, does no I/O, uses no Effect service, and knows nothing of React or the DOM, which the lint fence enforces. It reads mIRC formatting and casemapping from `@iirc/protocol`, positions from `@iirc/timelines`, and the Configuration's Schema from `@iirc/client/configuration`, all pure, and takes the types of what the runtime parsed from `@iirc/api`, never its values.
+The pure core of the web frontend ([ADR 0010](../../docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md)). It holds what a Frontend shows as plain data and reducers, and React in [`apps/web`](../../apps/web/README.md) only renders it. It is pure, as `@iirc/client` is: it reads no clock, no randomness, no locale, and no time zone, does no I/O, uses no Effect service, and knows nothing of React or the DOM, which the lint fence enforces. It reads mIRC formatting and casemapping from `@iirc/protocol`, positions from `@iirc/timelines`, the Configuration's Schema from `@iirc/client/configuration`, and the `ui` options' Schema from `@iirc/api/ui`, all pure, and takes the types of what the runtime parsed from `@iirc/api`, never its values.
 
 This README is the module's written interface. The types are in `src/`.
 
@@ -63,6 +63,8 @@ Each failure comes from the API's structure, never its text:
 initialTimelines: Timelines                       // timelinesWith(windowCap)
 timelinesWith(cap): Timelines                     // windows of at most `cap` items
 windowCap: 1000, keptClosed: 4
+olderUnasked(window, cap): boolean               // whether a view may read the page before without asking
+OlderMode = "Auto" | "Asked"                     // how a page before was wanted
 reduceTimelines(state: Timelines, event: TimelinesEvent): Timelines
 wanted(state): readonly Read[]                    // the reads to make now, none already in flight
 followFrom(state): Place | null | undefined       // where to follow the changes from, once it can
@@ -92,7 +94,8 @@ Read = Networks | List { network, after } | Status { network }
 | `NetworksRead`, `ListRead`, `StatusRead`, `WindowRead { read, window }` | What `GET /api/networks`, a page of a Network's Timelines, `known`, and a window answered. A window's answer names the read it answers, cursor and generation included |
 | `Vanished`, `NetworkVanished` | A read answered `UnknownTimeline` or `UnknownNetwork` |
 | `Changed { place, change }`, `Overflowed { place, overflow }`, `Reset { reset }` | The changes stream, with the place each event left it |
-| `Opened { timeline }`, `OlderWanted { timeline }`, `NewerWanted { timeline }` | The Owner opened a Timeline in the focused Pane, or scrolled near its top, or near its bottom with more beyond |
+| `Opened { timeline }`, `OlderWanted { timeline, mode }`, `NewerWanted { timeline }` | The Owner opened a Timeline in the focused Pane, or the page before is wanted, `Auto` when the view reads it on its own, as near the top or when it cannot be scrolled, or `Asked` on purpose, which stays asked until read, or near its bottom with more beyond |
+| `LatestWanted { timeline }` | The Owner jumped to a Timeline's latest: its window is read again from the latest, which replaces what it holds, and it follows from there |
 | `Located { timeline, navigation }` | The Daemon placed a Message the Owner said with `opens`, as `/msg` does, in this Timeline, read from the step that said it, with the `navigation` its Say was submitted at |
 | `Following { timeline, following, seen }` | The view says the Owner is at the latest of an open Timeline, with `seen` the last item in view, or left it. Only the view sends it, once it has laid out |
 | `OptionsShown { filter }`, `OptionsFiltered { filter }` | The Owner showed the options, by `/set` or the sidebar, or typed in their filter |
@@ -106,7 +109,7 @@ Read = Networks | List { network, after } | Status { network }
 - **A new item lands only where it belongs by position.** In place of the item at its position, when it changed later, as a delivery does. Between the items loaded, as late history does. Past an end with nothing more beyond it, as a live item does at the latest. Anywhere else it is outside what the window holds. Late history inside a collapsed Gap of several may split it, so that window is read again.
 - **A Gap lands in the windows of its Network.** One that ends closes the collapsed Gap holding it. One that begins after the last item joins a collapsed Gap already there, with no item between, or begins one. One among the items means history changed under the window, which is read again. Older items read before the window bring their Gaps, and a collapsed Gap held that begins inside one of theirs is the same run, seen whole.
 - **Older items are read before the first item held, and newer after the last,** with the run of Gaps up to the cursor, as the API gives it. The cursor splits a run that crosses it into a part on each side, and the window joins two Gaps with no item between them into one run again, so pages fitted together show each run once. A page is brought up to date with what the stream gave on its own before it joins the window, which already reflects it.
-- **A window holds at most `windowCap` items, 1000.** While the Owner is at the latest, a live item past the end is kept, and past the cap the oldest go, with the Gaps that ended before the first item kept, and `earlier` says more lie before. Away from the latest, a live item past the end is not kept: `later` says more lie after, the Gaps that began after the last item go too, and they are read after the last item when the Owner scrolls down. A page read before the window drops the newest past the cap instead. `earlier` and `later` are true exactly when something lies beyond, so everything dropped can be read again. A trim through a collapsed Gap of several, which may hold Gaps on both sides of the first item kept, reads the window again.
+- **A window holds at most `windowCap` items, 1000.** While the Owner is at the latest, a live item past the end is kept, and past the cap the oldest go, with the Gaps that ended before the first item kept, and `earlier` says more lie before. Away from the latest, a live item past the end is not kept: `later` says more lie after, the Gaps that began after the last item go too, and they are read after the last item when the Owner scrolls down. A page read before the window carries how it was wanted. One `Asked` drops the newest past the cap instead, and `later` then says more lie after. One `Auto`, merged into a window that holds the latest, never drops its newest: it drops its own oldest past the cap, and `earlier` says more lie before, so a live item that arrived while it was read is kept too. A view asks for one `Auto` only while `olderUnasked` says one more page fits. `earlier` and `later` are true exactly when something lies beyond, so everything dropped can be read again. A trim through a collapsed Gap of several, which may hold Gaps on both sides of the first item kept, reads the window again.
 - **An answer is taken only by the window it was read for.** Each window is a generation of its Timeline's, and a window dropped and read again is a new one. A read names the generation it was made for and, before or after the window, its cursor, and its answer names that read. An answer for a window dropped or replaced since is ignored, without touching the window there is now or its read in flight. A page for an edge the window no longer has, as when the oldest were dropped past the cap while it was read, merges nothing, and is asked for again from the edge there is now.
 - **Only the windows of the Timelines open in a Pane and those of the four closed most recently are kept.** A Timeline no Pane has open any more, as one another replaced, or whose Pane closed, joins the most recently closed. Any other window is dropped, and read again when opened. A window is read for every Timeline a Pane has open, the focused Pane's first. A Timeline opens in the focused Pane, on its latest: its window follows again, and one left behind the latest is read again.
 - **A Timeline is open in one Pane at most.** Opening one another Pane has open focuses that Pane and shows it there again, changing nothing else: it keeps where the Owner scrolled, whether it follows, and its divider. So a Timeline's window, its `following`, its `seen`, and its divider are its Pane's alone, and two Panes never show one at different places, which a dense client gains little from and every rule of reading would have to say which Pane wins. It holds after anything: when a merge, or anything else, would leave two Panes on one Timeline, the focused Pane keeps it, or with neither focused the first in reading order, and the other is emptied, as a split with nothing to show is, its options kept if they show.
@@ -185,6 +188,7 @@ Intent = Say { network, target, kind: "Privmsg" | "Notice" | "Action", text, ope
        | Act { network, action: ActionRequest }   // the Daemon's `act`: Topic, Kick, Mode, Invite, Nick, Away, or Raw
        | OpenOptions { filter }                   // show the options view, filtered
        | Configure { network, edit: Edit }        // read, apply the edit, send it whole
+       | ChangeUi { option, value, device }       // a `ui` option set (value as JSON) or unset (none), on this device alone with `device`
        | AddNetwork { network, configuration }    // configure a Network that must not exist yet
        | PromptCredential { network, path }      // ask for a Credential option's value in a password prompt
        | Open { timeline }                        // open a Timeline in the focused Pane, or focus the Pane it is open in
@@ -220,9 +224,13 @@ Intent = Say { network, target, kind: "Privmsg" | "Notice" | "Action", text, ope
 | `/set <credential option>` |  |  | `PromptCredential`: the password prompt asks for its value |
 | `/set <option> <value>` |  |  | `Configure` with `Set`, the value being the rest of the line, exactly, checked in its syntax first. Empty text, or an empty list, is a value. A Credential option is refused here |
 | `/unset <option>` |  |  | `Configure` with `Unset` |
+| `/set ui.<option> <value>` |  |  | `ChangeUi`, the value parsed in its syntax and then by its Schema, for every device |
+| `/set -device ui.<option> <value>` |  |  | `ChangeUi` with `device`: this device alone overrides the option. Only an option under `ui` can be, so any other is refused in words, saying how |
+| `/unset [-device] ui.<option>` |  |  | `ChangeUi` with no value: back to its default for every device, or with `-device`, this device back to the shared value |
 | `/network add <id> <host>[/port] [-tls] <nick>` |  |  | `AddNetwork`, enabled, with that Ircd and nick and every other field as a new Network starts |
 | `/next` |  |  | `Open` of the Timeline after the open one in the sidebar's order, wrapping to the first, or the first when none is open. Nothing when it is the only one, and `Invalid` when there are none |
 | `/previous` | `/prev` |  | `Open` of the Timeline before, wrapping to the last, or the last when none is open |
+| `/latest` |  | `Focused` | `Latest` of the open Timeline: its latest read again, whole, and followed, whatever its window holds |
 | `/next-unread` | `/jump` |  | `Open` of the Timeline calling for the Owner most, below. Nothing when none does |
 | `/read` |  |  | `MarkRead` of the open Timeline up to its latest item, as the Daemon listed it. Nothing when nothing is unread there |
 | `/read all` |  |  | `MarkRead` of every Timeline with something unread, each up to its latest |
@@ -353,7 +361,7 @@ A composer is at a `Place`: a Timeline's id, or `Nowhere`, under a focused Pane 
 
 ```ts
 fields: readonly Field[]                          // { key, kind, description, optional, starts }, from the Schema
-optionsOf(network, configuration, held): readonly Option[]
+optionsOf(network, configuration, held): readonly NetworkOption[]
 resolve(name): Parsed<{ network, path, field }>   // from the Schema alone
 parseText(kind, text): Parsed<Json>, showText(kind, value): string
 apply(network, configuration, edit): Parsed<Configuration>   // set, unset, and the rest are edits
@@ -361,9 +369,9 @@ set(network, configuration, path, text), unset(network, configuration, path)
 starting(network, given): Parsed<Configuration>   // what a new Network starts with, the rest given
 credentialFor(network, configuration, path): Parsed<string>  // the Credential an option names, or the one derived
 matches(filter, name): boolean
-initialOptions, reduceOptions(state, event), listed(state, filter): readonly Option[]
+initialOptions, reduceOptions(state, event), listed(state, filter, device?): readonly Option[]
 
-Option = { name, network, path, kind, description, value: Shown { text } | Unset | Credential { name, held }, starts, unsettable }
+NetworkOption = { name, network, path, kind, description, value: Shown { text } | Unset | Credential { name, held }, starts, unsettable }
 Edit = Set { path, text } | Unset { path } | Point { path, credential } | Join { channels } | Part { channels }
 ```
 
@@ -389,6 +397,37 @@ A list is its elements separated by commas, as WeeChat's are. Within an element,
 - **A Channel's prefix is never guessed.** A name that starts with a character of the Network's `CHANTYPES` is kept exactly. A bare name gets the first `CHANTYPES` character. While `CHANTYPES` is unknown, a name with no prefix RFC 2811 names, `#`, `&`, `+`, or `!`, is refused, saying to give the prefix.
 - **A filter matches with `*` as a pattern,** anchored at both ends, such as `network.libera.*` or `*nick*`, and without one as text found anywhere, in any ASCII case.
 - **The options view is a reducer:** each Network's Configuration as read with its sequence, `Reading`, `Read`, or `Failed`, a read older than the one held never replacing it, the Credentials held, what the last edit came to, which option is being edited in place or asked to be unset, and which Credential option the password prompt asks for. `listed` is every option of every Network read that the filter matches.
+
+### The options under `ui`
+
+```ts
+uiFields: readonly Field[]                        // from the contract's UiOptions
+uiOptionsOf(shared, device): readonly UiOption[]
+resolveUi(name): Parsed<{ option, field }>, isUiName(name), uiOptionName(option)
+parseUiText(option, text): Parsed<Json>           // its syntax, then its Schema
+
+UiOption = { name, option, kind, description, value, shared, device, starts, unsettable }
+Option = NetworkOption | UiOption                 // tagged `Network` or `Ui`
+```
+
+An option under `ui` is named `ui.<option>`, such as `ui.time`, and derived from `UiOptions` in `@iirc/api/ui` as a Network's are from its Configuration's Schema, so `theme`, `time`, and `activity` are `Choice`s and a new field is a new option ([ADR 0015](../../docs/adr/0015-the-journal-holds-changes-that-belong-to-no-network.md)).
+
+- **Every device shares them, and one may override any for itself.** `value` is what is in effect on this device: its override, else the shared value, else the default until the shared ones are read. `shared` is the value every device shares, `Unset` until read, and `device` this device's override, or none. The options view's state holds the shared ones as last read or followed, by `UiRead`, an older never replacing a newer, and `listed` takes this device's overrides, listing the options under `ui` after every Network's.
+- **A change is whole.** `/set ui.<option>` gives the value as JSON its Schema took, and `/unset` none, so the runtime sends it made from the sequence read and, after a conflict, sends the same again.
+
+`@iirc/frontend/ui`: the options under `ui` as they take effect here.
+
+```ts
+effectiveUi(shared, device): UiOptions            // device ?? shared ?? default, for each option
+DeviceUi = Partial<UiOptions>, noOverrides
+deviceUiKey: "iirc.ui"                            // where a device keeps its overrides
+deviceUiOf(text): DeviceUi, deviceUiText(device): string | undefined
+overridden(device, option, value?): DeviceUi      // one overridden, or no longer
+showsItem(activity, kind, content): boolean
+```
+
+- **Overrides are parsed option by option.** `deviceUiOf` reads the text a device kept, at most 4 KB, as an object, and keeps each option `ui` has with a value its Schema takes, dropping the rest, so one bad override never loses the others. `overridden` parses the whole again, so a value the Schema refuses is never kept, and `deviceUiText` gives nothing for no overrides, so a device keeps nothing.
+- **`activity` changes what is drawn, never what is counted.** `showsItem` keeps every item of a Network's or a Direct Message's Timeline, and of a Channel's every item but Activity, which `all` keeps, `quiet` keeps but for `Joined`, `Parted`, and `Quit`, and `none` drops.
 
 ## Who is here
 
@@ -527,7 +566,7 @@ Notify = { network, timeline, title, body, tag }  // tag: `iirc:<timeline>`, one
 
 ## Tests
 
-`bun run test` runs twelve files. `src/sign-in.test.ts` covers each transition, checking again after a failed check, keeping a failure until the next attempt, signing out failing while staying signed in, `Refused` from signed in and while signing out, ignoring an answer that does not belong, and two properties over any sequence of events: `SignedIn` is entered only after a check or a sign-in said so, and every state survives `structuredClone` unchanged.
+`bun run test` runs thirteen files. `src/sign-in.test.ts` covers each transition, checking again after a failed check, keeping a failure until the next attempt, signing out failing while staying signed in, `Refused` from signed in and while signing out, ignoring an answer that does not belong, and two properties over any sequence of events: `SignedIn` is entered only after a check or a sign-in said so, and every state survives `structuredClone` unchanged.
 
 `src/timelines.test.ts` plays a model Daemon: random steps folded into Timelines, items, late history, deliveries, Sessions and their Gaps, and a second Network configured later, sometimes never heard from again, read a page at a time and a window at a time as the API reads them, before and after a cursor included, and changes given as it gives them. The reducer and a runtime in miniature read what `wanted` asks, at fold points the Daemon has reached, answered later in any order, while the stream lags the Daemon, some steps come as overflows, naming what they touched or everything, the Daemon may take a new projection version, which the stream resets, every event may come twice, and the Owner opens Timelines, goes back to the one before, opens another while older items are read and comes back, has the Daemon fold steps that come as overflows touching everything while the Network list is read, scrolls up and down, and leaves and returns to the latest at random, with windows of at most 4 items, pages of 2, and no closed window kept, so windows are dropped and read again with answers for them still in flight, which the runtime may answer newest first. After every action, a current window holds every item the Daemon had folded by its `through` between its first and last items, so a page merged into the wrong window, which leaves a hole, is caught as it happens. Once everything settles, the Networks are exactly the Daemon's, and each Network's Timelines and connection are exactly its, a Network that only a reset reaches included, and every current window is exactly what a read now would give between its first and last items, Gaps included, with `earlier` and `later` true exactly when something lies beyond. No window ever holds more than the cap, nor is any window kept but those of Timelines a Pane has open. The Owner also splits, opening a Timeline in the new Pane or none, closes, focuses, moves the focus, and swaps, and after every action no Timeline is open in two Panes, the focus is on a Pane, no window is kept for a Timeline no Pane has open, and `navigation` never goes back. Every state survives `structuredClone`. Examples cover opening the Direct Message Timeline a Message was placed in, by id, at once or once listed, the right one of `[bob]` and `{bob}`, never a Channel's or a detached one, a placement from before the Owner opened another ignored, a placement made while the options showed showing its Timeline in their place, and one from before they were shown let go, following after the smallest `through`, each read asked once, sidebar order, a live item, late history, an update in place, an item outside a window, a merge followed and learnt from a window read, overflows, a reset, a read of another version dropped, a read brought up to date from what the stream gave, reading older items before the first with the Gaps up to it, a page that lands after its window was dropped and read again ignored, the Network list kept stale when an overflow that touched everything came while it was read, and current from where the stream was when it was asked, not when it was taken on, joining a run the cursor split, the Network list read again on a reset and a pre-reset read of it landing late, collapsing Gaps, and a connection from `known` then from Session items. The Panes' examples cover a split opening a Timeline in the new Pane, focused, with its window read, and an empty one when another Pane has it open; opening a Timeline another Pane has open focusing that Pane, its window untouched; opening in the focused Pane, the Timeline replaced kept among the closed; closing a Pane, its window kept among the closed, and the last never; a placement let go once the Owner moves to another Pane, and kept when a swap moves the focused Pane, whole, with them; the options in one Pane, shown again there from another, with its Timeline open behind; and the layout kept as JSON, read back through its Schema, set aside until the Timelines are read, taken without a Pane whose Timeline is gone, with the options in the Pane they showed in and each Pane's window read, let go once the Owner opened a Timeline first, a Timeline kept twice opened once, and a layout with ids used twice or a Timeline's id that is not one refused. A merge that leaves both Panes on one Timeline empties the Pane not focused, either way round, and, as a property over any opening, splitting, closing, focusing, moving, swapping, and merging, no Timeline is ever open in two Panes and the focus is always on a Pane. `layoutKeptText` refuses, without throwing, text 5000 levels deep, of 65 Panes, longer than 64 KB, nested 17 Splits deep, or not JSON, and takes 16.
 
@@ -549,13 +588,15 @@ Notify = { network, timeline, title, body, tag }  // tag: `iirc:<timeline>`, one
 
 `src/options.test.ts` covers the fields derived from the Schema, one for each of the Configuration's, each described, with its kind; every option of a Configuration with a SASL login, a password, and a keyed Channel listed, each resolved by its name; each value and starting value in its syntax; Credential options showing only a name and whether it is held; a member's fields unset while another is in force; names with dotted Network ids and Channel names; Credential names derived, escaped, and kept; patterns and text matched. It checks, as properties, that each kind reads back what it shows, for any value the Schema admits, weighted towards quotes, commas, backslashes, spaces, and Unicode, that an Ircd list typed any way shows what it reads, and that any text set on any option gives a Configuration or says why. It covers setting each option to what it shows giving the same Configuration, setting and refusing values, a member put in force by one of its fields, keys kept as Channels are set again, unsetting each kind or refusing one that must be given, refusing to unset a SASL login's Credential, pointing a Credential option, joining and parting as the Network folds names and exactly while it says none, an ascii Network's `#[a]` and `#{a}` never merged or parted together, a name two entries fold to refused with both named, `PartTimeline` by the routed key, `%help` kept under `CHANTYPES=%`, a bare name prefixed with `&` on an `&`-only Network, and refused while `CHANTYPES` is unknown, the list syntax's escapes, edges, and empty elements, text set verbatim, the commands `/set`, `/unset`, `/network add`, `/join`, and `/part`, `/set` on a Credential opening the prompt and a value typed after it refused, the composer clearing such a line at once and keeping it nowhere, and the options view listing what it read, filtered, keeping the newest read.
 
+`src/options.test.ts` also covers the options under `ui`: one for each field of `UiOptions`, each described, each a `Choice`; each listed with the value in effect, the shared one, and this device's override, before and after the shared ones are read; listed after every Network's, filtered, with the newest read kept; and `/set` and `/unset` of one, in any case, with `-device`, refusing `-device` alone or with a Network's option, an empty value, an option `ui` does not have, and a value its Schema does not take. `src/ui.test.ts` covers a device's overrides read back from the text they are kept as, dropping an option `ui` lacks, a value its Schema refuses, text that is not an object or JSON, and text too long, one overridden, replaced, and no longer, and a refused value never kept; the override winning over the shared value, which wins over the default; and which items a Channel's Timeline shows under each `activity`, every item of another kind of Timeline shown.
+
 `src/render.test.ts` covers formatting, the schemes linked and those not, a link's style and `href`, a link ended at a bidirectional character, controls shown, bidirectional formatting closed, a line of 70 000 characters, linear time over 64 000 closing brackets after a link and 30 000 nested embeddings closed by isolates' pops, and, for any text weighted towards hostile pieces, that it never throws, no run holds a control, every run closes its bidirectional formatting, and every link is of an allowed scheme. Plain text strips formatting, controls, and bidirectional characters, makes separators spaces, cuts at the limit by code point with an ellipsis, never through an emoji, stops early on 70 000 characters, and, for any text weighted towards hostile pieces, holds no control, bidirectional character, or lone surrogate inside its isolate. Nick colours are the same in any case and on every run, in range, and spread over every slot. Lines cover a Message, each delivery in words, a rejection's code contained, and the Ircd's confirmed text, a hostile nick, each Activity, and a Session's start and end.
 
 ## Not yet
 
 - **One Timeline in two Panes,** at two places, as WeeChat and tmux allow. A Pane opens what no other Pane shows.
-- **A layout kept under `ui`,** shared by every device. It is kept per device until options under `ui` exist, and a phone's screen shows one Pane at a time whatever it holds.
-- **Options under `ui`,** for Frontends, such as the theme and overrides of the keymap, which [ADR 0013](../../docs/adr/0013-configuration-is-an-option-tree.md) puts in the same tree, and options of the Daemon's own. `keymapOf` is ready to read them, dropping what does not parse.
+- **A layout kept under `ui`,** shared by every device. It is kept per device, and a phone's screen shows one Pane at a time whatever it holds.
+- **More options under `ui`,** such as named palettes for the theme and overrides of the keymap, and options of the Daemon's own. `keymapOf` is ready to read them, dropping what does not parse.
 - **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone opens the palette, so a sequence beginning with it would make the palette wait.
 - **A divider for what came while the Owner was away from an open Timeline.** The divider is taken when a Timeline opens. One left open in a hidden page gathers unread items, which the counts show, but no divider until it is opened again.
 - **Marking a detached Direct Message read.** No Target names it, so its counts stay until the API can mark a Timeline by its id.

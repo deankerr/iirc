@@ -22,13 +22,14 @@ import {
   SignInsFailed,
   signInCookie,
   TimelinesFailed,
+  UiChanged,
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
   VaultFailed,
   windowLimit,
 } from "@iirc/api";
-import type { NewsEvent, TimelineChangesEvent, WindowQuery } from "@iirc/api";
+import type { NewsEvent, TimelineChangesEvent, UiEvent, WindowQuery } from "@iirc/api";
 import { IntentId } from "@iirc/client";
 import { Runtime } from "@iirc/runtime";
 import type { NetworkStopped as RuntimeNetworkStopped } from "@iirc/runtime";
@@ -69,6 +70,8 @@ import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import type { SignInsUnwritable } from "./sign-ins.ts";
+import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
+import type { UiChangedSince } from "./ui.ts";
 import {
   channelHeader,
   gap,
@@ -813,6 +816,77 @@ const timelines = HttpApiBuilder.group(
   })
 );
 
+const uiChanged = (error: UiChangedSince) => new UiChanged({ sequence: error.sequence });
+
+// A value is parsed by its option's Schema before it is journaled, and journaled in its
+// encoding, so the Journal holds only values the Schema takes.
+const ui = HttpApiBuilder.group(
+  DaemonApi,
+  "ui",
+  Effect.fn(function* (handlers) {
+    const options = yield* UiConfiguration;
+
+    return handlers
+      .handle("read", () => options.inForce)
+      .handle("set", ({ params, payload, query }) =>
+        Effect.gen(function* () {
+          const value = parseUiValue(params.option, payload.value);
+
+          if (Option.isNone(value)) {
+            return yield* new InvalidRequest({
+              issues: [
+                { message: `Is not a value of ui.${params.option}`, path: ["payload", "value"] },
+              ],
+            });
+          }
+
+          const sequence = yield* options.change(
+            {
+              _tag: "UiSet",
+              option: params.option,
+              value: uiValueJson(params.option, value.value),
+            },
+            query.ifSequence
+          );
+
+          return { sequence };
+        }).pipe(
+          Effect.catchTags({ JournalFailed: (error) => Effect.fail(journalFailed(error)) }),
+          Effect.catchTags({ UiChangedSince: (error) => Effect.fail(uiChanged(error)) })
+        )
+      )
+      .handle("unset", ({ params, query }) =>
+        options.change({ _tag: "UiUnset", option: params.option }, query.ifSequence).pipe(
+          Effect.map((sequence) => ({ sequence })),
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            UiChangedSince: (error) => Effect.fail(uiChanged(error)),
+          })
+        )
+      )
+      .handle("changes", ({ headers, query }) =>
+        Effect.gen(function* () {
+          const every = yield* Heartbeat;
+          // As for News, the header comes with the URL first used, so it wins.
+          const after = headers["last-event-id"] ?? query.after;
+
+          // Each event is the options whole, so one newer than `after` says all a Frontend
+          // missed. Without `after`, the options now come first, whatever their sequence.
+          const changed = options.changes.pipe(
+            Stream.filter((now) => after === undefined || now.sequence > after),
+            Stream.map((now): UiEvent => ({ data: now, event: "changed", id: now.sequence }))
+          );
+
+          const heartbeats = Stream.fromSchedule(Schedule.spaced(every)).pipe(
+            Stream.map((): UiEvent => ({ data: {}, event: "heartbeat" }))
+          );
+
+          return Stream.merge(changed, heartbeats, { haltStrategy: "left" });
+        })
+      );
+  })
+);
+
 // A value arrives `Redacted` and goes straight to the Vault, and nothing comes back but
 // names.
 const credentials = HttpApiBuilder.group(
@@ -865,9 +939,10 @@ const bodyLimit = HttpRouter.middleware(
 
 /**
  * The handler groups, with the key and sign-in check and request validation, needing the
- * Runtime, the Vault, the Timeline store and its projector, the keys, and the sign-ins.
+ * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the keys, and
+ * the sign-ins.
  */
-export const ApiHandlers = Layer.mergeAll(signIn, networks, news, timelines, credentials).pipe(
+export const ApiHandlers = Layer.mergeAll(signIn, networks, news, timelines, ui, credentials).pipe(
   Layer.provideMerge(Layer.mergeAll(requestValidation, authorization))
 );
 

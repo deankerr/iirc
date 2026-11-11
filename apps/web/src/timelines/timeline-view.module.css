@@ -39,6 +39,14 @@
   color: var(--color-muted);
 }
 
+/* The way back to the latest, under the log, while newer items lie beyond it. */
+.jump {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
 .placeholder {
   padding: var(--space-4);
   color: var(--color-muted);

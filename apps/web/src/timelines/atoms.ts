@@ -20,7 +20,13 @@ import {
   sidebar,
   wanted,
 } from "@iirc/frontend/timelines";
-import type { PaneChange, Read, Timelines, TimelinesEvent } from "@iirc/frontend/timelines";
+import type {
+  OlderMode,
+  PaneChange,
+  Read,
+  Timelines,
+  TimelinesEvent,
+} from "@iirc/frontend/timelines";
 import { Context, Duration, Effect, FiberSet, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -464,10 +470,23 @@ export const paned = Atom.fnSync((change: PaneChange, get) => {
   }
 }).pipe(Atom.keepAlive);
 
-/** Asks for what lies before the open Timeline's first item. */
-export const older = Atom.fnSync((timeline: TimelineId, get) => {
-  happened(get.registry, { _tag: "OlderWanted", timeline });
+/**
+ * Asks for what lies before the open Timeline's first item: `Asked` when the Owner asked on
+ * purpose, and `Auto` when the view reads on its own, which never drops the latest.
+ */
+export const older = Atom.fnSync(
+  ({ mode, timeline }: { readonly timeline: TimelineId; readonly mode: OlderMode }, get) => {
+    happened(get.registry, { _tag: "OlderWanted", mode, timeline });
+  }
+).pipe(Atom.keepAlive);
+
+/** Reads a Timeline's latest again, whole, and follows it from there. */
+export const latest = Atom.fnSync((timeline: TimelineId, get) => {
+  happened(get.registry, { _tag: "LatestWanted", timeline });
 }).pipe(Atom.keepAlive);
+
+/** The most items a window holds, which a view reads older pages without asking within. */
+export const windowCapOf = Atom.make((get) => get(timelinesState).windowCap);
 
 /** Asks for what lies after the open Timeline's last item, when the Owner scrolled back. */
 export const newer = Atom.fnSync((timeline: TimelineId, get) => {

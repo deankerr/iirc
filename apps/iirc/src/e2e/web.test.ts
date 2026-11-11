@@ -68,6 +68,25 @@ const decodeTimelines = Schema.decodeUnknownSync(
   )
 );
 
+/**
+ * What the end-to-end run reads of the options under `ui` every device shares.
+ * @param text - The answer of `GET /api/ui`.
+ * @returns The options.
+ */
+const decodeUi = (text: string) =>
+  Schema.decodeSync(
+    Schema.fromJsonString(
+      Schema.Struct({
+        options: Schema.Struct({
+          activity: Schema.String,
+          theme: Schema.String,
+          time: Schema.String,
+        }),
+        sequence: Schema.Finite,
+      })
+    )
+  )(text).options;
+
 /** What the end-to-end run reads of a layout the page kept: its root Split's ratios. */
 const decodeKeptRatios = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -1333,6 +1352,144 @@ describe("the web frontend on iirc daemon --web", () => {
           violations: "",
         });
       } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "shares ui options between devices, shows seconds, hides joins when quiet, and overrides the theme on one device",
+    { timeout: 90_000 },
+    async () => {
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "ui"),
+        "#iirc-ui"
+      );
+
+      const newcomer = await connectPeer({
+        host: ngircd.host,
+        nick: "newcomer",
+        port: ngircd.plainPort,
+      });
+
+      try {
+        // Two devices, each a browser context of its own, with its own storage.
+        const devices = [await watchedPage(browser), await watchedPage(browser)];
+
+        const opened = await Promise.all(
+          devices.map(async ({ page }) => {
+            await page.goto(base);
+            await page.getByLabel("Key").fill(key);
+            await page.getByRole("button", { name: "Sign in" }).click();
+            await page.getByRole("row", { name: channel }).click();
+
+            return {
+              composer: page.getByRole("textbox", { name: channel }),
+              log: page.getByRole("log", { name: channel }),
+              page,
+            };
+          })
+        );
+
+        const [first, second] = opened;
+
+        if (first === undefined || second === undefined) {
+          throw new Error("two devices were opened");
+        }
+
+        const type = async (where: typeof first, text: string) => {
+          await where.composer.fill(text);
+          await where.composer.press("Enter");
+        };
+
+        peer.send(`PRIVMSG ${channel} :before`);
+        await second.log.getByText("before", { exact: true }).waitFor();
+        const timeBefore = await second.log.locator("time").last().textContent();
+
+        // Set on one device, shown on the other: a line's time with seconds.
+        await type(first, "/set ui.time HH:mm:ss");
+        await expect
+          .poll(async () => await second.log.locator("time").last().textContent())
+          .toMatch(/^\d{2}:\d{2}:\d{2}$/u);
+
+        // Quiet hides a join, and the Message after it shows.
+        await type(first, "/set ui.activity quiet");
+        await expect
+          .poll(async () => {
+            const answer = await api("GET", "/ui");
+            const text = await answer.text();
+
+            return decodeUi(text).activity;
+          })
+          .toBe("quiet");
+        newcomer.send(`JOIN ${channel}`);
+        await newcomer.waitFor((line) => line.command === "JOIN", "the newcomer's own JOIN");
+        newcomer.send(`PRIVMSG ${channel} :after the join`);
+        await second.log.getByText("after the join", { exact: true }).waitFor();
+        await expect
+          .poll(async () => await second.log.getByText(/newcomer joined/u).count())
+          .toBe(0);
+        const quiet = await first.log.getByText(/newcomer joined/u).count();
+
+        // All shows it again, on both devices.
+        await type(second, "/set ui.activity all");
+        await second.log.getByText(/newcomer joined/u).waitFor();
+        await first.log.getByText(/newcomer joined/u).waitFor();
+
+        // A theme for this device alone wins over the one every device shares, and is never sent.
+        await type(first, "/set -device ui.theme light");
+        await type(second, "/set ui.theme dark");
+
+        const themeOf = async (where: typeof first) =>
+          await where.page.evaluate(() => [
+            document.documentElement.dataset.theme,
+            getComputedStyle(document.body).backgroundColor,
+          ]);
+
+        const drawnIn = async (where: typeof first) =>
+          await where.page.evaluate(() => document.documentElement.dataset.theme);
+
+        await expect.poll(async () => await drawnIn(second)).toBe("dark");
+        await expect.poll(async () => await drawnIn(first)).toBe("light");
+
+        const answered = await api("GET", "/ui");
+        const shared = await answered.text();
+        const kept = await first.page.evaluate(() => localStorage.getItem("iirc.ui"));
+
+        const violations = await Promise.all(
+          opened.map(
+            async ({ page }) =>
+              await page.evaluate(() => document.documentElement.dataset.cspViolations ?? "")
+          )
+        );
+
+        expect({
+          kept,
+          problems: devices.flatMap(({ problems }) =>
+            problems.filter((problem) => problem.includes("Content Security Policy"))
+          ),
+          quiet,
+          shared: decodeUi(shared),
+          themes: [await themeOf(first), await themeOf(second)],
+          timeBefore: /^\d{2}:\d{2}$/u.test(timeBefore ?? ""),
+          violations,
+        }).toStrictEqual({
+          kept: '{"theme":"light"}',
+          problems: [],
+          quiet: 0,
+          shared: { activity: "all", theme: "dark", time: "HH:mm:ss" },
+          themes: [
+            ["light", "rgb(246, 245, 241)"],
+            ["dark", "rgb(17, 19, 20)"],
+          ],
+          timeBefore: true,
+          violations: ["", ""],
+        });
+      } finally {
+        newcomer.close();
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

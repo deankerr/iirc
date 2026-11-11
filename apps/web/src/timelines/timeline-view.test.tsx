@@ -7,7 +7,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { deviceUi } from "../options/device.ts";
 import { pageState } from "../page/atoms.ts";
+import { movedEvent } from "../panes/atoms.ts";
 import { marking } from "../reading/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
@@ -68,6 +70,22 @@ const message = (sequence: number): typeof TimelineItem.Encoded => ({
   timeline: iirc,
 });
 
+const joined = (sequence: number): typeof TimelineItem.Encoded => ({
+  changed: sequence,
+  content: {
+    _tag: "Activity",
+    activity: { _tag: "Joined", channel: "#iirc", nick: `user${sequence}` },
+    at: { _tag: "Unknown" },
+    id: { _tag: "Unknown" },
+    live: true,
+  },
+  level: "Activity",
+  network: "libera",
+  position: cursor(sequence * 1000, sequence),
+  sequence,
+  timeline: iirc,
+});
+
 /**
  * Waits until something holds, letting React render what changed meanwhile.
  * @param holds - What must hold.
@@ -90,23 +108,31 @@ const pause = async (millis: number) => {
 
 /**
  * The Frontend signed in, its page seen, marking read, with `#iirc` holding two unread
- * Messages, and nothing open.
+ * Messages, or the items given, and nothing open.
  * @param gaps - The Gaps `#iirc` holds.
+ * @param items - What `#iirc` holds, two Messages unless given.
+ * @param more - How `#iirc` is listed, beyond two unread Messages.
  * @returns The fake, the registry, and the page.
  */
-const signedIn = async (gaps: readonly (typeof WindowGap.Encoded)[] = []) => {
+const signedIn = async (
+  gaps: readonly (typeof WindowGap.Encoded)[] = [],
+  items: readonly (typeof TimelineItem.Encoded)[] = [message(1), message(2)],
+  more: Partial<typeof Timeline.Encoded> = {}
+) => {
   const fake = fakeDaemon();
+  const last = items.at(-1)?.sequence ?? 2;
 
   fake.daemon.signedIn = true;
-  fake.daemon.through = 2;
+  fake.daemon.through = last;
   fake.daemon.timelines.set("libera", [
     { gaps: [], items: [], timeline: listed(own, "libera", "Network") },
     {
       gaps: [...gaps],
-      items: [message(1), message(2)],
+      items: [...items],
       timeline: listed(iirc, "#iirc", "Channel", {
-        latest: cursor(2000, 2),
+        latest: cursor(last * 1000, last),
         unread: { activity: 0, direct: 0, highlights: 0, messages: 2 },
+        ...more,
       }),
     },
   ]);
@@ -303,6 +329,19 @@ const fold = (
   });
 };
 
+/**
+ * Presses the button with a name, as a click does.
+ * @param name - Its name.
+ */
+const press = async (name: string) => {
+  const button = [...document.querySelectorAll("button")].find((one) => one.textContent === name);
+
+  await act(async () => {
+    button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
 describe("what the view says it shows", () => {
   beforeEach(() => {
     layout.content = 0;
@@ -420,5 +459,328 @@ describe("what the view says it shows", () => {
       gapOnly: 0,
       reads: [{ read: 2000, target: "#iirc" }],
     });
+  });
+
+  it("reads older pages without scrolling while ui.activity hides every row of the latest, and marks nothing hidden", async () => {
+    // One Message, then 250 joins: the latest two pages hold only joins.
+    const items = [message(1), ...Array.from({ length: 250 }, (_, index) => joined(index + 2))];
+    const { daemon, registry } = await signedIn([], items);
+
+    registry.set(deviceUi, { activity: "quiet" });
+    await openFromPalette();
+    await settled(() => logOf().textContent?.includes("line 1"));
+    await settled(() => daemon.reads.length > 0);
+    await pause(200);
+
+    expect({
+      reads: daemon.reads,
+      windows: daemon.windowsRead.map((query) => new URLSearchParams(query).has("before")),
+    }).toStrictEqual({
+      // Marked no further than the Message drawn, never a hidden join after it.
+      reads: [{ read: 1000, target: "#iirc" }],
+      windows: [false, true, true],
+    });
+  });
+
+  it("keeps the line read where it was when ui.activity hides or shows rows above it", async () => {
+    // Messages at odd steps, joins at even ones, 60 in all: the start of the Timeline is
+    // the first row, so step `n` is row `n`.
+    const items = Array.from({ length: 60 }, (_, index) =>
+      index % 2 === 0 ? message(index + 1) : joined(index + 1)
+    );
+
+    const { registry } = await signedIn([], items);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+
+    // Scrolled back, with the join at step 20 at the top of the view, and line 21 below it,
+    // past the "new" divider above the first unread row.
+    await scrollTo(420, 100_000);
+
+    const offsetOf = (text: string) => {
+      const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+        one.textContent?.includes(text)
+      );
+
+      const start = Number(
+        /translateY\((?<y>[\d.]+)px\)/u.exec(row?.style.transform ?? "")?.groups?.y
+      );
+
+      return start - logOf().scrollTop;
+    };
+
+    const before = offsetOf("line 21");
+
+    await act(async () => {
+      registry.set(deviceUi, { activity: "quiet" });
+      await Promise.resolve();
+    });
+
+    const quiet = { offset: offsetOf("line 21"), top: logOf().scrollTop };
+
+    await act(async () => {
+      registry.set(deviceUi, {});
+      await Promise.resolve();
+    });
+
+    expect({ again: offsetOf("line 21"), before, quiet }).toStrictEqual({
+      again: 20,
+      before: 20,
+      // The join at the top hidden, line 19 before it takes its place, so line 21 stays
+      // where it was, and the view stands ten rows higher with the joins above hidden.
+      quiet: { offset: 20, top: 220 },
+    });
+  });
+
+  it("never reads past the cap without asking, offers to on purpose, and jumps back to the latest, which it follows", async () => {
+    // One Message, then 1,100 joins: past the cap, all hidden.
+    const items = [message(1), ...Array.from({ length: 1100 }, (_, index) => joined(index + 2))];
+    const fake = await signedIn([], items);
+    const { daemon, registry } = fake;
+
+    registry.set(deviceUi, { activity: "quiet" });
+    await openFromPalette();
+
+    // Read without asking up to the cap, with the latest kept, then held.
+    await settled(() => logOf().textContent?.includes("Older history here is hidden activity"));
+    const unasked = daemon.windowsRead.length;
+
+    // Read on purpose: the newest go past the cap, and the Message is reached without
+    // scrolling, with a way back to the latest.
+    await press("Load older");
+    await settled(() => logOf().textContent?.includes("line 1"));
+
+    const reached = {
+      jump: document.body.textContent?.includes("Jump to latest"),
+      reads: [...daemon.reads],
+    };
+
+    // Something new arrives past the window, then the Owner jumps to the latest.
+    const live = (sequence: number) => {
+      fold(
+        fake,
+        sequence,
+        [message(sequence)],
+        listed(iirc, "#iirc", "Channel", {
+          changed: sequence,
+          latest: cursor(sequence * 1000, sequence),
+          unread: { activity: 0, direct: 0, highlights: 0, messages: 1 },
+        })
+      );
+    };
+
+    live(1102);
+    await press("Jump to latest");
+    await settled(() => logOf().textContent?.includes("line 1102"));
+    await settled(() => daemon.reads.length === 1);
+
+    // Following, a live Message after it is drawn and marked read too.
+    live(1103);
+    await settled(() => logOf().textContent?.includes("line 1103"));
+    await settled(() => daemon.reads.length === 2);
+
+    expect({
+      jumpAfter: document.body.textContent?.includes("Jump to latest"),
+      reached,
+      reads: daemon.reads,
+      unasked,
+    }).toStrictEqual({
+      jumpAfter: false,
+      reached: { jump: true, reads: [] },
+      reads: [
+        { read: 1_102_000, target: "#iirc" },
+        { read: 1_103_000, target: "#iirc" },
+      ],
+      // The latest, and nine pages before it: a thousand items.
+      unasked: 10,
+    });
+  });
+
+  it("keeps a row in view when ui.activity hides every row before it, anchoring to the next that shows", async () => {
+    // A Message long ago, joins 2 to 60, then Messages 61 to 120: the latest page begins
+    // with 40 joins, with more before it, read up to its latest so no divider shows.
+    const items = Array.from({ length: 120 }, (_, index) =>
+      index === 0 || index >= 60 ? message(index + 1) : joined(index + 1)
+    );
+
+    const { registry } = await signedIn([], items, {
+      read: 120_000,
+      unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+    });
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+
+    // Join 59, row 38, at the top of the view, and line 61 two rows below it.
+    await scrollTo(760, 100_000);
+
+    const offsetOf = (text: string) => {
+      const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+        one.textContent?.includes(text)
+      );
+
+      const begins = Number(
+        /translateY\((?<y>[\d.]+)px\)/u.exec(row?.style.transform ?? "")?.groups?.y
+      );
+
+      return begins - logOf().scrollTop;
+    };
+
+    const before = offsetOf("line 61");
+
+    await act(async () => {
+      registry.set(deviceUi, { activity: "quiet" });
+      await Promise.resolve();
+    });
+
+    const clamped = logOf().scrollTop;
+
+    // As a browser does once scrolled, the virtualizer draws where the view now stands, and
+    // near the top, the page before is asked for and kept above without moving line 61.
+    await act(async () => {
+      logOf().dispatchEvent(new Event("scroll"));
+      await Promise.resolve();
+    });
+
+    // Every row before it hidden, line 61 is the first row, scrolled no higher than the top.
+    expect({ before, clamped, quiet: offsetOf("line 61") }).toStrictEqual({
+      before: 40,
+      clamped: 0,
+      quiet: 0,
+    });
+  });
+
+  it("reads nothing without asking in a Pane that cannot be seen, until it is shown", async () => {
+    const items = [message(1), ...Array.from({ length: 250 }, (_, index) => joined(index + 2))];
+    const { daemon, registry } = await signedIn([], items);
+
+    registry.set(deviceUi, { activity: "quiet" });
+    layout.view = 0;
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await pause(200);
+    const hidden = daemon.windowsRead.length;
+
+    // Shown again, as a Pane moved back into the page is: it lays out and reads on.
+    layout.view = 500;
+    await act(async () => {
+      logOf().closest("[data-pane-host]")?.dispatchEvent(new Event(movedEvent));
+      await Promise.resolve();
+    });
+    // Both pages before are read, until the Message: the page before them holds it.
+    await settled(() => daemon.windowsRead.length === 3);
+    await pause(200);
+
+    expect({ hidden, shown: daemon.windowsRead.length }).toStrictEqual({ hidden: 1, shown: 3 });
+  });
+
+  it("never drops the latest for a scroll to the top once the window holds as much as it can", async () => {
+    // 1,200 joins, then a Message, the latest.
+    const items = [...Array.from({ length: 1200 }, (_, index) => joined(index + 1)), message(1201)];
+    const { daemon, registry } = await signedIn([], items);
+
+    // The window as the core holds it: its first and last items, and whether more lie after.
+    const held = () => {
+      const shown = registry.get(openTimeline);
+
+      return shown._tag === "Shown"
+        ? {
+            first: shown.window.items[0]?.sequence,
+            last: shown.window.items.at(-1)?.sequence,
+            later: shown.window.later,
+          }
+        : undefined;
+    };
+
+    await openFromPalette();
+    await settled(() => held()?.last === 1201);
+
+    // Scrolled to the top again and again: read on its own, up to as much as a window holds.
+    for (let pages = 2; pages <= 10; pages += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- scrolled once each page is in
+      await scrollTo(0, 100_000);
+      // oxlint-disable-next-line no-await-in-loop -- scrolled once each page is in
+      await settled(() => daemon.windowsRead.length === pages);
+    }
+
+    const full = held();
+
+    // Every join hidden, then scrolled to the top by a script, as a browser fires it.
+    await act(async () => {
+      registry.set(deviceUi, { activity: "quiet" });
+      await Promise.resolve();
+    });
+    await scrollTo(0, 100_000);
+    await pause(200);
+
+    expect({
+      after: held(),
+      full,
+      jump: document.body.textContent?.includes("Jump to latest"),
+      reads: daemon.windowsRead.length,
+    }).toStrictEqual({
+      after: { first: 202, last: 1201, later: false },
+      full: { first: 202, last: 1201, later: false },
+      jump: false,
+      reads: 10,
+    });
+  });
+
+  it("reads on without asking once the view is resized to be seen, with no move", async () => {
+    // A ResizeObserver that reports only when told, for the log alone.
+    const told: (() => void)[] = [];
+
+    // oxlint-disable-next-line typescript/no-extraneous-class -- it stands in for the browser's class.
+    class Observer {
+      readonly #report: () => void;
+
+      constructor(report: () => void) {
+        this.#report = report;
+      }
+
+      observe(element: Element) {
+        if (isLog(element)) {
+          told.push(this.#report);
+        }
+      }
+
+      unobserve() {
+        return this;
+      }
+
+      disconnect() {
+        return this;
+      }
+    }
+
+    Reflect.set(globalThis, "ResizeObserver", Observer);
+
+    try {
+      const items = [message(1), ...Array.from({ length: 250 }, (_, index) => joined(index + 2))];
+      const { daemon, registry } = await signedIn([], items);
+
+      registry.set(deviceUi, { activity: "quiet" });
+      layout.view = 0;
+      await openFromPalette();
+      await settled(() => registry.get(openTimeline)._tag === "Shown");
+      await pause(200);
+      const hidden = daemon.windowsRead.length;
+
+      // Only its size changes: the observer reports it, and it reads on.
+      layout.view = 500;
+      await act(async () => {
+        for (const report of told) {
+          report();
+        }
+
+        await Promise.resolve();
+      });
+      await settled(() => daemon.windowsRead.length === 3);
+
+      expect({ hidden, observed: told.length > 0 }).toStrictEqual({ hidden: 1, observed: true });
+    } finally {
+      Reflect.deleteProperty(globalThis, "ResizeObserver");
+    }
   });
 });

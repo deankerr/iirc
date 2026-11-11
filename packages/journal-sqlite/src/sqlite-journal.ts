@@ -43,14 +43,15 @@ const failed =
   };
 
 // The one place the table is created. `network` is derived from the record, so it cannot
-// disagree with it, and the index makes reading one Network cheap.
+// disagree with it, and the index makes reading one Network cheap. A Change names no
+// Network, so its `network` is NULL, which no Network's equals.
 const createJournal = (sql: SqlClient) =>
   Effect.gen(function* () {
     yield* sql`
       CREATE TABLE journal (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         record TEXT NOT NULL CHECK (json_valid(record)),
-        network TEXT NOT NULL GENERATED ALWAYS AS (json_extract(record, '$.network')) VIRTUAL
+        network TEXT GENERATED ALWAYS AS (json_extract(record, '$.network')) VIRTUAL
       ) STRICT
     `;
     yield* sql`CREATE INDEX journal_by_network ON journal (network)`;
