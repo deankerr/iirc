@@ -40,7 +40,7 @@ export const activityShown = Atom.make((get) => get(uiInEffect).activity);
  * @param registry - The registry.
  * @param ui - The options, and the sequence of the last Change.
  */
-const uiRead = (registry: AtomRegistry.AtomRegistry, ui: UiInForce) => {
+export const uiRead = (registry: AtomRegistry.AtomRegistry, ui: UiInForce) => {
   registry.set(optionsState, reduceOptions(registry.get(optionsState), { _tag: "UiRead", ui }));
 };
 
@@ -105,7 +105,7 @@ export interface UiChange {
  * @param tag - The error's tag.
  * @returns The outcome.
  */
-const uiFailed = (tag: string): Outcome => {
+export const uiFailed = (tag: string): Outcome => {
   switch (tag) {
     case "Unauthorized": {
       return { _tag: "SignedOut" };
@@ -208,22 +208,6 @@ export const changeUi = (registry: AtomRegistry.AtomRegistry, change: UiChange) 
 
     return second._tag === "Conflict" ? uiFailed("UiChanged") : second;
   });
-
-/**
- * Draws the page in the theme in effect on this device, as the root's `data-theme`, which
- * the theme's tokens follow. `system` follows the device's own setting.
- * @param registry - The registry.
- * @returns How to stop.
- */
-export const watchTheme = (registry: AtomRegistry.AtomRegistry): (() => void) => {
-  const apply = () => {
-    document.documentElement.dataset.theme = registry.get(uiInEffect).theme;
-  };
-
-  apply();
-
-  return registry.subscribe(uiInEffect, apply);
-};
 
 /** Makes a change of an option under `ui` from the options view, and says there what it came to. */
 export const changeUiOption = runtime

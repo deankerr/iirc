@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import { UiOptionName, UiOptions, uiDefaults } from "@iirc/api";
+import { UiOptionName, UiOptions, uiDefaults, uiValueKept } from "@iirc/api";
 import type { UiInForce } from "@iirc/api";
 import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed, Sequence } from "@iirc/runtime/journal";
@@ -50,7 +50,8 @@ export const uiValueJson = (option: UiOptionName, value: UiValue): Schema.Json =
 /**
  * Folds one Change. The whole value of one option wins over what it held, and an unset
  * returns it to its default. A Change of an option this Daemon does not have, or of a value
- * its Schema does not take, changes no option, though its sequence is the last.
+ * its Schema does not take, changes no option, though its sequence is the last, but for
+ * `themes`, whose entries are read one by one, so a theme it cannot take is dropped alone.
  * @param held - What was held.
  * @param change - The Change.
  * @param sequence - Its sequence.
@@ -68,10 +69,10 @@ export const foldChange = (held: Held, change: Change, sequence: number): Held =
   if (change._tag === "UiUnset") {
     set.delete(option.value);
   } else {
-    const value = parseUiValue(option.value, change.value);
+    const value = uiValueKept(option.value, change.value);
 
-    if (Option.isSome(value)) {
-      set.set(option.value, value.value);
+    if (value !== undefined) {
+      set.set(option.value, value);
     }
   }
 

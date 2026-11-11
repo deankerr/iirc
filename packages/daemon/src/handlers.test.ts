@@ -393,9 +393,18 @@ describe("the handlers", () => {
     );
 
     expect(result).toStrictEqual({
-      after: { options: { activity: "all", theme: "light", time: "HH:mm" }, sequence: 4 },
-      both: { options: { activity: "all", theme: "dark", time: "HH:mm:ss" }, sequence: 2 },
-      fresh: { options: { activity: "all", theme: "system", time: "HH:mm" }, sequence: 0 },
+      after: {
+        options: { activity: "all", colours: "theme", theme: "light", themes: [], time: "HH:mm" },
+        sequence: 4,
+      },
+      both: {
+        options: { activity: "all", colours: "theme", theme: "dark", themes: [], time: "HH:mm:ss" },
+        sequence: 2,
+      },
+      fresh: {
+        options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
+        sequence: 0,
+      },
       journaled: ["UiSet time", "UiSet theme", "UiSet theme", "UiUnset time"],
       refused: [{ message: "Is not a value of ui.activity", path: ["payload", "value"] }],
       set: { sequence: 1 },

@@ -119,14 +119,21 @@ export {
 
 export {
   ActivityShown,
+  Colour,
+  ColoursShown,
+  Palette,
+  Theme,
   ThemeName,
+  Themes,
   TimeShown,
   UiInForce,
   UiOptionName,
   UiOptions,
   UiSequence,
+  builtInThemeNames,
   uiDefaults,
   uiOptionNames,
+  uiValueKept,
 } from "./ui.ts";
 
 export { TimelineId, unreadCap } from "@iirc/timelines";

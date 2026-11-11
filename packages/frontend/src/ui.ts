@@ -8,8 +8,8 @@
  * @packageDocumentation
  */
 import type { ItemContent } from "@iirc/api";
-import { UiOptionName, UiOptions, uiDefaults } from "@iirc/api/ui";
-import type { ActivityShown, UiInForce } from "@iirc/api/ui";
+import { UiOptionName, ansiCount, themesCap, uiDefaults, uiValueKept } from "@iirc/api/ui";
+import type { UiOptions, ActivityShown, UiInForce } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
 /** The options this device overrides for itself, each with its own value. */
@@ -21,8 +21,30 @@ export const noOverrides: DeviceUi = {};
 /** Where a device keeps its overrides, as `localStorage` names it. */
 export const deviceUiKey = "iirc.ui";
 
-/** The longest text of overrides read, so a device's storage can hold up nothing. */
-const deviceUiLimit = 4096;
+/**
+ * The longest a device's overrides can be as `deviceUiText` writes them: every option
+ * overridden, with `themesCap` themes of the longest names, each with every colour.
+ */
+const longestOverrides = JSON.stringify({
+  ...uiDefaults,
+  theme: "x".repeat(32),
+  themes: Array.from({ length: themesCap }, (_, index) => ({
+    name: `${index}`.padEnd(32, "x"),
+    palette: {
+      ansi: Array.from({ length: ansiCount }, () => "#000000"),
+      background: "#000000",
+      cursor: "#000000",
+      foreground: "#000000",
+      selection: "#000000",
+    },
+  })),
+}).length;
+
+/**
+ * The longest text of overrides read: twice the longest a device writes, so any it kept is
+ * read, while a device's storage can hold up nothing.
+ */
+export const deviceUiLimit = longestOverrides * 2;
 
 const decodeObject = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json))
@@ -32,8 +54,9 @@ const decodeName = Schema.decodeUnknownOption(UiOptionName);
 
 /**
  * The overrides a device kept, from their text: every option it names that `ui` has, with
- * a value its Schema takes. Anything else, and text that is not an object or is too long,
- * is dropped.
+ * a value its Schema takes, each option on its own, and each theme of `themes` on its own.
+ * Anything else, and text that is not an object or is longer than `deviceUiLimit`, is
+ * dropped.
  * @param text - The text kept, or none.
  * @returns The overrides.
  */
@@ -49,13 +72,9 @@ export const deviceUiOf = (text: string | undefined): DeviceUi => {
     Object.entries(kept.value).flatMap(([key, value]) => {
       const name = decodeName(key);
 
-      const parsed = name.pipe(
-        Option.flatMap((option) =>
-          Schema.decodeOption(Schema.toCodecJson(UiOptions.fields[option]))(value)
-        )
-      );
+      const parsed = Option.isSome(name) ? uiValueKept(name.value, value) : undefined;
 
-      return Option.isSome(name) && Option.isSome(parsed) ? [[name.value, parsed.value]] : [];
+      return Option.isSome(name) && parsed !== undefined ? [[name.value, parsed]] : [];
     })
   );
 };

@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
-import type { UiOptionName } from "@iirc/api/ui";
+import type { ThemeName, UiOptionName } from "@iirc/api/ui";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
@@ -24,6 +24,8 @@ import {
   starting,
 } from "./options.ts";
 import type { Configuration, Edit, Json, Path } from "./options.ts";
+import { parseThemeName } from "./theme.ts";
+import type { ThemesEdit } from "./theme.ts";
 import type { PaneChange } from "./timelines.ts";
 
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
@@ -127,6 +129,13 @@ export interface Act {
  * - `ChangeUi`: set an option under `ui` to a value, as JSON its Schema took, or unset it
  *   with none: for every device, through the Daemon, made from the options read, or with
  *   `device`, for this device alone, which keeps it and never sends it.
+ * - `UseTheme`: draw in the theme named, for every device, or with `device`, for this one,
+ *   once the runtime has found it among the themes there are.
+ * - `EditThemes`: read the themes imported, apply the edit, and send them whole, made from
+ *   the options read, applying it once more after a conflict, as `Configure` does.
+ * - `ListThemes`: open the palette on the themes alone, each drawn while it is
+ *   highlighted.
+ * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it. A value never goes through the
  *   composer, nor through an intent.
@@ -162,6 +171,10 @@ export type Intent =
       readonly value: Json | undefined;
       readonly device: boolean;
     }
+  | { readonly _tag: "UseTheme"; readonly name: ThemeName; readonly device: boolean }
+  | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
+  | { readonly _tag: "ListThemes" }
+  | { readonly _tag: "ImportTheme" }
   | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path }
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "Latest"; readonly timeline: TimelineId }
@@ -561,6 +574,62 @@ const stepped =
 
     return parsed(to === open ? undefined : to);
   };
+
+const themeUsage = "/theme [[-device] <name> | import | remove <name>]";
+
+/**
+ * What `/theme` was given: nothing, to list the themes; `import`, to read one from a file;
+ * `remove` and a name, to remove one imported; or a name, perhaps after `-device`, to draw
+ * in it.
+ * @param args - The text after `/theme`.
+ * @returns The intent, or why there is none.
+ */
+const themeArguments = (args: string): Parsed<Intent> => {
+  const words = args
+    .trim()
+    .split(/\s+/u)
+    .filter((one) => one !== "");
+
+  const [first, second, ...rest] = words;
+  const lowered = first?.toLowerCase();
+
+  if (first === undefined) {
+    return parsed({ _tag: "ListThemes" });
+  }
+
+  if (lowered === "import") {
+    return second === undefined
+      ? parsed({ _tag: "ImportTheme" })
+      : invalid("/theme import takes nothing after it: paste the theme into the dialog it opens.");
+  }
+
+  const one = second === undefined || rest.length > 0 ? undefined : second;
+  const device = lowered === deviceFlag;
+
+  if (lowered === "remove" || device) {
+    const name = one === undefined ? invalid<string>(`Usage: ${themeUsage}`) : parseThemeName(one);
+
+    if (name._tag === "Invalid") {
+      return name;
+    }
+
+    return parsed(
+      device
+        ? { _tag: "UseTheme", device: true, name: name.value }
+        : { _tag: "EditThemes", edit: { _tag: "Remove", name: name.value } }
+    );
+  }
+
+  if (second !== undefined) {
+    return invalid(`Usage: ${themeUsage}`);
+  }
+
+  const name = parseThemeName(first);
+
+  return name._tag === "Invalid"
+    ? name
+    : parsed({ _tag: "UseTheme", device: false, name: name.value });
+};
 
 /**
  * The parser of a command that takes nothing after its name.
@@ -1568,6 +1637,18 @@ export const commands: readonly Command[] = [
   }),
   ...actions,
   setCommand,
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "List the themes, draw in one for every device or with -device for this one, import one from a terminal's theme file, or remove one imported.",
+    id: "theme.set",
+    intents: (intent: Intent) => [intent],
+    name: "theme",
+    parse: themeArguments,
+    usage: themeUsage,
+    when: [],
+  }),
   unfocused({
     aliases: [],
     arguments: "Required",

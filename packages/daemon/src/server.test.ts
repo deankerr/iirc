@@ -625,6 +625,18 @@ describe("the API over a real server", () => {
           ...json('{"value":"loud"}'),
         });
 
+        // An import may not take a built-in theme's name, so it never hides that theme.
+        const palette = JSON.stringify({
+          ansi: Array.from({ length: 16 }, () => "#808080"),
+          background: "#000000",
+          foreground: "#ffffff",
+        });
+
+        const reserved = yield* served.request("/api/ui/themes", {
+          method: "PUT",
+          ...json(`{"value":[{"name":"nord","palette":${palette}}]}`),
+        });
+
         const resumed = yield* Effect.flatMap(
           served.request("/api/ui/changes", { headers: { "last-event-id": "0" } }),
           (response) =>
@@ -634,6 +646,7 @@ describe("the API over a real server", () => {
         return {
           badValue: [badValue.status, yield* textOf(badValue)],
           first: first.filter((event) => event.event === "changed"),
+          reserved: [reserved.status, yield* textOf(reserved)],
           resumed: resumed.filter((event) => event.event === "changed"),
           set: [set.status, yield* textOf(set)],
           stale: [stale.status, yield* textOf(stale)],
@@ -652,14 +665,18 @@ describe("the API over a real server", () => {
       ],
       first: [
         {
-          data: '{"options":{"activity":"all","theme":"system","time":"HH:mm"},"sequence":0}',
+          data: '{"options":{"activity":"all","colours":"theme","theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
           event: "changed",
           id: "0",
         },
       ],
+      reserved: [
+        400,
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.themes","path":["payload","value"]}]}',
+      ],
       resumed: [
         {
-          data: '{"options":{"activity":"all","theme":"system","time":"HH:mm:ss"},"sequence":1}',
+          data: '{"options":{"activity":"all","colours":"theme","theme":"system","themes":[],"time":"HH:mm:ss"},"sequence":1}',
           event: "changed",
           id: "1",
         },

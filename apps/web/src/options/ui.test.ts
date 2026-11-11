@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { uiDefaults } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { describe, expect, it } from "vitest";
@@ -64,8 +65,8 @@ describe("the options under ui", () => {
     }).toStrictEqual({
       changes: [{ ifSequence: "0", route: "PUT time" }],
       notice: undefined,
-      seen: { activity: "all", theme: "system", time: "HH:mm:ss" },
-      shared: { options: { activity: "all", theme: "system", time: "HH:mm:ss" }, sequence: 10 },
+      seen: { ...uiDefaults, time: "HH:mm:ss" },
+      shared: { options: { ...uiDefaults, time: "HH:mm:ss" }, sequence: 10 },
     });
   });
 
@@ -89,7 +90,7 @@ describe("the options under ui", () => {
         { ifSequence: "7", route: "PUT theme" },
       ],
       notice: undefined,
-      ui: { activity: "quiet", theme: "dark", time: "HH:mm" },
+      ui: { ...uiDefaults, activity: "quiet", theme: "dark" },
     });
   });
 

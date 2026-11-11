@@ -1,8 +1,9 @@
 /*
  * The theme: every colour, size, and font the Frontend uses, as CSS variables. Modules
- * read these and never name a colour of their own. Each colour is light-dark(), so the
- * page's colour scheme picks it: the device's own setting, unless `ui.theme` names one,
- * which the root's `data-theme` says.
+ * read these and never name a colour of their own. Once the page runs, every colour is
+ * the core's, derived from the palette of the theme in effect and set on the root's own
+ * style, which wins over these. Until then each is light-dark(), so the first paint
+ * follows the device's own setting.
  */
 :root {
   color-scheme: light dark;
@@ -35,6 +36,7 @@
   --color-focus: light-dark(#0b6e6e, #5fb3b3);
   --color-scrim: light-dark(rgb(36 41 46 / 35%), rgb(0 0 0 / 55%));
   --color-shadow: light-dark(rgb(36 41 46 / 25%), rgb(0 0 0 / 60%));
+  --color-selection: light-dark(#b5cbc8, #283d3e);
 
   /* What is unread, by its highest level: read and Activity dim, Messages as text, and
      Direct Messages and Highlights accented. */
@@ -63,7 +65,8 @@
   --nick-14: light-dark(#6d4c41, #c8a594);
   --nick-15: light-dark(#546e7a, #a9bcc6);
 
-  /* mIRC's colours 0 to 15, as senders asked for them. */
+  /* mIRC's colours 0 to 15, as senders asked for them, until the theme's are drawn, with
+     16 to 98 too. */
   --irc-0: #ffffff;
   --irc-1: #000000;
   --irc-2: #00007f;
@@ -94,6 +97,11 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+::selection {
+  background: var(--color-selection);
+  color: var(--color-text);
 }
 
 html,

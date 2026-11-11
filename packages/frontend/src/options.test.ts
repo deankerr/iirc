@@ -879,7 +879,7 @@ const change = (option: string, value: Json | undefined, device: boolean) => ({
 
 describe("the options under ui", () => {
   const shared = {
-    options: { activity: "quiet", theme: "dark", time: "HH:mm" },
+    options: { activity: "quiet", colours: "theme", theme: "dark", themes: [], time: "HH:mm" },
     sequence: 7,
   } as const;
 
@@ -893,7 +893,9 @@ describe("the options under ui", () => {
       keys: Object.keys(UiOptions.fields),
       kinds: [
         { _tag: "Choice", choices: ["all", "quiet", "none"] },
-        { _tag: "Choice", choices: ["system", "dark", "light"] },
+        { _tag: "Choice", choices: ["theme", "raw"] },
+        { _tag: "Text" },
+        { _tag: "Names", fields: [] },
         { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "none"] },
       ],
     });
@@ -909,7 +911,9 @@ describe("the options under ui", () => {
     }).toStrictEqual({
       before: [
         ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
+        ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
+        ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.time", { _tag: "Shown", text: "HH:mm" }, { _tag: "Unset" }, undefined],
       ],
       options: [
@@ -921,12 +925,20 @@ describe("the options under ui", () => {
           "all",
         ],
         [
+          "ui.colours",
+          { _tag: "Shown", text: "theme" },
+          { _tag: "Shown", text: "theme" },
+          undefined,
+          "theme",
+        ],
+        [
           "ui.theme",
           { _tag: "Shown", text: "light" },
           { _tag: "Shown", text: "dark" },
           { _tag: "Shown", text: "light" },
           "system",
         ],
+        ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Shown", text: "" }, undefined, ""],
         [
           "ui.time",
           { _tag: "Shown", text: "HH:mm" },
@@ -957,11 +969,18 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-4),
+        .slice(-6),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
-      last: ["network.libera.username", "ui.activity", "ui.theme", "ui.time"],
+      last: [
+        "network.libera.username",
+        "ui.activity",
+        "ui.colours",
+        "ui.theme",
+        "ui.themes",
+        "ui.time",
+      ],
       time: [{ _tag: "Shown", text: "HH:mm:ss" }],
     });
   });

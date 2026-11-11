@@ -2,6 +2,7 @@ import { Input, Instant } from "@iirc/client";
 import { Journal, NetworkId } from "@iirc/runtime/journal";
 import type { Change, JournalRecord } from "@iirc/runtime/journal";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
+import type { Schema } from "effect";
 import { Deferred, Effect, Exit, Fiber, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -18,6 +19,8 @@ const set = (option: string, value: string): Change => ({ _tag: "UiSet", option,
 
 const unset = (option: string): Change => ({ _tag: "UiUnset", option });
 
+const themes = (value: Schema.Json): Change => ({ _tag: "UiSet", option: "themes", value });
+
 const fold = (changes: readonly Change[]) => {
   let held = nothingHeld;
 
@@ -31,7 +34,7 @@ const fold = (changes: readonly Change[]) => {
 describe("folding the ui options", () => {
   it("starts every option at its default, with sequence 0", () => {
     expect(fold([])).toStrictEqual({
-      options: { activity: "all", theme: "system", time: "HH:mm" },
+      options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
       sequence: 0,
     });
   });
@@ -46,7 +49,7 @@ describe("folding the ui options", () => {
         unset("theme"),
       ])
     ).toStrictEqual({
-      options: { activity: "quiet", theme: "system", time: "none" },
+      options: { activity: "quiet", colours: "theme", theme: "system", themes: [], time: "none" },
       sequence: 5,
     });
   });
@@ -55,8 +58,33 @@ describe("folding the ui options", () => {
     expect(
       fold([set("time", "HH:mm:ss"), set("time", "noon"), set("palette", "dusk"), unset("nope")])
     ).toStrictEqual({
-      options: { activity: "all", theme: "system", time: "HH:mm:ss" },
+      options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm:ss" },
       sequence: 4,
+    });
+  });
+});
+
+describe("folding the themes imported", () => {
+  it("drops alone a theme it cannot take, as one journaled under a name since reserved", () => {
+    const palette = {
+      ansi: Array.from({ length: 16 }, () => "#808080"),
+      background: "#000000",
+      foreground: "#ffffff",
+    };
+
+    expect({
+      kept: fold([
+        themes([
+          { name: "nord", palette },
+          { name: "mine", palette },
+          { name: "mine", palette: { ...palette, background: "#111111" } },
+          { name: "bad", palette: { ...palette, ansi: [] } },
+        ]),
+      ]).options.themes,
+      notAList: fold([themes([{ name: "mine", palette }]), themes("dusk")]).options.themes,
+    }).toStrictEqual({
+      kept: [{ name: "mine", palette }],
+      notAList: [{ name: "mine", palette }],
     });
   });
 });
@@ -94,9 +122,27 @@ describe("the ui options, kept", () => {
     );
 
     expect(result).toStrictEqual({
-      again: { options: { activity: "all", theme: "light", time: "HH:mm:ss" }, sequence: 3 },
+      again: {
+        options: {
+          activity: "all",
+          colours: "theme",
+          theme: "light",
+          themes: [],
+          time: "HH:mm:ss",
+        },
+        sequence: 3,
+      },
       first: {
-        inForce: { options: { activity: "all", theme: "light", time: "HH:mm:ss" }, sequence: 3 },
+        inForce: {
+          options: {
+            activity: "all",
+            colours: "theme",
+            theme: "light",
+            themes: [],
+            time: "HH:mm:ss",
+          },
+          sequence: 3,
+        },
         stale: new UiChangedSince({ sequence: 3 }),
       },
     });

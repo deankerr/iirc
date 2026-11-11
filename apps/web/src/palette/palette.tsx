@@ -1,15 +1,19 @@
 /**
  * The command palette: React Aria's Autocomplete over a Menu, in a modal Dialog, as its own
  * command palette is built. It lists what the core ranks for the query, in sections for
- * what was chosen recently, the commands, the Timelines, and the options, each row with
- * its name, a dim description, and a command's keys. Arrows move, Enter chooses, and
- * Escape clears the query, then closes, and focus returns where it was.
+ * what was chosen recently, the commands, the Timelines, the themes, and the options, or
+ * the themes alone, each row with its name, a dim description, and a command's keys.
+ * Arrows move, Enter chooses, and Escape clears the query, then closes, and focus returns
+ * where it was. A theme is drawn while its row is highlighted, and the theme in effect
+ * comes back as the highlight moves on or the palette closes.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { showChord } from "@iirc/frontend/keymap";
 import type { Entry } from "@iirc/frontend/palette";
+import { themeDescription } from "@iirc/frontend/palette";
+import { useEffect } from "react";
 import {
   Autocomplete,
   Collection,
@@ -27,7 +31,7 @@ import {
 } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
-import { closePalette, paletteSections, pickEntry, queryPalette } from "./atoms.ts";
+import { closePalette, highlightEntry, paletteSections, pickEntry, queryPalette } from "./atoms.ts";
 import { paletteState, platform } from "./state.ts";
 
 import styles from "./palette.module.css";
@@ -93,10 +97,51 @@ const Row = ({ entry }: { readonly entry: Entry }) => {
       );
     }
 
+    case "Theme": {
+      return (
+        <>
+          <Text className={styles.name} slot="label">
+            {entry.name}
+          </Text>
+          <Text className={styles.description} slot="description">
+            {entry.current ? `${themeDescription(entry)}, in effect` : themeDescription(entry)}
+          </Text>
+        </>
+      );
+    }
+
     default: {
       return entry satisfies never;
     }
   }
+};
+
+/**
+ * Tells the palette which row is highlighted, as it is and as it stops being, so a theme's
+ * row draws it while highlighted. React Aria's Autocomplete moves a virtual focus, which no
+ * focus event reports, and says it only as a row's `isFocused`, so this is the one place a
+ * row tells the core something from an effect. It draws nothing.
+ * @param props - The row's key, and whether it is highlighted.
+ * @returns Nothing.
+ */
+const Highlighted = ({
+  highlighted,
+  id,
+}: {
+  readonly id: string;
+  readonly highlighted: boolean;
+}) => {
+  const highlight = useAtomSet(highlightEntry);
+
+  useEffect(() => {
+    highlight({ highlighted, key: id });
+
+    return () => {
+      highlight({ highlighted: false, key: id });
+    };
+  }, [highlight, highlighted, id]);
+
+  return null;
 };
 
 /**
@@ -117,7 +162,8 @@ const resultsText = (count: number) => {
  * @returns The palette.
  */
 export const Palette = () => {
-  const { open, query } = useAtomValue(paletteState);
+  const { open, query, scope } = useAtomValue(paletteState);
+  const themesOnly = scope === "Themes";
   const shown = useAtomValue(paletteSections);
   const close = useAtomSet(closePalette);
   const setQuery = useAtomSet(queryPalette);
@@ -161,7 +207,10 @@ export const Palette = () => {
               <span aria-hidden="true" className={styles.prompt}>
                 &gt;
               </span>
-              <Input className={styles.input} placeholder="a command, a Timeline, or an option" />
+              <Input
+                className={styles.input}
+                placeholder={themesOnly ? "a theme" : "a command, a Timeline, or an option"}
+              />
             </SearchField>
             <Menu
               aria-label="Commands, Timelines, and options"
@@ -176,7 +225,12 @@ export const Palette = () => {
                   <Collection items={section.entries}>
                     {(entry) => (
                       <MenuItem className={styles.item} id={entry.key} textValue={nameOf(entry)}>
-                        <Row entry={entry} />
+                        {({ isFocused }) => (
+                          <>
+                            <Highlighted highlighted={isFocused} id={entry.key} />
+                            <Row entry={entry} />
+                          </>
+                        )}
                       </MenuItem>
                     )}
                   </Collection>

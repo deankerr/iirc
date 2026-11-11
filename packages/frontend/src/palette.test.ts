@@ -10,6 +10,7 @@ import { defaultKeymap, formatChord } from "./keymap.ts";
 import { optionsOf } from "./options.ts";
 import { choose, initialPalette, recentCap, reducePalette, remember, sections } from "./palette.ts";
 import type { Entry, Listing, PaletteEvent, Section } from "./palette.ts";
+import { listedThemes, paletteNamed } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
@@ -86,6 +87,8 @@ const listing = (context: CommandContext = inChannel): Listing => ({
   keymap: defaultKeymap,
   options: optionsOf(libera, configuration, new Set(["libera.password"])),
   sidebar,
+  theme: "system",
+  themes: [],
 });
 
 const keys = (shown: readonly Section[]) =>
@@ -154,6 +157,7 @@ describe("the palette's entries", () => {
     }).toStrictEqual({
       away: [
         "command:options.set",
+        "command:theme.set",
         "command:options.unset",
         "command:network.add",
         "command:timeline.next",
@@ -187,6 +191,7 @@ describe("the palette's entries", () => {
         "command:act.nick",
         "command:act.quote",
         "command:options.set",
+        "command:theme.set",
         "command:options.unset",
         "command:network.add",
         "command:timeline.latest",
@@ -313,19 +318,65 @@ describe("choosing an entry", () => {
   });
 });
 
+describe("the themes in the palette", () => {
+  const themed = {
+    ...listing(),
+    theme: "nord",
+    themes: listedThemes([{ name: "mine", palette: paletteNamed("dracula", [], true) }]),
+  };
+
+  it("lists every theme, the one in effect said, alone when scoped to them, and finds them by name or as themes", () => {
+    const scoped = sections(themed, "", ["command:timeline.next"], "Themes");
+    const nord = entryOf(scoped, "theme:nord");
+
+    expect({
+      all: titles(sections(themed, "", [])),
+      byName: keys(sections(themed, "dracu", [])),
+      chosen: choose(nord, inChannel),
+      current: nord._tag === "Theme" && nord.current,
+      scoped: keys(scoped),
+      themes: first(sections(themed, "theme", [])),
+    }).toStrictEqual({
+      all: ["Commands", "Timelines", "Themes", "Options"],
+      byName: [["Themes", ["theme:dracula"]]],
+      chosen: [{ _tag: "UseTheme", device: false, name: "nord" }],
+      current: true,
+      scoped: [
+        [
+          "Themes",
+          [
+            "theme:system",
+            "theme:dark",
+            "theme:light",
+            "theme:solarized-dark",
+            "theme:solarized-light",
+            "theme:gruvbox-dark",
+            "theme:nord",
+            "theme:dracula",
+            "theme:tokyo-night",
+            "theme:mine",
+          ],
+        ],
+      ],
+      themes: "command:theme.set",
+    });
+  });
+});
+
 describe("the palette's state", () => {
   it("opens empty, keeps what is typed, and remembers a choice as it closes", () => {
     const events: readonly PaletteEvent[] = [
-      { _tag: "Opened" },
+      { _tag: "Opened", scope: "All" },
       { _tag: "Queried", query: "nxt" },
       { _tag: "Chosen", key: "command:timeline.next" },
-      { _tag: "Opened" },
+      { _tag: "Opened", scope: "Themes" },
     ];
 
     expect(folded(events)).toStrictEqual({
       open: true,
       query: "",
       recent: ["command:timeline.next"],
+      scope: "Themes",
     });
   });
 

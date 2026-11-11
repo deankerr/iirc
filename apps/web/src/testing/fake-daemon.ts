@@ -20,6 +20,7 @@ import type {
   WindowGap,
   UiInForce,
 } from "@iirc/api";
+import { importTheme } from "@iirc/frontend/theme-import";
 import { Effect, Layer, Redacted, Result, Schema } from "effect";
 import { Base64Url } from "effect/encoding";
 import { FetchHttpClient } from "effect/http";
@@ -32,9 +33,16 @@ import { IntentNames } from "../composer/atoms.ts";
 import { Notifier } from "../notifications/notifier.ts";
 import type { NotifierPort } from "../notifications/notifier.ts";
 import { writeChoice } from "../page/device.ts";
+import { ThemeReader } from "../theme/reader.ts";
+import type { ThemeReaderPort } from "../theme/reader.ts";
 import { layoutKey, Waits } from "../timelines/atoms.ts";
 import type { WaitTimes } from "../timelines/atoms.ts";
 import { testNotifier } from "./notifier.ts";
+
+/** A reader of themes that reads in the page at once, as no Worker runs in happy-dom. */
+export const instantThemeReader: ThemeReaderPort = {
+  read: (text) => Effect.sync(() => importTheme(text)),
+};
 
 export const theKey = "iirc_the-key";
 
@@ -740,7 +748,10 @@ export const fakeDaemon = () => {
    */
   const uiRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
     const method = init.method ?? "GET";
-    const one = /^\/api\/ui\/(?<option>activity|theme|time)$/u.exec(url.pathname)?.groups;
+
+    const one = /^\/api\/ui\/(?<option>activity|colours|theme|themes|time)$/u.exec(
+      url.pathname
+    )?.groups;
 
     if (url.pathname === "/api/ui" && method === "GET") {
       return signedInOnly(() => json(200, daemon.ui));
@@ -1022,12 +1033,14 @@ export const fakeDaemon = () => {
  * @param waits - Waits other than a test's defaults, such as how long the changes stream
  * may give nothing before it is followed again.
  * @param notifier - The notifications' host, a test's, which shows none by default.
+ * @param reader - The reader of themes, which reads at once, in the page, by default.
  * @returns The registry.
  */
 export const registryFor = (
   fetch: typeof globalThis.fetch,
   waits: Partial<WaitTimes> = {},
-  notifier: NotifierPort = testNotifier().port
+  notifier: NotifierPort = testNotifier().port,
+  reader: ThemeReaderPort = instantThemeReader
 ) => {
   let named = 0;
 
@@ -1054,6 +1067,7 @@ export const registryFor = (
             ...waits,
           }),
           Layer.succeed(Notifier, notifier),
+          Layer.succeed(ThemeReader, reader),
           // Intents named in order, web-1, web-2, and on, so a test can name them.
           Layer.succeed(IntentNames, () => {
             named += 1;

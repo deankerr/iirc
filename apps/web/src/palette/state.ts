@@ -7,7 +7,7 @@
 import { defaultKeymap } from "@iirc/frontend/keymap";
 import type { Keymap, Platform } from "@iirc/frontend/keymap";
 import { initialPalette, reducePalette } from "@iirc/frontend/palette";
-import type { PaletteEvent } from "@iirc/frontend/palette";
+import type { PaletteEvent, Scope } from "@iirc/frontend/palette";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -17,6 +17,9 @@ import { refresh } from "../options/atoms.ts";
 
 /** Whether the palette is open, its query, and what was chosen recently, as the core folds it. */
 export const paletteState = Atom.make(initialPalette).pipe(Atom.keepAlive);
+
+/** The key of the palette's entry that is highlighted, as its rows say, which previews a theme. */
+export const paletteHighlight = Atom.make<string | undefined>(undefined).pipe(Atom.keepAlive);
 
 /**
  * The keymap the page holds. It is the core's default until options under `ui` can
@@ -43,13 +46,15 @@ export const paletteHappened = (registry: AtomRegistry.AtomRegistry, event: Pale
 };
 
 /**
- * Opens the palette, empty, and reads the options it lists, as opening the options view
- * does, so it lists every option of every Network as configured now.
+ * Opens the palette, empty, listing everything or the themes alone, and reads the options
+ * it lists, as opening the options view does, so it lists every option of every Network as
+ * configured now.
  */
 export const openPalette = runtime
-  .fn((_, get) =>
+  .fn((scope: Scope, get) =>
     Effect.gen(function* () {
-      paletteHappened(get.registry, { _tag: "Opened" });
+      get.registry.set(paletteHighlight, undefined);
+      paletteHappened(get.registry, { _tag: "Opened", scope });
       yield* refresh(get.registry);
     })
   )

@@ -52,6 +52,7 @@ import { changeUi } from "../options/ui.ts";
 import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
+import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, timelinesState, Waits } from "../timelines/atoms.ts";
 import { cancelCompletion } from "./completion-state.ts";
 
@@ -295,13 +296,17 @@ type Local = Extract<
       | "OpenPalette"
       | "FocusComposer"
       | "ShowMembers"
-      | "Pane";
+      | "Pane"
+      | "ListThemes"
+      | "ImportTheme";
   }
 >;
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "FocusComposer",
+  "ImportTheme",
   "Latest",
+  "ListThemes",
   "Open",
   "OpenOptions",
   "OpenPalette",
@@ -343,7 +348,17 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
     }
 
     case "OpenPalette": {
-      registry.set(openPalette, undefined);
+      registry.set(openPalette, "All");
+      break;
+    }
+
+    case "ListThemes": {
+      registry.set(openPalette, "Themes");
+      break;
+    }
+
+    case "ImportTheme": {
+      showImport(registry, true);
       break;
     }
 
@@ -408,6 +423,14 @@ const changeOne = (
 
     case "ChangeUi": {
       return changeUi(registry, intent);
+    }
+
+    case "UseTheme": {
+      return chooseTheme(registry, intent.name, intent.device);
+    }
+
+    case "EditThemes": {
+      return changeThemes(registry, intent.edit);
     }
 
     case "MarkRead": {
