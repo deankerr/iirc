@@ -15,6 +15,7 @@ import { Fragment, useContext, useId, useLayoutEffect, useRef } from "react";
 
 import { composerFocus } from "../composer/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
+import { Button } from "../ui/button.tsx";
 import { dateOf } from "../ui/dates.ts";
 import {
   closeSearch,
@@ -286,6 +287,15 @@ export const SearchView = () => {
             type="text"
             value={search.query}
           />
+          <Button
+            aria-label="Close the search"
+            onPress={() => {
+              close();
+              toComposer();
+            }}
+          >
+            close
+          </Button>
         </form>
       </search>
       {search.error === undefined ? null : (

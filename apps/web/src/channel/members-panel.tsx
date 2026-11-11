@@ -4,8 +4,10 @@
  * their rank's symbol, in their nick's colour, and dimmed while away, read a page at a
  * time as the Owner scrolls. Enter, or a double click, opens a member's Direct Message, as
  * `/query` does, and a member chosen offers that, looking them up, as `/whois` does, and
- * mentioning them in the composer, right under their nick, where Tab reaches them. On a phone's width it lies over the Pane, and its hide
- * button, `/members`, or Alt+M closes it.
+ * mentioning them in the composer, right under their nick, where Tab reaches them. On a
+ * compact screen it is a sheet over the focused Pane instead, a modal dialog, which its
+ * hide button, a press on the page behind it, Escape, `/members`, or Alt+M closes, and so
+ * does choosing what to do with a member, so what it does shows.
  *
  * @packageDocumentation
  */
@@ -17,19 +19,24 @@ import type { Intent } from "@iirc/frontend/commands";
 import { useId } from "react";
 import {
   Collection,
+  Dialog,
   GridList,
   GridListItem,
   GridListLoadMoreItem,
   ListLayout,
+  Modal,
+  ModalOverlay,
   Virtualizer,
 } from "react-aria-components";
 import type { Key, Selection } from "react-aria-components";
 
 import { commandContext, perform } from "../composer/atoms.ts";
+import { compact, drawerState } from "../page/drawer.ts";
+import { focusedId } from "../panes/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
 import { Button } from "../ui/button.tsx";
 import { channelOpen, chosenMember, chooseMember, moreMembers, roster } from "./atoms.ts";
-import { membersShown } from "./state.ts";
+import { membersVisible } from "./state.ts";
 
 import styles from "./members-panel.module.css";
 
@@ -60,7 +67,15 @@ const Member = ({ row }: { readonly row: MemberRow }) => (
  */
 const Actions = ({ chosen }: { readonly chosen: string }) => {
   const context = useAtomValue(commandContext);
-  const run = useAtomSet(perform);
+  const carryOut = useAtomSet(perform);
+  const setDrawer = useAtomSet(drawerState);
+
+  // The sheet, on a compact screen, closes first, so what the action does shows.
+  const run = (intents: readonly Intent[]) => {
+    setDrawer("None");
+    carryOut(intents);
+  };
+
   const query = commandNamed("query");
   const whois = commandNamed("whois");
 
@@ -123,7 +138,8 @@ const Members = ({
   readonly timeline: TimelineId;
 }) => {
   const askMore = useAtomSet(moreMembers);
-  const run = useAtomSet(perform);
+  const carryOut = useAtomSet(perform);
+  const setDrawer = useAtomSet(drawerState);
   const context = useAtomValue(commandContext);
   const chosen = useAtomValue(chosenMember(pane));
   const choose = useAtomSet(chooseMember);
@@ -156,7 +172,8 @@ const Members = ({
             nick === undefined || query === undefined ? undefined : runIn(query, nick, context);
 
           if (intents?._tag === "Parsed") {
-            run(intents.value);
+            setDrawer("None");
+            carryOut(intents.value);
           }
         }}
         onSelectionChange={onSelectionChange}
@@ -195,13 +212,16 @@ const Members = ({
  * @returns The panel, or nothing.
  */
 export const MembersPanel = ({ pane }: { readonly pane: string }) => {
-  const shown = useAtomValue(membersShown);
+  const shown = useAtomValue(membersVisible);
+  const sheet = useAtomValue(compact);
+  const focused = useAtomValue(focusedId) === pane;
   const open = useAtomValue(channelOpen(pane));
   const members = useAtomValue(roster(pane));
   const run = useAtomSet(perform);
   const headingId = useId();
 
-  if (!shown || !open) {
+  // On a compact screen only the focused Pane shows, and only its members lie over it.
+  if (!shown || !open || (sheet && !focused)) {
     return null;
   }
 
@@ -248,8 +268,8 @@ export const MembersPanel = ({ pane }: { readonly pane: string }) => {
     }
   }
 
-  return (
-    <section aria-labelledby={headingId} className={styles.panel}>
+  const content = (
+    <>
       <div className={styles.head}>
         <h2 className={styles.heading} id={headingId}>
           members
@@ -264,6 +284,33 @@ export const MembersPanel = ({ pane }: { readonly pane: string }) => {
         </Button>
       </div>
       {body}
-    </section>
+    </>
+  );
+
+  if (!sheet) {
+    return (
+      <section aria-labelledby={headingId} className={styles.panel}>
+        {content}
+      </section>
+    );
+  }
+
+  return (
+    <ModalOverlay
+      className={styles.scrim}
+      isDismissable
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          hide();
+        }
+      }}
+    >
+      <Modal className={styles.sheet}>
+        <Dialog aria-labelledby={headingId} className={styles.panel}>
+          {content}
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
   );
 };

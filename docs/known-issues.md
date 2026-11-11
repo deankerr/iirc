@@ -7,7 +7,14 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 ## Untested
 
 - **Only Chromium has run the web frontend.** Safari, Firefox, touch, and screen readers have not. The places most likely to differ: Safari and the sign-in cookie over plain `http://127.0.0.1` (the cookie is not `Secure` on loopback, which should suit WebKit), React Aria's scroll lock injecting an inline style on iOS, which the CSP blocks (only overscroll is lost), and the theme importer's speed in JavaScriptCore (below).
-- **Touch on the Panes' dividers, and window resizing during a drag,** were never tried.
+- **The phone layout has run only in Chromium's mobile emulation,** never on a real iPhone or Android phone. The end-to-end run checks fields of 16px, targets of 44px, the drawer, the sheet, and the palette's button at a phone's size, touched, but not iOS Safari's own zoom, its safe areas, or its keyboard.
+- **Touch on the Panes' dividers, and window resizing during a drag,** were never tried on a device. A divider takes a touch 44px across, but a phone shows one Pane, so only a tablet meets them.
+
+## On a phone
+
+- **The composer may not stay above iOS Safari's keyboard by resizing.** The page asks for `interactive-widget=resizes-content` and is `100dvh` tall, which Chromium on Android honours, but Safari ignores the former and keeps the page's height, scrolling it instead so the focused composer shows, which can push the bar out of view while typing.
+- **Back does not close the drawer or the sheet.** There is no router, so Android's back gesture leaves the page. Escape, a press outside, or a choice closes them.
+- **A tap on a member opens their Direct Message,** as React Aria acts on a tap in a list that has an action. Their `whois` and `mention` are reached by a long press, which selects them.
 
 ## Behaviour to know
 

@@ -753,13 +753,14 @@ saidCount(unread), callingCount(unread): number   // Highlights, Direct, and Mes
 countText(count): string                          // `999+` past the Daemon's cap
 labelOf(name, activity): string                   // `#iirc, 3 unread, 1 highlight`
 titleOf(sidebar): string                          // `(3) iirc`, or `iirc`
+saidLevel(sidebar): Level | undefined             // the highest level said and unread anywhere
 markOf(timeline, read), markLatest(timeline): MarkRead | undefined
 markDue(state, page: Page): MarkRead | undefined  // Page = { visible, focused, compact }
 lookingAt(state, page, timeline): boolean
 ```
 
 - **A level ranks what calls for the Owner,** as WeeChat ranks activity: Highlight, then Direct, then Message, then Activity. A Timeline's level is the highest with anything unread, and a Network's the highest of its Timelines, its counts their sums, kept at `unreadCap + 1` as the Daemon's own are, so `999+` means more.
-- **Activity is a dimmer name, never a number.** A label and the counts a view shows say what was said, Highlights, Direct Messages, and Messages. The page's title counts only Highlights and Direct Messages, across every Network.
+- **Activity is a dimmer name, never a number.** A label and the counts a view shows say what was said, Highlights, Direct Messages, and Messages. The page's title counts only Highlights and Direct Messages, across every Network, and `saidLevel` is the highest level of anything said that is unread across them, none for Activity alone, which a compact screen's sidebar button marks.
 - **A mark is due for what the Owner can see.** That is the Panes shown, as `shownPanes` says, the focused one alone while zoomed or on a compact screen, while the page is visible and focused. Of several, the focused Pane's Timeline comes first, and the next once that is marked, as the runtime asks again.
 - **A mark is never back and never past what was shown.** `markDue` is due only while the page is visible and focused, a Pane the Owner can see shows the Timeline, not the options, its window is current, following, and at the latest, with nothing beyond its last item, and the view said so, naming the last item in view. It marks up to that item's instant, the time its position stands at, as the Daemon compares items with a Read Marker, and only when that is later than the Read Marker and something is unread, so it is never due again once the Daemon's marker comes back, never past an item the view has not shown, even when the window or the Daemon holds a later one, and never for a Timeline just opened until the view has laid it out with its bottom in view. A detached Direct Message is never marked, since no Target names it. When to carry it out, the runtime decides.
 

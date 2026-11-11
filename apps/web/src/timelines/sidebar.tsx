@@ -2,9 +2,9 @@
  * The sidebar: a tree of the Networks, each with how its connection stands, and their
  * Timelines under them, each coloured by what is unread in it with small counts of what
  * calls for the Owner, and the options. Choosing a Timeline opens it in the main view, and
- * Options opens the options view there. React Aria's Tree
- * gives it its keyboard: arrows move and expand, Enter or Space opens, and typing a name
- * finds it.
+ * Options opens the options view there, each closing the sidebar's drawer on a compact
+ * screen. React Aria's Tree gives it its keyboard: arrows move and expand, Enter or Space
+ * opens, and typing a name finds it.
  *
  * @packageDocumentation
  */
@@ -26,6 +26,7 @@ import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
 import type { Key, Selection } from "react-aria-components";
 
 import { openOptions } from "../options/atoms.ts";
+import { drawerState } from "../page/drawer.ts";
 import { open, sidebarNetworks, timelinesState } from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
@@ -207,6 +208,7 @@ export const Sidebar = () => {
   const setCollapsed = useAtomSet(collapsed);
   const choose = useAtomSet(open);
   const showOptions = useAtomSet(openOptions);
+  const setDrawer = useAtomSet(drawerState);
   const optionsShown = chosen._tag === "Options";
 
   // A key is read back as the Timeline it names, never cast: a key that names none, such
@@ -214,6 +216,8 @@ export const Sidebar = () => {
   const timelineOf = (key: Key) =>
     networks.flatMap((network) => network.timelines).find((timeline) => timeline.id === key);
 
+  // Choosing closes the drawer on a compact screen, and so does choosing the Timeline
+  // already shown, which React Aria gives as an empty selection.
   const onSelectionChange = (selection: Selection) => {
     const [key] = selection === "all" ? [] : selection;
     const timeline = key === undefined ? undefined : timelineOf(key);
@@ -221,6 +225,8 @@ export const Sidebar = () => {
     if (timeline !== undefined) {
       choose(timeline.id);
     }
+
+    setDrawer("None");
   };
 
   const onExpandedChange = (keys: Set<Key>) => {
@@ -236,6 +242,7 @@ export const Sidebar = () => {
         className={styles.options}
         onPress={() => {
           showOptions("");
+          setDrawer("None");
         }}
       >
         Options

@@ -2,13 +2,16 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Clear of the rounded corners and the notch, in landscape. */
+  padding: 0 var(--safe-right) 0 var(--safe-left);
 }
 
 .bar {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-2) var(--space-3);
+  /* Clear of the notch and the status bar. */
+  padding: calc(var(--space-2) + var(--safe-top)) var(--space-3) var(--space-2);
   border-bottom: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
 }
@@ -47,14 +50,94 @@
   min-height: 0;
 }
 
+/* The sidebar's button, on a compact screen, with its mark while anything said is unread. */
+.menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--target-size);
+  min-height: var(--target-size);
+  margin-left: calc(-1 * var(--space-3));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: calc(var(--font-size) * 1.5);
+  cursor: default;
+}
+
+.menu[data-pressed] {
+  background: var(--color-background);
+}
+
+.menu[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+.mark {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: 50%;
+}
+
+.markMessage {
+  background: var(--color-level-message);
+}
+
+.markDirect {
+  background: var(--color-level-direct);
+}
+
+.markHighlight {
+  background: var(--color-level-highlight);
+}
+
+/* The sidebar's drawer, from the left, over the page dimmed. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: var(--color-scrim);
+}
+
+.drawer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: min(36ch, 85vw);
+  padding: var(--safe-top) 0 var(--safe-bottom) var(--safe-left);
+  border-right: var(--border-width) solid var(--color-accent);
+  background: var(--color-background);
+  box-shadow: 0 0 var(--space-5) var(--color-shadow);
+  outline: none;
+}
+
+.drawerDialog {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  outline: none;
+}
+
+.drawerDialog > nav {
+  flex: 1;
+}
+
+@media (pointer: coarse) {
+  .bar {
+    padding-block: var(--safe-top) 0;
+  }
+}
+
 @media (max-width: 640px) {
   .body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 35%) minmax(0, 1fr);
-  }
-
-  .body > nav {
-    border-right: 0;
-    border-bottom: var(--border-width) solid var(--color-border);
   }
 }

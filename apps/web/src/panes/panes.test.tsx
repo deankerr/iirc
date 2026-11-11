@@ -12,10 +12,12 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { membersShown, membersVisible } from "../channel/state.ts";
 import { edit } from "../composer/atoms.ts";
 import { openOptions, optionsState, optionsSync } from "../options/atoms.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
+import { drawerState, pageSeen } from "../page/drawer.ts";
 import { marking } from "../reading/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
@@ -416,6 +418,27 @@ const drawnOf = (pane: string) => {
 
   return flex === undefined ? undefined : Math.round(Number(flex.split(" ")[0]));
 };
+
+/**
+ * The bar's button that opens the sidebar's drawer on a compact screen.
+ * @returns It, or none.
+ */
+const button = () => document.querySelector<HTMLElement>('header button[aria-label^="Networks"]');
+
+/**
+ * How many dialogs the page shows.
+ * @returns The count.
+ */
+const dialogs = () => document.querySelectorAll('[role="dialog"]').length;
+
+/**
+ * A Channel header's members toggle.
+ * @returns It, or none.
+ */
+const toggle = () =>
+  [...document.querySelectorAll<HTMLElement>("header button")].find(
+    (one) => one.textContent === "members"
+  );
 
 /**
  * The logs shown, by name.
@@ -940,6 +963,165 @@ describe("what stands in front of a Timeline", () => {
       composer: "Pane 2: bob",
       shown: "Direct Message with bob",
       switcher: ["1 alice", "2 bob"],
+    });
+  });
+
+  it("draws the sidebar as a drawer on a compact screen, from a button marked by what is unread, closed by a choice", async () => {
+    const { registry } = await signedIn({ history: true });
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+
+    await settled(() => button() !== null);
+
+    const before = {
+      expanded: button()?.getAttribute("aria-expanded"),
+      label: button()?.getAttribute("aria-label"),
+      sidebar: document.querySelectorAll('nav[aria-label="Networks"]').length,
+    };
+
+    await act(async () => {
+      button()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="dialog"][aria-label="Networks"]') !== null);
+
+    const row = [...document.querySelectorAll<HTMLElement>('[role="dialog"] [role="row"]')].find(
+      (one) => one.getAttribute("aria-label")?.startsWith("#other") === true
+    );
+
+    const opened = {
+      expanded: button()?.getAttribute("aria-expanded"),
+      sidebar: document.querySelectorAll('[role="dialog"] nav[aria-label="Networks"]').length,
+    };
+
+    await act(async () => {
+      row?.click();
+      await Promise.resolve();
+    });
+    await settled(() => logNamed("#other") !== null);
+
+    expect({
+      after: {
+        dialog: document.querySelectorAll('[role="dialog"]').length,
+        drawer: registry.get(drawerState),
+        shown: shown(),
+      },
+      before,
+      opened,
+    }).toStrictEqual({
+      after: { dialog: 0, drawer: "None", shown: ["#other"] },
+      before: { expanded: "false", label: "Networks, Messages unread", sidebar: 0 },
+      opened: { expanded: "true", sidebar: 1 },
+    });
+  });
+
+  it("shows the members as a sheet on a compact screen, never kept, and the column again when wide", async () => {
+    const { registry } = await signedIn();
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+
+    await settled(() => toggle() !== undefined);
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="dialog"] h2')?.textContent === "members");
+
+    const sheet = {
+      column: registry.get(membersShown),
+      kept: readChoice("iirc.members"),
+      visible: registry.get(membersVisible),
+    };
+
+    await act(async () => {
+      document
+        .querySelector('[role="dialog"]')
+        ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="dialog"]') === null);
+
+    const closed = registry.get(drawerState);
+
+    // On a wide screen, the toggle shows the column beside the Channel, kept on this device.
+    await act(async () => {
+      pageSeen(registry, { compact: false, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector("section[aria-labelledby] h2") !== null);
+
+    const kept = readChoice("iirc.members");
+
+    writeChoice("iirc.members", undefined);
+
+    expect({
+      closed,
+      dialogs: document.querySelectorAll('[role="dialog"]').length,
+      kept,
+      sheet,
+    }).toStrictEqual({
+      closed: "None",
+      dialogs: 0,
+      kept: "on",
+      sheet: { column: false, kept: undefined, visible: true },
+    });
+  });
+
+  it("ends a drawer or a sheet left open when the screen widens, so narrowing it again opens neither", async () => {
+    const { registry } = await signedIn();
+
+    const resize = async (compact: boolean) => {
+      await act(async () => {
+        pageSeen(registry, { compact, focused: true, visible: true });
+        await Promise.resolve();
+      });
+    };
+
+    await resize(true);
+    await settled(() => button() !== null);
+    await act(async () => {
+      button()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await resize(false);
+    await resize(true);
+    await settled(() => button() !== null);
+
+    const sidebar = { dialogs: dialogs(), drawer: registry.get(drawerState) };
+
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await resize(false);
+
+    const wide = {
+      column: document.querySelectorAll("section[aria-labelledby]").length,
+      kept: registry.get(membersShown),
+    };
+
+    await resize(true);
+
+    expect({
+      members: { dialogs: dialogs(), drawer: registry.get(drawerState) },
+      sidebar,
+      wide,
+    }).toStrictEqual({
+      members: { dialogs: 0, drawer: "None" },
+      sidebar: { dialogs: 0, drawer: "None" },
+      wide: { column: 0, kept: false },
     });
   });
 });

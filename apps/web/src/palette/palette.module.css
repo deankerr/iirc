@@ -49,6 +49,7 @@
   background: transparent;
   color: var(--color-text);
   font: inherit;
+  font-size: var(--font-size-input);
   caret-color: var(--color-accent);
 }
 
@@ -68,7 +69,7 @@
 .menu {
   flex: 1;
   min-height: 0;
-  max-height: 60vh;
+  max-height: 60dvh;
   padding: var(--space-2) 0;
   overflow-y: auto;
   outline: none;
@@ -147,15 +148,37 @@
 
 @media (max-width: 640px) {
   .overlay {
-    padding-top: var(--space-3);
+    padding-top: calc(var(--space-3) + var(--safe-top));
   }
 
+  /* A command's description under its usage, close to it, apart from the next. */
   .item {
     grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 0;
+    padding-block: var(--space-2);
+  }
+
+  .item + .item {
+    border-top: var(--border-width) solid var(--color-border);
   }
 
   .description {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+}
+
+@media (pointer: coarse) {
+  .search {
+    padding-block: 0;
+  }
+
+  .input {
+    min-height: var(--target-size);
+  }
+
+  .item {
+    align-content: center;
+    min-height: var(--target-size);
   }
 }

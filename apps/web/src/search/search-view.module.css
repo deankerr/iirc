@@ -26,6 +26,7 @@
   background: var(--color-background);
   color: var(--color-text);
   font: inherit;
+  font-size: var(--font-size-input);
 }
 
 .query:focus-visible {
@@ -110,4 +111,14 @@
   background: var(--color-selection);
   color: inherit;
   font-weight: 700;
+}
+
+@media (pointer: coarse) {
+  .query {
+    min-height: var(--target-size);
+  }
+
+  .result {
+    min-height: var(--target-size);
+  }
 }

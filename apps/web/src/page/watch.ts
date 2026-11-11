@@ -8,16 +8,18 @@
 import type { AtomRegistry } from "effect/reactivity";
 
 import { documentTitle } from "../reading/atoms.ts";
-import { compactQuery, pageNow, pageState } from "./atoms.ts";
+import { compactQuery, pageNow } from "./atoms.ts";
+import { pageSeen } from "./drawer.ts";
 
 /**
  * Keeps whether the Owner can see the page, from the document's visibility and the window's
- * focus, and whether its screen is compact, from a media query, and writes the page's title as what is unread changes.
+ * focus, and whether its screen is compact, from a media query, ending a drawer as it widens,
+ * and writes the page's title as what is unread changes.
  * @param registry - The registry.
  */
 export const watchPage = (registry: AtomRegistry.AtomRegistry) => {
   const seen = () => {
-    registry.set(pageState, pageNow());
+    pageSeen(registry, pageNow());
   };
 
   document.addEventListener("visibilitychange", seen);

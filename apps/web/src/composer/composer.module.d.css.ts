@@ -10,6 +10,7 @@ declare const styles: {
   readonly input: string;
   readonly line: string;
   readonly notice: string;
+  readonly palette: string;
   readonly pane: string;
   readonly prompt: string;
   readonly status: string;

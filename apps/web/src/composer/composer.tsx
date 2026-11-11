@@ -17,9 +17,11 @@ import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
+import { Button as AriaButton } from "react-aria-components";
 
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, mainView } from "../options/atoms.ts";
+import { openPalette } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
 import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
@@ -73,6 +75,27 @@ const AwayMark = ({ network }: { readonly network: string | undefined }) => {
     >
       (away)
     </span>
+  );
+};
+
+/**
+ * The way to the command palette from a touch screen, which has no keys to open it with,
+ * beside the composer. Elsewhere Mod+K opens it, and the button is not drawn.
+ * @returns The button.
+ */
+const PaletteButton = () => {
+  const openNow = useAtomSet(openPalette);
+
+  return (
+    <AriaButton
+      aria-label="Command palette"
+      className={styles.palette}
+      onPress={() => {
+        openNow("All");
+      }}
+    >
+      <span aria-hidden="true">/</span>
+    </AriaButton>
   );
 };
 
@@ -360,6 +383,7 @@ const Composer = ({
           spellCheck
           value={draft.text}
         />
+        <PaletteButton />
       </div>
     </div>
   );

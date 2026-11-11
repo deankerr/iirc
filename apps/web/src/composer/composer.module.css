@@ -1,4 +1,5 @@
 .composer {
+  padding-bottom: var(--safe-bottom);
   border-top: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
 }
@@ -58,6 +59,7 @@
   background: transparent;
   color: var(--color-text);
   font: inherit;
+  font-size: var(--font-size-input);
   resize: none;
   field-sizing: content;
   caret-color: var(--color-accent);
@@ -104,4 +106,56 @@
 /* The focused Pane's number, among several: dim, before the Timeline's name. */
 .pane {
   color: var(--color-muted);
+}
+
+/* The palette's button, drawn only where there may be no keys to open it with. */
+.palette {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--target-size);
+  min-height: var(--target-size);
+  margin-right: calc(-1 * var(--space-3));
+  padding: 0;
+  border: 0;
+  border-left: var(--border-width) solid var(--color-border);
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: default;
+}
+
+.palette[data-pressed] {
+  background: var(--color-background);
+}
+
+.palette[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+/* On a touch screen the field itself is a finger's height, its one line in the middle. */
+@media (pointer: coarse) {
+  .line {
+    padding-block: 0;
+  }
+
+  .input {
+    --field-pad: max(0px, calc((var(--target-size) - var(--line-height) * 1em) / 2));
+
+    min-height: var(--target-size);
+    max-height: calc(6 * var(--line-height) * 1em + 2 * var(--field-pad));
+    padding-block: var(--field-pad);
+  }
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  .line {
+    align-items: center;
+  }
+
+  .palette {
+    display: flex;
+  }
 }

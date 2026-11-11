@@ -56,3 +56,13 @@
   outline: var(--border-width) solid var(--color-focus);
   outline-offset: var(--space-1);
 }
+
+@media (pointer: coarse) {
+  .line {
+    align-items: center;
+  }
+
+  .toggle {
+    min-height: var(--target-size);
+  }
+}
