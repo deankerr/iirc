@@ -494,7 +494,7 @@ const setArguments = (args: string): Parsed<Intent> => {
     : parsed({ _tag: "Configure", edit: { _tag: "Set", path, text }, network });
 };
 
-const networkUsage = "/network add <id> <host>[/port] [-tls] <nick>";
+const networkUsage = "/network add <id> <host>[/port] [plain] <nick>";
 
 /**
  * What `/network add` was given: an id, an Ircd, and a nick.

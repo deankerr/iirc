@@ -107,6 +107,8 @@ const Profile = ({ profile }: { readonly profile: ProfileShown }) => {
       )}
       {flags.length === 0 ? null : <p className={styles.dim}>{flags.join(" · ")}</p>}
       <Field label="account" value={profile.account} />
+      <Field label="connects from" value={profile.actual} />
+      <Field label="modes" value={profile.modes} />
       <Field label="away:" value={profile.away} />
       {profile.channels.length === 0 ? null : (
         <ul aria-label="Channels" className={styles.channels}>

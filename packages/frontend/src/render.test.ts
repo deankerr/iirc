@@ -1,5 +1,5 @@
-import { ItemContent } from "@iirc/api";
-import type { Activity, Delivery } from "@iirc/api";
+import { ItemContent, NetworkId } from "@iirc/api";
+import type { Activity, Delivery, EndReason } from "@iirc/api";
 import { plainStyle } from "@iirc/protocol/format";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -9,8 +9,9 @@ import {
   attemptedText,
   contained,
   formatted,
-  lineOf,
+  lineOf as lineIn,
   linkSchemes,
+  mismatchedTls,
   nickColour,
   nickSlots,
   plainLimit,
@@ -20,6 +21,10 @@ import {
 import type { Inline, Line } from "./render.ts";
 
 const bold = { ...plainStyle, bold: true };
+
+const libera = Schema.decodeSync(NetworkId)("libera");
+
+const lineOf = (content: ItemContent): Line => lineIn(content, libera);
 
 const texts = (inlines: readonly Inline[]) => inlines.map((inline) => inline.text).join("");
 
@@ -333,6 +338,10 @@ const read = (line: Line): string =>
               return part.text;
             }
 
+            case "Command": {
+              return `\`${part.text}\``;
+            }
+
             default: {
               return part satisfies never;
             }
@@ -361,6 +370,14 @@ const refused = (
   intent: "i1",
   reason,
 });
+
+const failed = (host: string, port: number, tls: boolean, reason: EndReason, opened = true) =>
+  read(
+    lineOf(content({ _tag: "ConnectionFailed", at: 0, ircd: { host, port, tls }, opened, reason }))
+  );
+
+const closed = (reason: "Ended" | "Refused" | "Tls" | "Reset" | "TimedOut") =>
+  ({ _tag: "Closed", reason }) as const;
 
 describe("lines", () => {
   it("shows a Message by its sender, in their colour", () => {
@@ -461,7 +478,13 @@ describe("lines", () => {
     const wire: readonly (typeof ItemContent.Encoded)[] = [
       { _tag: "SessionBegan", at: 0, nick: "iirc" },
       { _tag: "SessionEnded", at: 0, reason: { _tag: "Closed", reason: "Reset" } },
-      { _tag: "ConnectionFailed", at: 0, reason: { _tag: "Closed", reason: "Refused" } },
+      {
+        _tag: "ConnectionFailed",
+        at: 0,
+        ircd: { host: "irc.test", port: 6697, tls: true },
+        opened: false,
+        reason: { _tag: "Closed", reason: "Refused" },
+      },
     ];
 
     expect(
@@ -471,8 +494,39 @@ describe("lines", () => {
     ).toStrictEqual([
       ["Session", "Connected as <iirc>"],
       ["Session", "Disconnected: the connection was reset"],
-      ["Session", "Could not connect: the connection was refused"],
+      ["Session", "Could not connect to irc.test/6697: the connection was refused"],
     ]);
+  });
+
+  it("hints at TLS the other way, by the port and how the Connection ended alone", () => {
+    expect([
+      failed("irc.example.net", 6697, false, closed("Ended")),
+      failed("irc.example.net", 6697, false, { _tag: "Silent" }),
+      failed("irc.example.net", 6667, true, closed("Tls"), false),
+      failed("irc.example.net", 6697, false, closed("Refused"), false),
+      failed("irc.example.net", 6697, false, closed("TimedOut"), false),
+      failed("irc.example.net", 6697, false, closed("Reset"), false),
+      failed("irc.example.net", 6667, true, closed("Reset")),
+      failed("irc.example.net", 7000, false, closed("Ended")),
+      failed("irc.example.net", 6697, true, closed("Tls")),
+    ]).toStrictEqual([
+      "Could not connect to irc.example.net/6697 plain: the Ircd closed the connection. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
+      "Could not connect to irc.example.net/6697 plain: the Ircd stopped answering. Port 6697 is usually TLS: try `/set network.libera.ircds irc.example.net/6697`",
+      "Could not connect to irc.example.net/6667: TLS failed. Port 6667 is usually plaintext: try `/set network.libera.ircds irc.example.net/6667 plain`",
+      "Could not connect to irc.example.net/6697 plain: the connection was refused",
+      "Could not connect to irc.example.net/6697 plain: the connection timed out",
+      "Could not connect to irc.example.net/6697 plain: the connection was reset",
+      "Could not connect to irc.example.net/6667: the connection was reset",
+      "Could not connect to irc.example.net/7000 plain: the Ircd closed the connection",
+      "Could not connect to irc.example.net/6697: TLS failed",
+    ]);
+    expect(
+      mismatchedTls({
+        ircd: { host: "a", port: 6697, tls: false },
+        opened: true,
+        reason: { _tag: "Disabled" },
+      })
+    ).toBeUndefined();
   });
 
   it("describes a refused action calmly, by what it tried and the Ircd's code, never its text", () => {

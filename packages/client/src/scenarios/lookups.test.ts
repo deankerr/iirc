@@ -32,6 +32,28 @@ const resultOf = (run: Played<State>, index = 0): LookResult | undefined =>
 
 const seconds = (count: number) => Instant.make(count * 1000);
 
+const profileFrom = (...replies: readonly string[]) =>
+  resultOf(
+    played([
+      ...inChannel(),
+      lines(
+        "!! whois peer",
+        ">> WHOIS peer",
+        ...replies.map((reply) => `<< :irc.test ${reply}`),
+        "<< :irc.test 318 iirc peer :End"
+      ),
+    ])
+  );
+
+const shown = (...replies: readonly string[]) => {
+  const result = profileFrom(...replies);
+  const [profile] = result?._tag === "Found" ? result.profiles : [];
+
+  return profile === undefined
+    ? undefined
+    : { actual: profile.actual, modes: profile.modes, other: profile.other };
+};
+
 describe("a WHOIS on the floor", () => {
   it("collects an ngircd-like reply, with an unknown numeric kept", () => {
     const run = played([
@@ -46,6 +68,7 @@ describe("a WHOIS on the floor", () => {
         "<< :irc.test 301 iirc peer :gone fishing",
         "<< :irc.test 317 iirc peer 42 1767225600 :seconds idle, signon time",
         "<< :irc.test 378 iirc peer :is connecting from *@peer.test 192.0.2.1",
+        "<< :irc.test 379 iirc peer :is using modes +i",
         "<< :irc.test 318 iirc peer :End of WHOIS list",
         "?? looked-up i1 whois=peer found profiles=1"
       ),
@@ -56,6 +79,7 @@ describe("a WHOIS on the floor", () => {
       profiles: [
         {
           account: undefined,
+          actual: undefined,
           away: "gone fishing",
           channels: [
             { name: "#iirc", prefixes: ["o"] },
@@ -64,6 +88,7 @@ describe("a WHOIS on the floor", () => {
           ],
           host: "peer.test",
           idle: 42,
+          modes: "+i",
           nick: "peer",
           operator: false,
           other: [{ numeric: "378", params: ["peer", "is connecting from *@peer.test 192.0.2.1"] }],
@@ -88,7 +113,8 @@ describe("a WHOIS on the floor", () => {
         "<< :ergo.test 312 iirc peer ergo.test :Ergo server",
         "<< :ergo.test 313 iirc peer :is an IRC operator",
         "<< :ergo.test 330 iirc peer peeracct :is logged in as",
-        "<< :ergo.test 338 iirc peer 192.0.2.1 :Actual user@host, Actual IP",
+        "<< :ergo.test 338 iirc peer ~u@203.0.113.22 203.0.113.22 :Actual user@host, Actual IP",
+        "<< :ergo.test 379 iirc peer :is using modes +Zi",
         "<< :ergo.test 671 iirc peer :is using a secure connection",
         "<< :ergo.test 317 iirc peer 7 1767225000 :seconds idle, signon time",
         "<< :ergo.test 318 iirc peer :End of /WHOIS list",
@@ -101,13 +127,78 @@ describe("a WHOIS on the floor", () => {
       profiles: [
         {
           account: "peeracct",
+          actual: { ip: "203.0.113.22", mask: "~u@203.0.113.22" },
           channels: [{ name: "#iirc", prefixes: ["o", "v"] }],
+          modes: "+Zi",
           operator: true,
-          other: [{ numeric: "338", params: ["peer", "192.0.2.1", "Actual user@host, Actual IP"] }],
+          other: [],
           secure: true,
           signon: seconds(1_767_225_000),
         },
       ],
+    });
+  });
+
+  it("reads 338 and 379 by the shape of their parameters and words, and keeps any other form", () => {
+    expect({
+      bareText: shown("338 iirc peer :is actually peer@192.0.2.1", "379 iirc peer :is using modes"),
+      hostName: shown("338 iirc peer real.example :actually using host"),
+      ipv6: shown("338 iirc peer 0::1 :actually using host"),
+      mapped: shown("338 iirc peer 0::ffff:192.0.2.1 :actually using host"),
+      notIp: shown("338 iirc peer 192.0.2.256 :actually using host"),
+      octal: shown("338 iirc peer 010.000.000.001 :actually using host"),
+      solanum: shown("338 iirc peer 127.0.0.1 :actually using host"),
+      twoMasks: shown("338 iirc peer a@b c@d :actual"),
+      twoModes: shown("379 iirc peer :is using modes +iwx +cF"),
+      v4First: shown("338 iirc peer 192.0.2.1:: :actually using host"),
+      v4Inside: shown("338 iirc peer 0::192.0.2.1:1 :actually using host"),
+    }).toStrictEqual({
+      bareText: {
+        actual: undefined,
+        modes: undefined,
+        other: [
+          { numeric: "338", params: ["peer", "is actually peer@192.0.2.1"] },
+          { numeric: "379", params: ["peer", "is using modes"] },
+        ],
+      },
+      hostName: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "338", params: ["peer", "real.example", "actually using host"] }],
+      },
+      ipv6: { actual: { ip: "0::1", mask: undefined }, modes: undefined, other: [] },
+      mapped: { actual: { ip: "0::ffff:192.0.2.1", mask: undefined }, modes: undefined, other: [] },
+      notIp: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "338", params: ["peer", "192.0.2.256", "actually using host"] }],
+      },
+      octal: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "338", params: ["peer", "010.000.000.001", "actually using host"] }],
+      },
+      solanum: { actual: { ip: "127.0.0.1", mask: undefined }, modes: undefined, other: [] },
+      twoMasks: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "338", params: ["peer", "a@b", "c@d", "actual"] }],
+      },
+      twoModes: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "379", params: ["peer", "is using modes +iwx +cF"] }],
+      },
+      v4First: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "338", params: ["peer", "192.0.2.1::", "actually using host"] }],
+      },
+      v4Inside: {
+        actual: undefined,
+        modes: undefined,
+        other: [{ numeric: "338", params: ["peer", "0::192.0.2.1:1", "actually using host"] }],
+      },
     });
   });
 

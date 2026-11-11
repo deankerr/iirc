@@ -9,6 +9,7 @@ import type {
   Attempted,
   EndReason,
   Instant,
+  IrcdAddress,
   IntentId,
   MessageId,
   SayKind,
@@ -76,7 +77,15 @@ export type Content =
     }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
-  | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }
+  | {
+      readonly _tag: "ConnectionFailed";
+      readonly at: Instant;
+      readonly reason: EndReason;
+      /** The Ircd the Connection was dialled to. */
+      readonly ircd: IrcdAddress;
+      /** Whether the Connection was open before it ended. */
+      readonly opened: boolean;
+    }
   /**
    * An action of the Owner's, such as a topic or a kick, that the Ircd refused, or that
    * never left: what it tried, in short, at the time of the step that refused it.

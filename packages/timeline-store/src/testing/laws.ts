@@ -2463,7 +2463,15 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         // A failed Connection opens a Gap, a Session closes it at P, and a restart before any
         // more News opens the next Gap at the last step folded, which is P too.
         const steps = [
-          [{ _tag: "ConnectionFailed", at: at(10), reason: { _tag: "Closed", reason: "Reset" } }],
+          [
+            {
+              _tag: "ConnectionFailed",
+              at: at(10),
+              ircd: { host: "irc.test", port: 6697, tls: true },
+              opened: false,
+              reason: { _tag: "Closed", reason: "Reset" },
+            },
+          ],
           [{ _tag: "SessionBegan", at: at(20), nick: "iirc" }],
           [{ _tag: "SessionEnded", at: at(30), reason: { _tag: "Restarted" } }],
         ] as const;

@@ -403,10 +403,15 @@ const attempted = (source: Attempted): WireAttempted => {
 
 const profile = (source: Profile): Fields<Profile, WireProfile> => ({
   account: source.account ?? null,
+  actual:
+    source.actual === undefined
+      ? null
+      : { ip: source.actual.ip ?? null, mask: source.actual.mask ?? null },
   away: source.away ?? null,
   channels: source.channels.map(({ name, prefixes }) => ({ name, prefixes })),
   host: source.host ?? null,
   idle: source.idle ?? null,
+  modes: source.modes ?? null,
   nick: source.nick,
   operator: source.operator,
   other: source.other.map(({ numeric, params }) => ({ numeric, params })),
@@ -705,10 +710,21 @@ const news = (source: News): WireNews => {
       return wire;
     }
 
-    case "ConnectionFailed":
+    case "ConnectionFailed": {
+      const wire: Case<News, WireNews, "ConnectionFailed"> = {
+        _tag: "ConnectionFailed",
+        at: source.at,
+        ircd: { host: source.ircd.host, port: source.ircd.port, tls: source.ircd.tls },
+        opened: source.opened,
+        reason: endReason(source.reason),
+      };
+
+      return wire;
+    }
+
     case "SessionEnded": {
-      const wire: Case<News, WireNews, typeof source._tag> = {
-        _tag: source._tag,
+      const wire: Case<News, WireNews, "SessionEnded"> = {
+        _tag: "SessionEnded",
         at: source.at,
         reason: endReason(source.reason),
       };
@@ -1126,10 +1142,21 @@ const itemContent = (source: Content): WireItemContent => {
       return wire;
     }
 
-    case "ConnectionFailed":
+    case "ConnectionFailed": {
+      const wire: Case<Content, WireItemContent, "ConnectionFailed"> = {
+        _tag: "ConnectionFailed",
+        at: source.at,
+        ircd: { host: source.ircd.host, port: source.ircd.port, tls: source.ircd.tls },
+        opened: source.opened,
+        reason: endReason(source.reason),
+      };
+
+      return wire;
+    }
+
     case "SessionEnded": {
-      const wire: Case<Content, WireItemContent, typeof source._tag> = {
-        _tag: source._tag,
+      const wire: Case<Content, WireItemContent, "SessionEnded"> = {
+        _tag: "SessionEnded",
         at: source.at,
         reason: endReason(source.reason),
       };

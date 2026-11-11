@@ -1068,7 +1068,7 @@ describe("the web frontend on iirc daemon --web", () => {
         // With no Timeline open, the composer takes commands that need none.
         const nowhere = page.getByRole("textbox", { name: "iirc" });
 
-        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} -tls iirc`);
+        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
         await nowhere.press("Enter");
 
         const row = page.getByRole("row").first();

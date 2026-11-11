@@ -793,10 +793,12 @@ describe("the handlers", () => {
       profiles: [
         {
           account: null,
+          actual: null,
           away: null,
           channels: [{ name: "#iirc", prefixes: ["o"] }],
           host: "peer.test",
           idle: null,
+          modes: null,
           nick: "peer",
           operator: false,
           other: [{ numeric: "320", params: ["peer", "a vendor's own"] }],

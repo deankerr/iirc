@@ -366,10 +366,12 @@ export const profileOf = (
   fields: Partial<(typeof LookResult.Encoded & { readonly _tag: "Found" })["profiles"][number]>
 ): (typeof LookResult.Encoded & { readonly _tag: "Found" })["profiles"][number] => ({
   account: null,
+  actual: null,
   away: null,
   channels: [],
   host: null,
   idle: null,
+  modes: null,
   nick: "peer",
   operator: false,
   other: [],

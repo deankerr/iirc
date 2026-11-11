@@ -448,6 +448,10 @@ export interface ProfileShown {
   readonly away: string | undefined;
   readonly account: string | undefined;
   readonly secure: boolean;
+  /** Where the User actually connects from: the mask, the IP address, or both, each contained. */
+  readonly actual: string | undefined;
+  /** The User's modes, such as `+Zi`, contained. */
+  readonly modes: string | undefined;
   readonly other: readonly OtherShown[];
 }
 
@@ -607,10 +611,13 @@ export const profileShown = (
   profile: Profile,
   time: (instant: number) => string | undefined
 ): ProfileShown => {
-  const { host, user } = profile;
+  const { actual, host, user } = profile;
+  const where = actual === null ? [] : [actual.mask, actual.ip].map(said);
+  const connects = where.filter((one) => one !== undefined);
 
   return {
     account: said(profile.account),
+    actual: connects.length === 0 ? undefined : connects.join(" "),
     away: said(profile.away),
     channels: profile.channels.map((channel) => channelShown(timelines, card, channel)),
     colour: nickColour(profile.nick),
@@ -619,6 +626,7 @@ export const profileShown = (
       user === null && host === null
         ? undefined
         : `${contained(user ?? "?")}@${contained(host ?? "?")}`,
+    modes: said(profile.modes),
     nick: contained(profile.nick),
     operator: profile.operator,
     other: profile.other.map((one) => ({

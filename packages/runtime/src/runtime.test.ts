@@ -178,6 +178,84 @@ describe("carrying out", () => {
     expect(result.held).toStrictEqual([]);
   });
 
+  it("logs a Session's start, and each Connection's end once, with its Ircd and reasons", async () => {
+    const plain = { host: "irc.test", port: 6697, tls: false };
+    const second = ConnectionId.make(2);
+
+    const logged = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([
+          { outputs: [{ _tag: "Dial", connection: first, ircd: plain }], when: "Configured" },
+          {
+            news: [
+              {
+                _tag: "ConnectionFailed",
+                at: at(0),
+                ircd: plain,
+                opened: true,
+                reason: { _tag: "Closed", reason: "Ended" },
+              },
+            ],
+            outputs: [{ _tag: "Dial", connection: second, ircd }],
+            when: "Closed",
+          },
+          { news: [{ _tag: "SessionBegan", at: at(0), nick: "iirc" }], when: "Opened" },
+          {
+            news: [{ _tag: "SessionEnded", at: at(0), reason: { _tag: "Silent" } }],
+            when: "Closed",
+          },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+        const refused = yield* world.memory.ircd.accept;
+
+        yield* refused.open;
+        yield* refused.close("Ended");
+        const accepted = yield* world.memory.ircd.accept;
+
+        yield* accepted.open;
+        yield* settle;
+        yield* accepted.close("TimedOut");
+        yield* settle;
+
+        return world.logged
+          .filter((one) => one.level === "Info")
+          .map((one) => one.message)
+          .filter((message) => JSON.stringify(message).includes("Conn"));
+      })
+    );
+
+    expect(logged).toStrictEqual([
+      [
+        "Connection closed",
+        {
+          connection: first,
+          ended: "Closed",
+          host: "irc.test",
+          port: 6697,
+          reason: "Ended",
+          session: false,
+          tls: false,
+        },
+      ],
+      ["Connected as iirc"],
+      [
+        "Connection closed",
+        {
+          connection: second,
+          ended: "Silent",
+          host: "irc.test",
+          port: 6697,
+          reason: "TimedOut",
+          session: true,
+          tls: true,
+        },
+      ],
+    ]);
+  });
+
   it("fires a timer at its time, a reset one once, and a cancelled one never", async () => {
     const fired = await runTest((world) =>
       Effect.gen(function* () {

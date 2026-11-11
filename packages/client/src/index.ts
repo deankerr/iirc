@@ -54,6 +54,7 @@ export type {
   Ours,
   PartialReason,
   Profile,
+  ProfileActual,
   ProfileChannel,
   RefusedAction,
   RefusedReason,

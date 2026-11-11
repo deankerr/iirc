@@ -129,6 +129,14 @@ const Piece = ({ part }: { readonly part: Part }) => {
       );
     }
 
+    case "Command": {
+      return (
+        <code>
+          <bdi>{part.text}</bdi>
+        </code>
+      );
+    }
+
     default: {
       return part satisfies never;
     }
@@ -183,7 +191,7 @@ export const Line = ({ row }: { readonly row: Row }) => {
     );
   }
 
-  const line = lineOf(row.item.content);
+  const line = lineOf(row.item.content, row.item.network);
   const time = <Time at={row.item.position.at} />;
 
   if (line._tag === "Description") {

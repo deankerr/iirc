@@ -8,9 +8,11 @@
 import { Instant, timers } from "@iirc/client";
 import type {
   Client,
+  CloseReason,
   ConnectionId,
   Input,
   IntentId,
+  IrcdAddress,
   LookResult,
   NetworkConfiguration,
   News,
@@ -140,6 +142,8 @@ type Pending =
 /** A Connection the Runtime holds, with the Scope that ends it, and its Outbox. */
 interface Live {
   readonly link: Link;
+  /** The Ircd it was dialled to, for the log of how it ended. */
+  readonly ircd: IrcdAddress;
   readonly scope: Scope.Closeable;
   /** The Lines waiting to leave on this Connection. Never journaled. */
   readonly outbox: Ref.Ref<Outbox<UnsentLine>>;
@@ -328,6 +332,38 @@ const stoppedReason = (cause: Cause.Cause<JournalFailed | ClientThrew>): string 
 };
 
 // Takes the next Line. A secret taken is unfinished from the moment it leaves the Outbox.
+/**
+ * Logs how a Connection ended, once, as its `Closed` is stepped: the Ircd it was dialled
+ * to, the reason the Transport gave, and how the Client took it, from the News of that
+ * step, which says whether a Session had begun.
+ * @param connection - The Connection.
+ * @param ircd - The Ircd, or `undefined` when the Runtime no longer held the Connection.
+ * @param reason - The Transport's reason.
+ * @param news - The News of the `Closed`'s step.
+ * @returns The log.
+ */
+const logClosed = (
+  connection: ConnectionId,
+  ircd: IrcdAddress | undefined,
+  reason: CloseReason,
+  news: readonly News[]
+) => {
+  const end = news.find(
+    (one): one is Extract<News, { readonly _tag: "ConnectionFailed" | "SessionEnded" }> =>
+      one._tag === "ConnectionFailed" || one._tag === "SessionEnded"
+  );
+
+  return Effect.logInfo("Connection closed", {
+    connection,
+    ...(ircd !== undefined && { host: ircd.host, port: ircd.port, tls: ircd.tls }),
+    reason,
+    ...(end !== undefined && {
+      ended: end.reason._tag,
+      session: end._tag === "SessionEnded",
+    }),
+  });
+};
+
 const takeNext = (held: Pumped, at: Instant) =>
   Effect.uninterruptible(
     Effect.gen(function* () {
@@ -621,6 +657,7 @@ const drive = <S>(
         const held: Pumped = {
           dropped: yield* Ref.make<readonly UnsentLine[]>([]),
           hangup: yield* Ref.make<Instant | undefined>(undefined),
+          ircd: output.ircd,
           link,
           outbox: yield* Ref.make(
             makeOutbox<UnsentLine>({ capacity: timing.capacity, pacing: timing.pacing })
@@ -756,6 +793,10 @@ const drive = <S>(
         const waiting = yield* Ref.get(network.lookups);
 
         for (const one of step.news) {
+          if (one._tag === "SessionBegan") {
+            yield* Effect.logInfo(`Connected as ${one.nick}`);
+          }
+
           const waiter = one._tag === "LookedUp" ? waiting.get(one.intent) : undefined;
 
           if (waiter !== undefined && one._tag === "LookedUp") {
@@ -834,7 +875,12 @@ const drive = <S>(
           }
         }
 
-        yield* advance((at) => linkInput(connection, event, at));
+        const stepped = yield* advance((at) => linkInput(connection, event, at));
+
+        if (event._tag === "Closed") {
+          yield* logClosed(connection, held?.ircd, event.reason, stepped.news);
+        }
+
         yield* forget(connection);
         yield* checkDrained;
       });
