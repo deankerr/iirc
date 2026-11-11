@@ -855,7 +855,12 @@ const simulate = (played: Scenario) => {
       }
 
       case "Status": {
-        return { _tag: "StatusRead", network: read.network, session: daemon.known(read.network) };
+        return {
+          _tag: "StatusRead",
+          network: read.network,
+          self: null,
+          session: daemon.known(read.network),
+        };
       }
 
       case "Latest": {
@@ -2066,6 +2071,7 @@ describe("the Timelines' state", () => {
     state = reduceTimelines(state, {
       _tag: "StatusRead",
       network: alpha,
+      self: null,
       session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 }),
     });
     const known = state.networks.get(alpha)?.connection;

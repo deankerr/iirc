@@ -11,7 +11,7 @@ import type { StsPolicy } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import type { CapName, Instant, IntentId } from "./ids.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
-import type { EndReason } from "./news.ts";
+import type { EndReason, RefusedAction } from "./news.ts";
 import type { Seam } from "./seam.ts";
 
 /** Cap negotiation, which runs for a whole Connection. */
@@ -300,10 +300,21 @@ export interface State {
    * Sessions, and each Session begins by sending it again.
    */
   readonly away: string | undefined;
+  /**
+   * The Owner's latest actions that left, by intent, oldest first, at most
+   * {@link maxActions}: what each tried and where it belongs, so a refusal that comes
+   * later, `Rejected` or `Unsent`, says where to show it. They outlive Connections, since
+   * an `Unsent` can come after its Connection ended.
+   */
+  readonly actions: ReadonlyMap<IntentId, RefusedAction>;
 }
+
+/** How many of the Owner's actions the Client remembers, to place their refusals. */
+export const maxActions = 64;
 
 /** Before anything has happened. */
 export const initialState: State = {
+  actions: new Map(),
   attempt: 0,
   away: undefined,
   casemapping: "rfc1459",

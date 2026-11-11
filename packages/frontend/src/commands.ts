@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import type { Level, NetworkId, TimelineId } from "@iirc/api";
+import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
@@ -49,6 +49,12 @@ export interface CommandContext {
   readonly panes: number;
   /** Every Timeline with something unread, in the sidebar's order. */
   readonly unread: readonly Unseen[];
+  /**
+   * The head of the Channel in focus, as last read, or none before it is read or when the
+   * focus is no Channel's: its topic, and the Network's `PREFIX`, `CHANMODES`, and
+   * `CHANTYPES`, which an action on a Channel is parsed by, as the Client checks it.
+   */
+  readonly head: ChannelHeader | undefined;
 }
 
 /** A Timeline with something unread, as a command sees it. */
@@ -87,9 +93,21 @@ export interface Say {
 }
 
 /**
+ * Act on a Network, as the Daemon's `act` does: set a topic, kick, change modes, invite,
+ * change Self's nick, be away or back, or send a Line written as text. It is carried out
+ * as a Say is, under an intent the runtime names, and never sent twice.
+ */
+export interface Act {
+  readonly _tag: "Act";
+  readonly network: NetworkId;
+  readonly action: ActionRequest;
+}
+
+/**
  * What a command asks for, which the runtime carries out, in order.
  *
  * - `Say`: say a Message, above.
+ * - `Act`: act on a Network, above.
  * - `OpenOptions`: show the options view, filtered as given.
  * - `Configure`: read the Network's Configuration, apply the edit to it, and send the whole
  *   of it back, made from the one read. On a conflict, read it again and apply the same
@@ -115,6 +133,7 @@ export interface Say {
  */
 export type Intent =
   | Say
+  | Act
   | { readonly _tag: "OpenOptions"; readonly filter: string }
   | { readonly _tag: "Configure"; readonly network: NetworkId; readonly edit: Edit }
   | {
@@ -143,12 +162,14 @@ export type Parsed<A> =
  * - `Focused`: a Timeline is in focus.
  * - `Target`: the Timeline in focus has a Target: a Channel's, or a Direct Message
  *   partner's it still follows.
+ * - `Channel`: the Timeline in focus is a Channel's.
  * - `Session`: the focused Timeline's Network has a Session.
  * - `Panes`: there is more than one Pane.
  */
 export type Condition =
   | { readonly _tag: "Focused" }
   | { readonly _tag: "Target" }
+  | { readonly _tag: "Channel" }
   | { readonly _tag: "Session" }
   | { readonly _tag: "Panes" };
 
@@ -643,6 +664,676 @@ const queryArguments = (args: string): Parsed<string> => {
   return parsed(name);
 };
 
+const target: readonly Condition[] = [{ _tag: "Target" }, { _tag: "Session" }];
+const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Session" }];
+const anywhereActing = anywhere;
+const focused: readonly Condition[] = [{ _tag: "Focused" }];
+
+// Acting.
+
+/** Starting the composer with text, as `/topic` alone does, rather than acting. */
+type Starting = Extract<Intent, { readonly _tag: "FocusComposer" }>;
+
+/**
+ * A command that acts on the focused Timeline's Network, parsed with the head of the
+ * Channel in focus, if read.
+ * @param spec - The command, with its parser, which gives the action or other intents.
+ * @returns The command.
+ */
+const acting = (
+  spec: Omit<Command, "run"> & {
+    readonly parse: (
+      args: string,
+      focus: Focus,
+      head: ChannelHeader | undefined
+    ) => Parsed<ActionRequest | Starting>;
+  }
+): Command => {
+  const { parse, ...rest } = spec;
+
+  return {
+    ...rest,
+    run: (args, context) => {
+      const { focus } = context;
+
+      if (focus === undefined) {
+        return invalid("Open a Timeline first.");
+      }
+
+      const head = context.head?.timeline === focus.timeline ? context.head : undefined;
+      const value = parse(args, focus, head);
+
+      if (value._tag === "Invalid") {
+        return value;
+      }
+
+      const { value: action } = value;
+
+      return parsed(
+        action._tag === "FocusComposer"
+          ? [action]
+          : [{ _tag: "Act", action, network: focus.network }]
+      );
+    },
+  };
+};
+
+/**
+ * The words of a text, split at runs of whitespace, none empty.
+ * @param text - The text.
+ * @returns Its words.
+ */
+const wordsOf = (text: string): readonly string[] => text.split(/\s+/u).filter((one) => one !== "");
+
+/**
+ * The commands of a raw Line that carry a Credential, which the Client never sends written
+ * as text, since a Line written as text is journaled as written.
+ */
+const credentialCommands: ReadonlySet<string> = new Set(["AUTHENTICATE", "OPER", "PASS"]);
+
+const rawCredentialRefused =
+  "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+
+/**
+ * A raw Line's command, as an Ircd reads it: after any tags and source, in upper case.
+ * @param line - The raw Line, as typed.
+ * @returns Its command, or `""` for none.
+ */
+const rawCommandOf = (line: string): string => {
+  const words = wordsOf(line);
+  const tags = words[0]?.startsWith("@") === true ? 1 : 0;
+  const start = tags + (words[tags]?.startsWith(":") === true ? 1 : 0);
+
+  return (words[start] ?? "").replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
+};
+
+/**
+ * A name the Owner gives, one word with no `,`, or why it is not one.
+ * @param name - The name.
+ * @param what - What it names, to say so.
+ * @returns The name.
+ */
+const oneName = (name: string, what: string): Parsed<string> =>
+  name === "" || /[\s,]/u.test(name) ? invalid(`Give one ${what}, not "${name}".`) : parsed(name);
+
+const topicUsage = "/topic [<text> | -delete]";
+
+/**
+ * The topic as last read, the text of a Known or Stale one, `null` when none is set, or
+ * none when it is not known.
+ * @param head - The Channel's head.
+ * @returns The topic.
+ */
+const topicOf = (head: ChannelHeader | undefined): string | null | undefined => {
+  const fact = head?.topic;
+
+  if (fact === undefined || fact._tag === "Unknown") {
+    return undefined;
+  }
+
+  const topic = fact._tag === "Known" ? fact.value : fact.was;
+
+  return topic === null ? null : topic.text;
+};
+
+/**
+ * What `/topic` was given: text to set the topic to, exactly, `-delete` to clear it, or
+ * nothing, to put `/topic` and the topic as last read in the composer to edit.
+ * @param args - The text after `/topic`.
+ * @param focus - The Channel in focus.
+ * @param head - Its head, if read.
+ * @returns The action, or the intent that starts the composer.
+ */
+const topicArguments = (
+  args: string,
+  focus: Focus,
+  head: ChannelHeader | undefined
+): Parsed<ActionRequest | Starting> => {
+  if (args.trim() === "-delete") {
+    return parsed({ _tag: "Topic", channel: focus.name, text: "" });
+  }
+
+  if (args.trim() !== "") {
+    return parsed({ _tag: "Topic", channel: focus.name, text: args });
+  }
+
+  const topic = topicOf(head);
+
+  if (topic === undefined) {
+    return invalid(
+      `The topic of ${focus.name} is not known yet. Give the new topic: ${topicUsage}.`
+    );
+  }
+
+  return parsed({ _tag: "FocusComposer", text: `/topic ${topic ?? ""}` });
+};
+
+/**
+ * What `/kick` was given: nicks, comma-separated, and a reason, the rest of the line.
+ * @param args - The text after `/kick`.
+ * @param focus - The Channel in focus.
+ * @returns The action.
+ */
+const kickArguments = (args: string, focus: Focus): Parsed<ActionRequest> => {
+  const trimmed = args.trimStart();
+  const space = trimmed.search(/\s/u);
+  const list = space === -1 ? trimmed : trimmed.slice(0, space);
+  const reason = space === -1 ? "" : trimmed.slice(space + 1);
+  const [first, ...rest] = list.split(",");
+
+  if (first === undefined || first === "") {
+    return invalid("Kick whom? /kick <nick>[,<nick>…] [reason]");
+  }
+
+  if (rest.includes("")) {
+    return invalid(`Give nicks separated by single commas, not "${list}".`);
+  }
+
+  return parsed({
+    _tag: "Kick",
+    channel: focus.name,
+    nicks: [first, ...rest],
+    reason: reason.trim() === "" ? null : reason,
+  });
+};
+
+/** How the Channel modes take a parameter, as the head gave them. */
+type Chanmodes = NonNullable<ChannelHeader["chanmodes"]>;
+
+/** What an action on a Channel's modes is parsed by: the Network's rules, from the head. */
+interface ModeRules {
+  readonly ranks: ChannelHeader["ranks"];
+  readonly chanmodes: Chanmodes;
+  readonly chantypes: string;
+}
+
+/**
+ * The rules of the Network in focus, from the head of the Channel in focus: `PREFIX`,
+ * `CHANMODES`, and `CHANTYPES` are the Network's, so they hold for any Channel on it.
+ * @param head - The head, if read.
+ * @returns The rules, or none until a head is read.
+ */
+const rulesOf = (head: ChannelHeader | undefined): ModeRules | undefined =>
+  head?.chanmodes === null ||
+  head?.chanmodes === undefined ||
+  head.chantypes === null ||
+  head.chantypes === undefined
+    ? undefined
+    : { chanmodes: head.chanmodes, chantypes: head.chantypes, ranks: head.ranks };
+
+const rulesUnknown = (focus: Focus) =>
+  `The modes ${focus.network} has are not known yet: open a Channel on it, wait for its head to be read, and try again.`;
+
+/**
+ * Whether a Channel's mode takes a parameter when set or unset, by `PREFIX` and
+ * `CHANMODES`, or none when neither names it.
+ * @param rules - The rules.
+ * @param mode - The mode's letter.
+ * @param set - Whether it is set.
+ * @returns Whether it takes one.
+ */
+const takesParameter = (rules: ModeRules, mode: string, set: boolean): boolean | undefined => {
+  const { always, flags, list, whenSet } = rules.chanmodes;
+
+  if (
+    rules.ranks.some((one) => one.mode === mode) ||
+    list.includes(mode) ||
+    always.includes(mode)
+  ) {
+    return true;
+  }
+
+  if (whenSet.includes(mode)) {
+    return set;
+  }
+
+  return flags.includes(mode) ? false : undefined;
+};
+
+/** One mode change as typed, before its parameter is given. */
+interface Change {
+  readonly set: boolean;
+  readonly mode: string;
+}
+
+/**
+ * Reads a mode string, such as `+ov-l`: each letter after a sign is one change.
+ * @param text - The mode string.
+ * @returns The changes, or why it is not one.
+ */
+const changesOf = (text: string): Parsed<readonly Change[]> => {
+  const changes: Change[] = [];
+  let set: boolean | undefined;
+
+  for (const letter of text) {
+    if (letter === "+" || letter === "-") {
+      set = letter === "+";
+    } else if (set === undefined || !/^[!-~]$/u.test(letter) || letter === ":" || letter === ",") {
+      return invalid(`"${text}" is not a mode change: give signs and letters, such as +o or -v+l.`);
+    } else {
+      changes.push({ mode: letter, set });
+    }
+  }
+
+  return changes.length === 0
+    ? invalid(`"${text}" changes no mode: give signs and letters, such as +o or -v+l.`)
+    : parsed(changes);
+};
+
+const modeUsage = "/mode [target] <changes> [parameters…]";
+
+/**
+ * Whether `/mode`'s first word names its target. One starting with `+` or `-` is the
+ * changes to the open Channel, unless it can name a Channel, by `CHANTYPES`, and a second
+ * word reads as changes, as `/mode +local +m` does with `+` a Channel's prefix.
+ * @param first - The first word.
+ * @param second - The second word, or `""`.
+ * @param chantypes - What starts a Channel's name.
+ * @returns Whether it names the target.
+ */
+const namesTarget = (first: string, second: string, chantypes: string): boolean =>
+  (!first.startsWith("+") && !first.startsWith("-")) ||
+  (chantypes.includes(first[0] ?? " ") && changesOf(second)._tag === "Parsed");
+
+/**
+ * A Channel's mode changes, each given the next parameter when it takes one, as the
+ * Network's `PREFIX` and `CHANMODES` say, the Client checking them the same way.
+ * @param rules - The Network's rules.
+ * @param focus - The Timeline in focus, to name its Network.
+ * @param target - The Channel.
+ * @param changes - The changes, in order.
+ * @param params - The parameters, in order.
+ * @returns The action.
+ */
+const onChannelOf = (
+  rules: ModeRules,
+  focus: Focus,
+  target: string,
+  changes: readonly Change[],
+  params: readonly string[]
+): Parsed<ActionRequest> => {
+  const given = [...params];
+
+  const requests: {
+    readonly set: boolean;
+    readonly mode: string;
+    readonly param: string | null;
+  }[] = [];
+
+  for (const change of changes) {
+    const takes = takesParameter(rules, change.mode, change.set);
+    const sign = change.set ? "+" : "-";
+
+    if (takes === undefined) {
+      return invalid(
+        `${focus.network} has no Channel mode ${change.mode}, as its CHANMODES and PREFIX say.`
+      );
+    }
+
+    const param = takes ? given.shift() : undefined;
+
+    if (takes && param === undefined) {
+      return invalid(`${sign}${change.mode} needs a parameter. ${modeUsage}`);
+    }
+
+    requests.push({ ...change, param: param ?? null });
+  }
+
+  if (given.length > 0) {
+    return invalid(`Nothing takes ${given.join(" ")}. ${modeUsage}`);
+  }
+
+  const [one, ...others] = requests;
+
+  return one === undefined
+    ? invalid(`Change which modes? ${modeUsage}`)
+    : parsed({ _tag: "Mode", changes: [one, ...others], target });
+};
+
+/**
+ * What `/mode` was given: a target, the open Channel when left out, a mode string, and its
+ * parameters in order. On a Channel each change takes a parameter exactly as the Network's
+ * `PREFIX` and `CHANMODES` say, as the Client checks it. On Self, none does.
+ * @param args - The text after `/mode`.
+ * @param focus - The Timeline in focus.
+ * @param head - The head of the Channel in focus, if read.
+ * @returns The action.
+ */
+const modeArguments = (
+  args: string,
+  focus: Focus,
+  head: ChannelHeader | undefined
+): Parsed<ActionRequest> => {
+  const [first = "", second = "", ...more] = wordsOf(args);
+  const rest = second === "" ? [] : [second, ...more];
+  const rules = rulesOf(head);
+  // RFC 2811's prefixes stand in until a head says the Network's.
+  const chantypes = rules?.chantypes ?? "#&+!";
+
+  const named = namesTarget(first, second, chantypes);
+
+  if (first === "") {
+    return invalid(`Change which modes? ${modeUsage}`);
+  }
+
+  if (!named && focus.kind !== "Channel") {
+    return invalid(`Name whose modes to change, or open the Channel. ${modeUsage}`);
+  }
+
+  const target = named ? first : focus.name;
+  const [modes = "", ...params] = named ? rest : [first, ...rest];
+  const changes = changesOf(modes);
+
+  if (changes._tag === "Invalid") {
+    return changes;
+  }
+
+  const onChannel = chantypes.includes(target[0] ?? " ");
+
+  if (!onChannel) {
+    const [one, ...others] = changes.value.map((change) => ({ ...change, param: null }));
+
+    if (params.length > 0) {
+      return invalid(`Self's modes take no parameters here. Use /quote MODE ${target} … for that.`);
+    }
+
+    return one === undefined
+      ? invalid(`Change which modes? ${modeUsage}`)
+      : parsed({ _tag: "Mode", changes: [one, ...others], target });
+  }
+
+  return rules === undefined
+    ? invalid(rulesUnknown(focus))
+    : onChannelOf(rules, focus, target, changes.value, params);
+};
+
+/** What RFC 2811 names a rank's mode, to say which a Network lacks. */
+const rankNames: ReadonlyMap<string, string> = new Map([
+  ["o", "operator"],
+  ["v", "voice"],
+]);
+
+/**
+ * A membership mode given to or taken from nicks in the Channel in focus, as `/op`,
+ * `/deop`, `/voice`, and `/devoice` do, once the Network's `PREFIX` has it.
+ * @param mode - The rank's mode, `o` or `v`.
+ * @param set - Whether it is given.
+ * @param usage - How the command is typed.
+ * @returns The command's parser.
+ */
+const ranked = (mode: string, set: boolean, usage: string) => {
+  const change = (nick: string) => ({ mode, param: nick, set });
+
+  return (args: string, focus: Focus, head: ChannelHeader | undefined): Parsed<ActionRequest> => {
+    const [first, ...rest] = wordsOf(args.replaceAll(",", " "));
+
+    if (first === undefined) {
+      return invalid(`Whom? ${usage}`);
+    }
+
+    if (head === undefined) {
+      return invalid(rulesUnknown(focus));
+    }
+
+    if (!head.ranks.some((one) => one.mode === mode)) {
+      const ranks = head.ranks.map((one) => `${one.symbol} (${one.mode})`).join(", ");
+
+      return invalid(
+        `${focus.network} has no ${rankNames.get(mode) ?? mode} rank (${mode}): its PREFIX gives ${ranks === "" ? "none" : ranks}.`
+      );
+    }
+
+    return parsed({
+      _tag: "Mode",
+      changes: [change(first), ...rest.map(change)],
+      target: focus.name,
+    });
+  };
+};
+
+/**
+ * A ban mask: a mask as given, or a bare nick as `nick!*@*`.
+ * @param given - A nick or a mask.
+ * @returns The mask.
+ */
+const maskOf = (given: string): string =>
+  given.includes("!") || given.includes("@") ? given : `${given}!*@*`;
+
+/**
+ * Bans or unbans masks in the Channel in focus, once the Network's `CHANMODES` lists `b`.
+ * @param set - Whether to ban.
+ * @param usage - How the command is typed.
+ * @returns The command's parser.
+ */
+const banned = (set: boolean, usage: string) => {
+  const change = (given: string) => ({ mode: "b", param: maskOf(given), set });
+
+  return (args: string, focus: Focus, head: ChannelHeader | undefined): Parsed<ActionRequest> => {
+    const [first, ...rest] = wordsOf(args);
+
+    if (first === undefined) {
+      return invalid(`Whom? ${usage}`);
+    }
+
+    const rules = rulesOf(head);
+
+    if (rules === undefined) {
+      return invalid(rulesUnknown(focus));
+    }
+
+    if (!rules.chanmodes.list.includes("b")) {
+      return invalid(`${focus.network} has no ban list (b) in its CHANMODES.`);
+    }
+
+    return parsed({
+      _tag: "Mode",
+      changes: [change(first), ...rest.map(change)],
+      target: focus.name,
+    });
+  };
+};
+
+/**
+ * What `/invite` was given: a nick, and a Channel, the one in focus when left out.
+ * @param args - The text after `/invite`.
+ * @param focus - The Timeline in focus.
+ * @returns The action.
+ */
+const inviteArguments = (args: string, focus: Focus): Parsed<ActionRequest> => {
+  const [nick, channel, ...rest] = wordsOf(args);
+
+  if (nick === undefined) {
+    return invalid("Invite whom? /invite <nick> [channel]");
+  }
+
+  if (rest.length > 0) {
+    return invalid("Invite one nick to one Channel: /invite <nick> [channel]");
+  }
+
+  if (channel === undefined && focus.kind !== "Channel") {
+    return invalid("To which Channel? /invite <nick> <channel>, or open the Channel.");
+  }
+
+  const to = oneName(channel ?? focus.name, "Channel");
+  const who = oneName(nick, "nick");
+
+  if (who._tag === "Invalid") {
+    return who;
+  }
+
+  return to._tag === "Invalid"
+    ? to
+    : parsed({ _tag: "Invite", channel: to.value, nick: who.value });
+};
+
+/** Sending a Line written as text, which never carries a Credential. */
+const quoteCommand = acting({
+  aliases: ["raw"],
+  arguments: "Required",
+  description:
+    "Send a Line written as text to the open Timeline's Network, for what no other command covers.",
+  id: "act.quote",
+  name: "quote",
+  parse: (args) => {
+    if (args.trim() === "") {
+      return invalid("Send what? /quote <raw line>");
+    }
+
+    return credentialCommands.has(rawCommandOf(args))
+      ? invalid(rawCredentialRefused)
+      : parsed({ _tag: "Raw", line: args });
+  },
+  usage: "/quote <raw line>",
+  when: anywhereActing,
+});
+
+const actingOn: readonly Condition[] = [{ _tag: "Channel" }, { _tag: "Session" }];
+
+/** The commands that act on a Network: each gives an `Act`, as `act` takes it. */
+const actions: readonly Command[] = [
+  acting({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Set the open Channel's topic, clear it with -delete, or, with nothing, edit the topic as it is.",
+    id: "act.topic",
+    name: "topic",
+    parse: topicArguments,
+    usage: topicUsage,
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Kick nicks from the open Channel, with a reason or none.",
+    id: "act.kick",
+    name: "kick",
+    parse: kickArguments,
+    usage: "/kick <nick>[,<nick>…] [reason]",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Change modes of the open Channel, another target, or Self.",
+    id: "act.mode",
+    name: "mode",
+    parse: modeArguments,
+    usage: modeUsage,
+    when: anywhereActing,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Make nicks operators of the open Channel.",
+    id: "act.op",
+    name: "op",
+    parse: ranked("o", true, "/op <nick>…"),
+    usage: "/op <nick>…",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Take operator from nicks in the open Channel.",
+    id: "act.deop",
+    name: "deop",
+    parse: ranked("o", false, "/deop <nick>…"),
+    usage: "/deop <nick>…",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Give nicks voice in the open Channel.",
+    id: "act.voice",
+    name: "voice",
+    parse: ranked("v", true, "/voice <nick>…"),
+    usage: "/voice <nick>…",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Take voice from nicks in the open Channel.",
+    id: "act.devoice",
+    name: "devoice",
+    parse: ranked("v", false, "/devoice <nick>…"),
+    usage: "/devoice <nick>…",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Ban masks from the open Channel; a bare nick bans nick!*@*.",
+    id: "act.ban",
+    name: "ban",
+    parse: banned(true, "/ban <nick|mask>…"),
+    usage: "/ban <nick|mask>…",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Lift bans from the open Channel; a bare nick lifts nick!*@*.",
+    id: "act.unban",
+    name: "unban",
+    parse: banned(false, "/unban <mask>…"),
+    usage: "/unban <mask>…",
+    when: actingOn,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description: "Invite a nick to the open Channel, or to another.",
+    id: "act.invite",
+    name: "invite",
+    parse: inviteArguments,
+    usage: "/invite <nick> [channel]",
+    when: anywhereActing,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Be away on the open Timeline's Network, with a message, kept across reconnects; with none, be back.",
+    id: "act.away",
+    name: "away",
+    parse: (args) => parsed({ _tag: "Away", message: args.trim() === "" ? null : args }),
+    usage: "/away [message]",
+    when: focused,
+  }),
+  acting({
+    aliases: [],
+    arguments: "None",
+    description: "Be back on the open Timeline's Network, no longer away.",
+    id: "act.back",
+    name: "back",
+    parse: (args) =>
+      args.trim() === ""
+        ? parsed({ _tag: "Away", message: null })
+        : invalid("/back takes nothing after it. To be away with a message, use /away <message>."),
+    usage: "/back",
+    when: focused,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Change Self's nick on the open Timeline's Network for this Session; set network.<id>.nicks to keep it.",
+    id: "act.nick",
+    name: "nick",
+    parse: (args) => {
+      const nick = oneName(args.trim(), "nick");
+
+      return nick._tag === "Invalid" ? nick : parsed({ _tag: "Nick", nick: nick.value });
+    },
+    usage: "/nick <nick>",
+    when: anywhereActing,
+  }),
+  quoteCommand,
+];
+
 const say = (focus: Focus, kind: SayKind, text: string): Say => ({
   _tag: "Say",
   kind,
@@ -651,10 +1342,6 @@ const say = (focus: Focus, kind: SayKind, text: string): Say => ({
   target: focus.name,
   text,
 });
-
-const target: readonly Condition[] = [{ _tag: "Target" }, { _tag: "Session" }];
-const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Session" }];
-const focused: readonly Condition[] = [{ _tag: "Focused" }];
 
 /** Saying text to the open Timeline, which plain text does too. */
 const sayCommand = command({
@@ -753,6 +1440,7 @@ export const commands: readonly Command[] = [
     usage: "/part [#channel[,#channel…]]",
     when: focused,
   }),
+  ...actions,
   setCommand,
   unfocused({
     aliases: [],
@@ -998,23 +1686,44 @@ export const commandNamed = (name: string): Command | undefined =>
   byName.get(name.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase()));
 
 /**
- * Whether a line types a Credential's value after `/set`, which the composer refuses and
- * clears at once, so it is not kept as the draft.
+ * Why a line that types a Credential is refused, in words, or nothing when it types none:
+ * a value after `/set <credential option>`, or a `/quote` or `/raw` of `PASS`,
+ * `AUTHENTICATE`, or `OPER`, in any ASCII case. The composer refuses and clears such a
+ * line at once, keeping it nowhere.
+ * @param line - The line.
+ * @returns The words, or none.
+ */
+export const credentialRefusal = (line: string): string | undefined => {
+  const [command = "", name = "", ...rest] = line.split(" ");
+  const found = commandNamed(command.slice(1));
+
+  if (!command.startsWith("/") || command.startsWith("//")) {
+    return undefined;
+  }
+
+  if (found === quoteCommand) {
+    return credentialCommands.has(rawCommandOf(line.slice(command.length)))
+      ? rawCredentialRefused
+      : undefined;
+  }
+
+  const option = resolve(name);
+
+  return found === setCommand &&
+    rest.join(" ") !== "" &&
+    option._tag === "Parsed" &&
+    option.value.field.kind._tag === "Credential"
+    ? credentialRefused(name)
+    : undefined;
+};
+
+/**
+ * Whether a line types a Credential, as `credentialRefusal` says, which the composer
+ * refuses and clears at once, so it is not kept as the draft.
  * @param line - The line.
  * @returns Whether it does.
  */
-export const typesCredential = (line: string): boolean => {
-  const [command = "", name = "", ...rest] = line.split(" ");
-  const found = resolve(name);
-
-  return (
-    commandNamed(command.slice(1)) === setCommand &&
-    command.startsWith("/") &&
-    rest.join(" ") !== "" &&
-    found._tag === "Parsed" &&
-    found.value.field.kind._tag === "Credential"
-  );
-};
+export const typesCredential = (line: string): boolean => credentialRefusal(line) !== undefined;
 
 /**
  * Why a command cannot run in a context, in words, or nothing when it can.
@@ -1046,6 +1755,14 @@ export const unmet = (when: readonly Condition[], context: CommandContext): stri
 
         if (focus.detached) {
           return "This Direct Message no longer follows its partner, who changed nick. Use /msg <nick> <text>.";
+        }
+
+        break;
+      }
+
+      case "Channel": {
+        if (focus?.kind !== "Channel") {
+          return "Open a Channel first.";
         }
 
         break;

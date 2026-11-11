@@ -16,7 +16,7 @@ import type { KeyboardEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
 import { focusedId, paneNumber } from "../panes/atoms.ts";
-import { openTimeline } from "../timelines/atoms.ts";
+import { openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import {
   commandContext,
@@ -44,6 +44,30 @@ const offerLabel = (offer: Offer) => {
   }
 
   return offer.intent === undefined ? "Send the rest" : "Send again";
+};
+
+/**
+ * Whether Self is away on a Network, as the Ircd confirmed it, said quietly beside the
+ * prompt, with the message as its title.
+ * @param props - The Network, if any.
+ * @returns The mark, or nothing while Self is not known to be away.
+ */
+const AwayMark = ({ network }: { readonly network: string | undefined }) => {
+  const networks = useAtomValue(sidebarNetworks);
+  const away = networks.find((one) => one.network === network)?.away;
+
+  if (away?._tag !== "Away") {
+    return null;
+  }
+
+  return (
+    <span
+      className={styles.away}
+      title={away.message === "" ? "You are away" : `You are away: ${away.message}`}
+    >
+      (away)
+    </span>
+  );
 };
 
 /**
@@ -265,6 +289,7 @@ const Composer = ({
         <label className={styles.prompt} htmlFor={id}>
           {number === undefined ? null : <span className={styles.pane}>{number}</span>}
           <bdi>{name}</bdi>
+          <AwayMark network={context.focus?.network} />
           <span aria-hidden="true">&gt;</span>
         </label>
         <textarea

@@ -9,6 +9,7 @@ import { contextOf } from "@iirc/frontend/composer";
 import { resolve } from "@iirc/frontend/keymap";
 import type { AtomRegistry } from "effect/reactivity";
 
+import { channelState } from "../channel/state.ts";
 import { perform } from "../composer/atoms.ts";
 import { timelinesState } from "../timelines/atoms.ts";
 import { keymapState, paletteState, platform } from "./state.ts";
@@ -62,7 +63,7 @@ export const pressed = (registry: AtomRegistry.AtomRegistry, event: KeyboardEven
   const intents = resolve(
     registry.get(keymapState),
     {
-      command: contextOf(registry.get(timelinesState)),
+      command: contextOf(registry.get(timelinesState), registry.get(channelState)),
       editing: editing(event.target),
       palette: registry.get(paletteState).open,
       platform,

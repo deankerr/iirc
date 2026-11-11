@@ -1,4 +1,3 @@
-import { limitOf, modesOf, targetLimitsOf } from "@iirc/protocol/isupport";
 /**
  * The Owner's actions beyond saying: a topic, a kick, modes, an invite, a nick, away, and
  * a Line written as text. Each is built only through `@iirc/protocol`'s builders, and
@@ -12,6 +11,8 @@ import { limitOf, modesOf, targetLimitsOf } from "@iirc/protocol/isupport";
  *
  * @packageDocumentation
  */
+import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
+import { limitOf, modesOf, targetLimitsOf } from "@iirc/protocol/isupport";
 import {
   away as awayLine,
   encode,
@@ -31,11 +32,11 @@ import type { IntentId } from "./ids.ts";
 import type { Action, Input, ModeRequest } from "./input.ts";
 import { isSelf, namingNow, rulesNow } from "./meaning.ts";
 import { parseChannel, parseNick } from "./names.ts";
-import type { ModeChange } from "./news.ts";
+import type { ActionWhere, Attempted, ModeChange, RefusedAction } from "./news.ts";
 import type { Run } from "./run.ts";
-import { folder, ignore, linkOf, send, updateOpen } from "./run.ts";
+import { folder, ignore, linkOf, refuseIntent, send, updateOpen } from "./run.ts";
 import type { Acting, Awaiting } from "./state.ts";
-import { maxActing } from "./state.ts";
+import { maxActing, maxActions } from "./state.ts";
 import { openOf, sessionOf } from "./views.ts";
 
 const utf8 = new TextEncoder();
@@ -282,10 +283,10 @@ const modeLines = (run: Run, { target, changes }: Of<"Mode">) => {
 /**
  * Commands a Line written as text may not carry. Cap negotiation is the Client's own,
  * and an `ACK` it did not ask for is ignored, so the Ircd and the Client would disagree.
- * `PASS` and `AUTHENTICATE` are where Credentials go, and a Line written as text is
+ * `PASS`, `AUTHENTICATE`, and `OPER` carry a Credential, and a Line written as text is
  * journaled as it was written.
  */
-const unquotable: ReadonlySet<string> = new Set(["AUTHENTICATE", "CAP", "PASS"]);
+const unquotable: ReadonlySet<string> = new Set(["AUTHENTICATE", "CAP", "OPER", "PASS"]);
 
 // Only client-only tags may go on a Line written as text. `label` and `batch` are the
 // Client's own, which it ties answers by.
@@ -384,8 +385,113 @@ const plan = (
 export const online = (run: Run): boolean =>
   sessionOf(run.state) !== undefined && linkOf(run)?.closing === undefined && !run.state.stopping;
 
-const refuse = (run: Run, intent: IntentId, reason: "Offline" | "Unsendable"): void => {
-  run.news.push({ _tag: "Refused", intent, reason: { _tag: reason } });
+/**
+ * What an action tried, in short: its kind and the names the Owner gave it, never its
+ * text, a mode's parameter, or the rest of a raw Line.
+ * @param action - The action.
+ * @returns What it tried.
+ */
+const attemptedOf = (action: Action): Attempted => {
+  switch (action._tag) {
+    case "Topic": {
+      return { _tag: "Topic", channel: action.channel };
+    }
+
+    case "Kick": {
+      return { _tag: "Kick", channel: action.channel, nicks: action.nicks };
+    }
+
+    case "Mode": {
+      const [modes = ""] = modeArgs(action.changes.map((change) => ({ ...change, param: null })));
+
+      return { _tag: "Mode", modes, target: action.target };
+    }
+
+    case "Invite": {
+      return { _tag: "Invite", channel: action.channel, nick: action.nick };
+    }
+
+    case "Nick": {
+      return { _tag: "Nick", nick: action.nick };
+    }
+
+    case "Away": {
+      return { _tag: "Away", away: action.message !== null && action.message !== "" };
+    }
+
+    case "Raw": {
+      const line = quote(action.line);
+
+      return { _tag: "Raw", command: isRejected(line) ? null : line.command };
+    }
+
+    default: {
+      return action satisfies never;
+    }
+  }
+};
+
+/**
+ * Where an action belongs: the Channel it is about, when the Client holds that Channel,
+ * wanted or joined, keyed as `where` keys it, and otherwise the Network's own Timeline. A
+ * nick, away, a raw Line, and Self's own modes belong to the Network.
+ * @param run - The step.
+ * @param action - The action.
+ * @returns Where it belongs.
+ */
+const actionWhere = (run: Run, action: Action): ActionWhere => {
+  let name: string | undefined;
+
+  if (action._tag === "Topic" || action._tag === "Kick" || action._tag === "Invite") {
+    name = action.channel;
+  } else if (action._tag === "Mode") {
+    name = action.target;
+  }
+
+  if (
+    name === undefined ||
+    !isChannel(run, name) ||
+    !run.state.channels.has(folder(run.state)(name))
+  ) {
+    return { _tag: "Network" };
+  }
+
+  return { _tag: "Channel", key: casefold(run.state.declared ?? defaultCasemapping, name), name };
+};
+
+const actionOf = (run: Run, action: Action): RefusedAction => ({
+  attempted: attemptedOf(action),
+  where: actionWhere(run, action),
+});
+
+// Remembers an action that is about to leave, so a refusal that comes later says where it
+// belongs. The oldest is forgotten past the bound.
+const remember = (run: Run, intent: IntentId, action: Action): void => {
+  const actions = new Map(run.state.actions).set(intent, actionOf(run, action));
+
+  for (const oldest of actions.keys()) {
+    if (actions.size <= maxActions) {
+      break;
+    }
+
+    actions.delete(oldest);
+  }
+
+  run.state = { ...run.state, actions };
+};
+
+const refuse = (
+  run: Run,
+  intent: IntentId,
+  action: Action,
+  reason: "Offline" | "Unsendable"
+): void => {
+  run.news.push({
+    _tag: "Refused",
+    action: actionOf(run, action),
+    intent,
+    reason: { _tag: reason },
+  });
 };
 
 // Keeps a Line of an action, so an error numeric that names what it names can be tied
@@ -435,18 +541,23 @@ export const resendAway = (run: Run): void => {
 // Away describes the Owner, so it is kept whether or not a Session is up, and each
 // Session begins by sending it again. In a Session, it is sent now, if the Network can
 // carry it.
-const away = (run: Run, intent: IntentId, message: string | null): void => {
+const away = (run: Run, intent: IntentId, action: Of<"Away">): void => {
+  const { message } = action;
   const wanted = message === null || message === "" ? undefined : message;
   const line = awayLine(wanted);
   const now = online(run);
 
   if (isRejected(line) || (now && (!within(run, "AWAYLEN", wanted ?? "") || !fits(run, line)))) {
-    refuse(run, intent, "Unsendable");
+    refuse(run, intent, action, "Unsendable");
 
     return;
   }
 
   run.state = { ...run.state, away: wanted };
+
+  if (now) {
+    remember(run, intent, action);
+  }
 
   if (now && send(run, line, "AWAY", { _tag: "Acted", intent }) !== undefined) {
     asked(run, wanted ?? null);
@@ -464,13 +575,13 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
   const { action, intent } = input;
 
   if (action._tag === "Away") {
-    away(run, intent, action.message);
+    away(run, intent, action);
 
     return;
   }
 
   if (!online(run)) {
-    refuse(run, intent, "Offline");
+    refuse(run, intent, action, "Offline");
 
     return;
   }
@@ -478,10 +589,12 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
   const planned = plan(run, action);
 
   if (planned === undefined) {
-    refuse(run, intent, "Unsendable");
+    refuse(run, intent, action, "Unsendable");
 
     return;
   }
+
+  remember(run, intent, action);
 
   for (const { line, names, targets, away: message } of planned) {
     const sent = send(run, line, line.command, { _tag: "Acted", intent });
@@ -609,11 +722,7 @@ export const tieRejection = (run: Run, line: Line): void => {
   }
 
   if (!tied.reported) {
-    run.news.push({
-      _tag: "Refused",
-      intent: tied.intent,
-      reason: { _tag: "Rejected", reply: command },
-    });
+    refuseIntent(run, tied.intent, { _tag: "Rejected", reply: command });
   }
 
   const target = tied.targets.findIndex(

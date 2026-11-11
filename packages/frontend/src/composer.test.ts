@@ -33,6 +33,7 @@ const context: CommandContext = {
     network,
     timeline: channel,
   },
+  head: undefined,
   open: channel,
   panes: 1,
   session: true,
@@ -95,6 +96,36 @@ const say = (text: string): Intent => ({
 });
 
 describe("submitting", () => {
+  it("refuses a raw PASS, AUTHENTICATE, or OPER by either name, in any case, and keeps none of it", () => {
+    const before = sendAll(["hello"]);
+
+    const refusedOne = (text: string) => {
+      const { intents, state } = submit(reduceComposers(before, edited(text)), channel, context);
+      const draft = draftOf(state, channel);
+
+      return [intents.length, draft.text, draft.history, draft.notice?.message];
+    };
+
+    const words =
+      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+
+    expect([
+      refusedOne("/quote PASS one"),
+      refusedOne("/RAW pass two"),
+      refusedOne("/Quote @+x=y :me Authenticate three"),
+      refusedOne("hi\n/raw AuThEnTiCaTe four"),
+      refusedOne("/quote Oper admin five"),
+      refusedOne("/raw OPER admin six"),
+    ]).toStrictEqual([
+      [0, "", ["hello"], words],
+      [0, "", ["hello"], words],
+      [0, "", ["hello"], words],
+      [0, "", ["hello"], words],
+      [0, "", ["hello"], words],
+      [0, "", ["hello"], words],
+    ]);
+  });
+
   it("sends a line, clears the draft, and keeps it in the history", () => {
     const { intents, state } = submit(fold([edited("hello")]), channel, context);
 
@@ -309,7 +340,12 @@ describe("what became of a Say", () => {
     const one = fold([
       {
         _tag: "Failed",
-        failure: { _tag: "Refused", reason: { _tag: "Offline" }, target: "#iirc" },
+        failure: {
+          _tag: "Refused",
+          action: undefined,
+          reason: { _tag: "Offline" },
+          target: "#iirc",
+        },
         intent,
         intents: [say("one")],
         timeline: channel,
@@ -319,7 +355,12 @@ describe("what became of a Say", () => {
     const more = fold([
       {
         _tag: "Failed",
-        failure: { _tag: "Refused", reason: { _tag: "Unsendable" }, target: "\u202Epeer" },
+        failure: {
+          _tag: "Refused",
+          action: undefined,
+          reason: { _tag: "Unsendable" },
+          target: "\u202Epeer",
+        },
         intent,
         intents: [say("one"), say("two")],
         timeline: channel,

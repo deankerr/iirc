@@ -10,7 +10,7 @@ export type { Change, DeliveryChange } from "./change.ts";
 
 export { levels, unreadCap } from "./content.ts";
 
-export type { Content, Delivery, Level, OursItem } from "./content.ts";
+export type { ActionRefusal, Content, Delivery, Level, OursItem } from "./content.ts";
 
 export { emptyDirectory, projectionVersion, step } from "./fold.ts";
 

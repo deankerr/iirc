@@ -73,7 +73,7 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | News | Example |
 | --- | --- |
 | `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl`, `?? ignored Unsendable PONG`, `?? ignored UnmatchedEcho`, `?? ignored NoTimeline` |
-| `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404`, `?? refused i3 Unsent` |
+| `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404`, `?? refused i3 Unsent`, and for an action, what it tried and where it belongs: `?? refused i4 Rejected 482 topic=#iirc in=channel:#iirc`, with `kick=#iirc:a,b`, `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `raw=WHOIS`, or `raw` for a Line that did not parse |
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |

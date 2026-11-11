@@ -177,7 +177,7 @@ describe("saying something", () => {
 
     expect(step.outputs).toStrictEqual([]);
     expect(step.news).toStrictEqual([
-      { _tag: "Refused", intent: "i1", reason: { _tag: "Unsendable" } },
+      { _tag: "Refused", action: undefined, intent: "i1", reason: { _tag: "Unsendable" } },
     ]);
   });
 

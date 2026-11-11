@@ -46,7 +46,16 @@ import {
 import type { Registered } from "./registry.ts";
 import { registry } from "./registry.ts";
 import type { Run } from "./run.ts";
-import { folder, hangup, ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
+import {
+  folder,
+  hangup,
+  ignore,
+  linkOf,
+  readingOf,
+  refuseIntent,
+  send,
+  updateOpen,
+} from "./run.ts";
 import { runEffects, runStage } from "./seam.ts";
 import type { Link, State } from "./state.ts";
 import { initialState } from "./state.ts";
@@ -431,7 +440,7 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   const session = sessionOf(run.state);
 
   if (session === undefined || !online(run)) {
-    run.news.push({ _tag: "Refused", intent: input.intent, reason: { _tag: "Offline" } });
+    refuseIntent(run, input.intent, { _tag: "Offline" });
 
     return;
   }
@@ -445,7 +454,7 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
 
   // A Line that would be cut short when the Ircd relays it is not sent.
   if (isRejected(line) || isRejected(bytes) || bytes.length + relayed(run) > 512) {
-    run.news.push({ _tag: "Refused", intent: input.intent, reason: { _tag: "Unsendable" } });
+    refuseIntent(run, input.intent, { _tag: "Unsendable" });
 
     return;
   }
@@ -600,7 +609,7 @@ const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
 
     if (intent !== undefined && !confirmed.has(intent) && !refused.has(intent)) {
       refused.add(intent);
-      run.news.push({ _tag: "Refused", intent, reason: { _tag: "Unsent" } });
+      refuseIntent(run, intent, { _tag: "Unsent" });
     }
   }
 };

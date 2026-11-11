@@ -38,6 +38,11 @@
   white-space: nowrap;
 }
 
+/* Self is away there, as the Ircd confirmed it: said quietly, beside the prompt. */
+.away {
+  color: var(--color-muted);
+}
+
 .prompt bdi {
   overflow: hidden;
   text-overflow: ellipsis;

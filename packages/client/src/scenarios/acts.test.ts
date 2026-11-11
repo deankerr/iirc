@@ -32,17 +32,17 @@ describe("an action while offline", () => {
         "!! configure",
         "-> dial irc.test:6697 tls",
         "!! topic #iirc :hi",
-        "?? refused i1 Offline",
+        "?? refused i1 Offline topic=#iirc in=network",
         "!! kick #iirc peer",
-        "?? refused i2 Offline",
+        "?? refused i2 Offline kick=#iirc:peer in=network",
         "!! mode #iirc +m",
-        "?? refused i3 Offline",
+        "?? refused i3 Offline mode=#iirc:+m in=network",
         "!! invite peer #iirc",
-        "?? refused i4 Offline",
+        "?? refused i4 Offline invite=peer:#iirc in=network",
         "!! nick other",
-        "?? refused i5 Offline",
+        "?? refused i5 Offline nick=other in=network",
         "!! quote WHOIS peer",
-        "?? refused i6 Offline"
+        "?? refused i6 Offline raw=WHOIS in=network"
       ),
     ]);
 
@@ -70,11 +70,11 @@ describe("a topic", () => {
       ...inChannel(["TOPICLEN=5"]),
       lines(
         "!! topic #iirc :abcdef",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable topic=#iirc in=channel:#iirc",
         "!! topic #iirc :abcde",
         ">> TOPIC #iirc abcde",
         "!! topic #iirc :ééé",
-        "?? refused i3 Unsendable"
+        "?? refused i3 Unsendable topic=#iirc in=channel:#iirc"
       ),
     ]);
 
@@ -86,9 +86,9 @@ describe("a topic", () => {
       ...inChannel(),
       lines(
         "!! topic peer :hi",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable topic=peer in=network",
         "!! topic #a,#b :hi",
-        "?? refused i2 Unsendable"
+        "?? refused i2 Unsendable topic=#a,#b in=network"
       ),
     ]);
 
@@ -106,7 +106,15 @@ describe("a topic", () => {
 
     expect(step.outputs).toStrictEqual([]);
     expect(step.news).toStrictEqual([
-      { _tag: "Refused", intent: "i9", reason: { _tag: "Unsendable" } },
+      {
+        _tag: "Refused",
+        action: {
+          attempted: { _tag: "Topic", channel: "#iirc" },
+          where: { _tag: "Channel", key: "#iirc", name: "#iirc" },
+        },
+        intent: "i9",
+        reason: { _tag: "Unsendable" },
+      },
     ]);
   });
 
@@ -117,7 +125,7 @@ describe("a topic", () => {
         "!! topic #iirc :mine now",
         ">> TOPIC #iirc :mine now",
         "<< :irc.test 482 iirc #iirc :You're not channel operator",
-        "?? refused i1 Rejected 482"
+        "?? refused i1 Rejected 482 topic=#iirc in=channel:#iirc"
       ),
     ]);
 
@@ -155,7 +163,12 @@ describe("a topic", () => {
   it("is refused as Unsent when its Line never left", () => {
     played([
       ...inChannel(),
-      lines("!! topic #iirc :hi", ">> TOPIC #iirc hi", "== unsent 1", "?? refused i1 Unsent"),
+      lines(
+        "!! topic #iirc :hi",
+        ">> TOPIC #iirc hi",
+        "== unsent 1",
+        "?? refused i1 Unsent topic=#iirc in=channel:#iirc"
+      ),
     ]);
 
     expect.assertions(0);
@@ -173,7 +186,7 @@ describe("a topic", () => {
           "!! topic #iirc :one",
           ">> @label=l1 TOPIC #iirc one",
           "<< @label=l1 :irc.test 482 iirc #iirc :You're not channel operator",
-          "?? refused i1 Rejected 482",
+          "?? refused i1 Rejected 482 topic=#iirc in=channel:#iirc",
           "!! topic #iirc :two",
           ">> @label=l2 TOPIC #iirc two",
           "<< @label=l2 :iirc!~iirc@iirc.test TOPIC #iirc two",
@@ -215,13 +228,13 @@ describe("a kick", () => {
       ...inChannel(["KICKLEN=3"]),
       lines(
         "!! kick #iirc peer :goodbye",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable kick=#iirc:peer in=channel:#iirc",
         "!! kick #iirc peer :bye",
         ">> KICK #iirc peer bye",
         "!! kick #iirc @peer",
-        "?? refused i3 Unsendable",
+        '?? refused i3 Unsendable kick=#iirc:"@peer" in=channel:#iirc',
         "!! kick peer peer",
-        "?? refused i4 Unsendable"
+        "?? refused i4 Unsendable kick=peer:peer in=network"
       ),
     ]);
 
@@ -236,7 +249,7 @@ describe("a kick", () => {
         ">> KICK #iirc a",
         ">> KICK #iirc b",
         "<< :irc.test 441 iirc b #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441",
+        "?? refused i1 Rejected 441 kick=#iirc:a,b in=channel:#iirc",
         "<< :irc.test 482 iirc #iirc :You're not channel operator"
       ),
     ]);
@@ -253,7 +266,7 @@ describe("a kick", () => {
         "<< :iirc!~iirc@iirc.test KICK #iirc a",
         "...",
         "<< :irc.test 441 iirc b #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 kick=#iirc:a,b in=channel:#iirc"
       ),
     ]);
 
@@ -271,7 +284,7 @@ describe("a kick", () => {
           ">> @label=l1 KICK #iirc a",
           ">> @label=l2 KICK #iirc b",
           "<< @label=l1 :irc.test 482 iirc #iirc :You're not channel operator",
-          "?? refused i1 Rejected 482",
+          "?? refused i1 Rejected 482 kick=#iirc:a,b in=channel:#iirc",
           "<< @label=l2 :irc.test 482 iirc #iirc :You're not channel operator"
         ),
       ],
@@ -320,17 +333,17 @@ describe("modes", () => {
         ">> MODE #iirc +j-j+k-k 3:5 secret secret",
         ">> MODE #iirc +b *!*@bad.test",
         "!! mode #iirc +l",
-        "?? refused i2 Unsendable",
+        "?? refused i2 Unsendable mode=#iirc:+l in=channel:#iirc",
         "!! mode #iirc -j=3",
-        "?? refused i3 Unsendable",
+        "?? refused i3 Unsendable mode=#iirc:-j in=channel:#iirc",
         "!! mode #iirc +o",
-        "?? refused i4 Unsendable",
+        "?? refused i4 Unsendable mode=#iirc:+o in=channel:#iirc",
         "!! mode #iirc +m=x",
-        "?? refused i5 Unsendable",
+        "?? refused i5 Unsendable mode=#iirc:+m in=channel:#iirc",
         "!! mode #iirc +x",
-        "?? refused i6 Unsendable",
+        "?? refused i6 Unsendable mode=#iirc:+x in=channel:#iirc",
         "!! mode #iirc +k=:x",
-        "?? refused i7 Unsendable"
+        "?? refused i7 Unsendable mode=#iirc:+k in=channel:#iirc"
       ),
     ]);
 
@@ -346,7 +359,7 @@ describe("modes", () => {
         "<< :iirc!~iirc@iirc.test MODE #iirc +o a",
         "...",
         "<< :irc.test 441 iirc b #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 mode=#iirc:+oo in=channel:#iirc"
       ),
     ]);
 
@@ -360,7 +373,7 @@ describe("modes", () => {
         "!! mode IIRC +i -w",
         ">> MODE IIRC +i-w",
         "!! mode peer +i",
-        "?? refused i2 Unsendable"
+        "?? refused i2 Unsendable mode=peer:+i in=network"
       ),
     ]);
 
@@ -374,11 +387,11 @@ describe("modes", () => {
         "!! mode #iirc +o=peer",
         ">> MODE #iirc +o peer",
         "<< :irc.test 441 iirc peer #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441",
+        "?? refused i1 Rejected 441 mode=#iirc:+o in=channel:#iirc",
         "!! mode #iirc +m",
         ">> MODE #iirc +m",
         "<< :irc.test 482 iirc #iirc :You're not channel operator",
-        "?? refused i2 Rejected 482"
+        "?? refused i2 Rejected 482 mode=#iirc:+m in=channel:#iirc"
       ),
     ]);
 
@@ -394,7 +407,7 @@ describe("an invite", () => {
         "!! invite peer #iirc",
         ">> INVITE peer #iirc",
         "<< :irc.test 443 iirc peer #iirc :is already on channel",
-        "?? refused i1 Rejected 443"
+        "?? refused i1 Rejected 443 invite=peer:#iirc in=channel:#iirc"
       ),
     ]);
 
@@ -416,7 +429,10 @@ describe("an invite", () => {
   });
 
   it("is refused for a nick that is not one", () => {
-    played([...inChannel(), lines("!! invite #x #iirc", "?? refused i1 Unsendable")]);
+    played([
+      ...inChannel(),
+      lines("!! invite #x #iirc", "?? refused i1 Unsendable invite=#x:#iirc in=channel:#iirc"),
+    ]);
 
     expect.assertions(0);
   });
@@ -439,7 +455,7 @@ describe("a nick", () => {
         "!! nick taken",
         ">> NICK taken",
         "<< :irc.test 433 iirc taken :Nickname is already in use",
-        "?? refused i1 Rejected 433"
+        "?? refused i1 Rejected 433 nick=taken in=network"
       ),
     ]);
 
@@ -451,11 +467,11 @@ describe("a nick", () => {
       ...inChannel(),
       lines(
         "!! nick abcdefghij",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable nick=abcdefghij in=network",
         "!! nick #chan",
-        "?? refused i2 Unsendable",
+        "?? refused i2 Unsendable nick=#chan in=network",
         "!! nick a*",
-        "?? refused i3 Unsendable"
+        "?? refused i3 Unsendable nick=a* in=network"
       ),
     ]);
     played([...inChannel(["NICKLEN=30"]), lines("!! nick abcdefghij", ">> NICK abcdefghij")]);
@@ -517,12 +533,30 @@ describe("away", () => {
     expect(known(played(back))).toMatchObject({ _tag: "Known", value: null });
   });
 
+  it("reports what the Ircd confirmed as Self's AwayChanged, in the Network's own Timeline", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! away :gone fishing",
+        ">> AWAY :gone fishing",
+        "<< :irc.test 306 iirc :You have been marked as being away",
+        "?? activity AwayChanged iirc in=network :gone fishing",
+        "!! away",
+        ">> AWAY",
+        "<< :irc.test 305 iirc :You are no longer marked as away",
+        "?? activity AwayChanged iirc back in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
   it("is refused when AWAYLEN cannot carry it, and the Owner stays as they were", () => {
     played([
       ...inChannel(["AWAYLEN=4"]),
       lines(
         "!! away :lunch",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable away in=network",
         "!! away :tea",
         ">> AWAY tea",
         "== closed Reset",
@@ -633,7 +667,7 @@ describe("tying the Ircd's answers to actions", () => {
           "!! topic #iirc :mine",
           ">> TOPIC #iirc mine",
           "<< :irc.test 482 iirc #iirc :You're not channel operator",
-          "?? refused i2 Rejected 482"
+          "?? refused i2 Rejected 482 topic=#iirc in=channel:#iirc"
         ),
       ]);
 
@@ -650,7 +684,7 @@ describe("tying the Ircd's answers to actions", () => {
         "<< :iirc!~iirc@iirc.test KICK #iirc a",
         "...",
         "<< :irc.test 441 iirc a #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 kick=#iirc:a,a in=channel:#iirc"
       ),
     ]);
 
@@ -663,7 +697,7 @@ describe("tying the Ircd's answers to actions", () => {
         "<< :iirc!~iirc@iirc.test KICK #iirc {x}",
         "...",
         "<< :irc.test 441 iirc [X] #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 kick=#iirc:[x],{X} in=channel:#iirc"
       ),
     ]);
 
@@ -675,7 +709,7 @@ describe("tying the Ircd's answers to actions", () => {
         "<< :iirc!~iirc@iirc.test MODE #iirc +o a",
         "...",
         "<< :irc.test 441 iirc a #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 mode=#iirc:+oo in=channel:#iirc"
       ),
     ]);
 
@@ -697,7 +731,7 @@ describe("tying the Ircd's answers to actions", () => {
         "<< :irc.test 005 iirc CASEMAPPING=rfc1459 :are supported by this server",
         "...",
         "<< :irc.test 441 iirc {A} #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 kick=#iirc:[a] in=channel:#iirc"
       ),
     ]);
 
@@ -714,7 +748,7 @@ describe("tying the Ircd's answers to actions", () => {
         "!! topic #iirc :mine",
         ">> TOPIC #iirc mine",
         "<< :irc.test 482 iirc #iirc :You're not channel operator",
-        "?? refused i2 Rejected 482"
+        "?? refused i2 Rejected 482 topic=#iirc in=channel:#iirc"
       ),
     ]);
 
@@ -727,7 +761,7 @@ describe("tying the Ircd's answers to actions", () => {
         "<< :irc.test 005 iirc CASEMAPPING=ascii :are supported by this server",
         "...",
         "<< :irc.test 441 iirc [a] #iirc :They aren't on that channel",
-        "?? refused i1 Rejected 441"
+        "?? refused i1 Rejected 441 kick=#iirc:[A] in=channel:#iirc"
       ),
     ]);
 
@@ -757,21 +791,27 @@ describe("a Line written as text", () => {
       ...inChannel(),
       lines(
         "!! quote :me PRIVMSG #iirc :hi",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable raw in=network",
         "!! quote CAP REQ :echo-message",
-        "?? refused i2 Unsendable",
+        "?? refused i2 Unsendable raw=CAP in=network",
         "!! quote PASS hunter2",
-        "?? refused i3 Unsendable",
+        "?? refused i3 Unsendable raw=PASS in=network",
         "!! quote AUTHENTICATE PLAIN",
-        "?? refused i4 Unsendable",
+        "?? refused i4 Unsendable raw=AUTHENTICATE in=network",
+        "!! quote OPER admin hunter2",
+        "?? refused i5 Unsendable raw=OPER in=network",
+        "!! quote oper admin hunter2",
+        "?? refused i6 Unsendable raw=OPER in=network",
+        "!! quote Pass hunter2",
+        "?? refused i7 Unsendable raw=PASS in=network",
         "!! quote @label=x PING a",
-        "?? refused i5 Unsendable",
+        "?? refused i8 Unsendable raw=PING in=network",
         "!! quote @time=x PING a",
-        "?? refused i6 Unsendable",
+        "?? refused i9 Unsendable raw in=network",
         `!! quote PRIVMSG #iirc :${"x".repeat(500)}`,
-        "?? refused i7 Unsendable",
+        "?? refused i10 Unsendable raw in=network",
         "!! quote 12 x",
-        "?? refused i8 Unsendable"
+        "?? refused i11 Unsendable raw in=network"
       ),
     ]);
 
@@ -783,13 +823,13 @@ describe("a Line written as text", () => {
       ...inChannel(),
       lines(
         "!! quote PART #iirc",
-        "?? refused i1 Unsendable",
+        "?? refused i1 Unsendable raw=PART in=network",
         "!! quote PART #other,#IIRC :bye",
-        "?? refused i2 Unsendable",
+        "?? refused i2 Unsendable raw=PART in=network",
         "!! quote JOIN #iirc",
-        "?? refused i3 Unsendable",
+        "?? refused i3 Unsendable raw=JOIN in=network",
         "!! quote JOIN 0",
-        "?? refused i4 Unsendable",
+        "?? refused i4 Unsendable raw=JOIN in=network",
         "!! quote PART #other",
         ">> PART #other",
         "!! quote JOIN #other",
@@ -807,11 +847,11 @@ describe("a Line written as text", () => {
         "!! quote FROB x",
         ">> FROB x",
         "<< :irc.test 421 iirc FROB :Unknown command",
-        "?? refused i1 Rejected 421",
+        "?? refused i1 Rejected 421 raw=FROB in=network",
         "!! quote KNOCK",
         ">> KNOCK",
         "<< :irc.test 461 iirc KNOCK :Not enough parameters",
-        "?? refused i2 Rejected 461"
+        "?? refused i2 Rejected 461 raw=KNOCK in=network"
       ),
     ]);
 
@@ -853,5 +893,116 @@ describe("a Line written as text", () => {
     expect(client.known(run.state).self?.away).toMatchObject({
       value: { message: "be right back" },
     });
+  });
+});
+
+describe("where a refused action belongs", () => {
+  it("is the Channel it was about, when the Client holds it, keyed as where keys it", () => {
+    played([
+      registered(base, { isupport: [...floorIsupport, "CASEMAPPING=ascii"] }),
+      joined(base, "#IIRC", ["peer"]),
+      lines(
+        "!! kick #IIRC peer",
+        ">> KICK #IIRC peer",
+        "<< :irc.test 482 iirc #IIRC :You're not channel operator",
+        "?? refused i1 Rejected 482 kick=#IIRC:peer in=channel:#iirc:#IIRC",
+        "!! invite peer #IIRC",
+        ">> INVITE peer #IIRC",
+        "<< :irc.test 443 iirc peer #IIRC :is already on channel",
+        "?? refused i2 Rejected 443 invite=peer:#IIRC in=channel:#iirc:#IIRC"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is the Network's own for a Channel the Client does not hold, a nick, Self's modes, and a raw Line", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! topic #elsewhere :hi",
+        ">> TOPIC #elsewhere hi",
+        "<< :irc.test 442 iirc #elsewhere :You're not on that channel",
+        "?? refused i1 Rejected 442 topic=#elsewhere in=network",
+        "!! nick taken",
+        ">> NICK taken",
+        "<< :irc.test 433 iirc taken :Nickname is already in use",
+        "?? refused i2 Rejected 433 nick=taken in=network",
+        "!! mode iirc +i",
+        ">> MODE iirc +i",
+        "== unsent 1",
+        "?? refused i3 Unsent mode=iirc:+i in=network",
+        "!! quote FROB x",
+        ">> FROB x",
+        "<< :irc.test 421 iirc FROB :Unknown command",
+        "?? refused i4 Rejected 421 raw=FROB in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("names the modes it changed by sign and letter, never a parameter such as a key", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! mode #iirc +k=hunter2 +o=peer -v=peer",
+        ">> MODE #iirc +ko-v hunter2 peer peer",
+        "<< :irc.test 482 iirc #iirc :You're not channel operator",
+        "?? refused i1 Rejected 482 mode=#iirc:+ko-v in=channel:#iirc"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is said of an Unsent after its Connection ended, and of away", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! away :lunch",
+        ">> AWAY lunch",
+        "!! topic #iirc :hi",
+        ">> TOPIC #iirc hi",
+        "== closed Reset",
+        "...",
+        "== connection 1",
+        "== unsent 2",
+        "?? refused i1 Unsent away in=network",
+        "?? refused i2 Unsent topic=#iirc in=channel:#iirc"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is forgotten for the oldest of more than 64 actions, and never said of a Say", () => {
+    const pings = Array.from({ length: 64 }, (_each, index) => [
+      `!! quote PING ${index}`,
+      `>> PING ${index}`,
+    ]).flat();
+
+    const run = played([
+      ...inChannel(),
+      lines(
+        "!! topic #iirc :first",
+        ">> TOPIC #iirc first",
+        ...pings,
+        "!! say #iirc :hi",
+        ">> PRIVMSG #iirc hi",
+        "...",
+        "== unsent 66"
+      ),
+    ]);
+
+    const refused = refusals(run);
+
+    expect(refused).toHaveLength(66);
+    expect(refused[0]).toMatchObject({ action: undefined, intent: "i1" });
+    expect(refused[1]).toMatchObject({
+      action: { attempted: { _tag: "Raw", command: "PING" }, where: { _tag: "Network" } },
+      intent: "i2",
+    });
+    expect(refused.at(-1)).toMatchObject({ action: undefined, intent: "i66" });
   });
 });

@@ -38,11 +38,11 @@ import {
   welcomed,
 } from "./registration.ts";
 import type { Run } from "./run.ts";
-import { ignore, linkOf, readingOf, send, updateOpen } from "./run.ts";
+import { ignore, linkOf, readingOf, refuseIntent, send, updateOpen } from "./run.ts";
 import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
-import { onNow, openOf } from "./views.ts";
+import { onNow, openOf, sessionOf } from "./views.ts";
 import { routeActivity, routeMessage } from "./where.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
@@ -94,6 +94,32 @@ const selfAway = (run: Run, away: { readonly message: string } | null): void => 
         }
       : open
   );
+};
+
+/**
+ * The Ircd confirmed Self away or back, with `306` or `305`, which says no source: it is
+ * known, and reported as Self's `AwayChanged`, which belongs to the Network's own
+ * Timeline, so a Frontend learns of it from the projection.
+ * @param run - The step.
+ * @param away - Away with the message last sent, or `null` for back.
+ */
+const confirmedAway = (run: Run, away: { readonly message: string } | null): void => {
+  const nick = sessionOf(run.state)?.nick;
+
+  if (nick === undefined) {
+    return;
+  }
+
+  run.news.push(
+    routeActivity(run, {
+      _tag: "Activity",
+      activity: { _tag: "AwayChanged", away, nick },
+      at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+      id: { _tag: "Unknown" },
+      live: true,
+    })
+  );
+  selfAway(run, away);
 };
 
 // A `MODE` from Self answers each change it made, by its sign and letter, and a
@@ -542,13 +568,13 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
   [
     "305",
     (run) => {
-      selfAway(run, null);
+      confirmedAway(run, null);
     },
   ],
   [
     "306",
     (run) => {
-      selfAway(run, { message: openOf(run.state)?.asked ?? "" });
+      confirmedAway(run, { message: openOf(run.state)?.asked ?? "" });
     },
   ],
   // `341 <client> <nick> <channel>`: an invite went out.
@@ -629,11 +655,7 @@ export const interpret = (
   const reply = arrival.answers === undefined ? undefined : rejection(line);
 
   if (arrival.answers !== undefined && reply !== undefined) {
-    run.news.push({
-      _tag: "Refused",
-      intent: arrival.answers,
-      reason: { _tag: "Rejected", reply },
-    });
+    refuseIntent(run, arrival.answers, { _tag: "Rejected", reply });
   }
 
   if (hasMeaning(command)) {

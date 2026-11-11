@@ -119,6 +119,21 @@ export interface Rank {
 }
 
 /**
+ * How each Channel mode takes a parameter, from `CHANMODES`, or RFC 1459 and 2812's
+ * until an Ircd says. Membership modes, from `PREFIX`, are apart, and always take one.
+ */
+export interface ChannelModeKinds {
+  /** Type A: a list, such as bans, with a parameter whenever it is changed. */
+  readonly list: string;
+  /** Type B: a parameter whenever it is changed, such as a key. */
+  readonly always: string;
+  /** Type C: a parameter only when it is set, such as a limit. */
+  readonly whenSet: string;
+  /** Type D: never a parameter. */
+  readonly flags: string;
+}
+
+/**
  * One Channel as known, for a View that shows it alone, built from that Channel without
  * the rest of the Network.
  */
@@ -129,6 +144,10 @@ export interface ChannelView {
   readonly casemapping: Casemapping;
   /** The membership prefixes, from `PREFIX`, most privileged first. */
   readonly ranks: readonly Rank[];
+  /** How the Network's other Channel modes take a parameter, from `CHANMODES`. */
+  readonly chanmodes: ChannelModeKinds;
+  /** What starts a Channel's name on the Network, from `CHANTYPES`. */
+  readonly chantypes: string;
   readonly channel: ChannelKnowledge;
   /** Each member as a User, Self included, keyed as the members are. */
   readonly users: ReadonlyMap<string, UserKnowledge>;

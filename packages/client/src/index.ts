@@ -39,7 +39,9 @@ export {
 } from "./input.ts";
 
 export type {
+  ActionWhere,
   Activity,
+  Attempted,
   EndReason,
   IgnoredReason,
   Marked,
@@ -47,6 +49,7 @@ export type {
   Named,
   News,
   Ours,
+  RefusedAction,
   RefusedReason,
   Where,
 } from "./news.ts";

@@ -440,7 +440,9 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
         },
       ])
     : {
-        news: [{ _tag: "Refused", intent: input.intent, reason: { _tag: "Offline" } }],
+        news: [
+          { _tag: "Refused", action: undefined, intent: input.intent, reason: { _tag: "Offline" } },
+        ],
         outputs: [],
         state,
       };

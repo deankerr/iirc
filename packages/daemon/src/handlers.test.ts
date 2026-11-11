@@ -1818,6 +1818,8 @@ describe("a Channel's head and members", () => {
     );
 
     expect(result).toMatchObject({
+      chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
+      chantypes: "#&",
       members: 3,
       modes: { _tag: "Known", value: [{ mode: "n" }, { mode: "t" }] },
       name: "#iirc",

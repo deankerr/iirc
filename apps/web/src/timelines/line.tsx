@@ -124,6 +124,13 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
   );
 };
 
+/** Each description's tone, as its class: a refused action of ours is dim, like Activity. */
+const toneClass = {
+  Activity: styles.activity,
+  Refused: styles.refused,
+  Session: styles.session,
+} as const;
+
 /**
  * One row.
  * @param props - The row.
@@ -147,7 +154,7 @@ export const Line = ({ row }: { readonly row: Row }) => {
 
   if (line._tag === "Description") {
     return (
-      <div className={line.tone === "Session" ? styles.session : styles.activity}>
+      <div className={toneClass[line.tone]}>
         {time}
         <span className={styles.text}>
           {line.parts.map((part, index) => (

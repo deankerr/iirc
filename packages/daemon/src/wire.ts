@@ -9,6 +9,7 @@
 import { NetworkId as WireNetworkId, Sequence as WireSequence } from "@iirc/api";
 import type {
   Activity as WireActivity,
+  Attempted as WireAttempted,
   Delivery as WireDelivery,
   Gap as WireGap,
   ItemContent as WireItemContent,
@@ -40,12 +41,14 @@ import type {
 } from "@iirc/api";
 import type {
   Activity,
+  Attempted,
   EndReason,
   IgnoredReason,
   Inspection,
   Marked,
   ModeChange,
   News,
+  RefusedAction,
   RefusedReason,
   TimerTable,
   Where,
@@ -325,6 +328,84 @@ const refusedReason = (source: RefusedReason): WireRefusedReason => {
   }
 };
 
+const attempted = (source: Attempted): WireAttempted => {
+  switch (source._tag) {
+    case "Away": {
+      const wire: Case<Attempted, WireAttempted, "Away"> = { _tag: "Away", away: source.away };
+
+      return wire;
+    }
+
+    case "Invite": {
+      const wire: Case<Attempted, WireAttempted, "Invite"> = {
+        _tag: "Invite",
+        channel: source.channel,
+        nick: source.nick,
+      };
+
+      return wire;
+    }
+
+    case "Kick": {
+      const wire: Case<Attempted, WireAttempted, "Kick"> = {
+        _tag: "Kick",
+        channel: source.channel,
+        nicks: [...source.nicks],
+      };
+
+      return wire;
+    }
+
+    case "Mode": {
+      const wire: Case<Attempted, WireAttempted, "Mode"> = {
+        _tag: "Mode",
+        modes: source.modes,
+        target: source.target,
+      };
+
+      return wire;
+    }
+
+    case "Nick": {
+      const wire: Case<Attempted, WireAttempted, "Nick"> = { _tag: "Nick", nick: source.nick };
+
+      return wire;
+    }
+
+    case "Raw": {
+      const wire: Case<Attempted, WireAttempted, "Raw"> = {
+        _tag: "Raw",
+        command: source.command,
+      };
+
+      return wire;
+    }
+
+    case "Topic": {
+      const wire: Case<Attempted, WireAttempted, "Topic"> = {
+        _tag: "Topic",
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+type WireRefusedAction = NonNullable<Extract<WireNews, { readonly _tag: "Refused" }>["action"]>;
+
+const refusedAction = (source: RefusedAction): WireRefusedAction => ({
+  attempted: attempted(source.attempted),
+  where:
+    source.where._tag === "Network"
+      ? { _tag: "Network" }
+      : { _tag: "Channel", key: source.where.key, name: source.where.name },
+});
+
 const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
   switch (source._tag) {
     case "Endless":
@@ -579,6 +660,7 @@ const news = (source: News): WireNews => {
     case "Refused": {
       const wire: Case<News, WireNews, "Refused"> = {
         _tag: "Refused",
+        action: source.action === undefined ? null : refusedAction(source.action),
         intent: source.intent,
         reason: refusedReason(source.reason),
       };
@@ -694,6 +776,16 @@ export const channelHeader = (
   timeline: Summary,
   view: ChannelView | undefined
 ): WireChannelHeader => ({
+  chanmodes:
+    view === undefined
+      ? null
+      : {
+          always: view.chanmodes.always,
+          flags: view.chanmodes.flags,
+          list: view.chanmodes.list,
+          whenSet: view.chanmodes.whenSet,
+        },
+  chantypes: view?.chantypes ?? null,
   members: view?.channel.members.size ?? 0,
   modes:
     view === undefined
@@ -885,6 +977,21 @@ const delivery = (source: Delivery): WireDelivery => {
 
 const itemContent = (source: Content): WireItemContent => {
   switch (source._tag) {
+    case "ActionRefused": {
+      const wire: Case<Content, WireItemContent, "ActionRefused"> = {
+        _tag: "ActionRefused",
+        at: source.at,
+        attempted: attempted(source.attempted),
+        intent: source.intent,
+        reason:
+          source.reason._tag === "Rejected"
+            ? { _tag: "Rejected", reply: source.reason.reply }
+            : { _tag: "Unsent" },
+      };
+
+      return wire;
+    }
+
     case "Activity": {
       const wire: Case<Content, WireItemContent, "Activity"> = {
         _tag: "Activity",

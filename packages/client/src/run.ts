@@ -5,14 +5,14 @@
  *
  * @packageDocumentation
  */
-import { casefold } from "@iirc/protocol/casemapping";
+import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import { isRejected } from "@iirc/protocol/line";
 import type { OutboundLine, Rejected, SecretLine } from "@iirc/protocol/line";
 
 import type { Departure, KnownBefore, Refusal, Sendable } from "./feature.ts";
-import type { Instant } from "./ids.ts";
+import type { Instant, IntentId } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
-import type { EndReason, IgnoredReason, News } from "./news.ts";
+import type { EndReason, IgnoredReason, News, RefusedReason } from "./news.ts";
 import type { Output } from "./output.ts";
 import type { Registered } from "./registry.ts";
 import type { Reading } from "./seam.ts";
@@ -49,6 +49,33 @@ export const folder =
  */
 export const ignore = (run: Run, reason: IgnoredReason): void => {
   run.news.push({ _tag: "Ignored", reason });
+};
+
+/**
+ * Reports an Owner intent not carried out. One of the actions the Client remembers says
+ * what it tried and where it belongs, so its refusal can be shown there. Its Channel's
+ * name is folded as the refusal is reported, by the casemapping the Network last declared
+ * then, so a mapping declared since the action began keys it as the projection keys that
+ * Channel's Timeline now, and it never opens a second one.
+ * @param run - The step.
+ * @param intent - The intent.
+ * @param reason - Why.
+ */
+export const refuseIntent = (run: Run, intent: IntentId, reason: RefusedReason): void => {
+  const remembered = run.state.actions.get(intent);
+
+  const action =
+    remembered?.where._tag === "Channel"
+      ? {
+          ...remembered,
+          where: {
+            ...remembered.where,
+            key: casefold(run.state.declared ?? defaultCasemapping, remembered.where.name),
+          },
+        }
+      : remembered;
+
+  run.news.push({ _tag: "Refused", action, intent, reason });
 };
 
 /**
@@ -221,11 +248,7 @@ export const send = (
     if (departure.for._tag === "Protocol") {
       ignore(run, { _tag: "Unsendable", command: line.command });
     } else {
-      run.news.push({
-        _tag: "Refused",
-        intent: departure.for.intent,
-        reason: { _tag: "Unsendable" },
-      });
+      refuseIntent(run, departure.for.intent, { _tag: "Unsendable" });
     }
 
     return undefined;

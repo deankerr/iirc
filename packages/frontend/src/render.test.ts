@@ -6,6 +6,7 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import {
+  attemptedText,
   contained,
   formatted,
   lineOf,
@@ -14,6 +15,7 @@ import {
   nickSlots,
   plainLimit,
   plainText,
+  requested,
 } from "./render.ts";
 import type { Inline, Line } from "./render.ts";
 
@@ -338,6 +340,28 @@ const read = (line: Line): string =>
         })
         .join("");
 
+/** An action refused, as the wire carries it. */
+type ActionRefusedOnWire = Extract<typeof ItemContent.Encoded, { readonly _tag: "ActionRefused" }>;
+
+const rejected482: ActionRefusedOnWire["reason"] = { _tag: "Rejected", reply: "482" };
+
+/**
+ * An action's refusal, as an item shows it.
+ * @param attempted - What it tried.
+ * @param reason - Why it was refused.
+ * @returns The item's content, on the wire.
+ */
+const refused = (
+  attempted: ActionRefusedOnWire["attempted"],
+  reason: ActionRefusedOnWire["reason"] = rejected482
+): typeof ItemContent.Encoded => ({
+  _tag: "ActionRefused",
+  at: 0,
+  attempted,
+  intent: "i1",
+  reason,
+});
+
 describe("lines", () => {
   it("shows a Message by its sender, in their colour", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
@@ -449,6 +473,55 @@ describe("lines", () => {
       ["Session", "Disconnected: the connection was reset"],
       ["Session", "Could not connect: the connection was refused"],
     ]);
+  });
+
+  it("describes a refused action calmly, by what it tried and the Ircd's code, never its text", () => {
+    const wire: readonly (typeof ItemContent.Encoded)[] = [
+      refused({ _tag: "Topic", channel: "#iirc" }),
+      refused({ _tag: "Kick", channel: "#iirc", nicks: ["a", "b"] }, { _tag: "Unsent" }),
+      refused({ _tag: "Mode", modes: "+o-v", target: "#iirc" }),
+      refused(
+        { _tag: "Invite", channel: "#iirc", nick: "peer" },
+        { _tag: "Rejected", reply: "443" }
+      ),
+      refused({ _tag: "Nick", nick: "taken" }, { _tag: "Rejected", reply: "433" }),
+      refused({ _tag: "Away", away: true }, { _tag: "Unsent" }),
+      refused({ _tag: "Raw", command: "FROB" }, { _tag: "Rejected", reply: "421" }),
+      refused({ _tag: "Raw", command: null }, { _tag: "Rejected", reply: "\u202E1" }),
+    ];
+
+    expect(
+      wire
+        .map((one) => lineOf(content(one)))
+        .map((line) => [line._tag === "Description" && line.tone, read(line)])
+    ).toStrictEqual([
+      ["Refused", "Your topic change for #iirc was refused (482)"],
+      ["Refused", "Your kick of <a>, <b> from #iirc was not sent: its connection ended first"],
+      ["Refused", "Your mode change +o-v on #iirc was refused (482)"],
+      ["Refused", "Your invite of <peer> to #iirc was refused (443)"],
+      ["Refused", "Your nick change to <taken> was refused (433)"],
+      ["Refused", "Marking you away was not sent: its connection ended first"],
+      ["Refused", "Your raw FROB was refused (421)"],
+      ["Refused", "Your raw line was refused (\u202E1\u202C)"],
+    ]);
+  });
+
+  it("says what an action asked for as the Client would summarise it", () => {
+    expect([
+      attemptedText(
+        requested({
+          _tag: "Mode",
+          changes: [
+            { mode: "o", param: "a", set: true },
+            { mode: "v", param: "b", set: true },
+            { mode: "k", param: "secret", set: false },
+          ],
+          target: "#iirc",
+        })
+      ),
+      attemptedText(requested({ _tag: "Raw", line: "@+x=y whois peer" })),
+      attemptedText(requested({ _tag: "Away", message: "" })),
+    ]).toStrictEqual(["Your mode change +ov-k on #iirc", "Your raw WHOIS", "Marking you back"]);
   });
 });
 

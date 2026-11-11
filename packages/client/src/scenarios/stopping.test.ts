@@ -205,8 +205,8 @@ describe("Unsent", () => {
     });
 
     expect(refusedLast(played)).toStrictEqual([
-      { _tag: "Refused", intent: "i1", reason: { _tag: "Unsent" } },
-      { _tag: "Refused", intent: "i2", reason: { _tag: "Unsent" } },
+      { _tag: "Refused", action: undefined, intent: "i1", reason: { _tag: "Unsent" } },
+      { _tag: "Refused", action: undefined, intent: "i2", reason: { _tag: "Unsent" } },
     ]);
   });
 

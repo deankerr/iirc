@@ -11,6 +11,7 @@ import { choose, sections } from "@iirc/frontend/palette";
 import type { Entry, Section } from "@iirc/frontend/palette";
 import { Atom } from "effect/reactivity";
 
+import { channelState } from "../channel/state.ts";
 import { perform } from "../composer/atoms.ts";
 import { optionsState } from "../options/atoms.ts";
 import { sidebarNetworks, timelinesState } from "../timelines/atoms.ts";
@@ -26,7 +27,7 @@ export const paletteSections = Atom.make((get): readonly ListedSection[] => {
   const { query, recent } = get(paletteState);
 
   const listing = {
-    context: contextOf(get(timelinesState)),
+    context: contextOf(get(timelinesState), get(channelState)),
     keymap: get(keymapState),
     options: listed(get(optionsState), ""),
     sidebar: get(sidebarNetworks),
@@ -51,7 +52,11 @@ export const queryPalette = Atom.fnSync((query: string, get) => {
  */
 export const pickEntry = Atom.fnSync((entry: Entry, get) => {
   const { registry } = get;
-  const intents = choose(entry, contextOf(registry.get(timelinesState)));
+
+  const intents = choose(
+    entry,
+    contextOf(registry.get(timelinesState), registry.get(channelState))
+  );
 
   paletteHappened(registry, { _tag: "Chosen", key: entry.key });
   registry.set(perform, intents);

@@ -470,6 +470,7 @@ describe("the sources", () => {
       {
         _tag: "StatusRead",
         network,
+        self: null,
         session: Schema.decodeSync(SessionKnowledge)({ _tag: "Registered", ircd: "x", since: 1 }),
       },
       { _tag: "Opened", timeline: iirc },

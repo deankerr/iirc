@@ -21,6 +21,7 @@ import type {
   TimelineOverflow,
   TimelineReset,
   TimelineWindow,
+  UserKnowledge,
   WindowGap,
 } from "@iirc/api";
 import { comparePositions, cursorOf, TimelineId as TimelineIdSchema } from "@iirc/timelines";
@@ -90,6 +91,17 @@ export type Connection =
       readonly reason: EndReason | undefined;
     };
 
+/**
+ * Whether Self is away on a Network, as the Ircd confirmed it, from `known`: `Unknown`
+ * before it is read or with no Session, `Here`, or `Away` with the message the Ircd
+ * confirmed. A Session begins with Self here, and an `AwayChanged` in the Network's own
+ * Timeline, where Self's belong, has `known` read again.
+ */
+export type SelfAway =
+  | { readonly _tag: "Unknown" }
+  | { readonly _tag: "Here" }
+  | { readonly _tag: "Away"; readonly message: string };
+
 /** One Network as the Frontend holds it. */
 export interface NetworkView {
   readonly network: NetworkId;
@@ -98,6 +110,10 @@ export interface NetworkView {
   readonly connection: Connection;
   /** The sequence of the last Session item that set `connection`, or `known`'s place. */
   readonly connectionAt: number;
+  /** Whether Self is away, as `known` last said, or a Session item since. */
+  readonly away: SelfAway;
+  /** The sequence of the last `AwayChanged` in the Network's own Timeline, which `known` is read again for. */
+  readonly awayAt: number;
   readonly timelines: ReadonlyMap<TimelineId, Timeline>;
   readonly list: ListLoad;
   readonly status: StatusLoad;
@@ -331,7 +347,12 @@ export type TimelinesEvent =
       readonly after: TimelineId | undefined;
       readonly page: TimelineList;
     }
-  | { readonly _tag: "StatusRead"; readonly network: NetworkId; readonly session: SessionKnowledge }
+  | {
+      readonly _tag: "StatusRead";
+      readonly network: NetworkId;
+      readonly session: SessionKnowledge;
+      readonly self: UserKnowledge | null;
+    }
   | {
       readonly _tag: "WindowRead";
       readonly read: WindowRequest;
@@ -398,6 +419,8 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
 export const initialTimelines: Timelines = timelinesWith(windowCap);
 
 const newNetwork = (network: NetworkId): NetworkView => ({
+  away: { _tag: "Unknown" },
+  awayAt: 0,
   connection: { _tag: "Unknown" },
   connectionAt: 0,
   list: unreadList,
@@ -896,7 +919,8 @@ const connectionFromItem = (item: TimelineItem): Connection | undefined => {
     }
 
     case "Message":
-    case "Activity": {
+    case "Activity":
+    case "ActionRefused": {
       return undefined;
     }
 
@@ -941,6 +965,30 @@ const changeList = (
 };
 
 /**
+ * Whether Self is away, once a Session item set the connection: here as a Session begins,
+ * and unknown with none.
+ * @param connection - The connection.
+ * @returns Whether Self is away now.
+ */
+const awayOfConnection = (connection: Connection): SelfAway => {
+  switch (connection._tag) {
+    case "Connected": {
+      return { _tag: "Here" };
+    }
+
+    case "Connecting":
+    case "Offline":
+    case "Unknown": {
+      return { _tag: "Unknown" };
+    }
+
+    default: {
+      return connection satisfies never;
+    }
+  }
+};
+
+/**
  * Brings a Network's connection up to date with the Session items of one step, when they
  * are later than what set it.
  * @param network - The Network.
@@ -948,18 +996,58 @@ const changeList = (
  * @returns The Network.
  */
 const changeConnection = (network: NetworkView, change: TimelineChange): NetworkView => {
-  let { connection, connectionAt } = network;
+  let { awayAt, connection, connectionAt } = network;
 
   for (const item of change.items) {
-    const said = item.network === network.network ? connectionFromItem(item) : undefined;
+    const ours = item.network === network.network;
+    const said = ours ? connectionFromItem(item) : undefined;
 
     if (said !== undefined && item.sequence > connectionAt) {
       connection = said;
       connectionAt = item.sequence;
     }
+
+    // Self's away changes belong to the Network's own Timeline. Which User it was, and
+    // what the Ircd confirmed, `known` says.
+    if (
+      ours &&
+      item.content._tag === "Activity" &&
+      item.content.activity._tag === "AwayChanged" &&
+      network.timelines.get(item.timeline)?.kind === "Network"
+    ) {
+      awayAt = Math.max(awayAt, item.sequence);
+    }
   }
 
-  return connectionAt === network.connectionAt ? network : { ...network, connection, connectionAt };
+  const connected =
+    connectionAt === network.connectionAt
+      ? network
+      : {
+          ...network,
+          away: awayOfConnection(connection),
+          connection,
+          connectionAt,
+        };
+
+  return awayAt === network.awayAt
+    ? connected
+    : { ...connected, awayAt, status: { ...connected.status, fresh: false } };
+};
+
+/**
+ * Whether Self is away, as `known` says: as the Ircd confirmed it while registered.
+ * @param session - The Session, as `known` says.
+ * @param self - Self, as `known` says.
+ * @returns Whether Self is away.
+ */
+const awayOfKnown = (session: SessionKnowledge, self: UserKnowledge | null): SelfAway => {
+  const fact = self?.away;
+
+  if (session._tag !== "Registered" || fact === undefined || fact._tag !== "Known") {
+    return { _tag: "Unknown" };
+  }
+
+  return fact.value === null ? { _tag: "Here" } : { _tag: "Away", message: fact.value.message };
 };
 
 /**
@@ -1508,15 +1596,22 @@ const listRead = (
 };
 
 /**
- * Takes what `known` said of a Network's Session, unless a Session item later than the
- * read's place already said more. A read started before the oldest place kept for reads
- * in flight, as one started before a reset is, is read again.
+ * Takes what `known` said of a Network's Session, and whether Self is away, unless a
+ * Session item later than the read's place already said more. A read started before the
+ * oldest place kept for reads in flight, as one started before a reset is, is read again,
+ * and so is one that began before Self's away changed again.
  * @param state - The state.
  * @param id - The Network.
  * @param session - What the Client knows of its Session.
+ * @param self - What the Client knows of Self.
  * @returns The state.
  */
-const statusRead = (state: Timelines, id: NetworkId, session: SessionKnowledge): Timelines => {
+const statusRead = (
+  state: Timelines,
+  id: NetworkId,
+  session: SessionKnowledge,
+  self: UserKnowledge | null
+): Timelines => {
   const network = state.networks.get(id);
 
   if (network === undefined) {
@@ -1542,9 +1637,11 @@ const statusRead = (state: Timelines, id: NetworkId, session: SessionKnowledge):
     ...state,
     networks: setIn(state.networks, id, {
       ...network,
+      away: newer ? network.away : awayOfKnown(session, self),
       connection: newer ? network.connection : connectionOf(session),
       connectionAt: Math.max(network.connectionAt, from),
-      status: { ...network.status, attempt: 0, fresh: true, reading: false },
+      // An away change after the read began may not be in it, so it is read again.
+      status: { ...network.status, attempt: 0, fresh: network.awayAt <= from, reading: false },
     }),
   };
 };
@@ -2275,7 +2372,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
     }
 
     case "StatusRead": {
-      return { state: statusRead(state, event.network, event.session) };
+      return { state: statusRead(state, event.network, event.session, event.self) };
     }
 
     case "WindowRead": {
@@ -2524,6 +2621,8 @@ export interface SidebarNetwork {
   readonly network: NetworkId;
   readonly running: NetworkStatus | undefined;
   readonly connection: Connection;
+  /** Whether Self is away there, as the Ircd confirmed it. */
+  readonly away: SelfAway;
   readonly timelines: readonly Timeline[];
   /** Its Timelines are not all read yet. */
   readonly reading: boolean;
@@ -2538,6 +2637,7 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
   [...state.networks.values()]
     .toSorted((left, right) => byCodeUnits(left.network, right.network))
     .map((network) => ({
+      away: network.away,
       connection: network.connection,
       network: network.network,
       reading: !network.list.fresh,

@@ -121,9 +121,26 @@ const Delivery = Schema.TaggedUnion({
   Unsent: {},
 });
 
+/** What an action of the Owner's tried, in short. */
+const Attempted = Schema.TaggedUnion({
+  Away: { away: Schema.Boolean },
+  Invite: { channel: Schema.String, nick: Schema.String },
+  Kick: { channel: Schema.String, nicks: Schema.Array(Schema.String) },
+  Mode: { modes: Schema.String, target: Schema.String },
+  Nick: { nick: Schema.String },
+  Raw: { command: Schema.NullOr(Schema.String) },
+  Topic: { channel: Schema.String },
+});
+
 /** What an item shows. */
 const Content = exactly<Content>()(
   Schema.TaggedUnion({
+    ActionRefused: {
+      at: Instant,
+      attempted: Attempted,
+      intent: IntentId,
+      reason: Schema.TaggedUnion({ Rejected: { reply: Schema.String }, Unsent: {} }),
+    },
     Activity: {
       activity: Activity,
       at: Fact(Instant),

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { mainView, openOptions } from "../options/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
-import { open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
+import { open, openTimeline, sidebarNetworks, sync, timelinesState } from "../timelines/atoms.ts";
 import { composerState, confirmSend, edit, send, takeUp } from "./atoms.ts";
 
 const hex = (value: number, digits: number) => value.toString(16).padStart(digits, "0");
@@ -420,6 +420,163 @@ describe("saying", () => {
     expect({ notice: notice()?.offer, open: openOf(registry.get(timelinesState)) }).toStrictEqual({
       notice: undefined,
       open: channel,
+    });
+  });
+});
+
+describe("acting", () => {
+  it("acts under an intent it names, as `act` takes it, and clears the draft", async () => {
+    const { daemon, notice, registry, type } = await composing();
+
+    await type("/kick peer,other go away");
+
+    expect({
+      acts: daemon.acts,
+      draft: draftOf(registry.get(composerState), channel).text,
+      notice: notice(),
+    }).toStrictEqual({
+      acts: [
+        {
+          action: { _tag: "Kick", channel: "#iirc", nicks: ["peer", "other"], reason: "go away" },
+          intent: "web-1",
+        },
+      ],
+      draft: "",
+      notice: undefined,
+    });
+  });
+
+  it("says a refusal `act` answered with in words, and sends nothing after it", async () => {
+    const { daemon, notice, type } = await composing();
+
+    daemon.sayAnswers.push("Offline");
+    await type("/kick peer\nhello");
+
+    expect({
+      acts: daemon.acts.length,
+      notice: notice()?.message,
+      says: daemon.says,
+    }).toStrictEqual({
+      acts: 1,
+      notice:
+        "Your kick of peer from #iirc was not sent: the Network had no Session when it arrived. Nothing after it was sent.",
+      says: [],
+    });
+  });
+
+  it("asks `said` when the Network stopped, and acts again under the same intent only when it was not journaled", async () => {
+    const { daemon, notice, registry, type } = await composing();
+
+    daemon.sayAnswers.push("NetworkStopped");
+    await type("/topic a new topic");
+    const offered = notice();
+
+    await run(registry, takeUp, channel);
+
+    daemon.sayAnswers.push("NetworkStoppedJournaled");
+    await type("/away gone");
+    const journaled = notice();
+
+    expect({
+      acts: daemon.acts.map((one) => one.intent),
+      journaled: [journaled?.message, journaled?.offer],
+      offered: [offered?.message, offered?.offer?._tag, offered?.offer?.intent],
+    }).toStrictEqual({
+      acts: ["web-1", "web-1", "web-2"],
+      journaled: [
+        "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too.",
+        undefined,
+      ],
+      offered: [
+        "The Network stopped before this was journaled, so it was not sent.",
+        "SendAgain",
+        "web-1",
+      ],
+    });
+  });
+
+  it("never acts again after a lost response, and only offers to check", async () => {
+    const { daemon, notice, registry, type } = await composing();
+
+    daemon.sayAnswers.push("Lost");
+    await type("/nick other");
+    const first = notice();
+
+    await run(registry, takeUp, channel);
+
+    expect({
+      acts: daemon.acts.length,
+      checked: notice()?.offer,
+      first: [first?.message, first?.offer?._tag],
+    }).toStrictEqual({
+      acts: 1,
+      checked: undefined,
+      first: [
+        "The Daemon did not answer, so whether this was sent is unknown. Nothing after it was sent.",
+        "CheckAgain",
+      ],
+    });
+  });
+
+  it("shows Self away as `known` says once the Ircd confirmed it, read again for Self's AwayChanged", async () => {
+    const { daemon, registry, send: changed } = await composing();
+    const awayOf = () => registry.get(sidebarNetworks)[0]?.away;
+
+    await until(registry, sidebarNetworks, (held) => held[0]?.away._tag === "Unknown");
+
+    const awayChanged = (sequence: number, message: string | null) => {
+      daemon.selves.set("libera", {
+        account: { _tag: "Unknown" },
+        away:
+          message === null
+            ? { _tag: "Known", at: sequence, from: "ircd", value: null }
+            : { _tag: "Known", at: sequence, from: "ircd", value: { message } },
+        mask: { _tag: "Unknown" },
+        nick: "iirc",
+        realname: { _tag: "Unknown" },
+      });
+      changed({
+        data: JSON.stringify({
+          gaps: [],
+          items: [
+            {
+              changed: sequence,
+              content: {
+                _tag: "Activity",
+                activity: {
+                  _tag: "AwayChanged",
+                  away: message === null ? null : { message },
+                  nick: "iirc",
+                },
+                at: { _tag: "Unknown" },
+                id: { _tag: "Unknown" },
+                live: true,
+              },
+              level: "Activity",
+              network: "libera",
+              position: `${hex(2 ** 53 + sequence, 14)}-${hex(sequence, 14)}-${hex(0, 8)}`,
+              sequence,
+              timeline: idOf(1),
+            },
+          ],
+          merged: [],
+          sequence,
+          timelines: [],
+        }),
+        event: "changed",
+        id: `1.${sequence}`,
+      });
+    };
+
+    awayChanged(5, "gone");
+    const away = await until(registry, sidebarNetworks, (held) => held[0]?.away._tag === "Away");
+
+    awayChanged(6, null);
+    await until(registry, sidebarNetworks, (held) => held[0]?.away._tag === "Here");
+
+    expect({ away: away[0]?.away, back: awayOf() }).toStrictEqual({
+      away: { _tag: "Away", message: "gone" },
+      back: { _tag: "Here" },
     });
   });
 });

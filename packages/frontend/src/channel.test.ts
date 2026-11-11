@@ -167,6 +167,7 @@ const world = (
     {
       _tag: "StatusRead",
       network,
+      self: null,
       session: Schema.decodeSync(SessionKnowledge)({
         _tag: "Registered",
         ircd: "ircd.test",
@@ -218,6 +219,8 @@ const header = (
   topic?: (typeof ChannelHeader.Encoded)["topic"]
 ) =>
   decodeHeader({
+    chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
+    chantypes: "#&",
     members: 3,
     modes: {
       _tag: "Known",

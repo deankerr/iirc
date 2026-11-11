@@ -64,4 +64,39 @@ describe("a played Session", () => {
     expect([...(libera?.directs.keys() ?? [])]).toStrictEqual(["peer2"]);
     expect(libera?.gap).toBeUndefined();
   });
+
+  it("places a refused action in its Channel's Timeline as re-keyed by a casemapping declared since", () => {
+    const ascii = registered(base, {
+      isupport: ["CASEMAPPING=ascii", "CHANTYPES=#", "PREFIX=(ov)@+"],
+    });
+
+    const { changes, directory } = folded([
+      ascii,
+      joined(base, "#Foo[", ["peer"]),
+      lines(
+        "<< :peer!u@h PRIVMSG #Foo[ :hello",
+        "...",
+        "!! topic #Foo[ :mine",
+        ">> TOPIC #Foo[ mine",
+        "<< :irc.test 005 iirc CASEMAPPING=rfc1459 :are supported by this server",
+        "...",
+        "<< :irc.test 482 iirc #Foo[ :You're not channel operator",
+        "?? refused i1 Rejected 482 topic=#Foo[ in=channel:#foo{:#Foo["
+      ),
+    ]);
+
+    const channels = directory.networks.get("libera")?.channels;
+
+    const refused = changes.find(
+      (change) => change._tag === "Added" && change.content._tag === "ActionRefused"
+    );
+
+    expect({
+      channels: [...(channels?.keys() ?? [])],
+      opened: changes.filter(
+        (change) => change._tag === "Described" && change.timeline.kind === "Channel"
+      ).length,
+      placed: refused?._tag === "Added" ? refused.timeline : undefined,
+    }).toStrictEqual({ channels: ["#foo{"], opened: 2, placed: channels?.get("#foo{") });
+  });
 });

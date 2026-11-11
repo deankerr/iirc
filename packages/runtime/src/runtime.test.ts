@@ -639,14 +639,31 @@ describe("`say`", () => {
           world,
           scripted([
             {
-              news: [{ _tag: "Refused", intent: offline, reason: { _tag: "Offline" } }],
+              news: [
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: offline,
+                  reason: { _tag: "Offline" },
+                },
+              ],
               when: "Say",
             },
             // A refusal of another intent, or one only an Ircd's reply gives, is not its own.
             {
               news: [
-                { _tag: "Refused", intent: offline, reason: { _tag: "Unsendable" } },
-                { _tag: "Refused", intent: later, reason: { _tag: "Rejected", reply: "404" } },
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: offline,
+                  reason: { _tag: "Unsendable" },
+                },
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: later,
+                  reason: { _tag: "Rejected", reply: "404" },
+                },
               ],
               when: "Say",
             },
@@ -682,12 +699,24 @@ describe("`act`", () => {
           world,
           scripted([
             {
-              news: [{ _tag: "Refused", intent: offline, reason: { _tag: "Unsendable" } }],
+              news: [
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: offline,
+                  reason: { _tag: "Unsendable" },
+                },
+              ],
               when: "Act",
             },
             {
               news: [
-                { _tag: "Refused", intent: later, reason: { _tag: "Rejected", reply: "482" } },
+                {
+                  _tag: "Refused",
+                  action: undefined,
+                  intent: later,
+                  reason: { _tag: "Rejected", reply: "482" },
+                },
               ],
               when: "Act",
             },
@@ -911,7 +940,10 @@ describe("closing the Runtime", () => {
 
         const script: readonly Scripted[] = [
           { when: "Configured" },
-          { news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }], when: "Say" },
+          {
+            news: [{ _tag: "Refused", action: undefined, intent, reason: { _tag: "Offline" } }],
+            when: "Say",
+          },
           { news: [told("STARTED")], when: "Started" },
         ];
 
@@ -944,7 +976,10 @@ describe("closing the Runtime", () => {
     expect(result).toStrictEqual({
       // `said` finds the Say, which the restart folded before its Started.
       found: Option.some(2),
-      news: [{ _tag: "Refused", intent, reason: { _tag: "Offline" } }, told("STARTED")],
+      news: [
+        { _tag: "Refused", action: undefined, intent, reason: { _tag: "Offline" } },
+        told("STARTED"),
+      ],
       outline: ["1 libera Configured", "2 libera Say", "3 libera Started"],
       said: Exit.fail(closedFor(libera)),
     });
