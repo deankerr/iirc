@@ -62,6 +62,8 @@ const valueOf = (read: ReturnType<typeof set>) => {
 };
 
 const inChannel: CommandContext = {
+  behind: false,
+  draft: undefined,
   focus: {
     detached: false,
     key: "#iirc",
@@ -80,6 +82,8 @@ const inChannel: CommandContext = {
 };
 
 const nowhere: CommandContext = {
+  behind: false,
+  draft: undefined,
   focus: undefined,
   head: undefined,
   open: undefined,
@@ -271,9 +275,12 @@ describe("names", () => {
 const anyText = fc.oneof(
   fc.string({ unit: "binary" }),
   fc
-    .array(fc.constantFrom('"', ",", "\\", " ", "a", "é", "日", "🐱", "/", "-tls", "\t"), {
-      maxLength: 8,
-    })
+    .array(
+      fc.constantFrom('"', ",", "\\", " ", "a", "é", "日", "🐱", "/", "-tls", " plain", "\t"),
+      {
+        maxLength: 8,
+      }
+    )
     .map((parts) => parts.join(""))
 );
 
@@ -346,7 +353,7 @@ describe("the text syntax", () => {
         fc.tuple(
           simpleHost,
           fc.option(fc.integer({ max: 65_535, min: 1 })),
-          fc.constantFrom("", " -tls", " +tls")
+          fc.constantFrom("", " plain", " PLAIN")
         ),
         { maxLength: 3, minLength: 1 }
       )
@@ -379,10 +386,12 @@ describe("the text syntax", () => {
       ircds: [
         "irc.test",
         "irc.test/7000",
-        "irc.test -tls",
-        "::1/6697 -tls",
+        "irc.test plain",
+        "::1/6697 plain",
         "irc.test/0",
         "a -tlsx",
+        "irc.test/6697 -tls",
+        "irc.test +tls",
         "",
       ].map((text) => parseText(ircds, text)),
       toggles: ["on", "OFF", "true", "false", "yes"].map((text) => parseText(toggle, text)._tag),
@@ -394,6 +403,16 @@ describe("the text syntax", () => {
         { _tag: "Parsed", value: [{ host: "::1", port: 6697, tls: false }] },
         { _tag: "Invalid", message: 'An Ircd\'s port is 1 to 65535, not "0".' },
         { _tag: "Parsed", value: [{ host: "a -tlsx", port: 6697, tls: true }] },
+        {
+          _tag: "Invalid",
+          message:
+            'Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "irc.test/6697 -tls".',
+        },
+        {
+          _tag: "Invalid",
+          message:
+            'Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "irc.test +tls".',
+        },
         { _tag: "Invalid", message: "Give at least one Ircd, as host/port." },
       ],
       toggles: ["Parsed", "Parsed", "Parsed", "Parsed", "Invalid"],
@@ -474,7 +493,7 @@ describe("editing", () => {
       empty: set(libera, plain, ["nicks"], ""),
       nicks: valueOf(set(libera, plain, ["nicks"], "a, b ,c")).nicks,
       off: valueOf(set(libera, plain, ["enabled"], "off")).enabled,
-      port: valueOf(set(libera, plain, ["ircds"], "127.0.0.1/6670 -tls")).ircds,
+      port: valueOf(set(libera, plain, ["ircds"], "127.0.0.1/6670 plain")).ircds,
       wrong: set(libera, plain, ["fallbackEncoding"], "ebcdic")._tag,
     }).toStrictEqual({
       empty: {
@@ -729,12 +748,13 @@ describe("the commands", () => {
   });
 
   it("add a Network with one Ircd and one nick, everything else as a new Network starts", () => {
-    const added = read("/network add test 127.0.0.1/6670 -tls bot");
+    const added = read("/network add test 127.0.0.1/6670 plain bot");
 
     expect({
       added,
       badId: read("/network add Test irc.test bot"),
       noNick: read("/network add test irc.test"),
+      oldFlag: read("/network add test 127.0.0.1/6670 -tls bot"),
       verb: read("/network remove test"),
     }).toStrictEqual({
       added: {
@@ -760,13 +780,18 @@ describe("the commands", () => {
       badId: {
         _tag: "Invalid",
         message:
-          'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Test". /network add <id> <host>[/port] [-tls] <nick>',
+          'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Test". /network add <id> <host>[/port] [plain] <nick>',
       },
       noNick: {
         _tag: "Invalid",
-        message: "Give an Ircd and a nick. /network add <id> <host>[/port] [-tls] <nick>",
+        message: "Give an Ircd and a nick. /network add <id> <host>[/port] [plain] <nick>",
       },
-      verb: { _tag: "Invalid", message: "Use /network add <id> <host>[/port] [-tls] <nick>." },
+      oldFlag: {
+        _tag: "Invalid",
+        message:
+          'Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "127.0.0.1/6670 -tls".',
+      },
+      verb: { _tag: "Invalid", message: "Use /network add <id> <host>[/port] [plain] <nick>." },
     });
   });
 

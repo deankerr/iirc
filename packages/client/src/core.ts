@@ -184,7 +184,13 @@ const ended = (run: Run, link: Link, reason: EndReason): void => {
 
   run.news.push(
     session === undefined
-      ? { _tag: "ConnectionFailed", at: run.at, reason }
+      ? {
+          _tag: "ConnectionFailed",
+          at: run.at,
+          ircd: link.ircd,
+          opened: phase._tag === "Open",
+          reason,
+        }
       : { _tag: "SessionEnded", at: run.at, reason }
   );
 

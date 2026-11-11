@@ -4,7 +4,8 @@
  * this device overrides says so, beside the value every device shares. React Aria's GridList gives it its
  * keyboard: arrows move, Enter edits the focused value in place as its raw text, turns a
  * toggle over, or opens the password prompt for a Credential, Escape lets an edit go, and
- * Delete or Backspace asks to unset it. An edit is a plain, uncontrolled input read once
+ * Delete or Backspace asks to unset it. Escape anywhere else in it, or its close button,
+ * shows what the Pane showed before. An edit is a plain, uncontrolled input read once
  * when Enter is pressed. A Credential's value is never edited here.
  *
  * @packageDocumentation
@@ -17,10 +18,12 @@ import { useContext, useId, useRef } from "react";
 import { GridList, GridListItem, Input, SearchField } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
+import { composerFocus } from "../composer/atoms.ts";
 import { pressed } from "../palette/press.ts";
 import { Button } from "../ui/button.tsx";
 import {
   change,
+  closeOptions,
   confirming as confirmingAtom,
   editing as editingAtom,
   filterOptions,
@@ -249,8 +252,33 @@ export const OptionsView = () => {
   const ask = useAtomSet(confirmingAtom);
   const setTo = useSetTo();
   const prompt = useAtomSet(promptCredential);
+  const close = useAtomSet(closeOptions);
+  const registry = useContext(RegistryContext);
   const list = useRef<HTMLDivElement>(null);
   const noticeId = useId();
+
+  // Closing shows what the Pane showed before, and gives the composer the focus, as closing
+  // the search does.
+  const closeNow = () => {
+    close();
+    registry.set(composerFocus, registry.get(composerFocus) + 1);
+  };
+
+  // Escape closes the view, unless something in it took it first: an edit, a question, or
+  // the filter clearing its text.
+  const onViewKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (
+      event.key !== "Escape" ||
+      event.defaultPrevented ||
+      editing !== undefined ||
+      confirming !== undefined
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    closeNow();
+  };
 
   const named = (key: Key | null | undefined) => rows.find((option) => option.name === key);
 
@@ -301,9 +329,13 @@ export const OptionsView = () => {
   const asked = named(confirming);
 
   return (
-    <section aria-label="Options" className={styles.view}>
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
+    <section aria-label="Options" className={styles.view} onKeyDown={onViewKeyDown}>
       <header className={styles.header}>
         <h2 className={styles.title}>Options</h2>
+        <Button aria-label="Close the options" onPress={closeNow}>
+          close
+        </Button>
         <SearchField
           aria-label="Filter options"
           className={styles.filter}

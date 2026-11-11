@@ -15,6 +15,7 @@ import {
   CloseReason,
   ConnectionId,
   FeatureName,
+  IrcdAddress,
   Instant,
   IntentId,
   MessageId as ClientMessageId,
@@ -526,6 +527,13 @@ export const Lookup = Schema.TaggedUnion({
 export const Profile = Schema.Struct({
   /** The account, from `330`. */
   account: Schema.NullOr(Untrusted),
+  /**
+   * Where the User actually connects from, from `338`'s parameters between the nick and its
+   * text: a `user@host` mask, an IP address, or both, each told by its shape.
+   */
+  actual: Schema.NullOr(
+    Schema.Struct({ ip: Schema.NullOr(Untrusted), mask: Schema.NullOr(Untrusted) })
+  ),
   /** The away message, from `301`. */
   away: Schema.NullOr(Untrusted),
   /** From `319`: each Channel, with the membership modes its prefixes stand for, by `PREFIX`. */
@@ -533,6 +541,8 @@ export const Profile = Schema.Struct({
   host: Schema.NullOr(Untrusted),
   /** Seconds idle, from `317`. */
   idle: Schema.NullOr(Schema.Int),
+  /** The User's modes, such as `+Zi`, from `379`, when its text holds them as one word. */
+  modes: Schema.NullOr(Untrusted),
   nick: Untrusted,
   /** From `313`. */
   operator: Schema.Boolean,
@@ -610,7 +620,11 @@ export const News = Schema.TaggedUnion({
     where: Schema.Array(Where),
   },
   Confirmed: { at: Fact(Instant), id: Fact(MessageId), intent: IntentId, text: Untrusted },
-  ConnectionFailed: { at: Instant, reason: EndReason },
+  /**
+   * A Connection ended before its Session began, with the Ircd it was dialled to, and
+   * whether it was open, the Ircd reached, before it ended.
+   */
+  ConnectionFailed: { at: Instant, ircd: IrcdAddress, opened: Schema.Boolean, reason: EndReason },
   Ignored: { reason: IgnoredReason },
   /** A Lookup is over, and this is all it found. Exactly one comes for each. */
   LookedUp: { intent: IntentId, lookup: Lookup, result: LookResult },
@@ -929,7 +943,11 @@ export const ItemContent = Schema.TaggedUnion({
     reason: Schema.TaggedUnion({ Rejected: { reply: Untrusted }, Unsent: {} }),
   },
   Activity: { activity: Activity, at: Fact(Instant), id: Fact(MessageId), live: Schema.Boolean },
-  ConnectionFailed: { at: Instant, reason: EndReason },
+  /**
+   * A Connection ended before its Session began, with the Ircd it was dialled to, and
+   * whether it was open, the Ircd reached, before it ended.
+   */
+  ConnectionFailed: { at: Instant, ircd: IrcdAddress, opened: Schema.Boolean, reason: EndReason },
   Message: {
     at: Fact(Instant),
     id: Fact(MessageId),

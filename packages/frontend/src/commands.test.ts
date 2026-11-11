@@ -18,7 +18,17 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   timeline,
 });
 
-const around = { head: undefined, open: undefined, panes: 1, shown: [], timelines: [], unread: [] };
+const around = {
+  behind: false,
+  draft: undefined,
+  head: undefined,
+  open: undefined,
+  panes: 1,
+  shown: [],
+  timelines: [],
+  unread: [],
+};
+
 const inChannel: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: true };
 const inDirect: CommandContext = { ...around, focus: focus("Direct", "peer"), session: true };
 const inNetwork: CommandContext = { ...around, focus: focus("Network", "libera"), session: true };
@@ -89,6 +99,57 @@ describe("reading a line", () => {
       { _tag: "Parsed", value: [say("#iirc", "waves", "Action")] },
       { _tag: "Parsed", value: [say("#iirc", "/etc")] },
     ]);
+  });
+
+  it("says what is typed in a Direct Message not yet begun to its nick, opening it once placed", () => {
+    const drafting: CommandContext = { ...nowhere, draft: { network, nick: "bob" }, session: true };
+    const offline: CommandContext = { ...drafting, session: false };
+
+    expect({
+      action: interpret("/me waves", drafting),
+      empty: message("/say", drafting),
+      literal: interpret("//shrug", drafting),
+      offline: message("hello", offline),
+      other: interpret("/whois bob", drafting),
+      plain: interpret("hello", drafting),
+      said: interpret("/SAY hi", drafting),
+    }).toStrictEqual({
+      action: { _tag: "Parsed", value: [say("bob", "waves", "Action", true)] },
+      empty: "Say what? Type it after /say.",
+      literal: { _tag: "Parsed", value: [say("bob", "/shrug", "Privmsg", true)] },
+      offline: "libera is not connected, so nothing can be said there now.",
+      // Any other command reads as anywhere else: with no Timeline in focus, it needs one.
+      other: { _tag: "Invalid", message: "Open a Timeline first." },
+      plain: { _tag: "Parsed", value: [say("bob", "hello", "Privmsg", true)] },
+      said: { _tag: "Parsed", value: [say("bob", "hi", "Privmsg", true)] },
+    });
+  });
+
+  it("connects and disconnects a Network by setting its `enabled`, the focused one unless named", () => {
+    const enabled = (text: "on" | "off", on = network) => ({
+      _tag: "Parsed",
+      value: [{ _tag: "Configure", edit: { _tag: "Set", path: ["enabled"], text }, network: on }],
+    });
+
+    const oftc = Schema.decodeSync(NetworkId)("oftc");
+
+    expect({
+      bad: message("/connect Not-An-Id", inChannel),
+      connect: interpret("/connect", inChannel),
+      disconnect: interpret("/disconnect", inNetwork),
+      drafting: interpret("/disconnect", { ...nowhere, draft: { network, nick: "bob" } }),
+      named: interpret("/CONNECT  oftc ", nowhere),
+      namedOff: interpret("/disconnect oftc", inChannel),
+      none: message("/connect", nowhere),
+    }).toStrictEqual({
+      bad: 'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Not-An-Id". /connect [id]',
+      connect: enabled("on"),
+      disconnect: enabled("off"),
+      drafting: enabled("off"),
+      named: enabled("on", oftc),
+      namedOff: enabled("off", oftc),
+      none: "Name a Network, or open one of its Timelines first. /connect [id]",
+    });
   });
 
   it("says `//text` as `/text`", () => {
@@ -239,6 +300,8 @@ describe("reading a line", () => {
       "lookup.whowas": "Required",
       "members.toggle": "Optional",
       "network.add": "Required",
+      "network.connect": "Optional",
+      "network.disconnect": "Optional",
       "notify.set": "Required",
       "options.set": "Optional",
       "options.unset": "Required",

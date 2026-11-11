@@ -2,9 +2,9 @@
  * The sidebar: a tree of the Networks, each with how its connection stands, and their
  * Timelines under them, each coloured by what is unread in it with small counts of what
  * calls for the Owner, and the options. Choosing a Timeline opens it in the main view, and
- * Options opens the options view there. React Aria's Tree
- * gives it its keyboard: arrows move and expand, Enter or Space opens, and typing a name
- * finds it.
+ * Options opens the options view there, each closing the sidebar's drawer on a compact
+ * screen. React Aria's Tree gives it its keyboard: arrows move and expand, Enter or Space
+ * opens, and typing a name finds it.
  *
  * @packageDocumentation
  */
@@ -19,13 +19,14 @@ import {
 } from "@iirc/frontend/activity";
 import type { Activity } from "@iirc/frontend/activity";
 import { endReason } from "@iirc/frontend/render";
-import { openOf } from "@iirc/frontend/timelines";
+import { chosenOf } from "@iirc/frontend/timelines";
 import type { Connection, SidebarNetwork } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 import { Button, Tree, TreeItem, TreeItemContent } from "react-aria-components";
 import type { Key, Selection } from "react-aria-components";
 
-import { mainView, openOptions } from "../options/atoms.ts";
+import { openOptions } from "../options/atoms.ts";
+import { drawerState } from "../page/drawer.ts";
 import { open, sidebarNetworks, timelinesState } from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
@@ -33,8 +34,12 @@ import styles from "./sidebar.module.css";
 /** The Networks the Owner collapsed in the sidebar. Every other is expanded. */
 const collapsed = Atom.make<readonly string[]>([]).pipe(Atom.keepAlive);
 
-/** The Timeline open in the focused Pane, as the sidebar marks it. */
-const selected = Atom.make((get) => openOf(get(timelinesState)));
+/**
+ * What the focused Pane shows, as the sidebar marks it: the options, or its Timeline, but
+ * not a Timeline open behind the options, the search, or a Direct Message not yet begun,
+ * so choosing that Timeline shows it.
+ */
+const selected = Atom.make((get) => chosenOf(get(timelinesState)));
 
 // A Network's row has an id no Timeline's can have, since a Timeline's is hex and `-`.
 const networkKey = (network: string) => `network:${network}`;
@@ -203,13 +208,16 @@ export const Sidebar = () => {
   const setCollapsed = useAtomSet(collapsed);
   const choose = useAtomSet(open);
   const showOptions = useAtomSet(openOptions);
-  const optionsShown = useAtomValue(mainView)._tag === "Options";
+  const setDrawer = useAtomSet(drawerState);
+  const optionsShown = chosen._tag === "Options";
 
   // A key is read back as the Timeline it names, never cast: a key that names none, such
   // as a Network's row, opens nothing.
   const timelineOf = (key: Key) =>
     networks.flatMap((network) => network.timelines).find((timeline) => timeline.id === key);
 
+  // Choosing closes the drawer on a compact screen, and so does choosing the Timeline
+  // already shown, which React Aria gives as an empty selection.
   const onSelectionChange = (selection: Selection) => {
     const [key] = selection === "all" ? [] : selection;
     const timeline = key === undefined ? undefined : timelineOf(key);
@@ -217,6 +225,8 @@ export const Sidebar = () => {
     if (timeline !== undefined) {
       choose(timeline.id);
     }
+
+    setDrawer("None");
   };
 
   const onExpandedChange = (keys: Set<Key>) => {
@@ -232,6 +242,7 @@ export const Sidebar = () => {
         className={styles.options}
         onPress={() => {
           showOptions("");
+          setDrawer("None");
         }}
       >
         Options
@@ -250,7 +261,7 @@ export const Sidebar = () => {
             .map((network) => networkKey(network.network))}
           onExpandedChange={onExpandedChange}
           onSelectionChange={onSelectionChange}
-          selectedKeys={chosen === undefined ? [] : [chosen]}
+          selectedKeys={chosen._tag === "Timeline" ? [chosen.timeline] : []}
           selectionMode="single"
         >
           {networks.map((network) => (

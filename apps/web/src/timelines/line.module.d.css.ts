@@ -5,6 +5,7 @@ declare const styles: {
   readonly gap: string;
   readonly gapText: string;
   readonly highlight: string;
+  readonly marker: string;
   readonly message: string;
   readonly new: string;
   readonly newText: string;
@@ -25,11 +26,16 @@ declare const styles: {
   readonly nick8: string;
   readonly nick9: string;
   readonly refused: string;
+  readonly repeated: string;
+  readonly rule: string;
+  readonly seconds: string;
   readonly sender: string;
   readonly session: string;
   readonly text: string;
   readonly time: string;
+  readonly timed: string;
   readonly unsent: string;
+  readonly untimed: string;
 };
 
 export default styles;

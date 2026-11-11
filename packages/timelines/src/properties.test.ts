@@ -200,8 +200,15 @@ const news: fc.Arbitrary<News> = fc.oneof(
   }),
   fc.record({ _tag: fc.constant("SessionBegan"), at, nick: fc.constant("iirc") }),
   fc.record({
-    _tag: fc.constantFrom("SessionEnded", "ConnectionFailed"),
+    _tag: fc.constant("SessionEnded"),
     at,
+    reason: fc.constantFrom({ _tag: "Silent" } as const, { _tag: "Restarted" } as const),
+  }),
+  fc.record({
+    _tag: fc.constant("ConnectionFailed"),
+    at,
+    ircd: fc.constant({ host: "irc.test", port: 6697, tls: true }),
+    opened: fc.boolean(),
     reason: fc.constantFrom({ _tag: "Silent" } as const, { _tag: "Restarted" } as const),
   }),
   fc.record({

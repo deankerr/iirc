@@ -17,6 +17,8 @@ import {
   contextOf,
   draftOf,
   initialComposers,
+  placeIn,
+  placeOfDraft,
   reduceComposers,
   started,
   submit,
@@ -29,8 +31,8 @@ import type {
   Place,
   SayFailure,
 } from "@iirc/frontend/composer";
-import { followFrom, opened, reduceTimelines } from "@iirc/frontend/timelines";
-import type { Timelines } from "@iirc/frontend/timelines";
+import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
+import type { Origin, Timelines } from "@iirc/frontend/timelines";
 import { Effect, Option, Schedule, Semaphore, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
@@ -55,7 +57,7 @@ import { markRead } from "../reading/atoms.ts";
 import { showSearch } from "../search/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
-import { latest, open, paned, timelinesState, Waits } from "../timelines/atoms.ts";
+import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
 import { cancelCompletion } from "./completion-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
@@ -80,11 +82,8 @@ export const composerFocus = Atom.make(0).pipe(Atom.keepAlive);
  * @param registry - The registry.
  * @returns Its place.
  */
-export const placeOf = (registry: AtomRegistry.AtomRegistry): Place => {
-  const shown = opened(registry.get(timelinesState));
-
-  return shown._tag === "Shown" ? shown.timeline : "Nowhere";
-};
+export const placeOf = (registry: AtomRegistry.AtomRegistry): Place =>
+  placeIn(registry.get(timelinesState));
 
 /**
  * Folds one event into the composers.
@@ -174,6 +173,8 @@ interface Placed {
   readonly intent: IntentId;
   /** The core's navigation when its Say was submitted: opening another lets it go. */
   readonly navigation: number;
+  /** The Pane it was said from, and what that showed: it opens only there, while it still does. */
+  readonly from: Origin;
 }
 
 /**
@@ -295,11 +296,13 @@ type Local = Extract<
       | "ListThemes"
       | "ImportTheme"
       | "Search"
-      | "Look";
+      | "Look"
+      | "Draft";
   }
 >;
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
+  "Draft",
   "FocusComposer",
   "ImportTheme",
   "Latest",
@@ -395,6 +398,16 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
       break;
     }
 
+    case "Draft": {
+      registry.set(showDraft, {
+        declared: intent.declared,
+        network: intent.network,
+        nick: intent.nick,
+      });
+      registry.set(composerFocus, registry.get(composerFocus) + 1);
+      break;
+    }
+
     default: {
       intent satisfies never;
     }
@@ -486,6 +499,7 @@ const changeOne = (
  * @param intents - The intents.
  * @param first - The intent id the first Say keeps, when it is sent again.
  * @param navigation - The core's navigation when they were submitted.
+ * @param from - The Pane they were submitted from, and what it showed.
  * @returns The Says said that open their Direct Message once placed.
  */
 const carryOut = (
@@ -493,7 +507,8 @@ const carryOut = (
   timeline: Place,
   intents: readonly Intent[],
   first: IntentId | undefined,
-  navigation: number
+  navigation: number,
+  from: Origin
 ) =>
   Effect.gen(function* () {
     const name = yield* IntentNames;
@@ -530,6 +545,7 @@ const carryOut = (
       if (outcome._tag === "Said") {
         if (intent._tag === "Say" && intent.opens) {
           placed.push({
+            from,
             intent: id,
             navigation,
             network: intent.network,
@@ -639,6 +655,7 @@ const openPlaced = (registry: AtomRegistry.AtomRegistry, placed: Placed) =>
           timelinesState,
           reduceTimelines(registry.get(timelinesState), {
             _tag: "Located",
+            from: placed.from,
             navigation: placed.navigation,
             timeline: item.timeline,
           })
@@ -665,13 +682,52 @@ const sendAll = (
   first: IntentId | undefined
 ) =>
   Effect.gen(function* () {
-    const { navigation } = registry.get(timelinesState);
-    const placed = yield* carryOut(registry, timeline, intents, first, navigation);
+    const state = registry.get(timelinesState);
+
+    const placed = yield* carryOut(
+      registry,
+      timeline,
+      intents,
+      first,
+      state.navigation,
+      originOf(state)
+    );
 
     for (const one of placed) {
       yield* openPlaced(registry, one);
     }
   });
+
+/**
+ * Carries what was typed under a draft, unsent, to its Timeline's composer when the draft
+ * comes to show that Timeline, as when the partner spoke first or another Frontend said
+ * something to them, so nothing typed is lost. Mounted once for the page.
+ */
+export const draftsCarried = runtime
+  .atom((get) =>
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        const { registry } = get;
+        let before = registry.get(timelinesState);
+
+        return registry.subscribe(timelinesState, (after) => {
+          const met = draftsMetBetween(before, after);
+
+          before = after;
+
+          for (const one of met) {
+            happened(registry, {
+              _tag: "Carried",
+              from: placeOfDraft(one.network, one.nick),
+              to: one.timeline,
+            });
+          }
+        });
+      }),
+      (stop) => Effect.sync(stop)
+    ).pipe(Effect.andThen(Effect.never), Effect.scoped)
+  )
+  .pipe(Atom.keepAlive);
 
 /** Edits a Timeline's draft. */
 export const edit = Atom.fnSync(

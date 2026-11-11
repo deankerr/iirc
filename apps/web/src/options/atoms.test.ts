@@ -17,7 +17,7 @@ import {
   until,
 } from "../testing/fake-daemon.ts";
 import { open, openTimeline, sync } from "../timelines/atoms.ts";
-import { hold, mainView, openOptions, optionRows, optionsState } from "./atoms.ts";
+import { hold, mainView, openOptions, optionRows, optionsState, optionsSync } from "./atoms.ts";
 
 const hex = (value: number, digits: number) => value.toString(16).padStart(digits, "0");
 const idOf = (sequence: number) => `${hex(sequence, 14)}-00000000-00000000`;
@@ -59,6 +59,7 @@ const configuring = async () => {
 
   await run(registry, check, undefined);
   registry.mount(sync);
+  registry.mount(optionsSync);
   await eventually(() => fake.daemon.followers.length === 1);
   registry.set(open, channel);
   await until(registry, openTimeline, (shown) => shown._tag === "Shown");
@@ -82,6 +83,7 @@ describe("the options", () => {
 
     daemon.credentials.set("libera.sasl", "not shown");
     await run(registry, openOptions, "*nicks");
+    await until(registry, optionsState, (state) => state.held !== undefined);
 
     expect({
       held: registry.get(optionsState).held,
@@ -90,7 +92,7 @@ describe("the options", () => {
     }).toStrictEqual({
       held: new Set(["libera.sasl"]),
       rows: [["network.libera.nicks", { _tag: "Shown", text: "iirc" }]],
-      shown: { _tag: "Options", filter: "*nicks" },
+      shown: { _tag: "Options", back: { _tag: "Timeline" }, filter: "*nicks" },
     });
   });
 
@@ -107,7 +109,7 @@ describe("the options", () => {
     expect({ closed: registry.get(mainView), first, opened }).toStrictEqual({
       closed: { _tag: "Timeline" },
       first: "network.libera.channels",
-      opened: { _tag: "Options", filter: "network.libera.*" },
+      opened: { _tag: "Options", back: { _tag: "Timeline" }, filter: "network.libera.*" },
     });
   });
 

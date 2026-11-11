@@ -10,7 +10,7 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, sequence, at, news }        // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 4
+projectionVersion: number                         // 5
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
@@ -61,7 +61,7 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `Refused` `Unsent` | `Unsent` for its intent in the Network. |
 | `Refused` `Rejected` | `Rejected` for its intent in the Network, with the Ircd's `reply`: its numeric or standard reply's code, never text. `Offline` and `Unsendable` refuse a `Say` in its own step, before any Message is reported, so they place nothing and change nothing. |
 | `Refused` with `action`, `Rejected` or `Unsent` | An action of ours refused after it left. `Described` if it opens the Channel its `action.where` names, as a `where` entry does, then one `Added` there, an `ActionRefused` item standing at the step's own time, with what the action tried, its intent, and the reason. It changes no Message's delivery. `Offline` and `Unsendable` refuse an action in its own step, which the `act` answer already said to whoever acted, so they place nothing, as for a `Say`. |
-| `SessionBegan`, `SessionEnded`, `ConnectionFailed` | `Added` to the Network's Timeline, and a `Gap` as below. |
+| `SessionBegan`, `SessionEnded`, `ConnectionFailed` | `Added` to the Network's Timeline, and a `Gap` as below. A `ConnectionFailed` item keeps the Ircd it was dialled to and whether it was open. |
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it, followed by `ReadMarker` for the one kept when the merged one was read further. |
 | `ReadMarker` | `ReadMarker` for the Timeline its `where` names, when it moves that Timeline's Read Marker forward. |
 | `LookedUp` | Nothing. A Lookup's result is the answer to whoever looked, read through the API, not something said or done on the Network. |

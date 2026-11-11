@@ -1,23 +1,27 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import { TimelineId } from "@iirc/api";
+import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline, TimelineItem } from "@iirc/api";
 import { panesOf } from "@iirc/frontend/layout";
 import type { Layout } from "@iirc/frontend/layout";
 import type { PaneView } from "@iirc/frontend/timelines";
-import { openOf } from "@iirc/frontend/timelines";
+import { mainOf, openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { membersShown, membersVisible } from "../channel/state.ts";
+import { edit } from "../composer/atoms.ts";
+import { openOptions, optionsState, optionsSync } from "../options/atoms.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
+import { drawerState, pageSeen } from "../page/drawer.ts";
 import { marking } from "../reading/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
-import { layoutKey, open, paned, sync, timelinesState } from "../timelines/atoms.ts";
+import { layoutKey, open, paned, showDraft, sync, timelinesState } from "../timelines/atoms.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -264,6 +268,7 @@ const logNamed = (name: string) =>
 const signedIn = async ({
   history = false,
   kept,
+  opening = true,
   strict = false,
   visible = true,
 }: {
@@ -271,6 +276,7 @@ const signedIn = async ({
   readonly kept?: string;
   readonly history?: boolean;
   readonly visible?: boolean;
+  readonly opening?: boolean;
 } = {}) => {
   const fake = fakeDaemon();
 
@@ -311,6 +317,7 @@ const signedIn = async ({
   await run(registry, check, undefined);
   registry.mount(sync);
   registry.mount(marking);
+  registry.mount(optionsSync);
 
   const container = document.createElement("div");
 
@@ -340,12 +347,14 @@ const signedIn = async ({
       ) && fake.daemon.followers.length === 1
   );
 
-  await act(async () => {
-    registry.set(open, iirc);
-    await Promise.resolve();
-  });
+  if (opening) {
+    await act(async () => {
+      registry.set(open, iirc);
+      await Promise.resolve();
+    });
 
-  await settled(() => logNamed("#iirc") !== null);
+    await settled(() => logNamed("#iirc") !== null);
+  }
 
   return { container, daemon: fake.daemon, layouts, registry };
 };
@@ -409,6 +418,27 @@ const drawnOf = (pane: string) => {
 
   return flex === undefined ? undefined : Math.round(Number(flex.split(" ")[0]));
 };
+
+/**
+ * The bar's button that opens the sidebar's drawer on a compact screen.
+ * @returns It, or none.
+ */
+const button = () => document.querySelector<HTMLElement>('header button[aria-label^="Networks"]');
+
+/**
+ * How many dialogs the page shows.
+ * @returns The count.
+ */
+const dialogs = () => document.querySelectorAll('[role="dialog"]').length;
+
+/**
+ * A Channel header's members toggle.
+ * @returns It, or none.
+ */
+const toggle = () =>
+  [...document.querySelectorAll<HTMLElement>("header button")].find(
+    (one) => one.textContent === "members"
+  );
 
 /**
  * The logs shown, by name.
@@ -722,5 +752,376 @@ describe("the Panes", () => {
     }
 
     expect(started).toStrictEqual(["1 true", "1 true", "1 true", "1 true"]);
+  });
+});
+
+/**
+ * The button named so.
+ * @param label - Its accessible name.
+ * @returns It.
+ */
+const buttonNamed = (label: string) => {
+  const found = [...document.querySelectorAll<HTMLElement>("button")].find(
+    (one) => one.getAttribute("aria-label") === label || one.textContent === label
+  );
+
+  if (found === undefined) {
+    throw new Error(`no button ${label}`);
+  }
+
+  return found;
+};
+
+/**
+ * The sidebar's row of a Timeline, by its name.
+ * @param name - Its name.
+ * @returns The row.
+ */
+const rowNamed = (name: string) =>
+  [...document.querySelectorAll<HTMLElement>('nav [role="row"]')].find(
+    (one) => one.dataset.key !== undefined && one.textContent.startsWith(name)
+  );
+
+/**
+ * What the focused Pane shows, by its tag.
+ * @param registry - The registry.
+ * @returns The tag.
+ */
+const mainTag = (registry: Awaited<ReturnType<typeof signedIn>>["registry"]) =>
+  mainOf(registry.get(timelinesState))._tag;
+
+describe("what stands in front of a Timeline", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(() => {
+        unmount();
+      });
+    }
+  });
+
+  it("closes the options by Escape or their close button, back to the Timeline behind them", async () => {
+    const { registry } = await signedIn();
+
+    await run(registry, openOptions, "");
+    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+
+    const grid = document.querySelector<HTMLElement>('section[aria-label="Options"] [role="grid"]');
+
+    await press(grid ?? composer(), { key: "Escape" });
+    await settled(() => logNamed("#iirc") !== null);
+    const escaped = mainTag(registry);
+
+    await run(registry, openOptions, "");
+    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+
+    await act(async () => {
+      buttonNamed("Close the options").click();
+      await Promise.resolve();
+    });
+    await settled(() => logNamed("#iirc") !== null);
+
+    expect({ closed: mainTag(registry), escaped }).toStrictEqual({
+      closed: "Timeline",
+      escaped: "Timeline",
+    });
+  });
+
+  it("marks only what the focused Pane shows, and shows the Timeline behind the options when it is chosen", async () => {
+    const { registry } = await signedIn();
+
+    await run(registry, openOptions, "");
+    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+
+    const marked = {
+      iirc: rowNamed("#iirc")?.getAttribute("aria-selected"),
+      options: buttonNamed("Options").getAttribute("aria-current"),
+    };
+
+    await act(async () => {
+      rowNamed("#iirc")?.click();
+      await Promise.resolve();
+    });
+    await settled(() => logNamed("#iirc") !== null);
+
+    expect({
+      after: {
+        iirc: rowNamed("#iirc")?.getAttribute("aria-selected"),
+        main: mainTag(registry),
+        options: buttonNamed("Options").getAttribute("aria-current"),
+      },
+      marked,
+    }).toStrictEqual({
+      after: { iirc: "true", main: "Timeline", options: "false" },
+      marked: { iirc: "false", options: "page" },
+    });
+  });
+
+  it("reads what the options show when a layout kept with them showing comes back", async () => {
+    const kept = JSON.stringify({
+      focused: "p0",
+      next: 1,
+      root: { _tag: "Pane", id: "p0", view: { open: iirc, options: "" } },
+      zoomed: false,
+    });
+
+    const { registry } = await signedIn({ kept, opening: false });
+
+    await settled(
+      () =>
+        registry.get(optionsState).networks.get(Schema.decodeSync(NetworkId)("libera"))?._tag ===
+        "Read"
+    );
+
+    expect(mainTag(registry)).toBe("Options");
+  });
+
+  it("shows a Direct Message not yet begun, with the composer under it, and Escape closes it", async () => {
+    const { registry } = await signedIn();
+
+    await act(async () => {
+      registry.set(showDraft, {
+        declared: null,
+        network: Schema.decodeSync(NetworkId)("libera"),
+        nick: "bob",
+      });
+      await Promise.resolve();
+    });
+    await settled(
+      () => document.querySelector('section[aria-label="Direct Message with bob"]') !== null
+    );
+
+    const drawn = {
+      log: document.querySelector('section[aria-label="Direct Message with bob"] p')?.textContent,
+      prompt: document.querySelector("label")?.textContent,
+    };
+
+    await press(composer(), { key: "Escape" });
+    await settled(() => logNamed("#iirc") !== null);
+
+    expect({ drawn, main: mainTag(registry) }).toStrictEqual({
+      drawn: {
+        log: "No Messages with bob yet. What you say below starts the conversation.",
+        prompt: "bob>",
+      },
+      main: "Timeline",
+    });
+  });
+
+  it("closes the options /set opened by Escape in the composer, which keeps the focus", async () => {
+    const { registry } = await signedIn();
+    const input = composer();
+
+    await act(async () => {
+      input.focus();
+      await Promise.resolve();
+    });
+    // `/set` typed into `#iirc`'s composer, which keeps the focus throughout.
+    await act(async () => {
+      registry.set(edit, { text: "/set", timeline: iirc });
+      await Promise.resolve();
+    });
+    await press(input, { key: "Enter" });
+    await settled(() => document.querySelector('section[aria-label="Options"]') !== null);
+    const shown = mainTag(registry);
+
+    await press(composer(), { key: "Escape" });
+    await settled(() => logNamed("#iirc") !== null);
+
+    expect({
+      closed: mainTag(registry),
+      focused: document.activeElement === composer(),
+      shown,
+    }).toStrictEqual({
+      closed: "Timeline",
+      focused: true,
+      shown: "Options",
+    });
+  });
+
+  it("names Panes by their drafts on a compact screen, in the switcher and the composer", async () => {
+    const { registry } = await signedIn();
+    const libera = Schema.decodeSync(NetworkId)("libera");
+
+    await act(async () => {
+      registry.set(showDraft, { declared: null, network: libera, nick: "alice" });
+      registry.set(paned, { _tag: "Split", axis: "Horizontal", timeline: undefined });
+      registry.set(showDraft, { declared: null, network: libera, nick: "bob" });
+      registry.set(pageState, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelectorAll('[aria-label="Panes"] button').length === 2);
+
+    expect({
+      composer: composer().getAttribute("aria-label"),
+      shown: document
+        .querySelector('section[aria-label^="Direct Message with"]')
+        ?.getAttribute("aria-label"),
+      switcher: [...document.querySelectorAll('[aria-label="Panes"] button')].map(
+        (one) => one.textContent
+      ),
+    }).toStrictEqual({
+      composer: "Pane 2: bob",
+      shown: "Direct Message with bob",
+      switcher: ["1 alice", "2 bob"],
+    });
+  });
+
+  it("draws the sidebar as a drawer on a compact screen, from a button marked by what is unread, closed by a choice", async () => {
+    const { registry } = await signedIn({ history: true });
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+
+    await settled(() => button() !== null);
+
+    const before = {
+      expanded: button()?.getAttribute("aria-expanded"),
+      label: button()?.getAttribute("aria-label"),
+      sidebar: document.querySelectorAll('nav[aria-label="Networks"]').length,
+    };
+
+    await act(async () => {
+      button()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="dialog"][aria-label="Networks"]') !== null);
+
+    const row = [...document.querySelectorAll<HTMLElement>('[role="dialog"] [role="row"]')].find(
+      (one) => one.getAttribute("aria-label")?.startsWith("#other") === true
+    );
+
+    const opened = {
+      expanded: button()?.getAttribute("aria-expanded"),
+      sidebar: document.querySelectorAll('[role="dialog"] nav[aria-label="Networks"]').length,
+    };
+
+    await act(async () => {
+      row?.click();
+      await Promise.resolve();
+    });
+    await settled(() => logNamed("#other") !== null);
+
+    expect({
+      after: {
+        dialog: document.querySelectorAll('[role="dialog"]').length,
+        drawer: registry.get(drawerState),
+        shown: shown(),
+      },
+      before,
+      opened,
+    }).toStrictEqual({
+      after: { dialog: 0, drawer: "None", shown: ["#other"] },
+      before: { expanded: "false", label: "Networks, Messages unread", sidebar: 0 },
+      opened: { expanded: "true", sidebar: 1 },
+    });
+  });
+
+  it("shows the members as a sheet on a compact screen, never kept, and the column again when wide", async () => {
+    const { registry } = await signedIn();
+
+    await act(async () => {
+      pageSeen(registry, { compact: true, focused: true, visible: true });
+      await Promise.resolve();
+    });
+
+    await settled(() => toggle() !== undefined);
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="dialog"] h2')?.textContent === "members");
+
+    const sheet = {
+      column: registry.get(membersShown),
+      kept: readChoice("iirc.members"),
+      visible: registry.get(membersVisible),
+    };
+
+    await act(async () => {
+      document
+        .querySelector('[role="dialog"]')
+        ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector('[role="dialog"]') === null);
+
+    const closed = registry.get(drawerState);
+
+    // On a wide screen, the toggle shows the column beside the Channel, kept on this device.
+    await act(async () => {
+      pageSeen(registry, { compact: false, focused: true, visible: true });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => document.querySelector("section[aria-labelledby] h2") !== null);
+
+    const kept = readChoice("iirc.members");
+
+    writeChoice("iirc.members", undefined);
+
+    expect({
+      closed,
+      dialogs: document.querySelectorAll('[role="dialog"]').length,
+      kept,
+      sheet,
+    }).toStrictEqual({
+      closed: "None",
+      dialogs: 0,
+      kept: "on",
+      sheet: { column: false, kept: undefined, visible: true },
+    });
+  });
+
+  it("ends a drawer or a sheet left open when the screen widens, so narrowing it again opens neither", async () => {
+    const { registry } = await signedIn();
+
+    const resize = async (compact: boolean) => {
+      await act(async () => {
+        pageSeen(registry, { compact, focused: true, visible: true });
+        await Promise.resolve();
+      });
+    };
+
+    await resize(true);
+    await settled(() => button() !== null);
+    await act(async () => {
+      button()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await resize(false);
+    await resize(true);
+    await settled(() => button() !== null);
+
+    const sidebar = { dialogs: dialogs(), drawer: registry.get(drawerState) };
+
+    await act(async () => {
+      toggle()?.click();
+      await Promise.resolve();
+    });
+    await settled(() => dialogs() === 1);
+    await resize(false);
+
+    const wide = {
+      column: document.querySelectorAll("section[aria-labelledby]").length,
+      kept: registry.get(membersShown),
+    };
+
+    await resize(true);
+
+    expect({
+      members: { dialogs: dialogs(), drawer: registry.get(drawerState) },
+      sidebar,
+      wide,
+    }).toStrictEqual({
+      members: { dialogs: 0, drawer: "None" },
+      sidebar: { dialogs: 0, drawer: "None" },
+      wide: { column: 0, kept: false },
+    });
   });
 });

@@ -180,6 +180,27 @@ export const titleOf = (networks: readonly SidebarNetwork[]): string => {
 };
 
 /**
+ * The highest level of anything said that is unread, across every Network: Highlight,
+ * then Direct, then Message, or none when nothing said is unread. Activity alone is none,
+ * as a view shows it only as a dimmer name. A compact screen's sidebar button marks it.
+ * @param networks - The sidebar.
+ * @returns The level, or none.
+ */
+export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefined => {
+  let highest: Level | undefined;
+
+  for (const network of networks) {
+    const { level } = networkActivity(network);
+
+    if (level !== "Activity" && rank(level) > rank(highest)) {
+      highest = level;
+    }
+  }
+
+  return highest;
+};
+
+/**
  * How the Daemon is asked to mark a Timeline read up to an instant, or nothing when that
  * would change nothing: the Timeline has nothing unread, its Read Marker is already there
  * or later, or it is a detached Direct Message, whose partner's nick now names another

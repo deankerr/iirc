@@ -740,6 +740,8 @@ const ended = (at: Instant, restarted = false): News => ({
 const failed = (at: Instant): News => ({
   _tag: "ConnectionFailed",
   at,
+  ircd: { host: "irc.test", port: 6697, tls: true },
+  opened: false,
   reason: { _tag: "Closed", reason: "Refused" },
 });
 

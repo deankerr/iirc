@@ -10,6 +10,8 @@ declare const styles: {
   readonly loading: string;
   readonly member: string;
   readonly panel: string;
+  readonly scrim: string;
+  readonly sheet: string;
   readonly symbol: string;
 };
 

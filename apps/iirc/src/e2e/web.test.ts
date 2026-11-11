@@ -295,6 +295,17 @@ const privateNetwork = async (dataDir: string, channel: string) => {
   return { api, base, channel, child, key, ngircd, peer };
 };
 
+/**
+ * The smaller of an element's width and height, as drawn.
+ * @param locator - The element.
+ * @returns The side, in whole pixels, or 0 when it is not drawn.
+ */
+const leastSide = async (locator: ReturnType<Page["getByRole"]>) => {
+  const box = await locator.boundingBox();
+
+  return box === null ? 0 : Math.round(Math.min(box.width, box.height));
+};
+
 describe("the web frontend on iirc daemon --web", () => {
   let browser: Browser;
   let directory: string;
@@ -673,6 +684,89 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: [],
           recalled: "/msg peer hi",
           rows: 1,
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "disconnects and connects with /disconnect and /connect, and begins a Direct Message with /query",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "connect"),
+        "#iirc-connect"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const standing = async () => (await page.getByRole("row").first().textContent()) ?? "";
+
+        // `/disconnect` turns the focused Network off, and the sidebar says so.
+        await composer.fill("/disconnect");
+        await composer.press("Enter");
+        await expect.poll(standing, { timeout: 20_000 }).toMatch(/(?:offline|stopped)$/u);
+        const off = await standing();
+
+        // `/connect` turns it on again.
+        await composer.fill("/connect");
+        await composer.press("Enter");
+        await expect.poll(standing, { timeout: 20_000 }).toMatch(/connected$/u);
+        const on = await standing();
+
+        // `/query` to a nick nothing was said to yet shows a Direct Message not yet begun,
+        // and plain text typed there goes to the nick, which makes its Timeline.
+        await composer.fill("/query peer");
+        await composer.press("Enter");
+        await page.getByRole("region", { name: "Direct Message with peer" }).waitFor();
+
+        const draft = page.getByRole("textbox", { name: "peer" });
+
+        await draft.fill("hi");
+        await draft.press("Enter");
+
+        const direct = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[0] === "peer",
+          "the Direct Message"
+        );
+
+        await page.getByRole("log", { name: "peer" }).getByText("hi", { exact: true }).waitFor();
+
+        const drafted = await page
+          .getByRole("region", { name: "Direct Message with peer" })
+          .count();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          direct: direct.params,
+          drafted,
+          off: /(?:offline|stopped)$/u.test(off),
+          on: on.endsWith("connected"),
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          violations,
+        }).toStrictEqual({
+          direct: ["peer", "hi"],
+          drafted: 0,
+          off: true,
+          on: true,
+          problems: [],
           violations: "",
         });
       } finally {
@@ -1068,7 +1162,7 @@ describe("the web frontend on iirc daemon --web", () => {
         // With no Timeline open, the composer takes commands that need none.
         const nowhere = page.getByRole("textbox", { name: "iirc" });
 
-        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} -tls iirc`);
+        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
         await nowhere.press("Enter");
 
         const row = page.getByRole("row").first();
@@ -1933,6 +2027,182 @@ describe("the web frontend on iirc daemon --web", () => {
           stayed: true,
           target: true,
           violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "works on a phone: fields at 16px, targets a finger's size, the sidebar as a drawer, the members as a sheet, and the palette from a button, never scrolling sideways",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "phone"),
+        "#iirc-phone"
+      );
+
+      try {
+        // A phone's screen, touched, at the width of most phones today.
+        const context = await browser.newContext({
+          deviceScaleFactor: 3,
+          hasTouch: true,
+          isMobile: true,
+          viewport: { height: 844, width: 390 },
+        });
+
+        const page = await context.newPage();
+        const problems: string[] = [];
+
+        page.on("pageerror", (error) => problems.push(error.message));
+
+        /**
+         * The computed font size of every field in the page.
+         * @returns Each, in pixels.
+         */
+        const fieldSizes = async () =>
+          await page.evaluate(() =>
+            [...document.querySelectorAll("input, textarea")].map((one) =>
+              Number(getComputedStyle(one).fontSize.replace("px", ""))
+            )
+          );
+
+        /**
+         * How far the page can scroll sideways: none, on a phone.
+         * @returns How far, in pixels.
+         */
+        const sideways = async () =>
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+          );
+
+        const fields: number[] = [];
+        const targets: Record<string, number> = {};
+        const scrolled: number[] = [];
+
+        await page.goto(base);
+        await page.getByLabel("Key").waitFor();
+        fields.push(...(await fieldSizes()));
+        scrolled.push(await sideways());
+        await page.getByLabel("Key").fill(key);
+        targets.key = await leastSide(page.getByLabel("Key"));
+        targets["sign in"] = await leastSide(page.getByRole("button", { name: "Sign in" }));
+        await page.getByRole("button", { name: "Sign in" }).tap();
+
+        // Signed in: no sidebar beside the Panes, and a button in the bar for it.
+        const networks = page.getByRole("button", { name: /^Networks/u });
+
+        await networks.waitFor();
+        await page.getByRole("textbox").first().waitFor();
+        const sidebarBeside = await page.locator('nav[aria-label="Networks"]').count();
+
+        fields.push(...(await fieldSizes()));
+        scrolled.push(await sideways());
+        targets.networks = await leastSide(networks);
+        targets["sign out"] = await leastSide(page.getByRole("button", { name: "Sign out" }));
+        targets.palette = await leastSide(page.getByRole("button", { name: "Command palette" }));
+        targets.composer = await leastSide(page.getByRole("textbox").first());
+
+        // The drawer opens, and choosing a Timeline in it opens that and closes it.
+        await networks.tap();
+        const drawer = page.getByRole("dialog", { name: "Networks" });
+
+        await drawer.waitFor();
+        const row = drawer.getByRole("row", { name: new RegExp(`^${channel}`, "u") });
+
+        await row.waitFor();
+        targets["sidebar row"] = await leastSide(row);
+        targets.options = await leastSide(drawer.getByRole("button", { name: "Options" }));
+        scrolled.push(await sideways());
+        await row.tap();
+        await drawer.waitFor({ state: "detached" });
+        const log = page.getByRole("log", { name: channel });
+
+        await log.waitFor();
+        peer.send(`PRIVMSG ${channel} :hello from a phone's peer`);
+        await log.getByText("hello from a phone's peer").waitFor();
+
+        // The members are a sheet over the Channel, from its header.
+        const toggle = page.getByRole("button", { name: "members" });
+
+        targets["members toggle"] = await leastSide(toggle);
+        await toggle.tap();
+        const sheet = page.getByRole("dialog", { name: "members" });
+        const member = sheet.getByRole("row", { name: /^peer\b/u });
+
+        await member.waitFor();
+        targets["member row"] = await leastSide(member);
+        targets["members hide"] = await leastSide(sheet.getByRole("button", { name: "hide" }));
+        scrolled.push(await sideways());
+        await sheet.getByRole("button", { name: "hide" }).tap();
+        await sheet.waitFor({ state: "detached" });
+
+        // The palette, from its button, since a phone has no keys to open it with.
+        await page.getByRole("button", { name: "Command palette" }).tap();
+        const palette = page.getByRole("dialog", { name: "Command palette" });
+
+        await palette.waitFor();
+        const entry = palette.getByRole("menuitem").first();
+
+        await entry.waitFor();
+        targets["palette entry"] = await leastSide(entry);
+        targets["palette field"] = await leastSide(palette.getByRole("searchbox"));
+        fields.push(...(await fieldSizes()));
+        scrolled.push(await sideways());
+        await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
+        await palette.waitFor({ state: "detached" });
+
+        // The options' filter and the search's field, each in turn. The composer's name is
+        // what its Pane shows, so it is found as the one textarea.
+        const composer = page.locator("textarea");
+
+        await composer.fill("/set");
+        await composer.press("Enter");
+        await page.getByRole("searchbox").waitFor();
+        fields.push(...(await fieldSizes()));
+        scrolled.push(await sideways());
+        targets["options close"] = await leastSide(
+          page.getByRole("button", { name: "Close the options" })
+        );
+        await page.getByRole("button", { name: "Close the options" }).tap();
+        await log.waitFor();
+
+        await composer.fill("/search hello");
+        await composer.press("Enter");
+        const searchField = page.getByRole("textbox", { exact: true, name: "Search" });
+
+        await searchField.waitFor();
+        fields.push(...(await fieldSizes()));
+        scrolled.push(await sideways());
+        targets["search field"] = await leastSide(searchField);
+
+        // Its close button shows the Timeline again, with no key to press.
+        const closeSearch = page.getByRole("button", { name: "Close the search" });
+
+        targets["search close"] = await leastSide(closeSearch);
+        await closeSearch.tap();
+        await searchField.waitFor({ state: "detached" });
+        await log.waitFor();
+
+        const small = Object.entries(targets).filter(([, side]) => side < 44);
+
+        expect({
+          fields: fields.length > 0 && fields.every((size) => size >= 16),
+          problems,
+          sidebarBeside,
+          sideways: scrolled.every((by) => by === 0) ? true : scrolled,
+          small,
+        }).toStrictEqual({
+          fields: true,
+          problems: [],
+          sidebarBeside: 0,
+          sideways: true,
+          small: [],
         });
       } finally {
         peer.close();

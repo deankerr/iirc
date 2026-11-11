@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { CloseReason, Instant, IntentId, MessageId, SayKind } from "@iirc/client";
+import { CloseReason, Instant, IntentId, IrcdAddress, MessageId, SayKind } from "@iirc/client";
 import { TimelineId, cursorOf, levels, parseCursor } from "@iirc/timelines";
 import type { Content, Directory, Position } from "@iirc/timelines";
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
@@ -147,7 +147,7 @@ const Content = exactly<Content>()(
       id: Fact(MessageId),
       live: Schema.Boolean,
     },
-    ConnectionFailed: { at: Instant, reason: EndReason },
+    ConnectionFailed: { at: Instant, ircd: IrcdAddress, opened: Schema.Boolean, reason: EndReason },
     Message: {
       at: Fact(Instant),
       id: Fact(MessageId),

@@ -32,7 +32,7 @@ import { runtime } from "../app/runtime.ts";
 import { signedOut } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, timelinesState, Waits } from "../timelines/atoms.ts";
-import { channelHappened, channelState, membersShown } from "./state.ts";
+import { channelHappened, channelState, membersVisible } from "./state.ts";
 
 /**
  * The Channel a Pane shows, as held, or nothing read of it yet.
@@ -92,7 +92,7 @@ export const chooseMember = Atom.fnSync(
  * @returns The reads.
  */
 const readsNow = (read: <A>(atom: Atom.Atom<A>) => A) =>
-  channelsReads(read(channelState), openChannels(read(timelinesState)), read(membersShown));
+  channelsReads(read(channelState), openChannels(read(timelinesState)), read(membersVisible));
 
 /** The reads the core calls for now. */
 const wanted = Atom.make((get) => readsNow(get));

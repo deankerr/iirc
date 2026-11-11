@@ -3,7 +3,9 @@
  * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
  * Enter sends and Shift+Enter starts a new line, Up and Down recall what was sent from
  * the first and last lines, and Escape lets go of an error or a confirmation, or, with
- * neither, puts the focused Pane's Lookup card away. What it says goes through the command
+ * neither, closes what stands in front of the focused Pane's Timeline, the options, the
+ * search, or a Direct Message not yet begun, or with nothing in front, puts its Lookup card
+ * away. What it says goes through the command
  * registry in the core, and the runtime carries it out.
  *
  * @packageDocumentation
@@ -11,14 +13,18 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
 import { active, announced, completes, cycled } from "@iirc/frontend/completion";
-import { linesOf } from "@iirc/frontend/composer";
+import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
+import { Button as AriaButton } from "react-aria-components";
 
 import { dismissCard } from "../lookup/atoms.ts";
+import { closeOptions, mainView } from "../options/atoms.ts";
+import { openPalette } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
-import { openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
+import { closeSearch } from "../search/atoms.ts";
+import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import {
   commandContext,
@@ -73,6 +79,27 @@ const AwayMark = ({ network }: { readonly network: string | undefined }) => {
 };
 
 /**
+ * The way to the command palette from a touch screen, which has no keys to open it with,
+ * beside the composer. Elsewhere Mod+K opens it, and the button is not drawn.
+ * @returns The button.
+ */
+const PaletteButton = () => {
+  const openNow = useAtomSet(openPalette);
+
+  return (
+    <AriaButton
+      aria-label="Command palette"
+      className={styles.palette}
+      onPress={() => {
+        openNow("All");
+      }}
+    >
+      <span aria-hidden="true">/</span>
+    </AriaButton>
+  );
+};
+
+/**
  * The composer of one Timeline, or the one under no Timeline.
  * @param props - Where it is, and the name its prompt shows.
  * @returns The composer.
@@ -98,6 +125,10 @@ const Composer = ({
   const confirmNow = useAtomSet(confirmSend);
   const again = useAtomSet(takeUp);
   const closeCard = useAtomSet(dismissCard);
+  const closeTheDraft = useAtomSet(closeDraft);
+  const closeTheOptions = useAtomSet(closeOptions);
+  const closeTheSearch = useAtomSet(closeSearch);
+  const main = useAtomValue(mainView);
   const pane = useAtomValue(focusedId);
   const focusAsked = useAtomValue(composerFocus);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -136,9 +167,11 @@ const Composer = ({
     input.current?.setSelectionRange(caret, caret);
   }, [completion]);
 
+  const network = context.focus?.network ?? context.draft?.network;
+
   const offline =
-    context.focus !== undefined && !context.session
-      ? `${context.focus.network} is not connected: nothing can be said there until it is.`
+    network !== undefined && !context.session
+      ? `${network} is not connected: nothing can be said there until it is.`
       : undefined;
 
   /**
@@ -175,13 +208,40 @@ const Composer = ({
     return false;
   };
 
-  // Escape lets go of a notice or a confirmation, and with neither, puts the focused
-  // Pane's Lookup card away.
+  // Escape lets go of a notice or a confirmation first. With neither, it closes what stands
+  // in front of the focused Pane's Timeline, the options, the search, or a draft, and with
+  // nothing in front, puts its Lookup card away.
   const escaped = () => {
-    if (notice === undefined && confirming === undefined) {
-      closeCard(pane);
-    } else {
+    if (notice !== undefined || confirming !== undefined) {
       dismissNow(timeline);
+
+      return;
+    }
+
+    switch (main._tag) {
+      case "Options": {
+        closeTheOptions();
+        break;
+      }
+
+      case "Search": {
+        closeTheSearch();
+        break;
+      }
+
+      case "DirectDraft": {
+        closeTheDraft();
+        break;
+      }
+
+      case "Timeline": {
+        closeCard(pane);
+        break;
+      }
+
+      default: {
+        main satisfies never;
+      }
     }
   };
 
@@ -303,7 +363,7 @@ const Composer = ({
         <label className={styles.prompt} htmlFor={id}>
           {number === undefined ? null : <span className={styles.pane}>{number}</span>}
           <bdi>{name}</bdi>
-          <AwayMark network={context.focus?.network} />
+          <AwayMark network={network} />
           <span aria-hidden="true">&gt;</span>
         </label>
         <textarea
@@ -323,6 +383,7 @@ const Composer = ({
           spellCheck
           value={draft.text}
         />
+        <PaletteButton />
       </div>
     </div>
   );
@@ -336,14 +397,31 @@ const Composer = ({
  */
 export const MainComposer = () => {
   const shown = useAtomValue(openTimeline);
+  const main = useAtomValue(mainView);
   const number = useAtomValue(paneNumber(useAtomValue(focusedId)));
 
-  if (shown._tag === "Shown") {
-    const name = shown.description?.name ?? "Timeline";
+  // A Direct Message not yet begun has a composer of its own, which says plain text to its
+  // nick.
+  if (main._tag === "DirectDraft") {
+    return (
+      <Composer name={main.nick} number={number} timeline={placeOfDraft(main.network, main.nick)} />
+    );
+  }
 
-    return <Composer name={name} number={number} timeline={shown.timeline} />;
+  // Its prompt names what the Pane shows: the options or the search by name, in front of
+  // the Timeline it writes to.
+  const name = main._tag === "Timeline" ? undefined : main._tag.toLowerCase();
+
+  if (shown._tag === "Shown") {
+    return (
+      <Composer
+        name={name ?? shown.description?.name ?? "Timeline"}
+        number={number}
+        timeline={shown.timeline}
+      />
+    );
   }
 
   // One composer element under every Timeline, so focus stays in it as Timelines open.
-  return <Composer name="iirc" number={number} timeline="Nowhere" />;
+  return <Composer name={name ?? "iirc"} number={number} timeline="Nowhere" />;
 };

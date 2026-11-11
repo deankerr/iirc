@@ -180,10 +180,12 @@ const head = decodeHeader({
 
 const profile = (fields: Partial<typeof Profile.Encoded> = {}): typeof Profile.Encoded => ({
   account: null,
+  actual: null,
   away: null,
   channels: [],
   host: null,
   idle: null,
+  modes: null,
   nick: "peer",
   operator: false,
   other: [],
@@ -466,6 +468,7 @@ describe("a card as a view draws it", () => {
           result: found(
             profile({
               account: "peeraccount",
+              actual: { ip: "121.200.5.82", mask: null },
               away: "lunch",
               channels: [
                 { name: "#iirc", prefixes: ["o", "v"] },
@@ -474,6 +477,7 @@ describe("a card as a view draws it", () => {
               ],
               host: "example.test",
               idle: 180,
+              modes: "+Zi",
               operator: true,
               other: [{ numeric: "378", params: ["is connecting from", "*@10.0.0.1"] }],
               realname: "Peer Pal",
@@ -497,6 +501,7 @@ describe("a card as a view draws it", () => {
         profiles: [
           {
             account: "peeraccount",
+            actual: "121.200.5.82",
             away: "lunch",
             channels: [
               {
@@ -522,6 +527,7 @@ describe("a card as a view draws it", () => {
             colour: shown.colour,
             idle: "idle 3m",
             mask: "~peer@example.test",
+            modes: "+Zi",
             nick: "peer",
             operator: true,
             other: [{ numeric: "378", text: "is connecting from *@10.0.0.1" }],
@@ -591,8 +597,10 @@ describe("a card as a view draws it", () => {
         id: 1,
         result: found(
           profile({
+            actual: { ip: "1.2.3.4", mask: "u\u0007@h‮" },
             channels: [{ name: "#‮evil", prefixes: [] }],
             host: "<b>host</b>",
+            modes: "+i‮",
             nick: "pe‮er",
             other: [{ numeric: "999", params: ["a\u0000b", "⁦open"] }],
             realname: "line\nbreak‮",
@@ -606,14 +614,18 @@ describe("a card as a view draws it", () => {
     const profiled = shown.body._tag === "Profiles" ? shown.body.profiles[0] : undefined;
 
     expect({
+      actual: profiled?.actual,
       channel: profiled?.channels[0]?.name,
       mask: profiled?.mask,
+      modes: profiled?.modes,
       nick: profiled?.nick,
       other: profiled?.other,
       realname: profiled?.realname,
     }).toStrictEqual({
+      actual: "u␇@h‮‬ 1.2.3.4",
       channel: "#‮evil‬",
       mask: "u␇@<b>host</b>",
+      modes: "+i‮‬",
       nick: "pe‮er‬",
       other: [{ numeric: "999", text: "a␀b ⁦open⁩" }],
       realname: "line␊break‮‬",

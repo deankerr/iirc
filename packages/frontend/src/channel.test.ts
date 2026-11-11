@@ -772,7 +772,7 @@ describe("touching", () => {
 });
 
 describe("/query", () => {
-  it("opens the Timeline the name keys, as the Network folds names, or starts /msg to say the first Message", () => {
+  it("opens the Timeline the name keys, as the Network folds names, or a Direct Message not yet begun", () => {
     const state = world(undefined);
 
     expect({
@@ -781,10 +781,10 @@ describe("/query", () => {
       found: queried(state, network, "PEER", undefined),
       missing: queried(state, network, "stranger", undefined),
     }).toStrictEqual({
-      ascii: [{ _tag: "FocusComposer", text: "/msg [BOB] " }],
+      ascii: [{ _tag: "Draft", declared: "ascii", network, nick: "[BOB]" }],
       folded: [{ _tag: "Open", timeline: bob }],
       found: [{ _tag: "Open", timeline: peer }],
-      missing: [{ _tag: "FocusComposer", text: "/msg stranger " }],
+      missing: [{ _tag: "Draft", declared: null, network, nick: "stranger" }],
     });
   });
 });

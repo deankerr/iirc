@@ -16,15 +16,52 @@ import { credentialRefusal, interpret } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
 import { panesOf } from "./layout.ts";
 import { attemptedText, contained, requested } from "./render.ts";
-import { opened, openOf, resolve, sidebar } from "./timelines.ts";
+import { mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
 
 /**
- * Where a composer is: under a Timeline, or `Nowhere`, under the main view while no
- * Timeline is open, where commands that need none, such as `/network add`, are typed. A
- * Timeline's id is hex and `-`, so it is never `Nowhere`.
+ * Where a composer is: under a Timeline, under a Direct Message not yet begun, by
+ * `placeOfDraft`, or `Nowhere`, under the main view while no Timeline is open, where
+ * commands that need none, such as `/network add`, are typed. A Timeline's id is hex and
+ * `-`, so it is never `Nowhere` nor a draft's, which begins `draft `.
  */
-export type Place = TimelineId | "Nowhere";
+export type Place = TimelineId | "Nowhere" | `draft ${string}`;
+
+/**
+ * The place of the composer under a Direct Message not yet begun: its Network and its nick,
+ * neither of which holds a space.
+ * @param network - Its Network.
+ * @param nick - The nick it is to.
+ * @returns The place.
+ */
+export const placeOfDraft = (network: NetworkId, nick: string): Place => `draft ${network} ${nick}`;
+
+/**
+ * Where the composer under the Panes is: under the focused Pane's Direct Message not yet
+ * begun while it shows one, else under its open Timeline once that is shown, else nowhere.
+ * @param timelines - The Timelines.
+ * @returns Its place.
+ */
+export const placeIn = (timelines: Timelines): Place => {
+  const main = mainOf(timelines);
+
+  if (main._tag === "DirectDraft") {
+    return placeOfDraft(main.network, main.nick);
+  }
+
+  const shown = opened(timelines);
+
+  return shown._tag === "Shown" ? shown.timeline : "Nowhere";
+};
+
+/**
+ * Whether a place is under a Timeline, rather than under a Direct Message not yet begun or
+ * nowhere.
+ * @param place - The place.
+ * @returns Whether it is a Timeline's id.
+ */
+export const isTimelinePlace = (place: Place): place is TimelineId =>
+  place !== "Nowhere" && !place.startsWith("draft ");
 
 /** The id a Say or an Act is made under, which the runtime names. */
 export type IntentId = typeof CallerIntent.Type;
@@ -87,6 +124,12 @@ export interface Draft {
 /** Every Timeline's composer, and the one under no Timeline. */
 export interface Composers {
   readonly drafts: ReadonlyMap<Place, Draft>;
+  /**
+   * Each draft's place that came to show a Timeline, and that Timeline's: what is said of a
+   * Say or an Act sent from the draft, once it answers, is said under the Timeline, where
+   * the composer now is.
+   */
+  readonly carried: ReadonlyMap<Place, Place>;
 }
 
 /**
@@ -128,6 +171,9 @@ export type SayFailure =
  * - `Failed`: a Say or an Act failed; `intents` are it and those after it, none carried out after it.
  * - `Noticed`: an intent other than a Say or an Act did not go as asked, such as a change of
  *   Configuration, in words. Nothing after it was carried out.
+ * - `Carried`: a draft came to show its Timeline, so what was typed under it, unsent, goes
+ *   to the Timeline's composer, unless that holds text of its own, with its notice unless
+ *   that holds one, and what is said later of a Say sent from the draft is said there.
  */
 export type ComposerEvent =
   | { readonly _tag: "Edited"; readonly timeline: Place; readonly text: string }
@@ -144,7 +190,8 @@ export type ComposerEvent =
       readonly failure: SayFailure;
       readonly intents: readonly Intent[];
     }
-  | { readonly _tag: "Noticed"; readonly timeline: Place; readonly message: string };
+  | { readonly _tag: "Noticed"; readonly timeline: Place; readonly message: string }
+  | { readonly _tag: "Carried"; readonly from: Place; readonly to: Place };
 
 /** A composer's next state, and the intents it asks the runtime to carry out. */
 export interface Submitted {
@@ -153,7 +200,7 @@ export interface Submitted {
 }
 
 /** No composer touched yet. */
-export const initialComposers: Composers = { drafts: new Map() };
+export const initialComposers: Composers = { carried: new Map(), drafts: new Map() };
 
 /** A composer never touched. */
 export const emptyDraft: Draft = {
@@ -183,8 +230,16 @@ const withDraft = (
   drafts: new Map(state.drafts).set(timeline, change(draftOf(state, timeline))),
 });
 
+/**
+ * Says a notice under a composer, or under the Timeline its draft came to show, where the
+ * composer now is.
+ * @param state - The composers.
+ * @param timeline - Where what it is of was sent from.
+ * @param notice - The notice.
+ * @returns The composers.
+ */
 const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =>
-  withDraft(state, timeline, (draft) => ({ ...draft, notice }));
+  withDraft(state, state.carried.get(timeline) ?? timeline, (draft) => ({ ...draft, notice }));
 
 /**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
@@ -200,10 +255,14 @@ export const contextOf = (
 ): CommandContext => {
   const shown = opened(timelines);
   const open = openOf(timelines);
+  const main = mainOf(timelines);
 
   const listed = sidebar(timelines).flatMap((one) => one.timelines);
 
+  // A Timeline behind the options, the search, or a draft is not the one shown, so
+  // `/next-unread` may go to it, which shows it.
   const around = {
+    behind: main._tag !== "Timeline",
     open: open === undefined ? undefined : resolve(timelines, open),
     panes: panesOf(timelines.layout.root).length,
     shown: panesOf(timelines.layout.root).flatMap((pane) =>
@@ -219,8 +278,22 @@ export const contextOf = (
     }),
   };
 
+  // A Direct Message not yet begun stands in front of any Timeline, and has no focus of its
+  // own: what is said there goes to its nick, on its Network.
+  if (main._tag === "DirectDraft") {
+    const network = timelines.networks.get(main.network);
+
+    return {
+      ...around,
+      draft: { network: main.network, nick: main.nick },
+      focus: undefined,
+      head: undefined,
+      session: network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
+    };
+  }
+
   if (shown._tag !== "Shown" || shown.description === undefined) {
-    return { ...around, focus: undefined, head: undefined, session: false };
+    return { ...around, draft: undefined, focus: undefined, head: undefined, session: false };
   }
 
   const { description } = shown;
@@ -239,6 +312,7 @@ export const contextOf = (
 
   return {
     ...around,
+    draft: undefined,
     focus,
     head:
       description.kind === "Channel" && header?.timeline === description.id ? header : undefined,
@@ -521,6 +595,33 @@ const recalledIn = (draft: Draft, direction: "Older" | "Newer"): Draft => {
  */
 export const reduceComposers = (state: Composers, event: ComposerEvent): Composers => {
   switch (event._tag) {
+    // The draft's text goes over unless the Timeline's composer holds text of its own, and
+    // its notice unless that holds one, and anything said of it later follows.
+    case "Carried": {
+      const from = draftOf(state, event.from);
+      const to = draftOf(state, event.to);
+      const moving = from.text.trim() !== "" && to.text.trim() === "";
+      const drafts = new Map(state.drafts);
+
+      drafts.delete(event.from);
+
+      return {
+        carried: new Map(state.carried).set(event.from, event.to),
+        drafts: drafts.set(
+          event.to,
+          moving
+            ? {
+                ...to,
+                confirming: from.confirming,
+                notice: to.notice ?? from.notice,
+                recalled: undefined,
+                text: from.text,
+              }
+            : { ...to, notice: to.notice ?? from.notice }
+        ),
+      };
+    }
+
     case "Edited": {
       // Lines waiting to be confirmed were read from the text before it changed.
       return withDraft(state, event.timeline, (draft) => ({

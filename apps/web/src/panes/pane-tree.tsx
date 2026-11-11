@@ -123,6 +123,12 @@ const NodeContext = createContext<ComponentType<{ readonly node: Node<PaneView> 
 const leastSize = "6rem";
 
 /**
+ * The least a divider's hit area measures across, in pixels, whatever its line: a finger's
+ * size on a touch screen, and the library's own for a mouse.
+ */
+const resizeTarget = { coarse: 44, fine: 10 };
+
+/**
  * One Split: a Group of its children, with a divider between each two.
  * @param props - The Split.
  * @returns The Group.
@@ -183,6 +189,7 @@ const SplitView = ({ split }: { readonly split: Split<PaneView> }) => {
         });
       }}
       orientation={split.axis === "Horizontal" ? "horizontal" : "vertical"}
+      resizeTargetMinimumSize={resizeTarget}
     >
       {split.children.flatMap((child, index) => [
         index === 0 ? null : (

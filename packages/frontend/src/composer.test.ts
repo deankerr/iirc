@@ -12,6 +12,7 @@ import {
   historyCap,
   initialComposers,
   linesOf,
+  placeOfDraft,
   reduceComposers,
   takeOffer,
   submit,
@@ -25,6 +26,8 @@ const channel = timelineId("00000000000002-00000000-00000000");
 const other = timelineId("00000000000003-00000000-00000000");
 
 const context: CommandContext = {
+  behind: false,
+  draft: undefined,
   focus: {
     detached: false,
     key: "#iirc",
@@ -426,5 +429,53 @@ describe("what became of a Say", () => {
         "The Daemon did not answer, so whether this was said is unknown. Nothing after it was sent.",
       offer: { _tag: "CheckAgain", intent, intents, network },
     });
+  });
+});
+
+describe("a draft that came to show its Timeline", () => {
+  const draft = placeOfDraft(network, "bob");
+
+  const refused: ComposerEvent = {
+    _tag: "Failed",
+    failure: { _tag: "Refused", action: undefined, reason: { _tag: "Offline" }, target: "bob" },
+    intent: intentId("web-1"),
+    intents: [],
+    timeline: draft,
+  };
+
+  it("carries its text and notice to the Timeline's composer, and says what answers later there", () => {
+    const before = fold([
+      { _tag: "Edited", text: "not sent yet", timeline: draft },
+      { _tag: "Noticed", message: "said before", timeline: draft },
+    ]);
+
+    const carried = reduceComposers(before, { _tag: "Carried", from: draft, to: other });
+
+    const later = reduceComposers(
+      reduceComposers(carried, { _tag: "Dismissed", timeline: other }),
+      refused
+    );
+
+    expect({
+      carried: [draftOf(carried, other).text, draftOf(carried, other).notice?.message],
+      draft: draftOf(later, draft).notice,
+      later: draftOf(later, other).notice?.message.includes("bob"),
+    }).toStrictEqual({
+      carried: ["not sent yet", "said before"],
+      draft: undefined,
+      later: true,
+    });
+  });
+
+  it("keeps what the Timeline's composer holds already", () => {
+    const state = reduceComposers(
+      fold([
+        { _tag: "Edited", text: "under the draft", timeline: draft },
+        { _tag: "Edited", text: "under the Timeline", timeline: other },
+      ]),
+      { _tag: "Carried", from: draft, to: other }
+    );
+
+    expect(draftOf(state, other).text).toBe("under the Timeline");
   });
 });

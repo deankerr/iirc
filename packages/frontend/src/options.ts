@@ -46,8 +46,8 @@ type Record = Schema.JsonObject;
  * - `Choice`: one of `choices`, in any ASCII case.
  * - `Credential`: the name of a Credential, set by giving its value, which the Vault holds.
  * - `Texts`: a list, comma-separated, as WeeChat's are, never empty when `nonEmpty`.
- * - `Ircds`: Ircds, comma-separated, each `host/port`, TLS unless followed by `-tls`. A
- *   port left out is 6697 with TLS and 6667 without.
+ * - `Ircds`: Ircds, comma-separated, each `host/port`, TLS unless followed by the word
+ *   `plain`. A port left out is 6697 with TLS and 6667 without.
  * - `Names`: a list of records keyed by their `name`, such as Channels, comma-separated by
  *   name. Each record's other fields are options of their own under its name.
  * - `Tagged`: one of `members`, by its tag in lower case, such as `none` or `sasl`. Each
@@ -475,20 +475,28 @@ const showList = (elements: readonly string[]): string =>
 type Ircd = Readonly<{ host: string; port: number; tls: boolean }>;
 
 /**
- * One Ircd, `host[/port]` with `-tls` or `+tls` after it.
+ * One Ircd, `host[/port]`, TLS unless the word `plain` follows. The old `-tls` and `+tls`
+ * flags are refused, not read as part of the host, so a habit cannot silently choose the
+ * wrong one.
  * @param text - The text.
  * @returns The Ircd, or why not.
  */
 export const parseIrcd = (text: string): Parsed<Ircd> => {
-  const flag = /\s+(?<flag>[-+]tls)$/u.exec(text);
-  const tls = flag?.groups?.flag !== "-tls";
-  const address = flag === null ? text : text.slice(0, flag.index);
+  if (/\s[-+]tls$/iu.test(text)) {
+    return invalid(
+      `Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "${text}".`
+    );
+  }
+
+  const word = /\s+plain$/iu.exec(text);
+  const tls = word === null;
+  const address = word === null ? text : text.slice(0, word.index);
   const withPort = /^(?<host>.*)\/(?<port>\d{1,5})$/su.exec(address)?.groups;
   const host = withPort?.host ?? address;
 
   if (host === "") {
     return invalid(
-      `An Ircd needs a host, as host/port, with -tls after it for plaintext, not "${text}".`
+      `An Ircd needs a host, as host/port, with the word plain after it for plaintext, not "${text}".`
     );
   }
 
@@ -503,9 +511,14 @@ export const parseIrcd = (text: string): Parsed<Ircd> => {
     : invalid(`An Ircd's port is 1 to 65535, not "${withPort.port}".`);
 };
 
+/**
+ * One Ircd's text, as `parseIrcd` reads it: its port always, and ` plain` when not TLS.
+ * @param ircd - The Ircd, as JSON.
+ * @returns The text.
+ */
 const showIrcd = (ircd: Record): string =>
   // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
-  `${textOf(ircd.host) ?? ""}/${typeof ircd.port === "number" ? ircd.port : ""}${ircd.tls === false ? " -tls" : ""}`;
+  `${textOf(ircd.host) ?? ""}/${typeof ircd.port === "number" ? ircd.port : ""}${ircd.tls === false ? " plain" : ""}`;
 
 const toggles: ReadonlyMap<string, boolean> = new Map([
   ["false", false],

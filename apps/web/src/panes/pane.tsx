@@ -1,5 +1,6 @@
 /**
- * One Pane: its open Timeline with its header, the options, or the search, and its Channel's members
+ * One Pane: its open Timeline with its header, the options, the search, or a Direct Message
+ * not yet begun, and its Channel's members
  * beside it while they show, marked while it has the focus. A press or the focus moving
  * anywhere in it gives it the focus, so the composer then writes to its Timeline.
  *
@@ -12,13 +13,15 @@ import type { PaneView } from "@iirc/frontend/timelines";
 import { MembersPanel } from "../channel/members-panel.tsx";
 import { OptionsView } from "../options/options-view.tsx";
 import { SearchView } from "../search/search-view.tsx";
+import { DraftView } from "../timelines/draft-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
 import { alone, focusedId, focusPane, paneNumber } from "./atoms.ts";
 
 import styles from "./pane.module.css";
 
 /**
- * What a Pane shows in its main place: the options, the search, or its Timeline.
+ * What a Pane shows in its main place: the options, the search, a Direct Message not yet
+ * begun, or its Timeline.
  * @param pane - The Pane.
  * @returns The view.
  */
@@ -34,6 +37,10 @@ const main = (pane: PaneOf<PaneView>) => {
 
     case "Timeline": {
       return <TimelineView pane={pane.id} />;
+    }
+
+    case "DirectDraft": {
+      return <DraftView network={pane.view.main.network} nick={pane.view.main.nick} />;
     }
 
     default: {

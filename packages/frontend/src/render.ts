@@ -13,10 +13,15 @@ import type {
   Delivery as WireDelivery,
   EndReason,
   ItemContent,
+  NetworkId,
 } from "@iirc/api";
+import type { IrcdAddress } from "@iirc/client/configuration";
 import { casefold } from "@iirc/protocol/casemapping";
 import { parseFormatting, stripFormatting } from "@iirc/protocol/format";
 import type { Style } from "@iirc/protocol/format";
+
+import { optionName, showText } from "./options.ts";
+import type { Kind } from "./options.ts";
 
 export type { Colour, Style } from "@iirc/protocol/format";
 
@@ -322,7 +327,9 @@ export type Part =
   | { readonly _tag: "Words"; readonly text: string }
   | { readonly _tag: "Nick"; readonly nick: string; readonly colour: number }
   | { readonly _tag: "Name"; readonly text: string }
-  | { readonly _tag: "Said"; readonly inlines: readonly Inline[] };
+  | { readonly _tag: "Said"; readonly inlines: readonly Inline[] }
+  /** A command the Owner can type, as a view shows code. */
+  | { readonly _tag: "Command"; readonly text: string };
 
 /** Where one of our Messages stands with the Ircd, as shown. */
 export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rejected";
@@ -346,8 +353,48 @@ export type Line =
   | {
       readonly _tag: "Description";
       readonly tone: "Activity" | "Session" | "Refused";
+      /**
+       * What stands in the senders' column, where a Message's nick does, so the words line
+       * up with a Message's text: `-->` for one who arrived, `<--` for one who left, `--`
+       * for any other Activity, as WeeChat marks them, and none for a Session or a refusal.
+       */
+      readonly marker: Marker | undefined;
       readonly parts: readonly Part[];
     };
+
+/** What marks an Activity in the senders' column: arriving, leaving, or anything else. */
+export type Marker = "-->" | "<--" | "--";
+
+/**
+ * What marks an Activity: `-->` for a join, `<--` for a part, a quit, or a kick, and `--`
+ * for anything else.
+ * @param activity - The Activity.
+ * @returns Its marker.
+ */
+const markerOf = (activity: Activity): Marker => {
+  switch (activity._tag) {
+    case "Joined": {
+      return "-->";
+    }
+
+    case "Parted":
+    case "Quit":
+    case "Kicked": {
+      return "<--";
+    }
+
+    case "NickChanged":
+    case "TopicChanged":
+    case "ModeChanged":
+    case "AwayChanged": {
+      return "--";
+    }
+
+    default: {
+      return activity satisfies never;
+    }
+  }
+};
 
 const words = (text: string): Part => ({ _tag: "Words", text });
 
@@ -574,7 +621,8 @@ export const attemptedText = (attempted: Attempted): string =>
     .map((part) => {
       switch (part._tag) {
         case "Words":
-        case "Name": {
+        case "Name":
+        case "Command": {
           return part.text;
         }
 
@@ -678,12 +726,88 @@ const deliveryWords = (delivery: WireDelivery): string | undefined => {
   }
 };
 
+/** The port IANA registers for IRC over TLS (`ircs-u`), and the one plaintext IRC has long used. */
+const ports = { plain: 6667, tls: 6697 } as const;
+
+/**
+ * The Ircd to try instead after a failed Connection, when its port and its TLS look
+ * mismatched, decided from structure alone: a plaintext Connection to 6697 that was open,
+ * so the Ircd was reached, and then ended before registration, as one speaking TLS ends a
+ * plaintext one, or a TLS Connection to 6667 whose handshake failed. A Connection that was
+ * never open, such as one whose connect timed out or was reset at a firewall, says nothing
+ * of TLS, and neither does any other port.
+ * @param failed - The failed Connection: its Ircd, whether it was open, and why it ended.
+ * @returns The same host on the same port with TLS the other way, or none.
+ */
+export const mismatchedTls = (failed: {
+  readonly ircd: IrcdAddress;
+  readonly opened: boolean;
+  readonly reason: EndReason;
+}): IrcdAddress | undefined => {
+  const { ircd, opened, reason } = failed;
+  const closed = reason._tag === "Closed" ? reason.reason : undefined;
+
+  if (!ircd.tls && ircd.port === ports.tls) {
+    const reached =
+      opened &&
+      (reason._tag === "Silent" ||
+        reason._tag === "Error" ||
+        closed === "Ended" ||
+        closed === "Reset" ||
+        closed === "TimedOut" ||
+        closed === "HungUp");
+
+    return reached ? { ...ircd, tls: true } : undefined;
+  }
+
+  return ircd.tls && ircd.port === ports.plain && closed === "Tls"
+    ? { ...ircd, tls: false }
+    : undefined;
+};
+
+/**
+ * A failed Connection, in words: the Ircd, why, and, when its port and TLS look
+ * mismatched, the command that tries them the other way.
+ * @param content - The failed Connection.
+ * @param network - Its Network.
+ * @returns The parts.
+ */
+const failedParts = (
+  content: ItemContent & { readonly _tag: "ConnectionFailed" },
+  network: NetworkId
+): readonly Part[] => {
+  const ircds: Kind = { _tag: "Ircds" };
+  const instead = mismatchedTls(content);
+
+  const failed = [
+    words("Could not connect to "),
+    { _tag: "Name", text: contained(showText(ircds, [content.ircd])) } as const,
+    words(`: ${endReason(content.reason)}`),
+  ];
+
+  if (instead === undefined) {
+    return failed;
+  }
+
+  const usually = instead.tls ? "TLS" : "plaintext";
+
+  return [
+    ...failed,
+    words(`. Port ${instead.port} is usually ${usually}: try `),
+    {
+      _tag: "Command",
+      text: contained(`/set ${optionName(network, ["ircds"])} ${showText(ircds, [instead])}`),
+    },
+  ];
+};
+
 /**
  * An item as a line.
  * @param content - What the item shows.
+ * @param network - The Network it belongs to, which a command it suggests names.
  * @returns The line.
  */
-export const lineOf = (content: ItemContent): Line => {
+export const lineOf = (content: ItemContent, network: NetworkId): Line => {
   switch (content._tag) {
     case "Message": {
       const delivery = content.ours?.delivery;
@@ -703,12 +827,18 @@ export const lineOf = (content: ItemContent): Line => {
     }
 
     case "Activity": {
-      return { _tag: "Description", parts: describeActivity(content.activity), tone: "Activity" };
+      return {
+        _tag: "Description",
+        marker: markerOf(content.activity),
+        parts: describeActivity(content.activity),
+        tone: "Activity",
+      };
     }
 
     case "SessionBegan": {
       return {
         _tag: "Description",
+        marker: undefined,
         parts: [words("Connected as "), nickPart(content.nick)],
         tone: "Session",
       };
@@ -717,6 +847,7 @@ export const lineOf = (content: ItemContent): Line => {
     case "SessionEnded": {
       return {
         _tag: "Description",
+        marker: undefined,
         parts: [words(`Disconnected: ${endReason(content.reason)}`)],
         tone: "Session",
       };
@@ -725,7 +856,8 @@ export const lineOf = (content: ItemContent): Line => {
     case "ConnectionFailed": {
       return {
         _tag: "Description",
-        parts: [words(`Could not connect: ${endReason(content.reason)}`)],
+        marker: undefined,
+        parts: failedParts(content, network),
         tone: "Session",
       };
     }
@@ -735,6 +867,7 @@ export const lineOf = (content: ItemContent): Line => {
 
       return {
         _tag: "Description",
+        marker: undefined,
         parts: [
           ...attemptedParts(content.attempted),
           words(

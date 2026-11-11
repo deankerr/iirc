@@ -143,7 +143,7 @@ describe("the shell", () => {
     }).toStrictEqual({
       nested: false,
       text: [
-        "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [-tls] <nick>. /set opens the options.",
+        "Choose a Timeline, or add a Network with /network add <id> <host>[/port] [plain] <nick>. /set opens the options.",
       ],
     });
   });

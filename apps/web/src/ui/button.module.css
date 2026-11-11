@@ -41,3 +41,11 @@
 .quiet {
   border-color: transparent;
 }
+
+/* On a touch screen, a finger's size, its text kept as it is. */
+@media (pointer: coarse) {
+  .button {
+    min-width: var(--target-size);
+    min-height: var(--target-size);
+  }
+}

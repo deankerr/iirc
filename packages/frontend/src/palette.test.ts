@@ -63,6 +63,8 @@ const configuration = Schema.decodeSync(NetworkConfiguration)({
 });
 
 const inChannel: CommandContext = {
+  behind: false,
+  draft: undefined,
   focus: {
     detached: false,
     key: "#iirc",
@@ -160,6 +162,8 @@ describe("the palette's entries", () => {
         "command:theme.set",
         "command:options.unset",
         "command:network.add",
+        "command:network.connect",
+        "command:network.disconnect",
         "command:timeline.next",
         "command:timeline.previous",
         "command:timeline.unread",
@@ -195,6 +199,8 @@ describe("the palette's entries", () => {
         "command:theme.set",
         "command:options.unset",
         "command:network.add",
+        "command:network.connect",
+        "command:network.disconnect",
         "command:timeline.latest",
         "command:timeline.next",
         "command:timeline.previous",

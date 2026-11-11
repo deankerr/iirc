@@ -6,6 +6,7 @@
  */
 import type { UnparseableReason } from "@iirc/protocol/line";
 
+import type { IrcdAddress } from "./configuration.ts";
 import type { ConnectionId, Instant, IntentId, MessageId, TimerId } from "./ids.ts";
 import type { CloseReason, Input, Lookup, SayKind } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
@@ -169,6 +170,12 @@ export interface OtherReply {
   readonly params: readonly string[];
 }
 
+/** Where a User actually connects from, by `338`: a `user@host` mask, an IP address, or both. */
+export interface ProfileActual {
+  readonly mask: string | undefined;
+  readonly ip: string | undefined;
+}
+
 /**
  * One User as a Lookup's reply describes them: a `WHOIS`'s, or one entry of a `WHOWAS`'s.
  * Every field is what the Network said, read by structure, and `undefined` or empty when
@@ -197,6 +204,13 @@ export interface Profile {
   readonly account: string | undefined;
   /** From `671`. */
   readonly secure: boolean;
+  /**
+   * Where the User actually connects from, from `338`'s parameters between the nick and its
+   * text: a `user@host` mask, an IP address, or both, as the Ircd shows them.
+   */
+  readonly actual: ProfileActual | undefined;
+  /** The User's modes, such as `+Zi`, from `379`, when its text holds them as one word. */
+  readonly modes: string | undefined;
   /** Every other numeric of the reply that named this User, in order, so nothing is lost. */
   readonly other: readonly OtherReply[];
 }
@@ -313,7 +327,15 @@ export type News =
     }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
-  | { readonly _tag: "ConnectionFailed"; readonly at: Instant; readonly reason: EndReason }
+  /** A Connection ended before its Session began, with the Ircd it was dialled to. */
+  | {
+      readonly _tag: "ConnectionFailed";
+      readonly at: Instant;
+      readonly reason: EndReason;
+      readonly ircd: IrcdAddress;
+      /** Whether the Connection was open, the Transport having reached the Ircd, before it ended. */
+      readonly opened: boolean;
+    }
   | {
       readonly _tag: "Refused";
       readonly intent: IntentId;

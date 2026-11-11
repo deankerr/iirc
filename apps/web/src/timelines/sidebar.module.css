@@ -143,3 +143,30 @@
 .messages {
   color: var(--color-muted);
 }
+
+/* On a touch screen, every row and control is a finger's size, its text kept as dense. */
+@media (pointer: coarse) {
+  .network,
+  .item {
+    min-height: var(--target-size);
+  }
+
+  .network {
+    padding-left: 0;
+  }
+
+  /* Under the Network's name, past its chevron. */
+  .item {
+    padding-left: var(--target-size);
+  }
+
+  .chevron {
+    align-self: stretch;
+    width: var(--target-size);
+    margin-right: calc(-1 * var(--space-2));
+  }
+
+  .options {
+    min-height: var(--target-size);
+  }
+}

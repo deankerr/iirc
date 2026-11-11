@@ -20,6 +20,7 @@ import {
   markDue,
   markLatest,
   networkActivity,
+  saidLevel,
   titleOf,
 } from "./activity.ts";
 import type { Page } from "./activity.ts";
@@ -234,6 +235,9 @@ const world = (
 const titled = (...timelines: readonly (typeof Timeline.Encoded)[]) =>
   titleOf(sidebar(world(timelines, undefined)));
 
+const leveled = (...timelines: readonly (typeof Timeline.Encoded)[]) =>
+  saidLevel(sidebar(world(timelines, undefined)));
+
 const changed = (
   sequence: number,
   change: Partial<typeof TimelineChange.Encoded>
@@ -327,6 +331,31 @@ describe("what is unread", () => {
         described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 1 } })
       ),
     }).toStrictEqual({ calling: "(3) iirc", calm: "iirc", capped: "(999+) iirc" });
+  });
+
+  it("gives the highest level said and unread anywhere, and none for Activity alone", () => {
+    expect({
+      activity: leveled(described({ id: iirc, name: "#iirc", unread: { activity: 5 } })),
+      direct: leveled(
+        described({ id: iirc, name: "#iirc", unread: { messages: 9 } }),
+        described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 1 } })
+      ),
+      highlight: leveled(
+        described({ id: iirc, name: "#iirc", unread: { highlights: 1 } }),
+        described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 1 } })
+      ),
+      message: leveled(
+        described({ id: own, kind: "Network", name: "libera", unread: { activity: 2 } }),
+        described({ id: iirc, name: "#iirc", unread: { activity: 5, messages: 1 } })
+      ),
+      none: leveled(described({ id: iirc, name: "#iirc" })),
+    }).toStrictEqual({
+      activity: undefined,
+      direct: "Direct",
+      highlight: "Highlight",
+      message: "Message",
+      none: undefined,
+    });
   });
 
   it("marks a Timeline read up to its latest, as the Daemon names its Target", () => {

@@ -132,10 +132,12 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
 
 const profileOf = (nick: string): Profile => ({
   account: undefined,
+  actual: undefined,
   away: undefined,
   channels: [],
   host: undefined,
   idle: undefined,
+  modes: undefined,
   nick,
   operator: false,
   other: [],
@@ -200,7 +202,11 @@ const channelsOf = (run: Run, list: string): readonly ProfileChannel[] | undefin
  * What one Line of a reply says of a User, read from its parameters after the nick, as a
  * change to them, or `undefined` when they do not fit.
  */
-type Reader = (said: readonly string[], run: Run) => ((profile: Profile) => Profile) | undefined;
+type Reader = (
+  said: readonly string[],
+  run: Run,
+  line: Line
+) => ((profile: Profile) => Profile) | undefined;
 
 // `311` and `314 <client> <nick> <user> <host> * :<realname>`.
 const readUser: Reader = ([user, host, , realname]) =>
@@ -230,6 +236,91 @@ const readChannels: Reader = (said, run) => {
   return channels === undefined
     ? undefined
     : (profile) => ({ ...profile, channels: [...profile.channels, ...channels] });
+};
+
+// Any other numeric of a reply, kept as it came, after the parameter that names Self.
+const keepOther = (line: Line) => (profile: Profile) => ({
+  ...profile,
+  other: [...profile.other, { numeric: line.command, params: line.params.slice(1) }],
+});
+
+// An IPv4 address in dotted-quad form, each part 0 to 255 in decimal, with no leading
+// zero, which some readers take as octal.
+const isIpv4 = (text: string): boolean => {
+  const parts = text.split(".");
+
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^(?:0|[1-9]\d{0,2})$/u.test(part) && Number(part) <= 255)
+  );
+};
+
+const hextet = /^[\dA-Fa-f]{1,4}$/u;
+
+// An IPv6 address: eight groups of up to four hex digits, or fewer around one `::`, as
+// `0::1`, the form an Ircd prefixes with a zero so it cannot start with a colon. An IPv4
+// address may stand for the last two groups only, the final 32 bits, as in
+// `0::ffff:192.0.2.1`, so nothing may follow it, a `::` included.
+const isIpv6 = (text: string): boolean => {
+  const halves = text.split("::");
+
+  if (halves.length > 2) {
+    return false;
+  }
+
+  const groups = halves.map((half) => (half === "" ? [] : half.split(":")));
+  const tail = groups.at(-1) ?? [];
+  const last = tail.at(-1);
+  const embedded = last !== undefined && isIpv4(last);
+  const hextets = [...groups.slice(0, -1).flat(), ...(embedded ? tail.slice(0, -1) : tail)];
+  const count = hextets.length + (embedded ? 2 : 0);
+
+  if (!hextets.every((group) => hextet.test(group))) {
+    return false;
+  }
+
+  return halves.length === 2 ? count <= 7 : count === 8;
+};
+
+const isIp = (text: string): boolean => isIpv4(text) || isIpv6(text);
+
+// `338 <client> <nick> [<user@host>] [<ip>] :<text>`. Its forms vary by Ircd, so each
+// parameter between the nick and the text is told by its shape alone: one holding `@`
+// is the mask, and one that is an IP address the IP. Its text is never read. A reply
+// with no such parameter, two of a kind, or one of neither shape is kept as it came.
+const readActual: Reader = (said, _run, line) => {
+  let mask: string | undefined;
+  let ip: string | undefined;
+
+  for (const param of said.slice(0, -1)) {
+    if (param.includes("@") && mask === undefined) {
+      mask = param;
+    } else if (isIp(param) && ip === undefined) {
+      ip = param;
+    } else {
+      return keepOther(line);
+    }
+  }
+
+  return mask === undefined && ip === undefined
+    ? keepOther(line)
+    : (profile) => ({ ...profile, actual: { ip, mask } });
+};
+
+const userModes = /^\+[A-Za-z]+$/u;
+
+// `379 <client> <nick> :is using modes +Zi`. The modes have no parameter of their own,
+// only a word in the text. A `+` and letters alone is the syntax of a change of user
+// modes, which no wording around it shares, so a text with exactly one such word gives
+// it, and any other, with none or with a second, as UnrealIRCd adds a snomask, is kept
+// as it came.
+const readModes: Reader = (said, _run, line) => {
+  const words = (said.at(-1) ?? "").split(" ").filter((word) => userModes.test(word));
+  const [modes] = words;
+
+  return words.length === 1 && modes !== undefined
+    ? (profile) => ({ ...profile, modes })
+    : keepOther(line);
 };
 
 /** What each numeric the Client models says, by the numeric. */
@@ -262,15 +353,11 @@ const readers: ReadonlyMap<string, Reader> = new Map<string, Reader>([
         ? undefined
         : (profile) => ({ ...profile, account }),
   ],
+  ["338", readActual],
+  ["379", readModes],
   // `671 <client> <nick> :is using a secure connection`
   ["671", () => (profile) => ({ ...profile, secure: true })],
 ]);
-
-// Any other numeric of a reply, kept as it came, after the parameter that names Self.
-const keepOther = (line: Line) => (profile: Profile) => ({
-  ...profile,
-  other: [...profile.other, { numeric: line.command, params: line.params.slice(1) }],
-});
 
 /**
  * What one Line of a reply says of the Users described: the profiles after it, or
@@ -286,7 +373,7 @@ const described = (run: Run, looking: Looking, line: Line): readonly Profile[] |
   const [, nick, ...said] = params;
   const { profiles } = looking;
   const reader = readers.get(command);
-  const apply = reader === undefined ? keepOther(line) : reader(said, run);
+  const apply = reader === undefined ? keepOther(line) : reader(said, run, line);
 
   if (nick === undefined || apply === undefined) {
     return undefined;

@@ -36,3 +36,14 @@
 .number {
   color: var(--color-muted);
 }
+
+@media (pointer: coarse) {
+  .switcher {
+    padding-block: 0;
+  }
+
+  .choice {
+    min-width: var(--target-size);
+    min-height: var(--target-size);
+  }
+}

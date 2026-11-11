@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 4;
+export const projectionVersion = 5;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -580,7 +580,15 @@ const foldNews = (draft: Draft, news: News, n: number) => {
         draft,
         draft.timeline,
         position,
-        { _tag: news._tag, at: news.at, reason: news.reason },
+        news._tag === "ConnectionFailed"
+          ? {
+              _tag: news._tag,
+              at: news.at,
+              ircd: news.ircd,
+              opened: news.opened,
+              reason: news.reason,
+            }
+          : { _tag: news._tag, at: news.at, reason: news.reason },
         undefined,
         "Activity"
       );

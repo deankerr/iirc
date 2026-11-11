@@ -14,7 +14,7 @@ import { perform } from "../composer/atoms.ts";
 import { Inlines } from "../timelines/inlines.tsx";
 import { formattedAt } from "../ui/dates.ts";
 import { timelineHeader } from "./atoms.ts";
-import { membersShown } from "./state.ts";
+import { membersVisible } from "./state.ts";
 
 import styles from "./timeline-header.module.css";
 
@@ -77,11 +77,12 @@ const Topic = ({ topic }: { readonly topic: TopicShown }) => {
 };
 
 /**
- * The toggle that shows or hides the members, as `/members` does.
+ * The toggle that shows or hides the members, as `/members` does: the column beside the
+ * Channel, or the sheet over it on a compact screen.
  * @returns The toggle.
  */
 const MembersToggle = () => {
-  const shown = useAtomValue(membersShown);
+  const shown = useAtomValue(membersVisible);
   const run = useAtomSet(perform);
 
   return (

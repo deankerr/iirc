@@ -1,11 +1,25 @@
+/* The columns every row shares, so an Activity's words start where a Message's text does. */
+.timed {
+  --time-column: 5ch;
+}
+
+.seconds {
+  --time-column: 8ch;
+}
+
+.untimed {
+  --time-column: 0;
+}
+
 .message,
 .highlight,
 .unsent,
 .activity,
 .refused,
-.session {
+.session,
+.gap {
   display: grid;
-  grid-template-columns: 6ch minmax(0, 16ch) minmax(0, 1fr) auto;
+  grid-template-columns: var(--time-column) minmax(0, 16ch) minmax(0, 1fr) auto;
   column-gap: var(--space-3);
   padding: 0 var(--space-3);
   line-height: var(--line-height);
@@ -14,7 +28,18 @@
 .activity,
 .refused,
 .session {
-  grid-template-columns: 6ch minmax(0, 1fr);
+  color: var(--color-muted);
+}
+
+/* What marks an Activity in the senders' column, right-aligned as a nick is, and dim. */
+.marker {
+  overflow: hidden;
+  color: var(--color-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.repeated {
   color: var(--color-muted);
 }
 
@@ -63,23 +88,30 @@
   color: var(--color-danger);
 }
 
+/* A Gap: a dashed rule through the senders' column, its words where text starts, and on. */
 .gap {
-  display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-1) var(--space-3);
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
   color: var(--color-danger);
 }
 
-.gap::before,
-.gap::after {
-  content: "";
-  flex: 1;
+.rule {
   border-top: var(--border-width) dashed var(--color-border);
 }
 
 .gapText {
+  display: flex;
+  grid-column: 3 / -1;
+  align-items: center;
+  gap: var(--space-3);
   white-space: nowrap;
+}
+
+.gapText::after {
+  content: "";
+  flex: 1;
+  border-top: var(--border-width) dashed var(--color-border);
 }
 
 /* Where what is new begins, as the Timeline opened. */

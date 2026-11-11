@@ -70,6 +70,39 @@ describe("dialling", () => {
   });
 });
 
+describe("a failed Connection", () => {
+  it("says whether it was open, so a connect that timed out is told from one the Ircd ended", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: lines(
+        "!! configure",
+        "-> dial irc.test:6697 tls",
+        "== closed TimedOut",
+        "?? connection-failed Closed TimedOut",
+        "+2s",
+        "-> dial irc.test:6697 tls",
+        "== opened",
+        ">> CAP LS 302",
+        ">> NICK iirc",
+        ">> USER iirc 0 * iirc",
+        "== closed TimedOut",
+        "?? connection-failed Closed TimedOut"
+      ),
+    });
+
+    expect(
+      played.steps.flatMap((step) =>
+        step.news.flatMap((news) =>
+          news._tag === "ConnectionFailed" ? [{ ircd: news.ircd, opened: news.opened }] : []
+        )
+      )
+    ).toStrictEqual([
+      { ircd: { host: "irc.test", port: 6697, tls: true }, opened: false },
+      { ircd: { host: "irc.test", port: 6697, tls: true }, opened: true },
+    ]);
+  });
+});
+
 describe("redialling", () => {
   it("waits 2 s, then 4, 8, and 16, doubling while Connections keep failing", () => {
     const played = play(client, {
