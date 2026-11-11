@@ -80,6 +80,13 @@ export interface WaitTimes {
   readonly interval: Duration.Input;
   /** How long completing a nick waits before asking the Daemon, superseded by another Tab. */
   readonly complete: Duration.Input;
+  /**
+   * How long a Lookup has, from when the Owner asked, for its result: its `look`, every ask
+   * after it by its intent, and the waits between.
+   */
+  readonly lookup: Duration.Input;
+  /** How long one request of a Lookup waits for its answer, within its deadline. */
+  readonly lookRequest: Duration.Input;
 }
 
 /** How long the runtime waits: a test makes these short. */
@@ -90,6 +97,8 @@ export class Waits extends Context.Reference<WaitTimes>("@iirc/web/Waits", {
     idle: "45 seconds",
     interval: "1 second",
     longest: "15 seconds",
+    lookRequest: "45 seconds",
+    lookup: "2 minutes",
     reconnect: "1 second",
     retry: "500 millis",
     settle: "1 second",
@@ -473,21 +482,37 @@ const restore = (registry: AtomRegistry.AtomRegistry) => {
 };
 
 /**
- * Keeps the layout on this device as it changes, as best it can.
- * @param kept - The layout as JSON text, each time it changes.
+ * Keeps the layout on this device as it changes, as best it can: in the same tick as the
+ * change, from the registry's own subscription, so a reload straight after it finds it
+ * kept, and once more as the page is hidden for good, on `pagehide`. Text already kept is
+ * not written again, and the core bounds what a layout can be.
+ * @param registry - The registry.
  * @returns The keeper, which runs until it is interrupted.
  */
-const keeper = (kept: Stream.Stream<string | undefined>) =>
-  kept.pipe(
-    Stream.changes,
-    Stream.runForEach((text) =>
-      Effect.sync(() => {
-        if (text !== undefined) {
-          writeChoice(layoutKey, text);
+const keeper = (registry: AtomRegistry.AtomRegistry) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      let written: string | undefined;
+
+      const keep = () => {
+        const text = registry.get(layoutKept);
+
+        if (text !== undefined && text !== written && writeChoice(layoutKey, text)) {
+          written = text;
         }
-      })
-    )
-  );
+      };
+
+      const stop = registry.subscribe(layoutKept, keep, { immediate: true });
+
+      globalThis.addEventListener("pagehide", keep);
+
+      return () => {
+        stop();
+        globalThis.removeEventListener("pagehide", keep);
+      };
+    }),
+    (release) => Effect.sync(release)
+  ).pipe(Effect.andThen(Effect.never), Effect.scoped);
 
 /**
  * While the browser is signed in, the Timelines are read and followed, from nothing each
@@ -509,7 +534,7 @@ export const sync = runtime
       const changes = get.stream(timelinesState);
 
       yield* Effect.all(
-        [reader(registry, changes), follower(registry, changes), keeper(get.stream(layoutKept))],
+        [reader(registry, changes), follower(registry, changes), keeper(registry)],
         { concurrency: "unbounded", discard: true }
       );
     })

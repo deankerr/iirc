@@ -12,6 +12,7 @@ import { ToggleButton } from "react-aria-components";
 
 import { perform } from "../composer/atoms.ts";
 import { Inlines } from "../timelines/inlines.tsx";
+import { formattedAt } from "../ui/dates.ts";
 import { timelineHeader } from "./atoms.ts";
 import { membersShown } from "./state.ts";
 
@@ -26,7 +27,7 @@ const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle:
  * @returns The words, or none when neither is known.
  */
 const setText = (topic: Extract<TopicShown, { readonly _tag: "Set" }>) => {
-  const when = topic.at === undefined ? undefined : day.format(new Date(topic.at));
+  const when = topic.at === undefined ? undefined : formattedAt(day, topic.at);
 
   if (topic.by === undefined) {
     return when === undefined ? undefined : `set ${when}`;

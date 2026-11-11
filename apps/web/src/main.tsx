@@ -15,6 +15,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/app.tsx";
 import { channelSync } from "./channel/atoms.ts";
 import { chantypesSync, completer } from "./composer/completion.ts";
+import { lookupSync } from "./lookup/atoms.ts";
 import { uiSync } from "./options/ui.ts";
 import { watchPage } from "./page/watch.ts";
 import { marking } from "./reading/atoms.ts";
@@ -40,6 +41,9 @@ registry.mount(channelSync);
 registry.mount(completer);
 
 registry.mount(chantypesSync);
+
+// Each Pane's Lookup card, let go of with its Pane, and every one on signing out.
+registry.mount(lookupSync);
 
 // Whether the Owner can see the page, and its title, kept in one place for its whole life.
 watchPage(registry);

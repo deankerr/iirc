@@ -12,6 +12,7 @@ import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
 import { timeShown } from "../options/ui.ts";
+import { dateOf, formattedAt } from "../ui/dates.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
@@ -47,10 +48,19 @@ const clockFor = (shown: TimeShown) => (shown === "HH:mm:ss" ? clockWithSeconds 
  */
 const Time = ({ at }: { readonly at: number }) => {
   const shown = useAtomValue(timeShown);
-  const date = new Date(at);
+  const date = dateOf(at);
 
   if (shown === "none") {
     return null;
+  }
+
+  // An instant a Date cannot hold, as a hostile Ircd's `server-time` can give, is unavailable.
+  if (date === undefined) {
+    return (
+      <span className={styles.time} title="Time unavailable">
+        {shown === "HH:mm:ss" ? "--:--:--" : "--:--"}
+      </span>
+    );
   }
 
   return (
@@ -132,8 +142,8 @@ const Piece = ({ part }: { readonly part: Part }) => {
  */
 const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }) => {
   const shown = clockFor(useAtomValue(timeShown));
-  const from = shown.format(new Date(gap.from.at));
-  const to = gap.to === null ? undefined : shown.format(new Date(gap.to.at));
+  const from = formattedAt(shown, gap.from.at) ?? "an unknown time";
+  const to = gap.to === null ? undefined : (formattedAt(shown, gap.to.at) ?? "an unknown time");
 
   const span =
     to === undefined ? `not connected since ${from}` : `not connected from ${from} to ${to}`;

@@ -778,6 +778,75 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "looks a User up: /whois shows their card with user@host and the Channel shared, and /whois nobody says not found",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "lookup"),
+        "#iirc-lookup"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+        await page.getByRole("log", { name: channel }).waitFor();
+
+        const composer = page.getByRole("textbox", { name: channel });
+
+        await composer.fill("/whois peer");
+        await composer.press("Enter");
+
+        // The peer made the Channel, so holds its operator rank there, and its Timeline is
+        // open, so choosing it opens it.
+        const card = page.getByRole("region", { name: "whois peer" });
+        const shared = card.getByRole("button", { name: `Open ${channel}, operator` });
+
+        await shared.waitFor();
+
+        const drawn = {
+          channel: await shared.textContent(),
+          mask: /\bpeer@\S+/u.test((await card.textContent()) ?? ""),
+        };
+
+        // Escape in the composer puts it away.
+        await composer.press("Escape");
+        await card.waitFor({ state: "detached" });
+
+        await composer.fill("/whois nobody");
+        await composer.press("Enter");
+
+        const missing = page.getByRole("region", { name: "whois nobody" });
+
+        await missing.getByText(/^No one uses the nick nobody now \(\d{3}\)\.$/u).waitFor();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          drawn,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          violations,
+        }).toStrictEqual({
+          drawn: { channel: `@${channel}`, mask: true },
+          problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "shows who is here: the header's topic, the members with their rank, nick completion, and /query",
     { timeout: 90_000 },
     async () => {
@@ -1327,6 +1396,8 @@ describe("the web frontend on iirc daemon --web", () => {
         await expect.poll(async () => await page.getByRole("separator").count()).toBe(1);
         const closeKept = await kept();
 
+        // The page keeps its layout in the same tick as it changes, so a reload straight
+        // after the close finds the two Panes side by side, with nothing to wait for.
         // A reload brings the layout back, the focus with it.
         await page.reload();
         await left.getByText("to the left", { exact: true }).waitFor();

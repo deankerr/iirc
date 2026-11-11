@@ -295,6 +295,25 @@ describe("completing", () => {
     });
   });
 
+  it("completes the nick after /whois and /whowas, asked of the members, with a space", () => {
+    const asked = play("/whois pe", [tab]);
+
+    const answered = play("/whois pe", [
+      tab,
+      { _tag: "NicksRead", nicks: ["peer"], place: iirc, request: 1, text: "/whois pe" },
+    ]);
+
+    expect({
+      answered: shown(answered),
+      asked: nicksWanted(asked.state),
+      direct: shown(play("/whowas pe", [tab], peers)),
+    }).toStrictEqual({
+      answered: ["/whois peer ", 12],
+      asked: { prefix: "pe", request: 1, timeline: iirc },
+      direct: ["/whowas peer ", 13],
+    });
+  });
+
   it("gives back what was typed on Escape, caret and all", () => {
     const middle = { ...play("x", []), caret: 6, text: "hi /m there" };
 

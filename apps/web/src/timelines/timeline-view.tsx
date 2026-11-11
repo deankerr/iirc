@@ -17,6 +17,7 @@ import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { TimelineHeader } from "../channel/timeline-header.tsx";
+import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown } from "../options/ui.ts";
 import { movedEvent, paneNumber } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
@@ -664,6 +665,7 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
       return (
         <section aria-label={label} className={styles.view}>
           <TimelineHeader name={label} number={number} pane={pane} />
+          <LookupCard pane={pane} />
           <Lines
             divider={shown.divider}
             key={shown.timeline}

@@ -86,6 +86,7 @@ Configuration always goes whole, so joining or parting a Channel is another `PUT
 | [`apps/iirc`](apps/iirc) | The `iirc` executable |
 | [`apps/web`](apps/web) | The web frontend: React over the pure core, built with Vite |
 | [`fixtures/transcripts`](fixtures/transcripts) | Real Sessions on Ergo and ngircd, replayed in the tests |
+| [`fixtures/nicks`](fixtures/nicks) | How a nick is read, as data the Client's and the web frontend's tests both run |
 | [`docs`](docs) | Architecture, decisions, and the IRC specifications |
 
 ## Documentation

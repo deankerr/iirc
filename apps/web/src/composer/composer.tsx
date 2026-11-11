@@ -2,8 +2,9 @@
  * The composer under the Panes, the focused Pane's Timeline's or, with none open, one where
  * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
  * Enter sends and Shift+Enter starts a new line, Up and Down recall what was sent from
- * the first and last lines, and Escape lets go of an error or a confirmation. What it
- * says goes through the command registry in the core, and the runtime carries it out.
+ * the first and last lines, and Escape lets go of an error or a confirmation, or, with
+ * neither, puts the focused Pane's Lookup card away. What it says goes through the command
+ * registry in the core, and the runtime carries it out.
  *
  * @packageDocumentation
  */
@@ -15,6 +16,7 @@ import type { Offer, Place } from "@iirc/frontend/composer";
 import type { KeyboardEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
+import { dismissCard } from "../lookup/atoms.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
 import { Button } from "../ui/button.tsx";
@@ -95,6 +97,8 @@ const Composer = ({
   const sendNow = useAtomSet(send);
   const confirmNow = useAtomSet(confirmSend);
   const again = useAtomSet(takeUp);
+  const closeCard = useAtomSet(dismissCard);
+  const pane = useAtomValue(focusedId);
   const focusAsked = useAtomValue(composerFocus);
   const input = useRef<HTMLTextAreaElement>(null);
   const focusSeen = useRef(focusAsked);
@@ -171,6 +175,16 @@ const Composer = ({
     return false;
   };
 
+  // Escape lets go of a notice or a confirmation, and with neither, puts the focused
+  // Pane's Lookup card away.
+  const escaped = () => {
+    if (notice === undefined && confirming === undefined) {
+      closeCard(pane);
+    } else {
+      dismissNow(timeline);
+    }
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const element = event.currentTarget;
     const { selectionEnd, selectionStart, value } = element;
@@ -203,7 +217,7 @@ const Composer = ({
       }
     } else if (event.key === "Escape") {
       event.preventDefault();
-      dismissNow(timeline);
+      escaped();
     } else if (
       event.key === "ArrowUp" &&
       plain &&

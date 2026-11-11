@@ -10,7 +10,6 @@
  *
  * @packageDocumentation
  */
-import { CallerIntent } from "@iirc/api";
 import type { Sequence } from "@iirc/api";
 import type { Act, Intent, Say } from "@iirc/frontend/commands";
 import {
@@ -32,13 +31,15 @@ import type {
 } from "@iirc/frontend/composer";
 import { followFrom, opened, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Timelines } from "@iirc/frontend/timelines";
-import { Context, Effect, Option, Schedule, Schema, Semaphore, Stream } from "effect";
+import { Effect, Option, Schedule, Semaphore, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
+import { decodeIntent, IntentNames } from "../app/intent-names.ts";
 import { runtime } from "../app/runtime.ts";
 import { query } from "../channel/atoms.ts";
 import { channelState, showMembers } from "../channel/state.ts";
+import { look } from "../lookup/atoms.ts";
 import { notifying } from "../notifications/notifier.ts";
 import {
   addNetwork,
@@ -84,13 +85,6 @@ export const placeOf = (registry: AtomRegistry.AtomRegistry): Place => {
 
   return shown._tag === "Shown" ? shown.timeline : "Nowhere";
 };
-
-/** Names each Say's intent, unique across the whole Journal: a test makes them predictable. */
-export class IntentNames extends Context.Reference<() => string>("@iirc/web/IntentNames", {
-  defaultValue: () => () => `web-${crypto.randomUUID()}`,
-}) {}
-
-const decodeIntent = Schema.decodeSync(CallerIntent);
 
 /**
  * Folds one event into the composers.
@@ -300,7 +294,8 @@ type Local = Extract<
       | "Pane"
       | "ListThemes"
       | "ImportTheme"
-      | "Search";
+      | "Search"
+      | "Look";
   }
 >;
 
@@ -309,6 +304,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "ImportTheme",
   "Latest",
   "ListThemes",
+  "Look",
   "Open",
   "OpenOptions",
   "OpenPalette",
@@ -328,7 +324,8 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 /**
  * Carries out an intent in the page: shows the options, the search, or a Timeline, jumps
  * to a Timeline's latest, opens the password prompt or the palette, focuses the composer,
- * starting an empty draft with text, shows or hides the members, or changes the Panes.
+ * starting an empty draft with text, shows or hides the members, changes the Panes, or
+ * starts a Lookup, which goes on beside the composer's turn.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -389,6 +386,12 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "Search": {
       registry.set(showSearch, intent.query);
+      break;
+    }
+
+    // A Lookup is asked beside the composer's turn, so a Say never waits behind it.
+    case "Look": {
+      look(registry, intent);
       break;
     }
 

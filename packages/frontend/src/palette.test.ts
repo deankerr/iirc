@@ -202,6 +202,8 @@ describe("the palette's entries", () => {
         "command:timeline.read",
         "command:notify.set",
         "command:timeline.query",
+        "command:lookup.whois",
+        "command:lookup.whowas",
         "command:members.toggle",
         "command:search.open",
         "command:pane.split",
