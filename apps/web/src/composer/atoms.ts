@@ -51,6 +51,7 @@ import type { Outcome as Changed } from "../options/atoms.ts";
 import { changeUi } from "../options/ui.ts";
 import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
+import { showSearch } from "../search/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, timelinesState, Waits } from "../timelines/atoms.ts";
@@ -298,7 +299,8 @@ type Local = Extract<
       | "ShowMembers"
       | "Pane"
       | "ListThemes"
-      | "ImportTheme";
+      | "ImportTheme"
+      | "Search";
   }
 >;
 
@@ -312,6 +314,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "OpenPalette",
   "Pane",
   "PromptCredential",
+  "Search",
   "ShowMembers",
 ]);
 
@@ -323,9 +326,9 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
 const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 
 /**
- * Carries out an intent in the page: shows the options or a Timeline, jumps to a Timeline's latest, opens the password
- * prompt or the palette, focuses the composer, starting an empty draft with text, shows
- * or hides the members, or changes the Panes.
+ * Carries out an intent in the page: shows the options, the search, or a Timeline, jumps
+ * to a Timeline's latest, opens the password prompt or the palette, focuses the composer,
+ * starting an empty draft with text, shows or hides the members, or changes the Panes.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -381,6 +384,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "Pane": {
       registry.set(paned, intent.change);
+      break;
+    }
+
+    case "Search": {
+      registry.set(showSearch, intent.query);
       break;
     }
 

@@ -1,5 +1,5 @@
 /**
- * One Pane: its open Timeline with its header, or the options, and its Channel's members
+ * One Pane: its open Timeline with its header, the options, or the search, and its Channel's members
  * beside it while they show, marked while it has the focus. A press or the focus moving
  * anywhere in it gives it the focus, so the composer then writes to its Timeline.
  *
@@ -11,10 +11,36 @@ import type { PaneView } from "@iirc/frontend/timelines";
 
 import { MembersPanel } from "../channel/members-panel.tsx";
 import { OptionsView } from "../options/options-view.tsx";
+import { SearchView } from "../search/search-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
 import { alone, focusedId, focusPane, paneNumber } from "./atoms.ts";
 
 import styles from "./pane.module.css";
+
+/**
+ * What a Pane shows in its main place: the options, the search, or its Timeline.
+ * @param pane - The Pane.
+ * @returns The view.
+ */
+const main = (pane: PaneOf<PaneView>) => {
+  switch (pane.view.main._tag) {
+    case "Options": {
+      return <OptionsView />;
+    }
+
+    case "Search": {
+      return <SearchView />;
+    }
+
+    case "Timeline": {
+      return <TimelineView pane={pane.id} />;
+    }
+
+    default: {
+      return pane.view.main satisfies never;
+    }
+  }
+};
 
 /**
  * One Pane's content.
@@ -41,9 +67,7 @@ export const Pane = ({ pane }: { readonly pane: PaneOf<PaneView> }) => {
         focus(pane.id);
       }}
     >
-      <div className={styles.main}>
-        {pane.view.main._tag === "Options" ? <OptionsView /> : <TimelineView pane={pane.id} />}
-      </div>
+      <div className={styles.main}>{main(pane)}</div>
       <MembersPanel pane={pane.id} />
     </div>
   );

@@ -34,6 +34,35 @@
   width: 100%;
 }
 
+/*
+ * The item jumped to from a search: an accent band at its edge, over a tint, that fades
+ * after a few seconds, and goes at once when the Owner scrolls.
+ */
+.target {
+  animation: target-fades 4s ease-in forwards;
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  background: var(--color-selection);
+}
+
+@keyframes target-fades {
+  0%,
+  60% {
+    box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+    background: var(--color-selection);
+  }
+
+  100% {
+    box-shadow: inset var(--edge-width) 0 0 transparent;
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .target {
+    animation-timing-function: steps(1, end);
+  }
+}
+
 .start {
   padding: var(--space-2) var(--space-3);
   color: var(--color-muted);

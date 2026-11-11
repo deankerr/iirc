@@ -170,6 +170,7 @@ const reading = async (page = seeing) => {
     if (shown._tag === "Shown") {
       registry.set(following, {
         following: true,
+        owned: false,
         seen: shown.window.items.at(-1)?.position,
         timeline: shown.timeline,
       });
@@ -239,7 +240,12 @@ describe("marking read", () => {
     await wait(150);
     const hidden = daemon.reads.length;
 
-    registry.set(following, { following: false, seen: undefined, timeline: timelineId(iirc) });
+    registry.set(following, {
+      following: false,
+      owned: false,
+      seen: undefined,
+      timeline: timelineId(iirc),
+    });
     registry.set(pageState, seeing);
     await wait(150);
     const back = daemon.reads.length;

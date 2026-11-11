@@ -253,6 +253,7 @@ describe("reading a line", () => {
       "say.notice": "Required",
       "say.privmsg": "Required",
       "say.to": "Required",
+      "search.open": "Optional",
       "theme.set": "Optional",
       "timeline.latest": "None",
       "timeline.next": "None",

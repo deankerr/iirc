@@ -1,6 +1,7 @@
 import {
   NetworkEntry,
   NetworkId,
+  SearchResults,
   Sequence,
   SessionKnowledge,
   Timeline,
@@ -16,6 +17,8 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { panesOf, single } from "./layout.ts";
+import { parseQuery } from "./search.ts";
+import type { SearchRequest } from "./search.ts";
 import {
   emptyView,
   followFrom,
@@ -894,6 +897,12 @@ const simulate = (played: Scenario) => {
             read.limit
           ),
         };
+      }
+
+      // A run of these properties never jumps to a result or searches.
+      case "Around":
+      case "Search": {
+        throw new Error(`a property run never reads ${read._tag}`);
       }
 
       default: {
@@ -2760,5 +2769,389 @@ describe("a page read on its own before a window that holds the latest", () => {
       later: shown._tag === "Shown" ? shown.window.later : undefined,
       mode: older.mode,
     }).toStrictEqual({ first: 901, last: 1900, later: true, mode: "Asked" });
+  });
+});
+
+// Searching, and jumping to what was found.
+
+const decodeResults = Schema.decodeSync(SearchResults);
+
+/**
+ * The search shown in the focused Pane, searching a query read against the Timelines.
+ * @param state - The state.
+ * @param query - The query.
+ * @returns The state.
+ */
+const searching = (state: Timelines, query: string) =>
+  reduceTimelines(state, {
+    _tag: "SearchShown",
+    parsed: parseQuery(query, {
+      dayStart: () => 0,
+      focused: alpha,
+      networks: sidebar(state),
+    }),
+    query,
+  });
+
+/**
+ * The page of the search the state wants, started.
+ * @param state - The state.
+ * @returns The state, and the read.
+ */
+const searchStarted = (state: Timelines) => {
+  const read = wanted(state).find((one): one is SearchRequest => one._tag === "Search");
+
+  if (read === undefined) {
+    throw new Error("no page of the search wanted");
+  }
+
+  return { read, state: reduceTimelines(state, { _tag: "ReadStarted", read }) };
+};
+
+const resultsPage = (more: boolean, ...items: readonly ReturnType<typeof message>[]) =>
+  decodeResults({
+    items: encodedItems(items),
+    more,
+    next: more ? `${cursor(10, 1)}.${idOf(2)}` : null,
+    through: 5,
+    version: 1,
+  });
+
+const windowOf = (state: Timelines, timeline: TimelineId) => state.windows.get(timeline);
+
+describe("searching", () => {
+  it("shows in the focused Pane in front of its Timeline, reads a page at a time while shown, and closes back", () => {
+    let state = searching(following(), "word in:#b");
+    const first = searchStarted(state);
+
+    state = reduceTimelines(first.state, {
+      _tag: "SearchRead",
+      page: resultsPage(true, message(idOf(2), 20, 2)),
+      read: first.read,
+    });
+
+    const afterFirst = wanted(state).filter((one) => one._tag === "Search");
+
+    state = reduceTimelines(state, { _tag: "SearchChanged", change: { _tag: "More" } });
+    const next = searchStarted(state);
+    const closed = reduceTimelines(next.state, { _tag: "SearchClosed" });
+
+    expect({
+      after: next.read.after?.position.sequence,
+      afterFirst,
+      closed: [mainOf(closed), openOf(closed)],
+      filters: [first.read.filters.text, first.read.filters.timeline],
+      hidden: wanted(reduceTimelines(state, { _tag: "SearchClosed" })).filter(
+        (one) => one._tag === "Search"
+      ),
+      main: mainOf(state),
+      results: state.search.results.map((item) => item.sequence),
+    }).toStrictEqual({
+      after: 1,
+      afterFirst: [],
+      closed: [{ _tag: "Timeline" }, three],
+      filters: ["word", two],
+      // Hidden, it reads nothing, and what it found is kept.
+      hidden: [],
+      main: { _tag: "Search", back: { _tag: "Timeline" } },
+      results: [2],
+    });
+  });
+
+  it("shows the options again when closed, if it was opened in front of them", () => {
+    let state = reduceTimelines(following(), { _tag: "OptionsShown", filter: "nick" });
+
+    state = searching(state, "word");
+    const kept = keptLayout(state);
+
+    state = reduceTimelines(state, { _tag: "SearchClosed" });
+
+    expect({
+      kept: kept?.root._tag === "Pane" ? kept.root.view : undefined,
+      main: mainOf(state),
+    }).toStrictEqual({
+      // A search is never kept: what it shows in front of is.
+      kept: { open: three, options: "nick" },
+      main: { _tag: "Options", filter: "nick" },
+    });
+  });
+
+  it("begins again from the first page when the changes report a merge, an overflow, or a reset", () => {
+    let state = searching(following(), "m2 word");
+    const first = searchStarted(state);
+
+    state = reduceTimelines(first.state, {
+      _tag: "SearchRead",
+      page: resultsPage(true, message(idOf(2), 20, 2)),
+      read: first.read,
+    });
+
+    const restartedBy = (event: TimelinesEvent) => {
+      const after = reduceTimelines(state, event);
+      const read = wanted(after).find((one): one is SearchRequest => one._tag === "Search");
+
+      return [after.search.results.length, read?.after, read?.generation];
+    };
+
+    expect({
+      merged: restartedBy(
+        changed(6, {
+          merged: [{ changed: 6, id: idOf(3), into: idOf(2), network: "alpha" }],
+        })
+      ),
+      overflowed: restartedBy({
+        _tag: "Overflowed",
+        overflow: { sequence: sequenceOf(6), timelines: [two] },
+        place: { sequence: 6, version: 1 },
+      }),
+      quiet: restartedBy(changed(6, { items: encodedItems([message(idOf(3), 50, 6)]) })),
+      reset: restartedBy({ _tag: "Reset", reset: { through: sequenceOf(6), version: 2 } }),
+    }).toStrictEqual({
+      merged: [0, undefined, 2],
+      overflowed: [0, undefined, 2],
+      // A step with no merge keeps the pages read, and wants none.
+      quiet: [1, undefined, undefined],
+      reset: [0, undefined, 2],
+    });
+  });
+});
+
+describe("jumping to a result", () => {
+  it("opens its Timeline in the search's Pane, read around its position as a new window, never following", () => {
+    let state = searching(following(), "m2 word");
+
+    state = reduceTimelines(state, {
+      _tag: "Jumped",
+      position: message(idOf(2), 20, 2).position,
+      timeline: two,
+    });
+
+    const around = wanted(state).find((one) => one._tag === "Around");
+
+    if (around === undefined || around._tag !== "Around") {
+      throw new Error("no read around the result");
+    }
+
+    const reading = opened(state)._tag;
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: around });
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: around,
+      window: decodeWindow({
+        earlier: true,
+        gaps: [],
+        items: encodedItems([message(idOf(2), 10, 1), message(idOf(2), 20, 2)]),
+        later: true,
+        network: "alpha",
+        through: 5,
+        timeline: idOf(2),
+        version: 1,
+      }),
+    });
+
+    // A live item past the end waits beyond it, since the Owner is not at the latest.
+    state = reduceTimelines(state, changed(6, { items: encodedItems([message(idOf(2), 60, 6)]) }));
+    const window = windowOf(state, two);
+
+    expect({
+      around: [around.around.sequence, around.generation],
+      main: mainOf(state),
+      open: openOf(state),
+      reading,
+      window: [
+        window?.items.map((item) => item.sequence),
+        window?.following,
+        window?.later,
+        window?.target?.sequence,
+        window?.seen,
+      ],
+    }).toStrictEqual({
+      around: [2, 1],
+      main: { _tag: "Timeline" },
+      open: two,
+      reading: "Reading",
+      window: [[1, 2], false, true, 2, undefined],
+    });
+  });
+
+  it("takes no answer of the window it replaced, and reads around again after an overflow", () => {
+    // The latest of three is being read when the Owner jumps into it.
+    let state = reduceTimelines(following(), { _tag: "LatestWanted", timeline: three });
+    const latest = wanted(state).find((one) => one._tag === "Latest");
+
+    if (latest === undefined) {
+      throw new Error("no read of the latest");
+    }
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: latest });
+    state = reduceTimelines(state, {
+      _tag: "Jumped",
+      position: message(idOf(3), 30, 3).position,
+      timeline: three,
+    });
+
+    const around = wanted(state).find((one) => one._tag === "Around");
+
+    // The latest lands, for the window replaced: it is not taken.
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: latest,
+      window: numberedWindow(1900, 1999, true, false),
+    });
+
+    const ignored = windowOf(state, three)?.items.length;
+
+    if (around === undefined || around._tag !== "Around") {
+      throw new Error("no read around the result");
+    }
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: around });
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: around,
+      window: numberedWindow(100, 199, true, true),
+    });
+
+    state = reduceTimelines(state, {
+      _tag: "Overflowed",
+      overflow: { sequence: sequenceOf(6), timelines: [three] },
+      place: { sequence: 6, version: 1 },
+    });
+
+    expect({
+      again: wanted(state).find((one) => one._tag === "Around" || one._tag === "Latest")?._tag,
+      ignored,
+      latest: latest.generation,
+      now: around.generation,
+    }).toStrictEqual({ again: "Around", ignored: 0, latest: 0, now: 1 });
+  });
+
+  it("takes the latest as seen only when the Owner moved there themselves", () => {
+    let state = reduceTimelines(following(), {
+      _tag: "Jumped",
+      position: message(idOf(3), 40, 4).position,
+      timeline: three,
+    });
+
+    const around = wanted(state).find((one) => one._tag === "Around");
+
+    if (around === undefined || around._tag !== "Around") {
+      throw new Error("no read around the result");
+    }
+
+    // The newest is the result: the window around it holds the latest.
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: around });
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: around,
+      window: decodeWindow({
+        earlier: false,
+        gaps: [],
+        items: encodedItems([message(idOf(3), 30, 3), message(idOf(3), 40, 4)]),
+        later: false,
+        network: "alpha",
+        through: 5,
+        timeline: idOf(3),
+        version: 1,
+      }),
+    });
+
+    const at = message(idOf(3), 40, 4).position;
+
+    const laidOut = reduceTimelines(state, {
+      _tag: "Following",
+      following: true,
+      seen: at,
+      timeline: three,
+    });
+
+    const owned = reduceTimelines(laidOut, {
+      _tag: "Following",
+      following: true,
+      owned: true,
+      seen: at,
+      timeline: three,
+    });
+
+    expect({
+      laidOut: [
+        windowOf(laidOut, three)?.following,
+        windowOf(laidOut, three)?.seen,
+        windowOf(laidOut, three)?.anchor?.sequence,
+      ],
+      owned: [
+        windowOf(owned, three)?.following,
+        windowOf(owned, three)?.seen?.sequence,
+        windowOf(owned, three)?.anchor,
+      ],
+    }).toStrictEqual({
+      laidOut: [false, undefined, 4],
+      owned: [true, 4, undefined],
+    });
+  });
+
+  it("marks nothing read, and reads the latest again once the Owner asks or reaches it", () => {
+    let state = reduceTimelines(following(), {
+      _tag: "Jumped",
+      position: message(idOf(3), 30, 3).position,
+      timeline: three,
+    });
+
+    const around = wanted(state).find((one) => one._tag === "Around");
+
+    if (around === undefined || around._tag !== "Around") {
+      throw new Error("no read around the result");
+    }
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: around });
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read: around,
+      window: numberedWindow(100, 199, true, true),
+    });
+
+    const jumped = windowOf(state, three);
+    const left = reduceTimelines(state, { _tag: "TargetLeft", timeline: three });
+    const latest = reduceTimelines(state, { _tag: "LatestWanted", timeline: three });
+
+    expect({
+      jumped: [jumped?.seen, jumped?.following, jumped?.target?.sequence],
+      latest: [
+        wanted(latest).find((one) => one._tag === "Latest" || one._tag === "Around")?._tag,
+        windowOf(latest, three)?.target,
+        windowOf(latest, three)?.following,
+      ],
+      left: windowOf(left, three)?.target,
+    }).toStrictEqual({
+      jumped: [undefined, false, 3],
+      latest: ["Latest", undefined, true],
+      left: undefined,
+    });
+  });
+
+  it("jumps in the Pane that has the Timeline open, which takes the focus, leaving the search where it is", () => {
+    // Two Panes: p0 has three open, p1 has two, and the search shows in p1.
+    let state = split(following(), two);
+
+    state = searching(state, "m3 word");
+    state = reduceTimelines(state, {
+      _tag: "Jumped",
+      position: message(idOf(3), 30, 3).position,
+      timeline: three,
+    });
+
+    expect({
+      focused: state.layout.focused,
+      mains: panesOf(state.layout.root).map((pane) => pane.view.main._tag),
+      opens: opens(state),
+    }).toStrictEqual({
+      focused: "p0",
+      mains: ["Timeline", "Search"],
+      opens: [
+        ["p0", three],
+        ["p1", two],
+      ],
+    });
   });
 });

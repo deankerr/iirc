@@ -489,6 +489,7 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "members.toggle", keys: "alt+m", when: "!palette" },
   { command: "composer.focus", keys: "i", when: "!editing && !palette" },
   { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
+  { command: "search.open", keys: "mod+shift+f", when: "!palette" },
   { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft", when: "!palette" },
   { args: "right", command: "pane.focus", keys: "alt+shift+arrowright", when: "!palette" },
   { args: "up", command: "pane.focus", keys: "alt+shift+arrowup", when: "!palette" },

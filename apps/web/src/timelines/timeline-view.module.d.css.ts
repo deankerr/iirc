@@ -6,6 +6,7 @@ declare const styles: {
   readonly rows: string;
   readonly scroller: string;
   readonly start: string;
+  readonly target: string;
   readonly view: string;
 };
 
