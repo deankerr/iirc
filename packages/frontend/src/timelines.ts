@@ -12,6 +12,7 @@ import type {
   NetworkEntry,
   NetworkId,
   NetworkStatus,
+  SearchResults,
   SessionKnowledge,
   Timeline,
   TimelineChange,
@@ -28,6 +29,7 @@ import { comparePositions, cursorOf, TimelineId as TimelineIdSchema } from "@iir
 import type { Position } from "@iirc/timelines";
 import { Option, Schema } from "effect";
 
+import type { Parsed } from "./commands.ts";
 import {
   deepestSplits,
   focusedPane,
@@ -40,6 +42,8 @@ import {
   withView,
 } from "./layout.ts";
 import type { Axis, Layout, LayoutChange, Node } from "./layout.ts";
+import { initialSearch, reduceSearch, searchWanted } from "./search.ts";
+import type { Search, SearchEvent, SearchFilters, SearchRequest } from "./search.ts";
 
 /** Where the changes stream stands: the projection version, and the last step it gave. */
 export interface Place {
@@ -162,6 +166,17 @@ export interface Window extends Load {
    * so. Only the view knows what was shown: opening a Timeline never sets it.
    */
   readonly seen: Position | undefined;
+  /**
+   * Where the window is read from when it is read again: around this position, as a jump
+   * to a search's result reads it, until the Owner reaches the latest or asks for it, or
+   * the latest with none.
+   */
+  readonly anchor: Position | undefined;
+  /**
+   * The item the Owner jumped to, which the view brings to the middle and marks, until the
+   * Owner scrolls, jumps to the latest, or opens the Timeline again.
+   */
+  readonly target: Position | undefined;
 }
 
 /** What the changes stream gave, kept while reads are in flight, to bring them up to date. */
@@ -193,7 +208,11 @@ type Follow =
  */
 export type MainView =
   | { readonly _tag: "Timeline" }
-  | { readonly _tag: "Options"; readonly filter: string };
+  | { readonly _tag: "Options"; readonly filter: string }
+  | { readonly _tag: "Search"; readonly back: BackView };
+
+/** What a Pane showed before the search, which closing the search shows again. */
+export type BackView = Exclude<MainView, { readonly _tag: "Search" }>;
 
 /**
  * Where the "new" divider goes in an open Timeline: before the first item after `read`,
@@ -268,6 +287,11 @@ export interface Timelines {
   readonly kept: number;
   /** The generation the next window made gets. */
   readonly nextGeneration: number;
+  /**
+   * The one search of the page, shown in at most one Pane, and kept while no Pane shows
+   * it, so showing it again shows what it found.
+   */
+  readonly search: Search;
 }
 
 /** How many items a window is read with, and the most a read again keeps. */
@@ -311,11 +335,12 @@ export type Read =
       readonly attempt: number;
     }
   | { readonly _tag: "Status"; readonly network: NetworkId; readonly attempt: number }
-  | WindowRequest;
+  | WindowRequest
+  | SearchRequest;
 
 /**
- * A read of a window: the latest, before its first item, or after its last, for one
- * generation of it. Its answer names it, so an answer for a window since dropped, or whose
+ * A read of a window: the latest, before its first item, after its last, or around a
+ * position, for one generation of it. Its answer names it, so an answer for a window since dropped, or whose
  * edge has moved, is told apart.
  */
 export type WindowRequest =
@@ -343,6 +368,14 @@ export type WindowRequest =
       readonly after: Position;
       readonly limit: number;
       readonly attempt: number;
+    }
+  | {
+      readonly _tag: "Around";
+      readonly timeline: TimelineId;
+      readonly generation: number;
+      readonly around: Position;
+      readonly limit: number;
+      readonly attempt: number;
     };
 
 /**
@@ -361,11 +394,17 @@ export type WindowRequest =
  * - `Opened`: the Owner opened a Timeline, which the main view then shows. `OlderWanted` and
  *   `NewerWanted`: they want what lies before or after what is held. `LatestWanted`: they
  *   want the latest, read again whole, and to follow it. `Following`: whether they are at
- *   the latest.
+ *   the latest, which a window read around a result takes only when the Owner moved there.
  * - `OptionsShown`: the focused Pane shows the options, filtered as given, which counts as
  *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter.
  * - `Pane`: the Owner changed the Panes, as a command or a drag of a divider did.
  * - `Restore`: the layout this device kept, read as the page starts.
+ * - `SearchShown`: the search shows in the Pane it shows in already, or the focused one,
+ *   searching the query when one was read. `SearchClosed`: it shows what it showed before.
+ *   `SearchChanged`: the Owner typed, asked for more, or moved through the results.
+ * - `SearchRead`, `SearchFailed`: a page of the search, or why it gave up, in words.
+ * - `Jumped`: the Owner chose a result: its Timeline opens read around its position.
+ *   `TargetLeft`: the Owner scrolled away from the item jumped to.
  */
 export type TimelinesEvent =
   | { readonly _tag: "ReadStarted"; readonly read: Read }
@@ -403,11 +442,31 @@ export type TimelinesEvent =
       readonly timeline: TimelineId;
       readonly following: boolean;
       readonly seen: Position | undefined;
+      /**
+       * The Owner moved the view there themselves, by the wheel, a touch, a press, or a
+       * key, rather than a layout or a scroll the view made. Only that takes a window read
+       * around a result to the latest.
+       */
+      readonly owned?: boolean;
     }
   | { readonly _tag: "OptionsShown"; readonly filter: string }
   | { readonly _tag: "OptionsFiltered"; readonly filter: string }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
-  | { readonly _tag: "Restore"; readonly layout: Layout<PaneView> };
+  | { readonly _tag: "Restore"; readonly layout: Layout<PaneView> }
+  | {
+      readonly _tag: "SearchShown";
+      readonly query: string | undefined;
+      readonly parsed: Parsed<SearchFilters> | undefined;
+    }
+  | { readonly _tag: "SearchClosed" }
+  | {
+      readonly _tag: "SearchChanged";
+      readonly change: Extract<SearchEvent, { readonly _tag: "Typed" | "More" | "Selected" }>;
+    }
+  | { readonly _tag: "SearchRead"; readonly read: SearchRequest; readonly page: SearchResults }
+  | { readonly _tag: "SearchFailed"; readonly read: SearchRequest; readonly message: string }
+  | { readonly _tag: "Jumped"; readonly timeline: TimelineId; readonly position: Position }
+  | { readonly _tag: "TargetLeft"; readonly timeline: TimelineId };
 
 /**
  * A change to the Panes. A layout's own, but a split names the Timeline the new Pane
@@ -441,6 +500,7 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   networks: new Map(),
   nextGeneration: 0,
   restoring: undefined,
+  search: initialSearch,
   vanished: new Set(),
   windowCap: cap,
   windows: new Map(),
@@ -1138,7 +1198,12 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
     }
   }
 
-  return { ...state, merged, networks, windows };
+  // A merge moves items into a Timeline with a lower id, so a page read after it may repeat
+  // what one read before it found: the search begins again.
+  const search =
+    change.merged.length > 0 ? reduceSearch(state.search, { _tag: "Restarted" }) : state.search;
+
+  return { ...state, merged, networks, search, windows };
 };
 
 /**
@@ -1222,6 +1287,8 @@ const applyOverflow = (state: Timelines, overflow: TimelineOverflow): Timelines 
         ? { ...staleList(network), status: { ...network.status, fresh: false } }
         : network
     ),
+    // What overflowed may have been a merge, whose changes never came.
+    search: reduceSearch(state.search, { _tag: "Restarted" }),
     windows: mapValues(state.windows, (window) => overflowWindow(window, touched)),
   };
 };
@@ -1251,6 +1318,7 @@ const applyReset = (state: Timelines, reset: TimelineReset): Timelines => {
       status: { ...network.status, fresh: false },
       timelines: new Map(),
     })),
+    search: reduceSearch(state.search, { _tag: "Restarted" }),
     vanished: new Set(),
     windows: mapValues(state.windows, (window) => ({
       ...window,
@@ -1363,9 +1431,14 @@ const started = (state: Timelines, read: Read): Timelines => {
           };
     }
 
+    case "Search": {
+      return { ...state, search: reduceSearch(state.search, { _tag: "Started", read }) };
+    }
+
     case "Latest":
     case "Older":
-    case "Newer": {
+    case "Newer":
+    case "Around": {
       const window = state.windows.get(read.timeline);
 
       // A read for a window since dropped starts nothing.
@@ -1377,6 +1450,7 @@ const started = (state: Timelines, read: Read): Timelines => {
       // takes no changes until it is read, and is a generation of its own.
       const placeholder: Window = window ?? {
         ...unread,
+        anchor: undefined,
         earlier: false,
         following: true,
         gaps: [],
@@ -1387,6 +1461,7 @@ const started = (state: Timelines, read: Read): Timelines => {
         newer: false,
         older: undefined,
         seen: undefined,
+        target: undefined,
         through: 0,
         timeline: read.timeline,
       };
@@ -1772,14 +1847,15 @@ const mergePage = (
 
 /**
  * Whether a page was read from the window's edge as it is now: before its first item, or
- * after its last. The latest is read from no edge.
+ * after its last. The latest, and a window around a position, are read from no edge.
  * @param window - The window.
  * @param read - The read the page answers.
  * @returns Whether it fits.
  */
 const atEdge = (window: Window, read: WindowRequest): boolean => {
   switch (read._tag) {
-    case "Latest": {
+    case "Latest":
+    case "Around": {
       return true;
     }
 
@@ -1802,7 +1878,8 @@ const atEdge = (window: Window, read: WindowRequest): boolean => {
 };
 
 /**
- * Takes a window read. The latest replaces what is held, and older or newer items join it. Either
+ * Takes a window read. The latest, or a window around a position, replaces what is held,
+ * and older or newer items join it. Either
  * is then brought up to date with what the stream gave after its `through`. A merged
  * Timeline's id reads the Timeline it went to, which is held from then on.
  * @param state - The state.
@@ -1854,7 +1931,7 @@ const windowRead = (
     };
   }
 
-  if (read._tag !== "Latest") {
+  if (read._tag === "Older" || read._tag === "Newer") {
     // The page is brought up to date on its own, since the window already reflects what
     // the stream gave, and then joins it.
     const page = catchUpWindow(
@@ -1886,6 +1963,7 @@ const windowRead = (
   }
 
   const fresh: Window = {
+    anchor: held.anchor,
     attempt: 0,
     earlier: answer.earlier,
     following: held.following,
@@ -1899,6 +1977,7 @@ const windowRead = (
     older: undefined,
     reading: false,
     seen: held.seen,
+    target: held.target,
     through,
     timeline: answer.timeline,
   };
@@ -2037,9 +2116,11 @@ const retained = (before: Timelines, after: Timelines): Timelines => {
     if (!was.has(id) && window !== undefined) {
       windows.set(id, {
         ...window,
+        anchor: undefined,
         following: true,
-        fresh: window.fresh && !window.later,
+        fresh: window.fresh && !window.later && window.anchor === undefined,
         seen: undefined,
+        target: undefined,
       });
     }
   }
@@ -2134,19 +2215,29 @@ const marked = (
         ...state,
         windows: setIn(state.windows, id, {
           ...window,
+          anchor: undefined,
           following: true,
           fresh: false,
           newer: false,
           older: undefined,
+          target: undefined,
         }),
       };
     }
 
     case "Following": {
+      // A window read around a result stays where the jump put it, and marks nothing seen,
+      // until the Owner moves it to the latest themselves.
+      if (window.anchor !== undefined && event.following && event.owned !== true) {
+        return state;
+      }
+
       return {
         ...state,
         windows: setIn(state.windows, id, {
           ...window,
+          // At the latest, it is read from the latest again.
+          anchor: event.following ? undefined : window.anchor,
           following: event.following,
           seen: event.following ? event.seen : undefined,
         }),
@@ -2205,7 +2296,16 @@ interface Applied {
 type Navigation = Extract<
   TimelinesEvent,
   {
-    readonly _tag: "Opened" | "Located" | "OptionsShown" | "OptionsFiltered" | "Pane" | "Restore";
+    readonly _tag:
+      | "Opened"
+      | "Located"
+      | "OptionsShown"
+      | "OptionsFiltered"
+      | "Pane"
+      | "Restore"
+      | "SearchShown"
+      | "SearchClosed"
+      | "Jumped";
   }
 >;
 
@@ -2216,6 +2316,9 @@ const navigations: ReadonlySet<string> = new Set([
   "OptionsFiltered",
   "Pane",
   "Restore",
+  "SearchShown",
+  "SearchClosed",
+  "Jumped",
 ]);
 
 const isNavigation = (event: TimelinesEvent): event is Navigation => navigations.has(event._tag);
@@ -2258,6 +2361,134 @@ const showingOptions = (state: Timelines, filter: string): Timelines => {
       ...view,
       main: { _tag: "Options", filter },
     }),
+  };
+};
+
+/**
+ * The Pane the search shows in, if any.
+ * @param layout - The layout.
+ * @returns Its id, or none.
+ */
+const searchPane = (layout: Layout<PaneView>): string | undefined =>
+  panesOf(layout.root).find((pane) => pane.view.main._tag === "Search")?.id;
+
+/**
+ * A Pane's view.
+ * @param layout - The layout.
+ * @param pane - The Pane's id.
+ * @returns Its view, or an empty one.
+ */
+const viewIn = (layout: Layout<PaneView>, pane: string): PaneView =>
+  panesOf(layout.root).find((one) => one.id === pane)?.view ?? emptyView;
+
+/**
+ * Shows the search: in the Pane it shows in already, which takes the focus, or else in the
+ * focused Pane, in place of what it showed, which closing it shows again. A query read is
+ * searched, from its first page.
+ * @param state - The state.
+ * @param event - The query, as typed, and read, if one was given.
+ * @returns The state.
+ */
+const showingSearch = (
+  state: Timelines,
+  event: Extract<TimelinesEvent, { readonly _tag: "SearchShown" }>
+): Timelines => {
+  const { layout } = state;
+  const at = searchPane(layout) ?? layout.focused;
+  const view = viewIn(layout, at);
+  const back: BackView = view.main._tag === "Search" ? view.main.back : view.main;
+
+  const search =
+    event.query === undefined || event.parsed === undefined
+      ? state.search
+      : reduceSearch(state.search, {
+          _tag: "Submitted",
+          parsed: event.parsed,
+          query: event.query,
+        });
+
+  return {
+    ...state,
+    layout: withView({ ...layout, focused: at }, at, { ...view, main: { _tag: "Search", back } }),
+    search,
+  };
+};
+
+/**
+ * Closes the search, showing what its Pane showed before: the options, unless they show
+ * in another Pane since, or its Timeline. What it found is kept.
+ * @param state - The state.
+ * @returns The state.
+ */
+const closingSearch = (state: Timelines): Timelines => {
+  const { layout } = state;
+  const at = searchPane(layout);
+
+  if (at === undefined) {
+    return state;
+  }
+
+  const view = viewIn(layout, at);
+  const back = view.main._tag === "Search" ? view.main.back : view.main;
+
+  const main: MainView =
+    back._tag === "Options" && optionsPane(layout) !== undefined ? { _tag: "Timeline" } : back;
+
+  return { ...state, layout: withView(layout, at, { ...view, main }) };
+};
+
+/**
+ * Opens a Timeline read around a position, as choosing a search's result does: in the
+ * Pane that has it open already, or the Pane the search shows in, or the focused Pane,
+ * which takes the focus. Its window is read again, as a new generation, around the
+ * position, never following, so live items wait beyond it and the latest stays a jump
+ * away, and the item there is the one to bring into view and mark. Nothing is marked read
+ * by it: only the view says what was seen, at the latest.
+ * @param state - The state.
+ * @param event - The Timeline and the position.
+ * @returns The state.
+ */
+const jumping = (
+  state: Timelines,
+  event: Extract<TimelinesEvent, { readonly _tag: "Jumped" }>
+): Timelines => {
+  const id = resolve(state, event.timeline);
+  const { layout } = state;
+  const at = paneOf(state, id) ?? searchPane(layout) ?? layout.focused;
+  const view = viewIn(layout, at);
+
+  const shown: PaneView =
+    view.open !== undefined && resolve(state, view.open) === id
+      ? { ...view, main: { _tag: "Timeline" } }
+      : viewOf(state, event.timeline);
+
+  const after = retained(state, {
+    ...state,
+    layout: withView({ ...layout, focused: at }, at, shown),
+  });
+
+  const window: Window = {
+    ...unread,
+    anchor: event.position,
+    earlier: false,
+    following: false,
+    gaps: [],
+    generation: after.nextGeneration,
+    items: [],
+    later: false,
+    network: after.windows.get(id)?.network,
+    newer: false,
+    older: undefined,
+    seen: undefined,
+    target: event.position,
+    through: 0,
+    timeline: id,
+  };
+
+  return {
+    ...after,
+    nextGeneration: after.nextGeneration + 1,
+    windows: setIn(after.windows, id, window),
   };
 };
 
@@ -2398,6 +2629,18 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
       return restored({ ...state, restoring: event.layout });
     }
 
+    case "SearchShown": {
+      return showingSearch(elsewhere(state), event);
+    }
+
+    case "SearchClosed": {
+      return searchPane(state.layout) === undefined ? state : closingSearch(elsewhere(state));
+    }
+
+    case "Jumped": {
+      return jumping(elsewhere(state), event);
+    }
+
     default: {
       return event satisfies never;
     }
@@ -2413,9 +2656,74 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
 const considering = (state: Timelines, place: Place): Timelines =>
   place.sequence > state.considered ? { ...state, considered: place.sequence } : state;
 
+/** An event of the search, or of the item jumped to. */
+type Searching = Extract<
+  TimelinesEvent,
+  { readonly _tag: "SearchChanged" | "SearchRead" | "SearchFailed" | "TargetLeft" }
+>;
+
+const searchings: ReadonlySet<string> = new Set([
+  "SearchChanged",
+  "SearchRead",
+  "SearchFailed",
+  "TargetLeft",
+]);
+
+const isSearching = (event: TimelinesEvent): event is Searching => searchings.has(event._tag);
+
+/**
+ * The search after the Owner or a read changed it, or a window after the Owner scrolled
+ * away from the item jumped to.
+ * @param state - The state.
+ * @param event - What happened.
+ * @returns The state.
+ */
+const searched = (state: Timelines, event: Searching): Timelines => {
+  switch (event._tag) {
+    case "SearchChanged": {
+      return { ...state, search: reduceSearch(state.search, event.change) };
+    }
+
+    case "SearchRead": {
+      return {
+        ...state,
+        search: reduceSearch(state.search, { _tag: "Read", page: event.page, read: event.read }),
+      };
+    }
+
+    case "SearchFailed": {
+      return {
+        ...state,
+        search: reduceSearch(state.search, {
+          _tag: "Failed",
+          message: event.message,
+          read: event.read,
+        }),
+      };
+    }
+
+    case "TargetLeft": {
+      const id = resolve(state, event.timeline);
+      const window = state.windows.get(id);
+
+      return window?.target === undefined
+        ? state
+        : { ...state, windows: setIn(state.windows, id, { ...window, target: undefined }) };
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
 const apply = (state: Timelines, event: TimelinesEvent): Applied => {
   if (isNavigation(event)) {
     return { state: navigated(state, event) };
+  }
+
+  if (isSearching(event)) {
+    return { state: searched(state, event) };
   }
 
   switch (event._tag) {
@@ -2551,7 +2859,8 @@ export const reduceTimelines = (state: Timelines, event: TimelinesEvent): Timeli
 
 /**
  * The read an open Timeline's window calls for, if any: the latest when it was never read
- * or missed something, or what lies before or after it when the Owner asked. A window is
+ * or missed something, or around where the Owner jumped while it is anchored there, or
+ * what lies before or after it when the Owner asked. A window is
  * read only once the stream is followed, so its `through` is never before the place the
  * stream follows from.
  * @param state - The state.
@@ -2568,6 +2877,19 @@ const wantedWindow = (state: Timelines, open: TimelineId): readonly Read[] => {
 
   if (state.vanished.has(id) || window?.reading === true) {
     return [];
+  }
+
+  if (window?.anchor !== undefined && !window.fresh) {
+    return [
+      {
+        _tag: "Around",
+        around: window.anchor,
+        attempt: window.attempt,
+        generation: window.generation,
+        limit: limitFor(window, state.windowCap),
+        timeline: id,
+      },
+    ];
   }
 
   if (window === undefined || !window.fresh) {
@@ -2616,9 +2938,10 @@ const wantedWindow = (state: Timelines, open: TimelineId): readonly Read[] => {
 
 /**
  * The reads the state calls for, none of them already in flight: the Network list, each
- * Network's Timelines and, once the stream is followed, its connection, and the window of
- * each Timeline open in a Pane, the focused Pane's first, latest first and older when
- * asked, once the stream is followed.
+ * Network's Timelines and, once the stream is followed, its connection, the window of
+ * each Timeline open in a Pane, the focused Pane's first, latest first, or around where the
+ * Owner jumped, and older when asked, once the stream is followed, and a page of the
+ * search while one is wanted and a Pane shows it.
  * @param state - The state.
  * @returns The reads.
  */
@@ -2646,7 +2969,14 @@ export const wanted = (state: Timelines): readonly Read[] => {
 
   const open = [...new Set(openIn(state.layout).map((one) => resolve(state, one)))];
 
-  return [...reads, ...open.flatMap((one) => wantedWindow(state, one))];
+  // A page of the search, only while a Pane shows it.
+  const page = searchPane(state.layout) === undefined ? undefined : searchWanted(state.search);
+
+  return [
+    ...reads,
+    ...open.flatMap((one) => wantedWindow(state, one)),
+    ...(page === undefined ? [] : [page]),
+  ];
 };
 
 /**
@@ -2774,6 +3104,15 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
   return rows;
 };
 
+/**
+ * The key of the row of the item the Owner jumped to, which a view brings into view and
+ * marks, or none.
+ * @param window - The window.
+ * @returns The row's key, as `rowsOf` gives it.
+ */
+export const targetKey = (window: Window): string | undefined =>
+  window.target === undefined ? undefined : cursorOf(window.target);
+
 /** A Pane's open Timeline, as shown. */
 export type Opened =
   | { readonly _tag: "Closed" }
@@ -2833,7 +3172,8 @@ export const opened = (state: Timelines, pane = state.layout.focused): Opened =>
 /**
  * What a device keeps of a Pane's view: its open Timeline, as the Owner chose it, and the
  * options' filter while they show in its place. A divider is never kept: it is taken afresh
- * as the Timeline opens again.
+ * as the Timeline opens again. Neither is a search, which comes back as what it showed
+ * in front of: its Timeline, or the options.
  */
 export interface KeptView {
   readonly open: TimelineId | null;
@@ -2887,10 +3227,11 @@ export const KeptLayoutSchema: Schema.Codec<KeptLayout, Layout<KeptViewJson>> = 
  */
 export const keptLayout = (state: Timelines): KeptLayout | undefined =>
   state.restoring === undefined
-    ? mapViews(state.layout, ({ view }): KeptView => ({
-        open: view.open ?? null,
-        options: view.main._tag === "Options" ? view.main.filter : null,
-      }))
+    ? mapViews(state.layout, ({ view }): KeptView => {
+        const main = view.main._tag === "Search" ? view.main.back : view.main;
+
+        return { open: view.open ?? null, options: main._tag === "Options" ? main.filter : null };
+      })
     : undefined;
 
 /**

@@ -14,11 +14,16 @@ projectionVersion: number                         // 4
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
+cursorsFrom(at): string                           // at or below every cursor at or after `at`, above the rest
 parseCursor(text): Position | undefined
 TimelineId                                         // a branded Schema
 Level = "Highlight" | "Direct" | "Message" | "Activity"
 levels: readonly Level[]                           // from the one that calls for the Owner most
 unreadCap: number                                  // 999
+foldForSearch(text): string                       // simple lower case, by Unicode 17.0's table
+searchFolding: string                             // "simple-lower/17.0", which a store keeps
+SearchText                                         // a branded Schema: 3 to 510 code points folded
+searchableOf(content): { text, sender } | undefined
 ```
 
 ## The fold holds the directory, and the store the rest
@@ -42,7 +47,7 @@ A **TimelineId** is opaque, and derived from where the Timeline was first opened
 
 An item stands at a **position**, `(at, sequence, n)`: the time of its News, the step's sequence, and the News's index in the step. The time of a Message or an Activity is its `at` fact's instant, `Known` or `Stale`, and the step's `at` when it is `Unknown`. A Session's start or end, or a failed Connection, has its own instant. A position never changes once given, so a Read Marker or a link can point at one.
 
-Positions are totally ordered by `at`, then `sequence`, then `n`, which `comparePositions` gives. History that arrives late stands where its time puts it, among what came before. `cursorOf` writes a position as `<at>-<sequence>-<n>` in fixed-width lower-case hex, the time offset by 2^53 so that one before 1970 still sorts first. Two cursors compare as text exactly as their positions compare, and `parseCursor` reads one back, or gives `undefined` for text that is not a cursor `cursorOf` could write. `cursorsAfter(at)` is text, never a cursor, that every cursor of a position later than `at` compares above and every other below, so a store finds what stands after a Read Marker by cursor alone, without making the instant after it, which the largest instant does not have.
+Positions are totally ordered by `at`, then `sequence`, then `n`, which `comparePositions` gives. History that arrives late stands where its time puts it, among what came before. `cursorOf` writes a position as `<at>-<sequence>-<n>` in fixed-width lower-case hex, the time offset by 2^53 so that one before 1970 still sorts first. Two cursors compare as text exactly as their positions compare, and `parseCursor` reads one back, or gives `undefined` for text that is not a cursor `cursorOf` could write. `cursorsAfter(at)` is text, never a cursor, that every cursor of a position later than `at` compares above and every other below, so a store finds what stands after a Read Marker by cursor alone, without making the instant after it, which the largest instant does not have. `cursorsFrom(at)` is text that every cursor of a position at or after `at` compares at or above and every other below, so a store bounds a range of time by cursor alone.
 
 ## Changes
 
@@ -84,13 +89,25 @@ Each `Added` item has a **level**, how much it calls for the Owner in its Timeli
 
 A Message Self said, one with `ours` or `self`, has no level, and never counts, and neither does an `ActionRefused`, which is ours too. One News placed in many Timelines can have a different level in each. `unreadCap` is the most a store counts of one level after a Read Marker: a count of `unreadCap + 1` means more than that.
 
+## What a search finds
+
+A store searches the Messages in its Timelines by their text, and every store finds the same ones, because they fold text one way, here.
+
+- **`foldForSearch`** lower-cases each code point by Unicode's simple mapping, one code point to one, never by a locale's, so `É` finds `é`, `Σ` finds `σ`, and `İ` folds to `i`, and a text keeps its count of code points. The mapping is `src/lower-case.ts`, a table pinned to Unicode 17.0, the version the Client's word characters follow, and never the runtime's own tables, so every runtime folds alike, and a store's index never depends on which one built it. `scripts/lower-case.ts` generates it, with `bun run generate:lower-case` on a runtime of the version to pin. It reads each code point's lower case from the runtime and takes the one the runtime expands, U+0130, from UnicodeData's simple mapping, refusing any other that expands.
+- **Nothing is composed or decomposed.** `é` written whole and `e` with a combining accent are different text, so one does not find the other. Composing (NFC) would match them, but needs the runtime's normalization tables, or pinned decomposition, combining-class, and composition tables of its own, while IRC clients send composed text all but always. So the smaller correct choice is to compose nothing and say so. Diacritics are kept: `cafe` does not find `café`, since no fold takes them off alike in every language, and one that guessed would find what was not said.
+- **`searchFolding`** names how text folds, `simple-lower/` and the table's Unicode version, so a table generated for another version changes it. A store that keeps folded text keeps this beside it, and folds it again when it differs. Whoever changes how text folds otherwise changes the scheme's name too.
+- **`SearchText`** is what a search looks for: one run of characters, found anywhere in a Message's text, of `searchTextMinimum`, 3, to `searchTextMaximum`, 510, the most a Line could carry, both counted in code points once folded, so three astral characters are enough and a composed letter counts one where a letter and its combining accent count two, with no line break or NUL, which no Message holds, and no lone surrogate, which is no character. A store finds text by its runs of three characters, so a shorter one could only be found by reading every Message, and so it cannot be made.
+- **`searchableOf`** says what an item is found by: a Message's text, folded, and its sender, folded, for a search kept to one sender. One of ours is found by the text the Ircd confirmed once it did, since that is what was said, and by our own text before. An Activity, a Session's start or end, and a refused action are found by nothing.
+
+The fold does not change by any of this, so it changes no projection version.
+
 ## The projection version
 
 `projectionVersion` is the version of what the fold gives. Bump it whenever News or the fold changes, in any way that would give a store different Timelines, ids, positions, or items. A store built with another version is reset and folded again from the Journal ([ADR 0002](../../docs/adr/0002-the-journal-holds-bytes.md)).
 
 ## Tests
 
-`fold.test.ts` takes each rule above in turn, levels, Read Markers, and refused actions included, placed in their Channel or the Network's own at the step's time with no level, opening a Channel, and nothing for one refused in its own step: forward only, opening nothing, following a rename, staying with a detached Timeline, a merge keeping the later, and the largest instant, which a Read Marker reaches and nothing passes. `properties.test.ts` folds random steps, including renames, refolds, and Gaps, and checks that folding them again gives the same directory and changes, that the directory is plain data and a step leaves the one it was given as it was, that every change carries its step's sequence, that ids open in order, that items go only to open Timelines, once per News, that a Read Marker moves only forward and only on an open Timeline, that only a Message Self said and a refused action have no level, that positions and their cursors order alike, and that a cursor is above `cursorsAfter` of an instant exactly when its position is later, the least and largest instants included. `client.test.ts` folds the News of a transcript played through the real Client, including an action on `#Foo[` under `ascii` refused after the Ircd declared `rfc1459`, which lands in the Channel's re-keyed Timeline rather than opening another.
+`fold.test.ts` takes each rule above in turn, levels, Read Markers, and refused actions included, placed in their Channel or the Network's own at the step's time with no level, opening a Channel, and nothing for one refused in its own step: forward only, opening nothing, following a rename, staying with a detached Timeline, a merge keeping the later, and the largest instant, which a Read Marker reaches and nothing passes. `properties.test.ts` folds random steps, including renames, refolds, and Gaps, and checks that folding them again gives the same directory and changes, that the directory is plain data and a step leaves the one it was given as it was, that every change carries its step's sequence, that ids open in order, that items go only to open Timelines, once per News, that a Read Marker moves only forward and only on an open Timeline, that only a Message Self said and a refused action have no level, that positions and their cursors order alike, and that a cursor is above `cursorsAfter` of an instant exactly when its position is later, the least and largest instants included. `search.test.ts` checks what a search may look for, at both limits, with astral, composed, decomposed, and dotted capital I text, the fold, composing nothing, what an item is found by, ours by the text confirmed, and `cursorsFrom` against cursors either side of its instant. `lower-case.test.ts` checks that regenerating the table on a runtime of Unicode 17.0 gives the one committed, and that it folds every code point as that runtime lower-cases it alone, U+0130 aside, and skips both on a runtime of another version, since the table is what decides, and that the runs are well formed. `client.test.ts` folds the News of a transcript played through the real Client, including an action on `#Foo[` under `ascii` refused after the Ircd declared `rfc1459`, which lands in the Channel's re-keyed Timeline rather than opening another.
 
 ## Not yet
 

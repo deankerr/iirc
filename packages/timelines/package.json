@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "generate:lower-case": "bun scripts/lower-case.ts",
     "test": "bun --bun vitest run"
   },
   "dependencies": {

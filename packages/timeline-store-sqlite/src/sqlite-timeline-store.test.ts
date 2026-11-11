@@ -10,7 +10,7 @@ import { holds } from "@iirc/runtime/testing";
 import { TimelineStore } from "@iirc/timeline-store";
 import type { TimelineStoreService } from "@iirc/timeline-store";
 import { timelineStoreLaws } from "@iirc/timeline-store/testing";
-import { emptyDirectory, step, timelineIdOf } from "@iirc/timelines";
+import { SearchText, emptyDirectory, searchFolding, step, timelineIdOf } from "@iirc/timelines";
 import type { Change, Position } from "@iirc/timelines";
 import { Effect, Layer, Option, Schema } from "effect";
 import type { Scope } from "effect";
@@ -182,6 +182,7 @@ const everything = (store: TimelineStoreService) =>
       gaps: yield* store.gaps(libera, {}),
       located: yield* store.locate(libera, 3),
       merged: yield* store.window(other, { _tag: "Before" }, 10),
+      searched: yield* store.search({ limit: 10, text: SearchText.make("two") }),
       timelines: yield* store.timelines(libera),
       window: yield* store.window(channel, { _tag: "Around", position: position(3, 3) }, 1),
     };
@@ -218,6 +219,62 @@ describe("reopening the file", () => {
         expect(after).toStrictEqual(before);
       })
     );
+  });
+
+  it("folds its search again when it was folded another way, and keeps everything else", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+
+        yield* using(file, applyAll);
+        const before = yield* using(file, everything);
+
+        // An index and senders as another folding would have kept them.
+        const database = new Database(file);
+
+        database.run("UPDATE folded SET folding = 'simple-lower/0.0'");
+        database.run("INSERT INTO search (search) VALUES ('delete-all')");
+
+        for (const { id } of database.query<{ id: number }, []>("SELECT id FROM items").all()) {
+          database.run("INSERT INTO search (rowid, text) VALUES (?, 'stale text')", [id]);
+        }
+
+        database.run("UPDATE items SET sender = 'nobody' WHERE sender IS NOT NULL");
+        database.close();
+
+        const after = yield* using(file, everything);
+
+        const found = yield* using(file, (store) =>
+          Effect.all({
+            byOld: store.search({ limit: 10, text: SearchText.make("stale") }),
+            bySender: store.search({ from: "PEER", limit: 10, text: SearchText.make("THREE") }),
+          })
+        );
+
+        const folding = new Database(file, { readonly: true })
+          .query("SELECT folding FROM folded")
+          .get();
+
+        return {
+          after,
+          before,
+          byOld: found.byOld.length,
+          bySender: found.bySender.length,
+          folding,
+          searched: after.searched.length,
+        };
+      })
+    );
+
+    expect(result.after).toStrictEqual(result.before);
+    expect({ ...result, after: undefined, before: undefined }).toStrictEqual({
+      after: undefined,
+      before: undefined,
+      byOld: 0,
+      bySender: 1,
+      folding: { folding: searchFolding },
+      searched: 1,
+    });
   });
 
   it("provides the store as a Layer", async () => {
@@ -477,6 +534,20 @@ describe("the file", () => {
                 )
               ),
               overflowed: yield* emitted(store.changedAfter(3, 1)),
+              // A search with every filter, through a merged id, and one with none.
+              search: yield* emitted(
+                store.search({
+                  after: { position: at, timeline: channel },
+                  from: "Peer",
+                  limit: 2,
+                  network: libera,
+                  since: at.at,
+                  text: SearchText.make("thr"),
+                  timeline: other,
+                  until: position(9, 9).at,
+                })
+              ),
+              searchAll: yield* emitted(store.search({ limit: 2, text: SearchText.make("thr") })),
               // One Timeline by its id, and by an id merged into it.
               timeline: yield* emitted(store.timeline(channel)),
               timelineMerged: yield* emitted(store.timeline(third)),
@@ -576,12 +647,42 @@ describe("the file", () => {
           unkeyed: [false, false],
         });
 
+        // A search walks the index's matches, finds each item by its row, and keeps only
+        // its page of them in order, never walking a table.
+        const searched = planned.filter((each) => each.read.startsWith("search"));
+
+        expect(
+          searched.map(({ plan, sql }) => ({
+            index: plan.split("\n").filter((line) => /SCAN|SEARCH|TEMP/u.test(line)),
+            limited: /LIMIT \?\s*$/u.test(sql),
+          }))
+        ).toStrictEqual([
+          {
+            index: [
+              expect.stringMatching(/^SCAN search VIRTUAL TABLE INDEX \d+:M/u),
+              "SEARCH items USING INTEGER PRIMARY KEY (rowid=?)",
+              // Where a merged id went, once.
+              "SEARCH tombstones USING INDEX sqlite_autoindex_tombstones_1 (id=?)",
+              "USE TEMP B-TREE FOR ORDER BY",
+            ],
+            limited: true,
+          },
+          {
+            index: [
+              expect.stringMatching(/^SCAN search VIRTUAL TABLE INDEX \d+:M/u),
+              "SEARCH items USING INTEGER PRIMARY KEY (rowid=?)",
+              "USE TEMP B-TREE FOR ORDER BY",
+            ],
+            limited: true,
+          },
+        ]);
+
         // Every read was emitted, and none scans a table or sorts.
         expect(
           Object.entries(reads).filter(([, statements]) => statements.length === 0)
         ).toStrictEqual([]);
 
-        for (const { plan, read, sql } of planned) {
+        for (const { plan, read, sql } of planned.filter((each) => !searched.includes(each))) {
           expect([read, sql, plan]).not.toStrictEqual([
             read,
             sql,

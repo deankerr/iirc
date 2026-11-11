@@ -16,6 +16,7 @@ import type {
   TimelineChangesEvent,
   TimelineItem,
   TimelineList,
+  SearchResults,
   TimelineWindow,
   WindowGap,
   UiInForce,
@@ -151,8 +152,9 @@ interface Follower {
 const encoder = new TextEncoder();
 
 /**
- * Its window of a Timeline, as the Daemon would give it: the latest, or the last before a
- * cursor, up to a limit, with every Gap it holds.
+ * Its window of a Timeline, as the Daemon would give it: the latest, the last before a
+ * cursor, the first after one, or as many from a cursor on as before it, up to a limit,
+ * with every Gap it holds. A cursor compares as its position does.
  * @param held - The Timeline.
  * @param query - The query.
  * @param through - The last step folded.
@@ -164,7 +166,37 @@ const windowOf = (
   through: number
 ): typeof TimelineWindow.Encoded => {
   const before = query.get("before");
+  const after = query.get("after");
+  const around = query.get("around");
   const limit = Number(query.get("limit") ?? "100");
+  const edges = { gaps: held.gaps, network: held.timeline.network, through, version: 1 };
+
+  if (around !== null) {
+    const at = held.items.findIndex((item) => item.position >= around);
+    const from = Math.max(0, (at === -1 ? held.items.length : at) - Math.floor(limit / 2));
+    const items = held.items.slice(from, from + limit);
+
+    return {
+      ...edges,
+      earlier: from > 0,
+      items,
+      later: from + items.length < held.items.length,
+      timeline: held.timeline.id,
+    };
+  }
+
+  if (after !== null) {
+    const candidates = held.items.filter((item) => item.position > after);
+    const items = candidates.slice(0, limit);
+
+    return {
+      ...edges,
+      earlier: true,
+      items,
+      later: candidates.length > items.length,
+      timeline: held.timeline.id,
+    };
+  }
 
   const candidates =
     before === null ? held.items : held.items.filter((item) => item.position < before);
@@ -179,6 +211,66 @@ const windowOf = (
     network: held.timeline.network,
     through,
     timeline: held.timeline.id,
+    version: 1,
+  };
+};
+
+/**
+ * What the fake finds for a search, as the Daemon would: the Messages whose text holds
+ * `text`, lower-cased as ASCII, which is all a test searches, kept to a Network, a
+ * Timeline, and a sender when given, latest first and at one position by Timeline id, last
+ * first, a page at a time from just after `after`.
+ * @param timelines - Every Timeline it holds.
+ * @param query - The query.
+ * @param through - The last step folded.
+ * @returns The page.
+ */
+const searchOf = (
+  timelines: readonly FakeTimeline[],
+  query: URLSearchParams,
+  through: number
+): typeof SearchResults.Encoded => {
+  const text = (query.get("text") ?? "").toLowerCase();
+  const from = query.get("from")?.toLowerCase();
+  const network = query.get("network");
+  const timeline = query.get("timeline");
+  const [afterAt, afterTimeline = ""] = (query.get("after") ?? "").split(".");
+  const limit = Number(query.get("limit") ?? "100");
+
+  const found = timelines
+    .filter(
+      (held) =>
+        (network === null || held.timeline.network === network) &&
+        (timeline === null || held.timeline.id === timeline)
+    )
+    .flatMap((held) => held.items)
+    .filter(
+      (item) =>
+        item.content._tag === "Message" &&
+        item.content.text.toLowerCase().includes(text) &&
+        (from === undefined || item.content.sender.toLowerCase() === from)
+    )
+    .toSorted(
+      (left, right) =>
+        right.position.localeCompare(left.position) || right.timeline.localeCompare(left.timeline)
+    )
+    .filter(
+      (item) =>
+        afterAt === undefined ||
+        afterAt === "" ||
+        item.position < afterAt ||
+        (item.position === afterAt && item.timeline < afterTimeline)
+    );
+
+  const items = found.slice(0, limit);
+  const last = items.at(-1);
+  const more = found.length > items.length;
+
+  return {
+    items,
+    more,
+    next: more && last !== undefined ? `${last.position}.${last.timeline}` : null,
+    through,
     version: 1,
   };
 };
@@ -281,6 +373,7 @@ export const fakeDaemon = () => {
   const locatesRead: number[] = [];
   const locatesHeld: (() => void)[] = [];
   const windowsRead: string[] = [];
+  const searchesRead: string[] = [];
   const hung: string[] = [];
   const networksHeld: (() => void)[] = [];
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
@@ -373,6 +466,8 @@ export const fakeDaemon = () => {
     sayAnswers: answers,
     /** Each `say` asked for, in order, refused or not. */
     says,
+    /** Each page of a search read, by its query, for a test to look at. */
+    searchesRead,
     /** Self on each Network, as `known` gives it: none until a test says. */
     selves: new Map<string, (typeof Knowledge.Encoded)["self"]>(),
     /** Each Network's connection, as `known` gives it. */
@@ -650,6 +745,19 @@ export const fakeDaemon = () => {
 
     if (url.pathname === "/api/timelines/changes") {
       return signedInOnly(() => following(followers, url, headers, init));
+    }
+
+    if (url.pathname === "/api/search") {
+      const held = [...daemon.timelines.values()].flat();
+      const timeline = url.searchParams.get("timeline");
+
+      daemon.searchesRead.push(url.search);
+
+      return signedInOnly(() =>
+        timeline !== null && !held.some((one) => one.timeline.id === timeline)
+          ? json(404, { _tag: "UnknownTimeline", timeline })
+          : json(200, searchOf(held, url.searchParams, daemon.through))
+      );
     }
 
     if (list?.network !== undefined) {

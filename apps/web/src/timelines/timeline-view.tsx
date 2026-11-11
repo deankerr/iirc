@@ -10,15 +10,16 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineId, TimelineItem } from "@iirc/api";
-import { olderUnasked, rowsOf } from "@iirc/frontend/timelines";
+import { olderUnasked, rowsOf, targetKey } from "@iirc/frontend/timelines";
 import type { Divider, Row, Window } from "@iirc/frontend/timelines";
 import { showsItem } from "@iirc/frontend/ui";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { activityShown } from "../options/ui.ts";
 import { movedEvent, paneNumber } from "../panes/atoms.ts";
+import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import { following, latest, newer, older, paneTimeline, windowCapOf } from "./atoms.ts";
 import { Line } from "./line.tsx";
@@ -30,6 +31,20 @@ const nearTop = 240;
 
 /** How near the bottom counts as at it, in pixels. */
 const nearBottom = 8;
+
+/** How long, in milliseconds, the Owner's input or a move it made lets a scroll be theirs. */
+const gestureLife = 1000;
+
+/** The keys that scroll a log, which the Owner pressing means they moved from the target. */
+const scrollKeys: ReadonlySet<string> = new Set([
+  "ArrowDown",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
 
 /**
  * A row as the view shows it: one of the window's, the start of the Timeline, or, where
@@ -174,6 +189,8 @@ const Lines = ({
   }, [activity, divider, kind, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);
+  const target = targetKey(window);
+  const leave = useAtomSet(leaveTarget);
   const askOlder = useAtomSet(older);
   const askNewer = useAtomSet(newer);
   const tellFollowing = useAtomSet(following);
@@ -190,6 +207,52 @@ const Lines = ({
   // What the core was last told: at the latest with the last item in view, or away. Nothing
   // yet, so the view says so once it has first laid out.
   const told = useRef<string | undefined>(undefined);
+  // Whose a scroll is, kept in one place: where the view last put the log itself, which
+  // the scroll event that follows reports, where the log last stood, and when the Owner
+  // last pressed, touched, wheeled, or pressed a key in it.
+  const placed = useRef<number | undefined>(undefined);
+  const stood = useRef(0);
+  const gestureAt = useRef<number | undefined>(undefined);
+
+  /**
+   * Puts the log at a position, as the view's own doing: the scroll event it causes is
+   * never the Owner's. Setting where it already stands causes no event, so records none.
+   * @param element - The scroller.
+   * @param top - Where to put it.
+   */
+  const place = (element: HTMLElement, top: number) => {
+    const before = element.scrollTop;
+
+    element.scrollTop = top;
+
+    if (element.scrollTop !== before) {
+      placed.current = element.scrollTop;
+      stood.current = element.scrollTop;
+    }
+  };
+
+  /**
+   * Whether a scroll event is the Owner's: not where the view last put the log, a move from
+   * where it last stood, and within a second of the Owner's own input, or of the last move
+   * that input made, as a wheel's or a drag's run of scrolls is. A scroll that does none of
+   * that, or comes later, ends the gesture.
+   * @param element - The scroller.
+   * @returns Whether it is.
+   */
+  const scrolledByOwner = (element: HTMLElement): boolean => {
+    const top = element.scrollTop;
+    const now = performance.now();
+    const own = top === placed.current;
+    const moved = top !== stood.current;
+    const live = gestureAt.current !== undefined && now - gestureAt.current <= gestureLife;
+    const owned = !own && moved && live;
+
+    placed.current = undefined;
+    stood.current = top;
+    gestureAt.current = owned ? now : undefined;
+
+    return owned;
+  };
 
   // TanStack Virtual hands back new functions each render, which nothing here memoizes.
   // oxlint-disable-next-line react/incompatible-library
@@ -199,6 +262,18 @@ const Lines = ({
     getItemKey: (index) => rows[index]?.key ?? index,
     getScrollElement: () => scroller.current,
     overscan: 24,
+    // Its corrections, as rows above the view are measured, are the view's own scrolls.
+    scrollToFn: (offset, options, instance) => {
+      const element = instance.scrollElement;
+      const before = element?.scrollTop;
+
+      elementScroll(offset, options, instance);
+
+      if (element !== null && element.scrollTop !== before) {
+        placed.current = element.scrollTop;
+        stood.current = element.scrollTop;
+      }
+    },
   });
 
   const items = virtualizer.getVirtualItems();
@@ -248,12 +323,20 @@ const Lines = ({
   /**
    * Tells the core whether the Owner is at the latest, and the last item in view, when that
    * changed. Only this says the Owner has seen the latest: opening a Timeline never does.
+   * A window read around a result says nothing of the latest until the Owner moved the
+   * view there themselves, so a jump near the latest, or to a Timeline that fits the view,
+   * marks nothing read.
    * @param element - The scroller.
+   * @param owned - Whether the Owner moved the view, by the wheel, a touch, a press, or a key.
    */
-  const tell = (element: HTMLDivElement) => {
+  const tell = (element: HTMLDivElement, owned = false) => {
     const atLatest =
       element.scrollHeight - element.scrollTop - element.clientHeight <= nearBottom &&
       !window.later;
+
+    if (atLatest && window.anchor !== undefined && !owned) {
+      return;
+    }
 
     const seen = atLatest ? lastInView(element) : undefined;
     let now = "away";
@@ -264,7 +347,7 @@ const Lines = ({
 
     if (now !== told.current) {
       told.current = now;
-      tellFollowing({ following: atLatest, seen, timeline });
+      tellFollowing({ following: atLatest, owned, seen, timeline });
     }
   };
 
@@ -325,15 +408,52 @@ const Lines = ({
     // Pinned only with nothing more beyond the last row.
     if ((atBottom.current || window.following) && !window.later) {
       atBottom.current = true;
-      element.scrollTop = element.scrollHeight;
+      place(element, element.scrollHeight);
     } else if (survivor !== undefined) {
       const index = rows.findIndex((row) => row.key === survivor.key);
       const begins = virtualizer.measurementsCache[index]?.start;
       const furthest = Math.max(0, element.scrollHeight - element.clientHeight);
 
       if (begins !== undefined) {
-        element.scrollTop = Math.min(furthest, Math.max(0, begins - survivor.offset));
+        place(element, Math.min(furthest, Math.max(0, begins - survivor.offset)));
       }
+    }
+  };
+
+  /**
+   * Brings the item jumped to into the middle of the view, within what can be scrolled, as
+   * the virtualizer has measured the rows so far, so it stays there as rows are measured
+   * or added. It does so until the Owner scrolls, which lets the target go.
+   * @param element - The scroller.
+   * @returns Whether the target is drawn, and was brought into view.
+   */
+  const centre = (element: HTMLDivElement): boolean => {
+    const index = target === undefined ? -1 : rows.findIndex((row) => row.key === target);
+    const measured = virtualizer.measurementsCache[index];
+
+    if (measured === undefined) {
+      return false;
+    }
+
+    const furthest = Math.max(0, element.scrollHeight - element.clientHeight);
+    const middle = measured.start + measured.size / 2 - element.clientHeight / 2;
+
+    place(element, Math.min(furthest, Math.max(0, middle)));
+    atBottom.current = false;
+    remember(element);
+
+    return true;
+  };
+
+  /**
+   * Notes the Owner's input, the wheel, a touch, a press, or a key that scrolls, which lets
+   * a scroll it makes within a second be theirs, and lets the item jumped to go.
+   */
+  const moved = () => {
+    gestureAt.current = performance.now();
+
+    if (target !== undefined) {
+      leave(timeline);
     }
   };
 
@@ -438,7 +558,10 @@ const Lines = ({
     shownActivity.current = activity;
 
     if (element !== null) {
-      standBack(element, shifted);
+      // The item jumped to stays in the middle until the Owner scrolls.
+      if (target === undefined || !centre(element)) {
+        standBack(element, shifted);
+      }
 
       // Laid out: what is in view now is what the Owner can see.
       tell(element);
@@ -452,6 +575,8 @@ const Lines = ({
   });
 
   return (
+    // Keys, a press, a touch, and the wheel only say the Owner moved the log themselves.
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       aria-label={label}
       className={styles.scroller}
@@ -459,7 +584,7 @@ const Lines = ({
         const element = event.currentTarget;
 
         remember(element);
-        tell(element);
+        tell(element, scrolledByOwner(element));
 
         const nearEnd = element.scrollHeight - element.scrollTop - element.clientHeight < nearTop;
 
@@ -469,6 +594,14 @@ const Lines = ({
           askNewer(timeline);
         }
       }}
+      onKeyDown={(event) => {
+        if (scrollKeys.has(event.key)) {
+          moved();
+        }
+      }}
+      onPointerDown={moved}
+      onTouchMove={moved}
+      onWheel={moved}
       ref={scroller}
       role="log"
       // The log scrolls by keyboard, as any page does.
@@ -481,8 +614,9 @@ const Lines = ({
 
           return row === undefined ? null : (
             <div
-              className={styles.row}
+              className={row.key === target ? `${styles.row} ${styles.target}` : styles.row}
               data-index={item.index}
+              data-target={row.key === target ? "" : undefined}
               key={item.key}
               ref={virtualizer.measureElement}
               style={{ transform: `translateY(${item.start}px)` }}
@@ -538,7 +672,9 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
             timeline={shown.timeline}
             window={shown.window}
           />
-          {shown.window.later ? <JumpToLatest timeline={shown.timeline} /> : null}
+          {shown.window.later || shown.window.anchor !== undefined ? (
+            <JumpToLatest timeline={shown.timeline} />
+          ) : null}
         </section>
       );
     }

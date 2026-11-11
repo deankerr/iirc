@@ -27,6 +27,8 @@ const choices = Atom.make((get) => {
 
     if (pane.view.main._tag === "Options") {
       name = "options";
+    } else if (pane.view.main._tag === "Search") {
+      name = "search";
     } else if (shown._tag === "Shown") {
       name = shown.description?.name ?? "Timeline";
     } else if (shown._tag !== "Closed") {

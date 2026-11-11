@@ -25,7 +25,7 @@ import {
 import type { Input } from "@iirc/client";
 import { CredentialName } from "@iirc/protocol/line";
 import type { UnparseableReason } from "@iirc/protocol/line";
-import { TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
+import { SearchText, TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Effect, Result, Schema, SchemaIssue, SchemaTransformation } from "effect";
 import { Base64Url } from "effect/encoding";
@@ -632,12 +632,13 @@ interface ItemPlace {
 const isTimelineId = Schema.is(TimelineId);
 
 /**
- * Where the next page of a step's items begins: just after an item, by its position and
- * then its Timeline, as one opaque text that a page gives as `next`. It is parsed into the
- * item's position and Timeline id at the boundary.
+ * Where the next page of a step's items, or of a search, begins: just after an item, by its
+ * position and then its Timeline, as one opaque text that a page gives as `next`. It is
+ * parsed into the item's position and Timeline id at the boundary.
  */
 export const ItemAfter = Schema.String.annotate({
-  description: "Where the next page of a step's items begins, as a page gave it in `next`.",
+  description:
+    "Where the next page of a step's items, or of a search, begins, as a page gave it in `next`.",
   identifier: "ItemAfter",
 }).pipe(
   Schema.decodeTo(
@@ -720,6 +721,37 @@ export const LocateQuery = Schema.Struct({
   after: Schema.optionalKey(ItemAfter),
   limit: Schema.optionalKey(Limit),
 });
+
+/** An instant, in milliseconds since the Unix epoch, as text in a query. */
+const InstantFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(Instant));
+
+/** A nick a search keeps the Messages of, which holds no space, line break, or NUL. */
+const SearchSender = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(510),
+  Schema.makeFilter(
+    (nick: string) => !/[\0\r\n ]/u.test(nick) || "must not hold a space, a line break, or NUL"
+  )
+);
+
+/**
+ * A search of the Messages in Timelines: those whose text holds `text`, whatever the case
+ * of either, newest first, kept to a Network, a Timeline, a sender, and a range of time
+ * when given, and a page at a time, from just after `after`, up to `limit`.
+ */
+export const SearchQuery = Schema.Struct({
+  after: Schema.optionalKey(ItemAfter),
+  from: Schema.optionalKey(SearchSender),
+  limit: Schema.optionalKey(Limit),
+  network: Schema.optionalKey(NetworkId),
+  since: Schema.optionalKey(InstantFromString),
+  text: SearchText,
+  timeline: Schema.optionalKey(TimelineId),
+  until: Schema.optionalKey(InstantFromString),
+});
+
+/** The decoded form of {@link SearchQuery}. */
+export type SearchQuery = typeof SearchQuery.Type;
 
 /** A page of a Network's Timelines: those opened after the Timeline `after`, up to `limit`. */
 export const ListQuery = Schema.Struct({
@@ -974,6 +1006,22 @@ export const Located = Schema.Struct({
 
 /** The decoded form of {@link Located}. */
 export type Located = typeof Located.Type;
+
+/**
+ * A page of what a search found, newest first: by position, latest first, and at one
+ * position by Timeline id, last first, and whether more follow.
+ */
+export const SearchResults = Schema.Struct({
+  items: Schema.Array(TimelineItem),
+  more: Schema.Boolean,
+  /** Where the next page begins, to give as `after`, or `null` when no more follow. */
+  next: Schema.NullOr(ItemAfter),
+  through: Through,
+  version: ProjectionVersion,
+});
+
+/** The decoded form of {@link SearchResults}. */
+export type SearchResults = typeof SearchResults.Type;
 
 /**
  * What one step changed in the Timelines, as each thing stands now: the Timelines, items,

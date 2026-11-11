@@ -16,6 +16,7 @@ import type {
   CollapsedGap,
   Folded,
   Overflowed,
+  Search,
   Summary,
   TimelineStoreService,
   Unread,
@@ -24,12 +25,24 @@ import {
   TimelineId,
   cursorOf,
   cursorsAfter,
+  cursorsFrom,
   delivered,
   emptyDirectory,
+  foldForSearch,
   levels,
+  searchFolding,
+  searchableOf,
   unreadCap,
 } from "@iirc/timelines";
-import type { Change, Content, DeliveryChange, Directory, Level, Position } from "@iirc/timelines";
+import type {
+  Change,
+  Content,
+  DeliveryChange,
+  Directory,
+  Level,
+  Position,
+  Searchable,
+} from "@iirc/timelines";
 import { Effect, Exit, FileSystem, Layer, Option, Schema } from "effect";
 import type { Duration, Scope } from "effect";
 import { Reactivity } from "effect/reactivity";
@@ -39,6 +52,7 @@ import type { Fragment } from "effect/sql/Statement";
 
 import {
   CollapsedGapRow,
+  ContentRow,
   ContentText,
   DirectoryRow,
   DirectoryText,
@@ -54,7 +68,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 2;
+const layoutVersion = 3;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -93,7 +107,8 @@ const layout = [
     only INTEGER PRIMARY KEY CHECK (only = 1),
     version INTEGER,
     through INTEGER,
-    directory TEXT NOT NULL
+    directory TEXT NOT NULL,
+    folding TEXT NOT NULL
   ) STRICT`,
   `CREATE TABLE timelines (
     id TEXT PRIMARY KEY,
@@ -110,7 +125,9 @@ const layout = [
   ) STRICT`,
   "CREATE INDEX timelines_by_network ON timelines (network, id)",
   "CREATE INDEX timelines_by_changed ON timelines (changed, id)",
+  // `id` is the item's row, which keeps it however it moves, and which `search` finds it by.
   `CREATE TABLE items (
+    id INTEGER PRIMARY KEY,
     timeline TEXT NOT NULL,
     cursor TEXT NOT NULL,
     network TEXT NOT NULL,
@@ -120,13 +137,19 @@ const layout = [
     content TEXT NOT NULL,
     changed INTEGER NOT NULL,
     level TEXT,
-    PRIMARY KEY (timeline, cursor)
+    sender TEXT,
+    UNIQUE (timeline, cursor)
   ) STRICT`,
   "CREATE UNIQUE INDEX items_by_message_id ON items (timeline, message_id) WHERE message_id IS NOT NULL",
   "CREATE INDEX items_by_intent ON items (network, intent) WHERE intent IS NOT NULL",
   "CREATE INDEX items_by_step ON items (network, step, cursor, timeline)",
   "CREATE INDEX items_by_changed ON items (changed, timeline, cursor)",
   "CREATE INDEX items_by_level ON items (timeline, level, cursor) WHERE level IS NOT NULL",
+  // Each Message's text, folded, by its item's id: an index of its runs of three characters,
+  // which holds no copy of the text. The store folds it, so SQLite compares it as it is.
+  `CREATE VIRTUAL TABLE search USING fts5(
+    text, content = '', contentless_delete = 1, tokenize = 'trigram case_sensitive 1'
+  )`,
   `CREATE TABLE tombstones (
     id TEXT PRIMARY KEY,
     network TEXT NOT NULL,
@@ -153,7 +176,10 @@ const createLayout = (sql: SqlClient) =>
       yield* sql.unsafe(statement);
     }
 
-    yield* sql`INSERT INTO folded (only, version, through, directory) VALUES (1, NULL, NULL, ${emptyDirectoryText})`;
+    yield* sql`
+      INSERT INTO folded (only, version, through, directory, folding)
+      VALUES (1, NULL, NULL, ${emptyDirectoryText}, ${searchFolding})
+    `;
     yield* sql.unsafe(`PRAGMA user_version = ${layoutVersion}`);
   });
 
@@ -169,10 +195,12 @@ const columns = [
   "folded.version INTEGER",
   "folded.through INTEGER",
   "folded.directory TEXT",
+  "folded.folding TEXT",
   "gaps.network TEXT",
   "gaps.from_cursor TEXT",
   "gaps.to_cursor TEXT",
   "gaps.changed INTEGER",
+  "items.id INTEGER",
   "items.timeline TEXT",
   "items.cursor TEXT",
   "items.network TEXT",
@@ -182,6 +210,8 @@ const columns = [
   "items.content TEXT",
   "items.changed INTEGER",
   "items.level TEXT",
+  "items.sender TEXT",
+  "search.text ",
   "timelines.id TEXT",
   "timelines.network TEXT",
   "timelines.kind TEXT",
@@ -227,11 +257,13 @@ const inspect = (sql: SqlClient): Effect.Effect<Found, SqlError> =>
     }
 
     // Every table and its columns, read from SQLite's own description of them, before any
-    // table is queried by the columns the layout gives it.
+    // table is queried by the columns the layout gives it. The tables SQLite keeps for the
+    // search index are its own, and the index is described by its one column.
     const found = yield* sql<{ readonly column: string }>`
       SELECT tables.name || '.' || info.name || ' ' || info.type AS "column"
-      FROM sqlite_master AS tables, pragma_table_info(tables.name) AS info
-      WHERE tables.type = 'table'
+      FROM pragma_table_list AS tables, pragma_table_info(tables.name) AS info
+      WHERE tables.schema = 'main' AND tables.type IN ('table', 'virtual')
+        AND tables.name NOT LIKE 'sqlite~_%' ESCAPE '~'
       ORDER BY tables.name, info.cid
     `;
 
@@ -273,13 +305,17 @@ const open = (filename: string, options: OpenOptions) =>
     filename,
   }).pipe(Effect.provide(Reactivity.layer), Effect.mapError(failed(`cannot open ${filename}`)));
 
-/** A step's change, with an item's content encoded before its transaction begins. */
+/**
+ * A step's change, with an item's content encoded, and what it is found by, before its
+ * transaction begins.
+ */
 type Prepared =
   | { readonly _tag: "Other"; readonly change: Exclude<Change, { readonly _tag: "Added" }> }
   | {
       readonly _tag: "Added";
       readonly change: Extract<Change, { readonly _tag: "Added" }>;
       readonly content: string;
+      readonly searchable: Searchable | undefined;
     };
 
 const textOrNull = (value: string | undefined) => value ?? null;
@@ -351,6 +387,73 @@ const decodeHead = Schema.decodeUnknownExit(
 );
 
 const decodeInto = Schema.decodeUnknownExit(Schema.Struct({ into: Schema.NullOr(TimelineId) }));
+
+const decodeRows = decodeAll(Schema.Struct({ id: Schema.Int }), "an item's row");
+const decodeContents = decodeAll(ContentRow, "an item");
+const decodeFolding = decodeAll(Schema.Struct({ folding: Schema.String }), "the folding");
+
+/** How many items folding again reads at a time. */
+const refoldPage = 1000;
+
+/**
+ * Folds what every item is found by again, when the store kept it under another folding
+ * than `searchFolding`: each Message's sender, and the search index, made again from the
+ * items, in the transaction that opens the store. So no index ever holds text folded two
+ * ways, and the Journal need not be folded again.
+ * @param sql - The store's connection, in a transaction.
+ * @returns Whether it folded anything again.
+ */
+const refold = (sql: SqlClient) =>
+  Effect.gen(function* () {
+    const [kept] = yield* sql`SELECT folding FROM folded WHERE only = 1`.pipe(
+      Effect.flatMap(decodeFolding)
+    );
+
+    if (kept?.folding === searchFolding) {
+      return false;
+    }
+
+    yield* sql`INSERT INTO search (search) VALUES ('delete-all')`;
+
+    let after = 0;
+
+    for (;;) {
+      const rows = yield* sql`
+        SELECT id, content FROM items WHERE id > ${after} ORDER BY id LIMIT ${refoldPage}
+      `.pipe(Effect.flatMap(decodeContents));
+
+      for (const row of rows) {
+        const searchable = searchableOf(row.content);
+
+        yield* sql`UPDATE items SET sender = ${textOrNull(searchable?.sender)} WHERE id = ${row.id}`;
+
+        if (searchable !== undefined) {
+          yield* sql`INSERT INTO search (rowid, text) VALUES (${row.id}, ${searchable.text})`;
+        }
+      }
+
+      const last = rows.at(-1);
+
+      if (last === undefined) {
+        break;
+      }
+
+      after = last.id;
+    }
+
+    yield* sql`UPDATE folded SET folding = ${searchFolding} WHERE only = 1`;
+
+    return true;
+  });
+
+/**
+ * Text as a phrase of a full-text query: one string, its quotes doubled, so nothing in it
+ * is an operator, a column, or a prefix. The trigram index finds a phrase wherever it
+ * stands in the text, so this is a search for it as a run of characters.
+ * @param text - The text, folded.
+ * @returns The query.
+ */
+const phraseOf = (text: string) => `"${text.replaceAll('"', '""')}"`;
 
 /**
  * A row of a window: its first names the Timeline and its Network, and the rest are items
@@ -491,7 +594,12 @@ const prepare = (changes: readonly Change[]) =>
   Effect.forEach(changes, (change) =>
     change._tag === "Added"
       ? Schema.encodeEffect(ContentText)(change.content).pipe(
-          Effect.map((content): Prepared => ({ _tag: "Added", change, content })),
+          Effect.map((content): Prepared => ({
+            _tag: "Added",
+            change,
+            content,
+            searchable: searchableOf(change.content),
+          })),
           Effect.mapError(failed("cannot encode an item"))
         )
       : Effect.succeed<Prepared>({ _tag: "Other", change })
@@ -549,7 +657,15 @@ export const makeSqliteTimelineStore = (
               }
 
               case "Ready": {
-                return Effect.void;
+                return refold(sql).pipe(
+                  Effect.flatMap((folded) =>
+                    folded
+                      ? Effect.logWarning(
+                          "The Timeline store's search was folded another way, so it is folded again"
+                        ).pipe(Effect.annotateLogs({ file: filename, folding: searchFolding }))
+                      : Effect.void
+                  )
+                );
               }
 
               case "Unusable": {
@@ -638,7 +754,7 @@ export const makeSqliteTimelineStore = (
     const deliver = (change: DeliveryChange) =>
       Effect.gen(function* () {
         const rows = yield* sql`
-          SELECT timeline, cursor, message_id AS messageId, content FROM items
+          SELECT id, timeline, cursor, message_id AS messageId, content FROM items
           WHERE network = ${change.network} AND intent = ${change.intent}
           ORDER BY timeline, cursor
         `.pipe(Effect.flatMap(decodeOurs));
@@ -670,24 +786,41 @@ export const makeSqliteTimelineStore = (
             WHERE timeline = ${row.timeline} AND cursor = ${row.cursor}
           `;
           yield* touch(row.timeline, change.sequence);
+
+          // The text the Ircd confirmed is what it is found by from now on.
+          const was = searchableOf(row.content);
+          const now = searchableOf(content);
+
+          if (was !== undefined && now !== undefined && was.text !== now.text) {
+            yield* sql`DELETE FROM search WHERE rowid = ${row.id}`;
+            yield* sql`INSERT INTO search (rowid, text) VALUES (${row.id}, ${now.text})`;
+          }
         }
       });
 
-    const added = (change: Extract<Change, { readonly _tag: "Added" }>, content: string) =>
+    const added = (
+      change: Extract<Change, { readonly _tag: "Added" }>,
+      content: string,
+      searchable: Searchable | undefined
+    ) =>
       Effect.gen(function* () {
-        const kept = yield* sql`
+        const [kept] = yield* sql`
           INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
-            level)
+            level, sender)
           VALUES (${change.timeline}, ${cursorOf(change.position)}, ${change.network},
             ${change.position.sequence}, ${textOrNull(change.messageId)},
             ${textOrNull(change.intent)}, ${content}, ${change.sequence},
-            ${textOrNull(change.level)})
+            ${textOrNull(change.level)}, ${textOrNull(searchable?.sender)})
           ON CONFLICT DO NOTHING
-          RETURNING 1 AS kept
-        `;
+          RETURNING id
+        `.pipe(Effect.flatMap(decodeRows));
 
-        if (kept.length === 0) {
+        if (kept === undefined) {
           return;
+        }
+
+        if (searchable !== undefined) {
+          yield* sql`INSERT INTO search (rowid, text) VALUES (${kept.id}, ${searchable.text})`;
         }
 
         yield* touch(change.timeline, change.sequence);
@@ -706,7 +839,7 @@ export const makeSqliteTimelineStore = (
     const applyOne = (prepared: Prepared) =>
       Effect.gen(function* () {
         if (prepared._tag === "Added") {
-          yield* added(prepared.change, prepared.content);
+          yield* added(prepared.change, prepared.content, prepared.searchable);
 
           return;
         }
@@ -754,14 +887,21 @@ export const makeSqliteTimelineStore = (
           case "Merged": {
             // Each item moves by the rule `Added` keeps: one whose position or message id
             // `into` already has is dropped. `from`'s items share neither among themselves.
+            // An item moved keeps its row, so the search index still finds it, and one
+            // dropped leaves the index with it.
             yield* sql`
-              INSERT INTO items (timeline, cursor, network, step, message_id, intent, content, changed,
-                level)
-              SELECT ${change.into}, cursor, network, step, message_id, intent, content,
-                ${change.sequence}, level
-              FROM items WHERE timeline = ${change.from}
-              ON CONFLICT DO NOTHING
+              UPDATE OR IGNORE items SET timeline = ${change.into}, changed = ${change.sequence}
+              WHERE timeline = ${change.from}
             `;
+
+            const dropped = yield* sql`
+              SELECT id FROM items WHERE timeline = ${change.from} AND sender IS NOT NULL
+            `.pipe(Effect.flatMap(decodeRows));
+
+            for (const { id } of dropped) {
+              yield* sql`DELETE FROM search WHERE rowid = ${id}`;
+            }
+
             yield* sql`DELETE FROM items WHERE timeline = ${change.from}`;
             yield* sql`DELETE FROM timelines WHERE id = ${change.from}`;
             yield* sql`
@@ -1174,6 +1314,39 @@ export const makeSqliteTimelineStore = (
         })
       );
 
+    // The search index finds every Message whose text holds the phrase, which is the one
+    // walk a search makes, and each is found in `items` by its row. They are ordered newest
+    // first, and only the page is kept as they are, so a search costs one step for each
+    // Message that holds the phrase, and never reads any other. CROSS JOIN keeps the index
+    // first, so a filter never turns it into a walk of a Timeline's items.
+    const search = (each: Search) => {
+      const { after, since, until } = each;
+
+      return sql`
+        SELECT items.timeline, items.cursor AS position, items.network, items.content,
+          items.changed, items.level
+        FROM search CROSS JOIN items ON items.id = search.rowid
+        WHERE search MATCH ${phraseOf(foldForSearch(each.text))}
+          ${each.network === undefined ? sql`` : sql`AND items.network = ${each.network}`}
+          ${
+            each.timeline === undefined
+              ? sql``
+              : sql`AND items.timeline = coalesce(
+                  (SELECT into_id FROM tombstones WHERE id = ${each.timeline}), ${each.timeline})`
+          }
+          ${each.from === undefined ? sql`` : sql`AND items.sender = ${foldForSearch(each.from)}`}
+          ${since === undefined ? sql`` : sql`AND items.cursor >= ${cursorsFrom(since)}`}
+          ${until === undefined ? sql`` : sql`AND items.cursor < ${cursorsFrom(until)}`}
+          ${
+            after === undefined
+              ? sql``
+              : sql`AND (items.cursor, items.timeline) < (${cursorOf(after.position)}, ${after.timeline})`
+          }
+        ORDER BY items.cursor DESC, items.timeline DESC
+        LIMIT ${Math.max(0, Math.floor(each.limit))}
+      `.pipe(Effect.flatMap(decodeItems));
+    };
+
     return {
       // Once begun, an apply runs to its end, encoding included, and an interruption waits
       // for it. A failure rolls the transaction back, so nothing of it is kept.
@@ -1272,6 +1445,8 @@ export const makeSqliteTimelineStore = (
                 yield* sql.unsafe(`DELETE FROM ${table}`);
               }
 
+              yield* sql`INSERT INTO search (search) VALUES ('delete-all')`;
+
               yield* sql`
                 UPDATE folded SET version = ${version}, through = NULL,
                   directory = ${emptyDirectoryText}
@@ -1280,6 +1455,7 @@ export const makeSqliteTimelineStore = (
             })
           )
         ).pipe(Effect.mapError(failed("cannot reset"))),
+      search: (each) => query("a search", search(each)),
       timeline,
       timelines: (network, page = {}) =>
         query(

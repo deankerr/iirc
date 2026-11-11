@@ -154,6 +154,8 @@ export interface Act {
  *   Direct Message's. A Timeline exists only once something was said in it, so with none,
  *   the composer starts `/msg <name> ` to say the first Message, which opens it.
  * - `Pane`: change the Panes: split, close, focus, swap, resize, or zoom.
+ * - `Search`: show the search, searching the query when there is one, which the runtime
+ *   reads against the Timelines and the Owner's time zone, or showing what it last found.
  */
 export type Intent =
   | Say
@@ -184,7 +186,8 @@ export type Intent =
   | { readonly _tag: "Notify"; readonly on: boolean }
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
   | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string }
-  | { readonly _tag: "Pane"; readonly change: PaneChange };
+  | { readonly _tag: "Pane"; readonly change: PaneChange }
+  | { readonly _tag: "Search"; readonly query: string | undefined };
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -1767,6 +1770,19 @@ export const commands: readonly Command[] = [
     name: "members",
     parse: membersArguments,
     usage: "/members [on|off]",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Search the Messages of every Timeline, newest first, narrowed by from:<nick>, in:<#channel|nick>, network:<id>, since:<date>, and until:<date>, or show the last search.",
+    id: "search.open",
+    intents: (query: string | undefined) => [{ _tag: "Search", query }],
+    name: "search",
+    parse: (args: string) => parsed(args.trim() === "" ? undefined : args.trim()),
+    usage:
+      "/search [<text>] [from:<nick>] [in:<name>] [network:<id>] [since:<date>] [until:<date>]",
     when: [],
   }),
   unfocused({

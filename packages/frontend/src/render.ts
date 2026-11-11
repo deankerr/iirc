@@ -134,16 +134,17 @@ const dropped = (code: number): boolean =>
   code === popIsolate;
 
 /**
- * Text a Network sent as plain text for somewhere that shows no formatting, such as a
- * notification: mIRC formatting stripped, every control, bidirectional formatting
- * character, and lone surrogate dropped, line and paragraph separators made spaces, cut to
- * `limit` characters with an ellipsis, and the whole isolated, so its direction cannot
- * reorder what is around it.
+ * The characters of text a Network sent, as plain text shows them: mIRC formatting
+ * stripped, every control, bidirectional formatting character, and lone surrogate dropped,
+ * and line and paragraph separators made spaces. Each is one code point.
  * @param text - The text, as the Network sent it.
- * @param limit - The most characters kept.
- * @returns The text, isolated.
+ * @param limit - How many are needed: reading stops one past it.
+ * @returns The characters.
  */
-export const plainText = (text: string, limit = plainLimit): string => {
+export const plainCharacters = (
+  text: string,
+  limit = Number.POSITIVE_INFINITY
+): readonly string[] => {
   const kept: string[] = [];
 
   for (const character of stripFormatting(text)) {
@@ -160,6 +161,20 @@ export const plainText = (text: string, limit = plainLimit): string => {
       break;
     }
   }
+
+  return kept;
+};
+
+/**
+ * Text a Network sent as plain text for somewhere that shows no formatting, such as a
+ * notification: its plain characters, cut to `limit` with an ellipsis, and the whole
+ * isolated, so its direction cannot reorder what is around it.
+ * @param text - The text, as the Network sent it.
+ * @param limit - The most characters kept.
+ * @returns The text, isolated.
+ */
+export const plainText = (text: string, limit = plainLimit): string => {
+  const kept = plainCharacters(text, limit);
 
   const cut = kept.length > limit ? `${kept.slice(0, limit - 1).join("")}\u2026` : kept.join("");
 

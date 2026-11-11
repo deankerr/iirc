@@ -90,6 +90,8 @@ export {
   StepRefusal,
   SaidAnswer,
   SayRequest,
+  SearchQuery,
+  SearchResults,
   Sequence,
   SequenceFromString,
   SignInRequest,
@@ -136,4 +138,4 @@ export {
   uiValueKept,
 } from "./ui.ts";
 
-export { TimelineId, unreadCap } from "@iirc/timelines";
+export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";

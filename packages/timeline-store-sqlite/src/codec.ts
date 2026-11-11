@@ -266,11 +266,15 @@ export const ItemRow = Schema.toCodecJson(
   })
 );
 
+/** An item's row and its content, as folding the search again reads it. */
+export const ContentRow = Schema.toCodecJson(Schema.Struct({ content: ContentText, id: Int }));
+
 /** One of ours, as a delivery update reads it. */
 export const OursRow = Schema.toCodecJson(
   Schema.Struct({
     content: ContentText,
     cursor: Schema.String,
+    id: Int,
     messageId: Schema.UndefinedOr(MessageId),
     timeline: TimelineId,
   })

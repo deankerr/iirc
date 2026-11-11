@@ -1677,4 +1677,198 @@ describe("the web frontend on iirc daemon --web", () => {
       }
     }
   );
+
+  it(
+    "searches the Messages newest first, narrows by sender, and jumps to an older one, centred and marked, while live ones arrive below",
+    { timeout: 120_000 },
+    async () => {
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "search"),
+        "#iirc-search"
+      );
+
+      const say = async (text: string) =>
+        await api(
+          "POST",
+          "/networks/private/say",
+          JSON.stringify({ kind: "Privmsg", target: channel, text })
+        );
+
+      // How many Messages the Daemon finds for some text, once it folded them.
+      const found = async (text: string) => {
+        const answer = await api("GET", `/search?text=${encodeURIComponent(text)}`);
+
+        const page = Schema.decodeSync(
+          Schema.fromJsonString(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))
+        )(await answer.text());
+
+        return page.items.length;
+      };
+
+      try {
+        // Each needle said by peer, then by us, with filler around them, so the first lies
+        // far from the latest and has a view's worth before it.
+        for (let index = 1; index <= 40; index += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- said in order
+          await say(`filler before ${index}`);
+        }
+
+        peer.send(`PRIVMSG ${channel} :a needle from peer 1`);
+        await expect.poll(async () => await found("needle from peer"), { timeout: 20_000 }).toBe(1);
+        await say("a needle from iirc 1");
+
+        for (let index = 1; index <= 30; index += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- said in order
+          await say(`filler between ${index}`);
+        }
+
+        peer.send(`PRIVMSG ${channel} :a needle from peer 2`);
+        await expect.poll(async () => await found("needle from peer"), { timeout: 20_000 }).toBe(2);
+        await say("a needle from iirc 2");
+
+        for (let index = 1; index <= 60; index += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- said in order
+          await say(`filler after ${index}`);
+        }
+
+        await expect.poll(async () => await found("filler after 60"), { timeout: 20_000 }).toBe(1);
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+
+        await log.getByText("filler after 60", { exact: true }).waitFor();
+
+        // Mod+Shift+F from the composer shows the search, with the caret in its field.
+        await page.getByRole("textbox", { name: channel }).focus();
+        await page.keyboard.press("Control+Shift+F");
+
+        const field = page.getByRole("textbox", { exact: true, name: "Search" });
+        const results = page.getByRole("listbox", { name: "Results" });
+        const options = results.getByRole("option");
+
+        await expect
+          .poll(async () => await field.evaluate((element) => element === document.activeElement))
+          .toBe(true);
+
+        await page.keyboard.type("needle");
+        await page.keyboard.press("Enter");
+        await expect.poll(async () => await options.count()).toBe(4);
+
+        // Who said each, by the nick its line shows, newest first, and what was marked.
+        const shown = async () =>
+          await options.evaluateAll((rows) =>
+            rows.map((row) => row.textContent?.replace(/^.*?</u, "<") ?? "")
+          );
+
+        const all = await shown();
+        const marked = await options.first().locator("mark").textContent();
+
+        await field.fill("needle from:peer");
+        await page.keyboard.press("Enter");
+        await expect.poll(async () => await options.count()).toBe(2);
+        const narrowed = await shown();
+
+        // Into the results, to the older, and Enter jumps to it.
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+
+        const target = log.locator("[data-target]");
+
+        await target.waitFor();
+
+        // How far the target's middle stands from the middle of the log, in pixels.
+        const offCentre = async () =>
+          await log.evaluate((element) => {
+            const row = element.querySelector("[data-target]");
+            const box = element.getBoundingClientRect();
+            const at = row?.getBoundingClientRect();
+
+            return at === undefined
+              ? null
+              : Math.round(at.top + at.height / 2 - (box.top + box.height / 2));
+          });
+
+        // Centred within a row, and settled: the same twice, a moment apart, as rows measure.
+        let last: number | null = null;
+
+        await expect
+          .poll(async () => {
+            const now = await offCentre();
+            const settled = now !== null && now === last && Math.abs(now) <= 20;
+
+            last = now;
+
+            return settled;
+          })
+          .toBe(true);
+        const centred = await offCentre();
+        const targetText = await target.textContent();
+        const jump = page.getByRole("button", { name: "Jump to latest" });
+        const jumpShown = await jump.isVisible();
+
+        // Live Messages arrive beyond the window, and the target stays where it was.
+        peer.send(`PRIVMSG ${channel} :live one`);
+        peer.send(`PRIVMSG ${channel} :live two`);
+        await expect.poll(async () => await found("live two"), { timeout: 20_000 }).toBe(1);
+        await page.waitForTimeout(500);
+        const stayed = await offCentre();
+
+        // Jump to latest reads the latest again, and follows it.
+        await jump.click();
+        await log.getByText("live two", { exact: true }).waitFor();
+        await expect
+          .poll(
+            async () =>
+              await log.evaluate(
+                (element) => element.scrollHeight - element.scrollTop - element.clientHeight < 8
+              )
+          )
+          .toBe(true);
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          all,
+          centred: Math.abs(centred ?? 999) <= 20,
+          jumpShown,
+          marked,
+          narrowed,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          stayed: Math.abs((stayed ?? 999) - (centred ?? 0)) <= 2 ? true : [centred, stayed],
+          target: targetText?.includes("a needle from peer 1"),
+          violations,
+        }).toStrictEqual({
+          all: [
+            "<iirc> a needle from iirc 2",
+            "<peer> a needle from peer 2",
+            "<iirc> a needle from iirc 1",
+            "<peer> a needle from peer 1",
+          ],
+          centred: true,
+          jumpShown: true,
+          marked: "needle",
+          narrowed: ["<peer> a needle from peer 2", "<peer> a needle from peer 1"],
+          problems: [],
+          stayed: true,
+          target: true,
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
 });

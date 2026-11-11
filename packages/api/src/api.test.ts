@@ -56,6 +56,7 @@ describe("the contract", () => {
       "GET /api/networks/{network}/said/{intent}",
       "GET /api/networks/{network}/timelines",
       "GET /api/news",
+      "GET /api/search",
       "GET /api/timelines/changes",
       "GET /api/timelines/{timeline}",
       "GET /api/timelines/{timeline}/channel",

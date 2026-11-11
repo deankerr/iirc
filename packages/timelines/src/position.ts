@@ -71,6 +71,15 @@ export const cursorOf = (position: Position): string =>
  */
 export const cursorsAfter = (at: Instant): string => `${hex(BigInt(at) + offset, atDigits)}-~`;
 
+/**
+ * Text that every cursor of a position at or later than an instant compares at or above,
+ * and every other cursor below: the instant's part of a cursor, then `-`, which comes
+ * before every hex digit. So a store bounds a range of time by cursor alone.
+ * @param at - The instant.
+ * @returns The bound, which is no cursor itself.
+ */
+export const cursorsFrom = (at: Instant): string => `${hex(BigInt(at) + offset, atDigits)}-`;
+
 const safe = (value: bigint): number | undefined =>
   value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER)
     ? Number(value)

@@ -10,10 +10,12 @@ import type { Fact } from "@iirc/client/known";
 import { LawBroken } from "@iirc/runtime/testing";
 import type { Law } from "@iirc/runtime/testing";
 import {
+  SearchText,
   comparePositions,
   cursorOf,
   emptyDirectory,
   levels,
+  searchableOf,
   step,
   timelineIdOf,
   unreadCap,
@@ -28,12 +30,13 @@ import type {
   Position,
   TimelineId,
 } from "@iirc/timelines";
-import { Deferred, Effect, Equal, Fiber, Option, Scheduler } from "effect";
+import { Deferred, Effect, Equal, Fiber, Option, Scheduler, Schema } from "effect";
 
 import type {
   Anchor,
   Gap,
   Item,
+  Search,
   Summary,
   TimelineStoreFailed,
   TimelineStoreService,
@@ -169,12 +172,37 @@ const inOrder = <A, B, E, R>(items: Iterable<A>, f: (item: A) => Effect.Effect<B
   // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
   Effect.forEach(items, f);
 
+const isSearchText = Schema.is(SearchText);
+
+// The text of each Message among items that a search can look for, folded, once each.
+const searchTexts = (items: readonly Item[]) =>
+  [
+    ...new Set(
+      items.flatMap((item) => {
+        const found = searchableOf(item.content);
+
+        return found === undefined || !isSearchText(found.text) ? [] : [found.text];
+      })
+    ),
+  ].toSorted();
+
+// What a search found, as each item's Timeline and cursor, in the order given.
+const placesOf = (items: readonly Item[]) =>
+  items.map(({ position: where, timeline }) => [timeline, cursorOf(where)] as const);
+
 // Everything a store holds that a reader can see, to compare before and after: each read
 // that returns what a step may have changed, in full.
 const snapshot = (store: TimelineStoreService) =>
   Effect.gen(function* () {
     const changed = yield* store.changedAfter(undefined);
     const timelines = yield* store.timelines(libera);
+
+    // Each Message's text searched for, so an index half kept is seen.
+    const searched = yield* inOrder(searchTexts(changed.items), (text) =>
+      store
+        .search({ limit: 1000, text: SearchText.make(text) })
+        .pipe(Effect.map((found) => [text, placesOf(found)] as const))
+    );
 
     const windows = yield* inOrder(timelines, ({ id }) =>
       store
@@ -190,6 +218,7 @@ const snapshot = (store: TimelineStoreService) =>
       gapsRead: yield* store.gaps(libera, {}),
       items: changed.items,
       merged: changed.merged,
+      searched,
       timelines,
       windows,
     };
@@ -241,6 +270,11 @@ const countUnread = (items: readonly Item[], read: Instant | undefined): Unread 
   return counts;
 };
 
+// The order a search gives: by position, latest first, and at one position by Timeline id,
+// last first.
+const newestFirst = (left: Item, right: Item) =>
+  comparePositions(right.position, left.position) || compareText(right.timeline, left.timeline);
+
 const project = (model: Model): Snapshot => {
   const itemsIn = (timeline: TimelineId) =>
     model.items
@@ -278,6 +312,17 @@ const project = (model: Model): Snapshot => {
     ),
     merged: model.merged.toSorted(
       (left, right) => left.changed - right.changed || compareText(left.id, right.id)
+    ),
+    searched: searchTexts(model.items).map(
+      (text) =>
+        [
+          text,
+          placesOf(
+            model.items
+              .filter((item) => searchableOf(item.content)?.text.includes(text) === true)
+              .toSorted(newestFirst)
+          ),
+        ] as const
     ),
     timelines,
     windows: timelines.map(
@@ -765,6 +810,407 @@ const randomSteps = (seed: number): readonly (readonly Change[])[] => {
 
   return steps;
 };
+
+// Something a participant said, as `said` says it, from a sender of its own.
+const spoken = (text: string, sender: string): Content => {
+  const content = said(text);
+
+  return content._tag === "Message" ? { ...content, sender } : content;
+};
+
+type Searching = Omit<Search, "text" | "limit"> & {
+  readonly text: string;
+  readonly limit?: number | undefined;
+};
+
+// The texts of what a search finds, in the order found, 100 at most unless it says.
+const searchFor = (store: TimelineStoreService, search: Searching) =>
+  store
+    .search({ ...search, limit: search.limit ?? 100, text: SearchText.make(search.text) })
+    .pipe(Effect.map((found) => found.map(textOf)));
+
+// Every page of a search, each given after where the one before ended.
+const pagesOf = (store: TimelineStoreService, search: Searching, limit: number) =>
+  Effect.gen(function* () {
+    const pages: (readonly Item[])[] = [];
+    let after: Search["after"];
+
+    for (;;) {
+      const page = yield* store.search({
+        ...search,
+        after,
+        limit,
+        text: SearchText.make(search.text),
+      });
+
+      pages.push(page);
+
+      const last = page.at(-1);
+
+      if (page.length < limit || last === undefined) {
+        return pages;
+      }
+
+      after = { position: last.position, timeline: last.timeline };
+    }
+  });
+
+const searchLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(10, 2, 0), said("Hello IIRC world")),
+          added(2, other, position(20, 2, 1), said("iirc rocks")),
+          added(2, channel, position(5, 2, 2), said("Über alles")),
+          added(2, channel, position(6, 2, 3), said("caf\u00E9 au lait")),
+          // The same letter written with a combining accent.
+          added(2, channel, position(7, 2, 4), said("cafe\u0301 noir")),
+          added(2, network, position(8, 2, 5), { _tag: "SessionBegan", at: at(8), nick: "iirc" }),
+          added(2, channel, position(9, 2, 6), spoken("someone", "iirc")),
+        ]);
+
+        yield* same("by its text, newest first", yield* searchFor(store, { text: "iirc" }), [
+          "iirc rocks",
+          "Hello IIRC world",
+        ]);
+        yield* same("in any case", yield* searchFor(store, { text: "IiRc" }), [
+          "iirc rocks",
+          "Hello IIRC world",
+        ]);
+        yield* same("beyond ASCII", yield* searchFor(store, { text: "über" }), ["Über alles"]);
+        // Nothing is composed, so a letter written whole and one written with a combining
+        // accent are different text.
+        yield* same("composed", yield* searchFor(store, { text: "CAF\u00C9" }), [
+          "caf\u00E9 au lait",
+        ]);
+        yield* same("decomposed", yield* searchFor(store, { text: "CAFE\u0301" }), [
+          "cafe\u0301 noir",
+        ]);
+        yield* same("diacritics kept", yield* searchFor(store, { text: "cafe " }), []);
+        yield* same("anywhere in it", yield* searchFor(store, { text: "c w" }), [
+          "Hello IIRC world",
+        ]);
+        yield* same("up to the limit", yield* searchFor(store, { limit: 1, text: "iirc" }), [
+          "iirc rocks",
+        ]);
+        yield* same("nothing", yield* searchFor(store, { text: "nowhere" }), []);
+      }),
+    name: "finds the Messages whose text holds the search's, lower-cased, newest first",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          described(2, oftcNetwork, "Network", oftc, null, oftc),
+          added(2, channel, position(1, 2, 0), spoken("deploy one", "Alice")),
+          added(2, other, position(2, 2, 1), spoken("deploy two", "bob")),
+          added(2, channel, position(3, 2, 2), spoken("deploy three", "alice")),
+          added(2, oftcNetwork, position(4, 2, 3), spoken("deploy four", "ALICE"), undefined, oftc),
+        ]);
+
+        const text = "deploy";
+
+        yield* same("all", yield* searchFor(store, { text }), [
+          "deploy four",
+          "deploy three",
+          "deploy two",
+          "deploy one",
+        ]);
+        yield* same("a Network's", yield* searchFor(store, { network: libera, text }), [
+          "deploy three",
+          "deploy two",
+          "deploy one",
+        ]);
+        yield* same("a Timeline's", yield* searchFor(store, { text, timeline: channel }), [
+          "deploy three",
+          "deploy one",
+        ]);
+        yield* same("a sender's, folded", yield* searchFor(store, { from: "aLiCe", text }), [
+          "deploy four",
+          "deploy three",
+          "deploy one",
+        ]);
+        yield* same("a sender's, whole", yield* searchFor(store, { from: "ali", text }), []);
+        yield* same("since, at it included", yield* searchFor(store, { since: at(2), text }), [
+          "deploy four",
+          "deploy three",
+          "deploy two",
+        ]);
+        yield* same("until, at it left out", yield* searchFor(store, { text, until: at(3) }), [
+          "deploy two",
+          "deploy one",
+        ]);
+        yield* same(
+          "every filter at once",
+          yield* searchFor(store, {
+            from: "alice",
+            network: libera,
+            since: at(1),
+            text,
+            timeline: channel,
+            until: at(4),
+          }),
+          ["deploy three", "deploy one"]
+        );
+        yield* same(
+          "a Timeline of another Network",
+          yield* searchFor(store, { network: oftc, text, timeline: channel }),
+          []
+        );
+      }),
+    name: "filters by Network, Timeline, sender, and time",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // One Message in two Timelines at one position, late history among the rest, and
+        // Messages in two Networks.
+        yield* apply(store, 2, [
+          ...opened(2),
+          described(2, oftcNetwork, "Network", oftc, null, oftc),
+          ...Array.from({ length: 7 }, (_, n) =>
+            added(2, n % 2 === 0 ? channel : other, position(n * 10, 2, n), said(`page ${n}`))
+          ),
+          added(2, channel, position(35, 2, 9), said("page both")),
+          added(2, other, position(35, 2, 9), said("page both")),
+          added(2, oftcNetwork, position(36, 2, 10), said("page oftc"), undefined, oftc),
+        ]);
+        yield* apply(store, 3, [added(3, channel, position(15, 3), said("page late"))]);
+
+        const whole = yield* store.search({ limit: 100, text: SearchText.make("page") });
+
+        yield* same(
+          "newest first, by position and then Timeline id, each later first",
+          whole.map((item) => [item.timeline, textOf(item)]),
+          [
+            [channel, "page 6"],
+            [other, "page 5"],
+            [channel, "page 4"],
+            [oftcNetwork, "page oftc"],
+            [other, "page both"],
+            [channel, "page both"],
+            [other, "page 3"],
+            [channel, "page 2"],
+            [channel, "page late"],
+            [other, "page 1"],
+            [channel, "page 0"],
+          ]
+        );
+
+        for (const limit of [1, 2, 3, 4]) {
+          const pages = yield* pagesOf(store, { text: "page" }, limit);
+
+          yield* same(`pages of ${limit}, fitted together`, pages.flat(), whole);
+          yield* same(
+            `pages of ${limit}, each within it`,
+            pages.every((page) => page.length <= limit),
+            true
+          );
+        }
+
+        const filtered = yield* store.search({
+          limit: 100,
+          network: libera,
+          text: SearchText.make("page"),
+          timeline: channel,
+        });
+
+        yield* same(
+          "pages of a filtered search",
+          (yield* pagesOf(store, { network: libera, text: "page", timeline: channel }, 2)).flat(),
+          filtered
+        );
+      }),
+    name: "pages a search newest first, with nothing lost or given twice",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // `other` is merged into `channel`, whose id is lower, so an item that moves stands
+        // after where a page that ended on it in `other` ended, and is given again.
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(1, 2, 0), said("hop a1")),
+          added(2, other, position(2, 2, 1), said("hop b2")),
+          added(2, other, position(3, 2, 2), said("hop b3")),
+        ]);
+
+        const text = SearchText.make("hop");
+        const [first] = yield* store.search({ limit: 1, text });
+
+        yield* same("the first page", first === undefined ? undefined : textOf(first), "hop b3");
+
+        const after = { position: position(3, 2, 2), timeline: other };
+        yield* same(
+          "the next page, with no merge between",
+          (yield* store.search({ after, limit: 1, text })).map(textOf),
+          ["hop b2"]
+        );
+
+        yield* apply(store, 3, [
+          { _tag: "Merged", from: other, into: channel, network: libera, sequence: 3 },
+        ]);
+
+        yield* same(
+          "the next page, after a merge between, repeats what moved",
+          (yield* store.search({ after, limit: 1, text })).map(textOf),
+          ["hop b3"]
+        );
+      }),
+    name: "repeats nothing across pages, unless a merge moved what a page ended on",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          described(2, third, "Channel", "#c", "#c"),
+          added(2, channel, position(1, 2, 0), said("merge kept"), "m1"),
+          added(2, other, position(2, 2, 1), said("merge moved")),
+          // Its id is the kept Timeline's too, so it is dropped as it moves.
+          added(2, other, position(3, 2, 2), said("merge twice"), "m1"),
+          added(2, third, position(4, 2, 3), said("merge detached")),
+        ]);
+        yield* apply(store, 3, [
+          described(3, third, "Channel", "#c", null),
+          { _tag: "Merged", from: other, into: channel, network: libera, sequence: 3 },
+        ]);
+
+        const found = yield* store.search({ limit: 100, text: SearchText.make("merge") });
+
+        yield* same(
+          "moved, the duplicate dropped, and the detached one kept",
+          found.map((item) => [item.timeline, textOf(item)]),
+          [
+            [third, "merge detached"],
+            [channel, "merge moved"],
+            [channel, "merge kept"],
+          ]
+        );
+        yield* same(
+          "a merged id searches the Timeline it went to",
+          yield* searchFor(store, { text: "merge", timeline: other }),
+          ["merge moved", "merge kept"]
+        );
+        yield* same(
+          "a detached Timeline",
+          yield* searchFor(store, { text: "merge", timeline: third }),
+          ["merge detached"]
+        );
+        yield* same(
+          "an id never given",
+          yield* searchFor(store, { text: "merge", timeline: timelineIdOf(99, 0, 1) }),
+          []
+        );
+      }),
+    name: "searches a merged Timeline through its tombstone, and a detached one",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(1, 2, 0), said("helo wrld", "Pending")),
+          added(2, channel, position(2, 2, 1), said("lost words", "Unconfirmed")),
+        ]);
+        yield* apply(store, 3, [
+          {
+            _tag: "Confirmed",
+            at: known(at(4)),
+            id: known(MessageId.make("m1")),
+            intent: IntentId.make("intent-helo wrld"),
+            messageId: MessageId.make("m1"),
+            network: libera,
+            sequence: 3,
+            text: "hello world",
+          },
+          {
+            _tag: "Unsent",
+            intent: IntentId.make("intent-lost words"),
+            network: libera,
+            sequence: 3,
+          },
+        ]);
+
+        yield* same("by the text confirmed", yield* searchFor(store, { text: "hello" }), [
+          "helo wrld",
+        ]);
+        yield* same("not by ours", yield* searchFor(store, { text: "helo" }), []);
+        yield* same("unsent, by ours", yield* searchFor(store, { text: "lost" }), ["lost words"]);
+        yield* same("by its sender", yield* searchFor(store, { from: "PEER", text: "wor" }), [
+          "lost words",
+          "helo wrld",
+        ]);
+      }),
+    name: "finds our Message by the text the Ircd confirmed, once it did",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // Text that would be an operator, a column filter, or a quote in a query.
+        const hostile = [
+          'say "hi" now',
+          "a*b star",
+          "NEAR(x y) here",
+          "this OR that",
+          "^caret first",
+          "text: colon",
+          "{text}: braces",
+          "it's -minus +plus (paren)",
+          "back\\slash",
+          "AND NOT done",
+        ];
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          ...hostile.map((text, n) => added(2, channel, position(n, 2, n), said(text))),
+        ]);
+
+        const queries: readonly (readonly [string, readonly string[]])[] = [
+          ['"hi"', ['say "hi" now']],
+          ['"', []],
+          ['" OR "', []],
+          ["a*b", ["a*b star"]],
+          ["***", []],
+          ["NEAR(x", ["NEAR(x y) here"]],
+          ["near(", ["NEAR(x y) here"]],
+          ["S OR T", ["this OR that"]],
+          ["^ca", ["^caret first"]],
+          ["text:", ["text: colon"]],
+          ["{text}:", ["{text}: braces"]],
+          ["-minus +plus", ["it's -minus +plus (paren)"]],
+          ["(paren)", ["it's -minus +plus (paren)"]],
+          ["\\sl", ["back\\slash"]],
+          ["AND NOT", ["AND NOT done"]],
+          ["NOT", ["AND NOT done"]],
+        ];
+
+        for (const [text, expected] of queries) {
+          // A search shorter than the least is no search, so it is padded to be one.
+          const padded = isSearchText(text) ? text : `${text}${text}${text}`;
+
+          yield* same(`searching ${padded}`, yield* searchFor(store, { text: padded }), expected);
+        }
+      }),
+    name: "takes a search's text as text, never as a query's syntax",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const steps = [...opened(2), added(2, channel, position(1, 2), said("forgotten"))];
+
+        yield* apply(store, 2, steps);
+        yield* store.reset(5);
+        yield* same("after a reset", yield* searchFor(store, { text: "forgot" }), []);
+        yield* apply(store, 2, steps);
+        yield* same("folded again", yield* searchFor(store, { text: "forgot" }), ["forgotten"]);
+      }),
+    name: "forgets what it found on reset, and finds it once when folded again",
+  },
+];
 
 /** The laws every Timeline store adapter keeps, starting from a fresh, empty store. */
 export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStoreFailed>[] = [
@@ -2351,6 +2797,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
       }),
     name: "counts what lies after each Read Marker as counting one by one does, after any steps",
   },
+  ...searchLaws,
   {
     check: interrupting(additions),
     name: "applies a step whole, or not at all",

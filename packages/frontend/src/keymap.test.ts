@@ -344,6 +344,29 @@ describe("the keymap", () => {
     ]);
   });
 
+  it("shows the search with Mod+Shift+F, while typing too, leaving Mod+F to the browser's find", () => {
+    const shown = [{ _tag: "Search", query: undefined }];
+
+    expect({
+      find: resolve(defaultKeymap, at(), press("f", "KeyF", { ctrl: true })),
+      mac: resolve(
+        defaultKeymap,
+        at({ platform: "Mac" }),
+        press("F", "KeyF", { meta: true, shift: true })
+      ),
+      open: resolve(
+        defaultKeymap,
+        at({ palette: true }),
+        press("F", "KeyF", { ctrl: true, shift: true })
+      ),
+      typing: resolve(
+        defaultKeymap,
+        at({ editing: true }),
+        press("F", "KeyF", { ctrl: true, shift: true })
+      ),
+    }).toStrictEqual({ find: undefined, mac: shown, open: undefined, typing: shown });
+  });
+
   it("respects the bound command's own conditions, and lets a later binding win", () => {
     const keymap = keymapOf([
       { args: "hello", command: "say.privmsg", keys: "alt+h" },

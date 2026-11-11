@@ -13,6 +13,7 @@ import type {
   Directory,
   Level,
   Position,
+  SearchText,
   TimelineId,
 } from "@iirc/timelines";
 import { Context, Schema } from "effect";
@@ -183,6 +184,35 @@ export interface Consistent<A> {
   readonly version: number | undefined;
 }
 
+/** Where an item stands, and in which Timeline: what a page of items resumes after. */
+export interface ItemPlace {
+  readonly position: Position;
+  readonly timeline: TimelineId;
+}
+
+/**
+ * A search of the Messages in Timelines, newest first: by position, latest first, and at
+ * one position by Timeline id, last first.
+ */
+export interface Search {
+  /** What a Message's text holds, compared folded by `foldForSearch`. */
+  readonly text: SearchText;
+  /** Only this Network's. */
+  readonly network?: string | undefined;
+  /** Only this Timeline's, or, for a merged id, the Timeline it went to. */
+  readonly timeline?: TimelineId | undefined;
+  /** Only those said by this nick, compared folded by `foldForSearch`. */
+  readonly from?: string | undefined;
+  /** Only those whose position's time is at or after this instant. */
+  readonly since?: Instant | undefined;
+  /** Only those whose position's time is before this instant. */
+  readonly until?: Instant | undefined;
+  /** Only those after this item, in the order given: where the page before ended. */
+  readonly after?: ItemPlace | undefined;
+  /** The most to give. */
+  readonly limit: number;
+}
+
 /** The store could not be written or read. */
 export class TimelineStoreFailed extends Schema.TaggedError<
   TimelineStoreFailed,
@@ -233,6 +263,11 @@ export interface TimelineStoreService {
       readonly limit?: number | undefined;
     }
   ) => Effect.Effect<readonly Item[], TimelineStoreFailed>;
+  /**
+   * The Messages whose text holds the search's text, folded, newest first, with its
+   * filters, up to its limit, after the item it names.
+   */
+  readonly search: (search: Search) => Effect.Effect<readonly Item[], TimelineStoreFailed>;
   /**
    * A Network's Gaps that overlap a range of positions, either end of which may be open, in
    * the order they began. A Network's Gaps do not overlap, except that one may begin exactly

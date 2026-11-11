@@ -6,8 +6,9 @@
  *
  * @packageDocumentation
  */
-import type { TimelineChangesEvent, TimelineId, TimelineItem } from "@iirc/api";
+import type { SearchQuery, TimelineChangesEvent, TimelineId, TimelineItem } from "@iirc/api";
 import { notificationsOf } from "@iirc/frontend/notifications";
+import type { SearchRequest } from "@iirc/frontend/search";
 import { reduce as reduceSignIn } from "@iirc/frontend/sign-in";
 import {
   followFrom,
@@ -126,6 +127,49 @@ export const retrying = Effect.gen(function* () {
 });
 
 /**
+ * The query of a page of a search, with only the filters it has.
+ * @param read - The read.
+ * @returns The query.
+ */
+const searchQueryOf = (read: SearchRequest): SearchQuery => {
+  const { after, filters } = read;
+  let query: SearchQuery = { limit: read.limit, text: filters.text };
+
+  if (after !== undefined) {
+    query = { ...query, after };
+  }
+
+  if (filters.from !== undefined) {
+    query = { ...query, from: filters.from };
+  }
+
+  if (filters.network !== undefined) {
+    query = { ...query, network: filters.network };
+  }
+
+  if (filters.since !== undefined) {
+    query = { ...query, since: filters.since };
+  }
+
+  if (filters.timeline !== undefined) {
+    query = { ...query, timeline: filters.timeline };
+  }
+
+  if (filters.until !== undefined) {
+    query = { ...query, until: filters.until };
+  }
+
+  return query;
+};
+
+/** Why a search found nothing, in words, by what the Daemon answered. */
+const searchRefusals: ReadonlyMap<string, string> = new Map([
+  ["InvalidRequest", "The Daemon could not read this search, so nothing was searched."],
+  ["UnknownNetwork", "That Network is not configured, so nothing was searched."],
+  ["UnknownTimeline", "That Timeline is gone, so nothing was searched."],
+]);
+
+/**
  * The request a read makes, and the event its answer is.
  * @param read - The read.
  * @returns The request.
@@ -188,6 +232,21 @@ const request = (read: Read) =>
         return { _tag: "WindowRead", read, window } as const;
       }
 
+      case "Around": {
+        const window = yield* client.timelines.window({
+          params: { timeline: read.timeline },
+          query: { around: read.around, limit: read.limit },
+        });
+
+        return { _tag: "WindowRead", read, window } as const;
+      }
+
+      case "Search": {
+        const page = yield* client.timelines.search({ query: searchQueryOf(read) });
+
+        return { _tag: "SearchRead", page, read } as const;
+      }
+
       default: {
         return read satisfies never;
       }
@@ -225,12 +284,22 @@ const perform = (registry: AtomRegistry.AtomRegistry, read: Read) =>
       happened(registry, { _tag: "Requesting", read });
     }).pipe(Effect.andThen(request(read)));
 
+    // A search the Daemon refused says why, and is not asked again.
+    const refusal = (tag: string) => (read._tag === "Search" ? searchRefusals.get(tag) : undefined);
+
     yield* attempt.pipe(
-      Effect.retry({ schedule, while: (error) => !final.has(error._tag) }),
+      Effect.retry({
+        schedule,
+        while: (error) => !final.has(error._tag) && refusal(error._tag) === undefined,
+      }),
       Effect.match({
         onFailure: (error) => {
+          const words = refusal(error._tag);
+
           if (error._tag === "Unauthorized") {
             refused(registry);
+          } else if (read._tag === "Search" && words !== undefined) {
+            happened(registry, { _tag: "SearchFailed", message: words, read });
           } else if (error._tag === "UnknownTimeline" && "timeline" in read) {
             happened(registry, { _tag: "Vanished", timeline: read.timeline });
           } else if (error._tag === "UnknownNetwork" && "network" in read) {
@@ -501,15 +570,18 @@ export const following = Atom.fnSync(
   (
     {
       following: at,
+      owned,
       seen,
       timeline,
     }: {
       readonly timeline: TimelineId;
       readonly following: boolean;
       readonly seen: TimelineItem["position"] | undefined;
+      /** The Owner moved the view there themselves. */
+      readonly owned: boolean;
     },
     get
   ) => {
-    happened(get.registry, { _tag: "Following", following: at, seen, timeline });
+    happened(get.registry, { _tag: "Following", following: at, owned, seen, timeline });
   }
 ).pipe(Atom.keepAlive);

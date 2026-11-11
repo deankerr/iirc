@@ -793,6 +793,63 @@ const timelines = HttpApiBuilder.group(
           };
         })
       )
+      .handle("search", ({ query }) =>
+        Effect.gen(function* () {
+          if (query.network !== undefined) {
+            yield* known(query.network);
+          }
+
+          const limit = query.limit ?? windowLimit.default;
+
+          // The Timeline, when one is named, is found in the same state the search reads,
+          // and one more than the page is read, to say whether more follow.
+          const read = yield* store
+            .consistent(
+              Effect.gen(function* () {
+                const { timeline } = query;
+
+                const unknown =
+                  timeline !== undefined && Option.isNone(yield* store.timeline(timeline))
+                    ? timeline
+                    : undefined;
+
+                return {
+                  found:
+                    unknown === undefined
+                      ? yield* store.search({
+                          after: query.after,
+                          from: query.from,
+                          limit: limit + 1,
+                          network: query.network,
+                          since: query.since,
+                          text: query.text,
+                          timeline,
+                          until: query.until,
+                        })
+                      : [],
+                  unknown,
+                };
+              })
+            )
+            .pipe(Effect.mapError(timelinesFailed));
+
+          if (read.value.unknown !== undefined) {
+            return yield* new UnknownTimeline({ timeline: read.value.unknown });
+          }
+
+          const items = read.value.found.slice(0, limit);
+          const last = items.at(-1);
+          const more = read.value.found.length > limit && last !== undefined;
+
+          return {
+            items: items.map(timelineItem),
+            more,
+            next: more ? { position: last.position, timeline: last.timeline } : null,
+            through: throughOf(read.through),
+            version: versionOf(read.version),
+          };
+        })
+      )
       .handle("changes", ({ headers, query }) =>
         Effect.gen(function* () {
           const every = yield* Heartbeat;

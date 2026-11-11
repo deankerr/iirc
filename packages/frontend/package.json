@@ -15,6 +15,7 @@
     "./options": "./src/options.ts",
     "./palette": "./src/palette.ts",
     "./render": "./src/render.ts",
+    "./search": "./src/search.ts",
     "./sign-in": "./src/sign-in.ts",
     "./timelines": "./src/timelines.ts",
     "./theme": "./src/theme.ts",
