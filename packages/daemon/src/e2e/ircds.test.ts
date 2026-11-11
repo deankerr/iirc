@@ -4,7 +4,7 @@
  * never in `bun run test`.
  */
 import { CallerIntent, CredentialPathName, NetworkId } from "@iirc/api";
-import type { ActionRequest, Happened, TimelineItem } from "@iirc/api";
+import type { ActionRequest, Happened, LookupRequest, TimelineItem } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { Effect, Fiber, Redacted } from "effect";
 import type { Scope } from "effect";
@@ -228,6 +228,71 @@ describe("ngircd, on the floor", () => {
         version: true,
       },
       wasSaid: true,
+    });
+  }, 60_000);
+
+  it("looks the other User up, and a nick no one holds or held", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+
+        const peer = yield* Effect.promise(
+          async () => await connectPeer({ host: ngircd.host, nick: "seen", port: ngircd.plainPort })
+        );
+
+        peer.send(`JOIN ${channel}`);
+
+        // A nick of its own: ngircd holds back what a client sends after a burst of
+        // Lookups, so the Daemon's QUIT may land after the next test registers.
+        yield* api.networks.configure({
+          params: { network },
+          payload: { ...floor(), nicks: ["looker"] },
+          query: {},
+        });
+        yield* joined(api);
+
+        const look = (lookup: LookupRequest) =>
+          api.networks.look({ params: { network }, payload: { lookup } });
+
+        const whois = yield* look({ _tag: "Whois", nick: "seen" });
+        // ngircd keeps no history of a connection as short as a test's, so this one is
+        // never found, as a nick no one held is not.
+        const whowas = yield* look({ _tag: "Whowas", nick: "neverwas" });
+        const nobody = yield* look({ _tag: "Whois", nick: "nobody" });
+
+        const found =
+          whois._tag === "LookedUp" && whois.result._tag === "Found"
+            ? whois.result.profiles[0]
+            : undefined;
+
+        const stored = yield* api.networks.looked({ params: { intent: whois.intent, network } });
+
+        peer.close();
+        yield* daemon.stop;
+
+        return {
+          channels: found?.channels.map((one) => one.name),
+          nick: found?.nick,
+          nobody: nobody._tag === "LookedUp" ? nobody.result : nobody,
+          server: found?.server !== null && found?.server.name !== "",
+          stored: stored._tag === "LookedUp" ? stored.result._tag : stored._tag,
+          user: found?.user !== null && found?.user !== undefined,
+          whowas: whowas._tag === "LookedUp" ? whowas.result : whowas,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      channels: [channel],
+      nick: "seen",
+      nobody: { _tag: "NotFound", reply: "401" },
+      server: true,
+      stored: "Found",
+      user: true,
+      whowas: { _tag: "NotFound", reply: "406" },
     });
   }, 60_000);
 
@@ -637,6 +702,36 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
         const inspected = yield* api.networks.inspect({ params: { network } });
         const names = yield* api.credentials.list();
 
+        // Labelled, so each reply is collected by its label.
+        const self = yield* api.networks.look({
+          params: { network },
+          payload: { lookup: { _tag: "Whois", nick: "iirc" } },
+        });
+
+        const other = yield* api.networks.look({
+          params: { network },
+          payload: { lookup: { _tag: "Whois", nick: "peer" } },
+        });
+
+        const leaving = yield* Effect.promise(
+          async () => await connectPeer({ host: ergo.host, nick: "leaver", port: ergo.plainPort })
+        );
+
+        leaving.send("QUIT :bye");
+        yield* Effect.promise(
+          async () => await leaving.waitFor((line) => line.command === "ERROR", "the Ircd's ERROR")
+        );
+
+        const left = yield* api.networks.look({
+          params: { network },
+          payload: { lookup: { _tag: "Whowas", nick: "leaver" } },
+        });
+
+        const profileOf = (looked: typeof self) =>
+          looked._tag === "LookedUp" && looked.result._tag === "Found"
+            ? looked.result.profiles[0]
+            : undefined;
+
         peer.close();
         yield* daemon.stop;
 
@@ -646,7 +741,21 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
           account: known.self?.account,
           confirmed,
           features: inspected.client.features.some((feature) => feature === "sasl"),
+          left:
+            left._tag === "LookedUp" && left.result._tag === "Found"
+              ? left.result.profiles.map((one) => one.nick)
+              : left,
           names,
+          other: {
+            account: profileOf(other)?.account,
+            channels: profileOf(other)?.channels.map((one) => one.name),
+            nick: profileOf(other)?.nick,
+          },
+          self: {
+            account: profileOf(self)?.account,
+            channels: profileOf(self)?.channels.map((one) => one.name),
+            secure: profileOf(self)?.secure,
+          },
           session: known.session._tag,
           shown: JSON.stringify(happened).includes(password),
         };
@@ -657,7 +766,10 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       account: { _tag: "Known", value: "iirc" },
       confirmed: true,
       features: true,
+      left: ["leaver"],
       names: { names: ["ergo-password"] },
+      other: { account: null, channels: [channel], nick: "peer" },
+      self: { account: "iirc", channels: [channel], secure: true },
       session: "Registered",
       shown: false,
     });

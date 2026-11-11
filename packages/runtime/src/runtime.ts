@@ -10,6 +10,8 @@ import type {
   Client,
   Inspection,
   Instant,
+  Lookup,
+  LookResult,
   NetworkConfiguration,
   News,
   RefusedReason,
@@ -38,6 +40,7 @@ import {
 import { Journal, NetworkId } from "./journal.ts";
 import type { JournalFailed, Sequence } from "./journal.ts";
 import {
+  awaitLookup,
   changedSince,
   halt,
   heldConnections,
@@ -56,7 +59,7 @@ import type {
   Ports,
   ConfigurationChanged,
 } from "./network.ts";
-import { fresh, newsAfter, refold } from "./replay.ts";
+import { fresh, lookedUp, newsAfter, refold } from "./replay.ts";
 import type { Happened, InForce } from "./replay.ts";
 import { Transport } from "./transport.ts";
 import { Vault } from "./vault.ts";
@@ -121,6 +124,31 @@ export type ActOutcome =
       readonly sequence: Sequence;
       readonly reason: StepRefusal;
     };
+
+/** What the Owner looks up on a Network. */
+export interface Looking {
+  readonly lookup: Lookup;
+  /**
+   * The intent id to look up under. Left out, the Runtime names one. It is the caller's to
+   * keep unique for the Network across its whole Journal, as a `say`'s is, and `looked`
+   * finds it.
+   */
+  readonly intent?: IntentId | undefined;
+}
+
+/**
+ * What a `look` answers: the `Look` was journaled at `sequence`, and its result came, as
+ * `LookedUp`, with whatever the Client found or why it refused, or did not come within
+ * the bound, or before the Network stopped, as `Pending`, which `looked` can ask after.
+ */
+export type LookOutcome =
+  | {
+      readonly _tag: "LookedUp";
+      readonly intent: IntentId;
+      readonly sequence: Sequence;
+      readonly result: LookResult;
+    }
+  | { readonly _tag: "Pending"; readonly intent: IntentId; readonly sequence: Sequence };
 
 /** How far the Owner has read a Timeline. */
 export interface Reading {
@@ -188,6 +216,12 @@ export interface RuntimeOptions {
   readonly hangupDrain?: Duration.Input | undefined;
   /** How long shutdown waits for each Network's Connections to close. By default 5 s. */
   readonly stopTimeout?: Duration.Input | undefined;
+  /**
+   * How long a `look` waits for its result once the `Look` is stepped, before it answers
+   * `Pending`. By default 35 s, past the Client's own 30 s for a reply to end, so a reply
+   * that never ends still answers with what came.
+   */
+  readonly lookTimeout?: Duration.Input | undefined;
 }
 
 /** How long a `Hangup` drains by default. */
@@ -195,6 +229,9 @@ export const defaultHangupDrain: Duration.Duration = Duration.seconds(5);
 
 /** How long shutdown waits for Connections to close by default. */
 export const defaultStopTimeout: Duration.Duration = Duration.seconds(5);
+
+/** How long a `look` waits for its result by default. */
+export const defaultLookTimeout: Duration.Duration = Duration.seconds(35);
 
 const millisOf = (input: Duration.Input | undefined, fallback: Duration.Duration): number =>
   Duration.toMillis(input === undefined ? fallback : Duration.fromInputUnsafe(input));
@@ -242,6 +279,27 @@ export interface RuntimeService {
     network: NetworkId,
     intent: IntentId
   ) => Effect.Effect<Option.Option<Sequence>, JournalFailed>;
+  /**
+   * Journals a `Look`, under the caller's intent id or one the Runtime names, waits until
+   * it is stepped, and then for its result, for at most `lookTimeout`. It answers with the
+   * result the Network's own fiber reported for the intent, `LookedUp`, which may say the
+   * Client refused it, or `Pending` when none came within the bound or the Network
+   * stopped first.
+   */
+  readonly look: (
+    network: NetworkId,
+    looking: Looking
+  ) => Effect.Effect<LookOutcome, UnknownNetwork | NetworkStopped>;
+  /**
+   * A Lookup by its intent, from the Journal: `LookedUp` once a step reported its result,
+   * `Pending` while none has, or `None` when no `Look` under the intent was journaled. It
+   * folds the Network's Inputs from `initial` once, to the Journal's end as it stood, and
+   * ends, so it answers the same on this Runtime or one started after it.
+   */
+  readonly looked: (
+    network: NetworkId,
+    intent: IntentId
+  ) => Effect.Effect<Option.Option<LookOutcome>, JournalFailed>;
   /**
    * Journals a `Read`: the Owner has read a Timeline up to the instant `read`, of a
    * Target, or with `target` null, the Network's own. It waits until it is stepped. The
@@ -322,6 +380,7 @@ export const makeRuntime = <S>(
       vault: yield* Vault,
     };
 
+    const lookTimeout = millisOf(options.lookTimeout, defaultLookTimeout);
     const held = yield* Ref.make<ReadonlyMap<NetworkId, Network<S>>>(new Map());
     // Admission and shutdown take the same permit, so a Network is either added before
     // shutdown begins, and stopped by it, or refused.
@@ -455,6 +514,33 @@ export const makeRuntime = <S>(
         Effect.map(
           Effect.flatMap(find(id), (network) => Ref.get(network.current)),
           ({ state }) => client.known(state)
+        ),
+      look: (id, looking) =>
+        Effect.gen(function* () {
+          const network = yield* find(id);
+          const intent = looking.intent ?? (yield* intentId);
+          const { lookup } = looking;
+
+          const { stepped, result } = yield* awaitLookup(
+            network,
+            intent,
+            tell(network, (at) => ({ _tag: "Look", at, intent, lookup })),
+            lookTimeout
+          );
+
+          const { sequence } = stepped;
+
+          return result === undefined
+            ? ({ _tag: "Pending", intent, sequence } as const)
+            : ({ _tag: "LookedUp", intent, result, sequence } as const);
+        }),
+      looked: (id, intent) =>
+        Effect.map(lookedUp(client, ports.journal, id, intent), (found) =>
+          Option.map(Option.fromUndefinedOr(found), ({ result, sequence }) =>
+            result === undefined
+              ? ({ _tag: "Pending", intent, sequence } as const)
+              : ({ _tag: "LookedUp", intent, result, sequence } as const)
+          )
         ),
       networks: Effect.flatMap(Ref.get(held), (networks) =>
         Effect.map(

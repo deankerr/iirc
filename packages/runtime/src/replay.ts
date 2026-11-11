@@ -10,6 +10,8 @@ import type {
   Client,
   Input,
   Instant,
+  IntentId,
+  LookResult,
   NetworkConfiguration,
   News,
   Step,
@@ -204,4 +206,65 @@ export const newsAfter = <S>(
         );
       }
     )
+  );
+
+/** What the Journal says of a Lookup: the sequence of its `Look`, and its result once a step reported it. */
+export interface LookFound {
+  readonly sequence: Sequence;
+  readonly result: LookResult | undefined;
+}
+
+/** How far a search for a Lookup has folded: the Network so far, and its `Look` once found. */
+interface LookFold<S> {
+  readonly folded: Folded<S>;
+  readonly found: LookFound | undefined;
+}
+
+/**
+ * A Lookup of one Network, found by its intent: the Network's Inputs are folded from
+ * `initial`, to the Journal's end as it stood, until a step reports `LookedUp` for it.
+ * @param client - The Client.
+ * @param journal - The Journal.
+ * @param network - The Network.
+ * @param intent - The Lookup's intent.
+ * @returns Its `Look` and result, or `undefined` when no `Look` under the intent was journaled.
+ */
+export const lookedUp = <S>(
+  client: Client<S>,
+  journal: JournalService,
+  network: NetworkId,
+  intent: IntentId
+): Effect.Effect<LookFound | undefined, JournalFailed> =>
+  journal.read({ network }).pipe(
+    Stream.runFoldEffect(
+      (): LookFold<S> => ({ folded: fresh(client), found: undefined }),
+      (fold, entry) => {
+        if (entry.record._tag !== "Input" || fold.found?.result !== undefined) {
+          return Effect.succeed(fold);
+        }
+
+        const { input } = entry.record;
+
+        const look =
+          fold.found ??
+          (input._tag === "Look" && input.intent === intent
+            ? { result: undefined, sequence: entry.sequence }
+            : undefined);
+
+        return foldOne(client, fold.folded, input, entry.sequence).pipe(
+          Effect.map(([folded, news]) => {
+            const reported = news.find((one) => one._tag === "LookedUp" && one.intent === intent);
+
+            return {
+              folded,
+              found:
+                look === undefined || reported?._tag !== "LookedUp"
+                  ? look
+                  : { result: reported.result, sequence: look.sequence },
+            };
+          })
+        );
+      }
+    ),
+    Effect.map(({ found }) => found)
   );

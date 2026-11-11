@@ -16,9 +16,13 @@ import type { Entry, Position } from "@iirc/runtime/journal";
 import { holds, journalLaws } from "@iirc/runtime/testing";
 import { Deferred, Effect, Exit, Fiber, Ref, Schema, Stream } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { layerSqliteJournal, makeSqliteJournal, openSqliteJournal } from "./sqlite-journal.ts";
+
+// A law carries its own ten-second guard against a hang (`holds`), so Vitest must wait longer
+// than that, or a law that is only slow under a loaded machine fails as Vitest's timeout.
+vi.setConfig({ testTimeout: 20_000 });
 
 const libera = NetworkId.make("libera");
 const oftc = NetworkId.make("oftc");

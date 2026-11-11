@@ -191,6 +191,31 @@ export const ActRequest = Schema.Struct({
 export type ActRequest = typeof ActRequest.Type;
 
 /**
+ * What the Owner looks up on a Network: a `WHOIS` or a `WHOWAS` of one nick. The Client
+ * checks the nick against the Network's rules before it sends anything, so the wire
+ * checks only that no line break or NUL is in it.
+ */
+export const LookupRequest = Schema.TaggedUnion({
+  /** What the Network says of a User now. */
+  Whois: { nick: OwnerName },
+  /** Who held a nick before. */
+  Whowas: { nick: OwnerName },
+});
+
+/** The decoded form of {@link LookupRequest}. */
+export type LookupRequest = typeof LookupRequest.Type;
+
+/** What the Owner looks up, and the intent to look it up under. */
+export const LookRequest = Schema.Struct({
+  /** The intent to look it up under. Left out, the Daemon names one, and gives it back. */
+  intent: Schema.optionalKey(CallerIntent),
+  lookup: LookupRequest,
+});
+
+/** The decoded form of {@link LookRequest}. */
+export type LookRequest = typeof LookRequest.Type;
+
+/**
  * How far the Owner has read a Timeline: up to the instant `read`, in milliseconds since
  * the Unix epoch, of a Target, a Channel or a Direct Message partner named as a `say`
  * names one, or with `target` null, the Network's own.
@@ -388,6 +413,7 @@ const inputTags = everyOf<Input["_tag"]>()([
   "Closed",
   "Configured",
   "Fired",
+  "Look",
   "Opened",
   "Read",
   "Received",
@@ -486,6 +512,94 @@ const RefusedAction = Schema.Struct({
 /** A client-only tag on a Message, such as `+draft/reply`. */
 export const Tag = Schema.Struct({ key: Untrusted, value: Untrusted });
 
+/** What was looked up: a `WHOIS` or a `WHOWAS`, and the nick the Owner gave it. */
+export const Lookup = Schema.TaggedUnion({
+  Whois: { nick: Untrusted },
+  Whowas: { nick: Untrusted },
+});
+
+/**
+ * One User as a Lookup's reply describes them: a `WHOIS`'s, or one entry of a `WHOWAS`'s.
+ * Every field is what the Network said, read by structure, and `null` or empty when it
+ * said nothing of it.
+ */
+export const Profile = Schema.Struct({
+  /** The account, from `330`. */
+  account: Schema.NullOr(Untrusted),
+  /** The away message, from `301`. */
+  away: Schema.NullOr(Untrusted),
+  /** From `319`: each Channel, with the membership modes its prefixes stand for, by `PREFIX`. */
+  channels: Schema.Array(Schema.Struct({ name: Untrusted, prefixes: Schema.Array(Untrusted) })),
+  host: Schema.NullOr(Untrusted),
+  /** Seconds idle, from `317`. */
+  idle: Schema.NullOr(Schema.Int),
+  nick: Untrusted,
+  /** From `313`. */
+  operator: Schema.Boolean,
+  /** Every other numeric of the reply, as it came: its parameters after the first. */
+  other: Schema.Array(Schema.Struct({ numeric: Untrusted, params: Schema.Array(Untrusted) })),
+  realname: Schema.NullOr(Untrusted),
+  /** From `671`. */
+  secure: Schema.Boolean,
+  /** From `312`: the server the User is on, or was, and the Network's text about it. */
+  server: Schema.NullOr(Schema.Struct({ info: Untrusted, name: Untrusted })),
+  /** When the User signed on, from `317`, when the Ircd says. */
+  signon: Schema.NullOr(Instant),
+  user: Schema.NullOr(Untrusted),
+});
+
+/** The decoded form of {@link Profile}. */
+export type Profile = typeof Profile.Type;
+
+/**
+ * What a Lookup found: `Found`, its whole reply; `Partial`, what had come when it
+ * stopped, because no end came in time (`TimedOut`), its Connection ended (`Ended`), or
+ * the reply ran past the Lines one Lookup keeps (`Bounded`); `NotFound`, no such User, by
+ * `401`, `406`, or an end with no User; `Failed`, another error, by its numeric or a
+ * `FAIL`'s code, or a labelled answer that said nothing readable, by its command; `Refused`, not sent, `Offline`, `Unsendable`, or `Busy` with too many
+ * Lookups at once; or `Unsent`, its Line never left.
+ */
+export const LookResult = Schema.TaggedUnion({
+  Failed: { reply: Untrusted },
+  Found: { profiles: Schema.Array(Profile) },
+  NotFound: { reply: Untrusted },
+  Partial: {
+    profiles: Schema.Array(Profile),
+    reason: Schema.Literals(["TimedOut", "Ended", "Bounded"]),
+  },
+  Refused: { reason: Schema.Literals(["Offline", "Unsendable", "Busy"]) },
+  Unsent: {},
+});
+
+/** The decoded form of {@link LookResult}. */
+export type LookResult = typeof LookResult.Type;
+
+/**
+ * What a `look` answers, once its `Look` is journaled and stepped under its intent:
+ * `LookedUp` with its result, or `Pending` when none came within the Daemon's bound,
+ * which `GET /api/networks/{network}/lookups/{intent}` can ask after.
+ */
+export const Looked = Schema.Union([
+  Schema.TaggedStruct("LookedUp", { intent: IntentId, result: LookResult, sequence: Sequence }),
+  Schema.TaggedStruct("Pending", { intent: IntentId, sequence: Sequence }),
+]);
+
+/** The decoded form of {@link Looked}. */
+export type Looked = typeof Looked.Type;
+
+/**
+ * A Lookup by its intent: `LookedUp` once its result came, `Pending` while it has not, or
+ * `NotJournaled` when no Lookup under the intent was journaled.
+ */
+export const LookedAnswer = Schema.Union([
+  Schema.TaggedStruct("LookedUp", { intent: IntentId, result: LookResult, sequence: Sequence }),
+  Schema.TaggedStruct("Pending", { intent: IntentId, sequence: Sequence }),
+  Schema.TaggedStruct("NotJournaled", {}),
+]);
+
+/** The decoded form of {@link LookedAnswer}. */
+export type LookedAnswer = typeof LookedAnswer.Type;
+
 /** What happened in one step, as the Client's News says it. */
 export const News = Schema.TaggedUnion({
   Activity: {
@@ -498,6 +612,8 @@ export const News = Schema.TaggedUnion({
   Confirmed: { at: Fact(Instant), id: Fact(MessageId), intent: IntentId, text: Untrusted },
   ConnectionFailed: { at: Instant, reason: EndReason },
   Ignored: { reason: IgnoredReason },
+  /** A Lookup is over, and this is all it found. Exactly one comes for each. */
+  LookedUp: { intent: IntentId, lookup: Lookup, result: LookResult },
   Message: {
     at: Fact(Instant),
     /**

@@ -7,9 +7,13 @@ import { Vault } from "@iirc/runtime/vault";
 import type { VaultService } from "@iirc/runtime/vault";
 import { Context, Effect, FileSystem, Layer, Logger, Redacted, References, Schema } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { layerBun } from "./index.ts";
+
+// A law carries its own ten-second guard against a hang (`holds`), so Vitest must wait longer
+// than that, or a law that is only slow under a loaded machine fails as Vitest's timeout.
+vi.setConfig({ testTimeout: 20_000 });
 
 const secret = "s3cr3t-v4lue-ZXCV";
 const name = CredentialName.make("libera-password");

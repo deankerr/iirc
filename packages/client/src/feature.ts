@@ -94,6 +94,13 @@ export interface Arrival {
   /** The intent this Line answers. Starts unknown. `labeled-response` works it out from `label`. */
   readonly answers: IntentId | undefined;
   /**
+   * The Lookup whose labelled reply this Line is part of, and whether it ends that reply:
+   * a labelled Line on its own, or the end of the batch that carried the label. Starts
+   * unknown. `labeled-response` works it out from `label`, and the core collects the
+   * reply by it rather than by the names the Line holds.
+   */
+  readonly within: { readonly intent: IntentId; readonly ends: boolean } | undefined;
+  /**
    * Starts true. A `chathistory` batch makes it false, so the Line is history, not news:
    * it is reported, with `live` false, and never changes what is known now, such as
    * membership, nicks, topics, or modes.
@@ -127,13 +134,16 @@ export interface Departure {
     | { readonly _tag: "Said"; readonly intent: IntentId }
     /** A Line of an Owner's action, such as a `KICK` or a `/quote`d Line. */
     | { readonly _tag: "Acted"; readonly intent: IntentId }
+    /** The Line of an Owner's Lookup, such as a `WHOIS`, whose reply is collected for its intent. */
+    | { readonly _tag: "Looked"; readonly intent: IntentId }
     | { readonly _tag: "Protocol" };
   /**
    * Whether the Ircd will echo this Line back, tied to its intent. It starts false, and
    * only a Feature that can tie the echo to the intent sets it, as `labeled-response`
    * with `echo-message` does. A `Said` Line's Message reports it as `ours.echo`. For an
    * `Acted` Line it says the Ircd's answer is tied to the intent by label, so the core
-   * need not tie it by the answer's parameters.
+   * need not tie it by the answer's parameters, and for a `Looked` one, that its reply
+   * comes marked `within` its intent.
    */
   readonly echo: boolean;
 }

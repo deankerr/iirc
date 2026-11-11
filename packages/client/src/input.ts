@@ -77,6 +77,21 @@ export const Action = Schema.TaggedUnion({
 export type Action = typeof Action.Type;
 
 /**
+ * What the Owner can ask a Network, and collect the reply to: a Lookup. Each is built
+ * through `@iirc/protocol`'s builders, and its reply, which may span many Lines, is read
+ * by structure into one result.
+ */
+export const Lookup = Schema.TaggedUnion({
+  /** `WHOIS` of one nick: what the Network says of that User now. */
+  Whois: { nick: Schema.String },
+  /** `WHOWAS` of one nick: who held it before. */
+  Whowas: { nick: Schema.String },
+});
+
+/** The decoded form of {@link Lookup}. */
+export type Lookup = typeof Lookup.Type;
+
+/**
  * A Line the Client output that never left: a `Send` or a `SendSecret`, as it was output.
  * It is the same shape as those outputs, so the Runtime gives back exactly what it was
  * given.
@@ -109,6 +124,11 @@ export const Input = Schema.TaggedUnion({
    * firing from an earlier setting of the same timer is told apart and ignored.
    */
   Fired: { at: Instant, due: Instant, timer: TimerId },
+  /**
+   * The Owner wants to look something up on the Network, with an intent id from the
+   * Runtime. Its result is one `LookedUp` News for that intent.
+   */
+  Look: { at: Instant, intent: IntentId, lookup: Lookup },
   /** A Connection the Client dialled is open. */
   Opened: { at: Instant, connection: ConnectionId },
   /**

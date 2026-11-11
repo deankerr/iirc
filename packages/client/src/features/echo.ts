@@ -25,6 +25,11 @@
  *   until it is gone, a Message from Self is an echo nothing can tie to what we sent, so
  *   it is `Ignored`. When `labeled-response` is left without `echo-message`, the Feature
  *   is off, and gives it up the same way. `batch` is the `batch` Feature's own.
+ * - **Lookups.** The Line of a Lookup is labelled the same way, and every Line of its
+ *   answer, the labelled Line on its own or each Line of the batch that carries the
+ *   label, is marked `within` its intent, rejections included, so the core collects the
+ *   reply by label and never by the names it holds. The Line that ends the answer, the
+ *   labelled Line on its own or the `BATCH -` of that batch, says so.
  * - **Bounds.** At most {@link maxPending} labels await an answer: past that, the oldest
  *   is forgotten, and its Message stays unconfirmed, as one the Ircd never answers does.
  *   An answer for a label not awaited, such as one forgotten, is read as any other Line.
@@ -58,6 +63,8 @@ interface Answering {
 interface Awaited {
   readonly intent: IntentId;
   readonly said: boolean;
+  /** Whether it was sent for a Lookup, whose whole reply is marked `within` its intent. */
+  readonly looked: boolean;
   readonly reported: boolean;
 }
 
@@ -150,6 +157,18 @@ const batchLine = (own: Echoes, line: Line): Echoes => {
   };
 };
 
+// The Lookup whose answer a `BATCH -ref` ends: the batch that carried its label.
+const lookupEnding = (own: Echoes, line: Line): IntentId | undefined => {
+  const [reference] = line.params;
+
+  const ending =
+    reference?.startsWith("-") === true ? own.batches.get(reference.slice(1)) : undefined;
+
+  const awaited = ending?.top === true ? own.pending.get(ending.label) : undefined;
+
+  return awaited?.looked === true ? awaited.intent : undefined;
+};
+
 // Marks every label awaited for an intent as refused already.
 const reportedFor = (
   pending: ReadonlyMap<string, Awaited>,
@@ -183,6 +202,7 @@ export const echo: Feature<Echoes> = {
 
     const pending = new Map(context.own.pending).set(label, {
       intent: departure.for.intent,
+      looked: departure.for._tag === "Looked",
       reported: false,
       said: departure.for._tag === "Said",
     });
@@ -209,7 +229,12 @@ export const echo: Feature<Echoes> = {
     }
 
     if (line.command === "BATCH") {
-      return { own: batchLine(own, line), value: arrival };
+      const ends = lookupEnding(own, line);
+
+      return {
+        own: batchLine(own, line),
+        value: ends === undefined ? arrival : { ...arrival, within: { ends: true, intent: ends } },
+      };
     }
 
     const label = line.tags.get("label");
@@ -219,6 +244,17 @@ export const echo: Feature<Echoes> = {
 
     if (answers === undefined || awaited === undefined) {
       return { value: arrival };
+    }
+
+    // A Lookup's reply is every Line of its answer, which the core collects for its
+    // intent. A labelled Line on its own is the whole of it.
+    if (awaited.looked) {
+      const lone = label !== undefined;
+
+      return {
+        own: lone ? { ...own, pending: without(own.pending, answers) } : own,
+        value: { ...arrival, within: { ends: lone, intent: awaited.intent } },
+      };
     }
 
     // The first Line that settles the intent answers it. A labelled Line on its own is

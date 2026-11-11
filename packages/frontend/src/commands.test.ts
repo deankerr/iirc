@@ -235,6 +235,8 @@ describe("reading a line", () => {
       "channels.join": "Required",
       "channels.part": "Optional",
       "composer.focus": "None",
+      "lookup.whois": "Required",
+      "lookup.whowas": "Required",
       "members.toggle": "Optional",
       "network.add": "Required",
       "notify.set": "Required",

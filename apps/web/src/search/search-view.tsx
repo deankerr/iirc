@@ -15,6 +15,7 @@ import { Fragment, useContext, useId, useLayoutEffect, useRef } from "react";
 
 import { composerFocus } from "../composer/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
+import { dateOf } from "../ui/dates.ts";
 import {
   closeSearch,
   jumpTo,
@@ -55,16 +56,20 @@ const pageRows = 10;
  */
 const Result = ({ row }: { readonly row: ResultRow }) => {
   const { found, place } = row;
-  const date = new Date(found.item.position.at);
+  const date = dateOf(found.item.position.at);
   const nick = <Nick colour={found.colour} nick={found.nick} />;
 
   return (
     <>
       <span className={styles.where}>
         <bdi className={styles.place}>{place}</bdi>{" "}
-        <time className={styles.time} dateTime={date.toISOString()}>
-          {when.format(date)}
-        </time>
+        {date === undefined ? (
+          <span className={styles.time}>at a time unavailable</span>
+        ) : (
+          <time className={styles.time} dateTime={date.toISOString()}>
+            {when.format(date)}
+          </time>
+        )}
       </span>
       <span className={styles.line}>
         <span className={styles.sender}>

@@ -438,6 +438,17 @@ const ownerInput = <State>(at: Driver<State>, owner: Owner): Input => {
       };
     }
 
+    case "Look": {
+      at.intents += 1;
+
+      return {
+        _tag: "Look",
+        at: at.now,
+        intent: IntentId.make(`i${at.intents}`),
+        lookup: owner.lookup,
+      };
+    }
+
     case "Retry": {
       return { _tag: "Retry", at: at.now };
     }

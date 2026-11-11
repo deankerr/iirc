@@ -4,6 +4,7 @@ import { BunFileSystem, BunHttpServer } from "@effect/platform-bun";
 import {
   Happened,
   ItemAfter,
+  LookedAnswer,
   SaidAnswer,
   SearchResults,
   TimelineChange,
@@ -221,6 +222,8 @@ const talk = (served: Served, texts: readonly string[]) =>
 const decodeHappened = Schema.decodeUnknownSync(Schema.fromJsonString(Happened));
 
 const decodeSaid = Schema.decodeUnknownSync(Schema.fromJsonString(SaidAnswer));
+
+const decodeLooked = Schema.decodeUnknownSync(Schema.fromJsonString(LookedAnswer));
 
 const decodeChange = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineChange));
 
@@ -802,6 +805,59 @@ describe("the API over a real server", () => {
       found: "Journaled",
       statuses: [200, 200, 400, 400],
     });
+  });
+
+  it("refuses a Lookup the wire cannot read, saying where, and finds one by its intent", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        // With no Session, a Lookup is answered at once, refused as `Offline`.
+        yield* served.request("/api/networks/libera", {
+          method: "PUT",
+          ...json(JSON.stringify(floor)),
+        });
+
+        const look = (body: {
+          readonly intent?: string;
+          readonly lookup: { readonly _tag: string; readonly nick?: string };
+        }) =>
+          served.request("/api/networks/libera/lookups", {
+            method: "POST",
+            ...json(JSON.stringify(body)),
+          });
+
+        const answered = [];
+
+        for (const body of [
+          { lookup: { _tag: "Whois", nick: "peer\r\nQUIT" } },
+          { lookup: { _tag: "Whois", nick: "" } },
+          { lookup: { _tag: "List" } },
+          { intent: "..", lookup: { _tag: "Whois", nick: "peer" } },
+        ]) {
+          const response = yield* look(body);
+          const error = decodeError(yield* bodyOf(response));
+
+          answered.push([response.status, error._tag, error.issues?.[0]?.path]);
+        }
+
+        const pending = yield* look({ intent: "who.1", lookup: { _tag: "Whowas", nick: "gone" } });
+        const found = yield* served.request("/api/networks/libera/lookups/who.1");
+
+        return {
+          answered,
+          found: [found.status, decodeLooked(yield* bodyOf(found))._tag],
+          looked: [pending.status, decodeLooked(yield* bodyOf(pending))._tag],
+        };
+      })
+    );
+
+    expect(result.answered).toStrictEqual([
+      [400, "InvalidRequest", ["payload", "lookup", "nick"]],
+      [400, "InvalidRequest", ["payload", "lookup", "nick"]],
+      [400, "InvalidRequest", ["payload", "lookup"]],
+      [400, "InvalidRequest", ["payload", "intent"]],
+    ]);
+    expect(result.looked).toStrictEqual([200, "LookedUp"]);
+    expect(result.found).toStrictEqual([200, "LookedUp"]);
   });
 
   it("refuses a body over 1 MiB", async () => {

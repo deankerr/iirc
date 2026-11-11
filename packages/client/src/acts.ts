@@ -69,7 +69,7 @@ export const relayed = (run: Run): number => {
  * @param line - The Line, or why it cannot be built.
  * @returns Whether it can be sent and relayed whole.
  */
-const fits = (run: Run, line: OutboundLine | Rejected): line is OutboundLine => {
+export const fits = (run: Run, line: OutboundLine | Rejected): line is OutboundLine => {
   const bytes = isRejected(line) ? line : encode(line);
 
   return !isRejected(line) && !isRejected(bytes) && bytes.length + relayed(run) <= relayedLimit;
@@ -503,9 +503,22 @@ const awaitAnswer = (
   names: readonly string[],
   targets: readonly Awaiting[]
 ) => {
-  const acting: Acting = { command: line.command, intent, names, reported: false, targets };
+  updateOpen(run, (open) => {
+    const acting: Acting = {
+      command: line.command,
+      intent,
+      names,
+      order: open.awaited,
+      reported: false,
+      targets,
+    };
 
-  updateOpen(run, (open) => ({ ...open, acting: [...open.acting, acting].slice(-maxActing) }));
+    return {
+      ...open,
+      acting: [...open.acting, acting].slice(-maxActing),
+      awaited: open.awaited + 1,
+    };
+  });
 };
 
 // An `AWAY` went out with a message, or `null` for none: a `306` confirms it.
@@ -675,25 +688,28 @@ const resolve = (
   });
 };
 
+/** A Line of an action an error numeric names: where it waits, and when it was sent. */
+export interface Tied {
+  readonly index: number;
+  readonly order: number;
+}
+
 /**
- * Ties an error numeric to the oldest Line of an action it names, and reports the action
- * `Rejected` with the numeric, once for its intent. It reads the numeric's parameters
- * only: a Channel or nick, as each numeric places them, or for `421` and `461`, a command.
- * Names are compared folded by the Connection's casemapping now. A numeric that names one
- * of a Line's targets, such as `441` a nick of a `KICK`, answers one occurrence of that
- * target alone, and one that names only what the Line is about, such as `482` its
- * Channel, answers the whole Line.
+ * The oldest Line of an action an error numeric names, by its parameters only: a Channel
+ * or nick, as each numeric places them, or for `421` and `461`, a command. Names are
+ * compared folded by the Connection's casemapping now.
  * @param run - The step.
  * @param line - The Line, live and tied to nothing by label.
+ * @returns The Line it names, or `undefined` for none.
  */
-export const tieRejection = (run: Run, line: Line): void => {
+export const tiedAction = (run: Run, line: Line): Tied | undefined => {
   const open = openOf(run.state);
   const { command, params } = line;
   const tie = ties.get(command);
   const named = command === "421" || command === "461";
 
   if (open === undefined || open.acting.length === 0 || (tie === undefined && !named)) {
-    return;
+    return undefined;
   }
 
   const fold = folder(run.state);
@@ -702,7 +718,7 @@ export const tieRejection = (run: Run, line: Line): void => {
   const verb = named ? upperCaseAscii(params[1] ?? "") : "";
 
   if (names.length !== said.length) {
-    return;
+    return undefined;
   }
 
   const holds = (each: Acting, name: string) =>
@@ -717,21 +733,49 @@ export const tieRejection = (run: Run, line: Line): void => {
 
   const tied = open.acting[index];
 
+  return tied === undefined ? undefined : { index, order: tied.order };
+};
+
+/**
+ * Ties an error numeric to the Line of an action {@link tiedAction} found, and reports the
+ * action `Rejected` with the numeric, once for its intent. A numeric that names one of a
+ * Line's targets, such as `441` a nick of a `KICK`, answers one occurrence of that target
+ * alone, and one that names only what the Line is about, such as `482` its Channel,
+ * answers the whole Line.
+ * @param run - The step.
+ * @param line - The Line, live and tied to nothing by label.
+ * @param found - The Line of an action it names.
+ */
+export const tieRejection = (run: Run, line: Line, found: Tied): void => {
+  const open = openOf(run.state);
+  const tied = open?.acting[found.index];
+
   if (tied === undefined) {
     return;
   }
 
+  const fold = folder(run.state);
+  const tie = ties.get(line.command);
+
+  const names = new Set(
+    (tie?.params ?? []).flatMap((index) => {
+      const name = line.params[index];
+
+      return name === undefined ? [] : [fold(name)];
+    })
+  );
+
   if (!tied.reported) {
-    refuseIntent(run, tied.intent, { _tag: "Rejected", reply: command });
+    refuseIntent(run, tied.intent, { _tag: "Rejected", reply: line.command });
   }
 
   const target = tied.targets.findIndex(
-    (each) => each.name !== undefined && names.includes(fold(each.name))
+    (each) => each.name !== undefined && names.has(fold(each.name))
   );
 
   updateOpen(run, (phase) => ({
     ...phase,
-    acting: resolve(phase.acting, index, target === -1 ? undefined : target, true),
+    acting: resolve(phase.acting, found.index, target === -1 ? undefined : target, true),
   }));
 };
 

@@ -77,6 +77,7 @@ import {
   gap,
   happened,
   knowledge,
+  looked,
   member,
   networkInspection,
   networkStatus,
@@ -382,6 +383,33 @@ const networks = HttpApiBuilder.group(
             Option.match({
               onNone: () => ({ _tag: "NotJournaled" }) as const,
               onSome: (sequence) => ({ _tag: "Journaled", sequence }) as const,
+            })
+          ),
+          Effect.mapError(journalFailed)
+        )
+      )
+      .handle("look", ({ params, payload }) =>
+        Effect.gen(function* () {
+          const intent = payload.intent ?? (yield* intentId);
+
+          return yield* runtime
+            .look(NetworkId.make(params.network), { intent, lookup: payload.lookup })
+            .pipe(
+              Effect.map(looked),
+              Effect.catchTags({
+                NetworkStopped: (error) =>
+                  Effect.fail(networkStopped(params.network, error, intent)),
+                UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
+              })
+            );
+        })
+      )
+      .handle("looked", ({ params }) =>
+        runtime.looked(NetworkId.make(params.network), params.intent).pipe(
+          Effect.map(
+            Option.match({
+              onNone: () => ({ _tag: "NotJournaled" }) as const,
+              onSome: looked,
             })
           ),
           Effect.mapError(journalFailed)

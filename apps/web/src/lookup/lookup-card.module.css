@@ -1,0 +1,76 @@
+/* A Pane's Lookup card: under its header, over its Timeline, as compact as the header. */
+.card {
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+  overflow-wrap: anywhere;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.head > :last-child {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+}
+
+.heading {
+  font: inherit;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.profile {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile + .profile {
+  padding-top: var(--space-2);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+}
+
+.field {
+  overflow-wrap: anywhere;
+}
+
+.dim {
+  color: var(--color-muted);
+}
+
+.note {
+  color: var(--color-level-highlight);
+}
+
+.channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.channel > button {
+  padding: 0;
+}
+
+.symbol {
+  color: var(--color-muted);
+}

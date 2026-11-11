@@ -12,6 +12,8 @@ import type { ThemeName, UiOptionName } from "@iirc/api/ui";
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
 import type { Axis, Direction } from "./layout.ts";
+import { lookOf, nickRulesOf, parseLookupNick } from "./lookup.ts";
+import type { Look, LookupKind } from "./lookup.ts";
 import {
   channelsOf,
   isUiName,
@@ -156,6 +158,8 @@ export interface Act {
  * - `Pane`: change the Panes: split, close, focus, swap, resize, or zoom.
  * - `Search`: show the search, searching the query when there is one, which the runtime
  *   reads against the Timelines and the Owner's time zone, or showing what it last found.
+ * - `Look`: look a nick up on a Network, `WHOIS` or `WHOWAS`, under an intent the runtime
+ *   names, and show what came back in a card over the Pane that asked.
  */
 export type Intent =
   | Say
@@ -187,7 +191,8 @@ export type Intent =
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
   | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
-  | { readonly _tag: "Search"; readonly query: string | undefined };
+  | { readonly _tag: "Search"; readonly query: string | undefined }
+  | Look;
 
 /** A value parsed, or why it could not be, in words. */
 export type Parsed<A> =
@@ -863,6 +868,41 @@ const queryArguments = (args: string): Parsed<string> => {
 };
 
 const target: readonly Condition[] = [{ _tag: "Target" }, { _tag: "Session" }];
+
+/**
+ * A Lookup's command: `/whois` or `/whowas` of one nick, read as the Client reads one, on
+ * the open Timeline's Network.
+ * @param kind - The Lookup.
+ * @param description - What it does.
+ * @returns The command.
+ */
+const lookupCommand = (kind: LookupKind, description: string): Command => {
+  const name = kind.toLowerCase();
+
+  return {
+    aliases: [],
+    arguments: "Required",
+    description,
+    id: `lookup.${name}`,
+    name,
+    run: (args, context) => {
+      const { focus, head } = context;
+
+      if (focus === undefined) {
+        return invalid("Open a Timeline first.");
+      }
+
+      const nick = parseLookupNick(kind, args, nickRulesOf(head));
+
+      return nick._tag === "Invalid"
+        ? nick
+        : parsed([lookOf(kind, nick.value, focus.network, focus.timeline, head)]);
+    },
+    usage: `/${name} <nick>`,
+    when: [{ _tag: "Focused" }, { _tag: "Session" }],
+  };
+};
+
 const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Session" }];
 const anywhereActing = anywhere;
 const focused: readonly Condition[] = [{ _tag: "Focused" }];
@@ -1761,6 +1801,11 @@ export const commands: readonly Command[] = [
     usage: "/query <nick>",
     when: focused,
   }),
+  lookupCommand(
+    "Whois",
+    "Look a nick up on the open Timeline's Network: who they are, where, and in which Channels."
+  ),
+  lookupCommand("Whowas", "Look up who used a nick on the open Timeline's Network before."),
   unfocused({
     aliases: [],
     arguments: "Optional",

@@ -10,6 +10,8 @@ import type {
   Client,
   ConnectionId,
   Input,
+  IntentId,
+  LookResult,
   NetworkConfiguration,
   News,
   Output,
@@ -190,6 +192,12 @@ export interface Network<S> {
   readonly drained: Latch.Latch;
   /** The driver's fiber, once it is forked, so shutdown can stop it. */
   readonly driver: Ref.Ref<Fiber.Fiber<unknown, unknown> | undefined>;
+  /**
+   * Callers waiting on a Lookup's result, by its intent. The Network's fiber completes one
+   * when a step reports `LookedUp` for its intent, so no second reader of the Journal is
+   * needed. Each caller removes its own when it stops waiting.
+   */
+  readonly lookups: Ref.Ref<ReadonlyMap<IntentId, Deferred.Deferred<LookResult>>>;
 }
 
 /** A Network as stepped so far. */
@@ -363,6 +371,7 @@ const makeNetwork = <S>(id: NetworkId, folded: Folded<S>) =>
       driver: yield* Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined),
       id,
       links: yield* Ref.make<ReadonlyMap<ConnectionId, Live>>(new Map()),
+      lookups: yield* Ref.make<ReadonlyMap<IntentId, Deferred.Deferred<LookResult>>>(new Map()),
       queue: yield* Queue.bounded<Pending>(queueCapacity),
       status: yield* Ref.make<NetworkStatus>({ _tag: "Running" }),
       stopped: yield* Deferred.make<never, NetworkStopped>(),
@@ -743,6 +752,17 @@ const drive = <S>(
           });
         }
 
+        // A Lookup's result goes to whoever waits on it, whichever step reported it.
+        const waiting = yield* Ref.get(network.lookups);
+
+        for (const one of step.news) {
+          const waiter = one._tag === "LookedUp" ? waiting.get(one.intent) : undefined;
+
+          if (waiter !== undefined && one._tag === "LookedUp") {
+            yield* Deferred.succeed(waiter, one.result);
+          }
+        }
+
         for (const output of step.outputs) {
           refused.push(...(yield* carryOut(output)));
         }
@@ -982,6 +1002,48 @@ export const tell = <S>(
         Deferred.await(done)
       ),
       Deferred.await(network.stopped)
+    )
+  );
+
+/**
+ * Waits for a Lookup's result while an effect runs, and after it for at most `bound`
+ * milliseconds: the waiter is in place before the effect's input can be stepped, so no
+ * result is missed, and removed once the wait is over, however it ends.
+ * @param network - The Network.
+ * @param intent - The Lookup's intent.
+ * @param tell - Gives the Network the `Look`, and answers with its own step.
+ * @param bound - How long to wait after it, in milliseconds.
+ * @returns Its own step, and the result if it came within the bound and before the
+ * Network stopped.
+ */
+export const awaitLookup = <S, E>(
+  network: Network<S>,
+  intent: IntentId,
+  tell: Effect.Effect<Stepped, E>,
+  bound: number
+): Effect.Effect<{ readonly stepped: Stepped; readonly result: LookResult | undefined }, E> =>
+  Effect.flatMap(Deferred.make<LookResult>(), (done) =>
+    Effect.gen(function* () {
+      yield* Ref.update(network.lookups, (waiting) => new Map(waiting).set(intent, done));
+
+      const stepped = yield* tell;
+
+      const result = yield* Effect.raceFirst(
+        Deferred.await(done),
+        Effect.as(Effect.ignore(Deferred.await(network.stopped)), undefined)
+      ).pipe(Effect.timeoutOption(bound));
+
+      return { result: result._tag === "Some" ? result.value : undefined, stepped };
+    }).pipe(
+      Effect.ensuring(
+        Ref.update(network.lookups, (waiting) => {
+          const next = new Map(waiting);
+
+          next.delete(intent);
+
+          return next;
+        })
+      )
     )
   );
 

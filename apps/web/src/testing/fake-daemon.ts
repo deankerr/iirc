@@ -8,6 +8,7 @@ import { ConfigurationInForce, UiOptionName, UiOptions, uiDefaults } from "@iirc
 import type {
   ChannelHeader,
   Knowledge,
+  LookResult,
   Member,
   MemberPage,
   Located,
@@ -29,8 +30,8 @@ import { AtomRegistry } from "effect/reactivity";
 import type { Atom } from "effect/reactivity";
 
 import { layerDaemonClient } from "../app/daemon-client.ts";
+import { IntentNames } from "../app/intent-names.ts";
 import { runtime } from "../app/runtime.ts";
-import { IntentNames } from "../composer/atoms.ts";
 import { Notifier } from "../notifications/notifier.ts";
 import type { NotifierPort } from "../notifications/notifier.ts";
 import { writeChoice } from "../page/device.ts";
@@ -76,7 +77,15 @@ type Answer =
     }
   | { readonly _tag: "UnknownNetwork"; readonly network: string }
   | typeof UiInForce.Encoded
-  | { readonly _tag: "UiChanged"; readonly sequence: number };
+  | { readonly _tag: "UiChanged"; readonly sequence: number }
+  | {
+      readonly _tag: "LookedUp";
+      readonly intent: string;
+      readonly result: typeof LookResult.Encoded;
+      readonly sequence: number;
+    }
+  | { readonly _tag: "Pending"; readonly intent: string; readonly sequence: number }
+  | { readonly _tag: "NotJournaled" };
 
 const json = (status: number, body: Answer) => Response.json(body, { status });
 
@@ -323,6 +332,55 @@ export const liberaConfiguration: ConfigurationOnWire = {
   username: "iirc",
 };
 
+const LookBody = Schema.fromJsonString(
+  Schema.Struct({
+    intent: Schema.optionalKey(Schema.String),
+    lookup: Schema.Struct({ _tag: Schema.Literals(["Whois", "Whowas"]), nick: Schema.String }),
+  })
+);
+
+/**
+ * How the fake answers a `look`: journaled and `LookedUp` at once, journaled and `Pending`,
+ * `NetworkStopped` journaled or not, `UnknownNetwork`, or journaled and no answer (`Lost`).
+ * Asked after by intent, it answers `Pending` `pending` times, then `LookedUp` with
+ * `result`.
+ */
+export interface LookScript {
+  readonly answer:
+    | "LookedUp"
+    | "Pending"
+    | "NetworkStopped"
+    | "NetworkStoppedJournaled"
+    | "UnknownNetwork"
+    | "Lost";
+  readonly result: typeof LookResult.Encoded;
+  readonly pending: number;
+}
+
+/**
+ * A User as a Lookup's reply describes them, with nothing said but what a test gives.
+ * @param fields - What the reply said.
+ * @returns The User, as the wire carries them.
+ */
+export const profileOf = (
+  fields: Partial<(typeof LookResult.Encoded & { readonly _tag: "Found" })["profiles"][number]>
+): (typeof LookResult.Encoded & { readonly _tag: "Found" })["profiles"][number] => ({
+  account: null,
+  away: null,
+  channels: [],
+  host: null,
+  idle: null,
+  nick: "peer",
+  operator: false,
+  other: [],
+  realname: null,
+  secure: false,
+  server: null,
+  signon: null,
+  user: null,
+  ...fields,
+});
+
 /** A `say` the fake was asked for, as its body said it. */
 type SaidToFake = typeof SayBody.Type;
 
@@ -356,6 +414,25 @@ export const hasValue = (redacted: Redacted.Redacted<unknown>) => {
 };
 
 /**
+ * Waits until a test releases a request, or the request is given up, which aborts it.
+ * @param releases - Where its release goes.
+ * @param init - The request.
+ * @returns Once released.
+ */
+const heldUntilReleased = async (releases: (() => void)[], init: RequestInit) => {
+  const { promise, reject, resolve } = Promise.withResolvers<undefined>();
+
+  releases.push(() => {
+    resolve(undefined);
+  });
+  init.signal?.addEventListener("abort", () => {
+    reject(new DOMException("aborted", "AbortError"));
+  });
+
+  await promise;
+};
+
+/**
  * A Daemon's sign-in routes and Network list as the wire carries them, with one key and
  * the one cookie a browser would hold. It can be down, answer through a gateway that
  * cannot reach it, or fail to write its sign-ins.
@@ -386,6 +463,17 @@ export const fakeDaemon = () => {
   const uiFollowers: Follower[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
 
+  const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
+  const lookScripts: LookScript[] = [];
+  const looked: string[] = [];
+  const lookedHeld: (() => void)[] = [];
+  const looksHeld: (() => void)[] = [];
+
+  const lookups = new Map<
+    string,
+    { pending: number; result: typeof LookResult.Encoded; sequence: number }
+  >();
+
   const daemon = {
     /** How many requests that never began their answer were given up. */
     abandoned: 0,
@@ -414,6 +502,10 @@ export const fakeDaemon = () => {
     holdKnown: false,
     /** Whether each `at/{sequence}` read waits until released. */
     holdLocates: false,
+    /** Whether each `GET` of a Lookup by its intent waits until released. */
+    holdLooked: false,
+    /** Whether each `look` waits, once journaled, until released. */
+    holdLooks: false,
     /** Whether each read of a Channel's members waits until released. */
     holdMembers: false,
     /** Whether each request for the Network list waits until released. */
@@ -446,6 +538,18 @@ export const fakeDaemon = () => {
     locatesHeld,
     /** Each `at/{sequence}` read, by its sequence, failed or held ones included. */
     locatesRead,
+    /** How the next `look`s are answered, first to last; past them, `LookedUp` not found. */
+    lookScripts,
+    /** Each `GET` of a Lookup by its intent, in order. */
+    looked,
+    /** Releases each `GET` of a Lookup held, in the order they came. */
+    lookedHeld,
+    /** Each `look` asked for, in order, with its Network. */
+    looks,
+    /** Releases each `look` held, in the order they came. */
+    looksHeld,
+    /** Each Lookup journaled, by its intent: how many asks it answers `Pending`, and its result. */
+    lookups,
     /** Each read of a Channel's members, by its query. */
     membersRead,
     /** Releases each request for the Network list held, in the order they came. */
@@ -904,7 +1008,123 @@ export const fakeDaemon = () => {
     return json(200, { sequence: daemon.ui.sequence });
   };
 
+  /**
+   * A Lookup asked after by its intent: `Pending` as many times as it was given, then
+   * `LookedUp`, or `NotJournaled` for one never journaled. It waits until a test releases it
+   * when `holdLooked` says.
+   * @param intent - Its intent.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const askedAfter = async (intent: string, init: RequestInit) => {
+    daemon.looked.push(intent);
+
+    if (daemon.holdLooked) {
+      await heldUntilReleased(daemon.lookedHeld, init);
+    }
+
+    const held = daemon.lookups.get(intent);
+
+    if (held === undefined) {
+      return json(200, { _tag: "NotJournaled" });
+    }
+
+    if (held.pending > 0) {
+      held.pending -= 1;
+
+      return json(200, { _tag: "Pending", intent, sequence: held.sequence });
+    }
+
+    return json(200, { _tag: "LookedUp", intent, result: held.result, sequence: held.sequence });
+  };
+
+  /**
+   * A `look`, answered as the next of `lookScripts` says, and a Lookup asked after by its
+   * intent, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const lookupRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const method = init.method ?? "GET";
+
+    const one = /^\/api\/networks\/(?<network>[^/]+)\/lookups(?:\/(?<intent>[^/]+))?$/u.exec(
+      url.pathname
+    )?.groups;
+
+    if (one?.network === undefined) {
+      return undefined;
+    }
+
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const { intent, network } = one;
+
+    if (method === "GET" && intent !== undefined) {
+      return await askedAfter(intent, init);
+    }
+
+    const body = Schema.decodeSync(LookBody)(await new Response(init.body).text());
+    const named = body.intent ?? `daemon-${daemon.nextSequence}`;
+
+    const script = daemon.lookScripts.shift() ?? {
+      answer: "LookedUp",
+      pending: 0,
+      result: { _tag: "NotFound", reply: "401" },
+    };
+
+    daemon.looks.push({ ...body, network });
+
+    if (script.answer === "UnknownNetwork") {
+      return json(404, { _tag: "UnknownNetwork", network });
+    }
+
+    const sequence = daemon.nextSequence;
+
+    if (script.answer !== "NetworkStopped") {
+      daemon.lookups.set(named, { pending: script.pending, result: script.result, sequence });
+      daemon.nextSequence += 1;
+    }
+
+    // A Daemon that journaled the Lookup and is slow to answer, until a test releases it.
+    if (daemon.holdLooks) {
+      await heldUntilReleased(daemon.looksHeld, init);
+    }
+
+    switch (script.answer) {
+      case "Lost": {
+        throw new TypeError("fetch failed");
+      }
+
+      case "NetworkStopped":
+      case "NetworkStoppedJournaled": {
+        return json(503, {
+          _tag: "NetworkStopped",
+          intent: named,
+          network,
+          outcome: "Uncertain",
+          reason: "stopped",
+        });
+      }
+
+      case "Pending": {
+        return json(200, { _tag: "Pending", intent: named, sequence });
+      }
+
+      case "LookedUp": {
+        return json(200, { _tag: "LookedUp", intent: named, result: script.result, sequence });
+      }
+
+      default: {
+        return script.answer satisfies never;
+      }
+    }
+  };
+
   const elsewhere = async (url: URL, init: RequestInit) =>
+    (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??
@@ -1169,6 +1389,8 @@ export const registryFor = (
             idle: "2 seconds",
             interval: "100 millis",
             longest: "50 millis",
+            lookRequest: "500 millis",
+            lookup: "1 second",
             reconnect: "10 millis",
             retry: "10 millis",
             settle: "50 millis",

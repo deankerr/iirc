@@ -3,8 +3,9 @@
  * labelled region holding a virtualized grid list, most privileged first, each member with
  * their rank's symbol, in their nick's colour, and dimmed while away, read a page at a
  * time as the Owner scrolls. Enter, or a double click, opens a member's Direct Message, as
- * `/query` does, and a member chosen offers that and mentioning them in the composer. On a
- * phone's width it lies over the Pane, and its hide button, `/members`, or Alt+M closes it.
+ * `/query` does, and a member chosen offers that, looking them up, as `/whois` does, and
+ * mentioning them in the composer. On a phone's width it lies over the Pane, and its hide
+ * button, `/members`, or Alt+M closes it.
  *
  * @packageDocumentation
  */
@@ -129,7 +130,8 @@ const Members = ({
 
 /**
  * What can be done with the member chosen, as commands: open their Direct Message, as
- * `/query` does, or mention them, starting the composer with their nick.
+ * `/query` does, look them up, as `/whois` does, or mention them, starting the composer
+ * with their nick.
  * @param props - The Pane.
  * @returns The actions, or nothing while none is chosen.
  */
@@ -138,12 +140,14 @@ const Actions = ({ pane }: { readonly pane: string }) => {
   const context = useAtomValue(commandContext);
   const run = useAtomSet(perform);
   const query = commandNamed("query");
+  const whois = commandNamed("whois");
 
   if (chosen === undefined) {
     return null;
   }
 
   const queried = query === undefined ? undefined : runIn(query, chosen, context);
+  const looked = whois === undefined ? undefined : runIn(whois, chosen, context);
   const mention: readonly Intent[] = [{ _tag: "FocusComposer", text: `${chosen}: ` }];
 
   return (
@@ -155,6 +159,16 @@ const Actions = ({ pane }: { readonly pane: string }) => {
           }}
         >
           /query <bdi>{chosen}</bdi>
+        </Button>
+      ) : null}
+      {looked?._tag === "Parsed" ? (
+        <Button
+          aria-label={`Whois ${chosen}`}
+          onPress={() => {
+            run(looked.value);
+          }}
+        >
+          whois
         </Button>
       ) : null}
       <Button

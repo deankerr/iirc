@@ -447,6 +447,35 @@ const said = (state: ToyState, input: Extract<Input, { readonly _tag: "Say" }>):
         state,
       };
 
+// An input from the Transport, which an old Connection's is ignored.
+const linked = (
+  state: ToyState,
+  input: Extract<Input, { readonly _tag: "Opened" | "Received" | "Closed" }>,
+  flaws: Flaws
+): Step<ToyState> => {
+  if (input.connection !== state.connection) {
+    return ignore(state, { _tag: "StaleConnection", connection: input.connection });
+  }
+
+  switch (input._tag) {
+    case "Opened": {
+      return opened(state, input.at);
+    }
+
+    case "Received": {
+      return received(state, input, flaws);
+    }
+
+    case "Closed": {
+      return closed(state, input);
+    }
+
+    default: {
+      return input satisfies never;
+    }
+  }
+};
+
 const step =
   (flaws: Flaws) =>
   (state: ToyState, input: Input): Step<ToyState> => {
@@ -454,28 +483,15 @@ const step =
       return ignore(state, { _tag: "NotNow", input: input._tag });
     }
 
-    if (
-      (input._tag === "Opened" || input._tag === "Received" || input._tag === "Closed") &&
-      input.connection !== state.connection
-    ) {
-      return ignore(state, { _tag: "StaleConnection", connection: input.connection });
-    }
-
     switch (input._tag) {
       case "Configured": {
         return configured(state, input);
       }
 
-      case "Opened": {
-        return opened(state, input.at);
-      }
-
-      case "Received": {
-        return received(state, input, flaws);
-      }
-
+      case "Opened":
+      case "Received":
       case "Closed": {
-        return closed(state, input);
+        return linked(state, input, flaws);
       }
 
       case "Fired": {
@@ -491,6 +507,7 @@ const step =
       }
 
       case "Act":
+      case "Look":
       case "Read":
       case "Retry":
       case "Stopping":

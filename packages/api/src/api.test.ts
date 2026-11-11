@@ -53,6 +53,7 @@ describe("the contract", () => {
       "GET /api/networks/{network}/configuration",
       "GET /api/networks/{network}/inspect",
       "GET /api/networks/{network}/known",
+      "GET /api/networks/{network}/lookups/{intent}",
       "GET /api/networks/{network}/said/{intent}",
       "GET /api/networks/{network}/timelines",
       "GET /api/news",
@@ -64,6 +65,7 @@ describe("the contract", () => {
       "GET /api/ui",
       "GET /api/ui/changes",
       "POST /api/networks/{network}/act",
+      "POST /api/networks/{network}/lookups",
       "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
@@ -454,6 +456,28 @@ describe("the contract", () => {
         { after: "nope" },
       ].map((each) => Option.isSome(query(each)))
     ).toStrictEqual([true, true, false, false, false, false, false]);
+  });
+
+  it("marks every field of a Lookup's profile a Network wrote as Untrusted", () => {
+    const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
+    const nullable = `{"anyOf":[${untrusted},{"type":"null"}]}`;
+    const looked = JSON.stringify(document.paths["/api/networks/{network}/lookups/{intent}"]);
+
+    expect(
+      [
+        `"account":${nullable}`,
+        `"away":${nullable}`,
+        `"host":${nullable}`,
+        `"nick":${untrusted}`,
+        `"realname":${nullable}`,
+        `"user":${nullable}`,
+        `"properties":{"info":${untrusted},"name":${untrusted}}`,
+        `"properties":{"name":${untrusted},"prefixes":{"type":"array","items":${untrusted}}}`,
+        `"properties":{"numeric":${untrusted},"params":{"type":"array","items":${untrusted}}}`,
+        `"enum":["Failed"]},"reply":${untrusted}}`,
+        `"enum":["NotFound"]},"reply":${untrusted}}`,
+      ].filter((field) => !looked.includes(field))
+    ).toStrictEqual([]);
   });
 
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {
