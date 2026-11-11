@@ -8,7 +8,7 @@ import { Effect, Exit, Fiber, Latch, Option, Redacted, References, Schema, Strea
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
-import { Entry, JournalFailed, NetworkId, Sequence } from "./journal.ts";
+import { Entry, JournalFailed, NetworkId, Sequence, networkOf } from "./journal.ts";
 import type { JournalRecord } from "./journal.ts";
 import {
   ConfigurationChanged,
@@ -493,7 +493,7 @@ describe("one Network's failure", () => {
 
         const journal = wrapJournal(world.journal, {
           before: (record) =>
-            failing && record.network === oftc
+            failing && networkOf(record) === oftc
               ? Effect.fail(new JournalFailed({ reason: "disk full" }))
               : Effect.void,
         });
@@ -810,6 +810,12 @@ describe("marking read", () => {
   });
 });
 
+/** A Change that names no Network, as the Daemon journals one. */
+const uiChange: JournalRecord = {
+  _tag: "Change",
+  change: { _tag: "UiSet", option: "time", value: "HH:mm:ss" },
+};
+
 describe("the News stream", () => {
   it("gives every Network's News from a sequence, in order, then live", async () => {
     const result = await runTest((world) =>
@@ -824,6 +830,8 @@ describe("the News stream", () => {
 
         yield* runtime.configure(libera, configuration);
         yield* runtime.configure(oftc, configuration);
+        // A Change belongs to no Network, so it is never stepped and makes no News.
+        yield* world.journal.append(uiChange);
         yield* runtime.retry(libera);
         yield* runtime.retry(libera);
 
@@ -850,9 +858,9 @@ describe("the News stream", () => {
 
     expect(result).toStrictEqual({
       // The second Retry to libera made no News, so it is not given.
-      all: ["1 libera first", "2 oftc first", "3 libera second third"],
-      live: Exit.succeed(["5 oftc second third"]),
-      resumed: ["3 libera second third"],
+      all: ["1 libera first", "2 oftc first", "4 libera second third"],
+      live: Exit.succeed(["6 oftc second third"]),
+      resumed: ["4 libera second third"],
     });
   });
 });
@@ -1102,6 +1110,8 @@ describe("restarting", () => {
         yield* TestClock.adjust(1000);
         yield* settle;
         yield* first.close;
+        // A Change between the two is read and never stepped.
+        yield* world.journal.append(uiChange);
 
         const second = yield* startRuntime(world, scripted(script));
 
@@ -1121,8 +1131,9 @@ describe("restarting", () => {
         "2 libera of 1: Wake Wake",
         "3 libera Fired",
         "4 libera Stopping",
-        "5 libera Started",
-        "6 libera Fired",
+        "5 UiSet time",
+        "6 libera Started",
+        "7 libera Fired",
       ],
       pending: new Map([[TimerId.make("pending"), at(5000)]]),
     });

@@ -27,6 +27,7 @@ import {
   NotInChannel,
   SignInsFailed,
   TimelinesFailed,
+  UiChanged,
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
@@ -64,8 +65,11 @@ import {
   TimelineChangesEvent,
   TimelineList,
   TimelineWindow,
+  UiEvent,
+  UiValue,
   WindowQuery,
 } from "./schemas.ts";
+import { UiInForce, UiOptionName } from "./ui.ts";
 
 /**
  * How the API parses a request: a key nothing reads, such as a misspelt field of a
@@ -229,6 +233,37 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
   )
   .middleware(Authorization) {}
 
+const UiQuery = { ifSequence: Schema.optionalKey(IfSequence) };
+
+/**
+ * The options under `ui`, which belong to the Owner rather than to any Network and are
+ * shared by every device: read whole, set or unset one at a time, made from the options
+ * read, and followed as Server-Sent Events, the options whole each time they change.
+ */
+export class UiGroup extends HttpApiGroup.make("ui")
+  .add(
+    HttpApiEndpoint.get("read", "/ui", { success: UiInForce }),
+    HttpApiEndpoint.get("changes", "/ui/changes", {
+      headers: { "last-event-id": Schema.optionalKey(After) },
+      query: { after: Schema.optionalKey(After) },
+      success: HttpApiSchema.StreamSse({ error: JournalFailed, events: UiEvent }),
+    }),
+    HttpApiEndpoint.put("set", "/ui/:option", {
+      error: [UiChanged, JournalFailed],
+      params: { option: UiOptionName },
+      payload: UiValue,
+      query: UiQuery,
+      success: Journaled,
+    }),
+    HttpApiEndpoint.delete("unset", "/ui/:option", {
+      error: [UiChanged, JournalFailed],
+      params: { option: UiOptionName },
+      query: UiQuery,
+      success: Journaled,
+    })
+  )
+  .middleware(Authorization) {}
+
 /** Credentials, by name. A value goes in, and only names come out. */
 export class CredentialsGroup extends HttpApiGroup.make("credentials")
   .add(
@@ -271,6 +306,7 @@ export class DaemonApi extends HttpApi.make("iirc")
   .add(NetworksGroup)
   .add(NewsGroup)
   .add(TimelinesGroup)
+  .add(UiGroup)
   .add(CredentialsGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)

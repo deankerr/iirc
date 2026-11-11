@@ -16,6 +16,7 @@ export {
   SignInGroup,
   signInCookie,
   TimelinesGroup,
+  UiGroup,
 } from "./api.ts";
 
 export {
@@ -28,6 +29,7 @@ export {
   NotInChannel,
   SignInsFailed,
   TimelinesFailed,
+  UiChanged,
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
@@ -106,11 +108,32 @@ export {
   Topic,
   Untrusted,
   Unread,
+  UiEvent,
+  UiValue,
   UserKnowledge,
   Where,
   WindowGap,
   WindowQuery,
   windowLimit,
 } from "./schemas.ts";
+
+export {
+  ActivityShown,
+  Colour,
+  ColoursShown,
+  Palette,
+  Theme,
+  ThemeName,
+  Themes,
+  TimeShown,
+  UiInForce,
+  UiOptionName,
+  UiOptions,
+  UiSequence,
+  builtInThemeNames,
+  uiDefaults,
+  uiOptionNames,
+  uiValueKept,
+} from "./ui.ts";
 
 export { TimelineId, unreadCap } from "@iirc/timelines";

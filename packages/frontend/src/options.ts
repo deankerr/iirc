@@ -11,15 +11,23 @@
  * A Credential option is write-only: it shows the Credential's name and whether the Vault
  * holds it, never a value.
  *
+ * The options under `ui` are the Owner's rather than any Network's, named `ui.<option>`,
+ * and come from the contract's `UiOptions` the same way (ADR 0015). Every device shares
+ * them, and a device may override any of them for itself, which it never sends.
+ *
  * @packageDocumentation
  */
 import type { NetworkId } from "@iirc/api";
+import { UiOptionName, UiOptions, uiDefaults } from "@iirc/api/ui";
+import type { UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 import { Exit, Option as Maybe, Schema, SchemaAST } from "effect";
 
 import type { Parsed } from "./commands.ts";
+import { effectiveUi, noOverrides } from "./ui.ts";
+import type { DeviceUi } from "./ui.ts";
 
 /** The decoded form of a Network's Configuration. */
 export type Configuration = NetworkConfiguration;
@@ -102,8 +110,9 @@ export type Value =
   | { readonly _tag: "Unset" }
   | { readonly _tag: "Credential"; readonly name: string; readonly held: boolean | undefined };
 
-/** One option, as the options view lists it. */
-export interface Option {
+/** One option of a Network's Configuration, as the options view lists it. */
+export interface NetworkOption {
+  readonly _tag: "Network";
   /** Its dotted name, such as `network.libera.login.account`. */
   readonly name: string;
   readonly network: NetworkId;
@@ -116,6 +125,32 @@ export interface Option {
   /** Whether `/unset` can return it to what a new Network starts with. */
   readonly unsettable: boolean;
 }
+
+/**
+ * One option under `ui`, as the options view lists it: the value in effect on this device,
+ * which is this device's override when it has one, and the value every device shares.
+ */
+export interface UiOption {
+  readonly _tag: "Ui";
+  /** Its dotted name, such as `ui.time`. */
+  readonly name: string;
+  readonly option: UiOptionName;
+  readonly kind: Kind;
+  readonly description: string;
+  /** The value in effect here: this device's override, or else the shared one. */
+  readonly value: Value;
+  /** The value every device shares, its default until one is set, or unset while not yet read. */
+  readonly shared: Value;
+  /** This device's override, which wins over the shared value here, or none. */
+  readonly device: Value | undefined;
+  /** What it starts as, in its text syntax. */
+  readonly starts: string | undefined;
+  /** Whether `/unset` can return it to what it starts as, which every `ui` option can. */
+  readonly unsettable: boolean;
+}
+
+/** One option, as the options view lists it. */
+export type Option = NetworkOption | UiOption;
 
 /**
  * A change to one Network's Configuration, which is applied to the Configuration in force,
@@ -297,6 +332,9 @@ const kindOf = (ast: SchemaAST.AST): Kind | undefined => {
 
 /** Every field of a Network's Configuration, derived once from its Schema. */
 export const fields: readonly Field[] = fieldsOf(NetworkConfiguration.ast, kindOf);
+
+/** Every option under `ui`, derived once from the contract's Schema. */
+export const uiFields: readonly Field[] = fieldsOf(UiOptions.ast, kindOf);
 
 // JSON.
 
@@ -711,7 +749,9 @@ export const resolve = (name: string): Parsed<Resolved> => {
   const prefix = "network.";
 
   if (!name.startsWith(prefix)) {
-    return invalid(`There is no option ${name}. Options are named network.<id>.<option>.`);
+    return invalid(
+      `There is no option ${name}. Options are named network.<id>.<option> or ui.<option>.`
+    );
   }
 
   const rest = name.slice(prefix.length);
@@ -733,6 +773,141 @@ export const resolve = (name: string): Parsed<Resolved> => {
   }
 
   return found.length === 1 ? parsed(only) : invalid(`${name} could name more than one option.`);
+};
+
+// The options under `ui`.
+
+/** What every option under `ui` is named with first. */
+export const uiPrefix = "ui.";
+
+/**
+ * Whether a name is under `ui`, so `resolveUi` reads it rather than `resolve`.
+ * @param name - The name.
+ * @returns Whether it is.
+ */
+export const isUiName = (name: string): boolean => name.startsWith(uiPrefix);
+
+/** What a name under `ui` resolves to: the option, and its field. */
+export interface ResolvedUi {
+  readonly option: UiOptionName;
+  readonly field: Field;
+}
+
+const decodeUiName = Schema.decodeUnknownOption(UiOptionName);
+
+/**
+ * The option a name under `ui` names, read from the Schema alone: `ui.<option>`.
+ * @param name - The name.
+ * @returns The option and its field, or why it names none.
+ */
+export const resolveUi = (name: string): Parsed<ResolvedUi> => {
+  const key = isUiName(name) ? name.slice(uiPrefix.length) : "";
+  const option = decodeUiName(key);
+  const field = fieldNamed(uiFields, key);
+
+  return Maybe.isSome(option) && field !== undefined
+    ? parsed({ field, option: option.value })
+    : invalid(
+        `There is no option ${name}. Options are named network.<id>.<option> or ui.<option>.`
+      );
+};
+
+/**
+ * A `ui` option's name.
+ * @param option - The option.
+ * @returns Its dotted name, such as `ui.time`.
+ */
+export const uiOptionName = (option: UiOptionName): string => `${uiPrefix}${option}`;
+
+/**
+ * A `ui` option's value, from its text syntax, parsed by its Schema, as the JSON the Daemon
+ * takes and a device keeps.
+ * @param option - The option.
+ * @param text - The text.
+ * @returns The value, or why the text is not one.
+ */
+export const parseUiText = (option: UiOptionName, text: string): Parsed<Json> => {
+  const field = fieldNamed(uiFields, option);
+
+  if (field === undefined) {
+    return invalid(`There is no option ${uiOptionName(option)}.`);
+  }
+
+  const json = parseText(field.kind, text);
+
+  if (json._tag === "Invalid") {
+    return invalid(`${uiOptionName(option)}: ${json.message}`);
+  }
+
+  const codec = Schema.toCodecJson(UiOptions.fields[option]);
+  const value = Schema.decodeOption(codec)(json.value);
+
+  return Maybe.isSome(value)
+    ? parsed(Schema.encodeUnknownSync(codec)(value.value))
+    : invalid(`${uiOptionName(option)} cannot be ${text}.`);
+};
+
+/**
+ * A `ui` option's value as JSON, as the Daemon takes it.
+ * @param option - The option.
+ * @param value - Its value.
+ * @returns The JSON.
+ */
+const uiValueJson = (option: UiOptionName, value: UiOptions[UiOptionName]): Json =>
+  Schema.encodeUnknownSync(Schema.toCodecJson(UiOptions.fields[option]))(value);
+
+/**
+ * A `ui` option's value, shown in its text syntax.
+ * @param field - Its field.
+ * @param value - Its value, as JSON.
+ * @returns The value as the view shows it.
+ */
+const shownUi = (field: Field, value: Json): Value => ({
+  _tag: "Shown",
+  text: showText(field.kind, value),
+});
+
+/**
+ * Every option under `ui`, in the Schema's order, each with the value in effect on this
+ * device, the shared one, and this device's override.
+ * @param shared - The shared options, once read.
+ * @param device - This device's overrides.
+ * @returns The options.
+ */
+export const uiOptionsOf = (
+  shared: UiInForce | undefined,
+  device: DeviceUi
+): readonly UiOption[] => {
+  const effective = effectiveUi(shared, device);
+
+  return uiFields.flatMap((field) => {
+    const option = decodeUiName(field.key);
+
+    if (Maybe.isNone(option)) {
+      return [];
+    }
+
+    const name = option.value;
+    const own = device[name];
+
+    return [
+      {
+        _tag: "Ui",
+        description: field.description,
+        device: own === undefined ? undefined : shownUi(field, uiValueJson(name, own)),
+        kind: field.kind,
+        name: uiOptionName(name),
+        option: name,
+        shared:
+          shared === undefined
+            ? { _tag: "Unset" }
+            : shownUi(field, uiValueJson(name, shared.options[name])),
+        starts: showText(field.kind, uiValueJson(name, uiDefaults[name])),
+        unsettable: true,
+        value: shownUi(field, uiValueJson(name, effective[name])),
+      },
+    ];
+  });
 };
 
 // Reading by path.
@@ -1453,7 +1628,7 @@ const optionOf = (
   path: Path,
   value: Json | undefined,
   held: ReadonlySet<string> | undefined
-): Option => {
+): NetworkOption => {
   const credential = field.kind._tag === "Credential" ? textOf(value) : undefined;
 
   const shown = (): Value => {
@@ -1467,6 +1642,7 @@ const optionOf = (
   };
 
   return {
+    _tag: "Network",
     description: field.description,
     kind: field.kind,
     name: optionName(network, path),
@@ -1490,7 +1666,7 @@ export const optionsOf = (
   network: NetworkId,
   configuration: Configuration,
   held: ReadonlySet<string> | undefined
-): readonly Option[] => {
+): readonly NetworkOption[] => {
   const plain: Record = configuration;
 
   return fields.flatMap((field) => {
@@ -1598,6 +1774,8 @@ export type Reading =
 export interface Options {
   /** Each Network's Configuration, by id, in the order the Networks were listed. */
   readonly networks: ReadonlyMap<NetworkId, Reading>;
+  /** The options under `ui` every device shares, as last read or followed, once they are. */
+  readonly ui: UiInForce | undefined;
   /** The names of the Credentials the Vault holds, once read. */
   readonly held: ReadonlySet<string> | undefined;
   /** What the last edit from the view came to, when it did not go as asked, in words. */
@@ -1623,6 +1801,7 @@ export interface Prompt {
  *
  * - `Listed`: the Networks to read, as `GET /api/networks` listed them.
  * - `Read`, `ReadFailed`: a Network's Configuration was read, or could not be.
+ * - `UiRead`: the options under `ui` were read, or followed.
  * - `Held`: the names of the Credentials the Vault holds.
  * - `Noticed`: what an edit came to, or nothing to let go of the last.
  * - `Editing`: an option is edited in place, or none is.
@@ -1638,6 +1817,7 @@ export type OptionsEvent =
       readonly sequence: number;
     }
   | { readonly _tag: "ReadFailed"; readonly network: NetworkId; readonly message: string }
+  | { readonly _tag: "UiRead"; readonly ui: UiInForce }
   | { readonly _tag: "Held"; readonly names: readonly string[] }
   | { readonly _tag: "Noticed"; readonly message: string | undefined }
   | { readonly _tag: "Editing"; readonly name: string | undefined }
@@ -1655,6 +1835,7 @@ export const initialOptions: Options = {
   networks: new Map(),
   notice: undefined,
   prompting: undefined,
+  ui: undefined,
 };
 
 /**
@@ -1702,6 +1883,13 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
       };
     }
 
+    // An older read that lands late never replaces a newer one.
+    case "UiRead": {
+      return state.ui !== undefined && state.ui.sequence > event.ui.sequence
+        ? state
+        : { ...state, ui: event.ui };
+    }
+
     case "Held": {
       return { ...state, held: new Set(event.names) };
     }
@@ -1740,16 +1928,21 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
 };
 
 /**
- * The options the view lists: every option of every Network read, that the filter matches.
+ * The options the view lists, that the filter matches: every option of every Network read,
+ * and then every option under `ui`, as it takes effect on this device.
  * @param state - The view.
  * @param filter - What the Owner typed to filter them.
- * @returns The options, by Network in the order listed.
+ * @param device - This device's overrides of the options under `ui`.
+ * @returns The options, by Network in the order listed, then those under `ui`.
  */
-export const listed = (state: Options, filter: string): readonly Option[] =>
-  [...state.networks].flatMap(([network, reading]) =>
-    reading._tag === "Read"
-      ? optionsOf(network, reading.configuration, state.held).filter((option) =>
-          matches(filter, option.name)
-        )
-      : []
-  );
+export const listed = (
+  state: Options,
+  filter: string,
+  device: DeviceUi = noOverrides
+): readonly Option[] =>
+  [
+    ...[...state.networks].flatMap(([network, reading]) =>
+      reading._tag === "Read" ? optionsOf(network, reading.configuration, state.held) : []
+    ),
+    ...uiOptionsOf(state.ui, device),
+  ].filter((option) => matches(filter, option.name));

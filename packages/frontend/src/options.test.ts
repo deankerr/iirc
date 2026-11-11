@@ -1,4 +1,5 @@
 import { NetworkId, TimelineId } from "@iirc/api";
+import { UiOptions } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -22,9 +23,11 @@ import {
   set,
   showText,
   starting,
+  uiFields,
+  uiOptionsOf,
   unset,
 } from "./options.ts";
-import type { Configuration, Edit, Json, Kind, Option, OptionsEvent } from "./options.ts";
+import type { Configuration, Edit, Json, Kind, NetworkOption, OptionsEvent } from "./options.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
 const dotted = Schema.decodeSync(NetworkId)("my.net");
@@ -231,7 +234,8 @@ describe("names", () => {
       channel: ["libera", "channels", "#a.b", "key"],
       dotted: [dotted, "nicks"],
       member: [dotted, "login", "account"],
-      noNetwork: "There is no option libera.nicks. Options are named network.<id>.<option>.",
+      noNetwork:
+        "There is no option libera.nicks. Options are named network.<id>.<option> or ui.<option>.",
       none: "There is no option network.libera.nope.",
       uppercase: "There is no option network.Libera.nicks.",
     });
@@ -648,7 +652,7 @@ describe("editing", () => {
     const valid = Schema.is(NetworkConfiguration);
 
     fc.assert(
-      fc.property(fc.constantFrom(...options), fc.string(), (option: Option, text) => {
+      fc.property(fc.constantFrom(...options), fc.string(), (option: NetworkOption, text) => {
         const after = set(libera, full, option.path, text);
 
         expect(after._tag === "Invalid" || valid(after.value)).toBeTruthy();
@@ -864,6 +868,163 @@ describe("the options view", () => {
     }).toStrictEqual({
       kept: { _tag: "Read", configuration: plain, sequence: 5 },
       names: ["network.libera.nicks", "network.my.net.nicks"],
+    });
+  });
+});
+
+const change = (option: string, value: Json | undefined, device: boolean) => ({
+  _tag: "Parsed",
+  value: [{ _tag: "ChangeUi", device, option, value }],
+});
+
+describe("the options under ui", () => {
+  const shared = {
+    options: { activity: "quiet", colours: "theme", theme: "dark", themes: [], time: "HH:mm" },
+    sequence: 7,
+  } as const;
+
+  it("has an option for every field of the contract's UiOptions, each described, with its kind", () => {
+    expect({
+      described: uiFields.every((field) => field.description !== ""),
+      keys: uiFields.map((field) => field.key),
+      kinds: uiFields.map((field) => field.kind),
+    }).toStrictEqual({
+      described: true,
+      keys: Object.keys(UiOptions.fields),
+      kinds: [
+        { _tag: "Choice", choices: ["all", "quiet", "none"] },
+        { _tag: "Choice", choices: ["theme", "raw"] },
+        { _tag: "Text" },
+        { _tag: "Names", fields: [] },
+        { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "none"] },
+      ],
+    });
+  });
+
+  it("lists each with the value in effect, the shared one, and this device's override", () => {
+    const options = uiOptionsOf(shared, { theme: "light" });
+    const before = uiOptionsOf(undefined, {});
+
+    expect({
+      before: before.map((one) => [one.name, one.value, one.shared, one.device]),
+      options: options.map((one) => [one.name, one.value, one.shared, one.device, one.starts]),
+    }).toStrictEqual({
+      before: [
+        ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
+        ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
+        ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
+        ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
+        ["ui.time", { _tag: "Shown", text: "HH:mm" }, { _tag: "Unset" }, undefined],
+      ],
+      options: [
+        [
+          "ui.activity",
+          { _tag: "Shown", text: "quiet" },
+          { _tag: "Shown", text: "quiet" },
+          undefined,
+          "all",
+        ],
+        [
+          "ui.colours",
+          { _tag: "Shown", text: "theme" },
+          { _tag: "Shown", text: "theme" },
+          undefined,
+          "theme",
+        ],
+        [
+          "ui.theme",
+          { _tag: "Shown", text: "light" },
+          { _tag: "Shown", text: "dark" },
+          { _tag: "Shown", text: "light" },
+          "system",
+        ],
+        ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Shown", text: "" }, undefined, ""],
+        [
+          "ui.time",
+          { _tag: "Shown", text: "HH:mm" },
+          { _tag: "Shown", text: "HH:mm" },
+          undefined,
+          "HH:mm",
+        ],
+      ],
+    });
+  });
+
+  it("lists them after every Network's, filtered, and keeps the newest read of them", () => {
+    let state = initialOptions;
+
+    for (const event of [
+      { _tag: "Listed", networks: [libera] },
+      { _tag: "Read", configuration: plain, network: libera, sequence: 5 },
+      { _tag: "UiRead", ui: shared },
+      {
+        _tag: "UiRead",
+        ui: { ...shared, options: { ...shared.options, time: "none" }, sequence: 3 },
+      },
+    ] satisfies readonly OptionsEvent[]) {
+      state = reduceOptions(state, event);
+    }
+
+    expect({
+      kept: state.ui,
+      last: listed(state, "")
+        .map((option) => option.name)
+        .slice(-6),
+      time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
+    }).toStrictEqual({
+      kept: shared,
+      last: [
+        "network.libera.username",
+        "ui.activity",
+        "ui.colours",
+        "ui.theme",
+        "ui.themes",
+        "ui.time",
+      ],
+      time: [{ _tag: "Shown", text: "HH:mm:ss" }],
+    });
+  });
+
+  it("are set and unset with /set and /unset, for every device or with -device for this one", () => {
+    expect({
+      alone: read("/set ui.time"),
+      anyCase: read("/set ui.time hh:mm:ss"),
+      device: read("/set -device ui.theme light"),
+      deviceAlone: read("/set -device"),
+      deviceNetwork: read("/set -device network.libera.nicks a"),
+      empty: read("/set ui.time "),
+      shared: read("/set ui.time HH:mm:ss"),
+      unknown: read("/set ui.palette dusk"),
+      unset: read("/unset ui.activity"),
+      unsetDevice: read("/unset -device ui.theme"),
+      wrong: read("/set ui.activity loud"),
+    }).toStrictEqual({
+      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.time" }] },
+      anyCase: change("time", "HH:mm:ss", false),
+      device: change("theme", "light", true),
+      deviceAlone: {
+        _tag: "Invalid",
+        message:
+          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+      },
+      deviceNetwork: {
+        _tag: "Invalid",
+        message:
+          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+      },
+      empty: { _tag: "Invalid", message: "Give ui.time a value, or use /unset ui.time." },
+      shared: change("time", "HH:mm:ss", false),
+      unknown: {
+        _tag: "Invalid",
+        message:
+          "There is no option ui.palette. Options are named network.<id>.<option> or ui.<option>.",
+      },
+      unset: change("activity", undefined, false),
+      unsetDevice: change("theme", undefined, true),
+      wrong: {
+        _tag: "Invalid",
+        message: 'ui.activity: Choose one of all, quiet, none, not "loud".',
+      },
     });
   });
 });

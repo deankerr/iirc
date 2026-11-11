@@ -5,10 +5,13 @@
  *
  * @packageDocumentation
  */
+import { useAtomValue } from "@effect/atom-react";
+import type { TimeShown } from "@iirc/api";
 import { lineOf } from "@iirc/frontend/render";
 import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
+import { timeShown } from "../options/ui.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
@@ -20,19 +23,39 @@ const clock = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const clockWithSeconds = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  hourCycle: "h23",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
 const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /**
- * A time as the line shows it.
+ * The clock a time is shown by, as `ui.time` says: with seconds for `HH:mm:ss`, and
+ * without them otherwise, as a Gap's times always show.
+ * @param shown - How a line's time shows.
+ * @returns The clock.
+ */
+const clockFor = (shown: TimeShown) => (shown === "HH:mm:ss" ? clockWithSeconds : clock);
+
+/**
+ * A time as the line shows it, as `ui.time` says, or nothing for `none`.
  * @param props - The instant.
- * @returns The time, HH:MM, with the full date and time on hover.
+ * @returns The time, with the full date and time on hover.
  */
 const Time = ({ at }: { readonly at: number }) => {
+  const shown = useAtomValue(timeShown);
   const date = new Date(at);
+
+  if (shown === "none") {
+    return null;
+  }
 
   return (
     <time className={styles.time} dateTime={date.toISOString()} title={day.format(date)}>
-      {clock.format(date)}
+      {clockFor(shown).format(date)}
     </time>
   );
 };
@@ -108,8 +131,9 @@ const Piece = ({ part }: { readonly part: Part }) => {
  * @returns The divider.
  */
 const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }) => {
-  const from = clock.format(new Date(gap.from.at));
-  const to = gap.to === null ? undefined : clock.format(new Date(gap.to.at));
+  const shown = clockFor(useAtomValue(timeShown));
+  const from = shown.format(new Date(gap.from.at));
+  const to = gap.to === null ? undefined : shown.format(new Date(gap.to.at));
 
   const span =
     to === undefined ? `not connected since ${from}` : `not connected from ${from} to ${to}`;

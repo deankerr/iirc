@@ -204,6 +204,16 @@ describe("reading a line", () => {
     });
   });
 
+  it("jumps to the open Timeline's latest with /latest, and takes nothing after it", () => {
+    const run = (line: string) => interpret(line, inChannel);
+
+    expect([run("/latest"), run("/latest now"), interpret("/latest", nowhere)]).toStrictEqual([
+      { _tag: "Parsed", value: [{ _tag: "Latest", timeline: inChannel.focus?.timeline }] },
+      { _tag: "Invalid", message: "/latest takes nothing after it." },
+      { _tag: "Invalid", message: "Open a Timeline first." },
+    ]);
+  });
+
   it("says which commands take arguments, for the palette", () => {
     expect(
       Object.fromEntries(commands.map((one) => [one.id, one.arguments] as const))
@@ -243,6 +253,8 @@ describe("reading a line", () => {
       "say.notice": "Required",
       "say.privmsg": "Required",
       "say.to": "Required",
+      "theme.set": "Optional",
+      "timeline.latest": "None",
       "timeline.next": "None",
       "timeline.previous": "None",
       "timeline.query": "Required",
@@ -271,6 +283,49 @@ const outcome = (line: string, context: CommandContext) => {
 
   return read._tag === "Parsed" ? read.value : read.message;
 };
+
+describe("themes", () => {
+  it("lists, imports, draws in, and removes themes by /theme", () => {
+    const usage = {
+      _tag: "Invalid",
+      message: "Usage: /theme [[-device] <name> | import | remove <name>]",
+    };
+
+    expect({
+      badName: interpret("/theme tokyo_night", nowhere),
+      device: interpret("/theme -device Dracula", nowhere),
+      deviceAlone: interpret("/theme -device", nowhere),
+      importAfter: interpret("/theme import more", nowhere),
+      imported: interpret("/theme IMPORT", nowhere),
+      listed: interpret("/theme", nowhere),
+      named: interpret("/theme Nord", nowhere),
+      removeAlone: interpret("/theme remove", nowhere),
+      removed: interpret("/theme remove mine", nowhere),
+      twoWords: interpret("/theme nord dracula", nowhere),
+    }).toStrictEqual({
+      badName: {
+        _tag: "Invalid",
+        message:
+          "tokyo_night is not a theme's name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
+      },
+      device: { _tag: "Parsed", value: [{ _tag: "UseTheme", device: true, name: "dracula" }] },
+      deviceAlone: usage,
+      importAfter: {
+        _tag: "Invalid",
+        message: "/theme import takes nothing after it: paste the theme into the dialog it opens.",
+      },
+      imported: { _tag: "Parsed", value: [{ _tag: "ImportTheme" }] },
+      listed: { _tag: "Parsed", value: [{ _tag: "ListThemes" }] },
+      named: { _tag: "Parsed", value: [{ _tag: "UseTheme", device: false, name: "nord" }] },
+      removeAlone: usage,
+      removed: {
+        _tag: "Parsed",
+        value: [{ _tag: "EditThemes", edit: { _tag: "Remove", name: "mine" } }],
+      },
+      twoWords: usage,
+    });
+  });
+});
 
 describe("what is unread", () => {
   const idOf = Schema.decodeSync(TimelineId);

@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -35,6 +35,20 @@ const startDaemon = async (dataDir: string) => await startWith(source, dataDir, 
 
 const wrongKey = "iirc_not-the-key-but-close";
 
+/**
+ * A colour as CSS computes it, `rgb(r, g, b)`, as hex.
+ * @param rgb - The computed colour.
+ * @returns Its hex.
+ */
+const hexOf = (rgb: string) =>
+  `#${[...rgb.matchAll(/\d+/gu)].map(([digits]) => Number(digits).toString(16).padStart(2, "0")).join("")}`;
+
+/** Nord as Alacritty's theme of it has it, a real theme file to import. */
+const nordAlacritty = readFileSync(
+  path.join(import.meta.dirname, "..", "..", "..", "..", "fixtures", "themes", "nord.toml"),
+  "utf-8"
+);
+
 /** What the end-to-end run reads of `known`: which Channels the Client has joined. */
 const decodeKnown = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -67,6 +81,25 @@ const decodeTimelines = Schema.decodeUnknownSync(
     })
   )
 );
+
+/**
+ * What the end-to-end run reads of the options under `ui` every device shares.
+ * @param text - The answer of `GET /api/ui`.
+ * @returns The options.
+ */
+const decodeUi = (text: string) =>
+  Schema.decodeSync(
+    Schema.fromJsonString(
+      Schema.Struct({
+        options: Schema.Struct({
+          activity: Schema.String,
+          theme: Schema.String,
+          time: Schema.String,
+        }),
+        sequence: Schema.Finite,
+      })
+    )
+  )(text).options;
 
 /** What the end-to-end run reads of a layout the page kept: its root Split's ratios. */
 const decodeKeptRatios = Schema.decodeUnknownSync(
@@ -537,7 +570,8 @@ describe("the web frontend on iirc daemon --web", () => {
           status,
           violations,
         }).toStrictEqual({
-          formatting: { bold: "700", red: "rgb(255, 0, 0)" },
+          // mIRC's red is the theme's bright red, `light`'s under Playwright's light device.
+          formatting: { bold: "700", red: "rgb(194, 24, 91)" },
           kept: true,
           linked: { href: "https://example.com/x", rel: "noopener noreferrer", target: "_blank" },
           pinned: true,
@@ -1331,6 +1365,309 @@ describe("the web frontend on iirc daemon --web", () => {
           said: channel,
           sideBySide: true,
           violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "shares ui options between devices, shows seconds, hides joins when quiet, and overrides the theme on one device",
+    { timeout: 90_000 },
+    async () => {
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "ui"),
+        "#iirc-ui"
+      );
+
+      const newcomer = await connectPeer({
+        host: ngircd.host,
+        nick: "newcomer",
+        port: ngircd.plainPort,
+      });
+
+      try {
+        // Two devices, each a browser context of its own, with its own storage.
+        const devices = [await watchedPage(browser), await watchedPage(browser)];
+
+        const opened = await Promise.all(
+          devices.map(async ({ page }) => {
+            await page.goto(base);
+            await page.getByLabel("Key").fill(key);
+            await page.getByRole("button", { name: "Sign in" }).click();
+            await page.getByRole("row", { name: channel }).click();
+
+            return {
+              composer: page.getByRole("textbox", { name: channel }),
+              log: page.getByRole("log", { name: channel }),
+              page,
+            };
+          })
+        );
+
+        const [first, second] = opened;
+
+        if (first === undefined || second === undefined) {
+          throw new Error("two devices were opened");
+        }
+
+        const type = async (where: typeof first, text: string) => {
+          await where.composer.fill(text);
+          await where.composer.press("Enter");
+        };
+
+        peer.send(`PRIVMSG ${channel} :before`);
+        await second.log.getByText("before", { exact: true }).waitFor();
+        const timeBefore = await second.log.locator("time").last().textContent();
+
+        // Set on one device, shown on the other: a line's time with seconds.
+        await type(first, "/set ui.time HH:mm:ss");
+        await expect
+          .poll(async () => await second.log.locator("time").last().textContent())
+          .toMatch(/^\d{2}:\d{2}:\d{2}$/u);
+
+        // Quiet hides a join, and the Message after it shows.
+        await type(first, "/set ui.activity quiet");
+        await expect
+          .poll(async () => {
+            const answer = await api("GET", "/ui");
+            const text = await answer.text();
+
+            return decodeUi(text).activity;
+          })
+          .toBe("quiet");
+        newcomer.send(`JOIN ${channel}`);
+        await newcomer.waitFor((line) => line.command === "JOIN", "the newcomer's own JOIN");
+        newcomer.send(`PRIVMSG ${channel} :after the join`);
+        await second.log.getByText("after the join", { exact: true }).waitFor();
+        await expect
+          .poll(async () => await second.log.getByText(/newcomer joined/u).count())
+          .toBe(0);
+        const quiet = await first.log.getByText(/newcomer joined/u).count();
+
+        // All shows it again, on both devices.
+        await type(second, "/set ui.activity all");
+        await second.log.getByText(/newcomer joined/u).waitFor();
+        await first.log.getByText(/newcomer joined/u).waitFor();
+
+        // A theme for this device alone wins over the one every device shares, and is never sent.
+        await type(first, "/set -device ui.theme light");
+        await type(second, "/set ui.theme dark");
+
+        const themeOf = async (where: typeof first) =>
+          await where.page.evaluate(() => [
+            document.documentElement.dataset.theme,
+            getComputedStyle(document.body).backgroundColor,
+          ]);
+
+        const drawnIn = async (where: typeof first) =>
+          await where.page.evaluate(() => document.documentElement.dataset.theme);
+
+        await expect.poll(async () => await drawnIn(second)).toBe("dark");
+        await expect.poll(async () => await drawnIn(first)).toBe("light");
+
+        const answered = await api("GET", "/ui");
+        const shared = await answered.text();
+        const kept = await first.page.evaluate(() => localStorage.getItem("iirc.ui"));
+
+        const violations = await Promise.all(
+          opened.map(
+            async ({ page }) =>
+              await page.evaluate(() => document.documentElement.dataset.cspViolations ?? "")
+          )
+        );
+
+        expect({
+          kept,
+          problems: devices.flatMap(({ problems }) =>
+            problems.filter((problem) => problem.includes("Content Security Policy"))
+          ),
+          quiet,
+          shared: decodeUi(shared),
+          themes: [await themeOf(first), await themeOf(second)],
+          timeBefore: /^\d{2}:\d{2}$/u.test(timeBefore ?? ""),
+          violations,
+        }).toStrictEqual({
+          kept: '{"theme":"light"}',
+          problems: [],
+          quiet: 0,
+          shared: { activity: "all", theme: "dark", time: "HH:mm:ss" },
+          themes: [
+            ["light", "rgb(246, 245, 241)"],
+            ["dark", "rgb(17, 19, 20)"],
+          ],
+          timeBefore: true,
+          violations: ["", ""],
+        });
+      } finally {
+        newcomer.close();
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "imports a theme from Alacritty's text, previews it, saves it, draws in it on two devices, and previews built-ins from the palette, under the policy",
+    { timeout: 90_000 },
+    async () => {
+      const { channel, child, key, ngircd, peer, base } = await privateNetwork(
+        path.join(directory, "themes"),
+        "#iirc-themes"
+      );
+
+      try {
+        const devices = [await watchedPage(browser), await watchedPage(browser)];
+
+        const opened = await Promise.all(
+          devices.map(async ({ page }) => {
+            await page.goto(base);
+            await page.getByLabel("Key").fill(key);
+            await page.getByRole("button", { name: "Sign in" }).click();
+            await page.getByRole("row", { name: channel }).click();
+
+            return {
+              composer: page.getByRole("textbox", { name: channel }),
+              log: page.getByRole("log", { name: channel }),
+              page,
+            };
+          })
+        );
+
+        const [first, second] = opened;
+
+        if (first === undefined || second === undefined) {
+          throw new Error("two devices were opened");
+        }
+
+        const type = async (where: typeof first, text: string) => {
+          await where.composer.fill(text);
+          await where.composer.press("Enter");
+        };
+
+        const drawn = async (where: typeof first) =>
+          await where.page.evaluate(() => [
+            document.documentElement.dataset.theme,
+            getComputedStyle(document.body).backgroundColor,
+          ]);
+
+        const background = async (where: typeof first) =>
+          await where.page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+        const before = await drawn(first);
+
+        // The dialog reads the text as it is pasted, and draws the page in it at once.
+        await type(first, "/theme import");
+        const dialog = first.page.getByRole("dialog", { name: "Import a theme" });
+
+        await dialog.getByLabel(/theme file's text/u).fill(nordAlacritty);
+        await dialog.getByText("Read as Alacritty.").waitFor();
+        await expect.poll(async () => await background(first)).toBe("rgb(46, 52, 64)");
+        const previewed = await background(first);
+
+        await dialog.getByLabel("Name").fill("nord-mine");
+        await dialog.getByRole("button", { name: "Save" }).click();
+        await dialog.waitFor({ state: "detached" });
+        const saved = await drawn(first);
+
+        // Drawn in on one device, every device draws it.
+        await type(first, "/theme nord-mine");
+        await expect
+          .poll(async () => await drawn(second))
+          .toStrictEqual(["nord-mine", "rgb(46, 52, 64)"]);
+        await expect
+          .poll(async () => await drawn(first))
+          .toStrictEqual(["nord-mine", "rgb(46, 52, 64)"]);
+
+        // The palette draws a built-in one while it is highlighted, and the one in effect after.
+        await type(second, "/theme");
+        const search = second.page.getByRole("searchbox", { name: "Command, Timeline, or option" });
+
+        await search.fill("dracula");
+        await second.page.keyboard.press("ArrowDown");
+        await expect.poll(async () => await background(second)).toBe("rgb(40, 42, 54)");
+        const highlighted = await background(second);
+
+        await second.page.keyboard.press("Escape");
+        await second.page.keyboard.press("Escape");
+        await search.waitFor({ state: "detached" });
+        await expect.poll(async () => await background(second)).toBe("rgb(46, 52, 64)");
+
+        // A colour a Message asks for is the theme's, through its variable.
+        peer.send(`PRIVMSG ${channel} :\u000304warned`);
+        const warned = first.log.getByText("warned", { exact: true });
+
+        await warned.waitFor();
+
+        const colour = await warned.evaluate((element) => ({
+          asked: element.style.color,
+          drawn: getComputedStyle(element).color,
+          theme: getComputedStyle(document.documentElement).getPropertyValue("--irc-4").trim(),
+        }));
+
+        // Text Effect's YAML parser takes seconds over in JavaScriptCore and Node is read in a
+        // Worker, ended after a second and refused in words, while the page answers at once.
+        // Chromium's V8 reads it in milliseconds, so the Worker's script is stood in for here
+        // by one that never answers, served from the page's own origin as the real one is.
+        await first.page.route(/import-worker-[^/]*\.js$/u, async (route) => {
+          await route.fulfill({
+            body: "self.addEventListener('message', () => { for (;;) {} });",
+            contentType: "text/javascript",
+          });
+        });
+
+        await type(first, "/theme import");
+        const slowDialog = first.page.getByRole("dialog", { name: "Import a theme" });
+        const slowText = `base00: x\nextra: "${"\\".repeat(160_000)}x\n  end"`;
+        const pasted = Date.now();
+
+        await slowDialog.getByLabel(/theme file's text/u).fill(slowText);
+        await slowDialog.getByText("Reading…").waitFor();
+        const answered = Date.now();
+
+        await first.page.evaluate(() => document.title);
+        const responsive = Date.now() - answered;
+
+        await slowDialog.getByText(/took too long to read/u).waitFor({ timeout: 5000 });
+        const refusedAfter = Date.now() - pasted;
+
+        await slowDialog.getByRole("button", { name: "Cancel" }).click();
+        await slowDialog.waitFor({ state: "detached" });
+        await first.page.unrouteAll();
+
+        const violations = await Promise.all(
+          opened.map(
+            async ({ page }) =>
+              await page.evaluate(() => document.documentElement.dataset.cspViolations ?? "")
+          )
+        );
+
+        expect({
+          before,
+          colour: { asked: colour.asked, drawn: hexOf(colour.drawn) === colour.theme },
+          highlighted,
+          previewed,
+          problems: devices.flatMap(({ problems }) =>
+            problems.filter((problem) => problem.includes("Content Security Policy"))
+          ),
+          saved,
+          slow: { refused: refusedAfter < 3000, responsive: responsive < 500 },
+          violations,
+        }).toStrictEqual({
+          before: ["system", "rgb(246, 245, 241)"],
+          colour: { asked: "var(--irc-4)", drawn: true },
+          highlighted: "rgb(40, 42, 54)",
+          previewed: "rgb(46, 52, 64)",
+          problems: [],
+          saved: ["system", "rgb(246, 245, 241)"],
+          slow: { refused: true, responsive: true },
+          violations: ["", ""],
         });
       } finally {
         peer.close();

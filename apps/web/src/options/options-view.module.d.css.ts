@@ -2,6 +2,7 @@
 declare const styles: {
   readonly confirm: string;
   readonly description: string;
+  readonly device: string;
   readonly editor: string;
   readonly filter: string;
   readonly filterInput: string;

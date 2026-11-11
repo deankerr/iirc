@@ -170,9 +170,9 @@ const noView: Pattern = {
 };
 
 // The core reads mIRC formatting and casemapping from the protocol, positions from the
-// fold, and the Configuration's Schema from the Client, to derive its options, which are
-// pure. It takes the API's types for what the runtime parsed, and never its values, which
-// are the HTTP contract.
+// fold, and the Configuration's Schema from the Client and the `ui` options' from the
+// contract, to derive its options, which are pure. It takes the API's types for what the
+// runtime parsed, and never its values, which are the HTTP contract.
 const frontendToPure = ours(
   [
     "@iirc/protocol/format",
@@ -180,8 +180,9 @@ const frontendToPure = ours(
     "@iirc/client/configuration",
     "@iirc/timelines",
     "@iirc/api",
+    "@iirc/api/ui",
   ],
-  "`@iirc/frontend` depends only on `@iirc/protocol`'s formatting and casemapping, the Client's Configuration Schema, `@iirc/timelines`, and `@iirc/api`'s types."
+  "`@iirc/frontend` depends only on `@iirc/protocol`'s formatting and casemapping, the Client's Configuration Schema, `@iirc/timelines`, `@iirc/api`'s types, and the `ui` options' Schema in `@iirc/api/ui`."
 );
 
 const apiTypesOnly: Pattern = {

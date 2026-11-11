@@ -1,6 +1,9 @@
 /*
  * The theme: every colour, size, and font the Frontend uses, as CSS variables. Modules
- * read these and never name a colour of their own.
+ * read these and never name a colour of their own. Once the page runs, every colour is
+ * the core's, derived from the palette of the theme in effect and set on the root's own
+ * style, which wins over these. Until then each is light-dark(), so the first paint
+ * follows the device's own setting.
  */
 :root {
   color-scheme: light dark;
@@ -21,18 +24,19 @@
   --edge-width: 2px;
   --measure: 44ch;
 
-  --color-background: #f6f5f1;
-  --color-surface: #ecebe6;
-  --color-text: #24292e;
-  --color-muted: #6a737d;
-  --color-border: #d1d0ca;
-  --color-accent: #0b6e6e;
-  --color-on-accent: #f6f5f1;
-  --color-danger: #b3261e;
-  --color-ok: #2e7d32;
-  --color-focus: #0b6e6e;
-  --color-scrim: rgb(36 41 46 / 35%);
-  --color-shadow: rgb(36 41 46 / 25%);
+  --color-background: light-dark(#f6f5f1, #111314);
+  --color-surface: light-dark(#ecebe6, #1a1d1f);
+  --color-text: light-dark(#24292e, #d4d7d6);
+  --color-muted: light-dark(#6a737d, #7d8588);
+  --color-border: light-dark(#d1d0ca, #2c3134);
+  --color-accent: light-dark(#0b6e6e, #5fb3b3);
+  --color-on-accent: light-dark(#f6f5f1, #111314);
+  --color-danger: light-dark(#b3261e, #f28b82);
+  --color-ok: light-dark(#2e7d32, #8bc48a);
+  --color-focus: light-dark(#0b6e6e, #5fb3b3);
+  --color-scrim: light-dark(rgb(36 41 46 / 35%), rgb(0 0 0 / 55%));
+  --color-shadow: light-dark(rgb(36 41 46 / 25%), rgb(0 0 0 / 60%));
+  --color-selection: light-dark(#b5cbc8, #283d3e);
 
   /* What is unread, by its highest level: read and Activity dim, Messages as text, and
      Direct Messages and Highlights accented. */
@@ -40,28 +44,29 @@
   --color-level-activity: var(--color-muted);
   --color-level-message: var(--color-text);
   --color-level-direct: var(--color-accent);
-  --color-level-highlight: #b5560b;
-  --color-highlight-surface: rgb(181 86 11 / 8%);
+  --color-level-highlight: light-dark(#b5560b, #f0a35e);
+  --color-highlight-surface: light-dark(rgb(181 86 11 / 8%), rgb(240 163 94 / 9%));
 
   /* The colour slots nicks are spread over, by a hash of the folded nick. */
-  --nick-0: #b3261e;
-  --nick-1: #c25e00;
-  --nick-2: #8a6d00;
-  --nick-3: #4f7a00;
-  --nick-4: #2e7d32;
-  --nick-5: #00796b;
-  --nick-6: #00838f;
-  --nick-7: #0277bd;
-  --nick-8: #1565c0;
-  --nick-9: #3949ab;
-  --nick-10: #5e35b1;
-  --nick-11: #8e24aa;
-  --nick-12: #ad1457;
-  --nick-13: #c2185b;
-  --nick-14: #6d4c41;
-  --nick-15: #546e7a;
+  --nick-0: light-dark(#b3261e, #f28b82);
+  --nick-1: light-dark(#c25e00, #fbae6a);
+  --nick-2: light-dark(#8a6d00, #e6c56b);
+  --nick-3: light-dark(#4f7a00, #b5d86a);
+  --nick-4: light-dark(#2e7d32, #8bc48a);
+  --nick-5: light-dark(#00796b, #6fcfbf);
+  --nick-6: light-dark(#00838f, #6dd0dc);
+  --nick-7: light-dark(#0277bd, #7cc4f5);
+  --nick-8: light-dark(#1565c0, #8fb4f8);
+  --nick-9: light-dark(#3949ab, #a5a8f0);
+  --nick-10: light-dark(#5e35b1, #b9a0f2);
+  --nick-11: light-dark(#8e24aa, #d59ae6);
+  --nick-12: light-dark(#ad1457, #f095c4);
+  --nick-13: light-dark(#c2185b, #f7a1b5);
+  --nick-14: light-dark(#6d4c41, #c8a594);
+  --nick-15: light-dark(#546e7a, #a9bcc6);
 
-  /* mIRC's colours 0 to 15, as senders asked for them. */
+  /* mIRC's colours 0 to 15, as senders asked for them, until the theme's are drawn, with
+     16 to 98 too. */
   --irc-0: #ffffff;
   --irc-1: #000000;
   --irc-2: #00007f;
@@ -80,46 +85,23 @@
   --irc-15: #d2d2d2;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: #111314;
-    --color-surface: #1a1d1f;
-    --color-text: #d4d7d6;
-    --color-muted: #7d8588;
-    --color-border: #2c3134;
-    --color-accent: #5fb3b3;
-    --color-on-accent: #111314;
-    --color-danger: #f28b82;
-    --color-ok: #8bc48a;
-    --color-focus: #5fb3b3;
-    --color-scrim: rgb(0 0 0 / 55%);
-    --color-shadow: rgb(0 0 0 / 60%);
-    --color-level-highlight: #f0a35e;
-    --color-highlight-surface: rgb(240 163 94 / 9%);
+:root[data-theme="light"] {
+  color-scheme: light;
+}
 
-    --nick-0: #f28b82;
-    --nick-1: #fbae6a;
-    --nick-2: #e6c56b;
-    --nick-3: #b5d86a;
-    --nick-4: #8bc48a;
-    --nick-5: #6fcfbf;
-    --nick-6: #6dd0dc;
-    --nick-7: #7cc4f5;
-    --nick-8: #8fb4f8;
-    --nick-9: #a5a8f0;
-    --nick-10: #b9a0f2;
-    --nick-11: #d59ae6;
-    --nick-12: #f095c4;
-    --nick-13: #f7a1b5;
-    --nick-14: #c8a594;
-    --nick-15: #a9bcc6;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+::selection {
+  background: var(--color-selection);
+  color: var(--color-text);
 }
 
 html,

@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Input, Instant } from "@iirc/client";
-import { Journal, JournalRecord, NetworkId, Sequence, journalVersion } from "@iirc/runtime/journal";
+import {
+  Journal,
+  JournalRecord,
+  NetworkId,
+  Sequence,
+  journalVersion,
+  networkOf,
+} from "@iirc/runtime/journal";
 import type { Entry, Position } from "@iirc/runtime/journal";
 import { holds, journalLaws } from "@iirc/runtime/testing";
 import { Deferred, Effect, Exit, Fiber, Ref, Schema, Stream } from "effect";
@@ -152,7 +159,7 @@ describe("reopening the file", () => {
         );
         expect(afterMiddle).toHaveLength(total - 600);
         expect(afterMiddle[0]?.sequence).toBe(601);
-        expect(onlyOftc.every((entry) => entry.record.network === oftc)).toBeTruthy();
+        expect(onlyOftc.every((entry) => networkOf(entry.record) === oftc)).toBeTruthy();
         // The first record is Entry 1, so Entry `n + 1` holds the record numbered `n`.
         expect(onlyOftc.map((entry) => entry.sequence)).toStrictEqual(
           Array.from({ length: 400 }, (_, i) => (i + 1) * 3 + 1)
@@ -199,6 +206,45 @@ describe("the version check", () => {
         raw.close();
         expect(row).toStrictEqual({ user_version: journalVersion });
         yield* using(file, () => Effect.void);
+      })
+    );
+  });
+
+  it("opens a Journal of this version written before Changes, and reads it as it was", async () => {
+    await run(
+      Effect.gen(function* () {
+        const file = yield* temporaryFile;
+        const raw = new Database(file);
+
+        // The table as it was made before a Change could name no Network.
+        raw.run(`
+          CREATE TABLE journal (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            record TEXT NOT NULL CHECK (json_valid(record)),
+            network TEXT NOT NULL GENERATED ALWAYS AS (json_extract(record, '$.network')) VIRTUAL
+          ) STRICT
+        `);
+        raw.run("CREATE INDEX journal_by_network ON journal (network)");
+        raw.run(`PRAGMA user_version = ${journalVersion}`);
+        raw.query("INSERT INTO journal (record) VALUES (?)").run(recordText(retry(libera, 1)));
+        raw.query("INSERT INTO journal (record) VALUES (?)").run(recordText(retry(oftc, 2)));
+        raw.close();
+
+        const { all, forOftc, next } = yield* using(file, (journal) =>
+          Effect.gen(function* () {
+            return {
+              all: yield* collect(journal.read({})),
+              forOftc: yield* collect(journal.read({ network: oftc })),
+              next: yield* journal.append(retry(libera, 3)),
+            };
+          })
+        );
+
+        expect(all.map((entry) => recordText(entry.record))).toStrictEqual(
+          [retry(libera, 1), retry(oftc, 2)].map((record) => recordText(record))
+        );
+        expect(forOftc.map((entry) => entry.sequence)).toStrictEqual([2]);
+        expect(next).toBe(3);
       })
     );
   });
@@ -417,7 +463,7 @@ describe("following", () => {
               expected.slice(2).map((e) => e.sequence)
             );
             expect((yield* Fiber.join(forOftc)).map((e) => e.sequence)).toStrictEqual(
-              expected.filter((e) => e.record.network === oftc).map((e) => e.sequence)
+              expected.filter((e) => networkOf(e.record) === oftc).map((e) => e.sequence)
             );
           })
         );

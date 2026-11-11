@@ -8,6 +8,7 @@ import {
   NetworkId,
   Sequence as WireSequence,
   TimelineId,
+  UiChanged,
 } from "@iirc/api";
 import type {
   Member,
@@ -16,6 +17,7 @@ import type {
   Resume,
   TimelineChangesEvent,
   TimelineItem,
+  UiEvent,
 } from "@iirc/api";
 import { Instant } from "@iirc/client";
 import { configured } from "@iirc/client/testing";
@@ -64,6 +66,7 @@ const makeClient = HttpApiTest.groups(DaemonApi, [
   "networks",
   "news",
   "timelines",
+  "ui",
   "credentials",
 ]);
 
@@ -259,6 +262,24 @@ const stoppedSaying = async (named: "lost" | "kept") =>
         : "keep"
   );
 
+/**
+ * The first `changed` events of the `ui` options' stream, each as its id and `time`.
+ * @param events - The stream.
+ * @param count - How many.
+ * @returns Them.
+ */
+const uiChangedIn = <E>(events: Stream.Stream<UiEvent, E>, count: number) =>
+  events.pipe(
+    Stream.filter((event) => event.event === "changed"),
+    Stream.take(count),
+    Stream.runCollect,
+    Effect.map((all) =>
+      all.map((event) =>
+        event.event === "changed" ? `${event.id} ${event.data.options.time}` : ""
+      )
+    )
+  );
+
 describe("the handlers", () => {
   it("reads the Configuration in force, and refuses a PUT made from another, with 409", async () => {
     const result = await run((_, api) =>
@@ -313,6 +334,117 @@ describe("the handlers", () => {
       stale: new ConfigurationChanged({ network: libera, sequence: WireSequence.make(3) }),
       unknown: "UnknownNetwork",
     });
+  });
+
+  it("reads the ui options, sets and unsets one made from them, and refuses one made from others with 409", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const fresh = yield* api.ui.read();
+
+        const set = yield* api.ui.set({
+          params: { option: "time" },
+          payload: { value: "HH:mm:ss" },
+          query: { ifSequence: 0 },
+        });
+
+        // Made from the options before that Change, so refused, and nothing journaled.
+        const stale = yield* api.ui
+          .set({
+            params: { option: "theme" },
+            payload: { value: "dark" },
+            query: { ifSequence: 0 },
+          })
+          .pipe(Effect.flip);
+
+        const theme = yield* api.ui.set({
+          params: { option: "theme" },
+          payload: { value: "dark" },
+          query: { ifSequence: set.sequence },
+        });
+
+        const both = yield* api.ui.read();
+
+        // Without `ifSequence`, the latest wins.
+        yield* api.ui.set({ params: { option: "theme" }, payload: { value: "light" }, query: {} });
+        const unset = yield* api.ui.unset({ params: { option: "time" }, query: {} });
+        const after = yield* api.ui.read();
+
+        const refused = yield* api.ui
+          .set({ params: { option: "activity" }, payload: { value: "loud" }, query: {} })
+          .pipe(Effect.flip);
+
+        const journaled = (yield* Stream.runCollect(world.journal.read({}))).flatMap(
+          ({ record }) =>
+            record._tag === "Change" ? [`${record.change._tag} ${record.change.option}`] : []
+        );
+
+        return {
+          after,
+          both,
+          fresh,
+          journaled,
+          refused: refused._tag === "InvalidRequest" ? refused.issues : refused._tag,
+          set,
+          stale,
+          theme,
+          unset,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      after: {
+        options: { activity: "all", colours: "theme", theme: "light", themes: [], time: "HH:mm" },
+        sequence: 4,
+      },
+      both: {
+        options: { activity: "all", colours: "theme", theme: "dark", themes: [], time: "HH:mm:ss" },
+        sequence: 2,
+      },
+      fresh: {
+        options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
+        sequence: 0,
+      },
+      journaled: ["UiSet time", "UiSet theme", "UiSet theme", "UiUnset time"],
+      refused: [{ message: "Is not a value of ui.activity", path: ["payload", "value"] }],
+      set: { sequence: 1 },
+      stale: new UiChanged({ sequence: 1 }),
+      theme: { sequence: 2 },
+      unset: { sequence: 4 },
+    });
+  });
+
+  it("follows the ui options, the ones in force first, and resumes after a sequence", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        // With no place, the options in force come first, before any Change.
+        const fromNothing = yield* uiChangedIn(
+          yield* api.ui.changes({ headers: {}, query: {} }),
+          1
+        );
+
+        yield* api.ui.set({ params: { option: "time" }, payload: { value: "none" }, query: {} });
+
+        // After 1, which the header says and wins over the query: only what came later.
+        const resumed = yield* Effect.forkChild(
+          uiChangedIn(
+            yield* api.ui.changes({ headers: { "last-event-id": 1 }, query: { after: 0 } }),
+            1
+          )
+        );
+
+        yield* Effect.yieldNow;
+        yield* api.ui.set({
+          params: { option: "time" },
+          payload: { value: "HH:mm:ss" },
+          query: {},
+        });
+
+        return { fromNothing, resumed: yield* Fiber.join(resumed) };
+      })
+    );
+
+    expect(result).toStrictEqual({ fromNothing: ["0 HH:mm"], resumed: ["2 HH:mm:ss"] });
   });
 
   it("refuses a request with no key, or a key it does not hold", async () => {

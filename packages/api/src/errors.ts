@@ -7,6 +7,7 @@ import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
 import { CallerIntent, NetworkId, Sequence } from "./schemas.ts";
+import { UiSequence } from "./ui.ts";
 
 /** No Network by this id has been configured. */
 export class UnknownNetwork extends Schema.TaggedError<
@@ -98,6 +99,16 @@ export class ConfigurationChanged extends Schema.TaggedError<
 >()(
   "ConfigurationChanged",
   { network: NetworkId, sequence: Schema.NullOr(Sequence) },
+  { httpApiStatus: 409 }
+) {}
+
+/**
+ * A change of a `ui` option was made from other options than those now in force: another
+ * Change was journaled since, at `sequence`, the last one. Nothing was journaled: a 409.
+ */
+export class UiChanged extends Schema.TaggedError<UiChanged, { readonly brand: unique symbol }>()(
+  "UiChanged",
+  { sequence: UiSequence },
   { httpApiStatus: 409 }
 ) {}
 

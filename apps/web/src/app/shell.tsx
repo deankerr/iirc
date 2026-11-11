@@ -18,6 +18,7 @@ import { PaneSwitcher } from "../panes/pane-switcher.tsx";
 import { PaneTree } from "../panes/pane-tree.tsx";
 import { Pane } from "../panes/pane.tsx";
 import { signOut } from "../sign-in/atoms.ts";
+import { ImportDialog } from "../theme/import-dialog.tsx";
 import { Sidebar } from "../timelines/sidebar.tsx";
 import { Button } from "../ui/button.tsx";
 
@@ -61,6 +62,7 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
         </main>
       </div>
       <Palette />
+      <ImportDialog />
       <Keys />
     </div>
   );

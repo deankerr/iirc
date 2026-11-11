@@ -31,6 +31,7 @@ import { HttpApiMiddleware } from "effect/http-api";
 import { ApiKeys, createKey } from "../keys.ts";
 import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
+import { layerUiConfiguration } from "../ui.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -114,14 +115,15 @@ export const makeWorld = (
 
 /**
  * The Runtime, on the world's ports, with the real Client, the projector folding its News
- * into the world's Timeline store, and the keys and browser sign-ins of a data directory.
+ * into the world's Timeline store, the `ui` options folded from the Journal's Changes, and
+ * the keys and browser sign-ins of a data directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
  * @returns The Layer.
  */
 export const layerWorld = (world: World, dataDir: string) =>
   Layer.mergeAll(
-    layerProjector.pipe(
+    Layer.merge(layerProjector, layerUiConfiguration).pipe(
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
         layerRuntime(client).pipe(

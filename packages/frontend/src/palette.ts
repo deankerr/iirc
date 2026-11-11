@@ -1,8 +1,9 @@
 /**
  * The command palette, as data: what it lists for a query, ranked, and what choosing an
- * entry asks for. It lists the commands the registry can run here, every Timeline, and the
- * options, and adds no action of its own: choosing gives the same intents the composer's
- * `/commands` do. Which entries were chosen recently is remembered, at most `recentCap`.
+ * entry asks for. It lists the commands the registry can run here, every Timeline, every
+ * theme, and the options, or the themes alone, as `/theme` opens it, and adds no action of
+ * its own: choosing gives the same intents the composer's `/commands` do. Which entries
+ * were chosen recently is remembered, at most `recentCap`.
  *
  * @packageDocumentation
  */
@@ -13,6 +14,7 @@ import type { CommandContext, Intent } from "./commands.ts";
 import { chordsFor } from "./keymap.ts";
 import type { Chord, Keymap } from "./keymap.ts";
 import type { Option } from "./options.ts";
+import type { ListedTheme } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
 
 /** How many entries chosen recently the palette remembers. */
@@ -44,11 +46,19 @@ export type Entry =
       readonly name: string;
       readonly description: string;
       readonly credential: boolean;
+    }
+  | {
+      readonly _tag: "Theme";
+      readonly key: string;
+      readonly name: string;
+      readonly builtIn: boolean;
+      /** Whether it is the one in effect on this device. */
+      readonly current: boolean;
     };
 
 /** A section of the palette, with its entries in order. */
 export interface Section {
-  readonly title: "Recent" | "Commands" | "Timelines" | "Options";
+  readonly title: "Recent" | "Commands" | "Timelines" | "Themes" | "Options";
   readonly entries: readonly Entry[];
 }
 
@@ -58,11 +68,21 @@ export interface Listing {
   readonly sidebar: readonly SidebarNetwork[];
   readonly options: readonly Option[];
   readonly keymap: Keymap;
+  /** Every theme, and the name of the one in effect on this device. */
+  readonly themes: readonly ListedTheme[];
+  readonly theme: string;
 }
 
-/** Whether the palette is open, its query, and the keys of entries chosen, newest first. */
+/** What the palette lists: everything, or the themes alone, as `/theme` opens it. */
+export type Scope = "All" | "Themes";
+
+/**
+ * Whether the palette is open, what it lists, its query, and the keys of entries chosen,
+ * newest first.
+ */
 export interface Palette {
   readonly open: boolean;
+  readonly scope: Scope;
   readonly query: string;
   readonly recent: readonly string[];
 }
@@ -70,19 +90,19 @@ export interface Palette {
 /**
  * What happened to the palette.
  *
- * - `Opened`: it opens with an empty query.
+ * - `Opened`: it opens with an empty query, listing what `scope` says.
  * - `Closed`: it closes, as Escape does, choosing nothing.
  * - `Queried`: the Owner typed.
  * - `Chosen`: the Owner chose the entry with this key, which is remembered, and it closes.
  */
 export type PaletteEvent =
-  | { readonly _tag: "Opened" }
+  | { readonly _tag: "Opened"; readonly scope: Scope }
   | { readonly _tag: "Closed" }
   | { readonly _tag: "Queried"; readonly query: string }
   | { readonly _tag: "Chosen"; readonly key: string };
 
 /** The palette closed, with nothing chosen yet. */
-export const initialPalette: Palette = { open: false, query: "", recent: [] };
+export const initialPalette: Palette = { open: false, query: "", recent: [], scope: "All" };
 
 /**
  * Remembers a key as the newest chosen, once, keeping at most `recentCap`.
@@ -102,7 +122,7 @@ export const remember = (recent: readonly string[], key: string): readonly strin
 export const reducePalette = (state: Palette, event: PaletteEvent): Palette => {
   switch (event._tag) {
     case "Opened": {
-      return { ...state, open: true, query: "" };
+      return { ...state, open: true, query: "", scope: event.scope };
     }
 
     case "Closed": {
@@ -237,6 +257,14 @@ const scoreOf = (
 };
 
 /**
+ * What a theme is, in a few words, which a query matches too, so `theme` finds them all.
+ * @param theme - The theme, and whether it is built in.
+ * @returns The words.
+ */
+export const themeDescription = (theme: { readonly builtIn: boolean }) =>
+  theme.builtIn ? "built-in theme" : "imported theme";
+
+/**
  * What an entry is matched by: its names, best first, and its description.
  * @param entry - The entry.
  * @returns Its names and description.
@@ -266,6 +294,10 @@ const matchedBy = (entry: Entry): Matched => {
       return { description: entry.description, names: [entry.name] };
     }
 
+    case "Theme": {
+      return { description: themeDescription(entry), names: [entry.name] };
+    }
+
     default: {
       return entry satisfies never;
     }
@@ -275,7 +307,7 @@ const matchedBy = (entry: Entry): Matched => {
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; and every option read.
+ * sidebar's order; every theme; and every option read.
  * @param listing - What the palette lists from.
  * @returns The sections, each with every entry.
  */
@@ -308,6 +340,16 @@ const everything = (listing: Listing): readonly Section[] => [
     title: "Timelines",
   },
   {
+    entries: listing.themes.map((theme): Entry => ({
+      _tag: "Theme",
+      builtIn: theme.builtIn,
+      current: theme.name === listing.theme,
+      key: `theme:${theme.name}`,
+      name: theme.name,
+    })),
+    title: "Themes",
+  },
+  {
     entries: listing.options.map((option): Entry => ({
       _tag: "Option",
       credential: option.kind._tag === "Credential",
@@ -323,18 +365,24 @@ const everything = (listing: Listing): readonly Section[] => [
  * What the palette lists for a query. With none, the entries chosen recently come first,
  * newest first, and then each section in its own order. With one, only entries that match,
  * each section ranked best first, and the sections by their best entry. A leading `/` is
- * ignored, so `/set` finds `set`.
+ * ignored, so `/set` finds `set`. Scoped to the themes, it lists only them, with nothing
+ * recent.
  * @param listing - What the palette lists from.
  * @param query - What the Owner typed.
  * @param recent - The keys of entries chosen recently, newest first.
+ * @param scope - What it lists.
  * @returns The sections, none empty.
  */
 export const sections = (
   listing: Listing,
   query: string,
-  recent: readonly string[]
+  recent: readonly string[],
+  scope: Scope = "All"
 ): readonly Section[] => {
-  const all = everything(listing);
+  const all = everything(listing).filter(
+    (section) => scope === "All" || section.title === "Themes"
+  );
+
   const wanted = lower(query.trim().replace(/^\//u, ""));
 
   if (wanted === "") {
@@ -342,7 +390,7 @@ export const sections = (
       all.flatMap((section) => section.entries.map((one) => [one.key, one] as const))
     );
 
-    const recently = recent.flatMap((key) => byKey.get(key) ?? []);
+    const recently = scope === "All" ? recent.flatMap((key) => byKey.get(key) ?? []) : [];
     const shown = new Set(recently.map((one) => one.key));
 
     return [
@@ -384,7 +432,8 @@ export const sections = (
  * name would; one that needs them, or that cannot run with none, starts in the composer
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
- * `/set <name>` alone does, since its value is never typed into the composer.
+ * `/set <name>` alone does, since its value is never typed into the composer. A theme is
+ * drawn in, on every device.
  * @param entry - The entry chosen.
  * @param context - The context commands are judged in.
  * @returns The intents to carry out.
@@ -418,6 +467,10 @@ export const choose = (entry: Entry, context: CommandContext): readonly Intent[]
       }
 
       return [{ _tag: "FocusComposer", text: `/set ${entry.name} ` }];
+    }
+
+    case "Theme": {
+      return [{ _tag: "UseTheme", device: false, name: entry.name }];
     }
 
     default: {

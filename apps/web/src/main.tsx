@@ -1,8 +1,8 @@
 /**
  * Starts the Frontend: one registry for every atom, a check of whether the browser is
- * signed in, the Timelines followed, the open one marked read, and the open Channel and
- * the nicks completion waits on read while it is, the page's visibility and title watched,
- * and React over them.
+ * signed in, the Timelines and the options under `ui` followed, the open one marked read,
+ * and the open Channel and the nicks completion waits on read while it is, the page's
+ * visibility and title watched, the theme in effect drawn, and React over them.
  *
  * @packageDocumentation
  */
@@ -15,9 +15,11 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/app.tsx";
 import { channelSync } from "./channel/atoms.ts";
 import { chantypesSync, completer } from "./composer/completion.ts";
+import { uiSync } from "./options/ui.ts";
 import { watchPage } from "./page/watch.ts";
 import { marking } from "./reading/atoms.ts";
 import { check } from "./sign-in/atoms.ts";
+import { watchTheme } from "./theme/atoms.ts";
 import { sync } from "./timelines/atoms.ts";
 
 const registry = AtomRegistry.make({ scheduleTask });
@@ -27,6 +29,8 @@ const registry = AtomRegistry.make({ scheduleTask });
 registry.set(check, undefined);
 
 registry.mount(sync);
+
+registry.mount(uiSync);
 
 registry.mount(marking);
 
@@ -39,6 +43,9 @@ registry.mount(chantypesSync);
 
 // Whether the Owner can see the page, and its title, kept in one place for its whole life.
 watchPage(registry);
+
+// The theme in effect, drawn from its palette as custom properties on the root.
+watchTheme(registry);
 
 const root = document.querySelector("#root");
 

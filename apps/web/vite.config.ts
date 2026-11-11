@@ -26,4 +26,6 @@ export default defineConfig({
       },
     },
   },
+  // The theme reader's Worker is a module of its own, in `assets/`, from the page's origin.
+  worker: { format: "es" },
 });

@@ -7,12 +7,25 @@
  * @packageDocumentation
  */
 import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
+import type { ThemeName, UiOptionName } from "@iirc/api/ui";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
 import type { Axis, Direction } from "./layout.ts";
-import { channelsOf, networkIdOf, parseIrcd, parseText, resolve, starting } from "./options.ts";
-import type { Configuration, Edit, Path } from "./options.ts";
+import {
+  channelsOf,
+  isUiName,
+  networkIdOf,
+  parseIrcd,
+  parseText,
+  parseUiText,
+  resolve,
+  resolveUi,
+  starting,
+} from "./options.ts";
+import type { Configuration, Edit, Json, Path } from "./options.ts";
+import { parseThemeName } from "./theme.ts";
+import type { ThemesEdit } from "./theme.ts";
 import type { PaneChange } from "./timelines.ts";
 
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
@@ -113,10 +126,21 @@ export interface Act {
  *   of it back, made from the one read. On a conflict, read it again and apply the same
  *   edit once more, since an edit is a pure function of the Configuration.
  * - `AddNetwork`: configure a Network that must not exist yet, as a new one starts.
+ * - `ChangeUi`: set an option under `ui` to a value, as JSON its Schema took, or unset it
+ *   with none: for every device, through the Daemon, made from the options read, or with
+ *   `device`, for this device alone, which keeps it and never sends it.
+ * - `UseTheme`: draw in the theme named, for every device, or with `device`, for this one,
+ *   once the runtime has found it among the themes there are.
+ * - `EditThemes`: read the themes imported, apply the edit, and send them whole, made from
+ *   the options read, applying it once more after a conflict, as `Configure` does.
+ * - `ListThemes`: open the palette on the themes alone, each drawn while it is
+ *   highlighted.
+ * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it. A value never goes through the
  *   composer, nor through an intent.
  * - `Open`: open a Timeline in the focused Pane, or focus the Pane it is open in.
+ * - `Latest`: read a Timeline's latest again and follow it, wherever its window stands.
  * - `OpenPalette`: open the command palette.
  * - `FocusComposer`: focus the composer under the main view, starting it with `text` when
  *   there is one, as the palette starts a command that needs arguments. A draft with text
@@ -141,8 +165,19 @@ export type Intent =
       readonly network: NetworkId;
       readonly configuration: Configuration;
     }
+  | {
+      readonly _tag: "ChangeUi";
+      readonly option: UiOptionName;
+      readonly value: Json | undefined;
+      readonly device: boolean;
+    }
+  | { readonly _tag: "UseTheme"; readonly name: ThemeName; readonly device: boolean }
+  | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
+  | { readonly _tag: "ListThemes" }
+  | { readonly _tag: "ImportTheme" }
   | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path }
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
+  | { readonly _tag: "Latest"; readonly timeline: TimelineId }
   | { readonly _tag: "OpenPalette" }
   | { readonly _tag: "FocusComposer"; readonly text: string | undefined }
   | MarkRead
@@ -294,13 +329,112 @@ const unfocused = <A>(
 const credentialRefused = (name: string) =>
   `A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set ${name} alone, which asks for it in a password prompt.`;
 
+/** What `/set` and `/unset` take first to change an option under `ui` on this device alone. */
+const deviceFlag = "-device";
+
+/**
+ * The arguments after `-device`, when they come first, or none.
+ * @param args - The arguments.
+ * @returns The rest, or none without the flag.
+ */
+const afterDevice = (args: string): string | undefined =>
+  args === deviceFlag || args.startsWith(`${deviceFlag} `)
+    ? args.slice(deviceFlag.length).trimStart()
+    : undefined;
+
+const deviceOnlyUi = `Only an option under ui is kept for this device, as in /set ${deviceFlag} ui.theme light.`;
+
+/**
+ * An option under `ui` set to a value given as text, for every device or this one.
+ * @param name - The option's name.
+ * @param text - The value.
+ * @param device - Whether for this device alone.
+ * @returns The intent, or why there is none.
+ */
+const setUi = (name: string, text: string, device: boolean): Parsed<Intent> => {
+  const found = resolveUi(name);
+
+  if (found._tag === "Invalid") {
+    return found;
+  }
+
+  if (text.trim() === "") {
+    return invalid(`Give ${name} a value, or use /unset ${device ? `${deviceFlag} ` : ""}${name}.`);
+  }
+
+  const value = parseUiText(found.value.option, text);
+
+  return value._tag === "Invalid"
+    ? value
+    : parsed({ _tag: "ChangeUi", device, option: found.value.option, value: value.value });
+};
+
+/**
+ * What `/set -device` was given: an option under `ui` and a value, for this device.
+ * @param args - The text after `-device`.
+ * @returns The intent, or why there is none.
+ */
+const setOnDevice = (args: string): Parsed<Intent> => {
+  const space = args.indexOf(" ");
+  const name = space === -1 ? args : args.slice(0, space);
+
+  return isUiName(name)
+    ? setUi(name, space === -1 ? "" : args.slice(space + 1), true)
+    : invalid(deviceOnlyUi);
+};
+
+/**
+ * What `/unset` was given: an option, back to what it starts as, or with `-device`, an
+ * option under `ui` back to the value every device shares.
+ * @param args - The text after `/unset`.
+ * @returns The intent, or why there is none.
+ */
+const unsetArguments = (args: string): Parsed<Intent> => {
+  const onDevice = afterDevice(args.trim());
+  const name = (onDevice ?? args).trim();
+
+  if (onDevice !== undefined && !isUiName(name)) {
+    return invalid(deviceOnlyUi);
+  }
+
+  if (isUiName(name)) {
+    const found = resolveUi(name);
+
+    return found._tag === "Invalid"
+      ? found
+      : parsed({
+          _tag: "ChangeUi",
+          device: onDevice !== undefined,
+          option: found.value.option,
+          value: undefined,
+        });
+  }
+
+  const found = resolve(name);
+
+  return found._tag === "Invalid"
+    ? found
+    : parsed({
+        _tag: "Configure",
+        edit: { _tag: "Unset", path: found.value.path },
+        network: found.value.network,
+      });
+};
+
 /**
  * What `/set` was given: nothing or a pattern, to open the options view filtered, or an
- * option's name and a value, to set it.
+ * option's name and a value, to set it, or with `-device` first, an option under `ui` and
+ * a value for this device alone.
  * @param args - The text after `/set`.
  * @returns The intent, or why there is none.
  */
 const setArguments = (args: string): Parsed<Intent> => {
+  const onDevice = afterDevice(args);
+
+  if (onDevice !== undefined) {
+    return setOnDevice(onDevice);
+  }
+
   const space = args.indexOf(" ");
   const alone = space === -1 ? resolve(args) : undefined;
 
@@ -318,6 +452,11 @@ const setArguments = (args: string): Parsed<Intent> => {
 
   const name = args.slice(0, space);
   const text = args.slice(space + 1);
+
+  if (isUiName(name)) {
+    return setUi(name, text, false);
+  }
+
   const found = resolve(name);
 
   if (found._tag === "Invalid") {
@@ -435,6 +574,62 @@ const stepped =
 
     return parsed(to === open ? undefined : to);
   };
+
+const themeUsage = "/theme [[-device] <name> | import | remove <name>]";
+
+/**
+ * What `/theme` was given: nothing, to list the themes; `import`, to read one from a file;
+ * `remove` and a name, to remove one imported; or a name, perhaps after `-device`, to draw
+ * in it.
+ * @param args - The text after `/theme`.
+ * @returns The intent, or why there is none.
+ */
+const themeArguments = (args: string): Parsed<Intent> => {
+  const words = args
+    .trim()
+    .split(/\s+/u)
+    .filter((one) => one !== "");
+
+  const [first, second, ...rest] = words;
+  const lowered = first?.toLowerCase();
+
+  if (first === undefined) {
+    return parsed({ _tag: "ListThemes" });
+  }
+
+  if (lowered === "import") {
+    return second === undefined
+      ? parsed({ _tag: "ImportTheme" })
+      : invalid("/theme import takes nothing after it: paste the theme into the dialog it opens.");
+  }
+
+  const one = second === undefined || rest.length > 0 ? undefined : second;
+  const device = lowered === deviceFlag;
+
+  if (lowered === "remove" || device) {
+    const name = one === undefined ? invalid<string>(`Usage: ${themeUsage}`) : parseThemeName(one);
+
+    if (name._tag === "Invalid") {
+      return name;
+    }
+
+    return parsed(
+      device
+        ? { _tag: "UseTheme", device: true, name: name.value }
+        : { _tag: "EditThemes", edit: { _tag: "Remove", name: name.value } }
+    );
+  }
+
+  if (second !== undefined) {
+    return invalid(`Usage: ${themeUsage}`);
+  }
+
+  const name = parseThemeName(first);
+
+  return name._tag === "Invalid"
+    ? name
+    : parsed({ _tag: "UseTheme", device: false, name: name.value });
+};
 
 /**
  * The parser of a command that takes nothing after its name.
@@ -1361,12 +1556,12 @@ const setCommand = unfocused({
   aliases: [],
   arguments: "Optional",
   description:
-    "Open the options, filtered by a pattern such as network.libera.* or *nick*, set an option to a value, or ask for a Credential's value in a password prompt.",
+    "Open the options, filtered by a pattern such as network.libera.* or *nick*, set an option to a value, set an option under ui for this device alone with -device, or ask for a Credential's value in a password prompt.",
   id: "options.set",
   intents: (intent: Intent) => [intent],
   name: "set",
   parse: setArguments,
-  usage: "/set [<pattern> | <option> [<value>]]",
+  usage: "/set [<pattern> | [-device] <option> [<value>]]",
   when: [],
 });
 
@@ -1444,23 +1639,26 @@ export const commands: readonly Command[] = [
   setCommand,
   unfocused({
     aliases: [],
+    arguments: "Optional",
+    description:
+      "List the themes, draw in one for every device or with -device for this one, import one from a terminal's theme file, or remove one imported.",
+    id: "theme.set",
+    intents: (intent: Intent) => [intent],
+    name: "theme",
+    parse: themeArguments,
+    usage: themeUsage,
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
     arguments: "Required",
-    description: "Return an option to what a new Network starts with, or leave it unset.",
+    description:
+      "Return an option to what it starts as, or leave it unset, or with -device, stop this device overriding an option under ui.",
     id: "options.unset",
     intents: (intent: Intent) => [intent],
     name: "unset",
-    parse: (args) => {
-      const found = resolve(args.trim());
-
-      return found._tag === "Invalid"
-        ? found
-        : parsed<Intent>({
-            _tag: "Configure",
-            edit: { _tag: "Unset", path: found.value.path },
-            network: found.value.network,
-          });
-    },
-    usage: "/unset <option>",
+    parse: unsetArguments,
+    usage: "/unset [-device] <option>",
     when: [],
   }),
   unfocused({
@@ -1474,6 +1672,18 @@ export const commands: readonly Command[] = [
     parse: networkArguments,
     usage: networkUsage,
     when: [],
+  }),
+  command({
+    aliases: [],
+    arguments: "None",
+    description: "Jump to the open Timeline's latest, and follow it from there.",
+    id: "timeline.latest",
+    intents: (_: undefined, focus) => [{ _tag: "Latest", timeline: focus.timeline }],
+    name: "latest",
+    parse: (args) =>
+      args.trim() === "" ? parsed(undefined) : invalid("/latest takes nothing after it."),
+    usage: "/latest",
+    when: focused,
   }),
   unfocused({
     aliases: [],

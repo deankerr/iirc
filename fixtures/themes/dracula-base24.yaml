@@ -1,0 +1,29 @@
+system: "base24"
+name: "Dracula"
+author: "clach04"
+variant: "dark"
+palette:
+  base00: "#282a36" # background
+  base01: "#21222c" # Lighter Background (Used for status bars) NOT a Dracula color!
+  base02: "#44475A" # selection
+  base03: "#6272a4" # comment
+  base04: "#9ea8c7" # Dark Foreground (Used for status bars) NOT a Dracula color!
+  base05: "#f8f8f2" # foreground
+  base06: "#f8f8f2" # Light Foreground (Not often used)
+  base07: "#ffffff" # Light Background (Not often used)
+  base08: "#ff5555" # red
+  base09: "#FFB86C" # orange
+  base0A: "#f1fa8c" # yellow
+  base0B: "#50fa7b" # green
+  base0C: "#8be9fd" # cyan
+  base0D: "#bd93f9" # purple
+  base0E: "#ff79c6" # pink
+  base0F: "#993333" # Deprecated, Opening/Closing Embedded Language Tags, e.g. <?php ?>
+  base10: "#1e2029" # NOT a Dracula color!
+  base11: "#16171d" # NOT a Dracula color!
+  base12: "#ff6e6e" # bright red
+  base13: "#ffffa5" # bright yellow
+  base14: "#69ff94" # bright green
+  base15: "#a4ffff" # bright cyan
+  base16: "#d6acff" # bright blue
+  base17: "#ff92df" # bright magenta

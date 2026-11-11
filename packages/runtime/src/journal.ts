@@ -31,8 +31,28 @@ export const Sequence = Schema.Int.pipe(
 /** The decoded form of {@link Sequence}. */
 export type Sequence = typeof Sequence.Type;
 
+/**
+ * Something the Owner altered that belongs to no Network, as the whole value of one
+ * option, so applying it twice is applying it once and the latest for an option wins
+ * (ADR 0015). The Journal holds an option by its name and its value as JSON, and knows
+ * nothing of which options exist: the Daemon parses a value by the contract's Schema before
+ * it is journaled, and folds Changes into the Owner's Configuration.
+ *
+ * - `UiSet`: an option under `ui` set to a value.
+ * - `UiUnset`: an option under `ui` back to its default.
+ */
+export const Change = Schema.TaggedUnion({
+  UiSet: { option: Schema.String, value: Schema.Json },
+  UiUnset: { option: Schema.String },
+});
+
+/** The decoded form of {@link Change}. */
+export type Change = typeof Change.Type;
+
 /** What one Entry records. */
 export const JournalRecord = Schema.TaggedUnion({
+  /** A Change the Owner made that belongs to no Network. The Runtime never steps one. */
+  Change: { change: Change },
   /** An input to a Network's Client, journaled before it is stepped. */
   Input: { input: Input, network: NetworkId },
   /** What the Client asked for when it stepped the input at `of`, as it was carried out. */
@@ -42,13 +62,25 @@ export const JournalRecord = Schema.TaggedUnion({
 /** The decoded form of {@link JournalRecord}. */
 export type JournalRecord = typeof JournalRecord.Type;
 
+/**
+ * The Network a record belongs to, or none for a Change.
+ * @param record - The record.
+ * @returns Its Network.
+ */
+export const networkOf = (record: JournalRecord): NetworkId | undefined =>
+  record._tag === "Change" ? undefined : record.network;
+
 /** One numbered record. */
 export const Entry = Schema.Struct({ record: JournalRecord, sequence: Sequence });
 
 /** The decoded form of {@link Entry}. */
 export type Entry = typeof Entry.Type;
 
-/** Where to start reading, and which Network's Entries to read. Left out, from the start and for every Network. */
+/**
+ * Where to start reading, and which Network's Entries to read. Left out, from the start and
+ * for every Network, Changes included. A Network named leaves out every Change, since a
+ * Change belongs to none.
+ */
 export interface Position {
   readonly after?: Sequence | undefined;
   readonly network?: NetworkId | undefined;

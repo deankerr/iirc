@@ -1,0 +1,108 @@
+/* The page behind the dialog stays visible, drawn in the theme being read. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh var(--space-3) var(--space-3);
+  background: var(--color-scrim);
+}
+
+.modal {
+  width: min(72ch, 100%);
+  max-height: 100%;
+  display: flex;
+  outline: none;
+}
+
+.dialog {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 var(--space-3) var(--space-5) var(--color-shadow);
+  outline: none;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.heading {
+  margin: 0;
+  color: var(--color-accent);
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  color: var(--color-muted);
+}
+
+.text,
+.input {
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  caret-color: var(--color-accent);
+}
+
+.text {
+  resize: vertical;
+}
+
+.text:focus-visible,
+.input:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.status {
+  color: var(--color-ok);
+}
+
+.failure {
+  color: var(--color-danger);
+}
+
+.sample {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  background: var(--color-background);
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.accent {
+  color: var(--color-accent);
+}
+
+.highlight {
+  color: var(--color-level-highlight);
+}

@@ -313,7 +313,7 @@ describe("following the Timelines", () => {
     registry.set(open, iirc);
     const latest = await until(registry, openTimeline, (shown) => shown._tag === "Shown");
 
-    registry.set(older, iirc);
+    registry.set(older, { mode: "Auto", timeline: iirc });
     const all = await until(registry, openTimeline, (shown) => shownItems(shown).length === 150);
 
     expect({
