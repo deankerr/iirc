@@ -97,6 +97,8 @@ Configuration always goes whole, so joining or parting a Channel is another `PUT
 | [`GLOSSARY.md`](GLOSSARY.md) | What our words mean. Capitalised terms, such as Line and Entry, are defined there |
 | [`docs/architecture.md`](docs/architecture.md) | How the pieces fit together, and where to extend them |
 | [`docs/adr/`](docs/adr/) | Decisions and why |
+| [`docs/roadmap.md`](docs/roadmap.md) | What we plan to build next |
+| [`docs/known-issues.md`](docs/known-issues.md) | What is built but not yet right |
 | Each package's README | Its written interface: what it does, guarantees, and does not do yet |
 | [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) | The IRC protocol documents we work from |
 | [`AGENTS.md`](AGENTS.md) | Instructions for coding agents |
