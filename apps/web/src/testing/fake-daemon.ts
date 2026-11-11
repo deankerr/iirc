@@ -461,6 +461,7 @@ export const fakeDaemon = () => {
   const channelsHeld: (() => void)[] = [];
   const membersHeld: (() => void)[] = [];
   const knownHeld: (() => void)[] = [];
+  const saysHeld: (() => void)[] = [];
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
@@ -496,8 +497,8 @@ export const fakeDaemon = () => {
     gatewayOnly: false,
     /** Whether a request to follow the changes never begins its answer. */
     hangChanges: false,
-    /** Releases each read held: of a Channel's head, of its members, or of `known`. */
-    held: { channel: channelsHeld, known: knownHeld, members: membersHeld },
+    /** Releases each request held: a read of a Channel's head, its members, or `known`, or a `say`. */
+    held: { channel: channelsHeld, known: knownHeld, members: membersHeld, says: saysHeld },
     /** Whether each read of a Channel's head waits until released. */
     holdChannels: false,
     /** Whether each read of `known` waits until released. */
@@ -512,6 +513,8 @@ export const fakeDaemon = () => {
     holdMembers: false,
     /** Whether each request for the Network list waits until released. */
     holdNetworks: false,
+    /** Whether each `say` waits, before it is answered as `sayAnswers` says, until released. */
+    holdSays: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
     /**
@@ -1246,6 +1249,15 @@ export const fakeDaemon = () => {
         const body = Schema.decodeSync(SayBody)(await new Response(init.body).text());
 
         daemon.says.push(body);
+
+        if (daemon.holdSays) {
+          const { promise, resolve } = Promise.withResolvers<undefined>();
+
+          saysHeld.push(() => {
+            resolve(undefined);
+          });
+          await promise;
+        }
 
         return stepped(body.intent, "Said");
       }

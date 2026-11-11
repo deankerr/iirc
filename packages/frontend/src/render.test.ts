@@ -379,6 +379,17 @@ const failed = (host: string, port: number, tls: boolean, reason: EndReason, ope
 const closed = (reason: "Ended" | "Refused" | "Tls" | "Reset" | "TimedOut") =>
   ({ _tag: "Closed", reason }) as const;
 
+/**
+ * What stands in the senders' column for an item described, or that it is a Message.
+ * @param shown - The item's content.
+ * @returns Its marker.
+ */
+const markerOf = (shown: ItemContent) => {
+  const line = lineOf(shown);
+
+  return line._tag === "Description" ? line.marker : "a Message";
+};
+
 describe("lines", () => {
   it("shows a Message by its sender, in their colour", () => {
     expect(lineOf(message("peer", "\u0002hi"))).toStrictEqual({
@@ -431,6 +442,22 @@ describe("lines", () => {
     const line = lineOf(message("\u202Eevil\u0007", "x"));
 
     expect(line._tag === "Message" && line.nick).toBe("\u202Eevil\u2407\u202C");
+  });
+
+  it("marks each Activity in the senders' column as WeeChat does, and a Session not at all", () => {
+    expect([
+      markerOf(activity({ _tag: "Joined", channel: "#iirc", nick: "peer" })),
+      markerOf(activity({ _tag: "Parted", channel: "#iirc", nick: "peer", reason: null })),
+      markerOf(activity({ _tag: "Quit", nick: "peer", reason: null })),
+      markerOf(
+        activity({ _tag: "Kicked", by: "op", channel: "#iirc", nick: "peer", reason: null })
+      ),
+      markerOf(activity({ _tag: "NickChanged", from: "peer", to: "peer2" })),
+      markerOf(activity({ _tag: "TopicChanged", by: "op", channel: "#iirc", topic: null })),
+      markerOf(activity({ _tag: "AwayChanged", away: null, nick: "peer" })),
+      markerOf(content({ _tag: "SessionBegan", at: 0, nick: "iirc" })),
+      markerOf(message("peer", "hi")),
+    ]).toStrictEqual(["-->", "<--", "<--", "<--", "--", "--", "--", undefined, "a Message"]);
   });
 
   it("describes each Activity in a few words", () => {

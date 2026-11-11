@@ -14,8 +14,10 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./app/app.tsx";
 import { channelSync } from "./channel/atoms.ts";
+import { draftsCarried } from "./composer/atoms.ts";
 import { chantypesSync, completer } from "./composer/completion.ts";
 import { lookupSync } from "./lookup/atoms.ts";
+import { optionsSync } from "./options/atoms.ts";
 import { uiSync } from "./options/ui.ts";
 import { watchPage } from "./page/watch.ts";
 import { marking } from "./reading/atoms.ts";
@@ -33,6 +35,9 @@ registry.mount(sync);
 
 registry.mount(uiSync);
 
+// What the options show is read each time they come to show, however they came to.
+registry.mount(optionsSync);
+
 registry.mount(marking);
 
 // The open Channel's head and members, and the nicks and CHANTYPES completion reads, likewise.
@@ -41,6 +46,9 @@ registry.mount(channelSync);
 registry.mount(completer);
 
 registry.mount(chantypesSync);
+
+// What was typed under a draft goes to its Timeline once the draft shows it.
+registry.mount(draftsCarried);
 
 // Each Pane's Lookup card, let go of with its Pane, and every one on signing out.
 registry.mount(lookupSync);

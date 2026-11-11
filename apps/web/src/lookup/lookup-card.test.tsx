@@ -251,7 +251,7 @@ describe("the Lookup card", () => {
     });
   });
 
-  it("is asked from a member chosen in the members, by their Whois", async () => {
+  it("is asked from a member chosen in the members, by their Whois, right under them", async () => {
     const { container, daemon, registry } = await signedIn(hostilePeer);
 
     await act(async () => {
@@ -266,12 +266,30 @@ describe("the Lookup card", () => {
     });
     await settled(() => container.querySelector('button[aria-label="Whois peer"]') !== null);
 
+    // The actions stand right under the member chosen, in their row, and nowhere else.
+    const under = [
+      ...container.querySelectorAll<HTMLElement>('[aria-label="Members"] [role="row"] button'),
+    ].map((button) => [
+      button.closest<HTMLElement>('[role="row"]')?.dataset.key,
+      button.getAttribute("aria-label"),
+    ]);
+
     await act(async () => {
       container.querySelector<HTMLElement>('button[aria-label="Whois peer"]')?.click();
       await Promise.resolve();
     });
     await settled(() => card()?.textContent.includes("example.test") === true);
 
-    expect(daemon.looks.map((one) => one.lookup)).toStrictEqual([{ _tag: "Whois", nick: "peer" }]);
+    expect({
+      looks: daemon.looks.map((one) => one.lookup),
+      under,
+    }).toStrictEqual({
+      looks: [{ _tag: "Whois", nick: "peer" }],
+      under: [
+        ["peer", "Query peer"],
+        ["peer", "Whois peer"],
+        ["peer", "Mention peer"],
+      ],
+    });
   });
 });

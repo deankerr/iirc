@@ -685,6 +685,89 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "disconnects and connects with /disconnect and /connect, and begins a Direct Message with /query",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "connect"),
+        "#iirc-connect"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const standing = async () => (await page.getByRole("row").first().textContent()) ?? "";
+
+        // `/disconnect` turns the focused Network off, and the sidebar says so.
+        await composer.fill("/disconnect");
+        await composer.press("Enter");
+        await expect.poll(standing, { timeout: 20_000 }).toMatch(/(?:offline|stopped)$/u);
+        const off = await standing();
+
+        // `/connect` turns it on again.
+        await composer.fill("/connect");
+        await composer.press("Enter");
+        await expect.poll(standing, { timeout: 20_000 }).toMatch(/connected$/u);
+        const on = await standing();
+
+        // `/query` to a nick nothing was said to yet shows a Direct Message not yet begun,
+        // and plain text typed there goes to the nick, which makes its Timeline.
+        await composer.fill("/query peer");
+        await composer.press("Enter");
+        await page.getByRole("region", { name: "Direct Message with peer" }).waitFor();
+
+        const draft = page.getByRole("textbox", { name: "peer" });
+
+        await draft.fill("hi");
+        await draft.press("Enter");
+
+        const direct = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[0] === "peer",
+          "the Direct Message"
+        );
+
+        await page.getByRole("log", { name: "peer" }).getByText("hi", { exact: true }).waitFor();
+
+        const drafted = await page
+          .getByRole("region", { name: "Direct Message with peer" })
+          .count();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          direct: direct.params,
+          drafted,
+          off: /(?:offline|stopped)$/u.test(off),
+          on: on.endsWith("connected"),
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          violations,
+        }).toStrictEqual({
+          direct: ["peer", "hi"],
+          drafted: 0,
+          off: true,
+          on: true,
+          problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "acts on the Network from the composer: a refusal shown calmly, the topic, ranks, away, and a kick",
     { timeout: 90_000 },
     async () => {

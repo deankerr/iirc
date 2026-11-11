@@ -1,6 +1,8 @@
 /**
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
- * their colour, or a dimmer description of an Activity or a Session, or a Gap as a divider.
+ * their colour, or a dimmer description of an Activity, marked in the senders' column as
+ * WeeChat marks one, or of a Session, or a Gap as a divider, each one's words starting
+ * where a Message's text does. Failed Connections in a row say how many and when.
  * Every name and every text a Network sent sits in its own isolate, as a text node.
  *
  * @packageDocumentation
@@ -50,8 +52,10 @@ const Time = ({ at }: { readonly at: number }) => {
   const shown = useAtomValue(timeShown);
   const date = dateOf(at);
 
+  // With no time shown, its column is still there, empty and with no width, so every row
+  // keeps the same columns.
   if (shown === "none") {
-    return null;
+    return <span className={styles.time} />;
   }
 
   // An instant a Date cannot hold, as a hostile Ircd's `server-time` can give, is unavailable.
@@ -158,6 +162,8 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
 
   return (
     <p className={styles.gap}>
+      <span className={styles.time} />
+      <span aria-hidden className={styles.rule} />
       <span className={styles.gapText}>
         {span}
         {gap.count > 1 ? `, ${gap.count} times` : ""}
@@ -165,6 +171,34 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
     </p>
   );
 };
+
+/**
+ * How many times a failed Connection repeated, and from when to when, as the times show.
+ * @param props - How many, and the instants of the first and the latest.
+ * @returns The words.
+ */
+const RepeatedWords = ({
+  count,
+  from,
+  to,
+}: {
+  readonly count: number;
+  readonly from: number;
+  readonly to: number;
+}) => {
+  const shown = clockFor(useAtomValue(timeShown));
+  const first = formattedAt(shown, from) ?? "an unknown time";
+  const latest = formattedAt(shown, to) ?? "an unknown time";
+
+  return <span className={styles.repeated}>{` \u00D7${count}, ${first}\u2013${latest}`}</span>;
+};
+
+/** The column widths each row shares, as how the time shows says. */
+const timedClass = {
+  "HH:mm": styles.timed,
+  "HH:mm:ss": styles.seconds,
+  none: styles.untimed,
+} as const;
 
 /** Each description's tone, as its class: a refused action of ours is dim, like Activity. */
 const toneClass = {
@@ -174,11 +208,12 @@ const toneClass = {
 } as const;
 
 /**
- * One row.
+ * One row's line, in the columns every row shares: the time, the sender or a marker, and
+ * the text, so an Activity's or a Session's words start where a Message's text does.
  * @param props - The row.
  * @returns The line.
  */
-export const Line = ({ row }: { readonly row: Row }) => {
+const RowLine = ({ row }: { readonly row: Row }) => {
   if (row._tag === "Gap") {
     return <GapLine gap={row.gap} />;
   }
@@ -195,15 +230,23 @@ export const Line = ({ row }: { readonly row: Row }) => {
   const time = <Time at={row.item.position.at} />;
 
   if (line._tag === "Description") {
+    const { repeated } = row;
+
     return (
       <div className={toneClass[line.tone]}>
         {time}
+        <span aria-hidden className={styles.marker}>
+          {line.marker ?? ""}
+        </span>
         <span className={styles.text}>
           {line.parts.map((part, index) => (
             // A description's pieces never move, so their order is their identity.
             // oxlint-disable-next-line react/no-array-index-key
             <Piece key={index} part={part} />
           ))}
+          {repeated === undefined ? null : (
+            <RepeatedWords count={repeated.count} from={repeated.from} to={row.item.position.at} />
+          )}
         </span>
       </div>
     );
@@ -232,3 +275,14 @@ export const Line = ({ row }: { readonly row: Row }) => {
     </div>
   );
 };
+
+/**
+ * One row, in the columns every row shares, as wide as how the time shows says.
+ * @param props - The row.
+ * @returns The line.
+ */
+export const Line = ({ row }: { readonly row: Row }) => (
+  <div className={timedClass[useAtomValue(timeShown)]}>
+    <RowLine row={row} />
+  </div>
+);

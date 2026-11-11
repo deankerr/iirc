@@ -22,6 +22,7 @@ import {
   wanted,
 } from "@iirc/frontend/timelines";
 import type {
+  Drafted,
   OlderMode,
   PaneChange,
   Read,
@@ -548,6 +549,21 @@ export const sync = runtime
 export const open = Atom.fnSync((timeline: TimelineId, get) => {
   cancelCompletion(get.registry);
   happened(get.registry, { _tag: "Opened", timeline });
+}).pipe(Atom.keepAlive);
+
+/**
+ * Shows a Direct Message not yet begun in the focused Pane, letting go of what was being
+ * completed, since the composer then stands under it.
+ */
+export const showDraft = Atom.fnSync((draft: Drafted, get) => {
+  cancelCompletion(get.registry);
+  happened(get.registry, { _tag: "DraftShown", ...draft });
+}).pipe(Atom.keepAlive);
+
+/** Closes the focused Pane's Direct Message not yet begun, showing what it showed before. */
+export const closeDraft = Atom.fnSync((_, get) => {
+  cancelCompletion(get.registry);
+  happened(get.registry, { _tag: "DraftClosed" });
 }).pipe(Atom.keepAlive);
 
 /**

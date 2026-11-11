@@ -1,15 +1,23 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline, TimelineChangesEvent } from "@iirc/api";
-import { draftOf } from "@iirc/frontend/composer";
+import { draftOf, placeOfDraft } from "@iirc/frontend/composer";
 import { followFrom, openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { mainView, openOptions } from "../options/atoms.ts";
+import { closeOptions, mainView, openOptions } from "../options/atoms.ts";
+import { closeSearch, showSearch } from "../search/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
-import { open, openTimeline, sidebarNetworks, sync, timelinesState } from "../timelines/atoms.ts";
-import { composerState, confirmSend, edit, send, takeUp } from "./atoms.ts";
+import {
+  open,
+  openTimeline,
+  showDraft,
+  sidebarNetworks,
+  sync,
+  timelinesState,
+} from "../timelines/atoms.ts";
+import { composerState, confirmSend, draftsCarried, edit, send, takeUp } from "./atoms.ts";
 
 const hex = (value: number, digits: number) => value.toString(16).padStart(digits, "0");
 const idOf = (sequence: number) => `${hex(sequence, 14)}-00000000-00000000`;
@@ -345,8 +353,218 @@ describe("saying", () => {
 
     expect({ after: registry.get(mainView), before }).toStrictEqual({
       after: { _tag: "Timeline" },
-      before: { _tag: "Options", filter: "" },
+      before: { _tag: "Options", back: { _tag: "Timeline" }, filter: "" },
     });
+  });
+
+  it("says plain text in a Direct Message not yet begun to its nick, and shows the Timeline it made", async () => {
+    const { daemon, registry, send: sendChange } = await composing();
+    const libera = Schema.decodeSync(NetworkId)("libera");
+    const place = placeOfDraft(libera, "{bob}");
+
+    registry.set(showDraft, { declared: null, network: libera, nick: "{bob}" });
+    const drafted = registry.get(mainView);
+
+    registry.set(edit, { text: "hello", timeline: place });
+    registry.set(send, place);
+    await eventually(() => daemon.says.length === 1);
+
+    // The Daemon makes `{bob}`'s Timeline with the Message, and places it there.
+    placeAt10(daemon);
+    sendChange({
+      data: JSON.stringify({
+        gaps: [],
+        items: [],
+        merged: [],
+        sequence: 10,
+        timelines: [describeTimeline(idOf(4), "{bob}", "Direct", 10)],
+      }),
+      event: "changed",
+      id: "1.10",
+    });
+    await until(registry, timelinesState, (state) => openOf(state) === idOf(4));
+
+    expect({
+      after: registry.get(mainView),
+      draft: draftOf(registry.get(composerState), place).text,
+      drafted: drafted._tag,
+      said: daemon.says.map((one) => [one.target, one.text]),
+    }).toStrictEqual({
+      after: { _tag: "Timeline" },
+      draft: "",
+      drafted: "DirectDraft",
+      said: [["{bob}", "hello"]],
+    });
+  });
+
+  it("shows a draft's Timeline once one is listed, whoever spoke first, carrying what was typed", async () => {
+    const { registry, send: sendChange } = await composing();
+    const libera = Schema.decodeSync(NetworkId)("libera");
+
+    registry.mount(draftsCarried);
+
+    /**
+     * A Message in a Direct Message Timeline, said by a sender, as a step lists it.
+     * @param sequence - The step, which is also the Timeline's id.
+     * @param name - The partner's nick.
+     * @param sender - Who said it: the partner, or Self from another Frontend.
+     */
+    const listed = (sequence: number, name: string, sender: string) => {
+      sendChange({
+        data: JSON.stringify({
+          gaps: [],
+          items: [
+            {
+              changed: sequence,
+              content: {
+                _tag: "Message",
+                at: { _tag: "Unknown" },
+                id: { _tag: "Unknown" },
+                kind: "Privmsg",
+                live: true,
+                ours:
+                  sender === "iirc"
+                    ? { delivery: { _tag: "Unconfirmed" }, intent: "other-1" }
+                    : null,
+                sender,
+                tags: [],
+                target: sender === "iirc" ? name : "iirc",
+                text: "hello",
+              },
+              level: sender === "iirc" ? null : "Direct",
+              network: "libera",
+              position: `${hex(2 ** 53 + sequence * 1000, 14)}-${hex(sequence, 14)}-${hex(0, 8)}`,
+              sequence,
+              timeline: idOf(sequence),
+            },
+          ],
+          merged: [],
+          sequence,
+          timelines: [describeTimeline(idOf(sequence), name, "Direct", sequence)],
+        }),
+        event: "changed",
+        id: `1.${sequence}`,
+      });
+    };
+
+    // Bob speaks first, while a draft to him holds words not yet sent.
+    registry.set(showDraft, { declared: null, network: libera, nick: "Bob" });
+    registry.set(edit, { text: "not sent yet", timeline: placeOfDraft(libera, "Bob") });
+    const { navigation } = registry.get(timelinesState);
+
+    listed(4, "Bob", "Bob");
+    await until(registry, timelinesState, (state) => openOf(state) === idOf(4));
+
+    const bob = {
+      main: registry.get(mainView)._tag,
+      moved: registry.get(timelinesState).navigation !== navigation,
+      text: draftOf(registry.get(composerState), Schema.decodeSync(TimelineId)(idOf(4))).text,
+    };
+
+    // Another Frontend says something to Carol, while a draft to her shows.
+    registry.set(showDraft, { declared: null, network: libera, nick: "carol" });
+    listed(5, "carol", "iirc");
+    await until(registry, timelinesState, (state) => openOf(state) === idOf(5));
+
+    expect({
+      bob,
+      carol: registry.get(mainView)._tag,
+      draft: draftOf(registry.get(composerState), placeOfDraft(libera, "Bob")).text,
+    }).toStrictEqual({
+      bob: { main: "Timeline", moved: false, text: "not sent yet" },
+      carol: "Timeline",
+      draft: "",
+    });
+  });
+
+  it("carries a draft's text when closing the options or the search over it shows its Timeline", async () => {
+    const { registry, send: sendChange } = await composing();
+    const libera = Schema.decodeSync(NetworkId)("libera");
+
+    registry.mount(draftsCarried);
+
+    const covered = async (nick: string, sequence: number, cover: "options" | "search") => {
+      const place = placeOfDraft(libera, nick);
+      const timeline = Schema.decodeSync(TimelineId)(idOf(sequence));
+
+      registry.set(showDraft, { declared: null, network: libera, nick });
+      registry.set(edit, { text: `to ${nick}`, timeline: place });
+
+      if (cover === "options") {
+        await run(registry, openOptions, "");
+      } else {
+        registry.set(showSearch, undefined);
+      }
+
+      sendChange({
+        data: JSON.stringify({
+          gaps: [],
+          items: [],
+          merged: [],
+          sequence,
+          timelines: [describeTimeline(idOf(sequence), nick, "Direct", sequence)],
+        }),
+        event: "changed",
+        id: `1.${sequence}`,
+      });
+      await until(registry, sidebarNetworks, (networks) =>
+        networks.some((one) => one.timelines.some((listed) => listed.id === timeline))
+      );
+      registry.set(cover === "options" ? closeOptions : closeSearch, undefined);
+      await until(registry, timelinesState, (state) => openOf(state) === timeline);
+
+      return draftOf(registry.get(composerState), timeline).text;
+    };
+
+    expect({
+      options: await covered("erin", 6, "options"),
+      search: await covered("finn", 7, "search"),
+    }).toStrictEqual({ options: "to erin", search: "to finn" });
+  });
+
+  it("says a Say's failure under the Timeline a draft came to show while the Say was in flight", async () => {
+    const { daemon, registry, send: sendChange } = await composing();
+    const libera = Schema.decodeSync(NetworkId)("libera");
+    const place = placeOfDraft(libera, "dave");
+    const dave = Schema.decodeSync(TimelineId)(idOf(6));
+
+    registry.mount(draftsCarried);
+    registry.set(showDraft, { declared: null, network: libera, nick: "dave" });
+
+    // The Say is held, then refused, while Dave speaks first and makes his Timeline.
+    daemon.holdSays = true;
+    daemon.sayAnswers.push("Offline");
+    registry.set(edit, { text: "hello", timeline: place });
+    registry.set(send, place);
+    await eventually(() => daemon.held.says.length === 1);
+
+    sendChange({
+      data: JSON.stringify({
+        gaps: [],
+        items: [],
+        merged: [],
+        sequence: 6,
+        timelines: [describeTimeline(idOf(6), "dave", "Direct", 6)],
+      }),
+      event: "changed",
+      id: "1.6",
+    });
+    await until(registry, timelinesState, (state) => openOf(state) === dave);
+
+    for (const release of daemon.held.says.splice(0)) {
+      release();
+    }
+
+    const notice = await until(
+      registry,
+      composerState,
+      (state) => draftOf(state, dave).notice !== undefined
+    );
+
+    expect({
+      draft: draftOf(notice, place).notice,
+      shown: draftOf(notice, dave).notice?.message.includes("dave"),
+    }).toStrictEqual({ draft: undefined, shown: true });
   });
 
   it("reads the step again after a read that got no answer, and never says it again", async () => {

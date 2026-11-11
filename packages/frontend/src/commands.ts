@@ -8,6 +8,7 @@
  */
 import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
 import type { ThemeName, UiOptionName } from "@iirc/api/ui";
+import type { Casemapping } from "@iirc/protocol/casemapping";
 
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
@@ -45,17 +46,33 @@ export interface Focus {
   readonly key: string | undefined;
 }
 
+/** A Direct Message not yet begun: the nick it is to, on a Network. */
+export interface DraftTo {
+  readonly network: NetworkId;
+  readonly nick: string;
+}
+
 /** What a command's `when` and its arguments are judged against. */
 export interface CommandContext {
   /** The Timeline in focus, if any. */
   readonly focus: Focus | undefined;
+  /**
+   * The Direct Message not yet begun that the focused Pane shows, if any, in place of a
+   * Timeline in focus: what is said there goes to its nick.
+   */
+  readonly draft: DraftTo | undefined;
+  /**
+   * Whether the open Timeline stands behind the options, the search, or a draft, so it is
+   * not the one shown, and `/next-unread` may go to it, which shows it.
+   */
+  readonly behind: boolean;
   /** Whether the focused Timeline's Network has a Session. */
   readonly session: boolean;
   /** Every Timeline, in the sidebar's order. */
   readonly timelines: readonly TimelineId[];
   /**
    * The Timeline open in the focused Pane, as a merge resolves it, even while it is still
-   * read.
+   * read, and while something stands in front of it.
    */
   readonly open: TimelineId | undefined;
   /** Every Timeline open in a Pane, as a merge resolves it. */
@@ -190,6 +207,13 @@ export type Intent =
   | { readonly _tag: "Notify"; readonly on: boolean }
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
   | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string }
+  | {
+      readonly _tag: "Draft";
+      readonly network: NetworkId;
+      readonly nick: string;
+      /** How the Network folded names when this was read: its Timeline is found by it alone. */
+      readonly declared: Casemapping | null;
+    }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
   | { readonly _tag: "Search"; readonly query: string | undefined }
   | Look;
@@ -494,6 +518,47 @@ const setArguments = (args: string): Parsed<Intent> => {
     : parsed({ _tag: "Configure", edit: { _tag: "Set", path, text }, network });
 };
 
+/**
+ * The Network `/connect` or `/disconnect` names: the one given, or else the focused one,
+ * the Timeline's or the Direct Message not yet begun's.
+ * @param usage - How the command is typed, to say when it is.
+ * @returns The parser.
+ */
+const enabledArguments =
+  (usage: string) =>
+  (args: string, context: CommandContext): Parsed<NetworkId> => {
+    const id = args.trim();
+
+    if (id === "") {
+      const network = context.focus?.network ?? context.draft?.network;
+
+      return network === undefined
+        ? invalid(`Name a Network, or open one of its Timelines first. ${usage}`)
+        : parsed(network);
+    }
+
+    const network = networkIdOf(id);
+
+    return network === undefined
+      ? invalid(
+          `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${id}". ${usage}`
+        )
+      : parsed(network);
+  };
+
+/**
+ * Turns a Network on or off, as `/set network.<id>.enabled on` or `off` does, through the
+ * same edit, so a change another Frontend made meanwhile is applied to.
+ * @param network - The Network.
+ * @param on - Whether it is to be connected.
+ * @returns The intent.
+ */
+const enabling = (network: NetworkId, on: boolean): Intent => ({
+  _tag: "Configure",
+  edit: { _tag: "Set", path: ["enabled"], text: on ? "on" : "off" },
+  network,
+});
+
 const networkUsage = "/network add <id> <host>[/port] [plain] <nick>";
 
 /**
@@ -714,7 +779,7 @@ const calling = (
 };
 
 /**
- * The Timeline with the most calling for the Owner, other than the open one: the highest
+ * The Timeline with the most calling for the Owner, other than the one shown: the highest
  * level unread, Highlights first, then Direct Messages, then Messages, and ties by the
  * sidebar's order. Activity alone is not enough, since joins and quits pile up everywhere.
  * @param args - The text after `/next-unread`.
@@ -723,7 +788,7 @@ const calling = (
  */
 const nextUnread = (args: string, context: CommandContext): Parsed<TimelineId | undefined> =>
   args.trim() === ""
-    ? parsed(calling(context, (timeline) => timeline === context.open))
+    ? parsed(calling(context, (timeline) => !context.behind && timeline === context.open))
     : invalid("/next-unread takes nothing after it.");
 
 const directions: ReadonlyMap<string, Direction> = new Map([
@@ -1594,6 +1659,50 @@ const sayCommand = command({
   when: target,
 });
 
+/**
+ * A line said in a Direct Message not yet begun: plain text, `//text`, `/say`, and `/me`
+ * go to its nick, with `opens`, so its Timeline shows once the Daemon placed it there.
+ * Any other line is read as anywhere else.
+ * @param line - The line.
+ * @param context - The context.
+ * @param draft - The Direct Message not yet begun.
+ * @returns What it says, or none when it is another command.
+ */
+const inDraft = (
+  line: string,
+  context: CommandContext,
+  draft: DraftTo
+): Parsed<readonly Intent[]> | undefined => {
+  const space = line.indexOf(" ");
+  const name = (space === -1 ? line : line.slice(0, space)).toLowerCase();
+  const args = space === -1 ? "" : line.slice(space + 1);
+  let kind: SayKind = "Privmsg";
+  let text = line;
+
+  if (line.startsWith("//")) {
+    text = line.slice(1);
+  } else if (name === "/say") {
+    text = args;
+  } else if (name === "/me" || name === "/action") {
+    kind = "Action";
+    text = args;
+  } else if (line.startsWith("/")) {
+    return undefined;
+  }
+
+  if (text === "") {
+    return invalid(`Say what? Type it after ${name}.`);
+  }
+
+  if (!context.session) {
+    return invalid(`${draft.network} is not connected, so nothing can be said there now.`);
+  }
+
+  return parsed([
+    { _tag: "Say", kind, network: draft.network, opens: true, target: draft.nick, text },
+  ]);
+};
+
 /** Opening the options, setting an option, or asking for a Credential option's value. */
 const setCommand = unfocused({
   aliases: [],
@@ -1714,6 +1823,30 @@ export const commands: readonly Command[] = [
     name: "network",
     parse: networkArguments,
     usage: networkUsage,
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Connect to a Network, the focused one unless named, by setting network.<id>.enabled on.",
+    id: "network.connect",
+    intents: (network: NetworkId) => [enabling(network, true)],
+    name: "connect",
+    parse: enabledArguments("/connect [id]"),
+    usage: "/connect [id]",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description:
+      "Disconnect from a Network, the focused one unless named, by setting network.<id>.enabled off.",
+    id: "network.disconnect",
+    intents: (network: NetworkId) => [enabling(network, false)],
+    name: "disconnect",
+    parse: enabledArguments("/disconnect [id]"),
+    usage: "/disconnect [id]",
     when: [],
   }),
   command({
@@ -2089,6 +2222,12 @@ export const runIn = (
  * @returns Its intents, or why there are none.
  */
 export const interpret = (line: string, context: CommandContext): Parsed<readonly Intent[]> => {
+  const drafted = context.draft === undefined ? undefined : inDraft(line, context, context.draft);
+
+  if (drafted !== undefined) {
+    return drafted;
+  }
+
   const literal = line.startsWith("//");
 
   if (!line.startsWith("/") || literal) {

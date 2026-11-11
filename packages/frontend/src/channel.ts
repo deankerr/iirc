@@ -1042,7 +1042,8 @@ export const rosterOf = (
  * What `/query` comes to: the Timeline a name keys on a Network, opened, when its Network
  * lists one that still follows it, as the Daemon keyed it, by the casemapping the Network
  * last declared, or `rfc1459` until one has. With none, nothing was said there yet, and a
- * Timeline is made only by what is said, so the composer starts `/msg <name> ` instead.
+ * Timeline is made only by what is said, so a Direct Message not yet begun shows instead,
+ * whose first Message makes it.
  * @param state - The Timelines.
  * @param network - The Network.
  * @param name - The name, as typed.
@@ -1062,6 +1063,6 @@ export const queried = (
   );
 
   return found === undefined
-    ? [{ _tag: "FocusComposer", text: `/msg ${name} ` }]
+    ? [{ _tag: "Draft", declared: casemapping ?? null, network, nick: name }]
     : [{ _tag: "Open", timeline: found.id }];
 };

@@ -7,7 +7,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { panesOf } from "@iirc/frontend/layout";
-import { opened } from "@iirc/frontend/timelines";
+import { paneName } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 import { ToggleButton, ToggleButtonGroup } from "react-aria-components";
 import type { Key } from "react-aria-components";
@@ -21,22 +21,11 @@ import styles from "./pane-switcher.module.css";
 const choices = Atom.make((get) => {
   const state = get(timelinesState);
 
-  return panesOf(state.layout.root).map((pane, index) => {
-    const shown = opened(state, pane.id);
-    let name = "empty";
-
-    if (pane.view.main._tag === "Options") {
-      name = "options";
-    } else if (pane.view.main._tag === "Search") {
-      name = "search";
-    } else if (shown._tag === "Shown") {
-      name = shown.description?.name ?? "Timeline";
-    } else if (shown._tag !== "Closed") {
-      name = "…";
-    }
-
-    return { id: pane.id, name, number: index + 1 };
-  });
+  return panesOf(state.layout.root).map((pane, index) => ({
+    id: pane.id,
+    name: paneName(state, pane.id),
+    number: index + 1,
+  }));
 });
 
 /**

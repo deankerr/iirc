@@ -25,6 +25,8 @@ import type {
   UserKnowledge,
   WindowGap,
 } from "@iirc/api";
+import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
+import type { Casemapping } from "@iirc/protocol/casemapping";
 import { comparePositions, cursorOf, TimelineId as TimelineIdSchema } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Option, Schema } from "effect";
@@ -203,16 +205,75 @@ type Follow =
     };
 
 /**
- * What a Pane shows: its open Timeline, or the options with what filters them. Opening a
- * Timeline, a placement included, shows it, and only showing the options leaves it.
+ * What a Pane shows: its open Timeline, the options with what filters them, the search, or
+ * a Direct Message not yet begun, with the nick it is to. Opening a Timeline, a placement
+ * included, shows it. Each of the others keeps what the Pane showed before it as `back`,
+ * which closing it shows again.
  */
 export type MainView =
   | { readonly _tag: "Timeline" }
-  | { readonly _tag: "Options"; readonly filter: string }
-  | { readonly _tag: "Search"; readonly back: BackView };
+  | { readonly _tag: "Options"; readonly filter: string; readonly back: BackView }
+  | { readonly _tag: "Search"; readonly back: BackView }
+  | ({ readonly _tag: "DirectDraft"; readonly back: BackView } & Drafted);
 
-/** What a Pane showed before the search, which closing the search shows again. */
-export type BackView = Exclude<MainView, { readonly _tag: "Search" }>;
+/**
+ * A Direct Message not yet begun: the nick it is to, on a Network, and how that Network
+ * folded names when `/query` read it, `null` when no Ircd had declared it, so `rfc1459`,
+ * as the Daemon keys Timelines. Its Timeline is found by that mapping alone, never one read
+ * at another time, which an Ircd's `005` may have changed since.
+ */
+export interface Drafted {
+  readonly network: NetworkId;
+  readonly nick: string;
+  readonly declared: Casemapping | null;
+}
+
+/**
+ * What a Pane showed before the options, the search, or a Direct Message not yet begun,
+ * which closing it shows again: one step back, so nothing grows however often they show.
+ */
+export type BackView =
+  | { readonly _tag: "Timeline" }
+  | { readonly _tag: "Options"; readonly filter: string }
+  | ({ readonly _tag: "DirectDraft" } & Drafted);
+
+/** The Timeline, as what a Pane shows or showed. */
+const timelineMain = { _tag: "Timeline" } as const;
+
+/**
+ * What a Pane showing a view goes back to once another shows in front of it: the view
+ * itself, one step deep, or, for the search, what it showed in front of.
+ * @param main - What it shows.
+ * @returns What it goes back to.
+ */
+const behind = (main: MainView): BackView => {
+  switch (main._tag) {
+    case "Timeline": {
+      return timelineMain;
+    }
+
+    case "Options": {
+      return { _tag: "Options", filter: main.filter };
+    }
+
+    case "DirectDraft": {
+      return {
+        _tag: "DirectDraft",
+        declared: main.declared,
+        network: main.network,
+        nick: main.nick,
+      };
+    }
+
+    case "Search": {
+      return main.back;
+    }
+
+    default: {
+      return main satisfies never;
+    }
+  }
+};
 
 /**
  * Where the "new" divider goes in an open Timeline: before the first item after `read`,
@@ -272,9 +333,9 @@ export interface Timelines {
   readonly closed: readonly TimelineId[];
   /**
    * The Timeline the Daemon placed a Message the Owner said in, to open once its Network
-   * lists it, if it is a Direct Message Timeline.
+   * lists it, if it is a Direct Message Timeline, and the Pane it was said from, as it was.
    */
-  readonly located: TimelineId | undefined;
+  readonly located: Located | undefined;
   /**
    * How many times the Owner opened a Timeline, showed the options, or moved to another
    * Pane. A placement captures it when its Say is submitted, and one from before the Owner
@@ -293,6 +354,34 @@ export interface Timelines {
    */
   readonly search: Search;
 }
+
+/**
+ * Where a Say with `opens` was said from: the Pane, and what it showed then, as `shownIn`
+ * gives it. Its placement opens only there, and only while the Pane still shows that.
+ */
+export interface Origin {
+  readonly pane: string;
+  readonly shown: string;
+}
+
+/** A placement waiting for its Timeline to be listed, and where it was said from. */
+interface Located {
+  readonly timeline: TimelineId;
+  readonly from: Origin;
+}
+
+/**
+ * What a Pane shows, as a key two views share only when they show the same thing: its open
+ * Timeline, and what stands in front of it, a draft by its Network and nick.
+ * @param view - The Pane's view.
+ * @returns The key.
+ */
+const shownIn = (view: PaneView): string =>
+  JSON.stringify([
+    view.open ?? null,
+    view.main._tag,
+    view.main._tag === "DirectDraft" ? [view.main.network, view.main.nick] : null,
+  ]);
 
 /** How many items a window is read with, and the most a read again keeps. */
 export const pageSize = 100;
@@ -396,7 +485,10 @@ export type WindowRequest =
  *   want the latest, read again whole, and to follow it. `Following`: whether they are at
  *   the latest, which a window read around a result takes only when the Owner moved there.
  * - `OptionsShown`: the focused Pane shows the options, filtered as given, which counts as
- *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter.
+ *   going elsewhere. `OptionsFiltered`: the Owner typed in their filter. `OptionsClosed`:
+ *   the Pane they show in shows what it showed before them.
+ * - `DraftShown`: the focused Pane shows a Direct Message not yet begun, to a nick on a
+ *   Network. `DraftClosed`: the focused Pane shows what it showed before it.
  * - `Pane`: the Owner changed the Panes, as a command or a drag of a divider did.
  * - `Restore`: the layout this device kept, read as the page starts.
  * - `SearchShown`: the search shows in the Pane it shows in already, or the focused one,
@@ -433,7 +525,12 @@ export type TimelinesEvent =
   | { readonly _tag: "Overflowed"; readonly place: Place; readonly overflow: TimelineOverflow }
   | { readonly _tag: "Reset"; readonly reset: TimelineReset }
   | { readonly _tag: "Opened"; readonly timeline: TimelineId }
-  | { readonly _tag: "Located"; readonly timeline: TimelineId; readonly navigation: number }
+  | {
+      readonly _tag: "Located";
+      readonly timeline: TimelineId;
+      readonly navigation: number;
+      readonly from: Origin;
+    }
   | { readonly _tag: "OlderWanted"; readonly timeline: TimelineId; readonly mode: OlderMode }
   | { readonly _tag: "NewerWanted"; readonly timeline: TimelineId }
   | { readonly _tag: "LatestWanted"; readonly timeline: TimelineId }
@@ -451,6 +548,9 @@ export type TimelinesEvent =
     }
   | { readonly _tag: "OptionsShown"; readonly filter: string }
   | { readonly _tag: "OptionsFiltered"; readonly filter: string }
+  | { readonly _tag: "OptionsClosed" }
+  | ({ readonly _tag: "DraftShown" } & Drafted)
+  | { readonly _tag: "DraftClosed" }
   | { readonly _tag: "Pane"; readonly change: PaneChange }
   | { readonly _tag: "Restore"; readonly layout: Layout<PaneView> }
   | {
@@ -1707,16 +1807,12 @@ const listRead = (
  * oldest place kept for reads in flight, as one started before a reset is, is read again,
  * and so is one that began before Self's away changed again.
  * @param state - The state.
- * @param id - The Network.
- * @param session - What the Client knows of its Session.
- * @param self - What the Client knows of Self.
+ * @param event - What `known` said: the Network, its Session, and Self.
  * @returns The state.
  */
 const statusRead = (
   state: Timelines,
-  id: NetworkId,
-  session: SessionKnowledge,
-  self: UserKnowledge | null
+  { network: id, self, session }: Extract<TimelinesEvent, { readonly _tag: "StatusRead" }>
 ): Timelines => {
   const network = state.networks.get(id);
 
@@ -2082,6 +2178,33 @@ export const openOf = (state: Timelines): TimelineId | undefined => focusedView(
 export const mainOf = (state: Timelines): MainView => focusedView(state).main;
 
 /**
+ * What the sidebar marks as chosen: what the focused Pane shows, the options or its
+ * Timeline, or nothing, as for the search or a Direct Message not yet begun, which have no
+ * row. A Timeline open behind something else is not chosen, so choosing it shows it.
+ */
+export type Chosen =
+  | { readonly _tag: "Options" }
+  | { readonly _tag: "Timeline"; readonly timeline: TimelineId }
+  | { readonly _tag: "Nothing" };
+
+/**
+ * What the sidebar marks as chosen, derived from what the focused Pane shows.
+ * @param state - The state.
+ * @returns What it marks.
+ */
+export const chosenOf = (state: Timelines): Chosen => {
+  const view = focusedView(state);
+
+  if (view.main._tag === "Options") {
+    return { _tag: "Options" };
+  }
+
+  return view.main._tag === "Timeline" && view.open !== undefined
+    ? { _tag: "Timeline", timeline: resolve(state, view.open) }
+    : { _tag: "Nothing" };
+};
+
+/**
  * Keeps the windows of what the Panes show, after they changed. A Timeline no Pane has open
  * any more joins the most recently closed, and only the windows of those open and of the
  * few closed most recently are kept: any other is read again when it opens. A Timeline
@@ -2253,6 +2376,53 @@ const marked = (
 // The reducer.
 
 /**
+ * Opens a placed Timeline in the Pane its Say was said from, and only while that Pane
+ * still shows what it showed then, or the Timeline already: else it is let go, with the
+ * Timeline listed. In the focused Pane it opens as opening one does. In another, which the
+ * focus left for one showing the same, it takes that Pane's place without the focus, unless
+ * another Pane has it open.
+ * @param state - The state.
+ * @param from - Where it was said from.
+ * @param timeline - The Timeline.
+ * @returns The state.
+ */
+const placing = (state: Timelines, from: Origin, timeline: TimelineId): Timelines => {
+  const pane = panesOf(state.layout.root).find((one) => one.id === from.pane);
+
+  if (pane === undefined) {
+    return state;
+  }
+
+  const showsIt =
+    pane.view.open !== undefined && resolve(state, pane.view.open) === resolve(state, timeline);
+
+  if (shownIn(pane.view) !== from.shown && !showsIt) {
+    return state;
+  }
+
+  if (pane.id === state.layout.focused) {
+    return opening(state, timeline);
+  }
+
+  return paneOf(state, timeline) === undefined
+    ? retained(state, {
+        ...state,
+        layout: withView(state.layout, pane.id, viewOf(state, timeline)),
+      })
+    : state;
+};
+
+/**
+ * Where a Say said now is said from: the focused Pane, and what it shows.
+ * @param state - The state.
+ * @returns The origin, which its placement carries.
+ */
+export const originOf = (state: Timelines): Origin => ({
+  pane: state.layout.focused,
+  shown: shownIn(focusedView(state)),
+});
+
+/**
  * Opens the Timeline a Message the Owner said was placed in, once its Network lists it:
  * a Direct Message Timeline that still follows its partner. Any other kind is let go, so a
  * Message to a Channel opens nothing. The Daemon's routing chose it, so the Frontend never
@@ -2268,17 +2438,118 @@ const found = (state: Timelines): Timelines => {
   }
 
   for (const network of state.networks.values()) {
-    const timeline = network.timelines.get(located);
+    const timeline = network.timelines.get(located.timeline);
 
     if (timeline !== undefined) {
+      const unset = { ...state, located: undefined };
+
       return timeline.kind === "Direct" && !timeline.detached
-        ? opening({ ...state, located: undefined }, timeline.id)
-        : { ...state, located: undefined };
+        ? placing(unset, located.from, timeline.id)
+        : unset;
     }
   }
 
   return state;
 };
+
+/** Every mapping, for a draft made before its Network declared one. */
+const casemappings: readonly Casemapping[] = ["ascii", "rfc1459", "rfc1459-strict", "rfc8265"];
+
+/**
+ * The Direct Message Timeline a draft's nick keys on its Network, once one is listed: one
+ * that follows its partner, under the key the nick folds to by the mapping the draft was
+ * made with, as `/query` read it, never one held from another time. A draft made before any
+ * mapping was declared meets a Timeline only when every mapping folds its nick alike, since
+ * the Ircd may yet declare one under which `[bob]` and `{bob}` are two Users. Until then it
+ * stays a draft, which still sends to the nick as typed.
+ * @param state - The state.
+ * @param draft - The draft.
+ * @returns The Timeline, or none.
+ */
+export const draftTimeline = (state: Timelines, draft: Drafted): TimelineId | undefined => {
+  const key = casefold(draft.declared ?? defaultCasemapping, draft.nick);
+
+  if (
+    draft.declared === null &&
+    casemappings.some((casemapping) => casefold(casemapping, draft.nick) !== key)
+  ) {
+    return undefined;
+  }
+
+  return [...(state.networks.get(draft.network)?.timelines.values() ?? [])].find(
+    (one) => one.kind === "Direct" && !one.detached && one.key === key
+  )?.id;
+};
+
+/**
+ * Each draft shown whose Timeline is listed now shows it in its place, in the same Pane,
+ * as when the partner spoke first or another Frontend said something to them. Neither the
+ * focus nor `navigation` moves, since the Owner went nowhere. A draft whose Timeline another
+ * Pane has open stays.
+ * @param state - The state.
+ * @returns The state.
+ */
+const draftsMet = (state: Timelines): Timelines => {
+  let after = state;
+
+  for (const pane of panesOf(state.layout.root)) {
+    const { main } = pane.view;
+
+    const timeline = main._tag === "DirectDraft" ? draftTimeline(state, main) : undefined;
+
+    if (timeline !== undefined && paneOf(after, timeline) === undefined) {
+      after = retained(after, {
+        ...after,
+        layout: withView(after.layout, pane.id, viewOf(after, timeline)),
+      });
+    }
+  }
+
+  return after;
+};
+
+/**
+ * The draft a Pane holds: shown, or behind the options or the search, which closing shows.
+ * @param main - What the Pane shows.
+ * @returns The draft, or none.
+ */
+const draftIn = (main: MainView): Drafted | undefined => {
+  if (main._tag === "DirectDraft") {
+    return main;
+  }
+
+  return (main._tag === "Options" || main._tag === "Search") && main.back._tag === "DirectDraft"
+    ? main.back
+    : undefined;
+};
+
+/**
+ * The drafts that came to show their Timeline between two states, by the Pane they were
+ * held in, shown or behind the options or the search, whose closing shows the Timeline in
+ * one step: so the runtime can carry a draft's unsent text, and anything said of it later,
+ * to its Timeline's composer.
+ * @param before - The state before.
+ * @param after - The state after.
+ * @returns Each draft met, with its Timeline.
+ */
+export const draftsMetBetween = (
+  before: Timelines,
+  after: Timelines
+): readonly (Drafted & { readonly timeline: TimelineId })[] =>
+  panesOf(before.layout.root).flatMap((pane) => {
+    const draft = draftIn(pane.view.main);
+    const now = panesOf(after.layout.root).find((one) => one.id === pane.id)?.view;
+
+    if (draft === undefined || now?.main._tag !== "Timeline" || now.open === undefined) {
+      return [];
+    }
+
+    const timeline = draftTimeline(after, draft);
+
+    return timeline !== undefined && resolve(after, now.open) === timeline
+      ? [{ declared: draft.declared, network: draft.network, nick: draft.nick, timeline }]
+      : [];
+  });
 
 /**
  * The state after an event.
@@ -2301,6 +2572,9 @@ type Navigation = Extract<
       | "Located"
       | "OptionsShown"
       | "OptionsFiltered"
+      | "OptionsClosed"
+      | "DraftShown"
+      | "DraftClosed"
       | "Pane"
       | "Restore"
       | "SearchShown"
@@ -2314,6 +2588,9 @@ const navigations: ReadonlySet<string> = new Set([
   "Located",
   "OptionsShown",
   "OptionsFiltered",
+  "OptionsClosed",
+  "DraftShown",
+  "DraftClosed",
   "Pane",
   "Restore",
   "SearchShown",
@@ -2336,6 +2613,15 @@ const elsewhere = (state: Timelines): Timelines => ({
 });
 
 /**
+ * A Pane's view.
+ * @param layout - The layout.
+ * @param pane - The Pane's id.
+ * @returns Its view, or an empty one.
+ */
+const viewIn = (layout: Layout<PaneView>, pane: string): PaneView =>
+  panesOf(layout.root).find((one) => one.id === pane)?.view ?? emptyView;
+
+/**
  * The Pane the options show in, if any.
  * @param layout - The layout.
  * @returns Its id, or none.
@@ -2353,15 +2639,110 @@ const optionsPane = (layout: Layout<PaneView>): string | undefined =>
 const showingOptions = (state: Timelines, filter: string): Timelines => {
   const { layout } = state;
   const at = optionsPane(layout) ?? layout.focused;
-  const view = panesOf(layout.root).find((pane) => pane.id === at)?.view ?? emptyView;
+  const view = viewIn(layout, at);
+  const before = view.main._tag === "Options" ? view.main.back : behind(view.main);
+  // Options shown again in front of the search they were behind go back to its Timeline.
+  const back = before._tag === "Options" ? timelineMain : before;
 
   return {
     ...state,
     layout: withView({ ...layout, focused: at }, at, {
       ...view,
-      main: { _tag: "Options", filter },
+      main: { _tag: "Options", back, filter },
     }),
   };
+};
+
+/**
+ * What a Pane shows once what stood in front of it closes: what it showed before, the
+ * options only while no other Pane shows them since, as they show in one Pane at most.
+ * @param layout - The layout.
+ * @param at - The Pane.
+ * @param back - What it showed before.
+ * @returns What it shows.
+ */
+const backTo = (layout: Layout<PaneView>, at: string, back: BackView): MainView => {
+  switch (back._tag) {
+    case "Timeline": {
+      return timelineMain;
+    }
+
+    case "Options": {
+      const elsewhere = panesOf(layout.root).some(
+        (pane) => pane.id !== at && pane.view.main._tag === "Options"
+      );
+
+      return elsewhere ? timelineMain : { ...back, back: timelineMain };
+    }
+
+    case "DirectDraft": {
+      return { ...back, back: timelineMain };
+    }
+
+    default: {
+      return back satisfies never;
+    }
+  }
+};
+
+/**
+ * Closes the options, showing what their Pane showed before them.
+ * @param state - The state.
+ * @returns The state.
+ */
+const closingOptions = (state: Timelines): Timelines => {
+  const { layout } = state;
+  const at = optionsPane(layout);
+
+  if (at === undefined) {
+    return state;
+  }
+
+  const view = viewIn(layout, at);
+  const back = view.main._tag === "Options" ? view.main.back : timelineMain;
+
+  return { ...state, layout: withView(layout, at, { ...view, main: backTo(layout, at, back) }) };
+};
+
+/**
+ * Shows a Direct Message not yet begun in the focused Pane, in front of what it showed,
+ * which closing it shows again.
+ * @param state - The state.
+ * @param draft - The nick it is to, its Network, and how that folded names.
+ * @returns The state.
+ */
+const showingDraft = (state: Timelines, { declared, network, nick }: Drafted): Timelines => {
+  const { layout } = state;
+  const view = focusedView(state);
+  const back = view.main._tag === "DirectDraft" ? view.main.back : behind(view.main);
+
+  return {
+    ...state,
+    layout: withView(layout, layout.focused, {
+      ...view,
+      main: { _tag: "DirectDraft", back, declared, network, nick },
+    }),
+  };
+};
+
+/**
+ * Closes the focused Pane's Direct Message not yet begun, showing what it showed before.
+ * @param state - The state.
+ * @returns The state.
+ */
+const closingDraft = (state: Timelines): Timelines => {
+  const { layout } = state;
+  const view = focusedView(state);
+
+  return view.main._tag === "DirectDraft"
+    ? {
+        ...state,
+        layout: withView(layout, layout.focused, {
+          ...view,
+          main: backTo(layout, layout.focused, view.main.back),
+        }),
+      }
+    : state;
 };
 
 /**
@@ -2371,15 +2752,6 @@ const showingOptions = (state: Timelines, filter: string): Timelines => {
  */
 const searchPane = (layout: Layout<PaneView>): string | undefined =>
   panesOf(layout.root).find((pane) => pane.view.main._tag === "Search")?.id;
-
-/**
- * A Pane's view.
- * @param layout - The layout.
- * @param pane - The Pane's id.
- * @returns Its view, or an empty one.
- */
-const viewIn = (layout: Layout<PaneView>, pane: string): PaneView =>
-  panesOf(layout.root).find((one) => one.id === pane)?.view ?? emptyView;
 
 /**
  * Shows the search: in the Pane it shows in already, which takes the focus, or else in the
@@ -2396,7 +2768,7 @@ const showingSearch = (
   const { layout } = state;
   const at = searchPane(layout) ?? layout.focused;
   const view = viewIn(layout, at);
-  const back: BackView = view.main._tag === "Search" ? view.main.back : view.main;
+  const back = behind(view.main);
 
   const search =
     event.query === undefined || event.parsed === undefined
@@ -2429,12 +2801,9 @@ const closingSearch = (state: Timelines): Timelines => {
   }
 
   const view = viewIn(layout, at);
-  const back = view.main._tag === "Search" ? view.main.back : view.main;
+  const back = view.main._tag === "Search" ? view.main.back : behind(view.main);
 
-  const main: MainView =
-    back._tag === "Options" && optionsPane(layout) !== undefined ? { _tag: "Timeline" } : back;
-
-  return { ...state, layout: withView(layout, at, { ...view, main }) };
+  return { ...state, layout: withView(layout, at, { ...view, main: backTo(layout, at, back) }) };
 };
 
 /**
@@ -2576,11 +2945,54 @@ const restored = (state: Timelines): Timelines => {
  * @param after - The state after.
  * @returns Whether they did.
  */
-const wentElsewhere = (before: Timelines, after: Timelines): boolean => {
-  const was = focusedView(before);
-  const now = focusedView(after);
+const wentElsewhere = (before: Timelines, after: Timelines): boolean =>
+  shownIn(focusedView(before)) !== shownIn(focusedView(after));
 
-  return was.open !== now.open || was.main._tag !== now.main._tag;
+/**
+ * The options filtered or closed, or a Direct Message not yet begun shown or closed.
+ * @param state - The state.
+ * @param event - What the Owner did.
+ * @returns The state.
+ */
+const inFront = (
+  state: Timelines,
+  event: Extract<
+    Navigation,
+    { readonly _tag: "OptionsFiltered" | "OptionsClosed" | "DraftShown" | "DraftClosed" }
+  >
+): Timelines => {
+  switch (event._tag) {
+    case "OptionsFiltered": {
+      const at = optionsPane(state.layout);
+      const view = at === undefined ? undefined : viewIn(state.layout, at);
+
+      return at === undefined || view?.main._tag !== "Options"
+        ? state
+        : {
+            ...state,
+            layout: withView(state.layout, at, {
+              ...view,
+              main: { ...view.main, filter: event.filter },
+            }),
+          };
+    }
+
+    case "OptionsClosed": {
+      return optionsPane(state.layout) === undefined ? state : closingOptions(elsewhere(state));
+    }
+
+    case "DraftShown": {
+      return showingDraft(elsewhere(state), event);
+    }
+
+    case "DraftClosed": {
+      return mainOf(state)._tag === "DirectDraft" ? closingDraft(elsewhere(state)) : state;
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
 };
 
 /**
@@ -2597,26 +3009,20 @@ const navigated = (state: Timelines, event: Navigation): Timelines => {
     }
 
     case "Located": {
-      return event.navigation === state.navigation ? { ...state, located: event.timeline } : state;
+      return event.navigation === state.navigation
+        ? { ...state, located: { from: event.from, timeline: event.timeline } }
+        : state;
     }
 
     case "OptionsShown": {
       return showingOptions(elsewhere(state), event.filter);
     }
 
-    case "OptionsFiltered": {
-      const at = optionsPane(state.layout);
-      const view = panesOf(state.layout.root).find((pane) => pane.id === at)?.view;
-
-      return at === undefined || view === undefined
-        ? state
-        : {
-            ...state,
-            layout: withView(state.layout, at, {
-              ...view,
-              main: { _tag: "Options", filter: event.filter },
-            }),
-          };
+    case "OptionsFiltered":
+    case "OptionsClosed":
+    case "DraftShown":
+    case "DraftClosed": {
+      return inFront(state, event);
     }
 
     case "Pane": {
@@ -2744,7 +3150,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
     }
 
     case "StatusRead": {
-      return { state: statusRead(state, event.network, event.session, event.self) };
+      return { state: statusRead(state, event) };
     }
 
     case "WindowRead": {
@@ -2852,7 +3258,7 @@ const onePaneEach = (state: Timelines): Timelines => {
 export const reduceTimelines = (state: Timelines, event: TimelinesEvent): Timelines => {
   const { recorded, state: after } = apply(state, event);
 
-  return onePaneEach(restored(found(record(after, recorded))));
+  return draftsMet(onePaneEach(restored(found(record(after, recorded)))));
 };
 
 // What to read.
@@ -3046,9 +3452,65 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
  * before the first item after the Read Marker the Timeline opened with.
  */
 export type Row =
-  | { readonly _tag: "Item"; readonly key: string; readonly item: TimelineItem }
+  | {
+      readonly _tag: "Item";
+      readonly key: string;
+      readonly item: TimelineItem;
+      /**
+       * Failed Connections in a row to one Ircd for one reason are one row: the latest, with
+       * how many there were and when the first was, so a reconnecting Network does not fill
+       * its Timeline. Present only for more than one.
+       */
+      readonly repeated?: Repeated;
+    }
   | { readonly _tag: "Gap"; readonly key: string; readonly gap: WindowGap }
   | { readonly _tag: "New"; readonly key: string };
+
+/** How many failed Connections one row stands for, and the instant of the first. */
+export interface Repeated {
+  readonly count: number;
+  readonly from: number;
+}
+
+/**
+ * Whether an item is a failed Connection that repeats another: to the same Ircd, for the
+ * same reason.
+ * @param item - The item.
+ * @param before - The item before it.
+ * @returns Whether it repeats it.
+ */
+const repeats = (item: TimelineItem, before: TimelineItem): boolean =>
+  item.content._tag === "ConnectionFailed" &&
+  before.content._tag === "ConnectionFailed" &&
+  JSON.stringify(item.content.ircd) === JSON.stringify(before.content.ircd) &&
+  JSON.stringify(item.content.reason) === JSON.stringify(before.content.reason);
+
+/**
+ * The rows with each run of failed Connections that repeat one another made one: the
+ * latest item, which a view draws with its hint, under the key of the first, which stays
+ * as the run grows, with how many there were and when the first was. Only items next to
+ * one another join, so a Gap, the "new" divider, or anything else between ends a run.
+ * @param rows - The rows.
+ * @returns The rows, collapsed.
+ */
+const collapsed = (rows: readonly Row[]): readonly Row[] => {
+  const out: Row[] = [];
+
+  for (const row of rows) {
+    const last = out.at(-1);
+
+    if (row._tag === "Item" && last?._tag === "Item" && repeats(row.item, last.item)) {
+      const first = last.repeated?.from ?? last.item.position.at;
+      const count = (last.repeated?.count ?? 1) + 1;
+
+      out[out.length - 1] = { ...row, key: last.key, repeated: { count, from: first } };
+    } else {
+      out.push(row);
+    }
+  }
+
+  return out;
+};
 
 /** The key of the "new" divider's row, which no item's or Gap's can be. */
 const newKey = "new";
@@ -3101,7 +3563,7 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
     rows.push(gapRow(gap));
   }
 
-  return rows;
+  return collapsed(rows);
 };
 
 /**
@@ -3167,6 +3629,46 @@ export const opened = (state: Timelines, pane = state.layout.focused): Opened =>
   };
 };
 
+/**
+ * A Pane's name, as the switcher, the composer's prompt, and its label say it: what it
+ * shows, never what stands behind it. `options` or `search` by name, a draft by its nick,
+ * its Timeline by name, `…` while that is read, and `empty` with none open.
+ * @param state - The state.
+ * @param pane - The Pane's id: the focused Pane unless another is named.
+ * @returns The name.
+ */
+export const paneName = (state: Timelines, pane = state.layout.focused): string => {
+  const view = viewIn(state.layout, pane);
+
+  switch (view.main._tag) {
+    case "Options": {
+      return "options";
+    }
+
+    case "Search": {
+      return "search";
+    }
+
+    case "DirectDraft": {
+      return view.main.nick;
+    }
+
+    case "Timeline": {
+      const shown = opened(state, pane);
+
+      if (shown._tag === "Shown") {
+        return shown.description?.name ?? "Timeline";
+      }
+
+      return shown._tag === "Closed" ? "empty" : "\u2026";
+    }
+
+    default: {
+      return view.main satisfies never;
+    }
+  }
+};
+
 // The layout this device keeps.
 
 /**
@@ -3228,7 +3730,13 @@ export const KeptLayoutSchema: Schema.Codec<KeptLayout, Layout<KeptViewJson>> = 
 export const keptLayout = (state: Timelines): KeptLayout | undefined =>
   state.restoring === undefined
     ? mapViews(state.layout, ({ view }): KeptView => {
-        const main = view.main._tag === "Search" ? view.main.back : view.main;
+        // A Pane kept comes back as the options, or else as its Timeline: a search or a
+        // Direct Message not yet begun is never kept, so it comes back as what it was in
+        // front of.
+        const main =
+          view.main._tag === "Search" || view.main._tag === "DirectDraft"
+            ? view.main.back
+            : view.main;
 
         return { open: view.open ?? null, options: main._tag === "Options" ? main.filter : null };
       })
@@ -3241,7 +3749,10 @@ export const keptLayout = (state: Timelines): KeptLayout | undefined =>
  */
 const keptView = (kept: KeptView): PaneView => ({
   divider: undefined,
-  main: kept.options === null ? { _tag: "Timeline" } : { _tag: "Options", filter: kept.options },
+  main:
+    kept.options === null
+      ? timelineMain
+      : { _tag: "Options", back: timelineMain, filter: kept.options },
   open: kept.open ?? undefined,
 });
 

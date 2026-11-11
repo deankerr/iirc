@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
-import { editing, openOptions } from "../options/atoms.ts";
+import { editing, openOptions, optionsSync } from "../options/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
@@ -69,6 +69,7 @@ const signedIn = async () => {
 
   await run(registry, check, undefined);
   registry.mount(sync);
+  registry.mount(optionsSync);
 
   const container = document.createElement("div");
 

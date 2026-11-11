@@ -1,7 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import type { Member, Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
-import { openOf } from "@iirc/frontend/timelines";
+import { mainOf, openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -376,7 +376,7 @@ describe("the members", () => {
 });
 
 describe("/query", () => {
-  it("opens the Direct Message with a nick, or starts /msg to them when nothing was said yet", async () => {
+  it("opens the Direct Message with a nick, or one not yet begun when nothing was said yet", async () => {
     const { registry } = await inChannel([]);
 
     registry.set(edit, { text: "/query PEER", timeline: timelineId(iirc) });
@@ -391,10 +391,27 @@ describe("/query", () => {
     registry.set(edit, { text: "/query stranger", timeline: timelineId(peer) });
     await run(registry, send, timelineId(peer));
 
+    const drafted = await until(
+      registry,
+      timelinesState,
+      (state) => mainOf(state)._tag === "DirectDraft"
+    );
+
     expect({
       draft: draftOf(registry.get(composerState), timelineId(peer)).text,
+      main: mainOf(drafted),
       opened: openOf(opened),
-    }).toStrictEqual({ draft: "/msg stranger ", opened: peer });
+    }).toStrictEqual({
+      draft: "",
+      main: {
+        _tag: "DirectDraft",
+        back: { _tag: "Timeline" },
+        declared: null,
+        network: "libera",
+        nick: "stranger",
+      },
+      opened: peer,
+    });
   });
 });
 

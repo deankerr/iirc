@@ -16,10 +16,15 @@ import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { interpret } from "./commands.ts";
+import { contextOf } from "./composer.ts";
 import { panesOf, single } from "./layout.ts";
 import { parseQuery } from "./search.ts";
 import type { SearchRequest } from "./search.ts";
 import {
+  chosenOf,
+  draftsMetBetween,
+  originOf,
   emptyView,
   followFrom,
   initialTimelines,
@@ -32,6 +37,7 @@ import {
   openOf,
   olderUnasked,
   opened,
+  paneName,
   reduceTimelines,
   resolve,
   rowsOf,
@@ -1585,8 +1591,13 @@ describe("the Timelines' state", () => {
     let state = reduceTimelines(following(), changed(6, { timelines: [direct(idOf(6), "[bob]")] }));
 
     // Placed in `{bob}`'s, which is not listed yet: it opens once it is.
-    state = reduceTimelines(state, { _tag: "Located", navigation: 1, timeline: curly });
-    const waiting = [openOf(state), state.located];
+    state = reduceTimelines(state, {
+      _tag: "Located",
+      from: originOf(state),
+      navigation: 1,
+      timeline: curly,
+    });
+    const waiting = [openOf(state), state.located?.timeline];
 
     state = reduceTimelines(state, changed(7, { timelines: [direct(idOf(7), "{bob}")] }));
     const opens = [openOf(state), state.located];
@@ -1595,6 +1606,7 @@ describe("the Timelines' state", () => {
     const atOnce = openOf(
       reduceTimelines(state, {
         _tag: "Located",
+        from: originOf(state),
         navigation: 1,
         timeline: square,
       })
@@ -1603,13 +1615,14 @@ describe("the Timelines' state", () => {
     // A Channel's, or a detached one, opens nothing.
     const channel = reduceTimelines(following(), {
       _tag: "Located",
+      from: originOf(following()),
       navigation: 1,
       timeline: timelineId(idOf(2)),
     });
 
     const detached = reduceTimelines(
       reduceTimelines(following(), changed(8, { timelines: [direct(idOf(8), "gone", true)] })),
-      { _tag: "Located", navigation: 1, timeline: timelineId(idOf(8)) }
+      { _tag: "Located", from: originOf(following()), navigation: 1, timeline: timelineId(idOf(8)) }
     );
 
     expect({
@@ -1638,6 +1651,7 @@ describe("the Timelines' state", () => {
 
     const late = reduceTimelines(elsewhere, {
       _tag: "Located",
+      from: originOf(elsewhere),
       navigation: 1,
       timeline: timelineId(idOf(6)),
     });
@@ -1661,6 +1675,7 @@ describe("the Timelines' state", () => {
 
     const placed = reduceTimelines(filtered, {
       _tag: "Located",
+      from: originOf(filtered),
       navigation: filtered.navigation,
       timeline: timelineId(idOf(6)),
     });
@@ -1668,6 +1683,7 @@ describe("the Timelines' state", () => {
     // A placement from before the options were shown is let go, and they stay.
     const before = reduceTimelines(filtered, {
       _tag: "Located",
+      from: originOf(listed),
       navigation: listed.navigation,
       timeline: timelineId(idOf(6)),
     });
@@ -1678,8 +1694,8 @@ describe("the Timelines' state", () => {
       placed: [mainOf(placed), openOf(placed)],
       start: mainOf(listed),
     }).toStrictEqual({
-      before: [{ _tag: "Options", filter: "*nick*" }, three],
-      filtered: { _tag: "Options", filter: "*nick*" },
+      before: [{ _tag: "Options", back: { _tag: "Timeline" }, filter: "*nick*" }, three],
+      filtered: { _tag: "Options", back: { _tag: "Timeline" }, filter: "*nick*" },
       placed: [{ _tag: "Timeline" }, idOf(6)],
       start: { _tag: "Timeline" },
     });
@@ -2308,6 +2324,7 @@ describe("the Panes", () => {
       openOf(
         reduceTimelines(state, {
           _tag: "Located",
+          from: originOf(state),
           navigation: listed.navigation,
           timeline: timelineId(idOf(6)),
         })
@@ -2347,7 +2364,7 @@ describe("the Panes", () => {
       state: [state.layout.focused, mainOf(state), openOf(state)],
     }).toStrictEqual({
       back: ["p1", { _tag: "Timeline" }],
-      state: ["p1", { _tag: "Options", filter: "b" }, two],
+      state: ["p1", { _tag: "Options", back: { _tag: "Timeline" }, filter: "b" }, two],
     });
   });
 
@@ -2443,7 +2460,7 @@ describe("the Panes", () => {
           ["p2", one],
         ],
         "p2",
-        { _tag: "Options", filter: "x" },
+        { _tag: "Options", back: { _tag: "Timeline" }, filter: "x" },
         undefined,
       ],
       waiting: [true, undefined, [["p0", undefined]]],
@@ -2872,7 +2889,7 @@ describe("searching", () => {
     }).toStrictEqual({
       // A search is never kept: what it shows in front of is.
       kept: { open: three, options: "nick" },
-      main: { _tag: "Options", filter: "nick" },
+      main: { _tag: "Options", back: { _tag: "Timeline" }, filter: "nick" },
     });
   });
 
@@ -3152,6 +3169,516 @@ describe("jumping to a result", () => {
         ["p0", three],
         ["p1", two],
       ],
+    });
+  });
+});
+
+describe("what stands in front of a Timeline", () => {
+  it("closes the options back to what the Pane showed before them, the Timeline or the search's", () => {
+    const shown = reduceTimelines(following(), { _tag: "OptionsShown", filter: "nick" });
+    const closed = reduceTimelines(shown, { _tag: "OptionsClosed" });
+
+    // Shown in front of the search, they close to what the search was in front of.
+    const searched = searching(following(), "m3 word");
+    const overSearch = reduceTimelines(searched, { _tag: "OptionsShown", filter: "" });
+
+    expect({
+      again: reduceTimelines(closed, { _tag: "OptionsClosed" }) === closed,
+      closed: [mainOf(closed), openOf(closed)],
+      moved: closed.navigation > shown.navigation,
+      overSearch: mainOf(reduceTimelines(overSearch, { _tag: "OptionsClosed" })),
+      shown: mainOf(shown),
+    }).toStrictEqual({
+      again: true,
+      closed: [{ _tag: "Timeline" }, three],
+      moved: true,
+      overSearch: { _tag: "Timeline" },
+      shown: { _tag: "Options", back: { _tag: "Timeline" }, filter: "nick" },
+    });
+  });
+
+  it("closes the options in the Pane they show in, whichever has the focus", () => {
+    let state = reduceTimelines(following(), { _tag: "OptionsShown", filter: "" });
+
+    state = split(state, two);
+    state = reduceTimelines(state, { _tag: "OptionsClosed" });
+
+    expect({
+      focused: state.layout.focused,
+      mains: panesOf(state.layout.root).map((pane) => pane.view.main),
+    }).toStrictEqual({
+      focused: "p1",
+      mains: [{ _tag: "Timeline" }, { _tag: "Timeline" }],
+    });
+  });
+
+  it("marks in the sidebar only what the focused Pane shows, never a Timeline behind something", () => {
+    const start = following();
+    const options = reduceTimelines(start, { _tag: "OptionsShown", filter: "" });
+    const search = searching(start, "m3 word");
+
+    const draft = reduceTimelines(start, {
+      _tag: "DraftShown",
+      declared: null,
+      network: alpha,
+      nick: "bob",
+    });
+
+    // Choosing the Timeline open behind the options shows it.
+    const chosen = reduceTimelines(options, { _tag: "Opened", timeline: three });
+
+    expect({
+      chosen: [chosenOf(chosen), mainOf(chosen)],
+      draft: chosenOf(draft),
+      empty: chosenOf(initialTimelines),
+      options: chosenOf(options),
+      search: chosenOf(search),
+      start: chosenOf(start),
+    }).toStrictEqual({
+      chosen: [{ _tag: "Timeline", timeline: three }, { _tag: "Timeline" }],
+      draft: { _tag: "Nothing" },
+      empty: { _tag: "Nothing" },
+      options: { _tag: "Options" },
+      search: { _tag: "Nothing" },
+      start: { _tag: "Timeline", timeline: three },
+    });
+  });
+
+  it("shows a Direct Message not yet begun, closes it back, and lets the Timeline its first Message made take its place", () => {
+    const start = reduceTimelines(following(), { _tag: "OptionsShown", filter: "x" });
+
+    const draft = reduceTimelines(start, {
+      _tag: "DraftShown",
+      declared: null,
+      network: alpha,
+      nick: "bob",
+    });
+
+    const closed = reduceTimelines(draft, { _tag: "DraftClosed" });
+
+    // The first Message said there is placed in a new Direct Message Timeline, which opens.
+    const placed = folded(draft, [
+      {
+        _tag: "Located",
+        from: originOf(draft),
+        navigation: draft.navigation,
+        timeline: timelineId(idOf(6)),
+      },
+      changed(6, { timelines: [direct(idOf(6), "bob")] }),
+    ]);
+
+    // One placed after the Owner closed it is let go.
+    const late = folded(closed, [
+      {
+        _tag: "Located",
+        from: originOf(draft),
+        navigation: draft.navigation,
+        timeline: timelineId(idOf(6)),
+      },
+      changed(6, { timelines: [direct(idOf(6), "bob")] }),
+    ]);
+
+    expect({
+      closed: mainOf(closed),
+      draft: [mainOf(draft), openOf(draft)],
+      kept: keptLayout(draft)?.root,
+      late: [mainOf(late), openOf(late)],
+      placed: [mainOf(placed), openOf(placed)],
+    }).toStrictEqual({
+      closed: { _tag: "Options", back: { _tag: "Timeline" }, filter: "x" },
+      draft: [
+        {
+          _tag: "DirectDraft",
+          back: { _tag: "Options", filter: "x" },
+          declared: null,
+          network: alpha,
+          nick: "bob",
+        },
+        three,
+      ],
+      kept: { _tag: "Pane", id: "p0", view: { open: three, options: "x" } },
+      late: [{ _tag: "Options", back: { _tag: "Timeline" }, filter: "x" }, three],
+      placed: [{ _tag: "Timeline" }, idOf(6)],
+    });
+  });
+
+  it("closes the options shown over a Direct Message not yet begun back to it", () => {
+    const draft = reduceTimelines(following(), {
+      _tag: "DraftShown",
+      declared: null,
+      network: alpha,
+      nick: "bob",
+    });
+
+    const options = reduceTimelines(draft, { _tag: "OptionsShown", filter: "" });
+    const closed = reduceTimelines(options, { _tag: "OptionsClosed" });
+    const again = reduceTimelines(closed, { _tag: "DraftClosed" });
+
+    expect([mainOf(closed), mainOf(again)]).toStrictEqual([
+      {
+        _tag: "DirectDraft",
+        back: { _tag: "Timeline" },
+        declared: null,
+        network: alpha,
+        nick: "bob",
+      },
+      { _tag: "Timeline" },
+    ]);
+  });
+});
+
+/**
+ * A failed Connection, as an item of alpha's own Timeline.
+ * @param at - Its time.
+ * @param sequence - Its step.
+ * @param host - The Ircd's host.
+ * @param reason - Why it ended.
+ * @returns The item.
+ */
+const failure = (
+  at: number,
+  sequence: number,
+  host = "irc.example.net",
+  reason: "Ended" | "Refused" = "Ended"
+) =>
+  decodeItem({
+    changed: sequence,
+    content: {
+      _tag: "ConnectionFailed",
+      at,
+      ircd: { host, port: 6697, tls: false },
+      opened: true,
+      reason: { _tag: "Closed", reason },
+    },
+    level: "Activity",
+    network: "alpha",
+    position: cursor(at, sequence),
+    sequence,
+    timeline: idOf(1),
+  });
+
+describe("failed Connections in a row", () => {
+  it("are one row: the latest, with how many and when the first was, under the first's key", () => {
+    let state = reduceTimelines(following(), { _tag: "Opened", timeline: one });
+    const read = wanted(state).find((each) => each._tag === "Latest") ?? latestOf(one, 0);
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read });
+    state = reduceTimelines(state, {
+      _tag: "WindowRead",
+      read,
+      window: decodeWindow({
+        earlier: false,
+        gaps: [],
+        items: [
+          failure(10, 1),
+          failure(20, 2),
+          failure(30, 3),
+          // Another reason, then another Ircd, each its own run.
+          failure(40, 4, "irc.example.net", "Refused"),
+          failure(50, 5, "irc.example.org", "Refused"),
+          failure(60, 6, "irc.example.org", "Refused"),
+          message(idOf(1), 70, 7),
+          // After something else, a run begins again.
+          failure(80, 8),
+        ].map((item) => Schema.encodeSync(TimelineItem)(item)),
+        later: false,
+        network: "alpha",
+        through: 9,
+        timeline: idOf(1),
+        version: 1,
+      }),
+    });
+
+    const shown = opened(state);
+    const rows = shown._tag === "Shown" ? rowsOf(shown.window) : [];
+
+    expect(
+      rows.map((row) =>
+        row._tag === "Item" ? [row.key, row.item.sequence, row.repeated] : [row.key]
+      )
+    ).toStrictEqual([
+      [cursor(10, 1), 3, { count: 3, from: 10 }],
+      [cursor(40, 4), 4, undefined],
+      [cursor(50, 5), 6, { count: 2, from: 50 }],
+      [cursor(70, 7), 7, undefined],
+      [cursor(80, 8), 8, undefined],
+    ]);
+  });
+});
+
+/**
+ * A state following alpha with no Timeline open in its one Pane.
+ * @returns The state.
+ */
+const nothingOpen = (): Timelines => ({ ...following(), layout: single(emptyView) });
+
+/**
+ * A draft in each of two Panes, nothing open behind either: Alice's in p0, and Bob's in p1,
+ * which has the focus.
+ * @returns The state.
+ */
+const twoDrafts = (): Timelines =>
+  folded(nothingOpen(), [
+    { _tag: "DraftShown", declared: null, network: alpha, nick: "alice" },
+    { _tag: "Pane", change: { _tag: "Split", axis: "Horizontal", timeline: undefined } },
+    { _tag: "DraftShown", declared: null, network: alpha, nick: "bob" },
+  ]);
+
+/**
+ * The placement of a Say said in a state, and Bob's Timeline then listed.
+ * @param said - The state the Say was said in.
+ * @returns The events.
+ */
+const placedFrom = (said: Timelines): readonly TimelinesEvent[] => [
+  {
+    _tag: "Located",
+    from: originOf(said),
+    navigation: said.navigation,
+    timeline: timelineId(idOf(6)),
+  },
+  changed(6, { timelines: [direct(idOf(6), "bob")] }),
+];
+
+/**
+ * Each Pane's view, by what it shows.
+ * @param state - The state.
+ * @returns The Panes.
+ */
+const showing = (state: Timelines) =>
+  panesOf(state.layout.root).map((pane) => [
+    pane.id,
+    pane.view.main._tag === "DirectDraft" ? pane.view.main.nick : pane.view.main._tag,
+    pane.view.open,
+  ]);
+
+describe("a placement lands where it was said", () => {
+  it("lets go of one said from Bob's draft once the focus moved to Alice's", () => {
+    const said = twoDrafts();
+    const moved = reduceTimelines(said, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } });
+    const after = folded(moved, placedFrom(said));
+
+    expect({
+      after: showing(after),
+      bumped: moved.navigation > said.navigation,
+      located: after.located,
+    }).toStrictEqual({
+      // Alice's Pane is untouched; Bob's draft meets its Timeline in its own Pane.
+      after: [
+        ["p0", "alice", undefined],
+        ["p1", "Timeline", idOf(6)],
+      ],
+      bumped: true,
+      located: undefined,
+    });
+  });
+
+  it("lets go of one said from Bob's draft once Bob's Pane closed onto Alice's", () => {
+    const said = twoDrafts();
+    const closed = reduceTimelines(said, { _tag: "Pane", change: { _tag: "Close" } });
+    const after = folded(closed, placedFrom(said));
+
+    expect(showing(after)).toStrictEqual([["p0", "alice", undefined]]);
+  });
+
+  it("opens in its own Pane, not the focused one, when the focus moved to a Pane showing the same", () => {
+    // Two empty Panes: `/msg bob hi` said from p1, then the focus moves to p0, also empty.
+    const said = reduceTimelines(nothingOpen(), {
+      _tag: "Pane",
+      change: { _tag: "Split", axis: "Horizontal", timeline: undefined },
+    });
+
+    const moved = reduceTimelines(said, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } });
+    const after = folded(moved, placedFrom(said));
+
+    expect({
+      after: showing(after),
+      bumped: moved.navigation > said.navigation,
+      focused: after.layout.focused,
+    }).toStrictEqual({
+      after: [
+        ["p0", "Timeline", undefined],
+        ["p1", "Timeline", idOf(6)],
+      ],
+      bumped: false,
+      focused: "p0",
+    });
+  });
+
+  it("still opens after a swap, which moves the Pane it was said from with the focus", () => {
+    const said = twoDrafts();
+
+    const swapped = reduceTimelines(said, {
+      _tag: "Pane",
+      change: { _tag: "Swap", direction: "Left" },
+    });
+
+    const after = folded(swapped, placedFrom(said));
+
+    expect({ after: showing(after), bumped: swapped.navigation > said.navigation }).toStrictEqual({
+      after: [
+        ["p1", "Timeline", idOf(6)],
+        ["p0", "alice", undefined],
+      ],
+      bumped: false,
+    });
+  });
+});
+
+describe("a draft meets its Timeline", () => {
+  it("shows the Timeline listed for its nick, by the mapping it was made with, in place, moving nothing else", () => {
+    const start = reduceTimelines(following(), {
+      _tag: "DraftShown",
+      declared: "ascii",
+      network: alpha,
+      nick: "Bob",
+    });
+
+    // Bob spoke first, or another Frontend said something to him: his Timeline is listed.
+    const met = reduceTimelines(start, changed(6, { timelines: [direct(idOf(6), "bob")] }));
+
+    expect({
+      between: draftsMetBetween(start, met),
+      met: [showing(met), met.navigation, met.layout.focused],
+    }).toStrictEqual({
+      between: [{ declared: "ascii", network: alpha, nick: "Bob", timeline: idOf(6) }],
+      met: [[["p0", "Timeline", idOf(6)]], start.navigation, "p0"],
+    });
+  });
+
+  it("never folds by a mapping the draft was not made with, so `[bob]` never meets `{bob}` once ascii is declared", () => {
+    // `known` was read before the Ircd's 005, when nothing was declared, so rfc1459 folded
+    // `[bob]` and `{bob}` together. The 005 then declared ascii, and `/query [bob]` read that
+    // fresh, finding no Timeline, so it made the draft with ascii.
+    const read = folded(following(), [
+      { _tag: "ReadStarted", read: { _tag: "Status", attempt: 0, network: alpha } },
+      {
+        _tag: "StatusRead",
+        network: alpha,
+        self: null,
+        session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 }),
+      },
+    ]);
+
+    const ascii = folded(read, [
+      { _tag: "DraftShown", declared: "ascii", network: alpha, nick: "[bob]" },
+      changed(6, { timelines: [direct(idOf(6), "{bob}")] }),
+      changed(7, { timelines: [direct(idOf(7), "someone")] }),
+    ]);
+
+    // A draft made before any declaration cannot know whether `[bob]` and `{bob}` are one
+    // User, so it waits; a nick every mapping folds alike still meets its Timeline.
+    const undeclared = folded(read, [
+      { _tag: "DraftShown", declared: null, network: alpha, nick: "[bob]" },
+      changed(6, { timelines: [direct(idOf(6), "{bob}")] }),
+    ]);
+
+    const plain = folded(read, [
+      { _tag: "DraftShown", declared: null, network: alpha, nick: "Bob" },
+      changed(6, { timelines: [direct(idOf(6), "bob")] }),
+    ]);
+
+    expect({
+      ascii: [mainOf(ascii)._tag, openOf(ascii)],
+      plain: [mainOf(plain)._tag, openOf(plain)],
+      undeclared: [mainOf(undeclared)._tag, openOf(undeclared)],
+    }).toStrictEqual({
+      ascii: ["DirectDraft", three],
+      plain: ["Timeline", idOf(6)],
+      undeclared: ["DirectDraft", three],
+    });
+  });
+
+  it("reports a draft behind the options or the search as met when closing them shows its Timeline", () => {
+    const draft = reduceTimelines(following(), {
+      _tag: "DraftShown",
+      declared: null,
+      network: alpha,
+      nick: "bob",
+    });
+
+    const covered = [
+      reduceTimelines(draft, { _tag: "OptionsShown", filter: "" }),
+      searching(draft, "m3 word"),
+    ].map((over) => reduceTimelines(over, changed(6, { timelines: [direct(idOf(6), "bob")] })));
+
+    const closed = covered.map((over) =>
+      reduceTimelines(over, {
+        _tag: mainOf(over)._tag === "Options" ? "OptionsClosed" : "SearchClosed",
+      })
+    );
+
+    expect({
+      behind: covered.map((over) => mainOf(over)._tag),
+      closed: closed.map((after) => [mainOf(after)._tag, openOf(after)]),
+      met: covered.map((over, index) => draftsMetBetween(over, closed[index] ?? over)),
+    }).toStrictEqual({
+      behind: ["Options", "Search"],
+      closed: [
+        ["Timeline", idOf(6)],
+        ["Timeline", idOf(6)],
+      ],
+      met: [
+        [{ declared: null, network: alpha, nick: "bob", timeline: idOf(6) }],
+        [{ declared: null, network: alpha, nick: "bob", timeline: idOf(6) }],
+      ],
+    });
+  });
+});
+
+describe("what a Pane is called, and what the composer counts as open", () => {
+  it("names a Pane by what it shows, never by the Timeline behind it", () => {
+    const start = following();
+    const options = reduceTimelines(start, { _tag: "OptionsShown", filter: "" });
+
+    const draft = reduceTimelines(start, {
+      _tag: "DraftShown",
+      declared: null,
+      network: alpha,
+      nick: "bob",
+    });
+
+    expect([
+      paneName(start),
+      paneName(options),
+      paneName(searching(start, "m3 word")),
+      paneName(draft),
+      paneName(nothingOpen()),
+    ]).toStrictEqual(["#a", "options", "search", "bob", "empty"]);
+  });
+
+  it("counts a Timeline behind something in front as not shown, so /next-unread goes to it", () => {
+    // `#a`, open behind the options or a draft, has a Highlight unread.
+    const unread = reduceTimelines(
+      following(),
+      changed(6, {
+        timelines: [
+          Schema.encodeSync(Timeline)({
+            ...timelineOf(idOf(3), "Channel", "#a", 6),
+            unread: { activity: 0, direct: 0, highlights: 1, messages: 1 },
+          }),
+        ],
+      })
+    );
+
+    const behind = [
+      reduceTimelines(unread, { _tag: "OptionsShown", filter: "" }),
+      reduceTimelines(unread, { _tag: "DraftShown", declared: null, network: alpha, nick: "bob" }),
+    ].map((state) => {
+      const context = contextOf(state);
+      const jump = interpret("/next-unread", context);
+
+      return [context.behind, jump._tag === "Parsed" ? jump.value : jump];
+    });
+
+    expect({
+      behind,
+      shown: interpret("/next-unread", contextOf(unread)),
+    }).toStrictEqual({
+      behind: [
+        [true, [{ _tag: "Open", timeline: three }]],
+        [true, [{ _tag: "Open", timeline: three }]],
+      ],
+      shown: { _tag: "Parsed", value: [] },
     });
   });
 });

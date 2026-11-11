@@ -1,0 +1,40 @@
+/* A Direct Message not yet begun: its head as a Timeline's, and an empty log under it. */
+.view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.name {
+  color: var(--color-accent);
+}
+
+.dim {
+  color: var(--color-muted);
+}
+
+.header > :last-child {
+  margin-left: auto;
+}
+
+.log {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-muted);
+  outline: none;
+}
+
+.log:focus-visible {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}

@@ -11,6 +11,7 @@ import type { NetworkId, TimelineId } from "@iirc/api";
 import { casefold } from "@iirc/protocol/casemapping";
 
 import { commands } from "./commands.ts";
+import { isTimelinePlace } from "./composer.ts";
 import type { Place } from "./composer.ts";
 import { fields, optionName } from "./options.ts";
 import type { Option } from "./options.ts";
@@ -664,7 +665,7 @@ export const chantypesWanted = (
   place: Place,
   chantypes: ReadonlyMap<NetworkId, Chantypes>
 ): { readonly network: NetworkId; readonly since: number } | undefined => {
-  if (place === "Nowhere") {
+  if (!isTimelinePlace(place)) {
     return undefined;
   }
 
@@ -722,7 +723,7 @@ export const sourcesOf = (
     options: optionNames(networks, options),
   };
 
-  if (place === "Nowhere") {
+  if (!isTimelinePlace(place)) {
     return {
       ...at,
       channels: [],

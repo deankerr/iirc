@@ -42,7 +42,8 @@
 
 .item {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   padding: 0 var(--space-3);
   outline: none;
   cursor: default;
@@ -88,12 +89,12 @@
   color: var(--color-muted);
 }
 
+/* The chosen member's actions, right under their nick. */
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border-top: var(--border-width) solid var(--color-border);
+  padding: var(--space-1) 0 var(--space-1) calc(1ch + var(--space-1));
 }
 
 @media (max-width: 640px) {

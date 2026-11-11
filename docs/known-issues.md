@@ -13,7 +13,6 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 
 - **A theme file can take too long in Safari or Node.** Effect's YAML parser has quadratic regexes (`endsWithEscape`, `foldFlowLines`) in JavaScriptCore and Node, though V8 reads the same text at once. Import runs in a Worker with a one-second limit, so the page never freezes, but a hostile or very odd base16 or Alacritty YAML file is refused as too slow to read. Reporting it upstream is still to do.
 - **Scrolling up through a long Timeline pauses once at a thousand lines** with "Load older", so an automatic read never pushes the latest out of the window. One click goes on.
-- **`/query` cannot open a conversation that has never had a Message.** A Direct Message Timeline exists only once something is said, so `/query` puts `/msg <nick> ` in the composer instead.
 - **A detached Direct Message Timeline cannot be marked read,** since no Target names it. Its counts stay until the API can mark a Timeline by its id.
 - **The Panes' keys do nothing while the sidebar's tree has focus,** because the tree takes Alt+Shift and an arrow itself. They work from the composer or a Pane.
 - **Search keeps diacritics and does not join composed and decomposed forms,** so `cafe` finds neither `café` nor `cafe` written with a combining accent. `from:` compares the sender folded for search, not by the Network's casemapping, so under `rfc1459` `[a` does not find `{a`.

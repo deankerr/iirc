@@ -62,6 +62,8 @@ const valueOf = (read: ReturnType<typeof set>) => {
 };
 
 const inChannel: CommandContext = {
+  behind: false,
+  draft: undefined,
   focus: {
     detached: false,
     key: "#iirc",
@@ -80,6 +82,8 @@ const inChannel: CommandContext = {
 };
 
 const nowhere: CommandContext = {
+  behind: false,
+  draft: undefined,
   focus: undefined,
   head: undefined,
   open: undefined,

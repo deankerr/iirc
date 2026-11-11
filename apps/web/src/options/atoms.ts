@@ -30,7 +30,7 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
-import { signInState } from "../sign-in/atoms.ts";
+import { signedIn, signInState } from "../sign-in/atoms.ts";
 import { timelinesState } from "../timelines/atoms.ts";
 import { deviceUi } from "./device.ts";
 
@@ -394,20 +394,53 @@ const navigated = (registry: AtomRegistry.AtomRegistry, event: TimelinesEvent) =
   registry.set(timelinesState, reduceTimelines(registry.get(timelinesState), event));
 };
 
+/** Whether a Pane shows the options, however they came to show. */
+const optionsShown = Atom.make((get) => get(optionsFilter) !== undefined);
+
 /**
- * Shows the options in the main view, filtered as given, with nothing edited or asked, and
- * reads what they show. Opening any Timeline shows it again.
+ * Reads every Network's Configuration, and the Credentials held, each time the options come
+ * to show in a Pane, however they came to: `/set`, the sidebar, the palette, a Pane focused
+ * or closed, or a layout restored with them showing. So what they show follows from their
+ * showing, and nothing that shows them need remember to read. Mounted once for the page.
+ */
+export const optionsSync = runtime
+  .atom((get) =>
+    Effect.gen(function* () {
+      if (get(signedIn) && get(optionsShown)) {
+        yield* refresh(get.registry);
+      }
+    })
+  )
+  .pipe(Atom.keepAlive);
+
+/**
+ * Shows the options in the main view, filtered as given, with nothing edited or asked.
+ * Showing them reads what they show, by `optionsSync`, and asking again while they show
+ * reads it again. Opening any Timeline, Escape, or their close button shows what the Pane
+ * showed before.
  */
 export const openOptions = runtime
   .fn((filter: string, get) =>
     Effect.gen(function* () {
+      const again = get.registry.get(optionsShown);
+
       navigated(get.registry, { _tag: "OptionsShown", filter });
       happened(get.registry, { _tag: "Editing", name: undefined });
       happened(get.registry, { _tag: "Noticed", message: undefined });
-      yield* refresh(get.registry);
+
+      if (again) {
+        yield* refresh(get.registry);
+      }
     })
   )
   .pipe(Atom.keepAlive);
+
+/** Closes the options, showing what their Pane showed before them. */
+export const closeOptions = Atom.fnSync((_, get) => {
+  happened(get.registry, { _tag: "Editing", name: undefined });
+  happened(get.registry, { _tag: "Confirming", name: undefined });
+  navigated(get.registry, { _tag: "OptionsClosed" });
+}).pipe(Atom.keepAlive);
 
 /** Filters the options view as the Owner types. */
 export const filterOptions = Atom.fnSync((filter: string, get) => {

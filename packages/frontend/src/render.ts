@@ -353,8 +353,48 @@ export type Line =
   | {
       readonly _tag: "Description";
       readonly tone: "Activity" | "Session" | "Refused";
+      /**
+       * What stands in the senders' column, where a Message's nick does, so the words line
+       * up with a Message's text: `-->` for one who arrived, `<--` for one who left, `--`
+       * for any other Activity, as WeeChat marks them, and none for a Session or a refusal.
+       */
+      readonly marker: Marker | undefined;
       readonly parts: readonly Part[];
     };
+
+/** What marks an Activity in the senders' column: arriving, leaving, or anything else. */
+export type Marker = "-->" | "<--" | "--";
+
+/**
+ * What marks an Activity: `-->` for a join, `<--` for a part, a quit, or a kick, and `--`
+ * for anything else.
+ * @param activity - The Activity.
+ * @returns Its marker.
+ */
+const markerOf = (activity: Activity): Marker => {
+  switch (activity._tag) {
+    case "Joined": {
+      return "-->";
+    }
+
+    case "Parted":
+    case "Quit":
+    case "Kicked": {
+      return "<--";
+    }
+
+    case "NickChanged":
+    case "TopicChanged":
+    case "ModeChanged":
+    case "AwayChanged": {
+      return "--";
+    }
+
+    default: {
+      return activity satisfies never;
+    }
+  }
+};
 
 const words = (text: string): Part => ({ _tag: "Words", text });
 
@@ -787,12 +827,18 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
     }
 
     case "Activity": {
-      return { _tag: "Description", parts: describeActivity(content.activity), tone: "Activity" };
+      return {
+        _tag: "Description",
+        marker: markerOf(content.activity),
+        parts: describeActivity(content.activity),
+        tone: "Activity",
+      };
     }
 
     case "SessionBegan": {
       return {
         _tag: "Description",
+        marker: undefined,
         parts: [words("Connected as "), nickPart(content.nick)],
         tone: "Session",
       };
@@ -801,6 +847,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
     case "SessionEnded": {
       return {
         _tag: "Description",
+        marker: undefined,
         parts: [words(`Disconnected: ${endReason(content.reason)}`)],
         tone: "Session",
       };
@@ -809,6 +856,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
     case "ConnectionFailed": {
       return {
         _tag: "Description",
+        marker: undefined,
         parts: failedParts(content, network),
         tone: "Session",
       };
@@ -819,6 +867,7 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
 
       return {
         _tag: "Description",
+        marker: undefined,
         parts: [
           ...attemptedParts(content.attempted),
           words(
