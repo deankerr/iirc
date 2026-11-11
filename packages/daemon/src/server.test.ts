@@ -1,7 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync } from "node:fs";
 
 import { BunFileSystem, BunHttpServer } from "@effect/platform-bun";
-import { Happened, SaidAnswer, TimelineChange, TimelineList, TimelineWindow } from "@iirc/api";
+import {
+  Happened,
+  ItemAfter,
+  SaidAnswer,
+  SearchResults,
+  TimelineChange,
+  TimelineList,
+  TimelineWindow,
+} from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { makeSqliteJournal } from "@iirc/journal-sqlite";
 import { makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
@@ -219,6 +227,10 @@ const decodeChange = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineChan
 const decodeList = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineList));
 
 const decodeWindow = Schema.decodeUnknownSync(Schema.fromJsonString(TimelineWindow));
+
+const decodeSearch = Schema.decodeUnknownSync(Schema.fromJsonString(SearchResults));
+
+const encodeAfter = Schema.encodeSync(ItemAfter);
 
 // What an error's body says: its tag, and for an `InvalidRequest`, where each issue was.
 const decodeError = Schema.decodeUnknownSync(
@@ -472,6 +484,87 @@ describe("the API over a real server", () => {
       located: 200,
       projection: { _tag: "Running" },
       through: true,
+    });
+  });
+
+  it("searches over the wire, takes a query's syntax as text, and refuses a search it cannot make", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        const following = yield* served.request("/api/timelines/changes");
+        const texts = ['say "hi" OR NEAR(x)', "Hello there", "hello again"];
+
+        yield* talk(served, texts);
+        yield* readEvents(following, (read) => changedTexts(read).includes("hello again"));
+
+        const search = (query: string) =>
+          served.request(`/api/search?${query}`).pipe(
+            Effect.flatMap((response) => bodyOf(response)),
+            Effect.map(decodeSearch)
+          );
+
+        const found = (query: string) =>
+          search(query).pipe(
+            Effect.map((page) =>
+              page.items.map((item) => (item.content._tag === "Message" ? item.content.text : ""))
+            )
+          );
+
+        const first = yield* search("text=HELLO&limit=1");
+
+        const answered = [];
+
+        for (const query of [
+          "text=ab",
+          "text=a%00bc",
+          "text=a%0Abc",
+          "",
+          "text=hello&limit=501",
+          "text=hello&after=nope",
+          "text=hello&since=soon",
+          "text=hello&from=a%20b",
+          "text=hello&timeline=nope",
+          "text=hello&network=Libera",
+          "text=hello&network=oftc",
+          "text=hello&timeline=00000000000fff-00000000-00000000",
+        ]) {
+          const response = yield* served.request(`/api/search?${query}`);
+
+          answered.push([response.status, decodeError(yield* bodyOf(response))._tag]);
+        }
+
+        return {
+          answered,
+          first: [first.items.length, first.more, first.next === null],
+          hostile: yield* found(`text=${encodeURIComponent('"hi" OR NEAR(')}`),
+          next: yield* found(
+            `text=hello&after=${encodeURIComponent(first.next === null ? "" : encodeAfter(first.next))}`
+          ),
+          peer: yield* found("text=hello&from=PEER&network=libera"),
+          star: yield* found(`text=${encodeURIComponent("*")}${encodeURIComponent("**")}`),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      answered: [
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [400, "InvalidRequest"],
+        [404, "UnknownNetwork"],
+        [404, "UnknownTimeline"],
+      ],
+      first: [1, true, false],
+      hostile: ['say "hi" OR NEAR(x)'],
+      next: ["Hello there"],
+      peer: ["hello again", "Hello there"],
+      star: [],
     });
   });
 

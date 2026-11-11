@@ -16,9 +16,20 @@ export { emptyDirectory, projectionVersion, step } from "./fold.ts";
 
 export type { Directory, Happened, Keyed, NetworkDirectory, Stepped } from "./fold.ts";
 
-export { comparePositions, cursorOf, cursorsAfter, parseCursor } from "./position.ts";
+export { comparePositions, cursorOf, cursorsAfter, cursorsFrom, parseCursor } from "./position.ts";
 
 export type { Position } from "./position.ts";
+
+export {
+  SearchText,
+  foldForSearch,
+  searchTextMaximum,
+  searchFolding,
+  searchTextMinimum,
+  searchableOf,
+} from "./search.ts";
+
+export type { Searchable } from "./search.ts";
 
 export { TimelineId, timelineIdOf } from "./timeline.ts";
 

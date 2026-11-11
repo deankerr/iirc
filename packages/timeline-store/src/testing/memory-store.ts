@@ -1,5 +1,12 @@
 import type { Instant, IntentId, MessageId } from "@iirc/client";
-import { cursorOf, delivered, emptyDirectory, unreadCap } from "@iirc/timelines";
+import {
+  cursorOf,
+  delivered,
+  emptyDirectory,
+  foldForSearch,
+  searchableOf,
+  unreadCap,
+} from "@iirc/timelines";
 import type {
   Change,
   DeliveryChange,
@@ -17,6 +24,7 @@ import type {
   CollapsedGap,
   Gap,
   Item,
+  Search,
   Summary,
   TimelineStoreService,
   Tombstone,
@@ -559,6 +567,43 @@ const collapse = (
 };
 
 /**
+ * The Messages a search finds, by walking every item, as no adapter that must stay bounded
+ * may: newest first, by position and then Timeline id, each later one first.
+ * @param memory - The store.
+ * @param search - The search.
+ * @returns Up to its limit, after the item it names.
+ */
+const searched = (memory: Memory, search: Search): readonly Item[] => {
+  const text = foldForSearch(search.text);
+  const from = search.from === undefined ? undefined : foldForSearch(search.from);
+
+  const timeline =
+    search.timeline === undefined
+      ? undefined
+      : (memory.merged.get(search.timeline)?.into ?? search.timeline);
+
+  const { after, since, until } = search;
+
+  return allItems(memory)
+    .filter((item) => {
+      const found = searchableOf(item.content);
+
+      return (
+        found !== undefined &&
+        found.text.includes(text) &&
+        (from === undefined || found.sender === from) &&
+        (search.network === undefined || item.network === search.network) &&
+        (timeline === undefined || item.timeline === timeline) &&
+        (since === undefined || item.position.at >= since) &&
+        (until === undefined || item.position.at < until) &&
+        (after === undefined || byPosition(item, { ...item, ...after }) < 0)
+      );
+    })
+    .toSorted((left, right) => byPosition(right, left))
+    .slice(0, Math.max(0, Math.floor(search.limit)));
+};
+
+/**
  * A Timeline store in memory. Each step is applied to a copy and swapped in at once, so
  * an apply is whole or absent. A write and reads made together take turns.
  * @returns A fresh, empty store, built by no projection version.
@@ -619,6 +664,7 @@ export const makeMemoryTimelineStore: Effect.Effect<TimelineStoreService> = Effe
             .slice(0, page.limit);
         }),
       reset: (version) => Ref.set(memory, empty(version)).pipe(turn.withPermits(1)),
+      search: (search) => read((now) => searched(now, search)),
       timeline: (timeline) =>
         read((now) => {
           const id = now.timelines.has(timeline) ? timeline : now.merged.get(timeline)?.into;

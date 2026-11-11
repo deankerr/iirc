@@ -60,6 +60,8 @@ import {
   Said,
   SaidAnswer,
   SayRequest,
+  SearchQuery,
+  SearchResults,
   SequenceFromString,
   SignInRequest,
   TimelineChangesEvent,
@@ -192,7 +194,8 @@ export class NewsGroup extends HttpApiGroup.make("news")
  * changed, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
  * Each read says the projection version and the last step folded into what it gave, to
  * follow the changes after. A Channel's Timeline also gives its head and its members, a
- * page at a time, as the Client knows them now.
+ * page at a time, as the Client knows them now. A search finds Messages by their text, a
+ * page at a time, newest first.
  */
 export class TimelinesGroup extends HttpApiGroup.make("timelines")
   .add(
@@ -229,6 +232,11 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
       params: { network: NetworkId, sequence: SequenceFromString },
       query: LocateQuery,
       success: Located,
+    }),
+    HttpApiEndpoint.get("search", "/search", {
+      error: [UnknownNetwork, UnknownTimeline, TimelinesFailed],
+      query: SearchQuery,
+      success: SearchResults,
     })
   )
   .middleware(Authorization) {}

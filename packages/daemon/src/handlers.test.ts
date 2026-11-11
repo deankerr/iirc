@@ -6,6 +6,7 @@ import {
   CredentialPathName,
   DaemonApi,
   NetworkId,
+  SearchText,
   Sequence as WireSequence,
   TimelineId,
   UiChanged,
@@ -1287,6 +1288,84 @@ describe("the handlers", () => {
       same: true,
       through: true,
       unlisted: "UnknownNetwork",
+    });
+  });
+
+  it("searches Messages newest first, a page at a time, and a result opens a window around it", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, ["deploy one", "chat", "Deploy two"]);
+
+        yield* say(call, ":other!u@h PRIVMSG iirc :DEPLOY by other");
+        yield* say(call, ":peer!u@h PRIVMSG iirc :deploy three");
+        yield* settle;
+
+        const peer = yield* timelineNamed(api, "peer");
+        const text = SearchText.make("deploy");
+        const first = yield* api.timelines.search({ query: { limit: 2, text } });
+
+        if (first.next === null) {
+          return yield* Effect.die(new Error("no next page"));
+        }
+
+        const second = yield* api.timelines.search({
+          query: { after: first.next, limit: 2, text },
+        });
+
+        const [two] = second.items;
+
+        if (two === undefined) {
+          return yield* Effect.die(new Error("no second page"));
+        }
+
+        // The result's position opens a window of its Timeline that holds it.
+        const around = yield* api.timelines.window({
+          params: { timeline: two.timeline },
+          query: { around: two.position, limit: 3 },
+        });
+
+        const texts = (query: Omit<Parameters<typeof api.timelines.search>[0]["query"], "text">) =>
+          api.timelines
+            .search({ query: { ...query, text } })
+            .pipe(Effect.map((page) => page.items.map(textOf)));
+
+        const unknownTimeline = yield* api.timelines
+          .search({
+            query: { text, timeline: TimelineId.make("00000000000fff-00000000-00000000") },
+          })
+          .pipe(Effect.flip);
+
+        const unknownNetwork = yield* api.timelines
+          .search({ query: { network: NetworkId.make("oftc"), text } })
+          .pipe(Effect.flip);
+
+        return {
+          first: [first.items.map(textOf), first.more, first.next !== null],
+          from: yield* texts({ from: "OTHER" }),
+          inPeer: yield* texts({ network: libera, timeline: peer }),
+          opened: around.items.some(
+            (item) =>
+              item.timeline === two.timeline &&
+              item.sequence === two.sequence &&
+              textOf(item) === "Deploy two"
+          ),
+          second: [second.items.map(textOf), second.more, second.next],
+          through: first.through !== null && first.version === projectionVersion,
+          unknownNetwork: unknownNetwork._tag,
+          unknownTimeline: unknownTimeline._tag,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      first: [["deploy three", "DEPLOY by other"], true, true],
+      from: ["DEPLOY by other"],
+      inPeer: ["deploy three", "Deploy two", "deploy one"],
+      opened: true,
+      second: [["Deploy two", "deploy one"], false, null],
+      through: true,
+      unknownNetwork: "UnknownNetwork",
+      unknownTimeline: "UnknownTimeline",
     });
   });
 
