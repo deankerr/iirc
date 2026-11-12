@@ -58,6 +58,11 @@ const decodeKnown = Schema.decodeUnknownSync(
   )
 );
 
+/** A Channel's head as the Daemon answers it, whatever it holds, to answer it changed. */
+const decodeHead = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+);
+
 /** What the end-to-end run reads of a Configuration: its Channels and nicks. */
 const decodeInForce = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -2464,6 +2469,34 @@ describe("the web frontend on iirc daemon --web", () => {
 
         page.on("pageerror", (error) => problems.push(error.message));
 
+        // No Ircd here says a Channel's modes with a parameter as long as it likes, so the
+        // Channel's head is answered as the Daemon answers it, with its modes made hostile.
+        await page.route(/\/api\/timelines\/[^/]+\/channel$/u, async (route) => {
+          // The Daemon may have stopped, as the test ends.
+          const response = await route.fetch().catch(() => {});
+
+          if (response === undefined) {
+            await route.abort();
+
+            return;
+          }
+
+          const head = decodeHead(await response.text());
+
+          await route.fulfill({
+            json: {
+              ...head,
+              modes: {
+                _tag: "Known",
+                at: 1,
+                from: "ircd",
+                value: [{ mode: "f", param: "x".repeat(200) }],
+              },
+            },
+            response,
+          });
+        });
+
         await page.goto(base);
         await page.getByLabel("Key").fill(key);
         await page.getByRole("button", { name: "Sign in" }).click();
@@ -2472,6 +2505,13 @@ describe("the web frontend on iirc daemon --web", () => {
         const log = page.getByRole("log", { name: channel });
 
         await log.waitFor();
+
+        // Enough before them that the Timeline scrolls, each long enough to wrap where narrow.
+        for (let index = 1; index <= 80; index += 1) {
+          peer.send(`PRIVMSG ${channel} :filler ${index} ${"some words to wrap ".repeat(5)}`);
+        }
+
+        await log.getByText("filler 80 ", { exact: false }).waitFor();
 
         // What has nowhere to break, what is wide, and what is plain, said and done.
         const said = [
@@ -2516,6 +2556,39 @@ describe("the web frontend on iirc daemon --web", () => {
           });
         };
 
+        /**
+         * Whether a Channel's modes as long as a Network likes keep the bar's control in its
+         * Pane, with the hostile modes the head was answered with.
+         * @param width - The page's width.
+         * @returns How far the members' toggle reaches past the bar.
+         */
+        const hostileModes = async (width: number) => {
+          await page.setViewportSize({ height: 800, width });
+
+          return await page
+            .locator("[data-pane] header")
+            .first()
+            .evaluate((bar) => {
+              const toggle = bar.querySelector("[data-members-toggle]");
+
+              if (toggle === null) {
+                return "missing";
+              }
+
+              return Math.max(
+                Math.round(
+                  toggle.getBoundingClientRect().right - bar.getBoundingClientRect().right
+                ),
+                0
+              );
+            });
+        };
+
+        await page.locator("[data-pane] header bdi[title^='+f']").waitFor();
+        const modesPast = [await hostileModes(1280), await hostileModes(560)];
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+
         const drawn: Record<number, { layout: string; sideways: number }> = {};
 
         for (const width of [1280, 900, 700, 520, 390, 320, 240]) {
@@ -2524,11 +2597,18 @@ describe("the web frontend on iirc daemon --web", () => {
         }
 
         expect({
+          modesPast,
           narrow: drawn[390]?.layout,
           problems,
           sideways: Object.entries(drawn).filter(([, one]) => one.sideways > 0),
           wide: drawn[1280]?.layout,
-        }).toStrictEqual({ narrow: "block", problems: [], sideways: [], wide: "grid" });
+        }).toStrictEqual({
+          modesPast: [0, 0],
+          narrow: "block",
+          problems: [],
+          sideways: [],
+          wide: "grid",
+        });
       } finally {
         visitor.close();
         peer.close();

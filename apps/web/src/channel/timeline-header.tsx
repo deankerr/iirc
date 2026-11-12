@@ -85,8 +85,9 @@ const TopicLine = ({ open, topic }: { readonly topic: TopicShown; readonly open:
           {open ? (
             <bdi className={styles.dim}>{setText(topic) ?? "the topic"}</bdi>
           ) : (
+            // The line is a button, so a link in it is text here, and a link once disclosed.
             <bdi>
-              <Inlines inlines={topic.inlines} />
+              <Inlines inlines={topic.inlines} links={false} />
             </bdi>
           )}
         </AriaButton>
@@ -147,7 +148,7 @@ const Details = ({ header, open }: { readonly header: Header; readonly open: boo
         <>
           {header.modes === undefined ? null : (
             <BarText fill={false}>
-              <bdi>{header.modes}</bdi>
+              <bdi title={header.modes}>{header.modes}</bdi>
             </BarText>
           )}
           {header.note === undefined ? (

@@ -27,7 +27,7 @@ const iirc = idOf(2);
 // A topic a hostile Network could send: an override that would reverse what follows, and
 // a word long enough to widen anything that let it.
 const override = String.fromCodePoint(0x20_2e);
-const hostileTopic = `${override}the plan ${"x".repeat(400)}`;
+const hostileTopic = `${override}the plan https://example.com/plan ${"x".repeat(400)}`;
 
 const listed = (
   id: string,
@@ -213,6 +213,8 @@ describe("a Pane's status bar", () => {
     const closed = {
       expanded: topic?.getAttribute("aria-expanded"),
       isolated: topic?.querySelector("bdi")?.textContent.includes("the plan") === true,
+      // The line is a button, so a link in the topic is only text there.
+      links: topic?.querySelectorAll("a").length,
       // The count is said once, in the toggle, and no word "members" stands in the bar.
       said: bar()?.textContent.includes("members") === true,
       shown: panelOf(topic)?.hidden === false,
@@ -228,6 +230,8 @@ describe("a Pane's status bar", () => {
       closed,
       open: {
         isolated: panel?.querySelector("bdi")?.textContent.includes("the plan") === true,
+        // Disclosed, the topic's link is a link.
+        link: panel?.querySelector("a")?.getAttribute("href"),
         // Who set it stands in the topic's place on the bar.
         set: topic?.textContent === "set by op",
         visible: panel?.hidden !== true,
@@ -236,11 +240,12 @@ describe("a Pane's status bar", () => {
       closed: {
         expanded: "false",
         isolated: true,
+        links: 0,
         said: false,
         shown: false,
         toggle: ["◨2", "false"],
       },
-      open: { isolated: true, set: true, visible: true },
+      open: { isolated: true, link: "https://example.com/plan", set: true, visible: true },
     });
   });
 });

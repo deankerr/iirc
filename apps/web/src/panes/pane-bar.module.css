@@ -13,12 +13,16 @@
   min-width: 0;
   min-block-size: calc(var(--line-height) * 1em + 2 * var(--border-width) + 2 * var(--space-1));
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  /* Whatever a Network sends, nothing on the line reaches past the Pane. */
+  overflow: hidden;
   white-space: nowrap;
 }
 
-/* Whatever a Network names a Timeline, it takes at most half the line, and is cut. */
+/* Whatever a Network names a Timeline, it takes at most half the line, and is cut, and
+   gives way further where the line is too short for the bar's control too. */
 .name {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 50%;
   overflow: hidden;
   color: var(--color-accent);
@@ -45,8 +49,14 @@
   text-overflow: ellipsis;
 }
 
+/* What stands as it is while it is short, such as a Channel's modes, which a Network can
+   make as long as it likes: at most a third of the line, cut, so the control stays in. */
 .fixed {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 33%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The bar's control, at its right. */

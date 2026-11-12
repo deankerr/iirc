@@ -15,7 +15,7 @@ import type { Level } from "@iirc/api";
 import { saidLevel } from "@iirc/frontend/activity";
 import type { Attempt } from "@iirc/frontend/sign-in";
 import { Atom } from "effect/reactivity";
-import { useContext, useLayoutEffect, useRef } from "react";
+import { useContext, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 
@@ -132,13 +132,36 @@ const edgeMoved = (key: string, width: number, shift: boolean): number | undefin
 };
 
 /**
+ * Calls back as the window is resized.
+ * @param changed - What to call.
+ * @returns What stops it.
+ */
+const onResize = (changed: () => void) => {
+  window.addEventListener("resize", changed);
+
+  return () => {
+    window.removeEventListener("resize", changed);
+  };
+};
+
+/**
+ * Half the window's width, the most the shell draws the sidebar.
+ * @returns It, in whole CSS pixels.
+ */
+const halfWindow = () => Math.floor(window.innerWidth / 2);
+
+/**
  * The sidebar's edge, a window splitter: dragged, or focused and moved with the arrows,
  * Home and End, it resizes the sidebar, and a double click puts it back as it began. The
  * width is kept as a drag ends, and as each key moves it.
  * @returns The separator.
  */
 const SidebarEdge = () => {
-  const width = useAtomValue(sidebarWidth);
+  const kept = useAtomValue(sidebarWidth);
+  // The sidebar is never drawn wider than half the window, whatever width was kept, so the
+  // edge says, and moves from, the width drawn.
+  const most = Math.max(narrowest, Math.min(widest, useSyncExternalStore(onResize, halfWindow)));
+  const width = Math.min(kept, most);
   const registry = useContext(RegistryContext);
   // Where a drag began: the pointer's x and the width then. A ref, since a drag is no state
   // anything else derives from.
@@ -158,7 +181,7 @@ const SidebarEdge = () => {
     const from = dragged.current;
 
     if (from !== undefined) {
-      resizeSidebar(registry, from.width + event.clientX - from.x, false);
+      resizeSidebar(registry, Math.min(most, from.width + event.clientX - from.x), false);
     }
   };
 
@@ -179,7 +202,7 @@ const SidebarEdge = () => {
 
     if (next !== undefined) {
       event.preventDefault();
-      resizeSidebar(registry, next, true);
+      resizeSidebar(registry, Math.min(most, next), true);
     }
   };
 
@@ -190,7 +213,7 @@ const SidebarEdge = () => {
     <hr
       aria-label="Resize the sidebar"
       aria-orientation="vertical"
-      aria-valuemax={widest}
+      aria-valuemax={most}
       aria-valuemin={narrowest}
       aria-valuenow={width}
       className={styles.edge}
