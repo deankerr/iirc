@@ -21,11 +21,12 @@ The core decides and this package draws and does the I/O.
 - **Takes what is typed from anywhere.** A character, a dead key, or a paste pressed where nothing takes text, such as a Pane's Timeline, the sidebar's tree, or the members' list, goes to the composer, which takes the focus with that very key. A palette, a dialog, a popover, or a menu keeps its keys, as does a key the keymap binds.
 - **Marks read where the Owner has seen it:** a Timeline at its latest, in a Pane they can see, once that has held for a second. The Daemon keeps the Read Marker, so every Frontend sees the counts clear.
 - **Searches the Messages of every Timeline,** newest first, in front of a Pane's Timeline. It searches on Enter, not as the Owner types, since a query half typed would search for something else. Choosing a result opens its Timeline read around it, and marks nothing read.
-- **Has a command palette,** opened by Mod+K, which lists commands, Timelines, themes, and options, ranked as the Owner types.
+- **Has a command palette,** opened by Mod+K, which lists commands, Timelines, themes, fonts, and options, ranked as the Owner types.
 - **Takes keys from anywhere on the page,** by the core's keymap. A key the keymap does not take goes on as it would.
 - **Changes Configuration as an option tree**, by `/set` and its kin or in the options view, which edits each option in place. A Credential is given only in a password prompt.
 - **Shares the options under `ui` between devices, and lets one override them** with `-device`.
 - **Draws in themes made from terminal palettes,** built in or imported from a theme file. A theme highlighted in the palette, or being imported, previews on the whole page.
+- **Draws text in the size and font the Owner chooses:** `ui.size`, from 10 to 24 pixels, 14 to start, and `ui.font`, the device's own monospace font, or one of five it serves itself, below. A font highlighted in the palette previews on the whole page, and a change takes effect at once.
 - **Shows who is here.** A Pane's status bar is one line: its number, the Timeline's name, a Channel's modes and its topic, cut to the line, and the members' toggle, which says how many there are. A press on the topic discloses it in full under the bar. The toggle, `/members`, or Alt+M shows the members under the bar, by rank, and a press, a tap, or Enter on one opens a menu of `query`, `whois`, and `mention`, Query first, so Enter twice opens their Direct Message.
 - **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
 - **Looks a User up,** with `/whois` and `/whowas`, as a card under the Pane's status bar.
@@ -45,7 +46,7 @@ The core decides and this package draws and does the I/O.
 | `src/search/`, `src/palette/`, `src/channel/`, `src/lookup/` | Each of those views and its atoms. `src/palette/` also holds the one key listener |
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
 | `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the sidebar's width and whether it shows |
-| `src/theme/` | The theme drawn, importing and removing themes, and the Worker a theme is read in |
+| `src/theme/` | The theme and the text's size and font drawn, the fonts, importing and removing themes, and the Worker a theme is read in |
 | `src/ui/` | The theme's tokens, a button, a password field that holds no value, and dates |
 
 ### The runtime
@@ -88,7 +89,8 @@ The core decides and this package draws and does the I/O.
 - **The Timeline view is TanStack Virtual's,** with only the rows near the view in the page. Where the view stands is kept in refs, never in state. A row in view stays still as rows are added above, dropped, or hidden by `ui.activity`.
 - **The view tells the core what the Owner has seen.** It says whether it is at the latest and names the last item in view. It tells a scroll the Owner made from one it made itself, so a Timeline opened at a search's result marks nothing read until the Owner goes to the latest.
 - **A view that cannot scroll reads older pages on its own,** as when the latest page is all hidden Activity, up to the window's cap. Past that, "Load older" asks on purpose.
-- **The theme is custom properties on the root, set through the CSSOM,** which a Content Security Policy allows where it refuses inline styles. `src/ui/theme.css` gives each colour as `light-dark()` for the first paint.
+- **The theme, and the text's size and font, are custom properties on the root, set through the CSSOM,** which a Content Security Policy allows where it refuses inline styles. `src/ui/theme.css` gives each colour as `light-dark()`, and the defaults' size and font, for the first paint. Rows are measured, so none assumes a size.
+- **A font is fetched only once text is drawn in it.** `src/theme/fonts.css` declares each one's faces from its `@fontsource` package: a regular, a bold, and both italic, or a variable font, in WOFF2 alone, split into the ranges the package gives. The browser fetches a file only for a family drawn with and a character of its range on the page, so the device's own font fetches nothing. Vite emits each as a file of the page's own and never inlines one, which `font-src 'self'` would refuse. While a font loads, if it never does, and for any glyph it lacks, such as box drawing, text is in the device's font.
 - **A theme file is read in a Worker, never in the page.** Effect's YAML parser is quadratic on some text, so a read that takes longer than a second is ended and refused in words. A browser that cannot start a Worker says so.
 - **Styles are CSS Modules over the theme.** No module names a colour of its own, and each module's class names are declared beside it, so a class that does not exist fails to compile.
 
@@ -117,6 +119,18 @@ Whether the screen is compact is `(max-width: 640px)`, past every phone held upr
 - **It runs under a strict Content Security Policy.** It loads nothing but its own files, with no inline script or style. React Aria would inject one inline `<style>` for its pressable elements, so `public/pressable.css` carries the same rule under the id React Aria looks for. On iOS WebKit alone, React Aria's scroll locking adds a `<style>` the policy refuses: the page still works, and only that rule is lost.
 - **An instant out of a `Date`'s range never takes the page down.** A Network can give any integer, so every time shown goes through `src/ui/dates.ts`, and one out of range shows as unavailable.
 - **The composer is no keyboard trap.** Tab is taken only when there is a word to complete.
+
+### The fonts
+
+Each is under the SIL Open Font License 1.1, which lets the fonts be served with the page so long as their licence goes with them: the build ships each package's licence as `licences/<font>.txt`. The versions are pinned in `package.json`. A size is of every file of the font, as the build and so the binary carry it. A page fetches only the ones its text needs, such as the Latin regular and italic, 80 kB for JetBrains Mono.
+
+| `ui.font`                    | Package                                           | Size   |
+| ---------------------------- | ------------------------------------------------- | ------ |
+| `jetbrains-mono`             | `@fontsource-variable/jetbrains-mono`             | 179 kB |
+| `ibm-plex-mono`              | `@fontsource/ibm-plex-mono`, 400 and 700          | 211 kB |
+| `source-code-pro`            | `@fontsource-variable/source-code-pro`            | 173 kB |
+| `commit-mono`                | `@fontsource/commit-mono`, 400 and 700            | 197 kB |
+| `atkinson-hyperlegible-mono` | `@fontsource-variable/atkinson-hyperlegible-mono` | 59 kB  |
 
 ## Development
 

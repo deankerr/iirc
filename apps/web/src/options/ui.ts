@@ -34,6 +34,9 @@ export const timeShown = Atom.make((get) => get(uiInEffect).time);
 /** Which Activity a Channel shows on this device, alone, as `timeShown` is. */
 export const activityShown = Atom.make((get) => get(uiInEffect).activity);
 
+/** The text's size on this device, in pixels, alone, as `timeShown` is. */
+export const sizeShown = Atom.make((get) => get(uiInEffect).size);
+
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older
  * read never replaces a newer one.

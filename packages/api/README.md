@@ -70,7 +70,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 
 - **A change names what it was made from.** A `PUT` of Configuration, or of an option under `ui`, with `ifSequence` is refused when another change was journaled since, and nothing is journaled: read again and send it again. The check and the append are one step, so two changes made from the same state never both pass. Without `ifSequence`, the last wins.
 - **Configuration is an option tree, and the Schema says what each option is**. A Frontend walks `NetworkConfiguration` to offer every field as an option, so a new field needs no work in any Frontend.
-- **The options under `ui` are the Owner's, shared by every device**. `UiOptions`, in `@iirc/api/ui`, describes each with its default: `theme`, `themes`, `colours`, `time`, and `activity`. A value is parsed by its option's Schema before it is journaled. At most 32 themes are held, and an import may not take `system`, a built-in theme's name, or a word `/theme` reads.
+- **The options under `ui` are the Owner's, shared by every device**. `UiOptions`, in `@iirc/api/ui`, describes each with its default: `theme`, `themes`, `colours`, `font`, `size`, `time`, and `activity`. A value is parsed by its option's Schema before it is journaled. At most 32 themes are held, and an import may not take `system`, a built-in theme's name, or a word `/theme` reads.
 - **The options under `ui` are streamed whole.** Each `changed` event is every option in force, so a Frontend that follows needs no read first, and one that reconnects misses nothing.
 
 ### Saying, acting, and looking up

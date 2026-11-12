@@ -508,4 +508,36 @@ describe("the palette and the keys", () => {
       value: editor.value,
     }).toStrictEqual({ editing: true, puts: 0, taken: true, value: "changed,not,sent" });
   });
+
+  it("edits the text's size in a number field within its bounds, set for every device on Enter", async () => {
+    const { container, daemon, registry } = await signedIn();
+    const name = "ui.size";
+    const selector = `input[aria-label="Value of ${name}"]`;
+
+    await run(registry, openOptions, "ui.size");
+    await act(async () => {
+      registry.set(editing, name);
+      await Promise.resolve();
+    });
+    await settled(() => container.querySelector(selector) !== null);
+
+    const editor = container.querySelector<HTMLInputElement>(selector);
+
+    if (editor === null) {
+      throw new Error("no editor");
+    }
+
+    const field = [editor.type, editor.min, editor.max, editor.step, editor.value];
+
+    await act(async () => {
+      editor.focus();
+      editor.value = "17";
+      await Promise.resolve();
+    });
+
+    await press(editor, { key: "Enter" });
+    await settled(() => daemon.ui.options.size === 17);
+
+    expect(field).toStrictEqual(["number", "10", "24", "1", "14"]);
+  });
 });

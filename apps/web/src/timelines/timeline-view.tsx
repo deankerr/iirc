@@ -17,7 +17,7 @@ import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 import { LookupCard } from "../lookup/lookup-card.tsx";
-import { activityShown } from "../options/ui.ts";
+import { activityShown, sizeShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
@@ -31,6 +31,9 @@ const nearTop = 240;
 
 /** How near the bottom counts as at it, in pixels. */
 const nearBottom = 8;
+
+/** A line's height, in ems, as `--line-height` in `theme.css` gives it. */
+const lineHeight = 1.45;
 
 /** How long, in milliseconds, the Owner's input or a move it made lets a scroll be theirs. */
 const gestureLife = 1000;
@@ -164,6 +167,7 @@ const Lines = ({
   readonly window: Window;
 }) => {
   const activity = useAtomValue(activityShown);
+  const size = useAtomValue(sizeShown);
   const cap = useAtomValue(windowCapOf);
   // Whether the page before can be read without asking, as scrolling near the top, or a
   // view that cannot be scrolled, reads it. Where it cannot, the view offers to read it on
@@ -256,7 +260,8 @@ const Lines = ({
   // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
-    estimateSize: () => 20,
+    // A line of text, as `--line-height` sets it, until a row is measured.
+    estimateSize: () => Math.ceil(size * lineHeight),
     getItemKey: (index) => rows[index]?.key ?? index,
     getScrollElement: () => scroller.current,
     overscan: 24,

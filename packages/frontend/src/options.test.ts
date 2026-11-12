@@ -904,7 +904,15 @@ const change = (option: string, value: Json | undefined, device: boolean) => ({
 
 describe("the options under ui", () => {
   const shared = {
-    options: { activity: "quiet", colours: "theme", theme: "dark", themes: [], time: "HH:mm" },
+    options: {
+      activity: "quiet",
+      colours: "theme",
+      font: "system",
+      size: 14,
+      theme: "dark",
+      themes: [],
+      time: "HH:mm",
+    },
     sequence: 7,
   } as const;
 
@@ -919,6 +927,18 @@ describe("the options under ui", () => {
       kinds: [
         { _tag: "Choice", choices: ["all", "quiet", "none"] },
         { _tag: "Choice", choices: ["theme", "raw"] },
+        {
+          _tag: "Choice",
+          choices: [
+            "system",
+            "jetbrains-mono",
+            "ibm-plex-mono",
+            "source-code-pro",
+            "commit-mono",
+            "atkinson-hyperlegible-mono",
+          ],
+        },
+        { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
         { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "none"] },
@@ -927,7 +947,7 @@ describe("the options under ui", () => {
   });
 
   it("lists each with the value in effect, the shared one, and this device's override", () => {
-    const options = uiOptionsOf(shared, { theme: "light" });
+    const options = uiOptionsOf(shared, { size: 18, theme: "light" });
     const before = uiOptionsOf(undefined, {});
 
     expect({
@@ -937,6 +957,8 @@ describe("the options under ui", () => {
       before: [
         ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
         ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
+        ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
+        ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.time", { _tag: "Shown", text: "HH:mm" }, { _tag: "Unset" }, undefined],
@@ -955,6 +977,20 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "theme" },
           undefined,
           "theme",
+        ],
+        [
+          "ui.font",
+          { _tag: "Shown", text: "system" },
+          { _tag: "Shown", text: "system" },
+          undefined,
+          "system",
+        ],
+        [
+          "ui.size",
+          { _tag: "Shown", text: "18" },
+          { _tag: "Shown", text: "14" },
+          { _tag: "Shown", text: "18" },
+          "14",
         ],
         [
           "ui.theme",
@@ -994,7 +1030,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-6),
+        .slice(-8),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1002,6 +1038,8 @@ describe("the options under ui", () => {
         "network.libera.username",
         "ui.activity",
         "ui.colours",
+        "ui.font",
+        "ui.size",
         "ui.theme",
         "ui.themes",
         "ui.time",
@@ -1018,7 +1056,12 @@ describe("the options under ui", () => {
       deviceAlone: read("/set -device"),
       deviceNetwork: read("/set -device network.libera.nicks a"),
       empty: read("/set ui.time "),
+      font: read("/set ui.font IBM-Plex-Mono"),
+      fractional: read("/set ui.size 14.5"),
       shared: read("/set ui.time HH:mm:ss"),
+      size: read("/set -device ui.size 20"),
+      tooBig: read("/set ui.size 25"),
+      tooSmall: read("/set ui.size 9"),
       unknown: read("/set ui.palette dusk"),
       unset: read("/unset ui.activity"),
       unsetDevice: read("/unset -device ui.theme"),
@@ -1038,7 +1081,18 @@ describe("the options under ui", () => {
           "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
       },
       empty: { _tag: "Invalid", message: "Give ui.time a value, or use /unset ui.time." },
+      font: change("font", "ibm-plex-mono", false),
+      fractional: {
+        _tag: "Invalid",
+        message: 'ui.size: Give a whole number from 10 to 24, not "14.5".',
+      },
       shared: change("time", "HH:mm:ss", false),
+      size: change("size", 20, true),
+      tooBig: { _tag: "Invalid", message: 'ui.size: Give a whole number from 10 to 24, not "25".' },
+      tooSmall: {
+        _tag: "Invalid",
+        message: 'ui.size: Give a whole number from 10 to 24, not "9".',
+      },
       unknown: {
         _tag: "Invalid",
         message:

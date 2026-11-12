@@ -23,7 +23,7 @@ import type { UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
-import { Exit, Option as Maybe, Schema, SchemaAST } from "effect";
+import { Exit, Option as Maybe, Predicate, Schema, SchemaAST } from "effect";
 
 import type { Parsed } from "./commands.ts";
 import { effectiveUi, noOverrides } from "./ui.ts";
@@ -44,6 +44,7 @@ type Record = Schema.JsonObject;
  * - `Toggle`: `on` or `off`, and `true` or `false` too.
  * - `Text`: the text as typed, and `""` for none.
  * - `Choice`: one of `choices`, in any ASCII case.
+ * - `Integer`: a whole number from `minimum` to `maximum`, in decimal digits.
  * - `Credential`: the name of a Credential, set by giving its value, which the Vault holds.
  * - `Texts`: a list, comma-separated, as WeeChat's are, never empty when `nonEmpty`.
  * - `Ircds`: Ircds, comma-separated, each `host/port`, TLS unless followed by the word
@@ -57,6 +58,7 @@ export type Kind =
   | { readonly _tag: "Toggle" }
   | { readonly _tag: "Text" }
   | { readonly _tag: "Choice"; readonly choices: readonly string[] }
+  | { readonly _tag: "Integer"; readonly minimum: number; readonly maximum: number }
   | { readonly _tag: "Credential" }
   | { readonly _tag: "Texts"; readonly nonEmpty: boolean }
   | { readonly _tag: "Ircds" }
@@ -200,6 +202,68 @@ const literalsOf = (ast: SchemaAST.Union): readonly string[] | undefined => {
   return values.every((one) => one !== undefined) ? values : undefined;
 };
 
+/** What a number's checks say of it: whether it is whole, and its bounds, when given. */
+interface NumberChecks {
+  whole: boolean;
+  minimum: number | undefined;
+  maximum: number | undefined;
+}
+
+/** What a number with no checks is: not known to be whole, and unbounded. */
+const nothingChecked: NumberChecks = { maximum: undefined, minimum: undefined, whole: false };
+
+/**
+ * What a number's checks say of it, from Effect's own `isInt` and `isBetween`, read by the
+ * ids they describe themselves with.
+ * @param checks - The checks.
+ * @param found - What was found before them.
+ * @returns What they say, with what was found before.
+ */
+const numberChecks = (
+  checks: readonly SchemaAST.Check<unknown>[],
+  found: NumberChecks
+): NumberChecks => {
+  let said = found;
+
+  for (const check of checks) {
+    if (check._tag === "FilterGroup") {
+      said = numberChecks(check.checks, said);
+      continue;
+    }
+
+    const { representation } = check.annotations ?? {};
+    const payload: unknown = representation?.payload;
+
+    if (representation?.id === "effect/schema/isInt") {
+      said = { ...said, whole: true };
+    } else if (
+      representation?.id === "effect/schema/isBetween" &&
+      Predicate.hasProperty(payload, "minimum") &&
+      Predicate.hasProperty(payload, "maximum") &&
+      Predicate.isNumber(payload.minimum) &&
+      Predicate.isNumber(payload.maximum)
+    ) {
+      said = { ...said, maximum: payload.maximum, minimum: payload.minimum };
+    }
+  }
+
+  return said;
+};
+
+/**
+ * The kind of a number, from its checks: whole and bounded, or none, since no option is
+ * yet any other number.
+ * @param ast - The number.
+ * @returns Its kind, or none.
+ */
+const numberKindOf = (ast: SchemaAST.AST): Kind | undefined => {
+  const { maximum, minimum, whole } = numberChecks(ast.checks ?? [], nothingChecked);
+
+  return whole && minimum !== undefined && maximum !== undefined
+    ? { _tag: "Integer", maximum, minimum }
+    : undefined;
+};
+
 const tagOf = (ast: SchemaAST.Objects): string | undefined => {
   const tag = ast.propertySignatures.find((one) => one.name === "_tag")?.type;
 
@@ -303,6 +367,10 @@ const kindOf = (ast: SchemaAST.AST): Kind | undefined => {
 
   if (ast._tag === "String") {
     return isCredential(ast) ? { _tag: "Credential" } : { _tag: "Text" };
+  }
+
+  if (ast._tag === "Number") {
+    return numberKindOf(ast);
   }
 
   if (ast._tag === "Arrays") {
@@ -571,6 +639,25 @@ const choiceOf = (choices: readonly string[], text: string): Parsed<string> => {
 };
 
 /**
+ * A whole number within an `Integer`'s bounds, in decimal digits.
+ * @param bounds - The least and the most it may be.
+ * @param text - The text.
+ * @returns The number, or why not.
+ */
+const integerOf = (
+  bounds: { readonly minimum: number; readonly maximum: number },
+  text: string
+): Parsed<number> => {
+  const { maximum, minimum } = bounds;
+  const trimmed = text.trim();
+  const value = /^-?\d{1,16}$/u.test(trimmed) ? Number(trimmed) : undefined;
+
+  return value === undefined || value < minimum || value > maximum
+    ? invalid(`Give a whole number from ${minimum} to ${maximum}, not "${text}".`)
+    : parsed(value);
+};
+
+/**
  * A value of a kind, from its text syntax. A `Names` list gives its names, and a `Tagged`
  * one its tag.
  * @param kind - The kind.
@@ -591,6 +678,10 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
 
     case "Choice": {
       return choiceOf(kind.choices, text);
+    }
+
+    case "Integer": {
+      return integerOf(kind, text);
     }
 
     case "Credential": {
@@ -646,6 +737,11 @@ export const showText = (kind: Kind, value: Json): string => {
     case "Choice":
     case "Credential": {
       return textOf(value) ?? "";
+    }
+
+    case "Integer": {
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
+      return typeof value === "number" ? String(value) : "";
     }
 
     case "Texts": {

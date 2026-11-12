@@ -761,7 +761,7 @@ describe("the API over a real server", () => {
       ],
       first: [
         {
-          data: '{"options":{"activity":"all","colours":"theme","theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
+          data: '{"options":{"activity":"all","colours":"theme","font":"system","size":14,"theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
           event: "changed",
           id: "0",
         },
@@ -772,7 +772,7 @@ describe("the API over a real server", () => {
       ],
       resumed: [
         {
-          data: '{"options":{"activity":"all","colours":"theme","theme":"system","themes":[],"time":"HH:mm:ss"},"sequence":1}',
+          data: '{"options":{"activity":"all","colours":"theme","font":"system","size":14,"theme":"system","themes":[],"time":"HH:mm:ss"},"sequence":1}',
           event: "changed",
           id: "1",
         },

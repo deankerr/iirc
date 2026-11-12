@@ -194,10 +194,53 @@ export const ActivityShown = Schema.Literals(["all", "quiet", "none"]).annotate(
 /** The decoded form of {@link ActivityShown}. */
 export type ActivityShown = typeof ActivityShown.Type;
 
+/** The least and the most the text's size may be, in pixels. */
+export const textSizeBounds = { maximum: 24, minimum: 10 } as const;
+
+/**
+ * The text's size, in pixels: a whole number within {@link textSizeBounds}, so a size too
+ * small to read or too big to fit cannot be given.
+ */
+export const TextSize = Schema.Int.check(Schema.isBetween(textSizeBounds)).annotate({
+  default: 14,
+  description: `The text's size, in pixels, from ${textSizeBounds.minimum} to ${textSizeBounds.maximum}. A field's text on a touch screen is never under 16.`,
+});
+
+/** The decoded form of {@link TextSize}. */
+export type TextSize = typeof TextSize.Type;
+
+/**
+ * The fonts text can be drawn in: `system`, the device's own monospace font, which needs
+ * nothing fetched, or a freely licensed monospace font the Frontend serves itself.
+ */
+export const fontNames = [
+  "system",
+  "jetbrains-mono",
+  "ibm-plex-mono",
+  "source-code-pro",
+  "commit-mono",
+  "atkinson-hyperlegible-mono",
+] as const;
+
+/**
+ * The font text is drawn in, by name, one of {@link fontNames}. A glyph it lacks is drawn
+ * in the device's own monospace font.
+ */
+export const FontShown = Schema.Literals(fontNames).annotate({
+  default: "system",
+  description:
+    "The font text is drawn in: system, the device's own monospace font, or jetbrains-mono, ibm-plex-mono, source-code-pro, commit-mono, or atkinson-hyperlegible-mono.",
+});
+
+/** The decoded form of {@link FontShown}. */
+export type FontShown = typeof FontShown.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
   colours: ColoursShown,
+  font: FontShown,
+  size: TextSize,
   theme: ThemeShown,
   themes: Themes,
   time: TimeShown,

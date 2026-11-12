@@ -141,11 +141,11 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 ## Palette
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, and every option read.
+What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read.
 
 - **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
 - **With no query, recent choices come first,** at most 20.
-- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, and a Credential option opens the password prompt.
+- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme or a font is drawn in on every device.
 - **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
 
 ## Composer
@@ -170,6 +170,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `Toggle`           | `on` or `off`                                                |
 | `Text`             | The raw text, exactly                                        |
 | `Choice`, `Tagged` | One of the Schema's literals or tags                         |
+| `Integer`          | A whole number within the Schema's bounds                    |
 | `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes |
 | `Ircds`            | A list of `host` or `host/port`, TLS unless `plain` follows  |
 | `Credential`       | Never text: its Credential's name, and whether it is held    |
