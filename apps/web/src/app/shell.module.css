@@ -2,39 +2,69 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Clear of the rounded corners and the notch, in landscape. */
-  padding: 0 var(--safe-right) 0 var(--safe-left);
+  /* Clear of the notch, the status bar, and the rounded corners, in landscape. */
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
 }
 
+/* The page's name, for a screen reader's outline, not drawn. */
+.title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* One slim bar, on a compact screen alone: the sidebar's button and the Panes' switcher. */
 .bar {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  /* Clear of the notch and the status bar. */
-  padding: calc(var(--space-2) + var(--safe-top)) var(--space-3) var(--space-2);
+  min-width: 0;
   border-bottom: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
-}
-
-.title {
-  color: var(--color-accent);
-  margin-right: auto;
-}
-
-.failure {
-  color: var(--color-danger);
 }
 
 .body {
   display: grid;
   flex: 1;
-  /* The sidebar, and the Panes. */
-  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
-.body > nav {
-  border-right: var(--border-width) solid var(--color-border);
+/* The sidebar, its edge, and the Panes. The sidebar is as wide as this device keeps it, and
+   never more than half the window. */
+.withSidebar {
+  grid-template-columns: min(var(--sidebar-width), 50vw) var(--border-width) minmax(0, 1fr);
+}
+
+/* The sidebar's edge: a line, with a wider grip either side of it. */
+.edge {
+  position: relative;
+  z-index: 1;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 0;
+  background: var(--color-border);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.edge::before {
+  position: absolute;
+  inset: 0 calc(-1 * var(--space-2));
+  content: "";
+}
+
+.edge:hover,
+.edge:active {
+  background: var(--color-accent);
+}
+
+.edge:focus-visible {
+  background: var(--color-focus);
+  outline: var(--border-width) solid var(--color-focus);
 }
 
 .main {
@@ -50,15 +80,27 @@
   min-height: 0;
 }
 
-/* The sidebar's button, on a compact screen, with its mark while anything said is unread. */
+/* The composer, with the sidebar's button before it while the sidebar is hidden. */
+.foot {
+  display: flex;
+  min-width: 0;
+}
+
+.composer {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The sidebar's button, with its mark while anything said is unread: in the bar on a
+   compact screen, and before the composer while the sidebar is hidden. */
 .menu {
   position: relative;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   min-width: var(--target-size);
   min-height: var(--target-size);
-  margin-left: calc(-1 * var(--space-3));
   padding: 0;
   border: 0;
   background: transparent;
@@ -77,6 +119,15 @@
   outline-offset: calc(-1 * var(--border-width));
 }
 
+.foot .menu {
+  min-width: 4ch;
+  min-height: 0;
+  border-top: var(--border-width) solid var(--color-border);
+  border-right: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+  font-size: var(--font-size);
+}
+
 .mark {
   position: absolute;
   top: var(--space-3);
@@ -84,6 +135,13 @@
   width: var(--space-3);
   height: var(--space-3);
   border-radius: 50%;
+}
+
+.foot .mark {
+  top: var(--space-2);
+  right: var(--space-2);
+  width: var(--space-2);
+  height: var(--space-2);
 }
 
 .markMessage {
@@ -111,7 +169,8 @@
   inset: 0 auto 0 0;
   display: flex;
   width: min(36ch, 85vw);
-  padding: var(--safe-top) 0 var(--safe-bottom) var(--safe-left);
+  /* The sidebar's foot keeps clear of the home bar itself. */
+  padding: var(--safe-top) 0 0 var(--safe-left);
   border-right: var(--border-width) solid var(--color-accent);
   background: var(--color-background);
   box-shadow: 0 0 var(--space-5) var(--color-shadow);
@@ -130,14 +189,14 @@
   flex: 1;
 }
 
+/* On a touch screen, the edge's grip and the sidebar's button are a finger's size. */
 @media (pointer: coarse) {
-  .bar {
-    padding-block: var(--safe-top) 0;
+  .edge::before {
+    inset: 0 calc(var(--target-size) / -2);
   }
-}
 
-@media (max-width: 640px) {
-  .body {
-    grid-template-columns: minmax(0, 1fr);
+  .foot .menu {
+    min-width: var(--target-size);
+    min-height: var(--target-size);
   }
 }

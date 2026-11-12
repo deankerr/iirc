@@ -471,11 +471,11 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
 /**
  * The bindings the Frontend starts with. Opening the palette and moving between Timelines
  * work while typing in the composer, as an IRC client's do, and Alt+A jumps to what calls
- * for the Owner most, as WeeChat's does, and Alt+M shows or hides the members, as Alt+A
- * does beside it: Mod+Shift+M is the browser's own in Chrome and Firefox. Focusing the
- * composer is `i`,
- * outside a field: a letter outside a field has no browser default, where Ctrl+L and Cmd+L
- * go to the address bar, and inside one it is typed. The Panes are Alt+Shift: with the
+ * for the Owner most, as WeeChat's does. Alt+M shows or hides the members and Alt+N the
+ * sidebar of Networks beside them: Mod+Shift+M is the browser's own in Chrome and Firefox,
+ * and Ctrl+B is bold to an IRC user. Focusing the composer is `i`, outside a field: a
+ * letter outside a field has no browser default, where Ctrl+L and Cmd+L go to the address
+ * bar, and inside one it is typed. The Panes are Alt+Shift: with the
  * arrows to move between them, as Alt and the arrows move between Timelines, and with a
  * letter to split, close, zoom, equalize, grow, or shrink, a letter because Option on a
  * Mac types another character, which only a letter's or a digit's physical key names back.
@@ -487,6 +487,7 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "timeline.previous", keys: "alt+arrowup", when: "!palette" },
   { command: "timeline.unread", keys: "alt+a", when: "!palette" },
   { command: "members.toggle", keys: "alt+m", when: "!palette" },
+  { command: "sidebar.toggle", keys: "alt+n", when: "!palette" },
   { command: "composer.focus", keys: "i", when: "!editing && !palette" },
   { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
   { command: "search.open", keys: "mod+shift+f", when: "!palette" },

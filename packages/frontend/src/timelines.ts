@@ -2205,6 +2205,24 @@ export const chosenOf = (state: Timelines): Chosen => {
 };
 
 /**
+ * What the sidebar marks, more quietly than what is chosen: each Timeline a Pane other
+ * than the focused one shows, with that Pane's number, counted as the Panes lie. A
+ * Timeline behind something else is not shown, as for `chosenOf`.
+ * @param state - The state.
+ * @returns Each Timeline shown elsewhere, with its Pane's number.
+ */
+export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId, number> =>
+  new Map(
+    panesOf(state.layout.root).flatMap((pane, index) =>
+      pane.id === state.layout.focused ||
+      pane.view.main._tag !== "Timeline" ||
+      pane.view.open === undefined
+        ? []
+        : [[resolve(state, pane.view.open), index + 1] as const]
+    )
+  );
+
+/**
  * Keeps the windows of what the Panes show, after they changed. A Timeline no Pane has open
  * any more joins the most recently closed, and only the windows of those open and of the
  * few closed most recently are kept: any other is read again when it opens. A Timeline
@@ -3446,6 +3464,28 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
       running: network.running,
       timelines: [...network.timelines.values()].toSorted(sidebarOrder),
     }));
+
+/**
+ * A Network as the sidebar's tree draws it: its row, which is its own Timeline, and the
+ * Timelines under it, its Channels and Direct Messages.
+ */
+export interface NetworkTree {
+  /** The Network's own Timeline, or none while it has none yet. */
+  readonly own: Timeline | undefined;
+  readonly children: readonly Timeline[];
+}
+
+/**
+ * A Network's Timelines, as the sidebar's tree draws them: its own as its row, and every
+ * other under it, in sidebar order.
+ * @param network - The Network.
+ * @returns Its tree.
+ */
+export const treeOf = (network: SidebarNetwork): NetworkTree => {
+  const own = network.timelines.find((timeline) => timeline.kind === "Network");
+
+  return { children: network.timelines.filter((timeline) => timeline !== own), own };
+};
 
 /**
  * One row of a window as shown: an item, a collapsed Gap among them, or the "new" divider

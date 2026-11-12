@@ -1,7 +1,9 @@
 /**
  * The Panes, as a compact row of their numbers and names, shown on a compact screen, where
- * only the focused Pane shows, and while zoomed, so every Pane is a press away. Choosing
- * one focuses it, as Alt+Shift and an arrow does. The layout stays as it was.
+ * only the focused Pane shows, and while zoomed, so every Pane is a press away. On a
+ * compact screen it sits in the shell's one bar, and elsewhere it is a row of its own above
+ * the Panes. Choosing one focuses it, as Alt+Shift and an arrow does. The layout stays as
+ * it was.
  *
  * @packageDocumentation
  */
@@ -30,9 +32,10 @@ const choices = Atom.make((get) => {
 
 /**
  * The switcher, while one Pane shows alone among several.
+ * @param props - Where it is placed: in the shell's bar, or as a row of its own.
  * @returns The switcher, or nothing.
  */
-export const PaneSwitcher = () => {
+export const PaneSwitcher = ({ placement }: { readonly placement: "Bar" | "Row" }) => {
   const one = useAtomValue(alone);
   const panes = useAtomValue(choices);
   const focused = useAtomValue(focusedId);
@@ -45,7 +48,7 @@ export const PaneSwitcher = () => {
   return (
     <ToggleButtonGroup
       aria-label="Panes"
-      className={styles.switcher}
+      className={`${styles.switcher} ${placement === "Row" ? styles.row : styles.inBar}`}
       disallowEmptySelection
       onSelectionChange={(keys: Set<Key>) => {
         const [key] = keys;

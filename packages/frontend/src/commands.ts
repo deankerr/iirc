@@ -169,6 +169,8 @@ export interface Act {
  *   to turn them on.
  * - `ShowMembers`: show or hide the open Channel's members on this device, or turn them
  *   over when `shown` is none.
+ * - `ShowSidebar`: show or hide the sidebar on this device, or turn it over when `shown`
+ *   is none.
  * - `Query`: open the Timeline of a name on a Network, as the Daemon keyed it, such as a
  *   Direct Message's. A Timeline exists only once something was said in it, so with none,
  *   the composer starts `/msg <name> ` to say the first Message, which opens it.
@@ -206,6 +208,7 @@ export type Intent =
   | MarkRead
   | { readonly _tag: "Notify"; readonly on: boolean }
   | { readonly _tag: "ShowMembers"; readonly shown: boolean | undefined }
+  | { readonly _tag: "ShowSidebar"; readonly shown: boolean | undefined }
   | { readonly _tag: "Query"; readonly network: NetworkId; readonly name: string }
   | {
       readonly _tag: "Draft";
@@ -895,23 +898,28 @@ const notifyArguments = (args: string): Parsed<boolean> => {
 };
 
 /**
- * What `/members` was given: nothing, to turn the members over, or `on` or `off`.
- * @param args - The text after `/members`.
- * @returns Whether to show them, none to turn them over, or why it cannot tell.
+ * What a command that shows or hides something was given: nothing, to turn it over, or
+ * `on` or `off`.
+ * @param name - The command's name, such as `members`.
+ * @param what - What it shows, as said in a refusal, such as `them`.
+ * @returns The parser, giving whether to show it, none to turn it over, or why it cannot
+ * tell.
  */
-const membersArguments = (args: string): Parsed<boolean | undefined> => {
-  const what = args.trim().toLowerCase();
+const shownArguments =
+  (name: string, what: string) =>
+  (args: string): Parsed<boolean | undefined> => {
+    const said = args.trim().toLowerCase();
 
-  if (what === "") {
-    return parsed(undefined);
-  }
+    if (said === "") {
+      return parsed(undefined);
+    }
 
-  if (what === "on" || what === "off") {
-    return parsed(what === "on");
-  }
+    if (said === "on" || said === "off") {
+      return parsed(said === "on");
+    }
 
-  return invalid("Use /members to show or hide them, or /members on or /members off.");
-};
+    return invalid(`Use /${name} to show or hide ${what}, or /${name} on or /${name} off.`);
+  };
 
 /**
  * What `/query` was given: one name, with no space or `,`.
@@ -1946,8 +1954,19 @@ export const commands: readonly Command[] = [
     id: "members.toggle",
     intents: (shown: boolean | undefined) => [{ _tag: "ShowMembers", shown }],
     name: "members",
-    parse: membersArguments,
+    parse: shownArguments("members", "them"),
     usage: "/members [on|off]",
+    when: [],
+  }),
+  unfocused({
+    aliases: [],
+    arguments: "Optional",
+    description: "Show or hide the sidebar of Networks and their Timelines, on this device.",
+    id: "sidebar.toggle",
+    intents: (shown: boolean | undefined) => [{ _tag: "ShowSidebar", shown }],
+    name: "sidebar",
+    parse: shownArguments("sidebar", "it"),
+    usage: "/sidebar [on|off]",
     when: [],
   }),
   unfocused({

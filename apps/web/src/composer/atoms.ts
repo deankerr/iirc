@@ -52,6 +52,7 @@ import {
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
 import { changeUi } from "../options/ui.ts";
+import { showSidebar } from "../page/sidebar.ts";
 import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
 import { showSearch } from "../search/atoms.ts";
@@ -292,6 +293,7 @@ type Local = Extract<
       | "OpenPalette"
       | "FocusComposer"
       | "ShowMembers"
+      | "ShowSidebar"
       | "Pane"
       | "ListThemes"
       | "ImportTheme"
@@ -315,6 +317,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "PromptCredential",
   "Search",
   "ShowMembers",
+  "ShowSidebar",
 ]);
 
 /**
@@ -327,8 +330,8 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 /**
  * Carries out an intent in the page: shows the options, the search, or a Timeline, jumps
  * to a Timeline's latest, opens the password prompt or the palette, focuses the composer,
- * starting an empty draft with text, shows or hides the members, changes the Panes, or
- * starts a Lookup, which goes on beside the composer's turn.
+ * starting an empty draft with text, shows or hides the members or the sidebar, changes
+ * the Panes, or starts a Lookup, which goes on beside the composer's turn.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -379,6 +382,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "ShowMembers": {
       showMembers(registry, intent.shown);
+      break;
+    }
+
+    case "ShowSidebar": {
+      showSidebar(registry, intent.shown);
       break;
     }
 

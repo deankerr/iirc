@@ -27,7 +27,7 @@ A reducer over what the Frontend asked and what the API answered. The state is `
 
 Everything the Frontend holds of the Timelines, as a reducer (`reduceTimelines`) over what it read from the API and what the changes stream said. It never folds News: the Daemon does that, and this keeps what was read up to date.
 
-For each Network it holds its Timelines, its connection, and whether Self is away. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, and `rowsOf` a window as rows.
+For each Network it holds its Timelines, its connection, and whether Self is away. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows.
 
 ### Reading and following
 
@@ -97,7 +97,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
-| Reading | `/read`, `/read all`, `/notify`, `/members` |
+| Reading | `/read`, `/read all`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 
 Each entry in `src/commands.ts` carries its usage, aliases, and description, which the palette shows.
@@ -122,6 +122,7 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 | `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline               |
 | `alt+a`                           | The Timeline that calls most             |
 | `alt+m`                           | Show or hide the members                 |
+| `alt+n`                           | Show or hide the sidebar                 |
 | `mod+,`                           | Show the options                         |
 | `mod+shift+f`                     | Show the search                          |
 | `i`                               | Focus the composer, from outside a field |
