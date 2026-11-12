@@ -307,6 +307,20 @@ describe("the keymap", () => {
     }).toStrictEqual({ mac: turned, open: undefined, other: turned });
   });
 
+  it("shows or hides the sidebar with Alt+N, Option+N on a Mac, a dead key there, while typing too", () => {
+    const turned = [{ _tag: "ShowSidebar", shown: undefined }];
+
+    expect({
+      mac: resolve(
+        defaultKeymap,
+        at({ editing: true, platform: "Mac" }),
+        press("Dead", "KeyN", { alt: true })
+      ),
+      open: resolve(defaultKeymap, at({ palette: true }), press("n", "KeyN", { alt: true })),
+      other: resolve(defaultKeymap, at({ editing: true }), press("n", "KeyN", { alt: true })),
+    }).toStrictEqual({ mac: turned, open: undefined, other: turned });
+  });
+
   it("moves to the next and previous Timeline in the sidebar's order, wrapping, while typing too", () => {
     const down = press("ArrowDown", "ArrowDown", { alt: true });
     const up = press("ArrowUp", "ArrowUp", { alt: true });

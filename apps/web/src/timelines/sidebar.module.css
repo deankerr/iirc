@@ -1,5 +1,14 @@
+/* The tree scrolls, and the footer stays at the foot. */
 .sidebar {
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.scroll {
+  display: flex;
+  flex: 1;
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
@@ -26,8 +35,9 @@
   cursor: default;
 }
 
+/* Under the Network's name, past the gutter that holds another Pane's number. */
 .item {
-  padding-left: calc(var(--space-3) + 2ch);
+  padding-left: var(--space-3);
 }
 
 .network[data-focus-visible],
@@ -36,22 +46,46 @@
   outline-offset: calc(-1 * var(--border-width));
 }
 
-.item[data-hovered] {
+.network:not([data-disabled], [data-selected])[data-hovered],
+.item:not([data-selected])[data-hovered] {
   background: var(--color-surface);
 }
 
+/* What the focused Pane shows. */
+.network[data-selected],
 .item[data-selected] {
   background: var(--color-accent);
   color: var(--color-on-accent);
 }
 
-.item[data-selected] .muted,
+.network[data-selected] .chevron,
+.network[data-selected] .standing,
+.network[data-selected] .name,
+.network[data-selected] .counts > *,
 .item[data-selected] .name,
 .item[data-selected] .counts > * {
   color: inherit;
 }
 
+/* What another Pane shows: an accent edge, and that Pane's number, dim. */
+.elsewhere:not([data-selected]) {
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+}
+
+.pane {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Where a Timeline's row says which other Pane shows it, as wide as a Network's chevron. */
+.gutter {
+  flex-shrink: 0;
+  width: 2ch;
+  text-align: center;
+}
+
 .chevron {
+  flex-shrink: 0;
   width: 2ch;
   padding: 0;
   border: 0;
@@ -61,7 +95,18 @@
 }
 
 .name {
+  min-width: 0;
   margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How a Network's connection stands, as a symbol whose shape says it too. */
+.standing {
+  flex-shrink: 0;
+  width: 2ch;
+  text-align: center;
 }
 
 .connected {
@@ -80,24 +125,37 @@
   color: var(--color-muted);
 }
 
-.options {
-  margin: 0 var(--space-3);
+/* The options, signing out, and hiding the sidebar, at its foot. */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) calc(var(--space-1) + var(--safe-bottom));
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.controls button {
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  text-align: left;
 }
 
-.options[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
+/* The options, while the focused Pane shows them. */
+.current button {
+  color: var(--color-accent);
 }
 
-.options[aria-current="page"] {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
+.hide {
+  margin-left: auto;
+}
+
+.failure {
+  padding: 0 var(--space-2);
+  color: var(--color-danger);
 }
 
 /* A name by the highest level unread in it: read and Activity dim, Messages as text, and
@@ -155,9 +213,13 @@
     padding-left: 0;
   }
 
-  /* Under the Network's name, past its chevron. */
   .item {
-    padding-left: var(--target-size);
+    padding-left: 0;
+  }
+
+  .gutter {
+    width: var(--target-size);
+    margin-right: calc(-1 * var(--space-2));
   }
 
   .chevron {
@@ -166,7 +228,7 @@
     margin-right: calc(-1 * var(--space-2));
   }
 
-  .options {
-    min-height: var(--target-size);
+  .controls button {
+    padding: var(--space-2) var(--space-3);
   }
 }

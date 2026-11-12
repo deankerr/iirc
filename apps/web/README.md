@@ -12,7 +12,8 @@ The core decides and this package draws and does the I/O.
 ## What it does
 
 - **Signs in with a key,** given to `POST /api/sign-in` once, for a sign-in the browser holds in an `HttpOnly` cookie. A failure is said in words, with a way to try again.
-- **Lists the Networks and their Timelines in a sidebar,** as a tree: each Network with how its connection stands, then its own Timeline, its Channels, and its Direct Messages.
+- **Lists the Networks and their Timelines in a sidebar,** as a tree. A Network's row is its own Timeline, with how its connection stands as a symbol whose shape and colour both say it, and its Channels and Direct Messages are under it. What the focused Pane shows is chosen, and what another Pane shows has an accent edge and that Pane's number. The options and signing out are at its foot.
+- **Lets the sidebar be resized and hidden, on this device.** Its edge drags, or takes the arrows, Home, and End once focused, and keeps its width as the window changes. `/sidebar` or Alt+N hides it, and so does the button at its foot. While it is hidden, the button before the composer brings it back, marked by what is unread.
 - **Shows what is new, calmly.** A row's name is coloured by the highest level unread in it, with small counts beside it, and the page's title counts Highlights and Direct Messages. A Highlight's line is tinted, and a "new" divider stands before the first unread item.
 - **Shows a Timeline live,** as terminal lines in shared columns: the time, the sender in their colour, and the text with its formatting and links. Activity is dimmer, a Gap is a divider, and our own Messages say only when they are sending, not sent, or refused. Where a Timeline is narrow, as a Pane split a few times is, the columns go and a row reads as one run of text that wraps under itself. It opens on the latest, stays at the bottom as items arrive, and reads older items as the Owner scrolls up.
 - **Splits into Panes,** as a tiling window manager does. Each Pane has its own header, Timeline, scroll position, and members. One composer under the Panes writes to the focused Pane's Timeline.
@@ -29,7 +30,7 @@ The core decides and this package draws and does the I/O.
 - **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
 - **Looks a User up,** with `/whois` and `/whowas`, as a card under the Pane's header.
 - **Notifies, when the Owner asks,** with `/notify on`: a Highlight or a Direct Message in a Timeline they are not looking at.
-- **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with a switcher above it, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
+- **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with one slim bar holding the sidebar's button and the Panes' switcher, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
 
 ## How it is built
 
@@ -43,7 +44,7 @@ The core decides and this package draws and does the I/O.
 | `src/options/` | The options view, changing a Configuration, holding a Credential, and the options under `ui` |
 | `src/search/`, `src/palette/`, `src/channel/`, `src/lookup/` | Each of those views and its atoms. `src/palette/` also holds the one key listener |
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
-| `src/page/` | Whether the Owner can see the page, what this device keeps, and what lies over a compact screen |
+| `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the sidebar's width and whether it shows |
 | `src/theme/` | The theme drawn, importing and removing themes, and the Worker a theme is read in |
 | `src/ui/` | The theme's tokens, a button, a password field that holds no value, and dates |
 
@@ -100,6 +101,8 @@ Each is in `localStorage`, read once as the page starts and written as best it c
 | `iirc.ui` | This device's overrides of options under `ui` | They are the device's own |
 | `iirc.notify` | Whether this device notifies | A device's own choice |
 | `iirc.members` | Whether the members' column shows | How wide a screen is is the device's own |
+| `iirc.sidebar` | Whether the sidebar is hidden, beside the Panes | The same |
+| `iirc.sidebar-width` | How wide the sidebar is, in CSS pixels | The same |
 
 Anything kept that cannot be read leaves the page starting as new.
 

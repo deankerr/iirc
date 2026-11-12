@@ -171,18 +171,27 @@ const countLayoutWrites = () => {
   };
 };
 
+/** How a Network's row ends its label, once its connection is known: the word for it. */
+const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
+
 /**
  * The first Network's row in the sidebar, once its connection is known.
  * @param page - The page.
- * @returns The row's text: its chevron, its id, and its connection.
+ * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol.
  */
 const networkRow = async (page: Page) => {
-  const row = page.getByRole("row").first();
+  await page.getByRole("row", { name: standingWord }).first().waitFor();
 
-  await row.getByText(/^(?:connected|offline|stopped)$/u).waitFor();
-
-  return await row.textContent();
+  return (await page.getByRole("row").first().textContent()) ?? "";
 };
+
+/**
+ * How the first Network's connection stands, as its row's label says it.
+ * @param page - The page.
+ * @returns The label.
+ */
+const standingLabel = async (page: Page) =>
+  (await page.getByRole("row").first().getAttribute("aria-label")) ?? "";
 
 /**
  * Whether anything React keeps for the page, its state and its props, holds a secret. It
@@ -306,6 +315,48 @@ const leastSide = async (locator: ReturnType<Page["getByRole"]>) => {
   return box === null ? 0 : Math.round(Math.min(box.width, box.height));
 };
 
+/**
+ * Drags the sidebar's edge 100 pixels wider, which the device keeps, then hides the sidebar
+ * with Alt+N, reloads, which keeps it hidden, and shows it again from the button beside the
+ * composer.
+ * @param page - The page, on a wide screen, with the sidebar shown at its first width.
+ * @returns Its width before and after, the width kept, and how many sidebars the reload drew.
+ */
+const resizedSidebar = async (page: Page) => {
+  const sidebar = page.getByRole("navigation", { name: "Networks" });
+  const edge = await page.getByRole("separator", { name: "Resize the sidebar" }).boundingBox();
+  const at = { x: (edge?.x ?? 0) + 0.5, y: (edge?.y ?? 0) + 300 };
+
+  const sidebarWidth = async () => {
+    const box = await sidebar.boundingBox();
+
+    return Math.round(box?.width ?? 0);
+  };
+
+  const narrow = await sidebarWidth();
+
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 100, at.y, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(sidebarWidth).toBe(narrow + 100);
+
+  const widthKept = await page.evaluate(() => localStorage.getItem("iirc.sidebar-width"));
+
+  await page.keyboard.press("Alt+N");
+  await sidebar.waitFor({ state: "detached" });
+  await page.reload();
+  const show = page.getByRole("button", { name: /^Show the sidebar/u });
+
+  await show.waitFor();
+  const hiddenKept = await sidebar.count();
+
+  await show.click();
+  await sidebar.waitFor();
+
+  return { hiddenKept, narrow, wide: await sidebarWidth(), widthKept };
+};
+
 describe("the web frontend on iirc daemon --web", () => {
   let browser: Browser;
   let directory: string;
@@ -419,13 +470,14 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: problems.filter((problem) => !problem.includes("401")),
           wrong,
         }).toStrictEqual({
-          afterReload: "exampleoffline",
+          // Its id, and an open circle, which is offline.
+          afterReload: "example\u25CB",
           afterWrong: { describedBy: true, field: "", inPage: false, tracker: "" },
           configured: 200,
           cookies: [{ holdsKey: false, httpOnly: true, name: "iirc_sign_in", sameSite: "Strict" }],
           cookiesAfter: [],
           held: { cookie: "", local: ["iirc.layout"], localHoldsKey: false, session: 0 },
-          listed: "exampleoffline",
+          listed: "example\u25CB",
           problems: [],
           wrong:
             "That key matches none the Daemon holds. Check it, or make one with iirc key create.",
@@ -578,7 +630,7 @@ describe("the web frontend on iirc daemon --web", () => {
           linked,
           pinned,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
-          status,
+          status: status.startsWith("\u25BEprivate") && status.endsWith("\u25CF"),
           violations,
         }).toStrictEqual({
           // mIRC's red is the theme's bright red, `light`'s under Playwright's light device.
@@ -587,7 +639,8 @@ describe("the web frontend on iirc daemon --web", () => {
           linked: { href: "https://example.com/x", rel: "noopener noreferrer", target: "_blank" },
           pinned: true,
           problems: [],
-          status: "\u25BEprivateconnected",
+          // The chevron, the id, and a filled circle, which is connected.
+          status: true,
           violations: "",
         });
       } finally {
@@ -723,18 +776,20 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.getByRole("row", { name: channel }).click();
 
         const composer = page.getByRole("textbox", { name: channel });
-        const standing = async () => (await page.getByRole("row").first().textContent()) ?? "";
+        const standing = async () => await standingLabel(page);
 
         // `/disconnect` turns the focused Network off, and the sidebar says so.
         await composer.fill("/disconnect");
         await composer.press("Enter");
-        await expect.poll(standing, { timeout: 20_000 }).toMatch(/(?:offline|stopped)$/u);
+        await expect
+          .poll(standing, { timeout: 20_000 })
+          .toMatch(/, (?:offline|stopped)(?:: .*)?$/u);
         const off = await standing();
 
         // `/connect` turns it on again.
         await composer.fill("/connect");
         await composer.press("Enter");
-        await expect.poll(standing, { timeout: 20_000 }).toMatch(/connected$/u);
+        await expect.poll(standing, { timeout: 20_000 }).toMatch(/, connected$/u);
         const on = await standing();
 
         // `/query` to a nick nothing was said to yet shows a Direct Message not yet begun,
@@ -766,8 +821,8 @@ describe("the web frontend on iirc daemon --web", () => {
         expect({
           direct: direct.params,
           drafted,
-          off: /(?:offline|stopped)$/u.test(off),
-          on: on.endsWith("connected"),
+          off: /, (?:offline|stopped)(?:: .*)?$/u.test(off),
+          on: on.endsWith(", connected"),
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           violations,
         }).toStrictEqual({
@@ -1174,12 +1229,12 @@ describe("the web frontend on iirc daemon --web", () => {
         await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
         await nowhere.press("Enter");
 
-        const row = page.getByRole("row").first();
+        const row = page.getByRole("row", { name: /^test, .*connected$/u });
 
-        await row.getByText("connected", { exact: true }).waitFor({ timeout: 20_000 });
+        await row.waitFor({ timeout: 20_000 });
 
-        // The Network's own Timeline, under the Network's row of the same name, then /join there.
-        await page.getByRole("row", { exact: true, name: "test" }).last().click();
+        // The Network's own Timeline, which its row opens, then /join there.
+        await row.click();
         const composer = page.getByRole("textbox", { name: "test" });
 
         await composer.fill("/join #iirc");
@@ -1419,7 +1474,10 @@ describe("the web frontend on iirc daemon --web", () => {
 
         // Split side by side: the new Pane has the focus, and the second Channel opens in it.
         await page.keyboard.press("Alt+Shift+S");
-        await page.getByRole("separator").waitFor();
+        // The Panes' dividers, apart from the sidebar's edge, which is outside the main view.
+        const dividers = page.getByRole("main").getByRole("separator");
+
+        await dividers.waitFor();
         await page.getByRole("row", { name: other }).click();
 
         const left = page.getByRole("log", { name: channel });
@@ -1443,7 +1501,7 @@ describe("the web frontend on iirc daemon --web", () => {
           leftBox.y === rightBox.y;
 
         // A drag of the divider is one Resize, on release, however far it moves.
-        const separator = page.getByRole("separator");
+        const separator = dividers;
         const box = await separator.boundingBox();
 
         const writes = async () =>
@@ -1485,7 +1543,7 @@ describe("the web frontend on iirc daemon --web", () => {
         // moves the node back, and the focus with it.
         await left.focus();
         await page.keyboard.press("Alt+Shift+D");
-        await page.getByRole("separator").nth(1).waitFor();
+        await dividers.nth(1).waitFor();
 
         const kept = async () =>
           await left.evaluate((element) => ({
@@ -1496,7 +1554,7 @@ describe("the web frontend on iirc daemon --web", () => {
         const splitKept = await kept();
 
         await page.keyboard.press("Alt+Shift+W");
-        await expect.poll(async () => await page.getByRole("separator").count()).toBe(1);
+        await expect.poll(async () => await dividers.count()).toBe(1);
         const closeKept = await kept();
 
         // The page keeps its layout in the same tick as it changes, so a reload straight
@@ -1513,8 +1571,11 @@ describe("the web frontend on iirc daemon --web", () => {
 
         const after = {
           logs: await page.getByRole("log").count(),
-          separators: await page.getByRole("separator").count(),
+          separators: await dividers.count(),
         };
+
+        // The sidebar resizes and hides apart from the Panes, each kept on this device.
+        const resized = await resizedSidebar(page);
 
         const violations = await page.evaluate(
           () => document.documentElement.dataset.cspViolations ?? ""
@@ -1525,6 +1586,7 @@ describe("the web frontend on iirc daemon --web", () => {
           dragged: dragged !== undefined && dragged > 0.6 && dragged < 0.7,
           moved: [splitKept, closeKept],
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          resized,
           said: said.params[0],
           sideBySide,
           violations,
@@ -1536,6 +1598,7 @@ describe("the web frontend on iirc daemon --web", () => {
             { focused: true, latest: true },
           ],
           problems: [],
+          resized: { hiddenKept: 0, narrow: 200, wide: 300, widthKept: "300" },
           said: channel,
           sideBySide: true,
           violations: "",
@@ -2112,7 +2175,6 @@ describe("the web frontend on iirc daemon --web", () => {
         fields.push(...(await fieldSizes()));
         scrolled.push(await sideways());
         targets.networks = await leastSide(networks);
-        targets["sign out"] = await leastSide(page.getByRole("button", { name: "Sign out" }));
         targets.palette = await leastSide(page.getByRole("button", { name: "Command palette" }));
         targets.composer = await leastSide(page.getByRole("textbox").first());
 
@@ -2125,7 +2187,9 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await row.waitFor();
         targets["sidebar row"] = await leastSide(row);
+        targets["network row"] = await leastSide(drawer.getByRole("row").first());
         targets.options = await leastSide(drawer.getByRole("button", { name: "Options" }));
+        targets["sign out"] = await leastSide(drawer.getByRole("button", { name: "Sign out" }));
         scrolled.push(await sideways());
         await row.tap();
         await drawer.waitFor({ state: "detached" });

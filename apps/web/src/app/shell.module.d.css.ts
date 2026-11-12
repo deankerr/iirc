@@ -2,9 +2,11 @@
 declare const styles: {
   readonly bar: string;
   readonly body: string;
+  readonly composer: string;
   readonly drawer: string;
   readonly drawerDialog: string;
-  readonly failure: string;
+  readonly edge: string;
+  readonly foot: string;
   readonly main: string;
   readonly mark: string;
   readonly markDirect: string;
@@ -15,6 +17,7 @@ declare const styles: {
   readonly shell: string;
   readonly title: string;
   readonly view: string;
+  readonly withSidebar: string;
 };
 
 export default styles;

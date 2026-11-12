@@ -23,6 +23,7 @@ import { parseQuery } from "./search.ts";
 import type { SearchRequest } from "./search.ts";
 import {
   chosenOf,
+  elsewhereOf,
   draftsMetBetween,
   originOf,
   emptyView,
@@ -42,6 +43,7 @@ import {
   resolve,
   rowsOf,
   sidebar,
+  treeOf,
   timelinesWith,
   wanted,
   windowCap,
@@ -1590,6 +1592,25 @@ describe("the Timelines' state", () => {
         network.timelines.map((timeline) => timeline.name),
       ])
     ).toStrictEqual([["alpha", ["alpha", "#a", "#b"]]]);
+  });
+
+  it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {
+    const [network] = sidebar(following());
+    const tree = network === undefined ? undefined : treeOf(network);
+
+    const none =
+      network === undefined
+        ? undefined
+        : treeOf({ ...network, timelines: network.timelines.slice(1) });
+
+    expect({
+      none: none === undefined ? undefined : [none.own, none.children.map((one) => one.name)],
+      tree: tree === undefined ? undefined : [tree.own?.id, tree.children.map((one) => one.name)],
+    }).toStrictEqual({
+      // A Network with no Timeline of its own yet has a row that opens nothing.
+      none: [undefined, ["#a", "#b"]],
+      tree: [one, ["#a", "#b"]],
+    });
   });
 
   it("appends a live item, inserts late history, updates in place, and skips what it read", () => {
@@ -3345,6 +3366,45 @@ describe("what stands in front of a Timeline", () => {
       options: { _tag: "Options" },
       search: { _tag: "Nothing" },
       start: { _tag: "Timeline", timeline: three },
+    });
+  });
+
+  it("marks in the sidebar what the other Panes show, by their number, never what is behind something", () => {
+    const start = following();
+    const two_ = split(start, two);
+    const three_ = split(two_, one, true);
+
+    // The first Pane shows the options in front of its Timeline.
+    const behind = reduceTimelines(
+      reduceTimelines(three_, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } }),
+      { _tag: "OptionsShown", filter: "" }
+    );
+
+    const refocused = reduceTimelines(three_, {
+      _tag: "Pane",
+      change: { _tag: "Focus", pane: "p0" },
+    });
+
+    expect({
+      alone: [...elsewhereOf(start)],
+      behind: [
+        ...elsewhereOf(
+          reduceTimelines(behind, { _tag: "Pane", change: { _tag: "Focus", pane: "p1" } })
+        ),
+      ],
+      refocused: [...elsewhereOf(refocused)],
+      three: [...elsewhereOf(three_)],
+    }).toStrictEqual({
+      alone: [],
+      behind: [[one, 3]],
+      refocused: [
+        [two, 2],
+        [one, 3],
+      ],
+      three: [
+        [three, 1],
+        [two, 2],
+      ],
     });
   });
 

@@ -4,8 +4,18 @@
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
   overflow-x: auto;
+}
+
+/* A row of its own, above the Panes. */
+.row {
   border-bottom: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
+}
+
+/* In the shell's bar, beside the sidebar's button. */
+.inBar {
+  flex: 1;
+  min-width: 0;
 }
 
 .choice {
