@@ -1,7 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  // The tsconfig plugin name is served by @effect/tsgo, not its own package.
-  "ignoreDependencies": ["@effect/language-service"],
+  // The tsconfig plugin name is served by @effect/tsgo, not its own package. The fonts are
+  // read only by url() in apps/web/src/theme/fonts.css, which knip does not follow.
+  "ignoreDependencies": [
+    "@effect/language-service",
+    "@fontsource-variable/atkinson-hyperlegible-mono",
+    "@fontsource-variable/jetbrains-mono",
+    "@fontsource-variable/source-code-pro",
+    "@fontsource/commit-mono",
+    "@fontsource/ibm-plex-mono",
+  ],
   // TypeScript reads these for the class names each CSS Module exports; nothing imports them.
   "ignore": ["apps/web/src/**/*.module.d.css.ts"],
 }

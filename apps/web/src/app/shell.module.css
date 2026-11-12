@@ -2,39 +2,71 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Clear of the rounded corners and the notch, in landscape. */
-  padding: 0 var(--safe-right) 0 var(--safe-left);
+  /* Clear of the notch, the status bar, and the rounded corners, in landscape. */
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
 }
 
+/* The page's name, for a screen reader's outline, not drawn. */
+.title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* One slim bar, on a compact screen alone: the sidebar's button and the Panes' switcher. */
 .bar {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  /* Clear of the notch and the status bar. */
-  padding: calc(var(--space-2) + var(--safe-top)) var(--space-3) var(--space-2);
+  min-width: 0;
   border-bottom: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
-}
-
-.title {
-  color: var(--color-accent);
-  margin-right: auto;
-}
-
-.failure {
-  color: var(--color-danger);
 }
 
 .body {
   display: grid;
   flex: 1;
-  /* The sidebar, and the Panes. */
-  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
-.body > nav {
-  border-right: var(--border-width) solid var(--color-border);
+/* The sidebar, its edge, and the Panes. The sidebar is as wide as this device keeps it, and
+   never more than half the window. */
+.withSidebar {
+  grid-template-columns: min(var(--sidebar-width), 50vw) var(--border-width) minmax(0, 1fr);
+}
+
+/* The sidebar's edge: a line, with a wider grip either side of it. */
+.edge {
+  position: relative;
+  z-index: 1;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 0;
+  background: var(--color-border);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.edge::before {
+  position: absolute;
+  inset: 0 calc(-1 * var(--space-2));
+  content: "";
+}
+
+.edge:hover,
+.edge:active {
+  background: var(--color-accent);
+}
+
+/* Focused from the keyboard: the line in the focus colour, as wide as an edge either side. */
+.edge:focus-visible {
+  background: var(--color-focus);
+  outline: none;
+  box-shadow: 0 0 0 var(--edge-width) var(--color-focus);
 }
 
 .main {
@@ -50,39 +82,23 @@
   min-height: 0;
 }
 
-/* The sidebar's button, on a compact screen, with its mark while anything said is unread. */
-.menu {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--target-size);
-  min-height: var(--target-size);
-  margin-left: calc(-1 * var(--space-3));
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  font-size: calc(var(--font-size) * 1.5);
-  cursor: default;
+/* The sidebar and its edge, two of the grid's columns. */
+.column {
+  display: contents;
 }
 
-.menu[data-pressed] {
-  background: var(--color-background);
+/* The button that shows the sidebar, while it is hidden, before the composer's prompt. */
+.show {
+  align-self: flex-start;
 }
 
-.menu[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-  outline-offset: calc(-1 * var(--border-width));
-}
-
+/* What is unread, as a dot at the corner of the sidebar's button. */
 .mark {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  width: var(--space-3);
-  height: var(--space-3);
+  top: 0.15em;
+  right: 0.15em;
+  width: 0.45em;
+  height: 0.45em;
   border-radius: 50%;
 }
 
@@ -111,7 +127,8 @@
   inset: 0 auto 0 0;
   display: flex;
   width: min(36ch, 85vw);
-  padding: var(--safe-top) 0 var(--safe-bottom) var(--safe-left);
+  /* The sidebar's foot keeps clear of the home bar itself. */
+  padding: var(--safe-top) 0 0 var(--safe-left);
   border-right: var(--border-width) solid var(--color-accent);
   background: var(--color-background);
   box-shadow: 0 0 var(--space-5) var(--color-shadow);
@@ -130,14 +147,9 @@
   flex: 1;
 }
 
+/* On a touch screen, the edge's grip is a finger's size. */
 @media (pointer: coarse) {
-  .bar {
-    padding-block: var(--safe-top) 0;
-  }
-}
-
-@media (max-width: 640px) {
-  .body {
-    grid-template-columns: minmax(0, 1fr);
+  .edge::before {
+    inset: 0 calc(var(--target-size) / -2);
   }
 }

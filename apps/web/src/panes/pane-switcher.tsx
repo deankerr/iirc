@@ -1,7 +1,9 @@
 /**
  * The Panes, as a compact row of their numbers and names, shown on a compact screen, where
- * only the focused Pane shows, and while zoomed, so every Pane is a press away. Choosing
- * one focuses it, as Alt+Shift and an arrow does. The layout stays as it was.
+ * only the focused Pane shows, and while zoomed, so every Pane is a press away. On a
+ * compact screen it sits in the shell's one bar, and elsewhere it is a row of its own above
+ * the Panes. Choosing one focuses it, as Alt+Shift and an arrow does. The layout stays as
+ * it was.
  *
  * @packageDocumentation
  */
@@ -9,10 +11,11 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { panesOf } from "@iirc/frontend/layout";
 import { paneName } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
-import { ToggleButton, ToggleButtonGroup } from "react-aria-components";
+import { ToggleButtonGroup } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
 import { timelinesState } from "../timelines/atoms.ts";
+import { ToggleButton } from "../ui/button.tsx";
 import { alone, focusedId, focusPane } from "./atoms.ts";
 
 import styles from "./pane-switcher.module.css";
@@ -30,9 +33,10 @@ const choices = Atom.make((get) => {
 
 /**
  * The switcher, while one Pane shows alone among several.
+ * @param props - Where it is placed: in the shell's bar, or as a row of its own.
  * @returns The switcher, or nothing.
  */
-export const PaneSwitcher = () => {
+export const PaneSwitcher = ({ placement }: { readonly placement: "Bar" | "Row" }) => {
   const one = useAtomValue(alone);
   const panes = useAtomValue(choices);
   const focused = useAtomValue(focusedId);
@@ -45,7 +49,7 @@ export const PaneSwitcher = () => {
   return (
     <ToggleButtonGroup
       aria-label="Panes"
-      className={styles.switcher}
+      className={`${styles.switcher} ${placement === "Row" ? styles.row : styles.inBar}`}
       disallowEmptySelection
       onSelectionChange={(keys: Set<Key>) => {
         const [key] = keys;
@@ -59,8 +63,9 @@ export const PaneSwitcher = () => {
       selectionMode="single"
     >
       {panes.map((pane) => (
-        <ToggleButton className={styles.choice} id={pane.id} key={pane.id}>
-          <span className={styles.number}>{pane.number}</span> <bdi>{pane.name}</bdi>
+        <ToggleButton className={styles.choice} id={pane.id} key={pane.id} size="small">
+          <span className={styles.number}>{pane.number}</span>{" "}
+          <bdi className={styles.name}>{pane.name}</bdi>
         </ToggleButton>
       ))}
     </ToggleButtonGroup>

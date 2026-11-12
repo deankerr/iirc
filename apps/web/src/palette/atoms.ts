@@ -14,6 +14,7 @@ import { Atom } from "effect/reactivity";
 import { channelState } from "../channel/state.ts";
 import { perform } from "../composer/atoms.ts";
 import { optionsState } from "../options/atoms.ts";
+import { uiInEffect } from "../options/ui.ts";
 import { themesListed } from "../theme/atoms.ts";
 import { sidebarNetworks, timelinesState } from "../timelines/atoms.ts";
 import { keymapState, paletteHappened, paletteHighlight, paletteState } from "./state.ts";
@@ -29,6 +30,7 @@ export const paletteSections = Atom.make((get): readonly ListedSection[] => {
 
   const listing = {
     context: contextOf(get(timelinesState), get(channelState)),
+    font: get(uiInEffect).font,
     keymap: get(keymapState),
     options: listed(get(optionsState), ""),
     sidebar: get(sidebarNetworks),
@@ -49,7 +51,7 @@ export const closePalette = Atom.fnSync((_, get) => {
 
 /**
  * Says which entry the palette highlights, or that one no longer is, which previews a theme
- * while its entry is highlighted.
+ * or a font while its entry is highlighted.
  */
 export const highlightEntry = Atom.fnSync(
   (change: { readonly key: string; readonly highlighted: boolean }, get) => {

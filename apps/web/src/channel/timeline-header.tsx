@@ -1,20 +1,27 @@
 /**
- * What a Pane's open Timeline shows at its head: a Channel's name, its topic, formatted, with
- * who set it and when, dim, how many members it has, its modes, and where Self stands when
- * not in it; a Direct Message's partner; or a Network's id and how its connection stands.
- * A Channel's header has the members' toggle beside it.
+ * A Pane's status bar while it shows a Timeline, or none yet: what the bar says after the
+ * Timeline's name. A Channel's says its modes, where Self stands when not in it, and its
+ * topic, cut to the line, which a press discloses in full under the bar, wrapped, saying in
+ * its place who set it and when, and at the right the members' toggle, which says how many
+ * there are. A Direct Message's says so, or why it no longer follows its partner, and a
+ * Network's how its connection stands. With no Timeline shown, the bar names the Pane alone.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Header, TopicShown } from "@iirc/frontend/channel";
-import { ToggleButton } from "react-aria-components";
+import { useState } from "react";
+import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
-import { perform } from "../composer/atoms.ts";
+import { paneNameOf } from "../panes/atoms.ts";
+import { BarText, PaneBar } from "../panes/pane-bar.tsx";
+import { paneTimeline } from "../timelines/atoms.ts";
 import { Inlines } from "../timelines/inlines.tsx";
+import { Tip, ToggleButton } from "../ui/button.tsx";
 import { formattedAt } from "../ui/dates.ts";
+import { Icon } from "../ui/icon.tsx";
 import { timelineHeader } from "./atoms.ts";
-import { membersVisible } from "./state.ts";
+import { membersOpen, toggleMembers } from "./state.ts";
 
 import styles from "./timeline-header.module.css";
 
@@ -37,36 +44,53 @@ const setText = (topic: Extract<TopicShown, { readonly _tag: "Set" }>) => {
 };
 
 /**
- * A Channel's topic.
- * @param props - The topic.
- * @returns The topic, or nothing while unknown.
+ * A topic in full, wrapped, and whether it is as last known, under the bar. The panel is
+ * there before any topic is, since React Aria hides only a panel it found as it started.
+ * @param props - The topic, if one is set.
+ * @returns The panel.
  */
-const Topic = ({ topic }: { readonly topic: TopicShown }) => {
+const TopicPanel = ({ topic }: { readonly topic: TopicShown | undefined }) => (
+  <DisclosurePanel>
+    {topic?._tag === "Set" ? (
+      <p className={styles.full}>
+        <bdi>
+          <Inlines inlines={topic.inlines} />
+        </bdi>
+        {topic.stale ? <span className={styles.dim}> (as last known)</span> : null}
+      </p>
+    ) : null}
+  </DisclosurePanel>
+);
+
+/**
+ * What a Channel's bar says of its topic: nothing while it is unknown, that none is set,
+ * or the topic on one line, which a press discloses in full under the bar, saying in its
+ * place who set it and when.
+ * @param props - The topic, and whether it is disclosed.
+ * @returns The topic's part of the bar.
+ */
+const TopicLine = ({ open, topic }: { readonly topic: TopicShown; readonly open: boolean }) => {
   switch (topic._tag) {
     case "Unknown": {
       return null;
     }
 
     case "None": {
-      return <p className={styles.dim}>No topic is set.</p>;
+      return <BarText>no topic</BarText>;
     }
 
     case "Set": {
-      const set = setText(topic);
-
       return (
-        <p className={styles.topic}>
-          <bdi>
-            <Inlines inlines={topic.inlines} />
-          </bdi>
-          {set === undefined ? null : (
-            <span className={styles.dim}>
-              {" "}
-              — <bdi>{set}</bdi>
-            </span>
+        <AriaButton className={styles.topic} slot="trigger">
+          {open ? (
+            <bdi className={styles.dim}>{setText(topic) ?? "the topic"}</bdi>
+          ) : (
+            // The line is a button, so a link in it is text here, and a link once disclosed.
+            <bdi>
+              <Inlines inlines={topic.inlines} links={false} />
+            </bdi>
           )}
-          {topic.stale ? <span className={styles.dim}> (as last known)</span> : null}
-        </p>
+        </AriaButton>
       );
     }
 
@@ -77,58 +101,75 @@ const Topic = ({ topic }: { readonly topic: TopicShown }) => {
 };
 
 /**
- * The toggle that shows or hides the members, as `/members` does: the column beside the
- * Channel, or the sheet over it on a compact screen.
+ * The toggle that shows or hides a Pane's members, saying how many there are: beside the
+ * Timeline, over it in a narrow Pane, or as a sheet over it on a compact screen.
+ * @param props - The Pane, and how many members its Channel has, if known.
  * @returns The toggle.
  */
-const MembersToggle = () => {
-  const shown = useAtomValue(membersVisible);
-  const run = useAtomSet(perform);
+const MembersToggle = ({
+  count,
+  pane,
+}: {
+  readonly pane: string;
+  readonly count: number | undefined;
+}) => {
+  const shown = useAtomValue(membersOpen(pane));
+  const toggle = useAtomSet(toggleMembers);
 
   return (
-    <ToggleButton
-      className={styles.toggle}
-      isSelected={shown}
-      onChange={(isSelected) => {
-        run([{ _tag: "ShowMembers", shown: isSelected }]);
-      }}
-    >
-      members
-    </ToggleButton>
+    <Tip command="members.toggle" label="Members">
+      <ToggleButton
+        aria-label={count === undefined ? "Members" : `Members, ${count}`}
+        // Which Pane's toggle this is, so a press on it is not a press outside its members.
+        data-members-toggle={pane}
+        isSelected={shown}
+        onChange={(isSelected) => {
+          toggle({ pane, shown: isSelected });
+        }}
+        size="small"
+        variant="quiet"
+      >
+        <Icon name="members" />
+        {count === undefined ? null : <span>{count}</span>}
+      </ToggleButton>
+    </Tip>
   );
 };
 
 /**
- * What a Header says beside its name.
- * @param props - The header.
+ * What a Header says after its name, on the bar's one line.
+ * @param props - The header, and whether its topic is disclosed.
  * @returns Its details.
  */
-const Details = ({ header }: { readonly header: Header }) => {
+const Details = ({ header, open }: { readonly header: Header; readonly open: boolean }) => {
   switch (header._tag) {
     case "Channel": {
       return (
         <>
-          {header.members === undefined ? null : (
-            <span className={styles.dim}>
-              {header.members === 1 ? "1 member" : `${header.members} members`}
-            </span>
+          {header.modes === undefined ? null : (
+            <BarText fill={false}>
+              <bdi title={header.modes}>{header.modes}</bdi>
+            </BarText>
           )}
-          {header.modes === undefined ? null : <bdi className={styles.dim}>{header.modes}</bdi>}
-          {header.note === undefined ? null : <span className={styles.note}>{header.note}</span>}
+          {header.note === undefined ? (
+            <TopicLine open={open} topic={header.topic} />
+          ) : (
+            <BarText tone="Note">{header.note}</BarText>
+          )}
         </>
       );
     }
 
     case "Direct": {
       return header.note === undefined ? (
-        <span className={styles.dim}>Direct Message</span>
+        <BarText>Direct Message</BarText>
       ) : (
-        <span className={styles.note}>{header.note}</span>
+        <BarText tone="Note">{header.note}</BarText>
       );
     }
 
     case "Network": {
-      return <span className={styles.dim}>{header.status}</span>;
+      return <BarText>{header.status}</BarText>;
     }
 
     default: {
@@ -138,37 +179,45 @@ const Details = ({ header }: { readonly header: Header }) => {
 };
 
 /**
- * A Pane's open Timeline's header.
- * @param props - The Pane, the name to show until the header is known, and its number
- * among several Panes, if there are several.
- * @returns The header.
+ * A Pane's status bar, while it shows a Timeline or is still to show one.
+ * @param props - The Pane.
+ * @returns The bar.
  */
-export const TimelineHeader = ({
-  name,
-  number,
-  pane,
-}: {
-  readonly name: string;
-  readonly number: number | undefined;
-  readonly pane: string;
-}) => {
+export const TimelineHeader = ({ pane }: { readonly pane: string }) => {
+  const shown = useAtomValue(paneTimeline(pane));
   const header = useAtomValue(timelineHeader(pane));
+  const paneName = useAtomValue(paneNameOf(pane));
+  // Whether the topic is disclosed, closed again for each Timeline the Pane opens.
+  const [disclosed, setDisclosed] = useState<{ readonly timeline: string } | undefined>();
+
+  if (shown._tag !== "Shown") {
+    return <PaneBar name={paneName} pane={pane} />;
+  }
+
+  const name = header?.name ?? shown.description?.name ?? "Timeline";
+  const topic = header?._tag === "Channel" && header.note === undefined ? header.topic : undefined;
+  const open = disclosed?.timeline === shown.timeline;
 
   return (
-    <header className={styles.header}>
-      <div className={styles.line}>
-        {number === undefined ? null : (
-          <span className={styles.dim} title={`Pane ${number}`}>
-            {number}
-          </span>
-        )}
-        <h2 className={styles.name}>
-          <bdi>{header?.name ?? name}</bdi>
-        </h2>
-        {header === undefined ? null : <Details header={header} />}
-        {header?._tag === "Channel" ? <MembersToggle /> : null}
-      </div>
-      {header?._tag === "Channel" ? <Topic topic={header.topic} /> : null}
-    </header>
+    <Disclosure
+      className={styles.disclosure}
+      isExpanded={open}
+      onExpandedChange={(expanded) => {
+        setDisclosed(expanded ? { timeline: shown.timeline } : undefined);
+      }}
+    >
+      <PaneBar
+        end={
+          header?._tag === "Channel" ? (
+            <MembersToggle count={header.members} pane={pane} />
+          ) : undefined
+        }
+        below={<TopicPanel topic={topic} />}
+        name={name}
+        pane={pane}
+      >
+        {header === undefined ? null : <Details header={header} open={open} />}
+      </PaneBar>
+    </Disclosure>
   );
 };

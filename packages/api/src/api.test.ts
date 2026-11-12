@@ -260,8 +260,8 @@ describe("the contract", () => {
         Option.getOrNull(option(each))
       ),
       options: [
-        { activity: "quiet", colours: "theme", theme: "dark", themes: [], time: "HH:mm:ss" },
-        { activity: "loud", colours: "theme", theme: "dark", themes: [], time: "HH:mm" },
+        { ...uiDefaults, activity: "quiet", theme: "dark", time: "HH:mm:ss" },
+        { ...uiDefaults, activity: "loud", theme: "dark" },
         { theme: "dark", time: "HH:mm" },
         { ...uiDefaults, theme: "tokyo-night" },
         { ...uiDefaults, theme: "Tokyo Night" },
@@ -269,16 +269,48 @@ describe("the contract", () => {
         { ...uiDefaults, themes: [mine, mine] },
         { ...uiDefaults, themes: [{ ...mine, palette: { ...mine.palette, ansi: ["#000000"] } }] },
         { ...uiDefaults, themes: [{ ...mine, palette: { ...mine.palette, background: "#FFF" } }] },
+        { ...uiDefaults, font: "jetbrains-mono", size: 10 },
+        { ...uiDefaults, font: "atkinson-hyperlegible-mono", size: 24 },
+        { ...uiDefaults, size: 9 },
+        { ...uiDefaults, size: 25 },
+        { ...uiDefaults, size: 14.5 },
+        { ...uiDefaults, size: "14" },
+        { ...uiDefaults, font: "Comic Sans" },
       ].map((each) => Option.isSome(options(each))),
       statuses: Object.keys(set?.responses ?? {}).toSorted(),
       value: [{ value: "dark" }, { value: { any: ["json", 1] } }, {}, { other: 2, value: 1 }].map(
         (each) => Option.isSome(Schema.decodeUnknownOption(UiValue, requestParseOptions)(each))
       ),
     }).toStrictEqual({
-      defaults: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
-      names: ["activity", "colours", "theme", "themes", "time"],
+      defaults: {
+        activity: "all",
+        colours: "theme",
+        font: "system",
+        size: 14,
+        theme: "system",
+        themes: [],
+        time: "HH:mm",
+      },
+      names: ["activity", "colours", "font", "size", "theme", "themes", "time"],
       option: ["time", "theme", "activity", null, null, null],
-      options: [true, false, false, true, false, true, false, false, false],
+      options: [
+        true,
+        false,
+        false,
+        true,
+        false,
+        true,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ],
       statuses: ["200", "400", "401", "403", "409", "500"],
       value: [true, true, false, false],
     });
@@ -287,12 +319,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","font":"system","size":14,"theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","theme":"dark","themes":[],"time":"HH:mm:ss"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","font":"ibm-plex-mono","size":16,"theme":"dark","themes":[],"time":"HH:mm:ss"},"sequence":9}',
         event: "changed",
         id: "9",
       },

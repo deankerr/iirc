@@ -41,7 +41,7 @@ The caps that sharpen facts the Client already keeps, each a Feature: `account-n
 
 - **An installable web app,** with a manifest and an icon, served by the Daemon.
 - **Web Push,** so a phone is notified of Highlights and Direct Messages with the page closed.
-- **Touch, past the basics:** the phone layout tested on a real iPhone and Android phone, the keyboard on iOS Safari kept from hiding the bar, back closing the drawer and the sheet, a swipe to open the drawer, a member's actions without a long press, and dragging the dividers between Panes on a tablet.
+- **Touch, past the basics:** the phone layout tested on a real iPhone and Android phone, the keyboard on iOS Safari kept from hiding the bar, back closing the drawer and the sheet, a swipe to open the drawer, and dragging the dividers between Panes on a tablet.
 
 ## The Owner's own keys and rules
 

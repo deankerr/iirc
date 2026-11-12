@@ -95,12 +95,28 @@ export type Offer =
       readonly intents: readonly Intent[];
     };
 
-/** Something to say under the composer: an error, or what became of a Say or an Act. */
-export interface Notice {
-  readonly message: string;
-  /** What the Owner can do next, if anything. */
-  readonly offer: Offer | undefined;
-}
+/**
+ * Something to say under the composer, by what it is about, which is how long it is true.
+ *
+ * - `AboutText`: what a submit could not read in the text as typed, such as no such command,
+ *   wrong arguments, or a refused Credential. It is let go of when the text is edited, and
+ *   when the composer turns to another Timeline, so it never comes back for text it no
+ *   longer sits under.
+ * - `Offering`: what became of a Say or an Act, with something the Owner can do about it. It
+ *   stays with its Timeline, through later submits, until the offer is taken, the notice
+ *   dismissed, or a newer notice takes its place, since a composer says one thing at a time.
+ * - `Outcome`: what became of something that arrived later, such as a change that did not go
+ *   as asked, or a Say that failed with nothing to offer. An edit does not hide it, since
+ *   the Owner may not have read it yet. It stays until dismissed or the next submit.
+ */
+export type Notice =
+  | { readonly _tag: "AboutText"; readonly message: string }
+  | { readonly _tag: "Offering"; readonly message: string; readonly offer: Offer }
+  | { readonly _tag: "Outcome"; readonly message: string };
+
+const aboutText = (message: string): Notice => ({ _tag: "AboutText", message });
+
+const outcome = (message: string): Notice => ({ _tag: "Outcome", message });
 
 /** Lines waiting for the Owner to confirm them before they are sent. */
 export interface Confirming {
@@ -165,15 +181,19 @@ export type SayFailure =
 /**
  * What happened to a composer.
  *
- * - `Edited`: the Owner changed the text, which lets go of lines waiting to be confirmed.
- * - `Recalled`: Up or Down through the history.
+ * - `Edited`: the Owner changed the text, which lets go of lines waiting to be confirmed,
+ *   and of a notice about the text. Text left as it was changes nothing.
+ * - `Recalled`: Up or Down through the history, which changes the text as an edit does.
+ * - `Left`: the composer turned to another Timeline, which lets go of a notice about the
+ *   text it holds, since the text stays and the complaint about it does not come back.
  * - `Dismissed`: Escape, which lets go of a notice and a confirmation.
  * - `Failed`: a Say or an Act failed; `intents` are it and those after it, none carried out after it.
  * - `Noticed`: an intent other than a Say or an Act did not go as asked, such as a change of
  *   Configuration, in words. Nothing after it was carried out.
  * - `Carried`: a draft came to show its Timeline, so what was typed under it, unsent, goes
  *   to the Timeline's composer, unless that holds text of its own, with its notice unless
- *   that holds one, and what is said later of a Say sent from the draft is said there.
+ *   that holds one, and what is said later of a Say sent from the draft is said there. A
+ *   notice about the text stays behind.
  */
 export type ComposerEvent =
   | { readonly _tag: "Edited"; readonly timeline: Place; readonly text: string }
@@ -182,6 +202,7 @@ export type ComposerEvent =
       readonly timeline: Place;
       readonly direction: "Older" | "Newer";
     }
+  | { readonly _tag: "Left"; readonly timeline: Place }
   | { readonly _tag: "Dismissed"; readonly timeline: Place }
   | {
       readonly _tag: "Failed";
@@ -329,8 +350,17 @@ export const linesOf = (text: string): readonly string[] =>
   text.split(/\r\n|\r|\n/u).filter((line) => line.trim() !== "");
 
 /**
+ * A notice once the Owner submits: an offer stays, since it can still be taken, and anything
+ * else is let go of.
+ * @param notice - The notice.
+ * @returns What is left of it.
+ */
+const afterSubmit = (notice: Notice | undefined): Notice | undefined =>
+  notice?._tag === "Offering" ? notice : undefined;
+
+/**
  * The composer once its text was sent: cleared, and its text the newest in its history,
- * unless it is already.
+ * unless it is already. An offer made of an earlier Say or Act stays.
  * @param draft - The composer.
  * @returns The composer after.
  */
@@ -340,6 +370,7 @@ const sent = (draft: Draft): Draft => ({
     draft.history[0] === draft.text
       ? draft.history
       : [draft.text, ...draft.history].slice(0, historyCap),
+  notice: afterSubmit(draft.notice),
 });
 
 /**
@@ -355,13 +386,21 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   const draft = draftOf(state, timeline);
   const lines = linesOf(draft.text);
 
+  // Nothing to send still counts as a submit to an outcome, which often arrives once the
+  // composer is empty again: Enter lets go of it.
   if (lines.length === 0) {
-    return { intents: [], state };
+    return {
+      intents: [],
+      state:
+        draft.notice?._tag === "Outcome"
+          ? withDraft(state, timeline, (one) => ({ ...one, notice: undefined }))
+          : state,
+    };
   }
 
   const refuse = (message: string): Submitted => ({
     intents: [],
-    state: noticed(state, timeline, { message, offer: undefined }),
+    state: noticed(state, timeline, aboutText(message)),
   });
 
   // A Credential's value typed here is let go of at once: the draft, what was kept while
@@ -376,7 +415,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
       state: withDraft(state, timeline, (one) => ({
         ...emptyDraft,
         history: one.history,
-        notice: { message: credential, offer: undefined },
+        notice: aboutText(credential),
       })),
     };
   }
@@ -403,7 +442,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
       state: withDraft(state, timeline, (one) => ({
         ...one,
         confirming: { intents, lines: lines.length },
-        notice: undefined,
+        notice: afterSubmit(one.notice),
       })),
     };
   }
@@ -438,14 +477,14 @@ export const takeOffer = (
   state: Composers,
   timeline: Place
 ): { readonly state: Composers; readonly offer: Offer | undefined } => {
-  const offered = draftOf(state, timeline).notice?.offer;
+  const { notice } = draftOf(state, timeline);
 
-  return offered === undefined
-    ? { offer: undefined, state }
-    : {
-        offer: offered,
+  return notice?._tag === "Offering"
+    ? {
+        offer: notice.offer,
         state: withDraft(state, timeline, (draft) => ({ ...draft, notice: undefined })),
-      };
+      }
+    : { offer: undefined, state };
 };
 
 /**
@@ -496,12 +535,11 @@ export const failed = (
 
   switch (failure._tag) {
     case "Refused": {
-      return {
-        message: more
+      return outcome(
+        more
           ? `${refusal(failure.reason, failure.target, failure.action)} Nothing after it was sent.`
-          : refusal(failure.reason, failure.target, failure.action),
-        offer: undefined,
-      };
+          : refusal(failure.reason, failure.target, failure.action)
+      );
     }
 
     case "Journaled": {
@@ -509,14 +547,18 @@ export const failed = (
         ? "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. What the Ircd did shows in the Timeline, and a refusal there too."
         : "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery.";
 
-      return {
-        message: more ? `${journaled} What came after it was not sent.` : journaled,
-        offer: more ? { _tag: "SendAgain", intent: undefined, intents: rest } : undefined,
-      };
+      return more
+        ? {
+            _tag: "Offering",
+            message: `${journaled} What came after it was not sent.`,
+            offer: { _tag: "SendAgain", intent: undefined, intents: rest },
+          }
+        : outcome(journaled);
     }
 
     case "NotJournaled": {
       return {
+        _tag: "Offering",
         message: `The Network stopped before this was journaled, so it was not ${acted ? "sent" : "said"}.`,
         offer: { _tag: "SendAgain", intent, intents },
       };
@@ -524,27 +566,24 @@ export const failed = (
 
     case "Unknown": {
       return {
+        _tag: "Offering",
         message: `The Daemon did not answer, so whether this was ${acted ? "sent" : "said"} is unknown. Nothing after it was sent.`,
         offer: { _tag: "CheckAgain", intent, intents, network: failure.network },
       };
     }
 
     case "UnknownNetwork": {
-      return { message: `The Daemon has no Network ${failure.network}.`, offer: undefined };
+      return outcome(`The Daemon has no Network ${failure.network}.`);
     }
 
     case "Malformed": {
-      return {
-        message: `The Daemon could not read this as something to ${acted ? "do" : "say"}.`,
-        offer: undefined,
-      };
+      return outcome(`The Daemon could not read this as something to ${acted ? "do" : "say"}.`);
     }
 
     case "Unexpected": {
-      return {
-        message: `The Daemon answered in a way the Frontend could not read, so whether this was ${acted ? "sent" : "said"} is unknown.`,
-        offer: undefined,
-      };
+      return outcome(
+        `The Daemon answered in a way the Frontend could not read, so whether this was ${acted ? "sent" : "said"} is unknown.`
+      );
     }
 
     default: {
@@ -588,6 +627,16 @@ const recalledIn = (draft: Draft, direction: "Older" | "Newer"): Draft => {
 };
 
 /**
+ * A notice, once the text it may be about is edited or not: a notice about the text is let
+ * go of, and any other stays.
+ * @param notice - The notice.
+ * @param edited - Whether the text changed.
+ * @returns The notice after.
+ */
+const unlessAboutText = (notice: Notice | undefined, edited: boolean): Notice | undefined =>
+  edited && notice?._tag === "AboutText" ? undefined : notice;
+
+/**
  * The composers after an event.
  * @param state - The state before.
  * @param event - What happened.
@@ -596,10 +645,12 @@ const recalledIn = (draft: Draft, direction: "Older" | "Newer"): Draft => {
 export const reduceComposers = (state: Composers, event: ComposerEvent): Composers => {
   switch (event._tag) {
     // The draft's text goes over unless the Timeline's composer holds text of its own, and
-    // its notice unless that holds one, and anything said of it later follows.
+    // its notice unless that holds one, and anything said of it later follows. A notice about
+    // the text does not: it was said under a draft that is gone.
     case "Carried": {
       const from = draftOf(state, event.from);
       const to = draftOf(state, event.to);
+      const kept = from.notice?._tag === "AboutText" ? undefined : from.notice;
       const moving = from.text.trim() !== "" && to.text.trim() === "";
       const drafts = new Map(state.drafts);
 
@@ -613,31 +664,42 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
             ? {
                 ...to,
                 confirming: from.confirming,
-                notice: to.notice ?? from.notice,
+                notice: to.notice ?? kept,
                 recalled: undefined,
                 text: from.text,
               }
-            : { ...to, notice: to.notice ?? from.notice }
+            : { ...to, notice: to.notice ?? kept }
         ),
       };
     }
 
     case "Edited": {
-      // Lines waiting to be confirmed were read from the text before it changed.
+      // Lines waiting to be confirmed were read from the text before it changed, and a
+      // complaint about the text is about the text as it was.
       return withDraft(state, event.timeline, (draft) => ({
         ...draft,
         confirming: undefined,
+        notice: unlessAboutText(draft.notice, draft.text !== event.text),
         recalled: undefined,
         text: event.text,
       }));
+    }
+
+    case "Left": {
+      return draftOf(state, event.timeline).notice?._tag === "AboutText"
+        ? withDraft(state, event.timeline, (draft) => ({ ...draft, notice: undefined }))
+        : state;
     }
 
     case "Recalled": {
       return withDraft(state, event.timeline, (before) => {
         const after = recalledIn(before, event.direction);
 
-        // Lines waiting to be confirmed were read from the text it showed before.
-        return after.text === before.text ? after : { ...after, confirming: undefined };
+        // Lines waiting to be confirmed were read from the text it showed before, and a
+        // complaint about the text is about that.
+        return after.text === before.text
+          ? after
+          : { ...after, confirming: undefined, notice: unlessAboutText(after.notice, true) };
       });
     }
 
@@ -654,7 +716,7 @@ export const reduceComposers = (state: Composers, event: ComposerEvent): Compose
     }
 
     case "Noticed": {
-      return noticed(state, event.timeline, { message: event.message, offer: undefined });
+      return noticed(state, event.timeline, outcome(event.message));
     }
 
     default: {
@@ -683,8 +745,11 @@ export const started = (state: Composers, timeline: Place, text: string | undefi
     return reduceComposers(state, { _tag: "Edited", text, timeline });
   }
 
-  return noticed(state, timeline, {
-    message: `${contained(text.trim())} was not put in, since the composer has text. Clear it and choose again.`,
-    offer: undefined,
-  });
+  return noticed(
+    state,
+    timeline,
+    aboutText(
+      `${contained(text.trim())} was not put in, since the composer has text. Clear it and choose again.`
+    )
+  );
 };

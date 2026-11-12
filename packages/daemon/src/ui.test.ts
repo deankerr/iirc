@@ -34,7 +34,15 @@ const fold = (changes: readonly Change[]) => {
 describe("folding the ui options", () => {
   it("starts every option at its default, with sequence 0", () => {
     expect(fold([])).toStrictEqual({
-      options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
+      options: {
+        activity: "all",
+        colours: "theme",
+        font: "system",
+        size: 14,
+        theme: "system",
+        themes: [],
+        time: "HH:mm",
+      },
       sequence: 0,
     });
   });
@@ -49,7 +57,15 @@ describe("folding the ui options", () => {
         unset("theme"),
       ])
     ).toStrictEqual({
-      options: { activity: "quiet", colours: "theme", theme: "system", themes: [], time: "none" },
+      options: {
+        activity: "quiet",
+        colours: "theme",
+        font: "system",
+        size: 14,
+        theme: "system",
+        themes: [],
+        time: "none",
+      },
       sequence: 5,
     });
   });
@@ -58,7 +74,15 @@ describe("folding the ui options", () => {
     expect(
       fold([set("time", "HH:mm:ss"), set("time", "noon"), set("palette", "dusk"), unset("nope")])
     ).toStrictEqual({
-      options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm:ss" },
+      options: {
+        activity: "all",
+        colours: "theme",
+        font: "system",
+        size: 14,
+        theme: "system",
+        themes: [],
+        time: "HH:mm:ss",
+      },
       sequence: 4,
     });
   });
@@ -126,6 +150,8 @@ describe("the ui options, kept", () => {
         options: {
           activity: "all",
           colours: "theme",
+          font: "system",
+          size: 14,
           theme: "light",
           themes: [],
           time: "HH:mm:ss",
@@ -137,6 +163,8 @@ describe("the ui options, kept", () => {
           options: {
             activity: "all",
             colours: "theme",
+            font: "system",
+            size: 14,
             theme: "light",
             themes: [],
             time: "HH:mm:ss",

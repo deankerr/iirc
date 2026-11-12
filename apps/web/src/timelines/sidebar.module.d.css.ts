@@ -4,9 +4,15 @@ declare const styles: {
   readonly chevron: string;
   readonly connected: string;
   readonly connecting: string;
+  readonly controls: string;
   readonly counts: string;
   readonly direct: string;
+  readonly elsewhere: string;
+  readonly failure: string;
+  readonly footer: string;
+  readonly gutter: string;
   readonly heading: string;
+  readonly hide: string;
   readonly item: string;
   readonly levelActivity: string;
   readonly levelDirect: string;
@@ -18,8 +24,10 @@ declare const styles: {
   readonly name: string;
   readonly network: string;
   readonly offline: string;
-  readonly options: string;
+  readonly pane: string;
+  readonly scroll: string;
   readonly sidebar: string;
+  readonly standing: string;
   readonly tree: string;
 };
 

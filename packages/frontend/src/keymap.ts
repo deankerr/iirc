@@ -92,11 +92,16 @@ export interface BindingText {
  * - `command`: the context the bound command is judged in.
  * - `editing`: focus is in a field that takes text, such as the composer.
  * - `palette`: the command palette is open.
+ * - `covered`: a modal dialog, a popover, or a menu is open or holds the focus, and keeps
+ *   its keys.
+ * - `composer`: there is a composer for typing to land in.
  */
 export interface KeyContext {
   readonly command: CommandContext;
   readonly editing: boolean;
   readonly palette: boolean;
+  readonly covered: boolean;
+  readonly composer: boolean;
   readonly platform: Platform;
 }
 
@@ -293,6 +298,17 @@ const printable = /^[^\p{C}\s]$/u;
 const ascii = /^[!-~]$/u;
 
 /**
+ * The letter or digit a physical key is, from its `code`.
+ * @param code - `KeyboardEvent.code`.
+ * @returns The letter or digit, or none for any other key.
+ */
+const physicalOf = (code: string): string | undefined => {
+  const physical = /^(?:Key(?<letter>[A-Z])|Digit(?<digit>\d))$/u.exec(code)?.groups;
+
+  return physical?.letter ?? physical?.digit;
+};
+
+/**
  * The key a key event names. With no modifier, or Shift alone, it is the character the
  * layout typed, so an AZERTY `é` is `é`, not the `2` its physical key is on QWERTY. The
  * physical key, a letter or digit, names it only where the layout's character says less:
@@ -313,8 +329,7 @@ const keyOfEvent = (event: KeyEvent): KeyName | undefined => {
     return keyNamed(namedKey);
   }
 
-  const physical = /^(?:Key(?<letter>[A-Z])|Digit(?<digit>\d))$/u.exec(event.code)?.groups;
-  const fromCode = physical?.letter ?? physical?.digit;
+  const fromCode = physicalOf(event.code);
   const typed = printable.test(event.key) ? keyNamed(event.key) : undefined;
 
   if (typed === undefined) {
@@ -471,11 +486,10 @@ export const keymapOf = (texts: readonly BindingText[]): Keymap =>
 /**
  * The bindings the Frontend starts with. Opening the palette and moving between Timelines
  * work while typing in the composer, as an IRC client's do, and Alt+A jumps to what calls
- * for the Owner most, as WeeChat's does, and Alt+M shows or hides the members, as Alt+A
- * does beside it: Mod+Shift+M is the browser's own in Chrome and Firefox. Focusing the
- * composer is `i`,
- * outside a field: a letter outside a field has no browser default, where Ctrl+L and Cmd+L
- * go to the address bar, and inside one it is typed. The Panes are Alt+Shift: with the
+ * for the Owner most, as WeeChat's does. Alt+M shows or hides the members and Alt+N the
+ * sidebar of Networks beside them: Mod+Shift+M is the browser's own in Chrome and Firefox,
+ * and Ctrl+B is bold to an IRC user. No letter is bound to focusing the composer, since a
+ * character typed outside a field goes to it. The Panes are Alt+Shift: with the
  * arrows to move between them, as Alt and the arrows move between Timelines, and with a
  * letter to split, close, zoom, equalize, grow, or shrink, a letter because Option on a
  * Mac types another character, which only a letter's or a digit's physical key names back.
@@ -487,7 +501,7 @@ export const defaultBindings: readonly BindingText[] = [
   { command: "timeline.previous", keys: "alt+arrowup", when: "!palette" },
   { command: "timeline.unread", keys: "alt+a", when: "!palette" },
   { command: "members.toggle", keys: "alt+m", when: "!palette" },
-  { command: "composer.focus", keys: "i", when: "!editing && !palette" },
+  { command: "sidebar.toggle", keys: "alt+n", when: "!palette" },
   { args: "", command: "options.set", keys: "mod+,", when: "!palette" },
   { command: "search.open", keys: "mod+shift+f", when: "!palette" },
   { args: "left", command: "pane.focus", keys: "alt+shift+arrowleft", when: "!palette" },
@@ -554,6 +568,77 @@ export const resolve = (
 
   return undefined;
 };
+
+/**
+ * Whether a key pressed is the platform's paste chord: Mod+V, with or without Shift.
+ * @param event - The event.
+ * @param platform - The platform.
+ * @returns Whether it is.
+ */
+const pastes = (event: KeyEvent, platform: Platform) => {
+  const mac = platform === "Mac";
+
+  return (
+    lower(event.key) === "v" &&
+    (mac ? event.meta && !event.ctrl : event.ctrl && !event.meta) &&
+    !event.alt
+  );
+};
+
+/**
+ * Whether a key types a character, or starts to: a printable character, with Shift or not,
+ * a dead key, the key an input method holds as its composition begins, a character AltGr
+ * types, a character Option types on a Mac, or the platform's paste chord. Space and Enter
+ * are not typing, they activate what has the focus, and a key with Ctrl, Meta, or Alt held
+ * is a chord, unless it types.
+ * @param event - The event.
+ * @param platform - The platform.
+ * @returns Whether it is.
+ */
+export const isTyping = (event: KeyEvent, platform: Platform): boolean => {
+  if (pastes(event, platform)) {
+    return true;
+  }
+
+  const character = event.key === "Dead" || printable.test(event.key);
+
+  if (event.altGraph) {
+    return character;
+  }
+
+  // Ctrl or Cmd with a key is a chord, and Alt with one is too, but where Option types a
+  // character on a Mac, as `å`, it is typing.
+  if (event.ctrl || event.meta) {
+    return false;
+  }
+
+  // Option types a character other than its physical key's, and a key that makes the
+  // character it is on is a chord with Alt held.
+  if (event.alt) {
+    return (
+      platform === "Mac" && character && lower(event.key) !== lower(physicalOf(event.code) ?? "")
+    );
+  }
+
+  return character || event.key === "Process";
+};
+
+/**
+ * Whether a key pressed should be typed in the composer, which takes the focus for it: it
+ * types, nothing that takes text or keeps its keys has the focus, there is a composer, and
+ * no binding takes it, since a bound key is still the keymap's.
+ * @param keymap - The keymap.
+ * @param context - Where the key was pressed.
+ * @param event - The key.
+ * @returns Whether the composer is to have it.
+ */
+export const typesInComposer = (keymap: Keymap, context: KeyContext, event: KeyEvent): boolean =>
+  context.composer &&
+  !context.editing &&
+  !context.palette &&
+  !context.covered &&
+  isTyping(event, context.platform) &&
+  resolve(keymap, context, event) === undefined;
 
 /**
  * The chords bound to a command with no arguments, for a list to show beside it.

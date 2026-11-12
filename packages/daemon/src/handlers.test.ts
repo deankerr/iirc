@@ -395,15 +395,39 @@ describe("the handlers", () => {
 
     expect(result).toStrictEqual({
       after: {
-        options: { activity: "all", colours: "theme", theme: "light", themes: [], time: "HH:mm" },
+        options: {
+          activity: "all",
+          colours: "theme",
+          font: "system",
+          size: 14,
+          theme: "light",
+          themes: [],
+          time: "HH:mm",
+        },
         sequence: 4,
       },
       both: {
-        options: { activity: "all", colours: "theme", theme: "dark", themes: [], time: "HH:mm:ss" },
+        options: {
+          activity: "all",
+          colours: "theme",
+          font: "system",
+          size: 14,
+          theme: "dark",
+          themes: [],
+          time: "HH:mm:ss",
+        },
         sequence: 2,
       },
       fresh: {
-        options: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
+        options: {
+          activity: "all",
+          colours: "theme",
+          font: "system",
+          size: 14,
+          theme: "system",
+          themes: [],
+          time: "HH:mm",
+        },
         sequence: 0,
       },
       journaled: ["UiSet time", "UiSet theme", "UiSet theme", "UiUnset time"],

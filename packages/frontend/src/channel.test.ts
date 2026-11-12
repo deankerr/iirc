@@ -823,8 +823,18 @@ describe("the Channels the Panes show", () => {
     }).toStrictEqual({ headers: ["#iirc", undefined], open: [other, iirc] });
   });
 
+  it("reads the members of only the Channels whose members show", () => {
+    const reads = channelsReads(initialChannels, [inIirc, inOther], new Set([timelineId(other)]));
+
+    expect(reads.map((read) => [read._tag, read.timeline])).toStrictEqual([
+      ["Head", iirc],
+      ["Head", other],
+      ["Members", other],
+    ]);
+  });
+
   it("reads each Channel's head, keeps each apart, and lets go of one no Pane shows", () => {
-    const reads = channelsReads(initialChannels, [inIirc, inOther], false);
+    const reads = channelsReads(initialChannels, [inIirc, inOther], new Set());
     const started = reads.map((read): ChannelsEvent => ({ _tag: "ReadStarted", at: 0, read }));
     const [forIirc, forOther] = reads;
 
@@ -839,7 +849,7 @@ describe("the Channels the Panes show", () => {
     const kept = reduceChannels(answered, { _tag: "Kept", timelines: [timelineId(iirc)] });
 
     expect({
-      again: channelsReads(answered, [inIirc, inOther], false).map((read) => [
+      again: channelsReads(answered, [inIirc, inOther], new Set()).map((read) => [
         read.timeline,
         read.wait,
       ]),

@@ -58,6 +58,11 @@ const decodeKnown = Schema.decodeUnknownSync(
   )
 );
 
+/** A Channel's head as the Daemon answers it, whatever it holds, to answer it changed. */
+const decodeHead = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+);
+
 /** What the end-to-end run reads of a Configuration: its Channels and nicks. */
 const decodeInForce = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -171,18 +176,27 @@ const countLayoutWrites = () => {
   };
 };
 
+/** How a Network's row ends its label, once its connection is known: the word for it. */
+const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
+
 /**
  * The first Network's row in the sidebar, once its connection is known.
  * @param page - The page.
- * @returns The row's text: its chevron, its id, and its connection.
+ * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol.
  */
 const networkRow = async (page: Page) => {
-  const row = page.getByRole("row").first();
+  await page.getByRole("row", { name: standingWord }).first().waitFor();
 
-  await row.getByText(/^(?:connected|offline|stopped)$/u).waitFor();
-
-  return await row.textContent();
+  return (await page.getByRole("row").first().textContent()) ?? "";
 };
+
+/**
+ * How the first Network's connection stands, as its row's label says it.
+ * @param page - The page.
+ * @returns The label.
+ */
+const standingLabel = async (page: Page) =>
+  (await page.getByRole("row").first().getAttribute("aria-label")) ?? "";
 
 /**
  * Whether anything React keeps for the page, its state and its props, holds a secret. It
@@ -306,6 +320,58 @@ const leastSide = async (locator: ReturnType<Page["getByRole"]>) => {
   return box === null ? 0 : Math.round(Math.min(box.width, box.height));
 };
 
+/**
+ * Drags the sidebar's edge 100 pixels wider, which the device keeps, then hides the sidebar
+ * with Alt+N while the focus is in it, which sends the focus to the composer, reloads, which
+ * keeps it hidden, and shows it again from the button beside the composer.
+ * @param page - The page, on a wide screen, with the sidebar shown at its first width.
+ * @returns Its width before and after, the width kept, whether the composer took the focus,
+ * and how many sidebars the reload drew.
+ */
+const resizedSidebar = async (page: Page) => {
+  const sidebar = page.getByRole("navigation", { name: "Networks" });
+  const edge = await page.getByRole("separator", { name: "Resize the sidebar" }).boundingBox();
+  const at = { x: (edge?.x ?? 0) + 0.5, y: (edge?.y ?? 0) + 300 };
+
+  const sidebarWidth = async () => {
+    const box = await sidebar.boundingBox();
+
+    return Math.round(box?.width ?? 0);
+  };
+
+  const narrow = await sidebarWidth();
+
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 100, at.y, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(sidebarWidth).toBe(narrow + 100);
+
+  const widthKept = await page.evaluate(() => localStorage.getItem("iirc.sidebar-width"));
+
+  // Hidden while the focus is in it, the focus goes to the composer, not nowhere.
+  await sidebar.getByRole("row").first().focus();
+  await page.keyboard.press("Alt+N");
+  await sidebar.waitFor({ state: "detached" });
+
+  const focusAfter = await page.evaluate(() => {
+    const focused = document.activeElement;
+
+    return focused instanceof HTMLElement && focused.dataset.composer !== undefined;
+  });
+
+  await page.reload();
+  const show = page.getByRole("button", { name: /^Show the sidebar/u });
+
+  await show.waitFor();
+  const hiddenKept = await sidebar.count();
+
+  await show.click();
+  await sidebar.waitFor();
+
+  return { focusAfter, hiddenKept, narrow, wide: await sidebarWidth(), widthKept };
+};
+
 describe("the web frontend on iirc daemon --web", () => {
   let browser: Browser;
   let directory: string;
@@ -419,13 +485,14 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: problems.filter((problem) => !problem.includes("401")),
           wrong,
         }).toStrictEqual({
-          afterReload: "exampleoffline",
+          // Its id, and an open circle, which is offline.
+          afterReload: "example\u25CB",
           afterWrong: { describedBy: true, field: "", inPage: false, tracker: "" },
           configured: 200,
           cookies: [{ holdsKey: false, httpOnly: true, name: "iirc_sign_in", sameSite: "Strict" }],
           cookiesAfter: [],
           held: { cookie: "", local: ["iirc.layout"], localHoldsKey: false, session: 0 },
-          listed: "exampleoffline",
+          listed: "example\u25CB",
           problems: [],
           wrong:
             "That key matches none the Daemon holds. Check it, or make one with iirc key create.",
@@ -578,7 +645,7 @@ describe("the web frontend on iirc daemon --web", () => {
           linked,
           pinned,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
-          status,
+          status: status.startsWith("\u25BEprivate") && status.endsWith("\u25CF"),
           violations,
         }).toStrictEqual({
           // mIRC's red is the theme's bright red, `light`'s under Playwright's light device.
@@ -587,7 +654,8 @@ describe("the web frontend on iirc daemon --web", () => {
           linked: { href: "https://example.com/x", rel: "noopener noreferrer", target: "_blank" },
           pinned: true,
           problems: [],
-          status: "\u25BEprivateconnected",
+          // The chevron, the id, and a filled circle, which is connected.
+          status: true,
           violations: "",
         });
       } finally {
@@ -629,10 +697,17 @@ describe("the web frontend on iirc daemon --web", () => {
           "the Message"
         );
 
-        // Ours, in the Timeline, once: ngircd has no echo-message, so it stays unconfirmed.
+        // Ours, in the Timeline, once: ngircd has no echo-message, so it stays unconfirmed,
+        // which is not worth saying on every line.
         const ourRow = log.locator("[data-index]", { hasText: "hello from the web" });
 
-        await ourRow.getByText("unconfirmed").waitFor();
+        await ourRow.waitFor();
+        await expect.poll(async () => await ourRow.textContent()).not.toContain("sending");
+
+        const delivery = /sending|unconfirmed|not sent|refused/u.test(
+          (await ourRow.textContent()) ?? ""
+        );
+
         const rows = await ourRow.count();
         const cleared = await composer.inputValue();
 
@@ -670,6 +745,7 @@ describe("the web frontend on iirc daemon --web", () => {
         expect({
           action: action.params,
           cleared,
+          delivery,
           direct: direct.params,
           heard: heard.params,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
@@ -679,6 +755,7 @@ describe("the web frontend on iirc daemon --web", () => {
         }).toStrictEqual({
           action: [channel, "\u0001ACTION waves\u0001"],
           cleared: "",
+          delivery: false,
           direct: ["peer", "hi"],
           heard: [channel, "hello from the web"],
           problems: [],
@@ -714,18 +791,20 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.getByRole("row", { name: channel }).click();
 
         const composer = page.getByRole("textbox", { name: channel });
-        const standing = async () => (await page.getByRole("row").first().textContent()) ?? "";
+        const standing = async () => await standingLabel(page);
 
         // `/disconnect` turns the focused Network off, and the sidebar says so.
         await composer.fill("/disconnect");
         await composer.press("Enter");
-        await expect.poll(standing, { timeout: 20_000 }).toMatch(/(?:offline|stopped)$/u);
+        await expect
+          .poll(standing, { timeout: 20_000 })
+          .toMatch(/, (?:offline|stopped)(?:: .*)?$/u);
         const off = await standing();
 
         // `/connect` turns it on again.
         await composer.fill("/connect");
         await composer.press("Enter");
-        await expect.poll(standing, { timeout: 20_000 }).toMatch(/connected$/u);
+        await expect.poll(standing, { timeout: 20_000 }).toMatch(/, connected$/u);
         const on = await standing();
 
         // `/query` to a nick nothing was said to yet shows a Direct Message not yet begun,
@@ -757,8 +836,8 @@ describe("the web frontend on iirc daemon --web", () => {
         expect({
           direct: direct.params,
           drafted,
-          off: /(?:offline|stopped)$/u.test(off),
-          on: on.endsWith("connected"),
+          off: /, (?:offline|stopped)(?:: .*)?$/u.test(off),
+          on: on.endsWith(", connected"),
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           violations,
         }).toStrictEqual({
@@ -796,7 +875,6 @@ describe("the web frontend on iirc daemon --web", () => {
         await networkRow(page);
         await page.getByRole("row", { name: channel }).click();
 
-        const view = page.getByRole("region", { name: channel });
         const log = page.getByRole("log", { name: channel });
         const composer = page.getByRole("textbox", { name: channel });
 
@@ -821,10 +899,13 @@ describe("the web frontend on iirc daemon --web", () => {
         peer.send(`MODE ${channel} +o iirc`);
         await members.getByRole("row", { name: "iirc, operator" }).waitFor();
 
-        // A topic set from the composer shows in the header.
+        // A topic set from the composer shows in the Pane's status bar.
         await composer.fill("/topic a plan for today");
         await composer.press("Enter");
-        await view.locator("header").getByText("a plan for today", { exact: true }).waitFor();
+        await page
+          .locator("[data-pane] header")
+          .getByRole("button", { exact: true, name: "a plan for today" })
+          .waitFor();
 
         // Taking the peer's rank and giving it back, by PREFIX's `o`.
         await composer.fill("/deop peer");
@@ -958,15 +1039,17 @@ describe("the web frontend on iirc daemon --web", () => {
         await networkRow(page);
         await page.getByRole("row", { name: channel }).click();
 
-        const view = page.getByRole("region", { name: channel });
         const composer = page.getByRole("textbox", { name: channel });
 
         await page.getByRole("log", { name: channel }).waitFor();
 
-        // The peer sets the topic: the header reads the Channel again and shows it, formatted.
+        // The peer sets the topic: the bar reads the Channel again and shows it on one line,
+        // which a press discloses in full, formatted, with who set it in its place.
         peer.send(`TOPIC ${channel} :the \u0002plan\u0002 for today`);
-        const head = view.locator("header");
+        const head = page.locator("[data-pane] header");
+        const line = head.getByRole("button", { name: "the plan for today" });
 
+        await line.click();
         await head.getByText("set by peer", { exact: false }).waitFor();
 
         const topic = await head
@@ -981,6 +1064,23 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await peerRow.waitFor();
         const symbol = await peerRow.textContent();
+
+        // A press on a member opens their menu, as dense as the list, Query focused first.
+        await peerRow.click();
+        const query = page.getByRole("menuitem", { name: "Query peer" });
+
+        await query.waitFor();
+
+        const [actionBox, rowBox] = [await query.boundingBox(), await peerRow.boundingBox()];
+
+        const menu = {
+          focused: await query.evaluate((element) => element === document.activeElement),
+          height: actionBox?.height === rowBox?.height,
+          items: await page.getByRole("menuitem").count(),
+        };
+
+        await page.keyboard.press("Escape");
+        await query.waitFor({ state: "detached" });
 
         // The peer ops Self, which the list reads again and shows.
         peer.send(`MODE ${channel} +o iirc`);
@@ -1012,12 +1112,14 @@ describe("the web frontend on iirc daemon --web", () => {
 
         expect({
           completed,
+          menu,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           symbol,
           topic,
           violations,
         }).toStrictEqual({
           completed: "peer: ",
+          menu: { focused: true, height: true, items: 3 },
           problems: [],
           symbol: "@peer",
           topic: "700",
@@ -1165,12 +1267,12 @@ describe("the web frontend on iirc daemon --web", () => {
         await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
         await nowhere.press("Enter");
 
-        const row = page.getByRole("row").first();
+        const row = page.getByRole("row", { name: /^test, .*connected$/u });
 
-        await row.getByText("connected", { exact: true }).waitFor({ timeout: 20_000 });
+        await row.waitFor({ timeout: 20_000 });
 
-        // The Network's own Timeline, under the Network's row of the same name, then /join there.
-        await page.getByRole("row", { exact: true, name: "test" }).last().click();
+        // The Network's own Timeline, which its row opens, then /join there.
+        await row.click();
         const composer = page.getByRole("textbox", { name: "test" });
 
         await composer.fill("/join #iirc");
@@ -1410,7 +1512,10 @@ describe("the web frontend on iirc daemon --web", () => {
 
         // Split side by side: the new Pane has the focus, and the second Channel opens in it.
         await page.keyboard.press("Alt+Shift+S");
-        await page.getByRole("separator").waitFor();
+        // The Panes' dividers, apart from the sidebar's edge, which is outside the main view.
+        const dividers = page.getByRole("main").getByRole("separator");
+
+        await dividers.waitFor();
         await page.getByRole("row", { name: other }).click();
 
         const left = page.getByRole("log", { name: channel });
@@ -1434,7 +1539,7 @@ describe("the web frontend on iirc daemon --web", () => {
           leftBox.y === rightBox.y;
 
         // A drag of the divider is one Resize, on release, however far it moves.
-        const separator = page.getByRole("separator");
+        const separator = dividers;
         const box = await separator.boundingBox();
 
         const writes = async () =>
@@ -1476,7 +1581,7 @@ describe("the web frontend on iirc daemon --web", () => {
         // moves the node back, and the focus with it.
         await left.focus();
         await page.keyboard.press("Alt+Shift+D");
-        await page.getByRole("separator").nth(1).waitFor();
+        await dividers.nth(1).waitFor();
 
         const kept = async () =>
           await left.evaluate((element) => ({
@@ -1487,7 +1592,7 @@ describe("the web frontend on iirc daemon --web", () => {
         const splitKept = await kept();
 
         await page.keyboard.press("Alt+Shift+W");
-        await expect.poll(async () => await page.getByRole("separator").count()).toBe(1);
+        await expect.poll(async () => await dividers.count()).toBe(1);
         const closeKept = await kept();
 
         // The page keeps its layout in the same tick as it changes, so a reload straight
@@ -1504,8 +1609,11 @@ describe("the web frontend on iirc daemon --web", () => {
 
         const after = {
           logs: await page.getByRole("log").count(),
-          separators: await page.getByRole("separator").count(),
+          separators: await dividers.count(),
         };
+
+        // The sidebar resizes and hides apart from the Panes, each kept on this device.
+        const resized = await resizedSidebar(page);
 
         const violations = await page.evaluate(
           () => document.documentElement.dataset.cspViolations ?? ""
@@ -1516,6 +1624,7 @@ describe("the web frontend on iirc daemon --web", () => {
           dragged: dragged !== undefined && dragged > 0.6 && dragged < 0.7,
           moved: [splitKept, closeKept],
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          resized,
           said: said.params[0],
           sideBySide,
           violations,
@@ -1527,6 +1636,7 @@ describe("the web frontend on iirc daemon --web", () => {
             { focused: true, latest: true },
           ],
           problems: [],
+          resized: { focusAfter: true, hiddenKept: 0, narrow: 200, wide: 300, widthKept: "300" },
           said: channel,
           sideBySide: true,
           violations: "",
@@ -1670,6 +1780,158 @@ describe("the web frontend on iirc daemon --web", () => {
         });
       } finally {
         newcomer.close();
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "fetches no font with the device's own, sets the text's size and a bundled font at once, and serves its files from the page's origin, under the policy",
+    { timeout: 60_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "fonts"),
+        "#iirc-fonts"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+        const fonts: { url: string; type: string | null; cache: string | null }[] = [];
+
+        page.on("response", (response) => {
+          if (response.request().resourceType() === "font") {
+            const headers = response.headers();
+
+            fonts.push({
+              cache: headers["cache-control"] ?? null,
+              type: headers["content-type"] ?? null,
+              url: response.url(),
+            });
+          }
+        });
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("row", { name: channel }).click();
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const log = page.getByRole("log", { name: channel });
+
+        const type = async (text: string) => {
+          await composer.fill(text);
+          await composer.press("Enter");
+        };
+
+        // Bold, italic, box drawing, and block elements, as IRC art has them.
+        peer.send(`PRIVMSG ${channel} :\u0002bold\u0002 \u001Ditalic\u001D ┌─┐│█▓▒░│└─┘`);
+        await log.getByText("italic").waitFor();
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
+
+        const drawn = async () =>
+          await page.evaluate(() => {
+            const style = getComputedStyle(document.body);
+
+            return [style.fontSize, style.fontFamily.split(",")[0]?.trim() ?? ""];
+          });
+
+        const byDefault = { drawn: await drawn(), fetched: fonts.length };
+
+        await type("/set ui.size 18");
+        await expect.poll(drawn).toStrictEqual(["18px", "ui-monospace"]);
+
+        await type("/set ui.font jetbrains-mono");
+        await expect.poll(drawn).toStrictEqual(["18px", '"JetBrains Mono Variable"']);
+
+        // Each face the line draws with is fetched: the regular, whose variable weight is also
+        // the bold, and the italic.
+        await expect
+          .poll(
+            async () =>
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+
+                return [...document.fonts]
+                  .flatMap((face) =>
+                    face.status === "loaded" ? [`${face.family} ${face.style}`] : []
+                  )
+                  .toSorted();
+              })
+          )
+          .toStrictEqual(["JetBrains Mono Variable italic", "JetBrains Mono Variable normal"]);
+
+        // Both answers are in, in whichever order they came.
+        await expect.poll(() => fonts.length).toBe(2);
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        const { origin } = new URL(base);
+
+        // The options at the largest text, in a Pane too narrow for their four columns on a
+        // screen that is not compact: nothing reaches past the Pane.
+        await page.setViewportSize({ height: 800, width: 700 });
+        await type("/set ui.size 24");
+        await expect.poll(drawn).toStrictEqual(["24px", '"JetBrains Mono Variable"']);
+        await page.keyboard.press("Control+,");
+
+        await page.getByRole("searchbox", { name: "Filter options" }).waitFor();
+
+        // How far anything drawn in the Pane reaches past its right edge, in whole pixels.
+        const optionsPast = await page
+          .locator("[data-pane]")
+          .first()
+          .evaluate((pane) => {
+            const { right } = pane.getBoundingClientRect();
+            let past = 0;
+
+            for (const one of pane.querySelectorAll("*")) {
+              past = Math.max(past, Math.round(one.getBoundingClientRect().right - right));
+            }
+
+            return past;
+          });
+
+        expect({
+          byDefault,
+          fetched: fonts
+            .map((font) => ({
+              cache: font.cache,
+              own: new URL(font.url).origin === origin,
+              path: new URL(font.url).pathname.replace(/-[\w-]{8}\.woff2$/u, ".woff2"),
+              type: font.type,
+            }))
+            .toSorted((left, right) => (left.path < right.path ? -1 : 1)),
+          optionsPast,
+          problems: problems.filter((problem) => !problem.includes("401")),
+          violations,
+        }).toStrictEqual({
+          byDefault: { drawn: ["14px", "ui-monospace"], fetched: 0 },
+          fetched: [
+            {
+              cache: "public, max-age=31536000, immutable",
+              own: true,
+              path: "/assets/jetbrains-mono-latin-wght-italic.woff2",
+              type: "font/woff2",
+            },
+            {
+              cache: "public, max-age=31536000, immutable",
+              own: true,
+              path: "/assets/jetbrains-mono-latin-wght-normal.woff2",
+              type: "font/woff2",
+            },
+          ],
+          optionsPast: 0,
+          problems: [],
+          violations: "",
+        });
+      } finally {
         peer.close();
         child.kill("SIGTERM");
         await child.exited;
@@ -2103,7 +2365,6 @@ describe("the web frontend on iirc daemon --web", () => {
         fields.push(...(await fieldSizes()));
         scrolled.push(await sideways());
         targets.networks = await leastSide(networks);
-        targets["sign out"] = await leastSide(page.getByRole("button", { name: "Sign out" }));
         targets.palette = await leastSide(page.getByRole("button", { name: "Command palette" }));
         targets.composer = await leastSide(page.getByRole("textbox").first());
 
@@ -2116,7 +2377,9 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await row.waitFor();
         targets["sidebar row"] = await leastSide(row);
+        targets["network row"] = await leastSide(drawer.getByRole("row").first());
         targets.options = await leastSide(drawer.getByRole("button", { name: "Options" }));
+        targets["sign out"] = await leastSide(drawer.getByRole("button", { name: "Sign out" }));
         scrolled.push(await sideways());
         await row.tap();
         await drawer.waitFor({ state: "detached" });
@@ -2126,8 +2389,8 @@ describe("the web frontend on iirc daemon --web", () => {
         peer.send(`PRIVMSG ${channel} :hello from a phone's peer`);
         await log.getByText("hello from a phone's peer").waitFor();
 
-        // The members are a sheet over the Channel, from its header.
-        const toggle = page.getByRole("button", { name: "members" });
+        // The members are a sheet over the Channel, from the toggle in its status bar.
+        const toggle = page.getByRole("button", { name: /^Members\b/u });
 
         targets["members toggle"] = await leastSide(toggle);
         await toggle.tap();
@@ -2136,9 +2399,21 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await member.waitFor();
         targets["member row"] = await leastSide(member);
-        targets["members hide"] = await leastSide(sheet.getByRole("button", { name: "hide" }));
+        targets["members hide"] = await leastSide(
+          sheet.getByRole("button", { name: "Hide the members" })
+        );
         scrolled.push(await sideways());
-        await sheet.getByRole("button", { name: "hide" }).tap();
+
+        // A tap on a member opens their menu, a finger's size, and Escape closes it alone.
+        await member.tap();
+        const action = page.getByRole("menuitem", { name: "Query peer" });
+
+        await action.waitFor();
+        targets["member action"] = await leastSide(action);
+        scrolled.push(await sideways());
+        await page.keyboard.press("Escape");
+        await action.waitFor({ state: "detached" });
+        await sheet.getByRole("button", { name: "Hide the members" }).tap();
         await sheet.waitFor({ state: "detached" });
 
         // The palette, from its button, since a phone has no keys to open it with.
@@ -2203,6 +2478,585 @@ describe("the web frontend on iirc daemon --web", () => {
           sidebarBeside: 0,
           sideways: true,
           small: [],
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "draws a Timeline's rows inline where it is narrow, and never scrolls it sideways at any width",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "narrow"),
+        "#iirc-narrow"
+      );
+
+      const visitor = await connectPeer({
+        host: ngircd.host,
+        nick: "visitor",
+        port: ngircd.plainPort,
+      });
+
+      try {
+        const context = await browser.newContext({ viewport: { height: 800, width: 1280 } });
+        const page = await context.newPage();
+        const problems: string[] = [];
+
+        page.on("pageerror", (error) => problems.push(error.message));
+
+        // No Ircd here says a Channel's modes with a parameter as long as it likes, so the
+        // Channel's head is answered as the Daemon answers it, with its modes made hostile.
+        await page.route(/\/api\/timelines\/[^/]+\/channel$/u, async (route) => {
+          // The Daemon may have stopped, as the test ends.
+          const response = await route.fetch().catch(() => {});
+
+          if (response === undefined) {
+            await route.abort();
+
+            return;
+          }
+
+          const head = decodeHead(await response.text());
+
+          await route.fulfill({
+            json: {
+              ...head,
+              modes: {
+                _tag: "Known",
+                at: 1,
+                from: "ircd",
+                value: [{ mode: "f", param: "x".repeat(200) }],
+              },
+            },
+            response,
+          });
+        });
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+        const log = page.getByRole("log", { name: channel });
+
+        await log.waitFor();
+
+        // Enough before them that the Timeline scrolls, each long enough to wrap where narrow.
+        for (let index = 1; index <= 80; index += 1) {
+          peer.send(`PRIVMSG ${channel} :filler ${index} ${"some words to wrap ".repeat(5)}`);
+        }
+
+        await log.getByText("filler 80 ", { exact: false }).waitFor();
+
+        // What has nowhere to break, what is wide, and what is plain, said and done.
+        const said = [
+          "a short one",
+          "unbroken".repeat(40),
+          `https://example.com/${"path/".repeat(60)}?q=${"v".repeat(80)}`,
+          "\u5168\u89D2\u6587\u5B57".repeat(25),
+          "words that wrap ".repeat(12),
+        ];
+
+        for (const line of said) {
+          peer.send(`PRIVMSG ${channel} :${line}`);
+        }
+
+        peer.send(`PRIVMSG ${channel} :\u0001ACTION ${"waves ".repeat(30)}\u0001`);
+        visitor.send(`JOIN ${channel}`);
+        visitor.send(`QUIT :${"gone".repeat(60)}`);
+        await log.getByText("a short one").waitFor();
+        await log.getByText("waves", { exact: false }).first().waitFor();
+
+        /**
+         * How the log draws at a width: whether it scrolls sideways, and how a Message's row is laid out.
+         * @param width - The page's width.
+         * @returns What it drew.
+         */
+        const drawnAt = async (width: number) => {
+          await page.setViewportSize({ height: 800, width });
+          await expect.poll(async () => await log.getByText("a short one").count()).toBe(1);
+
+          return await log.evaluate((element) => {
+            const row = [...element.querySelectorAll("[data-index]")].find((one) =>
+              one.textContent?.includes("a short one")
+            );
+
+            const message = row?.firstElementChild?.firstElementChild;
+
+            return {
+              layout:
+                message === null || message === undefined ? "" : getComputedStyle(message).display,
+              sideways: element.scrollWidth - element.clientWidth,
+            };
+          });
+        };
+
+        /**
+         * Whether a Channel's modes as long as a Network likes keep the bar's control in its
+         * Pane, with the hostile modes the head was answered with.
+         * @param width - The page's width.
+         * @returns How far the members' toggle reaches past the bar.
+         */
+        const hostileModes = async (width: number) => {
+          await page.setViewportSize({ height: 800, width });
+
+          return await page
+            .locator("[data-pane] header")
+            .first()
+            .evaluate((bar) => {
+              const toggle = bar.querySelector("[data-members-toggle]");
+
+              if (toggle === null) {
+                return "missing";
+              }
+
+              return Math.max(
+                Math.round(
+                  toggle.getBoundingClientRect().right - bar.getBoundingClientRect().right
+                ),
+                0
+              );
+            });
+        };
+
+        /**
+         * Where the Timeline stands: how far it is from its end, and the first row whose top
+         * is in view, the row the view holds still as the rows wrap again, with how far below
+         * the top of the view it starts.
+         * @returns Where it stands.
+         */
+        const standing = async () =>
+          await log.evaluate((element) => {
+            const { top } = element.getBoundingClientRect();
+
+            const first = [...element.querySelectorAll("[data-index]")]
+              .map((row) => ({ at: row.getBoundingClientRect().top - top, row }))
+              .find(({ at }) => at > -0.5);
+
+            return {
+              fromEnd: Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+              offset: first === undefined ? undefined : Math.round(first.at),
+              row: first?.row.textContent?.match(/filler \d+/u)?.[0],
+            };
+          });
+
+        const fromEnd = async () => {
+          const now = await standing();
+
+          return now.fromEnd;
+        };
+
+        /**
+         * Waits for frames to be drawn after this one.
+         * @param count - How many.
+         */
+        const frames = async (count: number) => {
+          await page.evaluate(async (left) => {
+            for (let index = 0; index < left; index += 1) {
+              const { promise, resolve } = Promise.withResolvers<undefined>();
+
+              requestAnimationFrame(() => {
+                resolve(undefined);
+              });
+              // oxlint-disable-next-line no-await-in-loop -- one frame after another
+              await promise;
+            }
+          }, count);
+        };
+
+        /**
+         * Where the view stands once it has settled: read on each frame until it holds, for
+         * up to five seconds, then read again a few frames later, so a late correction shows.
+         * @param holds - Whether it stands as it should.
+         * @returns Where it stands then.
+         */
+        const settledWhere = async (
+          holds: (now: Awaited<ReturnType<typeof standing>>) => boolean
+        ) => {
+          const until = Date.now() + 5000;
+
+          // oxlint-disable-next-line no-await-in-loop -- polled, one frame after another
+          while (!holds(await standing()) && Date.now() < until) {
+            // oxlint-disable-next-line no-await-in-loop -- polled, one frame after another
+            await frames(1);
+          }
+
+          await frames(5);
+
+          return await standing();
+        };
+
+        /**
+         * How the log is laid out, read at once: its width, how a Message's row is laid out,
+         * in a row or as a block, and how the log's width says it should be, as a block
+         * where it is sixty characters of its text or narrower.
+         * @returns How it is.
+         */
+        const laidOut = async () =>
+          await log.evaluate((element) => {
+            const probe = document.createElement("div");
+
+            probe.style.width = "60ch";
+            element.append(probe);
+            const narrowest = probe.getBoundingClientRect().width;
+
+            probe.remove();
+
+            const row = [...element.querySelectorAll("[data-index]")].find((one) =>
+              one.textContent?.includes("filler")
+            );
+
+            const message = row?.firstElementChild?.firstElementChild;
+
+            return {
+              expected: element.clientWidth <= narrowest ? "block" : "grid",
+              layout: message instanceof Element ? getComputedStyle(message).display : "",
+              width: element.clientWidth,
+            };
+          });
+
+        /**
+         * Resizes the page in one step, and waits for the log to be as wide as it is there,
+         * and its rows laid out as that width says.
+         * @param width - The page's width.
+         */
+        const resize = async (width: number) => {
+          const before = await laidOut();
+
+          await page.setViewportSize({ height: 800, width });
+          await expect
+            .poll(async () => {
+              const now = await laidOut();
+
+              return now.width !== before.width && now.layout === now.expected;
+            })
+            .toBe(true);
+        };
+
+        /**
+         * Whether the view is at the latest, within a pixel.
+         * @param now - Where it stands.
+         * @returns Whether it is.
+         */
+        const atLatest = (now: Awaited<ReturnType<typeof standing>>) => now.fromEnd <= 1;
+
+        const box = await log.boundingBox();
+
+        await page.mouse.move((box?.x ?? 0) + 100, (box?.y ?? 0) + 100);
+
+        // At the latest, it stays at the latest as every row wraps again, and follows what is
+        // said after.
+        await page.mouse.wheel(0, 100_000);
+        await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+
+        await resize(560);
+        const latestNarrow = await settledWhere(atLatest);
+
+        peer.send(`PRIVMSG ${channel} :said once narrow`);
+        await log.getByText("said once narrow").waitFor();
+        const latestAfter = await settledWhere(atLatest);
+
+        await resize(1280);
+        const latestBack = await settledWhere(atLatest);
+
+        // Reading older, the first row in view stays where it is as every row wraps again,
+        // in one step there and back, while the scroll that put it there has only just ended.
+        await page.mouse.wheel(0, -1200);
+        await expect.poll(fromEnd).toBeGreaterThan(400);
+        await frames(5);
+        const reading = await standing();
+
+        /**
+         * Whether the view stood as it did: the same row first in view, as far below the top,
+         * within a pixel.
+         * @param now - Where it stands now.
+         * @returns Whether it did.
+         */
+        const held = (now: Awaited<ReturnType<typeof standing>>) =>
+          now.row !== undefined &&
+          now.row === reading.row &&
+          Math.abs((now.offset ?? Number.NaN) - (reading.offset ?? Number.NaN)) <= 1;
+
+        await resize(560);
+        const readingNarrow = await settledWhere(held);
+
+        await resize(1280);
+        const readingBack = await settledWhere(held);
+
+        // The same as the text's size changes, which wraps them again too.
+        const composer = page.getByRole("textbox", { name: channel });
+
+        const sized = async () =>
+          await page.evaluate(() => getComputedStyle(document.body).fontSize);
+
+        await composer.fill("/set ui.size 20");
+        await composer.press("Enter");
+        await expect.poll(sized).toBe("20px");
+        const readingLarger = await settledWhere(held);
+
+        await composer.fill("/set ui.size 14");
+        await composer.press("Enter");
+        await expect.poll(sized).toBe("14px");
+        const readingSized = await settledWhere(held);
+
+        // Back to the latest.
+        await page.mouse.wheel(0, 100_000);
+        await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+
+        /**
+         * Following the latest, the Owner wheels up by 300 pixels as the log's box is made
+         * 60 pixels shorter, as a composer that grows a line makes it: the box changes as the
+         * wheel's scroll is reported, or as the wheel arrives, before the scroll it makes.
+         * Then a Message is said. Where they end, from the end, before and after it, and
+         * whether the view drew it.
+         * @param when - Which comes first.
+         * @param said - What is said after.
+         * @returns Where they ended, and whether the Message was drawn.
+         */
+        const leaveAsReboxed = async (when: "scroll" | "wheel", said: string) => {
+          await log.evaluate((element, armed) => {
+            const shorter = () => {
+              element.style.maxHeight = `${element.clientHeight - 60}px`;
+            };
+
+            // Ahead of the view's own listeners: the document's capture runs before the
+            // log's, and the window's before React's own.
+            if (armed === "scroll") {
+              document.addEventListener("scroll", shorter, { capture: true, once: true });
+            } else {
+              globalThis.addEventListener("wheel", shorter, { capture: true, once: true });
+            }
+          }, when);
+          await page.mouse.wheel(0, -300);
+          const left = await settledWhere((now) => now.fromEnd > 1);
+
+          // Away, the view offers the latest; following, it draws the Message.
+          const jump = page.getByRole("button", { name: "Jump to latest" });
+
+          peer.send(`PRIVMSG ${channel} :${said}`);
+          await jump.or(log.getByText(said)).first().waitFor();
+          const after = await settledWhere(() => false);
+          const drawn = await log.getByText(said).count();
+
+          // The box as it was, and back to the latest.
+          await log.evaluate((element) => {
+            element.style.maxHeight = "";
+          });
+
+          if ((await jump.count()) > 0) {
+            await jump.click();
+          }
+
+          await log.getByText(said).waitFor();
+          await page.mouse.move((box?.x ?? 0) + 100, (box?.y ?? 0) + 100);
+          await page.mouse.wheel(0, 100_000);
+          await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+          await frames(5);
+
+          return { after: after.fromEnd, drawn, left: left.fromEnd };
+        };
+
+        const leftAsScrolled = await leaveAsReboxed("scroll", "said once left by the wheel");
+        const leftAsWheeled = await leaveAsReboxed("wheel", "said once left as the box changed");
+
+        await page.locator("[data-pane] header bdi[title^='+f']").waitFor();
+        const modesPast = [await hostileModes(1280), await hostileModes(560)];
+
+        await page.setViewportSize({ height: 800, width: 1280 });
+
+        const drawn: Record<number, { layout: string; sideways: number }> = {};
+
+        for (const width of [1280, 900, 700, 520, 390, 320, 240]) {
+          // oxlint-disable-next-line no-await-in-loop -- one width after another
+          drawn[width] = await drawnAt(width);
+        }
+
+        expect({
+          latest: [latestNarrow, latestAfter, latestBack].map(atLatest),
+          left: [leftAsScrolled, leftAsWheeled],
+          modesPast,
+          narrow: drawn[390]?.layout,
+          problems,
+          reading: [readingNarrow, readingBack, readingLarger, readingSized].map(held),
+          sideways: Object.entries(drawn).filter(([, one]) => one.sideways > 0),
+          wide: drawn[1280]?.layout,
+        }).toStrictEqual({
+          latest: [true, true, true],
+          // Where they wheeled to from the end, and kept there as a Message is said.
+          left: [
+            { after: 300, drawn: 0, left: 300 },
+            { after: 300, drawn: 0, left: 300 },
+          ],
+          modesPast: [0, 0],
+          narrow: "block",
+          problems: [],
+          reading: [true, true, true, true],
+          sideways: [],
+          wide: "grid",
+        });
+      } finally {
+        visitor.close();
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "takes what is typed anywhere into the composer, and lets a notice go when it stops being true",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "typing"),
+        "#iirc-typing"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+          origin: new URL(base).origin,
+        });
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const log = page.getByRole("log", { name: channel });
+        const palette = page.getByRole("dialog", { name: "Command palette" });
+
+        const hasFocus = async () =>
+          await composer.evaluate((element) => element === document.activeElement);
+
+        const caret = async () =>
+          await composer.evaluate((element: HTMLTextAreaElement) => [
+            element.selectionStart,
+            element.selectionEnd,
+            element.value.length,
+          ]);
+
+        // A Timeline chosen in the sidebar, then typing: the first character is not lost, and
+        // the tree's typeahead does not take the focus to a row.
+        await page.getByRole("row", { name: channel }).click();
+        await log.waitFor();
+        await page.getByRole("row", { name: channel }).focus();
+        await page.keyboard.type("hello");
+        const fromSidebar = [await composer.inputValue(), await hasFocus()];
+
+        // A Pane's Timeline clicked, then typing: the caret goes to the end of the draft.
+        await log.click();
+        await page.keyboard.type("!?");
+        const fromPane = [await composer.inputValue(), await hasFocus(), await caret()];
+
+        // Space and Enter are not typing: Space on a row opens it, and the draft is as it was.
+        await page.getByRole("row", { name: channel }).focus();
+        await page.keyboard.press("Space");
+        const afterSpace = await composer.inputValue();
+
+        // A key the keymap binds is the keymap's: Alt+M shows the members, nothing is typed.
+        await log.click();
+        await page.keyboard.press("Alt+m");
+        const members = page.getByRole("region", { name: "members" });
+
+        await members.getByRole("row", { name: "peer" }).waitFor();
+        const afterBound = await composer.inputValue();
+
+        // From the members' list, the composer wins over its typeahead.
+        await members.getByRole("row", { name: "peer" }).focus();
+        await page.keyboard.type("p");
+        const fromMembers = [await composer.inputValue(), await hasFocus()];
+
+        // With the palette open, a key stays with the palette's search field.
+        await page.keyboard.press("Control+k");
+        await palette.waitFor();
+        await page.keyboard.type("set");
+        const typedInPalette = await composer.inputValue();
+
+        // Escape clears the search field first, and closes the palette second.
+        await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
+        await palette.waitFor({ state: "detached" });
+
+        // A paste by the platform's chord from outside the composer lands in it.
+        await page.evaluate(async () => {
+          await navigator.clipboard.writeText(" pasted");
+        });
+        await log.click();
+        await page.keyboard.press("Control+v");
+        await expect.poll(async () => await composer.inputValue()).toBe("hello!?p pasted");
+        const fromPaste = [await composer.inputValue(), await hasFocus()];
+
+        // A field inside a shadow root keeps what is typed into it: at the document the key
+        // names the root's host, and only its path names the field.
+        await page.evaluate(() => {
+          const host = document.createElement("div");
+          const field = document.createElement("input");
+
+          host.id = "shadowed";
+          host.attachShadow({ mode: "open" }).append(field);
+          document.body.append(host);
+          field.focus();
+        });
+        await page.keyboard.type("z");
+
+        const inShadow = await page.evaluate(() => {
+          const host = document.querySelector("#shadowed");
+          const typed = host?.shadowRoot?.querySelector("input")?.value;
+
+          host?.remove();
+
+          return typed;
+        });
+
+        const afterShadow = await composer.inputValue();
+
+        // A complaint about the text goes when the text is edited, and a button dismisses it.
+        await composer.fill("/d");
+        await composer.press("Enter");
+        const complaint = page.getByRole("alert").filter({ hasText: "There is no command /d" });
+
+        await complaint.waitFor();
+        await composer.press("End");
+        await page.keyboard.type("x");
+        await complaint.waitFor({ state: "detached" });
+
+        await composer.press("Enter");
+        await complaint.waitFor();
+        await complaint.getByRole("button", { name: "Dismiss" }).click();
+        await complaint.waitFor({ state: "detached" });
+
+        expect({
+          afterBound,
+          afterShadow,
+          afterSpace,
+          fromMembers,
+          fromPane,
+          fromPaste,
+          fromSidebar,
+          inShadow,
+          problems: problems.filter((problem) => !problem.includes("401")),
+          typedInPalette,
+        }).toStrictEqual({
+          afterBound: "hello!?",
+          afterShadow: "hello!?p pasted",
+          afterSpace: "hello!?",
+          fromMembers: ["hello!?p", true],
+          fromPane: ["hello!?", true, [7, 7, 7]],
+          fromPaste: ["hello!?p pasted", true],
+          fromSidebar: ["hello", true],
+          inShadow: "z",
+          problems: [],
+          typedInPalette: "hello!?p",
         });
       } finally {
         peer.close();

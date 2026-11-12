@@ -1,11 +1,8 @@
 // The class names in timeline-header.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly disclosure: string;
   readonly dim: string;
-  readonly header: string;
-  readonly line: string;
-  readonly name: string;
-  readonly note: string;
-  readonly toggle: string;
+  readonly full: string;
   readonly topic: string;
 };
 

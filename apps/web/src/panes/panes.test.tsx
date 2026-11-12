@@ -12,7 +12,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
-import { membersShown, membersVisible } from "../channel/state.ts";
+import { membersPanes, membersShown } from "../channel/state.ts";
 import { edit } from "../composer/atoms.ts";
 import { openOptions, optionsState, optionsSync } from "../options/atoms.ts";
 import { pageState } from "../page/atoms.ts";
@@ -432,13 +432,13 @@ const button = () => document.querySelector<HTMLElement>('header button[aria-lab
 const dialogs = () => document.querySelectorAll('[role="dialog"]').length;
 
 /**
- * A Channel header's members toggle.
+ * A Pane's members' toggle, in its status bar.
+ * @param pane - The Pane's id.
  * @returns It, or none.
  */
-const toggle = () =>
-  [...document.querySelectorAll<HTMLElement>("header button")].find(
-    (one) => one.textContent === "members"
-  );
+const toggle = (pane = "p0") =>
+  document.querySelector<HTMLElement>(`[data-pane="${pane}"] header [data-members-toggle]`) ??
+  undefined;
 
 /**
  * The logs shown, by name.
@@ -517,7 +517,7 @@ describe("the Panes", () => {
     });
   });
 
-  it("moves the focus by keys, and the composer writes to the focused Pane's Timeline", async () => {
+  it("moves the focus by keys, marks the focused Pane, dims the other's name, and the composer writes to the focused Pane's Timeline", async () => {
     const { registry } = await signedIn();
 
     await press(composer(), altShift("s"));
@@ -532,7 +532,13 @@ describe("the Panes", () => {
 
     const marked = document.querySelector<HTMLElement>('[data-marked="true"]')?.dataset.pane;
 
-    expect({ marked, open: openOf(registry.get(timelinesState)) }).toStrictEqual({
+    // Each bar says whether its name is dimmed: only the one without the focus.
+    const dimmed = ["p0", "p1"].map(
+      (pane) => document.querySelector<HTMLElement>(`[data-pane="${pane}"] header`)?.dataset.dim
+    );
+
+    expect({ dimmed, marked, open: openOf(registry.get(timelinesState)) }).toStrictEqual({
+      dimmed: ["false", "true"],
       marked: "p0",
       open: iirc,
     });
@@ -1036,7 +1042,7 @@ describe("what stands in front of a Timeline", () => {
     const sheet = {
       column: registry.get(membersShown),
       kept: readChoice("iirc.members"),
-      visible: registry.get(membersVisible),
+      visible: registry.get(membersPanes).length > 0,
     };
 
     await act(async () => {
@@ -1058,7 +1064,7 @@ describe("what stands in front of a Timeline", () => {
       toggle()?.click();
       await Promise.resolve();
     });
-    await settled(() => document.querySelector("section[aria-labelledby] h2") !== null);
+    await settled(() => document.querySelector('section[aria-label="Members"]') !== null);
 
     const kept = readChoice("iirc.members");
 
@@ -1108,7 +1114,7 @@ describe("what stands in front of a Timeline", () => {
     await resize(false);
 
     const wide = {
-      column: document.querySelectorAll("section[aria-labelledby]").length,
+      column: document.querySelectorAll('section[aria-label="Members"]').length,
       kept: registry.get(membersShown),
     };
 

@@ -1,13 +1,25 @@
-/* The members, a column beside the Timeline, or a sheet over it on a compact screen. */
+/* The members: a column beside the Timeline, over it in a narrow Pane, or a sheet. */
 .panel {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   width: 18ch;
   min-height: 0;
   border-left: var(--border-width) solid var(--color-border);
   background: var(--color-background);
+  outline: none;
 }
 
+/* Over a narrow Pane's Timeline, under its bar, at its right. */
+.floating {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 2;
+  max-width: 80%;
+  box-shadow: 0 0 var(--space-5) var(--color-shadow);
+}
+
+/* The sheet's head: what it is, how many, and a way to close it. */
 .head {
   display: flex;
   align-items: center;
@@ -20,7 +32,7 @@
   color: var(--color-muted);
 }
 
-.head > :last-child {
+.close {
   margin-left: auto;
 }
 
@@ -42,8 +54,7 @@
 
 .item {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   padding: 0 var(--space-3);
   outline: none;
   cursor: default;
@@ -54,11 +65,6 @@
   background: var(--color-surface);
 }
 
-.item[data-selected] {
-  background: var(--color-surface);
-  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
-}
-
 .item[data-focus-visible] {
   outline: var(--border-width) solid var(--color-focus);
   outline-offset: calc(-1 * var(--border-width));
@@ -67,6 +73,15 @@
 .member,
 .away {
   display: flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A nick longer than the column, as an Ircd may allow thirty characters and more: cut,
+   with an ellipsis, and given whole in the member's menu. */
+.member > bdi,
+.away > bdi {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,12 +104,37 @@
   color: var(--color-muted);
 }
 
-/* The chosen member's actions, right under their nick. */
-.actions {
+/* A member's menu, under their row, as dense as the list. Its width is its own, never the
+   row's, which on a phone would widen the page it is placed in. */
+.popover {
+  min-width: 16ch;
+  max-width: calc(100vw - 2 * var(--space-4));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 0 var(--space-4) var(--color-shadow);
+  outline: none;
+}
+
+.menu {
+  padding: var(--space-1) 0;
+  outline: none;
+}
+
+.action {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding: var(--space-1) 0 var(--space-1) calc(1ch + var(--space-1));
+  align-items: center;
+  padding: 0 var(--space-3) 0 calc(var(--space-3) + 1ch + var(--space-1));
+  outline: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.action[data-hovered],
+.action[data-focused] {
+  background: var(--color-surface);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  color: var(--color-accent);
 }
 
 /* On a compact screen: the page dimmed behind a sheet of the members, from the bottom. */
@@ -121,12 +161,11 @@
   flex: 1;
   width: auto;
   border-left: 0;
-  outline: none;
 }
 
 @media (pointer: coarse) {
-  .item {
-    justify-content: center;
+  .item,
+  .action {
     min-height: var(--target-size);
   }
 

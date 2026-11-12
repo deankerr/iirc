@@ -1,6 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline, TimelineChangesEvent } from "@iirc/api";
 import { draftOf, placeOfDraft } from "@iirc/frontend/composer";
+import type { Notice } from "@iirc/frontend/composer";
 import { followFrom, openOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -40,6 +41,9 @@ const describeTimeline = (
   read: null,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
+
+const offerOf = (notice: Notice | undefined) =>
+  notice?._tag === "Offering" ? notice.offer : undefined;
 
 /**
  * A Daemon with one Network, connected, and `#iirc` open in a browser signed in to it.
@@ -209,8 +213,8 @@ describe("saying", () => {
 
     expect({
       journaled: journaled?.message,
-      journaledOffer: journaled?.offer,
-      offered: [offered?.message, offered?.offer?._tag, offered?.offer?.intent],
+      journaledOffer: offerOf(journaled),
+      offered: [offered?.message, offerOf(offered)?._tag, offerOf(offered)?.intent],
       says: daemon.says.map((one) => [one.intent, one.text]),
     }).toStrictEqual({
       journaled:
@@ -256,7 +260,7 @@ describe("saying", () => {
 
     expect({
       checked: checked?.message,
-      first: [first?.message, first?.offer?._tag],
+      first: [first?.message, offerOf(first)?._tag],
       says: daemon.says.map((one) => [one.intent, one.text]),
     }).toStrictEqual({
       checked:
@@ -275,7 +279,7 @@ describe("saying", () => {
     daemon.sayAnswers.push("Down");
     await type("gone");
     await run(registry, takeUp, channel);
-    const notJournaled = notice()?.offer?._tag;
+    const notJournaled = offerOf(notice())?._tag;
 
     daemon.saidDown = true;
     await run(registry, takeUp, channel);
@@ -283,7 +287,7 @@ describe("saying", () => {
     expect({
       notJournaled,
       says: daemon.says.length,
-      unanswered: notice()?.offer?._tag,
+      unanswered: offerOf(notice())?._tag,
     }).toStrictEqual({ notJournaled: "CheckAgain", says: 1, unanswered: "CheckAgain" });
   });
 
@@ -635,10 +639,69 @@ describe("saying", () => {
     daemon.through = 10;
     await type("/msg peer hi");
 
-    expect({ notice: notice()?.offer, open: openOf(registry.get(timelinesState)) }).toStrictEqual({
-      notice: undefined,
-      open: channel,
+    expect({ notice: offerOf(notice()), open: openOf(registry.get(timelinesState)) }).toStrictEqual(
+      {
+        notice: undefined,
+        open: channel,
+      }
+    );
+  });
+});
+
+describe("how long a notice lasts", () => {
+  it("lets go of a complaint about the text when the composer turns to another Timeline, keeps the text, and keeps an offer", async () => {
+    const { daemon, notice, registry, type } = await composing();
+
+    registry.mount(draftsCarried);
+
+    await type("/d");
+    const complaint = notice()?._tag;
+    const text = () => draftOf(registry.get(composerState), channel).text;
+
+    registry.set(open, network);
+    await until(
+      registry,
+      openTimeline,
+      (shown) => shown._tag === "Shown" && shown.timeline === network
+    );
+    const away = [notice()?._tag, text()];
+
+    registry.set(open, channel);
+    await until(
+      registry,
+      openTimeline,
+      (shown) => shown._tag === "Shown" && shown.timeline === channel
+    );
+    registry.set(edit, { text: "kept", timeline: channel });
+
+    daemon.sayAnswers.push("NetworkStopped");
+    await type("one");
+    const offered = notice()?._tag;
+
+    registry.set(open, network);
+    await until(
+      registry,
+      openTimeline,
+      (shown) => shown._tag === "Shown" && shown.timeline === network
+    );
+
+    expect({ away, complaint, offered, offeredStays: notice()?._tag }).toStrictEqual({
+      away: [undefined, "/d"],
+      complaint: "AboutText",
+      offered: "Offering",
+      offeredStays: "Offering",
     });
+  });
+
+  it("keeps a Credential's refusal on the draft it cleared, which the clearing does not let go of", async () => {
+    const { notice, registry, type } = await composing();
+
+    await type("/set network.libera.password hunter2");
+
+    expect({
+      notice: notice()?._tag,
+      text: draftOf(registry.get(composerState), channel).text,
+    }).toStrictEqual({ notice: "AboutText", text: "" });
   });
 });
 
@@ -697,8 +760,8 @@ describe("acting", () => {
 
     expect({
       acts: daemon.acts.map((one) => one.intent),
-      journaled: [journaled?.message, journaled?.offer],
-      offered: [offered?.message, offered?.offer?._tag, offered?.offer?.intent],
+      journaled: [journaled?.message, offerOf(journaled)],
+      offered: [offered?.message, offerOf(offered)?._tag, offerOf(offered)?.intent],
     }).toStrictEqual({
       acts: ["web-1", "web-1", "web-2"],
       journaled: [
@@ -724,8 +787,8 @@ describe("acting", () => {
 
     expect({
       acts: daemon.acts.length,
-      checked: notice()?.offer,
-      first: [first?.message, first?.offer?._tag],
+      checked: offerOf(notice()),
+      first: [first?.message, offerOf(first)?._tag],
     }).toStrictEqual({
       acts: 1,
       checked: undefined,

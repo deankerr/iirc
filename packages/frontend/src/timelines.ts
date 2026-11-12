@@ -2205,6 +2205,24 @@ export const chosenOf = (state: Timelines): Chosen => {
 };
 
 /**
+ * What the sidebar marks, more quietly than what is chosen: each Timeline a Pane other
+ * than the focused one shows, with that Pane's number, counted as the Panes lie. A
+ * Timeline behind something else is not shown, as for `chosenOf`.
+ * @param state - The state.
+ * @returns Each Timeline shown elsewhere, with its Pane's number.
+ */
+export const elsewhereOf = (state: Timelines): ReadonlyMap<TimelineId, number> =>
+  new Map(
+    panesOf(state.layout.root).flatMap((pane, index) =>
+      pane.id === state.layout.focused ||
+      pane.view.main._tag !== "Timeline" ||
+      pane.view.open === undefined
+        ? []
+        : [[resolve(state, pane.view.open), index + 1] as const]
+    )
+  );
+
+/**
  * Keeps the windows of what the Panes show, after they changed. A Timeline no Pane has open
  * any more joins the most recently closed, and only the windows of those open and of the
  * few closed most recently are kept: any other is read again when it opens. A Timeline
@@ -3448,6 +3466,28 @@ export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
     }));
 
 /**
+ * A Network as the sidebar's tree draws it: its row, which is its own Timeline, and the
+ * Timelines under it, its Channels and Direct Messages.
+ */
+export interface NetworkTree {
+  /** The Network's own Timeline, or none while it has none yet. */
+  readonly own: Timeline | undefined;
+  readonly children: readonly Timeline[];
+}
+
+/**
+ * A Network's Timelines, as the sidebar's tree draws them: its own as its row, and every
+ * other under it, in sidebar order.
+ * @param network - The Network.
+ * @returns Its tree.
+ */
+export const treeOf = (network: SidebarNetwork): NetworkTree => {
+  const own = network.timelines.find((timeline) => timeline.kind === "Network");
+
+  return { children: network.timelines.filter((timeline) => timeline !== own), own };
+};
+
+/**
  * One row of a window as shown: an item, a collapsed Gap among them, or the "new" divider
  * before the first item after the Read Marker the Timeline opened with.
  */
@@ -3531,15 +3571,39 @@ const gapRow = (gap: WindowGap): Row => ({ _tag: "Gap", gap, key: `gap-${cursorO
  * A window's rows: its items in order, each collapsed Gap after the items at or before
  * where it began, and with a divider, the "new" divider before the first item after its
  * Read Marker, if the window holds one. Each row's key is stable as rows are added around it.
+ *
+ * A Gap that ended, with no item of the Timeline before it, in a window that holds the
+ * Timeline's start, says nothing: nothing was there to miss. It is left out of the rows and
+ * stays in the window. A Gap still open stays wherever it is, since it says why nothing is
+ * arriving. Which items count as before a Gap is decided by every item the window holds,
+ * not only those `shows` lets through, since an Activity a view hides was still there.
  * @param window - The window.
  * @param divider - The divider, if the Timeline opened with something unread.
+ * @param shows - Which items are drawn, or every one.
  * @returns The rows.
  */
-export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
+export const rowsOf = (
+  window: Window,
+  divider?: Divider,
+  shows: (item: TimelineItem) => boolean = () => true
+): readonly Row[] => {
   const rows: Row[] = [];
   let next = 0;
   // Whether the divider still waits for its item: the first after the Read Marker.
   let waiting = divider !== undefined;
+  // Whether an item stands before what comes next, drawn or not.
+  let anyBefore = false;
+
+  /**
+   * Draws a Gap, unless it is one of nothing: one that ended before the start of a
+   * Timeline held to its start.
+   * @param gap - The Gap.
+   */
+  const drawGap = (gap: WindowGap) => {
+    if (anyBefore || window.earlier || gap.to === null) {
+      rows.push(gapRow(gap));
+    }
+  };
 
   for (const item of window.items) {
     for (
@@ -3547,8 +3611,14 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
       gap !== undefined && comparePositions(gap.from, item.position) < 0;
       gap = window.gaps[next]
     ) {
-      rows.push(gapRow(gap));
+      drawGap(gap);
       next += 1;
+    }
+
+    anyBefore = true;
+
+    if (!shows(item)) {
+      continue;
     }
 
     if (waiting && divider !== undefined && isNew(divider, item)) {
@@ -3560,7 +3630,7 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
   }
 
   for (const gap of window.gaps.slice(next)) {
-    rows.push(gapRow(gap));
+    drawGap(gap);
   }
 
   return collapsed(rows);

@@ -1,21 +1,27 @@
 /**
- * One Pane: its open Timeline with its header, the options, the search, or a Direct Message
- * not yet begun, and its Channel's members
- * beside it while they show, marked while it has the focus. A press or the focus moving
- * anywhere in it gives it the focus, so the composer then writes to its Timeline.
+ * One Pane: its status bar, and under it its open Timeline, the options, the search, or a
+ * Direct Message not yet begun, each of which draws the bar it needs, and its Channel's
+ * members under the bar while they show. Among
+ * several shown, the one with the focus is marked along its top and its bottom. A press or
+ * the focus moving anywhere in it gives it the focus, so the composer then writes to its
+ * Timeline. It is measured as it is drawn, since a narrow Pane shows its members over its
+ * Timeline rather than beside it.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Pane as PaneOf } from "@iirc/frontend/layout";
 import type { PaneView } from "@iirc/frontend/timelines";
+import { useRef } from "react";
 
 import { MembersPanel } from "../channel/members-panel.tsx";
+import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { OptionsView } from "../options/options-view.tsx";
 import { SearchView } from "../search/search-view.tsx";
 import { DraftView } from "../timelines/draft-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
 import { alone, focusedId, focusPane, paneNumber } from "./atoms.ts";
+import { useMeasured } from "./measure.ts";
 
 import styles from "./pane.module.css";
 
@@ -28,11 +34,11 @@ import styles from "./pane.module.css";
 const main = (pane: PaneOf<PaneView>) => {
   switch (pane.view.main._tag) {
     case "Options": {
-      return <OptionsView />;
+      return <OptionsView pane={pane.id} />;
     }
 
     case "Search": {
-      return <SearchView />;
+      return <SearchView pane={pane.id} />;
     }
 
     case "Timeline": {
@@ -40,7 +46,9 @@ const main = (pane: PaneOf<PaneView>) => {
     }
 
     case "DirectDraft": {
-      return <DraftView network={pane.view.main.network} nick={pane.view.main.nick} />;
+      return (
+        <DraftView network={pane.view.main.network} nick={pane.view.main.nick} pane={pane.id} />
+      );
     }
 
     default: {
@@ -59,6 +67,9 @@ export const Pane = ({ pane }: { readonly pane: PaneOf<PaneView> }) => {
   const one = useAtomValue(alone);
   const number = useAtomValue(paneNumber(pane.id));
   const focus = useAtomSet(focusPane);
+  const element = useRef<HTMLDivElement>(null);
+
+  useMeasured(pane.id, element);
 
   return (
     <div
@@ -73,9 +84,13 @@ export const Pane = ({ pane }: { readonly pane: PaneOf<PaneView> }) => {
       onPointerDownCapture={() => {
         focus(pane.id);
       }}
+      ref={element}
     >
-      <div className={styles.main}>{main(pane)}</div>
-      <MembersPanel pane={pane.id} />
+      {pane.view.main._tag === "Timeline" ? <TimelineHeader pane={pane.id} /> : null}
+      <div className={styles.body}>
+        <div className={styles.main}>{main(pane)}</div>
+        <MembersPanel pane={pane.id} />
+      </div>
     </div>
   );
 };

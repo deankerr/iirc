@@ -52,6 +52,7 @@ import {
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
 import { changeUi } from "../options/ui.ts";
+import { showSidebar } from "../page/sidebar.ts";
 import { openPalette } from "../palette/state.ts";
 import { markRead } from "../reading/atoms.ts";
 import { showSearch } from "../search/atoms.ts";
@@ -292,6 +293,7 @@ type Local = Extract<
       | "OpenPalette"
       | "FocusComposer"
       | "ShowMembers"
+      | "ShowSidebar"
       | "Pane"
       | "ListThemes"
       | "ImportTheme"
@@ -315,6 +317,7 @@ const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
   "PromptCredential",
   "Search",
   "ShowMembers",
+  "ShowSidebar",
 ]);
 
 /**
@@ -327,8 +330,8 @@ const isLocal = (intent: Intent): intent is Local => localTags.has(intent._tag);
 /**
  * Carries out an intent in the page: shows the options, the search, or a Timeline, jumps
  * to a Timeline's latest, opens the password prompt or the palette, focuses the composer,
- * starting an empty draft with text, shows or hides the members, changes the Panes, or
- * starts a Lookup, which goes on beside the composer's turn.
+ * starting an empty draft with text, shows or hides the members or the sidebar, changes
+ * the Panes, or starts a Lookup, which goes on beside the composer's turn.
  * @param registry - The registry.
  * @param place - Where the composer under the main view is.
  * @param intent - The intent.
@@ -379,6 +382,11 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "ShowMembers": {
       showMembers(registry, intent.shown);
+      break;
+    }
+
+    case "ShowSidebar": {
+      showSidebar(registry, intent.shown);
       break;
     }
 
@@ -701,7 +709,9 @@ const sendAll = (
 /**
  * Carries what was typed under a draft, unsent, to its Timeline's composer when the draft
  * comes to show that Timeline, as when the partner spoke first or another Frontend said
- * something to them, so nothing typed is lost. Mounted once for the page.
+ * something to them, so nothing typed is lost. It also says when the composer turns to
+ * another Timeline, which lets go of a complaint about the text it leaves. Mounted once for
+ * the page.
  */
 export const draftsCarried = runtime
   .atom((get) =>
@@ -712,6 +722,7 @@ export const draftsCarried = runtime
 
         return registry.subscribe(timelinesState, (after) => {
           const met = draftsMetBetween(before, after);
+          const left = placeIn(before);
 
           before = after;
 
@@ -721,6 +732,10 @@ export const draftsCarried = runtime
               from: placeOfDraft(one.network, one.nick),
               to: one.timeline,
             });
+          }
+
+          if (left !== placeIn(after)) {
+            happened(registry, { _tag: "Left", timeline: left });
           }
         });
       }),

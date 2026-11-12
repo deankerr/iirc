@@ -14,8 +14,10 @@ import {
   keymapOf,
   parseChord,
   parseWhen,
+  isTyping,
   resolve,
   showChord,
+  typesInComposer,
 } from "./keymap.ts";
 import type { Chord, KeyContext, KeyEvent, KeyName, Platform } from "./keymap.ts";
 
@@ -48,7 +50,15 @@ const inChannel: CommandContext = {
 const at = (
   more: Partial<Omit<KeyContext, "command">> = {},
   command: CommandContext = inChannel
-): KeyContext => ({ command, editing: false, palette: false, platform: "Other", ...more });
+): KeyContext => ({
+  command,
+  composer: true,
+  covered: false,
+  editing: false,
+  palette: false,
+  platform: "Other",
+  ...more,
+});
 
 const press = (key: string, code: string, held: Partial<KeyEvent> = {}): KeyEvent => ({
   alt: false,
@@ -297,6 +307,20 @@ describe("the keymap", () => {
     }).toStrictEqual({ mac: turned, open: undefined, other: turned });
   });
 
+  it("shows or hides the sidebar with Alt+N, Option+N on a Mac, a dead key there, while typing too", () => {
+    const turned = [{ _tag: "ShowSidebar", shown: undefined }];
+
+    expect({
+      mac: resolve(
+        defaultKeymap,
+        at({ editing: true, platform: "Mac" }),
+        press("Dead", "KeyN", { alt: true })
+      ),
+      open: resolve(defaultKeymap, at({ palette: true }), press("n", "KeyN", { alt: true })),
+      other: resolve(defaultKeymap, at({ editing: true }), press("n", "KeyN", { alt: true })),
+    }).toStrictEqual({ mac: turned, open: undefined, other: turned });
+  });
+
   it("moves to the next and previous Timeline in the sidebar's order, wrapping, while typing too", () => {
     const down = press("ArrowDown", "ArrowDown", { alt: true });
     const up = press("ArrowUp", "ArrowUp", { alt: true });
@@ -325,13 +349,17 @@ describe("the keymap", () => {
   });
 
   it("does not fire a binding meant for outside a field while typing in one, so the key is typed", () => {
-    const i = press("i", "KeyI");
+    const keymap = keymapOf([
+      { command: "composer.focus", keys: "j", when: "!editing && !palette" },
+    ]);
+
+    const j = press("j", "KeyJ");
 
     expect({
-      outside: resolve(defaultKeymap, at(), i),
-      typing: resolve(defaultKeymap, at({ editing: true }), i),
-      unbound: resolve(defaultKeymap, at(), press("j", "KeyJ")),
-      withMod: resolve(defaultKeymap, at(), press("i", "KeyI", { ctrl: true })),
+      outside: resolve(keymap, at(), j),
+      typing: resolve(keymap, at({ editing: true }), j),
+      unbound: resolve(keymap, at(), press("k", "KeyK")),
+      withMod: resolve(keymap, at(), press("j", "KeyJ", { ctrl: true })),
     }).toStrictEqual({
       outside: [{ _tag: "FocusComposer", text: undefined }],
       typing: undefined,
@@ -522,5 +550,123 @@ describe("the Panes' keys", () => {
       left: change(press("ArrowLeft", "ArrowLeft", { alt: true, shift: true }), one),
       split: change(press("S", "KeyS", { alt: true, shift: true }), one),
     }).toStrictEqual({ close: undefined, left: undefined, split: ["Split"] });
+  });
+
+  it("takes a printable character, with Shift or not, a dead key, and the start of an input method's composition as typing", () => {
+    expect({
+      dead: isTyping(press("Dead", "Quote"), "Other"),
+      digit: isTyping(press("7", "Digit7"), "Other"),
+      input: isTyping(press("Process", "KeyA"), "Other"),
+      letter: isTyping(press("a", "KeyA"), "Other"),
+      punctuation: isTyping(press("/", "Slash"), "Other"),
+      shifted: isTyping(press("A", "KeyA", { shift: true }), "Other"),
+      unicode: isTyping(press("é", "Digit2"), "Other"),
+    }).toStrictEqual({
+      dead: true,
+      digit: true,
+      input: true,
+      letter: true,
+      punctuation: true,
+      shifted: true,
+      unicode: true,
+    });
+  });
+
+  it("does not take Space, Enter, Tab, the arrows, or a lone modifier as typing", () => {
+    expect(
+      [
+        "Enter",
+        " ",
+        "Tab",
+        "ArrowDown",
+        "Backspace",
+        "Escape",
+        "Shift",
+        "Control",
+        "Alt",
+        "F5",
+      ].map((name) => isTyping(press(name, name), "Other"))
+    ).toStrictEqual(Array.from({ length: 10 }, () => false));
+  });
+
+  it("does not take a key held with Ctrl, Meta, or Alt as typing, where those are chords", () => {
+    expect({
+      alt: isTyping(press("x", "KeyX", { alt: true }), "Other"),
+      altShift: isTyping(press("S", "KeyS", { alt: true, shift: true }), "Other"),
+      ctrl: isTyping(press("a", "KeyA", { ctrl: true }), "Other"),
+      meta: isTyping(press("a", "KeyA", { meta: true }), "Mac"),
+      metaAlt: isTyping(press("å", "KeyA", { alt: true, meta: true }), "Mac"),
+    }).toStrictEqual({ alt: false, altShift: false, ctrl: false, meta: false, metaAlt: false });
+  });
+
+  it("takes a character AltGr types as typing, though the browser reports Ctrl and Alt too", () => {
+    expect({
+      altGr: isTyping(press("@", "KeyQ", { alt: true, altGraph: true, ctrl: true }), "Other"),
+      altGrNamed: isTyping(press("ArrowDown", "ArrowDown", { altGraph: true }), "Other"),
+      chord: isTyping(press("q", "KeyQ", { alt: true, ctrl: true }), "Other"),
+    }).toStrictEqual({ altGr: true, altGrNamed: false, chord: false });
+  });
+
+  it("takes a character Option types on a Mac as typing, and not a character Alt makes elsewhere", () => {
+    expect({
+      mac: isTyping(press("å", "KeyA", { alt: true }), "Mac"),
+      macDead: isTyping(press("Dead", "KeyE", { alt: true }), "Mac"),
+      other: isTyping(press("å", "KeyA", { alt: true }), "Other"),
+    }).toStrictEqual({ mac: true, macDead: true, other: false });
+  });
+
+  it("takes the platform's paste chord as typing, and no other chord with V", () => {
+    expect({
+      altPaste: isTyping(press("v", "KeyV", { alt: true, ctrl: true }), "Other"),
+      ctrlOnMac: isTyping(press("v", "KeyV", { ctrl: true }), "Mac"),
+      mac: isTyping(press("v", "KeyV", { meta: true }), "Mac"),
+      metaElsewhere: isTyping(press("v", "KeyV", { meta: true }), "Other"),
+      other: isTyping(press("v", "KeyV", { ctrl: true }), "Other"),
+      plain: isTyping(press("v", "KeyV", { ctrl: true, shift: true }), "Other"),
+    }).toStrictEqual({
+      altPaste: false,
+      ctrlOnMac: false,
+      mac: true,
+      metaElsewhere: false,
+      other: true,
+      plain: true,
+    });
+  });
+
+  it("gives a typed key to the composer where nothing takes text or keeps its keys, and a bound key to the keymap", () => {
+    const a = press("a", "KeyA");
+    const bound = keymapOf([{ command: "timeline.next", keys: "a" }]);
+
+    expect({
+      bound: typesInComposer(bound, at(), a),
+      covered: typesInComposer(defaultKeymap, at({ covered: true }), a),
+      editing: typesInComposer(defaultKeymap, at({ editing: true }), a),
+      free: typesInComposer(defaultKeymap, at(), a),
+      noComposer: typesInComposer(defaultKeymap, at({ composer: false }), a),
+      palette: typesInComposer(defaultKeymap, at({ palette: true }), a),
+      // A binding that cannot run here, as `timeline.next` with no Timelines, takes nothing.
+      unrunnable: typesInComposer(
+        bound,
+        at({}, { ...inChannel, open: undefined, timelines: [] }),
+        a
+      ),
+    }).toStrictEqual({
+      bound: false,
+      covered: false,
+      editing: false,
+      free: true,
+      noComposer: false,
+      palette: false,
+      unrunnable: true,
+    });
+  });
+
+  it("leaves a key the keymap binds, even a typing one outside a field, to the keymap", () => {
+    expect({
+      altA: typesInComposer(defaultKeymap, at(), press("a", "KeyA", { alt: true })),
+      modK: typesInComposer(defaultKeymap, at(), press("k", "KeyK", { ctrl: true })),
+      paste: typesInComposer(defaultKeymap, at(), press("v", "KeyV", { ctrl: true })),
+      plain: typesInComposer(defaultKeymap, at(), press("i", "KeyI")),
+    }).toStrictEqual({ altA: false, modK: false, paste: true, plain: true });
   });
 });

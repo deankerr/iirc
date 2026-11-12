@@ -27,7 +27,7 @@ A reducer over what the Frontend asked and what the API answered. The state is `
 
 Everything the Frontend holds of the Timelines, as a reducer (`reduceTimelines`) over what it read from the API and what the changes stream said. It never folds News: the Daemon does that, and this keeps what was read up to date.
 
-For each Network it holds its Timelines, its connection, and whether Self is away. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, and `rowsOf` a window as rows.
+For each Network it holds its Timelines, its connection, and whether Self is away. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows.
 
 ### Reading and following
 
@@ -45,6 +45,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **Only the view says what the Owner has seen.** A window's `seen` is set by the view's `Following` event alone, so opening a Timeline never makes the core believe its latest was read.
 - **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Daemon's Read Marker moves.
 - **Failed Connections in a row are one row,** counted, when they are to the same Ircd for the same reason.
+- **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, says nothing was missed, so `rowsOf` leaves it out and the window keeps it. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
 
 ### What a Pane shows
 
@@ -97,7 +98,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
-| Reading | `/read`, `/read all`, `/notify`, `/members` |
+| Reading | `/read`, `/read all`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 
 Each entry in `src/commands.ts` carries its usage, aliases, and description, which the palette shows.
@@ -116,18 +117,18 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 Keybindings as data over the registry. A binding names a chord, a command, its arguments, and a `when`. `resolve` gives a pressed key's intents, or nothing, so a key no binding takes is never swallowed.
 
-| Keys                              | Does                                     |
-| --------------------------------- | ---------------------------------------- |
-| `mod+k`, `mod+shift+p`            | Open the palette                         |
-| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline               |
-| `alt+a`                           | The Timeline that calls most             |
-| `alt+m`                           | Show or hide the members                 |
-| `mod+,`                           | Show the options                         |
-| `mod+shift+f`                     | Show the search                          |
-| `i`                               | Focus the composer, from outside a field |
-| `alt+shift+arrows`                | Move between Panes                       |
-| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down              |
-| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink      |
+| Keys                              | Does                                |
+| --------------------------------- | ----------------------------------- |
+| `mod+k`, `mod+shift+p`            | Open the palette                    |
+| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline          |
+| `alt+a`                           | The Timeline that calls most        |
+| `alt+m`                           | Show or hide the members            |
+| `alt+n`                           | Show or hide the sidebar            |
+| `mod+,`                           | Show the options                    |
+| `mod+shift+f`                     | Show the search                     |
+| `alt+shift+arrows`                | Move between Panes                  |
+| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down         |
+| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink |
 
 - **A chord is parsed.** `formatChord` writes one so that it parses back the same. A binding that does not parse, or names no command, is dropped, so a keymap holds only bindings that can fire.
 - **`mod` is Cmd on a Mac and Ctrl elsewhere.** `showChord` writes a chord as the platform does.
@@ -135,15 +136,16 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 - **AltGr in a field is typing,** so German AltGr+Q types `@`.
 - **The last binding that applies wins,** so overrides go after the defaults.
 - **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses.
+- **A key that types goes to the composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, the palette, an overlay holding the focus, or no composer to write to, leaves the key alone.
 - **The Panes' keys are Alt+Shift and a letter.** Option on a Mac types another character, which a letter's physical key names back and punctuation's does not.
 
 ## Palette
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, and every option read.
+What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read.
 
 - **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
 - **With no query, recent choices come first,** at most 20.
-- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, and a Credential option opens the password prompt.
+- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme or a font is drawn in on every device.
 - **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
 
 ## Composer
@@ -154,6 +156,7 @@ What the Owner is writing in each Timeline, what they sent from it, and why some
 - **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept. More than 5 lines wait for the Owner to confirm, and what is confirmed is always exactly what is shown.
 - **A Credential's value typed here is let go of at once.** It sends nothing, clears the draft, and enters no history.
 - **A refusal is said in words under the composer it came from,** and nothing after it is sent.
+- **A notice lasts as long as it is true.** One about the text as typed, such as no such command, goes when the text is edited and when the composer turns to another Timeline. One with an offer stays with its Timeline until taken or dismissed. One of an outcome that arrived later stays until dismissed or the next submit, since an edit must not hide what the Owner may not have read.
 - **What failed says what is safe to do next, and nothing is sent twice.** A Say or an Act that was not journaled may be sent again under the same intent. One that was journaled is never sent again. One with no answer can only be checked again.
 
 ## Options
@@ -167,6 +170,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `Toggle`           | `on` or `off`                                                |
 | `Text`             | The raw text, exactly                                        |
 | `Choice`, `Tagged` | One of the Schema's literals or tags                         |
+| `Integer`          | A whole number within the Schema's bounds                    |
 | `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes |
 | `Ircds`            | A list of `host` or `host/port`, TLS unless `plain` follows  |
 | `Credential`       | Never text: its Credential's name, and whether it is held    |
@@ -259,7 +263,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 - **Hostile text is contained.** Controls show as symbols, and every bidirectional embedding, override, or isolate a run opens is closed at its end. The work is linear in the text, however hostile.
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
-- **One of our Messages says its delivery in a few words,** and a refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
+- **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
 - **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it.
 

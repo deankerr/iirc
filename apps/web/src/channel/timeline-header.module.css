@@ -1,68 +1,52 @@
-/* The open Timeline's head: its name and a few dim words on one line, and the topic under. */
-.header {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: var(--border-width) solid var(--color-border);
-}
-
-.line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--space-3);
-}
-
-.name {
-  color: var(--color-accent);
+/* The bar and, under it, the topic disclosed in full. */
+.disclosure {
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .dim {
   color: var(--color-muted);
 }
 
-.note {
-  color: var(--color-level-highlight);
-}
-
-/* The topic wraps up to three lines, then is cut. */
+/* The topic, cut to what is left of the bar's line: the topic's own text, which a press
+   discloses, and so not one of the buttons, whose box would neither fill nor cut it. */
 .topic {
-  display: -webkit-box;
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow-wrap: anywhere;
-}
-
-.toggle {
-  margin-left: auto;
-  padding: 0 var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius);
+  padding: 0;
+  border: 0;
   background: transparent;
-  color: var(--color-muted);
+  color: inherit;
   font: inherit;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: default;
 }
 
-.toggle[data-hovered] {
-  border-color: var(--color-muted);
+.topic[data-hovered] {
+  color: var(--color-text);
+  text-decoration: underline dotted var(--color-muted);
 }
 
-.toggle[data-selected] {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-
-.toggle[data-focus-visible] {
+.topic[data-focus-visible] {
   outline: var(--border-width) solid var(--color-focus);
-  outline-offset: var(--space-1);
+  outline-offset: var(--border-width);
+}
+
+/* The topic in full: wrapped anywhere, and scrolled when it is longer than a few lines. Its
+   panel is left as React Aria draws it, hidden while closed. */
+.full {
+  max-height: calc(var(--line-height) * 10em);
+  overflow: hidden auto;
+  padding: 0 var(--space-3) var(--space-2);
+  overflow-wrap: anywhere;
 }
 
 @media (pointer: coarse) {
-  .line {
-    align-items: center;
-  }
-
-  .toggle {
+  .topic {
     min-height: var(--target-size);
   }
 }

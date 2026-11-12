@@ -2,13 +2,14 @@
  * The theme, as atoms: the one in effect on this device, drawn by the core from its
  * palette, or one previewed, while the palette highlights a theme or the import dialog
  * reads one, in a Worker through the `ThemeReader` port, one text at a time and for at most
- * a second; drawing it as CSS custom properties on the document's root; choosing one, and
- * importing and removing themes for every device, each made from the options read.
+ * a second; the text's size and font, or a font the palette highlights; drawing them as CSS
+ * custom properties on the document's root; choosing a theme, and importing and removing
+ * themes for every device, each made from the options read.
  *
  * @packageDocumentation
  */
-import { Themes } from "@iirc/api";
-import type { Palette, ThemeName, UiInForce } from "@iirc/api";
+import { Themes, fontNames } from "@iirc/api";
+import type { FontShown, Palette, ThemeName, UiInForce } from "@iirc/api";
 import type { Parsed } from "@iirc/frontend/commands";
 import type { Json } from "@iirc/frontend/options";
 import {
@@ -34,6 +35,7 @@ import type { Outcome } from "../options/atoms.ts";
 import { changeUi, uiFailed, uiInEffect, uiRead } from "../options/ui.ts";
 import { paletteHighlight, paletteState } from "../palette/state.ts";
 import { signedIn } from "../sign-in/atoms.ts";
+import { fontStack } from "./fonts.ts";
 import { ThemeReader } from "./reader.ts";
 
 /** The media query whose match says the device prefers dark. */
@@ -160,6 +162,26 @@ export const drawnTheme = Atom.make((get) => {
   const palette = get(previewed) ?? paletteNamed(ui.theme, ui.themes, get(prefersDark));
 
   return drawn(palette, ui.colours);
+});
+
+/** Each font, by the key of its entry in the palette. */
+const fontKeys: ReadonlyMap<string, FontShown> = new Map(
+  fontNames.map((font) => [`font:${font}`, font])
+);
+
+/**
+ * The text's size and font in effect on this device, as the root's custom properties: the
+ * font the open palette highlights, while it highlights one, else the one in effect.
+ */
+const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
+  const ui = get(uiInEffect);
+  const highlighted = get(paletteState).open ? get(paletteHighlight) : undefined;
+  const font = (highlighted === undefined ? undefined : fontKeys.get(highlighted)) ?? ui.font;
+
+  return [
+    ["--font-size", `${ui.size}px`],
+    ["--font-mono", fontStack(font)],
+  ];
 });
 
 /** Every theme there is, and the name of the one in effect here, for the palette to list. */
@@ -415,8 +437,9 @@ export const saveImport = runtime
  * Draws the page in the theme in effect, or the one previewed: every colour the core
  * derived as a custom property on the root's style, which a Content Security Policy that
  * refuses inline styles allows, since it is set through the CSSOM, the root's
- * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect.
- * Whether the device prefers dark is followed, for `system`.
+ * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect. The
+ * text's size and font are custom properties there too. Whether the device prefers dark is
+ * followed, for `system`.
  * @param registry - The registry.
  * @returns How to stop.
  */
@@ -439,11 +462,19 @@ export const watchTheme = (registry: AtomRegistry.AtomRegistry): (() => void) =>
     root.dataset.theme = registry.get(uiInEffect).theme;
   };
 
+  const drawType = () => {
+    for (const [name, value] of registry.get(drawnType)) {
+      root.style.setProperty(name, value);
+    }
+  };
+
   preferred();
   query.addEventListener("change", preferred);
   draw();
+  drawType();
 
   const stopTheme = registry.subscribe(drawnTheme, draw);
+  const stopType = registry.subscribe(drawnType, drawType);
 
   // Signing out closes an import, ending its reads, so its preview never reaches the sign-in.
   const stopImport = registry.subscribe(signedIn, (yes) => {
@@ -457,6 +488,7 @@ export const watchTheme = (registry: AtomRegistry.AtomRegistry): (() => void) =>
   return () => {
     query.removeEventListener("change", preferred);
     stopTheme();
+    stopType();
     stopName();
     stopImport();
   };

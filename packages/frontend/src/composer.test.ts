@@ -14,10 +14,11 @@ import {
   linesOf,
   placeOfDraft,
   reduceComposers,
+  started,
   takeOffer,
   submit,
 } from "./composer.ts";
-import type { ComposerEvent, Composers } from "./composer.ts";
+import type { ComposerEvent, Composers, Notice, Place } from "./composer.ts";
 
 const network = Schema.decodeSync(NetworkId)("libera");
 const timelineId = Schema.decodeSync(TimelineId);
@@ -55,7 +56,10 @@ const fold = (events: readonly ComposerEvent[], from: Composers = initialCompose
   return state;
 };
 
-const edited = (text: string, timeline = channel): ComposerEvent => ({
+const offerOf = (notice: Notice | undefined) =>
+  notice?._tag === "Offering" ? notice.offer : undefined;
+
+const edited = (text: string, timeline: Place = channel): ComposerEvent => ({
   _tag: "Edited",
   text,
   timeline,
@@ -372,13 +376,13 @@ describe("what became of a Say", () => {
 
     expect([draftOf(one, channel).notice, draftOf(more, channel).notice]).toStrictEqual([
       {
+        _tag: "Outcome",
         message: "Not said to #iirc: the Network had no Session when it arrived.",
-        offer: undefined,
       },
       {
+        _tag: "Outcome",
         message:
           "Not said to \u202Epeer\u202C: no IRC Line can carry it there. Nothing after it was sent.",
-        offer: undefined,
       },
     ]);
   });
@@ -398,10 +402,11 @@ describe("what became of a Say", () => {
 
     expect({
       journaled: draftOf(journaled, channel).notice,
-      notJournaled: draftOf(notJournaled, channel).notice?.offer,
+      notJournaled: offerOf(draftOf(notJournaled, channel).notice),
       taken: [taken.offer?._tag, draftOf(taken.state, channel).notice],
     }).toStrictEqual({
       journaled: {
+        _tag: "Offering",
         message:
           "This was journaled, but whether it reached the Ircd is unknown, and it is not sent again on its own. Its item in the Timeline shows its delivery. What came after it was not sent.",
         offer: { _tag: "SendAgain", intent: undefined, intents: [say("two")] },
@@ -425,6 +430,7 @@ describe("what became of a Say", () => {
     ]);
 
     expect(draftOf(lost, channel).notice).toStrictEqual({
+      _tag: "Offering",
       message:
         "The Daemon did not answer, so whether this was said is unknown. Nothing after it was sent.",
       offer: { _tag: "CheckAgain", intent, intents, network },
@@ -477,5 +483,247 @@ describe("a draft that came to show its Timeline", () => {
     );
 
     expect(draftOf(state, other).text).toBe("under the Timeline");
+  });
+});
+
+/**
+ * The composer after `/d` was submitted, which no command reads.
+ * @returns The composers.
+ */
+const complained = () => submit(fold([edited("/d")]), channel, context).state;
+
+const tagOf = (state: Composers, timeline: Place = channel) =>
+  draftOf(state, timeline).notice?._tag;
+
+describe("how long a notice lasts", () => {
+  const intent = intentId("web-1");
+
+  const refused = (timeline: Place = channel): ComposerEvent => ({
+    _tag: "Failed",
+    failure: { _tag: "Refused", action: undefined, reason: { _tag: "Offline" }, target: "#iirc" },
+    intent,
+    intents: [say("hi")],
+    timeline,
+  });
+
+  const offering = (timeline: Place = channel): ComposerEvent => ({
+    _tag: "Failed",
+    failure: { _tag: "NotJournaled" },
+    intent,
+    intents: [say("hi")],
+    timeline,
+  });
+
+  it("says what a submit could not read as about the text", () => {
+    expect(tagOf(complained())).toBe("AboutText");
+  });
+
+  it("lets go of a notice about the text as soon as the text is edited", () => {
+    const state = complained();
+
+    expect({
+      before: tagOf(state),
+      edited: tagOf(reduceComposers(state, edited("/de"))),
+      emptied: tagOf(reduceComposers(state, edited(""))),
+      same: tagOf(reduceComposers(state, edited("/d"))),
+    }).toStrictEqual({
+      before: "AboutText",
+      edited: undefined,
+      emptied: undefined,
+      same: "AboutText",
+    });
+  });
+
+  it("lets go of a notice about the text when the text is recalled from the history, and not when nothing is", () => {
+    const sentOne = sendAll(["hello"]);
+    const state = reduceComposers(sentOne, edited("/d"));
+    const complaint = submit(state, channel, context).state;
+
+    const recalled = reduceComposers(complaint, {
+      _tag: "Recalled",
+      direction: "Older",
+      timeline: channel,
+    });
+
+    const nothing = reduceComposers(complained(), {
+      _tag: "Recalled",
+      direction: "Older",
+      timeline: channel,
+    });
+
+    expect({
+      nothing: tagOf(nothing),
+      recalled: [tagOf(recalled), draftOf(recalled, channel).text],
+    }).toStrictEqual({ nothing: "AboutText", recalled: [undefined, "hello"] });
+  });
+
+  it("lets go of a notice about the text when the composer turns to another Timeline, and the text stays", () => {
+    const state = reduceComposers(complained(), { _tag: "Left", timeline: channel });
+
+    expect([tagOf(state), draftOf(state, channel).text]).toStrictEqual([undefined, "/d"]);
+  });
+
+  it("turns away from a Timeline with no notice about its text, touching nothing", () => {
+    const state = fold([edited("hello")]);
+    const away = reduceComposers(state, { _tag: "Left", timeline: channel });
+    const never = reduceComposers(state, { _tag: "Left", timeline: other });
+
+    expect({
+      away: away === state,
+      made: never.drafts.has(other),
+      never: never === state,
+    }).toStrictEqual({ away: true, made: false, never: true });
+  });
+
+  it("keeps a refused Credential's notice on the draft it cleared, until the text is edited", () => {
+    const { state } = submit(
+      fold([edited("/set network.libera.password secret")]),
+      channel,
+      context
+    );
+
+    const cleared = reduceComposers(state, edited(""));
+
+    expect({
+      cleared: [tagOf(cleared), draftOf(cleared, channel).text],
+      refused: [tagOf(state), draftOf(state, channel).text],
+      typed: tagOf(reduceComposers(state, edited("hi"))),
+    }).toStrictEqual({
+      cleared: ["AboutText", ""],
+      refused: ["AboutText", ""],
+      typed: undefined,
+    });
+  });
+
+  it("says that a draft with text was not replaced as about the text, so clearing it lets the notice go", () => {
+    const state = started(fold([edited("hello")]), channel, "/me ");
+
+    expect({
+      before: tagOf(state),
+      cleared: tagOf(reduceComposers(state, edited(""))),
+    }).toStrictEqual({ before: "AboutText", cleared: undefined });
+  });
+
+  it("keeps a notice with an offer through an edit and through turning away, until it is taken or dismissed", () => {
+    const state = fold([edited("hi"), offering()]);
+
+    const through = reduceComposers(reduceComposers(state, edited("hi there")), {
+      _tag: "Left",
+      timeline: channel,
+    });
+
+    const taken = takeOffer(through, channel);
+    const dismissed = reduceComposers(through, { _tag: "Dismissed", timeline: channel });
+
+    expect({
+      dismissed: tagOf(dismissed),
+      taken: [taken.offer?._tag, tagOf(taken.state)],
+      through: [tagOf(through), offerOf(draftOf(through, channel).notice)?._tag],
+    }).toStrictEqual({
+      dismissed: undefined,
+      taken: ["SendAgain", undefined],
+      through: ["Offering", "SendAgain"],
+    });
+  });
+
+  it("keeps a notice of an outcome that arrived later through an edit and through turning away, until dismissed", () => {
+    const noticed = fold([
+      edited("hi"),
+      { _tag: "Noticed", message: "the change did not go as asked", timeline: channel },
+    ]);
+
+    const failed = fold([edited("hi"), refused()]);
+
+    const through = (state: Composers) =>
+      reduceComposers(reduceComposers(state, edited("hi there")), {
+        _tag: "Left",
+        timeline: channel,
+      });
+
+    expect({
+      dismissed: tagOf(reduceComposers(through(noticed), { _tag: "Dismissed", timeline: channel })),
+      failed: tagOf(through(failed)),
+      noticed: tagOf(through(noticed)),
+      recalled: tagOf(reduceComposers(reduceComposers(sendAll(["one"]), refused()), up())),
+    }).toStrictEqual({
+      dismissed: undefined,
+      failed: "Outcome",
+      noticed: "Outcome",
+      recalled: "Outcome",
+    });
+  });
+
+  it("lets go of an outcome at the next submit that is sent, and replaces it at one that is refused", () => {
+    const noticed = fold([
+      { _tag: "Noticed", message: "the change did not go as asked", timeline: channel },
+      edited("hello"),
+    ]);
+
+    const sent = submit(noticed, channel, context);
+    const bad = submit(reduceComposers(noticed, edited("/d")), channel, context);
+
+    expect({
+      bad: tagOf(bad.state),
+      sent: [tagOf(sent.state), sent.intents.length],
+    }).toStrictEqual({ bad: "AboutText", sent: [undefined, 1] });
+  });
+
+  it("keeps an offer through a later submit that is sent, and through lines waiting and confirmed", () => {
+    const state = fold([edited("hi"), offering(), edited("something else")]);
+    const sent = submit(state, channel, context);
+    const many = ["one", "two", "three", "four", "five", "six"].join("\n");
+    const waiting = submit(reduceComposers(state, edited(many)), channel, context);
+    const confirmed = confirm(waiting.state, channel);
+
+    expect({
+      confirmed: [tagOf(confirmed.state), confirmed.intents.length],
+      sent: [tagOf(sent.state), offerOf(draftOf(sent.state, channel).notice)?._tag],
+      waiting: [tagOf(waiting.state), draftOf(waiting.state, channel).confirming?.lines],
+    }).toStrictEqual({
+      confirmed: ["Offering", 6],
+      sent: ["Offering", "SendAgain"],
+      waiting: ["Offering", 6],
+    });
+  });
+
+  it("lets go of an outcome at Enter on an empty composer, and keeps an offer and a complaint there", () => {
+    const empty = (event: ComposerEvent) =>
+      tagOf(submit(reduceComposers(initialComposers, event), channel, context).state);
+
+    const complaint = reduceComposers(
+      submit(fold([edited("/d")]), channel, context).state,
+      // The same text again, as the runtime sets it: nothing was edited.
+      edited("/d")
+    );
+
+    expect({
+      complaint: tagOf(complaint),
+      offering: empty(offering()),
+      outcome: empty({ _tag: "Noticed", message: "no", timeline: channel }),
+    }).toStrictEqual({ complaint: "AboutText", offering: "Offering", outcome: undefined });
+  });
+
+  it("carries a draft's offer and outcome to its Timeline, and leaves a notice about its text behind", () => {
+    const draft = placeOfDraft(network, "bob");
+
+    const carry = (event: ComposerEvent) => {
+      const state = reduceComposers(fold([edited("hi", draft)]), event);
+
+      return tagOf(reduceComposers(state, { _tag: "Carried", from: draft, to: other }), other);
+    };
+
+    const complaint = submit(fold([edited("/d", draft)]), draft, {
+      ...context,
+      draft: undefined,
+    }).state;
+
+    expect({
+      complaint: tagOf(
+        reduceComposers(complaint, { _tag: "Carried", from: draft, to: other }),
+        other
+      ),
+      offering: carry(offering(draft)),
+      outcome: carry({ _tag: "Noticed", message: "no", timeline: draft }),
+    }).toStrictEqual({ complaint: undefined, offering: "Offering", outcome: "Outcome" });
   });
 });

@@ -41,16 +41,23 @@ const styled = (style: Style, theme: Drawn) => {
 
 /**
  * Formatted text.
- * @param props - The inlines.
+ * @param props - The inlines, and whether a link is drawn as one: not inside something that
+ * is itself pressed, such as a button, where a link's text is drawn as any other run.
  * @returns Each run, in order.
  */
-export const Inlines = ({ inlines }: { readonly inlines: readonly Inline[] }) => {
+export const Inlines = ({
+  inlines,
+  links = true,
+}: {
+  readonly inlines: readonly Inline[];
+  readonly links?: boolean;
+}) => {
   const theme = useAtomValue(drawnTheme);
 
   return inlines.map((inline, index) => {
     const { className, colours } = styled(inline.style, theme);
 
-    return inline._tag === "Link" ? (
+    return inline._tag === "Link" && links ? (
       <a
         className={`${styles.link} ${className}`}
         // The runs of one text never move, so their order is their identity.

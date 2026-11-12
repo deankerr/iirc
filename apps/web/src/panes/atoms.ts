@@ -6,6 +6,7 @@
  * @packageDocumentation
  */
 import { focusedPane, panesOf } from "@iirc/frontend/layout";
+import { paneName } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
 
 import { pageState } from "../page/atoms.ts";
@@ -45,6 +46,15 @@ export const paneNumber = Atom.family((pane: string) =>
 
     return numbers.length < 2 ? undefined : numbers.find((one) => one.id === pane)?.number;
   })
+);
+
+/**
+ * A Pane's name, as its status bar, the switcher, and the composer say it: what it shows.
+ * @param pane - The Pane's id.
+ * @returns The atom.
+ */
+export const paneNameOf = Atom.family((pane: string) =>
+  Atom.make((get) => paneName(get(timelinesState), pane))
 );
 
 /** Focuses a Pane, as a click or focus moving into it does, unless it has the focus already. */

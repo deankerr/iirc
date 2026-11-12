@@ -1,5 +1,13 @@
 /// <reference lib="dom" />
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -138,13 +146,29 @@ describe("the compiled iirc", () => {
           throw new Error("the built index.html names no script under assets/");
         }
 
+        // A font, which the page fetches only once it is chosen.
+        const fontFile = readdirSync(path.join(web, "assets")).find((file) =>
+          file.endsWith(".woff2")
+        );
+
+        if (fontFile === undefined) {
+          throw new Error("the built web frontend holds no font under assets/");
+        }
+
         const index = await fetch(base, { headers: { accept: "text/html" } });
         const asset = await fetch(`${base}/${script}`);
+        const font = await fetch(`${base}/assets/${fontFile}`);
 
         const served = {
           asset: {
             ...headersOf(asset),
             same: (await asset.text()) === readFileSync(path.join(web, script), "utf-8"),
+          },
+          font: {
+            ...headersOf(font),
+            same: Buffer.from(await font.arrayBuffer()).equals(
+              readFileSync(path.join(web, "assets", fontFile))
+            ),
           },
           index: { ...headersOf(index), same: (await index.text()) === indexHtml },
         };
@@ -211,6 +235,14 @@ describe("the compiled iirc", () => {
               lastModified: null,
               same: true,
               type: "text/javascript; charset=utf-8",
+            },
+            font: {
+              cacheControl: "public, max-age=31536000, immutable",
+              csp: contentSecurityPolicy,
+              etag: null,
+              lastModified: null,
+              same: true,
+              type: "font/woff2",
             },
             index: {
               cacheControl: "no-cache",

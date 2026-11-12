@@ -15,9 +15,8 @@ import { typesCredential } from "@iirc/frontend/commands";
 import { active, announced, completes, cycled } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
-import { Button as AriaButton } from "react-aria-components";
 
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, mainView } from "../options/atoms.ts";
@@ -25,7 +24,7 @@ import { openPalette } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
 import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
-import { Button } from "../ui/button.tsx";
+import { Button, IconButton } from "../ui/button.tsx";
 import {
   commandContext,
   composerFocus,
@@ -87,24 +86,26 @@ const PaletteButton = () => {
   const openNow = useAtomSet(openPalette);
 
   return (
-    <AriaButton
-      aria-label="Command palette"
+    <IconButton
       className={styles.palette}
+      command="palette.open"
+      icon="palette"
+      label="Command palette"
       onPress={() => {
         openNow("All");
       }}
-    >
-      <span aria-hidden="true">/</span>
-    </AriaButton>
+      size="small"
+    />
   );
 };
 
 /**
  * The composer of one Timeline, or the one under no Timeline.
- * @param props - Where it is, and the name its prompt shows.
+ * @param props - Where it is, the name its prompt shows, and what stands before the prompt.
  * @returns The composer.
  */
 const Composer = ({
+  before,
   name,
   number,
   timeline,
@@ -112,6 +113,7 @@ const Composer = ({
   readonly timeline: Place;
   readonly name: string;
   readonly number: number | undefined;
+  readonly before: ReactNode;
 }) => {
   const draft = useAtomValue(draftAtom(timeline));
   const context = useAtomValue(commandContext);
@@ -316,6 +318,7 @@ const Composer = ({
             onPress={() => {
               confirmNow(timeline);
             }}
+            size="small"
             variant="primary"
           >
             Send {confirming.lines} lines
@@ -325,15 +328,25 @@ const Composer = ({
       {notice === undefined || confirming !== undefined ? null : (
         <div className={`${styles.notice} ${styles.failure}`} id={noticeId} role="alert">
           <p>{notice.message}</p>
-          {notice.offer === undefined ? null : (
+          {notice._tag === "Offering" ? (
             <Button
               onPress={() => {
                 again(timeline);
               }}
+              size="small"
             >
               {offerLabel(notice.offer)}
             </Button>
-          )}
+          ) : null}
+          <IconButton
+            icon="close"
+            keys="Esc"
+            label="Dismiss"
+            onPress={() => {
+              dismissNow(timeline);
+            }}
+            size="small"
+          />
         </div>
       )}
       {offline === undefined ? null : (
@@ -360,6 +373,7 @@ const Composer = ({
         {announced(completion, timeline, draft.text)}
       </output>
       <div className={styles.line}>
+        {before}
         <label className={styles.prompt} htmlFor={id}>
           {number === undefined ? null : <span className={styles.pane}>{number}</span>}
           <bdi>{name}</bdi>
@@ -373,6 +387,7 @@ const Composer = ({
           aria-invalid={notice === undefined ? undefined : true}
           autoComplete="off"
           className={styles.input}
+          data-composer=""
           id={id}
           onChange={(event) => {
             setText({ text: event.currentTarget.value, timeline });
@@ -393,9 +408,10 @@ const Composer = ({
  * The composer under the Panes: the focused Pane's open Timeline's, or, with none open, the
  * one where commands that need no Timeline, such as `/network add` and `/set`, are typed.
  * Among several Panes, its prompt says the focused Pane's number, as its header does.
+ * @param props - What stands before its prompt, such as the button that shows the sidebar.
  * @returns The composer.
  */
-export const MainComposer = () => {
+export const MainComposer = ({ before }: { readonly before?: ReactNode }) => {
   const shown = useAtomValue(openTimeline);
   const main = useAtomValue(mainView);
   const number = useAtomValue(paneNumber(useAtomValue(focusedId)));
@@ -404,7 +420,12 @@ export const MainComposer = () => {
   // nick.
   if (main._tag === "DirectDraft") {
     return (
-      <Composer name={main.nick} number={number} timeline={placeOfDraft(main.network, main.nick)} />
+      <Composer
+        before={before}
+        name={main.nick}
+        number={number}
+        timeline={placeOfDraft(main.network, main.nick)}
+      />
     );
   }
 
@@ -415,6 +436,7 @@ export const MainComposer = () => {
   if (shown._tag === "Shown") {
     return (
       <Composer
+        before={before}
         name={name ?? shown.description?.name ?? "Timeline"}
         number={number}
         timeline={shown.timeline}
@@ -423,5 +445,5 @@ export const MainComposer = () => {
   }
 
   // One composer element under every Timeline, so focus stays in it as Timelines open.
-  return <Composer name={name ?? "iirc"} number={number} timeline="Nowhere" />;
+  return <Composer before={before} name={name ?? "iirc"} number={number} timeline="Nowhere" />;
 };

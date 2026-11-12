@@ -23,6 +23,7 @@ import { parseQuery } from "./search.ts";
 import type { SearchRequest } from "./search.ts";
 import {
   chosenOf,
+  elsewhereOf,
   draftsMetBetween,
   originOf,
   emptyView,
@@ -42,6 +43,7 @@ import {
   resolve,
   rowsOf,
   sidebar,
+  treeOf,
   timelinesWith,
   wanted,
   windowCap,
@@ -1408,6 +1410,38 @@ const rowText = (row: Row) => {
   return row._tag === "Gap" ? `gap ${row.gap.count}` : "new";
 };
 
+// The rows of a window holding the Timeline's items 30 and 40, with these Gaps, and whether
+// older items lie beyond it, and how many Gaps the window keeps.
+const rowsWith = (
+  gaps: readonly (typeof WindowGap.Encoded)[],
+  earlier: boolean,
+  shows?: (item: TimelineItem) => boolean
+) => {
+  const state = reduceTimelines(following(), {
+    _tag: "WindowRead",
+    read: latestOf(three, 0),
+    window: decodeWindow({
+      earlier,
+      gaps: [...gaps],
+      items: encodedItems([message(idOf(3), 30, 3), message(idOf(3), 40, 4)]),
+      later: false,
+      network: "alpha",
+      through: 5,
+      timeline: idOf(3),
+      version: 1,
+    }),
+  });
+
+  const shown = opened(state);
+
+  return shown._tag === "Shown"
+    ? {
+        held: shown.window.gaps.length,
+        rows: rowsOf(shown.window, undefined, shows).map((row) => rowText(row)),
+      }
+    : undefined;
+};
+
 // The page before the first item held carries the Gaps up to it, as the API gives them.
 const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.Encoded)[]) => {
   let state = reduceTimelines(following(), {
@@ -1558,6 +1592,25 @@ describe("the Timelines' state", () => {
         network.timelines.map((timeline) => timeline.name),
       ])
     ).toStrictEqual([["alpha", ["alpha", "#a", "#b"]]]);
+  });
+
+  it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {
+    const [network] = sidebar(following());
+    const tree = network === undefined ? undefined : treeOf(network);
+
+    const none =
+      network === undefined
+        ? undefined
+        : treeOf({ ...network, timelines: network.timelines.slice(1) });
+
+    expect({
+      none: none === undefined ? undefined : [none.own, none.children.map((one) => one.name)],
+      tree: tree === undefined ? undefined : [tree.own?.id, tree.children.map((one) => one.name)],
+    }).toStrictEqual({
+      // A Network with no Timeline of its own yet has a row that opens nothing.
+      none: [undefined, ["#a", "#b"]],
+      tree: [one, ["#a", "#b"]],
+    });
   });
 
   it("appends a live item, inserts late history, updates in place, and skips what it read", () => {
@@ -2166,6 +2219,78 @@ describe("the Timelines' state", () => {
     expect(
       shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : []
     ).toStrictEqual([3, "gap 1", 4, "gap 3"]);
+  });
+
+  describe("a Gap before anything", () => {
+    const closed = { count: 2, from: cursor(10, 1), to: cursor(20, 2) };
+
+    it("is not a row once it ended, in a Timeline read to its start, and the window keeps it", () => {
+      expect(rowsWith([closed], false)).toStrictEqual({ held: 1, rows: [3, 4] });
+    });
+
+    it("is a row while older items lie beyond the window", () => {
+      expect(rowsWith([closed], true)).toStrictEqual({ held: 1, rows: ["gap 2", 3, 4] });
+    });
+
+    it("is a row while it is still open, wherever it is", () => {
+      expect(rowsWith([{ count: 1, from: cursor(10, 1), to: null }], false)?.rows).toStrictEqual([
+        "gap 1",
+        3,
+        4,
+      ]);
+    });
+
+    it("is a row once an item came before it, as a Gap between items is", () => {
+      expect(
+        rowsWith(
+          [
+            { count: 1, from: cursor(35, 3), to: cursor(37, 3) },
+            { count: 1, from: cursor(45, 4), to: cursor(47, 4) },
+          ],
+          false
+        )?.rows
+      ).toStrictEqual([3, "gap 1", 4, "gap 1"]);
+    });
+
+    it("is a row when only an item the view hides stands before it, since it was still there", () => {
+      expect(
+        rowsWith(
+          [{ count: 1, from: cursor(35, 3), to: cursor(37, 3) }],
+          false,
+          (item) => item.sequence !== 3
+        )?.rows
+      ).toStrictEqual(["gap 1", 4]);
+    });
+
+    it("is no row before the first item all the same, though the view hides that item", () => {
+      expect(rowsWith([closed], false, (item) => item.sequence !== 3)?.rows).toStrictEqual([4]);
+    });
+
+    it("is not a row in a Timeline with no item at all, once it ended", () => {
+      const state = reduceTimelines(following(), {
+        _tag: "WindowRead",
+        read: latestOf(three, 0),
+        window: decodeWindow({
+          earlier: false,
+          gaps: [
+            { count: 1, from: cursor(10, 1), to: cursor(20, 2) },
+            { count: 1, from: cursor(30, 3), to: null },
+          ],
+          items: [],
+          later: false,
+          network: "alpha",
+          through: 5,
+          timeline: idOf(3),
+          version: 1,
+        }),
+      });
+
+      const shown = opened(state);
+
+      expect(
+        shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : undefined
+      ).toStrictEqual(["gap 1"]);
+    });
   });
 });
 
@@ -3241,6 +3366,45 @@ describe("what stands in front of a Timeline", () => {
       options: { _tag: "Options" },
       search: { _tag: "Nothing" },
       start: { _tag: "Timeline", timeline: three },
+    });
+  });
+
+  it("marks in the sidebar what the other Panes show, by their number, never what is behind something", () => {
+    const start = following();
+    const two_ = split(start, two);
+    const three_ = split(two_, one, true);
+
+    // The first Pane shows the options in front of its Timeline.
+    const behind = reduceTimelines(
+      reduceTimelines(three_, { _tag: "Pane", change: { _tag: "Focus", pane: "p0" } }),
+      { _tag: "OptionsShown", filter: "" }
+    );
+
+    const refocused = reduceTimelines(three_, {
+      _tag: "Pane",
+      change: { _tag: "Focus", pane: "p0" },
+    });
+
+    expect({
+      alone: [...elsewhereOf(start)],
+      behind: [
+        ...elsewhereOf(
+          reduceTimelines(behind, { _tag: "Pane", change: { _tag: "Focus", pane: "p1" } })
+        ),
+      ],
+      refocused: [...elsewhereOf(refocused)],
+      three: [...elsewhereOf(three_)],
+    }).toStrictEqual({
+      alone: [],
+      behind: [[one, 3]],
+      refocused: [
+        [two, 2],
+        [one, 3],
+      ],
+      three: [
+        [three, 1],
+        [two, 2],
+      ],
     });
   });
 

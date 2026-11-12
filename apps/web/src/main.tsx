@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 import "./ui/theme.css";
+import "./theme/fonts.css";
 import { RegistryContext, scheduleTask } from "@effect/atom-react";
 import { AtomRegistry } from "effect/reactivity";
 import { StrictMode } from "react";

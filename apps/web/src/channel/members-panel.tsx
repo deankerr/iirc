@@ -1,13 +1,15 @@
 /**
- * A Pane's Channel's members, beside it while the Owner shows them on this device: a
- * labelled region holding a virtualized grid list, most privileged first, each member with
- * their rank's symbol, in their nick's colour, and dimmed while away, read a page at a
- * time as the Owner scrolls. Enter, or a double click, opens a member's Direct Message, as
- * `/query` does, and a member chosen offers that, looking them up, as `/whois` does, and
- * mentioning them in the composer, right under their nick, where Tab reaches them. On a
- * compact screen it is a sheet over the focused Pane instead, a modal dialog, which its
- * hide button, a press on the page behind it, Escape, `/members`, or Alt+M closes, and so
- * does choosing what to do with a member, so what it does shows.
+ * A Pane's Channel's members, under its status bar while they show: a virtualized grid
+ * list, most privileged first, each member with their rank's symbol, in their nick's
+ * colour, and dimmed while away, read a page at a time as the Owner scrolls. A press, a
+ * tap, or Enter on a member opens a menu of what to do with them, anchored to their row:
+ * open their Direct Message, as `/query` does, first, so Enter twice opens it, look them
+ * up, as `/whois` does, or mention them in the composer.
+ *
+ * Where the Pane is wide, they are a column beside its Timeline, a region. Where it is
+ * narrow, they lie over its Timeline instead, a dialog that leaves the page usable, and on
+ * a compact screen they are a sheet over the focused Pane, a modal dialog. Those two are put away by the toggle, Escape, a press elsewhere,
+ * `/members`, Alt+M, or choosing what to do with a member, so what it does shows.
  *
  * @packageDocumentation
  */
@@ -16,7 +18,8 @@ import type { TimelineId } from "@iirc/api";
 import type { MemberRow } from "@iirc/frontend/channel";
 import { commandNamed, runIn } from "@iirc/frontend/commands";
 import type { Intent } from "@iirc/frontend/commands";
-import { useId } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   Collection,
   Dialog,
@@ -24,26 +27,25 @@ import {
   GridListItem,
   GridListLoadMoreItem,
   ListLayout,
+  Menu,
+  MenuItem,
   Modal,
   ModalOverlay,
+  Popover,
   Virtualizer,
 } from "react-aria-components";
-import type { Key, Selection } from "react-aria-components";
+import type { Key } from "react-aria-components";
 
 import { commandContext, perform } from "../composer/atoms.ts";
-import { compact, drawerState } from "../page/drawer.ts";
-import { focusedId } from "../panes/atoms.ts";
+import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
-import { Button } from "../ui/button.tsx";
-import { channelOpen, chosenMember, chooseMember, moreMembers, roster } from "./atoms.ts";
-import { membersVisible } from "./state.ts";
+import { IconButton } from "../ui/button.tsx";
+import { channelOpen, moreMembers, roster } from "./atoms.ts";
+import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
 
 import styles from "./members-panel.module.css";
 
-/**
- * How tall a member's row is, in pixels, for the virtualizer to estimate them by: the
- * chosen member's is taller, with their actions under the nick, and is measured.
- */
+/** How tall a member's row is, in pixels, for the virtualizer to estimate them by. */
 const rowHeight = 19;
 
 /**
@@ -59,175 +61,269 @@ const Member = ({ row }: { readonly row: MemberRow }) => (
 );
 
 /**
- * What can be done with the member chosen, as commands, right under their nick: open their
- * Direct Message, as `/query` does, look them up, as `/whois` does, or mention them,
- * starting the composer with their nick.
- * @param props - The member chosen.
- * @returns The actions.
+ * What can be done with a member, as a menu anchored to their row: open their Direct
+ * Message, as `/query` does, look them up, as `/whois` does, or mention them, starting the
+ * composer with their nick. Choosing one puts away members that lie over something.
+ * @param props - The member, their row, and what closes the menu.
+ * @returns The menu.
  */
-const Actions = ({ chosen }: { readonly chosen: string }) => {
+const Actions = ({
+  anchor,
+  nick,
+  onClose,
+}: {
+  readonly nick: string;
+  readonly anchor: RefObject<HTMLElement | null>;
+  readonly onClose: () => void;
+}) => {
   const context = useAtomValue(commandContext);
   const carryOut = useAtomSet(perform);
-  const setDrawer = useAtomSet(drawerState);
-
-  // The sheet, on a compact screen, closes first, so what the action does shows.
-  const run = (intents: readonly Intent[]) => {
-    setDrawer("None");
-    carryOut(intents);
-  };
+  const dismiss = useAtomSet(membersDismissed);
 
   const query = commandNamed("query");
   const whois = commandNamed("whois");
+  const queried = query === undefined ? undefined : runIn(query, nick, context);
+  const looked = whois === undefined ? undefined : runIn(whois, nick, context);
 
-  const queried = query === undefined ? undefined : runIn(query, chosen, context);
-  const looked = whois === undefined ? undefined : runIn(whois, chosen, context);
-  const mention: readonly Intent[] = [{ _tag: "FocusComposer", text: `${chosen}: ` }];
+  const actions = [
+    ...(queried?._tag === "Parsed"
+      ? [{ id: "query", intents: queried.value, label: `Query ${nick}`, text: "query" }]
+      : []),
+    ...(looked?._tag === "Parsed"
+      ? [{ id: "whois", intents: looked.value, label: `Whois ${nick}`, text: "whois" }]
+      : []),
+    {
+      id: "mention",
+      intents: [{ _tag: "FocusComposer", text: `${nick}: ` }] satisfies readonly Intent[],
+      label: `Mention ${nick}`,
+      text: "mention",
+    },
+  ];
 
   return (
-    <div className={styles.actions}>
-      {queried?._tag === "Parsed" ? (
-        <Button
-          aria-label={`Query ${chosen}`}
-          onPress={() => {
-            run(queried.value);
-          }}
-        >
-          query
-        </Button>
-      ) : null}
-      {looked?._tag === "Parsed" ? (
-        <Button
-          aria-label={`Whois ${chosen}`}
-          onPress={() => {
-            run(looked.value);
-          }}
-        >
-          whois
-        </Button>
-      ) : null}
-      <Button
-        aria-label={`Mention ${chosen}`}
-        onPress={() => {
-          run(mention);
+    <Popover
+      className={styles.popover}
+      isOpen
+      offset={0}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onClose();
+        }
+      }}
+      placement="bottom start"
+      triggerRef={anchor}
+    >
+      <Menu
+        aria-label={`What to do with ${nick}`}
+        autoFocus="first"
+        className={styles.menu}
+        items={actions}
+        onAction={(key) => {
+          const chosen = actions.find((action) => action.id === String(key));
+
+          onClose();
+
+          if (chosen !== undefined) {
+            dismiss(undefined);
+            carryOut(chosen.intents);
+          }
         }}
       >
-        mention
-      </Button>
-    </div>
+        {(action) => (
+          <MenuItem
+            aria-label={action.label}
+            className={styles.action}
+            id={action.id}
+            textValue={action.text}
+          >
+            {action.text}
+          </MenuItem>
+        )}
+      </Menu>
+    </Popover>
   );
 };
 
 /**
- * The members read, in rank order, paged as the Owner scrolls.
- * @param props - The members, whether more follow, and whether they are being read.
+ * The members read, in rank order, paged as the Owner scrolls, and the menu of the one
+ * pressed.
+ * @param props - The members, whether more follow, whether they are being read, and the
+ * member whose menu is open, with what changes it.
  * @returns The list.
  */
 const Members = ({
-  label,
   loading,
+  menu,
   more,
-  pane,
   rows,
+  setMenu,
   timeline,
 }: {
-  readonly label: string;
-  readonly pane: string;
   readonly rows: readonly MemberRow[];
   readonly more: boolean;
   readonly loading: boolean;
   readonly timeline: TimelineId;
+  readonly menu: string | undefined;
+  readonly setMenu: (nick: string | undefined) => void;
 }) => {
   const askMore = useAtomSet(moreMembers);
-  const carryOut = useAtomSet(perform);
-  const setDrawer = useAtomSet(drawerState);
-  const context = useAtomValue(commandContext);
-  const chosen = useAtomValue(chosenMember(pane));
-  const choose = useAtomSet(chooseMember);
-  const query = commandNamed("query");
+  const drawn = useRef(new Map<string, HTMLElement>());
+  const anchor = useRef<HTMLElement | null>(null);
 
   // A key is read back as the member it names, never cast.
   const nickOf = (key: Key) => rows.find((row) => row.nick === String(key))?.nick;
 
-  const onSelectionChange = (selection: Selection) => {
-    const [first] = selection === "all" ? [] : [...selection];
-
-    choose({ nick: first === undefined ? undefined : nickOf(first), pane });
-  };
-
   return (
-    <Virtualizer
-      layout={ListLayout}
-      layoutOptions={{ estimatedRowSize: rowHeight, loaderSize: rowHeight }}
-    >
-      <GridList
-        aria-label={label}
-        className={styles.list}
-        items={rows}
-        // Tab moves into the chosen member's actions, under their nick.
-        keyboardNavigationBehavior="tab"
-        onAction={(key) => {
-          const nick = nickOf(key);
-
-          const intents =
-            nick === undefined || query === undefined ? undefined : runIn(query, nick, context);
-
-          if (intents?._tag === "Parsed") {
-            setDrawer("None");
-            carryOut(intents.value);
-          }
-        }}
-        onSelectionChange={onSelectionChange}
-        selectedKeys={chosen === undefined ? [] : [chosen]}
-        selectionBehavior="replace"
-        selectionMode="single"
+    <>
+      <Virtualizer
+        layout={ListLayout}
+        layoutOptions={{ estimatedRowSize: rowHeight, loaderSize: rowHeight }}
       >
-        {/* The chosen member's row draws their actions, so it is drawn again as they change. */}
-        <Collection dependencies={[chosen]} items={rows}>
-          {(row) => (
-            <GridListItem className={styles.item} id={row.nick} textValue={row.label}>
-              <Member row={row} />
-              {row.nick === chosen ? <Actions chosen={chosen} /> : null}
-            </GridListItem>
-          )}
-        </Collection>
-        {more ? (
-          <GridListLoadMoreItem
-            className={styles.loading}
-            isLoading={loading}
-            onLoadMore={() => {
-              askMore(timeline);
-            }}
-          >
-            reading more…
-          </GridListLoadMoreItem>
-        ) : null}
-      </GridList>
-    </Virtualizer>
+        <GridList
+          aria-label="Members"
+          className={styles.list}
+          items={rows}
+          onAction={(key) => {
+            const nick = nickOf(key);
+
+            anchor.current = nick === undefined ? null : (drawn.current.get(nick) ?? null);
+            setMenu(anchor.current === null ? undefined : nick);
+          }}
+        >
+          <Collection items={rows}>
+            {(row) => (
+              <GridListItem
+                className={styles.item}
+                id={row.nick}
+                ref={(element) => {
+                  if (element === null) {
+                    drawn.current.delete(row.nick);
+                  } else {
+                    drawn.current.set(row.nick, element);
+                  }
+                }}
+                textValue={row.label}
+              >
+                <Member row={row} />
+              </GridListItem>
+            )}
+          </Collection>
+          {more ? (
+            <GridListLoadMoreItem
+              className={styles.loading}
+              isLoading={loading}
+              onLoadMore={() => {
+                askMore(timeline);
+              }}
+            >
+              reading more…
+            </GridListLoadMoreItem>
+          ) : null}
+        </GridList>
+      </Virtualizer>
+      {menu === undefined ? null : (
+        <Actions
+          anchor={anchor}
+          nick={menu}
+          onClose={() => {
+            setMenu(undefined);
+          }}
+        />
+      )}
+    </>
   );
 };
 
 /**
- * The members of a Pane's Channel, while the Owner shows them on this device.
- * @param props - The Pane.
- * @returns The panel, or nothing.
+ * Members over a narrow Pane's Timeline, under its bar, for a moment: a dialog that takes
+ * the focus but leaves the page usable. Escape puts it away and gives the focus back to
+ * where it was, and a press anywhere but on it or the Pane's toggle puts it away, unless a
+ * member's menu is open, which a press outside it closes first.
+ * @param props - The Pane, whether a member's menu is open, and the members.
+ * @returns The members.
  */
-export const MembersPanel = ({ pane }: { readonly pane: string }) => {
-  const shown = useAtomValue(membersVisible);
+const Floating = ({
+  children,
+  menuOpen,
+  pane,
+}: {
+  readonly pane: string;
+  readonly menuOpen: boolean;
+  readonly children: ReactNode;
+}) => {
+  const dismiss = useAtomSet(membersDismissed);
+  const panel = useRef<HTMLElement>(null);
+  const before = useRef<HTMLElement | undefined>(undefined);
+
+  // Where the focus was before the dialog takes it, as it does once drawn.
+  useLayoutEffect(() => {
+    const { activeElement } = document;
+
+    before.current = activeElement instanceof HTMLElement ? activeElement : undefined;
+  }, []);
+
+  // Escape on the members, or in them, though not in a member's menu, which is elsewhere.
+  useEffect(() => {
+    const node = panel.current;
+
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        event.stopPropagation();
+        dismiss(undefined);
+        before.current?.focus();
+      }
+    };
+
+    node?.addEventListener("keydown", escape);
+
+    return () => {
+      node?.removeEventListener("keydown", escape);
+    };
+  }, [dismiss]);
+
+  useEffect(() => {
+    const down = (event: PointerEvent) => {
+      const { target } = event;
+
+      if (menuOpen || !(target instanceof Element) || panel.current?.contains(target) === true) {
+        return;
+      }
+
+      const toggle = target.closest<HTMLElement>("[data-members-toggle]");
+
+      if (toggle?.dataset.membersToggle !== pane) {
+        dismiss(undefined);
+      }
+    };
+
+    document.addEventListener("pointerdown", down, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", down, true);
+    };
+  }, [dismiss, menuOpen, pane]);
+
+  return (
+    <Dialog aria-label="Members" className={`${styles.panel} ${styles.floating}`} ref={panel}>
+      {children}
+    </Dialog>
+  );
+};
+
+/**
+ * A Pane's Channel's members, shown: as a sheet on a compact screen, over the Timeline in
+ * a narrow Pane, and beside it elsewhere.
+ * @param props - The Pane.
+ * @returns The members.
+ */
+const Shown = ({ pane }: { readonly pane: string }) => {
   const sheet = useAtomValue(compact);
-  const focused = useAtomValue(focusedId) === pane;
-  const open = useAtomValue(channelOpen(pane));
+  const narrow = useAtomValue(paneNarrow(pane));
   const members = useAtomValue(roster(pane));
-  const run = useAtomSet(perform);
+  const toggle = useAtomSet(toggleMembers);
   const headingId = useId();
-
-  // On a compact screen only the focused Pane shows, and only its members lie over it.
-  if (!shown || !open || (sheet && !focused)) {
-    return null;
-  }
-
-  const hide = () => {
-    run([{ _tag: "ShowMembers", shown: false }]);
-  };
+  const [menu, setMenu] = useState<string | undefined>(undefined);
 
   let body = <p className={styles.dim}>Reading…</p>;
   let count: string | undefined;
@@ -252,11 +348,11 @@ export const MembersPanel = ({ pane }: { readonly pane: string }) => {
       count = members.count === undefined ? undefined : String(members.count);
       body = (
         <Members
-          label="Members"
           loading={members.loading}
+          menu={menu}
           more={members.more}
-          pane={pane}
           rows={members.rows}
+          setMenu={setMenu}
           timeline={members.timeline}
         />
       );
@@ -268,49 +364,67 @@ export const MembersPanel = ({ pane }: { readonly pane: string }) => {
     }
   }
 
-  const content = (
-    <>
-      <div className={styles.head}>
-        <h2 className={styles.heading} id={headingId}>
-          members
-        </h2>
-        {count === undefined ? null : <span className={styles.dim}>{count}</span>}
-        <Button
-          onPress={() => {
-            hide();
-          }}
-        >
-          hide
-        </Button>
-      </div>
-      {body}
-    </>
-  );
-
-  if (!sheet) {
+  if (sheet) {
+    // A modal dialog needs its label, so the sheet keeps a heading, and a way to close it.
     return (
-      <section aria-labelledby={headingId} className={styles.panel}>
-        {content}
-      </section>
+      <ModalOverlay
+        className={styles.scrim}
+        isDismissable
+        isOpen
+        onOpenChange={(isOpen) => {
+          if (!isOpen) {
+            toggle({ pane, shown: false });
+          }
+        }}
+      >
+        <Modal className={styles.sheet}>
+          <Dialog aria-labelledby={headingId} className={styles.panel}>
+            <div className={styles.head}>
+              <h2 className={styles.heading} id={headingId}>
+                members
+              </h2>
+              {count === undefined ? null : <span className={styles.dim}>{count}</span>}
+              <IconButton
+                className={styles.close}
+                command="members.toggle"
+                icon="close"
+                label="Hide the members"
+                onPress={() => {
+                  toggle({ pane, shown: false });
+                }}
+              />
+            </div>
+            {body}
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+    );
+  }
+
+  if (narrow) {
+    return (
+      <Floating menuOpen={menu !== undefined} pane={pane}>
+        {body}
+      </Floating>
     );
   }
 
   return (
-    <ModalOverlay
-      className={styles.scrim}
-      isDismissable
-      isOpen
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          hide();
-        }
-      }}
-    >
-      <Modal className={styles.sheet}>
-        <Dialog aria-labelledby={headingId} className={styles.panel}>
-          {content}
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
+    <section aria-label="Members" className={styles.panel}>
+      {body}
+    </section>
   );
+};
+
+/**
+ * The members of a Pane's Channel, while they show there.
+ * @param props - The Pane.
+ * @returns The members, or nothing.
+ */
+export const MembersPanel = ({ pane }: { readonly pane: string }) => {
+  const shown = useAtomValue(membersOpen(pane));
+  const open = useAtomValue(channelOpen(pane));
+
+  // Drawn afresh each time they show, so no menu outlives them.
+  return shown && open ? <Shown pane={pane} /> : null;
 };

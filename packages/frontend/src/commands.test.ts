@@ -205,6 +205,20 @@ describe("reading a line", () => {
     ]);
   });
 
+  it("shows, hides, or turns over the sidebar with `/sidebar`, from anywhere", () => {
+    expect([
+      interpret("/sidebar", nowhere),
+      interpret("/sidebar on", inChannel),
+      interpret("/sidebar OFF", inDirect),
+      message("/sidebar later", inChannel),
+    ]).toStrictEqual([
+      { _tag: "Parsed", value: [{ _tag: "ShowSidebar", shown: undefined }] },
+      { _tag: "Parsed", value: [{ _tag: "ShowSidebar", shown: true }] },
+      { _tag: "Parsed", value: [{ _tag: "ShowSidebar", shown: false }] },
+      "Use /sidebar to show or hide it, or /sidebar on or /sidebar off.",
+    ]);
+  });
+
   it("refuses an unknown command, and a bare `/`, sending nothing", () => {
     expect([message("/frobnicate x", inChannel), message("/ x", inChannel)]).toStrictEqual([
       "There is no command /frobnicate. Start with // to say text that begins with /.",
@@ -319,6 +333,7 @@ describe("reading a line", () => {
       "say.privmsg": "Required",
       "say.to": "Required",
       "search.open": "Optional",
+      "sidebar.toggle": "Optional",
       "theme.set": "Optional",
       "timeline.latest": "None",
       "timeline.next": "None",
