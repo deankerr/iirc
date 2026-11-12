@@ -1,10 +1,11 @@
 /**
  * A Pane's open Timeline, as a log anchored to the bottom like a chat: it opens on the latest,
  * stays at the bottom while live items arrive there, keeps what is in view still when
- * older items are added above, and asks for older items as the Owner nears the top, or
- * while what it draws cannot be scrolled at all. Away from the latest, it tells the core
- * so, which then leaves new items to be read when the Owner scrolls back down, and with
- * newer items beyond what it holds, it offers to jump to the latest.
+ * older items are added above or its rows wrap again, and asks for older items as the
+ * Owner nears the top, or while what it draws cannot be scrolled at all. Away from the
+ * latest, it tells the core so, which then leaves new items to be read when the Owner
+ * scrolls back down, and with newer items beyond what it holds, it offers to jump to the
+ * latest.
  *
  * @packageDocumentation
  */
@@ -83,6 +84,50 @@ interface Anchor {
   readonly key: string;
   readonly offset: number;
 }
+
+/** The scroller's box, as the view last laid it out. */
+interface Box {
+  readonly height: number;
+  readonly width: number;
+}
+
+/**
+ * The row the view holds still while rows change around it, as when they wrap again at a
+ * new width or text size: the first whose top is in view, the line the Owner reads from,
+ * or, with none, as when one row is taller than the view, the row across its top edge.
+ * The rows are laid out in order, so their tops only grow.
+ * @param laid - Where each row starts and ends, in order.
+ * @param top - How far the view is scrolled.
+ * @param height - How tall the view is.
+ * @returns The row's index, or none with no rows.
+ */
+const anchorIndex = (
+  laid: readonly { readonly end: number; readonly start: number }[],
+  top: number,
+  height: number
+): number | undefined => {
+  // The first row that starts at the top of the view or below it.
+  let low = 0;
+  let high = laid.length;
+
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+
+    if ((laid[middle]?.start ?? 0) < top) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+
+  const first = laid[low];
+
+  if (first !== undefined && first.start < top + height) {
+    return low;
+  }
+
+  return low > 0 ? low - 1 : undefined;
+};
 
 /**
  * A row of the log: the start of the Timeline, a way to read the page before on purpose,
@@ -211,6 +256,9 @@ const Lines = ({
   // What the core was last told: at the latest with the last item in view, or away. Nothing
   // yet, so the view says so once it has first laid out.
   const told = useRef<string | undefined>(undefined);
+  // The scroller's box when the view last stood itself in it, so a scroll the browser makes
+  // as the box changes, before the view has stood itself again, is told from the Owner's.
+  const laidBox = useRef<Box | undefined>(undefined);
   // Whose a scroll is, kept in one place: where the view last put the log itself, which
   // the scroll event that follows reports, where the log last stood, and when the Owner
   // last pressed, touched, wheeled, or pressed a key in it.
@@ -258,6 +306,13 @@ const Lines = ({
     return owned;
   };
 
+  /**
+   * Whether the view stays at the bottom as rows change: it was there, or the Owner jumped
+   * to the latest, with nothing beyond the last row.
+   * @returns Whether it does.
+   */
+  const pinned = () => (atBottom.current || window.following) && !window.later;
+
   // TanStack Virtual hands back new functions each render, which nothing here memoizes.
   // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
@@ -281,19 +336,40 @@ const Lines = ({
     },
   });
 
+  // A row measured at a new size moves the view by as much when it is before the row the
+  // view holds still, or, at the bottom, wherever it is, so the rows wrapping again at a
+  // new width or text size move nothing in view, however many change at once. The
+  // virtualizer's own rule leaves a row alone while it thinks the Owner scrolls up, which
+  // it does for a moment after any scroll, and so lost the place. The rule is a field of
+  // the virtualizer's, not an option, so each render sets it afresh.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    if (pinned()) {
+      return true;
+    }
+
+    const held = anchorIndex(
+      instance.measurementsCache,
+      instance.scrollOffset ?? 0,
+      instance.scrollRect?.height ?? 0
+    );
+
+    return held !== undefined && item.index < held;
+  };
+
   const items = virtualizer.getVirtualItems();
   const total = virtualizer.getTotalSize();
 
   const remember = (element: HTMLDivElement) => {
+    const laid = virtualizer.measurementsCache;
+    const index = anchorIndex(laid, element.scrollTop, element.clientHeight);
+    const held = index === undefined ? undefined : laid[index];
+
     atBottom.current =
       element.scrollHeight - element.scrollTop - element.clientHeight <= nearBottom;
-
-    const top = items.find((item) => item.end > element.scrollTop);
-
     anchor.current =
-      top === undefined
+      held === undefined
         ? undefined
-        : { key: String(top.key), offset: top.start - element.scrollTop };
+        : { key: String(held.key), offset: held.start - element.scrollTop };
   };
 
   /**
@@ -411,7 +487,7 @@ const Lines = ({
     const survivor = shifted && kept !== undefined ? survivorOf(kept) : undefined;
 
     // Pinned only with nothing more beyond the last row.
-    if ((atBottom.current || window.following) && !window.later) {
+    if (pinned()) {
       atBottom.current = true;
       place(element, element.scrollHeight);
     } else if (survivor !== undefined) {
@@ -449,6 +525,44 @@ const Lines = ({
 
     return true;
   };
+
+  /**
+   * Stands the view where it belongs: the item jumped to in the middle, until the Owner
+   * scrolls, or else where it stood, and notes the box it stood in.
+   * @param element - The scroller.
+   * @param shifted - Whether rows were added above, dropped, or hidden, moving every row.
+   */
+  const stand = (element: HTMLDivElement, shifted: boolean) => {
+    if (target === undefined || !centre(element)) {
+      standBack(element, shifted);
+    }
+
+    laidBox.current = { height: element.clientHeight, width: element.clientWidth };
+  };
+
+  /**
+   * Stands the view again in a box that changed under it, where the browser may have moved
+   * the log, and takes where it stands then as no move of the Owner's, so the scroll the
+   * browser reports of it says nothing.
+   * @param element - The scroller.
+   */
+  const restandIn = (element: HTMLDivElement) => {
+    placed.current = undefined;
+    stand(element, true);
+    stood.current = element.scrollTop;
+  };
+
+  /**
+   * Whether the scroller's box changed since the view last stood in it, as when its Pane
+   * is resized: the rows have not been measured at the new size yet, and a scroll the
+   * browser makes meanwhile says nothing of where the Owner stands.
+   * @param element - The scroller.
+   * @returns Whether it did.
+   */
+  const reboxed = (element: HTMLDivElement) =>
+    laidBox.current !== undefined &&
+    (laidBox.current.height !== element.clientHeight ||
+      laidBox.current.width !== element.clientWidth);
 
   /**
    * Notes the Owner's input, the wheel, a touch, a press, or a key that scrolls, which lets
@@ -498,16 +612,28 @@ const Lines = ({
     fill(element);
   };
 
-  // The latest way back, for the Pane's move, and the latest fill, for a change of the
+  /**
+   * Stands the view again in a scroller whose box changed, at the bottom or around the item
+   * jumped to, tells the core what is in view there now, and reads on while what is drawn
+   * falls short of filling it, as when a Pane is shown again or a window made taller.
+   * @param element - The scroller.
+   */
+  const resized = (element: HTMLDivElement) => {
+    restandIn(element);
+    tell(element);
+    fill(element);
+  };
+
+  // The latest way back, for the Pane's move, and the latest stand, for a change of the
   // scroller's size, each of which happens between renders.
   const back = useRef(shownAgain);
-  const refill = useRef(fill);
+  const restand = useRef(resized);
 
   back.current = shownAgain;
-  refill.current = fill;
+  restand.current = resized;
 
-  // A change of the scroller's size alone, as a Pane shown again or a window made taller,
-  // may leave what is drawn short of filling it, so it checks again.
+  // A change of the scroller's size alone, the rows' sizes aside, which the virtualizer
+  // answers, may leave the view short of the bottom or of filling it.
   useLayoutEffect(() => {
     const element = scroller.current;
 
@@ -515,7 +641,7 @@ const Lines = ({
       element === null || typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(() => {
-            refill.current(element);
+            restand.current(element);
           });
 
     if (element !== null) {
@@ -564,9 +690,7 @@ const Lines = ({
 
     if (element !== null) {
       // The item jumped to stays in the middle until the Owner scrolls.
-      if (target === undefined || !centre(element)) {
-        standBack(element, shifted);
-      }
+      stand(element, shifted);
 
       // Laid out: what is in view now is what the Owner can see.
       tell(element);
@@ -587,6 +711,15 @@ const Lines = ({
       className={styles.scroller}
       onScroll={(event) => {
         const element = event.currentTarget;
+
+        // The browser moved the log as its box changed, before the view stood itself in
+        // it again: it does so now, where it stood, and the Owner moved nothing.
+        if (reboxed(element)) {
+          restandIn(element);
+          tell(element);
+
+          return;
+        }
 
         remember(element);
         tell(element, scrolledByOwner(element));
