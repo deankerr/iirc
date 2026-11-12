@@ -35,7 +35,7 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
-import { channelHappened } from "../channel/state.ts";
+import { channelHappened } from "../channel/channels.ts";
 import { forgetChantypes } from "../composer/chantypes-state.ts";
 import { cancelCompletion } from "../composer/completion-state.ts";
 import { notifyAll } from "../notifications/notifier.ts";

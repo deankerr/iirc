@@ -15,7 +15,7 @@ The core decides and this package draws and does the I/O.
 - **Lists the Networks and their Timelines in a sidebar,** as a tree: each Network with how its connection stands, then its own Timeline, its Channels, and its Direct Messages.
 - **Shows what is new, calmly.** A row's name is coloured by the highest level unread in it, with small counts beside it, and the page's title counts Highlights and Direct Messages. A Highlight's line is tinted, and a "new" divider stands before the first unread item.
 - **Shows a Timeline live,** as terminal lines in shared columns: the time, the sender in their colour, and the text with its formatting and links. Activity is dimmer, a Gap is a divider, and our own Messages say how their delivery stands. It opens on the latest, stays at the bottom as items arrive, and reads older items as the Owner scrolls up.
-- **Splits into Panes,** as a tiling window manager does. Each Pane has its own header, Timeline, scroll position, and members. One composer under the Panes writes to the focused Pane's Timeline.
+- **Splits into Panes,** as a tiling window manager does. Each Pane has its own status bar, Timeline, scroll position, and members. Among several, the focused Pane is edged in the accent along its top and bottom, and the others' names are dimmed. One composer under the Panes writes to the focused Pane's Timeline.
 - **Says Messages and runs commands from the composer.** Enter sends, Shift+Enter starts a new line, Up and Down recall what was sent, and Tab completes. A paste of more than five lines asks first. Why something was not said is shown under it, with a way to send or check again when that is safe.
 - **Marks read where the Owner has seen it:** a Timeline at its latest, in a Pane they can see, once that has held for a second. The Daemon keeps the Read Marker, so every Frontend sees the counts clear.
 - **Searches the Messages of every Timeline,** newest first, in front of a Pane's Timeline. It searches on Enter, not as the Owner types, since a query half typed would search for something else. Choosing a result opens its Timeline read around it, and marks nothing read.
@@ -24,9 +24,9 @@ The core decides and this package draws and does the I/O.
 - **Changes Configuration as an option tree**, by `/set` and its kin or in the options view, which edits each option in place. A Credential is given only in a password prompt.
 - **Shares the options under `ui` between devices, and lets one override them** with `-device`.
 - **Draws in themes made from terminal palettes,** built in or imported from a theme file. A theme highlighted in the palette, or being imported, previews on the whole page.
-- **Shows who is here.** A Channel's header has its topic, modes, and count. `/members` or Alt+M shows its members beside it, by rank, each offering `query`, `whois`, and `mention`.
+- **Shows who is here.** A Pane's status bar is one line: its number, the Timeline's name, a Channel's modes and its topic, cut to the line, and the members' toggle, which says how many there are. A press on the topic discloses it in full under the bar. The toggle, `/members`, or Alt+M shows the members under the bar, by rank, and a press, a tap, or Enter on one opens a menu of `query`, `whois`, and `mention`, Query first, so Enter twice opens their Direct Message.
 - **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
-- **Looks a User up,** with `/whois` and `/whowas`, as a card under the Pane's header.
+- **Looks a User up,** with `/whois` and `/whowas`, as a card under the Pane's status bar.
 - **Notifies, when the Owner asks,** with `/notify on`: a Highlight or a Direct Message in a Timeline they are not looking at.
 - **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with a switcher above it, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
 
@@ -37,7 +37,7 @@ The core decides and this package draws and does the I/O.
 | `src/app/` | The shell, the one Effect runtime, the Daemon's client, and how intents are named |
 | `src/sign-in/` | The sign-in screen and its commands |
 | `src/timelines/` | The Timelines' atoms, the changes stream, the layout kept, the sidebar, and the Timeline view |
-| `src/panes/` | The Pane tree, drawn with `react-resizable-panels` |
+| `src/panes/` | The Pane tree, drawn with `react-resizable-panels`, and how wide each Pane is |
 | `src/composer/` | The composer, what carries out its intents, and Tab completion |
 | `src/options/` | The options view, changing a Configuration, holding a Credential, and the options under `ui` |
 | `src/search/`, `src/palette/`, `src/channel/`, `src/lookup/` | Each of those views and its atoms. `src/palette/` also holds the one key listener |
@@ -80,6 +80,7 @@ The core decides and this package draws and does the I/O.
 - **One key listener for the page.** `Keys` listens on the document after every widget's own handlers, asks the core's `resolve`, and prevents a key's default only when a binding took it.
 - **The palette is React Aria's Autocomplete over a Menu, in a Modal's Dialog.** What it lists is ranked by the core, so the Autocomplete filters nothing itself.
 - **The core owns the Panes, and `react-resizable-panels` only draws them**. The library has no controlled layout, so each Split pushes the core's ratios with `setLayout`, and only a change the Owner made goes back to the core. Each Pane's content is drawn once, through a portal, into a node that lives as long as the Pane, so a split or a swap moves it and never draws it afresh. The Timeline view puts back the scroll position a move loses.
+- **A Pane narrower than 600px shows its members over its Timeline,** never beside it, since eighteen characters of members would leave too little Timeline. Each Pane is measured with a `ResizeObserver`. There the toggle opens them for that Pane alone, and Escape, a press elsewhere, or choosing an action puts them away, as each does the sheet on a compact screen. The device's choice of a column covers only the Panes wide enough for one.
 - **The Timeline view is TanStack Virtual's,** with only the rows near the view in the page. Where the view stands is kept in refs, never in state. A row in view stays still as rows are added above, dropped, or hidden by `ui.activity`.
 - **The view tells the core what the Owner has seen.** It says whether it is at the latest and names the last item in view. It tells a scroll the Owner made from one it made itself, so a Timeline opened at a search's result marks nothing read until the Owner goes to the latest.
 - **A view that cannot scroll reads older pages on its own,** as when the latest page is all hidden Activity, up to the window's cap. Past that, "Load older" asks on purpose.
@@ -96,7 +97,7 @@ Each is in `localStorage`, read once as the page starts and written as best it c
 | `iirc.layout` | The Panes, naming Timelines by id | A phone shows one Pane at a time anyway |
 | `iirc.ui` | This device's overrides of options under `ui` | They are the device's own |
 | `iirc.notify` | Whether this device notifies | A device's own choice |
-| `iirc.members` | Whether the members' column shows | How wide a screen is is the device's own |
+| `iirc.members` | Whether the members' column shows beside a Pane wide enough | How wide a screen is is the device's own |
 
 Anything kept that cannot be read leaves the page starting as new.
 

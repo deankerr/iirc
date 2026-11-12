@@ -14,7 +14,6 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 
 - **The composer may not stay above iOS Safari's keyboard by resizing.** The page asks for `interactive-widget=resizes-content` and is `100dvh` tall, which Chromium on Android honours, but Safari ignores the former and keeps the page's height, scrolling it instead so the focused composer shows, which can push the bar out of view while typing.
 - **Back does not close the drawer or the sheet.** There is no router, so Android's back gesture leaves the page. Escape, a press outside, or a choice closes them.
-- **A tap on a member opens their Direct Message,** as React Aria acts on a tap in a list that has an action. Their `whois` and `mention` are reached by a long press, which selects them.
 
 ## Behaviour to know
 

@@ -796,7 +796,6 @@ describe("the web frontend on iirc daemon --web", () => {
         await networkRow(page);
         await page.getByRole("row", { name: channel }).click();
 
-        const view = page.getByRole("region", { name: channel });
         const log = page.getByRole("log", { name: channel });
         const composer = page.getByRole("textbox", { name: channel });
 
@@ -821,10 +820,13 @@ describe("the web frontend on iirc daemon --web", () => {
         peer.send(`MODE ${channel} +o iirc`);
         await members.getByRole("row", { name: "iirc, operator" }).waitFor();
 
-        // A topic set from the composer shows in the header.
+        // A topic set from the composer shows in the Pane's status bar.
         await composer.fill("/topic a plan for today");
         await composer.press("Enter");
-        await view.locator("header").getByText("a plan for today", { exact: true }).waitFor();
+        await page
+          .locator("[data-pane] header")
+          .getByRole("button", { exact: true, name: "a plan for today" })
+          .waitFor();
 
         // Taking the peer's rank and giving it back, by PREFIX's `o`.
         await composer.fill("/deop peer");
@@ -958,15 +960,17 @@ describe("the web frontend on iirc daemon --web", () => {
         await networkRow(page);
         await page.getByRole("row", { name: channel }).click();
 
-        const view = page.getByRole("region", { name: channel });
         const composer = page.getByRole("textbox", { name: channel });
 
         await page.getByRole("log", { name: channel }).waitFor();
 
-        // The peer sets the topic: the header reads the Channel again and shows it, formatted.
+        // The peer sets the topic: the bar reads the Channel again and shows it on one line,
+        // which a press discloses in full, formatted, with who set it in its place.
         peer.send(`TOPIC ${channel} :the \u0002plan\u0002 for today`);
-        const head = view.locator("header");
+        const head = page.locator("[data-pane] header");
+        const line = head.getByRole("button", { name: "the plan for today" });
 
+        await line.click();
         await head.getByText("set by peer", { exact: false }).waitFor();
 
         const topic = await head
@@ -981,6 +985,23 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await peerRow.waitFor();
         const symbol = await peerRow.textContent();
+
+        // A press on a member opens their menu, as dense as the list, Query focused first.
+        await peerRow.click();
+        const query = page.getByRole("menuitem", { name: "Query peer" });
+
+        await query.waitFor();
+
+        const [actionBox, rowBox] = [await query.boundingBox(), await peerRow.boundingBox()];
+
+        const menu = {
+          focused: await query.evaluate((element) => element === document.activeElement),
+          height: actionBox?.height === rowBox?.height,
+          items: await page.getByRole("menuitem").count(),
+        };
+
+        await page.keyboard.press("Escape");
+        await query.waitFor({ state: "detached" });
 
         // The peer ops Self, which the list reads again and shows.
         peer.send(`MODE ${channel} +o iirc`);
@@ -1012,12 +1033,14 @@ describe("the web frontend on iirc daemon --web", () => {
 
         expect({
           completed,
+          menu,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           symbol,
           topic,
           violations,
         }).toStrictEqual({
           completed: "peer: ",
+          menu: { focused: true, height: true, items: 3 },
           problems: [],
           symbol: "@peer",
           topic: "700",
@@ -2126,8 +2149,8 @@ describe("the web frontend on iirc daemon --web", () => {
         peer.send(`PRIVMSG ${channel} :hello from a phone's peer`);
         await log.getByText("hello from a phone's peer").waitFor();
 
-        // The members are a sheet over the Channel, from its header.
-        const toggle = page.getByRole("button", { name: "members" });
+        // The members are a sheet over the Channel, from the toggle in its status bar.
+        const toggle = page.getByRole("button", { name: /^Members\b/u });
 
         targets["members toggle"] = await leastSide(toggle);
         await toggle.tap();
@@ -2138,6 +2161,16 @@ describe("the web frontend on iirc daemon --web", () => {
         targets["member row"] = await leastSide(member);
         targets["members hide"] = await leastSide(sheet.getByRole("button", { name: "hide" }));
         scrolled.push(await sideways());
+
+        // A tap on a member opens their menu, a finger's size, and Escape closes it alone.
+        await member.tap();
+        const action = page.getByRole("menuitem", { name: "Query peer" });
+
+        await action.waitFor();
+        targets["member action"] = await leastSide(action);
+        scrolled.push(await sideways());
+        await page.keyboard.press("Escape");
+        await action.waitFor({ state: "detached" });
         await sheet.getByRole("button", { name: "hide" }).tap();
         await sheet.waitFor({ state: "detached" });
 

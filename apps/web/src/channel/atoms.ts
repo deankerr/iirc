@@ -62,30 +62,6 @@ export const roster = Atom.family((pane: string) =>
   Atom.make((get) => rosterOf(get(timelinesState), get(paneChannel(pane)), pane))
 );
 
-/** The member the Owner chose in a Pane's list, by nick, by the Pane's id. */
-const memberChoice = Atom.family((_pane: string) =>
-  Atom.make<string | undefined>(undefined).pipe(Atom.keepAlive)
-);
-
-/** The member chosen in a Pane's list, while the list still holds them. */
-export const chosenMember = Atom.family((pane: string) =>
-  Atom.make((get) => {
-    const chosen = get(memberChoice(pane));
-    const members = get(roster(pane));
-
-    return members._tag === "Listed" && members.rows.some((row) => row.nick === chosen)
-      ? chosen
-      : undefined;
-  })
-);
-
-/** Chooses a member in a Pane's list, or none. */
-export const chooseMember = Atom.fnSync(
-  ({ nick, pane }: { readonly pane: string; readonly nick: string | undefined }, get) => {
-    get.registry.set(memberChoice(pane), nick);
-  }
-).pipe(Atom.keepAlive);
-
 /**
  * The reads the core calls for now, for every Channel the Panes show.
  * @param read - Reads an atom, from the registry or as a derived atom does.
