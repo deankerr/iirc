@@ -249,23 +249,29 @@ describe("telling the query's answers from the Owner's /mode", () => {
     expect.assertions(0);
   });
 
-  it("leaves an error that answers only a change to the Owner's action, though the query was sent first", () => {
+  it("leaves an error that answers only a change to the Owner's action, though the query was sent first, and still awaits its own answer", () => {
     const played = play(client, {
       configuration: base,
       transcript: [
         ...joinedAsking,
         lines(
-          "!! mode #iirc +l=5",
-          ">> MODE #iirc +l 5",
-          "<< :irc.test 696 iirc #iirc l 5 :Invalid mode parameter",
-          "?? refused i1 Rejected 696 mode=#iirc:+l in=channel:#iirc",
+          "!! mode #iirc +k=hunter2",
+          ">> MODE #iirc +k hunter2",
+          "<< :irc.test 467 iirc #iirc :Channel key already set",
+          "?? refused i1 Rejected 467 mode=#iirc:+k in=channel:#iirc",
           "<< :irc.test 324 iirc #iirc +nt",
           "?? channel-learned channel:#iirc"
         ),
       ],
     });
 
-    expect(modesOf(played)).toMatchObject({ _tag: "Known" });
+    expect(modesOf(played)).toMatchObject({
+      _tag: "Known",
+      value: new Map([
+        ["n", null],
+        ["t", null],
+      ]),
+    });
   });
 
   it("never takes a 324 as the answer to an action", () => {

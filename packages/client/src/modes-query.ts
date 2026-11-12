@@ -70,10 +70,10 @@ export const askModes = (run: Run): void => {
 
 /**
  * The error numerics that answer only a change of modes, never the question of what they
- * are: `467`, a key is already set, and `696`, a mode's parameter is refused. The query
- * leaves these to the Owner's action, however the two were sent.
+ * are: `467`, a key is already set. The query leaves these to the Owner's action, however
+ * the two were sent.
  */
-const ofChanges: ReadonlySet<string> = new Set(["467", "696"]);
+const ofChanges: ReadonlySet<string> = new Set(["467"]);
 
 /**
  * The query a Line answers, by its structure alone: a `324` of its Channel, an error
