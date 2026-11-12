@@ -2584,6 +2584,121 @@ describe("the web frontend on iirc daemon --web", () => {
             });
         };
 
+        /**
+         * Where the Timeline stands: how far it is from its end, and the first row whose top
+         * is in view, the row the view holds still as the rows wrap again, with how far below
+         * the top of the view it starts.
+         * @returns Where it stands.
+         */
+        const standing = async () =>
+          await log.evaluate((element) => {
+            const { top } = element.getBoundingClientRect();
+
+            const first = [...element.querySelectorAll("[data-index]")]
+              .map((row) => ({ at: row.getBoundingClientRect().top - top, row }))
+              .find(({ at }) => at > -0.5);
+
+            return {
+              fromEnd: Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+              offset: first === undefined ? undefined : Math.round(first.at),
+              row: first?.row.textContent?.match(/filler \d+/u)?.[0],
+            };
+          });
+
+        const fromEnd = async () => {
+          const now = await standing();
+
+          return now.fromEnd;
+        };
+
+        /** Waits for a frame to be drawn after this one, by which the rows are measured. */
+        const painted = async () => {
+          await page.evaluate(async () => {
+            const { promise, resolve } = Promise.withResolvers<undefined>();
+
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                resolve(undefined);
+              });
+            });
+            await promise;
+          });
+        };
+
+        /**
+         * Resizes the page in one step, and waits for the rows to be drawn at the new width.
+         * @param width - The page's width.
+         */
+        const resize = async (width: number) => {
+          await page.setViewportSize({ height: 800, width });
+          await painted();
+        };
+
+        const box = await log.boundingBox();
+
+        await page.mouse.move((box?.x ?? 0) + 100, (box?.y ?? 0) + 100);
+
+        // At the latest, it stays at the latest as every row wraps again, and follows what is
+        // said after.
+        await page.mouse.wheel(0, 100_000);
+        await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+        await resize(560);
+        const latestNarrow = await fromEnd();
+
+        peer.send(`PRIVMSG ${channel} :said once narrow`);
+        await log.getByText("said once narrow").waitFor();
+        await painted();
+        const latestAfter = await fromEnd();
+
+        await resize(1280);
+        const latestBack = await fromEnd();
+
+        // Reading older, the first row in view stays where it is as every row wraps again,
+        // in one step there and back, while the scroll that put it there has only just ended.
+        await page.mouse.wheel(0, -1200);
+        await expect.poll(fromEnd).toBeGreaterThan(400);
+        await painted();
+        const reading = await standing();
+
+        await resize(560);
+        const readingNarrow = await standing();
+
+        await resize(1280);
+        const readingBack = await standing();
+
+        // The same as the text's size changes, which wraps them again too.
+        const composer = page.getByRole("textbox", { name: channel });
+
+        const sized = async () =>
+          await page.evaluate(() => getComputedStyle(document.body).fontSize);
+
+        await composer.fill("/set ui.size 20");
+        await composer.press("Enter");
+        await expect.poll(sized).toBe("20px");
+        await painted();
+        const readingLarger = await standing();
+
+        await composer.fill("/set ui.size 14");
+        await composer.press("Enter");
+        await expect.poll(sized).toBe("14px");
+        await painted();
+        const readingSized = await standing();
+
+        // Back to the latest, where the widths below expect it.
+        await page.mouse.wheel(0, 100_000);
+        await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+
+        /**
+         * Whether the view stood as it did: the same row first in view, as far below the top,
+         * within a pixel.
+         * @param now - Where it stands now.
+         * @returns Whether it did.
+         */
+        const held = (now: Awaited<ReturnType<typeof standing>>) =>
+          now.row !== undefined &&
+          now.row === reading.row &&
+          Math.abs((now.offset ?? Number.NaN) - (reading.offset ?? Number.NaN)) <= 1;
+
         await page.locator("[data-pane] header bdi[title^='+f']").waitFor();
         const modesPast = [await hostileModes(1280), await hostileModes(560)];
 
@@ -2597,15 +2712,19 @@ describe("the web frontend on iirc daemon --web", () => {
         }
 
         expect({
+          latest: [latestNarrow, latestAfter, latestBack].map((one) => one <= 1),
           modesPast,
           narrow: drawn[390]?.layout,
           problems,
+          reading: [readingNarrow, readingBack, readingLarger, readingSized].map(held),
           sideways: Object.entries(drawn).filter(([, one]) => one.sideways > 0),
           wide: drawn[1280]?.layout,
         }).toStrictEqual({
+          latest: [true, true, true],
           modesPast: [0, 0],
           narrow: "block",
           problems: [],
+          reading: [true, true, true, true],
           sideways: [],
           wide: "grid",
         });

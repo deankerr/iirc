@@ -190,12 +190,10 @@ const logOf = () => {
 
 /**
  * How the log is laid out, as a browser would and happy-dom does not: how tall its view is,
- * and how tall what it holds is, which a test changes to scroll back.
+ * and how tall what it holds is, which a test changes to scroll back, how tall each row is,
+ * and how wide the view is, which a test changes to wrap the rows again.
  */
-const layout = { content: 0, top: 0, view: 0 };
-
-/** How tall each row is, as a browser would measure it. */
-const rowHeight = 20;
+const layout = { content: 0, row: 20, top: 0, view: 0, width: 800 };
 
 const isLog = (element: Element) => element.getAttribute("role") === "log";
 
@@ -210,6 +208,12 @@ const layOut = () => {
       return isLog(this) ? layout.view : 0;
     },
   });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return isLog(this) ? layout.width : 0;
+    },
+  });
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get(this: HTMLElement) {
@@ -220,7 +224,7 @@ const layOut = () => {
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
     configurable: true,
     get(this: HTMLElement) {
-      return Object.hasOwn(this.dataset, "index") ? rowHeight : 0;
+      return Object.hasOwn(this.dataset, "index") ? layout.row : 0;
     },
   });
   // Scrolled no further than what it holds allows, as a browser clamps it.
@@ -239,10 +243,10 @@ const layOut = () => {
     configurable: true,
     value(this: HTMLElement) {
       if (isLog(this)) {
-        return new DOMRect(0, 0, 800, layout.view);
+        return new DOMRect(0, 0, layout.width, layout.view);
       }
 
-      return new DOMRect(0, 0, 0, Object.hasOwn(this.dataset, "index") ? rowHeight : 0);
+      return new DOMRect(0, 0, 0, Object.hasOwn(this.dataset, "index") ? layout.row : 0);
     },
   });
 };
@@ -351,8 +355,10 @@ const press = async (name: string) => {
 describe("what the view says it shows", () => {
   beforeEach(() => {
     layout.content = 0;
+    layout.row = 20;
     layout.top = 0;
     layout.view = 500;
+    layout.width = 800;
     layOut();
   });
 
@@ -849,5 +855,209 @@ describe("what the view says it shows", () => {
     );
 
     expect(row?.textContent).toMatch(/^\S+ <\S+> line 2$/u);
+  });
+});
+
+/** What a ResizeObserver reports of a box, as much of it as the page reads. */
+interface Observed {
+  readonly borderBoxSize: readonly { readonly blockSize: number; readonly inlineSize: number }[];
+  readonly contentRect: DOMRect;
+  readonly target: Element;
+}
+
+/** How a ResizeObserver reports. */
+type Report = (entries: readonly Observed[]) => void;
+
+/** What each ResizeObserver the page made watches, and how it reports. */
+const observers = new Set<{ readonly report: Report; readonly watched: Set<Element> }>();
+
+/** A ResizeObserver that reports only when told, as the browser's does after a layout. */
+// oxlint-disable-next-line typescript/no-extraneous-class -- it stands in for the browser's class.
+class Observer {
+  readonly #own: { readonly report: Report; readonly watched: Set<Element> };
+
+  constructor(report: Report) {
+    this.#own = { report, watched: new Set() };
+    observers.add(this.#own);
+  }
+
+  observe(element: Element) {
+    this.#own.watched.add(element);
+  }
+
+  unobserve(element: Element) {
+    this.#own.watched.delete(element);
+  }
+
+  disconnect() {
+    this.#own.watched.clear();
+  }
+}
+
+/**
+ * Lays the log out again, as a browser does once its width or text size changed: every row
+ * at a new height, what it holds as tall as they are, and each observer of the log or its
+ * rows told of their boxes.
+ * @param row - How tall each row is now.
+ */
+const wrapAgain = async (row: number) => {
+  const rows = logOf().querySelector<HTMLElement>(":scope > div");
+  const count = Number(rows?.style.height.replace("px", "") ?? "0") / layout.row;
+
+  layout.row = row;
+  layout.content = count * row;
+
+  await act(async () => {
+    for (const { report, watched } of observers) {
+      const entries = [...watched].flatMap((target) => {
+        const isRow = target instanceof HTMLElement && Object.hasOwn(target.dataset, "index");
+        const height = isLog(target) ? layout.view : row;
+
+        return target.isConnected && (isLog(target) || isRow)
+          ? [
+              {
+                borderBoxSize: [{ blockSize: height, inlineSize: layout.width }],
+                contentRect: new DOMRect(0, 0, layout.width, height),
+                target,
+              },
+            ]
+          : [];
+      });
+
+      if (entries.length > 0) {
+        report(entries);
+      }
+    }
+
+    await Promise.resolve();
+  });
+};
+
+/**
+ * The first row whose top is in view, by what it says, and how far below the top it starts.
+ * @returns It.
+ */
+const firstInView = () => {
+  const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].map((row) => ({
+    offset:
+      Number(/translateY\((?<y>[\d.]+)px\)/u.exec(row.style.transform)?.groups?.y) -
+      logOf().scrollTop,
+    text: /line \d+/u.exec(row.textContent ?? "")?.[0],
+  }));
+
+  return rows.toSorted((one, other) => one.offset - other.offset).find((row) => row.offset >= 0);
+};
+
+/**
+ * `#iirc` with sixty Messages, open and laid out at its latest.
+ * @returns The fake, and the registry.
+ */
+const opened = async () => {
+  const fake = await signedIn(
+    [],
+    Array.from({ length: 60 }, (_, index) => message(index + 1))
+  );
+
+  await openFromPalette();
+  await settled(() => fake.registry.get(openTimeline)._tag === "Shown");
+  // Laid out as tall as its rows, and at the bottom, where it opens.
+  await wrapAgain(20);
+  await scrollTo(layout.content, layout.content);
+  await settled(() => logOf().textContent?.includes("line 60"));
+
+  return fake;
+};
+
+/**
+ * Whether the core holds the open Timeline as following its latest.
+ * @param registry - The registry.
+ * @returns Whether it does.
+ */
+const following = (registry: Awaited<ReturnType<typeof opened>>["registry"]) => {
+  const shown = registry.get(openTimeline);
+
+  return shown._tag === "Shown" && shown.window.following;
+};
+
+describe("where the view stands as its rows wrap again", () => {
+  beforeEach(() => {
+    layout.content = 0;
+    layout.row = 20;
+    layout.top = 0;
+    layout.view = 400;
+    layout.width = 800;
+    layOut();
+    observers.clear();
+    Reflect.set(globalThis, "ResizeObserver", Observer);
+    Reflect.set(window, "ResizeObserver", Observer);
+  });
+
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    Reflect.deleteProperty(globalThis, "ResizeObserver");
+    Reflect.deleteProperty(window, "ResizeObserver");
+  });
+
+  it("keeps the first row in view where it was, just after the Owner scrolled up, and tells the core nothing new", async () => {
+    const { daemon, registry } = await opened();
+
+    // The Owner scrolls up, and the rows wrap again before the scroll has settled.
+    await act(async () => {
+      logOf().dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -800 }));
+      await Promise.resolve();
+    });
+    await scrollTo(410, layout.content);
+
+    const before = {
+      first: firstInView(),
+      following: following(registry),
+      reads: daemon.reads.length,
+    };
+
+    await wrapAgain(40);
+
+    const taller = {
+      first: firstInView(),
+      following: following(registry),
+      reads: daemon.reads.length,
+    };
+
+    await wrapAgain(20);
+
+    const back = {
+      first: firstInView(),
+      following: following(registry),
+      reads: daemon.reads.length,
+    };
+
+    expect({ back, taller }).toStrictEqual({ back: before, taller: before });
+    expect(before.first?.offset).toBe(10);
+  });
+
+  it("stays at the latest as its rows wrap again, though the browser moved the log as its box changed", async () => {
+    const { registry } = await opened();
+    const bottom = () => layout.content - layout.view;
+    const atLatest = { following: following(registry), top: logOf().scrollTop === bottom() };
+
+    // The Owner's wheel just now did nothing, at the bottom. Narrowed, the rows overflow
+    // before they are measured, and the browser moves the log by a pixel.
+    await act(async () => {
+      logOf().dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 800 }));
+      await Promise.resolve();
+    });
+    const top = logOf().scrollTop;
+
+    layout.width = 400;
+    layout.content += 80;
+    await scrollTo(top - 1, layout.content);
+    await wrapAgain(40);
+
+    expect({ following: following(registry), top: logOf().scrollTop === bottom() }).toStrictEqual(
+      atLatest
+    );
+    expect(atLatest).toStrictEqual({ following: true, top: true });
   });
 });
