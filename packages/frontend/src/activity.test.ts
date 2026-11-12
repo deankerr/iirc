@@ -80,6 +80,7 @@ const described = ({
 }: Described): typeof Timeline.Encoded => ({
   changed,
   detached,
+  head: null,
   id,
   key: kind === "Network" || detached ? null : name,
   kind,

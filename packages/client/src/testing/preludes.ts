@@ -11,6 +11,7 @@ import {
   encode,
   isRejected,
   join,
+  mode,
   nick as nickLine,
   user,
 } from "@iirc/protocol/line";
@@ -187,7 +188,8 @@ export interface Joining {
 
 /**
  * Writes Self joining a Channel: the Owner wants it, the Client sends `JOIN`, the Ircd
- * echoes it and lists the members with `353` and `366`. Self is listed first, unless
+ * echoes it, the Client asks its modes with `MODE`, the Ircd lists the members with `353`
+ * and `366`, and then answers with `324`: `+nt`. Self is listed first, unless
  * `names` already lists it.
  * @param configuration - The scenario's Configuration, which names Self.
  * @param channel - The Channel, such as `#iirc`.
@@ -209,8 +211,10 @@ export const joined = (
     `!! configure +${channel}`,
     sent(join([channel])),
     `<< :${nick}!~${configuration.username}@iirc.test JOIN ${channel}`,
+    sent(mode(channel)),
     `<< :${server} 353 ${nick} = ${channel} :${listed.join(" ")}`,
-    `<< :${server} 366 ${nick} ${channel} :End of /NAMES list.`
+    `<< :${server} 366 ${nick} ${channel} :End of /NAMES list.`,
+    `<< :${server} 324 ${nick} ${channel} +nt`
   );
 };
 

@@ -68,7 +68,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 3;
+const layoutVersion = 4;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -118,6 +118,7 @@ const layout = [
     key TEXT,
     changed INTEGER NOT NULL,
     read INTEGER,
+    head INTEGER,
     unread_highlights INTEGER NOT NULL,
     unread_direct INTEGER NOT NULL,
     unread_messages INTEGER NOT NULL,
@@ -219,6 +220,7 @@ const columns = [
   "timelines.key TEXT",
   "timelines.changed INTEGER",
   "timelines.read INTEGER",
+  "timelines.head INTEGER",
   "timelines.unread_highlights INTEGER",
   "timelines.unread_direct INTEGER",
   "timelines.unread_messages INTEGER",
@@ -707,7 +709,7 @@ export const makeSqliteTimelineStore = (
 
     // Timelines, each with the position of its last item, which the primary key finds.
     const summaries = (where: Fragment, order: Fragment) => sql`
-      SELECT id, network, kind, name, key, changed, read,
+      SELECT id, network, kind, name, key, changed, read, head,
         unread_highlights AS highlights, unread_direct AS direct,
         unread_messages AS messages, unread_activity AS activity,
         (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest
@@ -850,7 +852,7 @@ export const makeSqliteTimelineStore = (
           case "Described": {
             const { timeline } = change;
 
-            // A Timeline described again keeps its Read Marker and counts.
+            // A Timeline described again keeps its Read Marker, its head, and its counts.
             yield* sql`
               INSERT INTO timelines (id, network, kind, name, key, changed, read,
                 unread_highlights, unread_direct, unread_messages, unread_activity)
@@ -858,6 +860,14 @@ export const makeSqliteTimelineStore = (
                 ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0)
               ON CONFLICT (id) DO UPDATE SET network = excluded.network, kind = excluded.kind,
                 name = excluded.name, key = excluded.key, changed = excluded.changed
+            `;
+            break;
+          }
+
+          case "HeadChanged": {
+            yield* sql`
+              UPDATE timelines SET head = ${change.sequence}, changed = ${change.sequence}
+              WHERE id = ${change.timeline}
             `;
             break;
           }

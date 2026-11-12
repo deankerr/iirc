@@ -178,8 +178,11 @@ const long = [
   again(),
   lines(
     "<< :iirc!~iirc@iirc.test JOIN #iirc",
+    ">> MODE #iirc",
     "<< :irc.test 353 iirc = #iirc :iirc @op",
-    "<< :irc.test 366 iirc #iirc :End"
+    "<< :irc.test 366 iirc #iirc :End",
+    "<< :irc.test 324 iirc #iirc +nt",
+    "<< :irc.test 329 iirc #iirc 1767225600"
   ),
   traffic(2),
   lines(
@@ -280,8 +283,11 @@ const everyFeature = [
     .replace(/(?<welcome><< :irc\.test 001 [^\n]*\n)/u, "$<welcome>>> JOIN #iirc\n"),
   lines(
     "<< :iirc!~iirc@iirc.test JOIN #iirc",
+    ">> MODE #iirc",
     "<< :irc.test 353 iirc = #iirc :iirc @+op",
-    "<< :irc.test 366 iirc #iirc :End"
+    "<< :irc.test 366 iirc #iirc :End",
+    "<< :irc.test 324 iirc #iirc +nt",
+    "<< :irc.test 329 iirc #iirc 1767225600"
   ),
   featured(2, 1),
 ];

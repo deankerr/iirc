@@ -120,8 +120,13 @@ const run = async <A, E>(
 
         return yield* Effect.gen(function* () {
           const api = yield* makeClient;
+          const result = yield* test(world, api, key, dataDir);
 
-          return yield* test(world, api, key, dataDir);
+          // Stopping says `QUIT`, which is paced as every Line is, so the bucket a test
+          // spent refills before the Runtime stops, as the real clock would have it.
+          yield* TestClock.adjust("10 seconds");
+
+          return result;
         }).pipe(Effect.provide(Layer.merge(presenting(key), handlers)));
       })
     ).pipe(Effect.provide(TestClock.layer()))
@@ -502,6 +507,8 @@ describe("the handlers", () => {
 
         expect(yield* heard(call)).toBe("JOIN #iirc");
         yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
         yield* say(call, ":irc.test 353 iirc = #iirc :iirc @peer");
         yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
         yield* settle;
@@ -647,6 +654,8 @@ describe("the handlers", () => {
 
         expect(yield* heard(call)).toBe("JOIN #iirc");
         yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
         yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
         yield* settle;
 
@@ -751,6 +760,8 @@ describe("the handlers", () => {
 
         expect(yield* heard(call)).toBe("JOIN #iirc");
         yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
         yield* say(call, ":irc.test 353 iirc = #iirc :iirc peer");
         yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
         yield* settle;
@@ -923,6 +934,8 @@ describe("the handlers", () => {
 
         expect(yield* heard(call)).toBe("JOIN #iirc");
         yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
         yield* say(call, ":peer!u@h PRIVMSG #iirc :iirc: look");
         yield* settle;
 
@@ -1169,6 +1182,8 @@ describe("the handlers", () => {
 
         expect(yield* heard(call)).toBe("JOIN #iirc");
         yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
         yield* say(call, ":peer!u@h PRIVMSG #iirc :hi there");
         yield* say(call, ":peer!u@h PRIVMSG iirc :psst");
         yield* settle;
@@ -1239,6 +1254,8 @@ describe("the handlers", () => {
 
         expect(yield* heard(call)).toBe("JOIN #iirc");
         yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
         yield* say(call, ":peer!u@h PRIVMSG #iirc :hi there");
         yield* say(call, ":peer!u@h PRIVMSG #iirc :iirc: look");
         yield* say(call, ":iirc!~iirc@elsewhere PRIVMSG #iirc :from my phone");
@@ -2060,6 +2077,7 @@ const inChannel = (
     yield* say(call, `:irc.test 005 iirc ${isupport} :are supported by this server`);
     expect(yield* heard(call)).toBe("JOIN #iirc");
     yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+    expect(yield* heard(call)).toBe("MODE #iirc");
 
     for (let first = 0; first < names.length; first += 50) {
       yield* say(call, `:irc.test 353 iirc = #iirc :${names.slice(first, first + 50).join(" ")}`);
@@ -2179,6 +2197,55 @@ describe("a Channel's head and members", () => {
       ],
       standing: "Joined",
       topic: { _tag: "Known", value: { setBy: "setter", text: "the topic" } },
+    });
+  });
+
+  it("asks a Channel's modes on joining, and tells a follower of the changes to read its head again", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call, timeline } = yield* inChannel(world, api, ["iirc"]);
+        const before = yield* api.timelines.channel({ params: { timeline } });
+        const listed = yield* api.timelines.list({ params: { network: libera }, query: {} });
+        const after = { sequence: listed.through ?? 0, version: listed.version };
+
+        yield* say(call, ":irc.test 324 iirc #iirc +ntk secret");
+        yield* settle;
+
+        const [changed] = yield* api.timelines
+          .changes({ headers: {}, query: { after } })
+          .pipe(Effect.flatMap(firstChange));
+
+        const now = yield* api.timelines.channel({ params: { timeline } });
+
+        return {
+          before: before.modes._tag,
+          changed:
+            changed?.event === "changed"
+              ? {
+                  heads: changed.data.timelines.map(({ head, id }) => [
+                    id === timeline,
+                    head === changed.data.sequence,
+                  ]),
+                  items: changed.data.items.length,
+                }
+              : undefined,
+          now: now.modes,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      before: "Unknown",
+      changed: { heads: [[true, true]], items: 0 },
+      now: {
+        _tag: "Known",
+        from: "replied",
+        value: [
+          { mode: "n", param: null },
+          { mode: "t", param: null },
+          { mode: "k", param: null },
+        ],
+      },
     });
   });
 

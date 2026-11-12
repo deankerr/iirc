@@ -21,7 +21,8 @@ search({ text, network?, timeline?, from?, since?, until?, after?, limit }): Eff
 consistent(reads): Effect<{ value, through, version }, TimelineStoreFailed>
 reset(version): Effect<void, TimelineStoreFailed>
 
-Summary = Descriptor & { latest: Position | undefined, read: Instant | undefined, unread: Unread, changed }
+Summary = Descriptor & { latest: Position | undefined, read: Instant | undefined, unread: Unread,
+  head: number | undefined, changed }
                                                    // Descriptor is { id, network, kind, name, key }
 Unread = { highlights, direct, messages, activity }
 unreadOf: { [L in Level]: keyof Unread }           // which count a level is counted in
@@ -59,8 +60,9 @@ Search = { text: SearchText, network?, timeline?, from?, since?: Instant, until?
 - **`Merged`** moves every item of `from` into `into`, by the same rule as `Added`, so an item whose message id or position `into` already has is dropped. `from` is gone from `timelines` and leaves a **tombstone** naming `into`. A tombstone always names a Timeline that exists: a tombstone that named `from` is moved on to `into`.
 - **`Gap`** keeps a Network's Gap by where it began, so the one that says where it ended replaces the one that did not.
 - **`ReadMarker`** sets a Timeline's Read Marker, **only forward**: one at or before the Read Marker it has changes nothing, whatever the fold sent. `Described` keeps the Read Marker a Timeline has.
+- **`HeadChanged`** sets a Timeline's `head` to its sequence: the last step that changed what the Client knows of its Channel in a way no item says. It adds no item, and changes nothing of a Timeline never described. `Described` keeps the `head` a Timeline has.
 
-Each Timeline, item, tombstone, and Gap records `changed`, the last sequence that changed it. A Timeline's counts any change to its items too: one added, confirmed, marked unsent or rejected, or moved in, and any change to its Read Marker or its unread counts.
+Each Timeline, item, tombstone, and Gap records `changed`, the last sequence that changed it. A Timeline's counts any change to its items too: one added, confirmed, marked unsent or rejected, or moved in, and any change to its Read Marker, its unread counts, or its `head`.
 
 ## Unread counts
 

@@ -61,7 +61,7 @@ export const noneUnread: Unread = { activity: 0, direct: 0, highlights: 0, messa
 
 /**
  * A Timeline as a store holds it, with its latest item's position, its Read Marker, what
- * stands after it, and the last sequence that changed it.
+ * stands after it, when its head last changed, and the last sequence that changed it.
  */
 export interface Summary extends Descriptor {
   /** The position of its last item, or `undefined` while it has none. */
@@ -70,7 +70,12 @@ export interface Summary extends Descriptor {
   readonly read: Instant | undefined;
   /** How many items of each level stand after `read`, capped. */
   readonly unread: Unread;
-  /** The last sequence that changed it, its Read Marker, or any of its items. */
+  /**
+   * The last sequence that changed what the Client knows of its Channel in a way no item
+   * says, as `HeadChanged` reports, or `undefined` while none has.
+   */
+  readonly head: number | undefined;
+  /** The last sequence that changed it, its Read Marker, its head, or any of its items. */
   readonly changed: number;
 }
 

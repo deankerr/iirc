@@ -131,6 +131,11 @@ type LinkPhase =
        */
       readonly lookups: readonly Looking[];
       /**
+       * The one `MODE` query the Client sent of its own, to learn a Channel's modes on
+       * joining it, whose answer has not come, or `undefined` for none.
+       */
+      readonly modesQuery: ModesQuery | undefined;
+      /**
        * How many of the Owner's Lines awaiting an answer by their parameters, actions' and
        * Lookups' alike, have been sent on this Connection: each takes the next as its
        * `order`, so a reply tied to neither by label goes to the one sent first.
@@ -173,6 +178,20 @@ export interface Acting {
   readonly targets: readonly Awaiting[];
   /** Whether a refusal was already reported for its intent, by another of its Lines. */
   readonly reported: boolean;
+}
+
+/**
+ * A `MODE` query the Client sent of its own, awaiting its answer: a `324`, or an error
+ * that names its Channel or its command. It takes an `order` as the Owner's Lines do, so
+ * whichever was sent first takes a reply that could answer either.
+ */
+export interface ModesQuery {
+  /** The Channel, as it was sent. */
+  readonly channel: string;
+  /** When it was sent among the Lines awaiting an answer on the Connection, as an action's `order` is. */
+  readonly order: number;
+  /** When it stops waiting, and the next Channel is asked. */
+  readonly deadline: Instant;
 }
 
 /**
@@ -277,6 +296,8 @@ export interface Joined {
   readonly modes: Fact<ReadonlyMap<string, string | null>>;
   /** Whether the replies to our `JOIN` are still arriving: no topic by their end means none. */
   readonly burst: boolean;
+  /** Whether the Client has asked for its modes since Self joined it. It asks once a join. */
+  readonly queried: boolean;
 }
 
 /** Where Self is with a Channel the Owner wants. */

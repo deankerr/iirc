@@ -138,7 +138,7 @@ Preludes write transcript text, and commit to how a Client registers. The Client
 | --- | --- | --- |
 | `configured(overrides)` | `configured({ channels: [{ name: "#iirc" }] })` | A base Configuration, decoded: `iirc` on `irc.test:6697` over TLS, enabled, no Channels, no login, nothing declined. |
 | `registered(configuration, { offered, requested, isupport, server })` | `registered(base, { offered: ["sasl=PLAIN", "multi-prefix", "away-notify"], requested: ["sasl", "multi-prefix"] })` | `!! configure`, the dial it makes at once, `== opened`, `CAP LS 302`, `PASS` if configured, `NICK`, `USER`. `offered` is what the Ircd lists in `CAP LS`, with values. `requested` is what the Client is expected to `CAP REQ`, by name: the caps it has a Feature for, less those the Owner declined. Left out, it is every cap offered, so a simple scenario stays short. The Ircd acknowledges them, SASL `PLAIN` logs in when the Configuration has a login and `sasl` is requested, and `CAP END` follows, at once after `LS` when nothing is requested. Requesting a cap that is not offered throws. With nothing offered, the floor: `421` for `CAP`. Then `001` to `005`, 13 tokens to a `005`, `floorIsupport` by default. |
-| `joined(configuration, channel, names, { nick, server })` | `joined(base, "#iirc", ["@peer"])` | `!! configure +#iirc`, `>> JOIN #iirc`, the echo, `353` with Self first, and `366`. |
+| `joined(configuration, channel, names, { nick, server })` | `joined(base, "#iirc", ["@peer"])` | `!! configure +#iirc`, `>> JOIN #iirc`, the echo, the `>> MODE #iirc` it draws, `353` with Self first, `366`, and `324` answering `+nt`. |
 | `across(caps)` | `across(["a", "b"])` | `[[], ["a"], ["b"], ["a", "b"]]`: none, each cap alone, and every pair. |
 
 ## The laws

@@ -24,6 +24,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
   decodeTimeline({
     changed: 1,
     detached: false,
+    head: null,
     id,
     key: kind === "Network" ? null : name,
     kind,

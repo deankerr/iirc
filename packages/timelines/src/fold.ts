@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 5;
+export const projectionVersion = 6;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -500,6 +500,54 @@ const gap = (draft: Draft, from: Position, to: Position | undefined) => {
 };
 
 /**
+ * A refusal: an action's placed where it belongs, and a `Say`'s marks its Message, when it
+ * came after the Line left.
+ * @param draft - The step.
+ * @param news - The refusal.
+ * @param n - Its index in the step.
+ */
+const refused = (draft: Draft, news: Extract<News, { readonly _tag: "Refused" }>, n: number) => {
+  if (news.action !== undefined) {
+    refuseAction(draft, news, news.action, n);
+  } else if (news.reason._tag === "Unsent") {
+    draft.changes.push({
+      _tag: "Unsent",
+      intent: news.intent,
+      network: draft.network,
+      sequence: draft.sequence,
+    });
+  } else if (news.reason._tag === "Rejected") {
+    draft.changes.push({
+      _tag: "Rejected",
+      intent: news.intent,
+      network: draft.network,
+      reply: news.reason.reply,
+      sequence: draft.sequence,
+    });
+  }
+};
+
+/**
+ * What the Client learned of a Channel shows in no item, only in its head, which a
+ * Frontend reads again. A Channel with no Timeline yet has nothing to read again, so it
+ * opens none.
+ * @param draft - The step.
+ * @param key - The Channel's key.
+ */
+const learned = (draft: Draft, key: string) => {
+  const id = draft.maps.channels.get(key);
+
+  if (id !== undefined && draft.maps.keyed.has(id)) {
+    draft.changes.push({
+      _tag: "HeadChanged",
+      network: draft.network,
+      sequence: draft.sequence,
+      timeline: id,
+    });
+  }
+};
+
+/**
  * Folds one News.
  * @param draft - The step.
  * @param news - The News.
@@ -530,24 +578,7 @@ const foldNews = (draft: Draft, news: News, n: number) => {
     }
 
     case "Refused": {
-      if (news.action !== undefined) {
-        refuseAction(draft, news, news.action, n);
-      } else if (news.reason._tag === "Unsent") {
-        draft.changes.push({
-          _tag: "Unsent",
-          intent: news.intent,
-          network: draft.network,
-          sequence: draft.sequence,
-        });
-      } else if (news.reason._tag === "Rejected") {
-        draft.changes.push({
-          _tag: "Rejected",
-          intent: news.intent,
-          network: draft.network,
-          reply: news.reason.reply,
-          sequence: draft.sequence,
-        });
-      }
+      refused(draft, news, n);
 
       break;
     }
@@ -614,6 +645,12 @@ const foldNews = (draft: Draft, news: News, n: number) => {
 
     case "ReadMarker": {
       mark(draft, news.where, news.read);
+
+      break;
+    }
+
+    case "ChannelLearned": {
+      learned(draft, news.channel.key);
 
       break;
     }

@@ -2,6 +2,7 @@ import {
   cap,
   isRejected,
   join,
+  mode,
   nick,
   parse,
   parseSource,
@@ -238,7 +239,8 @@ const onJoin = ({ state, heard, input, line }: Heard): Step<ToyState> => {
           channels: withMembers(state, channel, [[parseSource(line.source ?? "").nick, ""]]),
         },
         input.at,
-        []
+        // As the real Client asks a Channel's modes when it joins, so a prelude plays alike.
+        parseSource(line.source ?? "").nick === state.self ? send(state, mode(channel)) : []
       );
 };
 

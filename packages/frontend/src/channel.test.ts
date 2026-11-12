@@ -72,6 +72,7 @@ const described = (
 ): typeof Timeline.Encoded => ({
   changed: 1,
   detached,
+  head: null,
   id,
   key,
   kind,
@@ -338,6 +339,18 @@ const changed = (change: Partial<typeof TimelineChange.Encoded>): ChannelEvent =
   change: decodeChange({ gaps: [], items: [], merged: [], sequence: 11, timelines: [], ...change }),
 });
 
+/**
+ * A change that lists `#iirc` with its Timeline's `head`.
+ * @param at - The step that last moved its head.
+ * @param sequence - The change's own step.
+ * @returns The change, as an event.
+ */
+const headMoved = (at: number, sequence: number) =>
+  changed({
+    sequence,
+    timelines: [{ ...described(iirc, "#iirc"), changed: sequence, head: at }],
+  });
+
 const tags = (reads: readonly ChannelRead[]) =>
   reads.map((read) => ({
     after: read._tag === "Members" ? read.after : undefined,
@@ -381,6 +394,30 @@ describe("the open Channel", () => {
         { after: undefined, tag: "Head", wait: false },
         { after: undefined, tag: "Members", wait: false },
       ],
+    });
+  });
+
+  it("reads again when its Timeline's head moved, though the change that says so was gathered from later steps, and once for each move", () => {
+    const { state } = settled();
+
+    // What a Frontend that fell behind is told: the head moved at step 9, then a Read
+    // Marker at step 11, as one change of step 11.
+    const gathered = reduceChannel(state, headMoved(9, 11));
+    // The same head said again, as every later change of the Timeline says it.
+    const same = reduceChannel(gathered, headMoved(9, 12));
+    const further = reduceChannel(same, headMoved(13, 13));
+
+    expect({
+      further: [further.generation - same.generation, further.headSeen],
+      gathered: [
+        tags(channelReads(gathered, inIirc, true)).map((read) => read.tag),
+        gathered.headSeen,
+      ],
+      same: same.generation - gathered.generation,
+    }).toStrictEqual({
+      further: [1, 13],
+      gathered: [["Head", "Members"], 9],
+      same: 0,
     });
   });
 
@@ -587,13 +624,15 @@ const standingShown = (standing: Parameters<typeof header>[0]) => {
 /**
  * Whether a change touches `#iirc`.
  * @param change - The change.
+ * @param headSeen - Its Timeline's `head` as the changes last said it: 4 unless given.
  * @returns Whether it does.
  */
-const touchesIirc = (change: Partial<typeof TimelineChange.Encoded>) =>
+const touchesIirc = (change: Partial<typeof TimelineChange.Encoded>, headSeen: number | null = 4) =>
   touches(
     decodeChange({ gaps: [], items: [], merged: [], sequence: 11, timelines: [], ...change }),
     timelineId(iirc),
-    network
+    network,
+    headSeen
   );
 
 describe("the header", () => {
@@ -750,23 +789,48 @@ describe("the members", () => {
 });
 
 describe("touching", () => {
-  it("is an Activity in the Channel's Timeline, or a Gap of its Network", () => {
+  it("is an Activity in the Channel's Timeline, its head moved past the one seen, or a Gap of its Network", () => {
     expect({
       activity: touchesIirc({ items: [joined(11)] }),
       elsewhere: touchesIirc({ items: [joined(11, other)] }),
       gap: touchesIirc({
         gaps: [{ changed: 11, from: cursor(1, 11), network: "libera", to: null }],
       }),
+      head: touchesIirc({ timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: 11 }] }),
+      headBefore: touchesIirc({
+        timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: 4 }],
+      }),
+      // A change gathered from several steps: the head moved at 9, and something else at 11.
+      headGathered: touchesIirc({
+        timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: 9 }],
+      }),
+      headNone: touchesIirc({
+        timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: null }],
+      }),
+      // With none seen yet, a head said counts as moved.
+      headUnseen: touchesIirc(
+        { timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: 4 }] },
+        null
+      ),
       message: touchesIirc({ items: [said(11, "peer")] }),
       otherGap: touchesIirc({
         gaps: [{ changed: 11, from: cursor(1, 11), network: "oftc", to: null }],
+      }),
+      otherHead: touchesIirc({
+        timelines: [{ ...described(other, "#other"), changed: 11, head: 11 }],
       }),
     }).toStrictEqual({
       activity: true,
       elsewhere: false,
       gap: true,
+      head: true,
+      headBefore: false,
+      headGathered: true,
+      headNone: false,
+      headUnseen: true,
       message: false,
       otherGap: false,
+      otherHead: false,
     });
   });
 });

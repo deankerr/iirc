@@ -58,6 +58,7 @@ const describeNews = (happened: readonly Happened[]) =>
           return [one.activity._tag];
         }
 
+        case "ChannelLearned":
         case "Confirmed":
         case "Ignored":
         case "LookedUp":
@@ -98,7 +99,14 @@ describe("the real Client on the in-memory ports", () => {
 
         yield* secure.open;
         yield* converse(secure, opening(plain, ["sts=duration=3600"]));
-        yield* converse(secure, joined(plain, "#iirc", ["@peer"]));
+
+        // `CAP END` and the JOIN spent the burst, so the query of the Channel's modes waits
+        // its turn.
+        const [join = "", rest = ""] = joined(plain, "#iirc", ["@peer"]).split(">> MODE #iirc\n");
+
+        yield* converse(secure, join);
+        yield* TestClock.adjust(2000);
+        yield* converse(secure, `>> MODE #iirc\n${rest}`);
         yield* settle;
         const registeredAs = (yield* runtime.known(libera)).session;
 
@@ -178,8 +186,8 @@ describe("Lines that never left", () => {
         yield* converse(call, opening(base, []));
         yield* converse(call, joined(base, "#iirc", ["@peer"]));
 
-        // Registration and the join spent all but one Line of the burst, so the first
-        // leaves at once, and the others wait their turn.
+        // Registration, the join, and the query of its modes spent the burst, so each
+        // waits its turn: the first leaves after one interval, and the others wait on.
         const intents: IntentId[] = [];
 
         for (const words of ["one", "two", "three"]) {
@@ -192,6 +200,8 @@ describe("Lines that never left", () => {
           intents.push(said.intent);
         }
 
+        // Registration, the join, and the query of its modes spent the burst.
+        yield* TestClock.adjust(2000);
         const heard = yield* heardText(call);
 
         yield* call.close("Reset");
@@ -245,6 +255,8 @@ describe("an action", () => {
           action: { _tag: "Kick", channel: "nobody", nicks: ["peer"], reason: null },
         });
 
+        // Registration, the join, and the query of its modes spent the burst.
+        yield* TestClock.adjust(2000);
         const heard = yield* heardText(call);
 
         yield* call.say(encoder.encode(":irc.test 482 iirc #iirc :You're not channel operator"));
@@ -310,6 +322,8 @@ describe("a Lookup", () => {
           })
         );
 
+        // Registration, the join, and the query of its modes spent the burst.
+        yield* TestClock.adjust(2000);
         const heard = yield* heardText(call);
 
         yield* call.say(encoder.encode(":irc.test 311 iirc peer ~u peer.test * :Peer"));
@@ -359,6 +373,8 @@ describe("a Lookup", () => {
           first.runtime.look(libera, { lookup: { _tag: "Whowas", nick: "gone" } })
         );
 
+        // Registration, the join, and the query of its modes spent the burst.
+        yield* TestClock.adjust(2000);
         const heard = yield* heardText(call);
 
         yield* call.say(encoder.encode(":irc.test 314 iirc gone ~g gone.test * :Gone"));

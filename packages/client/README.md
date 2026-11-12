@@ -86,6 +86,7 @@ The State holds no timer table. Each machine's state names the instants it waits
 | `keepalive` | in a Session | a `PING` after 60 s of silence, a hang-up after 90 s |
 | `rejoin <channel>` | a Channel is refused or kicked | joins it again |
 | `lookup <intent>` | a Lookup awaits its reply, 30 s | reports what it has |
+| `modes` | the Client's own `MODE` query awaits its answer, 30 s | asks the next Channel |
 
 ## News
 
@@ -100,6 +101,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `ConnectionFailed` | A Connection that ended before registration: why, the Ircd dialled, and whether it had opened. |
 | `Refolded` | An Ircd declared another casemapping, so keys in `where` fold by it from here on. |
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
+| `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
 | `Ignored` | An input that changed nothing, and why. |
@@ -173,6 +175,7 @@ A fact's source is `ircd`, `replied`, `receipt`, or `ours`. Nothing in Knowledge
 | `caps` | `Listing`, `Requesting`, `Holding`, `Ready.Steady`, `Ready.Changing`, `None` |
 | `presence` | `Registering`, `Session` |
 | `keepalive` | `Listening`, `Pinged` |
+| `modes` | `Asking` |
 | `channel <name>` | `Wanted`, `Joining`, `Joined.Syncing`, `Joined.Synced`, `Refused`, `Kicked` |
 
 A machine that is not running is left out.
@@ -239,6 +242,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Registration** (`registration.test.ts`). Sends `CAP LS 302`, `PASS` when configured, `NICK`, and `USER` at once. An Ircd with no cap negotiation answers `421` or goes straight to `001`. When a nick is taken, it offers the configured nicks in order, then the first with `_`, `2`, `3`, and on, within `NICKLEN`.
 - **The Session and ISUPPORT** (`session.test.ts`). `001` begins a Session. ISUPPORT accumulates over every `005`, at most 256 tokens. Self's mask is never read from `001`, whose text is for people.
 - **Keepalive** (`keepalive.test.ts`). Answers `PING` at once, byte for byte. After 60 s of silence it sends a `PING`, and after 90 s it hangs up.
+- **A Channel's modes** (`modes.test.ts`). Each time Self's join is confirmed, the Client asks the Channel's modes once with `MODE <channel>`, and folds the `324` that answers. One query waits at a time on a Connection, so a hundred Channels are asked one after another, each when the last is answered or after 30 s, and the Owner's Lines never queue behind them all. A Channel whose modes are already known by its turn is not asked. An error in answer leaves the modes unknown. A `MODE` while they are known keeps them true, by `CHANMODES`, with `PREFIX`'s modes as membership; one while they are unknown leaves them unknown, never a partial set. A key is kept only as set.
 - **Channels** (`channels.test.ts`). Each Channel the Owner wants is a machine. Wanted Channels share `JOIN` Lines as `TARGMAX` allows, and one with a key goes alone. A refused Channel, a kick, or a `PART` the Owner did not ask for is joined again on the backoff. A Channel Self was put in without asking is followed with `wanted` false and never joined again. Without `multi-prefix`, a member's prefixes are partial.
 - **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. Other CTCP is neither reported nor answered. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
 - **Read Markers** (`read.test.ts`). A `Read` moves one Timeline's Read Marker forward, never back, so two Frontends marking at once cannot undo each other. It needs no Session, and markers outlive Connections.
@@ -253,7 +257,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **`Mode`** gives each change a parameter exactly as `PREFIX` and `CHANMODES` say, and splits across Lines by `MODES`. A mode neither names is `Unsendable`.
 - **`Away`** describes the Owner, so it outlives Sessions and is sent again as each begins. It is the one action that needs no Session.
 - **`Raw`** sends a Line written as text. It may not be `CAP`, nor `PASS`, `AUTHENTICATE`, or `OPER`, which carry a Credential. A `JOIN` or `PART` of a Channel the Configuration wants is refused, since those are changes to the Configuration. The Client follows whatever the Ircd echoes back, as if another IRC client of the same account had sent it.
-- **A refusal is tied to its action by structure.** With `labeled-response`, by label. On the floor, an error numeric is tied to the oldest Line of an action that names what the numeric names, such as `482` by its Channel.
+- **A refusal is tied to its action by structure.** With `labeled-response`, by label. On the floor, an error numeric is tied to the oldest Line of an action that names what the numeric names, such as `482` by its Channel. The Client's own `MODE` query of a Channel waits among them in the order it was sent, and takes a `324` of its Channel, an error numeric naming its Channel, or a `421` or `461` naming `MODE`, when it is the oldest.
 - **Some refusals cannot be tied on the floor:** a numeric that names nothing the action named, such as `472`, and anything an Ircd says only in text.
 
 ### Lookups

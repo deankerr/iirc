@@ -436,6 +436,7 @@ describe("the sources", () => {
   ): typeof Timeline.Encoded => ({
     changed: 1,
     detached: false,
+    head: null,
     id,
     key: kind === "Network" ? null : name,
     kind,

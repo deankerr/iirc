@@ -302,6 +302,10 @@ const statesOf = (state: State): Inspection["states"] => {
     states.set("keepalive", session.keepalive.pinged ? "Pinged" : "Listening");
   }
 
+  if (open?.modesQuery !== undefined) {
+    states.set("modes", "Asking");
+  }
+
   for (const channel of state.channels.values()) {
     states.set(`channel ${channel.name}`, channelName(channel.phase));
   }

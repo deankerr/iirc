@@ -412,6 +412,10 @@ export const describeNews = (news: News, now: Instant): string => {
       return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
     }
 
+    case "ChannelLearned": {
+      return words(["channel-learned", `channel:${writeNamed(news.channel)}`]);
+    }
+
     case "Message": {
       return words([
         "message",
