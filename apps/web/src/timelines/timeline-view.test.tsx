@@ -49,7 +49,13 @@ const listed = (
   ...more,
 });
 
-const message = (sequence: number): typeof TimelineItem.Encoded => ({
+const message = (
+  sequence: number,
+  ours: {
+    readonly delivery: { readonly _tag: "Unconfirmed" | "Unsent" };
+    readonly intent: string;
+  } | null = null
+): typeof TimelineItem.Encoded => ({
   changed: sequence,
   content: {
     _tag: "Message",
@@ -57,7 +63,7 @@ const message = (sequence: number): typeof TimelineItem.Encoded => ({
     id: { _tag: "Unknown" },
     kind: "Privmsg",
     live: true,
-    ours: null,
+    ours,
     sender: "peer",
     tags: [],
     target: "#iirc",
@@ -782,5 +788,66 @@ describe("what the view says it shows", () => {
     } finally {
       Reflect.deleteProperty(globalThis, "ResizeObserver");
     }
+  });
+
+  it("draws no Gap before the first item of a Timeline read to its start, and one still open stays", async () => {
+    const closed = await signedIn([{ count: 1, from: cursor(500, 1), to: cursor(800, 1) }]);
+
+    await openFromPalette();
+    await settled(() => closed.registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const withClosed = logOf().textContent;
+
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    const open = await signedIn([{ count: 1, from: cursor(500, 1), to: null }]);
+
+    await openFromPalette();
+    await settled(() => open.registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    expect({
+      closed: withClosed?.includes("not connected"),
+      open: logOf().textContent?.includes("not connected since"),
+      start: withClosed?.includes("The start of this Timeline"),
+    }).toStrictEqual({ closed: false, open: true, start: true });
+  });
+
+  it("says nothing of a Message of ours the Ircd cannot confirm, and says one not sent", async () => {
+    const { registry } = await signedIn(
+      [],
+      [
+        message(1, { delivery: { _tag: "Unconfirmed" }, intent: "web-1" }),
+        message(2, { delivery: { _tag: "Unsent" }, intent: "web-2" }),
+      ]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const text = logOf().textContent ?? "";
+
+    expect({
+      notSent: text.includes("not sent"),
+      unconfirmed: text.includes("unconfirmed"),
+    }).toStrictEqual({ notSent: true, unconfirmed: false });
+  });
+
+  it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {
+    const { registry } = await signedIn();
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
+      one.textContent?.includes("line 2")
+    );
+
+    expect(row?.textContent).toMatch(/^\S+ <\S+> line 2$/u);
   });
 });

@@ -403,7 +403,7 @@ describe("lines", () => {
     });
   });
 
-  it("shows how one of ours stands, and the Ircd's own text once it confirmed it", () => {
+  it("shows how one of ours stands, saying nothing once confirmed or while it cannot be, and the Ircd's own text once confirmed", () => {
     const pending = lineOf(message("iirc", "hello", { _tag: "Pending" }));
 
     const confirmed = lineOf(
@@ -429,7 +429,8 @@ describe("lines", () => {
     }).toStrictEqual({
       confirmed: ["Confirmed", undefined, "hello!"],
       others: [
-        ["Unconfirmed", "unconfirmed"],
+        // With no `echo-message` it stays so for good, which is ordinary, so nothing is said.
+        ["Unconfirmed", undefined],
         ["Unsent", "not sent"],
         // The Ircd's code is contained, as any text it sends is.
         ["Rejected", "refused: 404\u202E\u202C"],

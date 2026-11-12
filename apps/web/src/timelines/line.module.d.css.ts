@@ -5,6 +5,7 @@ declare const styles: {
   readonly gap: string;
   readonly gapText: string;
   readonly highlight: string;
+  readonly line: string;
   readonly marker: string;
   readonly message: string;
   readonly new: string;

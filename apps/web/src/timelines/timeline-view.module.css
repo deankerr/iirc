@@ -12,6 +12,10 @@
   min-height: 0;
   overflow-y: auto;
   overflow-anchor: none;
+  /* The log never scrolls sideways, whatever a row holds: each row wraps or clips its own. */
+  overflow-x: hidden;
+  /* Its own width, not the screen's, says how a row is laid out, since Panes split. */
+  container-type: inline-size;
 }
 
 .scroller:focus-visible {
