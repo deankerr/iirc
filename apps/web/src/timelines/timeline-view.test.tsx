@@ -979,6 +979,48 @@ const following = (registry: Awaited<ReturnType<typeof opened>>["registry"]) => 
   return shown._tag === "Shown" && shown.window.following;
 };
 
+/**
+ * How far the log is from its end, as the Owner sees it.
+ * @returns The distance.
+ */
+const fromEnd = () => layout.content - logOf().scrollTop - layout.view;
+
+/**
+ * The Owner gives input to the log that may scroll it: the wheel, a key that scrolls, or a
+ * press, as on its scrollbar.
+ * @param kind - Which.
+ */
+const give = async (kind: "wheel" | "key" | "pointer") => {
+  const events = {
+    key: () => new KeyboardEvent("keydown", { bubbles: true, key: "PageUp" }),
+    pointer: () => new PointerEvent("pointerdown", { bubbles: true }),
+    wheel: () => new WheelEvent("wheel", { bubbles: true, deltaY: -100 }),
+  };
+
+  await act(async () => {
+    logOf().dispatchEvent(events[kind]());
+    await Promise.resolve();
+  });
+};
+
+/**
+ * A Message said in `#iirc` as it is followed.
+ * @param fake - The fake Daemon.
+ * @param sequence - Its step.
+ */
+const live = (fake: Awaited<ReturnType<typeof opened>>, sequence: number) => {
+  fold(
+    fake,
+    sequence,
+    [message(sequence)],
+    listed(iirc, "#iirc", "Channel", {
+      changed: sequence,
+      latest: cursor(sequence * 1000, sequence),
+      unread: { activity: 0, direct: 0, highlights: 0, messages: 1 },
+    })
+  );
+};
+
 describe("where the view stands as its rows wrap again", () => {
   beforeEach(() => {
     layout.content = 0;
@@ -1059,5 +1101,134 @@ describe("where the view stands as its rows wrap again", () => {
       atLatest
     );
     expect(atLatest).toStrictEqual({ following: true, top: true });
+  });
+
+  it.each([
+    ["just before the log's box changed", "before"],
+    ["just after the log's box changed, before the view stood in it again", "after"],
+  ] as const)(
+    "lets the Owner leave the latest by the wheel %s, and keeps them there as a Message arrives",
+    async (_, order) => {
+      const fake = await opened();
+      const { daemon, registry } = fake;
+
+      // Every row measured, as tall as it is laid out.
+      await wrapAgain(20);
+      await wrapAgain(20);
+
+      // The composer grows a line, so the log is shorter, as the Owner wheels up by 200.
+      const from = logOf().scrollTop;
+
+      if (order === "before") {
+        await give("wheel");
+        layout.view = 340;
+      } else {
+        layout.view = 340;
+        await give("wheel");
+      }
+
+      await scrollTo(from - 200, layout.content);
+      // The frame after: the log's observer reports its new box.
+      await wrapAgain(20);
+
+      const left = { following: following(registry), fromEnd: fromEnd() };
+      const reads = daemon.reads.length;
+      const top = logOf().scrollTop;
+
+      // Away, the core leaves it beyond what the view draws, to be read on the way down.
+      live(fake, 61);
+      await settled(() => {
+        const shown = registry.get(openTimeline);
+
+        return shown._tag === "Shown" && shown.window.later;
+      });
+      await wrapAgain(20);
+      await pause(250);
+
+      expect({
+        after: {
+          following: following(registry),
+          reads: daemon.reads.length,
+          top: logOf().scrollTop,
+        },
+        left,
+      }).toStrictEqual({
+        after: { following: false, reads, top },
+        // At the new end, then 200 up, as they wheeled.
+        left: { following: false, fromEnd: 200 },
+      });
+    }
+  );
+
+  it.each(["wheel", "key", "pointer"] as const)(
+    "lets a continuing gesture by the %s stand as the log's box changes on every frame",
+    async (kind) => {
+      const { registry } = await opened();
+
+      // Every row measured, and the end, once the log is 40 pixels shorter.
+      await wrapAgain(20);
+      await wrapAgain(20);
+      const end = layout.content - 360;
+      const tops: number[] = [];
+
+      // A trackpad's momentum wheels on, a held Page Up repeats, a dragged scrollbar stays
+      // pressed, while the log is 40 pixels shorter, then taller, then shorter again.
+      for (const view of [360, 400, 360, 400]) {
+        if (kind !== "pointer" || tops.length === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- one frame after another
+          await give(kind);
+        }
+
+        const from = logOf().scrollTop;
+
+        layout.view = view;
+        // oxlint-disable-next-line no-await-in-loop -- one frame after another
+        await scrollTo(from - 100, layout.content);
+        // oxlint-disable-next-line no-await-in-loop -- one frame after another
+        await wrapAgain(20);
+        tops.push(logOf().scrollTop);
+      }
+
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      // From the new end, a hundred up on each frame.
+      expect({ following: following(registry), tops }).toStrictEqual({
+        following: false,
+        tops: [end - 100, end - 200, end - 300, end - 400],
+      });
+    }
+  );
+
+  it("takes a scroll in a changed box as the browser's, once the view stood itself again since the Owner's input", async () => {
+    const { registry } = await opened();
+
+    // The Owner wheels up, and the scroll it makes is theirs.
+    await give("wheel");
+    await scrollTo(logOf().scrollTop - 200, layout.content);
+
+    const reading = {
+      first: firstInView(),
+      following: following(registry),
+      top: logOf().scrollTop,
+    };
+
+    // Within the second their wheel lets a scroll be theirs, the log is shorter, and the view
+    // stands itself in it. Then it is taller, and the browser moves the log as it changes.
+    layout.view = 360;
+    await wrapAgain(20);
+    const from = logOf().scrollTop;
+
+    layout.view = 400;
+    await scrollTo(from - 30, layout.content);
+
+    expect({
+      first: firstInView(),
+      following: following(registry),
+      top: logOf().scrollTop,
+    }).toStrictEqual(reading);
+    expect({ following: reading.following }).toStrictEqual({ following: false });
   });
 });
