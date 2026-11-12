@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
-import { channelSync, chooseMember } from "../channel/atoms.ts";
+import { channelSync } from "../channel/atoms.ts";
 import { membersShown } from "../channel/state.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, profileOf, registryFor, run } from "../testing/fake-daemon.ts";
@@ -251,45 +251,44 @@ describe("the Lookup card", () => {
     });
   });
 
-  it("is asked from a member chosen in the members, by their Whois, right under them", async () => {
+  it("is asked from a member's menu in the members, by their Whois, Query first", async () => {
     const { container, daemon, registry } = await signedIn(hostilePeer);
 
     await act(async () => {
       registry.set(membersShown, true);
       await Promise.resolve();
     });
-    await settled(() => container.querySelector('[role="grid"]') !== null);
+    await settled(() => container.querySelector('[role="grid"] [data-key="peer"]') !== null);
 
+    // A press on the member opens their menu, anchored to their row.
     await act(async () => {
-      registry.set(chooseMember, { nick: "peer", pane: "p0" });
+      container.querySelector<HTMLElement>('[role="grid"] [data-key="peer"]')?.click();
       await Promise.resolve();
     });
-    await settled(() => container.querySelector('button[aria-label="Whois peer"]') !== null);
+    await settled(() => document.querySelector('[role="menu"]') !== null);
 
-    // The actions stand right under the member chosen, in their row, and nowhere else.
-    const under = [
-      ...container.querySelectorAll<HTMLElement>('[aria-label="Members"] [role="row"] button'),
-    ].map((button) => [
-      button.closest<HTMLElement>('[role="row"]')?.dataset.key,
-      button.getAttribute("aria-label"),
-    ]);
+    const menu = document.querySelector('[role="menu"]');
+
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) =>
+      item.getAttribute("aria-label")
+    );
 
     await act(async () => {
-      container.querySelector<HTMLElement>('button[aria-label="Whois peer"]')?.click();
+      document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Whois peer"]')?.click();
       await Promise.resolve();
     });
     await settled(() => card()?.textContent.includes("example.test") === true);
 
     expect({
+      closed: document.querySelector('[role="menu"]') === null,
+      items,
+      label: menu?.getAttribute("aria-label"),
       looks: daemon.looks.map((one) => one.lookup),
-      under,
     }).toStrictEqual({
+      closed: true,
+      items: ["Query peer", "Whois peer", "Mention peer"],
+      label: "What to do with peer",
       looks: [{ _tag: "Whois", nick: "peer" }],
-      under: [
-        ["peer", "Query peer"],
-        ["peer", "Whois peer"],
-        ["peer", "Mention peer"],
-      ],
     });
   });
 });

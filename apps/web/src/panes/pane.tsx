@@ -1,21 +1,26 @@
 /**
- * One Pane: its open Timeline with its header, the options, the search, or a Direct Message
- * not yet begun, and its Channel's members
- * beside it while they show, marked while it has the focus. A press or the focus moving
- * anywhere in it gives it the focus, so the composer then writes to its Timeline.
+ * One Pane: its open Timeline under its status bar, the options, the search, or a Direct
+ * Message not yet begun, and its Channel's members under the bar while they show. Among
+ * several shown, the one with the focus is marked along its top and its bottom. A press or
+ * the focus moving anywhere in it gives it the focus, so the composer then writes to its
+ * Timeline. It is measured as it is drawn, since a narrow Pane shows its members over its
+ * Timeline rather than beside it.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Pane as PaneOf } from "@iirc/frontend/layout";
 import type { PaneView } from "@iirc/frontend/timelines";
+import { useRef } from "react";
 
 import { MembersPanel } from "../channel/members-panel.tsx";
+import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { OptionsView } from "../options/options-view.tsx";
 import { SearchView } from "../search/search-view.tsx";
 import { DraftView } from "../timelines/draft-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
 import { alone, focusedId, focusPane, paneNumber } from "./atoms.ts";
+import { useMeasured } from "./measure.ts";
 
 import styles from "./pane.module.css";
 
@@ -59,6 +64,9 @@ export const Pane = ({ pane }: { readonly pane: PaneOf<PaneView> }) => {
   const one = useAtomValue(alone);
   const number = useAtomValue(paneNumber(pane.id));
   const focus = useAtomSet(focusPane);
+  const element = useRef<HTMLDivElement>(null);
+
+  useMeasured(pane.id, element);
 
   return (
     <div
@@ -73,9 +81,13 @@ export const Pane = ({ pane }: { readonly pane: PaneOf<PaneView> }) => {
       onPointerDownCapture={() => {
         focus(pane.id);
       }}
+      ref={element}
     >
-      <div className={styles.main}>{main(pane)}</div>
-      <MembersPanel pane={pane.id} />
+      {pane.view.main._tag === "Timeline" ? <TimelineHeader pane={pane.id} /> : null}
+      <div className={styles.body}>
+        <div className={styles.main}>{main(pane)}</div>
+        <MembersPanel pane={pane.id} />
+      </div>
     </div>
   );
 };

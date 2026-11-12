@@ -1,18 +1,34 @@
-/* The open Timeline's head: its name and a few dim words on one line, and the topic under. */
+/* A Pane's status bar: one line that never wraps, the topic disclosed in full under it. */
 .header {
-  padding: var(--space-2) var(--space-3);
+  flex-shrink: 0;
+  min-width: 0;
   border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.disclosure {
+  min-width: 0;
 }
 
 .line {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 var(--space-3);
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  white-space: nowrap;
 }
 
+/* Whatever a Network names a Timeline, it takes at most half the line, and is cut. */
 .name {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
   color: var(--color-accent);
+  text-overflow: ellipsis;
+}
+
+.header[data-dim="true"] .name {
+  color: var(--color-muted);
 }
 
 .dim {
@@ -23,19 +39,58 @@
   color: var(--color-level-highlight);
 }
 
-/* The topic wraps up to three lines, then is cut. */
+.modes {
+  flex-shrink: 0;
+}
+
+/* What fills the line after the name: cut with an ellipsis, never widening the Pane. */
+.rest,
 .topic {
-  display: -webkit-box;
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  text-overflow: ellipsis;
+}
+
+.topic {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.topic[data-hovered] {
+  color: var(--color-text);
+  text-decoration: underline dotted var(--color-muted);
+}
+
+.topic[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--border-width));
+}
+
+/* The topic in full: wrapped anywhere, and scrolled when it is longer than a few lines. Its
+   panel is left as React Aria draws it, hidden while closed. */
+.full {
+  max-height: calc(var(--line-height) * 10em);
+  overflow: hidden auto;
+  padding: 0 var(--space-3) var(--space-2);
   overflow-wrap: anywhere;
 }
 
 .toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  gap: var(--space-2);
   margin-left: auto;
   padding: 0 var(--space-2);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius);
   background: transparent;
   color: var(--color-muted);
@@ -44,25 +99,32 @@
 }
 
 .toggle[data-hovered] {
-  border-color: var(--color-muted);
+  border-color: var(--color-border);
 }
 
 .toggle[data-selected] {
-  border-color: var(--color-accent);
   color: var(--color-accent);
 }
 
 .toggle[data-focus-visible] {
   outline: var(--border-width) solid var(--color-focus);
-  outline-offset: var(--space-1);
+  outline-offset: calc(-1 * var(--border-width));
 }
 
 @media (pointer: coarse) {
   .line {
     align-items: center;
+    padding-block: 0;
+  }
+
+  .toggle,
+  .topic {
+    min-height: var(--target-size);
   }
 
   .toggle {
-    min-height: var(--target-size);
+    align-items: center;
+    justify-content: center;
+    min-width: var(--target-size);
   }
 }

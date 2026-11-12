@@ -16,10 +16,9 @@ import { showsItem } from "@iirc/frontend/ui";
 import { elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef } from "react";
 
-import { TimelineHeader } from "../channel/timeline-header.tsx";
 import { LookupCard } from "../lookup/lookup-card.tsx";
 import { activityShown } from "../options/ui.ts";
-import { movedEvent, paneNumber } from "../panes/atoms.ts";
+import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
 import { following, latest, newer, older, paneTimeline, windowCapOf } from "./atoms.ts";
@@ -636,7 +635,6 @@ const Lines = ({
  */
 export const TimelineView = ({ pane }: { readonly pane: string }) => {
   const shown = useAtomValue(paneTimeline(pane));
-  const number = useAtomValue(paneNumber(pane));
 
   switch (shown._tag) {
     case "Closed": {
@@ -662,7 +660,6 @@ export const TimelineView = ({ pane }: { readonly pane: string }) => {
 
       return (
         <section aria-label={label} className={styles.view}>
-          <TimelineHeader name={label} number={number} pane={pane} />
           <LookupCard pane={pane} />
           <Lines
             divider={shown.divider}
