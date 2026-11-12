@@ -1,12 +1,13 @@
 /**
  * The options view: every option of every Network, and every option under `ui`, as the
  * core derives them from the Schemas, filtered as the Owner types. An option under `ui`
- * this device overrides says so, beside the value every device shares. React Aria's GridList gives it its
- * keyboard: arrows move, Enter edits the focused value in place as its raw text, turns a
- * toggle over, or opens the password prompt for a Credential, Escape lets an edit go, and
- * Delete or Backspace asks to unset it. Escape anywhere else in it, or its close button,
- * shows what the Pane showed before. An edit is a plain, uncontrolled input read once
- * when Enter is pressed. A Credential's value is never edited here.
+ * this device overrides says so, beside the value every device shares. React Aria's
+ * GridList gives it its keyboard: arrows move, Enter edits the focused value in place as
+ * its raw text, or a whole number in a number field, turns a toggle over, or opens the
+ * password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
+ * unset it. Escape anywhere else in it, or its close button, shows what the Pane showed
+ * before. An edit is a plain, uncontrolled input read once when Enter is pressed. A
+ * Credential's value is never edited here.
  *
  * @packageDocumentation
  */
@@ -176,6 +177,12 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
     }
   };
 
+  // A whole number is a number field within its bounds, so Up and Down step it.
+  const number =
+    option.kind._tag === "Integer"
+      ? { max: option.kind.maximum, min: option.kind.minimum, step: 1, type: "number" }
+      : { type: "text" };
+
   return (
     <input
       aria-label={`Value of ${option.name}`}
@@ -188,7 +195,7 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
       defaultValue={startingText(option)}
       onKeyDown={onKeyDown}
       spellCheck={false}
-      type="text"
+      {...number}
     />
   );
 };

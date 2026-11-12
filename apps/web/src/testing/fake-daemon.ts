@@ -4,7 +4,13 @@
  *
  * @packageDocumentation
  */
-import { ConfigurationInForce, UiOptionName, UiOptions, uiDefaults } from "@iirc/api";
+import {
+  ConfigurationInForce,
+  UiOptionName,
+  UiOptions,
+  uiDefaults,
+  uiOptionNames,
+} from "@iirc/api";
 import type {
   ChannelHeader,
   Knowledge,
@@ -312,6 +318,9 @@ const CredentialBody = Schema.fromJsonString(Schema.Struct({ value: Schema.Strin
 const noUiChange: typeof UiInForce.Encoded = { options: uiDefaults, sequence: 0 };
 
 /** A value for one `ui` option, as the fake takes it: whatever the options' Schema does. */
+/** The route of one option under `ui`, for each option the contract has. */
+const uiOptionRoute = new RegExp(`^/api/ui/(?<option>${uiOptionNames.join("|")})$`, "u");
+
 const UiBody = Schema.fromJsonString(Schema.Struct({ value: Schema.Json }));
 
 const ReadBody = Schema.fromJsonString(
@@ -966,9 +975,7 @@ export const fakeDaemon = () => {
   const uiRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
     const method = init.method ?? "GET";
 
-    const one = /^\/api\/ui\/(?<option>activity|colours|theme|themes|time)$/u.exec(
-      url.pathname
-    )?.groups;
+    const one = uiOptionRoute.exec(url.pathname)?.groups;
 
     if (url.pathname === "/api/ui" && method === "GET") {
       return signedInOnly(() => json(200, daemon.ui));

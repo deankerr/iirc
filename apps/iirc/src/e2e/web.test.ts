@@ -1688,6 +1688,127 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "fetches no font with the device's own, sets the text's size and a bundled font at once, and serves its files from the page's origin, under the policy",
+    { timeout: 60_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "fonts"),
+        "#iirc-fonts"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+        const fonts: { url: string; type: string | null; cache: string | null }[] = [];
+
+        page.on("response", (response) => {
+          if (response.request().resourceType() === "font") {
+            const headers = response.headers();
+
+            fonts.push({
+              cache: headers["cache-control"] ?? null,
+              type: headers["content-type"] ?? null,
+              url: response.url(),
+            });
+          }
+        });
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("row", { name: channel }).click();
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const log = page.getByRole("log", { name: channel });
+
+        const type = async (text: string) => {
+          await composer.fill(text);
+          await composer.press("Enter");
+        };
+
+        // Bold, italic, box drawing, and block elements, as IRC art has them.
+        peer.send(`PRIVMSG ${channel} :\u0002bold\u0002 \u001Ditalic\u001D ┌─┐│█▓▒░│└─┘`);
+        await log.getByText("italic").waitFor();
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
+
+        const drawn = async () =>
+          await page.evaluate(() => {
+            const style = getComputedStyle(document.body);
+
+            return [style.fontSize, style.fontFamily.split(",")[0]?.trim() ?? ""];
+          });
+
+        const byDefault = { drawn: await drawn(), fetched: fonts.length };
+
+        await type("/set ui.size 18");
+        await expect.poll(drawn).toStrictEqual(["18px", "ui-monospace"]);
+
+        await type("/set ui.font jetbrains-mono");
+        await expect.poll(drawn).toStrictEqual(["18px", '"JetBrains Mono Variable"']);
+
+        // Each face the line draws with is fetched: the regular, whose variable weight is also
+        // the bold, and the italic.
+        await expect
+          .poll(
+            async () =>
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+
+                return [...document.fonts]
+                  .flatMap((face) =>
+                    face.status === "loaded" ? [`${face.family} ${face.style}`] : []
+                  )
+                  .toSorted();
+              })
+          )
+          .toStrictEqual(["JetBrains Mono Variable italic", "JetBrains Mono Variable normal"]);
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        const { origin } = new URL(base);
+
+        expect({
+          byDefault,
+          fetched: fonts.map((font) => ({
+            cache: font.cache,
+            own: new URL(font.url).origin === origin,
+            path: new URL(font.url).pathname.replace(/-[\w-]{8}\.woff2$/u, ".woff2"),
+            type: font.type,
+          })),
+          problems: problems.filter((problem) => !problem.includes("401")),
+          violations,
+        }).toStrictEqual({
+          byDefault: { drawn: ["14px", "ui-monospace"], fetched: 0 },
+          fetched: [
+            {
+              cache: "public, max-age=31536000, immutable",
+              own: true,
+              path: "/assets/jetbrains-mono-latin-wght-normal.woff2",
+              type: "font/woff2",
+            },
+            {
+              cache: "public, max-age=31536000, immutable",
+              own: true,
+              path: "/assets/jetbrains-mono-latin-wght-italic.woff2",
+              type: "font/woff2",
+            },
+          ],
+          problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "imports a theme from Alacritty's text, previews it, saves it, draws in it on two devices, and previews built-ins from the palette, under the policy",
     { timeout: 90_000 },
     async () => {

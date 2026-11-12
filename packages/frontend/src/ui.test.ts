@@ -6,7 +6,15 @@ import { describe, expect, it } from "vitest";
 import { deviceUiOf, deviceUiText, effectiveUi, noOverrides, overridden, showsItem } from "./ui.ts";
 
 const shared = {
-  options: { activity: "quiet", colours: "theme", theme: "dark", themes: [], time: "HH:mm:ss" },
+  options: {
+    activity: "quiet",
+    colours: "theme",
+    font: "commit-mono",
+    size: 16,
+    theme: "dark",
+    themes: [],
+    time: "HH:mm:ss",
+  },
   sequence: 4,
 } as const;
 
@@ -20,6 +28,8 @@ describe("a device's overrides", () => {
       none: deviceUiOf(undefined),
       notAnObject: deviceUiOf("[1,2]"),
       notJson: deviceUiOf("{theme"),
+      sized: deviceUiOf('{"size":24,"font":"jetbrains-mono"}'),
+      sizes: deviceUiOf('{"size":9,"font":"iosevka"}'),
     }).toStrictEqual({
       back: { theme: "light", time: "none" },
       empty: undefined,
@@ -28,6 +38,8 @@ describe("a device's overrides", () => {
       none: {},
       notAnObject: {},
       notJson: {},
+      sized: { font: "jetbrains-mono", size: 24 },
+      sizes: {},
     });
   });
 
@@ -88,12 +100,20 @@ describe("a device's overrides", () => {
   it("win over the shared options, which win over the defaults", () => {
     expect({
       before: effectiveUi(undefined, noOverrides),
-      device: effectiveUi(shared, { theme: "light" }),
+      device: effectiveUi(shared, { size: 20, theme: "light" }),
       shared: effectiveUi(shared, noOverrides),
     }).toStrictEqual({
-      before: { activity: "all", colours: "theme", theme: "system", themes: [], time: "HH:mm" },
-      device: { activity: "quiet", colours: "theme", theme: "light", themes: [], time: "HH:mm:ss" },
-      shared: { activity: "quiet", colours: "theme", theme: "dark", themes: [], time: "HH:mm:ss" },
+      before: {
+        activity: "all",
+        colours: "theme",
+        font: "system",
+        size: 14,
+        theme: "system",
+        themes: [],
+        time: "HH:mm",
+      },
+      device: { ...shared.options, size: 20, theme: "light" },
+      shared: shared.options,
     });
   });
 });

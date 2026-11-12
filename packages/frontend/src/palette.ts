@@ -1,13 +1,15 @@
 /**
  * The command palette, as data: what it lists for a query, ranked, and what choosing an
  * entry asks for. It lists the commands the registry can run here, every Timeline, every
- * theme, and the options, or the themes alone, as `/theme` opens it, and adds no action of
+ * theme, every font, and the options, or the themes alone, as `/theme` opens it, and adds no action of
  * its own: choosing gives the same intents the composer's `/commands` do. Which entries
  * were chosen recently is remembered, at most `recentCap`.
  *
  * @packageDocumentation
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
+import { fontNames } from "@iirc/api/ui";
+import type { FontShown } from "@iirc/api/ui";
 
 import { commands, commandWithId, interpret, runIn, unmet } from "./commands.ts";
 import type { CommandContext, Intent } from "./commands.ts";
@@ -54,11 +56,18 @@ export type Entry =
       readonly builtIn: boolean;
       /** Whether it is the one in effect on this device. */
       readonly current: boolean;
+    }
+  | {
+      readonly _tag: "Font";
+      readonly key: string;
+      readonly name: FontShown;
+      /** Whether it is the one in effect on this device. */
+      readonly current: boolean;
     };
 
 /** A section of the palette, with its entries in order. */
 export interface Section {
-  readonly title: "Recent" | "Commands" | "Timelines" | "Themes" | "Options";
+  readonly title: "Recent" | "Commands" | "Timelines" | "Themes" | "Fonts" | "Options";
   readonly entries: readonly Entry[];
 }
 
@@ -71,6 +80,8 @@ export interface Listing {
   /** Every theme, and the name of the one in effect on this device. */
   readonly themes: readonly ListedTheme[];
   readonly theme: string;
+  /** The font in effect on this device. */
+  readonly font: FontShown;
 }
 
 /** What the palette lists: everything, or the themes alone, as `/theme` opens it. */
@@ -265,6 +276,14 @@ export const themeDescription = (theme: { readonly builtIn: boolean }) =>
   theme.builtIn ? "built-in theme" : "imported theme";
 
 /**
+ * What a font is, in a few words, which a query matches too, so `font` finds them all.
+ * @param font - The font.
+ * @returns The words.
+ */
+export const fontDescription = (font: FontShown) =>
+  font === "system" ? "font: the device's own monospace font" : "font";
+
+/**
  * What an entry is matched by: its names, best first, and its description.
  * @param entry - The entry.
  * @returns Its names and description.
@@ -298,6 +317,10 @@ const matchedBy = (entry: Entry): Matched => {
       return { description: themeDescription(entry), names: [entry.name] };
     }
 
+    case "Font": {
+      return { description: fontDescription(entry.name), names: [entry.name] };
+    }
+
     default: {
       return entry satisfies never;
     }
@@ -307,7 +330,7 @@ const matchedBy = (entry: Entry): Matched => {
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; every theme; and every option read.
+ * sidebar's order; every theme; every font; and every option read.
  * @param listing - What the palette lists from.
  * @returns The sections, each with every entry.
  */
@@ -348,6 +371,15 @@ const everything = (listing: Listing): readonly Section[] => [
       name: theme.name,
     })),
     title: "Themes",
+  },
+  {
+    entries: fontNames.map((font): Entry => ({
+      _tag: "Font",
+      current: font === listing.font,
+      key: `font:${font}`,
+      name: font,
+    })),
+    title: "Fonts",
   },
   {
     entries: listing.options.map((option): Entry => ({
@@ -432,8 +464,8 @@ export const sections = (
  * name would; one that needs them, or that cannot run with none, starts in the composer
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
- * `/set <name>` alone does, since its value is never typed into the composer. A theme is
- * drawn in, on every device.
+ * `/set <name>` alone does, since its value is never typed into the composer. A theme or a
+ * font is drawn in, on every device.
  * @param entry - The entry chosen.
  * @param context - The context commands are judged in.
  * @returns The intents to carry out.
@@ -471,6 +503,10 @@ export const choose = (entry: Entry, context: CommandContext): readonly Intent[]
 
     case "Theme": {
       return [{ _tag: "UseTheme", device: false, name: entry.name }];
+    }
+
+    case "Font": {
+      return [{ _tag: "ChangeUi", device: false, option: "font", value: entry.name }];
     }
 
     default: {

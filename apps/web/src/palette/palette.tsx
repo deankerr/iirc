@@ -1,18 +1,18 @@
 /**
  * The command palette: React Aria's Autocomplete over a Menu, in a modal Dialog, as its own
  * command palette is built. It lists what the core ranks for the query, in sections for
- * what was chosen recently, the commands, the Timelines, the themes, and the options, or
- * the themes alone, each row with its name, a dim description, and a command's keys.
- * Arrows move, Enter chooses, and Escape clears the query, then closes, and focus returns
- * where it was. A theme is drawn while its row is highlighted, and the theme in effect
- * comes back as the highlight moves on or the palette closes.
+ * what was chosen recently, the commands, the Timelines, the themes, the fonts, and the
+ * options, or the themes alone, each row with its name, a dim description, and a command's
+ * keys. Arrows move, Enter chooses, and Escape clears the query, then closes, and focus
+ * returns where it was. A theme or a font is drawn while its row is highlighted, and the
+ * one in effect comes back as the highlight moves on or the palette closes.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { showChord } from "@iirc/frontend/keymap";
 import type { Entry } from "@iirc/frontend/palette";
-import { themeDescription } from "@iirc/frontend/palette";
+import { fontDescription, themeDescription } from "@iirc/frontend/palette";
 import { useEffect } from "react";
 import {
   Autocomplete,
@@ -110,6 +110,21 @@ const Row = ({ entry }: { readonly entry: Entry }) => {
       );
     }
 
+    case "Font": {
+      return (
+        <>
+          <Text className={styles.name} slot="label">
+            {entry.name}
+          </Text>
+          <Text className={styles.description} slot="description">
+            {entry.current
+              ? `${fontDescription(entry.name)}, in effect`
+              : fontDescription(entry.name)}
+          </Text>
+        </>
+      );
+    }
+
     default: {
       return entry satisfies never;
     }
@@ -118,7 +133,7 @@ const Row = ({ entry }: { readonly entry: Entry }) => {
 
 /**
  * Tells the palette which row is highlighted, as it is and as it stops being, so a theme's
- * row draws it while highlighted. React Aria's Autocomplete moves a virtual focus, which no
+ * or a font's row draws it while highlighted. React Aria's Autocomplete moves a virtual focus, which no
  * focus event reports, and says it only as a row's `isFocused`, so this is the one place a
  * row tells the core something from an effect. It draws nothing.
  * @param props - The row's key, and whether it is highlighted.

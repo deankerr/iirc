@@ -1,16 +1,19 @@
 /*
  * The theme: every colour, size, and font the Frontend uses, as CSS variables. Modules
  * read these and never name a colour of their own. Once the page runs, every colour is
- * the core's, derived from the palette of the theme in effect and set on the root's own
- * style, which wins over these. Until then each is light-dark(), so the first paint
- * follows the device's own setting.
+ * the core's, derived from the palette of the theme in effect, and the text's size and font
+ * are `ui.size` and `ui.font`, each set on the root's own style, which wins over these.
+ * Until then each colour is light-dark(), so the first paint follows the device's own
+ * setting, and the text is in the defaults' size and font.
  */
 :root {
   color-scheme: light dark;
 
-  --font-mono:
+  /* The device's own monospace font, which draws whatever glyph a font chosen lacks. */
+  --font-device:
     ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  --font-size: 13px;
+  --font-mono: var(--font-device);
+  --font-size: 14px;
   /* A field's text: as the page's on a desktop, and never under 16px on a touch screen,
      where iOS Safari zooms the page into a field whose text is smaller. */
   --font-size-input: var(--font-size);

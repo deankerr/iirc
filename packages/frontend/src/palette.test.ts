@@ -86,6 +86,7 @@ const nowhere: CommandContext = { ...inChannel, focus: undefined, open: undefine
 
 const listing = (context: CommandContext = inChannel): Listing => ({
   context,
+  font: "system",
   keymap: defaultKeymap,
   options: optionsOf(libera, configuration, new Set(["libera.password"])),
   sidebar,
@@ -147,7 +148,7 @@ const rememberedAll = (chosen: readonly string[]) => {
 };
 
 describe("the palette's entries", () => {
-  it("lists the commands that can run here, every Timeline, and every option, but not itself", () => {
+  it("lists the commands that can run here, every Timeline, every font, and every option, but not itself", () => {
     const here = sections(listing(), "", []);
     const away = sections(listing(nowhere), "", []);
 
@@ -216,7 +217,7 @@ describe("the palette's entries", () => {
         "command:composer.focus",
       ],
       timelines: 3,
-      titles: ["Commands", "Timelines", "Options"],
+      titles: ["Commands", "Timelines", "Fonts", "Options"],
     });
   });
 
@@ -347,7 +348,7 @@ describe("the themes in the palette", () => {
       scoped: keys(scoped),
       themes: first(sections(themed, "theme", [])),
     }).toStrictEqual({
-      all: ["Commands", "Timelines", "Themes", "Options"],
+      all: ["Commands", "Timelines", "Themes", "Fonts", "Options"],
       byName: [["Themes", ["theme:dracula"]]],
       chosen: [{ _tag: "UseTheme", device: false, name: "nord" }],
       current: true,
@@ -369,6 +370,40 @@ describe("the themes in the palette", () => {
         ],
       ],
       themes: "command:theme.set",
+    });
+  });
+});
+
+describe("the fonts in the palette", () => {
+  it("lists every font, the one in effect said, finds them by name or as fonts, and sets one for every device", () => {
+    const fonted = { ...listing(), font: "commit-mono" as const, themes: listedThemes([]) };
+    const all = sections(fonted, "", []);
+    const commit = entryOf(all, "font:commit-mono");
+
+    expect({
+      byName: keys(sections(fonted, "plex", [])),
+      chosen: choose(commit, inChannel),
+      current: commit._tag === "Font" && commit.current,
+      fonts: keys(all).find(([title]) => title === "Fonts"),
+      found: keys(sections(fonted, "font", [])).find(([title]) => title === "Fonts")?.[1].length,
+      scoped: titles(sections(fonted, "", [], "Themes")),
+    }).toStrictEqual({
+      byName: [["Fonts", ["font:ibm-plex-mono"]]],
+      chosen: [{ _tag: "ChangeUi", device: false, option: "font", value: "commit-mono" }],
+      current: true,
+      fonts: [
+        "Fonts",
+        [
+          "font:system",
+          "font:jetbrains-mono",
+          "font:ibm-plex-mono",
+          "font:source-code-pro",
+          "font:commit-mono",
+          "font:atkinson-hyperlegible-mono",
+        ],
+      ],
+      found: 6,
+      scoped: ["Themes"],
     });
   });
 });
