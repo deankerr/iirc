@@ -381,6 +381,22 @@ const owned = (
     : { _tag: "Say", at, intent, kind: "Privmsg", target: next.target, text: next.text };
 };
 
+// A timer the table holds fires: one not early once it is due, as a clock fires it, and
+// one early before its time.
+const fire = (fold: Fold, next: Extract<Move, { readonly _tag: "Fire" }>): Input => {
+  const set = [...fold.table];
+  const at = Instant.make(fold.now);
+  const [timer, due] = set[next.which % Math.max(1, set.length)] ?? [TimerId.make("none"), at];
+
+  if (next.early) {
+    return { _tag: "Fired", at, due: Instant.make(due - 1), timer };
+  }
+
+  fold.now = Math.max(at, due);
+
+  return { _tag: "Fired", at: Instant.make(fold.now), due, timer };
+};
+
 // The input a move makes in the state it meets.
 const inputOf = (
   fold: Fold,
@@ -391,8 +407,6 @@ const inputOf = (
 
   const connection = (stale: boolean) =>
     stale ? ConnectionId.make(Math.max(0, current - 1)) : current;
-
-  const set = [...fold.table];
 
   switch (next._tag) {
     case "Configure": {
@@ -436,9 +450,7 @@ const inputOf = (
     }
 
     case "Fire": {
-      const [timer, due] = set[next.which % Math.max(1, set.length)] ?? [TimerId.make("none"), at];
-
-      return { _tag: "Fired", at, due: Instant.make(next.early ? due - 1 : due), timer };
+      return fire(fold, next);
     }
 
     case "Wait": {
@@ -705,6 +717,7 @@ describe("properties", () => {
       "channel #iirc=Joined.Synced",
       "channel #iirc=Refused",
       "keepalive=Pinged",
+      "modes=Asking",
       "network=Connection.Closing",
       "network=Idle",
       "network=Waiting",

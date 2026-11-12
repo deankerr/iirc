@@ -28,11 +28,13 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 - **A merge between two pages of search results can repeat a result.** The web frontend starts the search again when one happens.
 - **Completion of Channel names falls back to `#&+!`** if `CHANTYPES` was read before the Ircd's `005`, until the next Tab reads it again.
 - **The pane layout and notification choice are kept per device,** not shared.
+- **A Session that joins many Channels learns their modes one after another,** since one `MODE` query waits at a time. On an Ircd that answers at once, the last of a hundred Channels shows its modes about as long after joining as pacing takes to send a hundred Lines, a few minutes. One that never answers holds each query 30 s.
 
 ## Edges in what the Client works out
 
 - **Activity from history is placed by the Network's state now,** not then. Nothing sends history yet; a `chathistory` Feature must route by its batch's target.
 - **After a casemapping change, a Read Marker can sit under a different spelling's key than its Timeline,** so a later read of the Timeline may not be reported. The projection moves each Timeline's marker only forward, so none ever moves back. Networks almost never change their casemapping.
+- **An error that names a Channel while the Client's own `MODE` query of it waits is taken as the query's answer** when the query was sent first, as every floor reply goes to what was sent first. On an Ircd that never answers a `MODE` query but refuses the Owner's action on that Channel within those 30 s, the action is not reported refused.
 - **A `+k` change waits until an error or the 64-Line bound,** since no Ircd echoes a key, so an error about that Channel can be tied to it rather than a later action in rare orders.
 
 ## Operation

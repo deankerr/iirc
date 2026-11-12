@@ -221,7 +221,8 @@ export const openChannel = (
 /**
  * Whether a change may have changed a Channel's head or members: an Activity in its
  * Timeline, as a join, a part, a kick, a quit, a nick, a mode, a topic, or an away does,
- * or a Gap of its Network, which a Session ending or beginning makes.
+ * its Timeline's `head` moved by this step, as when a reply made its modes known, or a Gap
+ * of its Network, which a Session ending or beginning makes.
  * @param change - The change.
  * @param timeline - The Channel's Timeline.
  * @param network - Its Network.
@@ -233,6 +234,7 @@ export const touches = (
   network: NetworkId | undefined
 ): boolean =>
   change.items.some((item) => item.timeline === timeline && item.content._tag === "Activity") ||
+  change.timelines.some((each) => each.id === timeline && each.head === change.sequence) ||
   change.gaps.some((gap) => gap.network === network);
 
 /**

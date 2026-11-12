@@ -70,6 +70,7 @@ describe("what cannot be read is ignored, never fatal", () => {
           "!! configure +#iirc",
           ">> JOIN #iirc",
           "<< :iirc!~iirc@h JOIN :#iirc",
+          ">> MODE #iirc",
           "<< :irc.test 353 iirc = #iirc :iirc",
           "<< :irc.test 366 iirc #iirc End",
           "<< :peer!u@h JOIN :#iirc",

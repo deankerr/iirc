@@ -32,6 +32,7 @@ import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
 import { endLookups, expireLookup, look, unsentLookups } from "./lookups.ts";
 import { read } from "./markers.ts";
+import { modesQueryOver } from "./modes-query.ts";
 import type { EndReason } from "./news.ts";
 import {
   before,
@@ -563,6 +564,11 @@ const fire = (run: Run, purpose: Purpose): void => {
 
     case "Lookup": {
       expireLookup(run, purpose.intent);
+      break;
+    }
+
+    case "ModesQuery": {
+      modesQueryOver(run);
       break;
     }
 

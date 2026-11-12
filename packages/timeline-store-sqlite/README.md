@@ -19,7 +19,7 @@ One row of how far it has folded, four tables, each with the indexes its reads n
 CREATE TABLE folded (only INTEGER PRIMARY KEY CHECK (only = 1), version INTEGER, through INTEGER,
   directory TEXT NOT NULL, folding TEXT NOT NULL) STRICT;
 CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NOT NULL,
-  name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER,
+  name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER, head INTEGER,
   unread_highlights INTEGER NOT NULL, unread_direct INTEGER NOT NULL,
   unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL) STRICT;
 CREATE TABLE items (id INTEGER PRIMARY KEY, timeline TEXT NOT NULL, cursor TEXT NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE gaps (network TEXT NOT NULL, from_cursor TEXT NOT NULL, to_cursor T
   changed INTEGER NOT NULL, PRIMARY KEY (network, from_cursor)) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 3;  -- the layout's version
+PRAGMA user_version = 4;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.

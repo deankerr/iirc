@@ -388,6 +388,7 @@ const wireTimeline = (timeline: ModelTimeline) =>
   decodeTimeline({
     changed: timeline.changed,
     detached: false,
+    head: null,
     id: timeline.id,
     key: timeline.kind === "Network" ? null : `#${timeline.id}`,
     kind: timeline.kind,
@@ -1289,6 +1290,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
   decodeTimeline({
     changed,
     detached: false,
+    head: null,
     id,
     key: kind === "Network" ? null : name,
     kind,
@@ -1513,6 +1515,7 @@ const direct = (id: string, name: string, detached = false) =>
     decodeTimeline({
       changed: 6,
       detached,
+      head: null,
       id,
       key: detached ? null : name.toLowerCase(),
       kind: "Direct",

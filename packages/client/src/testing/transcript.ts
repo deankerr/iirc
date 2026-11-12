@@ -773,6 +773,7 @@ const writeOwner = (owner: Owner): string => {
 
 const expectations = new Map<string, News["_tag"]>([
   ["activity", "Activity"],
+  ["channel-learned", "ChannelLearned"],
   ["confirmed", "Confirmed"],
   ["connection-failed", "ConnectionFailed"],
   ["ignored", "Ignored"],

@@ -771,6 +771,15 @@ const news = (source: News): WireNews => {
       return wire;
     }
 
+    case "ChannelLearned": {
+      const wire: Case<News, WireNews, "ChannelLearned"> = {
+        _tag: "ChannelLearned",
+        channel: { key: source.channel.key, name: source.channel.name },
+      };
+
+      return wire;
+    }
+
     case "ReadMarker": {
       const wire: Case<News, WireNews, "ReadMarker"> = {
         _tag: "ReadMarker",
@@ -1236,6 +1245,7 @@ const unread = (source: Unread): Fields<Unread, WireUnread> => ({
 export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detached"> => ({
   changed: WireSequence.make(source.changed),
   detached: source.kind !== "Network" && source.key === null,
+  head: source.head === undefined ? null : WireSequence.make(source.head),
   id: source.id,
   key: source.key,
   kind: source.kind,

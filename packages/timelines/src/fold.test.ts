@@ -282,6 +282,24 @@ const readMarker = (where: Marked, read: Instant): News => ({
   where,
 });
 
+const learned = (name: string): News => ({
+  _tag: "ChannelLearned",
+  channel: { key: name.toLowerCase(), name },
+});
+
+describe("a Channel's head", () => {
+  it("is to be read again when the Client learns what no item says, and adds nothing", () => {
+    const { changes } = fold([
+      happened(1, [message([channel("#a")])]),
+      happened(2, [learned("#A"), learned("#b")]),
+    ]);
+
+    expect(changes.filter(({ sequence }) => sequence === 2)).toStrictEqual([
+      { _tag: "HeadChanged", network: "libera", sequence: 2, timeline: timelineIdOf(1, 0, 1) },
+    ]);
+  });
+});
+
 describe("Read Markers", () => {
   it("move a Timeline's forward, and only forward, whatever the News says", () => {
     const { changes, directory } = fold([

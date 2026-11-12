@@ -619,6 +619,12 @@ export const News = Schema.TaggedUnion({
     live: Schema.Boolean,
     where: Schema.Array(Where),
   },
+  /**
+   * What the Client knows of a Channel Self is in changed in a way no Activity reports, as a
+   * reply giving its modes or topic, or the end of a listing of its members, keyed as
+   * `where` keys it. Read the Channel again to see it.
+   */
+  ChannelLearned: { channel: Named },
   Confirmed: { at: Fact(Instant), id: Fact(MessageId), intent: IntentId, text: Untrusted },
   /**
    * A Connection ended before its Session began, with the Ircd it was dialled to, and
@@ -1021,12 +1027,15 @@ export type Unread = typeof Unread.Type;
  * name folded by the Network's casemapping, and `null` for the Network's own and for a
  * detached one, which keeps its items and receives nothing more. `latest` is where its
  * last item stands, `read` its Read Marker, `null` before any, `unread` how much stands
- * after it, by level, and `changed` the last step that changed it, its Read Marker, or any
- * of its items.
+ * after it, by level, `head` the last step that changed what the Client knows of its
+ * Channel in a way no item says, `null` before any, so a Frontend following the changes
+ * reads the Channel's head again, and `changed` the last step that changed it, its Read
+ * Marker, its head, or any of its items.
  */
 export const Timeline = Schema.Struct({
   changed: Sequence,
   detached: Schema.Boolean,
+  head: Schema.NullOr(Sequence),
   id: TimelineId,
   key: Schema.NullOr(Untrusted),
   kind: Schema.Literals(["Channel", "Direct", "Network"]),

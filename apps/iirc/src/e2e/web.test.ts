@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { connectPeer, startNgircd } from "@iirc/daemon/testing";
-import type { Ircd } from "@iirc/daemon/testing";
+import type { Ircd, Peer } from "@iirc/daemon/testing";
 import { Schema } from "effect";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
@@ -253,15 +253,27 @@ const tracked = (
   }
 ) => input._valueTracker?.getValue() ?? null;
 
+/** What the peer does in the Channel before the Daemon joins it, and the Channel's key, if it has one. */
+interface Preparing {
+  readonly prepare?: (peer: Peer) => Promise<void>;
+  readonly channelKey?: string;
+}
+
 /**
  * A private ngircd on a loopback port the kernel picks, a real `iirc daemon --web` with a
  * key, a Network configured through the API to join a Channel there, joined as the Client
- * knows it, and a raw IRC connection as the other User, `peer`, in the Channel.
+ * knows it, and a raw IRC connection as the other User, `peer`, in the Channel, who may
+ * set the Channel up first, with a key the Daemon holds as a Credential.
  * @param dataDir - The Daemon's data directory.
  * @param channel - The Channel.
+ * @param preparing - What the peer does first, and the Channel's key.
  * @returns Everything, for the test to stop.
  */
-const privateNetwork = async (dataDir: string, channel: string) => {
+const privateNetwork = async (
+  dataDir: string,
+  channel: string,
+  { channelKey, prepare }: Preparing = {}
+) => {
   const ngircd: Ircd = await startNgircd();
   const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
   const key = created.stdout.trim();
@@ -274,12 +286,25 @@ const privateNetwork = async (dataDir: string, channel: string) => {
   const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
 
   peer.send(`JOIN ${channel}`);
+  await prepare?.(peer);
+
+  if (channelKey !== undefined) {
+    const held = await api(
+      "PUT",
+      "/credentials/channel-key",
+      JSON.stringify({ value: channelKey })
+    );
+
+    expect(held.status).toBe(204);
+  }
 
   const configured = await api(
     "PUT",
     "/networks/private",
     JSON.stringify({
-      channels: [{ name: channel }],
+      channels: [
+        channelKey === undefined ? { name: channel } : { key: "channel-key", name: channel },
+      ],
       declined: [],
       enabled: true,
       fallbackEncoding: "windows-1252",
@@ -943,6 +968,72 @@ describe("the web frontend on iirc daemon --web", () => {
           symbol,
           violations,
         }).toStrictEqual({ problems: [], refusedStyle: "italic", symbol: "@peer", violations: "" });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "shows a Channel's modes in its status bar on joining, with no input and never its key, and follows a change",
+    { timeout: 90_000 },
+    async () => {
+      const secret = "hunter2-modes";
+
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "modes"),
+        "#iirc-modes",
+        {
+          channelKey: secret,
+          // The peer made the Channel, so sets its modes before the Daemon joins.
+          prepare: async (made) => {
+            made.send(`MODE #iirc-modes +ntlk 10 ${secret}`);
+            await made.waitFor(
+              (line) => line.command === "MODE" && line.params[0] === "#iirc-modes",
+              "the Channel's modes set"
+            );
+          },
+        }
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+        await page.getByRole("log", { name: channel }).waitFor();
+
+        const modes = page.locator("[data-pane] header bdi[title^='+']").first();
+
+        // The letters set, in any order, and each parameter, as the bar says them.
+        const shown = async () => {
+          const text = await modes.textContent();
+          const [letters = "", ...params] = (text ?? "").split(" ");
+
+          return [letters.split("").toSorted().join(""), ...params];
+        };
+
+        await expect.poll(shown, { timeout: 20_000 }).toStrictEqual(["+klnt", "10"]);
+
+        const first = await modes.getAttribute("title");
+
+        // Another User changes them, and the bar follows.
+        peer.send(`MODE ${channel} +m-l`);
+        await expect.poll(shown, { timeout: 20_000 }).toStrictEqual(["+kmnt"]);
+        const html = await page.content();
+
+        expect({
+          first: first?.includes(secret),
+          html: html.includes(secret),
+          problems: problems.filter((problem) => problem.includes(secret)),
+          react: await page.evaluate(heldByReact, secret),
+        }).toStrictEqual({ first: false, html: false, problems: [], react: false });
       } finally {
         peer.close();
         child.kill("SIGTERM");

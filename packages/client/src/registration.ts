@@ -153,6 +153,7 @@ export const begin = (run: Run): void => {
     isupport: new Map(),
     loggedIn: false,
     lookups: [],
+    modesQuery: undefined,
     opened: run.at,
     presence: {
       _tag: "Registering",

@@ -15,11 +15,13 @@ const registeredJoining = (configuration: typeof base, ...sent: readonly string[
     `$<welcome>${lines(...sent)}`
   );
 
-const echo = (channel: string, nick = "iirc") =>
+// The echo of Self's JOIN, and the MODE query it draws while no other waits.
+const echo = (channel: string, asks = true) =>
   lines(
-    `<< :${nick}!~iirc@iirc.test JOIN ${channel}`,
-    `<< :irc.test 353 ${nick} = ${channel} :${nick}`,
-    `<< :irc.test 366 ${nick} ${channel} :End of /NAMES list.`
+    `<< :iirc!~iirc@iirc.test JOIN ${channel}`,
+    ...(asks ? [`>> MODE ${channel}`] : []),
+    `<< :irc.test 353 iirc = ${channel} :iirc`,
+    `<< :irc.test 366 iirc ${channel} :End of /NAMES list.`
   );
 
 describe("joining", () => {
@@ -32,7 +34,14 @@ describe("joining", () => {
     const channel = client.known(played.state).channels.get("#iirc");
 
     expect(channel).toMatchObject({
-      modes: { _tag: "Unknown" },
+      modes: {
+        _tag: "Known",
+        from: "replied",
+        value: new Map([
+          ["n", null],
+          ["t", null],
+        ]),
+      },
       name: "#iirc",
       standing: "Joined",
       topic: { _tag: "Known", from: "ircd", value: null },
@@ -54,7 +63,7 @@ describe("joining", () => {
 
     const played = play(client, {
       configuration: two,
-      transcript: [registeredJoining(two, ">> JOIN #a,#b"), echo("#a"), echo("#b")],
+      transcript: [registeredJoining(two, ">> JOIN #a,#b"), echo("#a"), echo("#b", false)],
     });
 
     expect(
@@ -422,6 +431,7 @@ describe("what is known of a Channel", () => {
           "!! configure +#iirc",
           ">> JOIN #iirc",
           "<< :iirc!~iirc@iirc.test JOIN #iirc",
+          ">> MODE #iirc",
           "<< :irc.test 332 iirc #iirc :Welcome to #iirc",
           "<< :irc.test 333 iirc #iirc op!u@h 1767225600",
           "<< :irc.test 353 iirc = #iirc :iirc",

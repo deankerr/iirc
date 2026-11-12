@@ -32,6 +32,8 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  * - `Gap`: a period when the Network was not on, from `from`, to `to` once it is back on.
  * - `ReadMarker`: the Owner has read `timeline` up to `read`, which is always later than
  *   any Read Marker it had. What stands after it counts as unread.
+ * - `HeadChanged`: what the Client knows of the Channel `timeline` is changed in a way no
+ *   item says, such as its modes becoming known, so a Frontend reads it again.
  */
 export type Change =
   | { readonly _tag: "Described"; readonly sequence: number; readonly timeline: Descriptor }
@@ -93,6 +95,12 @@ export type Change =
       readonly network: string;
       readonly timeline: TimelineId;
       readonly read: Instant;
+    }
+  | {
+      readonly _tag: "HeadChanged";
+      readonly sequence: number;
+      readonly network: string;
+      readonly timeline: TimelineId;
     };
 
 /** A change to how one of our Messages stands with the Ircd. */

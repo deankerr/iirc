@@ -103,8 +103,13 @@ const joinFloor = (world: World) =>
 
     expect(yield* heard(call)).toBe("JOIN #iirc");
     yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+    expect(yield* heard(call)).toBe("MODE #iirc");
+    yield* say(call, ":irc.test 324 iirc #iirc +nt");
     yield* say(call, ":irc.test 353 iirc = #iirc :iirc @peer");
     yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
+    // Registration, the join, and the query of its modes spent the burst: a Line refills
+    // before the next is sent, the `QUIT` that stopping says among them.
+    yield* TestClock.adjust(2000);
 
     return call;
   });
@@ -254,6 +259,9 @@ describe("the projector", () => {
 
           yield* heard(call);
           yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+          expect(yield* heard(call)).toBe("MODE #iirc");
+          yield* say(call, ":irc.test 324 iirc #iirc +nt");
+          yield* TestClock.adjust(2000);
           yield* say(call, ":peer!u@h PRIVMSG #iirc :after");
           yield* eventually(holds(store, "#iirc", "after"));
 

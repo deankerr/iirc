@@ -31,7 +31,7 @@ const network: Where = { _tag: "Network" };
  * @param name - The name, as said.
  * @returns The name and its key.
  */
-const named = (run: Run, name: string): Named => ({
+export const named = (run: Run, name: string): Named => ({
   key: casefold(run.state.declared ?? defaultCasemapping, name),
   name,
 });

@@ -360,6 +360,12 @@ export type News =
    */
   | { readonly _tag: "ReadMarker"; readonly where: Marked; readonly read: Instant }
   /**
+   * What is known of a Channel Self is in changed in a way no Activity reports: a reply
+   * gave its modes or its topic, or a `NAMES` listing of its members ended. A projection
+   * tells a Frontend to read the Channel again. `channel` is keyed as a Message's `where`.
+   */
+  | { readonly _tag: "ChannelLearned"; readonly channel: Named }
+  /**
    * A Lookup the Owner asked for, under its intent, is over, and this is all it found.
    * Exactly one comes for each `Look`.
    */

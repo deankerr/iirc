@@ -387,6 +387,7 @@ const joining = (run: Run, nick: string): Joined => ({
   listing: undefined,
   members: new Map([[folder(run.state)(nick), fresh(run, nick)]]),
   modes: { _tag: "Unknown" },
+  queried: false,
   synced: false,
   topic: { _tag: "Unknown" },
 });

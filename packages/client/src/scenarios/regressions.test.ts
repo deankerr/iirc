@@ -67,6 +67,7 @@ describe("2. A casemapping change keeps every wanted Channel", () => {
           "!! configure +#x[ +#x{",
           ">> JOIN #x[,#x{",
           "<< :iirc!~iirc@h JOIN #x[",
+          ">> MODE #x[",
           "<< :iirc!~iirc@h JOIN #x{",
           "<< :irc.test 005 iirc CASEMAPPING=rfc1459 :are supported"
         ),
@@ -93,7 +94,11 @@ describe("3. Each Connection starts from the protocol's casemapping", () => {
           "-> dial irc.test:6697 tls"
         ),
         again(base, ">> JOIN #X["),
-        lines("<< :iirc!~iirc@h JOIN #x{", "?? activity Joined #x{ iirc in=channel:#x{"),
+        lines(
+          "<< :iirc!~iirc@h JOIN #x{",
+          "?? activity Joined #x{ iirc in=channel:#x{",
+          ">> MODE #X["
+        ),
       ],
     });
 
@@ -114,6 +119,7 @@ describe("4. Membership changes during NAMES are kept when it ends", () => {
           "!! configure +#a",
           ">> JOIN #a",
           "<< :iirc!~iirc@h JOIN #a",
+          ">> MODE #a",
           "<< :irc.test 353 iirc = #a :iirc peer",
           "<< :op!u@h MODE #a +o peer",
           "<< :irc.test 366 iirc #a :End"
@@ -235,6 +241,7 @@ describe("7. A Channel Self is put in without asking is modelled, and not undone
   const forced = lines(
     "<< :iirc!~iirc@h JOIN #forced",
     "?? activity Joined #forced iirc in=channel:#forced",
+    ">> MODE #forced",
     "<< :irc.test 332 iirc #forced :an oper put you here",
     "<< :irc.test 353 iirc = #forced :iirc @oper",
     "<< :irc.test 366 iirc #forced :End"
@@ -295,6 +302,7 @@ describe("7. A Channel Self is put in without asking is modelled, and not undone
         registered(base, { isupport: ["CHANLIMIT=#:2", "CHANTYPES=#"] }),
         lines(
           "<< :iirc!~iirc@h JOIN #one",
+          ">> MODE #one",
           "<< :iirc!~iirc@h JOIN #two",
           "<< :iirc!~iirc@h JOIN #three",
           "?? activity Joined #three iirc in=channel:#three",
@@ -414,6 +422,9 @@ describe("9. Generated nicks fit even a small NICKLEN", () => {
 const forced = (...names: readonly string[]) =>
   lines(...names.map((name) => `<< :iirc!~iirc@h JOIN ${name}`));
 
+// The MODE query the first of them draws, which no Ircd here answers, so it is the only one.
+const asked = (name: string) => `>> MODE ${name}\n`;
+
 describe("10. Forced Channels count within their own CHANLIMIT group", () => {
   it("keeps separate groups independent", () => {
     const played = play(client, {
@@ -421,6 +432,7 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       transcript: [
         registered(base, { isupport: ["CHANTYPES=#&", "CHANLIMIT=#:1,&:1"] }),
         forced("#one"),
+        asked("#one"),
         forced("#two"),
         "?? ignored NotNow Received\n",
         forced("&one"),
@@ -435,7 +447,9 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       configuration: base,
       transcript: [
         registered(base, { isupport: ["CHANTYPES=#&+", "CHANLIMIT=#&:2,+:5"] }),
-        forced("+other", "#one", "&one"),
+        forced("+other"),
+        asked("+other"),
+        forced("#one", "&one"),
         forced("#two"),
         "?? ignored NotNow Received\n",
       ],
@@ -451,7 +465,9 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
         registered(base, { isupport: ["CHANTYPES=#", "CHANLIMIT=#&:2"] }),
         forced("&one"),
         "?? ignored Malformed JOIN\n",
-        forced("#one", "#two"),
+        forced("#one"),
+        asked("#one"),
+        forced("#two"),
       ],
     });
 
@@ -465,7 +481,9 @@ describe("10. Forced Channels count within their own CHANLIMIT group", () => {
       configuration: base,
       transcript: [
         registered(base, { isupport: ["CHANTYPES=#&", "CHANLIMIT=#:1"] }),
-        forced("#one", ...many),
+        forced("#one"),
+        asked("#one"),
+        forced(...many),
         forced("&late"),
         "?? ignored NotNow Received\n",
       ],

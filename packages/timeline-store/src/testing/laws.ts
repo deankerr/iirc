@@ -447,6 +447,7 @@ const additions: Interruption = {
   edit: (before, sequence) => {
     const fresh: Summary = {
       changed: sequence,
+      head: undefined,
       id: timelineIdOf(sequence, 0, 1),
       key: `#new-${sequence}`,
       kind: "Channel",
@@ -647,6 +648,13 @@ const merging: Interruption = {
     },
   ],
 };
+
+const changedHead = (sequence: number, timeline: TimelineId): Change => ({
+  _tag: "HeadChanged",
+  network: libera,
+  sequence,
+  timeline,
+});
 
 const marker = (sequence: number, timeline: TimelineId, read: Instant, on = libera): Change => ({
   _tag: "ReadMarker",
@@ -2524,6 +2532,50 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         );
       }),
     name: "keeps a Gap that ends where the next began, after a restart, read from that point",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const headOf = (timeline: TimelineId) =>
+          store
+            .timeline(timeline)
+            .pipe(Effect.map(Option.map(({ changed, head }) => ({ changed, head }))));
+
+        yield* apply(store, 2, opened(2));
+        yield* same(
+          "no head changed yet",
+          yield* headOf(channel),
+          Option.some({ changed: 2, head: undefined })
+        );
+
+        yield* apply(store, 3, [changedHead(3, channel), changedHead(3, timelineIdOf(9, 0, 9))]);
+        yield* same("a head changed", yield* headOf(channel), Option.some({ changed: 3, head: 3 }));
+        yield* same(
+          "a Timeline never described is not made",
+          yield* headOf(timelineIdOf(9, 0, 9)),
+          Option.none()
+        );
+        yield* same(
+          "it adds no item",
+          (yield* store.window(channel, all, 10)).pipe(Option.map(({ items }) => items.length)),
+          Option.some(0)
+        );
+
+        yield* apply(store, 4, [described(4, channel, "Channel", "#A", "#a")]);
+        yield* same(
+          "a new description keeps it",
+          yield* headOf(channel),
+          Option.some({ changed: 4, head: 3 })
+        );
+
+        yield* apply(store, 5, [changedHead(5, channel)]);
+        yield* same(
+          "the changes carry it",
+          (yield* store.changedAfter(4)).timelines.map(({ head, id }) => [id, head]),
+          [[channel, 5]]
+        );
+      }),
+    name: "keeps when a Channel's head last changed, and gives it among the changes",
   },
   {
     check: (store) =>

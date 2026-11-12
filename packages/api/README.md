@@ -108,8 +108,8 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 
 ### Channels and search
 
-- **A Channel is read as the Client knows it now,** by its Timeline's id, never its name. These reads are of the Client, not the folded Timelines, so they carry no `version`: follow the changes to learn when to read again.
-- **A Channel's head always answers,** with `standing`, where Self stands with it, and the Network's `PREFIX`, `CHANMODES`, and `CHANTYPES`, so a Frontend parses a mode change as the Client will check it.
+- **A Channel is read as the Client knows it now,** by its Timeline's id, never its name. These reads are of the Client, not the folded Timelines, so they carry no `version`: follow the changes to learn when to read again. An Activity in its Timeline or a Gap of its Network may change it, and so may what no item says, such as its modes becoming known, which moves its Timeline's `head` to that step's sequence.
+- **A Channel's head always answers,** with `standing`, where Self stands with it, and the Network's `PREFIX`, `CHANMODES`, and `CHANTYPES`, so a Frontend parses a mode change as the Client will check it. Its modes never hold a key: `k` is set with a `null` parameter.
 - **Members come in rank order, then by nick,** compared by code unit, never by a locale. `prefix` keeps the nicks that start with it under the Connection's casemapping, for completing a nick. A member who changed rank between pages may be given again or missed, so read from the start to be sure of every one.
 - **A search finds Messages by what they say, newest first.** `text` is one run of 3 to 510 code points, found anywhere in a Message, whatever its case, by Unicode 17.0's simple lower-casing and never a locale's. A shorter one has no index to serve it, so it is refused.
 - **The Daemon reads no syntax from a query.** `text` is text and nothing else, whatever it holds. Terms such as `from:nick` are a Frontend's to parse into the filters.

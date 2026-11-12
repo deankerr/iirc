@@ -35,6 +35,7 @@ const timeline = (
   decodeTimeline({
     changed: sequence,
     detached,
+    head: null,
     id: idOf(sequence),
     key: detached ? null : key,
     kind: name.startsWith("#") ? "Channel" : "Direct",

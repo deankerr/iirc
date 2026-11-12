@@ -40,11 +40,12 @@ interface Stored {
   readonly intent: IntentId | undefined;
 }
 
-/** A Timeline, its Read Marker, and the last sequence that changed it. */
+/** A Timeline, its Read Marker, when its head last changed, and the last sequence that changed it. */
 interface Entry {
   descriptor: Descriptor;
   changed: number;
   read: Instant | undefined;
+  head: number | undefined;
 }
 
 interface Memory {
@@ -218,11 +219,25 @@ const merge = (memory: Memory, change: Extract<Change, { readonly _tag: "Merged"
 const applyChange = (memory: Memory, change: Change) => {
   switch (change._tag) {
     case "Described": {
+      const was = memory.timelines.get(change.timeline.id);
+
       memory.timelines.set(change.timeline.id, {
         changed: change.sequence,
         descriptor: change.timeline,
-        read: memory.timelines.get(change.timeline.id)?.read,
+        head: was?.head,
+        read: was?.read,
       });
+      break;
+    }
+
+    case "HeadChanged": {
+      const found = memory.timelines.get(change.timeline);
+
+      if (found !== undefined) {
+        found.head = change.sequence;
+        found.changed = change.sequence;
+      }
+
       break;
     }
 
@@ -306,12 +321,13 @@ const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => 
   return counts;
 };
 
-const summaryOf = (memory: Memory, { descriptor, changed, read }: Entry): Summary => {
+const summaryOf = (memory: Memory, { descriptor, changed, head, read }: Entry): Summary => {
   const items = sortedItems(memory, descriptor.id);
 
   return {
     ...descriptor,
     changed,
+    head,
     latest: items.at(-1)?.position,
     read,
     unread: unreadIn(items, read),

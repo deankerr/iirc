@@ -72,6 +72,7 @@ const described = (
 ): typeof Timeline.Encoded => ({
   changed: 1,
   detached,
+  head: null,
   id,
   key,
   kind,
@@ -750,23 +751,33 @@ describe("the members", () => {
 });
 
 describe("touching", () => {
-  it("is an Activity in the Channel's Timeline, or a Gap of its Network", () => {
+  it("is an Activity in the Channel's Timeline, its head moved by the step, or a Gap of its Network", () => {
     expect({
       activity: touchesIirc({ items: [joined(11)] }),
       elsewhere: touchesIirc({ items: [joined(11, other)] }),
       gap: touchesIirc({
         gaps: [{ changed: 11, from: cursor(1, 11), network: "libera", to: null }],
       }),
+      head: touchesIirc({ timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: 11 }] }),
+      headBefore: touchesIirc({
+        timelines: [{ ...described(iirc, "#iirc"), changed: 11, head: 4 }],
+      }),
       message: touchesIirc({ items: [said(11, "peer")] }),
       otherGap: touchesIirc({
         gaps: [{ changed: 11, from: cursor(1, 11), network: "oftc", to: null }],
+      }),
+      otherHead: touchesIirc({
+        timelines: [{ ...described(other, "#other"), changed: 11, head: 11 }],
       }),
     }).toStrictEqual({
       activity: true,
       elsewhere: false,
       gap: true,
+      head: true,
+      headBefore: false,
       message: false,
       otherGap: false,
+      otherHead: false,
     });
   });
 });

@@ -26,6 +26,7 @@ import { Instant } from "./ids.ts";
 import { collectFloor, collectLabelled, floorLookup } from "./lookups.ts";
 import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
+import { askModes, modesQueryOver, queryAnswered } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
 import type { Activity, ModeChange } from "./news.ts";
 import {
@@ -39,12 +40,12 @@ import {
   welcomed,
 } from "./registration.ts";
 import type { Run } from "./run.ts";
-import { ignore, linkOf, readingOf, refuseIntent, send, updateOpen } from "./run.ts";
+import { folder, ignore, linkOf, readingOf, refuseIntent, send, updateOpen } from "./run.ts";
 import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf, sessionOf } from "./views.ts";
-import { routeActivity, routeMessage } from "./where.ts";
+import { named, routeActivity, routeMessage } from "./where.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
 const refusals: ReadonlySet<string> = new Set([
@@ -213,6 +214,15 @@ const completedBy = (derived: readonly Meant[], refined: readonly Meant[]): Read
   return new Set(listedWith(refined, "Known").filter((key) => partial.has(key)));
 };
 
+// Folds live Activity into the Channels, and asks the modes of one Self joined.
+const foldLive = (run: Run, activity: Activity): void => {
+  foldActivity(run, activity, rulesNow(run), channelTest(run));
+
+  if (activity._tag === "Joined" && isSelf(run, activity.nick)) {
+    askModes(run);
+  }
+};
+
 // Folds what a Line meant into the model, and reports it. History is reported, and
 // never changes what is known now.
 const fold = (
@@ -265,7 +275,7 @@ const fold = (
   const selfRenamed = activity._tag === "NickChanged" && isSelf(run, activity.from);
 
   settled(run, activity);
-  foldActivity(run, activity, rulesNow(run), channelTest(run));
+  foldLive(run, activity);
 
   if (selfRenamed) {
     updateOpen(run, (open) =>
@@ -432,6 +442,18 @@ const malformed = (run: Run, line: Line): void => {
   ignore(run, { _tag: "Malformed", command: line.command });
 };
 
+/**
+ * Reports that a reply changed what is known of a Channel Self is in, which no Activity
+ * says, so a projection tells a Frontend to read it again.
+ * @param run - The step.
+ * @param channel - The Channel, as the reply names it.
+ */
+const learned = (run: Run, channel: string): void => {
+  if (run.state.channels.get(folder(run.state)(channel))?.phase._tag === "Joined") {
+    run.news.push({ _tag: "ChannelLearned", channel: named(run, channel) });
+  }
+};
+
 // `332 <client> <channel> :<topic>`, `331 <client> <channel>`, and
 // `333 <client> <channel> <who> <when>`. Replies to our `JOIN` are said as it happened.
 const topicReply = (run: Run, line: Line): void => {
@@ -443,6 +465,7 @@ const topicReply = (run: Run, line: Line): void => {
     return;
   }
 
+  learned(run, channel);
   changeJoined(run, channel, (joined) => {
     const from = joined.burst ? "ircd" : "replied";
 
@@ -494,6 +517,7 @@ const channelModes = (run: Run, line: Line): void => {
   const rules = rulesNow(run);
   const changes = readModes(modes, args, rules);
 
+  learned(run, channel);
   changeJoined(run, channel, (joined) => ({
     ...joined,
     modes: {
@@ -599,6 +623,7 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
     "366",
     (run, line) => {
       second(run, line, (name) => {
+        learned(run, name);
         endOfNames(run, name);
       });
     },
@@ -641,16 +666,20 @@ const rejection = (line: Line): string | undefined => {
 
 /**
  * Gives a numeric tied to nothing by label to the oldest of what waits for it on the
- * floor: a Lookup whose reply it can be part of, or an action's Line whose error it
- * names, by the order they were sent.
+ * floor: a Lookup whose reply it can be part of, an action's Line whose error it names,
+ * or the Client's own `MODE` query it answers, by the order they were sent.
  * @param run - The step.
  * @param line - The Line, live, outside any batch, and with no label.
  */
 const floor = (run: Run, line: Line): void => {
   const looking = floorLookup(run, line);
   const tied = tiedAction(run, line);
+  const query = queryAnswered(run, line);
+  const first = Math.min(looking?.order ?? Infinity, tied?.order ?? Infinity);
 
-  if (looking !== undefined && (tied === undefined || looking.order < tied.order)) {
+  if (query !== undefined && query.order < first) {
+    modesQueryOver(run);
+  } else if (looking !== undefined && (tied === undefined || looking.order < tied.order)) {
     collectFloor(run, looking, line);
   } else if (tied !== undefined) {
     tieRejection(run, line, tied);
