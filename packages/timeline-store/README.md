@@ -1,8 +1,8 @@
 # @iirc/timeline-store
 
-The Timeline store port: where the changes [`@iirc/timelines`](../timelines/README.md) folds from News are kept, and what Timelines are read from. The store is derived. It can be emptied and folded again from the Journal at any time, so nothing in it is the only copy of anything ([ADR 0002](../../docs/adr/0002-the-journal-holds-bytes.md), [ADR 0011](../../docs/adr/0011-timelines-are-a-projection-the-client-routes.md)).
+The Timeline store port: where the changes `@iirc/timelines` folds from News are kept, and what Timelines are read from. The store is derived. It can be emptied and folded again from the Journal at any time, so nothing in it is the only copy of anything.
 
-This README is the port's written interface. The types are in `src/store.ts`, and the in-memory adapter and the laws are in `src/testing/`, exported from `@iirc/timeline-store/testing`. The port lives beside the fold, not in the Runtime, because the Runtime never drives it: what drives it is whatever folds the Runtime's News, and the port's types are the fold's.
+The in-memory adapter and the laws are exported from `@iirc/timeline-store/testing`. The port lives beside the fold, not in the Runtime, because the Runtime never drives it: what drives it is whatever folds the Runtime's News, and the port's types are the fold's.
 
 ```ts
 import { TimelineStore } from "@iirc/timeline-store";
@@ -39,7 +39,7 @@ Search = { text: SearchText, network?, timeline?, from?, since?: Instant, until?
   after?: ItemPlace, limit }
 ```
 
-`TimelineStore` is an Effect service. An adapter provides it as a Layer from its own package: [`@iirc/timeline-store-sqlite`](../timeline-store-sqlite/README.md) in production, which the Daemon keeps in `views.sqlite`.
+`TimelineStore` is an Effect service. An adapter provides it as a Layer from its own package: `@iirc/timeline-store-sqlite` in production, which the Daemon keeps in `views.sqlite`.
 
 ## Writing
 

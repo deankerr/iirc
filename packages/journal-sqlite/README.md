@@ -1,6 +1,6 @@
 # @iirc/journal-sqlite
 
-The production adapter of the Journal port ([`packages/runtime/README.md`](../runtime/README.md), "Journal"), on SQLite. It keeps every Network's Entries in one file, and provides `Journal` as a Layer given that file's path. Its Entries are the Journal's, as ADR 0002 describes them: the Line Entries hold the bytes that crossed the Connection.
+The production adapter of the Journal port, on SQLite. It keeps every Network's Entries in one file, and provides `Journal` as a Layer given that file's path. Its Entries are the Journal's, as ADR 0002 describes them: the Line Entries hold the bytes that crossed the Connection.
 
 ```ts
 import { layerSqliteJournal, makeSqliteJournal } from "@iirc/journal-sqlite";

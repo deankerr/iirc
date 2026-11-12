@@ -1,6 +1,6 @@
 # @iirc/timeline-store-sqlite
 
-The production adapter of the Timeline store port ([`packages/timeline-store/README.md`](../timeline-store/README.md)), on SQLite. It keeps every Network's Timelines in one file, which the Daemon calls `views.sqlite`, and provides `TimelineStore` as a Layer given that file's path. Everything in it is derived from the Journal ([ADR 0002](../../docs/adr/0002-the-journal-holds-bytes.md)), so it is never the only copy of anything.
+The production adapter of the Timeline store port, on SQLite. It keeps every Network's Timelines in one file, which the Daemon calls `views.sqlite`, and provides `TimelineStore` as a Layer given that file's path. Everything in it is derived from the Journal, so it is never the only copy of anything.
 
 ```ts
 import { layerSqliteTimelineStore, makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
@@ -106,11 +106,11 @@ The store made again has no projection version, so whatever starts it folds the 
 
 ## Tests
 
-`bun run test` runs the port's laws against a fresh file each, and then: applying steps of every kind, closing the file, and opening it again reads exactly the same, a search included; a file whose search and senders were folded another way, under another `folding`, is folded again as it opens, finding nothing by the old index and everything by the new, and reads exactly as it did; the Layer keeps what it was given; a file of another layout, one of this layout's version whose `folded` table lacks a column, one whose directory does not decode, a database that is not a store, and a file that is not a database are each made again and then keep what they are given; a path that cannot be opened fails, removes nothing, and says SQLite's own reason; a store another connection holds locked fails to open, and keeps its file and everything in it; and the file is in WAL mode, with each read's query plan using an index, never a scan of a table or a sort, but for a search, whose plan must walk the search index by its phrase, find each item by its `id`, and keep its page in order with a `LIMIT`, never scanning `items`. The plans are of the statements the store itself emits, captured as the SQL client compiles them, through Effect's `CurrentTransformer`, and explained with their parameters, never of copies: a step's lookups by intent and message id and the count it keeps, a Read Marker moved and a merge, each counting its Timeline again, a page of what changed and a step too big for one, a page of Timelines, one Timeline by its id and by a merged id, a window from each anchor, a step's items, a search with every filter through a merged id and one with none, the Gaps over a range, and runs of Gaps with no cursor, after one, and before one. A run of Gaps must be bounded below by the key and counted from the index alone, which a run that filtered on `to_cursor` is not, and the test checks that it can tell the two apart. Each run of a page read before a cursor, its count and the search for its end, must be bounded on both sides by the key, which it is not without the bound at the cursor. Each count of a level after a Read Marker must search `items_by_level` by the Timeline, the level, and the cursor, from the index alone, and stop at a `LIMIT`, and the test checks that it can tell that from a count of a Timeline's items with no level, which walks them all.
+`bun run test` runs the port's laws against a fresh file each. It also checks the query plan of every statement the store itself emits, captured as the SQL client compiles it, so a read that stops using the index named above fails.
 
 ## Choices
 
-- **Effect SQL, not `bun:sqlite` directly** ([ADR 0005](../../docs/adr/0005-effect-wins-where-it-overlaps-bun.md)), as the Journal does. `@effect/sql-sqlite-bun` is pinned to the same version as `effect`.
+- **Effect SQL, not `bun:sqlite` directly**, as the Journal does. `@effect/sql-sqlite-bun` is pinned to the same version as `effect`.
 
 ## Not yet
 

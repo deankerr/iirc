@@ -1,6 +1,6 @@
 # @iirc/transport-bun
 
-The production adapter of the Transport port, over TCP and TLS on Bun. It keeps every promise in [the port's written interface](../runtime/README.md#transport) and every law in `transportLaws`, which its tests run over both TLS and plain TCP against real loopback listeners.
+The production adapter of the Transport port, over TCP and TLS on Bun. It keeps every law in `transportLaws`, which its tests run over both TLS and plain TCP against real loopback listeners.
 
 ```ts
 import { layer } from "@iirc/transport-bun";
@@ -12,7 +12,7 @@ const TransportLive = layer(); // production: every option at its default
 
 ## How it is built
 
-It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Effect's Node socket over Bun's `node:net` and `node:tls`), as [ADR 0005](../../docs/adr/0005-effect-wins-where-it-overlaps-bun.md) asks. Effect reads only when pulled and makes writes wait for `drain`.
+It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Effect's Node socket over Bun's `node:net` and `node:tls`), as ADR 0005 asks. Effect reads only when pulled and makes writes wait for `drain`.
 
 `src/open.ts` opens the socket itself, with `node:net` and then `node:tls`, and hands it to `fromDuplex`. Effect's own TLS upgrade takes only `servername` as the identity, and SNI may not carry an IP. Without a `servername`, a routed IP would be checked against the address it reached rather than the address dialled. Opening TLS directly lets the dialled host go to `host` and `checkServerIdentity`, apart from SNI. Nothing calls `Bun.connect` directly.
 
@@ -61,8 +61,4 @@ It uses Effect's socket from `@effect/platform-bun` (`BunSocket.fromDuplex`, Eff
 
 ## Tests
 
-`bun run test` runs the following, using only loopback and no external network, in about two seconds:
-
-- `src/laws.test.ts`: every `transportLaws` law, over TLS with a self-signed certificate for `irc.test` made by `openssl` for the run, and again over plain TCP. The harness in `src/testing/loopback.ts` plays `TestIrcd`. It opens a listener for each call and routes the dial there, or routes it to a refusing port or an `.invalid` name when the call is refused.
-- `src/framer.test.ts`: framing byte by byte. It covers CRLF, a bare LF, and a bare CR. It also covers a CRLF split across reads, a CR at the end of one read with the next Line in the next, and an LF followed by a CR, which is two endings with nothing between them. It covers a Line split across reads, several Lines in one read, and an unfinished Line at the end. It covers a long Line over many reads cut at `maxReceivedBytes`, and recovery after a cut Line that ends in CR, LF, or CRLF.
-- `src/transport.test.ts`: the failures and edge cases the laws cannot see. These are a refused dial, an unknown host, a connect timeout, SNI, an untrusted certificate, a wrong-name certificate, a plaintext answer to TLS, a handshake timeout, a reset over TCP and TLS, a routed IP or name whose certificate names only the destination, a stalled write, a hangup that lets 1,000 Lines and a `QUIT` arrive over TLS, a hangup that a paused peer cannot hold past `hangupTimeout`, a flood that waits in the kernel, a `send` before `Opened`, a hangup while connecting, the closing of the Scope while open, while routing, and during the TLS handshake, and connect and handshake timers that race `Opened` and end only once. On loopback a connect always beats even a 0 ms timer, so that race is only seen to end once, not seen to time out.
+`bun run test` runs every `transportLaws` law over TLS, with a self-signed certificate that `openssl` makes for the run, and again over plain TCP. It uses only loopback.

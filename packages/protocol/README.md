@@ -2,7 +2,7 @@
 
 The IRC protocol as values: Lines in, Lines out, the places a Credential can go, and readers for what Lines carry. It is pure, and depends on no other package of ours.
 
-This README is the module's written interface. Each subpath is its own module, and there is no root export.
+Each subpath is its own module, and there is no root export.
 
 | Subpath | What it holds |
 | --- | --- |
@@ -14,7 +14,7 @@ This README is the module's written interface. Each subpath is its own module, a
 
 ## Features, from the floor up
 
-The floor is RFC 1459 and 2812 as [Modern IRC](../../docs/irc-docs-2026-10-26/modern/client-protocol.md) describes them ([ADR 0001](../../docs/adr/0001-the-rfc-protocol-is-the-floor.md)). What sits above it is used only when an Ircd offers it, and nothing here depends on it.
+The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it is used only when an Ircd offers it, and nothing here depends on it.
 
 1. **Parsing a Line.** `parse` reads the grammar at the byte level: an optional source, a command, middle parameters, and a trailing parameter with or without its colon. Runs of spaces count as one, spaces before the first part are skipped, and any number of parameters is read. The Transport hands over Lines split at CR or LF, so a Line's bytes hold neither; should one hold a CR, LF, or NUL anyway, the Line ends there. Commands are upper-cased in ASCII. Bytes with no command are `Unparseable`, as `Empty` or `NoCommand`, and nothing throws.
 2. **Decoding.** Each part of a Line is decoded on its own, so one part in another encoding leaves the rest readable. Under `Utf8OrElse`, a part is UTF-8 if it is valid UTF-8, else in the fallback if it is valid there, else ISO-8859-1 byte for byte, which reads anything. Under `Utf8Only`, what `UTF8ONLY` promises, bytes that are not UTF-8 read as U+FFFD. A byte order mark is kept.
@@ -150,9 +150,4 @@ A colour of `99` is the default colour, so it is `undefined` in a `Style`. A col
 
 ## Tests
 
-- `src/testdata/msg-split.yaml` holds the ircdocs parser vectors, and `formatting.yaml` and `ctcp.yaml` hold the formatting and CTCP vectors, in the same style.
-- Every `<<` Line in `fixtures/transcripts/` parses, and every `>>` Line we sent there can be built and reads back the same.
-- Property tests, with fast-check: `quote` never throws, and what it builds reads back as the text read; `parse` never throws on arbitrary bytes, in any encoding; every `OutboundLine`, with text and byte parameters, round-trips, holds no NUL, CR, or LF but its line ending, and fits; `rawParams` splits exactly as `parse` does; changing a buffer after `OutboundLine.make`, `pong`, or `rawParams`, including a `Buffer`, whose slices share memory, changes nothing that is encoded; every SASL `PLAIN` response is valid `AUTHENTICATE` Lines of at most 400 bytes of payload, with the `+` rule, that decode to the response; formatting, CTCP, ISUPPORT, and casemapping never throw, and agree with their other halves.
-- `encode` is tested as the one guard: a getter that changes between reads, a spread Line whose parameters, tags, or command were replaced or made too long, and fields that are not what they claim each give `Rejected`, never unsafe bytes. A property test casts arbitrary records to `OutboundLine` and checks `encode` never writes NUL, CR, or LF but its final CRLF, and keeps to the limits. Another checks `outbound` never throws on any arguments.
-
-Tests read vectors and fixtures with Vite's `?raw` imports and Effect's YAML parser, so they need no file I/O.
+The ircdocs parser vectors are in `src/testdata/msg-split.yaml`, with formatting and CTCP vectors beside them in the same style. Every Line in `fixtures/transcripts/` must parse, or be built and read back the same. Tests read vectors and fixtures with Vite's `?raw` imports and Effect's YAML parser, so they need no file I/O.

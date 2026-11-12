@@ -20,19 +20,19 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 
 ## How we build
 
-- **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun ([ADR 0005](docs/adr/0005-effect-wins-where-it-overlaps-bun.md)). Finite lifecycles are pure folds over the Journal ([ADR 0003](docs/adr/0003-machines-are-projections.md)).
+- **Effect-pilled.** Effect owns errors, concurrency, resources, and dependencies, and wins where it overlaps Bun. Finite lifecycles are pure folds over the Journal.
 - **Parse, don't validate.** Bytes from the network and input from frontends become precise types at the boundary. A value that exists is a value that is valid, and that goes for outbound lines too: an IRC line that cannot be sent safely cannot be constructed.
-- **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt ([ADR 0002](docs/adr/0002-the-journal-holds-bytes.md), [ADR 0004](docs/adr/0004-configuration-lives-in-the-journal.md)).
+- **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt.
 - **Deep modules, compositional packages.** Small interfaces hide real work. One package has one job, and packages combine without knowing about each other.
 - **Contract-driven.** Schemas define the boundaries first, and implementations follow. `HttpApi` is the primary surface. Other transports, such as Effect RPC, SSE, or a wire format of our own, are adapters over the same contract.
 - **Agent-drivable and observable from the start.** Everything the Daemon can do is reachable through its API, and everything it knows can be inspected, except Credentials. An agent can run a real Daemon on a real Network, see exactly what happened, and check its own work. We build this first because it is what makes everything else fast.
-- **The RFC protocol is the floor.** Any Ircd that speaks RFC 1459 and 2812 gets at least base support, and nothing core depends on an IRCv3 capability. Beyond that, features arrive by progressive enhancement, when they are worth their cost, which is a high bar for anything that needs polling ([ADR 0001](docs/adr/0001-the-rfc-protocol-is-the-floor.md)).
-- **Hostile input is the normal case.** Networks and Users can send anything. Bad input never takes down a Connection, loses a Message, or reaches another system as a command. Security is proportionate: we defend against hostile Networks and text, not the Owner's own software ([ADR 0006](docs/adr/0006-proportionate-security.md)).
+- **The RFC protocol is the floor.** Any Ircd that speaks RFC 1459 and 2812 gets at least base support, and nothing core depends on an IRCv3 capability. Beyond that, features arrive by progressive enhancement, when they are worth their cost, which is a high bar for anything that needs polling.
+- **Hostile input is the normal case.** Networks and Users can send anything. Bad input never takes down a Connection, loses a Message, or reaches another system as a command. Security is proportionate: we defend against hostile Networks and text, not the Owner's own software.
 - **Prove it against the real thing.** Shared conformance vectors, fuzzing, and real networks matter more than fakes.
 
 ## Core stack
 
-Bun, TypeScript, and Effect, with Ultracite as the fence. The local protocol documents in [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) are our reference for IRC. The language we use is defined in [`GLOSSARY.md`](GLOSSARY.md). We choose everything else when we reach it, and we are free to try more than one option. The web frontend is React over a pure core ([ADR 0010](docs/adr/0010-the-web-frontend-is-a-pure-core-under-react.md)).
+Bun, TypeScript, and Effect, with Ultracite as the fence. The local protocol documents in `docs/irc-docs-2026-10-26/` are our reference for IRC. We choose everything else when we reach it, and we are free to try more than one option. The web frontend is React over a pure core.
 
 ## Not now
 
@@ -46,4 +46,4 @@ These are not rejections. They wait until something real needs them:
 
 ## Keeping this document
 
-This document holds goals and principles. Each module's README describes its features, from the floor up. Decisions live in [`docs/adr/`](docs/adr/), and how the pieces fit together in [`docs/architecture.md`](docs/architecture.md). Change it when the direction changes, and keep it short enough to reread.
+This document holds goals and principles. Change it when the direction changes, and keep it short enough to reread.

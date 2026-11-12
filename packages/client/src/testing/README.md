@@ -1,6 +1,6 @@
 # The transcript test kit
 
-`@iirc/client/testing` is how a Client is tested: a scenario is a transcript of IRC, and the kit plays it through the Client on a fake clock. It holds the scripted Client too. Production code never imports it, and the lint fence holds it to that. [The recorded fixtures](../../../../fixtures/transcripts/README.md) are written in the same format.
+`@iirc/client/testing` is how a Client is tested: a scenario is a transcript of IRC, and the kit plays it through the Client on a fake clock. It holds the scripted Client too. Production code never imports it, and the lint fence holds it to that. The recorded fixtures are written in the same format.
 
 The kit catches the bugs a Client plausibly has, and does not defend against a Client written to fool it, such as one that hides a Proxy in its State.
 
@@ -176,7 +176,7 @@ deactivates(subject, { after: () => "+1s\n<< :other!u@h JOIN #iirc\n" });
 
 ## Conventions the Client must keep
 
-These are the Client's own rules, from [its README](../../README.md), which the kit relies on:
+These are the Client's own rules, which the kit relies on:
 
 - A `Configured` or `Started` with the Network enabled dials at once. Only a redial after a `Closed` waits for backoff, and a `Configured` that disables the Network while connected hangs up.
 - Connection ids start at 1 and go up by 1 for each `Dial`, never reused. The nth `-> dial` in a transcript is Connection n.

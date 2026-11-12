@@ -1,8 +1,8 @@
 # @iirc/outbox
 
-One Connection's queue of Lines waiting to leave: which goes next, and when. It is pure. It holds plain data, reads no clock, and depends on no other package of ours, so time arrives as an argument and the caller does the waiting. The Runtime keeps one Outbox for each Connection it holds, and its pump carries the Lines out.
+One Connection's queue of Lines waiting to leave: which goes next, and when. It is pure. It holds plain data, reads no clock, and depends on no other package of ours, so time arrives as an argument and the caller does the waiting.
 
-This README is the module's written interface. The types are in `src/outbox.ts`. Priority stays out of the Client, and pacing is one safe default for every Ircd.
+Priority stays out of the Client, and pacing is one safe default for every Ircd.
 
 ```ts
 makeOutbox<A>({ pacing?, capacity?, firstCapacity? }): Outbox<A>  // empty, with a full bucket
@@ -35,7 +35,7 @@ The Outbox is generic over what it queues, so the Runtime queues its `Send` and 
 
 ## How the Runtime uses it
 
-Its pump calls `take` with the time from Effect's `Clock`: a `Taken` Line is sent, a `Wait` is slept until, and on `Empty` it waits for an offer. When a Connection ends, `takeAll` gives back what never left, in order, and the Runtime steps it as `Unsent`. [The Runtime's README](../runtime/README.md) has the rest.
+Its pump calls `take` with the time from Effect's `Clock`: a `Taken` Line is sent, a `Wait` is slept until, and on `Empty` it waits for an offer. When a Connection ends, `takeAll` gives back what never left, in order, and the Runtime steps it as `Unsent`.
 
 ## Not yet
 

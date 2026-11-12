@@ -1,6 +1,6 @@
 # iirc
 
-iirc is an always-on IRC client you can build on. A headless Daemon stays on your IRC Networks, records every Line in an append-only Journal, and exposes everything through a typed HTTP API, so a browser, a script, or an agent can drive it. It is built from a modular library, a pure protocol core with Effect runtime pieces on top, that other projects can use alone. Bun, TypeScript, and Effect. MIT licensed. [`VISION.md`](VISION.md) says what it is for.
+iirc is an always-on IRC client you can build on. A headless Daemon stays on your IRC Networks, records every Line in an append-only Journal, and exposes everything through a typed HTTP API, so a browser, a script, or an agent can drive it. It is built from a modular library, a pure protocol core with Effect runtime pieces on top, that other projects can use alone. Bun, TypeScript, and Effect. MIT licensed.
 
 ## What works today
 
@@ -27,7 +27,7 @@ bun run build:web     # the web frontend, into apps/web/dist
 bun run build:iirc    # one executable, dist/iirc, with the web frontend inside
 ```
 
-`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches. [The Daemon's README](packages/daemon/README.md#end-to-end) and [the executable's](apps/iirc/README.md#tests) say what it covers.
+`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches.
 
 ## Run a Daemon
 
@@ -43,7 +43,7 @@ bun run build:web
 bun run iirc daemon --data-dir ~/.local/share/iirc --web=apps/web/dist
 ```
 
-To run it as a service instead, `bun run build:iirc` makes one executable with the web frontend inside, and [the executable's README](apps/iirc/README.md#install) installs it as a systemd user service.
+To run it as a service instead, `bun run build:iirc` makes one executable with the web frontend inside, and `apps/iirc` installs it as a systemd user service.
 
 Then, from another shell, add a Network and watch it:
 
@@ -67,38 +67,38 @@ curl -X POST "$API/networks/libera/say" -H "$AUTH" -H 'content-type: application
   -d '{ "kind": "Privmsg", "target": "#my-channel", "text": "hello from iirc" }'
 ```
 
-Configuration always goes whole, so joining or parting a Channel is another `PUT`. [The API's README](packages/api/README.md) lists every route.
+Configuration always goes whole, so joining or parting a Channel is another `PUT`. `packages/api` lists every route.
 
 ## Repository
 
-| Path | What |
-| --- | --- |
-| [`packages/protocol`](packages/protocol) | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, and formatting |
-| [`packages/client`](packages/client) | The pure IRC client for one Network, and its transcript test kit |
-| [`packages/outbox`](packages/outbox) | Pacing: which Line leaves next, and when |
-| [`packages/runtime`](packages/runtime) | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
-| [`packages/transport-bun`](packages/transport-bun) | The production Transport: TCP and TLS on Bun, verified, framed, and bounded |
-| [`packages/journal-sqlite`](packages/journal-sqlite) | The production Journal: Entries in SQLite, durable before `append` returns |
-| [`packages/vault-file`](packages/vault-file) | The production Vault: Credentials in a `0600` file, written atomically |
-| [`packages/api`](packages/api) | The HTTP API's contract, which every Frontend uses |
-| [`packages/frontend`](packages/frontend) | The web frontend's pure core: what it shows, as plain data and reducers |
-| [`packages/daemon`](packages/daemon) | The Daemon: wires it all together and serves the API |
-| [`apps/iirc`](apps/iirc) | The `iirc` executable |
-| [`apps/web`](apps/web) | The web frontend: React over the pure core, built with Vite |
-| [`fixtures/transcripts`](fixtures/transcripts) | Real Sessions on Ergo and ngircd, replayed in the tests |
-| [`fixtures/nicks`](fixtures/nicks) | How a nick is read, as data the Client's and the web frontend's tests both run |
-| [`docs`](docs) | Architecture, decisions, and the IRC specifications |
+Each package's README says what it does, what it guarantees, and what it does not do yet.
 
-## Documentation
+| Path | Pure | What |
+| --- | --- | --- |
+| `packages/protocol` | yes | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, and formatting |
+| `packages/client` | yes | The IRC client for one Network, and its transcript test kit |
+| `packages/outbox` | yes | Pacing: which Line leaves next, and when |
+| `packages/timelines` | yes | Timelines as a fold over News |
+| `packages/frontend` | yes | The web frontend's core: what it shows, as plain data and reducers |
+| `packages/api` | contract | The HTTP API every Frontend uses, as Schemas and typed errors |
+| `packages/runtime` | no | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
+| `packages/timeline-store` | no | The Timeline store port, its in-memory adapter, and its laws |
+| `packages/transport-bun` | no | The production Transport: TCP and TLS on Bun |
+| `packages/journal-sqlite` | no | The production Journal: Entries in SQLite |
+| `packages/vault-file` | no | The production Vault: Credentials in a `0600` file |
+| `packages/timeline-store-sqlite` | no | The production Timeline store, in SQLite |
+| `packages/daemon` | no | The Daemon: wires it all together and serves the API |
+| `apps/iirc` | no | The `iirc` executable |
+| `apps/web` | no | The web frontend: React over its core, built with Vite |
+| `fixtures/transcripts` |  | Real Sessions on Ergo and ngircd, replayed in the tests |
+| `fixtures/nicks` |  | How a nick is read, as data two packages' tests run |
+| `fixtures/themes` |  | Real terminal theme files, for the theme importer's tests |
 
-| Document | Read it for |
-| --- | --- |
-| [`VISION.md`](VISION.md) | Goals and principles |
-| [`GLOSSARY.md`](GLOSSARY.md) | What our words mean. Capitalised terms, such as Line and Entry, are defined there |
-| [`docs/architecture.md`](docs/architecture.md) | How the pieces fit together, and where to extend them |
-| [`docs/adr/`](docs/adr/) | Decisions and why |
-| [`docs/roadmap.md`](docs/roadmap.md) | What we plan to build next |
-| [`docs/known-issues.md`](docs/known-issues.md) | What is built but not yet right |
-| Each package's README | Its written interface: what it does, guarantees, and does not do yet |
-| [`docs/irc-docs-2026-10-26/`](docs/irc-docs-2026-10-26/README.md) | The IRC protocol documents we work from |
-| [`AGENTS.md`](AGENTS.md) | Instructions for coding agents |
+| Document                    | Read it for                                           |
+| --------------------------- | ----------------------------------------------------- |
+| `ARCHITECTURE.md`           | How the pieces fit together, and where to extend them |
+| `ROADMAP.md`                | What we plan to build next                            |
+| `KNOWN-ISSUES.md`           | What is built but not yet right                       |
+| `docs/adr/`                 | Decisions and why                                     |
+| `docs/irc-docs-2026-10-26/` | The IRC protocol documents we work from               |
+| `AGENTS.md`                 | Instructions for coding agents                        |

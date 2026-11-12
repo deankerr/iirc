@@ -1,6 +1,6 @@
 # Known issues
 
-What is built but not yet right, or right only within limits worth knowing before relying on it. Each entry says what happens, how much it matters, and what to do. What is not built at all is in [`roadmap.md`](roadmap.md) and each module's "Not yet".
+What is built but not yet right, or right only within limits worth knowing before relying on it. Each entry says what happens, how much it matters, and what to do.
 
 Report what daily use turns up here, and remove an entry in the change that fixes it.
 

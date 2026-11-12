@@ -1,6 +1,6 @@
 # Roadmap
 
-What iirc plans to build next, grouped by what the Owner would notice, roughly in the order we expect to take it. Each item is built as a vertical slice: the contract, the Client or Daemon, and the web frontend together, reviewed until nothing blocking is left. Each module's README ends with what it does not do yet, in more detail than here, and [`known-issues.md`](known-issues.md) lists what is built but not yet right.
+What iirc plans to build next, grouped by what the Owner would notice, roughly in the order we expect to take it. Each item is built as a vertical slice: the contract, the Client or Daemon, and the web frontend together, reviewed until nothing blocking is left.
 
 The order bends to what the Owner finds in daily use.
 
@@ -16,8 +16,8 @@ A Message's links shown as cards: a page's title and image, an image or video in
 
 ## History and read state from the Ircd
 
-- **`chathistory`:** when a Session begins after a Gap, ask the Ircd for what was said during it, and show it in place with `live` false. The Client routes Activity from history by the Network's state now, not then ([known issues](known-issues.md)), so a `chathistory` Feature must route by the batch's target instead.
-- **`draft/read-marker`:** send `MARKREAD` when the Owner reads, and take the Ircd's own markers, so iirc and the Owner's other clients agree ([ADR 0014](adr/0014-read-markers-and-highlights-belong-to-the-client.md) already has the shape).
+- **`chathistory`:** when a Session begins after a Gap, ask the Ircd for what was said during it, and show it in place with `live` false. The Client routes Activity from history by the Network's state now, not then (known issues), so a `chathistory` Feature must route by the batch's target instead.
+- **`draft/read-marker`:** send `MARKREAD` when the Owner reads, and take the Ircd's own markers, so iirc and the Owner's other clients agree (ADR 0014 already has the shape).
 - **`netsplit` and `netjoin` batches,** shown as one Activity rather than hundreds of quits.
 
 ## Finding Channels and people
@@ -60,7 +60,7 @@ The caps that sharpen facts the Client already keeps, each a Feature: `account-n
 
 - **`iirc config`, `iirc credential` and `iirc backup`,** as Frontends of the API, and **`iirc web`,** the web frontend alone as a proxy to a Daemon elsewhere.
 - **Removing a Network,** not only disabling it.
-- **Key scopes** (`read`, `chat`, `admin`, as [ADR 0006](adr/0006-proportionate-security.md) names them), managing keys through the API, and listing and ending sign-ins.
+- **Key scopes** (`read`, `chat`, `admin`, as ADR 0006 names them), managing keys through the API, and listing and ending sign-ins.
 - **Pruning** what the Timelines keep, and snapshots so a News reader does not fold the Journal from its start.
 - **Pacing per Network,** taking an Ircd's advertised limits, and a cost per Line where an Ircd charges more.
 - **SASL `SCRAM-SHA-256` and `EXTERNAL`,** which need a decision on where a challenge's answer is worked out.

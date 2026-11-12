@@ -1,6 +1,6 @@
 # Recorded transcripts
 
-Real Sessions on real Ircds, written in the [transcript format](../../packages/client/src/testing/README.md) and replayed through the Client by `packages/client/src/scenarios/fixtures.test.ts`. The Client must register, follow each Session, and ignore nothing a correct Client would not. The `>>` Lines are the recorder's, not the Client's, so the replay does not match them.
+Real Sessions on real Ircds, written in the transcript format and replayed through the Client by `packages/client/src/scenarios/fixtures.test.ts`. The Client must register, follow each Session, and ignore nothing a correct Client would not. The `>>` Lines are the recorder's, not the Client's, so the replay does not match them.
 
 | Fixture                     | What it records                                              |
 | --------------------------- | ------------------------------------------------------------ |
