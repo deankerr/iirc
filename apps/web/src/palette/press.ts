@@ -82,14 +82,20 @@ const keyOf = (event: KeyboardEvent): KeyEvent => ({
  * @param event - The key, as the DOM gave it.
  * @returns Where it was.
  */
-const contextOfKey = (registry: AtomRegistry.AtomRegistry, event: KeyboardEvent): KeyContext => ({
-  command: contextOf(registry.get(timelinesState), registry.get(channelState)),
-  composer: composerInput(document) !== undefined,
-  covered: covered(event.target),
-  editing: editing(event.target),
-  palette: registry.get(paletteState).open,
-  platform,
-});
+const contextOfKey = (registry: AtomRegistry.AtomRegistry, event: KeyboardEvent): KeyContext => {
+  // Where the key was really pressed: at the document, a key from inside a shadow root
+  // names the root's host, not the field in it.
+  const [target = event.target] = event.composedPath();
+
+  return {
+    command: contextOf(registry.get(timelinesState), registry.get(channelState)),
+    composer: composerInput(document) !== undefined,
+    covered: covered(target),
+    editing: editing(target),
+    palette: registry.get(paletteState).open,
+    platform,
+  };
+};
 
 /**
  * Gives a key that types to the composer, which takes the focus at once, its caret at the end

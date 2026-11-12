@@ -62,9 +62,11 @@ export const membersOpen = Atom.family((pane: string) =>
   })
 );
 
-/** Whether any Pane shown shows its members, so they are read. */
-export const membersVisible = Atom.make((get) =>
-  shownPanes(get(layoutState), get(pageState).compact).some((pane) => get(membersOpen(pane.id)))
+/** The Panes shown that show their members, by id, so those members are read. */
+export const membersPanes = Atom.make((get) =>
+  shownPanes(get(layoutState), get(pageState).compact)
+    .map((pane) => pane.id)
+    .filter((pane) => get(membersOpen(pane)))
 );
 
 /**

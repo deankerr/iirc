@@ -103,7 +103,8 @@ export type Offer =
  *   when the composer turns to another Timeline, so it never comes back for text it no
  *   longer sits under.
  * - `Offering`: what became of a Say or an Act, with something the Owner can do about it. It
- *   stays with its Timeline until the offer is taken or the notice dismissed.
+ *   stays with its Timeline, through later submits, until the offer is taken, the notice
+ *   dismissed, or a newer notice takes its place, since a composer says one thing at a time.
  * - `Outcome`: what became of something that arrived later, such as a change that did not go
  *   as asked, or a Say that failed with nothing to offer. An edit does not hide it, since
  *   the Owner may not have read it yet. It stays until dismissed or the next submit.
@@ -349,8 +350,17 @@ export const linesOf = (text: string): readonly string[] =>
   text.split(/\r\n|\r|\n/u).filter((line) => line.trim() !== "");
 
 /**
+ * A notice once the Owner submits: an offer stays, since it can still be taken, and anything
+ * else is let go of.
+ * @param notice - The notice.
+ * @returns What is left of it.
+ */
+const afterSubmit = (notice: Notice | undefined): Notice | undefined =>
+  notice?._tag === "Offering" ? notice : undefined;
+
+/**
  * The composer once its text was sent: cleared, and its text the newest in its history,
- * unless it is already.
+ * unless it is already. An offer made of an earlier Say or Act stays.
  * @param draft - The composer.
  * @returns The composer after.
  */
@@ -360,6 +370,7 @@ const sent = (draft: Draft): Draft => ({
     draft.history[0] === draft.text
       ? draft.history
       : [draft.text, ...draft.history].slice(0, historyCap),
+  notice: afterSubmit(draft.notice),
 });
 
 /**
@@ -375,8 +386,16 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
   const draft = draftOf(state, timeline);
   const lines = linesOf(draft.text);
 
+  // Nothing to send still counts as a submit to an outcome, which often arrives once the
+  // composer is empty again: Enter lets go of it.
   if (lines.length === 0) {
-    return { intents: [], state };
+    return {
+      intents: [],
+      state:
+        draft.notice?._tag === "Outcome"
+          ? withDraft(state, timeline, (one) => ({ ...one, notice: undefined }))
+          : state,
+    };
   }
 
   const refuse = (message: string): Submitted => ({
@@ -423,7 +442,7 @@ export const submit = (state: Composers, timeline: Place, context: CommandContex
       state: withDraft(state, timeline, (one) => ({
         ...one,
         confirming: { intents, lines: lines.length },
-        notice: undefined,
+        notice: afterSubmit(one.notice),
       })),
     };
   }

@@ -32,7 +32,7 @@ import { runtime } from "../app/runtime.ts";
 import { signedOut } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, timelinesState, Waits } from "../timelines/atoms.ts";
-import { channelHappened, channelState, membersVisible } from "./state.ts";
+import { channelHappened, channelState, membersPanes } from "./state.ts";
 
 /**
  * The Channel a Pane shows, as held, or nothing read of it yet.
@@ -63,12 +63,28 @@ export const roster = Atom.family((pane: string) =>
 );
 
 /**
+ * The Channels whose members show in a Pane now, by their Timelines' ids, so only those are
+ * read: members over one narrow Pane's Timeline do not have every other Channel's read.
+ */
+const membersRead = Atom.make((get) => {
+  const state = get(timelinesState);
+
+  return new Set(
+    get(membersPanes).flatMap((pane) => {
+      const open = openChannel(state, pane);
+
+      return open === undefined ? [] : [open.timeline];
+    })
+  );
+});
+
+/**
  * The reads the core calls for now, for every Channel the Panes show.
  * @param read - Reads an atom, from the registry or as a derived atom does.
  * @returns The reads.
  */
 const readsNow = (read: <A>(atom: Atom.Atom<A>) => A) =>
-  channelsReads(read(channelState), openChannels(read(timelinesState)), read(membersVisible));
+  channelsReads(read(channelState), openChannels(read(timelinesState)), read(membersRead));
 
 /** The reads the core calls for now. */
 const wanted = Atom.make((get) => readsNow(get));

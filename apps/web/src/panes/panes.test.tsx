@@ -12,7 +12,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
-import { membersShown, membersVisible } from "../channel/state.ts";
+import { membersPanes, membersShown } from "../channel/state.ts";
 import { edit } from "../composer/atoms.ts";
 import { openOptions, optionsState, optionsSync } from "../options/atoms.ts";
 import { pageState } from "../page/atoms.ts";
@@ -1042,7 +1042,7 @@ describe("what stands in front of a Timeline", () => {
     const sheet = {
       column: registry.get(membersShown),
       kept: readChoice("iirc.members"),
-      visible: registry.get(membersVisible),
+      visible: registry.get(membersPanes).length > 0,
     };
 
     await act(async () => {

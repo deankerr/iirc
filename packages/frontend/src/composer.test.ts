@@ -668,6 +668,41 @@ describe("how long a notice lasts", () => {
     }).toStrictEqual({ bad: "AboutText", sent: [undefined, 1] });
   });
 
+  it("keeps an offer through a later submit that is sent, and through lines waiting and confirmed", () => {
+    const state = fold([edited("hi"), offering(), edited("something else")]);
+    const sent = submit(state, channel, context);
+    const many = ["one", "two", "three", "four", "five", "six"].join("\n");
+    const waiting = submit(reduceComposers(state, edited(many)), channel, context);
+    const confirmed = confirm(waiting.state, channel);
+
+    expect({
+      confirmed: [tagOf(confirmed.state), confirmed.intents.length],
+      sent: [tagOf(sent.state), offerOf(draftOf(sent.state, channel).notice)?._tag],
+      waiting: [tagOf(waiting.state), draftOf(waiting.state, channel).confirming?.lines],
+    }).toStrictEqual({
+      confirmed: ["Offering", 6],
+      sent: ["Offering", "SendAgain"],
+      waiting: ["Offering", 6],
+    });
+  });
+
+  it("lets go of an outcome at Enter on an empty composer, and keeps an offer and a complaint there", () => {
+    const empty = (event: ComposerEvent) =>
+      tagOf(submit(reduceComposers(initialComposers, event), channel, context).state);
+
+    const complaint = reduceComposers(
+      submit(fold([edited("/d")]), channel, context).state,
+      // The same text again, as the runtime sets it: nothing was edited.
+      edited("/d")
+    );
+
+    expect({
+      complaint: tagOf(complaint),
+      offering: empty(offering()),
+      outcome: empty({ _tag: "Noticed", message: "no", timeline: channel }),
+    }).toStrictEqual({ complaint: "AboutText", offering: "Offering", outcome: undefined });
+  });
+
   it("carries a draft's offer and outcome to its Timeline, and leaves a notice about its text behind", () => {
     const draft = placeOfDraft(network, "bob");
 

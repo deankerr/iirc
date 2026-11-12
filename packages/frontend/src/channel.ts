@@ -551,18 +551,22 @@ export const openChannels = (state: Timelines): readonly OpenChannel[] => {
 };
 
 /**
- * The reads to make now, for every Channel the Panes show, as `channelReads` gives each.
+ * The reads to make now, for every Channel the Panes show, as `channelReads` gives each:
+ * its head, and its members only where they show, so a Channel whose members are hidden is
+ * never asked for them.
  * @param state - The Channels.
  * @param open - The Channels shown.
- * @param members - Whether the members show.
+ * @param members - The Channels whose members show, by their Timelines' ids.
  * @returns The reads.
  */
 export const channelsReads = (
   state: Channels,
   open: readonly OpenChannel[],
-  members: boolean
+  members: ReadonlySet<TimelineId>
 ): readonly ChannelRead[] =>
-  open.flatMap((one) => channelReads(channelIn(state, one.timeline), one, members));
+  open.flatMap((one) =>
+    channelReads(channelIn(state, one.timeline), one, members.has(one.timeline))
+  );
 
 /**
  * What happened to the Channels: an event of one, which goes to the Channel it is of, or of
