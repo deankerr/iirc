@@ -1,0 +1,13 @@
+/* Two cells of the grid, the glyph in the middle, so a wider glyph from a fallback font
+   spreads evenly either side rather than pushing what follows. */
+.icon {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  inline-size: 2ch;
+  font-style: normal;
+  font-weight: normal;
+  /* Drawn as text, never as a colour emoji. */
+  font-variant-emoji: text;
+  line-height: 1;
+}

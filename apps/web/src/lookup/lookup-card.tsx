@@ -16,7 +16,7 @@ import { useId } from "react";
 
 import { perform } from "../composer/atoms.ts";
 import { Nick } from "../timelines/line.tsx";
-import { Button } from "../ui/button.tsx";
+import { Button, IconButton } from "../ui/button.tsx";
 import { dismissCard, paneCard } from "./atoms.ts";
 
 import styles from "./lookup-card.module.css";
@@ -53,6 +53,7 @@ const Channel = ({ channel }: { readonly channel: ChannelShown }) => {
         onPress={() => {
           run([choose]);
         }}
+        variant="text"
       >
         {text}
       </Button>
@@ -168,14 +169,16 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
           <span className={styles.dim}>{shown.kind === "Whois" ? "whois" : "whowas"} </span>
           <Nick colour={shown.colour} nick={shown.nick} />
         </h3>
-        <Button
-          aria-label="Close the Lookup"
+        <IconButton
+          className={styles.close}
+          icon="close"
+          keys="Esc"
+          label="Close the Lookup"
           onPress={() => {
             close();
           }}
-        >
-          close
-        </Button>
+          size="small"
+        />
       </div>
       <div aria-live="polite" className={styles.body}>
         {body._tag === "Profiles" ? (

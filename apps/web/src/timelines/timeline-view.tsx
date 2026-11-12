@@ -105,6 +105,7 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
             onPress={() => {
               askOlder({ mode: "Asked", timeline });
             }}
+            size="small"
           >
             Load older
           </Button>
@@ -138,6 +139,7 @@ const JumpToLatest = ({ timeline }: { readonly timeline: TimelineId }) => {
         onPress={() => {
           jump(timeline);
         }}
+        size="small"
       >
         Jump to latest
       </Button>

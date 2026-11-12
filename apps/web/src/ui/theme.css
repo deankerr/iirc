@@ -28,6 +28,9 @@
   --measure: 44ch;
   /* The least a control's hit area measures on a touch screen, each way. */
   --target-size: 44px;
+  /* A button's padding, in em and ch, so it keeps its shape at any text size. */
+  --control-pad-block: 0.25em;
+  --control-pad-inline: 1ch;
   /* What the notch, the rounded corners, and the home bar cover, as the device says. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);

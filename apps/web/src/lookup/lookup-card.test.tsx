@@ -247,7 +247,7 @@ describe("the Lookup card", () => {
 
     expect({ after: card() ?? null, words }).toStrictEqual({
       after: null,
-      words: "whois nobodycloseNo one uses the nick nobody now (401).",
+      words: "whois nobody×No one uses the nick nobody now (401).",
     });
   });
 

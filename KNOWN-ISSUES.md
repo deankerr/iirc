@@ -14,7 +14,7 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 
 ## On a phone
 
-- **The composer may not stay above iOS Safari's keyboard by resizing.** The page asks for `interactive-widget=resizes-content` and is `100dvh` tall, which Chromium on Android honours, but Safari ignores the former and keeps the page's height, scrolling it instead so the focused composer shows, which can push the bar out of view while typing.
+- **The composer may not stay above iOS Safari's keyboard by resizing.** The page asks for `interactive-widget=resizes-content` and is `100dvh` tall, which Chromium on Android honours, but Safari ignores the former and keeps the page's height, scrolling it instead so the focused composer shows, which can push the top of the page out of view while typing: on a phone, the slim bar with the sidebar's button and the Panes' switcher, and the focused Pane's status bar under it.
 - **Back does not close the drawer or the sheet.** There is no router, so Android's back gesture leaves the page. Escape, a press outside, or a choice closes them.
 
 ## Behaviour to know
@@ -37,7 +37,7 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 ## Operation
 
 - **A SQLite Journal from before Changes could not store `ui` options,** and a change to one answers 500. No Daemon has written a Journal in earnest yet; a new data directory has the current layout.
-- **The web script is one file of about 900 kB,** 290 kB gzipped, not split.
+- **The web script is one file of about 1.1 MB,** 350 kB gzipped, not split.
 - **Rebuilding `views.sqlite`** after a new projection version folds the whole Journal again on start, which grows with history.
 
 ## Tests

@@ -14,8 +14,9 @@ import type { KeyboardEvent } from "react";
 import { Fragment, useContext, useId, useLayoutEffect, useRef } from "react";
 
 import { composerFocus } from "../composer/atoms.ts";
+import { PaneBar } from "../panes/pane-bar.tsx";
 import { Nick } from "../timelines/line.tsx";
-import { Button } from "../ui/button.tsx";
+import { IconButton } from "../ui/button.tsx";
 import { dateOf } from "../ui/dates.ts";
 import {
   closeSearch,
@@ -128,10 +129,11 @@ const useStanding = (): string => {
 };
 
 /**
- * The search view.
+ * The search view, in a Pane.
+ * @param props - The Pane.
  * @returns The view.
  */
-export const SearchView = () => {
+export const SearchView = ({ pane }: { readonly pane: string }) => {
   const registry = useContext(RegistryContext);
   const search = useAtomValue(searchState);
   const rows = useAtomValue(resultRows);
@@ -254,6 +256,22 @@ export const SearchView = () => {
 
   return (
     <section aria-label="Search" className={styles.view}>
+      <PaneBar
+        end={
+          <IconButton
+            icon="close"
+            keys="Esc"
+            label="Close the search"
+            onPress={() => {
+              close();
+              toComposer();
+            }}
+            size="small"
+          />
+        }
+        name="search"
+        pane={pane}
+      />
       <search>
         <form
           className={styles.header}
@@ -287,15 +305,6 @@ export const SearchView = () => {
             type="text"
             value={search.query}
           />
-          <Button
-            aria-label="Close the search"
-            onPress={() => {
-              close();
-              toComposer();
-            }}
-          >
-            close
-          </Button>
         </form>
       </search>
       {search.error === undefined ? null : (

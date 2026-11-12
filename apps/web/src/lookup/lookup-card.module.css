@@ -11,16 +11,16 @@
 
 .head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
 }
 
-.head > :last-child {
+.close {
   margin-left: auto;
-  padding: 0 var(--space-2);
 }
 
 .heading {
+  margin: 0;
   font: inherit;
 }
 
@@ -65,10 +65,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.channel > button {
-  padding: 0;
 }
 
 .symbol {

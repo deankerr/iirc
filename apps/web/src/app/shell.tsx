@@ -3,9 +3,10 @@
  * options and signing out at its foot, the Panes, each showing a Timeline or the options,
  * with its Channel's members beside it when shown, the composer under them, writing to the
  * focused Pane's Timeline, and the command palette and the keys. The sidebar's edge drags
- * or takes arrows to resize it, and it can be hidden, leaving a button beside the composer
- * that marks what is unread. On a compact screen the sidebar is a drawer instead, opened
- * from the same button in one slim bar, beside the Panes' switcher.
+ * or takes arrows to resize it, and it can be hidden, leaving a button before the composer's
+ * prompt that marks what is unread, and the focus goes to the composer if it was in the
+ * sidebar. On a compact screen the sidebar is a drawer instead, opened from a button in one
+ * slim bar, beside the Panes' switcher.
  *
  * @packageDocumentation
  */
@@ -16,8 +17,9 @@ import type { Attempt } from "@iirc/frontend/sign-in";
 import { Atom } from "effect/reactivity";
 import { useContext, useLayoutEffect, useRef } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
-import { Button as AriaButton, Dialog, Modal, ModalOverlay } from "react-aria-components";
+import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 
+import { composerFocus } from "../composer/atoms.ts";
 import { MainComposer } from "../composer/composer.tsx";
 import { CredentialPrompt } from "../options/credential-prompt.tsx";
 import { compact, drawerShown } from "../page/drawer.ts";
@@ -38,6 +40,7 @@ import { Pane } from "../panes/pane.tsx";
 import { ImportDialog } from "../theme/import-dialog.tsx";
 import { sidebarNetworks } from "../timelines/atoms.ts";
 import { Sidebar } from "../timelines/sidebar.tsx";
+import { IconButton } from "../ui/button.tsx";
 
 import styles from "./shell.module.css";
 
@@ -72,21 +75,21 @@ const SidebarButton = () => {
   const registry = useContext(RegistryContext);
 
   return (
-    <AriaButton
+    <IconButton
       aria-expanded={drawer ? shown === "Sidebar" : false}
-      aria-label={`${drawer ? "Networks" : "Show the sidebar"}${level === undefined ? "" : unreadWords[level]}`}
-      className={styles.menu}
+      className={drawer ? undefined : styles.show}
+      command={drawer ? undefined : "sidebar.toggle"}
+      icon={drawer ? "menu" : "showSidebar"}
+      label={`${drawer ? "Networks" : "Show the sidebar"}${level === undefined ? "" : unreadWords[level]}`}
       onPress={() => {
         showSidebar(registry, true);
       }}
+      size={drawer ? "regular" : "small"}
     >
-      <span aria-hidden="true" title={drawer ? undefined : "Show the sidebar (Alt+N)"}>
-        ≡
-      </span>
       {level === undefined ? null : (
         <span aria-hidden="true" className={`${styles.mark} ${markClass[level]}`} />
       )}
-    </AriaButton>
+    </IconButton>
   );
 };
 
@@ -209,6 +212,37 @@ const SidebarEdge = () => {
 };
 
 /**
+ * The sidebar beside the Panes, and its edge. Hidden while the focus is in it, as its own
+ * button or Alt+N does, it gives the focus to the composer, so the focus is never left on
+ * the page's body.
+ * @param props - The attempt to sign out, for the sidebar's foot.
+ * @returns The sidebar and its edge.
+ */
+const SidebarColumn = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
+  const registry = useContext(RegistryContext);
+  const column = useRef<HTMLDivElement>(null);
+
+  // A layout effect, whose cleanup runs as the sidebar goes but before its nodes leave the
+  // page, so it still sees where the focus is.
+  useLayoutEffect(() => {
+    const node = column.current;
+
+    return () => {
+      if (node?.contains(document.activeElement) === true) {
+        registry.set(composerFocus, registry.get(composerFocus) + 1);
+      }
+    };
+  }, [registry]);
+
+  return (
+    <div className={styles.column} ref={column}>
+      <Sidebar signOut={attempt} />
+      <SidebarEdge />
+    </div>
+  );
+};
+
+/**
  * The sidebar as a drawer from the side, on a compact screen: a modal dialog, which a
  * press on the page beside it or Escape closes, and so does choosing what to show.
  * @param props - The attempt to sign out, for the sidebar's foot.
@@ -265,24 +299,14 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
         </header>
       ) : null}
       <div className={`${styles.body} ${beside ? styles.withSidebar : ""}`}>
-        {beside ? (
-          <>
-            <Sidebar signOut={attempt} />
-            <SidebarEdge />
-          </>
-        ) : null}
+        {beside ? <SidebarColumn signOut={attempt} /> : null}
         <main className={styles.main}>
           {drawn ? null : <PaneSwitcher placement="Row" />}
           <div className={styles.view}>
             <PaneTree render={(pane) => <Pane pane={pane} />} />
           </div>
           <CredentialPrompt />
-          <div className={styles.foot}>
-            {beside || drawn ? null : <SidebarButton />}
-            <div className={styles.composer}>
-              <MainComposer />
-            </div>
-          </div>
+          <MainComposer before={beside || drawn ? undefined : <SidebarButton />} />
         </main>
       </div>
       {drawn ? <SidebarDrawer signOut={attempt} /> : null}

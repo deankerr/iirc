@@ -4,8 +4,8 @@
  * unread in it with small counts of what calls for the Owner, and a footer with the options
  * and signing out. Choosing a row opens its Timeline in the focused Pane, and Options
  * opens the options view there, each closing the sidebar's drawer on a compact screen. What
- * the focused Pane shows is chosen, and what another Pane shows is marked more quietly,
- * with its number. React Aria's Tree gives it its keyboard: arrows move and expand, and
+ * the focused Pane shows is chosen, in the accent, and what another Pane shows is marked
+ * dimly, with its number, as the Panes' status bars accent the focused one and dim the rest. React Aria's Tree gives it its keyboard: arrows move and expand, and
  * Enter or Space opens.
  *
  * @packageDocumentation
@@ -33,7 +33,9 @@ import { perform } from "../composer/atoms.ts";
 import { openOptions } from "../options/atoms.ts";
 import { compact, drawerState } from "../page/drawer.ts";
 import { signOut } from "../sign-in/atoms.ts";
-import { Button } from "../ui/button.tsx";
+import { Button, IconButton } from "../ui/button.tsx";
+import { Icon } from "../ui/icon.tsx";
+import type { IconName } from "../ui/icon.tsx";
 import { open, sidebarNetworks, timelinesState } from "./atoms.ts";
 
 import styles from "./sidebar.module.css";
@@ -60,7 +62,7 @@ const networkKey = (network: string) => `network:${network}`;
  * its colour, the word a screen reader hears, and why, when it is offline or stopped.
  */
 interface Standing {
-  readonly symbol: string;
+  readonly icon: IconName;
   readonly word: string;
   readonly className: string;
   readonly why: string | undefined;
@@ -75,7 +77,7 @@ const standingOf = (network: SidebarNetwork): Standing => {
   if (network.running?._tag === "Stopped") {
     return {
       className: styles.offline,
-      symbol: "\u25A0",
+      icon: "stopped",
       why: network.running.reason,
       word: "stopped",
     };
@@ -85,17 +87,22 @@ const standingOf = (network: SidebarNetwork): Standing => {
 
   switch (connection._tag) {
     case "Connected": {
-      return { className: styles.connected, symbol: "\u25CF", why: undefined, word: "connected" };
+      return { className: styles.connected, icon: "connected", why: undefined, word: "connected" };
     }
 
     case "Connecting": {
-      return { className: styles.connecting, symbol: "\u25D0", why: undefined, word: "connecting" };
+      return {
+        className: styles.connecting,
+        icon: "connecting",
+        why: undefined,
+        word: "connecting",
+      };
     }
 
     case "Offline": {
       return {
         className: styles.offline,
-        symbol: "\u25CB",
+        icon: "offline",
         why: connection.reason === undefined ? undefined : endReason(connection.reason),
         word: "offline",
       };
@@ -104,7 +111,7 @@ const standingOf = (network: SidebarNetwork): Standing => {
     case "Unknown": {
       return {
         className: styles.connecting,
-        symbol: "\u25CC",
+        icon: "unknown",
         why: undefined,
         word: "not known yet",
       };
@@ -266,9 +273,11 @@ const NetworkRow = ({
 
   return (
     <>
+      {/* The Tree's own chevron, outside the tab order, as its row takes the keys: a part of
+          the row, not one of the buttons. */}
       {expandable ? (
         <AriaButton className={styles.chevron} slot="chevron">
-          <span aria-hidden>{expanded ? "\u25BE" : "\u25B8"}</span>
+          <Icon name={expanded ? "expanded" : "collapsed"} />
         </AriaButton>
       ) : (
         <span className={styles.chevron} />
@@ -278,12 +287,8 @@ const NetworkRow = ({
       </bdi>
       <Counts activity={activity} calling={calling} />
       <PaneMark pane={pane} />
-      <span
-        aria-hidden
-        className={`${styles.standing} ${standing.className}`}
-        title={standingWords(standing)}
-      >
-        {standing.symbol}
+      <span className={styles.standing} title={standingWords(standing)}>
+        <Icon className={standing.className} name={standing.icon} />
       </span>
     </>
   );
@@ -316,38 +321,38 @@ const Footer = ({
         </p>
       ) : null}
       <div className={styles.controls}>
-        <span className={optionsShown ? styles.current : undefined}>
-          <Button
-            aria-current={optionsShown ? "page" : false}
-            onPress={() => {
-              showOptions("");
-              setDrawer("None");
-            }}
-          >
-            Options
-          </Button>
-        </span>
+        <Button
+          aria-current={optionsShown ? "page" : false}
+          onPress={() => {
+            showOptions("");
+            setDrawer("None");
+          }}
+          size="small"
+          variant="quiet"
+        >
+          Options
+        </Button>
         <Button
           isPending={attempt._tag === "Waiting"}
           onPress={() => {
             signOutNow();
           }}
+          size="small"
+          variant="quiet"
         >
           Sign out
         </Button>
         {drawer ? null : (
-          <span className={styles.hide}>
-            <Button
-              aria-label="Hide the sidebar"
-              onPress={() => {
-                carryOut([{ _tag: "ShowSidebar", shown: false }]);
-              }}
-            >
-              <span aria-hidden title="Hide the sidebar (Alt+N)">
-                {"\u00AB"}
-              </span>
-            </Button>
-          </span>
+          <IconButton
+            className={styles.hide}
+            command="sidebar.toggle"
+            icon="hideSidebar"
+            label="Hide the sidebar"
+            onPress={() => {
+              carryOut([{ _tag: "ShowSidebar", shown: false }]);
+            }}
+            size="small"
+          />
         )}
       </div>
     </footer>

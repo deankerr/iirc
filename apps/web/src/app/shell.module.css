@@ -62,9 +62,11 @@
   background: var(--color-accent);
 }
 
+/* Focused from the keyboard: the line in the focus colour, as wide as an edge either side. */
 .edge:focus-visible {
   background: var(--color-focus);
-  outline: var(--border-width) solid var(--color-focus);
+  outline: none;
+  box-shadow: 0 0 0 var(--edge-width) var(--color-focus);
 }
 
 .main {
@@ -80,68 +82,24 @@
   min-height: 0;
 }
 
-/* The composer, with the sidebar's button before it while the sidebar is hidden. */
-.foot {
-  display: flex;
-  min-width: 0;
+/* The sidebar and its edge, two of the grid's columns. */
+.column {
+  display: contents;
 }
 
-.composer {
-  flex: 1;
-  min-width: 0;
+/* The button that shows the sidebar, while it is hidden, before the composer's prompt. */
+.show {
+  align-self: flex-start;
 }
 
-/* The sidebar's button, with its mark while anything said is unread: in the bar on a
-   compact screen, and before the composer while the sidebar is hidden. */
-.menu {
-  position: relative;
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--target-size);
-  min-height: var(--target-size);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  font-size: calc(var(--font-size) * 1.5);
-  cursor: default;
-}
-
-.menu[data-pressed] {
-  background: var(--color-background);
-}
-
-.menu[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-  outline-offset: calc(-1 * var(--border-width));
-}
-
-.foot .menu {
-  min-width: 4ch;
-  min-height: 0;
-  border-top: var(--border-width) solid var(--color-border);
-  border-right: var(--border-width) solid var(--color-border);
-  background: var(--color-surface);
-  font-size: var(--font-size);
-}
-
+/* What is unread, as a dot at the corner of the sidebar's button. */
 .mark {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  width: var(--space-3);
-  height: var(--space-3);
+  top: 0.15em;
+  right: 0.15em;
+  width: 0.45em;
+  height: 0.45em;
   border-radius: 50%;
-}
-
-.foot .mark {
-  top: var(--space-2);
-  right: var(--space-2);
-  width: var(--space-2);
-  height: var(--space-2);
 }
 
 .markMessage {
@@ -189,14 +147,9 @@
   flex: 1;
 }
 
-/* On a touch screen, the edge's grip and the sidebar's button are a finger's size. */
+/* On a touch screen, the edge's grip is a finger's size. */
 @media (pointer: coarse) {
   .edge::before {
     inset: 0 calc(var(--target-size) / -2);
-  }
-
-  .foot .menu {
-    min-width: var(--target-size);
-    min-height: var(--target-size);
   }
 }

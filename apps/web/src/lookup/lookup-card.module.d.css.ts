@@ -4,6 +4,7 @@ declare const styles: {
   readonly card: string;
   readonly channel: string;
   readonly channels: string;
+  readonly close: string;
   readonly dim: string;
   readonly field: string;
   readonly head: string;

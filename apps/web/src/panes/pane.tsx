@@ -1,6 +1,7 @@
 /**
- * One Pane: its open Timeline under its status bar, the options, the search, or a Direct
- * Message not yet begun, and its Channel's members under the bar while they show. Among
+ * One Pane: its status bar, and under it its open Timeline, the options, the search, or a
+ * Direct Message not yet begun, each of which draws the bar it needs, and its Channel's
+ * members under the bar while they show. Among
  * several shown, the one with the focus is marked along its top and its bottom. A press or
  * the focus moving anywhere in it gives it the focus, so the composer then writes to its
  * Timeline. It is measured as it is drawn, since a narrow Pane shows its members over its
@@ -33,11 +34,11 @@ import styles from "./pane.module.css";
 const main = (pane: PaneOf<PaneView>) => {
   switch (pane.view.main._tag) {
     case "Options": {
-      return <OptionsView />;
+      return <OptionsView pane={pane.id} />;
     }
 
     case "Search": {
-      return <SearchView />;
+      return <SearchView pane={pane.id} />;
     }
 
     case "Timeline": {
@@ -45,7 +46,9 @@ const main = (pane: PaneOf<PaneView>) => {
     }
 
     case "DirectDraft": {
-      return <DraftView network={pane.view.main.network} nick={pane.view.main.nick} />;
+      return (
+        <DraftView network={pane.view.main.network} nick={pane.view.main.nick} pane={pane.id} />
+      );
     }
 
     default: {

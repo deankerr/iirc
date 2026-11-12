@@ -114,30 +114,8 @@
 }
 
 /* The palette's button, drawn only where there may be no keys to open it with. */
-.palette {
+.line .palette {
   display: none;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--target-size);
-  min-height: var(--target-size);
-  margin-right: calc(-1 * var(--space-3));
-  padding: 0;
-  border: 0;
-  border-left: var(--border-width) solid var(--color-border);
-  background: transparent;
-  color: var(--color-accent);
-  font: inherit;
-  cursor: default;
-}
-
-.palette[data-pressed] {
-  background: var(--color-background);
-}
-
-.palette[data-focus-visible] {
-  outline: var(--border-width) solid var(--color-focus);
-  outline-offset: calc(-1 * var(--border-width));
 }
 
 /* On a touch screen the field itself is a finger's height, its one line in the middle. */
@@ -160,7 +138,7 @@
     align-items: center;
   }
 
-  .palette {
-    display: flex;
+  .line .palette {
+    display: inline-flex;
   }
 }

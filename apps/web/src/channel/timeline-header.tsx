@@ -1,27 +1,25 @@
 /**
- * A Pane's status bar, over its open Timeline: one line across the Pane, with its number
- * among several, the Timeline's name, dim in a Pane without the focus, and what it says
- * beside it. A Channel's says its modes, where Self stands when not in it, and its topic, cut
- * to the line, which a press discloses in full under the bar, wrapped, saying in its place
- * who set it and when, and at the right the members' toggle, which says how many there are. A Direct Message's says
- * so, or why it no longer follows its partner, and a Network's how its connection stands.
+ * A Pane's status bar while it shows a Timeline, or none yet: what the bar says after the
+ * Timeline's name. A Channel's says its modes, where Self stands when not in it, and its
+ * topic, cut to the line, which a press discloses in full under the bar, wrapped, saying in
+ * its place who set it and when, and at the right the members' toggle, which says how many
+ * there are. A Direct Message's says so, or why it no longer follows its partner, and a
+ * Network's how its connection stands. With no Timeline shown, the bar names the Pane alone.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Header, TopicShown } from "@iirc/frontend/channel";
 import { useState } from "react";
-import {
-  Button as AriaButton,
-  Disclosure,
-  DisclosurePanel,
-  ToggleButton,
-} from "react-aria-components";
+import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
-import { alone, focusedId, paneNumber } from "../panes/atoms.ts";
+import { paneNameOf } from "../panes/atoms.ts";
+import { BarText, PaneBar } from "../panes/pane-bar.tsx";
 import { paneTimeline } from "../timelines/atoms.ts";
 import { Inlines } from "../timelines/inlines.tsx";
+import { Tip, ToggleButton } from "../ui/button.tsx";
 import { formattedAt } from "../ui/dates.ts";
+import { Icon } from "../ui/icon.tsx";
 import { timelineHeader } from "./atoms.ts";
 import { membersOpen, toggleMembers } from "./state.ts";
 
@@ -29,9 +27,6 @@ import styles from "./timeline-header.module.css";
 
 // The Owner's own clock and time zone, which only the view reads.
 const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
-/** The glyph the members' toggle shows: a panel at the right, as the column is. */
-const membersGlyph = "◨";
 
 /**
  * Who set a topic, and when, in a few dim words.
@@ -81,7 +76,7 @@ const TopicLine = ({ open, topic }: { readonly topic: TopicShown; readonly open:
     }
 
     case "None": {
-      return <span className={`${styles.dim} ${styles.rest}`}>no topic</span>;
+      return <BarText>no topic</BarText>;
     }
 
     case "Set": {
@@ -121,63 +116,59 @@ const MembersToggle = ({
   const toggle = useAtomSet(toggleMembers);
 
   return (
-    <ToggleButton
-      aria-label={count === undefined ? "Members" : `Members, ${count}`}
-      className={styles.toggle}
-      // Which Pane's toggle this is, so a press on it is not a press outside its members.
-      data-members-toggle={pane}
-      isSelected={shown}
-      onChange={(isSelected) => {
-        toggle({ pane, shown: isSelected });
-      }}
-    >
-      <span aria-hidden>{membersGlyph}</span>
-      {count === undefined ? null : <span>{count}</span>}
-    </ToggleButton>
+    <Tip command="members.toggle" label="Members">
+      <ToggleButton
+        aria-label={count === undefined ? "Members" : `Members, ${count}`}
+        // Which Pane's toggle this is, so a press on it is not a press outside its members.
+        data-members-toggle={pane}
+        isSelected={shown}
+        onChange={(isSelected) => {
+          toggle({ pane, shown: isSelected });
+        }}
+        size="small"
+        variant="quiet"
+      >
+        <Icon name="members" />
+        {count === undefined ? null : <span>{count}</span>}
+      </ToggleButton>
+    </Tip>
   );
 };
 
 /**
  * What a Header says after its name, on the bar's one line.
- * @param props - The header, the Pane, and whether its topic is disclosed.
+ * @param props - The header, and whether its topic is disclosed.
  * @returns Its details.
  */
-const Details = ({
-  header,
-  open,
-  pane,
-}: {
-  readonly header: Header;
-  readonly pane: string;
-  readonly open: boolean;
-}) => {
+const Details = ({ header, open }: { readonly header: Header; readonly open: boolean }) => {
   switch (header._tag) {
     case "Channel": {
       return (
         <>
           {header.modes === undefined ? null : (
-            <bdi className={`${styles.dim} ${styles.modes}`}>{header.modes}</bdi>
+            <BarText fill={false}>
+              <bdi>{header.modes}</bdi>
+            </BarText>
           )}
           {header.note === undefined ? (
             <TopicLine open={open} topic={header.topic} />
           ) : (
-            <span className={`${styles.note} ${styles.rest}`}>{header.note}</span>
+            <BarText tone="Note">{header.note}</BarText>
           )}
-          <MembersToggle count={header.members} pane={pane} />
         </>
       );
     }
 
     case "Direct": {
       return header.note === undefined ? (
-        <span className={`${styles.dim} ${styles.rest}`}>Direct Message</span>
+        <BarText>Direct Message</BarText>
       ) : (
-        <span className={`${styles.note} ${styles.rest}`}>{header.note}</span>
+        <BarText tone="Note">{header.note}</BarText>
       );
     }
 
     case "Network": {
-      return <span className={`${styles.dim} ${styles.rest}`}>{header.status}</span>;
+      return <BarText>{header.status}</BarText>;
     }
 
     default: {
@@ -187,21 +178,19 @@ const Details = ({
 };
 
 /**
- * A Pane's status bar, while it shows a Timeline.
+ * A Pane's status bar, while it shows a Timeline or is still to show one.
  * @param props - The Pane.
- * @returns The bar, or nothing.
+ * @returns The bar.
  */
 export const TimelineHeader = ({ pane }: { readonly pane: string }) => {
   const shown = useAtomValue(paneTimeline(pane));
   const header = useAtomValue(timelineHeader(pane));
-  const number = useAtomValue(paneNumber(pane));
-  const focused = useAtomValue(focusedId) === pane;
-  const one = useAtomValue(alone);
+  const paneName = useAtomValue(paneNameOf(pane));
   // Whether the topic is disclosed, closed again for each Timeline the Pane opens.
   const [disclosed, setDisclosed] = useState<{ readonly timeline: string } | undefined>();
 
   if (shown._tag !== "Shown") {
-    return null;
+    return <PaneBar name={paneName} pane={pane} />;
   }
 
   const name = header?.name ?? shown.description?.name ?? "Timeline";
@@ -209,27 +198,25 @@ export const TimelineHeader = ({ pane }: { readonly pane: string }) => {
   const open = disclosed?.timeline === shown.timeline;
 
   return (
-    <header className={styles.header} data-dim={number !== undefined && !one && !focused}>
-      <Disclosure
-        className={styles.disclosure}
-        isExpanded={open}
-        onExpandedChange={(expanded) => {
-          setDisclosed(expanded ? { timeline: shown.timeline } : undefined);
-        }}
+    <Disclosure
+      className={styles.disclosure}
+      isExpanded={open}
+      onExpandedChange={(expanded) => {
+        setDisclosed(expanded ? { timeline: shown.timeline } : undefined);
+      }}
+    >
+      <PaneBar
+        end={
+          header?._tag === "Channel" ? (
+            <MembersToggle count={header.members} pane={pane} />
+          ) : undefined
+        }
+        below={<TopicPanel topic={topic} />}
+        name={name}
+        pane={pane}
       >
-        <div className={styles.line}>
-          {number === undefined ? null : (
-            <span className={styles.dim} title={`Pane ${number}`}>
-              {number}
-            </span>
-          )}
-          <h2 className={styles.name}>
-            <bdi>{name}</bdi>
-          </h2>
-          {header === undefined ? null : <Details header={header} open={open} pane={pane} />}
-        </div>
-        <TopicPanel topic={topic} />
-      </Disclosure>
-    </header>
+        {header === undefined ? null : <Details header={header} open={open} />}
+      </PaneBar>
+    </Disclosure>
   );
 };
