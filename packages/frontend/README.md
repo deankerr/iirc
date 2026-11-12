@@ -117,18 +117,17 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 Keybindings as data over the registry. A binding names a chord, a command, its arguments, and a `when`. `resolve` gives a pressed key's intents, or nothing, so a key no binding takes is never swallowed.
 
-| Keys                              | Does                                     |
-| --------------------------------- | ---------------------------------------- |
-| `mod+k`, `mod+shift+p`            | Open the palette                         |
-| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline               |
-| `alt+a`                           | The Timeline that calls most             |
-| `alt+m`                           | Show or hide the members                 |
-| `mod+,`                           | Show the options                         |
-| `mod+shift+f`                     | Show the search                          |
-| `i`                               | Focus the composer, from outside a field |
-| `alt+shift+arrows`                | Move between Panes                       |
-| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down              |
-| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink      |
+| Keys                              | Does                                |
+| --------------------------------- | ----------------------------------- |
+| `mod+k`, `mod+shift+p`            | Open the palette                    |
+| `alt+arrowdown`, `alt+arrowup`    | Next and previous Timeline          |
+| `alt+a`                           | The Timeline that calls most        |
+| `alt+m`                           | Show or hide the members            |
+| `mod+,`                           | Show the options                    |
+| `mod+shift+f`                     | Show the search                     |
+| `alt+shift+arrows`                | Move between Panes                  |
+| `alt+shift+s`, `alt+shift+d`      | Split side by side, or down         |
+| `alt+shift+w`, `z`, `e`, `g`, `r` | Close, zoom, equalize, grow, shrink |
 
 - **A chord is parsed.** `formatChord` writes one so that it parses back the same. A binding that does not parse, or names no command, is dropped, so a keymap holds only bindings that can fire.
 - **`mod` is Cmd on a Mac and Ctrl elsewhere.** `showChord` writes a chord as the platform does.
@@ -136,6 +135,7 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 - **AltGr in a field is typing,** so German AltGr+Q types `@`.
 - **The last binding that applies wins,** so overrides go after the defaults.
 - **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses.
+- **A key that types goes to the composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, the palette, an overlay holding the focus, or no composer to write to, leaves the key alone.
 - **The Panes' keys are Alt+Shift and a letter.** Option on a Mac types another character, which a letter's physical key names back and punctuation's does not.
 
 ## Palette
@@ -155,6 +155,7 @@ What the Owner is writing in each Timeline, what they sent from it, and why some
 - **Submitting sends every non-empty line, in order, or nothing.** The first line that cannot be sent says why, with the text kept. More than 5 lines wait for the Owner to confirm, and what is confirmed is always exactly what is shown.
 - **A Credential's value typed here is let go of at once.** It sends nothing, clears the draft, and enters no history.
 - **A refusal is said in words under the composer it came from,** and nothing after it is sent.
+- **A notice lasts as long as it is true.** One about the text as typed, such as no such command, goes when the text is edited and when the composer turns to another Timeline. One with an offer stays with its Timeline until taken or dismissed. One of an outcome that arrived later stays until dismissed or the next submit, since an edit must not hide what the Owner may not have read.
 - **What failed says what is safe to do next, and nothing is sent twice.** A Say or an Act that was not journaled may be sent again under the same intent. One that was journaled is never sent again. One with no answer can only be checked again.
 
 ## Options

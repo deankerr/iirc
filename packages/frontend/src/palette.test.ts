@@ -459,8 +459,8 @@ describe("a choice and the draft", () => {
         history: [],
         kept: "",
         notice: {
+          _tag: "AboutText",
           message: "/me was not put in, since the composer has text. Clear it and choose again.",
-          offer: undefined,
         },
         recalled: undefined,
         text: "half a thought",

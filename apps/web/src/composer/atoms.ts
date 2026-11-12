@@ -701,7 +701,9 @@ const sendAll = (
 /**
  * Carries what was typed under a draft, unsent, to its Timeline's composer when the draft
  * comes to show that Timeline, as when the partner spoke first or another Frontend said
- * something to them, so nothing typed is lost. Mounted once for the page.
+ * something to them, so nothing typed is lost. It also says when the composer turns to
+ * another Timeline, which lets go of a complaint about the text it leaves. Mounted once for
+ * the page.
  */
 export const draftsCarried = runtime
   .atom((get) =>
@@ -712,6 +714,7 @@ export const draftsCarried = runtime
 
         return registry.subscribe(timelinesState, (after) => {
           const met = draftsMetBetween(before, after);
+          const left = placeIn(before);
 
           before = after;
 
@@ -721,6 +724,10 @@ export const draftsCarried = runtime
               from: placeOfDraft(one.network, one.nick),
               to: one.timeline,
             });
+          }
+
+          if (left !== placeIn(after)) {
+            happened(registry, { _tag: "Left", timeline: left });
           }
         });
       }),

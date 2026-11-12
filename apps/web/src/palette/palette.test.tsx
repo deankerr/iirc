@@ -270,28 +270,133 @@ describe("the palette and the keys", () => {
     expect(names).toStrictEqual(["libera", "#iirc", "libera", "#iirc"]);
   });
 
-  it("types a key into the composer that a binding outside a field would take, and swallows nothing", async () => {
+  it("gives a key that types to the composer, with the caret at the end of its draft, and swallows nothing", async () => {
     const { container, registry } = await signedIn();
     const composer = composerOf(container);
+
+    await act(async () => {
+      Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+        composer,
+        "half a thought"
+      );
+      composer.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+
     const outside = await press(document.body, { code: "KeyI", key: "i" });
-
-    await settled(() => document.activeElement === composer);
-
+    const focused = document.activeElement === composer;
+    const caret = [composer.selectionStart, composer.selectionEnd];
     const inside = await press(composer, { code: "KeyI", key: "i" });
-    const unbound = await press(document.body, { code: "KeyJ", key: "j" });
 
     expect({
-      focused: document.activeElement === composer,
+      caret,
+      focused,
       inside,
       outside,
       palette: registry.get(paletteState).open,
-      unbound,
     }).toStrictEqual({
+      caret: [14, 14],
       focused: true,
       inside: false,
-      outside: true,
+      outside: false,
       palette: false,
-      unbound: false,
+    });
+  });
+
+  it("gives a key that types to the composer from the sidebar's tree, before its typeahead can move to a row", async () => {
+    const { container } = await signedIn();
+    const composer = composerOf(container);
+    const rows = [...container.querySelectorAll<HTMLElement>('nav [role="row"]')];
+
+    const first = rows.find(
+      (row) => row.textContent?.includes("libera") && !row.hasAttribute("aria-disabled")
+    );
+
+    first?.focus();
+    const before = document.activeElement === first;
+
+    await press(document.activeElement ?? document.body, { code: "KeyI", key: "#" });
+
+    expect({
+      before,
+      composer: document.activeElement === composer,
+      row: first !== undefined,
+    }).toStrictEqual({
+      before: true,
+      composer: true,
+      row: true,
+    });
+  });
+
+  it("does not give Space, Enter, or a key with Ctrl held to the composer", async () => {
+    const { container } = await signedIn();
+    const composer = composerOf(container);
+    const button = container.querySelector<HTMLButtonElement>("button");
+
+    button?.focus();
+
+    for (const init of [
+      { code: "Space", key: " " },
+      { code: "Enter", key: "Enter" },
+      { code: "KeyA", ctrlKey: true, key: "a" },
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- pressed in order
+      await press(button ?? document.body, init);
+    }
+
+    expect(document.activeElement).not.toBe(composer);
+  });
+
+  it("says what a command could not read, lets go of it when the text is edited, and dismisses any notice with a button", async () => {
+    const { container } = await signedIn();
+    const composer = composerOf(container);
+
+    /**
+     * Sets the composer's text as typing does.
+     * @param value - The text.
+     */
+    const write = async (value: string) => {
+      await act(async () => {
+        Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+          composer,
+          value
+        );
+        composer.dispatchEvent(new Event("input", { bubbles: true }));
+        await Promise.resolve();
+      });
+    };
+
+    const said = () => container.querySelector('[role="alert"] p')?.textContent;
+
+    const dismiss = () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]');
+
+    await write("/d");
+    await press(composer, { code: "Enter", key: "Enter" });
+    await settled(() => said() !== undefined);
+    const first = said();
+
+    await write("/de");
+    const edited = said();
+
+    await press(composer, { code: "Enter", key: "Enter" });
+    await settled(() => said() !== undefined);
+
+    await act(async () => {
+      dismiss()?.click();
+      await Promise.resolve();
+    });
+
+    expect({
+      dismissed: said(),
+      edited,
+      first,
+      text: composer.value,
+    }).toStrictEqual({
+      dismissed: undefined,
+      edited: undefined,
+      first: "There is no command /d. Start with // to say text that begins with /.",
+      text: "/de",
     });
   });
 
@@ -330,7 +435,7 @@ describe("the palette and the keys", () => {
     await settled(() => document.activeElement === composer);
 
     expect({
-      notice: container.querySelector('[role="alert"]')?.textContent,
+      notice: container.querySelector('[role="alert"] p')?.textContent,
       text: composer.value,
     }).toStrictEqual({
       notice: "/network was not put in, since the composer has text. Clear it and choose again.",
