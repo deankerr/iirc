@@ -2,6 +2,7 @@
 declare const styles: {
   readonly choice: string;
   readonly inBar: string;
+  readonly name: string;
   readonly number: string;
   readonly row: string;
   readonly switcher: string;

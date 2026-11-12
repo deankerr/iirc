@@ -2353,7 +2353,9 @@ describe("the web frontend on iirc daemon --web", () => {
 
         await member.waitFor();
         targets["member row"] = await leastSide(member);
-        targets["members hide"] = await leastSide(sheet.getByRole("button", { name: "hide" }));
+        targets["members hide"] = await leastSide(
+          sheet.getByRole("button", { name: "Hide the members" })
+        );
         scrolled.push(await sideways());
 
         // A tap on a member opens their menu, a finger's size, and Escape closes it alone.
@@ -2365,7 +2367,7 @@ describe("the web frontend on iirc daemon --web", () => {
         scrolled.push(await sideways());
         await page.keyboard.press("Escape");
         await action.waitFor({ state: "detached" });
-        await sheet.getByRole("button", { name: "hide" }).tap();
+        await sheet.getByRole("button", { name: "Hide the members" }).tap();
         await sheet.waitFor({ state: "detached" });
 
         // The palette, from its button, since a phone has no keys to open it with.

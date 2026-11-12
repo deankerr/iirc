@@ -1,0 +1,66 @@
+/* A Pane's status bar: one line that never wraps, as tall whether it holds a control or not,
+   and under it what the line discloses. */
+.bar {
+  flex-shrink: 0;
+  min-width: 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-block-size: calc(var(--line-height) * 1em + 2 * var(--border-width) + 2 * var(--space-1));
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  white-space: nowrap;
+}
+
+/* Whatever a Network names a Timeline, it takes at most half the line, and is cut. */
+.name {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--color-accent);
+  text-overflow: ellipsis;
+}
+
+.bar[data-dim="true"] .name {
+  color: var(--color-muted);
+}
+
+.dim {
+  color: var(--color-muted);
+}
+
+.note {
+  color: var(--color-level-highlight);
+}
+
+/* What fills the line after the name: cut with an ellipsis, never widening the Pane. */
+.rest {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fixed {
+  flex-shrink: 0;
+}
+
+/* The bar's control, at its right. */
+.end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+@media (pointer: coarse) {
+  .line {
+    min-block-size: var(--target-size);
+    padding-block: 0;
+  }
+}

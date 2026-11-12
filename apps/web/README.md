@@ -12,11 +12,11 @@ The core decides and this package draws and does the I/O.
 ## What it does
 
 - **Signs in with a key,** given to `POST /api/sign-in` once, for a sign-in the browser holds in an `HttpOnly` cookie. A failure is said in words, with a way to try again.
-- **Lists the Networks and their Timelines in a sidebar,** as a tree. A Network's row is its own Timeline, with how its connection stands as a symbol whose shape and colour both say it, and its Channels and Direct Messages are under it. What the focused Pane shows is chosen, and what another Pane shows has an accent edge and that Pane's number. The options and signing out are at its foot.
-- **Lets the sidebar be resized and hidden, on this device.** Its edge drags, or takes the arrows, Home, and End once focused, and keeps its width as the window changes. `/sidebar` or Alt+N hides it, and so does the button at its foot. While it is hidden, the button before the composer brings it back, marked by what is unread.
+- **Lists the Networks and their Timelines in a sidebar,** as a tree. A Network's row is its own Timeline, with how its connection stands as a symbol whose shape and colour both say it, and its Channels and Direct Messages are under it. What the focused Pane shows is chosen, in the accent, and what another Pane shows has a dim edge and that Pane's number, as a Pane's status bar is accented with the focus and dim without it. The options and signing out are at its foot.
+- **Lets the sidebar be resized and hidden, on this device.** Its edge drags, or takes the arrows, Home, and End once focused, and keeps its width as the window changes. `/sidebar` or Alt+N hides it, and so does the button at its foot, and the focus then goes to the composer if it was in the sidebar. While it is hidden, a button before the composer's prompt brings it back, marked by what is unread.
 - **Shows what is new, calmly.** A row's name is coloured by the highest level unread in it, with small counts beside it, and the page's title counts Highlights and Direct Messages. A Highlight's line is tinted, and a "new" divider stands before the first unread item.
 - **Shows a Timeline live,** as terminal lines in shared columns: the time, the sender in their colour, and the text with its formatting and links. Activity is dimmer, a Gap is a divider, and our own Messages say only when they are sending, not sent, or refused. Where a Timeline is narrow, as a Pane split a few times is, the columns go and a row reads as one run of text that wraps under itself. It opens on the latest, stays at the bottom as items arrive, and reads older items as the Owner scrolls up.
-- **Splits into Panes,** as a tiling window manager does. Each Pane has its own status bar, Timeline, scroll position, and members. Among several, the focused Pane is edged in the accent along its top and bottom, and the others' names are dimmed. One composer under the Panes writes to the focused Pane's Timeline.
+- **Splits into Panes,** as a tiling window manager does. Each Pane has its own status bar, whatever it shows, with its number among several and its name, and its own Timeline, scroll position, and members. What stands in front of a Timeline, the options, the search, or a Direct Message not yet begun, has a close button at the bar's right. Among several, the focused Pane is edged in the accent along its top and bottom, and the others' names are dimmed. One composer under the Panes writes to the focused Pane's Timeline.
 - **Says Messages and runs commands from the composer.** Enter sends, Shift+Enter starts a new line, Up and Down recall what was sent, and Tab completes. A paste of more than five lines asks first. Why something was not said is shown under it, with a way to dismiss it, and to send or check again when that is safe, and it goes when it stops being true.
 - **Takes what is typed from anywhere.** A character, a dead key, or a paste pressed where nothing takes text, such as a Pane's Timeline, the sidebar's tree, or the members' list, goes to the composer, which takes the focus with that very key. A palette, a dialog, a popover, or a menu keeps its keys, as does a key the keymap binds.
 - **Marks read where the Owner has seen it:** a Timeline at its latest, in a Pane they can see, once that has held for a second. The Daemon keeps the Read Marker, so every Frontend sees the counts clear.
@@ -47,7 +47,7 @@ The core decides and this package draws and does the I/O.
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
 | `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the sidebar's width and whether it shows |
 | `src/theme/` | The theme and the text's size and font drawn, the fonts, importing and removing themes, and the Worker a theme is read in |
-| `src/ui/` | The theme's tokens, a button, a password field that holds no value, and dates |
+| `src/ui/` | The theme's tokens, the one family of buttons with their tooltips, the icons, a password field that holds no value, and dates |
 
 ### The runtime
 
@@ -93,6 +93,8 @@ The core decides and this package draws and does the I/O.
 - **A font is fetched only once text is drawn in it.** `src/theme/fonts.css` declares each one's faces from its `@fontsource` package: a regular, a bold, and both italic, or a variable font, in WOFF2 alone, split into the ranges the package gives. The browser fetches a file only for a family drawn with and a character of its range on the page, so the device's own font fetches nothing. Vite emits each as a file of the page's own and never inlines one, which `font-src 'self'` would refuse. While a font loads, if it never does, and for any glyph it lacks, such as box drawing, text is in the device's font.
 - **A theme file is read in a Worker, never in the page.** Effect's YAML parser is quadratic on some text, so a read that takes longer than a second is ended and refused in words. A browser that cannot start a Worker says so.
 - **Styles are CSS Modules over the theme.** No module names a colour of its own, and each module's class names are declared beside it, so a class that does not exist fails to compile.
+- **Every button is one of one family.** `Button`, `ToggleButton`, and `IconButton` come in four variants, bordered, primary, quiet, and as text, and two sizes, regular in a form and small in a bar. A button's height is one line of its text, its padding, and its border, never its container's, and its padding is in `em` and `ch`, so it keeps its shape at any text size. Only the topic, which is its own text cut to the line, and the tree's chevron, which is part of its row, are drawn otherwise.
+- **An icon is a glyph in the UI's font,** named in `src/ui/icon.tsx` and drawn in a box two characters wide, hidden from assistive technology. A button that shows only an icon is named, and has React Aria's tooltip saying what it does and its key, where the keymap binds one.
 
 ### What this device keeps
 
@@ -147,7 +149,7 @@ The dev server proxies `/api` to a Daemon on `127.0.0.1:7667`, so the browser se
 ## Not yet
 
 - **A view of News.**
-- **Splitting the bundle.** It is one script of about 900 kB, 290 kB gzipped, most of it Effect, React Aria, and the Client's types the Timelines' positions bring with them, and Vite warns past 500 kB.
+- **Splitting the bundle.** It is one script of about 1.1 MB, 350 kB gzipped, most of it Effect, React Aria, and the Client's types the Timelines' positions bring with them, and Vite warns past 500 kB.
 - **Notifying per Network or per Timeline, or of words of the Owner's own,** which would be options under `ui`. Whether a device notifies is kept in its `localStorage` until then.
 - **A sound, or a badge on an installed app's icon,** with the manifest below.
 - **An installable web app,** with a manifest and an icon.

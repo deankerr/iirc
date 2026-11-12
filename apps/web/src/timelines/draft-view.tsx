@@ -1,6 +1,6 @@
 /**
- * A Direct Message not yet begun: a head naming the nick and its Network, with a close
- * button, and a log saying nothing was said yet. Nothing exists of it until something is
+ * A Direct Message not yet begun: its Pane's status bar naming the nick and its Network,
+ * with a close button, and a log saying nothing was said yet. Nothing exists of it until something is
  * said: the composer under it says plain text to the nick, and once the Daemon placed that
  * Message, the Pane shows the Timeline it made. Escape in it, or the close button, shows
  * what the Pane showed before.
@@ -13,22 +13,25 @@ import type { KeyboardEvent } from "react";
 import { useContext } from "react";
 
 import { composerFocus } from "../composer/atoms.ts";
-import { Button } from "../ui/button.tsx";
+import { BarText, PaneBar } from "../panes/pane-bar.tsx";
+import { IconButton } from "../ui/button.tsx";
 import { closeDraft } from "./atoms.ts";
 
 import styles from "./draft-view.module.css";
 
 /**
  * The view of a Direct Message not yet begun.
- * @param props - Its Network and the nick it is to.
+ * @param props - Its Network, the nick it is to, and its Pane.
  * @returns The view.
  */
 export const DraftView = ({
   network,
   nick,
+  pane,
 }: {
   readonly network: NetworkId;
   readonly nick: string;
+  readonly pane: string;
 }) => {
   const close = useAtomSet(closeDraft);
   const registry = useContext(RegistryContext);
@@ -53,17 +56,23 @@ export const DraftView = ({
       className={styles.view}
       onKeyDown={onKeyDown}
     >
-      <header className={styles.header}>
-        <h2 className={styles.name}>
-          <bdi>{nick}</bdi>
-        </h2>
-        <span className={styles.dim}>
+      <PaneBar
+        end={
+          <IconButton
+            icon="close"
+            keys="Esc"
+            label={`Close the Direct Message with ${nick}`}
+            onPress={closeNow}
+            size="small"
+          />
+        }
+        name={nick}
+        pane={pane}
+      >
+        <BarText>
           Direct Message on <bdi>{network}</bdi>
-        </span>
-        <Button aria-label={`Close the Direct Message with ${nick}`} onPress={closeNow}>
-          close
-        </Button>
-      </header>
+        </BarText>
+      </PaneBar>
       <p className={styles.log}>
         No Messages with <bdi>{nick}</bdi> yet. What you say below starts the conversation.
       </p>

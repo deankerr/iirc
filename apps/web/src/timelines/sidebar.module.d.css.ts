@@ -6,7 +6,6 @@ declare const styles: {
   readonly connecting: string;
   readonly controls: string;
   readonly counts: string;
-  readonly current: string;
   readonly direct: string;
   readonly elsewhere: string;
   readonly failure: string;

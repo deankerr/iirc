@@ -78,9 +78,11 @@ export const SignInScreen = ({ attempt }: { readonly attempt: Attempt }) => {
             {explain(attempt.failure)}
           </p>
         ) : null}
-        <Button isPending={attempt._tag === "Waiting"} type="submit" variant="primary">
-          {attempt._tag === "Waiting" ? "Signing in…" : "Sign in"}
-        </Button>
+        <div className={styles.actions}>
+          <Button isPending={attempt._tag === "Waiting"} type="submit" variant="primary">
+            {attempt._tag === "Waiting" ? "Signing in…" : "Sign in"}
+          </Button>
+        </div>
       </Form>
     </main>
   );

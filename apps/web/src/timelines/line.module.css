@@ -88,9 +88,11 @@
   white-space: pre-wrap;
 }
 
+/* Kept whole, so "refused: 404" never leaves its number on the next line. */
 .delivery {
   color: var(--color-muted);
   font-style: italic;
+  white-space: nowrap;
 }
 
 .repeated {

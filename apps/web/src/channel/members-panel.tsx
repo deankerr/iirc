@@ -39,7 +39,7 @@ import type { Key } from "react-aria-components";
 import { commandContext, perform } from "../composer/atoms.ts";
 import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
-import { Button } from "../ui/button.tsx";
+import { IconButton } from "../ui/button.tsx";
 import { channelOpen, moreMembers, roster } from "./atoms.ts";
 import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
 
@@ -384,13 +384,15 @@ const Shown = ({ pane }: { readonly pane: string }) => {
                 members
               </h2>
               {count === undefined ? null : <span className={styles.dim}>{count}</span>}
-              <Button
+              <IconButton
+                className={styles.close}
+                command="members.toggle"
+                icon="close"
+                label="Hide the members"
                 onPress={() => {
                   toggle({ pane, shown: false });
                 }}
-              >
-                hide
-              </Button>
+              />
             </div>
             {body}
           </Dialog>

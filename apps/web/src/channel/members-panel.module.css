@@ -32,7 +32,7 @@
   color: var(--color-muted);
 }
 
-.head > :last-child {
+.close {
   margin-left: auto;
 }
 
@@ -73,6 +73,15 @@
 .member,
 .away {
   display: flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A nick longer than the column, as an Ircd may allow thirty characters and more: cut,
+   with an ellipsis, and given whole in the member's menu. */
+.member > bdi,
+.away > bdi {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

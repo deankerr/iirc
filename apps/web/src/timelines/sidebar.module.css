@@ -59,7 +59,7 @@
 }
 
 .network[data-selected] .chevron,
-.network[data-selected] .standing,
+.network[data-selected] .standing > *,
 .network[data-selected] .name,
 .network[data-selected] .counts > *,
 .item[data-selected] .name,
@@ -67,9 +67,10 @@
   color: inherit;
 }
 
-/* What another Pane shows: an accent edge, and that Pane's number, dim. */
+/* What another Pane shows: a dim edge, and that Pane's number, dim, as the bar of a Pane
+   without the focus is dim. The accent is the focused Pane's alone. */
 .elsewhere:not([data-selected]) {
-  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-muted);
 }
 
 .pane {
@@ -85,7 +86,10 @@
 }
 
 .chevron {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
   width: 2ch;
   padding: 0;
   border: 0;
@@ -104,9 +108,8 @@
 
 /* How a Network's connection stands, as a symbol whose shape says it too. */
 .standing {
+  display: inline-flex;
   flex-shrink: 0;
-  width: 2ch;
-  text-align: center;
 }
 
 .connected {
@@ -138,15 +141,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-}
-
-.controls button {
-  padding: var(--space-1) var(--space-2);
-}
-
-/* The options, while the focused Pane shows them. */
-.current button {
-  color: var(--color-accent);
+  gap: var(--space-1);
 }
 
 .hide {
@@ -226,9 +221,5 @@
     align-self: stretch;
     width: var(--target-size);
     margin-right: calc(-1 * var(--space-2));
-  }
-
-  .controls button {
-    padding: var(--space-2) var(--space-3);
   }
 }

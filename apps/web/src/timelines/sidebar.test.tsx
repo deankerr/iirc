@@ -256,7 +256,7 @@ describe("the sidebar", () => {
 
   it("says how a connection stands as a symbol, keeping the word in its label and title", async () => {
     await signedIn();
-    const standing = row("libera").querySelector<HTMLElement>("[aria-hidden][title]");
+    const standing = row("libera").querySelector<HTMLElement>("[title]");
 
     expect({
       label: row("libera").getAttribute("aria-label"),
@@ -367,7 +367,8 @@ describe("the shell", () => {
   it("resizes the sidebar from its edge with the keys, within bounds, keeping its width", async () => {
     await signedIn();
     const separator = edge();
-    const shell = separator?.parentElement?.parentElement;
+    // The separator, in the sidebar's column, in the shell's body, in the shell.
+    const shell = separator?.parentElement?.parentElement?.parentElement;
 
     const widthAfter = async (init: KeyboardEventInit) => {
       if (separator !== null) {

@@ -2,6 +2,7 @@
 declare const styles: {
   readonly action: string;
   readonly away: string;
+  readonly close: string;
   readonly dim: string;
   readonly floating: string;
   readonly head: string;

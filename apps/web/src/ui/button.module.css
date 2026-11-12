@@ -1,30 +1,99 @@
+/*
+ * Every button and toggle on the page. A button's height is one line of its text, its
+ * padding, and its border, the same for every variant of a size, and never its
+ * container's: it never grows or stretches in a flex or grid row, and it centres itself
+ * across one. Its padding is in em and ch, so it keeps its shape at any text size.
+ */
 .button {
-  font: inherit;
-  padding: var(--space-2) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5ch;
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius);
   background: transparent;
   color: var(--color-text);
+  font: inherit;
+  line-height: var(--line-height);
+  text-align: center;
+  white-space: nowrap;
   cursor: default;
 }
 
-.button[data-hovered] {
-  border-color: var(--color-muted);
+/* Where it sits, which a class for its place in a layout overrides: centred across a row. */
+:where(.button) {
+  align-self: center;
+  margin: 0;
+}
+
+.regular {
+  padding: var(--control-pad-block) var(--control-pad-inline);
+}
+
+.small {
+  padding: 0 calc(var(--control-pad-inline) / 2);
+}
+
+/* An icon alone: as wide as it is tall, or nearly, its icon in the middle. */
+.icon/* Where it sits, which a class for its place in a layout overrides: centred across a row. */
+:where(.button) {
+  align-self: center;
+  margin: 0;
+}
+
+.regular {
+  padding-inline: var(--control-pad-block);
+}
+
+.icon.small {
+  padding-inline: 0;
 }
 
 .button[data-focus-visible] {
+  z-index: 1;
   outline: var(--border-width) solid var(--color-focus);
-  outline-offset: var(--space-1);
+  outline-offset: var(--border-width);
 }
 
-.button[data-pending],
-.button[data-disabled] {
+.button[data-disabled],
+.button[data-pending] {
   color: var(--color-muted);
 }
 
-.primary {
-  background: var(--color-accent);
+.button[data-pending] {
+  cursor: progress;
+}
+
+/* What the focused Pane shows, as the options at the sidebar's foot say they are, and a
+   toggle while it is on. */
+.button[aria-current="page"],
+.button[data-selected] {
+  color: var(--color-accent);
+}
+
+.default {
+  border-color: var(--color-border);
+}
+
+.default[data-hovered] {
+  border-color: var(--color-muted);
+}
+
+.default[data-pressed] {
+  background: var(--color-surface);
+}
+
+.default[data-selected] {
   border-color: var(--color-accent);
+}
+
+.primary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
   color: var(--color-on-accent);
 }
 
@@ -32,20 +101,65 @@
   border-color: var(--color-text);
 }
 
-.primary[data-pending],
-.primary[data-disabled] {
-  background: transparent;
+.primary[data-pressed] {
+  background: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
+}
+
+.primary[data-disabled],
+.primary[data-pending] {
   border-color: var(--color-border);
+  background: transparent;
 }
 
-.quiet {
-  border-color: transparent;
+.quiet[data-hovered] {
+  background: var(--color-surface);
 }
 
-/* On a touch screen, a finger's size, its text kept as it is. */
+.quiet[data-pressed] {
+  background: var(--color-border);
+}
+
+.text {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: start;
+  white-space: normal;
+}
+
+.text[data-hovered] {
+  text-decoration: underline dotted var(--color-muted);
+  text-underline-offset: 0.2em;
+}
+
+.text[data-pressed] {
+  color: var(--color-accent);
+}
+
+/* On a touch screen, a finger's size each way, its text kept as it is. */
 @media (pointer: coarse) {
   .button {
-    min-width: var(--target-size);
-    min-height: var(--target-size);
+    min-inline-size: var(--target-size);
+    min-block-size: var(--target-size);
   }
+}
+
+/* A tooltip: what a control does, and its keys, dim, after it. */
+.tip {
+  display: flex;
+  gap: 1ch;
+  max-inline-size: 40ch;
+  padding: 0 var(--control-pad-inline);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: 0 var(--space-1) var(--space-3) var(--color-shadow);
+  color: var(--color-text);
+  line-height: var(--line-height);
+  pointer-events: none;
+}
+
+.keys {
+  color: var(--color-muted);
+  font: inherit;
 }

@@ -5,9 +5,9 @@
  * GridList gives it its keyboard: arrows move, Enter edits the focused value in place as
  * its raw text, or a whole number in a number field, turns a toggle over, or opens the
  * password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
- * unset it. Escape anywhere else in it, or its close button, shows what the Pane showed
- * before. An edit is a plain, uncontrolled input read once when Enter is pressed. A
- * Credential's value is never edited here.
+ * unset it. Escape anywhere else in it, or the close button on its Pane's status bar, shows
+ * what the Pane showed before. An edit is a plain, uncontrolled input read once when Enter
+ * is pressed. A Credential's value is never edited here.
  *
  * @packageDocumentation
  */
@@ -21,7 +21,8 @@ import type { Key } from "react-aria-components";
 
 import { composerFocus } from "../composer/atoms.ts";
 import { pressed } from "../palette/press.ts";
-import { Button } from "../ui/button.tsx";
+import { PaneBar } from "../panes/pane-bar.tsx";
+import { Button, IconButton } from "../ui/button.tsx";
 import {
   change,
   closeOptions,
@@ -235,11 +236,12 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
           unset(option);
           done();
         }}
+        size="small"
         variant="primary"
       >
         Unset
       </Button>
-      <Button onKeyDown={escape} onPress={keep}>
+      <Button onKeyDown={escape} onPress={keep} size="small">
         Keep
       </Button>
     </div>
@@ -247,10 +249,11 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
 };
 
 /**
- * The options view, filtered.
+ * The options view, filtered, in a Pane.
+ * @param props - The Pane.
  * @returns The view.
  */
-export const OptionsView = () => {
+export const OptionsView = ({ pane }: { readonly pane: string }) => {
   const rows = useAtomValue(optionRows);
   const { confirming, editing, notice } = useAtomValue(optionsState);
   const filter = useAtomValue(optionsFilter) ?? "";
@@ -338,11 +341,20 @@ export const OptionsView = () => {
   return (
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- it only hears Escape from what is inside it, each of which takes its own keys.
     <section aria-label="Options" className={styles.view} onKeyDown={onViewKeyDown}>
-      <header className={styles.header}>
-        <h2 className={styles.title}>Options</h2>
-        <Button aria-label="Close the options" onPress={closeNow}>
-          close
-        </Button>
+      <PaneBar
+        end={
+          <IconButton
+            icon="close"
+            keys="Esc"
+            label="Close the options"
+            onPress={closeNow}
+            size="small"
+          />
+        }
+        name="options"
+        pane={pane}
+      />
+      <div className={styles.header}>
         <SearchField
           aria-label="Filter options"
           className={styles.filter}
@@ -351,7 +363,7 @@ export const OptionsView = () => {
         >
           <Input className={styles.filterInput} placeholder="network.libera.* or *nick*" />
         </SearchField>
-      </header>
+      </div>
       {notice === undefined ? null : (
         <p className={styles.notice} id={noticeId} role="alert">
           {notice}

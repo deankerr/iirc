@@ -11,10 +11,11 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { panesOf } from "@iirc/frontend/layout";
 import { paneName } from "@iirc/frontend/timelines";
 import { Atom } from "effect/reactivity";
-import { ToggleButton, ToggleButtonGroup } from "react-aria-components";
+import { ToggleButtonGroup } from "react-aria-components";
 import type { Key } from "react-aria-components";
 
 import { timelinesState } from "../timelines/atoms.ts";
+import { ToggleButton } from "../ui/button.tsx";
 import { alone, focusedId, focusPane } from "./atoms.ts";
 
 import styles from "./pane-switcher.module.css";
@@ -62,8 +63,9 @@ export const PaneSwitcher = ({ placement }: { readonly placement: "Bar" | "Row" 
       selectionMode="single"
     >
       {panes.map((pane) => (
-        <ToggleButton className={styles.choice} id={pane.id} key={pane.id}>
-          <span className={styles.number}>{pane.number}</span> <bdi>{pane.name}</bdi>
+        <ToggleButton className={styles.choice} id={pane.id} key={pane.id} size="small">
+          <span className={styles.number}>{pane.number}</span>{" "}
+          <bdi className={styles.name}>{pane.name}</bdi>
         </ToggleButton>
       ))}
     </ToggleButtonGroup>

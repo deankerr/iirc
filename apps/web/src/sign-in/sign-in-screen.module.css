@@ -24,3 +24,7 @@
 .failure {
   color: var(--color-danger);
 }
+
+.actions {
+  display: flex;
+}
