@@ -69,9 +69,16 @@ export const askModes = (run: Run): void => {
 };
 
 /**
+ * The error numerics that answer only a change of modes, never the question of what they
+ * are: `467`, a key is already set, and `696`, a mode's parameter is refused. The query
+ * leaves these to the Owner's action, however the two were sent.
+ */
+const ofChanges: ReadonlySet<string> = new Set(["467", "696"]);
+
+/**
  * The query a Line answers, by its structure alone: a `324` of its Channel, an error
  * numeric that names its Channel second, as `403`, `442`, and a numeric no document
- * names may, or a `421` or `461` that names `MODE`.
+ * names may, but not one that answers only a change, or a `421` or `461` that names `MODE`.
  * @param run - The step.
  * @param line - The Line, live, and tied to nothing by label.
  * @returns The query, or `undefined` if it answers none.
@@ -87,6 +94,10 @@ export const queryAnswered = (run: Run, line: Line): ModesQuery | undefined => {
 
   if (command === "421" || command === "461") {
     return upperCaseAscii(named) === "MODE" ? query : undefined;
+  }
+
+  if (ofChanges.has(command)) {
+    return undefined;
   }
 
   const fold = folder(run.state);

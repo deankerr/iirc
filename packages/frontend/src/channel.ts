@@ -116,6 +116,11 @@ export interface Channel {
    * generation is dirty, and read again.
    */
   readonly generation: number;
+  /**
+   * The Timeline's `head` as the changes last said it, or none yet: a later one is a head
+   * that moved, however many steps the change that says so was gathered from.
+   */
+  readonly headSeen: number | null;
   readonly head: HeadLoad;
   readonly roster: Roster;
 }
@@ -177,6 +182,7 @@ const unreadRoster: Roster = {
 export const initialChannel: Channel = {
   generation: 0,
   head: unread,
+  headSeen: null,
   network: undefined,
   roster: unreadRoster,
   timeline: undefined,
@@ -219,23 +225,43 @@ export const openChannel = (
 };
 
 /**
+ * A Timeline's `head` as a change says it: the last step that changed its Channel's head
+ * with no item saying so, or none when the change does not list it or it has none.
+ * @param change - The change.
+ * @param timeline - The Timeline.
+ * @returns Its `head`, or none.
+ */
+const headSaid = (change: TimelineChange, timeline: TimelineId): number | null =>
+  change.timelines.find((each) => each.id === timeline)?.head ?? null;
+
+/**
  * Whether a change may have changed a Channel's head or members: an Activity in its
  * Timeline, as a join, a part, a kick, a quit, a nick, a mode, a topic, or an away does,
- * its Timeline's `head` moved by this step, as when a reply made its modes known, or a Gap
- * of its Network, which a Session ending or beginning makes.
+ * its Timeline's `head` moved past the one last seen, as when a reply made its modes
+ * known, or a Gap of its Network, which a Session ending or beginning makes. The `head`
+ * is compared with the one seen, never with the change's own step: a change read after
+ * falling behind gathers several steps, and says a `head` an earlier one of them moved.
+ * With none seen yet, a `head` said counts as moved, which reads once more than it might.
  * @param change - The change.
  * @param timeline - The Channel's Timeline.
  * @param network - Its Network.
+ * @param headSeen - The Timeline's `head` as the changes last said it, or none yet.
  * @returns Whether it may have.
  */
 export const touches = (
   change: TimelineChange,
   timeline: TimelineId,
-  network: NetworkId | undefined
-): boolean =>
-  change.items.some((item) => item.timeline === timeline && item.content._tag === "Activity") ||
-  change.timelines.some((each) => each.id === timeline && each.head === change.sequence) ||
-  change.gaps.some((gap) => gap.network === network);
+  network: NetworkId | undefined,
+  headSeen: number | null
+): boolean => {
+  const head = headSaid(change, timeline);
+
+  return (
+    change.items.some((item) => item.timeline === timeline && item.content._tag === "Activity") ||
+    (head !== null && (headSeen === null || head > headSeen)) ||
+    change.gaps.some((gap) => gap.network === network)
+  );
+};
 
 /**
  * The reads to make now, for the open Channel and, while the members show, its members:
@@ -460,7 +486,7 @@ const touchedBy = (
 
   switch (event._tag) {
     case "Changed": {
-      return touches(event.change, timeline, network);
+      return touches(event.change, timeline, network, state.headSeen);
     }
 
     case "Overflowed": {
@@ -502,7 +528,15 @@ export const reduceChannel = (state: Channel, event: ChannelEvent): Channel => {
         : state;
     }
 
-    case "Changed":
+    case "Changed": {
+      const said = state.timeline === undefined ? null : headSaid(event.change, state.timeline);
+      const headSeen = said ?? state.headSeen;
+
+      return touchedBy(state, event)
+        ? { ...state, generation: state.generation + 1, headSeen }
+        : state;
+    }
+
     case "Overflowed":
     case "Reset": {
       return touchedBy(state, event) ? { ...state, generation: state.generation + 1 } : state;

@@ -650,6 +650,8 @@ const ties: ReadonlyMap<string, Tie> = new Map([
   ["482", { commands: onChannels, params: [1] }],
   // `467 <client> <channel>`: a key is already set.
   ["467", { commands: new Set(["MODE"]), params: [1] }],
+  // `696 <client> <target> <mode> <parameter>`: a mode's parameter is refused.
+  ["696", { commands: new Set(["MODE"]), params: [1] }],
   // `441 <client> <nick> <channel>`
   ["441", { commands: new Set(["KICK", "MODE"]), params: [1, 2] }],
   // `443 <client> <nick> <channel>`
