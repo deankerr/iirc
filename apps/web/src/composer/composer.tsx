@@ -325,7 +325,7 @@ const Composer = ({
       {notice === undefined || confirming !== undefined ? null : (
         <div className={`${styles.notice} ${styles.failure}`} id={noticeId} role="alert">
           <p>{notice.message}</p>
-          {notice.offer === undefined ? null : (
+          {notice._tag === "Offering" ? (
             <Button
               onPress={() => {
                 again(timeline);
@@ -333,7 +333,15 @@ const Composer = ({
             >
               {offerLabel(notice.offer)}
             </Button>
-          )}
+          ) : null}
+          <Button
+            aria-label="Dismiss"
+            onPress={() => {
+              dismissNow(timeline);
+            }}
+          >
+            <span aria-hidden="true">×</span>
+          </Button>
         </div>
       )}
       {offline === undefined ? null : (
@@ -373,6 +381,7 @@ const Composer = ({
           aria-invalid={notice === undefined ? undefined : true}
           autoComplete="off"
           className={styles.input}
+          data-composer=""
           id={id}
           onChange={(event) => {
             setText({ text: event.currentTarget.value, timeline });

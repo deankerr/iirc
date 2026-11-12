@@ -10,6 +10,8 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 - **The phone layout has run only in Chromium's mobile emulation,** never on a real iPhone or Android phone. The end-to-end run checks fields of 16px, targets of 44px, the drawer, the sheet, and the palette's button at a phone's size, touched, but not iOS Safari's own zoom, its safe areas, or its keyboard.
 - **Touch on the Panes' dividers, and window resizing during a drag,** were never tried on a device. A divider takes a touch 44px across, but a phone shows one Pane, so only a tablet meets them.
 
+- **Typing from anywhere has been proved for characters and paste only.** The composer takes the focus in the key's own `keydown`, which Chromium then types into. A dead key, an input method's first key, Option on a Mac, and AltGr are decided by the core's tests but never pressed on a real layout or input method, and Safari and Firefox may deliver the first key of a composition to the field that had the focus. Where one does, that character is lost and the next goes to the composer.
+
 ## On a phone
 
 - **The composer may not stay above iOS Safari's keyboard by resizing.** The page asks for `interactive-widget=resizes-content` and is `100dvh` tall, which Chromium on Android honours, but Safari ignores the former and keeps the page's height, scrolling it instead so the focused composer shows, which can push the bar out of view while typing.

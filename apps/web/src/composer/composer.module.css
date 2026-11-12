@@ -13,6 +13,11 @@
   border-bottom: var(--border-width) solid var(--color-border);
 }
 
+.notice > p {
+  flex: 1;
+  min-width: 0;
+}
+
 .failure {
   color: var(--color-danger);
 }

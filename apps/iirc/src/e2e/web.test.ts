@@ -2212,4 +2212,133 @@ describe("the web frontend on iirc daemon --web", () => {
       }
     }
   );
+
+  it(
+    "takes what is typed anywhere into the composer, and lets a notice go when it stops being true",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "typing"),
+        "#iirc-typing"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+          origin: new URL(base).origin,
+        });
+        await page.setViewportSize({ height: 800, width: 1280 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const log = page.getByRole("log", { name: channel });
+        const palette = page.getByRole("dialog", { name: "Command palette" });
+
+        const hasFocus = async () =>
+          await composer.evaluate((element) => element === document.activeElement);
+
+        const caret = async () =>
+          await composer.evaluate((element: HTMLTextAreaElement) => [
+            element.selectionStart,
+            element.selectionEnd,
+            element.value.length,
+          ]);
+
+        // A Timeline chosen in the sidebar, then typing: the first character is not lost, and
+        // the tree's typeahead does not take the focus to a row.
+        await page.getByRole("row", { name: channel }).click();
+        await log.waitFor();
+        await page.getByRole("row", { name: channel }).focus();
+        await page.keyboard.type("hello");
+        const fromSidebar = [await composer.inputValue(), await hasFocus()];
+
+        // A Pane's Timeline clicked, then typing: the caret goes to the end of the draft.
+        await log.click();
+        await page.keyboard.type("!?");
+        const fromPane = [await composer.inputValue(), await hasFocus(), await caret()];
+
+        // Space and Enter are not typing: Space on a row opens it, and the draft is as it was.
+        await page.getByRole("row", { name: channel }).focus();
+        await page.keyboard.press("Space");
+        const afterSpace = await composer.inputValue();
+
+        // A key the keymap binds is the keymap's: Alt+M shows the members, nothing is typed.
+        await log.click();
+        await page.keyboard.press("Alt+m");
+        const members = page.getByRole("region", { name: "members" });
+
+        await members.getByRole("row", { name: "peer" }).waitFor();
+        const afterBound = await composer.inputValue();
+
+        // From the members' list, the composer wins over its typeahead.
+        await members.getByRole("row", { name: "peer" }).focus();
+        await page.keyboard.type("p");
+        const fromMembers = [await composer.inputValue(), await hasFocus()];
+
+        // With the palette open, a key stays with the palette's search field.
+        await page.keyboard.press("Control+k");
+        await palette.waitFor();
+        await page.keyboard.type("set");
+        const typedInPalette = await composer.inputValue();
+
+        // Escape clears the search field first, and closes the palette second.
+        await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
+        await palette.waitFor({ state: "detached" });
+
+        // A paste by the platform's chord from outside the composer lands in it.
+        await page.evaluate(async () => {
+          await navigator.clipboard.writeText(" pasted");
+        });
+        await log.click();
+        await page.keyboard.press("Control+v");
+        await expect.poll(async () => await composer.inputValue()).toBe("hello!?p pasted");
+        const fromPaste = [await composer.inputValue(), await hasFocus()];
+
+        // A complaint about the text goes when the text is edited, and a button dismisses it.
+        await composer.fill("/d");
+        await composer.press("Enter");
+        const complaint = page.getByRole("alert").filter({ hasText: "There is no command /d" });
+
+        await complaint.waitFor();
+        await composer.press("End");
+        await page.keyboard.type("x");
+        await complaint.waitFor({ state: "detached" });
+
+        await composer.press("Enter");
+        await complaint.waitFor();
+        await complaint.getByRole("button", { name: "Dismiss" }).click();
+        await complaint.waitFor({ state: "detached" });
+
+        expect({
+          afterBound,
+          afterSpace,
+          fromMembers,
+          fromPane,
+          fromPaste,
+          fromSidebar,
+          problems: problems.filter((problem) => !problem.includes("401")),
+          typedInPalette,
+        }).toStrictEqual({
+          afterBound: "hello!?",
+          afterSpace: "hello!?",
+          fromMembers: ["hello!?p", true],
+          fromPane: ["hello!?", true, [7, 7, 7]],
+          fromPaste: ["hello!?p pasted", true],
+          fromSidebar: ["hello", true],
+          problems: [],
+          typedInPalette: "hello!?p",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
 });
