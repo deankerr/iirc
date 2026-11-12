@@ -3531,15 +3531,39 @@ const gapRow = (gap: WindowGap): Row => ({ _tag: "Gap", gap, key: `gap-${cursorO
  * A window's rows: its items in order, each collapsed Gap after the items at or before
  * where it began, and with a divider, the "new" divider before the first item after its
  * Read Marker, if the window holds one. Each row's key is stable as rows are added around it.
+ *
+ * A Gap that ended, with no item of the Timeline before it, in a window that holds the
+ * Timeline's start, says nothing: nothing was there to miss. It is left out of the rows and
+ * stays in the window. A Gap still open stays wherever it is, since it says why nothing is
+ * arriving. Which items count as before a Gap is decided by every item the window holds,
+ * not only those `shows` lets through, since an Activity a view hides was still there.
  * @param window - The window.
  * @param divider - The divider, if the Timeline opened with something unread.
+ * @param shows - Which items are drawn, or every one.
  * @returns The rows.
  */
-export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
+export const rowsOf = (
+  window: Window,
+  divider?: Divider,
+  shows: (item: TimelineItem) => boolean = () => true
+): readonly Row[] => {
   const rows: Row[] = [];
   let next = 0;
   // Whether the divider still waits for its item: the first after the Read Marker.
   let waiting = divider !== undefined;
+  // Whether an item stands before what comes next, drawn or not.
+  let anyBefore = false;
+
+  /**
+   * Draws a Gap, unless it is one of nothing: one that ended before the start of a
+   * Timeline held to its start.
+   * @param gap - The Gap.
+   */
+  const drawGap = (gap: WindowGap) => {
+    if (anyBefore || window.earlier || gap.to === null) {
+      rows.push(gapRow(gap));
+    }
+  };
 
   for (const item of window.items) {
     for (
@@ -3547,8 +3571,14 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
       gap !== undefined && comparePositions(gap.from, item.position) < 0;
       gap = window.gaps[next]
     ) {
-      rows.push(gapRow(gap));
+      drawGap(gap);
       next += 1;
+    }
+
+    anyBefore = true;
+
+    if (!shows(item)) {
+      continue;
     }
 
     if (waiting && divider !== undefined && isNew(divider, item)) {
@@ -3560,7 +3590,7 @@ export const rowsOf = (window: Window, divider?: Divider): readonly Row[] => {
   }
 
   for (const gap of window.gaps.slice(next)) {
-    rows.push(gapRow(gap));
+    drawGap(gap);
   }
 
   return collapsed(rows);

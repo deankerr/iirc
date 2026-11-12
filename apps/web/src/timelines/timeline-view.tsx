@@ -175,18 +175,16 @@ const Lines = ({
   // measured as every row is. The items `ui.activity` leaves out are not drawn, and are
   // counted all the same.
   const rows: readonly Shown[] = useMemo(() => {
-    const drawn = {
-      ...window,
-      items: window.items.filter((item) => showsItem(activity, kind, item.content)),
-    };
+    const shows = (item: TimelineItem) => showsItem(activity, kind, item.content);
+    const drawn = rowsOf(window, divider, shows);
 
     if (!window.earlier) {
-      return [start, ...rowsOf(drawn, divider)];
+      return [start, ...drawn];
     }
 
-    const held: Shown = { _tag: "Held", hidden: drawn.items.length === 0, key: "held" };
+    const held: Shown = { _tag: "Held", hidden: !window.items.some(shows), key: "held" };
 
-    return unasked ? rowsOf(drawn, divider) : [held, ...rowsOf(drawn, divider)];
+    return unasked ? drawn : [held, ...drawn];
   }, [activity, divider, kind, unasked, window]);
 
   const scroller = useRef<HTMLDivElement>(null);

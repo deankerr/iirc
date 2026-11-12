@@ -2,7 +2,8 @@
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
  * WeeChat marks one, or of a Session, or a Gap as a divider, each one's words starting
- * where a Message's text does. Failed Connections in a row say how many and when.
+ * where a Message's text does. In a Timeline too narrow for those columns, a row is one
+ * run of text that wraps under itself. Failed Connections in a row say how many and when.
  * Every name and every text a Network sent sits in its own isolate, as a text node.
  *
  * @packageDocumentation
@@ -229,15 +230,18 @@ const RowLine = ({ row }: { readonly row: Row }) => {
   const line = lineOf(row.item.content, row.item.network);
   const time = <Time at={row.item.position.at} />;
 
+  // The spaces between a row's parts are ignored while they are the grid's columns, and
+  // are what its words, as one run of text, are read and copied by when they are not.
+
   if (line._tag === "Description") {
     const { repeated } = row;
 
     return (
       <div className={toneClass[line.tone]}>
-        {time}
+        {time}{" "}
         <span aria-hidden className={styles.marker}>
           {line.marker ?? ""}
-        </span>
+        </span>{" "}
         <span className={styles.text}>
           {line.parts.map((part, index) => (
             // A description's pieces never move, so their order is their identity.
@@ -262,16 +266,21 @@ const RowLine = ({ row }: { readonly row: Row }) => {
 
   return (
     <div className={tone}>
-      {time}
+      {time}{" "}
       <span className={styles.sender}>
         {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
         {line.kind === "Notice" ? <>-{nick}-</> : null}
         {line.kind === "Action" ? <>* {nick}</> : null}
-      </span>
+      </span>{" "}
       <bdi className={styles.text}>
         <Inlines inlines={line.text} />
       </bdi>
-      {delivery === undefined ? null : <span className={styles.delivery}>{delivery}</span>}
+      {delivery === undefined ? null : (
+        <>
+          {" "}
+          <span className={styles.delivery}>{delivery}</span>
+        </>
+      )}
     </div>
   );
 };
@@ -282,7 +291,7 @@ const RowLine = ({ row }: { readonly row: Row }) => {
  * @returns The line.
  */
 export const Line = ({ row }: { readonly row: Row }) => (
-  <div className={timedClass[useAtomValue(timeShown)]}>
+  <div className={`${styles.line} ${timedClass[useAtomValue(timeShown)]}`}>
     <RowLine row={row} />
   </div>
 );

@@ -629,10 +629,17 @@ describe("the web frontend on iirc daemon --web", () => {
           "the Message"
         );
 
-        // Ours, in the Timeline, once: ngircd has no echo-message, so it stays unconfirmed.
+        // Ours, in the Timeline, once: ngircd has no echo-message, so it stays unconfirmed,
+        // which is not worth saying on every line.
         const ourRow = log.locator("[data-index]", { hasText: "hello from the web" });
 
-        await ourRow.getByText("unconfirmed").waitFor();
+        await ourRow.waitFor();
+        await expect.poll(async () => await ourRow.textContent()).not.toContain("sending");
+
+        const delivery = /sending|unconfirmed|not sent|refused/u.test(
+          (await ourRow.textContent()) ?? ""
+        );
+
         const rows = await ourRow.count();
         const cleared = await composer.inputValue();
 
@@ -670,6 +677,7 @@ describe("the web frontend on iirc daemon --web", () => {
         expect({
           action: action.params,
           cleared,
+          delivery,
           direct: direct.params,
           heard: heard.params,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
@@ -679,6 +687,7 @@ describe("the web frontend on iirc daemon --web", () => {
         }).toStrictEqual({
           action: [channel, "\u0001ACTION waves\u0001"],
           cleared: "",
+          delivery: false,
           direct: ["peer", "hi"],
           heard: [channel, "hello from the web"],
           problems: [],
@@ -2205,6 +2214,103 @@ describe("the web frontend on iirc daemon --web", () => {
           small: [],
         });
       } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "draws a Timeline's rows inline where it is narrow, and never scrolls it sideways at any width",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "narrow"),
+        "#iirc-narrow"
+      );
+
+      const visitor = await connectPeer({
+        host: ngircd.host,
+        nick: "visitor",
+        port: ngircd.plainPort,
+      });
+
+      try {
+        const context = await browser.newContext({ viewport: { height: 800, width: 1280 } });
+        const page = await context.newPage();
+        const problems: string[] = [];
+
+        page.on("pageerror", (error) => problems.push(error.message));
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+        const log = page.getByRole("log", { name: channel });
+
+        await log.waitFor();
+
+        // What has nowhere to break, what is wide, and what is plain, said and done.
+        const said = [
+          "a short one",
+          "unbroken".repeat(40),
+          `https://example.com/${"path/".repeat(60)}?q=${"v".repeat(80)}`,
+          "\u5168\u89D2\u6587\u5B57".repeat(25),
+          "words that wrap ".repeat(12),
+        ];
+
+        for (const line of said) {
+          peer.send(`PRIVMSG ${channel} :${line}`);
+        }
+
+        peer.send(`PRIVMSG ${channel} :\u0001ACTION ${"waves ".repeat(30)}\u0001`);
+        visitor.send(`JOIN ${channel}`);
+        visitor.send(`QUIT :${"gone".repeat(60)}`);
+        await log.getByText("a short one").waitFor();
+        await log.getByText("waves", { exact: false }).first().waitFor();
+
+        /**
+         * How the log draws at a width: whether it scrolls sideways, and how a Message's row is laid out.
+         * @param width - The page's width.
+         * @returns What it drew.
+         */
+        const drawnAt = async (width: number) => {
+          await page.setViewportSize({ height: 800, width });
+          await expect.poll(async () => await log.getByText("a short one").count()).toBe(1);
+
+          return await log.evaluate((element) => {
+            const row = [...element.querySelectorAll("[data-index]")].find((one) =>
+              one.textContent?.includes("a short one")
+            );
+
+            const message = row?.firstElementChild?.firstElementChild;
+
+            return {
+              layout:
+                message === null || message === undefined ? "" : getComputedStyle(message).display,
+              sideways: element.scrollWidth - element.clientWidth,
+            };
+          });
+        };
+
+        const drawn: Record<number, { layout: string; sideways: number }> = {};
+
+        for (const width of [1280, 900, 700, 520, 390, 320, 240]) {
+          // oxlint-disable-next-line no-await-in-loop -- one width after another
+          drawn[width] = await drawnAt(width);
+        }
+
+        expect({
+          narrow: drawn[390]?.layout,
+          problems,
+          sideways: Object.entries(drawn).filter(([, one]) => one.sideways > 0),
+          wide: drawn[1280]?.layout,
+        }).toStrictEqual({ narrow: "block", problems: [], sideways: [], wide: "grid" });
+      } finally {
+        visitor.close();
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

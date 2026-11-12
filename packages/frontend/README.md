@@ -45,6 +45,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **Only the view says what the Owner has seen.** A window's `seen` is set by the view's `Following` event alone, so opening a Timeline never makes the core believe its latest was read.
 - **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Daemon's Read Marker moves.
 - **Failed Connections in a row are one row,** counted, when they are to the same Ircd for the same reason.
+- **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, says nothing was missed, so `rowsOf` leaves it out and the window keeps it. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
 
 ### What a Pane shows
 
@@ -259,7 +260,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 - **Hostile text is contained.** Controls show as symbols, and every bidirectional embedding, override, or isolate a run opens is closed at its end. The work is linear in the text, however hostile.
 - **Plain text is for where nothing is drawn,** such as a notification: stripped, cut to 200 characters, and isolated.
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
-- **One of our Messages says its delivery in a few words,** and a refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
+- **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
 - **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it.
 

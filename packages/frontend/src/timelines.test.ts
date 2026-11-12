@@ -1408,6 +1408,38 @@ const rowText = (row: Row) => {
   return row._tag === "Gap" ? `gap ${row.gap.count}` : "new";
 };
 
+// The rows of a window holding the Timeline's items 30 and 40, with these Gaps, and whether
+// older items lie beyond it, and how many Gaps the window keeps.
+const rowsWith = (
+  gaps: readonly (typeof WindowGap.Encoded)[],
+  earlier: boolean,
+  shows?: (item: TimelineItem) => boolean
+) => {
+  const state = reduceTimelines(following(), {
+    _tag: "WindowRead",
+    read: latestOf(three, 0),
+    window: decodeWindow({
+      earlier,
+      gaps: [...gaps],
+      items: encodedItems([message(idOf(3), 30, 3), message(idOf(3), 40, 4)]),
+      later: false,
+      network: "alpha",
+      through: 5,
+      timeline: idOf(3),
+      version: 1,
+    }),
+  });
+
+  const shown = opened(state);
+
+  return shown._tag === "Shown"
+    ? {
+        held: shown.window.gaps.length,
+        rows: rowsOf(shown.window, undefined, shows).map((row) => rowText(row)),
+      }
+    : undefined;
+};
+
 // The page before the first item held carries the Gaps up to it, as the API gives them.
 const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.Encoded)[]) => {
   let state = reduceTimelines(following(), {
@@ -2166,6 +2198,78 @@ describe("the Timelines' state", () => {
     expect(
       shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : []
     ).toStrictEqual([3, "gap 1", 4, "gap 3"]);
+  });
+
+  describe("a Gap before anything", () => {
+    const closed = { count: 2, from: cursor(10, 1), to: cursor(20, 2) };
+
+    it("is not a row once it ended, in a Timeline read to its start, and the window keeps it", () => {
+      expect(rowsWith([closed], false)).toStrictEqual({ held: 1, rows: [3, 4] });
+    });
+
+    it("is a row while older items lie beyond the window", () => {
+      expect(rowsWith([closed], true)).toStrictEqual({ held: 1, rows: ["gap 2", 3, 4] });
+    });
+
+    it("is a row while it is still open, wherever it is", () => {
+      expect(rowsWith([{ count: 1, from: cursor(10, 1), to: null }], false)?.rows).toStrictEqual([
+        "gap 1",
+        3,
+        4,
+      ]);
+    });
+
+    it("is a row once an item came before it, as a Gap between items is", () => {
+      expect(
+        rowsWith(
+          [
+            { count: 1, from: cursor(35, 3), to: cursor(37, 3) },
+            { count: 1, from: cursor(45, 4), to: cursor(47, 4) },
+          ],
+          false
+        )?.rows
+      ).toStrictEqual([3, "gap 1", 4, "gap 1"]);
+    });
+
+    it("is a row when only an item the view hides stands before it, since it was still there", () => {
+      expect(
+        rowsWith(
+          [{ count: 1, from: cursor(35, 3), to: cursor(37, 3) }],
+          false,
+          (item) => item.sequence !== 3
+        )?.rows
+      ).toStrictEqual(["gap 1", 4]);
+    });
+
+    it("is no row before the first item all the same, though the view hides that item", () => {
+      expect(rowsWith([closed], false, (item) => item.sequence !== 3)?.rows).toStrictEqual([4]);
+    });
+
+    it("is not a row in a Timeline with no item at all, once it ended", () => {
+      const state = reduceTimelines(following(), {
+        _tag: "WindowRead",
+        read: latestOf(three, 0),
+        window: decodeWindow({
+          earlier: false,
+          gaps: [
+            { count: 1, from: cursor(10, 1), to: cursor(20, 2) },
+            { count: 1, from: cursor(30, 3), to: null },
+          ],
+          items: [],
+          later: false,
+          network: "alpha",
+          through: 5,
+          timeline: idOf(3),
+          version: 1,
+        }),
+      });
+
+      const shown = opened(state);
+
+      expect(
+        shown._tag === "Shown" ? rowsOf(shown.window).map((row) => rowText(row)) : undefined
+      ).toStrictEqual(["gap 1"]);
+    });
   });
 });
 

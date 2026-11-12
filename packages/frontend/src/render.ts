@@ -694,7 +694,9 @@ export const endReason = (reason: EndReason): string => {
 
 /**
  * How one of our Messages stands, in a few words: nothing once the Ircd confirmed it, and
- * a refusal with the Ircd's numeric or code, contained, never its text.
+ * nothing while it cannot, since an Ircd with no `echo-message` never echoes one of ours,
+ * so `Unconfirmed` is where every Message of ours there stays for good. Sending, not sent,
+ * and a refusal with the Ircd's numeric or code, contained, never its text, are said.
  * @param delivery - How it stands.
  * @returns The words, or none.
  */
@@ -704,8 +706,9 @@ const deliveryWords = (delivery: WireDelivery): string | undefined => {
       return "sending";
     }
 
+    case "Confirmed":
     case "Unconfirmed": {
-      return "unconfirmed";
+      return undefined;
     }
 
     case "Unsent": {
@@ -714,10 +717,6 @@ const deliveryWords = (delivery: WireDelivery): string | undefined => {
 
     case "Rejected": {
       return `refused: ${contained(delivery.reply)}`;
-    }
-
-    case "Confirmed": {
-      return undefined;
     }
 
     default: {
