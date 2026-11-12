@@ -592,6 +592,11 @@ const Lines = ({
    * to. With no fresh input, or no move beyond that, where the view stands again is no move
    * of the Owner's, the scroll the browser reports of it says nothing, and their input, if
    * any, is answered and no longer fresh.
+   *
+   * A box that grows takes up the Owner's move as far as it grew, and that is the truth of
+   * where they stand, not a move lost: scrolled up from the latest by less than the box
+   * grew by, the top of the view shows all they scrolled up to see and its foot is still
+   * the latest, so the view is at the latest and goes on following.
    * @param element - The scroller.
    * @returns Whether the Owner moved the log.
    */
