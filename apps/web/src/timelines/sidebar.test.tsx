@@ -364,6 +364,48 @@ describe("the shell", () => {
     });
   });
 
+  it("says, and moves from, the width drawn where the window is narrower than twice the width kept", async () => {
+    await signedIn();
+    const separator = edge();
+    const wide = window.innerWidth;
+
+    const said = () => [
+      separator?.getAttribute("aria-valuenow"),
+      separator?.getAttribute("aria-valuemax"),
+    ];
+
+    if (separator !== null) {
+      await press(separator, { key: "End" });
+    }
+
+    const kept = said();
+
+    // Half of 700 pixels is less than the 480 kept, and is what the shell draws.
+    await doing(() => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 700 });
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    const narrowed = said();
+
+    if (separator !== null) {
+      await press(separator, { key: "ArrowLeft" });
+    }
+
+    const moved = said();
+
+    await doing(() => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: wide });
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect({ kept, moved, narrowed }).toStrictEqual({
+      kept: ["480", "480"],
+      moved: ["334", "350"],
+      narrowed: ["350", "350"],
+    });
+  });
+
   it("resizes the sidebar from its edge with the keys, within bounds, keeping its width", async () => {
     await signedIn();
     const separator = edge();

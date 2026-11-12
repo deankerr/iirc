@@ -39,13 +39,7 @@
 }
 
 /* An icon alone: as wide as it is tall, or nearly, its icon in the middle. */
-.icon/* Where it sits, which a class for its place in a layout overrides: centred across a row. */
-:where(.button) {
-  align-self: center;
-  margin: 0;
-}
-
-.regular {
+.icon.regular {
   padding-inline: var(--control-pad-block);
 }
 

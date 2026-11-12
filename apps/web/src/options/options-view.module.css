@@ -1,7 +1,11 @@
+/* The view is measured by its own width, since a Pane split a few times is narrow on any
+   screen, and at any size of text. */
 .view {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -17,10 +21,13 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .filterInput {
   width: 28ch;
+  min-width: 0;
+  max-width: 100%;
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius);
@@ -121,7 +128,9 @@
   font-size: var(--font-size-input);
 }
 
-@media (max-width: 640px) {
+/* Too narrow for four columns of the text as it is drawn: each option's parts one under
+   another, and the filter as wide as the view. */
+@container (max-width: 72ch) {
   .filter {
     flex: 1 1 100%;
   }

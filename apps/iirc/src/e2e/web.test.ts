@@ -322,10 +322,11 @@ const leastSide = async (locator: ReturnType<Page["getByRole"]>) => {
 
 /**
  * Drags the sidebar's edge 100 pixels wider, which the device keeps, then hides the sidebar
- * with Alt+N, reloads, which keeps it hidden, and shows it again from the button beside the
- * composer.
+ * with Alt+N while the focus is in it, which sends the focus to the composer, reloads, which
+ * keeps it hidden, and shows it again from the button beside the composer.
  * @param page - The page, on a wide screen, with the sidebar shown at its first width.
- * @returns Its width before and after, the width kept, and how many sidebars the reload drew.
+ * @returns Its width before and after, the width kept, whether the composer took the focus,
+ * and how many sidebars the reload drew.
  */
 const resizedSidebar = async (page: Page) => {
   const sidebar = page.getByRole("navigation", { name: "Networks" });
@@ -348,8 +349,17 @@ const resizedSidebar = async (page: Page) => {
 
   const widthKept = await page.evaluate(() => localStorage.getItem("iirc.sidebar-width"));
 
+  // Hidden while the focus is in it, the focus goes to the composer, not nowhere.
+  await sidebar.getByRole("row").first().focus();
   await page.keyboard.press("Alt+N");
   await sidebar.waitFor({ state: "detached" });
+
+  const focusAfter = await page.evaluate(() => {
+    const focused = document.activeElement;
+
+    return focused instanceof HTMLElement && focused.dataset.composer !== undefined;
+  });
+
   await page.reload();
   const show = page.getByRole("button", { name: /^Show the sidebar/u });
 
@@ -359,7 +369,7 @@ const resizedSidebar = async (page: Page) => {
   await show.click();
   await sidebar.waitFor();
 
-  return { hiddenKept, narrow, wide: await sidebarWidth(), widthKept };
+  return { focusAfter, hiddenKept, narrow, wide: await sidebarWidth(), widthKept };
 };
 
 describe("the web frontend on iirc daemon --web", () => {
@@ -1626,7 +1636,7 @@ describe("the web frontend on iirc daemon --web", () => {
             { focused: true, latest: true },
           ],
           problems: [],
-          resized: { hiddenKept: 0, narrow: 200, wide: 300, widthKept: "300" },
+          resized: { focusAfter: true, hiddenKept: 0, narrow: 200, wide: 300, widthKept: "300" },
           said: channel,
           sideBySide: true,
           violations: "",
@@ -1855,20 +1865,50 @@ describe("the web frontend on iirc daemon --web", () => {
           )
           .toStrictEqual(["JetBrains Mono Variable italic", "JetBrains Mono Variable normal"]);
 
+        // Both answers are in, in whichever order they came.
+        await expect.poll(() => fonts.length).toBe(2);
+
         const violations = await page.evaluate(
           () => document.documentElement.dataset.cspViolations ?? ""
         );
 
         const { origin } = new URL(base);
 
+        // The options at the largest text, in a Pane too narrow for their four columns on a
+        // screen that is not compact: nothing reaches past the Pane.
+        await page.setViewportSize({ height: 800, width: 700 });
+        await type("/set ui.size 24");
+        await expect.poll(drawn).toStrictEqual(["24px", '"JetBrains Mono Variable"']);
+        await page.keyboard.press("Control+,");
+
+        await page.getByRole("searchbox", { name: "Filter options" }).waitFor();
+
+        // How far anything drawn in the Pane reaches past its right edge, in whole pixels.
+        const optionsPast = await page
+          .locator("[data-pane]")
+          .first()
+          .evaluate((pane) => {
+            const { right } = pane.getBoundingClientRect();
+            let past = 0;
+
+            for (const one of pane.querySelectorAll("*")) {
+              past = Math.max(past, Math.round(one.getBoundingClientRect().right - right));
+            }
+
+            return past;
+          });
+
         expect({
           byDefault,
-          fetched: fonts.map((font) => ({
-            cache: font.cache,
-            own: new URL(font.url).origin === origin,
-            path: new URL(font.url).pathname.replace(/-[\w-]{8}\.woff2$/u, ".woff2"),
-            type: font.type,
-          })),
+          fetched: fonts
+            .map((font) => ({
+              cache: font.cache,
+              own: new URL(font.url).origin === origin,
+              path: new URL(font.url).pathname.replace(/-[\w-]{8}\.woff2$/u, ".woff2"),
+              type: font.type,
+            }))
+            .toSorted((left, right) => (left.path < right.path ? -1 : 1)),
+          optionsPast,
           problems: problems.filter((problem) => !problem.includes("401")),
           violations,
         }).toStrictEqual({
@@ -1877,16 +1917,17 @@ describe("the web frontend on iirc daemon --web", () => {
             {
               cache: "public, max-age=31536000, immutable",
               own: true,
-              path: "/assets/jetbrains-mono-latin-wght-normal.woff2",
+              path: "/assets/jetbrains-mono-latin-wght-italic.woff2",
               type: "font/woff2",
             },
             {
               cache: "public, max-age=31536000, immutable",
               own: true,
-              path: "/assets/jetbrains-mono-latin-wght-italic.woff2",
+              path: "/assets/jetbrains-mono-latin-wght-normal.woff2",
               type: "font/woff2",
             },
           ],
+          optionsPast: 0,
           problems: [],
           violations: "",
         });
@@ -2705,6 +2746,30 @@ describe("the web frontend on iirc daemon --web", () => {
         await expect.poll(async () => await composer.inputValue()).toBe("hello!?p pasted");
         const fromPaste = [await composer.inputValue(), await hasFocus()];
 
+        // A field inside a shadow root keeps what is typed into it: at the document the key
+        // names the root's host, and only its path names the field.
+        await page.evaluate(() => {
+          const host = document.createElement("div");
+          const field = document.createElement("input");
+
+          host.id = "shadowed";
+          host.attachShadow({ mode: "open" }).append(field);
+          document.body.append(host);
+          field.focus();
+        });
+        await page.keyboard.type("z");
+
+        const inShadow = await page.evaluate(() => {
+          const host = document.querySelector("#shadowed");
+          const typed = host?.shadowRoot?.querySelector("input")?.value;
+
+          host?.remove();
+
+          return typed;
+        });
+
+        const afterShadow = await composer.inputValue();
+
         // A complaint about the text goes when the text is edited, and a button dismisses it.
         await composer.fill("/d");
         await composer.press("Enter");
@@ -2722,20 +2787,24 @@ describe("the web frontend on iirc daemon --web", () => {
 
         expect({
           afterBound,
+          afterShadow,
           afterSpace,
           fromMembers,
           fromPane,
           fromPaste,
           fromSidebar,
+          inShadow,
           problems: problems.filter((problem) => !problem.includes("401")),
           typedInPalette,
         }).toStrictEqual({
           afterBound: "hello!?",
+          afterShadow: "hello!?p pasted",
           afterSpace: "hello!?",
           fromMembers: ["hello!?p", true],
           fromPane: ["hello!?", true, [7, 7, 7]],
           fromPaste: ["hello!?p pasted", true],
           fromSidebar: ["hello", true],
+          inShadow: "z",
           problems: [],
           typedInPalette: "hello!?p",
         });
