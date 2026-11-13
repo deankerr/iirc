@@ -48,7 +48,6 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 
 ## Tests
 
-- **The daemon's tests print "All fibers interrupted without error"** to stderr while passing.
 - **A few tests bound time** (the Client's scale test, the theme importers, search timing). They pass with wide margins here, but a much slower machine could fail them.
 - **No test covers a Lookup's recovery when one `GET` times out and the next succeeds,** though a review exercised it by hand.
 - **The end-to-end runs use one Chromium,** and stand in a never-ending Worker to prove the theme importer's time limit, since Chromium reads the slow YAML at once.
