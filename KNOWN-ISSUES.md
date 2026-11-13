@@ -2,23 +2,11 @@
 
 What is built but not yet right, or right only within limits worth knowing before relying on it. Each entry says what happens, how much it matters, and what to do.
 
-Report what daily use turns up here, and remove an entry in the change that fixes it.
-
-## Untested
-
-- **Only Chromium has run the web frontend.** Safari, Firefox, touch, and screen readers have not. The places most likely to differ: Safari and the sign-in cookie over plain `http://127.0.0.1` (the cookie is not `Secure` on loopback, which should suit WebKit), React Aria's scroll lock injecting an inline style on iOS, which the CSP blocks (only overscroll is lost), and the theme importer's speed in JavaScriptCore (below).
-- **The phone layout has run only in Chromium's mobile emulation,** never on a real iPhone or Android phone. The end-to-end run checks fields of 16px, targets of 44px, the drawer, the sheet, and the palette's button at a phone's size, touched, but not iOS Safari's own zoom, its safe areas, or its keyboard.
-- **Touch on the Panes' dividers, and window resizing during a drag,** were never tried on a device. A divider takes a touch 44px across, but a phone shows one Pane, so only a tablet meets them.
-
-- **Typing from anywhere has been proved for characters and paste only.** The composer takes the focus in the key's own `keydown`, which Chromium then types into. A dead key, an input method's first key, Option on a Mac, and AltGr are decided by the core's tests but never pressed on a real layout or input method, and Safari and Firefox may deliver the first key of a composition to the field that had the focus. Where one does, that character is lost and the next goes to the composer.
-
-## On a phone
-
-- **The composer may not stay above iOS Safari's keyboard by resizing.** The page asks for `interactive-widget=resizes-content` and is `100dvh` tall, which Chromium on Android honours, but Safari ignores the former and keeps the page's height, scrolling it instead so the focused composer shows, which can push the top of the page out of view while typing: on a phone, the slim bar with the sidebar's button and the Panes' switcher, and the focused Pane's status bar under it.
-- **Back does not close the drawer or the sheet.** There is no router, so Android's back gesture leaves the page. Escape, a press outside, or a choice closes them.
+Report what daily use turns up here, and remove an entry in the change that fixes it. What has only not been tried, such as another browser or a real phone, is not an issue to list.
 
 ## Behaviour to know
 
+- **Back does not close the drawer or the sheet.** There is no router, so Android's back gesture leaves the page. Escape, a press outside, or a choice closes them.
 - **A theme file can take too long in Safari or Node.** Effect's YAML parser has quadratic regexes (`endsWithEscape`, `foldFlowLines`) in JavaScriptCore and Node, though V8 reads the same text at once. Import runs in a Worker with a one-second limit, so the page never freezes, but a hostile or very odd base16 or Alacritty YAML file is refused as too slow to read. Reporting it upstream is still to do.
 - **Scrolling up through a long Timeline pauses once at a thousand lines** with "Load older", so an automatic read never pushes the latest out of the window. One click goes on.
 - **A scroll still coasting a second after its last input is not taken as the Owner's if the Timeline's size changes then,** as when a Pane is resized mid-glide. The view stays where it stood rather than where the glide would have ended, never nearer the latest. Scrolling again goes on.
@@ -50,4 +38,3 @@ Report what daily use turns up here, and remove an entry in the change that fixe
 
 - **A few tests bound time** (the Client's scale test, the theme importers, search timing). They pass with wide margins here, but a much slower machine could fail them.
 - **No test covers a Lookup's recovery when one `GET` times out and the next succeeds,** though a review exercised it by hand.
-- **The end-to-end runs use one Chromium,** and stand in a never-ending Worker to prove the theme importer's time limit, since Chromium reads the slow YAML at once.
