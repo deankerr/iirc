@@ -14,6 +14,13 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## The board
+
+Every issue is on the GitHub project `iirc`, number 2 under `deankerr`, with its **Area** set to the part of the roadmap it belongs to: Look and feel, Previews, Uploads, Basics, or IRCv3. The board only groups. An issue's state is its labels and what blocks it.
+
+- **Add an issue to the board**: `gh project item-add 2 --owner deankerr --url <issue-url> --format json`, which answers the item's id.
+- **Set its Area**: `gh project item-edit --project-id <project-id> --id <item-id> --field-id <area-field-id> --single-select-option-id <option-id>`, with the ids from `gh project view 2 --owner deankerr --format json` and `gh project field-list 2 --owner deankerr --format json`.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
