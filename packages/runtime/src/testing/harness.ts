@@ -7,7 +7,7 @@
  */
 import type { Client } from "@iirc/client";
 import type { FallbackEncoding } from "@iirc/protocol/line";
-import { Duration, Effect, Exit, Fiber, Layer, Logger, Option, Scope, Stream } from "effect";
+import { Cause, Duration, Effect, Exit, Fiber, Layer, Logger, Option, Scope, Stream } from "effect";
 import type { LogLevel } from "effect";
 import { TestClock } from "effect/testing";
 
@@ -103,6 +103,8 @@ export const startRuntime = <S>(
 
     const bound = Duration.fromInputUnsafe(options.stopTimeout ?? defaultStopTimeout);
 
+    // Lets a closing fiber run, moving the clock past the stop's bound if it still waits,
+    // and gives how it ended.
     const within = <A, E>(closing: Fiber.Fiber<A, E>) =>
       Effect.gen(function* () {
         yield* settle;
@@ -111,10 +113,13 @@ export const startRuntime = <S>(
           yield* TestClock.adjust(bound);
         }
 
-        yield* Fiber.await(closing);
+        return yield* Fiber.await(closing);
       });
 
-    const close = Effect.flatMap(Effect.forkDetach(Scope.close(scope, Exit.void)), within);
+    const close = Effect.forkDetach(Scope.close(scope, Exit.void)).pipe(
+      Effect.flatMap(within),
+      Effect.flatMap((exit) => Effect.asVoid(exit))
+    );
 
     // The Scope closes as the finalizer of a fiber interrupted from outside, as `runMain`
     // interrupts main: whatever is interruptible in that finalizer ends at once.
@@ -125,7 +130,12 @@ export const startRuntime = <S>(
 
       yield* settle;
       main.interruptUnsafe();
-      yield* within(main);
+      const exit = yield* within(main);
+
+      // The interrupt is how it was closed. Anything else is a finalizer that failed.
+      yield* Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+        ? Effect.die(Cause.squash(exit.cause))
+        : Effect.void;
     });
 
     return { close, closeInterrupted, runtime };

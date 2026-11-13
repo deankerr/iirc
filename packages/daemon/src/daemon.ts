@@ -53,7 +53,8 @@ export const defaultListen: Listen = { host: "127.0.0.1", port: 7667 };
 
 /**
  * How long serving waits for requests in flight once asked to stop. By then the Runtime
- * has stopped and every stream a Frontend follows has ended, so this only covers reads.
+ * has stopped and every stream still being read has ended, so this only covers reads and
+ * a stream whose reader has stopped reading, which are cut.
  */
 const gracefulShutdownTimeout = Duration.millis(500);
 

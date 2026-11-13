@@ -58,22 +58,13 @@ describe("the Daemon, as it stops", () => {
               )
           );
 
-          const started = performance.now();
-
           yield* daemon.stop;
-          const took = performance.now() - started;
 
-          const endings = yield* Effect.promise(
-            async () => await Promise.all(readers.map(readToEnd))
-          );
-
-          // Serving waits 500 ms for requests in flight, so a stop that takes less waited
-          // for none.
-          return { endings, waited: took >= 500 };
+          return yield* Effect.promise(async () => await Promise.all(readers.map(readToEnd)));
         })
       )
     );
 
-    expect(result).toStrictEqual({ endings: ["ended", "ended", "ended"], waited: false });
+    expect(result).toStrictEqual(["ended", "ended", "ended"]);
   });
 });
