@@ -68,6 +68,8 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Composer**: Where the Owner writes a Message or a command. _Avoid_: Input, message input, prompt
 
+**Preview**: What a Frontend shows of a link in a Message beyond its address: a page's title and image, or the media itself. _Avoid_: Embed, unfurl, card
+
 **Read Marker**: How far through a Timeline the Owner has read, shared by every Frontend. _Avoid_: Unread pointer, last seen
 
 **Highlight**: A Message that calls for the Owner's attention, such as one that mentions Self. _Avoid_: Mention, ping, alert

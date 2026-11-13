@@ -1,6 +1,6 @@
 # Roadmap
 
-What iirc plans to build next, grouped by what the Owner would notice, roughly in the order we expect to take it. Each item is built as a vertical slice: the contract, the Client or Daemon, and the web frontend together, reviewed until nothing blocking is left.
+What iirc plans to build next, grouped by what the Owner would notice, roughly in the order we expect to take it. This document says what is intended. The work itself is issues, each a vertical slice: the contract, the Client or Daemon, and the web frontend together, reviewed until nothing blocking is left.
 
 The order bends to what the Owner finds in daily use. Refining what is built comes before anything under "Below the line", which waits until it is asked for.
 
@@ -23,7 +23,7 @@ Options under `ui`, shared by every device and overridable on one, as `ui.size` 
 
 IRC carries text, so a picture is always a link. Two features make a link feel like media, and both rest on one store in the Daemon: bytes kept by their hash beside the Journal, with what each is, served from an origin that runs no script. A Timeline shows an image, a video, or a sound from it in place, and larger on a press.
 
-### Link previews
+### Previews
 
 A Message's links shown as cards: a page's title and image, or the media itself in place.
 
@@ -32,8 +32,8 @@ A Message's links shown as cards: a page's title and image, or the media itself 
 - **Off until the Owner turns it on,** per Network or per Timeline as options under `ui`, and fetched only when a Message is shown, since fetching ahead tells a link's host when the Daemon saw it.
 - **Any page, by what the page says of itself:** OpenGraph, Twitter card tags, and the oEmbed it points to. **A link to media itself** by its content type: an image, an animated image, a video, or a sound.
 - **A player loads only on a press,** where a page's tags name one, in a sandboxed frame from a short list of hosts the CSP names. A service's script is never loaded into the page.
-- **No service is coded for.** A recorded page from each service that matters most is a fixture, so we know the card it gives: YouTube, GitHub, Reddit, Bluesky, Mastodon, Imgur, Giphy, Tenor, Twitch, Vimeo, Streamable, Spotify, SoundCloud, Bandcamp and Wikipedia.
-- **Open question:** whether a preview belongs in the Journal or only in the Daemon's cache. A cache is enough to start.
+- **No service is coded for.** A plain fetch already gets a card from most of the services that matter: YouTube, X, GitHub, Bluesky, Mastodon, Giphy, Twitch, Vimeo, Streamable, Spotify, SoundCloud, Bandcamp and Wikipedia. A recorded page from each is a fixture, so we know the card it gives.
+- **Open question:** whether a Preview belongs in the Journal or only in the Daemon's cache. A cache is enough to start.
 
 ### Uploads
 
@@ -48,7 +48,7 @@ IRC has no attachments, so the Daemon hosts what the Owner wants to show. It is 
 - **Bounded:** a limit on one file and on the whole store, and an expiry if the Owner sets one.
 - **Where the bytes are kept is a port:** the Daemon's own disk, or an S3-compatible bucket.
 - **Where a link points is a separate choice.** Either a second listener of the Daemon's, which answers a `GET` of an upload and nothing else, with no API, cookie, or listing, and which the Owner puts on the internet behind a proxy or a tunnel. Or the bucket's own public address, where the bucket serves each upload with the type and disposition the Daemon set on it.
-- **A link to our own upload previews with no fetch.**
+- **A link to our own upload gets its Preview with no fetch.**
 - **Open questions:** whether an upload and its deletion are Changes in the Journal with the bytes outside it, which is how everything else is kept; and whether an image is also resized.
 
 ## What an IRC client is expected to do
@@ -135,8 +135,9 @@ A draft waits until it is ratified, or until something above cannot be done well
 
 A card richer than a page's own tags give, from an adapter written for one service: a pure function from a link to what to ask, and from the answer to a card.
 
-- **X:** a post's text, author and media, and the post it quotes, from its oEmbed or its unofficial syndication answer.
+- **X:** the post a post quotes, and a thread, which its page and its oEmbed leave out.
+- **Reddit and TikTok:** their pages give a plain fetch nothing, and do not point at their oEmbed, which answers when asked directly.
 - **GitHub:** the lines a permalink names, and an issue's or pull request's state.
 - **Wikipedia:** an article's summary from its REST API.
-- **Hacker News and Stack Overflow:** a story or question with its score.
-- **Instagram and TikTok,** which answer a plain fetch with little or nothing.
+- **Hacker News and Stack Overflow:** a story or question with its score. Their pages carry no tags, or refuse the fetch.
+- **Instagram,** which gives little.

@@ -2,7 +2,7 @@
 
 What is built but not yet right, or right only within limits worth knowing before relying on it. Each entry says what happens, how much it matters, and what to do.
 
-Report what daily use turns up here, and remove an entry in the change that fixes it. What has only not been tried, such as another browser or a real phone, is not an issue to list.
+Remove an entry in the change that fixes it. A defect someone means to fix is an issue as well. What has only not been tried, such as another browser or a real phone, is not listed here.
 
 ## Behaviour to know
 

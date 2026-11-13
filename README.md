@@ -100,5 +100,6 @@ Each package's README says what it does, what it guarantees, and what it does no
 | `ROADMAP.md`                | What we plan to build next                            |
 | `KNOWN-ISSUES.md`           | What is built but not yet right                       |
 | `docs/adr/`                 | Decisions and why                                     |
+| `docs/agents/`              | How the agent skills use this repository              |
 | `docs/irc-docs-2026-10-26/` | The IRC protocol documents we work from               |
 | `AGENTS.md`                 | Instructions for coding agents                        |
