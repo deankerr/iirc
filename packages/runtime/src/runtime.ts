@@ -27,6 +27,7 @@ import {
   Duration,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Option,
   Random,
@@ -394,14 +395,24 @@ export const makeRuntime = <S>(
     // bound, for its Connections to close, and then its driver stops, which closes any
     // Connection left without waiting on it. So the whole stop takes the bound, and no
     // more than the time to close Scopes after it.
+    //
+    // The waiting is bounded by interrupting it, which a finalizer cannot do, so it runs
+    // in a fiber of its own. Making this fiber interruptible instead would end the waiting
+    // at once whenever the fiber closing the Runtime had itself been interrupted, which is
+    // how a signal stops a process: no `Stopping` would be stepped, and no `QUIT` said.
     const stopAll = Effect.gen(function* () {
       yield* Ref.set(closed, true);
-      yield* Effect.forEach(
-        (yield* Ref.get(held)).values(),
-        (network) =>
-          Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
-        { concurrency: "unbounded", discard: true }
-      ).pipe(Effect.interruptible);
+
+      const stopping = yield* Effect.forkDetach(
+        Effect.forEach(
+          (yield* Ref.get(held)).values(),
+          (network) =>
+            Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
+          { concurrency: "unbounded", discard: true }
+        )
+      );
+
+      yield* Fiber.await(stopping);
       yield* Scope.close(drivers, Exit.void);
     });
 

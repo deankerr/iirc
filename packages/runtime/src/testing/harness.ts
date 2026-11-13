@@ -82,7 +82,12 @@ export const startRuntime = <S>(
   options: RuntimeOptions = {},
   missing?: () => readonly FallbackEncoding[]
 ): Effect.Effect<
-  { readonly runtime: RuntimeService; readonly close: Effect.Effect<void> },
+  {
+    readonly runtime: RuntimeService;
+    readonly close: Effect.Effect<void>;
+    /** Closes it from a fiber that was interrupted, as a signal stops a process. */
+    readonly closeInterrupted: Effect.Effect<void>;
+  },
   DecodersMissing | JournalFailed
 > =>
   Effect.gen(function* () {
@@ -98,19 +103,32 @@ export const startRuntime = <S>(
 
     const bound = Duration.fromInputUnsafe(options.stopTimeout ?? defaultStopTimeout);
 
-    const close = Effect.gen(function* () {
-      const closing = yield* Effect.forkDetach(Scope.close(scope, Exit.void));
+    const within = <A, E>(closing: Fiber.Fiber<A, E>) =>
+      Effect.gen(function* () {
+        yield* settle;
+
+        if (closing.pollUnsafe() === undefined) {
+          yield* TestClock.adjust(bound);
+        }
+
+        yield* Fiber.await(closing);
+      });
+
+    const close = Effect.flatMap(Effect.forkDetach(Scope.close(scope, Exit.void)), within);
+
+    // The Scope closes as the finalizer of a fiber interrupted from outside, as `runMain`
+    // interrupts main: whatever is interruptible in that finalizer ends at once.
+    const closeInterrupted = Effect.gen(function* () {
+      const main = yield* Effect.forkDetach(
+        Effect.ensuring(Effect.never, Scope.close(scope, Exit.void))
+      );
 
       yield* settle;
-
-      if (closing.pollUnsafe() === undefined) {
-        yield* TestClock.adjust(bound);
-      }
-
-      yield* Fiber.join(closing);
+      main.interruptUnsafe();
+      yield* within(main);
     });
 
-    return { close, runtime };
+    return { close, closeInterrupted, runtime };
   });
 
 /**

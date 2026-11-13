@@ -93,10 +93,40 @@ import {
 /** The largest request body the API reads. Anything larger is refused before it is read. */
 export const maxBodySize = ByteSize.mebibytes(1);
 
-/** How often the News stream says it is alive while nothing happens. */
+/** How often a stream a Frontend follows says it is alive while nothing happens. */
 export class Heartbeat extends Context.Reference<Duration.Duration>("@iirc/daemon/Heartbeat", {
   defaultValue: () => Duration.seconds(15),
 }) {}
+
+/**
+ * Completes once the Daemon begins to stop. Never, unless given. A stream a Frontend
+ * follows ends there, since it would otherwise never end, and serving, which waits for
+ * requests in flight, would cut it as an error.
+ */
+export class Stopping extends Context.Reference<Effect.Effect<void>>("@iirc/daemon/Stopping", {
+  defaultValue: () => Effect.never,
+}) {}
+
+/**
+ * A stream as a Frontend follows it: its events, a heartbeat while nothing happens, and
+ * an end when the events end or the Daemon begins to stop.
+ * @param events - What the stream is of.
+ * @param heartbeat - The event that says it is alive.
+ * @returns The stream.
+ */
+const followed = <A, E, R>(events: Stream.Stream<A, E, R>, heartbeat: NoInfer<A>) =>
+  Effect.gen(function* () {
+    const every = yield* Heartbeat;
+    const stopping = yield* Stopping;
+
+    const heartbeats = Stream.fromSchedule(Schedule.spaced(every)).pipe(
+      Stream.map(() => heartbeat)
+    );
+
+    return Stream.merge(events, heartbeats, { haltStrategy: "left" }).pipe(
+      Stream.interruptWhen(stopping)
+    );
+  });
 
 const networkStopped = (network: WireNetworkId, error: RuntimeNetworkStopped, intent?: IntentId) =>
   new NetworkStopped({
@@ -455,8 +485,7 @@ const news = HttpApiBuilder.group(
     const runtime = yield* Runtime;
 
     return handlers.handle("follow", ({ headers, query }) =>
-      Effect.gen(function* () {
-        const every = yield* Heartbeat;
+      Effect.suspend(() => {
         // A reconnecting `EventSource` sends `Last-Event-ID` with the URL it first used,
         // so the header is the later place and wins.
         const after = headers["last-event-id"] ?? query.after ?? 0;
@@ -470,11 +499,7 @@ const news = HttpApiBuilder.group(
           Stream.mapError(journalFailed)
         );
 
-        const heartbeats = Stream.fromSchedule(Schedule.spaced(every)).pipe(
-          Stream.map((): NewsEvent => ({ data: {}, event: "heartbeat" }))
-        );
-
-        return Stream.merge(happenings, heartbeats, { haltStrategy: "left" });
+        return followed(happenings, { data: {}, event: "heartbeat" });
       })
     );
   })
@@ -879,8 +904,7 @@ const timelines = HttpApiBuilder.group(
         })
       )
       .handle("changes", ({ headers, query }) =>
-        Effect.gen(function* () {
-          const every = yield* Heartbeat;
+        Effect.suspend(() => {
           // As for News, the header comes with the URL first used, so it wins.
           const resume = headers["last-event-id"] ?? query.after;
 
@@ -889,13 +913,11 @@ const timelines = HttpApiBuilder.group(
               ? { after: 0, seen: undefined, version: undefined, wait: false }
               : { after: resume.sequence, seen: undefined, version: resume.version, wait: false };
 
-          const changes = changesFrom(first).pipe(Stream.mapError(timelinesFailed));
+          const changes: Stream.Stream<TimelineChangesEvent, TimelinesFailed> = changesFrom(
+            first
+          ).pipe(Stream.mapError(timelinesFailed));
 
-          const heartbeats = Stream.fromSchedule(Schedule.spaced(every)).pipe(
-            Stream.map((): TimelineChangesEvent => ({ data: {}, event: "heartbeat" }))
-          );
-
-          return Stream.merge(changes, heartbeats, { haltStrategy: "left" });
+          return followed(changes, { data: {}, event: "heartbeat" });
         })
       );
   })
@@ -950,8 +972,7 @@ const ui = HttpApiBuilder.group(
         )
       )
       .handle("changes", ({ headers, query }) =>
-        Effect.gen(function* () {
-          const every = yield* Heartbeat;
+        Effect.suspend(() => {
           // As for News, the header comes with the URL first used, so it wins.
           const after = headers["last-event-id"] ?? query.after;
 
@@ -962,11 +983,7 @@ const ui = HttpApiBuilder.group(
             Stream.map((now): UiEvent => ({ data: now, event: "changed", id: now.sequence }))
           );
 
-          const heartbeats = Stream.fromSchedule(Schedule.spaced(every)).pipe(
-            Stream.map((): UiEvent => ({ data: {}, event: "heartbeat" }))
-          );
-
-          return Stream.merge(changed, heartbeats, { haltStrategy: "left" });
+          return followed(changed, { data: {}, event: "heartbeat" });
         })
       );
   })

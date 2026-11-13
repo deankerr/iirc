@@ -11,6 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { connectPeer, startNgircd } from "@iirc/daemon/testing";
+import { Schema } from "effect";
 import { chromium } from "playwright";
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -25,6 +27,70 @@ const analyze = Bun.which("systemd-analyze");
 
 const contentSecurityPolicy =
   "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+
+/** What a run reads of one News event: how each Session it tells of ended. */
+const decodeHappened = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      news: Schema.Array(
+        Schema.Struct({ _tag: Schema.String, reason: Schema.optional(Schema.Unknown) })
+      ),
+    })
+  )
+);
+
+/**
+ * Reads the News from the start until it tells of a Session's end, for at most 10 s.
+ * @param base - The Daemon's base URL.
+ * @param key - A key.
+ * @returns How the first Session to end ended, or `"none"` if none did in time.
+ */
+const firstEnding = async (base: string, key: string) => {
+  const stopped = new AbortController();
+
+  const following = await fetch(`${base}/api/news?after=0`, {
+    headers: { authorization: `Bearer ${key}` },
+    signal: stopped.signal,
+  });
+
+  const read = async () => {
+    const decoder = new TextDecoder();
+    let buffered = "";
+
+    for await (const chunk of following.body ?? []) {
+      buffered += decoder.decode(chunk, { stream: true });
+
+      const ending = buffered
+        .split("\n\n")
+        .slice(0, -1)
+        .filter((event) => event.split("\n").includes("event: happened"))
+        .flatMap((event) => event.split("\n").filter((line) => line.startsWith("data: ")))
+        .flatMap((line) => decodeHappened(line.slice("data: ".length)).news)
+        .find((one) => one._tag === "SessionEnded");
+
+      if (ending !== undefined) {
+        return ending.reason;
+      }
+    }
+
+    return "none";
+  };
+
+  const ended = await Promise.race([read(), Bun.sleep(10_000).then(() => "none")]);
+
+  stopped.abort();
+
+  return ended;
+};
+
+/**
+ * Whether a Line is ours, decided by its command and source alone.
+ * @param command - The command.
+ * @returns The test of a Line.
+ */
+const ours =
+  (command: string) => (line: { readonly command: string; readonly source?: string | undefined }) =>
+    line.command === command && line.source?.split("!")[0] === "iirc";
 
 /**
  * Compiles `iirc` with `build.ts`, as `bun run build:iirc` does.
@@ -256,6 +322,139 @@ describe("the compiled iirc", () => {
           signedIn: [{ httpOnly: true, name: "iirc_sign_in" }],
           traversals: Array.from({ length: 6 }, () => ({ empty: true, status: "404" })),
           violations: "",
+        });
+      } finally {
+        child.kill("SIGTERM");
+        await child.exited;
+      }
+    }
+  );
+
+  it(
+    "says QUIT and hangs up on its Networks when SIGTERM stops it",
+    { timeout: 90_000 },
+    async () => {
+      const dataDir = path.join(directory, "quitting-data");
+      const created = await run([iirc], "key", "create", "quitter", "--data-dir", dataDir);
+      const key = created.stdout.trim();
+      const channel = "#iirc-quitting";
+      const ngircd = await startNgircd();
+      const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+      const { base, child } = await startDaemon([iirc], dataDir);
+
+      try {
+        peer.send(`JOIN ${channel}`);
+
+        const configured = await fetch(`${base}/api/networks/private`, {
+          body: JSON.stringify({
+            channels: [{ name: channel }],
+            declined: [],
+            enabled: true,
+            fallbackEncoding: "windows-1252",
+            ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+            login: { _tag: "None" },
+            nicks: ["iirc"],
+            realname: "iirc",
+            username: "iirc",
+          }),
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+          method: "PUT",
+        });
+
+        await peer.waitFor(ours("JOIN"), "the Daemon's JOIN");
+        child.kill("SIGTERM");
+        const exited = await child.exited;
+
+        // An Ircd says QUIT for a User whose Connection merely ended too, so what proves
+        // the stop is the Journal, as a Daemon started after it on the same data reads it:
+        // the Session ended because the Client hung up.
+        const again = await startDaemon([iirc], dataDir);
+
+        const ended = await firstEnding(again.base, key).finally(() => {
+          again.child.kill("SIGTERM");
+        });
+
+        await again.child.exited;
+
+        expect({ configured: configured.status, ended, exited }).toStrictEqual({
+          configured: 200,
+          ended: { _tag: "Closed", reason: "HungUp" },
+          exited: 0,
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "stops while a Frontend follows a stream, ending the stream and logging no error",
+    { timeout: 60_000 },
+    async () => {
+      const dataDir = path.join(directory, "followed-data");
+      const created = await run([iirc], "key", "create", "follower", "--data-dir", dataDir);
+      const key = created.stdout.trim();
+      const { base, child } = await startDaemon([iirc], dataDir);
+
+      try {
+        const following = await fetch(`${base}/api/ui/changes`, {
+          headers: { authorization: `Bearer ${key}` },
+        });
+
+        const reader = following.body?.getReader();
+
+        // The options in force come first, so one read says the stream is open.
+        await reader?.read();
+        child.kill("SIGTERM");
+
+        const ended = (async () => {
+          try {
+            for (;;) {
+              // oxlint-disable-next-line no-await-in-loop -- reading a stream in order
+              const chunk = await reader?.read();
+
+              if (chunk === undefined || chunk.done) {
+                return chunk !== undefined;
+              }
+            }
+          } catch {
+            return false;
+          }
+        })();
+
+        // What it logs from here to its end. Starting it read part of the log already, so
+        // the rest is read as that was, by a reader.
+        const rest = (async () => {
+          const log = child.stderr.getReader();
+          const decoder = new TextDecoder();
+          let text = "";
+
+          for (;;) {
+            // oxlint-disable-next-line no-await-in-loop -- reading the log in order
+            const chunk = await log.read();
+
+            if (chunk.done) {
+              return text;
+            }
+
+            text += decoder.decode(chunk.value, { stream: true });
+          }
+        })();
+
+        const [exited, logged] = await Promise.all([child.exited, rest]);
+
+        // Every line it logs is a log line: an error a stream was cut with is not one.
+        const unlogged = logged
+          .split("\n")
+          .filter((line) => line !== "" && !line.startsWith("timestamp="));
+
+        expect({ ended: await ended, exited, unlogged }).toStrictEqual({
+          ended: true,
+          exited: 0,
+          unlogged: [],
         });
       } finally {
         child.kill("SIGTERM");

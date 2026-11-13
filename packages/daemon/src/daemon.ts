@@ -13,13 +13,13 @@ import { layerSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { layer as layerTransport } from "@iirc/transport-bun";
 import type { BunTransportOptions } from "@iirc/transport-bun";
 import { layerBun as layerVault } from "@iirc/vault-file";
-import { Context, Duration, Effect, Exit, FileSystem, Layer, Logger, Scope } from "effect";
+import { Context, Duration, Effect, Exit, FileSystem, Latch, Layer, Logger, Scope } from "effect";
 import type { Path } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import { HttpRouter } from "effect/http";
 import type { HttpPlatform } from "effect/http";
 
-import { ApiRoutes, Heartbeat } from "./handlers.ts";
+import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
 import { layerProjector } from "./projector.ts";
@@ -53,7 +53,7 @@ export const defaultListen: Listen = { host: "127.0.0.1", port: 7667 };
 
 /**
  * How long serving waits for requests in flight once asked to stop. By then the Runtime
- * has stopped, so this only covers reads and News streams, which are cut.
+ * has stopped and every stream a Frontend follows has ended, so this only covers reads.
  */
 const gracefulShutdownTimeout = Duration.millis(500);
 
@@ -61,6 +61,22 @@ const gracefulShutdownTimeout = Duration.millis(500);
 class StopRuntime extends Context.Service<StopRuntime, Effect.Effect<void>>()(
   "@iirc/daemon/StopRuntime"
 ) {}
+
+/** Completes {@link Stopping}. Saying it again does nothing. */
+class SayStopping extends Context.Service<SayStopping, Effect.Effect<void>>()(
+  "@iirc/daemon/SayStopping"
+) {}
+
+/** {@link Stopping}, which {@link SayStopping} completes. */
+const layerStopping = Layer.effectContext(
+  Effect.gen(function* () {
+    const stopping = yield* Latch.make();
+
+    return Context.make(Stopping, stopping.await).pipe(
+      Context.add(SayStopping, Effect.asVoid(stopping.open))
+    );
+  })
+);
 
 /**
  * Makes the data directory if it is missing, owner-only, and holds it for as long as the
@@ -156,17 +172,21 @@ const layerCore = (options: DaemonOptions) => {
   return Layer.mergeAll(
     owned.pipe(Layer.provideMerge(runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)))),
     access,
-    heartbeat
+    heartbeat,
+    layerStopping
   ).pipe(Layer.provide(dataDirectory(dataDir)));
 };
 
 // Built after serving, so it closes first: the Runtime stops, every Owner input still
-// waiting fails with `NetworkStopped`, and only then does serving stop.
+// waiting fails with `NetworkStopped`, and every stream a Frontend follows ends, and only
+// then does serving stop. The streams end after the Runtime stops, not before: a Frontend
+// whose stream ended would follow again while the Runtime stops, and that stream be cut.
 const stopsFirst = Layer.effectDiscard(
   Effect.gen(function* () {
     const stop = yield* StopRuntime;
+    const say = yield* SayStopping;
 
-    yield* Effect.addFinalizer(() => stop);
+    yield* Effect.addFinalizer(() => Effect.ensuring(stop, say));
   })
 );
 

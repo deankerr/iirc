@@ -428,6 +428,47 @@ describe("shutdown", () => {
     });
   });
 
+  it("does the same when the fiber that closes it was interrupted, as a signal stops a process", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { call, closeInterrupted } = yield* opened(
+          world,
+          scripted(
+            script(
+              { when: "Opened" },
+              { outputs: [sendQuit, hangup], when: "Stopping" },
+              { when: "Closed" }
+            )
+          )
+        );
+
+        yield* settle;
+        const before = yield* Clock.currentTimeMillis;
+
+        yield* closeInterrupted;
+
+        return {
+          elapsed: (yield* Clock.currentTimeMillis) - before,
+          heard: yield* heardNow(call),
+          outline: yield* outline(world.journal),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      elapsed: 0,
+      heard: ["QUIT"],
+      outline: [
+        "1 libera Configured",
+        "2 libera of 1: Dial",
+        "3 libera Opened",
+        "4 libera Stopping",
+        "5 libera of 4: Send Hangup",
+        "6 libera Closed",
+      ],
+    });
+  });
+
   it("drains for at most half the bound, so the QUIT still leaves before it", async () => {
     const result = await runTest((world) =>
       Effect.gen(function* () {

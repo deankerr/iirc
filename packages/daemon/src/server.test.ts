@@ -368,10 +368,15 @@ describe("the API over a real server", () => {
           (response) => readEvents(response, (events) => happened(events).length > 0)
         );
 
+        // Read for its header alone, and cancelled, as a reader that leaves does.
+        const ahead = yield* served.request("/api/news?after=999999");
+
+        yield* Effect.promise(async () => {
+          await ahead.body?.cancel();
+        });
+
         return {
-          contentType: (yield* served.request("/api/news?after=999999")).headers.get(
-            "content-type"
-          ),
+          contentType: ahead.headers.get("content-type"),
           fromHeader: messagesOf(fromHeader),
           fromQuery: messagesOf(fromQuery),
           ids: ids.every((id) => id !== undefined && /^\d+$/u.test(id)),
