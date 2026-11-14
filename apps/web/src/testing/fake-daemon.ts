@@ -19,7 +19,6 @@ import type {
   MemberPage,
   Located,
   NetworkEntry,
-  RemovedNetwork,
   Timeline,
   TimelineChangesEvent,
   TimelineItem,
@@ -59,7 +58,6 @@ export const theKey = "iirc_the-key";
 type Answer =
   | Readonly<Record<string, string>>
   | (typeof NetworkEntry.Encoded)[]
-  | (typeof RemovedNetwork.Encoded)[]
   | typeof Knowledge.Encoded
   | typeof TimelineList.Encoded
   | typeof TimelineWindow.Encoded
@@ -1340,20 +1338,16 @@ export const fakeDaemon = () => {
         return signedInOnly(() =>
           json(
             200,
-            [...daemon.timelines.keys()].flatMap((network) =>
+            [...new Set([...daemon.timelines.keys(), ...daemon.kept])].map((network) =>
               daemon.kept.has(network)
-                ? []
-                : [{ life: daemon.lives.get(network) ?? 1, network, status: { _tag: "Running" } }]
+                ? { _tag: "Kept", life: daemon.lives.get(network) ?? 1, network }
+                : {
+                    _tag: "Live",
+                    life: daemon.lives.get(network) ?? 1,
+                    network,
+                    status: { _tag: "Running" },
+                  }
             )
-          )
-        );
-      }
-
-      case "GET /api/removed-networks": {
-        return signedInOnly(() =>
-          json(
-            200,
-            [...daemon.kept].map((network) => ({ life: daemon.lives.get(network) ?? 1, network }))
           )
         );
       }

@@ -270,11 +270,13 @@ export interface Known {
   readonly life: Life;
 }
 
-/** A Network configured, whether it is running, and its life. */
-export interface Living {
-  readonly status: NetworkStatus;
-  readonly life: Life;
-}
+/**
+ * A Network the Runtime holds, with its life: `Live`, configured, and whether it is
+ * running, or `Kept`, removed with its Timelines kept.
+ */
+export type Living =
+  | { readonly _tag: "Live"; readonly status: NetworkStatus; readonly life: Life }
+  | { readonly _tag: "Kept"; readonly life: Life };
 
 /** What the Runtime offers. */
 export interface RuntimeService {
@@ -384,8 +386,9 @@ export interface RuntimeService {
   /** Every Network, in the order it was added, with whether it is running. */
   readonly networks: Effect.Effect<ReadonlyMap<NetworkId, NetworkStatus>>;
   /**
-   * Every Network configured, in the order it was added, with whether it is running and
-   * its life, read together.
+   * Every Network held, live in the order it was added and then each kept, with its life,
+   * read together: a Network removed with its Timelines kept is always one or the other,
+   * never neither, however a removal falls between the reads.
    */
   readonly lives: Effect.Effect<ReadonlyMap<NetworkId, Living>>;
   /**
@@ -677,11 +680,13 @@ export const makeRuntime = <S>(
         // One removed before its first `Configured` was stepped has a life of its own.
         const life = current.life ?? sequence;
 
-        yield* Ref.update(held, (all) => without(all, id));
-
+        // Kept before it is held no more, so `lives`, which reads what is held first, finds
+        // it as one or the other.
         if (keep) {
           yield* Ref.update(kept, (all) => new Map(all).set(id, life));
         }
+
+        yield* Ref.update(held, (all) => without(all, id));
 
         if (configured !== undefined) {
           yield* Ref.update(unforgotten, (all) =>
@@ -839,19 +844,29 @@ export const makeRuntime = <S>(
               : Effect.succeed({ knowledge: client.known(state), life })
         ),
       // A Network added whose first `Configured` is not yet stepped has no life yet, and is
-      // left out, as `configuration` leaves it out.
-      lives: Effect.flatMap(Ref.get(held), (networks) =>
-        Effect.map(
-          Effect.forEach([...networks.values()], (network) =>
-            Effect.map(
-              Effect.all([Ref.get(network.status), Ref.get(network.current)]),
-              ([status, { life }]) =>
-                life === undefined ? [] : [[network.id, { life, status }] as const]
-            )
-          ),
-          (found) => new Map(found.flat())
-        )
-      ),
+      // left out, as `configuration` leaves it out. What is held is read before what is
+      // kept, and a removal keeps a Network before it lets go of it, so one removed between
+      // the two reads is found kept, or in both, where it is kept, and never in neither.
+      lives: Effect.gen(function* () {
+        const networks = yield* Ref.get(held);
+
+        const live = yield* Effect.forEach([...networks.values()], (network) =>
+          Effect.map(
+            Effect.all([Ref.get(network.status), Ref.get(network.current)]),
+            ([status, { life }]) =>
+              life === undefined ? [] : [[network.id, { _tag: "Live", life, status }] as const]
+          )
+        );
+
+        const keeping = yield* Ref.get(kept);
+        const all = new Map<NetworkId, Living>(live.flat());
+
+        for (const [id, life] of keeping) {
+          all.set(id, { _tag: "Kept", life });
+        }
+
+        return all;
+      }),
       look: (id, looking) =>
         Effect.gen(function* () {
           const network = yield* find(id);

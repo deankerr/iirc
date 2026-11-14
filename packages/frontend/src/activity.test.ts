@@ -175,6 +175,7 @@ const world = (
   viewed = true
 ): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    _tag: "Live",
     life: 1,
     network: "libera",
     status: { _tag: "Running" },
@@ -184,7 +185,7 @@ const world = (
 
   const events: TimelinesEvent[] = [
     { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-    { _tag: "NetworksRead", entries: [libera], removed: [] },
+    { _tag: "NetworksRead", entries: [libera] },
     { _tag: "ReadStarted", read: list },
     {
       _tag: "ListRead",
@@ -878,6 +879,7 @@ describe("notifications", () => {
     const first = reduceTimelines(state, event);
 
     const libera = Schema.decodeSync(NetworkEntry)({
+      _tag: "Live",
       life: 1,
       network: "libera",
       status: { _tag: "Running" },
@@ -887,7 +889,7 @@ describe("notifications", () => {
     const reloaded = [
       { _tag: "Reset", reset: Schema.decodeSync(TimelineReset)({ through: 10, version: 1 }) },
       { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-      { _tag: "NetworksRead", entries: [libera], removed: [] },
+      { _tag: "NetworksRead", entries: [libera] },
       {
         _tag: "ReadStarted",
         read: { _tag: "List", after: undefined, attempt: 0, network: libera.network },

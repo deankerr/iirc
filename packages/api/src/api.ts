@@ -61,7 +61,6 @@ import {
   NewsEvent,
   ReadRequest,
   Removed,
-  RemovedNetwork,
   RemoveQuery,
   Resume,
   Said,
@@ -128,7 +127,6 @@ const NetworkPath = { network: NetworkId };
 export class NetworksGroup extends HttpApiGroup.make("networks")
   .add(
     HttpApiEndpoint.get("list", "/networks", { success: Schema.Array(NetworkEntry) }),
-    HttpApiEndpoint.get("removed", "/removed-networks", { success: Schema.Array(RemovedNetwork) }),
     HttpApiEndpoint.put("configure", "/networks/:network", {
       error: [NetworkStopped, ConfigurationChanged, TimelinesKept],
       params: NetworkPath,

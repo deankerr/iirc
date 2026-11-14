@@ -83,7 +83,6 @@ export {
   Rank,
   ReadRequest,
   RefusedReason,
-  RemovedNetwork,
   Removed,
   Life,
   Keep,

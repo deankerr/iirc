@@ -190,14 +190,11 @@ const request = (read: Read) =>
 
     switch (read._tag) {
       case "Networks": {
-        // The Networks removed with their Timelines kept are read with the rest, since no
-        // other list names them, and they are still read.
-        const [entries, removed] = yield* Effect.all(
-          [client.networks.list(), client.networks.removed()],
-          { concurrency: 2 }
-        );
+        // One list names every Network, live or removed with its Timelines kept, as one
+        // state of the Daemon, so none falls between two reads.
+        const entries = yield* client.networks.list();
 
-        return { _tag: "NetworksRead", entries, removed } as const;
+        return { _tag: "NetworksRead", entries } as const;
       }
 
       case "List": {

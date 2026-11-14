@@ -25,7 +25,7 @@ known(network): Effect<{ knowledge, life }, UnknownNetwork>
 channel(network, name): Effect<Option<ChannelView>, UnknownNetwork>    // one Channel, by name, folded as the Connection folds
 inspect(network): Effect<NetworkInspection, UnknownNetwork>             // { status, client, connections: [{ connection, queued, nextAt }], timers }
 networks: Effect<ReadonlyMap<NetworkId, NetworkStatus>>                 // Running | Stopped { reason }
-lives: Effect<ReadonlyMap<NetworkId, { status, life }>>                  // the same, with each life, read together
+lives: Effect<ReadonlyMap<NetworkId, Live { status, life } | Kept { life }>>  // every one held, live or kept, read together
 news({ after? }): Stream<Happened, JournalFailed>                        // { network, life, sequence, at, news }, never ends
 ```
 

@@ -255,7 +255,13 @@ const stoppedSaying = async (named: "lost" | "kept") =>
         const said = yield* api.networks.said({ params: { intent, network: libera } });
         const listed = yield* api.networks.list();
 
-        return { listed: listed[0]?.status._tag, said, stopped };
+        const [first] = listed;
+
+        return {
+          listed: first?._tag === "Live" ? first.status._tag : first?._tag,
+          said,
+          stopped,
+        };
       }),
     (record: JournalRecord) =>
       // Either the Say itself fails to append, or what it output does.
@@ -599,7 +605,7 @@ describe("the handlers", () => {
         { machine: "channel #iirc", state: "Joined.Synced" },
       ],
       line: "PRIVMSG #iirc hello",
-      listed: [{ life: 1, network: "libera", status: { _tag: "Running" } }],
+      listed: [{ _tag: "Live", life: 1, network: "libera", status: { _tag: "Running" } }],
       members: [["#iirc", ["iirc", "peer"]]],
       messages: ["iirc #iirc :hello", "peer #iirc :hi there"],
       said: ["Said", 32],
@@ -1642,7 +1648,7 @@ describe("the handlers", () => {
           const networks = yield* api.networks.list();
 
           return {
-            networks: networks.map(({ status }) => status._tag),
+            networks: networks.map((each) => (each._tag === "Live" ? each.status._tag : each._tag)),
             projection: listed.projection,
             through: listed.through,
             timelines: listed.timelines,
@@ -2638,7 +2644,6 @@ describe("removing a Network", () => {
           listed: listed.timelines.map((each) => [each.name, each.removed]),
           networks: yield* api.networks.list(),
           news: Option.isSome(news) && news.value.event === "happened" ? news.value.data.news : [],
-          removed: yield* api.networks.removed(),
           same: listed.timelines.map((each) => each.id),
           was: before.timelines.map((each) => each.id),
           window: window.items.map(textOf),
@@ -2658,9 +2663,8 @@ describe("removing a Network", () => {
         ["libera", true],
         ["peer", true],
       ],
-      networks: [],
+      networks: [{ _tag: "Kept", life: 1, network: libera }],
       news: [{ _tag: "NetworkRemoved", keep: true }],
-      removed: [{ life: 1, network: libera }],
       same: result.was,
       was: result.was,
       window: ["kept words"],
@@ -2711,9 +2715,8 @@ describe("removing a Network", () => {
           again,
           dropped: changed?.data.dropped.map((each) => each.id).toSorted(),
           found: found.items,
-          networks: (yield* api.networks.list()).map((each) => each.network),
+          networks: (yield* api.networks.list()).map((each) => [each._tag, each.network]),
           reads,
-          removed: yield* api.networks.removed(),
           was: listed.timelines.map((each) => each.id).toSorted(),
         };
       })
@@ -2723,9 +2726,8 @@ describe("removing a Network", () => {
       again: "UnknownNetwork",
       dropped: result.was,
       found: [],
-      networks: [libera],
+      networks: [["Live", libera]],
       reads: ["UnknownNetwork", "UnknownTimeline", "UnknownNetwork"],
-      removed: [],
       was: result.was,
     });
     expect(result.was).toHaveLength(2);

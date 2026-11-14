@@ -174,7 +174,8 @@ export const refresh = (registry: AtomRegistry.AtomRegistry) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const entries = yield* client.networks.list();
-    const networks = entries.map((entry) => entry.network);
+    // A Network removed with its Timelines kept has no Configuration to read.
+    const networks = entries.flatMap((entry) => (entry._tag === "Live" ? [entry.network] : []));
 
     happened(registry, { _tag: "Listed", networks });
 

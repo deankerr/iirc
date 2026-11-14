@@ -348,11 +348,16 @@ const networks = HttpApiBuilder.group(
       .handle("list", () =>
         runtime.lives.pipe(
           Effect.map((all) =>
-            Array.from(all, ([network, { life, status }]) => ({
-              life,
-              network,
-              status: networkStatus(status),
-            }))
+            Array.from(all, ([network, living]) =>
+              living._tag === "Kept"
+                ? ({ _tag: "Kept", life: living.life, network } as const)
+                : ({
+                    _tag: "Live",
+                    life: living.life,
+                    network,
+                    status: networkStatus(living.status),
+                  } as const)
+            )
           )
         )
       )
@@ -386,13 +391,6 @@ const networks = HttpApiBuilder.group(
             UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
             VaultFailed: (error) => Effect.fail(vaultFailed(error)),
           })
-        )
-      )
-      .handle("removed", () =>
-        runtime.kept.pipe(
-          Effect.map((kept) =>
-            Array.from(kept, ([network, life]) => ({ life, network: WireNetworkId.make(network) }))
-          )
         )
       )
       .handle("configuration", ({ params }) =>
@@ -676,9 +674,9 @@ const timelines = HttpApiBuilder.group(
 
     // A Network removed with its Timelines kept is still known to them.
     const known = (network: WireNetworkId) =>
-      Effect.all([runtime.networks, runtime.kept]).pipe(
-        Effect.flatMap(([all, kept]) =>
-          all.has(NetworkId.make(network)) || kept.has(NetworkId.make(network))
+      runtime.lives.pipe(
+        Effect.flatMap((all) =>
+          all.has(NetworkId.make(network))
             ? Effect.void
             : Effect.fail(new UnknownNetwork({ network }))
         )

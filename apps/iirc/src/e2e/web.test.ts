@@ -77,8 +77,10 @@ const decodeInForce = Schema.decodeUnknownSync(
 );
 
 /** The Networks removed with their Timelines kept, as the Daemon lists them. */
-const decodeRemoved = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.Array(Schema.Struct({ network: Schema.String })))
+const decodeListed = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ _tag: Schema.String, network: Schema.String }))
+  )
 );
 
 /** What the end-to-end run reads of a Network's Timelines: each one's name and Read Marker. */
@@ -1773,11 +1775,13 @@ describe("the web frontend on iirc daemon --web", () => {
       const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
 
       const removedNetworks = async () => {
-        const answer = await fetch(`${base}/api/removed-networks`, {
+        const answer = await fetch(`${base}/api/networks`, {
           headers: { authorization: `Bearer ${key}` },
         });
 
-        return decodeRemoved(await answer.text());
+        return decodeListed(await answer.text())
+          .filter((entry) => entry._tag === "Kept")
+          .map(({ network }) => ({ network }));
       };
 
       try {

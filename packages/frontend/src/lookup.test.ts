@@ -88,6 +88,7 @@ const timelines = [
  */
 const world = (open: string | undefined): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    _tag: "Live",
     life: 1,
     network: "libera",
     status: { _tag: "Running" },
@@ -98,7 +99,7 @@ const world = (open: string | undefined): Timelines => {
 
   const events: TimelinesEvent[] = [
     { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-    { _tag: "NetworksRead", entries: [libera], removed: [] },
+    { _tag: "NetworksRead", entries: [libera] },
     { _tag: "ReadStarted", read: list },
     {
       _tag: "ListRead",

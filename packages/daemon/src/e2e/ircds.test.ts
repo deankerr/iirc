@@ -485,7 +485,7 @@ describe("ngircd, on the floor", () => {
     );
 
     expect(result).toStrictEqual({
-      listed: [{ life: 1, network: "private", status: { _tag: "Running" } }],
+      listed: [{ _tag: "Live", life: 1, network: "private", status: { _tag: "Running" } }],
       recovered: "Journaled",
       refolded: true,
       resumed: true,

@@ -1569,27 +1569,26 @@ export const NetworkStatus = Schema.TaggedUnion({
 /** The decoded form of {@link NetworkStatus}. */
 export type NetworkStatus = typeof NetworkStatus.Type;
 
-/** A Network and whether it is running. */
-export const NetworkEntry = Schema.Struct({
-  life: Life,
-  network: NetworkId,
-  status: NetworkStatus,
+/**
+ * A Network the Daemon holds, with its life, as one list reads every one together:
+ *
+ * - `Live`: configured, and whether it is running.
+ * - `Kept`: removed with its Timelines kept, which no Network can take the id of until they
+ *   are dropped, and which are only read.
+ */
+export const NetworkEntry = Schema.TaggedUnion({
+  Kept: { life: Life, network: NetworkId },
+  Live: { life: Life, network: NetworkId, status: NetworkStatus },
 });
 
 /** The decoded form of {@link NetworkEntry}. */
 export type NetworkEntry = typeof NetworkEntry.Type;
-
-/** A Network removed with its Timelines kept, which no Network can take the id of until they are dropped. */
-export const RemovedNetwork = Schema.Struct({ life: Life, network: NetworkId });
 
 /** A Network removed: the sequence its removal was journaled at, and the life it ended. */
 export const Removed = Schema.Struct({ life: Life, sequence: Sequence });
 
 /** The decoded form of {@link Removed}. */
 export type Removed = typeof Removed.Type;
-
-/** The decoded form of {@link RemovedNetwork}. */
-export type RemovedNetwork = typeof RemovedNetwork.Type;
 
 /** A timer and when it is due. */
 const Timer = Schema.Struct({ at: Instant, timer: TimerId });

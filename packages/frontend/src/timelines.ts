@@ -12,7 +12,6 @@ import type {
   NetworkEntry,
   NetworkId,
   NetworkStatus,
-  RemovedNetwork,
   SearchResults,
   SessionKnowledge,
   Timeline,
@@ -130,7 +129,7 @@ export interface NetworkView {
   /** Whether the Daemon runs it, as `GET /api/networks` said, until it is read. */
   readonly running: NetworkStatus | undefined;
   /**
-   * Whether its life was removed with its Timelines kept, as `GET /api/removed-networks`,
+   * Whether its life was removed with its Timelines kept, as the Network list
    * the changes, or the Daemon's answer to removing it said. Its Timelines flagged
    * `removed` say so too, and {@link isRemoved} reads both.
    */
@@ -527,7 +526,6 @@ export type TimelinesEvent =
   | {
       readonly _tag: "NetworksRead";
       readonly entries: readonly NetworkEntry[];
-      readonly removed: readonly RemovedNetwork[];
     }
   | {
       readonly _tag: "NetworkRemoved";
@@ -1848,17 +1846,13 @@ const requesting = (state: Timelines, read: Read): Timelines => {
 };
 
 /**
- * Takes the Network list.
+ * Takes the Network list: every Network the Daemon holds, live or removed with its
+ * Timelines kept, read in one pass.
  * @param state - The state.
- * @param entries - Each Network and whether it runs.
- * @param removedNetworks - Each Network removed with its Timelines kept.
+ * @param entries - Each Network, its life, and whether it runs or is kept.
  * @returns The state.
  */
-const networksRead = (
-  state: Timelines,
-  entries: readonly NetworkEntry[],
-  removedNetworks: readonly RemovedNetwork[]
-): Timelines => {
+const networksRead = (state: Timelines, entries: readonly NetworkEntry[]): Timelines => {
   // Begun before a reset, or an overflow that touched everything, either of which may have
   // configured a Network the stream never gave: read it again.
   if (!isCurrent(state, state.entries.from, { _tag: "NetworkList" })) {
@@ -1886,20 +1880,19 @@ const networksRead = (
         : lived.state;
   };
 
-  for (const entry of entries) {
-    take(entry.network, entry.life, (view) => ({ ...view, running: entry.status }));
-  }
-
   // A Network removed with its Timelines kept is read as any other, but for its Session,
   // which it has no more. A life once removed stays so, whatever an older list said.
-  for (const { life, network } of removedNetworks) {
-    take(network, life, (view) => ({ ...view, kept: true }));
+  for (const entry of entries) {
+    take(entry.network, entry.life, (view) =>
+      entry._tag === "Kept" ? { ...view, kept: true } : { ...view, running: entry.status }
+    );
   }
 
-  // A Network neither list names, whose life began before the list was asked for, is over,
+  // The one list names every Network the Daemon holds, live or kept, as one state of it, so
+  // a Network it does not name, whose life began before the list was asked for, is over,
   // with its Timelines dropped. One begun since, as the stream gave it, is not in the list
   // yet. Before the stream is followed, every Network held came of a read.
-  const listed = new Set([...entries, ...removedNetworks].map((one) => one.network));
+  const listed = new Set(entries.map((one) => one.network));
   const asked = state.follow._tag === "Following" ? state.entries.from : Number.POSITIVE_INFINITY;
 
   for (const held of read.networks.values()) {
@@ -3565,7 +3558,7 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
     }
 
     case "NetworksRead": {
-      return { state: startFollowing(networksRead(state, event.entries, event.removed)) };
+      return { state: startFollowing(networksRead(state, event.entries)) };
     }
 
     case "ListRead": {

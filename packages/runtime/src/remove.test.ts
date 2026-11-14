@@ -7,7 +7,7 @@ import { client } from "@iirc/client";
 import type { Client, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
-import { Effect, Exit, Fiber, Latch, Redacted, Result, Stream } from "effect";
+import { Effect, Exit, Fiber, Latch, Redacted, Result, Scheduler, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -390,6 +390,39 @@ describe("a Network whose Client throws on its first Configuration", () => {
       removal: { life: 1, sequence: 2 },
       retaken: "TimelinesKept",
     });
+  });
+});
+
+describe("the Networks held", () => {
+  it("name a Network removed with its Timelines kept as live or kept at every point, never neither", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configured({ enabled: false }));
+
+        // The removal yields to the reads every few operations, so they fall between any
+        // two of its steps.
+        const removing = yield* Effect.forkChild(
+          runtime
+            .remove(libera, { keep: true })
+            .pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 3))
+        );
+
+        const seen = new Set<string>();
+
+        while (removing.pollUnsafe() === undefined) {
+          const found = (yield* runtime.lives).get(libera);
+
+          seen.add(found?._tag ?? "neither");
+          yield* Effect.yieldNow;
+        }
+
+        return [...seen].toSorted();
+      })
+    );
+
+    expect(result).toStrictEqual(["Kept", "Live"]);
   });
 });
 
