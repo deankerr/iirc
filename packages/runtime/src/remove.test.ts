@@ -11,7 +11,7 @@ import { Effect, Fiber, Latch, Redacted, Result, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
-import { NetworkId } from "./journal.ts";
+import { NetworkId, networkOf } from "./journal.ts";
 import { TimelinesKept, UnknownNetwork } from "./runtime.ts";
 import type { RuntimeService } from "./runtime.ts";
 import { outline, runTest, settle, startRuntime, wrapJournal } from "./testing/harness.ts";
@@ -398,6 +398,52 @@ describe("a removal carried through", () => {
     );
 
     expect(result).toStrictEqual(new Set(["a", "pass"]));
+  });
+
+  it("waits for a Configuration still to be stepped whose caller went away", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* held(world);
+        yield* world.vault.hold(name("shared"), Redacted.make("secret"));
+
+        // Only `oftc`'s appends wait, so its Configured is still to be stepped while
+        // `libera` is removed.
+        const gate = yield* Latch.make(true);
+
+        const journal = wrapJournal(world.journal, {
+          before: (record) => (networkOf(record) === oftc ? gate.await : Effect.void),
+        });
+
+        const { runtime } = yield* startRuntime({ ...world, journal }, client);
+
+        yield* runtime.configure(libera, configured({ enabled: false, password: name("shared") }));
+        yield* runtime.configure(oftc, configured({ enabled: false }));
+        yield* gate.close;
+
+        const changing = yield* Effect.forkChild(
+          runtime.configure(oftc, configured({ enabled: false, password: name("shared") }))
+        );
+
+        yield* settle;
+        yield* Fiber.interrupt(changing);
+
+        const removing = yield* Effect.forkChild(runtime.remove(libera, { keep: false }));
+
+        yield* settle;
+        yield* gate.open;
+        yield* Fiber.join(removing);
+
+        return {
+          configured: (yield* runtime.configuration(oftc)).configuration.password,
+          vault: yield* world.vault.names,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      configured: "shared",
+      vault: new Set(["a", "b", "pass", "shared"]),
+    });
   });
 
   it("removes a Network its Client's bug stopped, now and after a restart", async () => {

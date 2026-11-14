@@ -747,15 +747,23 @@ export const makeRuntime = <S>(
               : Effect.succeed(configured)
           )
         ),
-      // `configuring` is held until the `Configured` is stepped, so a removal's check of
-      // which Credentials a Network still names never races a change of Configuration.
+      // `configuring` is held until the `Configured` is stepped, refused, or its driver
+      // stops, so a removal's check of which Credentials a Network still names never races
+      // a change of Configuration. It is held in a fiber of its own, which the caller only
+      // waits on, so a caller that goes away while its `Configured` is queued never lets go
+      // of it early.
       configure: (id, configuration, ifSequence) =>
         Effect.flatMap(adding.withPermit(findOrAdd(id, ifSequence)), (network) =>
-          configuring.withPermit(
-            Effect.map(
-              tellConfiguration(network, configuration, ifSequence),
-              ({ sequence }) => sequence
-            )
+          Effect.flatMap(
+            Effect.forkDetach(
+              configuring.withPermit(
+                Effect.map(
+                  tellConfiguration(network, configuration, ifSequence),
+                  ({ sequence }) => sequence
+                )
+              )
+            ),
+            Fiber.join
           )
         ),
       inspect: (id) =>
