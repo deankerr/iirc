@@ -65,14 +65,22 @@ export const uiRead = (registry: AtomRegistry.AtomRegistry, ui: UiInForce) => {
 /**
  * While the browser is signed in, follows the shared options, each event the options
  * whole, from the ones in force. Whenever the stream ends, or gives nothing for longer than
- * three heartbeats, it is followed again. A refusal signs the page out. Mounted once.
+ * three heartbeats, it is followed again. A refusal signs the page out, and signed out, the
+ * shared options are forgotten until they are read again. Mounted once.
  */
 export const uiSync = runtime
   .atom((get) =>
     Effect.gen(function* () {
       const { registry } = get;
 
+      // Signed out, the shared options held may be changed before the next sign-in, so they
+      // are forgotten, and a rule they set waits for them to be read again.
       if (!get(signedIn)) {
+        registry.set(
+          optionsState,
+          reduceOptions(registry.get(optionsState), { _tag: "UiForgotten" })
+        );
+
         return;
       }
 

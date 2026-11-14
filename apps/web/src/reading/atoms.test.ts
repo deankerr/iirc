@@ -3,15 +3,15 @@ import type { Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import type { Place } from "@iirc/frontend/composer";
 import { openOf } from "@iirc/frontend/timelines";
-import { Effect, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { composerState, edit, send } from "../composer/atoms.ts";
 import { optionsState } from "../options/atoms.ts";
-import { uiRead, uiSync } from "../options/ui.ts";
+import { readRule, uiRead, uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
-import { check } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
+import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
+import { eventually, fakeDaemon, registryFor, run, theKey, until } from "../testing/fake-daemon.ts";
 import { testNotifier } from "../testing/notifier.ts";
 import { following, open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
 import { documentTitle, marking } from "./atoms.ts";
@@ -313,6 +313,25 @@ describe("marking read", () => {
     expect({ reads: daemon.reads, unknown }).toStrictEqual({
       reads: [{ read: 2000, target: "#iirc" }],
       unknown: 0,
+    });
+  });
+
+  it("forgets the shared ui.read on signing out, and takes the one in force on signing in again", async () => {
+    const { daemon, registry } = await reading();
+    const before = registry.get(readRule);
+
+    await run(registry, signOut, undefined);
+    const out = registry.get(readRule);
+
+    // Changed on another device while this page was signed out.
+    daemon.ui = { options: { ...uiDefaults, read: "asked" }, sequence: 1 };
+    await run(registry, signInWithKey, Redacted.make(theKey));
+    const again = await until(registry, readRule, (rule) => rule !== undefined);
+
+    expect({ again, before, out }).toStrictEqual({
+      again: "asked",
+      before: "latest",
+      out: undefined,
     });
   });
 

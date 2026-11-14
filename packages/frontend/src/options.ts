@@ -2091,6 +2091,8 @@ export interface Prompt {
  * - `Listed`: the Networks to read, as `GET /api/networks` listed them.
  * - `Read`, `ReadFailed`: a Network's Configuration was read, or could not be.
  * - `UiRead`: the options under `ui` were read, or followed.
+ * - `UiForgotten`: the page signed out, so the shared `ui` options it held may no longer
+ *   be the ones in force, and are read again once it signs in.
  * - `Held`: the names of the Credentials the Vault holds.
  * - `Noticed`: what an edit came to, or nothing to let go of the last.
  * - `Editing`: an option is edited in place, or none is.
@@ -2107,6 +2109,7 @@ export type OptionsEvent =
     }
   | { readonly _tag: "ReadFailed"; readonly network: NetworkId; readonly message: string }
   | { readonly _tag: "UiRead"; readonly ui: UiInForce }
+  | { readonly _tag: "UiForgotten" }
   | { readonly _tag: "Held"; readonly names: readonly string[] }
   | { readonly _tag: "Noticed"; readonly message: string | undefined }
   | { readonly _tag: "Editing"; readonly name: string | undefined }
@@ -2177,6 +2180,10 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
       return state.ui !== undefined && state.ui.sequence > event.ui.sequence
         ? state
         : { ...state, ui: event.ui };
+    }
+
+    case "UiForgotten": {
+      return { ...state, ui: undefined };
     }
 
     case "Held": {

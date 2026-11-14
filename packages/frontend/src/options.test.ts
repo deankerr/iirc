@@ -1230,6 +1230,19 @@ describe("the options under ui", () => {
     });
   });
 
+  it("forgets the shared ones once the page signs out, so an older read after is taken", () => {
+    const newer = { ...shared, sequence: 9 };
+
+    const forgotten = reduceOptions(reduceOptions(initialOptions, { _tag: "UiRead", ui: newer }), {
+      _tag: "UiForgotten",
+    });
+
+    expect({
+      after: reduceOptions(forgotten, { _tag: "UiRead", ui: shared }).ui,
+      forgotten: forgotten.ui,
+    }).toStrictEqual({ after: shared, forgotten: undefined });
+  });
+
   it("lists them after every Network's, filtered, and keeps the newest read of them", () => {
     let state = initialOptions;
 
