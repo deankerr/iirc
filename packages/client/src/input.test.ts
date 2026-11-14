@@ -37,7 +37,7 @@ describe("inputs", () => {
     expect(Schema.decodeUnknownSync(json)(read)).toStrictEqual(received);
   });
 
-  it("give back a CTCP answer that never left with its request, and read one recorded before", () => {
+  it("give back a CTCP answer that never left with its request, and read ones recorded before", () => {
     const line = notice("peer", "\u0001VERSION iirc\u0001");
 
     if (isRejected(line)) {
@@ -45,10 +45,16 @@ describe("inputs", () => {
     }
 
     const send = { _tag: "Send", connection: ConnectionId.make(1), line } as const;
-    const answers = { command: "VERSION", nick: "peer", target: "#iirc" };
+    const unplaced = { command: "VERSION", nick: "peer", target: "#iirc" };
+    const answers = { ...unplaced, answer: 0, channels: ["#iirc"] };
 
-    expect([read(unsent([{ ...send, answers }])), read(unsent([send]))]).toStrictEqual([
+    expect([
+      read(unsent([{ ...send, answers }])),
+      read(unsent([{ ...send, answers: unplaced }])),
+      read(unsent([send])),
+    ]).toStrictEqual([
       unsent([{ ...send, answers }]),
+      unsent([{ ...send, answers: unplaced }]),
       unsent([send]),
     ]);
   });

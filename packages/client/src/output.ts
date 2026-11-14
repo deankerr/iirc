@@ -7,9 +7,15 @@ import type { Input } from "./input.ts";
 
 /**
  * The CTCP request a `Send` answers: who asked, where they sent it, and its command, so an
- * `Unsent` of the answer can be reported where the request was.
+ * `Unsent` of the answer can be reported where the request was. `channels` are the Channels
+ * the request was placed in, as named, fixed as it arrived, and empty for one placed by who
+ * asked, which `answer` numbers among Self's answers, so the Client can tell where that
+ * partner's Timeline has moved since. Both are absent from an answer recorded before they
+ * were, which is placed from the rest as the `Unsent` arrives.
  */
 export const Answers = Schema.Struct({
+  answer: Schema.optionalKey(Schema.Int),
+  channels: Schema.optionalKey(Schema.Array(Schema.String)),
   command: Schema.String,
   nick: Schema.String,
   target: Schema.String,

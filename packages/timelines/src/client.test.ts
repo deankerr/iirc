@@ -190,4 +190,36 @@ describe("a played Session", () => {
       ["CtcpUnsent", libera?.channels.get("#iirc"), "Activity"],
     ]);
   });
+
+  it("shows an answer that never left in its partner's Timeline after they changed nick", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      joined(base, "#iirc", ["peer"]),
+      lines(
+        "<< :peer!u@h PRIVMSG iirc :psst",
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "<< :peer!u@h NICK other",
+        "== unsent 1"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" &&
+      change.content._tag === "Activity" &&
+      change.content.activity._tag.startsWith("Ctcp")
+        ? [[change.content.activity._tag, change.timeline]]
+        : []
+    );
+
+    expect([...(libera?.directs.keys() ?? [])]).toStrictEqual(["other"]);
+    expect(placed).toStrictEqual([
+      ["CtcpRequest", libera?.directs.get("other")],
+      ["CtcpRequest", libera?.timeline],
+      ["CtcpUnsent", libera?.directs.get("other")],
+      ["CtcpUnsent", libera?.timeline],
+    ]);
+  });
 });

@@ -17,10 +17,11 @@ import type { Arrival } from "./feature.ts";
 import { Instant } from "./ids.ts";
 import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { parseNick, parseTargets } from "./names.ts";
-import type { Ctcp, CtcpAnswer, Unanswered, Where } from "./news.ts";
+import type { Ctcp, CtcpAnswer, Named, Unanswered, Where } from "./news.ts";
 import type { Answers } from "./output.ts";
 import type { Run } from "./run.ts";
 import { send } from "./run.ts";
+import { maxActions } from "./state.ts";
 import { isUser, named } from "./where.ts";
 
 /**
@@ -105,6 +106,58 @@ const answers: ReadonlyMap<string, (args: string, run: Run) => string> = new Map
 const unanswered = (reason: Unanswered): CtcpAnswer => ({ _tag: "Unanswered", reason });
 
 /**
+ * Remembers where the partner who asked for an answer is, by its number, as their Timeline
+ * will follow their nick. It is by number, not by nick, since a later User of the old nick
+ * may ask too, and each answer must follow its own partner. The oldest is forgotten past
+ * the bound.
+ * @param run - The step.
+ * @param number - The answer's number.
+ * @param nick - Who asked.
+ * @returns What is remembered of answers, with this one.
+ */
+const remember = (run: Run, number: number, nick: string): ReadonlyMap<number, string | null> => {
+  const answering = new Map(run.state.answering).set(number, nick);
+
+  for (const oldest of answering.keys()) {
+    if (answering.size <= maxActions) {
+      break;
+    }
+
+    answering.delete(oldest);
+  }
+
+  return answering;
+};
+
+/**
+ * The Channels a CTCP was sent to, once each, by the naming rules now.
+ * @param run - The step.
+ * @param target - The Target parameter, as said.
+ * @returns Each Channel, by its key.
+ */
+const channelsIn = (run: Run, target: string): readonly Named[] => {
+  const channels = new Map<string, Named>();
+
+  for (const each of parseTargets(namingNow(run), target)) {
+    if (each._tag === "Channel") {
+      const channel = named(run, each.name);
+
+      channels.set(channel.key, channel);
+    }
+  }
+
+  return [...channels.values()];
+};
+
+const network: Where = { _tag: "Network" };
+
+// A partner's Direct Messages, if they exist, and the Network's own Timeline.
+const byPartner = (run: Run, nick: string): readonly Where[] => [
+  { _tag: "Direct", existing: true, ...named(run, nick) },
+  network,
+];
+
+/**
  * Answers a request, if Self may, and says what became of it. It sends the answer and
  * spends the budget, so it is called once for each request, as it arrives.
  * @param run - The step.
@@ -151,13 +204,29 @@ const answer = (run: Run, arrival: Arrival, ctcp: Ctcp, fromUser: boolean): Ctcp
     return unanswered("Limited");
   }
 
-  const request: Answers = { command: ctcp.command, nick: ctcp.nick, target: ctcp.target };
+  // Where the request was placed is fixed now, as names, so a later `CHANTYPES` cannot
+  // move an `Unsent` of the answer out of the Channel the request is shown in.
+  const channels = channelsIn(run, ctcp.target).map(({ name }) => name);
+  const number = run.state.answered;
+
+  const request: Answers = {
+    answer: number,
+    channels,
+    command: ctcp.command,
+    nick: ctcp.nick,
+    target: ctcp.target,
+  };
 
   if (send(run, line, "NOTICE", undefined, request) === undefined) {
     return unanswered("Unsendable");
   }
 
-  run.state = { ...run.state, answersFullAt: Instant.make(fullAt + answerInterval) };
+  run.state = {
+    ...run.state,
+    answered: number + 1,
+    answering: channels.length === 0 ? remember(run, number, ctcp.nick) : run.state.answering,
+    answersFullAt: Instant.make(fullAt + answerInterval),
+  };
 
   return { _tag: "Answered", text };
 };
@@ -173,24 +242,15 @@ const answer = (run: Run, arrival: Arrival, ctcp: Ctcp, fromUser: boolean): Ctcp
  * @returns The Timelines.
  */
 const ctcpWhere = (run: Run, ctcp: Answers, fromUser: boolean): readonly Where[] => {
-  const naming = namingNow(run);
-  const channels = new Map<string, Where>();
+  const channels = channelsIn(run, ctcp.target);
 
-  for (const target of parseTargets(naming, ctcp.target)) {
-    if (target._tag === "Channel") {
-      const channel = named(run, target.name);
-
-      channels.set(channel.key, { _tag: "Channel", ...channel });
-    }
+  if (channels.length > 0) {
+    return channels.map((channel) => ({ _tag: "Channel", ...channel }));
   }
 
-  if (channels.size > 0) {
-    return [...channels.values()];
-  }
-
-  return fromUser && parseNick(naming, ctcp.nick) !== undefined
-    ? [{ _tag: "Direct", existing: true, ...named(run, ctcp.nick) }, { _tag: "Network" }]
-    : [{ _tag: "Network" }];
+  return fromUser && parseNick(namingNow(run), ctcp.nick) !== undefined
+    ? byPartner(run, ctcp.nick)
+    : [network];
 };
 
 /**
@@ -240,19 +300,61 @@ export const heardCtcp = (run: Run, arrival: Arrival): void => {
 };
 
 /**
+ * Where the Timelines a request was placed in stand now. Its Channels are the ones named as
+ * it arrived, keyed by the casemapping now, as their Timelines are. A request placed by
+ * who asked is placed by that partner's nick now, which follows a live rename as their
+ * Timeline does, or in the Network's own Timeline alone once another User took it, so the
+ * report never lands with someone else. An answer forgotten past the bound is placed by
+ * the nick that asked, and one recorded before its placement was is placed as its request
+ * would be now. Its request came from a User, or it would not have been answered.
+ * @param run - The step.
+ * @param answers - The request the answer was for.
+ * @returns The Timelines.
+ */
+const unsentWhere = (run: Run, answers: Answers): readonly Where[] => {
+  const { answer: number, channels } = answers;
+
+  if (channels === undefined) {
+    return ctcpWhere(run, answers, true);
+  }
+
+  if (channels.length > 0) {
+    return channels.map((name) => ({ _tag: "Channel", ...named(run, name) }));
+  }
+
+  const partner = number === undefined ? undefined : run.state.answering.get(number);
+
+  if (partner === null) {
+    return [network];
+  }
+
+  return byPartner(run, partner ?? answers.nick);
+};
+
+/**
  * Reports an answer that never left, where its request was, so a request reported as
- * `Answered` is not left standing alone. Its request came from a User, or it would not have
- * been answered. Nothing is sent, and the budget it spent stays spent.
+ * `Answered` is not left standing alone. Nothing is sent, and the budget it spent stays
+ * spent.
  * @param run - The step.
  * @param answers - The request the answer was for.
  */
 export const answerUnsent = (run: Run, answers: Answers): void => {
+  const where = unsentWhere(run, answers);
+  const { answer: number, command, nick, target } = answers;
+
+  if (number !== undefined && run.state.answering.has(number)) {
+    const answering = new Map(run.state.answering);
+
+    answering.delete(number);
+    run.state = { ...run.state, answering };
+  }
+
   run.news.push({
     _tag: "Activity",
-    activity: { _tag: "CtcpUnsent", ...answers },
+    activity: { _tag: "CtcpUnsent", command, nick, target },
     at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
     id: { _tag: "Unknown" },
     live: true,
-    where: ctcpWhere(run, answers, true),
+    where,
   });
 };

@@ -345,6 +345,79 @@ describe("an answer that never left", () => {
   });
 });
 
+describe("an answer that never left, after the Network changed since its request", () => {
+  it("is reported in the Channel the request was in, though its name no longer reads as one", () => {
+    played([
+      ...inChannel,
+      lines(
+        "<<\\ :peer!u@h PRIVMSG #iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "?? activity CtcpRequest peer #iirc VERSION answered=iirc in=channel:#iirc",
+        "<< :irc.test 005 iirc CHANTYPES=& :are supported by this server",
+        "== unsent 1",
+        "?? activity CtcpUnsent peer #iirc VERSION in=channel:#iirc"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is reported in the Network's Timeline for a request to Self, though Channels changed", () => {
+    played([
+      ...inChannel,
+      lines(
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "?? activity CtcpRequest peer iirc VERSION answered=iirc in=existing-direct:peer in=network",
+        "<< :irc.test 005 iirc CHANTYPES=i :are supported by this server",
+        "== unsent 1",
+        "?? activity CtcpUnsent peer iirc VERSION in=existing-direct:peer in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is reported in the Timeline of the partner who asked, after they changed nick", () => {
+    played([
+      ...inChannel,
+      lines(
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "?? activity CtcpRequest peer iirc VERSION answered=iirc in=existing-direct:peer in=network",
+        "<< :peer!u@h NICK other",
+        "?? activity NickChanged peer other in=channel:#iirc in=renamed:peer>other",
+        "<< :other!u@h NICK third",
+        "?? activity NickChanged other third in=channel:#iirc in=renamed:other>third",
+        "== unsent 1",
+        "?? activity CtcpUnsent peer iirc VERSION in=existing-direct:third in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is reported in the Network's Timeline alone once another User took the nick that asked", () => {
+    played([
+      registered(base),
+      joined(base, "#iirc", ["bob", "alice"]),
+      lines(
+        "<<\\ :bob!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE bob :\\x01VERSION iirc\\x01",
+        "?? activity CtcpRequest bob iirc VERSION answered=iirc in=existing-direct:bob in=network",
+        "<< :bob!u@h QUIT :bye",
+        "...",
+        "<< :alice!u@h NICK bob",
+        "?? activity NickChanged alice bob in=channel:#iirc in=renamed:alice>bob",
+        "== unsent 1",
+        "?? activity CtcpUnsent bob iirc VERSION in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+});
+
 describe("a CTCP reply", () => {
   it("is Activity that names who replied, and with what, and answers nothing", () => {
     played([
