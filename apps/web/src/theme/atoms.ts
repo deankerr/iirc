@@ -34,7 +34,7 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
-import { changeUi, uiFailed, uiInEffect, uiRead } from "../options/ui.ts";
+import { changeUi, readShared, uiFailed, uiInEffect } from "../options/ui.ts";
 import { paletteHighlight, paletteState } from "../palette/state.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { fontStack, monoStack } from "./fonts.ts";
@@ -213,10 +213,7 @@ const sharedNow = (registry: AtomRegistry.AtomRegistry) =>
       return held;
     }
 
-    const client = yield* DaemonClient;
-    const read: UiInForce = yield* client.ui.read();
-
-    uiRead(registry, read);
+    const read: UiInForce = yield* readShared(registry);
 
     return read;
   });
@@ -262,9 +259,7 @@ const conflict = { _tag: "Conflict" } as const;
 const tryEdit = (registry: AtomRegistry.AtomRegistry, edit: ThemesEdit) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
-    const read = yield* client.ui.read();
-
-    uiRead(registry, read);
+    const read = yield* readShared(registry);
 
     const themes = editThemes(read.options.themes, edit);
 
@@ -282,7 +277,7 @@ const tryEdit = (registry: AtomRegistry.AtomRegistry, edit: ThemesEdit) =>
       query: { ifSequence: read.sequence },
     });
 
-    uiRead(registry, yield* client.ui.read());
+    yield* readShared(registry);
 
     const done: Outcome = { _tag: "Done" };
 

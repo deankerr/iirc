@@ -66,6 +66,35 @@ export const uiRead = (registry: AtomRegistry.AtomRegistry, ui: UiInForce) => {
 };
 
 /**
+ * Reads the shared options now, and folds them in only when the page stayed signed in the
+ * whole time the read took: one that lands after it signed out, or after it signed in
+ * again, may be of options since changed, and the stream brings the ones in force anyway.
+ * @param registry - The registry.
+ * @returns The options read.
+ */
+export const readShared = (registry: AtomRegistry.AtomRegistry) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    let stayed = registry.get(signedIn);
+
+    const read = yield* Effect.acquireUseRelease(
+      Effect.sync(() =>
+        registry.subscribe(signedIn, (now) => {
+          stayed &&= now;
+        })
+      ),
+      () => client.ui.read(),
+      (unsubscribe) => Effect.sync(unsubscribe)
+    );
+
+    if (stayed) {
+      uiRead(registry, read);
+    }
+
+    return read;
+  });
+
+/**
  * While the browser is signed in, follows the shared options, each event the options
  * whole, from the ones in force. Whenever the stream ends, or gives nothing for longer than
  * three heartbeats, it is followed again. A refusal signs the page out, and signed out, the
@@ -184,9 +213,7 @@ const tryShared = (registry: AtomRegistry.AtomRegistry, change: UiChange, fresh:
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const held = registry.get(optionsState).ui;
-    const from = fresh || held === undefined ? yield* client.ui.read() : held;
-
-    uiRead(registry, from);
+    const from = fresh || held === undefined ? yield* readShared(registry) : held;
 
     const params = { option: change.option };
     const query = { ifSequence: from.sequence };
@@ -195,7 +222,7 @@ const tryShared = (registry: AtomRegistry.AtomRegistry, change: UiChange, fresh:
       ? client.ui.unset({ params, query })
       : client.ui.set({ params, payload: { value: change.value }, query });
 
-    uiRead(registry, yield* client.ui.read());
+    yield* readShared(registry);
 
     const done: Outcome = { _tag: "Done" };
 

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { composerState, edit, send } from "../composer/atoms.ts";
 import { optionsState } from "../options/atoms.ts";
-import { readRule, uiRead, uiSync } from "../options/ui.ts";
+import { changeUiOption, readRule, uiRead, uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, theKey, until } from "../testing/fake-daemon.ts";
@@ -335,6 +335,36 @@ describe("marking read", () => {
       before: "latest",
       out: undefined,
     });
+  });
+
+  it("drops a read of the shared options begun in an earlier sign-in, landing in the next", async () => {
+    const { daemon, registry } = await reading();
+
+    // A change for every device is made, and its read of the options after is slow.
+    daemon.holdUiReads = true;
+
+    const changing = run(registry, changeUiOption, {
+      device: false,
+      option: "time",
+      value: "HH:mm:ss",
+    });
+
+    await eventually(() => daemon.uiReadsHeld.length === 1);
+
+    // Signed out, the rule is changed on another device, and the page signs in again while
+    // the options' stream has not yet answered.
+    await run(registry, signOut, undefined);
+    daemon.ui = { options: { ...daemon.ui.options, read: "asked" }, sequence: 2 };
+    daemon.hangUiChanges = true;
+    await run(registry, signInWithKey, Redacted.make(theKey));
+
+    for (const release of daemon.uiReadsHeld) {
+      release();
+    }
+
+    await changing;
+
+    expect(registry.get(readRule)).toBeUndefined();
   });
 
   it("asks again after a mark that got no answer", async () => {

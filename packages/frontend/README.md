@@ -281,7 +281,7 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 
 - **A level ranks what calls for the Owner:** Highlight, then Direct, then Message, then Activity. A Timeline's level is the highest with anything unread.
 - **Activity is a dimmer name, never a number.** Counts and labels say what was said. The page's title counts only Highlights and Direct Messages.
-- **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, at the latest, as the view said.
+- **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, and under `latest`, at the latest, as the view said.
 - **A mark is never back, and never past what was shown.** It goes up to the last item the view named, even when the Daemon holds a later one.
 
 ## Notifications

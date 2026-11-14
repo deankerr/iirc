@@ -474,6 +474,7 @@ export const fakeDaemon = () => {
   const saysHeld: (() => void)[] = [];
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
+  const uiReadsHeld: (() => void)[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
 
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
@@ -507,6 +508,8 @@ export const fakeDaemon = () => {
     gatewayOnly: false,
     /** Whether a request to follow the changes never begins its answer. */
     hangChanges: false,
+    /** Whether a request to follow the `ui` options never begins its answer. */
+    hangUiChanges: false,
     /** Releases each request held: a read of a Channel's head, its members, or `known`, or a `say`. */
     held: { channel: channelsHeld, known: knownHeld, members: membersHeld, says: saysHeld },
     /** Whether each read of a Channel's head waits until released. */
@@ -525,6 +528,8 @@ export const fakeDaemon = () => {
     holdNetworks: false,
     /** Whether each `say` waits, before it is answered as `sayAnswers` says, until released. */
     holdSays: false,
+    /** Whether each read of the `ui` options waits until released, then answers as they were when asked. */
+    holdUiReads: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
     /**
@@ -605,6 +610,8 @@ export const fakeDaemon = () => {
     uiChanges,
     /** Each follower of the `ui` options. */
     uiFollowers,
+    /** Releases each read of the `ui` options held, in the order they came. */
+    uiReadsHeld,
     /** Each read of a window, by its query, for a test to look at. */
     windowsRead,
   };
@@ -979,7 +986,20 @@ export const fakeDaemon = () => {
     const one = uiOptionRoute.exec(url.pathname)?.groups;
 
     if (url.pathname === "/api/ui" && method === "GET") {
-      return signedInOnly(() => json(200, daemon.ui));
+      const asked = daemon.ui;
+      const answered = signedInOnly(() => json(200, asked));
+
+      if (daemon.holdUiReads) {
+        await heldUntilReleased(uiReadsHeld, init);
+      }
+
+      return answered;
+    }
+
+    // A Daemon that takes a follower of the `ui` options and never begins its answer, until
+    // the request is given up.
+    if (url.pathname === "/api/ui/changes" && daemon.hangUiChanges) {
+      return await heldUntilReleased([], init).then(() => new Response(null, { status: 502 }));
     }
 
     if (url.pathname === "/api/ui/changes") {
