@@ -27,6 +27,7 @@ import {
   NotInChannel,
   SignInsFailed,
   TimelinesFailed,
+  TimelinesKept,
   UiChanged,
   Unauthorized,
   UnknownNetwork,
@@ -59,6 +60,8 @@ import {
   NetworkInspection,
   NewsEvent,
   ReadRequest,
+  RemovedNetwork,
+  RemoveQuery,
   Resume,
   Said,
   SaidAnswer,
@@ -124,11 +127,18 @@ const NetworkPath = { network: NetworkId };
 export class NetworksGroup extends HttpApiGroup.make("networks")
   .add(
     HttpApiEndpoint.get("list", "/networks", { success: Schema.Array(NetworkEntry) }),
+    HttpApiEndpoint.get("removed", "/removed-networks", { success: Schema.Array(RemovedNetwork) }),
     HttpApiEndpoint.put("configure", "/networks/:network", {
-      error: [NetworkStopped, ConfigurationChanged],
+      error: [NetworkStopped, ConfigurationChanged, TimelinesKept],
       params: NetworkPath,
       payload: NetworkConfiguration,
       query: { ifSequence: Schema.optionalKey(IfSequence) },
+      success: Journaled,
+    }),
+    HttpApiEndpoint.delete("remove", "/networks/:network", {
+      error: [UnknownNetwork, NetworkStopped, JournalFailed, VaultFailed],
+      params: NetworkPath,
+      query: RemoveQuery,
       success: Journaled,
     }),
     HttpApiEndpoint.get("configuration", "/networks/:network/configuration", {

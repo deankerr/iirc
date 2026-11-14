@@ -241,7 +241,10 @@ export const DirectoryRow = Schema.Struct({ directory: DirectoryText });
 
 const Count = Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 
-/** A Timeline, with its latest item's position, its Read Marker, its head's last change, and its counts, flat. */
+/**
+ * A Timeline, with its latest item's position, its Read Marker, its head's last change,
+ * whether its Network was removed, and its counts, flat.
+ */
 export const SummaryRow = Schema.toCodecJson(
   Schema.Struct({
     activity: Count,
@@ -257,7 +260,13 @@ export const SummaryRow = Schema.toCodecJson(
     name: Schema.String,
     network: Schema.String,
     read: Schema.UndefinedOr(Instant),
+    removed: Schema.BooleanFromBit,
   })
+);
+
+/** A Timeline dropped with its Network. */
+export const DroppedRow = Schema.toCodecJson(
+  Schema.Struct({ changed: Int, id: TimelineId, network: Schema.String })
 );
 
 /** A tombstone. */

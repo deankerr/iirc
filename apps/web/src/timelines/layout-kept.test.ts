@@ -28,6 +28,7 @@ const listed = (
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 

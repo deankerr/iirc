@@ -1,7 +1,7 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
+import { credentialsOf, IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 
 const decode = Schema.decodeUnknownResult(IrcdAddress);
 
@@ -87,5 +87,24 @@ describe("answering CTCP", () => {
 
   it("starts on for a new Network", () => {
     expect(NetworkConfiguration.fields.answerCtcp.ast.annotations).toMatchObject({ default: true });
+  });
+});
+
+describe("the Credentials a Configuration names", () => {
+  it("are its password, its SASL login's, and each Channel's key, once each", () => {
+    const configuration = Schema.decodeSync(NetworkConfiguration)({
+      channels: [{ name: "#a" }, { key: "shared", name: "#b" }, { key: "shared", name: "#c" }],
+      declined: [],
+      enabled: true,
+      fallbackEncoding: "windows-1252",
+      ircds: [{ host: "irc.test", port: 6697, tls: true }],
+      login: { _tag: "Sasl", account: "iirc", credential: "sasl", required: false },
+      nicks: ["iirc"],
+      password: "pass",
+      realname: "iirc",
+      username: "iirc",
+    });
+
+    expect(credentialsOf(configuration)).toStrictEqual(new Set(["pass", "sasl", "shared"]));
   });
 });

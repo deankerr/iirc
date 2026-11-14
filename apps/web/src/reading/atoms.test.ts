@@ -68,6 +68,7 @@ const listed = (
     name,
     network: "libera",
     read: more.read ?? null,
+    removed: false,
     unread: { ...none, ...more.unread },
   };
 };
@@ -109,7 +110,7 @@ const changed = (
   items: readonly (typeof TimelineItem.Encoded)[],
   timelines: readonly (typeof Timeline.Encoded)[]
 ): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ gaps: [], items, merged: [], sequence, timelines }),
+  data: JSON.stringify({ dropped: [], gaps: [], items, merged: [], sequence, timelines }),
   event: "changed",
   id: `1.${sequence}`,
 });

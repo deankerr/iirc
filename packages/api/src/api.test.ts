@@ -72,6 +72,7 @@ describe("the contract", () => {
 
     expect(routes.map(({ route }) => route).toSorted()).toStrictEqual([
       "DELETE /api/credentials/{name}",
+      "DELETE /api/networks/{network}",
       "DELETE /api/sign-in",
       "DELETE /api/ui/{option}",
       "GET /api/credentials",
@@ -84,6 +85,7 @@ describe("the contract", () => {
       "GET /api/networks/{network}/said/{intent}",
       "GET /api/networks/{network}/timelines",
       "GET /api/news",
+      "GET /api/removed-networks",
       "GET /api/search",
       "GET /api/timelines/changes",
       "GET /api/timelines/{timeline}",
@@ -593,7 +595,7 @@ describe("the contract", () => {
   });
 
   it("carries where a folded step leaves a follower as its event id, and a reset or heartbeat with none", () => {
-    const data = { gaps: [], items: [], merged: [], sequence: 9, timelines: [] };
+    const data = { dropped: [], gaps: [], items: [], merged: [], sequence: 9, timelines: [] };
 
     const wire = [
       { data: JSON.stringify(data), event: "changed", id: "1.9" },

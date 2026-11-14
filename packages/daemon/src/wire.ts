@@ -18,6 +18,7 @@ import type {
   Unread as WireUnread,
   TimelineItem as WireTimelineItem,
   Tombstone as WireTombstone,
+  DroppedTimeline as WireDroppedTimeline,
   WindowGap as WireWindowGap,
   ChannelHeader as WireChannelHeader,
   ChannelKnowledge as WireChannelKnowledge,
@@ -73,7 +74,15 @@ import type {
   UserKnowledge,
 } from "@iirc/client/known";
 import type { Happened, LookOutcome, NetworkInspection, NetworkStatus } from "@iirc/runtime";
-import type { CollapsedGap, Gap, Item, Summary, Tombstone, Unread } from "@iirc/timeline-store";
+import type {
+  CollapsedGap,
+  Dropped,
+  Gap,
+  Item,
+  Summary,
+  Tombstone,
+  Unread,
+} from "@iirc/timeline-store";
 import type { Content, Delivery } from "@iirc/timelines";
 
 import { inRankOrder } from "./members.ts";
@@ -794,6 +803,15 @@ const news = (source: News): WireNews => {
       return wire;
     }
 
+    case "NetworkRemoved": {
+      const wire: Case<News, WireNews, "NetworkRemoved"> = {
+        _tag: "NetworkRemoved",
+        keep: source.keep,
+      };
+
+      return wire;
+    }
+
     case "Refolded": {
       const wire: Case<News, WireNews, "Refolded"> = {
         _tag: "Refolded",
@@ -1315,6 +1333,7 @@ export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detach
   name: source.name,
   network: networkOf(source.network),
   read: orNull(source.read),
+  removed: source.removed,
   unread: unread(source.unread),
 });
 
@@ -1339,6 +1358,17 @@ export const tombstone = (source: Tombstone): Fields<Tombstone, WireTombstone> =
   changed: WireSequence.make(source.changed),
   id: source.id,
   into: source.into,
+  network: networkOf(source.network),
+});
+
+/**
+ * A Timeline dropped with its Network.
+ * @param source - What the store keeps of it.
+ * @returns Its wire form.
+ */
+export const dropped = (source: Dropped): Fields<Dropped, WireDroppedTimeline> => ({
+  changed: WireSequence.make(source.changed),
+  id: source.id,
   network: networkOf(source.network),
 });
 

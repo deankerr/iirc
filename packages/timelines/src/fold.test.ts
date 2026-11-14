@@ -882,3 +882,52 @@ describe("Networks", () => {
     expect(directory.networks.get("oftc")?.channels.get("#a")).toBe(timelineIdOf(2, 0, 1));
   });
 });
+
+const removed = (keep: boolean): News => ({ _tag: "NetworkRemoved", keep });
+
+describe("a Network removed", () => {
+  it("is told to the store, and leaves the directory", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [removed(true)]),
+    ]);
+
+    expect(changes.at(-1)).toStrictEqual({
+      _tag: "Removed",
+      keep: true,
+      network: "libera",
+      sequence: 2,
+    });
+    expect(directory.networks.has("libera")).toBeFalsy();
+  });
+
+  it("removed again, to drop what it kept, opens nothing", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [removed(true)]),
+      happened(3, [removed(false)]),
+    ]);
+
+    expect(changes.filter((change) => change.sequence === 3)).toStrictEqual([
+      { _tag: "Removed", keep: false, network: "libera", sequence: 3 },
+    ]);
+    expect(directory.networks.has("libera")).toBeFalsy();
+  });
+
+  it("gives an id given again to a Network that opens anew", () => {
+    const { changes } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [removed(false)]),
+      happened(3, [message([channel("#iirc")])]),
+    ]);
+
+    expect(
+      ofTag(changes, "Described").map(({ sequence, timeline }) => [sequence, timeline.id])
+    ).toStrictEqual([
+      [1, timelineIdOf(1, 0, 0)],
+      [1, timelineIdOf(1, 0, 1)],
+      [3, timelineIdOf(3, 0, 0)],
+      [3, timelineIdOf(3, 0, 1)],
+    ]);
+  });
+});

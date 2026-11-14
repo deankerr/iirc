@@ -475,6 +475,7 @@ describe("the sources", () => {
     name,
     network: "libera",
     read: null,
+    removed: false,
     unread: nothing,
   });
 

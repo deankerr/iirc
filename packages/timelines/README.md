@@ -8,7 +8,7 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, sequence, at, news }        // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 8
+projectionVersion: number                         // 9
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
@@ -63,6 +63,7 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it, followed by `ReadMarker` for the one kept when the merged one was read further. |
 | `ReadMarker` | `ReadMarker` for the Timeline its `where` names, when it moves that Timeline's Read Marker forward. |
 | `ChannelLearned` | `HeadChanged` for the Channel's Timeline, when one exists, so a Frontend reads the Channel's head again. It opens no Timeline and adds no item. |
+| `NetworkRemoved` | `Removed` for the Network, with `keep`. The Network leaves the directory, so an id given to a Network again opens its Timelines anew, and a removal of a Network the directory no longer holds, to drop what it kept, opens nothing. |
 | `LookedUp` | Nothing. A Lookup's result is the answer to whoever looked, read through the API, not something said or done on the Network. |
 | `Ignored` | Nothing. |
 

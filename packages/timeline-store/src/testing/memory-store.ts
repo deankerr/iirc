@@ -22,6 +22,7 @@ import type {
   Applied,
   Changed,
   CollapsedGap,
+  Dropped,
   Gap,
   Item,
   Search,
@@ -40,12 +41,16 @@ interface Stored {
   readonly intent: IntentId | undefined;
 }
 
-/** A Timeline, its Read Marker, when its head last changed, and the last sequence that changed it. */
+/**
+ * A Timeline, its Read Marker, when its head last changed, whether its Network was removed,
+ * and the last sequence that changed it.
+ */
 interface Entry {
   descriptor: Descriptor;
   changed: number;
   read: Instant | undefined;
   head: number | undefined;
+  removed: boolean;
 }
 
 interface Memory {
@@ -56,12 +61,14 @@ interface Memory {
   /** Each Timeline's items, by cursor. */
   readonly items: Map<TimelineId, Map<string, Stored>>;
   readonly merged: Map<TimelineId, Tombstone>;
+  readonly dropped: Map<TimelineId, Dropped>;
   /** Each Network's Gaps, by the cursor of where they began. */
   readonly gaps: Map<string, Map<string, Gap>>;
 }
 
 const empty = (version: number | undefined): Memory => ({
   directory: emptyDirectory,
+  dropped: new Map(),
   gaps: new Map(),
   items: new Map(),
   merged: new Map(),
@@ -216,6 +223,40 @@ const merge = (memory: Memory, change: Extract<Change, { readonly _tag: "Merged"
   touch(memory, change.into, change.sequence);
 };
 
+// Kept, its Timelines are marked removed. Not kept, they go with their items, tombstones,
+// and Gaps, and each id is kept dropped.
+const remove = (memory: Memory, change: Extract<Change, { readonly _tag: "Removed" }>) => {
+  const of = <T>(all: Map<TimelineId, T>, network: (each: T) => string) =>
+    [...all].flatMap(([id, each]) => (network(each) === change.network ? [id] : []));
+
+  if (change.keep) {
+    for (const id of of(memory.timelines, (entry) => entry.descriptor.network)) {
+      const entry = memory.timelines.get(id);
+
+      if (entry !== undefined) {
+        entry.removed = true;
+        entry.changed = change.sequence;
+      }
+    }
+
+    return;
+  }
+
+  const ids = [
+    ...of(memory.timelines, (entry) => entry.descriptor.network),
+    ...of(memory.merged, (tombstone) => tombstone.network),
+  ];
+
+  for (const id of ids) {
+    memory.timelines.delete(id);
+    memory.merged.delete(id);
+    memory.items.delete(id);
+    memory.dropped.set(id, { changed: change.sequence, id, network: change.network });
+  }
+
+  memory.gaps.delete(change.network);
+};
+
 const applyChange = (memory: Memory, change: Change) => {
   switch (change._tag) {
     case "Described": {
@@ -226,6 +267,7 @@ const applyChange = (memory: Memory, change: Change) => {
         descriptor: change.timeline,
         head: was?.head,
         read: was?.read,
+        removed: was?.removed ?? false,
       });
       break;
     }
@@ -281,6 +323,11 @@ const applyChange = (memory: Memory, change: Change) => {
       break;
     }
 
+    case "Removed": {
+      remove(memory, change);
+      break;
+    }
+
     case "Gap": {
       const gaps = memory.gaps.get(change.network) ?? new Map<string, Gap>();
 
@@ -321,7 +368,10 @@ const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => 
   return counts;
 };
 
-const summaryOf = (memory: Memory, { descriptor, changed, head, read }: Entry): Summary => {
+const summaryOf = (
+  memory: Memory,
+  { descriptor, changed, head, read, removed }: Entry
+): Summary => {
   const items = sortedItems(memory, descriptor.id);
 
   return {
@@ -330,6 +380,7 @@ const summaryOf = (memory: Memory, { descriptor, changed, head, read }: Entry): 
     head,
     latest: items.at(-1)?.position,
     read,
+    removed,
     unread: unreadIn(items, read),
   };
 };
@@ -411,18 +462,22 @@ const changedAfter = (
 
   const items = allItems(memory).filter(({ changed }) => changed > since);
   const merged = [...memory.merged.values()].filter(({ changed }) => changed > since);
+  const dropped = [...memory.dropped.values()].filter(({ changed }) => changed > since);
 
   const gaps = [...memory.gaps.values()].flatMap((each) =>
     [...each.values()].filter(({ changed }) => changed > since)
   );
 
   const sequences = [
-    ...new Set([...timelines, ...items, ...merged, ...gaps].map(({ changed }) => changed)),
+    ...new Set(
+      [...timelines, ...items, ...merged, ...dropped, ...gaps].map(({ changed }) => changed)
+    ),
   ].toSorted((left, right) => left - right);
 
   const countOf = (sequence: number) =>
-    [...timelines, ...items, ...merged, ...gaps].filter(({ changed }) => changed === sequence)
-      .length;
+    [...timelines, ...items, ...merged, ...dropped, ...gaps].filter(
+      ({ changed }) => changed === sequence
+    ).length;
 
   // Whole sequences, while they come to at most `limit` things, and a first one that alone
   // is more given as overflowed.
@@ -457,6 +512,7 @@ const changedAfter = (
             ...timelines.flatMap(({ changed, id }) => (changed === overflowed ? [id] : [])),
             ...items.flatMap(({ changed, timeline }) => (changed === overflowed ? [timeline] : [])),
             ...merged.flatMap(({ changed, id }) => (changed === overflowed ? [id] : [])),
+            ...dropped.flatMap(({ changed, id }) => (changed === overflowed ? [id] : [])),
           ]),
         ].toSorted(textOrder);
 
@@ -468,6 +524,9 @@ const changedAfter = (
   const upTo = more || folded.length === 0 ? through : Math.max(...folded);
 
   return {
+    dropped: within(dropped).toSorted(
+      (left, right) => left.changed - right.changed || textOrder(left.id, right.id)
+    ),
     gaps: within(gaps).toSorted(
       (left, right) =>
         left.changed - right.changed ||

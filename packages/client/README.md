@@ -44,6 +44,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Act` | Owner | Act on the Network, with an intent id: set a topic, kick, change modes, invite, change Self's nick, be away or back, or send a Line written as text. |
 | `Look` | Owner | Look something up, with an intent id: `Whois { nick }` or `Whowas { nick }`. |
 | `Retry` | Owner | Try connecting now, cutting a wait short. |
+| `Removed` | Owner | The Owner removed the Network, keeping its Timelines readable or not, as `keep` says. |
 | `Read` | Owner | The Owner has read a Timeline up to an instant: a Target's, or the Network's own. |
 | `Opened`, `Received`, `Closed` | Transport | A Connection opened, one Line's bytes arrived, or a Connection is over, and how. |
 | `Fired` | Clock | A timer the Client set is due. It consumes the timer. |
@@ -56,13 +57,14 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 `NetworkConfiguration` is the Schema of what `Configured` carries. It is also exported alone from `@iirc/client/configuration`, as pure data a Frontend may import.
 
 - **A Frontend derives every option from the Schema alone**. Each field has a description and says what a new Network starts with, and each Credential field is marked as one. A field added here is an option there with no other work.
+- **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its SASL login's, and each Channel's key.
 - **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` starts on and decodes as off, since no answer was sent then.
 
 ### When the Client dials
 
 - A `Configured` or `Started` with the Network enabled dials at once. There is no backoff before a first dial.
 - After a `Closed` it waits on the backoff, then dials the next Ircd in `ircds`, round and round. `Retry` cuts the wait short.
-- Disabling the Network sends `QUIT`, hangs up, and waits for the `Closed`.
+- Disabling the Network sends `QUIT`, hangs up, and waits for the `Closed`. A `Removed` does the same, and nothing is dialled again.
 - A `Stopping` does the same, and then nothing is dialled and every `Say` is refused until the next `Started`.
 - While an STS policy holds for a host, the dial is TLS on the policy's port, whatever Configuration says.
 
@@ -100,6 +102,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `SessionBegan`, `SessionEnded` | A Session's start and end, and why it ended. |
 | `ConnectionFailed` | A Connection that ended before registration: why, the Ircd dialled, and whether it had opened. |
 | `Refolded` | An Ircd declared another casemapping, so keys in `where` fold by it from here on. |
+| `NetworkRemoved` | The Owner removed the Network, and `keep` is whether its Timelines stay readable. |
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
 | `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |

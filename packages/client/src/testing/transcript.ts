@@ -60,6 +60,8 @@ export type Owner =
   | { readonly _tag: "Look"; readonly lookup: Lookup }
   /** `!! retry`. */
   | { readonly _tag: "Retry" }
+  /** `!! remove`, or `!! remove keep` to keep its Timelines. */
+  | { readonly _tag: "Remove"; readonly keep: boolean }
   /** `!! read #iirc t+5s`, or `!! read t+5s` for the Network's own Timeline. */
   | { readonly _tag: "Read"; readonly target: string | null; readonly read: number };
 
@@ -655,10 +657,14 @@ const writeAction = (action: Action): string => {
   }
 };
 
-// `retry`, `whois <nick>`, and `whowas <nick>`, which take no more than a word.
+// `retry`, `remove [keep]`, `whois <nick>`, and `whowas <nick>`, which take no more than a word.
 const readSimple = (text: string): Owner | undefined => {
   if (text === "retry") {
     return { _tag: "Retry" };
+  }
+
+  if (text === "remove" || text === "remove keep") {
+    return { _tag: "Remove", keep: text === "remove keep" };
   }
 
   const looked = /^(?<verb>whois|whowas) (?<nick>\S+)$/u.exec(text)?.groups;
@@ -747,6 +753,10 @@ const writeOwner = (owner: Owner): string => {
       return "retry";
     }
 
+    case "Remove": {
+      return owner.keep ? "remove keep" : "remove";
+    }
+
     case "Look": {
       return `${owner.lookup._tag.toLowerCase()} ${owner.lookup.nick}`;
     }
@@ -779,6 +789,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["ignored", "Ignored"],
   ["looked-up", "LookedUp"],
   ["message", "Message"],
+  ["network-removed", "NetworkRemoved"],
   ["read-marker", "ReadMarker"],
   ["refolded", "Refolded"],
   ["refused", "Refused"],

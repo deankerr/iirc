@@ -397,6 +397,7 @@ const wireTimeline = (timeline: ModelTimeline) =>
     name: timeline.kind === "Network" ? timeline.network : `#${timeline.id}`,
     network: timeline.network,
     read: null,
+    removed: false,
     unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
@@ -601,6 +602,7 @@ const changeAt = (world: World, sequence: number) => {
   }
 
   return decodeChange({
+    dropped: [],
     gaps: gaps.map(wireGap),
     items: items.map((item) => Schema.encodeSync(TimelineItem)(wireItem(item))),
     merged: [],
@@ -1298,6 +1300,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
     name,
     network: "alpha",
     read: null,
+    removed: false,
     unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
@@ -1389,7 +1392,15 @@ const following = (): Timelines => {
 const changed = (sequence: number, change: Partial<typeof TimelineChange.Encoded>) =>
   ({
     _tag: "Changed",
-    change: decodeChange({ gaps: [], items: [], merged: [], sequence, timelines: [], ...change }),
+    change: decodeChange({
+      dropped: [],
+      gaps: [],
+      items: [],
+      merged: [],
+      sequence,
+      timelines: [],
+      ...change,
+    }),
     place: { sequence, version: 1 },
   }) as const;
 
@@ -1523,6 +1534,7 @@ const direct = (id: string, name: string, detached = false) =>
       name,
       network: "alpha",
       read: null,
+      removed: false,
       unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
     })
   );

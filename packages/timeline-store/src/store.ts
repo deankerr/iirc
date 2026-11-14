@@ -75,6 +75,8 @@ export interface Summary extends Descriptor {
    * says, as `HeadChanged` reports, or `undefined` while none has.
    */
   readonly head: number | undefined;
+  /** Whether its Network was removed, and its Timelines kept: it is read, and never said to. */
+  readonly removed: boolean;
   /** The last sequence that changed it, its Read Marker, its head, or any of its items. */
   readonly changed: number;
 }
@@ -96,6 +98,13 @@ export interface Tombstone {
   readonly network: string;
   readonly id: TimelineId;
   readonly into: TimelineId;
+  readonly changed: number;
+}
+
+/** A Timeline dropped with its Network, of which only its id is kept, to say it is gone. */
+export interface Dropped {
+  readonly network: string;
+  readonly id: TimelineId;
   readonly changed: number;
 }
 
@@ -145,7 +154,8 @@ export interface Overflowed {
  * What changed after a sequence, as it stands now. Each list is ordered by `changed`, and
  * among what changed in one sequence:
  *
- * - `timelines` and `merged` by Timeline id, which a tombstone's is the merged one's.
+ * - `timelines`, `merged`, and `dropped` by Timeline id, which a tombstone's is the merged
+ *   one's.
  * - `items` by their Timeline's id, then by position.
  * - `gaps` by Network id, compared by code point, then by where they began.
  *
@@ -157,6 +167,7 @@ export interface Changed {
   readonly timelines: readonly Summary[];
   readonly items: readonly Item[];
   readonly merged: readonly Tombstone[];
+  readonly dropped: readonly Dropped[];
   readonly gaps: readonly Gap[];
   /** The one step this page gives, when it changed more than the page holds. */
   readonly overflowed: Overflowed | undefined;
@@ -306,7 +317,8 @@ export interface TimelineStoreService {
     }
   ) => Effect.Effect<readonly CollapsedGap[], TimelineStoreFailed>;
   /**
-   * The Timelines, items, tombstones, and Gaps changed after a sequence, as they stand now,
+   * The Timelines, items, tombstones, dropped Timelines, and Gaps changed after a sequence,
+   * as they stand now,
    * each list ordered by `changed` and then as {@link Changed} says. With a limit, whole
    * sequences are given while they come to at most `limit` things together, and a first
    * sequence that alone is more is given as `overflowed`, so a page never holds more than

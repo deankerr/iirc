@@ -28,7 +28,7 @@ import { CredentialName } from "@iirc/protocol/line";
 import type { UnparseableReason } from "@iirc/protocol/line";
 import { SearchText, TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
-import { Effect, Result, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Effect, Result, Schema, SchemaGetter, SchemaIssue, SchemaTransformation } from "effect";
 import { Base64Url } from "effect/encoding";
 
 import { UiInForce } from "./ui.ts";
@@ -256,6 +256,17 @@ export const IfSequence = Schema.String.check(
   Schema.isPattern(/^(?:0|[1-9]\d{0,14})$/u, { message: "must be a sequence, or 0 for none" })
 ).pipe(Schema.decodeTo(Schema.Int, SchemaTransformation.numberFromString));
 
+/** Whether a removed Network's Timelines stay readable, as `true` or `false` in a query. */
+export const Keep = Schema.Literals(["true", "false"]).pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform((text) => text === "true"),
+    encode: SchemaGetter.transform((keep) => (keep ? "true" : "false")),
+  })
+);
+
+/** How a Network is removed: whether its Timelines stay readable. */
+export const RemoveQuery = { keep: Keep };
+
 /**
  * A Network's Configuration in force, and the sequence of the `Configured` that set it,
  * to send back as `ifSequence` with a change made from it.
@@ -466,6 +477,7 @@ const inputTags = everyOf<Input["_tag"]>()([
   "Opened",
   "Read",
   "Received",
+  "Removed",
   "Retry",
   "Say",
   "Started",
@@ -703,6 +715,11 @@ export const News = Schema.TaggedUnion({
     text: Untrusted,
     where: Schema.Array(Where),
   },
+  /**
+   * The Owner removed the Network, and `keep` is whether its Timelines stay readable. No
+   * News of it follows, but another removal, which drops Timelines it kept.
+   */
+  NetworkRemoved: { keep: Schema.Boolean },
   /**
    * The Owner's Read Marker of a Timeline moved forward, to `read`: the Network's own, a
    * Channel's, or a Direct Message partner's, keyed as `where` keys it.
@@ -1079,8 +1096,9 @@ export type Unread = typeof Unread.Type;
  * last item stands, `read` its Read Marker, `null` before any, `unread` how much stands
  * after it, by level, `head` the last step that changed what the Client knows of its
  * Channel in a way no item says, `null` before any, so a Frontend following the changes
- * reads the Channel's head again, and `changed` the last step that changed it, its Read
- * Marker, its head, or any of its items.
+ * reads the Channel's head again, `removed` whether its Network was removed with its
+ * Timelines kept, so it is read and never said to, and `changed` the last step that
+ * changed it, its Read Marker, its head, or any of its items.
  */
 export const Timeline = Schema.Struct({
   changed: Sequence,
@@ -1093,6 +1111,7 @@ export const Timeline = Schema.Struct({
   name: Untrusted,
   network: NetworkId,
   read: Schema.NullOr(Instant),
+  removed: Schema.Boolean,
   unread: Unread,
 });
 
@@ -1133,6 +1152,19 @@ export const Tombstone = Schema.Struct({
 
 /** The decoded form of {@link Tombstone}. */
 export type Tombstone = typeof Tombstone.Type;
+
+/**
+ * A Timeline dropped when its Network was removed without keeping it: no route reads it
+ * again, and a Frontend lets it go.
+ */
+export const DroppedTimeline = Schema.Struct({
+  changed: Sequence,
+  id: TimelineId,
+  network: NetworkId,
+});
+
+/** The decoded form of {@link DroppedTimeline}. */
+export type DroppedTimeline = typeof DroppedTimeline.Type;
 
 /** Whether the Daemon is folding News into Timelines, or why it stopped until it restarts. */
 export const Projection = Schema.TaggedUnion({
@@ -1218,9 +1250,10 @@ export type SearchResults = typeof SearchResults.Type;
 
 /**
  * What one step changed in the Timelines, as each thing stands now: the Timelines, items,
- * tombstones, and Gaps whose last change it was.
+ * tombstones, dropped Timelines, and Gaps whose last change it was.
  */
 export const TimelineChange = Schema.Struct({
+  dropped: Schema.Array(DroppedTimeline),
   gaps: Schema.Array(Gap),
   items: Schema.Array(TimelineItem),
   merged: Schema.Array(Tombstone),
@@ -1510,6 +1543,12 @@ export const NetworkEntry = Schema.Struct({ network: NetworkId, status: NetworkS
 
 /** The decoded form of {@link NetworkEntry}. */
 export type NetworkEntry = typeof NetworkEntry.Type;
+
+/** A Network removed with its Timelines kept, which no Network can take the id of until they are dropped. */
+export const RemovedNetwork = Schema.Struct({ network: NetworkId });
+
+/** The decoded form of {@link RemovedNetwork}. */
+export type RemovedNetwork = typeof RemovedNetwork.Type;
 
 /** A timer and when it is due. */
 const Timer = Schema.Struct({ at: Instant, timer: TimerId });

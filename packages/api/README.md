@@ -22,7 +22,9 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `POST /api/sign-in` | Signs a browser in with `{ key }` | `204` and the cookie | `Unauthorized`, `CrossOrigin`, `SignInsFailed` |
 | `DELETE /api/sign-in` | Signs the cookie's sign-in out, and clears the cookie. Signing out one that does not exist only clears it | `204` | `CrossOrigin`, `SignInsFailed` |
 | `GET /api/networks` | Lists each Network and whether it runs | `[{ network, status }]` |  |
-| `PUT /api/networks/{network}?ifSequence=` | The whole `NetworkConfiguration`, which adds the Network the first time. With `ifSequence`, only if it was made from the Configuration in force | `{ sequence }` | `NetworkStopped`, `ConfigurationChanged` |
+| `PUT /api/networks/{network}?ifSequence=` | The whole `NetworkConfiguration`, which adds the Network the first time. With `ifSequence`, only if it was made from the Configuration in force | `{ sequence }` | `NetworkStopped`, `ConfigurationChanged`, `TimelinesKept` |
+| `DELETE /api/networks/{network}?keep=true\|false` | Removes the Network: its Session ends with a `QUIT`, and its Configuration and Credentials go. `keep` is whether its Timelines stay readable. A Network removed with them kept is removed again with `keep=false` to drop them | `{ sequence }` | `UnknownNetwork`, `NetworkStopped`, `JournalFailed`, `VaultFailed` |
+| `GET /api/removed-networks` | Lists each Network removed with its Timelines kept | `[{ network }]` |  |
 | `GET /api/networks/{network}/configuration` | The Configuration in force, and the sequence of the `Configured` that set it | `{ configuration, sequence }` | `UnknownNetwork` |
 | `POST /api/networks/{network}/say` | `{ kind, target, text, intent? }` | `Said { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
 | `POST /api/networks/{network}/act` | `{ action, intent? }`: one of `Topic`, `Kick`, `Mode`, `Invite`, `Nick`, `Away`, and `Raw`, below | `Acted { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
@@ -73,6 +75,12 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **The options under `ui` are the Owner's, shared by every device**. `UiOptions`, in `@iirc/api/ui`, describes each with its default: `theme`, `light`, `dark`, `themes`, `colours`, `font`, `size`, `leading`, `time`, `activity`, `width`, `read`, which says when a Timeline is marked read, and the Composer's habits, `enter`, `spellcheck`, and `suffix`. A value is parsed by its option's Schema before it is journaled. `light` and `dark` name the themes `system` draws, and are never `system`. At most 32 themes are held, and an import may not take `system`, a built-in theme's name, or a word `/theme` reads. `font` is a font's name or a family's, which holds no `"`, `\`, or control character, so it is always one quoted CSS family. `suffix` is at most 8 characters, empty allowed, with no control character, so it never puts a line break or IRC formatting into the Composer.
 - **The options under `ui` are streamed whole.** Each `changed` event is every option in force, so a Frontend that follows needs no read first, and one that reconnects misses nothing.
 
+### Removing
+
+- **A removed Network is gone from every route that acts on it.** It leaves `GET /api/networks`, and every route that acts on it or reads what its Client knows answers `UnknownNetwork`, as for a Network never configured. `said` and a Lookup by its intent still answer from the Journal. A Frontend following News learns of it from one `NetworkRemoved`, after which no News of it comes.
+- **The Owner chooses whether its Timelines stay.** Kept, they are read and searched as before, listed by `GET /api/removed-networks` and `GET /api/networks/{network}/timelines`, and each says `removed`, so a Frontend shows them apart and never says to them. Its id stays taken while they are kept: a `PUT` of it is `TimelinesKept`. Not kept, no route reads or finds them, the changes stream gives each as `dropped`, and the id is free at once.
+- **Its Credentials go once its removal is journaled,** but those another Network's Configuration names. A `VaultFailed` leaves the removal standing, and the Credentials can be forgotten by name.
+
 ### Saying, acting, and looking up
 
 - **A `say` or an `act` answers with what its step knew.** `Said` or `Acted` means it was sent, not that it reached the Ircd. `Refused` means the Client refused it in that step, as `Offline` or `Unsendable`. Either way it was journaled, at `sequence`, under `intent`.
@@ -95,13 +103,14 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 - **A window is read from one place:** `before`, `after`, or `around` a cursor, or the latest with none. `earlier` and `later` say whether more lie beyond each end. A merged Timeline's id reads the Timeline it went to.
 - **A position travels as a cursor,** opaque text that compares exactly as positions do, so a Frontend places a Gap among items by comparing cursors.
 - **A window's Gaps are bounded by its items.** Consecutive Gaps with no item between them come as one, counted, so a quiet Timeline that spans every reconnect gives one Gap, never a list of them all. Pages read at a cursor split a run at the cursor, so pages fitted together give every Gap once.
+- **A removed Network's Timelines say so.** Each Timeline carries `removed`, set once its Network was removed with its Timelines kept.
 - **The Daemon counts what is unread.** Each Timeline carries `read`, its Read Marker, and `unread`, a count for each level of what stands after it, exact up to `unreadCap`, 999. Each item says its `level`. A Frontend shows the counts and never counts the items it holds, which are never all of them.
 - **One of our Messages says how its delivery stands:** `Pending`, `Unconfirmed`, `Confirmed`, `Unsent`, or `Rejected` with the Ircd's numeric or code, never its text.
 - **Every list comes a page at a time,** up to `limit`, 1 to 500 and 100 when left out, with `more` and an opaque `next` to give back as `after`. A `next` the Daemon did not give is `InvalidRequest`.
 
 ### The changes stream
 
-- **It resumes exactly, by an opaque place,** `<version>.<sequence>`: what a read gave, or an event's id. Each `changed` event is what one folded step changed, as it stands now. Something changed again comes again, so a Frontend keeps each thing by its id or position and takes the latest.
+- **It resumes exactly, by an opaque place,** `<version>.<sequence>`: what a read gave, or an event's id. Each `changed` event is what one folded step changed, as it stands now, and `dropped` the Timelines a removal took with it, which a Frontend lets go. Something changed again comes again, so a Frontend keeps each thing by its id or position and takes the latest.
 - **An event is bounded,** at 500 things. A step that changed more comes as `overflowed`, naming the Timelines to read again, or none, which says to read every one.
 - **A place that cannot be resumed is reset.** A place stays good across a restart. One of another projection version, or ahead of what the store has folded, gets one `reset` event, which says to drop what is held, read again, and follow from its place.
 - **It waits on the Daemon's folding, never polls, and never ends.**
@@ -122,11 +131,12 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 | `InvalidRequest` | 400 | The request could not be read. |
 | `Unauthorized` | 401 | No key and no sign-in, or none that matches. Signing in, a key that does not match. |
 | `CrossOrigin` | 403 | A request the cookie carries that changes something, or a sign-in or sign-out, that a browser did not say came from the Daemon's own origin. |
-| `UnknownNetwork` | 404 | No Network by that id was ever configured. |
+| `UnknownNetwork` | 404 | No Network by that id was ever configured, or it was removed. |
 | `UnknownTimeline` | 404 | No Timeline had that id, nor was merged from one that had. |
 | `NotAChannel` | 404 | The Timeline is the Network's own or a Direct Message partner's, which it names as `kind`, so it has no Channel. A Timeline's kind never changes. |
 | `NotInChannel` | 409 | Self is not in the Channel now, so it has no members to list. It says where Self stands with it, or `null` when the Client holds no such Channel. |
 | `ConfigurationChanged` | 409 | A `PUT` of Configuration was made from another than the one now in force, which it names. Nothing was journaled. |
+| `TimelinesKept` | 409 | A `PUT` of Configuration named a Network removed with its Timelines kept. Its id is free once they are dropped. Nothing was journaled. |
 | `UiChanged` | 409 | A change of an option under `ui` was made from other options than those in force: another Change was journaled since, at `sequence`, the last. Nothing was journaled. |
 | `NetworkStopped` | 503 | The Network stopped, so its outcome is `Uncertain`, below. |
 | `TimelinesFailed` | 503 | The Timelines could not be read. They are derived, and a read that waited on a lock may succeed when asked again, while a damaged store is made again from the Journal when the Daemon restarts. |
@@ -160,6 +170,5 @@ A body over 1 MiB is refused with 413 before it is read.
 - **Key scopes,** such as `read`, `chat`, and `admin`. Every key can do everything for now.
 - **Managing keys through the API.** A key is made with `iirc key create` while the Daemon is stopped.
 - **Ending sign-ins other than by signing out.** A sign-in lasts until it is signed out or its key is no longer held. It does not expire, and there is no listing or revoking the sign-ins of a key.
-- **Removing a Network.** A Network can be disabled through its Configuration, never forgotten.
 - **A search of several terms.** `text` is one run of characters, as a phrase. Terms that must all appear belong in a Frontend's query syntax, and then here.
 - **Other Lookups, and Leave.** `WHOIS` and `WHOWAS` are the Lookups the Client offers. Others, such as `LIST`, are new tags of `lookup` once the Client collects them, and until then their replies can be asked for as a raw Line, and read only as their Lines arrive.

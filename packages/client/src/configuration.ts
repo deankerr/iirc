@@ -155,3 +155,18 @@ export const NetworkConfiguration = Schema.Struct({
 
 /** The decoded form of {@link NetworkConfiguration}. */
 export type NetworkConfiguration = typeof NetworkConfiguration.Type;
+
+/**
+ * The Credentials a Configuration names: its Ircd password, its SASL login's, and each
+ * Channel's key.
+ * @param configuration - The Configuration.
+ * @returns Their names.
+ */
+export const credentialsOf = (configuration: NetworkConfiguration): ReadonlySet<CredentialName> =>
+  new Set([
+    ...(configuration.password === undefined ? [] : [configuration.password]),
+    ...(configuration.login._tag === "Sasl" ? [configuration.login.credential] : []),
+    ...configuration.channels.flatMap((channel) =>
+      channel.key === undefined ? [] : [channel.key]
+    ),
+  ]);

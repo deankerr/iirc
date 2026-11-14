@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 8;
+export const projectionVersion = 9;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -97,6 +97,8 @@ interface Draft {
   written: Maps | undefined;
   gap: Position | undefined;
   read: Instant | undefined;
+  /** Set once the Owner removed the Network in this step. */
+  removed: boolean;
 }
 
 const write = (draft: Draft): Maps => {
@@ -655,6 +657,19 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       break;
     }
 
+    // The Network leaves the directory, so an id given to a Network again opens anew.
+    case "NetworkRemoved": {
+      draft.changes.push({
+        _tag: "Removed",
+        keep: news.keep,
+        network: draft.network,
+        sequence: draft.sequence,
+      });
+      draft.removed = true;
+
+      break;
+    }
+
     // A Lookup's result is the Owner's answer, read from the API, and places nothing.
     case "Ignored":
     case "LookedUp": {
@@ -689,12 +704,15 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
     maps: known ?? { channels: new Map(), directs: new Map(), keyed: new Map() },
     network: happened.network,
     read: known?.read,
+    removed: false,
     sequence: happened.sequence,
     timeline,
     written: undefined,
   };
 
-  if (known === undefined) {
+  // A Network removed again, to drop the Timelines it kept, is no longer in the directory,
+  // and opens nothing.
+  if (known === undefined && !happened.news.some((news) => news._tag === "NetworkRemoved")) {
     describe(draft, "Network", timeline, happened.network, null);
   }
 
@@ -716,8 +734,13 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
     timeline,
   };
 
-  return {
-    changes,
-    directory: { networks: new Map(directory.networks).set(happened.network, folded) },
-  };
+  const networks = new Map(directory.networks);
+
+  if (draft.removed) {
+    networks.delete(happened.network);
+  } else {
+    networks.set(happened.network, folded);
+  }
+
+  return { changes, directory: { networks } };
 };

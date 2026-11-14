@@ -80,6 +80,7 @@ const described = (
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: nothing,
 });
 
@@ -336,7 +337,15 @@ const settled = () => {
 
 const changed = (change: Partial<typeof TimelineChange.Encoded>): ChannelEvent => ({
   _tag: "Changed",
-  change: decodeChange({ gaps: [], items: [], merged: [], sequence: 11, timelines: [], ...change }),
+  change: decodeChange({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    sequence: 11,
+    timelines: [],
+    ...change,
+  }),
 });
 
 /**
@@ -629,7 +638,15 @@ const standingShown = (standing: Parameters<typeof header>[0]) => {
  */
 const touchesIirc = (change: Partial<typeof TimelineChange.Encoded>, headSeen: number | null = 4) =>
   touches(
-    decodeChange({ gaps: [], items: [], merged: [], sequence: 11, timelines: [], ...change }),
+    decodeChange({
+      dropped: [],
+      gaps: [],
+      items: [],
+      merged: [],
+      sequence: 11,
+      timelines: [],
+      ...change,
+    }),
     timelineId(iirc),
     network,
     headSeen

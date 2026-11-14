@@ -34,6 +34,7 @@ import { Deferred, Effect, Equal, Fiber, Option, Scheduler, Schema } from "effec
 
 import type {
   Anchor,
+  Dropped,
   Gap,
   Item,
   Search,
@@ -213,6 +214,7 @@ const snapshot = (store: TimelineStoreService) =>
     return {
       changedTimelines: changed.timelines,
       directory: yield* store.directory,
+      dropped: changed.dropped,
       folded: yield* store.folded,
       gaps: changed.gaps,
       gapsRead: yield* store.gaps(libera, {}),
@@ -239,6 +241,7 @@ const compareText = (left: string, right: string) => {
 // for a model, ordered as the reads order it.
 interface Model {
   readonly directory: Directory;
+  readonly dropped: readonly Dropped[];
   readonly folded: Snapshot["folded"];
   readonly gaps: readonly Gap[];
   readonly items: readonly Item[];
@@ -248,6 +251,7 @@ interface Model {
 
 const modelOf = (shown: Snapshot): Model => ({
   directory: shown.directory,
+  dropped: shown.dropped,
   folded: shown.folded,
   gaps: shown.gaps,
   items: shown.items,
@@ -294,6 +298,9 @@ const project = (model: Model): Snapshot => {
       (left, right) => left.changed - right.changed || compareText(left.id, right.id)
     ),
     directory: model.directory,
+    dropped: model.dropped.toSorted(
+      (left, right) => left.changed - right.changed || compareText(left.id, right.id)
+    ),
     folded: model.folded,
     gaps: model.gaps.toSorted(
       (left, right) =>
@@ -455,6 +462,7 @@ const additions: Interruption = {
       name: `#new-${sequence}`,
       network: libera,
       read: undefined,
+      removed: false,
       unread: noneUnread,
     };
 
@@ -647,6 +655,71 @@ const merging: Interruption = {
       sequence,
     },
   ],
+};
+
+const removal = (sequence: number, keep: boolean, on = libera): Change => ({
+  _tag: "Removed",
+  keep,
+  network: on,
+  sequence,
+});
+
+// A step that removes the Network and keeps its Timelines, each marked removed, so a step
+// half done, some marked and some not, is seen.
+const keeping: Interruption = {
+  edit: (before, sequence) => ({
+    ...before,
+    timelines: before.timelines.map((each) => ({ ...each, changed: sequence, removed: true })),
+  }),
+  seed: (sequence) => [
+    described(
+      sequence,
+      timelineIdOf(sequence, 0, 1),
+      "Channel",
+      `#k-${sequence}`,
+      `#k-${sequence}`
+    ),
+    added(
+      sequence,
+      timelineIdOf(sequence, 0, 1),
+      position(sequence, sequence),
+      said(`k${sequence}`)
+    ),
+  ],
+  step: (sequence) => [removal(sequence, true)],
+};
+
+// A step that removes the Network and drops its Timelines, with items, a Gap, and a
+// tombstone of its own, so a drop half done, items left with no Timeline, or ids said to be
+// dropped while their Timelines stand, is seen.
+const dropping: Interruption = {
+  edit: (before, sequence) => ({
+    ...before,
+    dropped: [
+      ...before.dropped,
+      ...[...before.timelines.map(({ id }) => id), ...before.merged.map(({ id }) => id)].map(
+        (id) => ({ changed: sequence, id, network: libera })
+      ),
+    ],
+    gaps: before.gaps.filter(({ network: on }) => on !== libera),
+    items: before.items.filter(({ network: on }) => on !== libera),
+    merged: before.merged.filter(({ network: on }) => on !== libera),
+    timelines: before.timelines.filter(({ network: on }) => on !== libera),
+  }),
+  seed: (sequence) => {
+    const from = timelineIdOf(sequence, 0, 1);
+    const into = timelineIdOf(sequence, 0, 2);
+
+    return [
+      described(sequence, from, "Channel", `#from-${sequence}`, `#from-${sequence}`),
+      described(sequence, into, "Channel", `#into-${sequence}`, `#into-${sequence}`),
+      added(sequence, from, position(1, sequence, 0), said(`moved${sequence}`)),
+      added(sequence, into, position(2, sequence, 1), said(`stays${sequence}`)),
+      { _tag: "Merged", from, into, network: libera, sequence },
+      gap(sequence, position(sequence, sequence), undefined),
+    ];
+  },
+  step: (sequence) => [removal(sequence, false)],
 };
 
 const changedHead = (sequence: number, timeline: TimelineId): Change => ({
@@ -1235,6 +1308,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           version: undefined,
         });
         yield* same("changed", yield* store.changedAfter(undefined), {
+          dropped: [],
           gaps: [],
           items: [],
           merged: [],
@@ -1339,6 +1413,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         yield* same("folded", yield* store.folded, { through: undefined, version: 4 });
         yield* same("directory", yield* store.directory, emptyDirectory);
         yield* same("changed", yield* store.changedAfter(undefined), {
+          dropped: [],
           gaps: [],
           items: [],
           merged: [],
@@ -2857,6 +2932,167 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
       }),
     name: "counts what lies after each Read Marker as counting one by one does, after any steps",
   },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const oftcChannel = timelineIdOf(2, 0, 9);
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(0, 2), said("kept here")),
+          described(2, oftcNetwork, "Network", oftc, null, oftc),
+          described(2, oftcChannel, "Channel", "#a", "#a", oftc),
+          added(2, oftcChannel, position(1, 2), said("kept there"), undefined, oftc),
+        ]);
+        yield* apply(store, 3, [removal(3, true)]);
+
+        const listed = yield* store.timelines(libera);
+
+        yield* same(
+          "marked removed, by the step that removed them",
+          listed.map(({ id, removed, changed }) => [id, removed, changed]),
+          [
+            [network, true, 3],
+            [channel, true, 3],
+            [other, true, 3],
+          ]
+        );
+        yield* same(
+          "another Network's untouched",
+          (yield* store.timelines(oftc)).map(({ removed, changed }) => [removed, changed]),
+          [
+            [false, 2],
+            [false, 2],
+          ]
+        );
+        yield* same("read by id", yield* store.timeline(channel), Option.some(listed[1]));
+        yield* same("still readable", yield* texts(store, channel, all), "| kept here |");
+        yield* same(
+          "still found",
+          placesOf(yield* store.search({ limit: 10, text: SearchText.make("kept") })),
+          [
+            [oftcChannel, cursorOf(position(1, 2))],
+            [channel, cursorOf(position(0, 2))],
+          ]
+        );
+
+        const changed = yield* store.changedAfter(2);
+
+        yield* same(
+          "given among the changes",
+          {
+            dropped: changed.dropped,
+            items: changed.items,
+            timelines: changed.timelines.map(({ id, removed }) => [id, removed]),
+          },
+          {
+            dropped: [],
+            items: [],
+            timelines: [
+              [network, true],
+              [channel, true],
+              [other, true],
+            ],
+          }
+        );
+      }),
+    name: "keeps a removed Network's Timelines readable and searchable, marked removed",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const oftcChannel = timelineIdOf(2, 0, 9);
+        const again = timelineIdOf(6, 0, 0);
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          described(2, third, "Channel", "#c", "#c"),
+          added(2, channel, position(0, 2), said("gone here")),
+          added(2, other, position(1, 2), said("gone too")),
+          gap(2, position(2, 2), undefined),
+          described(2, oftcNetwork, "Network", oftc, null, oftc),
+          described(2, oftcChannel, "Channel", "#a", "#a", oftc),
+          added(2, oftcChannel, position(1, 2), said("gone? no"), undefined, oftc),
+          gap(2, position(3, 2), undefined, oftc),
+        ]);
+        yield* apply(store, 3, [
+          { _tag: "Merged", from: third, into: other, network: libera, sequence: 3 },
+        ]);
+        yield* apply(store, 4, [removal(4, true)]);
+        yield* apply(store, 5, [removal(5, false)]);
+
+        yield* same("listed", yield* store.timelines(libera), []);
+        yield* same(
+          "read by id, merged or not",
+          [
+            yield* store.timeline(channel),
+            yield* store.timeline(third),
+            yield* store.window(channel, all, 10),
+            yield* store.window(third, all, 10),
+          ],
+          [Option.none(), Option.none(), Option.none(), Option.none()]
+        );
+        yield* same(
+          "found",
+          placesOf(yield* store.search({ limit: 10, text: SearchText.make("gone") })),
+          [[oftcChannel, cursorOf(position(1, 2))]]
+        );
+        yield* same("located", yield* store.locate(libera, 2), []);
+        yield* same("Gaps", yield* store.gaps(libera, {}), []);
+        yield* same(
+          "another Network's untouched",
+          [
+            (yield* store.timelines(oftc)).length,
+            (yield* store.gaps(oftc, {})).length,
+            (yield* store.locate(oftc, 2)).length,
+          ],
+          [2, 1, 1]
+        );
+
+        const changed = yield* store.changedAfter(4);
+
+        yield* same(
+          "each id given as dropped, by id, and nothing else",
+          {
+            dropped: changed.dropped,
+            gaps: changed.gaps,
+            items: changed.items,
+            merged: changed.merged,
+            timelines: changed.timelines,
+          },
+          {
+            dropped: [network, channel, other, third].map((id) => ({
+              changed: 5,
+              id,
+              network: libera,
+            })),
+            gaps: [],
+            items: [],
+            merged: [],
+            timelines: [],
+          }
+        );
+        // Each dropped Timeline is one thing, and names one, so a drop bigger than the page
+        // names more than it holds.
+        yield* same("too many for a page", (yield* store.changedAfter(4, 3)).overflowed, {
+          sequence: 5,
+          timelines: undefined,
+        });
+
+        // The id is free, and a Network given it again starts with nothing.
+        yield* apply(store, 6, [
+          described(6, again, "Network", libera, null),
+          added(6, again, position(9, 6), said("new")),
+        ]);
+        yield* same(
+          "a Network given the id again",
+          (yield* store.timelines(libera)).map(({ id, removed }) => [id, removed]),
+          [[again, false]]
+        );
+        yield* same("its Gaps", yield* store.gaps(libera, {}), []);
+      }),
+    name: "drops a removed Network's Timelines, items, Gaps, and tombstones, and says which",
+  },
   ...searchLaws,
   {
     check: interrupting(additions),
@@ -2877,5 +3113,13 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: interrupting(marking),
     name: "applies a step that moves Read Markers whole, or not at all",
+  },
+  {
+    check: interrupting(keeping),
+    name: "applies a step that removes a Network and keeps its Timelines whole, or not at all",
+  },
+  {
+    check: interrupting(dropping),
+    name: "applies a step that removes a Network and drops its Timelines whole, or not at all",
   },
 ];

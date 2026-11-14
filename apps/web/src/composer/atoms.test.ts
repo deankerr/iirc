@@ -40,6 +40,7 @@ const describeTimeline = (
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
@@ -96,7 +97,7 @@ const network = Schema.decodeSync(TimelineId)(idOf(1));
  * @returns The event.
  */
 const foldedThrough = (sequence: number): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ gaps: [], items: [], merged: [], sequence, timelines: [] }),
+  data: JSON.stringify({ dropped: [], gaps: [], items: [], merged: [], sequence, timelines: [] }),
   event: "changed",
   id: `1.${sequence}`,
 });
@@ -117,6 +118,7 @@ const placing = async () => {
     );
   composed.send({
     data: JSON.stringify({
+      dropped: [],
       gaps: [],
       items: [],
       merged: [],
@@ -378,6 +380,7 @@ describe("saying", () => {
     placeAt10(daemon);
     sendChange({
       data: JSON.stringify({
+        dropped: [],
         gaps: [],
         items: [],
         merged: [],
@@ -417,6 +420,7 @@ describe("saying", () => {
     const listed = (sequence: number, name: string, sender: string) => {
       sendChange({
         data: JSON.stringify({
+          dropped: [],
           gaps: [],
           items: [
             {
@@ -503,6 +507,7 @@ describe("saying", () => {
 
       sendChange({
         data: JSON.stringify({
+          dropped: [],
           gaps: [],
           items: [],
           merged: [],
@@ -545,6 +550,7 @@ describe("saying", () => {
 
     sendChange({
       data: JSON.stringify({
+        dropped: [],
         gaps: [],
         items: [],
         merged: [],
@@ -819,6 +825,7 @@ describe("acting", () => {
       });
       changed({
         data: JSON.stringify({
+          dropped: [],
           gaps: [],
           items: [
             {

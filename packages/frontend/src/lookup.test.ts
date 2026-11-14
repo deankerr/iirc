@@ -67,6 +67,7 @@ const described = (
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: nothing,
 });
 

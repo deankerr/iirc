@@ -88,6 +88,7 @@ const described = ({
   name,
   network: "libera",
   read,
+  removed: false,
   unread: { ...nothing, ...unread },
 });
 
@@ -244,7 +245,15 @@ const changed = (
   change: Partial<typeof TimelineChange.Encoded>
 ): Extract<TimelinesEvent, { readonly _tag: "Changed" }> => ({
   _tag: "Changed",
-  change: decodeChange({ gaps: [], items: [], merged: [], sequence, timelines: [], ...change }),
+  change: decodeChange({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    sequence,
+    timelines: [],
+    ...change,
+  }),
   place: { sequence, version: 1 },
 });
 

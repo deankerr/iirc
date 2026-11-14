@@ -22,6 +22,7 @@ import {
   SignInsFailed,
   signInCookie,
   TimelinesFailed,
+  TimelinesKept,
   UiChanged,
   Unauthorized,
   UnknownNetwork,
@@ -74,6 +75,7 @@ import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
 import type { UiChangedSince } from "./ui.ts";
 import {
   channelHeader,
+  dropped,
   gap,
   happened,
   knowledge,
@@ -366,8 +368,27 @@ const networks = HttpApiBuilder.group(
                   new ConfigurationChanged({ network: params.network, sequence: error.sequence })
                 ),
               NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
+              TimelinesKept: () => Effect.fail(new TimelinesKept({ network: params.network })),
             })
           )
+      )
+      .handle("remove", ({ params, query }) =>
+        runtime.remove(NetworkId.make(params.network), { keep: query.keep }).pipe(
+          Effect.map((sequence) => ({ sequence })),
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
+            UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
+            VaultFailed: (error) => Effect.fail(vaultFailed(error)),
+          })
+        )
+      )
+      .handle("removed", () =>
+        runtime.kept.pipe(
+          Effect.map((kept) =>
+            Array.from(kept, (network) => ({ network: WireNetworkId.make(network) }))
+          )
+        )
       )
       .handle("configuration", ({ params }) =>
         runtime.configuration(NetworkId.make(params.network)).pipe(Effect.mapError(unknownNetwork))
@@ -601,14 +622,19 @@ const eventsOf = (changed: Changed, version: number): readonly TimelineChangesEv
 
   const sequences = [
     ...new Set(
-      [...changed.timelines, ...changed.items, ...changed.merged, ...changed.gaps].map(
-        (each) => each.changed
-      )
+      [
+        ...changed.timelines,
+        ...changed.items,
+        ...changed.merged,
+        ...changed.dropped,
+        ...changed.gaps,
+      ].map((each) => each.changed)
     ),
   ].toSorted((left, right) => left - right);
 
   return sequences.map((sequence): TimelineChangesEvent => ({
     data: {
+      dropped: changed.dropped.filter(at(sequence)).map(dropped),
       gaps: changed.gaps.filter(at(sequence)).map(gap),
       items: changed.items.filter(at(sequence)).map(timelineItem),
       merged: changed.merged.filter(at(sequence)).map(tombstone),
@@ -641,10 +667,11 @@ const timelines = HttpApiBuilder.group(
     const projector = yield* Projector;
     const page = yield* ChangesPage;
 
+    // A Network removed with its Timelines kept is still known to them.
     const known = (network: WireNetworkId) =>
-      runtime.networks.pipe(
-        Effect.flatMap((all) =>
-          all.has(NetworkId.make(network))
+      Effect.all([runtime.networks, runtime.kept]).pipe(
+        Effect.flatMap(([all, kept]) =>
+          all.has(NetworkId.make(network)) || kept.has(NetworkId.make(network))
             ? Effect.void
             : Effect.fail(new UnknownNetwork({ network }))
         )

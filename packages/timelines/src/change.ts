@@ -34,6 +34,9 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  *   any Read Marker it had. What stands after it counts as unread.
  * - `HeadChanged`: what the Client knows of the Channel `timeline` is changed in a way no
  *   item says, such as its modes becoming known, so a Frontend reads it again.
+ * - `Removed`: the Owner removed `network`. With `keep`, its Timelines stay readable and
+ *   are marked as a removed Network's. Without it, they are dropped, with their items and
+ *   Gaps, and only their ids are kept, to say they are gone.
  */
 export type Change =
   | { readonly _tag: "Described"; readonly sequence: number; readonly timeline: Descriptor }
@@ -101,6 +104,12 @@ export type Change =
       readonly sequence: number;
       readonly network: string;
       readonly timeline: TimelineId;
+    }
+  | {
+      readonly _tag: "Removed";
+      readonly sequence: number;
+      readonly network: string;
+      readonly keep: boolean;
     };
 
 /** A change to how one of our Messages stands with the Ircd. */

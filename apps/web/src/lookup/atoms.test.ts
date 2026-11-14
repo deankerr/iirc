@@ -46,6 +46,7 @@ const listed = (
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: none,
 });
 

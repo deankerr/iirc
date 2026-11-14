@@ -27,10 +27,16 @@ export interface InForce {
   readonly sequence: Sequence;
 }
 
+/** A Network the Owner removed, and whether its Timelines are kept. */
+interface Removal {
+  readonly keep: boolean;
+}
+
 /**
- * One Network's Client, as far as its Inputs have been folded, and the Configuration in
- * force. A Client that threw is `Broken`, and keeps the state from before the input that
- * broke it, so one Network's defect never stops another's fold.
+ * One Network's Client, as far as its Inputs have been folded, the Configuration in force,
+ * and its removal, once a `Removed` was stepped. A Client that threw is `Broken`, and keeps
+ * the state from before the input that broke it, so one Network's defect never stops
+ * another's fold.
  */
 export type Folded<S> =
   | {
@@ -38,12 +44,14 @@ export type Folded<S> =
       readonly state: S;
       readonly table: TimerTable;
       readonly configured: InForce | undefined;
+      readonly removed: Removal | undefined;
     }
   | {
       readonly _tag: "Broken";
       readonly state: S;
       readonly table: TimerTable;
       readonly configured: InForce | undefined;
+      readonly removed: Removal | undefined;
       readonly reason: string;
     };
 
@@ -95,6 +103,7 @@ export const stepContained = <S>(
 export const fresh = <S>(client: Client<S>): Folded<S> => ({
   _tag: "Folded",
   configured: undefined,
+  removed: undefined,
   state: client.initial,
   table: new Map(),
 });
@@ -102,6 +111,11 @@ export const fresh = <S>(client: Client<S>): Folded<S> => ({
 /**
  * Folds one more Input. A `Broken` Network stays broken. A `Configured` stepped is the
  * Configuration in force from its sequence on.
+ *
+ * A `Removed` ends the Network's life in the Journal. The Inputs that trail it, such as its
+ * Connection's `Closed`, are stepped and give no News, and another `Removed` gives its own.
+ * A `Configured` after it begins a new Network under the same id, from `initial`, so
+ * nothing of the removed one reaches it.
  * @param client - The Client.
  * @param folded - The Network so far.
  * @param input - The next Input.
@@ -114,11 +128,16 @@ const foldOne = <S>(
   input: Input,
   sequence: Sequence
 ): Effect.Effect<readonly [Folded<S>, readonly News[]]> => {
-  if (folded._tag === "Broken") {
-    return Effect.succeed([folded, []] as const);
+  const begun =
+    folded.removed !== undefined && input._tag === "Configured" ? fresh(client) : folded;
+
+  if (begun._tag === "Broken") {
+    return Effect.succeed([begun, []] as const);
   }
 
-  return stepContained(client, folded.state, input).pipe(
+  const told = begun.removed === undefined || input._tag === "Removed";
+
+  return stepContained(client, begun.state, input).pipe(
     Effect.map(
       (step) =>
         [
@@ -127,15 +146,16 @@ const foldOne = <S>(
             configured:
               input._tag === "Configured"
                 ? { configuration: input.configuration, sequence }
-                : folded.configured,
+                : begun.configured,
+            removed: input._tag === "Removed" ? { keep: input.keep } : begun.removed,
             state: step.state,
-            table: timers(folded.table, input, step.outputs),
+            table: timers(begun.table, input, step.outputs),
           },
-          step.news,
+          told ? step.news : [],
         ] as const
     ),
     Effect.catch((error) => {
-      const broken: Folded<S> = { ...folded, _tag: "Broken", reason: error.reason };
+      const broken: Folded<S> = { ...begun, _tag: "Broken", reason: error.reason };
 
       return Effect.succeed([broken, []] as const);
     })

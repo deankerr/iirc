@@ -103,6 +103,16 @@ export class ConfigurationChanged extends Schema.TaggedError<
 ) {}
 
 /**
+ * A `PUT` of Configuration named the id of a Network removed with its Timelines kept, so
+ * no Network can take it until they are dropped, by removing it again without keeping
+ * them. Nothing was journaled: a 409.
+ */
+export class TimelinesKept extends Schema.TaggedError<
+  TimelinesKept,
+  { readonly brand: unique symbol }
+>()("TimelinesKept", { network: NetworkId }, { httpApiStatus: 409 }) {}
+
+/**
  * A change of a `ui` option was made from other options than those now in force: another
  * Change was journaled since, at `sequence`, the last one. Nothing was journaled: a 409.
  */

@@ -511,6 +511,7 @@ const step =
       case "Act":
       case "Look":
       case "Read":
+      case "Removed":
       case "Retry":
       case "Stopping":
       case "Unfilled":

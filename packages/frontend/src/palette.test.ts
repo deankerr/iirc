@@ -43,6 +43,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
     name,
     network: "libera",
     read: null,
+    removed: false,
     unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
