@@ -14,14 +14,11 @@ import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
 import { timeShown } from "../options/ui.ts";
-import { clockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
+import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
-
-// The Owner's own calendar and time zone, which only the view reads.
-const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /**
  * A time as the line shows it, as `ui.time` says, or nothing for `none`.
@@ -54,7 +51,7 @@ const Time = ({ at }: { readonly at: number }) => {
       className={styles.time}
       data-sample={sample}
       dateTime={date.toISOString()}
-      title={day.format(date)}
+      title={datedClockFor(shown).format(date)}
     >
       {clockFor(shown).format(date)}
     </time>

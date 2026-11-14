@@ -20,9 +20,13 @@ const partsOf = (shown: TimeShown) =>
       .map((part) => [part.type, part.value])
   );
 
+// A number as the device's own digits write it, which a time's hour is in whatever language.
+const digits = new Intl.NumberFormat(undefined, { useGrouping: false });
+
 const sample = (shown: TimeShown) => sampleOf(shown)?.split("\n");
 
-const hours = (shown: TimeShown) => sample(shown)?.map((line) => /\d+/u.exec(line)?.[0]?.length);
+const hours = (shown: TimeShown) =>
+  sample(shown)?.map((line) => /\p{Nd}+/u.exec(line)?.[0]?.length);
 
 describe("the Owner's clock", () => {
   it("draws a 12-hour time with its day period and a 24-hour one without", () => {
@@ -34,15 +38,15 @@ describe("the Owner's clock", () => {
     ];
 
     expect({
-      twelve: [Number(twelve.hour), "dayPeriod" in twelve],
-      twelveWithSeconds: [Number(twelveWithSeconds.hour), "dayPeriod" in twelveWithSeconds],
-      twentyFour: [Number(twentyFour.hour), "dayPeriod" in twentyFour],
-      withSeconds: [Number(withSeconds.hour), "dayPeriod" in withSeconds],
+      twelve: [twelve.hour, "dayPeriod" in twelve],
+      twelveWithSeconds: [twelveWithSeconds.hour, "dayPeriod" in twelveWithSeconds],
+      twentyFour: [twentyFour.hour, "dayPeriod" in twentyFour],
+      withSeconds: [withSeconds.hour, "dayPeriod" in withSeconds],
     }).toStrictEqual({
-      twelve: [1, true],
-      twelveWithSeconds: [1, true],
-      twentyFour: [13, false],
-      withSeconds: [13, false],
+      twelve: [digits.format(1), true],
+      twelveWithSeconds: [digits.format(1), true],
+      twentyFour: [digits.format(13), false],
+      withSeconds: [digits.format(13), false],
     });
   });
 

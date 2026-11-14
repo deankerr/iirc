@@ -21,13 +21,26 @@ export type ClockForm = Exclude<TimeShown, "none">;
  */
 export const formOf = (shown: TimeShown): ClockForm => (shown === "none" ? "HH:mm" : shown);
 
-/** The Intl options of each form, which the formats and the tests that fix them read. */
-export const clockOptions: Readonly<Record<ClockForm, Intl.DateTimeFormatOptions>> = {
+/** The Intl options of each form, which every format here is made from. */
+const clockOptions: Readonly<Record<ClockForm, Intl.DateTimeFormatOptions>> = {
   "HH:mm": { hour: "2-digit", hourCycle: "h23", minute: "2-digit" },
   "HH:mm:ss": { hour: "2-digit", hourCycle: "h23", minute: "2-digit", second: "2-digit" },
   "h:mm a": { hour: "numeric", hourCycle: "h12", minute: "2-digit" },
   "h:mm:ss a": { hour: "numeric", hourCycle: "h12", minute: "2-digit", second: "2-digit" },
 };
+
+/**
+ * A form's format with its date.
+ * @param form - The form.
+ * @returns The format.
+ */
+const datedClock = (form: ClockForm) =>
+  new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    ...clockOptions[form],
+  });
 
 /** Each form's format, built once, as a format is costly to build and cheap to use. */
 const clocks: Readonly<Record<ClockForm, Intl.DateTimeFormat>> = {
@@ -36,6 +49,23 @@ const clocks: Readonly<Record<ClockForm, Intl.DateTimeFormat>> = {
   "h:mm a": new Intl.DateTimeFormat(undefined, clockOptions["h:mm a"]),
   "h:mm:ss a": new Intl.DateTimeFormat(undefined, clockOptions["h:mm:ss a"]),
 };
+
+/** Each form's format with its date, built once. Intl forbids a `dateStyle` beside an hour. */
+const datedClocks: Readonly<Record<ClockForm, Intl.DateTimeFormat>> = {
+  "HH:mm": datedClock("HH:mm"),
+  "HH:mm:ss": datedClock("HH:mm:ss"),
+  "h:mm a": datedClock("h:mm a"),
+  "h:mm:ss a": datedClock("h:mm:ss a"),
+};
+
+/**
+ * The format that draws a date and a time of day, as `ui.time` says: the day, the month,
+ * and the year, then the clock. Where a time shows beyond a line's own, such as on hover, a
+ * search result, a topic's, or a signon, it is this.
+ * @param shown - How a line's time shows.
+ * @returns The format, which is `HH:mm`'s for `none`.
+ */
+export const datedClockFor = (shown: TimeShown): Intl.DateTimeFormat => datedClocks[formOf(shown)];
 
 /**
  * The format that draws a time of day, as `ui.time` says.

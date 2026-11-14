@@ -30,7 +30,7 @@ import { signedOut } from "../options/atoms.ts";
 import { timeShown } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { timelinesState, Waits } from "../timelines/atoms.ts";
-import { clockFor } from "../ui/clock.ts";
+import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
 
 /** Each Pane's card, as the core folds it. */
@@ -45,24 +45,17 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: LookupsEvent) => {
   registry.set(lookupsState, reduceLookups(registry.get(lookupsState), event));
 };
 
-// The Owner's own calendar, clock, and time zone, which only the runtime and the view read.
-const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
-
 /**
- * An instant as the Owner reads a date and a time: the date, and the time as `ui.time`
- * says, or none when a `Date` cannot hold the instant. A signon is no line's time, so it
+ * An instant as the Owner reads a date and a time, the time as `ui.time` says, or none
+ * when a `Date` cannot hold the instant. A signon is no line's time, so it
  * shows even under `none`, as `HH:mm`.
  * @param shown - How a line's time shows.
  * @returns The format.
  */
 const timeFor =
   (shown: TimeShown) =>
-  (at: number): string | undefined => {
-    const day = formattedAt(date, at);
-    const time = formattedAt(clockFor(shown), at);
-
-    return day === undefined || time === undefined ? undefined : `${day}, ${time}`;
-  };
+  (at: number): string | undefined =>
+    formattedAt(datedClockFor(shown), at);
 
 /**
  * What a Pane's card shows, by the Pane's id, while the Pane has open the Timeline it was

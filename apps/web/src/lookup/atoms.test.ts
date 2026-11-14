@@ -306,10 +306,13 @@ describe("a Lookup", () => {
       return card?.body._tag === "Profiles" ? card.body.profiles[0]?.signon : undefined;
     };
 
-    const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(signon);
-
     const written = (options: Intl.DateTimeFormatOptions) =>
-      `signed on ${day}, ${new Intl.DateTimeFormat(undefined, options).format(signon)}`;
+      `signed on ${new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        ...options,
+      }).format(signon)}`;
 
     const twentyFour = { hour: "2-digit", hourCycle: "h23", minute: "2-digit" } as const;
     const twelve = { hour: "numeric", hourCycle: "h12", minute: "2-digit" } as const;

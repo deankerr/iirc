@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
-import type { Member, Timeline } from "@iirc/api";
+import type { Member, TimeShown, Timeline } from "@iirc/api";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { deviceUi } from "../options/device.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, sync } from "../timelines/atoms.ts";
@@ -62,9 +63,10 @@ const settled = async (holds: () => boolean) => {
 /**
  * A browser signed in to a Daemon with `#iirc` open, its topic hostile and set by `op`,
  * its members `op` and `peer`, the page drawn.
+ * @param setAt - When the topic was set, if known.
  * @returns The fake, the registry, and the page.
  */
-const signedIn = async () => {
+const signedIn = async (setAt: number | null = null) => {
   const fake = fakeDaemon();
 
   fake.daemon.signedIn = true;
@@ -90,7 +92,7 @@ const signedIn = async () => {
         _tag: "Known",
         at: 1,
         from: "ircd",
-        value: { setAt: null, setBy: "op", text: hostileTopic },
+        value: { setAt, setBy: "op", text: hostileTopic },
       },
     },
     members: [member("op", ["o"]), member("peer")],
@@ -248,6 +250,64 @@ describe("a Pane's status bar", () => {
       },
       open: { isolated: true, link: "https://example.com/plan", set: true, visible: true },
     });
+  });
+});
+
+describe("a topic's time", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+  });
+
+  it("is drawn as ui.time says, HH:mm under none", async () => {
+    // Local mid-afternoon, so no form of the clock writes it as another does.
+    const set = new Date(2026, 10, 15, 15, 7, 9);
+    const { registry } = await signedIn(set.getTime());
+
+    await settled(() => toggle()?.getAttribute("aria-label") === "Members, 2");
+
+    const topic = bar()?.querySelector<HTMLElement>("button[aria-expanded]");
+
+    await press(topic);
+    await settled(() => topic?.getAttribute("aria-expanded") === "true");
+
+    const drawn = async (time: TimeShown) => {
+      await act(async () => {
+        registry.set(deviceUi, { time });
+        await Promise.resolve();
+      });
+
+      return topic?.textContent;
+    };
+
+    const written = (options: Intl.DateTimeFormatOptions) =>
+      `set by op, ${new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        ...options,
+      }).format(set)}`;
+
+    const twentyFour = { hour: "2-digit", hourCycle: "h23", minute: "2-digit" } as const;
+    const twelve = { hour: "numeric", hourCycle: "h12", minute: "2-digit" } as const;
+
+    const texts = {
+      none: await drawn("none"),
+      twelve: await drawn("h:mm a"),
+      twelveWithSeconds: await drawn("h:mm:ss a"),
+      twentyFour: await drawn("HH:mm"),
+      withSeconds: await drawn("HH:mm:ss"),
+    };
+
+    expect(texts).toStrictEqual({
+      none: written(twentyFour),
+      twelve: written(twelve),
+      twelveWithSeconds: written({ ...twelve, second: "2-digit" }),
+      twentyFour: written(twentyFour),
+      withSeconds: written({ ...twentyFour, second: "2-digit" }),
+    });
+    expect(texts.twelve).not.toBe(texts.twentyFour);
   });
 });
 
