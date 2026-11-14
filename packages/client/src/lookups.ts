@@ -786,6 +786,25 @@ export const unsentLookups = (run: Run, intents: ReadonlySet<IntentId>): Readonl
 };
 
 /**
+ * The Network was removed: each Lookup still awaiting its reply reports what it has now,
+ * and is forgotten, since nothing of the Network is reported after its removal.
+ * @param run - The step.
+ */
+export const removedLookups = (run: Run): void => {
+  const lookups = openOf(run.state)?.lookups ?? [];
+
+  if (lookups.length === 0) {
+    return;
+  }
+
+  updateOpen(run, (open) => ({ ...open, lookups: [] }));
+
+  for (const looking of lookups) {
+    report(run, looking, resultOf(looking, "Ended", ""));
+  }
+};
+
+/**
  * A Connection ended: each Lookup still awaiting its reply reports what it has.
  * @param run - The step.
  * @param link - The Connection, as it was.

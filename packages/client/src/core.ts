@@ -31,7 +31,7 @@ import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
-import { endLookups, expireLookup, look, unsentLookups } from "./lookups.ts";
+import { endLookups, expireLookup, look, removedLookups, unsentLookups } from "./lookups.ts";
 import { read } from "./markers.ts";
 import { modesQueryOver } from "./modes-query.ts";
 import type { EndReason } from "./news.ts";
@@ -146,9 +146,12 @@ const disable = (run: Run): void => {
 };
 
 // The Owner removed the Network: a Session ends as disabling ends one, with a `QUIT`, and
-// nothing is dialled again, since the Configuration in force is no longer enabled.
+// nothing is dialled again, since the Configuration in force is no longer enabled. Each
+// Lookup still waiting reports what it has in this step, where the Network's life ends.
 const removed = (run: Run, keep: boolean): void => {
   const { configuration } = run.state;
+
+  removedLookups(run);
 
   if (configuration !== undefined) {
     run.state = { ...run.state, configuration: { ...configuration, enabled: false } };

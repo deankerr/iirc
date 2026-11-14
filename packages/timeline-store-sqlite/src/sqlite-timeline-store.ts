@@ -992,13 +992,12 @@ export const makeSqliteTimelineStore = (
               ON CONFLICT (id) DO UPDATE SET changed = excluded.changed, life = excluded.life
             `;
 
-            const found = yield* sql`
-              SELECT id FROM items WHERE network = ${change.network} AND sender IS NOT NULL
-            `.pipe(Effect.flatMap(decodeRows));
-
-            for (const { id } of found) {
-              yield* sql`DELETE FROM search WHERE rowid = ${id}`;
-            }
+            // In one statement, so a long history is never read out to be dropped.
+            yield* sql`
+              DELETE FROM search WHERE rowid IN (
+                SELECT id FROM items WHERE network = ${change.network} AND sender IS NOT NULL
+              )
+            `;
 
             yield* sql`DELETE FROM items WHERE network = ${change.network}`;
             yield* sql`DELETE FROM timelines WHERE network = ${change.network}`;

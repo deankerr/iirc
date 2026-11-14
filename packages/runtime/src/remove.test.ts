@@ -3,11 +3,11 @@
  * Runtime and the next, its Credentials are forgotten, and its id is free again unless its
  * Timelines are kept.
  */
-import { client, Instant } from "@iirc/client";
+import { client, Instant, IntentId } from "@iirc/client";
 import type { Client, ClientState, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
-import { Effect, Exit, Fiber, Latch, Redacted, Result, Scheduler, Stream } from "effect";
+import { Effect, Exit, Fiber, Latch, Option, Redacted, Result, Scheduler, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -434,6 +434,47 @@ describe("every fold of the Journal", () => {
 
     // Only the life whose Credentials were never forgotten is left.
     expect(result).toStrictEqual(["b"]);
+  });
+});
+
+describe("a Lookup waiting when its Network is removed", () => {
+  it("reads back as ended, not Pending, before and after a restart", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const first = yield* startRuntime(world, client);
+        const call = yield* online(world, first.runtime, base);
+        const intent = IntentId.make("who");
+
+        const looking = yield* Effect.forkChild(
+          first.runtime.look(libera, { intent, lookup: { _tag: "Whois", nick: "peer" } })
+        );
+
+        yield* settle;
+        yield* TestClock.adjust(5000);
+        // The `WHOIS` left, and no reply comes before the removal.
+        yield* call.heard;
+        yield* removing(first.runtime, libera, true);
+        yield* Fiber.join(looking);
+
+        const before = yield* first.runtime.looked(libera, intent);
+
+        yield* first.close;
+        const second = yield* startRuntime(world, client);
+        const after = yield* second.runtime.looked(libera, intent);
+
+        const tag = (found: typeof before) =>
+          Option.match(found, {
+            onNone: () => "None",
+            onSome: (outcome) =>
+              outcome._tag === "LookedUp" ? `LookedUp ${outcome.result._tag}` : outcome._tag,
+          });
+
+        return [tag(before), tag(after)];
+      })
+    );
+
+    // It reports what it had, which was nothing, as the end of a Connection does.
+    expect(result).toStrictEqual(["LookedUp Partial", "LookedUp Partial"]);
   });
 });
 

@@ -64,7 +64,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 
 - A `Configured` or `Started` with the Network enabled dials at once. There is no backoff before a first dial.
 - After a `Closed` it waits on the backoff, then dials the next Ircd in `ircds`, round and round. `Retry` cuts the wait short.
-- Disabling the Network sends `QUIT`, hangs up, and waits for the `Closed`. A `Removed` does the same, and nothing is dialled again.
+- Disabling the Network sends `QUIT`, hangs up, and waits for the `Closed`. A `Removed` does the same, and nothing is dialled again, and each Lookup still waiting reports what it has in the removal's own step.
 - A `Stopping` does the same, and then nothing is dialled and every `Say` is refused until the next `Started`.
 - While an STS policy holds for a host, the dial is TLS on the policy's port, whatever Configuration says.
 

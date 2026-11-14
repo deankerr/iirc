@@ -57,7 +57,11 @@ const channel = timelineIdOf(1, 0, 1);
 const other = timelineIdOf(1, 0, 2);
 const third = timelineIdOf(1, 0, 3);
 
-const said = (sequence: number, text: string, id?: string): Change => ({
+const said = (
+  sequence: number,
+  text: string,
+  id?: string
+): Extract<Change, { readonly _tag: "Added" }> => ({
   _tag: "Added",
   content: {
     _tag: "Message",
@@ -300,6 +304,79 @@ describe("reopening the file", () => {
         expect(after).toStrictEqual(before);
       })
     );
+  });
+
+  it("drops a Network of thousands of Messages, leaving search nothing of it, and another's as it was", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const store = yield* freshStore;
+        const oftcChannel = timelineIdOf(1, 0, 9);
+        const many = 3000;
+
+        yield* store.apply({
+          changes: [
+            {
+              _tag: "Described",
+              sequence: 1,
+              timeline: {
+                id: channel,
+                key: "#a",
+                kind: "Channel",
+                life: 1,
+                name: "#a",
+                network: libera,
+              },
+            },
+            {
+              _tag: "Described",
+              sequence: 1,
+              timeline: {
+                id: oftcChannel,
+                key: "#a",
+                kind: "Channel",
+                life: 1,
+                name: "#a",
+                network: "oftc",
+              },
+            },
+            ...Array.from({ length: many }, (_, n): Change => ({
+              ...said(1, `words ${n}`),
+              position: position(n, 1, n),
+            })),
+            {
+              ...said(1, "words there"),
+              network: "oftc",
+              position: position(0, 1),
+              timeline: oftcChannel,
+            },
+          ],
+          directory: emptyDirectory,
+          through: 1,
+        });
+
+        const before = yield* store.search({ limit: many + 10, text: SearchText.make("words") });
+
+        yield* store.apply({
+          changes: [{ _tag: "Removed", keep: false, life: 1, network: libera, sequence: 2 }],
+          directory: emptyDirectory,
+          through: 2,
+        });
+
+        const after = yield* store.search({ limit: many + 10, text: SearchText.make("words") });
+
+        return {
+          after: after.map((item) => item.network),
+          before: before.length,
+          kept: yield* store.search({
+            limit: 10,
+            network: libera,
+            text: SearchText.make("words"),
+          }),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ after: ["oftc"], before: 3001, kept: [] });
   });
 
   it("folds its search again when it was folded another way, and keeps everything else", async () => {
