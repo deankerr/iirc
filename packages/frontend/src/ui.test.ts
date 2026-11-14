@@ -10,6 +10,7 @@ const shared = {
     activity: "quiet",
     colours: "theme",
     font: "commit-mono",
+    leading: 1.45,
     size: 16,
     theme: "dark",
     themes: [],
@@ -23,6 +24,9 @@ describe("a device's overrides", () => {
     expect({
       back: deviceUiOf(deviceUiText({ theme: "light", time: "none" })),
       empty: deviceUiText(noOverrides),
+      leading: deviceUiOf('{"leading":1.2}'),
+      leadingFine: deviceUiOf('{"leading":1.455,"size":20}'),
+      leadings: deviceUiOf('{"leading":3,"size":20}'),
       long: deviceUiOf(`{"theme":"light","x":"${"x".repeat(50_000)}"}`),
       mixed: deviceUiOf('{"theme":"light","time":"noon","palette":"dusk","activity":3}'),
       none: deviceUiOf(undefined),
@@ -33,6 +37,9 @@ describe("a device's overrides", () => {
     }).toStrictEqual({
       back: { theme: "light", time: "none" },
       empty: undefined,
+      leading: { leading: 1.2 },
+      leadingFine: { size: 20 },
+      leadings: { size: 20 },
       long: {},
       mixed: { theme: "light" },
       none: {},
@@ -101,18 +108,21 @@ describe("a device's overrides", () => {
     expect({
       before: effectiveUi(undefined, noOverrides),
       device: effectiveUi(shared, { size: 20, theme: "light" }),
+      leading: effectiveUi(shared, { leading: 1.8 }).leading,
       shared: effectiveUi(shared, noOverrides),
     }).toStrictEqual({
       before: {
         activity: "all",
         colours: "theme",
         font: "system",
+        leading: 1.45,
         size: 14,
         theme: "system",
         themes: [],
         time: "HH:mm",
       },
       device: { ...shared.options, size: 20, theme: "light" },
+      leading: 1.8,
       shared: shared.options,
     });
   });

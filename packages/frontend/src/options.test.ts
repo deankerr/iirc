@@ -1,7 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import { UiOptions } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -343,6 +343,69 @@ describe("the text syntax", () => {
         expect(back).toStrictEqual({ _tag: "Parsed", value: readBack });
       })
     );
+  });
+
+  it("reads back every value the Schema takes for a decimal, whatever sum made it, and refuses the rest", () => {
+    const kind = uiFields.find((field) => field.key === "leading")?.kind ?? { _tag: "Text" };
+    const taken = Schema.decodeUnknownOption(UiOptions.fields.leading);
+
+    // Values made by sums and products, as arithmetic in binary leaves them, as well as
+    // those written in hundredths, and whatever the Schema takes of them.
+    const made = fc.oneof(
+      fc.integer({ max: 200, min: 100 }).map((hundredths) => hundredths / 100),
+      fc
+        .tuple(fc.integer({ max: 199, min: 100 }), fc.integer({ max: 100, min: 0 }))
+        .map(([base, more]) => base / 100 + more / 100),
+      fc.double({ max: 2, min: 1, noNaN: true })
+    );
+
+    fc.assert(
+      fc.property(
+        made.filter((value) => Option.isSome(taken(value))),
+        (value) => {
+          expect(parseText(kind, showText(kind, value))).toStrictEqual({ _tag: "Parsed", value });
+        }
+      ),
+      { numRuns: 500 }
+    );
+
+    expect({
+      binarySum: Option.isSome(taken(1.1 + 0.05)),
+      fine: Option.isSome(taken(1.455)),
+      step: Option.isSome(taken(1.15)),
+    }).toStrictEqual({ binarySum: false, fine: false, step: true });
+
+    expect(
+      [
+        "1",
+        "2",
+        " 1.5 ",
+        "1.45",
+        "0.99",
+        "2.01",
+        "1.455",
+        "1.",
+        ".5",
+        "-1.5",
+        "1e0",
+        "NaN",
+        "",
+      ].map((text) => parseText(kind, text)._tag)
+    ).toStrictEqual([
+      "Parsed",
+      "Parsed",
+      "Parsed",
+      "Parsed",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+      "Invalid",
+    ]);
   });
 
   it("shows what it reads, once read, for an Ircd list typed any way", () => {
@@ -902,12 +965,16 @@ const change = (option: string, value: Json | undefined, device: boolean) => ({
   value: [{ _tag: "ChangeUi", device, option, value }],
 });
 
+const leadingRefused = (text: string) =>
+  `ui.leading: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
+
 describe("the options under ui", () => {
   const shared = {
     options: {
       activity: "quiet",
       colours: "theme",
       font: "system",
+      leading: 1.45,
       size: 14,
       theme: "dark",
       themes: [],
@@ -938,6 +1005,7 @@ describe("the options under ui", () => {
             "atkinson-hyperlegible-mono",
           ],
         },
+        { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
@@ -958,6 +1026,7 @@ describe("the options under ui", () => {
         ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
         ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
         ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
+        ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
@@ -984,6 +1053,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "system" },
           undefined,
           "system",
+        ],
+        [
+          "ui.leading",
+          { _tag: "Shown", text: "1.45" },
+          { _tag: "Shown", text: "1.45" },
+          undefined,
+          "1.45",
         ],
         [
           "ui.size",
@@ -1030,7 +1106,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-8),
+        .slice(-9),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1039,6 +1115,7 @@ describe("the options under ui", () => {
         "ui.activity",
         "ui.colours",
         "ui.font",
+        "ui.leading",
         "ui.size",
         "ui.theme",
         "ui.themes",
@@ -1058,6 +1135,12 @@ describe("the options under ui", () => {
       empty: read("/set ui.time "),
       font: read("/set ui.font IBM-Plex-Mono"),
       fractional: read("/set ui.size 14.5"),
+      leading: read("/set ui.leading 1.6"),
+      leadingDevice: read("/set -device ui.leading 1.2"),
+      leadingNotANumber: read("/set ui.leading abc"),
+      leadingTooBig: read("/set ui.leading 2.5"),
+      leadingTooFine: read("/set ui.leading 1.555"),
+      leadingTooSmall: read("/set ui.leading 0.9"),
       shared: read("/set ui.time HH:mm:ss"),
       size: read("/set -device ui.size 20"),
       tooBig: read("/set ui.size 25"),
@@ -1086,6 +1169,12 @@ describe("the options under ui", () => {
         _tag: "Invalid",
         message: 'ui.size: Give a whole number from 10 to 24, not "14.5".',
       },
+      leading: change("leading", 1.6, false),
+      leadingDevice: change("leading", 1.2, true),
+      leadingNotANumber: { _tag: "Invalid", message: leadingRefused("abc") },
+      leadingTooBig: { _tag: "Invalid", message: leadingRefused("2.5") },
+      leadingTooFine: { _tag: "Invalid", message: leadingRefused("1.555") },
+      leadingTooSmall: { _tag: "Invalid", message: leadingRefused("0.9") },
       shared: change("time", "HH:mm:ss", false),
       size: change("size", 20, true),
       tooBig: { _tag: "Invalid", message: 'ui.size: Give a whole number from 10 to 24, not "25".' },

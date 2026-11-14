@@ -1,10 +1,11 @@
 /*
  * The theme: every colour, size, and font the Frontend uses, as CSS variables. Modules
  * read these and never name a colour of their own. Once the page runs, every colour is
- * the core's, derived from the palette of the theme in effect, and the text's size and font
- * are `ui.size` and `ui.font`, each set on the root's own style, which wins over these.
- * Until then each colour is light-dark(), so the first paint follows the device's own
- * setting, and the text is in the defaults' size and font.
+ * the core's, derived from the palette of the theme in effect, and the text's size, line
+ * height, and font are `ui.size`, `ui.leading`, and `ui.font`, each set on the root's own
+ * style, which wins over these. Until then each colour is light-dark(), so the first
+ * paint follows the device's own setting, and the text is in the defaults' size, line
+ * height, and font.
  */
 :root {
   color-scheme: light dark;

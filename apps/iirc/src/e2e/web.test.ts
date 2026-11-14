@@ -1173,6 +1173,60 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.keyboard.press("Escape");
         await query.waitFor({ state: "detached" });
 
+        // A change of the line height that leaves a row's estimate as it was still lays the
+        // list out again: each row's wrapper is as tall as the row it holds, to the pixel, so
+        // none is clipped or left with a gap under it.
+        const rowsStale = async () =>
+          await members.getByRole("row").evaluateAll((rows) =>
+            rows.flatMap((row) => {
+              const wrapper = row.parentElement?.getBoundingClientRect().height ?? 0;
+              const { height } = row.getBoundingClientRect();
+
+              return Math.abs(wrapper - height) >= 0.5 ? [{ row: height, wrapper }] : [];
+            })
+          );
+
+        const lineHeightIs = async (expected: string) =>
+          await page
+            .evaluate(() => getComputedStyle(document.body).lineHeight)
+            .then((now) => now === expected);
+
+        const stale: { row: number; wrapper: number }[][] = [];
+
+        // The list held at one size, as a sheet of a fixed height is, so nothing but the rows
+        // themselves can lay it out again.
+        await members.evaluate((list) => {
+          const { height, width } = list.getBoundingClientRect();
+
+          Object.assign(list.style, { flex: "none", height: `${height}px`, width: `${width}px` });
+        });
+
+        for (const [leading, expected] of [
+          ["1.43", "20.02px"],
+          ["1.5", "21px"],
+          ["1.45", "20.3px"],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await composer.fill(`/set ui.leading ${leading}`);
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await composer.press("Enter");
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await expect.poll(async () => await lineHeightIs(expected)).toBe(true);
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await page.evaluate(async () => {
+            const { promise, resolve } = Promise.withResolvers<undefined>();
+
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                resolve(undefined);
+              });
+            });
+            await promise;
+          });
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          stale.push(await rowsStale());
+        }
+
         // The peer ops Self, which the list reads again and shows.
         peer.send(`MODE ${channel} +o iirc`);
         await members.getByRole("row", { name: "iirc, operator" }).waitFor();
@@ -1205,6 +1259,7 @@ describe("the web frontend on iirc daemon --web", () => {
           completed,
           menu,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          stale,
           symbol,
           topic,
           violations,
@@ -1212,6 +1267,7 @@ describe("the web frontend on iirc daemon --web", () => {
           completed: "peer: ",
           menu: { focused: true, height: true, items: 3 },
           problems: [],
+          stale: [[], [], []],
           symbol: "@peer",
           topic: "700",
           violations: "",
@@ -2896,9 +2952,34 @@ describe("the web frontend on iirc daemon --web", () => {
         await expect.poll(sized).toBe("14px");
         const readingSized = await settledWhere(held);
 
+        // And as the line height changes, which makes every row taller or shorter.
+        const lineHeight = async () =>
+          await page.evaluate(() => getComputedStyle(document.body).lineHeight);
+
+        await composer.fill("/set ui.leading 2");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("28px");
+        const readingTaller = await settledWhere(held);
+
+        await composer.fill("/set ui.leading 1.45");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("20.3px");
+        const readingLeaded = await settledWhere(held);
+
         // Back to the latest.
         await page.mouse.wheel(0, 100_000);
         await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+
+        // At the latest, it stays at the latest as the line height changes there and back.
+        await composer.fill("/set ui.leading 2");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("28px");
+        const latestTaller = await settledWhere(atLatest);
+
+        await composer.fill("/set ui.leading 1.45");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("20.3px");
+        const latestLeaded = await settledWhere(atLatest);
 
         /**
          * Following the latest, the Owner wheels up by 300 pixels as the log's box is made
@@ -2969,16 +3050,23 @@ describe("the web frontend on iirc daemon --web", () => {
         }
 
         expect({
-          latest: [latestNarrow, latestAfter, latestBack].map(atLatest),
+          latest: [latestNarrow, latestAfter, latestBack, latestTaller, latestLeaded].map(atLatest),
           left: [leftAsScrolled, leftAsWheeled],
           modesPast,
           narrow: drawn[390]?.layout,
           problems,
-          reading: [readingNarrow, readingBack, readingLarger, readingSized].map(held),
+          reading: [
+            readingNarrow,
+            readingBack,
+            readingLarger,
+            readingSized,
+            readingTaller,
+            readingLeaded,
+          ].map(held),
           sideways: Object.entries(drawn).filter(([, one]) => one.sideways > 0),
           wide: drawn[1280]?.layout,
         }).toStrictEqual({
-          latest: [true, true, true],
+          latest: [true, true, true, true, true],
           // Where they wheeled to from the end, and kept there as a Message is said.
           left: [
             { after: 300, drawn: 0, left: 300 },
@@ -2987,7 +3075,7 @@ describe("the web frontend on iirc daemon --web", () => {
           modesPast: [0, 0],
           narrow: "block",
           problems: [],
-          reading: [true, true, true, true],
+          reading: [true, true, true, true, true, true],
           sideways: [],
           wide: "grid",
         });

@@ -8,7 +8,6 @@ The order bends to what the Owner finds in daily use. Refining what is built com
 
 Options under `ui`, shared by every device and overridable on one, as `ui.size` and `ui.font` are.
 
-- **Line height,** beside the text's size.
 - **Any font,** not only a monospace one: a family the device has, by name, and a few sans fonts served beside the monospace ones. Nothing drawn may assume every character is as wide as the next.
 - **How a line is laid out:** the nick in a column of its own, in the line, or above what was said, with a run of Messages from one User under one nick.
 - **A widest line,** so text in a wide Pane does not run the width of the screen.
