@@ -757,7 +757,8 @@ export const actionByCommand = (
 
 /**
  * Ties an error numeric to the Line of an action {@link tiedAction} found, and reports the
- * action `Rejected` with the numeric, or a `FAIL`'s code, once for its intent. A numeric that names one of a
+ * action `Rejected` with the numeric, or a `FAIL`'s code, once for its intent: one for an intent
+ * already refused refuses nothing. A numeric that names one of a
  * Line's targets, such as `441` a nick of a `KICK`, answers one occurrence of that target
  * alone, and one that names only what the Line is about, such as `482` its Channel,
  * answers the whole Line.
@@ -765,18 +766,19 @@ export const actionByCommand = (
  * @param line - The Line, live and tied to nothing by label.
  * @param found - The Line of an action it names.
  * @param reply - What it is reported `Rejected` with: the numeric, or a `FAIL`'s code.
+ * @returns Whether it refused the intent, as opposed to one already refused.
  */
 export const tieRejection = (
   run: Run,
   line: Line,
   found: Tied,
   reply: string = line.command
-): void => {
+): boolean => {
   const open = openOf(run.state);
   const tied = open?.acting[found.index];
 
   if (tied === undefined) {
-    return;
+    return false;
   }
 
   const fold = folder(run.state);
@@ -790,7 +792,9 @@ export const tieRejection = (
     })
   );
 
-  if (!tied.reported) {
+  const refuses = !tied.reported;
+
+  if (refuses) {
     refuseIntent(run, tied.intent, { _tag: "Rejected", reply });
   }
 
@@ -802,6 +806,8 @@ export const tieRejection = (
     ...phase,
     acting: resolve(phase.acting, found.index, target === -1 ? undefined : target, true),
   }));
+
+  return refuses;
 };
 
 /** What a success answers: one target of a Line, as `matches` finds it, or a Line with none. */

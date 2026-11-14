@@ -787,12 +787,9 @@ const standardReply = (run: Run, arrival: Arrival): void => {
     return;
   }
 
-  // A labelled `FAIL` of an action here rejects an intent already refused, which only uses
-  // up its label.
+  // What labels tie to an intent that refused, or settled, nothing more is shown with it.
   if (arrival.about !== undefined) {
-    if (reply.kind !== "FAIL" || rememberedAction(run, arrival.about) === undefined) {
-      reportReply(run, arrival, reply, intentWhere(run, arrival.about));
-    }
+    reportReply(run, arrival, reply, intentWhere(run, arrival.about));
 
     return;
   }
@@ -804,7 +801,11 @@ const standardReply = (run: Run, arrival: Arrival): void => {
   if (looking !== undefined && (acting === undefined || looking.order < acting.order)) {
     collectFloor(run, looking, line);
   } else if (acting !== undefined && reply.kind === "FAIL") {
-    tieRejection(run, line, acting, reply.code);
+    // Refuses its intent once. A later `FAIL` for the same action refuses nothing, and is
+    // shown where the action belongs, so none is dropped.
+    if (!tieRejection(run, line, acting, reply.code)) {
+      reportReply(run, arrival, reply, intentWhere(run, acting.intent));
+    }
   } else if (acting === undefined) {
     const said = floor ? latestSayWhere(run, reply.command) : undefined;
 

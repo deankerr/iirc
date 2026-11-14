@@ -344,7 +344,13 @@ export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): Activ
  * nick, as their Timeline follows the nick, so a reply that comes later is shown where the
  * Message stands. A Target is one Channel or one nick, since a `Say` has no list, and a
  * Target that names the old nick, by the Network's casemapping now, names the new one.
- * Channels never move. What is remembered stays as many as it was.
+ * Channels never move.
+ *
+ * A projection that moves a Timeline onto a nick detaches the Timeline already keyed by it,
+ * since nothing says it is the same person, so what is remembered of a Say to that nick is
+ * forgotten: a reply to it is shown in the Network's own Timeline, never in another User's.
+ * The Client cannot know whether the Timeline that moved exists, so it forgets whenever a
+ * partner is renamed onto a nick said to. What is remembered never grows.
  * @param run - The step.
  * @param where - Where an Activity belongs.
  */
@@ -357,23 +363,36 @@ export const followSays = (run: Run, where: readonly Where[]): void => {
 
   const naming = namingNow(run);
 
-  const follow = (target: string): string => {
-    const [only] = parseTargets(naming, target);
-    const key = only?._tag === "Nick" ? named(run, target).key : undefined;
+  const follow = (target: string | undefined): string | undefined => {
+    const [only] = target === undefined ? [] : parseTargets(naming, target);
+
+    if (target === undefined || only?._tag !== "Nick") {
+      return target;
+    }
+
+    const { key } = named(run, target);
+
+    // A rename that only changes the case of a nick takes it from no one.
+    if (moves.some((move) => move.to.key === key && move.key !== key)) {
+      return undefined;
+    }
 
     return moves.find((move) => move.key === key)?.to.name ?? target;
   };
 
   run.state = {
     ...run.state,
-    said: new Map([...run.state.said].map(([intent, target]) => [intent, follow(target)])),
+    said: new Map(
+      [...run.state.said].flatMap(([intent, target]) => {
+        const followed = follow(target);
+
+        return followed === undefined ? [] : [[intent, followed]];
+      })
+    ),
   };
 
   updateOpen(run, (open) => ({
     ...open,
-    lastSaid: {
-      NOTICE: open.lastSaid.NOTICE === undefined ? undefined : follow(open.lastSaid.NOTICE),
-      PRIVMSG: open.lastSaid.PRIVMSG === undefined ? undefined : follow(open.lastSaid.PRIVMSG),
-    },
+    lastSaid: { NOTICE: follow(open.lastSaid.NOTICE), PRIVMSG: follow(open.lastSaid.PRIVMSG) },
   }));
 };

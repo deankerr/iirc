@@ -17,8 +17,8 @@
  *   batch ends. An action's answer is only ever its first `FAIL` or error
  *   numeric, which rejects it: an `ACK` ends it with nothing to report, and what the Ircd
  *   relays of it, such as a `TOPIC`, is read as any Line is. An action split over several
- *   labelled Lines is refused once, and each later rejection only uses up its label, marked
- *   `about` the intent it would have refused.
+ *   labelled Lines is refused once, and each later rejection uses up its label and is marked
+ *   `about` the intent it would have refused, so the core shows it where the action belongs.
  * - **Never one without the other.** `labeled-response` depends on `batch`, which must be
  *   negotiated to use it, so labels need all three. The Feature is on while
  *   `echo-message` is enabled, and uses `labeled-response` and `batch`, asked for only
@@ -279,7 +279,7 @@ export const echo: Feature<Echoes> = {
         : new Map(own.pending).set(answers, { ...awaited, settled: true });
 
       // An action split over several Lines is refused once: the first rejection answers
-      // its intent, and the rest only use up their labels.
+      // its intent, and the rest use up their labels, and are shown with it.
       if (awaited.reported) {
         return { own: { ...own, pending }, value: { ...arrival, about: awaited.intent } };
       }

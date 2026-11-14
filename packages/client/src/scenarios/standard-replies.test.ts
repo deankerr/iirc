@@ -483,6 +483,147 @@ describe("a standard reply for a Say to a partner who changed nick since", () =>
   });
 });
 
+describe("a standard reply for a Say to a partner whose nick another User took", () => {
+  const withBoth = [registered(base, { offered: echo }), joined(base, "#iirc", ["bob", "alice"])];
+
+  const said = lines(
+    "!! say bob :hi",
+    ">> @label=l1 PRIVMSG bob hi",
+    "?? message Privmsg iirc bob at=ours:t+0s in=direct:bob ours=i1 echo :hi",
+    "!! say alice :yo",
+    ">> @label=l2 PRIVMSG alice yo",
+    "?? message Privmsg iirc alice at=ours:t+0s in=direct:alice ours=i2 echo :yo"
+  );
+
+  it("is shown in the Network's Timeline, by label, and not in the new Bob's", () => {
+    played([
+      ...withBoth,
+      said,
+      lines(
+        "<< :bob!u@h QUIT :bye",
+        "...",
+        "<< :alice!u@h NICK bob",
+        "?? activity NickChanged alice bob in=channel:#iirc in=renamed:alice>bob",
+        "<< @label=l1 :irc.test WARN PRIVMSG QUEUED bob :Held for a moment",
+        "?? activity StandardReply WARN PRIVMSG QUEUED context=bob in=network :Held for a moment",
+        "<< @label=l2 :irc.test WARN PRIVMSG QUEUED alice :Held for a moment",
+        "?? activity StandardReply WARN PRIVMSG QUEUED context=alice in=direct:bob :Held for a moment"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is shown in the Network's Timeline, without a label", () => {
+    played([
+      registered(base),
+      joined(base, "#iirc", ["bob", "alice"]),
+      lines(
+        "!! notice bob :hi",
+        ">> NOTICE bob hi",
+        "?? message Notice iirc bob at=ours:t+0s in=direct:bob ours=i1 :hi",
+        "!! say alice :yo",
+        ">> PRIVMSG alice yo",
+        "?? message Privmsg iirc alice at=ours:t+0s in=direct:alice ours=i2 :yo",
+        "<< :bob!u@h QUIT :bye",
+        "...",
+        "<< :alice!u@h NICK bob",
+        "?? activity NickChanged alice bob in=channel:#iirc in=renamed:alice>bob",
+        "<< :irc.test NOTE NOTICE QUEUED :Held",
+        "?? activity StandardReply NOTE NOTICE QUEUED in=network :Held",
+        "<< :irc.test NOTE PRIVMSG QUEUED :Held",
+        "?? activity StandardReply NOTE PRIVMSG QUEUED in=direct:bob :Held"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is still shown with the Say after a plain Quit, which detaches nothing", () => {
+    played([
+      ...withBoth,
+      said,
+      lines(
+        "<< :bob!u@h QUIT :bye",
+        "...",
+        "<< @label=l1 :irc.test WARN PRIVMSG QUEUED bob :Held for a moment",
+        "?? activity StandardReply WARN PRIVMSG QUEUED context=bob in=direct:bob :Held for a moment"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is still shown with the Say when the nick taken was folded the same, in another case", () => {
+    played([
+      ...withBoth,
+      said,
+      lines(
+        "<< :alice!u@h NICK BOB",
+        "?? activity NickChanged alice BOB in=channel:#iirc in=renamed:alice>bob:BOB",
+        "<< @label=l1 :irc.test WARN PRIVMSG QUEUED bob :Held for a moment",
+        "?? activity StandardReply WARN PRIVMSG QUEUED context=bob in=network :Held for a moment"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+});
+
+describe("every FAIL that refuses nothing", () => {
+  it("is shown where a labelled action belongs, after the first refused it", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! quote FROB x",
+        ">> @label=l1 FROB x",
+        "<< @label=l1 :irc.test BATCH +r labeled-response",
+        "<< @batch=r :irc.test FAIL FROB FIRST x :First failure",
+        "?? refused i1 Rejected FIRST raw=FROB in=network",
+        "<< @batch=r :irc.test FAIL FROB SECOND y :Another failure",
+        "?? activity StandardReply FAIL FROB SECOND context=y in=network :Another failure",
+        "<< :irc.test BATCH -r"
+      ),
+    ]);
+
+    expect(refusals(run)).toHaveLength(1);
+  });
+
+  it("is shown where an action belongs on the floor, after another Line of it refused it", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "!! kick #iirc peer,other :bye",
+        ">> KICK #iirc peer bye",
+        ">> KICK #iirc other bye",
+        "<< :irc.test FAIL KICK FIRST #iirc peer :First failure",
+        "?? refused i1 Rejected FIRST kick=#iirc:peer,other in=channel:#iirc",
+        "<< :irc.test FAIL KICK SECOND #iirc other :Another failure",
+        "?? activity StandardReply FAIL KICK SECOND context=#iirc context=other in=channel:#iirc :Another failure"
+      ),
+    ]);
+
+    expect(refusals(run)).toHaveLength(1);
+  });
+
+  it("is shown where an action belongs, on a second labelled Line of it", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! kick #iirc peer,other :bye",
+        ">> @label=l1 KICK #iirc peer bye",
+        ">> @label=l2 KICK #iirc other bye",
+        "<< @label=l1 :irc.test FAIL KICK FIRST #iirc peer :First failure",
+        "?? refused i1 Rejected FIRST kick=#iirc:peer,other in=channel:#iirc",
+        "<< @label=l2 :irc.test FAIL KICK SECOND #iirc other :Another failure",
+        "?? activity StandardReply FAIL KICK SECOND context=#iirc context=other in=channel:#iirc :Another failure"
+      ),
+    ]);
+
+    expect(refusals(run)).toHaveLength(1);
+  });
+});
+
 describe("a FAIL nothing else reads", () => {
   it("is shown in the Network's Timeline, never dropped", () => {
     played([
