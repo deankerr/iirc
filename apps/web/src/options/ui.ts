@@ -11,7 +11,7 @@
 import type { UiInForce, UiOptionName } from "@iirc/api";
 import type { Json } from "@iirc/frontend/options";
 import { reduceOptions } from "@iirc/frontend/options";
-import { deviceUiKey, deviceUiText, effectiveUi, overridden } from "@iirc/frontend/ui";
+import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
 import { Effect, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -47,26 +47,72 @@ export const enterShown = Atom.make((get) => get(uiInEffect).enter);
 export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
 
 /**
+ * When a Timeline is marked read on this device, as `timeShown` is, but none until it is
+ * known: this device's override, or the shared options once read.
+ */
+export const readRule = Atom.make((get) => readRuleOf(get(optionsState).ui, get(deviceUi)));
+
+/**
  * Folds the shared options, as read or followed, into the options' state, where an older
- * read never replaces a newer one.
+ * read never replaces a newer one. A read that lands once the page is signed out, as one
+ * begun before it was, is dropped, so what signing out forgot stays forgotten.
  * @param registry - The registry.
  * @param ui - The options, and the sequence of the last Change.
  */
 export const uiRead = (registry: AtomRegistry.AtomRegistry, ui: UiInForce) => {
-  registry.set(optionsState, reduceOptions(registry.get(optionsState), { _tag: "UiRead", ui }));
+  if (registry.get(signedIn)) {
+    registry.set(optionsState, reduceOptions(registry.get(optionsState), { _tag: "UiRead", ui }));
+  }
 };
+
+/**
+ * Reads the shared options now, and folds them in only when the page stayed signed in the
+ * whole time the read took: one that lands after it signed out, or after it signed in
+ * again, may be of options since changed, and the stream brings the ones in force anyway.
+ * @param registry - The registry.
+ * @returns The options read.
+ */
+export const readShared = (registry: AtomRegistry.AtomRegistry) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    let stayed = registry.get(signedIn);
+
+    const read = yield* Effect.acquireUseRelease(
+      Effect.sync(() =>
+        registry.subscribe(signedIn, (now) => {
+          stayed &&= now;
+        })
+      ),
+      () => client.ui.read(),
+      (unsubscribe) => Effect.sync(unsubscribe)
+    );
+
+    if (stayed) {
+      uiRead(registry, read);
+    }
+
+    return read;
+  });
 
 /**
  * While the browser is signed in, follows the shared options, each event the options
  * whole, from the ones in force. Whenever the stream ends, or gives nothing for longer than
- * three heartbeats, it is followed again. A refusal signs the page out. Mounted once.
+ * three heartbeats, it is followed again. A refusal signs the page out, and signed out, the
+ * shared options are forgotten until they are read again. Mounted once.
  */
 export const uiSync = runtime
   .atom((get) =>
     Effect.gen(function* () {
       const { registry } = get;
 
+      // Signed out, the shared options held may be changed before the next sign-in, so they
+      // are forgotten, and a rule they set waits for them to be read again.
       if (!get(signedIn)) {
+        registry.set(
+          optionsState,
+          reduceOptions(registry.get(optionsState), { _tag: "UiForgotten" })
+        );
+
         return;
       }
 
@@ -167,9 +213,7 @@ const tryShared = (registry: AtomRegistry.AtomRegistry, change: UiChange, fresh:
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const held = registry.get(optionsState).ui;
-    const from = fresh || held === undefined ? yield* client.ui.read() : held;
-
-    uiRead(registry, from);
+    const from = fresh || held === undefined ? yield* readShared(registry) : held;
 
     const params = { option: change.option };
     const query = { ifSequence: from.sequence };
@@ -178,7 +222,7 @@ const tryShared = (registry: AtomRegistry.AtomRegistry, change: UiChange, fresh:
       ? client.ui.unset({ params, query })
       : client.ui.set({ params, payload: { value: change.value }, query });
 
-    uiRead(registry, yield* client.ui.read());
+    yield* readShared(registry);
 
     const done: Outcome = { _tag: "Done" };
 

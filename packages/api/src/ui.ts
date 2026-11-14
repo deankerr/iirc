@@ -411,6 +411,21 @@ export const NickSuffix = Schema.String.check(
 /** The decoded form of {@link NickSuffix}. */
 export type NickSuffix = typeof NickSuffix.Type;
 
+/**
+ * When a Timeline is marked read: `shown`, up to the last item that has been on screen in a
+ * visible, focused page, even with its Pane scrolled up from the latest; `latest`, once a
+ * Pane shows it at its latest and follows it; or `asked`, only when the Owner asks, as
+ * `/read` does.
+ */
+export const ReadRule = Schema.Literals(["shown", "latest", "asked"]).annotate({
+  default: "latest",
+  description:
+    "When a Timeline is marked read: shown, up to the last line on screen, even scrolled up; latest, once a Pane is at its latest; or asked, only by /read.",
+});
+
+/** The decoded form of {@link ReadRule}. */
+export type ReadRule = typeof ReadRule.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
@@ -420,6 +435,7 @@ export const UiOptions = Schema.Struct({
   font: FontShown,
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
+  read: ReadRule,
   size: TextSize,
   spellcheck: SpellcheckShown,
   suffix: NickSuffix,

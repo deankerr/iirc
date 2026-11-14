@@ -290,8 +290,8 @@ const Lines = ({
   // `ui.activity` is found among the rows around it.
   const laidOut = useRef<readonly LaidOut[]>([]);
   const shownActivity = useRef(activity);
-  // What the core was last told: at the latest with the last item in view, or away. Nothing
-  // yet, so the view says so once it has first laid out.
+  // What the core was last told: of which window, at the latest or away, and the last item
+  // in view. Nothing yet, so the view says so once it has first laid out.
   const told = useRef<string | undefined>(undefined);
   // The scroller's box when the view last stood itself in it, so a scroll the browser makes
   // as the box changes, before the view has stood itself again, is told from the Owner's.
@@ -444,11 +444,11 @@ const Lines = ({
   };
 
   /**
-   * Tells the core whether the Owner is at the latest, and the last item in view, when that
-   * changed. Only this says the Owner has seen the latest: opening a Timeline never does.
-   * A window read around a result says nothing of the latest until the Owner moved the
-   * view there themselves, so a jump near the latest, or to a Timeline that fits the view,
-   * marks nothing read.
+   * Tells the core whether the Owner is at the latest, and the last item in view, at the
+   * latest or not, when either changed. Only this says what the Owner has seen: opening a
+   * Timeline never does. A window read around a result says nothing of the latest until
+   * the Owner moved the view there themselves, so a jump near the latest, or to a Timeline
+   * that fits the view, is told as away from it.
    * @param element - The scroller.
    * @param owned - Whether the Owner moved the view, by the wheel, a touch, a press, or a key.
    */
@@ -457,20 +457,15 @@ const Lines = ({
       element.scrollHeight - element.scrollTop - element.clientHeight <= nearBottom &&
       !window.later;
 
-    if (atLatest && window.anchor !== undefined && !owned) {
-      return;
-    }
-
-    const seen = atLatest ? lastInView(element) : undefined;
-    let now = "away";
-
-    if (atLatest) {
-      now = seen === undefined ? "latest" : `latest ${seen.at} ${seen.sequence} ${seen.n}`;
-    }
+    const latest = atLatest && (window.anchor === undefined || owned);
+    const seen = lastInView(element);
+    // A window read again holds nothing seen, so it is told again even where it stands.
+    const at = seen === undefined ? "none" : `${seen.at} ${seen.sequence} ${seen.n}`;
+    const now = `${window.generation} ${latest ? "latest" : "away"} ${at}`;
 
     if (now !== told.current) {
       told.current = now;
-      tellFollowing({ following: atLatest, owned, seen, timeline });
+      tellFollowing({ following: latest, owned, seen, timeline });
     }
   };
 

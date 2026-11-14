@@ -1,8 +1,8 @@
 /**
  * What is new, as atoms: the page's title, derived from the Daemon's counts, and marking
  * read. The core decides when the open Timeline is due to be marked read and up to what,
- * and the runtime waits until that has held for a moment, then asks the Daemon, which
- * keeps every Read Marker for every Frontend (ADR 0014).
+ * by the rule in effect on this device, and the runtime waits until that has held for a
+ * moment, then asks the Daemon, which keeps every Read Marker for every Frontend (ADR 0014).
  *
  * @packageDocumentation
  */
@@ -15,6 +15,7 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { signedOut } from "../options/atoms.ts";
+import { readRule } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
@@ -22,8 +23,15 @@ import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
 /** The page's title: how many Highlights and Direct Messages are unread, such as `(3) iirc`. */
 export const documentTitle = Atom.make((get) => titleOf(get(sidebarNetworks)));
 
-/** Whether the open Timeline is due to be marked read, and up to what, as the core says. */
-const dueMark = Atom.make((get) => markDue(get(timelinesState), get(pageState)));
+/**
+ * Whether the open Timeline is due to be marked read, and up to what, as the core says by
+ * `ui.read` on this device, and never while that is not yet known.
+ */
+const dueMark = Atom.make((get) => {
+  const rule = get(readRule);
+
+  return rule === undefined ? undefined : markDue(get(timelinesState), get(pageState), rule);
+});
 
 /**
  * Why the Daemon did not mark a Timeline read, in words, from its error's tag.
@@ -159,8 +167,8 @@ const marker = (registry: AtomRegistry.AtomRegistry) =>
   });
 
 /**
- * While the browser is signed in, the open Timeline is marked read once the Owner has seen
- * its latest for a moment. Mounted once for the page.
+ * While the browser is signed in, the open Timeline is marked read once the core has said
+ * for a moment that it is due. Mounted once for the page.
  */
 export const marking = runtime
   .atom((get) => (get(signedIn) ? marker(get.registry) : Effect.void))

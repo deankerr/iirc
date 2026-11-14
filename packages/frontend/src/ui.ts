@@ -18,7 +18,7 @@ import {
   uiDefaults,
   uiValueKept,
 } from "@iirc/api/ui";
-import type { UiOptions, ActivityShown, UiInForce } from "@iirc/api/ui";
+import type { UiOptions, ActivityShown, ReadRule, UiInForce } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
 /** The options this device overrides for itself, each with its own value. */
@@ -158,6 +158,17 @@ export const effectiveUi = (shared: UiInForce | undefined, device: DeviceUi): Ui
   ...shared?.options,
   ...device,
 });
+
+/**
+ * When a Timeline is marked read on this device: its override, else the shared rule once
+ * read, and none before, since a default taken then could mark read what the Owner's own
+ * rule never would.
+ * @param shared - The shared options, once read.
+ * @param device - This device's overrides.
+ * @returns The rule, or none while it is not yet known.
+ */
+export const readRuleOf = (shared: UiInForce | undefined, device: DeviceUi): ReadRule | undefined =>
+  device.read ?? shared?.options.read;
 
 /** The Activity `quiet` leaves out: a User coming or going. */
 const comings: ReadonlySet<string> = new Set(["Joined", "Parted", "Quit"]);

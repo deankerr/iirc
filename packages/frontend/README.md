@@ -42,7 +42,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **A window holds at most `windowCap` items, 1000.** `earlier` and `later` are true exactly when something lies beyond, so everything dropped can be read again.
 - **Only the windows of Timelines open in a Pane, and of the four closed most recently, are kept.** Any other is dropped and read again when opened.
 - **A new item lands only where it belongs by position:** in place of the item it updates, between the items held, or past the end when nothing more lies beyond. A Gap that changes history under a window has it read again.
-- **Only the view says what the Owner has seen.** A window's `seen` is set by the view's `Following` event alone, so opening a Timeline never makes the core believe its latest was read.
+- **Only the view says what the Owner has seen.** A window's `seen` is the last item the view's `Following` event said is in view, at the latest or not, so opening a Timeline never makes the core believe anything in it was read.
 - **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Daemon's Read Marker moves.
 - **Failed Connections in a row are one row,** counted, when they are to the same Ircd for the same reason.
 - **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, says nothing was missed, so `rowsOf` leaves it out and the window keeps it. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
@@ -53,7 +53,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **A Pane shows its Timeline, or something in front of it:** the options, the search, or a Direct Message not yet begun. It remembers one step back, which closing shows again. The options and the search each show in one Pane at most.
 - **A Direct Message not yet begun is a view, not a Timeline.** The API makes a Timeline only when something is said. The draft shows its Timeline as soon as one is listed, matched by the casemapping read when the draft was made, never one held from another time, which could match another User's Timeline.
 - **A Message said with `opens`, as `/msg` says one, opens the Timeline the Daemon placed it in,** by its id, never its name. It opens only in the Pane it was said from, and only while the Owner has not moved on.
-- **A jump from the search opens a window read around a position.** Nothing is marked read by it until the Owner moves to the latest themselves.
+- **A jump from the search opens a window read around a position.** It is not at the latest until the Owner moves there themselves, so under `ui.read latest` nothing is marked read by it until then.
 - **The layout is kept per device, as JSON, and taken back once the Timelines are read.** `layoutKeptText` bounds the text before anything parses it, then reads it through its Schema, and never throws. A Pane whose Timeline is gone is dropped.
 
 ## Panes
@@ -277,11 +277,11 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 
 ## Activity
 
-What is new, from the counts the Daemon keeps, and when marking a Timeline read is due (`markDue`). It never counts items itself, since a window holds only some of them.
+What is new, from the counts the Daemon keeps, and when marking a Timeline read is due (`markDue`), by the rule `ui.read` gives. It never counts items itself, since a window holds only some of them.
 
 - **A level ranks what calls for the Owner:** Highlight, then Direct, then Message, then Activity. A Timeline's level is the highest with anything unread.
 - **Activity is a dimmer name, never a number.** Counts and labels say what was said. The page's title counts only Highlights and Direct Messages.
-- **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, at the latest, as the view said.
+- **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, and under `latest`, at the latest, as the view said.
 - **A mark is never back, and never past what was shown.** It goes up to the last item the view named, even when the Daemon holds a later one.
 
 ## Notifications

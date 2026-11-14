@@ -1,15 +1,17 @@
-import { TimelineId } from "@iirc/api";
+import { TimelineId, uiDefaults } from "@iirc/api";
 import type { Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import type { Place } from "@iirc/frontend/composer";
 import { openOf } from "@iirc/frontend/timelines";
-import { Effect, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { composerState, edit, send } from "../composer/atoms.ts";
+import { optionsState } from "../options/atoms.ts";
+import { changeUiOption, readRule, uiRead, uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
-import { check } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
+import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
+import { eventually, fakeDaemon, registryFor, run, theKey, until } from "../testing/fake-daemon.ts";
 import { testNotifier } from "../testing/notifier.ts";
 import { following, open, openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
 import { documentTitle, marking } from "./atoms.ts";
@@ -118,11 +120,13 @@ const away = { compact: false, focused: false, visible: false };
 /**
  * A Daemon with libera's own Timeline, `#iirc` holding two unread Messages, `#other`, and a
  * Direct Message with `peer`, folded through step 2, and a browser signed in to it, its page
- * as given, following the Timelines and marking read.
+ * as given, following the Timelines and, unless told not to, the shared `ui` options, and
+ * marking read.
  * @param page - Whether the Owner can see the page.
+ * @param shared - Whether the shared `ui` options are followed, as a page signed in does.
  * @returns The fake, the registry, and the test's Notifier.
  */
-const reading = async (page = seeing) => {
+const reading = async (page = seeing, shared = true) => {
   const fake = fakeDaemon();
   const notifier = testNotifier();
 
@@ -146,6 +150,11 @@ const reading = async (page = seeing) => {
   registry.mount(sync);
   registry.mount(marking);
   await eventually(() => fake.daemon.followers.length === 1);
+
+  if (shared) {
+    registry.mount(uiSync);
+    await until(registry, optionsState, (options) => options.ui !== undefined);
+  }
 
   /**
    * Types a line into a composer and presses Enter.
@@ -276,6 +285,86 @@ describe("marking read", () => {
       reads: [{ read: 2000, target: "#iirc" }],
       unconfirmed: 0,
     });
+  });
+
+  it("marks nothing until the shared ui.read is known, and nothing once it says asked", async () => {
+    const { daemon, opening, registry } = await reading(seeing, false);
+
+    await opening(iirc);
+    await wait(150);
+    const unknown = daemon.reads.length;
+
+    uiRead(registry, { options: { ...uiDefaults, read: "asked" }, sequence: 1 });
+    await wait(150);
+
+    expect({ reads: daemon.reads, unknown }).toStrictEqual({ reads: [], unknown: 0 });
+  });
+
+  it("marks once the shared ui.read is known to be latest, having marked nothing before", async () => {
+    const { daemon, opening, registry } = await reading(seeing, false);
+
+    await opening(iirc);
+    await wait(150);
+    const unknown = daemon.reads.length;
+
+    uiRead(registry, { options: uiDefaults, sequence: 0 });
+    await eventually(() => daemon.reads.length === 1);
+
+    expect({ reads: daemon.reads, unknown }).toStrictEqual({
+      reads: [{ read: 2000, target: "#iirc" }],
+      unknown: 0,
+    });
+  });
+
+  it("forgets the shared ui.read on signing out, and takes the one in force on signing in again", async () => {
+    const { daemon, registry } = await reading();
+    const before = registry.get(readRule);
+
+    await run(registry, signOut, undefined);
+    // A read begun before signing out lands after it.
+    uiRead(registry, { options: uiDefaults, sequence: 5 });
+    const out = registry.get(readRule);
+
+    // Changed on another device while this page was signed out.
+    daemon.ui = { options: { ...uiDefaults, read: "asked" }, sequence: 1 };
+    await run(registry, signInWithKey, Redacted.make(theKey));
+    const again = await until(registry, readRule, (rule) => rule !== undefined);
+
+    expect({ again, before, out }).toStrictEqual({
+      again: "asked",
+      before: "latest",
+      out: undefined,
+    });
+  });
+
+  it("drops a read of the shared options begun in an earlier sign-in, landing in the next", async () => {
+    const { daemon, registry } = await reading();
+
+    // A change for every device is made, and its read of the options after is slow.
+    daemon.holdUiReads = true;
+
+    const changing = run(registry, changeUiOption, {
+      device: false,
+      option: "time",
+      value: "HH:mm:ss",
+    });
+
+    await eventually(() => daemon.uiReadsHeld.length === 1);
+
+    // Signed out, the rule is changed on another device, and the page signs in again while
+    // the options' stream has not yet answered.
+    await run(registry, signOut, undefined);
+    daemon.ui = { options: { ...daemon.ui.options, read: "asked" }, sequence: 2 };
+    daemon.hangUiChanges = true;
+    await run(registry, signInWithKey, Redacted.make(theKey));
+
+    for (const release of daemon.uiReadsHeld) {
+      release();
+    }
+
+    await changing;
+
+    expect(registry.get(readRule)).toBeUndefined();
   });
 
   it("asks again after a mark that got no answer", async () => {
