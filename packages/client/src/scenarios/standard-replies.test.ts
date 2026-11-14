@@ -624,6 +624,67 @@ describe("every FAIL that refuses nothing", () => {
   });
 });
 
+describe("a FAIL for a Lookup", () => {
+  it("ends one sent without a label at once, by its code, and frees its slot", () => {
+    // More than a Connection holds at once, each ended by a `FAIL` with no end numeric.
+    const pairs = Array.from({ length: 10 }, (_, index) => [
+      `!! whois nick${index}`,
+      `>> WHOIS nick${index}`,
+      `<< :irc.test FAIL WHOIS SOME_CODE nick${index} :No`,
+      `?? looked-up i${index + 1} whois=nick${index} failed=SOME_CODE`,
+    ]);
+
+    const run = played([...inChannel(), lines(...pairs.flat())]);
+
+    // Only the keepalive is left: no Lookup waits to time out.
+    expect([...run.timers.keys()]).toStrictEqual(["keepalive"]);
+  });
+
+  it("still waits for the end numeric after an error numeric, and keeps a later FAIL in its notes", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! whois ghost",
+        ">> WHOIS ghost",
+        "<< :irc.test 401 iirc ghost :No such nick",
+        "<< :irc.test FAIL WHOIS LATE ghost :Also failed",
+        "<< :irc.test 318 iirc ghost :End",
+        "?? looked-up i1 whois=ghost not-found=401 note=FAIL:LATE"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("keeps the first FAIL of a labelled reply as its result, and every later one in its notes", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! whowas gone",
+        ">> @label=l1 WHOWAS gone",
+        "<< @label=l1 :irc.test BATCH +b labeled-response",
+        "<< @batch=b :irc.test FAIL WHOWAS FIRST gone :First failure",
+        "<< @batch=b :irc.test FAIL WHOWAS SECOND gone :Another failure",
+        "<< @batch=b :irc.test NOTE WHOWAS EXTRA :And a note",
+        "<< :irc.test BATCH -b",
+        "?? looked-up i1 whowas=gone failed=FIRST note=FAIL:SECOND note=NOTE:EXTRA"
+      ),
+    ]);
+
+    const looked = run.steps.flatMap((step) =>
+      step.news.flatMap((news) => (news._tag === "LookedUp" ? [news.result] : []))
+    );
+
+    expect(looked[0]).toMatchObject({
+      notes: [
+        { code: "SECOND", description: "Another failure", kind: "FAIL" },
+        { code: "EXTRA", kind: "NOTE" },
+      ],
+      reply: "FIRST",
+    });
+  });
+});
+
 describe("a FAIL nothing else reads", () => {
   it("is shown in the Network's Timeline, never dropped", () => {
     played([

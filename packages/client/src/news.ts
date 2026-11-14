@@ -234,7 +234,7 @@ export interface Profile {
   readonly other: readonly OtherReply[];
 }
 
-/** The `WARN` and `NOTE` standard replies a Lookup's reply held. */
+/** The standard replies a Lookup's reply held besides its result: each `WARN` and `NOTE`, and each `FAIL` after the first. */
 export type Notes = readonly StandardReply[];
 
 /**
@@ -258,8 +258,9 @@ export type PartialReason = "TimedOut" | "Ended" | "Bounded";
  *   too many Lookups await their replies on the Connection (`Busy`).
  * - `Unsent`: its Line never left, because its Connection ended first.
  *
- * A result the Network answered keeps in `notes` each `WARN` and `NOTE` of its reply, in
- * order, which say something of it and end nothing.
+ * A result the Network answered keeps in `notes` each `WARN` and `NOTE` of its reply, and
+ * each `FAIL` after the first, which gave its result, in order. They say something of it
+ * and end nothing.
  */
 export type LookResult =
   | { readonly _tag: "Found"; readonly profiles: readonly Profile[]; readonly notes: Notes }

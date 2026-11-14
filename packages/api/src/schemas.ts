@@ -379,13 +379,13 @@ const standardReply = {
   kind: Schema.Literals(["FAIL", "WARN", "NOTE"]),
 };
 
-/** A standard reply, as a Lookup's result keeps a `WARN` or a `NOTE`. */
+/** A standard reply, as a Lookup's result keeps a `WARN`, a `NOTE`, or a `FAIL` after its first. */
 export const StandardReply = Schema.Struct(standardReply);
 
 /** The decoded form of {@link StandardReply}. */
 export type StandardReply = typeof StandardReply.Type;
 
-/** The `WARN` and `NOTE` standard replies a Lookup's reply held, in order. */
+/** The `WARN` and `NOTE` replies a Lookup's reply held, and each `FAIL` after the first, in order. */
 const Notes = Schema.Array(StandardReply);
 
 /**
@@ -595,7 +595,7 @@ export type Profile = typeof Profile.Type;
  * `401`, `406`, or an end with no User; `Failed`, another error, by its numeric or a
  * `FAIL`'s code, or a labelled answer that said nothing readable, by its command; `Refused`, not sent, `Offline`, `Unsendable`, or `Busy` with too many
  * Lookups at once; or `Unsent`, its Line never left. One the Network answered keeps the
- * `WARN` and `NOTE` replies its reply held in `notes`.
+ * `WARN` and `NOTE` replies its reply held, and each `FAIL` after the first, in `notes`.
  */
 export const LookResult = Schema.TaggedUnion({
   Failed: { notes: Notes, reply: Untrusted },

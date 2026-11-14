@@ -549,6 +549,28 @@ const rejectionOf = (looking: Looking, line: Line): Looking["error"] => {
     : { _tag: "Failed", reply: command };
 };
 
+// A `WARN` or a `NOTE` says something of the Lookup, and ends nothing, and neither does a
+// `FAIL` after the one that gave its result, which is kept beside them so none is lost.
+const isNote = (looking: Looking, command: string): boolean =>
+  command === "WARN" || command === "NOTE" || (command === "FAIL" && looking.error !== undefined);
+
+// Keeps a note in the Lookup's notes. Past the Lines one Lookup keeps, it is not kept.
+const keepNote = (run: Run, looking: Looking, line: Line): void => {
+  const note = readReply(line);
+
+  if (note === undefined) {
+    ignore(run, { _tag: "Malformed", command: line.command });
+
+    return;
+  }
+
+  change(run, looking.intent, (each) =>
+    each.lines >= maxLookupLines
+      ? { ...each, bounded: each.error === undefined }
+      : { ...each, lines: each.lines + 1, notes: [...each.notes, note] }
+  );
+};
+
 // One Line of a Lookup's reply: its end, an error, or something it says of a User.
 const take = (run: Run, looking: Looking, line: Line): void => {
   const { command } = line;
@@ -566,20 +588,8 @@ const take = (run: Run, looking: Looking, line: Line): void => {
     return;
   }
 
-  // A `WARN` or a `NOTE` says something of the Lookup, and ends nothing. Past the Lines one
-  // Lookup keeps, it is not kept.
-  if (command === "WARN" || command === "NOTE") {
-    const note = readReply(line);
-
-    if (note === undefined) {
-      ignore(run, { _tag: "Malformed", command });
-    } else {
-      change(run, intent, (each) =>
-        each.lines >= maxLookupLines
-          ? { ...each, bounded: each.error === undefined }
-          : { ...each, lines: each.lines + 1, notes: [...each.notes, note] }
-      );
-    }
+  if (isNote(looking, command)) {
+    keepNote(run, looking, line);
 
     return;
   }
@@ -708,8 +718,8 @@ export const floorLookup = (run: Run, line: Line): Looking | undefined =>
 
 /**
  * The oldest Lookup sent without a label that a standard reply, outside any batch or label,
- * names by its command, `WHOIS` or `WHOWAS`, compared without regard to ASCII case. A
- * Lookup that has its error leaves a `FAIL` to the next, as an error numeric does.
+ * names by its command, `WHOIS` or `WHOWAS`, compared without regard to ASCII case. One
+ * that already has its error keeps a later `FAIL` in its notes.
  * @param run - The step.
  * @param reply - The standard reply.
  * @returns The Lookup, or `undefined` for none.
@@ -718,22 +728,26 @@ export const lookupByCommand = (run: Run, reply: StandardReply): Looking | undef
   const verb = upperCaseAscii(reply.command);
 
   return openOf(run.state)?.lookups.find(
-    (each) =>
-      !each.labelled &&
-      upperCaseAscii(each.lookup._tag) === verb &&
-      (reply.kind !== "FAIL" || each.error === undefined)
+    (each) => !each.labelled && upperCaseAscii(each.lookup._tag) === verb
   );
 };
 
 /**
  * Collects a Line into a Lookup's reply, as {@link floorLookup} or
- * {@link lookupByCommand} found it.
+ * {@link lookupByCommand} found it. A `FAIL` that gives it its result ends it at once.
  * @param run - The step.
  * @param looking - The Lookup.
  * @param line - The Line.
  */
 export const collectFloor = (run: Run, looking: Looking, line: Line): void => {
   take(run, looking, line);
+
+  // The protocol promises no end numeric after a `FAIL`, so one that gives the Lookup its
+  // result ends it, rather than leaving it to wait out its time. An error numeric is
+  // followed by the end numeric, as it always was.
+  if (line.command === "FAIL" && looking.error === undefined) {
+    finish(run, looking.intent, "End", line.command);
+  }
 };
 
 /**

@@ -266,7 +266,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 
 - **Every `Look` gets exactly one result:** `Found`, `NotFound`, `Failed`, `Partial`, `Refused`, or `Unsent`.
 - **A reply is collected by structure.** With `labeled-response`, by its label. On the floor, a numeric belongs to the oldest Lookup whose nick it names.
-- **Only reply numerics and standard replies are read.** A numeric the Client does not model is kept as it came, so nothing is lost. A `FAIL` ends the Lookup by its code, and a `WARN` or `NOTE` is kept in the result's `notes`. Nothing is read from free text but the one mode word of a `379`.
+- **Only reply numerics and standard replies are read.** A numeric the Client does not model is kept as it came, so nothing is lost. A `FAIL` ends the Lookup by its code, at once when it was sent without a label, since nothing promises an end numeric after one. A `WARN` or `NOTE`, and each `FAIL` after the first, is kept in the result's `notes`. Nothing is read from free text but the one mode word of a `379`.
 - **Bounded.** At most 8 await their replies on a Connection, at most 64 Lines of one are kept, and one with no end within 30 s reports what it has.
 - **A `WHOIS` refreshes only what the Client already models,** and never undoes something said since. The Client never sends a Lookup itself, so nothing is polled.
 

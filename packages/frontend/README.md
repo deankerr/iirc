@@ -241,7 +241,7 @@ What `/whois` and `/whowas` ask, and a card for each Pane showing what came back
 - **A Channel in a profile opens its Timeline, or starts `/join`,** once `known` said how the Network names Channels. Until then it is text.
 - **Times are the caller's.** The core reads no clock or time zone, so the caller formats the sign-on instant, and one no calendar can hold is said to be unavailable.
 - **What found no User is said in words,** naming the reply's numeric.
-- **A `WARN` or `NOTE` the Network gave with its result is a line under it,** by its kind, command, code, context, and description, each contained.
+- **A `WARN` or `NOTE`, or a later `FAIL`, the Network gave with its result is a line under it,** by its kind, command, code, context, and description, each contained.
 
 ## Completion
 
