@@ -84,6 +84,8 @@ export {
   ReadRequest,
   RefusedReason,
   RemovedNetwork,
+  Removed,
+  Life,
   Keep,
   DroppedTimeline,
   NetworkRemoval,

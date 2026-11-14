@@ -21,10 +21,10 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | --- | --- | --- | --- |
 | `POST /api/sign-in` | Signs a browser in with `{ key }` | `204` and the cookie | `Unauthorized`, `CrossOrigin`, `SignInsFailed` |
 | `DELETE /api/sign-in` | Signs the cookie's sign-in out, and clears the cookie. Signing out one that does not exist only clears it | `204` | `CrossOrigin`, `SignInsFailed` |
-| `GET /api/networks` | Lists each Network and whether it runs | `[{ network, status }]` |  |
+| `GET /api/networks` | Lists each Network, its life, and whether it runs | `[{ network, life, status }]` |  |
 | `PUT /api/networks/{network}?ifSequence=` | The whole `NetworkConfiguration`, which adds the Network the first time. With `ifSequence`, only if it was made from the Configuration in force | `{ sequence }` | `NetworkStopped`, `ConfigurationChanged`, `TimelinesKept` |
-| `DELETE /api/networks/{network}?keep=true\|false` | Removes the Network: its Session ends with a `QUIT`, and its Configuration and Credentials go. `keep` is whether its Timelines stay readable. A Network removed with them kept is removed again with `keep=false` to drop them | `{ sequence }` | `UnknownNetwork`, `NetworkStopped`, `JournalFailed`, `VaultFailed` |
-| `GET /api/removed-networks` | Lists each Network removed with its Timelines kept | `[{ network }]` |  |
+| `DELETE /api/networks/{network}?keep=true\|false` | Removes the Network: its Session ends with a `QUIT`, and its Configuration and Credentials go. `keep` is whether its Timelines stay readable. A Network removed with them kept is removed again with `keep=false` to drop them | `{ sequence, life }`, the life it ended | `UnknownNetwork`, `NetworkStopped`, `JournalFailed`, `VaultFailed` |
+| `GET /api/removed-networks` | Lists each Network removed with its Timelines kept, and the life that was removed | `[{ network, life }]` |  |
 | `GET /api/networks/{network}/configuration` | The Configuration in force, and the sequence of the `Configured` that set it | `{ configuration, sequence }` | `UnknownNetwork` |
 | `POST /api/networks/{network}/say` | `{ kind, target, text, intent? }` | `Said { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
 | `POST /api/networks/{network}/act` | `{ action, intent? }`: one of `Topic`, `Kick`, `Mode`, `Invite`, `Nick`, `Away`, and `Raw`, below | `Acted { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
@@ -33,7 +33,7 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `GET /api/networks/{network}/lookups/{intent}` | A Lookup by its intent, from the Journal | `LookedUp { intent, sequence, result }`, `Pending { intent, sequence }`, or `NotJournaled` | `JournalFailed` |
 | `POST /api/networks/{network}/read` | Marks a Timeline read up to `{ read, target }`: an instant, and a Target, or `null` for the Network's own | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `POST /api/networks/{network}/retry` | Tries connecting now | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
-| `GET /api/networks/{network}/known` | What the Client knows: Session, Self, Channels, members, Users, the Connection's casemapping, the one an Ircd last declared (`declared`, `null` until one has), and `CHANTYPES` while a Session has said it (`chantypes`, `null` otherwise) | `Knowledge` | `UnknownNetwork` |
+| `GET /api/networks/{network}/known` | What the Client knows: Session, Self, Channels, members, Users, the Connection's casemapping, the one an Ircd last declared (`declared`, `null` until one has), and `CHANTYPES` while a Session has said it (`chantypes`, `null` otherwise), and the life it is of | `Knowledge` | `UnknownNetwork` |
 | `GET /api/networks/{network}/inspect` | Machine states, caps, ISUPPORT, STS, Features, timers, and Connections, each with how many Lines wait to leave and when the next may | `NetworkInspection` | `UnknownNetwork` |
 | `GET /api/news?after=` | Server-Sent Events of News, then live | `happened` and `heartbeat` events | `JournalFailed`, in the stream |
 | `GET /api/networks/{network}/timelines?after=&limit=` | A page of the Network's Timelines, merged ones aside, in the order they were opened, and whether they are being folded | `{ projection, version, through, timelines, more }` | `UnknownNetwork`, `TimelinesFailed` |
@@ -77,6 +77,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 
 ### Removing
 
+- **Every answer about a Network names its life.** A `life` is the sequence of the `Configured` that began that life of the Network, the first after it was added or removed. It only increases for an id, and a restart or a rebuild gives the same, so an answer from a Network removed and added again under its id is told apart from the new one's. The Network list, the removed list, `known`, each News event, each Timeline, each dropped Timeline and removal in the changes, and a removal's answer carry it.
 - **A removed Network is gone from every route that acts on it.** It leaves `GET /api/networks`, and every route that acts on it or reads what its Client knows answers `UnknownNetwork`, as for a Network never configured. `said` and a Lookup by its intent still answer from the Journal. A Frontend following News learns of it from one `NetworkRemoved`, after which no News of it comes.
 - **The Owner chooses whether its Timelines stay.** Kept, they are read and searched as before, listed by `GET /api/removed-networks` and `GET /api/networks/{network}/timelines`, and each says `removed`, so a Frontend shows them apart and never says to them. Its id stays taken while they are kept: a `PUT` of it is `TimelinesKept`. Not kept, no route reads or finds them, the changes stream gives each as `dropped`, and the id is free at once.
 - **Its Credentials go once its removal is journaled,** but those another Network's Configuration names. A `VaultFailed` leaves the removal standing, and the Daemon forgets them when it next starts.

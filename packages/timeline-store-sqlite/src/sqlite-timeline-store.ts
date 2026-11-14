@@ -70,7 +70,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 6;
+const layoutVersion = 7;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -125,7 +125,8 @@ const layout = [
     unread_direct INTEGER NOT NULL,
     unread_messages INTEGER NOT NULL,
     unread_activity INTEGER NOT NULL,
-    removed INTEGER NOT NULL
+    removed INTEGER NOT NULL,
+    life INTEGER NOT NULL
   ) STRICT`,
   "CREATE INDEX timelines_by_network ON timelines (network, id)",
   "CREATE INDEX timelines_by_changed ON timelines (changed, id)",
@@ -174,14 +175,16 @@ const layout = [
   `CREATE TABLE dropped (
     id TEXT PRIMARY KEY,
     network TEXT NOT NULL,
-    changed INTEGER NOT NULL
+    changed INTEGER NOT NULL,
+    life INTEGER NOT NULL
   ) STRICT`,
   "CREATE INDEX dropped_by_changed ON dropped (changed, id)",
   // Each Network's last removal, whether or not it had Timelines.
   `CREATE TABLE removals (
     network TEXT PRIMARY KEY,
     keep INTEGER NOT NULL,
-    changed INTEGER NOT NULL
+    changed INTEGER NOT NULL,
+    life INTEGER NOT NULL
   ) STRICT`,
   "CREATE INDEX removals_by_changed ON removals (changed, network)",
 ];
@@ -212,6 +215,7 @@ const columns = [
   "dropped.id TEXT",
   "dropped.network TEXT",
   "dropped.changed INTEGER",
+  "dropped.life INTEGER",
   "folded.only INTEGER",
   "folded.version INTEGER",
   "folded.through INTEGER",
@@ -235,6 +239,7 @@ const columns = [
   "removals.network TEXT",
   "removals.keep INTEGER",
   "removals.changed INTEGER",
+  "removals.life INTEGER",
   "search.text ",
   "timelines.id TEXT",
   "timelines.network TEXT",
@@ -249,6 +254,7 @@ const columns = [
   "timelines.unread_messages INTEGER",
   "timelines.unread_activity INTEGER",
   "timelines.removed INTEGER",
+  "timelines.life INTEGER",
   "tombstones.id TEXT",
   "tombstones.network TEXT",
   "tombstones.into_id TEXT",
@@ -735,7 +741,7 @@ export const makeSqliteTimelineStore = (
 
     // Timelines, each with the position of its last item, which the primary key finds.
     const summaries = (where: Fragment, order: Fragment) => sql`
-      SELECT id, network, kind, name, key, changed, read, head, removed,
+      SELECT id, network, kind, name, key, changed, read, head, removed, life,
         unread_highlights AS highlights, unread_direct AS direct,
         unread_messages AS messages, unread_activity AS activity,
         (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest
@@ -882,11 +888,12 @@ export const makeSqliteTimelineStore = (
             // whether its Network was removed.
             yield* sql`
               INSERT INTO timelines (id, network, kind, name, key, changed, read,
-                unread_highlights, unread_direct, unread_messages, unread_activity, removed)
+                unread_highlights, unread_direct, unread_messages, unread_activity, removed, life)
               VALUES (${timeline.id}, ${timeline.network}, ${timeline.kind}, ${timeline.name},
-                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0, 0)
+                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0, 0, ${timeline.life})
               ON CONFLICT (id) DO UPDATE SET network = excluded.network, kind = excluded.kind,
-                name = excluded.name, key = excluded.key, changed = excluded.changed
+                name = excluded.name, key = excluded.key, changed = excluded.changed,
+                life = excluded.life
             `;
             break;
           }
@@ -958,9 +965,10 @@ export const makeSqliteTimelineStore = (
 
           case "Removed": {
             yield* sql`
-              INSERT INTO removals (network, keep, changed)
-              VALUES (${change.network}, ${change.keep ? 1 : 0}, ${change.sequence})
-              ON CONFLICT (network) DO UPDATE SET keep = excluded.keep, changed = excluded.changed
+              INSERT INTO removals (network, keep, changed, life)
+              VALUES (${change.network}, ${change.keep ? 1 : 0}, ${change.sequence}, ${change.life})
+              ON CONFLICT (network) DO UPDATE SET keep = excluded.keep, changed = excluded.changed,
+                life = excluded.life
             `;
 
             if (change.keep) {
@@ -975,11 +983,13 @@ export const makeSqliteTimelineStore = (
             // goes: its items, leaving the search index first, its Timelines, its
             // tombstones, and its Gaps.
             yield* sql`
-              INSERT INTO dropped (id, network, changed)
-              SELECT id, network, ${change.sequence} FROM timelines WHERE network = ${change.network}
+              INSERT INTO dropped (id, network, changed, life)
+              SELECT id, network, ${change.sequence}, ${change.life} FROM timelines
+              WHERE network = ${change.network}
               UNION ALL
-              SELECT id, network, ${change.sequence} FROM tombstones WHERE network = ${change.network}
-              ON CONFLICT (id) DO UPDATE SET changed = excluded.changed
+              SELECT id, network, ${change.sequence}, ${change.life} FROM tombstones
+              WHERE network = ${change.network}
+              ON CONFLICT (id) DO UPDATE SET changed = excluded.changed, life = excluded.life
             `;
 
             const found = yield* sql`
@@ -1166,13 +1176,13 @@ export const makeSqliteTimelineStore = (
         `.pipe(Effect.flatMap(decodeTombstones));
 
         const dropped = yield* sql`
-          SELECT id, network, changed FROM dropped
+          SELECT id, network, changed, life FROM dropped
           WHERE changed > ${since} AND changed <= ${upTo}
           ORDER BY changed, id
         `.pipe(Effect.flatMap(decodeDropped));
 
         const removals = yield* sql`
-          SELECT network, keep, changed FROM removals
+          SELECT network, keep, changed, life FROM removals
           WHERE changed > ${since} AND changed <= ${upTo}
           ORDER BY changed, network
         `.pipe(Effect.flatMap(decodeRemovals));

@@ -803,17 +803,17 @@ export const fakeDaemon = () => {
 
     // Kept again changes nothing.
     if (keep && daemon.kept.has(network)) {
-      return json(200, { sequence });
+      return json(200, { life: 1, sequence });
     }
 
     const change = {
       dropped: keep
         ? []
-        : timelines.map((one) => ({ changed: sequence, id: one.timeline.id, network })),
+        : timelines.map((one) => ({ changed: sequence, id: one.timeline.id, life: 1, network })),
       gaps: [],
       items: [],
       merged: [],
-      removals: [{ changed: sequence, keep, network }],
+      removals: [{ changed: sequence, keep, life: 1, network }],
       sequence,
       timelines: keep
         ? timelines.map((one) => ({ ...one.timeline, changed: sequence, removed: true }))
@@ -833,7 +833,7 @@ export const fakeDaemon = () => {
 
     send({ data: JSON.stringify(change), event: "changed", id: `1.${sequence}` });
 
-    return json(200, { sequence });
+    return json(200, { life: 1, sequence });
   };
 
   /**
@@ -984,6 +984,7 @@ export const fakeDaemon = () => {
           channels: [],
           chantypes,
           declared,
+          life: 1,
           self: daemon.selves.get(known.network ?? "") ?? null,
           session,
           users: [],
@@ -1335,7 +1336,7 @@ export const fakeDaemon = () => {
           json(
             200,
             [...daemon.timelines.keys()].flatMap((network) =>
-              daemon.kept.has(network) ? [] : [{ network, status: { _tag: "Running" } }]
+              daemon.kept.has(network) ? [] : [{ life: 1, network, status: { _tag: "Running" } }]
             )
           )
         );
@@ -1345,7 +1346,7 @@ export const fakeDaemon = () => {
         return signedInOnly(() =>
           json(
             200,
-            [...daemon.kept].map((network) => ({ network }))
+            [...daemon.kept].map((network) => ({ life: 1, network }))
           )
         );
       }

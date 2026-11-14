@@ -346,9 +346,13 @@ const networks = HttpApiBuilder.group(
 
     return handlers
       .handle("list", () =>
-        runtime.networks.pipe(
+        runtime.lives.pipe(
           Effect.map((all) =>
-            Array.from(all, ([network, status]) => ({ network, status: networkStatus(status) }))
+            Array.from(all, ([network, { life, status }]) => ({
+              life,
+              network,
+              status: networkStatus(status),
+            }))
           )
         )
       )
@@ -375,7 +379,7 @@ const networks = HttpApiBuilder.group(
       )
       .handle("remove", ({ params, query }) =>
         runtime.remove(NetworkId.make(params.network), { keep: query.keep }).pipe(
-          Effect.map((sequence) => ({ sequence })),
+          Effect.map(({ life, sequence }) => ({ life, sequence })),
           Effect.catchTags({
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
             NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
@@ -387,7 +391,7 @@ const networks = HttpApiBuilder.group(
       .handle("removed", () =>
         runtime.kept.pipe(
           Effect.map((kept) =>
-            Array.from(kept, (network) => ({ network: WireNetworkId.make(network) }))
+            Array.from(kept, ([network, life]) => ({ life, network: WireNetworkId.make(network) }))
           )
         )
       )

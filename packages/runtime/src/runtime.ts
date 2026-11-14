@@ -251,6 +251,31 @@ export const defaultLookTimeout: Duration.Duration = Duration.seconds(35);
 const millisOf = (input: Duration.Input | undefined, fallback: Duration.Duration): number =>
   Duration.toMillis(input === undefined ? fallback : Duration.fromInputUnsafe(input));
 
+/**
+ * A life of a Network: the sequence of the `Configured` that began it, the first after the
+ * Network was created or after a `Removed`. It only increases for an id, and a rebuild
+ * gives the same.
+ */
+export type Life = Sequence;
+
+/** A removal: the sequence of its `Removed`, and the life it ended. */
+export interface Removal {
+  readonly sequence: Sequence;
+  readonly life: Life;
+}
+
+/** What a Network's Client knows now, and the life it belongs to. */
+export interface Known {
+  readonly knowledge: Knowledge;
+  readonly life: Life;
+}
+
+/** A Network configured, whether it is running, and its life. */
+export interface Living {
+  readonly status: NetworkStatus;
+  readonly life: Life;
+}
+
 /** What the Runtime offers. */
 export interface RuntimeService {
   /**
@@ -276,9 +301,12 @@ export interface RuntimeService {
   readonly remove: (
     network: NetworkId,
     removal: { readonly keep: boolean }
-  ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped | JournalFailed | VaultFailed>;
-  /** Every removed Network whose Timelines are kept, which no Network can take the id of. */
-  readonly kept: Effect.Effect<ReadonlySet<NetworkId>>;
+  ) => Effect.Effect<Removal, UnknownNetwork | NetworkStopped | JournalFailed | VaultFailed>;
+  /**
+   * Every removed Network whose Timelines are kept, which no Network can take the id of,
+   * with the life that was removed.
+   */
+  readonly kept: Effect.Effect<ReadonlyMap<NetworkId, Sequence>>;
   /** The Configuration in force, and the sequence of the `Configured` that set it. */
   readonly configuration: (network: NetworkId) => Effect.Effect<InForce, UnknownNetwork>;
   /**
@@ -341,7 +369,7 @@ export interface RuntimeService {
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
-  readonly known: (network: NetworkId) => Effect.Effect<Knowledge, UnknownNetwork>;
+  readonly known: (network: NetworkId) => Effect.Effect<Known, UnknownNetwork>;
   /**
    * What the Network's Client knows now of one Channel, by its name as the Connection's
    * casemapping folds it, or `None` when it holds no such Channel. It reads that Channel
@@ -355,6 +383,11 @@ export interface RuntimeService {
   readonly inspect: (network: NetworkId) => Effect.Effect<NetworkInspection, UnknownNetwork>;
   /** Every Network, in the order it was added, with whether it is running. */
   readonly networks: Effect.Effect<ReadonlyMap<NetworkId, NetworkStatus>>;
+  /**
+   * Every Network configured, in the order it was added, with whether it is running and
+   * its life, read together.
+   */
+  readonly lives: Effect.Effect<ReadonlyMap<NetworkId, Living>>;
   /**
    * The News of every Network, derived from the Journal: from just after `after`, or from
    * the start, then live. Each element is one step's News, with its Network and the
@@ -468,7 +501,7 @@ export const makeRuntime = <S>(
     yield* Effect.addFinalizer(() => stopAll);
 
     // Every removed Network whose Timelines are kept, which holds its id.
-    const kept = yield* Ref.make<ReadonlySet<NetworkId>>(new Set());
+    const kept = yield* Ref.make<ReadonlyMap<NetworkId, Life>>(new Map());
 
     // The Configurations of removals whose Credentials are not yet known to be forgotten,
     // by Network, folded from the Journal, so a removal cut short by a crash or a Vault that
@@ -486,7 +519,11 @@ export const makeRuntime = <S>(
 
       if (network.removed !== undefined) {
         if (network.removed.keep) {
-          yield* Ref.update(kept, (all) => new Set(all).add(id));
+          const { life } = network;
+
+          if (life !== undefined) {
+            yield* Ref.update(kept, (all) => new Map(all).set(id, life));
+          }
         }
 
         continue;
@@ -635,12 +672,15 @@ export const makeRuntime = <S>(
           : undefined;
 
         const sequence = told ?? (yield* removedAt(id)) ?? (yield* appendRemoved(id, keep));
-        const { configured } = yield* Ref.get(network.current);
+        const current = yield* Ref.get(network.current);
+        const { configured } = current;
+        // One removed before its first `Configured` was stepped has a life of its own.
+        const life = current.life ?? sequence;
 
         yield* Ref.update(held, (all) => without(all, id));
 
         if (keep) {
-          yield* Ref.update(kept, (all) => new Set(all).add(id));
+          yield* Ref.update(kept, (all) => new Map(all).set(id, life));
         }
 
         if (configured !== undefined) {
@@ -653,29 +693,23 @@ export const makeRuntime = <S>(
         yield* retire(network, ports.timing.stopTimeout);
         yield* forgetCredentials(id);
 
-        return sequence;
+        return { life, sequence };
       });
 
     // A removed Network whose Timelines are kept has no driver, so its `Removed` is
     // journaled alone, and folded as any input is on restart.
-    const removeKept = (id: NetworkId, keep: boolean) =>
+    const removeKept = (id: NetworkId, keep: boolean, life: Life) =>
       Effect.gen(function* () {
         const sequence = yield* appendRemoved(id, keep);
 
         if (!keep) {
-          yield* Ref.update(kept, (all) => {
-            const next = new Set(all);
-
-            next.delete(id);
-
-            return next;
-          });
+          yield* Ref.update(kept, (all) => without(all, id));
           yield* Effect.logInfo("Dropped a removed Network's Timelines", { network: id });
         }
 
         yield* forgetCredentials(id);
 
-        return sequence;
+        return { life, sequence };
       });
 
     // Once admitted, a removal runs to its end in a fiber of its own, holding the permit
@@ -696,11 +730,13 @@ export const makeRuntime = <S>(
                 return yield* removeHeld(id, network, keep);
               }
 
-              if (!(yield* Ref.get(kept)).has(id)) {
+              const life = (yield* Ref.get(kept)).get(id);
+
+              if (life === undefined) {
                 return yield* new UnknownNetwork({ network: id });
               }
 
-              return yield* removeKept(id, keep);
+              return yield* removeKept(id, keep, life);
             })
           )
         ),
@@ -793,11 +829,29 @@ export const makeRuntime = <S>(
           };
         }),
       kept: Ref.get(kept),
+      // Read from one state of the Network, so what is known and its life go together.
       known: (id) =>
-        Effect.map(
+        Effect.flatMap(
           Effect.flatMap(find(id), (network) => Ref.get(network.current)),
-          ({ state }) => client.known(state)
+          ({ life, state }) =>
+            life === undefined
+              ? Effect.fail(new UnknownNetwork({ network: id }))
+              : Effect.succeed({ knowledge: client.known(state), life })
         ),
+      // A Network added whose first `Configured` is not yet stepped has no life yet, and is
+      // left out, as `configuration` leaves it out.
+      lives: Effect.flatMap(Ref.get(held), (networks) =>
+        Effect.map(
+          Effect.forEach([...networks.values()], (network) =>
+            Effect.map(
+              Effect.all([Ref.get(network.status), Ref.get(network.current)]),
+              ([status, { life }]) =>
+                life === undefined ? [] : [[network.id, { life, status }] as const]
+            )
+          ),
+          (found) => new Map(found.flat())
+        )
+      ),
       look: (id, looking) =>
         Effect.gen(function* () {
           const network = yield* find(id);

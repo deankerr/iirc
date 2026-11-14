@@ -51,7 +51,7 @@ const removing = (runtime: RuntimeService, network: NetworkId, keep: boolean) =>
     yield* settle;
     yield* TestClock.adjust(5000);
 
-    return yield* Fiber.join(fiber);
+    return (yield* Fiber.join(fiber)).sequence;
   });
 
 // Adds a Network and plays its Ircd until its Session has begun.
@@ -80,7 +80,7 @@ describe("removing a Network", () => {
         return {
           configuration: yield* Effect.flip(runtime.configuration(libera)),
           heard: yield* heardText(call),
-          kept: yield* runtime.kept,
+          kept: new Set((yield* runtime.kept).keys()),
           networks: [...(yield* runtime.networks).keys()],
           outline: (yield* outline(world.journal)).slice(-4),
           say: yield* Effect.flip(
@@ -121,11 +121,11 @@ describe("removing a Network", () => {
         yield* first.close;
         const second = yield* startRuntime(world, client);
         const networks = [...(yield* second.runtime.networks).keys()];
-        const kept = yield* second.runtime.kept;
+        const kept = new Set((yield* second.runtime.kept).keys());
         const again = yield* Effect.flip(second.runtime.configure(libera, base));
 
         yield* second.runtime.remove(libera, { keep: false });
-        const dropped = yield* second.runtime.kept;
+        const dropped = new Set((yield* second.runtime.kept).keys());
 
         yield* second.close;
         const third = yield* startRuntime(world, client);
@@ -137,7 +137,7 @@ describe("removing a Network", () => {
           networks,
           refused,
           restarted: [...(yield* third.runtime.networks).keys()],
-          stillKept: yield* third.runtime.kept,
+          stillKept: new Set((yield* third.runtime.kept).keys()),
         };
       })
     );
@@ -172,9 +172,9 @@ describe("removing a Network", () => {
 
         return {
           configuration: (yield* restarted.runtime.configuration(libera)).configuration,
-          declared: known.declared,
+          declared: known.knowledge.declared,
           networks: [...(yield* restarted.runtime.networks).keys()],
-          restarted: (yield* restarted.runtime.known(libera)).declared,
+          restarted: (yield* restarted.runtime.known(libera)).knowledge.declared,
         };
       })
     );
@@ -291,6 +291,60 @@ const held = (world: World) =>
       yield* world.vault.hold(name(each), Redacted.make("secret"));
     }
   });
+
+describe("a Network's life", () => {
+  it("is the Configured that began it, the same after a restart, and larger when the id is given again", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const quiet = configured({ enabled: false });
+        const first = yield* startRuntime(world, client);
+        const began = yield* first.runtime.configure(libera, quiet);
+
+        yield* first.runtime.configure(libera, configured({ enabled: false, nicks: ["other"] }));
+        const living = (yield* first.runtime.lives).get(libera)?.life;
+        const removal = yield* first.runtime.remove(libera, { keep: true });
+
+        yield* first.close;
+        const second = yield* startRuntime(world, client);
+        const kept = (yield* second.runtime.kept).get(libera);
+        const dropping = yield* second.runtime.remove(libera, { keep: false });
+        const again = yield* second.runtime.configure(libera, quiet);
+
+        yield* second.close;
+        const third = yield* startRuntime(world, client);
+
+        const removals = yield* Stream.runCollect(
+          Stream.takeUntil(third.runtime.news(), (one) => one.sequence >= dropping.sequence)
+        );
+
+        return {
+          again,
+          began,
+          dropped: dropping.life,
+          kept,
+          known: (yield* third.runtime.known(libera)).life,
+          living,
+          removals: removals.map((one) => one.life),
+          removed: removal.life,
+          restarted: (yield* third.runtime.lives).get(libera)?.life,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: result.again,
+      began: result.began,
+      dropped: result.began,
+      kept: result.began,
+      known: result.again,
+      living: result.began,
+      removals: [result.began, result.began],
+      removed: result.began,
+      restarted: result.again,
+    });
+    expect(result.again).toBeGreaterThan(result.began);
+  });
+});
 
 describe("a removal carried through", () => {
   it("goes on to its end when its caller goes away", async () => {
@@ -513,7 +567,7 @@ describe("a removal carried through", () => {
         // Stopped by its refold, which stops at the same Line.
         const second = yield* startRuntime(world, fragile(client));
         const before = [...(yield* second.runtime.networks).keys()];
-        const sequence = yield* second.runtime.remove(oftc, { keep: true });
+        const { sequence } = yield* second.runtime.remove(oftc, { keep: true });
 
         yield* second.close;
         const third = yield* startRuntime(world, fragile(client));
@@ -524,7 +578,7 @@ describe("a removal carried through", () => {
 
         return {
           before,
-          kept: yield* third.runtime.kept,
+          kept: new Set((yield* third.runtime.kept).keys()),
           networks: [...(yield* third.runtime.networks).keys()],
           removals: news.flatMap((one) =>
             one.news.flatMap((each) =>

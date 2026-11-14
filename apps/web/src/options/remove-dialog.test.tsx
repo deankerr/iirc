@@ -35,6 +35,7 @@ const describeTimeline = (
   key: kind === "Network" ? null : name,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,

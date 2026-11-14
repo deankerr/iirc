@@ -44,7 +44,7 @@ import {
 import { now, sleepUntil } from "./clock.ts";
 import { JournalFailed, Sequence } from "./journal.ts";
 import type { JournalService, NetworkId } from "./journal.ts";
-import { ClientThrew, stepContained } from "./replay.ts";
+import { ClientThrew, lifeAfter, stepContained } from "./replay.ts";
 import type { Folded, InForce } from "./replay.ts";
 import type { Link, LinkEvent, TransportService } from "./transport.ts";
 import type { VaultService } from "./vault.ts";
@@ -217,6 +217,8 @@ interface Current<S> {
   readonly state: S;
   readonly table: TimerTable;
   readonly configured: InForce | undefined;
+  /** The sequence of the `Configured` that began this life of the Network. */
+  readonly life: Sequence | undefined;
 }
 
 /** The ports and the Client a driver uses. */
@@ -408,6 +410,7 @@ const makeNetwork = <S>(id: NetworkId, folded: Folded<S>) =>
     const network: Network<S> = {
       current: yield* Ref.make<Current<S>>({
         configured: folded.configured,
+        life: folded.life,
         state: folded.state,
         table: folded.table,
       }),
@@ -784,6 +787,7 @@ const drive = <S>(
             input._tag === "Configured"
               ? { configuration: input.configuration, sequence }
               : before.configured,
+          life: lifeAfter(before.life, input, sequence),
           state: step.state,
           table: timers(before.table, input, step.outputs),
         });

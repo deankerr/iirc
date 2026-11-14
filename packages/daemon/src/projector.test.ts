@@ -318,6 +318,7 @@ describe("the projector", () => {
                 id: timelineIdOf(999, 0, 1),
                 key: "#stale",
                 kind: "Channel",
+                life: 1,
                 name: "#stale",
                 network: libera,
               },
@@ -377,13 +378,20 @@ describe("the projector", () => {
           }
 
           yield* TestClock.adjust(5000);
-          const sequence = yield* Fiber.join(removing);
+          const { life, sequence } = yield* Fiber.join(removing);
 
           yield* eventually(
             store.folded.pipe(Effect.map(({ through }) => (through ?? 0) >= sequence))
           );
 
-          return (yield* store.timelines(libera)).map(({ name, removed }) => [name, removed]);
+          return {
+            life,
+            timelines: (yield* store.timelines(libera)).map((each) => [
+              each.name,
+              each.removed,
+              each.life,
+            ]),
+          };
         }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
 
         return yield* Effect.gen(function* () {
@@ -405,6 +413,8 @@ describe("the projector", () => {
           return {
             items: yield* textsIn(store, "#iirc"),
             kept,
+            lives: (yield* store.timelines(libera)).map((each) => each.life),
+            living: (yield* runtime.lives).get(libera)?.life,
             same: yield* everything(store),
             want: yield* everything(yield* foldedAfresh(through)),
           };
@@ -412,10 +422,16 @@ describe("the projector", () => {
       })
     );
 
-    expect(result.kept).toStrictEqual([
-      ["libera", true],
-      ["#iirc", true],
+    // The kept Timelines keep the life that was removed, and the Network given its id
+    // again has a later one, which its Timelines carry.
+    expect(result.kept.timelines).toStrictEqual([
+      ["libera", true, result.kept.life],
+      ["#iirc", true, result.kept.life],
     ]);
+    expect({
+      later: (result.living ?? 0) > result.kept.life,
+      lives: result.lives,
+    }).toStrictEqual({ later: true, lives: [result.living, result.living] });
     expect(result.items).toStrictEqual(["Activity", "after"]);
     expect(result.same.dropped).toHaveLength(2);
     expect(result.same).toStrictEqual(result.want);

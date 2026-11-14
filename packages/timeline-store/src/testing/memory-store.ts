@@ -233,6 +233,7 @@ const remove = (memory: Memory, change: Extract<Change, { readonly _tag: "Remove
   memory.removals.set(change.network, {
     changed: change.sequence,
     keep: change.keep,
+    life: change.life,
     network: change.network,
   });
 
@@ -261,7 +262,12 @@ const remove = (memory: Memory, change: Extract<Change, { readonly _tag: "Remove
     memory.timelines.delete(id);
     memory.merged.delete(id);
     memory.items.delete(id);
-    memory.dropped.set(id, { changed: change.sequence, id, network: change.network });
+    memory.dropped.set(id, {
+      changed: change.sequence,
+      id,
+      life: change.life,
+      network: change.network,
+    });
   }
 
   memory.gaps.delete(change.network);

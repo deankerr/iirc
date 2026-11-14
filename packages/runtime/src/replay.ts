@@ -44,6 +44,7 @@ export type Folded<S> =
       readonly state: S;
       readonly table: TimerTable;
       readonly configured: InForce | undefined;
+      readonly life: Sequence | undefined;
       readonly removed: Removal | undefined;
       readonly unforgotten: readonly NetworkConfiguration[];
     }
@@ -52,6 +53,7 @@ export type Folded<S> =
       readonly state: S;
       readonly table: TimerTable;
       readonly configured: InForce | undefined;
+      readonly life: Sequence | undefined;
       readonly removed: Removal | undefined;
       readonly unforgotten: readonly NetworkConfiguration[];
       readonly reason: string;
@@ -66,6 +68,12 @@ export interface Happened {
   readonly at: Instant;
   /** The News of that step, in order, and never empty. */
   readonly news: readonly News[];
+  /**
+   * Which life of the Network it belongs to: the sequence of the `Configured` that began
+   * it, the first after the Network was created or after a `Removed`. It only increases for
+   * an id, and a rebuild gives the same. A removal's own steps belong to the life it ends.
+   */
+  readonly life: Sequence;
 }
 
 /** A Client threw, which a total Client never does: a bug, contained to its Network. */
@@ -105,6 +113,7 @@ export const stepContained = <S>(
 export const fresh = <S>(client: Client<S>): Folded<S> => ({
   _tag: "Folded",
   configured: undefined,
+  life: undefined,
   removed: undefined,
   state: client.initial,
   table: new Map(),
@@ -123,6 +132,19 @@ const unforgottenAfter = <S>(folded: Folded<S>): readonly NetworkConfiguration[]
   folded.removed === undefined && folded.configured !== undefined
     ? [...folded.unforgotten, folded.configured.configuration]
     : folded.unforgotten;
+
+/**
+ * A Network's life after one more Input: the sequence of the `Configured` that began it.
+ * @param life - Its life so far, or `undefined` before its first `Configured`.
+ * @param input - The Input.
+ * @param sequence - The Input's sequence.
+ * @returns Its life after it.
+ */
+export const lifeAfter = (
+  life: Sequence | undefined,
+  input: Input,
+  sequence: Sequence
+): Sequence | undefined => life ?? (input._tag === "Configured" ? sequence : undefined);
 
 /**
  * Folds one more Input. A `Broken` Network stays broken. A `Configured` stepped is the
@@ -177,6 +199,7 @@ const foldOne = <S>(
               input._tag === "Configured"
                 ? { configuration: input.configuration, sequence }
                 : begun.configured,
+            life: lifeAfter(begun.life, input, sequence),
             removed: input._tag === "Removed" ? { keep: input.keep } : begun.removed,
             state: step.state,
             table: timers(begun.table, input, step.outputs),
@@ -265,7 +288,15 @@ export const newsAfter = <S>(
             networks.set(network, folded);
 
             const wanted = news.length > 0 && entry.sequence > (after ?? 0);
-            const happened: Happened = { at: input.at, network, news, sequence: entry.sequence };
+
+            // A step before any `Configured`, which the Runtime never journals, is its own.
+            const happened: Happened = {
+              at: input.at,
+              life: folded.life ?? entry.sequence,
+              network,
+              news,
+              sequence: entry.sequence,
+            };
 
             return [networks, wanted ? [happened] : []] as const;
           })

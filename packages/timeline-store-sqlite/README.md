@@ -22,7 +22,7 @@ CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NO
   name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER, head INTEGER,
   unread_highlights INTEGER NOT NULL, unread_direct INTEGER NOT NULL,
   unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL,
-  removed INTEGER NOT NULL) STRICT;
+  removed INTEGER NOT NULL, life INTEGER NOT NULL) STRICT;
 CREATE TABLE items (id INTEGER PRIMARY KEY, timeline TEXT NOT NULL, cursor TEXT NOT NULL,
   network TEXT NOT NULL, step INTEGER NOT NULL, message_id TEXT, intent TEXT,
   content TEXT NOT NULL, changed INTEGER NOT NULL, level TEXT, sender TEXT,
@@ -31,11 +31,13 @@ CREATE TABLE tombstones (id TEXT PRIMARY KEY, network TEXT NOT NULL, into_id TEX
   changed INTEGER NOT NULL) STRICT;
 CREATE TABLE gaps (network TEXT NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT,
   changed INTEGER NOT NULL, PRIMARY KEY (network, from_cursor)) STRICT;
-CREATE TABLE dropped (id TEXT PRIMARY KEY, network TEXT NOT NULL, changed INTEGER NOT NULL) STRICT;
-CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed INTEGER NOT NULL) STRICT;
+CREATE TABLE dropped (id TEXT PRIMARY KEY, network TEXT NOT NULL, changed INTEGER NOT NULL,
+  life INTEGER NOT NULL) STRICT;
+CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed INTEGER NOT NULL,
+  life INTEGER NOT NULL) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 6;  -- the layout's version
+PRAGMA user_version = 7;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.

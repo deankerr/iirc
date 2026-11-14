@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 9;
+export const projectionVersion = 10;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -27,6 +27,8 @@ export const projectionVersion = 9;
  */
 export interface Happened {
   readonly network: string;
+  /** Which life of the Network it belongs to: the sequence of the `Configured` that began it. */
+  readonly life: number;
   readonly sequence: number;
   readonly at: Instant;
   readonly news: readonly News[];
@@ -44,6 +46,8 @@ export interface Keyed {
 
 /** What the fold keeps for one Network. */
 export interface NetworkDirectory {
+  /** Which life of the Network its Timelines belong to. */
+  readonly life: number;
   /** The Network's own Timeline. */
   readonly timeline: TimelineId;
   /** How far the Owner has read the Network's own Timeline, or `undefined` before any Read Marker. */
@@ -84,6 +88,7 @@ interface Maps {
 // step first changes one, and copied then, so a step that opens nothing copies nothing.
 interface Draft {
   readonly network: string;
+  readonly life: number;
   readonly sequence: number;
   readonly at: Instant;
   readonly timeline: TimelineId;
@@ -118,7 +123,7 @@ const describe = (draft: Draft, kind: Kind, id: TimelineId, name: string, key: s
   draft.changes.push({
     _tag: "Described",
     sequence: draft.sequence,
-    timeline: { id, key, kind, name, network: draft.network },
+    timeline: { id, key, kind, life: draft.life, name, network: draft.network },
   });
 };
 
@@ -662,6 +667,7 @@ const foldNews = (draft: Draft, news: News, n: number) => {
       draft.changes.push({
         _tag: "Removed",
         keep: news.keep,
+        life: draft.life,
         network: draft.network,
         sequence: draft.sequence,
       });
@@ -701,6 +707,7 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
     changes,
     gap: known?.gap,
     last: known?.last,
+    life: known?.life ?? happened.life,
     maps: known ?? { channels: new Map(), directs: new Map(), keyed: new Map() },
     network: happened.network,
     read: known?.read,
@@ -730,6 +737,7 @@ export const step = (directory: Directory, happened: Happened): Stepped => {
       n: Math.max(0, happened.news.length - 1),
       sequence: happened.sequence,
     },
+    life: draft.life,
     read: draft.read,
     timeline,
   };

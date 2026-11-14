@@ -210,7 +210,11 @@ describe("the contract", () => {
 
   it("carries a step's sequence as its event id, and a heartbeat with none", () => {
     const wire = [
-      { data: '{"at":1,"network":"libera","news":[],"sequence":7}', event: "happened", id: "7" },
+      {
+        data: '{"at":1,"life":1,"network":"libera","news":[],"sequence":7}',
+        event: "happened",
+        id: "7",
+      },
       { data: "{}", event: "heartbeat" },
     ];
 

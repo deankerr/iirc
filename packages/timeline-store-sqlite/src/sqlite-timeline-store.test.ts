@@ -181,17 +181,24 @@ const steps: readonly { readonly through: number; readonly changes: readonly Cha
       {
         _tag: "Described",
         sequence: 1,
-        timeline: { id: network, key: null, kind: "Network", name: libera, network: libera },
+        timeline: {
+          id: network,
+          key: null,
+          kind: "Network",
+          life: 1,
+          name: libera,
+          network: libera,
+        },
       },
       {
         _tag: "Described",
         sequence: 1,
-        timeline: { id: channel, key: "#a", kind: "Channel", name: "#a", network: libera },
+        timeline: { id: channel, key: "#a", kind: "Channel", life: 1, name: "#a", network: libera },
       },
       {
         _tag: "Described",
         sequence: 1,
-        timeline: { id: other, key: "#b", kind: "Channel", name: "#B", network: libera },
+        timeline: { id: other, key: "#b", kind: "Channel", life: 1, name: "#B", network: libera },
       },
       { _tag: "Gap", from: position(0, 1), network: libera, sequence: 1, to: undefined },
     ],
@@ -224,6 +231,7 @@ const steps: readonly { readonly through: number; readonly changes: readonly Cha
 const directoryAt = (through: number) =>
   step(emptyDirectory, {
     at: at(through),
+    life: 1,
     network: libera,
     news: [{ _tag: "SessionBegan", at: at(through), nick: "iirc" }],
     sequence: through,
@@ -587,6 +595,7 @@ describe("the file", () => {
                         id: third,
                         key: "#c",
                         kind: "Channel",
+                        life: 1,
                         name: "#c",
                         network: libera,
                       },

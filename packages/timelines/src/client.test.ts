@@ -22,7 +22,7 @@ const folded = (transcript: readonly string[]) => {
 
     return input === undefined || each.news.length === 0
       ? []
-      : [{ at: input.at, network: "libera", news: each.news, sequence: index + 1 }];
+      : [{ at: input.at, life: 1, network: "libera", news: each.news, sequence: index + 1 }];
   });
 
   let directory: Directory = emptyDirectory;

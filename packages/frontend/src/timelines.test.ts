@@ -395,6 +395,7 @@ const wireTimeline = (timeline: ModelTimeline) =>
     kind: timeline.kind,
     latest:
       timeline.latest === undefined ? null : cursor(timeline.latest.at, timeline.latest.sequence),
+    life: 1,
     name: timeline.kind === "Network" ? timeline.network : `#${timeline.id}`,
     network: timeline.network,
     read: null,
@@ -557,7 +558,7 @@ const daemonAt = (world: World, through: number, version: number) => {
       decodeEntries(
         networks.flatMap((network) =>
           world.timelines.some((one) => one.network === network)
-            ? [{ network, status: { _tag: "Running" } }]
+            ? [{ life: 1, network, status: { _tag: "Running" } }]
             : []
         )
       ),
@@ -1299,6 +1300,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel", name: string, chang
     key: kind === "Network" ? null : name,
     kind,
     latest: null,
+    life: 1,
     name,
     network: "alpha",
     read: null,
@@ -1350,7 +1352,7 @@ const following = (): Timelines => {
     { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
     {
       _tag: "NetworksRead",
-      entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+      entries: decodeEntries([{ life: 1, network: "alpha", status: { _tag: "Running" } }]),
       removed: [],
     },
     { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
@@ -1503,7 +1505,7 @@ const olderPage = (held: (typeof WindowGap.Encoded)[], page: (typeof WindowGap.E
 };
 
 const entries = (...names: readonly string[]) =>
-  decodeEntries(names.map((network) => ({ network, status: { _tag: "Running" } })));
+  decodeEntries(names.map((network) => ({ life: 1, network, status: { _tag: "Running" } })));
 
 // Items numbered 0 to 1999, at 10 ms apart, each its own step.
 const numbered = (from: number, to: number) =>
@@ -1535,6 +1537,7 @@ const direct = (id: string, name: string, detached = false) =>
       key: detached ? null : name.toLowerCase(),
       kind: "Direct",
       latest: null,
+      life: 1,
       name,
       network: "alpha",
       read: null,
@@ -1552,8 +1555,8 @@ describe("the Timelines' state", () => {
       {
         _tag: "NetworksRead",
         entries: decodeEntries([
-          { network: "alpha", status: { _tag: "Running" } },
-          { network: "beta", status: { _tag: "Running" } },
+          { life: 1, network: "alpha", status: { _tag: "Running" } },
+          { life: 1, network: "beta", status: { _tag: "Running" } },
         ]),
         removed: [],
       },
@@ -2557,7 +2560,7 @@ describe("the Panes", () => {
       { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
       {
         _tag: "NetworksRead",
-        entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+        entries: decodeEntries([{ life: 1, network: "alpha", status: { _tag: "Running" } }]),
         removed: [],
       },
       { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
@@ -3946,7 +3949,7 @@ const keptAt = (sequence: number) =>
 
 const dropAt = (sequence: number) =>
   changed(sequence, {
-    dropped: [one, two, three].map((id) => ({ changed: sequence, id, network: "alpha" })),
+    dropped: [one, two, three].map((id) => ({ changed: sequence, id, life: 1, network: "alpha" })),
   });
 
 const seven = timelineId(idOf(7));
@@ -3990,8 +3993,8 @@ const withQuiet = () => {
   state = reduceTimelines(state, {
     _tag: "NetworksRead",
     entries: decodeEntries([
-      { network: "alpha", status: { _tag: "Running" } },
-      { network: "gamma", status: { _tag: "Running" } },
+      { life: 1, network: "alpha", status: { _tag: "Running" } },
+      { life: 1, network: "gamma", status: { _tag: "Running" } },
     ]),
     removed: [],
   });
@@ -4009,7 +4012,7 @@ const withQuiet = () => {
 };
 
 const removalOf = (sequence: number, keep: boolean) =>
-  changed(sequence, { removals: [{ changed: sequence, keep, network: "gamma" }] });
+  changed(sequence, { removals: [{ changed: sequence, keep, life: 1, network: "gamma" }] });
 
 const shownRemoved = (state: Timelines) =>
   sidebar(state).map((network) => [network.network, network.removed]);
@@ -4092,7 +4095,7 @@ describe("removing a Network", () => {
     state = reduceTimelines(state, {
       _tag: "NetworksRead",
       entries: [],
-      removed: [{ network: alpha }],
+      removed: [{ life: sequenceOf(1), network: alpha }],
     });
 
     const listing = wanted(state);
@@ -4224,7 +4227,7 @@ describe("removing a Network", () => {
     replaced = reduceTimelines(replaced, {
       _tag: "NetworksRead",
       entries: [],
-      removed: [{ network: alpha }],
+      removed: [{ life: sequenceOf(1), network: alpha }],
     });
 
     // Read while alpha was configured, landing after it was dropped.
@@ -4233,7 +4236,7 @@ describe("removing a Network", () => {
     restored = reduceTimelines(restored, dropAt(6));
     restored = reduceTimelines(restored, {
       _tag: "NetworksRead",
-      entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+      entries: decodeEntries([{ life: 1, network: "alpha", status: { _tag: "Running" } }]),
       removed: [],
     });
 
@@ -4280,8 +4283,8 @@ describe("removing a Network", () => {
       {
         _tag: "NetworksRead",
         entries: decodeEntries([
-          { network: "alpha", status: { _tag: "Running" } },
-          { network: "beta", status: { _tag: "Running" } },
+          { life: 1, network: "alpha", status: { _tag: "Running" } },
+          { life: 1, network: "beta", status: { _tag: "Running" } },
         ]),
         removed: [],
       },
@@ -4316,7 +4319,7 @@ describe("removing a Network", () => {
     // The stream, from 5, gives the old alpha's drop, then the new alpha's first step.
     state = reduceTimelines(
       state,
-      changed(7, { dropped: [{ changed: 7, id: idOf(1), network: "alpha" }] })
+      changed(7, { dropped: [{ changed: 7, id: idOf(1), life: 1, network: "alpha" }] })
     );
     state = reduceTimelines(state, alphaAgain(8));
 
@@ -4488,7 +4491,7 @@ describe("removing a Network", () => {
     state = reduceTimelines(state, {
       _tag: "NetworksRead",
       entries: [],
-      removed: [{ network: alpha }],
+      removed: [{ life: sequenceOf(1), network: alpha }],
     });
 
     expect({
@@ -4562,7 +4565,11 @@ describe("removing a Network", () => {
       [
         "a Network list naming it kept",
         [networks],
-        () => ({ _tag: "NetworksRead", entries: [], removed: [{ network: alpha }] }),
+        () => ({
+          _tag: "NetworksRead",
+          entries: [],
+          removed: [{ life: sequenceOf(1), network: alpha }],
+        }),
       ],
       [
         "a Network list naming it live",
@@ -4570,7 +4577,7 @@ describe("removing a Network", () => {
         () => ({
           _tag: "NetworksRead",
           entries: decodeEntries([
-            { network: "alpha", status: { _tag: "Stopped", reason: "old" } },
+            { life: 1, network: "alpha", status: { _tag: "Stopped", reason: "old" } },
           ]),
           removed: [],
         }),

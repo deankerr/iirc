@@ -60,6 +60,7 @@ import {
   NetworkInspection,
   NewsEvent,
   ReadRequest,
+  Removed,
   RemovedNetwork,
   RemoveQuery,
   Resume,
@@ -139,7 +140,7 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
       error: [UnknownNetwork, NetworkStopped, JournalFailed, VaultFailed],
       params: NetworkPath,
       query: RemoveQuery,
-      success: Journaled,
+      success: Removed,
     }),
     HttpApiEndpoint.get("configuration", "/networks/:network/configuration", {
       error: UnknownNetwork,

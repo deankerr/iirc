@@ -109,7 +109,7 @@ describe("the real Client on the in-memory ports", () => {
         yield* TestClock.adjust(2000);
         yield* converse(secure, `>> MODE #iirc\n${rest}`);
         yield* settle;
-        const registeredAs = (yield* runtime.known(libera)).session;
+        const registeredAs = (yield* runtime.known(libera)).knowledge.session;
 
         // Talking.
         const said = yield* runtime.say(libera, {
@@ -439,7 +439,8 @@ describe("a restart", () => {
 
         const before = {
           inspected: yield* first.runtime.inspect(libera),
-          known: yield* first.runtime.known(libera),
+          known: (yield* first.runtime.known(libera)).knowledge,
+          life: (yield* first.runtime.known(libera)).life,
         };
 
         const running = (yield* entries(world.journal)).length;
@@ -470,7 +471,8 @@ describe("a restart", () => {
         return {
           after: {
             inspected: yield* second.runtime.inspect(libera),
-            known: yield* second.runtime.known(libera),
+            known: (yield* second.runtime.known(libera)).knowledge,
+            life: (yield* second.runtime.known(libera)).life,
           },
           before,
           foldedAfter: folded(all.length),
@@ -496,6 +498,8 @@ describe("a restart", () => {
       after: uninterrupted(result.foldedAfter),
       before: uninterrupted(result.foldedBefore),
     });
+    // The life is the first `Configured`'s, the first Entry, before the restart and after.
+    expect([result.before.life, result.after.life]).toStrictEqual([1, 1]);
     expect({
       pending: [...result.before.inspected.timers.keys()],
       redialled: result.redialled,

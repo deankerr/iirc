@@ -87,6 +87,7 @@ const described = ({
   key: kind === "Network" || detached ? null : name,
   kind,
   latest: latest === null ? null : cursor(latest, 1),
+  life: 1,
   name,
   network: "libera",
   read,
@@ -174,6 +175,7 @@ const world = (
   viewed = true
 ): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    life: 1,
     network: "libera",
     status: { _tag: "Running" },
   });
@@ -876,6 +878,7 @@ describe("notifications", () => {
     const first = reduceTimelines(state, event);
 
     const libera = Schema.decodeSync(NetworkEntry)({
+      life: 1,
       network: "libera",
       status: { _tag: "Running" },
     });

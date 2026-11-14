@@ -109,6 +109,8 @@ export type Change =
       readonly _tag: "Removed";
       readonly sequence: number;
       readonly network: string;
+      /** The life of the Network it ended. */
+      readonly life: number;
       readonly keep: boolean;
     };
 

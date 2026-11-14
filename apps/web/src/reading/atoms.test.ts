@@ -65,6 +65,7 @@ const listed = (
     key: kind === "Network" ? null : name,
     kind,
     latest: more.latest === undefined ? null : cursor(more.latest, 1),
+    life: 1,
     name,
     network: "libera",
     read: more.read ?? null,

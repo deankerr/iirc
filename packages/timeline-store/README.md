@@ -23,7 +23,7 @@ reset(version): Effect<void, TimelineStoreFailed>
 
 Summary = Descriptor & { latest: Position | undefined, read: Instant | undefined, unread: Unread,
   head: number | undefined, removed: boolean, changed }
-                                                   // Descriptor is { id, network, kind, name, key }
+                                                   // Descriptor is { id, network, life, kind, name, key }
 Unread = { highlights, direct, messages, activity }
 unreadOf: { [L in Level]: keyof Unread }           // which count a level is counted in
 noneUnread: Unread                                 // every count 0
@@ -34,8 +34,8 @@ Changed = { timelines, items, merged, dropped, removals, gaps, overflowed, throu
 Overflowed = { sequence, timelines: readonly TimelineId[] | undefined }
 CollapsedGap = { from, to: Position | undefined, count }
 Tombstone = { network, id, into, changed }
-Dropped = { network, id, changed }
-NetworkRemoval = { network, keep, changed }        // a Network's last removal
+Dropped = { network, id, life, changed }           // life: the one the removal ended
+NetworkRemoval = { network, keep, life, changed }  // a Network's last removal
 Gap = { network, from, to: Position | undefined, changed }
 ItemPlace = { position, timeline }                 // what a page of items resumes after
 Search = { text: SearchText, network?, timeline?, from?, since?: Instant, until?: Instant,

@@ -216,6 +216,7 @@ const NetworkDirectory = Schema.Struct({
     })
   ),
   last: Cursor,
+  life: Int,
   read: Schema.UndefinedOr(Instant),
   timeline: TimelineId,
 });
@@ -256,6 +257,7 @@ export const SummaryRow = Schema.toCodecJson(
     key: Schema.NullOr(Schema.String),
     kind: Kind,
     latest: Schema.UndefinedOr(Cursor),
+    life: Int,
     messages: Count,
     name: Schema.String,
     network: Schema.String,
@@ -266,12 +268,12 @@ export const SummaryRow = Schema.toCodecJson(
 
 /** A Timeline dropped with its Network. */
 export const DroppedRow = Schema.toCodecJson(
-  Schema.Struct({ changed: Int, id: TimelineId, network: Schema.String })
+  Schema.Struct({ changed: Int, id: TimelineId, life: Int, network: Schema.String })
 );
 
 /** A Network's last removal. */
 export const RemovalRow = Schema.toCodecJson(
-  Schema.Struct({ changed: Int, keep: Schema.BooleanFromBit, network: Schema.String })
+  Schema.Struct({ changed: Int, keep: Schema.BooleanFromBit, life: Int, network: Schema.String })
 );
 
 /** A tombstone. */

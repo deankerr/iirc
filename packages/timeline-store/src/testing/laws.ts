@@ -92,8 +92,13 @@ const described = (
   kind: Kind,
   name: string,
   key: string | null,
-  on = libera
-): Change => ({ _tag: "Described", sequence, timeline: { id, key, kind, name, network: on } });
+  on = libera,
+  life = 1
+): Change => ({
+  _tag: "Described",
+  sequence,
+  timeline: { id, key, kind, life, name, network: on },
+});
 
 const opened = (sequence: number, on = libera): readonly Change[] => [
   described(sequence, network, "Network", on, null, on),
@@ -165,6 +170,7 @@ const apply = (store: TimelineStoreService, through: number, changes: readonly C
 const directoryAfter = (before: Directory, on: string, sequence: number): Directory =>
   step(before, {
     at: at(sequence),
+    life: 1,
     network: on,
     news: [{ _tag: "SessionBegan", at: at(sequence), nick: "iirc" }],
     sequence,
@@ -466,6 +472,7 @@ const additions: Interruption = {
       key: `#new-${sequence}`,
       kind: "Channel",
       latest: undefined,
+      life: 1,
       name: `#new-${sequence}`,
       network: libera,
       read: undefined,
@@ -664,9 +671,14 @@ const merging: Interruption = {
   ],
 };
 
-const removal = (sequence: number, keep: boolean, on = libera): Change => ({
+// Each Timeline's id, life, and whether its Network was removed.
+const lives = (summaries: readonly Summary[]) =>
+  summaries.map(({ id, life, removed }) => [id, life, removed]);
+
+const removal = (sequence: number, keep: boolean, on = libera, life = 1): Change => ({
   _tag: "Removed",
   keep,
+  life,
   network: on,
   sequence,
 });
@@ -676,7 +688,7 @@ const removal = (sequence: number, keep: boolean, on = libera): Change => ({
 const keeping: Interruption = {
   edit: (before, sequence) => ({
     ...before,
-    removals: [{ changed: sequence, keep: true, network: libera }],
+    removals: [{ changed: sequence, keep: true, life: 1, network: libera }],
     timelines: before.timelines.map((each) => ({ ...each, changed: sequence, removed: true })),
   }),
   seed: (sequence) => [
@@ -706,13 +718,13 @@ const dropping: Interruption = {
     dropped: [
       ...before.dropped,
       ...[...before.timelines.map(({ id }) => id), ...before.merged.map(({ id }) => id)].map(
-        (id) => ({ changed: sequence, id, network: libera })
+        (id) => ({ changed: sequence, id, life: 1, network: libera })
       ),
     ],
     gaps: before.gaps.filter(({ network: on }) => on !== libera),
     items: before.items.filter(({ network: on }) => on !== libera),
     merged: before.merged.filter(({ network: on }) => on !== libera),
-    removals: [{ changed: sequence, keep: false, network: libera }],
+    removals: [{ changed: sequence, keep: false, life: 1, network: libera }],
     timelines: before.timelines.filter(({ network: on }) => on !== libera),
   }),
   seed: (sequence) => {
@@ -1335,6 +1347,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
       Effect.gen(function* () {
         const stepped = step(emptyDirectory, {
           at: at(0),
+          life: 1,
           network: libera,
           news: [{ _tag: "SessionBegan", at: at(0), nick: "iirc" }],
           sequence: 5,
@@ -2576,6 +2589,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
 
             const stepped = step(yield* store.directory, {
               at: news[0].at,
+              life: 1,
               network: libera,
               news,
               sequence,
@@ -2946,13 +2960,53 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
   {
     check: (store) =>
       Effect.gen(function* () {
+        const again = timelineIdOf(5, 0, 0);
+
+        yield* apply(store, 2, [...opened(2)]);
+        yield* apply(store, 3, [removal(3, true)]);
+        yield* same(
+          "a kept removal's Timelines keep their life",
+          lives(yield* store.timelines(libera)),
+          [
+            [network, 1, true],
+            [channel, 1, true],
+            [other, 1, true],
+          ]
+        );
+        yield* apply(store, 4, [removal(4, false)]);
+        yield* same(
+          "what a drop gives names the life it ended",
+          (yield* store.changedAfter(3)).dropped.map(({ life }) => life),
+          [1, 1, 1]
+        );
+        yield* apply(store, 5, [described(5, again, "Network", libera, null, libera, 5)]);
+        yield* same(
+          "a Network given the id again, in a later life",
+          lives(yield* store.timelines(libera)),
+          [[again, 5, false]]
+        );
+        yield* apply(store, 6, [removal(6, false, libera, 5)]);
+
+        const changed = yield* store.changedAfter(5);
+
+        yield* same(
+          "its removal names the life it ended",
+          [changed.removals, changed.dropped.map(({ life }) => life)],
+          [[{ changed: 6, keep: false, life: 5, network: libera }], [5]]
+        );
+      }),
+    name: "keeps the life of each Timeline, of a drop, and of a removal",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
         // `oftc` never had a Timeline: it was configured disabled, and nothing happened.
         yield* apply(store, 2, [...opened(2)]);
         yield* apply(store, 3, [removal(3, true, oftc)]);
         yield* same(
           "a removal alone, of a Network with no Timeline",
           (yield* store.changedAfter(2, 1)).removals,
-          [{ changed: 3, keep: true, network: oftc }]
+          [{ changed: 3, keep: true, life: 1, network: oftc }]
         );
         yield* apply(store, 4, [removal(4, true), removal(4, false, oftc)]);
 
@@ -2962,13 +3016,13 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           "each Network's last removal, as it stands, by sequence and then Network",
           kept.removals,
           [
-            { changed: 4, keep: true, network: libera },
-            { changed: 4, keep: false, network: oftc },
+            { changed: 4, keep: true, life: 1, network: libera },
+            { changed: 4, keep: false, life: 1, network: oftc },
           ]
         );
         yield* same("given whole with its step", (yield* store.changedAfter(3)).removals, [
-          { changed: 4, keep: true, network: libera },
-          { changed: 4, keep: false, network: oftc },
+          { changed: 4, keep: true, life: 1, network: libera },
+          { changed: 4, keep: false, life: 1, network: oftc },
         ]);
         yield* same(
           "a step with a removal too big for the page, read everything again",
@@ -3110,6 +3164,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
             dropped: [network, channel, other, third].map((id) => ({
               changed: 5,
               id,
+              life: 1,
               network: libera,
             })),
             gaps: [],

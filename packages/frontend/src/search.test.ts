@@ -40,6 +40,7 @@ const timeline = (
     key: detached ? null : key,
     kind: name.startsWith("#") ? "Channel" : "Direct",
     latest: null,
+    life: 1,
     name,
     network,
     read: null,

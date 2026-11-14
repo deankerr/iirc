@@ -87,6 +87,16 @@ export type NetworkId = typeof NetworkId.Type;
 /** An Entry's place in the Journal. Sequences only increase, and may skip numbers. */
 export const Sequence = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.brand("Sequence"));
 
+/**
+ * Which life of a Network something belongs to: the sequence of the `Configured` that
+ * began that life, the first after the Network was added or after it was removed. It only
+ * increases for a Network's id, and the Daemon gives the same after a restart or a rebuild,
+ * so an answer from a Network removed and added again under its id is told apart.
+ */
+export const Life = Sequence.annotate({
+  description: "The sequence of the Configured that began this life of the Network.",
+});
+
 /** The decoded form of {@link Sequence}. */
 export type Sequence = typeof Sequence.Type;
 
@@ -741,6 +751,7 @@ export type News = typeof News.Type;
 /** What one Input to one Network made happen: its sequence, its time, and its News in order. */
 export const Happened = Schema.Struct({
   at: Instant,
+  life: Life,
   network: NetworkId,
   news: Schema.Array(News),
   sequence: Sequence,
@@ -1108,6 +1119,7 @@ export const Timeline = Schema.Struct({
   key: Schema.NullOr(Untrusted),
   kind: Schema.Literals(["Channel", "Direct", "Network"]),
   latest: Schema.NullOr(Cursor),
+  life: Life,
   name: Untrusted,
   network: NetworkId,
   read: Schema.NullOr(Instant),
@@ -1160,6 +1172,7 @@ export type Tombstone = typeof Tombstone.Type;
 export const DroppedTimeline = Schema.Struct({
   changed: Sequence,
   id: TimelineId,
+  life: Life,
   network: NetworkId,
 });
 
@@ -1174,6 +1187,7 @@ export type DroppedTimeline = typeof DroppedTimeline.Type;
 export const NetworkRemoval = Schema.Struct({
   changed: Sequence,
   keep: Schema.Boolean,
+  life: Life,
   network: NetworkId,
 });
 
@@ -1400,6 +1414,8 @@ export const Knowledge = Schema.Struct({
    * the keys of Timelines, or `null` until one has, when they are folded by `rfc1459`.
    */
   declared: Schema.NullOr(Casemapping),
+  /** The life of the Network this is known of. */
+  life: Life,
   self: Schema.NullOr(UserKnowledge),
   session: SessionKnowledge,
   users: Schema.Array(KeyedUser),
@@ -1554,13 +1570,23 @@ export const NetworkStatus = Schema.TaggedUnion({
 export type NetworkStatus = typeof NetworkStatus.Type;
 
 /** A Network and whether it is running. */
-export const NetworkEntry = Schema.Struct({ network: NetworkId, status: NetworkStatus });
+export const NetworkEntry = Schema.Struct({
+  life: Life,
+  network: NetworkId,
+  status: NetworkStatus,
+});
 
 /** The decoded form of {@link NetworkEntry}. */
 export type NetworkEntry = typeof NetworkEntry.Type;
 
 /** A Network removed with its Timelines kept, which no Network can take the id of until they are dropped. */
-export const RemovedNetwork = Schema.Struct({ network: NetworkId });
+export const RemovedNetwork = Schema.Struct({ life: Life, network: NetworkId });
+
+/** A Network removed: the sequence its removal was journaled at, and the life it ended. */
+export const Removed = Schema.Struct({ life: Life, sequence: Sequence });
+
+/** The decoded form of {@link Removed}. */
+export type Removed = typeof Removed.Type;
 
 /** The decoded form of {@link RemovedNetwork}. */
 export type RemovedNetwork = typeof RemovedNetwork.Type;

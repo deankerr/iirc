@@ -472,6 +472,7 @@ describe("the sources", () => {
     key: kind === "Network" ? null : name,
     kind,
     latest: null,
+    life: 1,
     name,
     network: "libera",
     read: null,
@@ -496,7 +497,11 @@ describe("the sources", () => {
       {
         _tag: "NetworksRead",
         entries: [
-          Schema.decodeSync(NetworkEntry)({ network: "libera", status: { _tag: "Running" } }),
+          Schema.decodeSync(NetworkEntry)({
+            life: 1,
+            network: "libera",
+            status: { _tag: "Running" },
+          }),
         ],
         removed: [],
       },

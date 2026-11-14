@@ -74,7 +74,7 @@ import type {
   Topic,
   UserKnowledge,
 } from "@iirc/client/known";
-import type { Happened, LookOutcome, NetworkInspection, NetworkStatus } from "@iirc/runtime";
+import type { Happened, Known, LookOutcome, NetworkInspection, NetworkStatus } from "@iirc/runtime";
 import type {
   CollapsedGap,
   Dropped,
@@ -920,6 +920,7 @@ const news = (source: News): WireNews => {
  */
 export const happened = (source: Happened): Fields<Happened, WireHappened> => ({
   at: source.at,
+  life: source.life,
   network: source.network,
   news: source.news.map(news),
   sequence: source.sequence,
@@ -1052,11 +1053,15 @@ export const member = (
  * @param source - The Client's Knowledge.
  * @returns Its wire form.
  */
-export const knowledge = (source: Knowledge): Fields<Knowledge, WireKnowledge> => ({
+export const knowledge = ({
+  knowledge: source,
+  life,
+}: Known): Fields<Knowledge, WireKnowledge, "life"> => ({
   casemapping: source.casemapping,
   channels: [...source.channels].map(([key, one]) => channel(key, one)),
   chantypes: source.chantypes ?? null,
   declared: source.declared ?? null,
+  life,
   self: source.self === undefined ? null : user(source.self),
   session: sessionKnowledge(source.session),
   users: [...source.users].map(([key, one]) => ({ ...user(one), key })),
@@ -1332,6 +1337,7 @@ export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detach
   key: source.key,
   kind: source.kind,
   latest: orNull(source.latest),
+  life: WireSequence.make(source.life),
   name: source.name,
   network: networkOf(source.network),
   read: orNull(source.read),
@@ -1371,6 +1377,7 @@ export const tombstone = (source: Tombstone): Fields<Tombstone, WireTombstone> =
 export const dropped = (source: Dropped): Fields<Dropped, WireDroppedTimeline> => ({
   changed: WireSequence.make(source.changed),
   id: source.id,
+  life: WireSequence.make(source.life),
   network: networkOf(source.network),
 });
 
@@ -1382,6 +1389,7 @@ export const dropped = (source: Dropped): Fields<Dropped, WireDroppedTimeline> =
 export const removal = (source: NetworkRemoval): Fields<NetworkRemoval, WireNetworkRemoval> => ({
   changed: WireSequence.make(source.changed),
   keep: source.keep,
+  life: WireSequence.make(source.life),
   network: networkOf(source.network),
 });
 

@@ -77,6 +77,7 @@ const described = (
   key,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
@@ -141,6 +142,7 @@ const world = (
   items: readonly (typeof TimelineItem.Encoded)[] = []
 ): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    life: 1,
     network: "libera",
     status: { _tag: "Running" },
   });

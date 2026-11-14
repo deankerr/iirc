@@ -104,6 +104,8 @@ export interface Tombstone {
 /** A Timeline dropped with its Network, of which only its id is kept, to say it is gone. */
 export interface Dropped {
   readonly network: string;
+  /** The life of its Network that was removed. */
+  readonly life: number;
   readonly id: TimelineId;
   readonly changed: number;
 }
@@ -114,6 +116,8 @@ export interface Dropped {
  */
 export interface NetworkRemoval {
   readonly network: string;
+  /** The life of the Network it ended. */
+  readonly life: number;
   readonly keep: boolean;
   readonly changed: number;
 }
