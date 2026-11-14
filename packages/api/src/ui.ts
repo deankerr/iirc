@@ -128,7 +128,7 @@ const themeForScheme = (scheme: "light" | "dark", example: ThemeName) =>
     Schema.makeFilter(
       (name: string) =>
         name !== "system" ||
-        "follows the device, so it is not a theme to draw while it is light or dark"
+        "must not be system, which follows the device and draws no theme of its own"
     )
   ).annotate({
     default: scheme,
@@ -369,15 +369,60 @@ export type FontShown = typeof FontShown.Type;
  */
 export const isFontName = (font: FontShown): font is FontName => fontNamesFolded.has(font);
 
+/**
+ * What Enter does in the Composer: `send` sends what is written, and Shift+Enter begins a
+ * new line; `newline` begins a new line, and Mod+Enter, Ctrl+Enter or ⌘Enter on a Mac,
+ * sends, as a phone's keyboard or a habit of writing several lines may want.
+ */
+export const EnterKey = Schema.Literals(["send", "newline"]).annotate({
+  default: "send",
+  description:
+    "What Enter does in the Composer: send, with Shift+Enter for a new line, or newline, with Ctrl+Enter, or ⌘Enter on a Mac, to send.",
+});
+
+/** The decoded form of {@link EnterKey}. */
+export type EnterKey = typeof EnterKey.Type;
+
+/** Whether the Composer checks spelling, as the device's own checker does. */
+export const SpellcheckShown = Schema.Boolean.annotate({
+  default: true,
+  description: "Whether the Composer checks spelling, with the device's own checker.",
+});
+
+/** The most UTF-16 code units the text after a completed nick may take. */
+export const nickSuffixMaxLength = 8;
+
+/**
+ * The text after a nick completed at the start of a line, as IRC clients address someone:
+ * at most {@link nickSuffixMaxLength} long, empty for none, with no control character or
+ * lone surrogate, so it never puts a line break or IRC formatting into the Composer. It is
+ * kept exactly as given, a trailing space included.
+ */
+export const NickSuffix = Schema.String.check(
+  Schema.isMaxLength(nickSuffixMaxLength, {
+    message: `must be at most ${nickSuffixMaxLength} characters`,
+  }),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]*$/u, { message: "must hold no control character" })
+).annotate({
+  default: ": ",
+  description: `The text after a nick Tab completes at the start of a line, up to ${nickSuffixMaxLength} characters, kept exactly, a trailing space included, or nothing. A nick completed anywhere else is followed by a space.`,
+});
+
+/** The decoded form of {@link NickSuffix}. */
+export type NickSuffix = typeof NickSuffix.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
   colours: ColoursShown,
   dark: themeForScheme("dark", "solarized-dark"),
+  enter: EnterKey,
   font: FontShown,
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
   size: TextSize,
+  spellcheck: SpellcheckShown,
+  suffix: NickSuffix,
   theme: ThemeShown,
   themes: Themes,
   time: TimeShown,

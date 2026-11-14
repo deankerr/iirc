@@ -388,18 +388,20 @@ const deviceOnlyUi = `Only an option under ui is kept for this device, as in /se
 /**
  * An option under `ui` set to a value given as text, for every device or this one.
  * @param name - The option's name.
- * @param text - The value.
+ * @param text - The value, or none when nothing followed the name.
  * @param device - Whether for this device alone.
  * @returns The intent, or why there is none.
  */
-const setUi = (name: string, text: string, device: boolean): Parsed<Intent> => {
+const setUi = (name: string, text: string | undefined, device: boolean): Parsed<Intent> => {
   const found = resolveUi(name);
 
   if (found._tag === "Invalid") {
     return found;
   }
 
-  if (text.trim() === "") {
+  // Text takes the rest of the line after the name's space as it is, empty or spaces
+  // included, as a Network's does. Anything else needs more than spaces.
+  if (text === undefined || (text.trim() === "" && found.value.field.kind._tag !== "Text")) {
     return invalid(`Give ${name} a value, or use /unset ${device ? `${deviceFlag} ` : ""}${name}.`);
   }
 
@@ -420,7 +422,7 @@ const setOnDevice = (args: string): Parsed<Intent> => {
   const name = space === -1 ? args : args.slice(0, space);
 
   return isUiName(name)
-    ? setUi(name, space === -1 ? "" : args.slice(space + 1), true)
+    ? setUi(name, space === -1 ? undefined : args.slice(space + 1), true)
     : invalid(deviceOnlyUi);
 };
 

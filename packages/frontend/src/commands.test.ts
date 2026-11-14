@@ -437,7 +437,8 @@ describe("themes", () => {
       light: [{ _tag: "UseTheme", device: false, name: "nord", option: "light" }],
       listed: [{ _tag: "ListThemes", option: "dark" }],
       set: [{ _tag: "ChangeUi", device: true, option: "light", value: "nord" }],
-      setSystem: 'ui.dark cannot be "system".',
+      setSystem:
+        "ui.dark must not be system, which follows the device and draws no theme of its own.",
       system:
         "system follows the device, so it is never the theme drawn while the device is light. Name a theme, such as light.",
       twice: usage,

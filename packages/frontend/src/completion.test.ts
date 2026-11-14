@@ -48,6 +48,7 @@ const sources: Sources = {
   options: ["network.libera.nicks", "network.libera.realname"],
   recent: [],
   self: undefined,
+  suffix: ": ",
 };
 
 /** Nicks at hand, as in a Direct Message, some alike under RFC 1459. */
@@ -216,6 +217,36 @@ describe("completing", () => {
       line: ["one\npeer: ", 10],
       middle: ["thanks peer ", 12],
       start: ["peer: ", 6],
+    });
+  });
+
+  it("puts the Owner's suffix after a nick at the start of a line, nothing for none, and a space elsewhere", () => {
+    const listed: Sources = {
+      ...sources,
+      nicks: { _tag: "Listed", nicks: ["peer"] },
+      suffix: ", ",
+    };
+
+    const none: Sources = { ...listed, suffix: "" };
+    const members: Sources = { ...sources, suffix: " -> " };
+    const read = { _tag: "NicksRead", nicks: ["peer"], request: 1 } as const;
+
+    expect({
+      asked: shown(play("pe", [tab, { ...read, place: iirc, text: "pe" }], members)),
+      askedMiddle: shown(play("hi pe", [tab, { ...read, place: iirc, text: "hi pe" }], members)),
+      cycled: shown(play("pe", [tab, tab], listed)),
+      line: shown(play("one\npe", [tab], listed)),
+      middle: shown(play("thanks pe", [tab], listed)),
+      none: shown(play("pe", [tab], none)),
+      start: shown(play("pe", [tab], listed)),
+    }).toStrictEqual({
+      asked: ["peer -> ", 8],
+      askedMiddle: ["hi peer ", 8],
+      cycled: ["peer, ", 6],
+      line: ["one\npeer, ", 10],
+      middle: ["thanks peer ", 12],
+      none: ["peer", 4],
+      start: ["peer, ", 6],
     });
   });
 
@@ -534,6 +565,7 @@ describe("the sources", () => {
       nowhere: [nowhere.channels, nowhere.nicks],
       options: channel.options.includes("network.libera.login.account"),
       recent: channel.recent,
+      suffix: [channel.suffix, sourcesOf(state, iirc, [], new Map(), ", ").suffix],
     }).toStrictEqual({
       channels: ["#iirc", "&local"],
       commands: true,
@@ -542,6 +574,7 @@ describe("the sources", () => {
       nowhere: [[], { _tag: "Listed", nicks: [] }],
       options: true,
       recent: ["ann", "bob", "ann"],
+      suffix: [": ", ", "],
     });
   });
 

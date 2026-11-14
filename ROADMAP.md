@@ -10,7 +10,6 @@ Options under `ui`, shared by every device and overridable on one, as `ui.size` 
 
 - **How a line is laid out:** the nick in a column of its own, in the line, or above what was said, with a run of Messages from one User under one nick.
 - **A 12-hour clock,** and how a day is written.
-- **The Composer's habits:** whether Enter sends, spellcheck, and what follows a completed nick.
 - **When a Timeline is marked read:** as it is shown, at its latest, or only when asked.
 - **Styles of the Owner's own,** as CSS, for what no option covers.
 - **The palette as part of the Composer,** opening above it rather than over the middle of the page: one list for commands, completions and Timelines. To be tried before it is decided.

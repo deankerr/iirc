@@ -1031,6 +1031,8 @@ const fontRefused = (text: string) => `ui.font cannot be "${text}".`;
 const leadingRefused = (text: string) =>
   `ui.leading: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
 
+const suffixRefused = (why: string) => `ui.suffix must ${why}.`;
+
 const widthRefused = (text: string) =>
   `ui.width: Give a whole number from 40 to 400, or none, not "${text}".`;
 
@@ -1040,10 +1042,13 @@ describe("the options under ui", () => {
       activity: "quiet",
       colours: "theme",
       dark: "dark",
+      enter: "send",
       font: "system",
       leading: 1.45,
       light: "light",
       size: 14,
+      spellcheck: false,
+      suffix: ", ",
       theme: "dark",
       themes: [],
       time: "HH:mm",
@@ -1064,6 +1069,7 @@ describe("the options under ui", () => {
         { _tag: "Choice", choices: ["all", "quiet", "none"] },
         { _tag: "Choice", choices: ["theme", "raw"] },
         { _tag: "Text" },
+        { _tag: "Choice", choices: ["send", "newline"] },
         {
           _tag: "ChoiceOrText",
           choices: [
@@ -1083,6 +1089,8 @@ describe("the options under ui", () => {
         { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Text" },
         { _tag: "Integer", maximum: 24, minimum: 10 },
+        { _tag: "Toggle" },
+        { _tag: "Text" },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
         { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "h:mm a", "h:mm:ss a", "none"] },
@@ -1103,10 +1111,13 @@ describe("the options under ui", () => {
         ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
         ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
         ["ui.dark", { _tag: "Shown", text: "dark" }, { _tag: "Unset" }, undefined],
+        ["ui.enter", { _tag: "Shown", text: "send" }, { _tag: "Unset" }, undefined],
         ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
         ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
+        ["ui.spellcheck", { _tag: "Shown", text: "on" }, { _tag: "Unset" }, undefined],
+        ["ui.suffix", { _tag: "Shown", text: ": " }, { _tag: "Unset" }, undefined],
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.time", { _tag: "Shown", text: "HH:mm" }, { _tag: "Unset" }, undefined],
@@ -1135,6 +1146,13 @@ describe("the options under ui", () => {
           "dark",
         ],
         [
+          "ui.enter",
+          { _tag: "Shown", text: "send" },
+          { _tag: "Shown", text: "send" },
+          undefined,
+          "send",
+        ],
+        [
           "ui.font",
           { _tag: "Shown", text: "system" },
           { _tag: "Shown", text: "system" },
@@ -1161,6 +1179,20 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "14" },
           { _tag: "Shown", text: "18" },
           "14",
+        ],
+        [
+          "ui.spellcheck",
+          { _tag: "Shown", text: "off" },
+          { _tag: "Shown", text: "off" },
+          undefined,
+          "on",
+        ],
+        [
+          "ui.suffix",
+          { _tag: "Shown", text: ", " },
+          { _tag: "Shown", text: ", " },
+          undefined,
+          ": ",
         ],
         [
           "ui.theme",
@@ -1207,7 +1239,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-12),
+        .slice(-15),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1216,10 +1248,13 @@ describe("the options under ui", () => {
         "ui.activity",
         "ui.colours",
         "ui.dark",
+        "ui.enter",
         "ui.font",
         "ui.leading",
         "ui.light",
         "ui.size",
+        "ui.spellcheck",
+        "ui.suffix",
         "ui.theme",
         "ui.themes",
         "ui.time",
@@ -1263,6 +1298,9 @@ describe("the options under ui", () => {
       deviceAlone: read("/set -device"),
       deviceNetwork: read("/set -device network.libera.nicks a"),
       empty: read("/set ui.time "),
+      enter: read("/set ui.enter newline"),
+      enterDevice: read("/set -device ui.enter NewLine"),
+      enterWrong: read("/set ui.enter shift"),
       font: read("/set ui.font IBM-Plex-Mono"),
       fontFamily: read("/set ui.font  Fira Code "),
       fontFamilyDevice: read("/set -device ui.font Fira Code"),
@@ -1280,6 +1318,17 @@ describe("the options under ui", () => {
       leadingTooSmall: read("/set ui.leading 0.9"),
       shared: read("/set ui.time HH:mm:ss"),
       size: read("/set -device ui.size 20"),
+      spellcheck: read("/set ui.spellcheck off"),
+      spellcheckDevice: read("/set -device ui.spellcheck ON"),
+      spellcheckWrong: read("/set ui.spellcheck maybe"),
+      suffix: read("/set ui.suffix , "),
+      suffixAlone: read("/set -device ui.suffix"),
+      suffixControl: read("/set ui.suffix :\u0003 "),
+      suffixDevice: read("/set -device ui.suffix  -> "),
+      suffixLongest: read(`/set ui.suffix ${"x".repeat(8)}`),
+      suffixNone: read("/set ui.suffix "),
+      suffixSpace: read("/set ui.suffix  "),
+      suffixTooLong: read(`/set ui.suffix ${"x".repeat(9)}`),
       tooBig: read("/set ui.size 25"),
       tooSmall: read("/set ui.size 9"),
       twelveHour: read("/set ui.time h:mm:ss a"),
@@ -1311,6 +1360,12 @@ describe("the options under ui", () => {
           "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
       },
       empty: { _tag: "Invalid", message: "Give ui.time a value, or use /unset ui.time." },
+      enter: change("enter", "newline", false),
+      enterDevice: change("enter", "newline", true),
+      enterWrong: {
+        _tag: "Invalid",
+        message: 'ui.enter: Choose one of send, newline, not "shift".',
+      },
       font: change("font", "ibm-plex-mono", false),
       fontFamily: change("font", "Fira Code", false),
       fontFamilyDevice: change("font", "Fira Code", true),
@@ -1331,6 +1386,21 @@ describe("the options under ui", () => {
       leadingTooSmall: { _tag: "Invalid", message: leadingRefused("0.9") },
       shared: change("time", "HH:mm:ss", false),
       size: change("size", 20, true),
+      spellcheck: change("spellcheck", false, false),
+      spellcheckDevice: change("spellcheck", true, true),
+      spellcheckWrong: { _tag: "Invalid", message: 'ui.spellcheck: Say on or off, not "maybe".' },
+      // The rest of the line after the name's space, exactly: a trailing space is kept.
+      suffix: change("suffix", ", ", false),
+      suffixAlone: {
+        _tag: "Invalid",
+        message: "Give ui.suffix a value, or use /unset -device ui.suffix.",
+      },
+      suffixControl: { _tag: "Invalid", message: suffixRefused("hold no control character") },
+      suffixDevice: change("suffix", " -> ", true),
+      suffixLongest: change("suffix", "x".repeat(8), false),
+      suffixNone: change("suffix", "", false),
+      suffixSpace: change("suffix", " ", false),
+      suffixTooLong: { _tag: "Invalid", message: suffixRefused("be at most 8 characters") },
       tooBig: { _tag: "Invalid", message: 'ui.size: Give a whole number from 10 to 24, not "25".' },
       tooSmall: {
         _tag: "Invalid",

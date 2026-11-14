@@ -23,7 +23,15 @@ import type { FontFamily, UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
-import { Exit, Number as Numbers, Option as Maybe, Predicate, Schema, SchemaAST } from "effect";
+import {
+  Exit,
+  Number as Numbers,
+  Option as Maybe,
+  Predicate,
+  Result,
+  Schema,
+  SchemaAST,
+} from "effect";
 
 import type { Parsed } from "./commands.ts";
 import { effectiveUi, noOverrides } from "./ui.ts";
@@ -1084,10 +1092,16 @@ export const parseUiText = (option: UiOptionName, text: string): Parsed<Json> =>
   }
 
   const codec = Schema.toCodecJson(UiOptions.fields[option]);
-  const value = Schema.decodeOption(codec)(json.value);
+  const value = Schema.decodeResult(codec)(json.value);
 
-  return Maybe.isSome(value)
-    ? parsed(Schema.encodeUnknownSync(codec)(value.value))
+  if (Result.isSuccess(value)) {
+    return parsed(Schema.encodeUnknownSync(codec)(value.success));
+  }
+
+  // Text is taken as it is, so only the Schema's own checks refuse it, and they say why
+  // without showing it back, as it may hold a control character.
+  return field.kind._tag === "Text"
+    ? invalid(`${uiOptionName(option)} ${value.failure.message}.`)
     : invalid(`${uiOptionName(option)} cannot be "${text.trim()}".`);
 };
 

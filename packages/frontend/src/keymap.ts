@@ -8,6 +8,8 @@
  *
  * @packageDocumentation
  */
+import type { EnterKey } from "@iirc/api/ui";
+
 import { commandWithId, runIn } from "./commands.ts";
 import type { CommandContext, Intent, Parsed } from "./commands.ts";
 
@@ -650,3 +652,78 @@ export const chordsFor = (keymap: Keymap, command: string): readonly Chord[] =>
   keymap
     .filter((binding) => binding.command === command && binding.args === "")
     .map((binding) => binding.keys);
+
+/** Enter, by the name a chord writes. */
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SAFETY: `named` holds `enter`, so it is a key's name, as `keyNamed` gives it.
+const enterKey = "enter" as KeyName;
+
+/**
+ * Enter, with Mod or Shift held or not.
+ * @param held - Whether Mod and Shift are held.
+ * @returns The chord.
+ */
+const enterWith = ({ mod, shift }: { readonly mod: boolean; readonly shift: boolean }): Chord => ({
+  alt: false,
+  ctrl: false,
+  key: enterKey,
+  meta: false,
+  mod,
+  shift,
+});
+
+/**
+ * The chord that sends what the Composer holds, as `ui.enter` says: Enter for `send`, and
+ * Mod+Enter for `newline`.
+ * @param enter - What Enter does.
+ * @returns The chord.
+ */
+export const sendChord = (enter: EnterKey): Chord =>
+  enterWith({ mod: enter === "newline", shift: false });
+
+/**
+ * The chord that begins a new line in the Composer, as `ui.enter` says: Shift+Enter for
+ * `send`, and Enter for `newline`.
+ * @param enter - What Enter does.
+ * @returns The chord.
+ */
+export const newLineChord = (enter: EnterKey): Chord =>
+  enterWith({ mod: false, shift: enter === "send" });
+
+/** What an Enter pressed in the Composer does: sends what it holds, or begins a new line. */
+export type EnterPress = "Send" | "NewLine";
+
+/**
+ * What an Enter pressed in the Composer does, as `ui.enter` says. With `send`, Enter sends
+ * whatever else is held, as it always has, but Shift, which begins a new line. With
+ * `newline`, Mod+Enter sends, and Enter or Shift+Enter begins a new line, which the field
+ * does itself. Any other key, or Enter with another modifier under `newline`, is none of
+ * the Composer's.
+ * @param enter - What Enter does.
+ * @param event - The key.
+ * @param platform - The platform, which says which key is Mod.
+ * @returns What it does, or none.
+ */
+export const enterPressed = (
+  enter: EnterKey,
+  event: KeyEvent,
+  platform: Platform
+): EnterPress | undefined => {
+  const pressed = chordOf(event, platform);
+
+  if (pressed?.key !== enterKey) {
+    return undefined;
+  }
+
+  if (enter === "send") {
+    return pressed.shift ? "NewLine" : "Send";
+  }
+
+  if (sameKeys(sendChord(enter), pressed, platform)) {
+    return "Send";
+  }
+
+  return sameKeys(newLineChord(enter), pressed, platform) ||
+    sameKeys(enterWith({ mod: false, shift: true }), pressed, platform)
+    ? "NewLine"
+    : undefined;
+};

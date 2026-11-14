@@ -1,8 +1,11 @@
 /**
  * The composer under the Panes, the focused Pane's Timeline's or, with none open, one where
  * commands that need no Timeline are typed: a prompt naming where it is, and a textarea.
- * Enter sends and Shift+Enter starts a new line, Up and Down recall what was sent from
- * the first and last lines, and Escape lets go of an error or a confirmation, or, with
+ * Enter sends, or begins a new line, as `ui.enter` says, and the other is Enter with a
+ * modifier; where Enter begins a new line a button sends too, as a phone's keyboard has no
+ * modifier. Up and Down recall what was sent from the first and last lines, and Tab
+ * completes, a nick at the start of a line followed by `ui.suffix`. Spelling is checked as
+ * `ui.spellcheck` says. Escape lets go of an error or a confirmation, or, with
  * neither, closes what stands in front of the focused Pane's Timeline, the options, the
  * search, or a Direct Message not yet begun, or with nothing in front, puts its Lookup card
  * away. What it says goes through the command
@@ -15,13 +18,16 @@ import { typesCredential } from "@iirc/frontend/commands";
 import { active, announced, completes, cycled } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
+import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { allScope } from "@iirc/frontend/palette";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, mainView } from "../options/atoms.ts";
-import { openPalette } from "../palette/state.ts";
+import { enterShown, spellcheckShown } from "../options/ui.ts";
+import { keyOf } from "../palette/press.ts";
+import { openPalette, platform } from "../palette/state.ts";
 import { focusedId, paneNumber } from "../panes/atoms.ts";
 import { closeSearch } from "../search/atoms.ts";
 import { closeDraft, openTimeline, sidebarNetworks } from "../timelines/atoms.ts";
@@ -134,6 +140,9 @@ const Composer = ({
   const main = useAtomValue(mainView);
   const pane = useAtomValue(focusedId);
   const focusAsked = useAtomValue(composerFocus);
+  const enter = useAtomValue(enterShown);
+  const spellcheck = useAtomValue(spellcheckShown);
+  const sendKeys = showChord(sendChord(enter), platform);
   const input = useRef<HTMLTextAreaElement>(null);
   const focusSeen = useRef(focusAsked);
   const appliedSeen = useRef(completion.applied);
@@ -248,6 +257,24 @@ const Composer = ({
     }
   };
 
+  /**
+   * Sends what the composer holds, or the lines waiting to be confirmed. A Credential's
+   * value typed here is refused, and let go of at once, the textarea's own value and React
+   * DOM's tracker of it included, before anything else reads it.
+   * @param element - The textarea.
+   */
+  const sendFrom = (element: HTMLTextAreaElement | null) => {
+    if (element !== null && linesOf(element.value).some((line) => typesCredential(line))) {
+      element.value = "";
+    }
+
+    if (confirming === undefined) {
+      sendNow(timeline);
+    } else {
+      confirmNow(timeline);
+    }
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const element = event.currentTarget;
     const { selectionEnd, selectionStart, value } = element;
@@ -264,20 +291,12 @@ const Composer = ({
       return;
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    // Enter that begins a new line is the textarea's own, so only one that sends is taken.
+    const entered = enterPressed(enter, keyOf(event.nativeEvent), platform);
+
+    if (entered === "Send") {
       event.preventDefault();
-
-      // A Credential's value typed here is refused, and let go of at once, the input's own
-      // value and React DOM's tracker of it included, before anything else reads it.
-      if (linesOf(value).some((line) => typesCredential(line))) {
-        element.value = "";
-      }
-
-      if (confirming === undefined) {
-        sendNow(timeline);
-      } else {
-        confirmNow(timeline);
-      }
+      sendFrom(element);
     } else if (event.key === "Escape") {
       event.preventDefault();
       escaped();
@@ -312,12 +331,12 @@ const Composer = ({
       {confirming === undefined ? null : (
         <div className={styles.notice} id={noticeId} role="alert">
           <p>
-            Send {confirming.lines} lines to <bdi>{name}</bdi>? Enter sends them, Escape keeps them
-            here.
+            Send {confirming.lines} lines to <bdi>{name}</bdi>? {sendKeys} sends them, Escape keeps
+            them here.
           </p>
           <Button
             onPress={() => {
-              confirmNow(timeline);
+              sendFrom(input.current);
             }}
             size="small"
             variant="primary"
@@ -396,9 +415,21 @@ const Composer = ({
           onKeyDown={onKeyDown}
           ref={input}
           rows={1}
-          spellCheck
+          spellCheck={spellcheck}
           value={draft.text}
         />
+        {enter === "newline" ? (
+          <IconButton
+            icon="send"
+            keys={sendKeys}
+            label="Send"
+            onPress={() => {
+              sendFrom(input.current);
+              input.current?.focus();
+            }}
+            size="small"
+          />
+        ) : null}
         <PaletteButton />
       </div>
     </div>

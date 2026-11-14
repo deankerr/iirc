@@ -977,26 +977,64 @@ describe("the web frontend on iirc daemon --web", () => {
         await composer.press("ArrowUp");
         const recalled = await composer.inputValue();
 
+        // With ui.enter newline on this device, Enter begins a line, a send button shows, and
+        // Mod+Enter sends both lines.
+        const sendButton = page.getByRole("button", { exact: true, name: "Send" });
+        const buttonBefore = await sendButton.count();
+
+        await composer.fill("/set -device ui.enter newline");
+        await composer.press("Enter");
+        await sendButton.waitFor();
+        await composer.fill("one");
+        await composer.press("Enter");
+        await composer.pressSequentially("two");
+        const twoLines = await composer.inputValue();
+
+        await composer.press("ControlOrMeta+Enter");
+
+        const first = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "one",
+          "the first line"
+        );
+
+        const second = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "two",
+          "the second line"
+        );
+
+        // The button sends as Mod+Enter does.
+        await composer.fill("pressed");
+        await sendButton.click();
+
+        const pressed = await peer.waitFor(
+          (line) => line.command === "PRIVMSG" && line.params[1] === "pressed",
+          "the line the button sent"
+        );
+
         const violations = await page.evaluate(
           () => document.documentElement.dataset.cspViolations ?? ""
         );
 
         expect({
           action: action.params,
+          buttonBefore,
           cleared,
           delivery,
           direct: direct.params,
           heard: heard.params,
+          newline: [twoLines, first.params, second.params, pressed.params],
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           recalled,
           rows,
           violations,
         }).toStrictEqual({
           action: [channel, "\u0001ACTION waves\u0001"],
+          buttonBefore: 0,
           cleared: "",
           delivery: false,
           direct: ["peer", "hi"],
           heard: [channel, "hello from the web"],
+          newline: ["one\ntwo", [channel, "one"], [channel, "two"], [channel, "pressed"]],
           problems: [],
           recalled: "/msg peer hi",
           rows: 1,

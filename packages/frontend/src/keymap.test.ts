@@ -9,13 +9,16 @@ import {
   chordsFor,
   defaultBindings,
   defaultKeymap,
+  enterPressed,
   formatChord,
   keyNamed,
   keymapOf,
+  newLineChord,
   parseChord,
   parseWhen,
   isTyping,
   resolve,
+  sendChord,
   showChord,
   typesInComposer,
 } from "./keymap.ts";
@@ -668,5 +671,82 @@ describe("the Panes' keys", () => {
       paste: typesInComposer(defaultKeymap, at(), press("v", "KeyV", { ctrl: true })),
       plain: typesInComposer(defaultKeymap, at(), press("i", "KeyI")),
     }).toStrictEqual({ altA: false, modK: false, paste: true, plain: true });
+  });
+});
+
+describe("Enter in the Composer", () => {
+  const held = {
+    alt: { alt: true },
+    ctrl: { ctrl: true },
+    meta: { meta: true },
+    plain: {},
+    shift: { shift: true },
+    shiftCtrl: { ctrl: true, shift: true },
+  } as const;
+
+  const presses = (enter: "send" | "newline", platform: Platform) =>
+    Object.fromEntries(
+      Object.entries(held).map(([name, more]) => [
+        name,
+        enterPressed(enter, press("Enter", "Enter", more), platform),
+      ])
+    );
+
+  it("sends on Enter and begins a new line on Shift+Enter, as it always has, under send", () => {
+    const sent = { alt: "Send", ctrl: "Send", meta: "Send", plain: "Send", shift: "NewLine" };
+
+    expect({
+      mac: presses("send", "Mac"),
+      other: presses("send", "Other"),
+    }).toStrictEqual({
+      mac: { ...sent, shiftCtrl: "NewLine" },
+      other: { ...sent, shiftCtrl: "NewLine" },
+    });
+  });
+
+  it("begins a new line on Enter and sends on Mod+Enter, Ctrl or Cmd as the platform has it, under newline", () => {
+    expect({
+      mac: presses("newline", "Mac"),
+      other: presses("newline", "Other"),
+    }).toStrictEqual({
+      mac: {
+        alt: undefined,
+        ctrl: undefined,
+        meta: "Send",
+        plain: "NewLine",
+        shift: "NewLine",
+        shiftCtrl: undefined,
+      },
+      other: {
+        alt: undefined,
+        ctrl: "Send",
+        meta: undefined,
+        plain: "NewLine",
+        shift: "NewLine",
+        shiftCtrl: undefined,
+      },
+    });
+  });
+
+  it("is none of the Composer's for any other key", () => {
+    expect(
+      (["send", "newline"] as const).flatMap((enter) => [
+        enterPressed(enter, press("a", "KeyA"), "Other"),
+        enterPressed(enter, press("Tab", "Tab", { ctrl: true }), "Mac"),
+        enterPressed(enter, press("Process", "Enter"), "Other"),
+      ])
+    ).toStrictEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  it("shows the chord that sends and the one that begins a new line, on each platform", () => {
+    expect(
+      (["send", "newline"] as const).map((enter) => ({
+        mac: [showChord(sendChord(enter), "Mac"), showChord(newLineChord(enter), "Mac")],
+        other: [showChord(sendChord(enter), "Other"), showChord(newLineChord(enter), "Other")],
+      }))
+    ).toStrictEqual([
+      { mac: ["Enter", "⇧Enter"], other: ["Enter", "Shift+Enter"] },
+      { mac: ["⌘Enter", "Enter"], other: ["Ctrl+Enter", "Enter"] },
+    ]);
   });
 });
