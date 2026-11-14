@@ -60,7 +60,7 @@ import {
 } from "./run.ts";
 import { runEffects, runStage } from "./seam.ts";
 import type { Link, State } from "./state.ts";
-import { initialState } from "./state.ts";
+import { initialState, maxActions } from "./state.ts";
 import { addressFor, pruned, rescheduled } from "./sts.ts";
 import { lagAfter, silentAfter, tableOf, timersOf, wakes } from "./timers.ts";
 import type { Purpose } from "./timers.ts";
@@ -322,6 +322,7 @@ const hear = (run: Run): void => {
 };
 
 const arrivalOf = (run: Run, line: Line): Arrival => ({
+  about: undefined,
   answers: undefined,
   batch: undefined,
   id: { _tag: "Unknown" },
@@ -446,6 +447,22 @@ const received = (run: Run, link: Link, bytes: Uint8Array): void => {
 
 // The Owner
 
+// Remembers where a labelled `Say` was said to, so a `WARN` or `NOTE` labelled for it is
+// shown where its Message stands. The oldest is forgotten past the bound.
+const rememberSaid = (run: Run, intent: IntentId, target: string): void => {
+  const said = new Map(run.state.said).set(intent, target);
+
+  for (const oldest of said.keys()) {
+    if (said.size <= maxActions) {
+      break;
+    }
+
+    said.delete(oldest);
+  }
+
+  run.state = { ...run.state, said };
+};
+
 const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   const session = sessionOf(run.state);
 
@@ -474,6 +491,19 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
   // A Feature refused it at egress, and `send` reported it.
   if (sent === undefined) {
     return;
+  }
+
+  if (sent.echo) {
+    rememberSaid(run, input.intent, input.target);
+  } else {
+    // Nothing ties a standard reply to this Say, but the latest of its command is the best
+    // guess, so its Target is kept for the Connection.
+    const command = input.kind === "Notice" ? "NOTICE" : "PRIVMSG";
+
+    updateOpen(run, (open) => ({
+      ...open,
+      lastSaid: { ...open.lastSaid, [command]: input.target },
+    }));
   }
 
   run.news.push(

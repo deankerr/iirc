@@ -737,21 +737,48 @@ export const tiedAction = (run: Run, line: Line): Tied | undefined => {
 };
 
 /**
+ * The oldest Line of an action sent with a command, as a standard reply names it, compared
+ * without regard to ASCII case.
+ * @param run - The step.
+ * @param command - The command the reply names.
+ * @returns The Line, with its intent, or `undefined` for none.
+ */
+export const actionByCommand = (
+  run: Run,
+  command: string
+): (Tied & { readonly intent: IntentId }) | undefined => {
+  const acting = openOf(run.state)?.acting ?? [];
+  const verb = upperCaseAscii(command);
+  const index = acting.findIndex((each) => each.command === verb);
+  const tied = acting[index];
+
+  return tied === undefined ? undefined : { index, intent: tied.intent, order: tied.order };
+};
+
+/**
  * Ties an error numeric to the Line of an action {@link tiedAction} found, and reports the
- * action `Rejected` with the numeric, once for its intent. A numeric that names one of a
+ * action `Rejected` with the numeric, or a `FAIL`'s code, once for its intent: one for an intent
+ * already refused refuses nothing. A numeric that names one of a
  * Line's targets, such as `441` a nick of a `KICK`, answers one occurrence of that target
  * alone, and one that names only what the Line is about, such as `482` its Channel,
  * answers the whole Line.
  * @param run - The step.
  * @param line - The Line, live and tied to nothing by label.
  * @param found - The Line of an action it names.
+ * @param reply - What it is reported `Rejected` with: the numeric, or a `FAIL`'s code.
+ * @returns Whether it refused the intent, as opposed to one already refused.
  */
-export const tieRejection = (run: Run, line: Line, found: Tied): void => {
+export const tieRejection = (
+  run: Run,
+  line: Line,
+  found: Tied,
+  reply: string = line.command
+): boolean => {
   const open = openOf(run.state);
   const tied = open?.acting[found.index];
 
   if (tied === undefined) {
-    return;
+    return false;
   }
 
   const fold = folder(run.state);
@@ -765,8 +792,10 @@ export const tieRejection = (run: Run, line: Line, found: Tied): void => {
     })
   );
 
-  if (!tied.reported) {
-    refuseIntent(run, tied.intent, { _tag: "Rejected", reply: line.command });
+  const refuses = !tied.reported;
+
+  if (refuses) {
+    refuseIntent(run, tied.intent, { _tag: "Rejected", reply });
   }
 
   const target = tied.targets.findIndex(
@@ -777,6 +806,8 @@ export const tieRejection = (run: Run, line: Line, found: Tied): void => {
     ...phase,
     acting: resolve(phase.acting, found.index, target === -1 ? undefined : target, true),
   }));
+
+  return refuses;
 };
 
 /** What a success answers: one target of a Line, as `matches` finds it, or a Line with none. */

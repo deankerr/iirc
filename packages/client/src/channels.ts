@@ -473,6 +473,11 @@ export const foldActivity = (
   const fold = folder(run.state);
 
   switch (activity._tag) {
+    // What the Network said of something sent changes no Channel.
+    case "StandardReply": {
+      return;
+    }
+
     case "Joined": {
       if (isSelf(run, activity.nick)) {
         joinedSelf(run, activity.channel);

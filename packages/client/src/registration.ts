@@ -151,6 +151,7 @@ export const begin = (run: Run): void => {
     confirmed: [],
     error: false,
     isupport: new Map(),
+    lastSaid: { NOTICE: undefined, PRIVMSG: undefined },
     loggedIn: false,
     lookups: [],
     modesQuery: undefined,

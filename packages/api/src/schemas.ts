@@ -366,7 +366,33 @@ export const ModeChange = Schema.Struct({
 /** The decoded form of {@link ModeChange}. */
 export type ModeChange = typeof ModeChange.Type;
 
-/** Something that changed on a Network, rather than something said. */
+/**
+ * A standard reply, by IRCv3: a `FAIL`, `WARN`, or `NOTE`, with the command it is about,
+ * or `*` for none, its code, the parameters between the code and the description, and the
+ * description, text for people, which nothing is decided from.
+ */
+const standardReply = {
+  code: Untrusted,
+  command: Untrusted,
+  context: Schema.Array(Untrusted),
+  description: Untrusted,
+  kind: Schema.Literals(["FAIL", "WARN", "NOTE"]),
+};
+
+/** A standard reply, as a Lookup's result keeps a `WARN`, a `NOTE`, or a `FAIL` after its first. */
+export const StandardReply = Schema.Struct(standardReply);
+
+/** The decoded form of {@link StandardReply}. */
+export type StandardReply = typeof StandardReply.Type;
+
+/** The `WARN` and `NOTE` replies a Lookup's reply held, and each `FAIL` after the first, in order. */
+const Notes = Schema.Array(StandardReply);
+
+/**
+ * Something that changed on a Network, rather than something said. A `StandardReply` is
+ * what the Network said of something sent, shown where that belongs, or of nothing, shown
+ * in the Network's own Timeline: a `WARN`, a `NOTE`, or a `FAIL` that refused nothing.
+ */
 export const Activity = Schema.TaggedUnion({
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
   Joined: { channel: Untrusted, nick: Untrusted },
@@ -375,6 +401,7 @@ export const Activity = Schema.TaggedUnion({
   NickChanged: { from: Untrusted, to: Untrusted },
   Parted: { channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   Quit: { nick: Untrusted, reason: Schema.NullOr(Untrusted) },
+  StandardReply: standardReply,
   TopicChanged: { by: Untrusted, channel: Untrusted, topic: Schema.NullOr(Topic) },
 });
 
@@ -567,13 +594,15 @@ export type Profile = typeof Profile.Type;
  * the reply ran past the Lines one Lookup keeps (`Bounded`); `NotFound`, no such User, by
  * `401`, `406`, or an end with no User; `Failed`, another error, by its numeric or a
  * `FAIL`'s code, or a labelled answer that said nothing readable, by its command; `Refused`, not sent, `Offline`, `Unsendable`, or `Busy` with too many
- * Lookups at once; or `Unsent`, its Line never left.
+ * Lookups at once; or `Unsent`, its Line never left. One the Network answered keeps the
+ * `WARN` and `NOTE` replies its reply held, and each `FAIL` after the first, in `notes`.
  */
 export const LookResult = Schema.TaggedUnion({
-  Failed: { reply: Untrusted },
-  Found: { profiles: Schema.Array(Profile) },
-  NotFound: { reply: Untrusted },
+  Failed: { notes: Notes, reply: Untrusted },
+  Found: { notes: Notes, profiles: Schema.Array(Profile) },
+  NotFound: { notes: Notes, reply: Untrusted },
   Partial: {
+    notes: Notes,
     profiles: Schema.Array(Profile),
     reason: Schema.Literals(["TimedOut", "Ended", "Bounded"]),
   },

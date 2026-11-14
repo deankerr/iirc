@@ -337,7 +337,7 @@ export type Delivery = "Pending" | "Unconfirmed" | "Confirmed" | "Unsent" | "Rej
 /**
  * One item as a line: a Message, by its sender, with its text and, for one of ours, its
  * delivery, or a description of an Activity, a Session's start or end, or an action of
- * ours that was refused, whose tone is `Refused`.
+ * ours that was refused, whose tone is `Refused`, as a `FAIL`'s is.
  */
 export type Line =
   | {
@@ -386,7 +386,8 @@ const markerOf = (activity: Activity): Marker => {
     case "NickChanged":
     case "TopicChanged":
     case "ModeChanged":
-    case "AwayChanged": {
+    case "AwayChanged":
+    case "StandardReply": {
       return "--";
     }
 
@@ -491,6 +492,19 @@ const describeActivity = (activity: Activity): readonly Part[] => {
             words(" is away"),
             ...(activity.away.message === "" ? [] : [words(": "), said(activity.away.message)]),
           ];
+    }
+
+    // As the Network gave it: its kind, the command it is about, its code, its context, and
+    // its description, each a field of its own.
+    case "StandardReply": {
+      return [
+        words(`${activity.kind} `),
+        name(activity.command),
+        words(" "),
+        name(activity.code),
+        ...activity.context.flatMap((each) => [words(" "), name(each)]),
+        ...(activity.description === "" ? [] : [words(": "), said(activity.description)]),
+      ];
     }
 
     default: {
@@ -826,11 +840,14 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
     }
 
     case "Activity": {
+      const { activity } = content;
+
       return {
         _tag: "Description",
-        marker: markerOf(content.activity),
-        parts: describeActivity(content.activity),
-        tone: "Activity",
+        marker: markerOf(activity),
+        parts: describeActivity(activity),
+        tone:
+          activity._tag === "StandardReply" && activity.kind === "FAIL" ? "Refused" : "Activity",
       };
     }
 

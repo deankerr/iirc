@@ -99,4 +99,41 @@ describe("a played Session", () => {
       placed: refused?._tag === "Added" ? refused.timeline : undefined,
     }).toStrictEqual({ channels: ["#foo{"], opened: 2, placed: channels?.get("#foo{") });
   });
+
+  it("does not place a reply to a Say to Bob in the Timeline of the User who took his nick", () => {
+    const echo = ["batch", "echo-message", "labeled-response"];
+
+    const { changes, directory } = folded([
+      registered(base, { offered: echo }),
+      joined(base, "#iirc", ["bob", "alice"]),
+      lines(
+        "!! say bob :hi",
+        ">> @label=l1 PRIVMSG bob hi",
+        "...",
+        "!! say alice :yo",
+        ">> @label=l2 PRIVMSG alice yo",
+        "...",
+        "<< :bob!u@h QUIT :bye",
+        "...",
+        "<< :alice!u@h NICK bob",
+        "?? activity NickChanged alice bob in=channel:#iirc in=renamed:alice>bob",
+        "<< @label=l1 :irc.test WARN PRIVMSG QUEUED bob :Held for a moment",
+        "?? activity StandardReply WARN PRIVMSG QUEUED context=bob in=network :Held for a moment"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const warned = changes.find(
+      (change) =>
+        change._tag === "Added" &&
+        change.content._tag === "Activity" &&
+        change.content.activity._tag === "StandardReply"
+    );
+
+    expect(warned?._tag === "Added" ? warned.timeline : undefined).toBe(libera?.timeline);
+    expect(warned?._tag === "Added" ? warned.timeline : undefined).not.toBe(
+      libera?.directs.get("bob")
+    );
+  });
 });

@@ -315,6 +315,25 @@ const activity = (activity: typeof Activity.Encoded): ItemContent =>
   content({ _tag: "Activity", activity, at: unknown, id: unknown, live: true });
 
 /**
+ * A standard reply's line, about `PRIVMSG` with a hostile code.
+ * @param kind - `FAIL`, `WARN`, or `NOTE`.
+ * @param context - Its context.
+ * @param description - Its description.
+ * @returns The line.
+ */
+const reply = (kind: "FAIL" | "WARN" | "NOTE", context: readonly string[], description: string) =>
+  lineOf(
+    activity({
+      _tag: "StandardReply",
+      code: "CODE\u202E",
+      command: "PRIVMSG",
+      context,
+      description,
+      kind,
+    })
+  );
+
+/**
  * A line's words, with each nick in angle brackets, as a reader would see it.
  * @param line - The line.
  * @returns Its words.
@@ -499,6 +518,24 @@ describe("lines", () => {
       "<op> set +o peer -m on #iirc",
       "<peer> is away: lunch",
       "<peer> is back",
+    ]);
+  });
+
+  it("shows a standard reply by its kind, command, code, context, and description, a FAIL as refused", () => {
+    expect(
+      [
+        reply("WARN", ["#iirc"], "\u0002Modified"),
+        reply("NOTE", [], ""),
+        reply("FAIL", ["a\u0007", "b"], "Nope"),
+      ].map((line) => [
+        line._tag === "Description" && line.tone,
+        line._tag === "Description" && line.marker,
+        read(line),
+      ])
+    ).toStrictEqual([
+      ["Activity", "--", "WARN PRIVMSG CODE\u202E\u202C #iirc: Modified"],
+      ["Activity", "--", "NOTE PRIVMSG CODE\u202E\u202C"],
+      ["Refused", "--", "FAIL PRIVMSG CODE\u202E\u202C a\u2407 b: Nope"],
     ]);
   });
 

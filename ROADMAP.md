@@ -79,10 +79,9 @@ Ratified specifications only, ordered by how many Ircds and Networks offer each 
 4. **Presence:** `MONITOR` with `extended-monitor`, for Direct Message partners and for a nick to take back, pushed by the Ircd rather than polled. `WATCH` where an Ircd offers only that.
 5. **`WHO` with `WHOX`,** once on joining, for the accounts and away status of members already there.
 6. **Replies,** through the `reply` client tag: a Message shown with what it answers, and written from a Message's menu. `channel-context` beside it.
-7. **`standard-replies`:** `FAIL`, `WARN` and `NOTE` read by code.
-8. **`netsplit` and `netjoin` batches,** shown as one Activity rather than hundreds of quits.
-9. **SASL `SCRAM-SHA-256` and `EXTERNAL`,** the latter with a client certificate, and logging in again when `sasl` is offered anew. Both need a decision on where a challenge's answer is worked out.
-10. **Typing,** through `TAGMSG`, once we decide how the Journal holds Lines that can arrive every few seconds.
+7. **`netsplit` and `netjoin` batches,** shown as one Activity rather than hundreds of quits.
+8. **SASL `SCRAM-SHA-256` and `EXTERNAL`,** the latter with a client certificate, and logging in again when `sasl` is offered anew. Both need a decision on where a challenge's answer is worked out.
+9. **Typing,** through `TAGMSG`, once we decide how the Journal holds Lines that can arrive every few seconds.
 
 Not taken up: `no-implicit-names`, since the Client wants the names; IRC over WebSocket, since the Daemon dials TCP; and WebIRC, which is for gateways.
 

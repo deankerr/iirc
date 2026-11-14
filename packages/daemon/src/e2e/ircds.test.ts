@@ -288,11 +288,11 @@ describe("ngircd, on the floor", () => {
     expect(result).toStrictEqual({
       channels: [channel],
       nick: "seen",
-      nobody: { _tag: "NotFound", reply: "401" },
+      nobody: { _tag: "NotFound", notes: [], reply: "401" },
       server: true,
       stored: "Found",
       user: true,
-      whowas: { _tag: "NotFound", reply: "406" },
+      whowas: { _tag: "NotFound", notes: [], reply: "406" },
     });
   }, 60_000);
 

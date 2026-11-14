@@ -17,7 +17,8 @@ import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
 import type { Run } from "./run.ts";
-import { folder } from "./run.ts";
+import { folder, updateOpen } from "./run.ts";
+import { sessionOf } from "./views.ts";
 
 type MessageNews = Extract<News, { readonly _tag: "Message" }>;
 
@@ -232,6 +233,11 @@ const activityTimelines = (
       return isSelf(run, activity.nick) ? [network] : theirs(activity.nick);
     }
 
+    // The core places a standard reply where what it answers belongs, before it is routed.
+    case "StandardReply": {
+      return [network];
+    }
+
     default: {
       return activity satisfies never;
     }
@@ -284,6 +290,15 @@ export const routeOurs = (run: Run, message: Unrouted<MessageNews>): MessageNews
 });
 
 /**
+ * Where a Message Self said to a Target stands now, as {@link routeOurs} places it.
+ * @param run - The step.
+ * @param target - The Target, as the Owner named it.
+ * @returns The Timelines.
+ */
+export const saidWhere = (run: Run, target: string): readonly Where[] =>
+  messageWhere(run, sessionOf(run.state)?.nick ?? "", true, target);
+
+/**
  * The Timeline an Owner's `Read` marks: the Network's own for no Target, else the one
  * Target's, read as a `Say`'s is, with a Direct Message partner's `existing`, since
  * marking read starts no Timeline. A list, a mask, or anything else that names no one
@@ -323,3 +338,61 @@ export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): Activ
   ...activity,
   where: activityWhere(run, activity.activity, activity.live),
 });
+
+/**
+ * Moves what the Client remembers of where Self said something to a partner who changed
+ * nick, as their Timeline follows the nick, so a reply that comes later is shown where the
+ * Message stands. A Target is one Channel or one nick, since a `Say` has no list, and a
+ * Target that names the old nick, by the Network's casemapping now, names the new one.
+ * Channels never move.
+ *
+ * A projection that moves a Timeline onto a nick detaches the Timeline already keyed by it,
+ * since nothing says it is the same person, so what is remembered of a Say to that nick is
+ * forgotten: a reply to it is shown in the Network's own Timeline, never in another User's.
+ * The Client cannot know whether the Timeline that moved exists, so it forgets whenever a
+ * partner is renamed onto a nick said to. What is remembered never grows.
+ * @param run - The step.
+ * @param where - Where an Activity belongs.
+ */
+export const followSays = (run: Run, where: readonly Where[]): void => {
+  const moves = where.flatMap((each) => (each._tag === "DirectRenamed" ? [each] : []));
+
+  if (moves.length === 0) {
+    return;
+  }
+
+  const naming = namingNow(run);
+
+  const follow = (target: string | undefined): string | undefined => {
+    const [only] = target === undefined ? [] : parseTargets(naming, target);
+
+    if (target === undefined || only?._tag !== "Nick") {
+      return target;
+    }
+
+    const { key } = named(run, target);
+
+    // A rename that only changes the case of a nick takes it from no one.
+    if (moves.some((move) => move.to.key === key && move.key !== key)) {
+      return undefined;
+    }
+
+    return moves.find((move) => move.key === key)?.to.name ?? target;
+  };
+
+  run.state = {
+    ...run.state,
+    said: new Map(
+      [...run.state.said].flatMap(([intent, target]) => {
+        const followed = follow(target);
+
+        return followed === undefined ? [] : [[intent, followed]];
+      })
+    ),
+  };
+
+  updateOpen(run, (open) => ({
+    ...open,
+    lastSaid: { NOTICE: follow(open.lastSaid.NOTICE), PRIVMSG: follow(open.lastSaid.PRIVMSG) },
+  }));
+};

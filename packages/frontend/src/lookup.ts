@@ -14,6 +14,7 @@ import type {
   NetworkId,
   Profile,
   Rank,
+  StandardReply,
   TimelineId,
 } from "@iirc/api";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
@@ -461,11 +462,15 @@ export interface ProfileShown {
  * - `Waiting`: no result yet, in words.
  * - `Profiles`: each User described, with a note when the reply was cut short.
  * - `Said`: no User, in words.
+ *
+ * `notes` are the `WARN` and `NOTE` replies the Network gave with its result, each as its
+ * kind, command, code, context, and description, contained.
  */
 export interface CardShown {
   readonly kind: LookupKind;
   readonly nick: string;
   readonly colour: number;
+  readonly notes: readonly string[];
   readonly body:
     | { readonly _tag: "Waiting"; readonly words: string }
     | {
@@ -703,6 +708,22 @@ const noUser = (
 };
 
 /**
+ * A `WARN` or `NOTE` of a Lookup's reply, as a line of text: its kind, command, code,
+ * context, and description, every field the Network wrote contained.
+ * @param note - The reply.
+ * @returns The text.
+ */
+const noteText = (note: StandardReply): string => {
+  const fields = [note.kind, note.command, note.code, ...note.context].map((each) =>
+    contained(each)
+  );
+
+  return note.description === ""
+    ? fields.join(" ")
+    : `${fields.join(" ")}: ${contained(note.description)}`;
+};
+
+/**
  * A card as a view draws it.
  * @param timelines - The Timelines, for which Channels have a Timeline to open.
  * @param card - The card.
@@ -717,8 +738,10 @@ export const cardShown = (
 ): CardShown => {
   const { lookup } = card.look;
   const nick = contained(lookup.nick);
-  const head = { colour: nickColour(lookup.nick), kind: lookup._tag, nick };
   const { phase } = card;
+  const result = phase._tag === "Done" ? phase.result : undefined;
+  const notes = result !== undefined && "notes" in result ? result.notes.map(noteText) : [];
+  const head = { colour: nickColour(lookup.nick), kind: lookup._tag, nick, notes };
 
   switch (phase._tag) {
     case "Asking": {

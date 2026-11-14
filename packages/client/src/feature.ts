@@ -94,6 +94,12 @@ export interface Arrival {
   /** The intent this Line answers. Starts unknown. `labeled-response` works it out from `label`. */
   readonly answers: IntentId | undefined;
   /**
+   * The intent whose answer this Line is part of, when it does not answer it itself, such
+   * as a `WARN` beside the echo, or a rejection of an intent already refused. Starts
+   * unknown. `labeled-response` works it out from `label`.
+   */
+  readonly about: IntentId | undefined;
+  /**
    * The Lookup whose labelled reply this Line is part of, and whether it ends that reply:
    * a labelled Line on its own, or the end of the batch that carried the label. Starts
    * unknown. `labeled-response` works it out from `label`, and the core collects the

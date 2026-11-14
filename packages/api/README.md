@@ -78,13 +78,13 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **A `say` or an `act` answers with what its step knew.** `Said` or `Acted` means it was sent, not that it reached the Ircd. `Refused` means the Client refused it in that step, as `Offline` or `Unsendable`. Either way it was journaled, at `sequence`, under `intent`.
 - **What happens after comes through the Timelines.** A Message's item says how its delivery stands, and an action the Ircd refuses later becomes an `ActionRefused` item, so a Frontend learns every outcome without reading News.
 - **The wire refuses little, and the Client checks the rest.** The wire refuses a line break or NUL, and an empty name. The Client checks an action against the Network, and never cuts a Line short.
-- **A Lookup answers with what it found,** waiting up to 35 s. `Pending` means no result came in that time: ask again by its intent. A Lookup changes nothing on the Network, so one whose outcome is uncertain can be asked again freely.
+- **A Lookup answers with what it found,** with any `WARN` or `NOTE` its reply held, and any `FAIL` after the first, in `notes`, waiting up to 35 s. `Pending` means no result came in that time: ask again by its intent. A Lookup changes nothing on the Network, so one whose outcome is uncertain can be asked again freely.
 - **A Read Marker only moves forward, and every Frontend shares it**. Marking read is a Frontend's decision, and the Daemon only records it.
 
 ### News
 
 - **News resumes exactly.** Each `happened` event is one step's News, and its event id is the sequence. A Frontend resumes with `after` or `Last-Event-ID`, misses nothing, and sees nothing twice. `heartbeat` events carry no id, so they never move its place.
-- **News says where it belongs.** Each Message and Activity carries `where`, and says whether it is a `highlight` and whether Self said it. A Frontend reads these and never works them out.
+- **News says where it belongs.** Each Message and Activity carries `where`, and says whether it is a `highlight` and whether Self said it. A Frontend reads these and never works them out. A `StandardReply` Activity is where what it answers belongs, or the Network's own Timeline.
 
 ### Timelines
 

@@ -96,6 +96,7 @@ export {
   SequenceFromString,
   SignInRequest,
   SessionKnowledge,
+  StandardReply,
   Tag,
   Level,
   Looked,

@@ -244,7 +244,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Keepalive** (`keepalive.test.ts`). Answers `PING` at once, byte for byte. After 60 s of silence it sends a `PING`, and after 90 s it hangs up.
 - **A Channel's modes** (`modes.test.ts`). Each time Self's join is confirmed, the Client asks the Channel's modes once with `MODE <channel>`, and folds the `324` that answers. One query waits at a time on a Connection, so a hundred Channels are asked one after another, each when the last is answered or after 30 s, and the Owner's Lines never queue behind them all. A Channel whose modes are already known by its turn is not asked. An error in answer leaves the modes unknown. A `MODE` while they are known keeps them true, by `CHANMODES`, with `PREFIX`'s modes as membership; one while they are unknown leaves them unknown, never a partial set. A key is kept only as set.
 - **Channels** (`channels.test.ts`). Each Channel the Owner wants is a machine. Wanted Channels share `JOIN` Lines as `TARGMAX` allows, and one with a key goes alone. A refused Channel, a kick, or a `PART` the Owner did not ask for is joined again on the backoff. A Channel Self was put in without asking is followed with `wanted` false and never joined again. Without `multi-prefix`, a member's prefixes are partial.
-- **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. Other CTCP is neither reported nor answered. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
+- **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. Other CTCP is neither reported nor answered. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and so is a standard reply that refused nothing. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
 - **Read Markers** (`read.test.ts`). A `Read` moves one Timeline's Read Marker forward, never back, so two Frontends marking at once cannot undo each other. It needs no Session, and markers outlive Connections.
 - **Highlights** (`highlight.test.ts`). A live Message from another User is a Highlight when it holds Self's nick, or one of the Configuration's `highlights`, as a whole word. Word boundaries use Unicode 17.0, pinned in `src/word-characters.ts`, so a Journal gives the same Highlights on every runtime. The search is linear in the text, however hostile.
 - **What is ignored** (`ignored.test.ts`). Nothing unreadable ends the Connection.
@@ -266,9 +266,17 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 
 - **Every `Look` gets exactly one result:** `Found`, `NotFound`, `Failed`, `Partial`, `Refused`, or `Unsent`.
 - **A reply is collected by structure.** With `labeled-response`, by its label. On the floor, a numeric belongs to the oldest Lookup whose nick it names.
-- **Only reply numerics are read.** A numeric the Client does not model is kept as it came, so nothing is lost. Nothing is read from free text but the one mode word of a `379`.
+- **Only reply numerics and standard replies are read.** A numeric the Client does not model is kept as it came, so nothing is lost. A `FAIL` ends the Lookup by its code, at once when it was sent without a label, since nothing promises an end numeric after one. A `WARN` or `NOTE`, and each `FAIL` after the first, is kept in the result's `notes`. Nothing is read from free text but the one mode word of a `379`.
 - **Bounded.** At most 8 await their replies on a Connection, at most 64 Lines of one are kept, and one with no end within 30 s reports what it has.
 - **A `WHOIS` refreshes only what the Client already models,** and never undoes something said since. The Client never sends a Lookup itself, so nothing is polled.
+
+### Standard replies
+
+`standard-replies.test.ts`. `FAIL`, `WARN`, and `NOTE` are read by structure: the command they are about, their code, their context, and their description, each its own field. Nothing is decided from the description.
+
+- **One that answers something Self sent is shown with it.** By label where there is one: where the `Say`'s Message stands, where the action belongs, or on the Lookup's result, including what follows the echo in the same answer. On the floor, by the command it names, to the oldest Line of an action or Lookup sent with that command. One that names `PRIVMSG` or `NOTICE` goes to the latest `Say` of that command sent on the Connection without a label: its Channel, or its Direct Message partner. Without labels nothing says which Message it answers, so that is a guess. The Client keeps only that Target for each command, forgets it when the Connection ends, and moves it when the partner changes nick, as the Timeline moves. It forgets it when another partner takes that nick, since the Timeline there is detached, so a reply is never shown in someone else's Timeline, and falls to the Network's own.
+- **A `FAIL` refuses.** One that answers an intent by label, or an action by its command, refuses it with its code, as an error numeric does. An intent is refused once: each later `FAIL` for it refuses nothing, and is shown where it belongs, as is one tied to a `Say` by the guess. A `WARN` or `NOTE` settles nothing, so a later answer still counts.
+- **The rest are Activity in the Network's own Timeline,** a `FAIL` that refused nothing included, and every one from history. None is dropped.
 
 ### With caps
 
@@ -279,7 +287,8 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 | Message tags | `message-tags` | A Line's `msgid` is its Message's id. Client-only tags are reported with the Message. | `tags.test.ts` |
 | Server time | `server-time` | A Line's `time` tag is when it happened. Without it, or when malformed, the time is when the Line arrived. | `tags.test.ts` |
 | Batches | `batch` | Tracks open batches, nested or interleaved. Lines are read as they arrive, never held back. | `batch.test.ts` |
-| Echoes | `echo-message`, `labeled-response`, and `batch`, only together | Each `Say` is labelled, and its echo is `Confirmed`. An error in its answer is `Rejected`. | `echo.test.ts` |
+| Echoes | `echo-message`, `labeled-response`, and `batch`, only together | Each `Say` is labelled, and its echo is `Confirmed`. An error in its answer is `Rejected`, and a `WARN` or `NOTE` in it is shown where the Message stands. | `echo.test.ts` |
+| Standard replies | `standard-replies` | Asks for the cap, so the Ircd may send any well-formed `FAIL`, `WARN`, or `NOTE`. They are read whether or not it was asked for. | `caps.test.ts`, `standard-replies.test.ts` |
 | Member prefixes | `multi-prefix` | A `NAMES` listing shows every prefix, so a member's prefixes are known, not partial. | `prefixes.test.ts` |
 | Away status | `away-notify` | Away status is kept up to date, and goes stale when the cap is deleted. | `away.test.ts` |
 | UTF-8 only | the ISUPPORT token `UTF8ONLY` | Bytes are read as UTF-8 with no fallback, and nothing leaves that is not UTF-8. | `utf8.test.ts` |

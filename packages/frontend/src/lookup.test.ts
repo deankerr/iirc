@@ -199,7 +199,7 @@ const profile = (fields: Partial<typeof Profile.Encoded> = {}): typeof Profile.E
 });
 
 const found = (...profiles: (typeof Profile.Encoded)[]) =>
-  decodeResult({ _tag: "Found", profiles });
+  decodeResult({ _tag: "Found", notes: [], profiles });
 
 const whois = (ranks = rfcRanks): Look => ({
   _tag: "Look",
@@ -236,6 +236,21 @@ const cardAfter = (more: readonly LookupsEvent[], look: Look = whois()): Card =>
 };
 
 const time = (at: number) => `T${at}`;
+
+/**
+ * A `WARN` or `NOTE` about `WHOIS`, with a hostile code.
+ * @param kind - Its kind.
+ * @param context - Its context.
+ * @param description - Its description.
+ * @returns The reply, as the wire has it.
+ */
+const note = (kind: "WARN" | "NOTE", context: readonly string[], description: string) => ({
+  code: "CODE\u202E",
+  command: "WHOIS",
+  context,
+  description,
+  kind,
+});
 
 /**
  * The result of card 1, as the wire carries it.
@@ -542,12 +557,17 @@ describe("a card as a view draws it", () => {
       colour: shown.colour,
       kind: "Whois",
       nick: "peer",
+      notes: [],
     });
   });
 
   it("says a signon that cannot be formatted is unavailable, and keeps the rest", () => {
     const card = cardAfter([
-      result({ _tag: "Found", profiles: [profile({ realname: "Peer Pal", signon: 9e15 })] }),
+      result({
+        _tag: "Found",
+        notes: [],
+        profiles: [profile({ realname: "Peer Pal", signon: 9e15 })],
+      }),
     ]);
 
     const shown = cardShown(world(iirc), card, () => {});
@@ -633,6 +653,25 @@ describe("a card as a view draws it", () => {
     });
   });
 
+  it("shows each WARN and NOTE of the reply by its fields, contained, and none before a result", () => {
+    const noted = cardShown(
+      world(iirc),
+      cardAfter([
+        result({
+          _tag: "Failed",
+          notes: [note("WARN", ["peer\u0007"], "Slow"), note("NOTE", [], "")],
+          reply: "TEMPORARILY_UNAVAILABLE",
+        }),
+      ]),
+      time
+    );
+
+    expect([noted.notes, cardShown(world(iirc), cardAfter([]), time).notes]).toStrictEqual([
+      ["WARN WHOIS CODE\u202E\u202C peer\u2407: Slow", "NOTE WHOIS CODE\u202E\u202C"],
+      [],
+    ]);
+  });
+
   it("says in words what it waits on, and what found no User", () => {
     const words = (more: readonly LookupsEvent[], look = whois()) => {
       const { body } = cardShown(world(iirc), cardAfter(more, look), time);
@@ -644,20 +683,24 @@ describe("a card as a view draws it", () => {
 
     expect({
       asking: words([]),
-      bounded: words([result({ _tag: "Partial", profiles: [profile()], reason: "Bounded" })]),
+      bounded: words([
+        result({ _tag: "Partial", notes: [], profiles: [profile()], reason: "Bounded" }),
+      ]),
       busy: words([result({ _tag: "Refused", reason: "Busy" })]),
-      ended: words([result({ _tag: "Partial", profiles: [], reason: "Ended" })]),
-      failed: words([result({ _tag: "Failed", reply: "402" })]),
+      ended: words([result({ _tag: "Partial", notes: [], profiles: [], reason: "Ended" })]),
+      failed: words([result({ _tag: "Failed", notes: [], reply: "402" })]),
       lost: words([{ _tag: "Failed", failure: "NoAnswer", id: 1 }]),
-      notFound: words([result({ _tag: "NotFound", reply: "401" })]),
+      notFound: words([result({ _tag: "NotFound", notes: [], reply: "401" })]),
       offline: words([result({ _tag: "Refused", reason: "Offline" })]),
       pending: words([{ _tag: "Waited", id: 1 }]),
       stopped: words([{ _tag: "Failed", failure: "Stopped", id: 1 }]),
-      timedOut: words([result({ _tag: "Partial", profiles: [profile()], reason: "TimedOut" })]),
+      timedOut: words([
+        result({ _tag: "Partial", notes: [], profiles: [profile()], reason: "TimedOut" }),
+      ]),
       unknown: words([{ _tag: "Failed", failure: "UnknownNetwork", id: 1 }]),
       unsendable: words([result({ _tag: "Refused", reason: "Unsendable" })]),
       unsent: words([result({ _tag: "Unsent" })]),
-      wasNotFound: words([result({ _tag: "NotFound", reply: "406" })], whowas),
+      wasNotFound: words([result({ _tag: "NotFound", notes: [], reply: "406" })], whowas),
     }).toStrictEqual({
       asking: "Looking up…",
       bounded: "The reply ran longer than a Lookup keeps, so this is how it began.",

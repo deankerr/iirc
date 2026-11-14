@@ -107,6 +107,32 @@ const heard = (sequence: number, text: string, timeline = channel): Change => ({
   timeline,
 });
 
+// What the Network said of nothing Self sent, which belongs to its own Timeline.
+const replied = (sequence: number): Change => ({
+  _tag: "Added",
+  content: {
+    _tag: "Activity",
+    activity: {
+      _tag: "StandardReply",
+      code: "INVALID_TARGET",
+      command: "CHATHISTORY",
+      context: ["LATEST", "#nope"],
+      description: "Unknown target",
+      kind: "FAIL",
+    },
+    at: { _tag: "Known", at: at(sequence), from: "receipt", value: at(sequence) },
+    id: { _tag: "Unknown" },
+    live: true,
+  },
+  intent: undefined,
+  level: "Activity",
+  messageId: undefined,
+  network: libera,
+  position: position(sequence, sequence, 2),
+  sequence,
+  timeline: network,
+});
+
 const marked = (sequence: number, read: number): Change => ({
   _tag: "ReadMarker",
   network: libera,
@@ -138,7 +164,10 @@ const steps: readonly { readonly through: number; readonly changes: readonly Cha
     ],
     through: 1,
   },
-  { changes: [said(2, "one", "m1"), said(3, "two"), heard(3, "three")], through: 3 },
+  {
+    changes: [said(2, "one", "m1"), said(3, "two"), heard(3, "three"), replied(3)],
+    through: 3,
+  },
   {
     changes: [
       {
@@ -220,6 +249,12 @@ describe("reopening the file", () => {
         expect(before.folded).toStrictEqual({ through: 4, version: 1 });
         expect(Option.isSome(before.merged)).toBeTruthy();
         expect(before.changed.items.length).toBeGreaterThan(0);
+        expect(
+          before.changed.items.some(
+            (item) =>
+              item.content._tag === "Activity" && item.content.activity._tag === "StandardReply"
+          )
+        ).toBeTruthy();
         expect(after).toStrictEqual(before);
       })
     );

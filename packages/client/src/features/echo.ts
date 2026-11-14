@@ -12,10 +12,13 @@
  *   it, with batches opened inside that one. Its first `PRIVMSG` or `NOTICE` is the echo,
  *   which the core reports as `Confirmed`. Its first `FAIL`, `ACK`, or error numeric
  *   rejects the intent, and the core reports it `Refused`. A Line in it that is neither,
- *   such as a `WARN`, answers nothing. An action's answer is only ever its first `FAIL`
- *   or error numeric, which rejects it: an `ACK` ends it with nothing to report, and what
- *   the Ircd relays of it, such as a `TOPIC`, is read as any Line is. An action split over
- *   several labelled Lines is refused once, and each later rejection only uses up its label.
+ *   such as a `WARN`, settles nothing, and is marked `about` the intent, so the core shows
+ *   it where the intent belongs. So is every Line after the one that settled it, until its
+ *   batch ends. An action's answer is only ever its first `FAIL` or error
+ *   numeric, which rejects it: an `ACK` ends it with nothing to report, and what the Ircd
+ *   relays of it, such as a `TOPIC`, is read as any Line is. An action split over several
+ *   labelled Lines is refused once, and each later rejection uses up its label and is marked
+ *   `about` the intent it would have refused, so the core shows it where the action belongs.
  * - **Never one without the other.** `labeled-response` depends on `batch`, which must be
  *   negotiated to use it, so labels need all three. The Feature is on while
  *   `echo-message` is enabled, and uses `labeled-response` and `batch`, asked for only
@@ -66,6 +69,12 @@ interface Awaited {
   /** Whether it was sent for a Lookup, whose whole reply is marked `within` its intent. */
   readonly looked: boolean;
   readonly reported: boolean;
+  /**
+   * Whether its answer has already settled it, so no later Line of that answer confirms or
+   * refuses it again. A label stays awaited until its batch ends, so what follows the
+   * settling Line is still marked `about` its intent.
+   */
+  readonly settled: boolean;
 }
 
 /** What the Feature holds for one Connection. */
@@ -205,6 +214,7 @@ export const echo: Feature<Echoes> = {
       looked: departure.for._tag === "Looked",
       reported: false,
       said: departure.for._tag === "Said",
+      settled: false,
     });
 
     for (const oldest of pending.keys()) {
@@ -257,15 +267,21 @@ export const echo: Feature<Echoes> = {
       };
     }
 
+    // A labelled Line on its own is the whole of its answer. A batch's answer lasts until
+    // its `BATCH -`, which forgets the label, so each Line in it is read by it.
+    const lone = label !== undefined;
+
     // The first Line that settles the intent answers it. A labelled Line on its own is
     // the whole answer, whatever it is, so an action's `ACK` ends it with nothing to tie.
-    if (settles(line, awaited)) {
-      const pending = without(own.pending, answers);
+    if (settles(line, awaited) && !awaited.settled) {
+      const pending = lone
+        ? without(own.pending, answers)
+        : new Map(own.pending).set(answers, { ...awaited, settled: true });
 
       // An action split over several Lines is refused once: the first rejection answers
-      // its intent, and the rest only use up their labels.
+      // its intent, and the rest use up their labels, and are shown with it.
       if (awaited.reported) {
-        return { own: { ...own, pending }, value: arrival };
+        return { own: { ...own, pending }, value: { ...arrival, about: awaited.intent } };
       }
 
       return {
@@ -274,9 +290,13 @@ export const echo: Feature<Echoes> = {
       };
     }
 
-    return label === undefined
-      ? { value: arrival }
-      : { own: { ...own, pending: without(own.pending, answers) }, value: arrival };
+    // Anything else, such as a `WARN`, or a Line after the one that settled it, is about
+    // the intent and settles nothing.
+    const about = { ...arrival, about: awaited.intent };
+
+    return lone
+      ? { own: { ...own, pending: without(own.pending, answers) }, value: about }
+      : { value: about };
   },
   // Until `echo-message` is gone, an echo of ours cannot be told from a new Message.
   meaning: (meant, _arrival, context) => ({

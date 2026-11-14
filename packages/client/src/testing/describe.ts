@@ -324,6 +324,18 @@ const writeActivity = (activity: Activity): ActivityParts => {
         : { head: [atom(activity.nick)], tail: trailing(activity.away.message) };
     }
 
+    case "StandardReply": {
+      return {
+        head: [
+          activity.kind,
+          atom(activity.command),
+          atom(activity.code),
+          ...activity.context.map((each) => `context=${atom(each)}`),
+        ],
+        tail: trailing(activity.description),
+      };
+    }
+
     default: {
       return activity satisfies never;
     }
@@ -332,10 +344,11 @@ const writeActivity = (activity: Activity): ActivityParts => {
 
 const words = (parts: readonly string[]): string => parts.join(" ");
 
-// A Lookup's result in short: `found profiles=1`, `partial=TimedOut profiles=0`,
-// `not-found=401`, `failed=402`, `refused=Offline`, or `unsent`. A scenario reads what
-// was found from the News itself.
-const writeLookResult = (result: LookResult): string => {
+// A Lookup's notes in short, each by its kind and code: `note=WARN:SLOW`.
+const writeNotes = (result: LookResult): readonly string[] =>
+  "notes" in result ? result.notes.map((note) => `note=${note.kind}:${atom(note.code)}`) : [];
+
+const writeOutcome = (result: LookResult): string => {
   switch (result._tag) {
     case "Found": {
       return `found profiles=${result.profiles.length}`;
@@ -366,6 +379,12 @@ const writeLookResult = (result: LookResult): string => {
     }
   }
 };
+
+// A Lookup's result in short: `found profiles=1`, `partial=TimedOut profiles=0`,
+// `not-found=401`, `failed=402`, `refused=Offline`, or `unsent`, with its notes after. A
+// scenario reads what was found from the News itself.
+const writeLookResult = (result: LookResult): string =>
+  words([writeOutcome(result), ...writeNotes(result)]);
 
 const sessionAt = (at: Instant, now: Instant): readonly string[] =>
   at === now ? [] : [`at=${writeInstant(at)}`];

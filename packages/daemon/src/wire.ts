@@ -55,6 +55,7 @@ import type {
   Profile,
   RefusedAction,
   RefusedReason,
+  StandardReply,
   TimerTable,
   Where,
 } from "@iirc/client";
@@ -177,6 +178,14 @@ const modeChange = (source: ModeChange): Fields<ModeChange, WireModeChange> => (
   set: source.set,
 });
 
+const standardReply = (source: StandardReply): StandardReply => ({
+  code: source.code,
+  command: source.command,
+  context: source.context,
+  description: source.description,
+  kind: source.kind,
+});
+
 const activity = (source: Activity): WireActivity => {
   switch (source._tag) {
     case "AwayChanged": {
@@ -248,6 +257,15 @@ const activity = (source: Activity): WireActivity => {
         _tag: "Quit",
         nick: source.nick,
         reason: orNull(source.reason),
+      };
+
+      return wire;
+    }
+
+    case "StandardReply": {
+      const wire: Case<Activity, WireActivity, "StandardReply"> = {
+        _tag: "StandardReply",
+        ...standardReply(source),
       };
 
       return wire;
@@ -428,6 +446,7 @@ const lookResult = (source: LookResult): WireLookResult => {
     case "Found": {
       const wire: Case<LookResult, WireLookResult, "Found"> = {
         _tag: "Found",
+        notes: source.notes.map(standardReply),
         profiles: source.profiles.map(profile),
       };
 
@@ -437,6 +456,7 @@ const lookResult = (source: LookResult): WireLookResult => {
     case "Partial": {
       const wire: Case<LookResult, WireLookResult, "Partial"> = {
         _tag: "Partial",
+        notes: source.notes.map(standardReply),
         profiles: source.profiles.map(profile),
         reason: source.reason,
       };
@@ -448,6 +468,7 @@ const lookResult = (source: LookResult): WireLookResult => {
     case "Failed": {
       const wire: Case<LookResult, WireLookResult, typeof source._tag> = {
         _tag: source._tag,
+        notes: source.notes.map(standardReply),
         reply: source.reply,
       };
 

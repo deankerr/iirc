@@ -12,7 +12,7 @@ import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import type { CapName, Instant, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
-import type { EndReason, LookResult, Profile, RefusedAction } from "./news.ts";
+import type { EndReason, Notes, Profile, RefusedAction } from "./news.ts";
 import type { Seam } from "./seam.ts";
 
 /** Cap negotiation, which runs for a whole Connection. */
@@ -146,7 +146,21 @@ type LinkPhase =
        * back, or `undefined` before any, which a `306` confirms.
        */
       readonly asked: string | null | undefined;
+      /**
+       * The Target of the latest `Say` sent on this Connection with no label, as the Owner
+       * named it, for each command a `Say` sends. Without labels nothing says which Message
+       * a standard reply answers, so one that names `PRIVMSG` or `NOTICE` is shown with the
+       * latest. It is one Target for each command, so it is bounded by construction, and it
+       * ends with the Connection.
+       */
+      readonly lastSaid: LastSaid;
     };
+
+/** The commands a `Say` sends. */
+type SayCommand = "NOTICE" | "PRIVMSG";
+
+/** The Target of the latest unlabelled `Say` for each command, or `undefined` for none yet. */
+type LastSaid = Readonly<Record<SayCommand, string | undefined>>;
 
 /**
  * One target of a Line of an action, awaiting its own answer: a nick of a `KICK`, or a
@@ -212,7 +226,9 @@ export interface Looking {
   /** The Users the reply has described so far, in order. */
   readonly profiles: readonly Profile[];
   /** The error its reply held, which it reports at its end. */
-  readonly error: Extract<LookResult, { readonly _tag: "NotFound" | "Failed" }> | undefined;
+  readonly error: { readonly _tag: "NotFound" | "Failed"; readonly reply: string } | undefined;
+  /** The `WARN` and `NOTE` standard replies its reply held, in order. */
+  readonly notes: Notes;
   /** Whether its end numeric came, inside a labelled answer, which ends only with that answer. */
   readonly ended: boolean;
   /** Whether its reply ran past {@link maxLookupLines}, so what came after was not kept. */
@@ -387,9 +403,15 @@ export interface State {
    * an `Unsent` can come after its Connection ended.
    */
   readonly actions: ReadonlyMap<IntentId, RefusedAction>;
+  /**
+   * The Owner's latest `Say`s sent with a label, by intent, oldest first, at most
+   * {@link maxActions}: the Target as the Owner named it, so a `WARN` or `NOTE` the Ircd
+   * labels for one is shown where its Message stands.
+   */
+  readonly said: ReadonlyMap<IntentId, string>;
 }
 
-/** How many of the Owner's actions the Client remembers, to place their refusals. */
+/** How many of the Owner's actions, and labelled `Say`s, the Client remembers, to place what answers them. */
 export const maxActions = 64;
 
 /** Before anything has happened. */
@@ -406,6 +428,7 @@ export const initialState: State = {
   network: { _tag: "Unconfigured" },
   policies: new Map(),
   rotation: 0,
+  said: new Map(),
   stopping: false,
 };
 

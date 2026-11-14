@@ -11,7 +11,25 @@ import type { ConnectionId, Instant, IntentId, MessageId, TimerId } from "./ids.
 import type { CloseReason, Input, Lookup, SayKind } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
 
-/** Something that changed on the Network, rather than something said. */
+/**
+ * A standard reply, by IRCv3: a `FAIL`, `WARN`, or `NOTE`, read by structure alone. Its
+ * `command` is the one it is about, or `*` for none, and its `code` says what happened,
+ * in a word a program reads. `context` is the parameters between the code and the
+ * description, and `description` is text for people, which nothing is decided from.
+ */
+export interface StandardReply {
+  readonly kind: "FAIL" | "WARN" | "NOTE";
+  readonly command: string;
+  readonly code: string;
+  readonly context: readonly string[];
+  readonly description: string;
+}
+
+/**
+ * Something that changed on the Network, rather than something said. A `StandardReply`
+ * is what the Network said of something sent, or of nothing: a `WARN` or a `NOTE`, or a
+ * `FAIL` that refused no intent.
+ */
 export type Activity =
   | { readonly _tag: "Joined"; readonly channel: string; readonly nick: string }
   | {
@@ -45,7 +63,8 @@ export type Activity =
       readonly _tag: "AwayChanged";
       readonly nick: string;
       readonly away: { readonly message: string } | null;
-    };
+    }
+  | ({ readonly _tag: "StandardReply" } & StandardReply);
 
 /**
  * A name as it was said, and its key: the name folded by the casemapping the Network last
@@ -215,6 +234,9 @@ export interface Profile {
   readonly other: readonly OtherReply[];
 }
 
+/** The standard replies a Lookup's reply held besides its result: each `WARN` and `NOTE`, and each `FAIL` after the first. */
+export type Notes = readonly StandardReply[];
+
 /**
  * Why a Lookup ended with only part of its reply: no end came within its time limit
  * (`TimedOut`), its Connection ended first (`Ended`), or the reply ran past the Lines
@@ -235,16 +257,21 @@ export type PartialReason = "TimedOut" | "Ended" | "Bounded";
  * - `Refused`: not sent: no Session (`Offline`), no Line can carry it (`Unsendable`), or
  *   too many Lookups await their replies on the Connection (`Busy`).
  * - `Unsent`: its Line never left, because its Connection ended first.
+ *
+ * A result the Network answered keeps in `notes` each `WARN` and `NOTE` of its reply, and
+ * each `FAIL` after the first, which gave its result, in order. They say something of it
+ * and end nothing.
  */
 export type LookResult =
-  | { readonly _tag: "Found"; readonly profiles: readonly Profile[] }
+  | { readonly _tag: "Found"; readonly profiles: readonly Profile[]; readonly notes: Notes }
   | {
       readonly _tag: "Partial";
       readonly profiles: readonly Profile[];
       readonly reason: PartialReason;
+      readonly notes: Notes;
     }
-  | { readonly _tag: "NotFound"; readonly reply: string }
-  | { readonly _tag: "Failed"; readonly reply: string }
+  | { readonly _tag: "NotFound"; readonly reply: string; readonly notes: Notes }
+  | { readonly _tag: "Failed"; readonly reply: string; readonly notes: Notes }
   | { readonly _tag: "Refused"; readonly reason: "Offline" | "Unsendable" | "Busy" }
   | { readonly _tag: "Unsent" };
 
