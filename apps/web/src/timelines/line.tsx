@@ -45,6 +45,14 @@ const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle:
 const clockFor = (shown: TimeShown) => (shown === "HH:mm:ss" ? clockWithSeconds : clock);
 
 /**
+ * The sample a time column is measured by: any time of the format, as the clock writes it,
+ * since every digit it shows is as wide as the next. None for `none`, whose column is empty.
+ * @param shown - How a line's time shows.
+ * @returns The sample, or nothing.
+ */
+const sampleOf = (shown: TimeShown) => (shown === "none" ? undefined : clockFor(shown).format(0));
+
+/**
  * A time as the line shows it, as `ui.time` says, or nothing for `none`.
  * @param props - The instant.
  * @returns The time, with the full date and time on hover.
@@ -52,6 +60,8 @@ const clockFor = (shown: TimeShown) => (shown === "HH:mm:ss" ? clockWithSeconds 
 const Time = ({ at }: { readonly at: number }) => {
   const shown = useAtomValue(timeShown);
   const date = dateOf(at);
+
+  const sample = sampleOf(shown);
 
   // With no time shown, its column is still there, empty and with no width, so every row
   // keeps the same columns.
@@ -62,14 +72,19 @@ const Time = ({ at }: { readonly at: number }) => {
   // An instant a Date cannot hold, as a hostile Ircd's `server-time` can give, is unavailable.
   if (date === undefined) {
     return (
-      <span className={styles.time} title="Time unavailable">
+      <span className={styles.time} data-sample={sample} title="Time unavailable">
         {shown === "HH:mm:ss" ? "--:--:--" : "--:--"}
       </span>
     );
   }
 
   return (
-    <time className={styles.time} dateTime={date.toISOString()} title={day.format(date)}>
+    <time
+      className={styles.time}
+      data-sample={sample}
+      dateTime={date.toISOString()}
+      title={day.format(date)}
+    >
       {clockFor(shown).format(date)}
     </time>
   );
@@ -154,7 +169,8 @@ const Piece = ({ part }: { readonly part: Part }) => {
  * @returns The divider.
  */
 const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }) => {
-  const shown = clockFor(useAtomValue(timeShown));
+  const format = useAtomValue(timeShown);
+  const shown = clockFor(format);
   const from = formattedAt(shown, gap.from.at) ?? "an unknown time";
   const to = gap.to === null ? undefined : (formattedAt(shown, gap.to.at) ?? "an unknown time");
 
@@ -163,7 +179,7 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
 
   return (
     <p className={styles.gap}>
-      <span className={styles.time} />
+      <span className={styles.time} data-sample={sampleOf(format)} />
       <span aria-hidden className={styles.rule} />
       <span className={styles.gapText}>
         {span}
@@ -193,13 +209,6 @@ const RepeatedWords = ({
 
   return <span className={styles.repeated}>{` \u00D7${count}, ${first}\u2013${latest}`}</span>;
 };
-
-/** The column widths each row shares, as how the time shows says. */
-const timedClass = {
-  "HH:mm": styles.timed,
-  "HH:mm:ss": styles.seconds,
-  none: styles.untimed,
-} as const;
 
 /** Each description's tone, as its class: a refused action of ours is dim, like Activity. */
 const toneClass = {
@@ -268,9 +277,11 @@ const RowLine = ({ row }: { readonly row: Row }) => {
     <div className={tone}>
       {time}{" "}
       <span className={styles.sender}>
-        {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
-        {line.kind === "Notice" ? <>-{nick}-</> : null}
-        {line.kind === "Action" ? <>* {nick}</> : null}
+        <span className={styles.said}>
+          {line.kind === "Privmsg" ? <>&lt;{nick}&gt;</> : null}
+          {line.kind === "Notice" ? <>-{nick}-</> : null}
+          {line.kind === "Action" ? <>* {nick}</> : null}
+        </span>
       </span>{" "}
       <bdi className={styles.text}>
         <Inlines inlines={line.text} />
@@ -286,12 +297,12 @@ const RowLine = ({ row }: { readonly row: Row }) => {
 };
 
 /**
- * One row, in the columns every row shares, as wide as how the time shows says.
+ * One row, in the columns every row shares.
  * @param props - The row.
  * @returns The line.
  */
 export const Line = ({ row }: { readonly row: Row }) => (
-  <div className={`${styles.line} ${timedClass[useAtomValue(timeShown)]}`}>
+  <div className={styles.line}>
     <RowLine row={row} />
   </div>
 );

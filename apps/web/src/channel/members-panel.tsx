@@ -59,6 +59,17 @@ const Member = ({ row }: { readonly row: MemberRow }) => (
 );
 
 /**
+ * What sizes the members' column: a member's row, unseen, with a symbol of every common rank
+ * and the widest nick monospace shows whole, in the font drawn.
+ * @returns The row.
+ */
+const Reference = () => (
+  <span aria-hidden className={styles.reference}>
+    <span className={styles.symbol} />
+  </span>
+);
+
+/**
  * What can be done with a member, as a menu anchored to their row: open their Direct
  * Message, as `/query` does, look them up, as `/whois` does, or mention them, starting the
  * composer with their nick. Choosing one puts away members that lie over something.
@@ -134,6 +145,8 @@ const Actions = ({
             id={action.id}
             textValue={action.text}
           >
+            {/* Where a rank's symbol is in the row above, so each word starts where its nick does. */}
+            <span aria-hidden className={styles.symbol} />
             {action.text}
           </MenuItem>
         )}
@@ -312,6 +325,7 @@ const Floating = ({
 
   return (
     <Dialog aria-label="Members" className={`${styles.panel} ${styles.floating}`} ref={panel}>
+      <Reference />
       {children}
     </Dialog>
   );
@@ -417,6 +431,7 @@ const Shown = ({ pane }: { readonly pane: string }) => {
 
   return (
     <section aria-label="Members" className={styles.panel}>
+      <Reference />
       {body}
     </section>
   );

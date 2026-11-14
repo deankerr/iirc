@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { connectPeer, startNgircd } from "@iirc/daemon/testing";
+import { connectPeer, startErgo, startNgircd } from "@iirc/daemon/testing";
 import type { Ircd, Peer } from "@iirc/daemon/testing";
 import { Schema } from "effect";
 import { chromium } from "playwright";
@@ -253,17 +253,22 @@ const tracked = (
   }
 ) => input._valueTracker?.getValue() ?? null;
 
-/** What the peer does in the Channel before the Daemon joins it, and the Channel's key, if it has one. */
+/**
+ * What the peer does in the Channel before the Daemon joins it, the Channel's key, if it has
+ * one, and the Ircd, ngircd unless it is another.
+ */
 interface Preparing {
   readonly prepare?: (peer: Peer) => Promise<void>;
   readonly channelKey?: string;
+  readonly start?: () => Promise<Ircd>;
 }
 
 /**
  * A private ngircd on a loopback port the kernel picks, a real `iirc daemon --web` with a
  * key, a Network configured through the API to join a Channel there, joined as the Client
  * knows it, and a raw IRC connection as the other User, `peer`, in the Channel, who may
- * set the Channel up first, with a key the Daemon holds as a Credential.
+ * set the Channel up first, with a key the Daemon holds as a Credential. Another Ircd may
+ * stand in for ngircd, as one whose nicks are longer than RFC 2812's nine characters.
  * @param dataDir - The Daemon's data directory.
  * @param channel - The Channel.
  * @param preparing - What the peer does first, and the Channel's key.
@@ -272,9 +277,9 @@ interface Preparing {
 const privateNetwork = async (
   dataDir: string,
   channel: string,
-  { channelKey, prepare }: Preparing = {}
+  { channelKey, prepare, start = startNgircd }: Preparing = {}
 ) => {
-  const ngircd: Ircd = await startNgircd();
+  const ngircd: Ircd = await start();
   const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
   const key = created.stdout.trim();
   const { base, child } = await startDaemon(dataDir);
@@ -396,6 +401,126 @@ const resizedSidebar = async (page: Page) => {
 
   return { focusAfter, hiddenKept, narrow, wide: await sidebarWidth(), widthKept };
 };
+
+/**
+ * Waits until every font is loaded and the page has drawn twice since.
+ * @param page - The page.
+ */
+const settled = async (page: Page) => {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+
+    const { promise, resolve } = Promise.withResolvers<undefined>();
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        resolve(undefined);
+      });
+    });
+    await promise;
+  });
+};
+
+/**
+ * How far anything in an element reaches past its right edge.
+ * @param locator - The element.
+ * @returns The distance in whole pixels, 0 when nothing does.
+ */
+const pastOf = async (locator: ReturnType<Page["getByRole"]>) =>
+  await locator.evaluate((element) => {
+    const { right } = element.getBoundingClientRect();
+
+    return Math.max(
+      0,
+      ...[...element.querySelectorAll("*")].map((one) =>
+        Math.round(one.getBoundingClientRect().right - right)
+      )
+    );
+  });
+
+/**
+ * How a Timeline's rows lie, in the columns every row shares: how many places their times
+ * end and their texts start, whose nicks are cut, and how many rows are taller than a line
+ * or reach past the log.
+ * @param log - The Timeline's log.
+ * @returns What it drew.
+ */
+const timelineDrawn = async (log: ReturnType<Page["getByRole"]>) =>
+  await log.evaluate((element) => {
+    const { right } = element.getBoundingClientRect();
+
+    const rows = [...element.querySelectorAll("time")].flatMap((time) => {
+      const row = time.parentElement;
+
+      if (row === null) {
+        return [];
+      }
+
+      const [, sender, text] = row.children;
+      const glyphs = document.createRange();
+
+      glyphs.selectNodeContents(time);
+
+      const cut =
+        sender !== undefined &&
+        [sender, ...sender.querySelectorAll("*")].some((one) => one.scrollWidth > one.clientWidth);
+
+      const reach = [...row.querySelectorAll("*")].map((one) => one.getBoundingClientRect().right);
+
+      return [
+        {
+          cut: cut ? (sender.querySelector("bdi")?.textContent ?? "") : undefined,
+          lines:
+            row.getBoundingClientRect().height /
+            Number(getComputedStyle(row).lineHeight.replace(/px$/u, "")),
+          past: Math.max(...reach) - right,
+          textStart: Math.round(text?.getBoundingClientRect().left ?? 0),
+          timeEnd: Math.round(glyphs.getBoundingClientRect().right),
+        },
+      ];
+    });
+
+    return {
+      clipped: rows.flatMap((row) => (row.cut === undefined ? [] : [row.cut])).toSorted(),
+      past: rows.filter((row) => row.past > 0.5).length,
+      rows: rows.length,
+      taller: rows.filter((row) => row.lines > 1.01).length,
+      textStarts: new Set(rows.map((row) => row.textStart)).size,
+      timeEnds: new Set(rows.map((row) => row.timeEnd)).size,
+    };
+  });
+
+/**
+ * How the members' rows lie: whose nicks are cut, how many places the nicks start, and how
+ * tall each row is.
+ * @param members - The members' list.
+ * @returns What it drew.
+ */
+const membersDrawn = async (members: ReturnType<Page["getByRole"]>) =>
+  await members.getByRole("row").evaluateAll((rows) => {
+    const drawn = rows.map((row) => ({
+      cut: [row, ...row.querySelectorAll("*")].some((one) => one.scrollWidth > one.clientWidth),
+      height: Math.round(row.getBoundingClientRect().height),
+      nick: row.querySelector("bdi")?.textContent ?? "",
+      start: Math.round(row.querySelector("bdi")?.getBoundingClientRect().left ?? 0),
+    }));
+
+    return {
+      clipped: drawn.flatMap((row) => (row.cut ? [row.nick] : [])).toSorted(),
+      heights: drawn.map((row) => row.height),
+      starts: new Set(drawn.map((row) => row.start)).size,
+    };
+  });
+
+/**
+ * Each of the sidebar's rows' heights.
+ * @param sidebar - The sidebar.
+ * @returns The heights, in whole pixels.
+ */
+const rowHeights = async (sidebar: ReturnType<Page["getByRole"]>) =>
+  await sidebar
+    .getByRole("row")
+    .evaluateAll((rows) => rows.map((row) => Math.round(row.getBoundingClientRect().height)));
 
 describe("the web frontend on iirc daemon --web", () => {
   let browser: Browser;
@@ -2111,6 +2236,223 @@ describe("the web frontend on iirc daemon --web", () => {
           violations: "",
         });
       } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "lines up and clips no more in a sans font than in monospace: the times, the nicks, the members, the composer's prompt, the sidebar, and a Lookup's card",
+    { timeout: 240_000 },
+    async () => {
+      // Ergo, whose nicks run to 32 characters, past RFC 2812's nine.
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "pitch"),
+        "#iirc-pitch",
+        { start: startErgo }
+      );
+
+      // The widest nick monospace shows whole, in brackets in its sixteen columns, in a wide
+      // letter and a narrow one, one past it, a short one, and one far past it.
+      const widest = "WWWWWWWWWWWWWW";
+      const nicks = [widest, "mmmmmmmmmmmmmm", "WWWWWWWWWWWWWWWW", "ab", "WWWWWWWWWWWWWWWWWWWW"];
+      const others: Peer[] = [];
+
+      try {
+        for (const nick of nicks) {
+          // oxlint-disable-next-line no-await-in-loop -- one User after another, in order
+          const other = await connectPeer({ host: ngircd.host, nick, port: ngircd.plainPort });
+
+          others.push(other);
+          other.send(`JOIN ${channel}`);
+          other.send(`PRIVMSG ${channel} :hello from ${nick.length}`);
+          // oxlint-disable-next-line no-await-in-loop -- one User after another, in order
+          await peer.waitFor(
+            (line) => line.command === "JOIN" && line.source?.startsWith(`${nick}!`) === true,
+            `${nick} to join`
+          );
+        }
+
+        // Voiced, so the members show a symbol of each kind: an operator's, a voice's, and none.
+        peer.send(`MODE ${channel} +v ab`);
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.setViewportSize({ height: 900, width: 1400 });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        const log = page.getByRole("log", { name: channel });
+        const members = page.getByRole("region", { name: "members" });
+        const sidebar = page.getByRole("navigation", { name: "Networks" });
+        const composer = page.getByRole("textbox", { name: channel });
+
+        const type = async (text: string) => {
+          await composer.fill(text);
+          await composer.press("Enter");
+        };
+
+        await log.getByText("hello from 20").waitFor();
+        await composer.click();
+        await page.keyboard.press("Alt+m");
+        await members.getByRole("row", { name: "ab, voice" }).waitFor();
+
+        // The composer's prompt for a Direct Message not yet begun with the widest nick: cut
+        // or not, and how tall its line is. Then back to the Channel.
+        const prompt = async () => {
+          await type(`/query ${widest}`);
+
+          const textbox = page.getByRole("textbox", { name: widest });
+
+          await textbox.waitFor();
+          await settled(page);
+
+          const id = (await textbox.getAttribute("id")) ?? "";
+
+          const drawn = await page.locator(`label[for="${id}"]`).evaluate((label) => ({
+            clipped: [label, ...label.querySelectorAll("*")].some(
+              (one) => one.scrollWidth > one.clientWidth
+            ),
+            height: Math.round(label.parentElement?.getBoundingClientRect().height ?? 0),
+          }));
+
+          await page.getByRole("row", { name: channel }).click();
+          await composer.waitFor();
+
+          return drawn;
+        };
+
+        // How far anything in the widest nick's Lookup reaches past its card, then put away.
+        const lookup = async () => {
+          await type(`/whois ${widest}`);
+
+          const card = page.getByRole("region", { name: `whois ${widest}` });
+
+          await card.getByRole("list", { name: "Channels" }).waitFor();
+          await settled(page);
+
+          const past = await pastOf(card);
+
+          await composer.press("Escape");
+          await card.waitFor({ state: "detached" });
+
+          return past;
+        };
+
+        const fonts = [
+          "system",
+          "jetbrains-mono",
+          "system-sans",
+          "ibm-plex-sans",
+          "atkinson-hyperlegible-next",
+          "source-sans-3",
+          "inter",
+        ];
+
+        const timelines: (Awaited<ReturnType<typeof timelineDrawn>> & {
+          readonly font: string;
+          readonly time: string;
+        })[] = [];
+
+        const rest = [];
+
+        for (const font of fonts) {
+          // oxlint-disable-next-line no-await-in-loop -- one font after another
+          await type(`/set ui.font ${font}`);
+          // oxlint-disable-next-line no-await-in-loop -- one font after another
+          await expect
+            .poll(
+              async () =>
+                await page.evaluate(() =>
+                  document.documentElement.style.getPropertyValue("--font-text")
+                )
+            )
+            .toContain(font.startsWith("system") ? "var(--font-device" : "Variable");
+
+          for (const time of ["HH:mm", "HH:mm:ss"]) {
+            // oxlint-disable-next-line no-await-in-loop -- one format after another
+            await type(`/set ui.time ${time}`);
+            // oxlint-disable-next-line no-await-in-loop -- one format after another
+            await expect
+              .poll(async () => await log.locator("time").first().textContent())
+              .toHaveLength(time.length);
+            // oxlint-disable-next-line no-await-in-loop -- once it is drawn
+            await settled(page);
+            // oxlint-disable-next-line no-await-in-loop -- one format after another
+            const drawn = await timelineDrawn(log);
+
+            timelines.push({ font, time, ...drawn });
+          }
+
+          // oxlint-disable-next-line no-await-in-loop -- one font after another
+          const promptDrawn = await prompt();
+          // oxlint-disable-next-line no-await-in-loop -- one font after another
+          const lookupPast = await lookup();
+
+          rest.push({
+            font,
+            lookupPast,
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            members: await membersDrawn(members),
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            membersPast: await pastOf(members),
+            prompt: promptDrawn,
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            sidebar: await rowHeights(sidebar),
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            sidebarPast: await pastOf(sidebar),
+          });
+        }
+
+        // Monospace is the measure: it cuts only nicks past its sixteen columns, and each sans
+        // font cuts only what it cuts, with every row, the sidebar's, the members', and the
+        // composer's, as tall as it is there.
+        const [mono] = timelines;
+        const [monoRest] = rest;
+
+        expect({
+          mono: [mono?.clipped, monoRest?.members.clipped, monoRest?.members.starts],
+          problems: problems.filter((problem) => !problem.includes("401")),
+          rest,
+          timelines,
+        }).toStrictEqual({
+          mono: [
+            ["WWWWWWWWWWWWWWWW", "WWWWWWWWWWWWWWWWWWWW"],
+            ["WWWWWWWWWWWWWWWW", "WWWWWWWWWWWWWWWWWWWW"],
+            1,
+          ],
+          problems: [],
+          rest: rest.map(({ font }) => ({
+            font,
+            lookupPast: 0,
+            members: monoRest?.members,
+            membersPast: 0,
+            prompt: { clipped: false, height: monoRest?.prompt.height },
+            sidebar: monoRest?.sidebar,
+            sidebarPast: 0,
+          })),
+          timelines: timelines.map(({ font, time }) => ({
+            clipped: mono?.clipped,
+            font,
+            past: 0,
+            rows: mono?.rows,
+            taller: 0,
+            textStarts: 1,
+            time,
+            timeEnds: 1,
+          })),
+        });
+      } finally {
+        for (const other of others) {
+          other.close();
+        }
+
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

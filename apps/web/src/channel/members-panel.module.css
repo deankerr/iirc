@@ -1,13 +1,38 @@
-/* The members: a column beside the Timeline, over it in a narrow Pane, or a sheet. */
+/*
+ * The members: a column beside the Timeline, over it in a narrow Pane, or a sheet. The
+ * column is as wide as its unseen reference row, a rank's symbol and the widest nick
+ * monospace shows whole, in the font drawn, and nothing else in it widens it.
+ */
 .panel {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 18ch;
+  width: max-content;
   min-height: 0;
   border-left: var(--border-width) solid var(--color-border);
   background: var(--color-background);
   outline: none;
+}
+
+.panel > * {
+  contain: inline-size;
+}
+
+/* A member's row, as wide as the widest nick shown whole, and drawn as nothing. */
+.panel > .reference {
+  display: flex;
+  height: 0;
+  overflow: hidden;
+  padding: 0 var(--space-3);
+  visibility: hidden;
+  white-space: nowrap;
+  contain: none;
+}
+
+.reference::after {
+  white-space: pre;
+  content: var(--nick-sample-upper-w) "\A" var(--nick-sample-upper-m) "\A"
+    var(--nick-sample-lower-m);
 }
 
 /* Over a narrow Pane's Timeline, under its bar, at its right. */
@@ -92,11 +117,20 @@
   opacity: 0.5;
 }
 
+/* As wide as the widest common rank's symbol, so every nick starts at one place. */
 .symbol {
   flex-shrink: 0;
-  width: 1ch;
   margin-right: var(--space-1);
   color: var(--color-muted);
+}
+
+.symbol::before {
+  display: block;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  white-space: pre;
+  content: var(--rank-samples);
 }
 
 .loading {
@@ -124,7 +158,7 @@
 .action {
   display: flex;
   align-items: center;
-  padding: 0 var(--space-3) 0 calc(var(--space-3) + 1ch + var(--space-1));
+  padding: 0 var(--space-3);
   outline: none;
   cursor: default;
   white-space: nowrap;

@@ -298,7 +298,7 @@ describe("themes", () => {
     });
   });
 
-  it("draws the text's size and font on the root at once, previews a font highlighted in the palette, and sets one chosen there", async () => {
+  it("draws the text's size and font on the root at once, with IRC's monospace in a monospace font beside a sans one, previews a font highlighted in the palette, and sets one chosen there", async () => {
     const fake = signedIn();
     const { notice, registry, type } = await page(fake);
     const stop = watchTheme(registry);
@@ -307,6 +307,7 @@ describe("themes", () => {
     const read = () => [
       root.style.getPropertyValue("--font-size"),
       root.style.getPropertyValue("--font-text"),
+      root.style.getPropertyValue("--font-mono"),
     ];
 
     const before = read();
@@ -324,6 +325,9 @@ describe("themes", () => {
     paletteHappened(registry, { _tag: "Opened", scope: "All" });
     registry.set(highlightEntry, { highlighted: true, key: "font:ibm-plex-mono" });
     const previewed = read();
+
+    registry.set(highlightEntry, { highlighted: true, key: "font:inter" });
+    const sans = read();
 
     registry.set(highlightEntry, { highlighted: true, key: "theme:nord" });
     const otherRow = read();
@@ -355,16 +359,34 @@ describe("themes", () => {
       picked: commit?.key,
       previewed,
       refused,
+      sans,
       sized,
     }).toStrictEqual({
-      before: ["14px", "var(--font-device)"],
-      closed: ["18px", '"JetBrains Mono Variable", var(--font-device)'],
-      device: ["18px", '"JetBrains Mono Variable", var(--font-device)'],
-      otherRow: ["18px", '"JetBrains Mono Variable", var(--font-device)'],
+      before: ["14px", "var(--font-device)", "var(--font-device)"],
+      closed: [
+        "18px",
+        '"JetBrains Mono Variable", var(--font-device)',
+        '"JetBrains Mono Variable", var(--font-device)',
+      ],
+      device: [
+        "18px",
+        '"JetBrains Mono Variable", var(--font-device)',
+        '"JetBrains Mono Variable", var(--font-device)',
+      ],
+      otherRow: [
+        "18px",
+        '"JetBrains Mono Variable", var(--font-device)',
+        '"JetBrains Mono Variable", var(--font-device)',
+      ],
       picked: "font:commit-mono",
-      previewed: ["18px", '"IBM Plex Mono", var(--font-device)'],
+      previewed: [
+        "18px",
+        '"IBM Plex Mono", var(--font-device)',
+        '"IBM Plex Mono", var(--font-device)',
+      ],
       refused: 'ui.size: Give a whole number from 10 to 24, not "30".',
-      sized: ["18px", "var(--font-device)"],
+      sans: ["18px", '"Inter Variable", var(--font-device-sans)', "var(--font-device)"],
+      sized: ["18px", "var(--font-device)", "var(--font-device)"],
     });
   });
 

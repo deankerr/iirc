@@ -29,14 +29,12 @@ declare const styles: {
   readonly refused: string;
   readonly repeated: string;
   readonly rule: string;
-  readonly seconds: string;
+  readonly said: string;
   readonly sender: string;
   readonly session: string;
   readonly text: string;
   readonly time: string;
-  readonly timed: string;
   readonly unsent: string;
-  readonly untimed: string;
 };
 
 export default styles;

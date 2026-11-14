@@ -17,6 +17,19 @@
   --font-device-sans:
     system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-text: var(--font-device);
+  /* IRC's monospace formatting: the font chosen when it is monospace, else the device's own. */
+  --font-mono: var(--font-device);
+  /*
+   * What a column of nicks is measured by, in whatever font draws it, since a count of
+   * characters holds only at fixed pitch: the widest nick a monospace font shows whole in a
+   * Timeline's sixteen columns, in each letter that is the widest a nick may hold in some
+   * font, and every common rank's symbol, one a line. A box sized by these, drawn unseen in
+   * it, holds in any font all that it holds in monospace.
+   */
+  --nick-sample-upper-w: "WWWWWWWWWWWWWW";
+  --nick-sample-upper-m: "MMMMMMMMMMMMMM";
+  --nick-sample-lower-m: "mmmmmmmmmmmmmm";
+  --rank-samples: "~\A&\A@\A%\A+";
   --font-size: 14px;
   /* A field's text: as the page's on a desktop, and never under 16px on a touch screen,
      where iOS Safari zooms the page into a field whose text is smaller. */

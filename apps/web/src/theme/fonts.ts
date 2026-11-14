@@ -48,3 +48,13 @@ export const fontStack = (font: FontShown): string => {
 
   return family === undefined ? device : `"${family}", ${device}`;
 };
+
+/**
+ * The fonts to draw IRC's monospace formatting in, as `--font-mono` takes them: the font's
+ * own stack when it is monospace, else the device's own monospace font, so text a sender
+ * set apart as fixed pitch stays fixed pitch beside a sans font.
+ * @param font - The font.
+ * @returns The stack, as CSS.
+ */
+export const monoStack = (font: FontShown): string =>
+  fonts[font].kind === "mono" ? fontStack(font) : deviceFonts.mono;

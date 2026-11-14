@@ -19,9 +19,9 @@
   min-width: 0;
 }
 
-/* A Pane's number and its name, cut to a few words. */
+/* A Pane's number and its name, cut to half the row, so another always shows beside it. */
 .choice {
-  max-width: 16ch;
+  max-width: 50%;
 }
 
 .number {

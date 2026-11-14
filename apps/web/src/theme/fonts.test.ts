@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fontNames } from "@iirc/api";
 import { describe, expect, it } from "vitest";
 
-import { fontStack } from "./fonts.ts";
+import { fontStack, monoStack } from "./fonts.ts";
 
 // Vitest hands a stylesheet to a test as nothing, even with `?raw`, so it is read as a file.
 const fontFaces = readFileSync(new URL("fonts.css", import.meta.url), "utf-8");
@@ -37,6 +37,22 @@ describe("the fonts", () => {
       '"Source Sans 3 Variable", var(--font-device-sans)',
       '"Inter Variable", var(--font-device-sans)',
     ]);
+  });
+
+  it("draw IRC's monospace formatting in the font chosen when it is monospace, and in the device's own monospace font beside a sans one", () => {
+    expect(Object.fromEntries(fontNames.map((font) => [font, monoStack(font)]))).toStrictEqual({
+      "atkinson-hyperlegible-mono": '"Atkinson Hyperlegible Mono Variable", var(--font-device)',
+      "atkinson-hyperlegible-next": "var(--font-device)",
+      "commit-mono": '"Commit Mono", var(--font-device)',
+      "ibm-plex-mono": '"IBM Plex Mono", var(--font-device)',
+      "ibm-plex-sans": "var(--font-device)",
+      inter: "var(--font-device)",
+      "jetbrains-mono": '"JetBrains Mono Variable", var(--font-device)',
+      "source-code-pro": '"Source Code Pro Variable", var(--font-device)',
+      "source-sans-3": "var(--font-device)",
+      system: "var(--font-device)",
+      "system-sans": "var(--font-device)",
+    });
   });
 
   it("each have a regular, a bold, and both italic, declared once per range, in WOFF2 alone, swapped in as they load", () => {

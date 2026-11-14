@@ -35,7 +35,7 @@ import type { Outcome } from "../options/atoms.ts";
 import { changeUi, uiFailed, uiInEffect, uiRead } from "../options/ui.ts";
 import { paletteHighlight, paletteState } from "../palette/state.ts";
 import { signedIn } from "../sign-in/atoms.ts";
-import { fontStack } from "./fonts.ts";
+import { fontStack, monoStack } from "./fonts.ts";
 import { ThemeReader } from "./reader.ts";
 
 /** The media query whose match says the device prefers dark. */
@@ -171,8 +171,8 @@ const fontKeys: ReadonlyMap<string, FontShown> = new Map(
 
 /**
  * The text's size, line height, and font in effect on this device, as the root's custom
- * properties: the font the open palette highlights, while it highlights one, else the one
- * in effect.
+ * properties, with the monospace font IRC's formatting asks for beside it: the font the
+ * open palette highlights, while it highlights one, else the one in effect.
  */
 const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
   const ui = get(uiInEffect);
@@ -183,6 +183,7 @@ const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
     ["--font-size", `${ui.size}px`],
     ["--line-height", String(ui.leading)],
     ["--font-text", fontStack(font)],
+    ["--font-mono", monoStack(font)],
   ];
 });
 
