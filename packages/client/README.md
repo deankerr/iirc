@@ -56,7 +56,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 `NetworkConfiguration` is the Schema of what `Configured` carries. It is also exported alone from `@iirc/client/configuration`, as pure data a Frontend may import.
 
 - **A Frontend derives every option from the Schema alone**. Each field has a description and says what a new Network starts with, and each Credential field is marked as one. A field added here is an option there with no other work.
-- **A field added later decodes old Journals as its default,** so a Journal written before it still replays.
+- **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` starts on and decodes as off, since no answer was sent then.
 
 ### When the Client dials
 
@@ -71,7 +71,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | Output | Meaning |
 | --- | --- |
 | `Dial` | Open a Connection to an Ircd, numbered by the Client from 1, never reused. |
-| `Send` | Send an `OutboundLine`. It counts as sent unless an `Unsent` says otherwise. Every Line of a `Say` or an `Act` carries its intent. |
+| `Send` | Send an `OutboundLine`. It counts as sent unless an `Unsent` says otherwise. Every Line of a `Say` or an `Act` carries its intent, and a CTCP answer the request it `answers`. |
 | `SendSecret` | Send a `SecretLine`. The Runtime fills in the Credential with `fillSecret` from `@iirc/protocol`. |
 | `Hangup` | End a Connection. The Client still waits for its `Closed`. |
 | `Wake` | Set a one-shot timer to an instant, or cancel it with `null`. The same id replaces the earlier one. |
@@ -209,7 +209,7 @@ A machine that is not running is left out.
 | An Owner intent that cannot be carried out | `Refused` with the intent id. It is not queued. |
 | A `Read` whose Target names no one Timeline | `Ignored` with `NoTimeline`. |
 | A Line a Feature refuses at egress | A `Say` is `Refused` with `Unsendable`. Any other is `Ignored`. Nothing is sent. |
-| `Unsent` | A `Say` or an `Act` whose Line is among them is `Refused` with `Unsent`, once. |
+| `Unsent` | A `Say` or an `Act` whose Line is among them is `Refused` with `Unsent`, once. A CTCP answer among them, from any Connection, is a `CtcpUnsent`, where its request is. |
 | `Unfilled` | SASL counts it as a failed login. A Channel whose key is unfilled is refused. Registration goes on without `PASS`. |
 | A Feature hook that throws | That Feature is off for the rest of the Connection, and `Ignored` with `FeatureFailed` records it. |
 
@@ -244,7 +244,8 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Keepalive** (`keepalive.test.ts`). Answers `PING` at once, byte for byte. After 60 s of silence it sends a `PING`, and after 90 s it hangs up.
 - **A Channel's modes** (`modes.test.ts`). Each time Self's join is confirmed, the Client asks the Channel's modes once with `MODE <channel>`, and folds the `324` that answers. One query waits at a time on a Connection, so a hundred Channels are asked one after another, each when the last is answered or after 30 s, and the Owner's Lines never queue behind them all. A Channel whose modes are already known by its turn is not asked. An error in answer leaves the modes unknown. A `MODE` while they are known keeps them true, by `CHANMODES`, with `PREFIX`'s modes as membership; one while they are unknown leaves them unknown, never a partial set. A key is kept only as set.
 - **Channels** (`channels.test.ts`). Each Channel the Owner wants is a machine. Wanted Channels share `JOIN` Lines as `TARGMAX` allows, and one with a key goes alone. A refused Channel, a kick, or a `PART` the Owner did not ask for is joined again on the backoff. A Channel Self was put in without asking is followed with `wanted` false and never joined again. Without `multi-prefix`, a member's prefixes are partial.
-- **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. Other CTCP is neither reported nor answered. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and so is a standard reply that refused nothing. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
+- **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. A `DCC` is dropped, and other CTCP is Activity, below. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and so is a standard reply that refused nothing. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
+- **CTCP** (`ctcp.test.ts`). A CTCP in a `PRIVMSG` from another User is a `CtcpRequest`, with what became of it, and one in a `NOTICE` a `CtcpReply`. Self answers a live `VERSION` (`iirc`, and nothing of what it runs), `PING` (its arguments, back), `TIME` (when the request arrived, in UTC), and `CLIENTINFO` with a `NOTICE` to the sender's nick, never to a Channel or a mask, and answers nothing when the Configuration's `answerCtcp` is off. Answers take a budget of three at once and then one every ten seconds, which reconnecting does not refill. A request that is not answered says why, and none is dropped. A request or a reply belongs to each Channel it was sent to, and otherwise to the Network, and to the sender's Direct Messages if those exist. An answer that never left is a `CtcpUnsent`, in the Timelines its request is in as they stand then: its Channels as named when it arrived, or its partner's Direct Messages as they followed a live rename. Once another User took that nick, or 64 later answers have pushed it out of memory, it goes to the Network's own Timeline alone, never another User's. Its budget stays spent.
 - **Read Markers** (`read.test.ts`). A `Read` moves one Timeline's Read Marker forward, never back, so two Frontends marking at once cannot undo each other. It needs no Session, and markers outlive Connections.
 - **Highlights** (`highlight.test.ts`). A live Message from another User is a Highlight when it holds Self's nick, or one of the Configuration's `highlights`, as a whole word. Word boundaries use Unicode 17.0, pinned in `src/word-characters.ts`, so a Journal gives the same Highlights on every runtime. The search is linear in the text, however hostile.
 - **What is ignored** (`ignored.test.ts`). Nothing unreadable ends the Connection.

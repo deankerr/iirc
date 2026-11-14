@@ -35,6 +35,7 @@ const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000
 const decode = Schema.decodeSync(NetworkConfiguration);
 
 const plain: Configuration = decode({
+  answerCtcp: true,
   channels: [{ name: "#iirc" }],
   declined: [],
   enabled: true,
@@ -108,6 +109,7 @@ describe("the options, derived from the Schema", () => {
       described: true,
       keys,
       kinds: {
+        answerCtcp: "Toggle",
         channels: "Names",
         declined: "Texts",
         enabled: "Toggle",
@@ -132,6 +134,7 @@ describe("the options, derived from the Schema", () => {
       resolved: names.every((name) => resolve(name)._tag === "Parsed"),
     }).toStrictEqual({
       names: [
+        "network.libera.answerCtcp",
         "network.libera.channels",
         "network.libera.channels.#secret.key",
         "network.libera.channels.#iirc.key",
@@ -162,6 +165,7 @@ describe("the options, derived from the Schema", () => {
     );
 
     expect(shown).toStrictEqual({
+      answerCtcp: { starts: "on", value: { _tag: "Shown", text: "on" } },
       channels: { starts: "", value: { _tag: "Shown", text: "#secret,#iirc" } },
       "channels.#iirc.key": { starts: "unset", value: { _tag: "Unset" } },
       "channels.#secret.key": {
@@ -826,6 +830,7 @@ describe("the commands", () => {
           {
             _tag: "AddNetwork",
             configuration: decode({
+              answerCtcp: true,
               channels: [],
               declined: [],
               enabled: true,
@@ -870,6 +875,7 @@ describe("the commands", () => {
       started: {
         _tag: "Parsed",
         value: decode({
+          answerCtcp: true,
           channels: [],
           declined: [],
           enabled: true,

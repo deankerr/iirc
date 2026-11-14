@@ -133,6 +133,39 @@ const replied = (sequence: number): Change => ({
   timeline: network,
 });
 
+// A CTCP request, with the answer Self sent, a reply, and an answer that never left, in the Network's own Timeline.
+const asked = (sequence: number): readonly Change[] =>
+  (
+    [
+      {
+        _tag: "CtcpRequest",
+        answer: { _tag: "Answered", text: "1 2" },
+        args: "1 2",
+        command: "PING",
+        nick: "peer",
+        target: "iirc",
+      },
+      { _tag: "CtcpReply", args: "irssi", command: "VERSION", nick: "peer", target: "iirc" },
+      { _tag: "CtcpUnsent", command: "PING", nick: "peer", target: "iirc" },
+    ] as const
+  ).map((activity, index) => ({
+    _tag: "Added",
+    content: {
+      _tag: "Activity",
+      activity,
+      at: { _tag: "Known", at: at(sequence), from: "receipt", value: at(sequence) },
+      id: { _tag: "Unknown" },
+      live: true,
+    },
+    intent: undefined,
+    level: "Activity",
+    messageId: undefined,
+    network: libera,
+    position: position(sequence, sequence, 3 + index),
+    sequence,
+    timeline: network,
+  }));
+
 const marked = (sequence: number, read: number): Change => ({
   _tag: "ReadMarker",
   network: libera,
@@ -165,7 +198,7 @@ const steps: readonly { readonly through: number; readonly changes: readonly Cha
     through: 1,
   },
   {
-    changes: [said(2, "one", "m1"), said(3, "two"), heard(3, "three"), replied(3)],
+    changes: [said(2, "one", "m1"), said(3, "two"), heard(3, "three"), replied(3), ...asked(3)],
     through: 3,
   },
   {
@@ -250,11 +283,12 @@ describe("reopening the file", () => {
         expect(Option.isSome(before.merged)).toBeTruthy();
         expect(before.changed.items.length).toBeGreaterThan(0);
         expect(
-          before.changed.items.some(
-            (item) =>
-              item.content._tag === "Activity" && item.content.activity._tag === "StandardReply"
+          ["StandardReply", "CtcpRequest", "CtcpReply", "CtcpUnsent"].map((tag) =>
+            before.changed.items.some(
+              (item) => item.content._tag === "Activity" && item.content.activity._tag === tag
+            )
           )
-        ).toBeTruthy();
+        ).toStrictEqual([true, true, true, true]);
         expect(after).toStrictEqual(before);
       })
     );

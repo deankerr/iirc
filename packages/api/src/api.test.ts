@@ -31,6 +31,9 @@ import { UiInForce, UiOptionName, UiOptions, uiDefaults, uiOptionNames } from ".
 
 const document = OpenApi.fromApi(DaemonApi);
 
+const roundTrip = (each: Activity) =>
+  Schema.decodeSync(Activity)(Schema.encodeSync(Activity)(each));
+
 describe("the contract", () => {
   it("puts every route under /api, and every one but signing in and out behind a key or a sign-in", () => {
     const routes = Object.entries(document.paths).flatMap(([path, operations]) =>
@@ -563,6 +566,37 @@ describe("the contract", () => {
         (field) => !looked.includes(field)
       ),
     ]).toStrictEqual([activity, result, false, []]);
+  });
+
+  it("carries a CTCP request with its answer, a reply, and an answer that never left, each field its own, every word Untrusted", () => {
+    const request = {
+      _tag: "CtcpRequest",
+      answer: { _tag: "Answered", text: "1 2" },
+      args: "1 2",
+      command: "PING",
+      nick: "peer",
+      target: "iirc",
+    } as const;
+
+    const refused = { ...request, answer: { _tag: "Unanswered", reason: "Limited" } } as const;
+
+    const reply = {
+      _tag: "CtcpReply",
+      args: "irssi",
+      command: "VERSION",
+      nick: "peer",
+      target: "iirc",
+    } as const;
+
+    const unsent = { _tag: "CtcpUnsent", command: "PING", nick: "peer", target: "iirc" } as const;
+
+    expect([
+      roundTrip(request),
+      roundTrip(refused),
+      roundTrip(reply),
+      roundTrip(unsent),
+      Schema.is(Activity)({ ...refused, answer: { _tag: "Unanswered", reason: "Bored" } }),
+    ]).toStrictEqual([request, refused, reply, unsent, false]);
   });
 
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {

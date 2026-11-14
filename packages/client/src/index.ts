@@ -43,6 +43,8 @@ export type {
   ActionWhere,
   Activity,
   Attempted,
+  Ctcp,
+  CtcpAnswer,
   EndReason,
   IgnoredReason,
   LookResult,
@@ -59,6 +61,7 @@ export type {
   RefusedAction,
   RefusedReason,
   StandardReply,
+  Unanswered,
   Where,
 } from "./news.ts";
 

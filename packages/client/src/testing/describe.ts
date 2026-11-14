@@ -336,6 +336,34 @@ const writeActivity = (activity: Activity): ActivityParts => {
       };
     }
 
+    case "CtcpUnsent": {
+      return {
+        head: [atom(activity.nick), atom(activity.target), atom(activity.command)],
+        tail: [],
+      };
+    }
+
+    case "CtcpRequest":
+    case "CtcpReply": {
+      const { answer } = activity._tag === "CtcpRequest" ? activity : { answer: undefined };
+
+      return {
+        head: [
+          atom(activity.nick),
+          atom(activity.target),
+          atom(activity.command),
+          ...(answer === undefined
+            ? []
+            : [
+                answer._tag === "Answered"
+                  ? `answered=${atom(answer.text)}`
+                  : `unanswered=${answer.reason}`,
+              ]),
+        ],
+        tail: activity.args === "" ? [] : trailing(activity.args),
+      };
+    }
+
     default: {
       return activity satisfies never;
     }

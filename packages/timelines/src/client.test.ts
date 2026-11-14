@@ -136,4 +136,90 @@ describe("a played Session", () => {
       libera?.directs.get("bob")
     );
   });
+
+  it("shows a CTCP request in the Network's own Timeline, and the partner's only once it exists", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      lines(
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "<< :peer!u@h PRIVMSG iirc :psst",
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01PING 1\\x01",
+        ">>\\ NOTICE peer :\\x01PING 1\\x01"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" &&
+      change.content._tag === "Activity" &&
+      change.content.activity._tag === "CtcpRequest"
+        ? [[change.content.activity.command, change.timeline]]
+        : []
+    );
+
+    expect(placed).toStrictEqual([
+      ["VERSION", libera?.timeline],
+      ["PING", libera?.directs.get("peer")],
+      ["PING", libera?.timeline],
+    ]);
+  });
+
+  it("shows an answer that never left beside its request, in the Channel it was asked in", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      joined(base, "#iirc", ["peer"]),
+      lines(
+        "<<\\ :peer!u@h PRIVMSG #iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "== unsent 1"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" && change.content._tag === "Activity"
+        ? [[change.content.activity._tag, change.timeline, change.level]]
+        : []
+    );
+
+    expect(placed.slice(-2)).toStrictEqual([
+      ["CtcpRequest", libera?.channels.get("#iirc"), "Activity"],
+      ["CtcpUnsent", libera?.channels.get("#iirc"), "Activity"],
+    ]);
+  });
+
+  it("shows an answer that never left in its partner's Timeline after they changed nick", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      joined(base, "#iirc", ["peer"]),
+      lines(
+        "<< :peer!u@h PRIVMSG iirc :psst",
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "<< :peer!u@h NICK other",
+        "== unsent 1"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" &&
+      change.content._tag === "Activity" &&
+      change.content.activity._tag.startsWith("Ctcp")
+        ? [[change.content.activity._tag, change.timeline]]
+        : []
+    );
+
+    expect([...(libera?.directs.keys() ?? [])]).toStrictEqual(["other"]);
+    expect(placed).toStrictEqual([
+      ["CtcpRequest", libera?.directs.get("other")],
+      ["CtcpRequest", libera?.timeline],
+      ["CtcpUnsent", libera?.directs.get("other")],
+      ["CtcpUnsent", libera?.timeline],
+    ]);
+  });
 });

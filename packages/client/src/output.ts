@@ -6,6 +6,24 @@ import { ConnectionId, Instant, IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 
 /**
+ * The CTCP request a `Send` answers: who asked, where they sent it, and its command, so an
+ * `Unsent` of the answer can be reported where the request was. `channels` are the Channels
+ * the request was placed in, as named, fixed as it arrived, and empty for one placed by who
+ * asked, which `answer` numbers among Self's answers, so the Client can tell where that
+ * partner's Timeline has moved since.
+ */
+export const Answers = Schema.Struct({
+  answer: Schema.Int,
+  channels: Schema.Array(Schema.String),
+  command: Schema.String,
+  nick: Schema.String,
+  target: Schema.String,
+});
+
+/** The decoded form of {@link Answers}. */
+export type Answers = typeof Answers.Type;
+
+/**
  * Everything a Client can ask the Runtime to do. Outputs are journaled with the input
  * that caused them, and carried out in order.
  */
@@ -20,9 +38,15 @@ export const Output = Schema.TaggedUnion({
   Hangup: { connection: ConnectionId },
   /**
    * Send a Line. It counts as sent unless an `Unsent` input says otherwise. `intent` is set
-   * on every Line of a `Say`, so an `Unsent` can be tied back to it.
+   * on every Line of a `Say` or an action, and `answers` on a CTCP answer, so an `Unsent`
+   * can be tied back to what it was for.
    */
-  Send: { connection: ConnectionId, intent: Schema.optionalKey(IntentId), line: OutboundLine },
+  Send: {
+    answers: Schema.optionalKey(Answers),
+    connection: ConnectionId,
+    intent: Schema.optionalKey(IntentId),
+    line: OutboundLine,
+  },
   /** Send a Line with a Credential filled in by the Runtime, which the Journal records by name. */
   SendSecret: { connection: ConnectionId, line: SecretLine },
   /** Set a timer to fire at an instant, replacing any earlier one with the same id, or cancel it with `null`. */
