@@ -15,6 +15,7 @@ import { typesCredential } from "@iirc/frontend/commands";
 import { active, announced, completes, cycled } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
+import { allScope } from "@iirc/frontend/palette";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef } from "react";
 
@@ -92,7 +93,7 @@ const PaletteButton = () => {
       icon="palette"
       label="Command palette"
       onPress={() => {
-        openNow("All");
+        openNow(allScope);
       }}
       size="small"
     />

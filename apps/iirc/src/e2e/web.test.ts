@@ -98,6 +98,8 @@ const decodeUi = (text: string) =>
       Schema.Struct({
         options: Schema.Struct({
           activity: Schema.String,
+          dark: Schema.String,
+          light: Schema.String,
           theme: Schema.String,
           time: Schema.String,
         }),
@@ -2129,7 +2131,13 @@ describe("the web frontend on iirc daemon --web", () => {
           kept: '{"theme":"light"}',
           problems: [],
           quiet: 0,
-          shared: { activity: "all", theme: "dark", time: "HH:mm:ss" },
+          shared: {
+            activity: "all",
+            dark: "dark",
+            light: "light",
+            theme: "dark",
+            time: "HH:mm:ss",
+          },
           themes: [
             ["light", "rgb(246, 245, 241)"],
             ["dark", "rgb(17, 19, 20)"],
@@ -2139,6 +2147,99 @@ describe("the web frontend on iirc daemon --web", () => {
         });
       } finally {
         newcomer.close();
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "draws system as the theme chosen for dark or for light, and follows the device the moment it changes",
+    { timeout: 60_000 },
+    async () => {
+      const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "schemes"),
+        "#iirc-schemes"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("row", { name: channel }).click();
+
+        const composer = page.getByRole("textbox", { name: channel });
+
+        const type = async (text: string) => {
+          await composer.fill(text);
+          await composer.press("Enter");
+        };
+
+        const drawn = async () =>
+          await page.evaluate(() => [
+            document.documentElement.dataset.theme,
+            document.documentElement.style.getPropertyValue("--color-background"),
+            getComputedStyle(document.body).backgroundColor,
+          ]);
+
+        // The device's change is followed at once, with no read of the options in between.
+        const followed = { timeout: 1000 };
+
+        const before = await drawn();
+
+        await type("/theme -dark nord");
+        await expect.poll(drawn).toStrictEqual(["system", "#2e3440", "rgb(46, 52, 64)"]);
+
+        await page.emulateMedia({ colorScheme: "light" });
+        await expect
+          .poll(drawn, followed)
+          .toStrictEqual(["system", "#f6f5f1", "rgb(246, 245, 241)"]);
+
+        await type("/theme -light solarized-light");
+        await expect.poll(drawn).toStrictEqual(["system", "#fdf6e3", "rgb(253, 246, 227)"]);
+
+        await page.emulateMedia({ colorScheme: "dark" });
+        await expect.poll(drawn, followed).toStrictEqual(["system", "#2e3440", "rgb(46, 52, 64)"]);
+
+        // A theme named wins over both, whatever the device prefers.
+        await type("/theme dracula");
+        await expect.poll(drawn).toStrictEqual(["dracula", "#282a36", "rgb(40, 42, 54)"]);
+        await page.emulateMedia({ colorScheme: "light" });
+
+        // A change of the device's setting is told in a frame's rendering, so two frames on it
+        // has been told.
+        await page.evaluate(async () => {
+          const { promise, resolve } = Promise.withResolvers<number>();
+
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+          await promise;
+        });
+        const named = await drawn();
+
+        const answered = await api("GET", "/ui");
+        const shared = decodeUi(await answered.text());
+
+        expect({
+          before,
+          named,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          shared: [shared.theme, shared.light, shared.dark],
+          violations: await page.evaluate(
+            () => document.documentElement.dataset.cspViolations ?? ""
+          ),
+        }).toStrictEqual({
+          before: ["system", "#111314", "rgb(17, 19, 20)"],
+          named: ["dracula", "#282a36", "rgb(40, 42, 54)"],
+          problems: [],
+          shared: ["dracula", "solarized-light", "nord"],
+          violations: "",
+        });
+      } finally {
         peer.close();
         child.kill("SIGTERM");
         await child.exited;

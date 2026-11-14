@@ -17,8 +17,10 @@ const shared = {
   options: {
     activity: "quiet",
     colours: "theme",
+    dark: "dark",
     font: "commit-mono",
     leading: 1.45,
+    light: "light",
     size: 16,
     theme: "dark",
     themes: [],
@@ -131,8 +133,10 @@ describe("a device's overrides", () => {
       before: {
         activity: "all",
         colours: "theme",
+        dark: "dark",
         font: "system",
         leading: 1.45,
+        light: "light",
         size: 14,
         theme: "system",
         themes: [],

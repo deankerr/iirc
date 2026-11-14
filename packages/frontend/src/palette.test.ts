@@ -1,5 +1,5 @@
 import { NetworkId, Timeline, TimelineId } from "@iirc/api";
-import { FontFamily } from "@iirc/api/ui";
+import { FontFamily, uiDefaults } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -10,6 +10,7 @@ import { draftOf, initialComposers, reduceComposers, started } from "./composer.
 import { defaultKeymap, formatChord } from "./keymap.ts";
 import { optionsOf } from "./options.ts";
 import {
+  allScope,
   choose,
   fontDescription,
   fontOfKey,
@@ -19,7 +20,7 @@ import {
   remember,
   sections,
 } from "./palette.ts";
-import type { Entry, Listing, PaletteEvent, Section } from "./palette.ts";
+import type { Entry, Listing, PaletteEvent, Scope, Section } from "./palette.ts";
 import { listedThemes, paletteNamed } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
 
@@ -95,13 +96,15 @@ const inChannel: CommandContext = {
 
 const nowhere: CommandContext = { ...inChannel, focus: undefined, open: undefined, session: false };
 
+const themesScope: Scope = { _tag: "Themes", option: "theme" };
+
 const listing = (context: CommandContext = inChannel): Listing => ({
+  chosen: { dark: "dark", light: "light", theme: "system" },
   context,
   font: "system",
   keymap: defaultKeymap,
   options: optionsOf(libera, configuration, new Set(["libera.password"])),
   sidebar,
-  theme: "system",
   themes: [],
 });
 
@@ -345,12 +348,12 @@ describe("choosing an entry", () => {
 describe("the themes in the palette", () => {
   const themed = {
     ...listing(),
-    theme: "nord",
-    themes: listedThemes([{ name: "mine", palette: paletteNamed("dracula", [], true) }]),
+    chosen: { dark: "mine", light: "light", theme: "nord" },
+    themes: listedThemes([{ name: "mine", palette: paletteNamed("dracula", uiDefaults, true) }]),
   };
 
   it("lists every theme, the one in effect said, alone when scoped to them, and finds them by name or as themes", () => {
-    const scoped = sections(themed, "", ["command:timeline.next"], "Themes");
+    const scoped = sections(themed, "", ["command:timeline.next"], themesScope);
     const nord = entryOf(scoped, "theme:nord");
 
     expect({
@@ -363,7 +366,7 @@ describe("the themes in the palette", () => {
     }).toStrictEqual({
       all: ["Commands", "Timelines", "Themes", "Fonts", "Options"],
       byName: [["Themes", ["theme:dracula"]]],
-      chosen: [{ _tag: "UseTheme", device: false, name: "nord" }],
+      chosen: [{ _tag: "UseTheme", device: false, name: "nord", option: "theme" }],
       current: true,
       scoped: [
         [
@@ -385,6 +388,22 @@ describe("the themes in the palette", () => {
       themes: "command:theme.set",
     });
   });
+
+  it("lists the themes for dark, without system, the one ui.dark names said, and choosing one sets ui.dark", () => {
+    const forDark = sections(themed, "", [], { _tag: "Themes", option: "dark" });
+    const mine = entryOf(forDark, "theme:mine");
+    const nord = entryOf(forDark, "theme:nord");
+
+    expect({
+      chosen: choose(nord, inChannel, false),
+      current: [mine, nord].map((one) => one._tag === "Theme" && one.current),
+      system: keys(forDark)[0]?.[1].includes("theme:system"),
+    }).toStrictEqual({
+      chosen: [{ _tag: "UseTheme", device: false, name: "nord", option: "dark" }],
+      current: [true, false],
+      system: false,
+    });
+  });
 });
 
 describe("the fonts in the palette", () => {
@@ -402,7 +421,7 @@ describe("the fonts in the palette", () => {
       current: commit._tag === "Font" && commit.current,
       fonts: keys(all).find(([title]) => title === "Fonts"),
       found: keys(sections(fonted, "font", [])).find(([title]) => title === "Fonts")?.[1].length,
-      scoped: titles(sections(fonted, "", [], "Themes")),
+      scoped: titles(sections(fonted, "", [], themesScope)),
     }).toStrictEqual({
       byName: [["Fonts", ["font:ibm-plex-mono", "font:ibm-plex-sans"]]],
       bySans: [
@@ -456,7 +475,7 @@ describe("a family typed in the palette", () => {
         (query) => fontsFor(query).length
       ),
       said: typed?._tag === "Font" ? fontDescription(typed.name) : undefined,
-      themes: titles(sections(fonted, "font Fira Code", [], "Themes")),
+      themes: titles(sections(fonted, "font Fira Code", [], themesScope)),
       typed,
     }).toStrictEqual({
       alone: [],
@@ -497,17 +516,17 @@ describe("a family typed in the palette", () => {
 describe("the palette's state", () => {
   it("opens empty, keeps what is typed, and remembers a choice as it closes", () => {
     const events: readonly PaletteEvent[] = [
-      { _tag: "Opened", scope: "All" },
+      { _tag: "Opened", scope: allScope },
       { _tag: "Queried", query: "nxt" },
       { _tag: "Chosen", key: "command:timeline.next" },
-      { _tag: "Opened", scope: "Themes" },
+      { _tag: "Opened", scope: themesScope },
     ];
 
     expect(folded(events)).toStrictEqual({
       open: true,
       query: "",
       recent: ["command:timeline.next"],
-      scope: "Themes",
+      scope: themesScope,
     });
   });
 

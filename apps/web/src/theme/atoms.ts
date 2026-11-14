@@ -10,8 +10,8 @@
  * @packageDocumentation
  */
 import { Themes } from "@iirc/api";
-import type { Palette, ThemeName, UiInForce } from "@iirc/api";
-import type { Parsed } from "@iirc/frontend/commands";
+import type { Palette, UiInForce } from "@iirc/api";
+import type { Intent, Parsed } from "@iirc/frontend/commands";
 import type { Json } from "@iirc/frontend/options";
 import { fontOfKey } from "@iirc/frontend/palette";
 import {
@@ -155,13 +155,13 @@ const previewed = Atom.make((get): Palette | undefined => {
 
   const ui = get(uiInEffect);
 
-  return paletteNamed(highlighted.slice("theme:".length), ui.themes, get(prefersDark));
+  return paletteNamed(highlighted.slice("theme:".length), ui, get(prefersDark));
 });
 
 /** The theme in effect on this device, or the one previewed, drawn by the core. */
 export const drawnTheme = Atom.make((get) => {
   const ui = get(uiInEffect);
-  const palette = get(previewed) ?? paletteNamed(ui.theme, ui.themes, get(prefersDark));
+  const palette = get(previewed) ?? paletteNamed(ui.theme, ui, get(prefersDark));
 
   return drawn(palette, ui.colours);
 });
@@ -187,11 +187,17 @@ const drawnType = Atom.make((get): readonly (readonly [string, string | undefine
   ];
 });
 
-/** Every theme there is, and the name of the one in effect here, for the palette to list. */
+/**
+ * Every theme there is, and the one each option that names a theme names here, for the
+ * palette to list.
+ */
 export const themesListed = Atom.make((get) => {
   const ui = get(uiInEffect);
 
-  return { theme: ui.theme, themes: listedThemes(ui.themes) };
+  return {
+    chosen: { dark: ui.dark, light: ui.light, theme: ui.theme },
+    themes: listedThemes(ui.themes),
+  };
 });
 
 /**
@@ -216,17 +222,16 @@ const sharedNow = (registry: AtomRegistry.AtomRegistry) =>
   });
 
 /**
- * Draws in a theme, for every device or this one, once it names a theme there is: one
- * built in, or one imported, as this device has them.
+ * Sets the option a choice of theme names, for every device or this one, once it names a
+ * theme there is: one built in, or one imported, as this device has them. `theme` draws in
+ * it, and `light` or `dark` has `system` draw it while the device is light or dark.
  * @param registry - The registry.
- * @param name - The theme's name.
- * @param device - Whether for this device alone.
+ * @param choice - The option, the theme's name, and whether for this device alone.
  * @returns What it came to.
  */
 export const chooseTheme = (
   registry: AtomRegistry.AtomRegistry,
-  name: ThemeName,
-  device: boolean
+  { device, name, option }: Extract<Intent, { readonly _tag: "UseTheme" }>
 ) =>
   Effect.gen(function* () {
     yield* sharedNow(registry);
@@ -239,7 +244,7 @@ export const chooseTheme = (
       return refused;
     }
 
-    return yield* changeUi(registry, { device, option: "theme", value: found.value });
+    return yield* changeUi(registry, { device, option, value: found.value });
   }).pipe(Effect.catch((error) => Effect.succeed(uiFailed(error._tag))));
 
 const themesJson = Schema.encodeSync(Schema.toCodecJson(Themes));

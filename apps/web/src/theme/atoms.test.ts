@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { draftOf } from "@iirc/frontend/composer";
+import { allScope } from "@iirc/frontend/palette";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { composerState, edit, send } from "../composer/atoms.ts";
 import { signedOut } from "../options/atoms.ts";
@@ -108,10 +109,34 @@ const deferred = (name: string) => {
   return { file, give: resolve };
 };
 
+/**
+ * Whether the device prefers dark, as the browser's media query says it, and changes it
+ * when the test says, as a device does when its setting changes.
+ */
+class DevicePreference extends EventTarget {
+  matches: boolean;
+
+  constructor(dark: boolean) {
+    super();
+    this.matches = dark;
+  }
+
+  /**
+   * Changes whether the device prefers dark, and says so.
+   * @param dark - Whether it prefers dark now.
+   */
+  prefer(dark: boolean) {
+    this.matches = dark;
+    this.dispatchEvent(new Event("change"));
+  }
+}
+
 /** Lets the reads a test started settle. */
 const settle = async () => {
   await Effect.runPromise(Effect.sleep("20 millis"));
 };
+
+const drawnNow = () => document.documentElement.style.getPropertyValue("--color-background");
 
 const lineHeight = () => document.documentElement.style.getPropertyValue("--line-height");
 
@@ -232,7 +257,7 @@ describe("themes", () => {
       closed: "#111314",
       command: "#111314",
       dracula: "#282a36",
-      listed: [true, "Themes"],
+      listed: [true, { _tag: "Themes", option: "theme" }],
       solarized: "#fdf6e3",
     });
   });
@@ -300,6 +325,85 @@ describe("themes", () => {
     });
   });
 
+  it("draws system as the theme chosen for light or dark, follows the device at once, and lets a named theme win", async () => {
+    const device = new DevicePreference(true);
+
+    vi.stubGlobal("matchMedia", () => device);
+
+    const fake = signedIn();
+    const { notice, registry, type } = await page(fake);
+    const stop = watchTheme(registry);
+    const before = drawnNow();
+
+    await type("/theme -dark nord");
+    await until(registry, uiInEffect, (ui) => ui.dark === "nord");
+    const dark = drawnNow();
+
+    device.prefer(false);
+    const light = drawnNow();
+
+    await type("/theme -light solarized-light");
+    await until(registry, uiInEffect, (ui) => ui.light === "solarized-light");
+    const lightChosen = drawnNow();
+
+    device.prefer(true);
+    const backToDark = drawnNow();
+
+    await type("/theme -light system");
+    const refused = notice();
+
+    await type("/theme -light");
+    const listed = registry.get(paletteState).scope;
+
+    const sunny = registry
+      .get(paletteSections)
+      .flatMap((section) => section.entries)
+      .find((entry) => entry.key === "theme:gruvbox-dark");
+
+    if (sunny !== undefined) {
+      registry.set(pickEntry, sunny);
+    }
+
+    await until(registry, uiInEffect, (ui) => ui.light === "gruvbox-dark");
+    device.prefer(false);
+    const picked = drawnNow();
+
+    await type("/theme dracula");
+    await until(registry, uiInEffect, (ui) => ui.theme === "dracula");
+    const named = drawnNow();
+
+    device.prefer(true);
+    const namedDark = drawnNow();
+
+    stop();
+    vi.unstubAllGlobals();
+
+    expect({
+      backToDark,
+      before,
+      dark,
+      light,
+      lightChosen,
+      listed,
+      named: [named, namedDark],
+      picked,
+      refused,
+      shared: [fake.daemon.ui.options.light, fake.daemon.ui.options.dark],
+    }).toStrictEqual({
+      backToDark: "#2e3440",
+      before: "#111314",
+      dark: "#2e3440",
+      light: "#f6f5f1",
+      lightChosen: "#fdf6e3",
+      listed: { _tag: "Themes", option: "light" },
+      named: ["#282a36", "#282a36"],
+      picked: "#282828",
+      refused:
+        "system follows the device, so it is never the theme drawn while the device is light. Name a theme, such as light.",
+      shared: ["gruvbox-dark", "nord"],
+    });
+  });
+
   it("draws the text's size and font on the root at once, with IRC's monospace in a monospace font beside a sans one, previews a font highlighted in the palette, and sets one chosen there", async () => {
     const fake = signedIn();
     const { notice, registry, type } = await page(fake);
@@ -324,7 +428,7 @@ describe("themes", () => {
     await type("/set -device ui.font jetbrains-mono");
     const device = read();
 
-    paletteHappened(registry, { _tag: "Opened", scope: "All" });
+    paletteHappened(registry, { _tag: "Opened", scope: allScope });
     registry.set(highlightEntry, { highlighted: true, key: "font:ibm-plex-mono" });
     const previewed = read();
 
@@ -338,7 +442,7 @@ describe("themes", () => {
     registry.set(closePalette, undefined);
     const closed = read();
 
-    paletteHappened(registry, { _tag: "Opened", scope: "All" });
+    paletteHappened(registry, { _tag: "Opened", scope: allScope });
 
     const commit = registry
       .get(paletteSections)
@@ -411,7 +515,7 @@ describe("themes", () => {
     await type("/set -device ui.font Fira Code");
     const set = read();
 
-    paletteHappened(registry, { _tag: "Opened", scope: "All" });
+    paletteHappened(registry, { _tag: "Opened", scope: allScope });
     paletteHappened(registry, { _tag: "Queried", query: "font Iosevka Term" });
 
     const typed = registry
@@ -451,7 +555,7 @@ describe("themes", () => {
     const { registry } = await page(fake);
 
     const choose = async (query: string, key: string, font: string) => {
-      paletteHappened(registry, { _tag: "Opened", scope: "All" });
+      paletteHappened(registry, { _tag: "Opened", scope: allScope });
       paletteHappened(registry, { _tag: "Queried", query });
 
       const entry = registry

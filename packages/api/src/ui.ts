@@ -111,8 +111,29 @@ export const themesCap = 32;
 const ThemeShown = ThemeName.annotate({
   default: "system",
   description:
-    "The theme to draw in: system, which follows the device's setting, a built-in such as dark, light, or nord, or one imported. /theme lists them.",
+    "The theme to draw in: system, which draws ui.light or ui.dark as the device is light or dark, a built-in such as dark, light, or nord, or one imported. /theme lists them.",
 });
+
+/**
+ * The theme `system` draws while the device is light or dark, by name: a built-in one or one
+ * imported, but never `system` itself, which follows the device and so draws nothing of its
+ * own. A name is plain text on the wire, as `theme`'s is, and one that names no theme, as
+ * one imported and removed since, draws as the built-in `light` or `dark`.
+ * @param scheme - Whether it is drawn while the device is light or dark.
+ * @param example - Another built-in theme for that scheme, to name.
+ * @returns The option's Schema.
+ */
+const themeForScheme = (scheme: "light" | "dark", example: ThemeName) =>
+  ThemeName.check(
+    Schema.makeFilter(
+      (name: string) =>
+        name !== "system" ||
+        "follows the device, so it is not a theme to draw while it is light or dark"
+    )
+  ).annotate({
+    default: scheme,
+    description: `The theme drawn while ui.theme is system and the device is ${scheme}: a built-in such as ${scheme} or ${example}, or one imported. /theme -${scheme} sets it.`,
+  });
 
 /** The themes the Owner imported, each named once, at most {@link themesCap}. */
 export const Themes = Schema.Array(Theme)
@@ -352,8 +373,10 @@ export const isFontName = (font: FontShown): font is FontName => fontNamesFolded
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
   colours: ColoursShown,
+  dark: themeForScheme("dark", "solarized-dark"),
   font: FontShown,
   leading: Leading,
+  light: themeForScheme("light", "solarized-light"),
   size: TextSize,
   theme: ThemeShown,
   themes: Themes,
