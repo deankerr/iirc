@@ -181,9 +181,12 @@ const foldOne = <S>(
       [{ _tag: "NetworkRemoved", keep } as const],
     ] as const;
 
+  // A life begins with its `Configured` whether or not the Client could step it.
   if (begun._tag === "Broken") {
+    const living = { ...begun, life: lifeAfter(begun.life, input, sequence) };
+
     return Effect.succeed(
-      input._tag === "Removed" ? endedBroken(begun, input.keep) : ([begun, []] as const)
+      input._tag === "Removed" ? endedBroken(living, input.keep) : ([living, []] as const)
     );
   }
 
@@ -209,7 +212,12 @@ const foldOne = <S>(
         ] as const
     ),
     Effect.catch((error) => {
-      const broken = { ...begun, _tag: "Broken", reason: error.reason } as const;
+      const broken = {
+        ...begun,
+        _tag: "Broken",
+        life: lifeAfter(begun.life, input, sequence),
+        reason: error.reason,
+      } as const;
 
       return Effect.succeed(
         input._tag === "Removed" ? endedBroken(broken, input.keep) : ([broken, []] as const)

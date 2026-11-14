@@ -346,6 +346,53 @@ describe("a Network's life", () => {
   });
 });
 
+// The Client, but one that throws on every Configuration, as a Client with a bug would.
+const throwing = <S>(inner: Client<S>): Client<S> => ({
+  ...inner,
+  step: (state, input) => {
+    if (input._tag === "Configured") {
+      throw new Error("boom");
+    }
+
+    return inner.step(state, input);
+  },
+});
+
+describe("a Network whose Client throws on its first Configuration", () => {
+  it("has the life that Configured began, and keeps its id after a restart once removed", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const first = yield* startRuntime(world, throwing(client));
+
+        const refused = yield* Effect.flip(
+          first.runtime.configure(libera, configured({ enabled: false }))
+        );
+
+        const removal = yield* first.runtime.remove(libera, { keep: true });
+
+        yield* first.close;
+        const second = yield* startRuntime(world, throwing(client));
+
+        return {
+          configured: refused._tag,
+          kept: yield* second.runtime.kept,
+          outline: yield* outline(world.journal),
+          removal,
+          retaken: (yield* Effect.flip(second.runtime.configure(libera, configured())))._tag,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      configured: "NetworkStopped",
+      kept: new Map([[libera, 1]]),
+      outline: ["1 libera Configured", "2 libera Removed"],
+      removal: { life: 1, sequence: 2 },
+      retaken: "TimelinesKept",
+    });
+  });
+});
+
 describe("a removal carried through", () => {
   it("goes on to its end when its caller goes away", async () => {
     const result = await runTest((world) =>

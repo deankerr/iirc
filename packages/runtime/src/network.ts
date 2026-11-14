@@ -778,6 +778,14 @@ const drive = <S>(
       Effect.gen(function* () {
         const input = make(yield* now);
         const sequence = yield* journal.append({ _tag: "Input", input, network: id });
+
+        // A life begins with its `Configured` once it is journaled, whether or not the
+        // Client can step it.
+        yield* Ref.update(current, (now) => ({
+          ...now,
+          life: lifeAfter(now.life, input, sequence),
+        }));
+
         const before = yield* Ref.get(current);
         const step = yield* stepContained(client, before.state, input);
         const refused: UnsentLine[] = [];
