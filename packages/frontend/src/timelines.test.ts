@@ -113,6 +113,8 @@ const compareSpots = (left: Spot, right: Spot) =>
 interface ModelTimeline {
   readonly id: string;
   readonly network: string;
+  /** Its Network's life, as the API names it: the step that configured the Network. */
+  readonly life: number;
   readonly kind: "Network" | "Channel";
   readonly changed: number;
   readonly latest: Spot | undefined;
@@ -193,6 +195,15 @@ const addItem = (world: World, timeline: ModelTimeline, item: ModelItem): World 
   touch({ ...world, items: [...world.items, item] }, timeline.id, item.changed, item.spot);
 
 /**
+ * A Network's life in the world: the step its own Timeline opened on, as it was configured.
+ * @param world - The world.
+ * @param network - The Network.
+ * @returns Its life, or none before it is configured.
+ */
+const lifeIn = (world: World, network: string): number | undefined =>
+  world.timelines.find((one) => one.network === network && one.kind === "Network")?.life;
+
+/**
  * Opens a Timeline: a Network's own on its first step, or a Channel's.
  * @param world - The world.
  * @param network - Its Network.
@@ -209,7 +220,15 @@ const openTimeline = (
   ...world,
   timelines: [
     ...world.timelines,
-    { changed: sequence, id: idOf(sequence), kind, latest: undefined, network },
+    {
+      changed: sequence,
+      id: idOf(sequence),
+      kind,
+      latest: undefined,
+      // A Network's own Timeline opens on the step that configured it, which began its life.
+      life: lifeIn(world, network) ?? sequence,
+      network,
+    },
   ],
 });
 
@@ -394,7 +413,7 @@ const wireTimeline = (timeline: ModelTimeline) =>
     kind: timeline.kind,
     latest:
       timeline.latest === undefined ? null : cursor(timeline.latest.at, timeline.latest.sequence),
-    life: 1,
+    life: timeline.life,
     name: timeline.kind === "Network" ? timeline.network : `#${timeline.id}`,
     network: timeline.network,
     read: null,
@@ -555,11 +574,11 @@ const daemonAt = (world: World, through: number, version: number) => {
   return {
     entries: () =>
       decodeEntries(
-        networks.flatMap((network) =>
-          world.timelines.some((one) => one.network === network)
-            ? [{ life: 1, network, status: { _tag: "Running" } }]
-            : []
-        )
+        networks.flatMap((network) => {
+          const life = lifeIn(world, network);
+
+          return life === undefined ? [] : [{ life, network, status: { _tag: "Running" } }];
+        })
       ),
     known: (network: string) =>
       decodeSession(
@@ -567,6 +586,7 @@ const daemonAt = (world: World, through: number, version: number) => {
           ? { _tag: "Offline", since: null }
           : { _tag: "Registered", ircd: "ircd.test", since: 0 }
       ),
+    life: (network: string) => lifeIn(world, network) ?? 0,
     list: (network: string, after: string | undefined) => {
       const all = world.timelines
         .filter((one) => one.network === network && (after === undefined || one.id > after))
@@ -874,7 +894,7 @@ const simulate = (played: Scenario) => {
       case "Status": {
         return {
           _tag: "StatusRead",
-          life: 1,
+          life: daemon.life(read.network),
           network: read.network,
           self: null,
           session: daemon.known(read.network),
@@ -1256,6 +1276,37 @@ describe("following the changes", () => {
       }),
       { numRuns: 200 }
     );
+  });
+
+  it("keeps a Network configured after the Network list was asked, which it does not name", () => {
+    // Shrunk from the property above: the stream stops, the Network list is answered before
+    // beta is configured, and beta's first steps come after it.
+    const played: Scenario = {
+      actions: [
+        { action: "BlackOut", pick: 0 },
+        { action: "Answer", pick: 0 },
+        { action: "Serve", pick: 0 },
+        { action: "Answer", pick: 0 },
+        { action: "Serve", pick: 0 },
+      ],
+      choices: [
+        { late: false, overflow: "None", pick: 0, what: 0 },
+        { late: false, overflow: "None", pick: 0, what: 1 },
+        { late: false, overflow: "None", pick: 0, what: 0 },
+      ],
+      quiet: false,
+      resetAt: undefined,
+      twice: false,
+    };
+
+    const { holes, state, world } = simulate(played);
+    const { expected, held } = compare(state, world);
+
+    expect({ following: followFrom(state) !== undefined, holes, ...held }).toStrictEqual({
+      following: true,
+      holes: [],
+      ...expected,
+    });
   });
 
   it("holds only plain data, which survives structuredClone", () => {
