@@ -19,7 +19,7 @@ import type {
 } from "@iirc/client";
 import { Effect, Schema, Stream } from "effect";
 
-import type { JournalFailed, JournalService, NetworkId, Sequence } from "./journal.ts";
+import type { Entry, JournalFailed, JournalService, NetworkId, Sequence } from "./journal.ts";
 
 /** The Configuration in force for a Network: the last `Configured` stepped, and its sequence. */
 export interface InForce {
@@ -227,6 +227,58 @@ const foldOne = <S>(
 };
 
 /**
+ * Folds one Entry into every Network so far, as every fold of the Journal does: an Input
+ * steps its Network, and a `Forgotten` clears the removals whose Credentials it forgot.
+ * @param client - The Client.
+ * @param networks - Every Network so far, which it changes.
+ * @param entry - The Entry.
+ * @returns What it made happen: one step's News, when it was an Input whose step gave any.
+ */
+export const foldEntry = <S>(
+  client: Client<S>,
+  networks: Map<NetworkId, Folded<S>>,
+  entry: Entry
+): Effect.Effect<readonly Happened[]> => {
+  const { record } = entry;
+
+  // The Credentials of every removal before it were forgotten.
+  if (record._tag === "Forgotten") {
+    const folded = networks.get(record.network);
+
+    if (folded !== undefined) {
+      networks.set(record.network, { ...folded, unforgotten: [] });
+    }
+
+    return Effect.succeed([]);
+  }
+
+  if (record._tag !== "Input") {
+    return Effect.succeed([]);
+  }
+
+  const { input, network } = record;
+
+  return foldOne(client, networks.get(network) ?? fresh(client), input, entry.sequence).pipe(
+    Effect.map(([folded, news]): readonly Happened[] => {
+      networks.set(network, folded);
+
+      // A step before any `Configured`, which the Runtime never journals, is its own.
+      return news.length === 0
+        ? []
+        : [
+            {
+              at: input.at,
+              life: folded.life ?? entry.sequence,
+              network,
+              news,
+              sequence: entry.sequence,
+            },
+          ];
+    })
+  );
+};
+
+/**
  * Every Network in the Journal, each folded from `initial` over its Inputs, as they
  * stood when reading began.
  * @param client - The Client.
@@ -240,37 +292,14 @@ export const refold = <S>(
   journal.read({}).pipe(
     Stream.runFoldEffect(
       () => new Map<NetworkId, Folded<S>>(),
-      (networks, entry) => {
-        const { record } = entry;
-
-        // The Credentials of every removal before it were forgotten.
-        if (record._tag === "Forgotten") {
-          const folded = networks.get(record.network);
-
-          return Effect.succeed(
-            folded === undefined
-              ? networks
-              : networks.set(record.network, { ...folded, unforgotten: [] })
-          );
-        }
-
-        if (record._tag !== "Input") {
-          return Effect.succeed(networks);
-        }
-
-        const { input, network } = record;
-
-        return foldOne(client, networks.get(network) ?? fresh(client), input, entry.sequence).pipe(
-          Effect.map(([folded]) => networks.set(network, folded))
-        );
-      }
+      (networks, entry) => Effect.as(foldEntry(client, networks, entry), networks)
     )
   );
 
 /**
  * The News of every Network, derived from the Journal: each Network's Inputs are folded
- * from `initial`, and what each step after `after` made happen is given, in Journal
- * order, and then live as Inputs are appended.
+ * from `initial`, as `refold` folds them, and what each step after `after` made happen is
+ * given, in Journal order, and then live as Inputs are appended.
  * @param client - The Client.
  * @param journal - The Journal.
  * @param after - The last sequence the reader has, if any.
@@ -284,32 +313,12 @@ export const newsAfter = <S>(
   journal.follow({}).pipe(
     Stream.mapAccumEffect(
       () => new Map<NetworkId, Folded<S>>(),
-      (networks, entry) => {
-        if (entry.record._tag !== "Input") {
-          return Effect.succeed([networks, []] as const);
-        }
-
-        const { input, network } = entry.record;
-
-        return foldOne(client, networks.get(network) ?? fresh(client), input, entry.sequence).pipe(
-          Effect.map(([folded, news]) => {
-            networks.set(network, folded);
-
-            const wanted = news.length > 0 && entry.sequence > (after ?? 0);
-
-            // A step before any `Configured`, which the Runtime never journals, is its own.
-            const happened: Happened = {
-              at: input.at,
-              life: folded.life ?? entry.sequence,
-              network,
-              news,
-              sequence: entry.sequence,
-            };
-
-            return [networks, wanted ? [happened] : []] as const;
-          })
-        );
-      }
+      (networks, entry) =>
+        Effect.map(
+          foldEntry(client, networks, entry),
+          (happened) =>
+            [networks, happened.filter(({ sequence }) => sequence > (after ?? 0))] as const
+        )
     )
   );
 

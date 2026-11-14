@@ -6,11 +6,12 @@
  *
  * @packageDocumentation
  */
+import { Sequence } from "@iirc/api";
 import type { NetworkId } from "@iirc/api";
 import { initialRemoval, reduceRemoval, removalOf } from "@iirc/frontend/removal";
 import type { RemovalAnswer, RemovalEvent } from "@iirc/frontend/removal";
 import { reduceTimelines, standingOf } from "@iirc/frontend/timelines";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -39,7 +40,8 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: RemovalEvent) => {
 };
 
 /**
- * Asks the Owner to confirm removing a Network, `keep` chosen to start with when given.
+ * Asks the Owner to confirm removing a Network, in the life of it shown now, `keep` chosen
+ * to start with when given.
  * @param registry - The registry.
  * @param network - The Network.
  * @param keep - Whether its Timelines are to be kept, if the Owner said.
@@ -49,8 +51,12 @@ export const askRemoval = (
   network: NetworkId,
   keep: boolean | undefined
 ) => {
-  happened(registry, { _tag: "Asked", keep, network });
+  const life = registry.get(timelinesState).networks.get(network)?.life;
+
+  happened(registry, { _tag: "Asked", keep, life, network });
 };
+
+const toSequence = Schema.decodeSync(Sequence);
 
 /** Asks to remove a Network, from a button that names it. */
 export const askToRemove = Atom.fnSync((network: NetworkId, get) => {
@@ -86,15 +92,23 @@ export const confirmRemoval = runtime
         return;
       }
 
-      const { keep, network } = removal;
+      const { keep, life: asked, network } = removal;
       const client = yield* DaemonClient;
 
       happened(registry, { _tag: "Sent" });
 
-      const sent = yield* client.networks.remove({ params: { network }, query: { keep } }).pipe(
-        Effect.map(({ life }) => ({ _tag: "Removed", life }) as const),
-        Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
-      );
+      // A Network not held when asked has no life to name, so the Daemon is not asked.
+      const sent =
+        asked === undefined
+          ? ({ _tag: "Failed", error: "UnknownNetwork" } as const)
+          : yield* client.networks
+              .remove({ params: { network }, query: { keep, life: toSequence(asked) } })
+              .pipe(
+                Effect.map(({ life }) => ({ _tag: "Removed", life }) as const),
+                Effect.catch((error) =>
+                  Effect.succeed({ _tag: "Failed", error: error._tag } as const)
+                )
+              );
 
       const answer: RemovalAnswer = sent._tag === "Removed" ? { _tag: "Removed" } : sent;
 
@@ -123,8 +137,27 @@ export const confirmRemoval = runtime
         );
       }
 
+      // Whether a removal whose Journal failed stands is unknown, and one made from an older
+      // life met another: the Network list is read again to say where it stands.
       if (
-        (sent._tag === "Removed" || sent.error === "VaultFailed") &&
+        sent._tag === "Failed" &&
+        (sent.error === "JournalFailed" || sent.error === "LifeChanged")
+      ) {
+        registry.set(
+          timelinesState,
+          reduceTimelines(registry.get(timelinesState), {
+            _tag: "NetworkVanished",
+            network,
+            of: "List",
+          })
+        );
+      }
+
+      if (
+        (sent._tag === "Removed" ||
+          sent.error === "VaultFailed" ||
+          sent.error === "JournalFailed" ||
+          sent.error === "LifeChanged") &&
         registry.get(optionsFilter) !== undefined
       ) {
         yield* refresh(registry);

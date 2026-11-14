@@ -22,6 +22,7 @@ import {
   CrossOrigin,
   InvalidRequest,
   JournalFailed,
+  LifeChanged,
   NetworkStopped,
   NotAChannel,
   NotInChannel,
@@ -135,7 +136,7 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
       success: Journaled,
     }),
     HttpApiEndpoint.delete("remove", "/networks/:network", {
-      error: [UnknownNetwork, NetworkStopped, JournalFailed, VaultFailed],
+      error: [UnknownNetwork, LifeChanged, NetworkStopped, JournalFailed, VaultFailed],
       params: NetworkPath,
       query: RemoveQuery,
       success: Removed,

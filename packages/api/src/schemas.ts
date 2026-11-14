@@ -274,8 +274,11 @@ export const Keep = Schema.Literals(["true", "false"]).pipe(
   })
 );
 
-/** How a Network is removed: whether its Timelines stay readable. */
-export const RemoveQuery = { keep: Keep };
+/**
+ * How a Network is removed: whether its Timelines stay readable, and the life of it the
+ * removal was made from, which it removes only while that is the life the Daemon holds.
+ */
+export const RemoveQuery = { keep: Keep, life: SequenceFromString };
 
 /**
  * A Network's Configuration in force, and the sequence of the `Configured` that set it,

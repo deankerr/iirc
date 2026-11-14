@@ -223,6 +223,28 @@ describe("removing a Network", () => {
     });
   });
 
+  it("removes nothing when the Network was removed or added again since it was asked about, and says so", async () => {
+    const { container, daemon } = await signedIn();
+
+    await submit(container, "/network remove libera");
+    await settled(() => question() !== null);
+
+    // Another Frontend dropped it and added the name again meanwhile.
+    daemon.lives.set("libera", 99);
+
+    await doing(() => {
+      button("Remove").click();
+    });
+    await settled(() => question()?.textContent?.includes("since you were asked") === true);
+
+    expect({
+      removals: daemon.removals,
+      said: question()?.textContent?.includes(
+        "libera was removed or added again since you were asked, so nothing was removed."
+      ),
+    }).toStrictEqual({ removals: [], said: true });
+  });
+
   it("keeps its Timelines to read, apart and with no Composer to say in, then drops them", async () => {
     const { container, daemon, registry } = await signedIn();
 

@@ -83,6 +83,16 @@ export class UnknownNetwork extends Schema.TaggedError<
 >()("UnknownNetwork", { network: NetworkId }) {}
 
 /**
+ * A removal named the life of the Network it was made from, and the Network holds another:
+ * `life`, live or kept, or `null` while one added has no life yet. It was removed, or added
+ * again, since. Nothing was journaled.
+ */
+export class LifeChanged extends Schema.TaggedError<
+  LifeChanged,
+  { readonly brand: unique symbol }
+>()("LifeChanged", { life: Schema.NullOr(Sequence), network: NetworkId }) {}
+
+/**
  * A Network removed under this id keeps its Timelines, so no Network can take the id until
  * it is removed again without them. Nothing was journaled.
  */
@@ -302,8 +312,11 @@ export interface RuntimeService {
    */
   readonly remove: (
     network: NetworkId,
-    removal: { readonly keep: boolean }
-  ) => Effect.Effect<Removal, UnknownNetwork | NetworkStopped | JournalFailed | VaultFailed>;
+    removal: { readonly keep: boolean; readonly life?: Life | undefined }
+  ) => Effect.Effect<
+    Removal,
+    UnknownNetwork | LifeChanged | NetworkStopped | JournalFailed | VaultFailed
+  >;
   /**
    * Every removed Network whose Timelines are kept, which no Network can take the id of,
    * with the life that was removed.
@@ -720,7 +733,9 @@ export const makeRuntime = <S>(
     // Once admitted, a removal runs to its end in a fiber of its own, holding the permit
     // that adds a Network, so a caller that goes away never leaves one journaled and half
     // done, and no `configure` takes the id or changes a Configuration meanwhile.
-    const remove = (id: NetworkId, keep: boolean) =>
+    // The life a removal was made from, when it names one, is checked in the same turn that
+    // removes, so no other removal or `configure` comes between.
+    const remove = (id: NetworkId, keep: boolean, from: Life | undefined) =>
       Effect.flatMap(
         Effect.forkDetach(
           adding.withPermit(
@@ -732,6 +747,12 @@ export const makeRuntime = <S>(
               const network = (yield* Ref.get(held)).get(id);
 
               if (network !== undefined) {
+                const { life } = yield* Ref.get(network.current);
+
+                if (from !== undefined && from !== life) {
+                  return yield* new LifeChanged({ life: life ?? null, network: id });
+                }
+
                 return yield* removeHeld(id, network, keep);
               }
 
@@ -739,6 +760,10 @@ export const makeRuntime = <S>(
 
               if (life === undefined) {
                 return yield* new UnknownNetwork({ network: id });
+              }
+
+              if (from !== undefined && from !== life) {
+                return yield* new LifeChanged({ life, network: id });
               }
 
               return yield* removeKept(id, keep, life);
@@ -915,7 +940,7 @@ export const makeRuntime = <S>(
             ({ sequence }) => sequence
           )
         ),
-      remove: (id, { keep }) => remove(id, keep),
+      remove: (id, { keep, life }) => remove(id, keep, life),
       retry: (id) =>
         Effect.flatMap(find(id), (network) =>
           Effect.map(

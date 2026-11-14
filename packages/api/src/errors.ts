@@ -103,6 +103,17 @@ export class ConfigurationChanged extends Schema.TaggedError<
 ) {}
 
 /**
+ * A removal named the life of the Network it was made from, and the Daemon holds another of
+ * it, live or kept: `life`, or `null` while one just added has none yet. Another Frontend
+ * removed it, or added it again, since. Nothing was journaled. Read the Network list again,
+ * and ask again about the life it names: a 409.
+ */
+export class LifeChanged extends Schema.TaggedError<
+  LifeChanged,
+  { readonly brand: unique symbol }
+>()("LifeChanged", { life: Schema.NullOr(Sequence), network: NetworkId }, { httpApiStatus: 409 }) {}
+
+/**
  * A `PUT` of Configuration named the id of a Network removed with its Timelines kept, so
  * no Network can take it until they are dropped, by removing it again without keeping
  * them. Nothing was journaled: a 409.

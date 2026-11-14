@@ -13,6 +13,7 @@ import {
   DaemonApi,
   InvalidRequest,
   JournalFailed,
+  LifeChanged,
   NetworkId as WireNetworkId,
   NetworkStopped,
   NotAChannel,
@@ -383,10 +384,12 @@ const networks = HttpApiBuilder.group(
           )
       )
       .handle("remove", ({ params, query }) =>
-        runtime.remove(NetworkId.make(params.network), { keep: query.keep }).pipe(
+        runtime.remove(NetworkId.make(params.network), { keep: query.keep, life: query.life }).pipe(
           Effect.map(({ life, sequence }) => ({ life, sequence })),
           Effect.catchTags({
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            LifeChanged: (error) =>
+              Effect.fail(new LifeChanged({ life: error.life, network: params.network })),
             NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
             UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
             VaultFailed: (error) => Effect.fail(vaultFailed(error)),

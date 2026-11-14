@@ -24,6 +24,7 @@ export {
   CrossOrigin,
   InvalidRequest,
   JournalFailed,
+  LifeChanged,
   NetworkStopped,
   NotAChannel,
   NotInChannel,

@@ -1447,7 +1447,10 @@ const living = (state: Timelines, network: NetworkId, life: number): Lived => {
 
 /**
  * Ends a life of a Network: kept, it is only read from then on, and not kept, it and its
- * Timelines are let go of. A removal of any other life than the one held changes nothing.
+ * Timelines are let go of. A removal of an older life than the one held changes nothing.
+ * One of a newer life, or of a Network not held, as one added elsewhere disabled and with no
+ * Channels, which no Timeline ever named, holds that life first, so a kept one is read from
+ * now on, and a dropped one is known to be over.
  * @param state - The state.
  * @param removal - The Network, the life it ended, and whether its Timelines were kept.
  * @returns The state.
@@ -1456,15 +1459,19 @@ const ended = (
   state: Timelines,
   removal: { readonly network: NetworkId; readonly life: number; readonly keep: boolean }
 ): Timelines => {
-  const held = state.networks.get(removal.network);
+  const lived = living(state, removal.network, removal.life);
+  const held = lived.state.networks.get(removal.network);
 
-  if (held === undefined || held.life !== removal.life) {
+  if (!lived.held || held === undefined) {
     return state;
   }
 
   return removal.keep
-    ? { ...state, networks: setIn(state.networks, removal.network, { ...held, kept: true }) }
-    : forgotten(state, removal.network, removal.life);
+    ? {
+        ...lived.state,
+        networks: setIn(lived.state.networks, removal.network, { ...held, kept: true }),
+      }
+    : forgotten(lived.state, removal.network, removal.life);
 };
 
 /**

@@ -20,23 +20,23 @@ const after = (...events: readonly RemovalEvent[]): Removal => {
 
 describe("removing a Network", () => {
   it("asks first, keeping the Timelines unless the Owner chooses to drop them", () => {
-    const asked = after({ _tag: "Asked", keep: undefined, network: libera });
+    const asked = after({ _tag: "Asked", keep: undefined, life: 1, network: libera });
     const dropping = reduceRemoval(asked, { _tag: "Chose", keep: false });
 
     expect({
       asked: removalOf(asked, "Live"),
       dropping: removalOf(dropping, "Live"),
       // `/network remove libera drop` starts on dropping them.
-      started: removalOf(after({ _tag: "Asked", keep: false, network: libera }), "Live"),
+      started: removalOf(after({ _tag: "Asked", keep: false, life: 1, network: libera }), "Live"),
     }).toStrictEqual({
-      asked: { keep: true, network: libera },
-      dropping: { keep: false, network: libera },
-      started: { keep: false, network: libera },
+      asked: { keep: true, life: 1, network: libera },
+      dropping: { keep: false, life: 1, network: libera },
+      started: { keep: false, life: 1, network: libera },
     });
   });
 
   it("only drops the Timelines of a Network removed with them kept, which frees its name", () => {
-    const asked = after({ _tag: "Asked", keep: true, network: libera });
+    const asked = after({ _tag: "Asked", keep: true, life: 1, network: libera });
 
     expect({
       question: questionOf(libera, "Kept"),
@@ -48,18 +48,18 @@ describe("removing a Network", () => {
         confirm: "Drop them",
         title: "Drop libera's Timelines?",
       },
-      sent: { keep: false, network: libera },
+      sent: { keep: false, life: 1, network: libera },
     });
   });
 
   it("sends nothing when cancelled, and closes once the Daemon removed it", () => {
     const cancelled = after(
-      { _tag: "Asked", keep: undefined, network: libera },
+      { _tag: "Asked", keep: undefined, life: 1, network: libera },
       { _tag: "Closed" }
     );
 
     const removed = after(
-      { _tag: "Asked", keep: undefined, network: libera },
+      { _tag: "Asked", keep: undefined, life: 1, network: libera },
       { _tag: "Sent" },
       { _tag: "Answered", answer: { _tag: "Removed" }, network: libera }
     );
@@ -71,14 +71,17 @@ describe("removing a Network", () => {
   });
 
   it("sends once, holds while in flight, and takes only its own answer", () => {
-    const sending = after({ _tag: "Asked", keep: undefined, network: libera }, { _tag: "Sent" });
+    const sending = after(
+      { _tag: "Asked", keep: undefined, life: 1, network: libera },
+      { _tag: "Sent" }
+    );
 
     expect({
       again: removalOf(sending, "Live"),
       held: [
         reduceRemoval(sending, { _tag: "Closed" }),
         reduceRemoval(sending, { _tag: "Chose", keep: false }),
-        reduceRemoval(sending, { _tag: "Asked", keep: undefined, network: oftc }),
+        reduceRemoval(sending, { _tag: "Asked", keep: undefined, life: 1, network: oftc }),
         reduceRemoval(sending, {
           _tag: "Answered",
           answer: { _tag: "Removed" },
@@ -91,18 +94,16 @@ describe("removing a Network", () => {
   it("says why it failed, from the error's tag, and lets it be sent again", () => {
     const failed = (error: string | undefined) =>
       after(
-        { _tag: "Asked", keep: undefined, network: libera },
+        { _tag: "Asked", keep: undefined, life: 1, network: libera },
         { _tag: "Sent" },
         { _tag: "Answered", answer: { _tag: "Failed", error }, network: libera }
       );
 
-    const failures = ["UnknownNetwork", "NetworkStopped", "JournalFailed", undefined].map(
-      (error) => {
-        const state = failed(error);
+    const failures = ["UnknownNetwork", "NetworkStopped", undefined].map((error) => {
+      const state = failed(error);
 
-        return state._tag === "Asking" ? [state.failure, state.sending] : state;
-      }
-    );
+      return state._tag === "Asking" ? [state.failure, state.sending] : state;
+    });
 
     expect({
       failures,
@@ -111,7 +112,6 @@ describe("removing a Network", () => {
       failures: [
         ["The Daemon has no Network libera, so nothing was removed.", false],
         ["libera has stopped, so it cannot be removed until the Daemon starts again.", false],
-        ["The Daemon could not write its Journal, so libera was not removed.", false],
         [
           "The Daemon did not answer, so whether libera was removed is unknown. Removing it again is safe.",
           false,
@@ -126,8 +126,33 @@ describe("removing a Network", () => {
     });
   });
 
+  it("never claims a removal failed whose Forgotten could not be journaled, or one made from an older life", () => {
+    const told = (error: string) =>
+      after(
+        { _tag: "Asked", keep: true, life: 1, network: libera },
+        { _tag: "Sent" },
+        { _tag: "Answered", answer: { _tag: "Failed", error }, network: libera }
+      );
+
+    expect({ changed: told("LifeChanged"), journal: told("JournalFailed") }).toStrictEqual({
+      changed: {
+        _tag: "Told",
+        message:
+          "libera was removed or added again since you were asked, so nothing was removed. Ask again about it as it is now.",
+        network: libera,
+      },
+      // The `Removed` may stand though what followed it could not be journaled.
+      journal: {
+        _tag: "Told",
+        message:
+          "The Daemon could not write its Journal, so whether libera was removed is unknown. The Networks are read again to show where it stands, and if it was removed, the Daemon forgets its Credentials when it next starts.",
+        network: libera,
+      },
+    });
+  });
+
   it("holds only plain data, which survives structuredClone", () => {
-    const state = after({ _tag: "Asked", keep: false, network: libera });
+    const state = after({ _tag: "Asked", keep: false, life: 1, network: libera });
 
     expect(structuredClone(state)).toStrictEqual(state);
   });

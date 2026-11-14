@@ -3,16 +3,19 @@
  * Runtime and the next, its Credentials are forgotten, and its id is free again unless its
  * Timelines are kept.
  */
-import { client } from "@iirc/client";
-import type { Client, NetworkConfiguration } from "@iirc/client";
+import { client, Instant } from "@iirc/client";
+import type { Client, ClientState, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
 import { Effect, Exit, Fiber, Latch, Redacted, Result, Scheduler, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
-import { NetworkId, networkOf } from "./journal.ts";
-import { TimelinesKept, UnknownNetwork } from "./runtime.ts";
+import { JournalFailed, NetworkId, Sequence, networkOf } from "./journal.ts";
+import type { Entry, JournalRecord } from "./journal.ts";
+import { foldEntry } from "./replay.ts";
+import type { Folded } from "./replay.ts";
+import { LifeChanged, TimelinesKept, UnknownNetwork } from "./runtime.ts";
 import type { RuntimeService } from "./runtime.ts";
 import { outline, runTest, settle, startRuntime, wrapJournal } from "./testing/harness.ts";
 import type { World } from "./testing/harness.ts";
@@ -389,6 +392,123 @@ describe("a Network whose Client throws on its first Configuration", () => {
       outline: ["1 libera Configured", "2 libera Removed"],
       removal: { life: 1, sequence: 2 },
       retaken: "TimelinesKept",
+    });
+  });
+});
+
+describe("every fold of the Journal", () => {
+  it("lets go of a removed Configuration once its Credentials were forgotten, the News fold too", async () => {
+    const result = await runTest(() =>
+      Effect.gen(function* () {
+        const networks = new Map<NetworkId, Folded<ClientState>>();
+        const at = Instant.make(0);
+
+        const records: readonly JournalRecord[] = [
+          {
+            _tag: "Input",
+            input: { _tag: "Configured", at, configuration: configured({ password: name("a") }) },
+            network: libera,
+          },
+          { _tag: "Input", input: { _tag: "Removed", at, keep: false }, network: libera },
+          { _tag: "Forgotten", credentials: [name("a")], network: libera },
+          {
+            _tag: "Input",
+            input: { _tag: "Configured", at, configuration: configured({ password: name("b") }) },
+            network: libera,
+          },
+          { _tag: "Input", input: { _tag: "Removed", at, keep: false }, network: libera },
+        ];
+
+        const entries: readonly Entry[] = records.map((record, index) => ({
+          record,
+          sequence: Sequence.make(index + 1),
+        }));
+
+        for (const entry of entries) {
+          yield* foldEntry(client, networks, entry);
+        }
+
+        return networks.get(libera)?.unforgotten.map((each) => each.password);
+      })
+    );
+
+    // Only the life whose Credentials were never forgotten is left.
+    expect(result).toStrictEqual(["b"]);
+  });
+});
+
+describe("a removal made from a life", () => {
+  it("is refused once the Network holds another, live or kept, and removes the one it names", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const { runtime } = yield* startRuntime(world, client);
+        const quiet = configured({ enabled: false });
+        const first = yield* runtime.configure(libera, quiet);
+        const { life } = yield* runtime.remove(libera, { keep: true, life: first });
+
+        // Another Frontend drops the kept Timelines and adds the name again.
+        yield* runtime.remove(libera, { keep: false, life });
+        const second = yield* runtime.configure(libera, quiet);
+        const stale = yield* Effect.flip(runtime.remove(libera, { keep: false, life: first }));
+        const listed = (yield* runtime.lives).get(libera);
+        const removed = (yield* runtime.remove(libera, { keep: true, life: second })).life;
+        const keptStale = yield* Effect.flip(runtime.remove(libera, { keep: false, life: first }));
+
+        return { keptStale, listed, removed, second, stale };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      keptStale: new LifeChanged({ life: result.second, network: libera }),
+      listed: { _tag: "Live", life: result.second, status: { _tag: "Running" } },
+      removed: result.second,
+      second: result.second,
+      stale: new LifeChanged({ life: result.second, network: libera }),
+    });
+  });
+});
+
+describe("a removal whose Forgotten cannot be journaled", () => {
+  it("stands, and the next start forgets and journals what it could not", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* world.vault.hold(name("pass"), Redacted.make("secret"));
+
+        const journal = wrapJournal(world.journal, {
+          before: (record) =>
+            record._tag === "Forgotten"
+              ? Effect.fail(new JournalFailed({ reason: "the disk is full" }))
+              : Effect.void,
+        });
+
+        const first = yield* startRuntime({ ...world, journal }, client);
+
+        yield* first.runtime.configure(
+          libera,
+          configured({ enabled: false, password: name("pass") })
+        );
+        const failed = yield* Effect.flip(first.runtime.remove(libera, { keep: true }));
+        const listed = (yield* first.runtime.lives).get(libera)?._tag;
+
+        yield* first.close;
+        const second = yield* startRuntime(world, client);
+
+        return {
+          failed: failed._tag,
+          kept: [...(yield* second.runtime.kept).keys()],
+          listed,
+          outline: (yield* outline(world.journal)).at(-1),
+          vault: yield* world.vault.names,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      failed: "JournalFailed",
+      kept: [libera],
+      listed: "Kept",
+      outline: "3 libera Forgotten pass",
+      vault: new Set(),
     });
   });
 });

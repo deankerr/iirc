@@ -11,8 +11,9 @@ import type { NetworkId } from "@iirc/api";
  * The question, as it stands.
  *
  * - `Closed`: nothing is asked.
- * - `Asking`: whether to remove `network`, keeping its Timelines or not, while the
- *   removal is `sending`, and why the last one failed, if it did.
+ * - `Asking`: whether to remove `network`, in the `life` of it shown when asked, or none
+ *   when it was not held, keeping its Timelines or not, while the removal is `sending`, and
+ *   why the last one failed, if it did.
  * - `Told`: `network` was removed, with something the Owner should know of it.
  */
 export type Removal =
@@ -20,6 +21,7 @@ export type Removal =
   | {
       readonly _tag: "Asking";
       readonly network: NetworkId;
+      readonly life: number | undefined;
       readonly keep: boolean;
       readonly sending: boolean;
       readonly failure: string | undefined;
@@ -37,15 +39,21 @@ export type RemovalAnswer =
 /**
  * What happened.
  *
- * - `Asked`: something asked to remove a Network, `keep` chosen to start with when given,
- *   and otherwise keeping its Timelines, which can be undone by dropping them later.
+ * - `Asked`: something asked to remove a Network, in the life of it held then, if any,
+ *   `keep` chosen to start with when given, and otherwise keeping its Timelines, which can
+ *   be undone by dropping them later.
  * - `Chose`: the Owner chose whether its Timelines stay readable.
  * - `Sent`: the Owner confirmed, and the removal was sent.
  * - `Answered`: what the Daemon answered the removal of a Network.
  * - `Closed`: the Owner let the question go, or read what they were told.
  */
 export type RemovalEvent =
-  | { readonly _tag: "Asked"; readonly network: NetworkId; readonly keep: boolean | undefined }
+  | {
+      readonly _tag: "Asked";
+      readonly network: NetworkId;
+      readonly life: number | undefined;
+      readonly keep: boolean | undefined;
+    }
   | { readonly _tag: "Chose"; readonly keep: boolean }
   | { readonly _tag: "Sent" }
   | { readonly _tag: "Answered"; readonly network: NetworkId; readonly answer: RemovalAnswer }
@@ -73,13 +81,42 @@ const failureOf = (network: NetworkId, error: string | undefined): string => {
       "NetworkStopped",
       `${network} has stopped, so it cannot be removed until the Daemon starts again.`,
     ],
-    ["JournalFailed", `The Daemon could not write its Journal, so ${network} was not removed.`],
   ]);
 
   return (
     failures.get(error) ??
     `The Daemon did not answer, so whether ${network} was removed is unknown. Removing it again is safe.`
   );
+};
+
+/**
+ * What the Owner is told of a removal whose outcome is not a plain failure, from its
+ * error's tag: one that stands though a Credential may still be held, one whose outcome is
+ * unknown, and one made from a life the Network no longer has.
+ * @param network - The Network.
+ * @param error - The error's tag, or none when the Daemon did not answer.
+ * @returns The words, or none for a plain failure.
+ */
+const toldOf = (network: NetworkId, error: string | undefined): string | undefined => {
+  switch (error ?? "") {
+    // The removal stands, but a Credential its Configuration named may still be held.
+    case "VaultFailed": {
+      return `${network} was removed, but the Daemon could not forget every Credential its Configuration named.`;
+    }
+
+    // The removal may have been journaled before what followed it failed.
+    case "JournalFailed": {
+      return `The Daemon could not write its Journal, so whether ${network} was removed is unknown. The Networks are read again to show where it stands, and if it was removed, the Daemon forgets its Credentials when it next starts.`;
+    }
+
+    case "LifeChanged": {
+      return `${network} was removed or added again since you were asked, so nothing was removed. Ask again about it as it is now.`;
+    }
+
+    default: {
+      return undefined;
+    }
+  }
 };
 
 /**
@@ -98,6 +135,7 @@ export const reduceRemoval = (state: Removal, event: RemovalEvent): Removal => {
             _tag: "Asking",
             failure: undefined,
             keep: event.keep ?? true,
+            life: event.life,
             network: event.network,
             sending: false,
           };
@@ -124,13 +162,10 @@ export const reduceRemoval = (state: Removal, event: RemovalEvent): Removal => {
         return initialRemoval;
       }
 
-      // The removal stands, but a Credential its Configuration named may still be held.
-      if (answer.error === "VaultFailed") {
-        return {
-          _tag: "Told",
-          message: `${state.network} was removed, but the Daemon could not forget every Credential its Configuration named.`,
-          network: state.network,
-        };
+      const told = toldOf(state.network, answer.error);
+
+      if (told !== undefined) {
+        return { _tag: "Told", message: told, network: state.network };
       }
 
       return { ...state, failure: failureOf(state.network, answer.error), sending: false };
@@ -179,8 +214,10 @@ export const questionOf = (network: NetworkId, standing: Standing): Question =>
       };
 
 /**
- * The removal to send once the Owner confirms: the Network, and whether its Timelines are
- * kept, never when they were kept already, since removing it again is how they are dropped.
+ * The removal to send once the Owner confirms: the Network, the life of it asked about,
+ * which it removes only while the Daemon still holds that life, and whether its Timelines
+ * are kept, never when they were kept already, since removing it again is how they are
+ * dropped.
  * @param state - The question.
  * @param standing - How its Network stands.
  * @returns The removal, or none when nothing is asked or one is in flight.
@@ -188,7 +225,9 @@ export const questionOf = (network: NetworkId, standing: Standing): Question =>
 export const removalOf = (
   state: Removal,
   standing: Standing
-): { readonly network: NetworkId; readonly keep: boolean } | undefined =>
+):
+  | { readonly network: NetworkId; readonly life: number | undefined; readonly keep: boolean }
+  | undefined =>
   state._tag === "Asking" && !state.sending
-    ? { keep: standing !== "Kept" && state.keep, network: state.network }
+    ? { keep: standing !== "Kept" && state.keep, life: state.life, network: state.network }
     : undefined;

@@ -4077,6 +4077,13 @@ const removalOf = (sequence: number, keep: boolean) =>
 const shownRemoved = (state: Timelines) =>
   sidebar(state).map((network) => [network.network, network.removed]);
 
+// delta, a Network this Frontend never held, removed at 6 in its life 4.
+const delta = (keep: boolean) =>
+  reduceTimelines(
+    following(),
+    changed(6, { removals: [{ changed: 6, keep, life: 4, network: "delta" }] })
+  );
+
 describe("removing a Network", () => {
   it("never forgets a kept Network the one list names, however the list and a removal cross", () => {
     // The list is asked for while alpha is live, the stream then removes it keeping its
@@ -4142,6 +4149,24 @@ describe("removing a Network", () => {
         ["beta", false],
         ["alpha", true],
       ],
+    });
+  });
+
+  it("holds a Network removed with its Timelines kept that it never held, as kept, and none dropped", () => {
+    const kept = delta(true);
+
+    expect({
+      dropped: shownRemoved(delta(false)),
+      kept: shownRemoved(kept),
+      reads: wanted(kept).filter((read) => "network" in read && read.network === "delta"),
+    }).toStrictEqual({
+      dropped: [["alpha", false]],
+      kept: [
+        ["alpha", false],
+        ["delta", true],
+      ],
+      // Its Timelines are read, and never its Session, which it has no more.
+      reads: [{ _tag: "List", after: undefined, attempt: 0, network: "delta" }],
     });
   });
 

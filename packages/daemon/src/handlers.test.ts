@@ -5,6 +5,7 @@ import {
   ConfigurationChanged,
   CredentialPathName,
   DaemonApi,
+  LifeChanged,
   NetworkId,
   SearchText,
   Sequence as WireSequence,
@@ -2554,11 +2555,14 @@ describe("a Channel's head and members", () => {
   });
 });
 
+// The life of `libera` each of these tests configures first, as the Journal's first Entry.
+const firstLife = WireSequence.make(1);
+
 // Removes it, letting the clock run past the pacing its `QUIT` waits on.
 const removing = (api: Effect.Success<typeof makeClient>, keep: boolean) =>
   Effect.gen(function* () {
     const removed = yield* api.networks
-      .remove({ params: { network: libera }, query: { keep } })
+      .remove({ params: { network: libera }, query: { keep, life: firstLife } })
       .pipe(Effect.forkChild);
 
     yield* settle;
@@ -2682,7 +2686,7 @@ describe("removing a Network", () => {
 
         const { sequence } = yield* api.networks.remove({
           params: { network: libera },
-          query: { keep: false },
+          query: { keep: false, life: firstLife },
         });
 
         const changed = yield* changeAfter(
@@ -2702,7 +2706,10 @@ describe("removing a Network", () => {
         const found = yield* api.timelines.search({ query: { text: SearchText.make("gone") } });
 
         const again = yield* outcome(
-          api.networks.remove({ params: { network: libera }, query: { keep: false } })
+          api.networks.remove({
+            params: { network: libera },
+            query: { keep: false, life: firstLife },
+          })
         );
 
         yield* api.networks.configure({
@@ -2744,12 +2751,43 @@ describe("removing a Network", () => {
           payload: configured({ enabled: false, password: name }),
           query: {},
         });
-        yield* api.networks.remove({ params: { network: libera }, query: { keep: false } });
+        yield* api.networks.remove({
+          params: { network: libera },
+          query: { keep: false, life: firstLife },
+        });
 
         return yield* api.credentials.list();
       })
     );
 
     expect(result).toStrictEqual({ names: [] });
+  });
+
+  it("refuses with 409 a removal made from a life the Network no longer has, and removes nothing", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        const quiet = configured({ enabled: false });
+        const params = { network: libera };
+
+        yield* api.networks.configure({ params, payload: quiet, query: {} });
+        yield* api.networks.remove({ params, query: { keep: false, life: firstLife } });
+        // Another Frontend adds the name again, and this one still asks about the first.
+        const { sequence } = yield* api.networks.configure({ params, payload: quiet, query: {} });
+
+        const refused = yield* api.networks
+          .remove({ params, query: { keep: false, life: firstLife } })
+          .pipe(Effect.flip);
+
+        return { listed: yield* api.networks.list(), refused, sequence };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      listed: [
+        { _tag: "Live", life: result.sequence, network: libera, status: { _tag: "Running" } },
+      ],
+      refused: new LifeChanged({ life: result.sequence, network: libera }),
+      sequence: result.sequence,
+    });
   });
 });

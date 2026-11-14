@@ -73,6 +73,7 @@ type Answer =
       readonly reason: { readonly _tag: "Offline" | "Unsendable" };
     }
   | { readonly _tag: "Journaled"; readonly sequence: number }
+  | { readonly _tag: "LifeChanged"; readonly life: number; readonly network: string }
   | typeof ConfigurationInForce.Encoded
   | { readonly sequence: number }
   | { readonly names: readonly string[] }
@@ -785,13 +786,20 @@ export const fakeDaemon = () => {
    * removed with them kept is removed again to drop them.
    * @param network - The Network.
    * @param keep - Whether its Timelines are kept.
+   * @param asked - The life of it the removal was made from, which must be the one held.
    * @returns The answer.
    */
-  const remove = (network: string, keep: boolean) => {
+  const remove = (network: string, keep: boolean, asked: number) => {
     const held = daemon.timelines.get(network);
 
     if (held === undefined && !daemon.configurations.has(network)) {
       return json(404, { _tag: "UnknownNetwork", network });
+    }
+
+    const holding = daemon.lives.get(network) ?? 1;
+
+    if (asked !== holding) {
+      return json(409, { _tag: "LifeChanged", life: holding, network });
     }
 
     daemon.removals.push({ keep, network });
@@ -1245,7 +1253,9 @@ export const fakeDaemon = () => {
 
     const { network } = whole;
 
-    return signedInOnly(() => remove(network, url.searchParams.get("keep") === "true"));
+    return signedInOnly(() =>
+      remove(network, url.searchParams.get("keep") === "true", Number(url.searchParams.get("life")))
+    );
   };
 
   const elsewhere = async (url: URL, init: RequestInit) =>
