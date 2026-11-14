@@ -1221,7 +1221,7 @@ describe("the web frontend on iirc daemon --web", () => {
         expect({
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
           roundTrip: roundTrip >= 0.3 && roundTrip < 20,
-          token: /^\d+$/u.test(token),
+          token: /^\d+-\d+$/u.test(token),
           version: version.params,
           violations,
         }).toStrictEqual({

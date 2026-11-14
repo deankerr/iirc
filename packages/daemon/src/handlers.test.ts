@@ -847,7 +847,7 @@ describe("the handlers", () => {
         { activity: { _tag: "CtcpReply", args: result.token, command: "PING", nick: "peer" } },
       ],
     });
-    expect(result.token).toBe(String(sent?.at));
+    expect(result.token).toBe(`${sent?.at}-0`);
     expect(reply?.activity).toHaveProperty("roundTrip", (reply?.at ?? 0) - (sent?.at ?? 0));
     expect(reply?.at).toBeGreaterThanOrEqual((sent?.at ?? 0) + 3500);
   });

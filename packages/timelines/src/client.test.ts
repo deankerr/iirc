@@ -198,9 +198,9 @@ describe("a played Session", () => {
       lines(
         "<< :peer!u@h PRIVMSG iirc :psst",
         "!! ping peer",
-        ">>\\ PRIVMSG peer :\\x01PING 1767225600000\\x01",
+        ">>\\ PRIVMSG peer :\\x01PING 1767225600000-0\\x01",
         "+1500ms",
-        "<<\\ :peer!u@h NOTICE iirc :\\x01PING 1767225600000\\x01"
+        "<<\\ :peer!u@h NOTICE iirc :\\x01PING 1767225600000-0\\x01"
       ),
     ]);
 
@@ -214,7 +214,7 @@ describe("a played Session", () => {
         : []
     );
 
-    const sent = { _tag: "CtcpSent", args: "1767225600000", command: "PING", nick: "peer" };
+    const sent = { _tag: "CtcpSent", args: "1767225600000-0", command: "PING", nick: "peer" };
     const reply = { ...sent, _tag: "CtcpReply", roundTrip: 1500, target: "iirc" };
 
     expect(placed).toStrictEqual([

@@ -168,6 +168,8 @@ type LinkPhase =
        * with the Connection.
        */
       readonly pings: readonly Pinged[];
+      /** How many `PING`s the Owner has sent on this Connection, which numbers their tokens. */
+      readonly pingsSent: number;
     };
 
 /** A CTCP `PING` the Owner sent: who to, as said, its token, and the instant it was sent. */

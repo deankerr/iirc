@@ -164,22 +164,13 @@ const ctcpLines = (
 
 /**
  * The token of a `PING` the Owner sends: the instant it is sent, in milliseconds, which
- * is what the Runtime journaled the action at, with `.1`, `.2`, and on after it when a
- * `PING` remembered on the Connection already has that token.
+ * is what the Runtime journaled the action at, and after a hyphen how many `PING`s the
+ * Owner has sent on this Connection before it. No two on a Connection share one, so a
+ * reply that comes twice is never taken for the reply to another `PING`.
  * @param run - The step.
  * @returns The token.
  */
-const pingToken = (run: Run): string => {
-  const pings = openOf(run.state)?.pings ?? [];
-  const base = String(run.at);
-  let token = base;
-
-  for (let suffix = 1; pings.some((ping) => ping.token === token); suffix += 1) {
-    token = `${base}.${suffix}`;
-  }
-
-  return token;
-};
+const pingToken = (run: Run): string => `${run.at}-${openOf(run.state)?.pingsSent ?? 0}`;
 
 /**
  * Splits items into Lines, as many to a Line as fit and as `limit` allows, keeping their
@@ -615,7 +606,11 @@ const requested = (run: Run, ctcp: Requested): void => {
   if (ctcp.command === "PING") {
     const ping: Pinged = { at: run.at, nick: ctcp.nick, token: ctcp.args };
 
-    updateOpen(run, (open) => ({ ...open, pings: [...open.pings, ping].slice(-maxActions) }));
+    updateOpen(run, (open) => ({
+      ...open,
+      pings: [...open.pings, ping].slice(-maxActions),
+      pingsSent: open.pingsSent + 1,
+    }));
   }
 };
 
@@ -723,7 +718,9 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
       requested(run, ctcp);
     }
 
-    if (!sent.echo) {
+    // A CTCP request waits for no error numeric: a `PRIVMSG` to a nick that is gone gets a
+    // `401` no parameter ties to it rather than to a later `Say`. Only its label does.
+    if (!sent.echo && ctcp === undefined) {
       awaitAnswer(run, intent, line, names, targets);
     }
   }
@@ -743,8 +740,8 @@ const nicks: Tie = { commands: new Set(["NICK"]), params: [1] };
  * `421` and `461` name a command instead, and are read apart.
  */
 const ties: ReadonlyMap<string, Tie> = new Map([
-  // `401 <client> <nick>`, which a CTCP request's `PRIVMSG` to a nick may be answered with
-  ["401", { commands: new Set(["INVITE", "KICK", "MODE", "PRIVMSG"]), params: [1] }],
+  // `401 <client> <nick>`
+  ["401", { commands: new Set(["INVITE", "KICK", "MODE"]), params: [1] }],
   // `403`, `442`, `476`, and `482 <client> <channel>`
   ["403", { commands: onChannels, params: [1] }],
   ["442", { commands: onChannels, params: [1] }],

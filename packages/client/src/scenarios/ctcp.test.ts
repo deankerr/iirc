@@ -31,6 +31,10 @@ const notices = (run: Played<State>): readonly unknown[] =>
     )
   );
 
+// Every Refused News of the run.
+const refusals = (run: Played<State>): readonly News[] =>
+  run.steps.flatMap((step) => step.news.filter((news) => news._tag === "Refused"));
+
 const requests = (run: Played<State>): readonly Extract<News, { _tag: "Activity" }>[] =>
   run.steps.flatMap((step) =>
     step.news.flatMap((news) =>
@@ -465,8 +469,11 @@ describe("a CTCP reply", () => {
   });
 });
 
-// The token Self's `PING` carries: the instant it was sent, in milliseconds.
+// The token Self's `PING`s carry: the instant the first was sent, in milliseconds, and how
+// many the Connection has had before it.
 const sentAt = "1767225600000";
+const first = `${sentAt}-0`;
+const second = `${sentAt}-1`;
 
 // What the Ircd says to a request, from `peer`, back to Self.
 const pong = (token: string, from = "peer") =>
@@ -542,18 +549,78 @@ describe("a CTCP request the Owner sends", () => {
     expect.assertions(0);
   });
 
-  it("is Rejected when the Ircd says there is no such nick", () => {
-    played([
+  it("is not refused by a 401 with no label, which nothing ties to it", () => {
+    const run = played([
       registered(base),
       lines(
         "!! ctcp nobody VERSION",
         ">>\\ PRIVMSG nobody \\x01VERSION\\x01",
-        "<< :irc.test 401 iirc nobody :No such nick/channel",
+        "<< :irc.test 401 iirc nobody :No such nick/channel"
+      ),
+    ]);
+
+    expect(refusals(run)).toStrictEqual([]);
+  });
+
+  it("is Rejected by a labelled 401, which its label ties to it", () => {
+    played([
+      registered(base, { offered: ["batch", "echo-message", "labeled-response"] }),
+      lines(
+        "!! ctcp nobody VERSION",
+        ">>\\ @label=l1 PRIVMSG nobody \\x01VERSION\\x01",
+        "<< @label=l1 :irc.test 401 iirc nobody :No such nick/channel",
         "?? refused i1 Rejected 401 ctcp=nobody:VERSION in=network"
       ),
     ]);
 
     expect.assertions(0);
+  });
+
+  it("answered, is not refused for a later Say to the same nick that gets a 401", () => {
+    const run = played([
+      ...inChannel,
+      lines(
+        "!! ctcp peer VERSION",
+        ">>\\ PRIVMSG peer \\x01VERSION\\x01",
+        "<<\\ :peer!u@h NOTICE iirc :\\x01VERSION irssi\\x01",
+        "<< :peer!u@h QUIT :bye",
+        "!! say peer :hello",
+        ">> PRIVMSG peer hello",
+        "<< :irc.test 401 iirc peer :No such nick/channel"
+      ),
+    ]);
+
+    expect(refusals(run)).toStrictEqual([]);
+  });
+
+  it("unanswered, does not take the 401 of a later Say", () => {
+    const run = played([
+      ...inChannel,
+      lines(
+        "!! ctcp peer VERSION",
+        ">>\\ PRIVMSG peer \\x01VERSION\\x01",
+        "<< :peer!u@h QUIT :bye",
+        "!! say peer :hello",
+        ">> PRIVMSG peer hello",
+        "<< :irc.test 401 iirc peer :No such nick/channel"
+      ),
+    ]);
+
+    expect(refusals(run)).toStrictEqual([]);
+  });
+
+  it("leaves nothing waiting for a reply, by its parameters", () => {
+    const run = played([
+      ...inChannel,
+      lines(
+        "!! ctcp peer VERSION",
+        ">>\\ PRIVMSG peer \\x01VERSION\\x01",
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`
+      ),
+    ]);
+
+    expect(openOf(run.state)?.acting).toStrictEqual([]);
   });
 
   it("is refused as Offline without a Session", () => {
@@ -577,12 +644,12 @@ describe("a CTCP request the Owner sends", () => {
       joined(base, "#iirc", ["peer"]),
       lines(
         "!! ping peer",
-        `>>\\ @label=l1 PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
-        `?? activity CtcpSent peer PING in=existing-direct:peer in=network :${sentAt}`,
-        `<<\\ @label=l1 :iirc!u@h PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
+        `>>\\ @label=l1 PRIVMSG peer :\\x01PING ${first}\\x01`,
+        `?? activity CtcpSent peer PING in=existing-direct:peer in=network :${first}`,
+        `<<\\ @label=l1 :iirc!u@h PRIVMSG peer :\\x01PING ${first}\\x01`,
         "+1s",
-        pong(sentAt),
-        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${sentAt}`
+        pong(first),
+        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${first}`
       ),
     ]);
 
@@ -596,11 +663,11 @@ describe("a PING the Owner sends", () => {
       ...inChannel,
       lines(
         "!! ping peer",
-        `>>\\ PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
-        `?? activity CtcpSent peer PING in=existing-direct:peer in=network :${sentAt}`,
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
+        `?? activity CtcpSent peer PING in=existing-direct:peer in=network :${first}`,
         "+250ms",
-        pong(sentAt, "PEER"),
-        `?? activity CtcpReply PEER iirc PING round-trip=250ms in=existing-direct:peer:PEER in=network :${sentAt}`
+        pong(first, "PEER"),
+        `?? activity CtcpReply PEER iirc PING round-trip=250ms in=existing-direct:peer:PEER in=network :${first}`
       ),
     ]);
 
@@ -627,19 +694,41 @@ describe("a PING the Owner sends", () => {
       ...inChannel,
       lines(
         "!! ping peer",
-        `>>\\ PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
         "!! ping peer",
-        `>>\\ PRIVMSG peer :\\x01PING ${sentAt}.1\\x01`,
+        `>>\\ PRIVMSG peer :\\x01PING ${second}\\x01`,
         "+1s",
-        pong(`${sentAt}.1`),
-        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${sentAt}.1`,
+        pong(second),
+        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${second}`,
         "+1s",
-        pong(sentAt),
-        `?? activity CtcpReply peer iirc PING round-trip=2000ms in=existing-direct:peer in=network :${sentAt}`
+        pong(first),
+        `?? activity CtcpReply peer iirc PING round-trip=2000ms in=existing-direct:peer in=network :${first}`
       ),
     ]);
 
     expect.assertions(0);
+  });
+
+  it("never gives one PING's token to another, even once the first has been answered", () => {
+    played([
+      ...inChannel,
+      lines(
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
+        pong(first),
+        `?? activity CtcpReply peer iirc PING round-trip=0ms in=existing-direct:peer in=network :${first}`,
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${second}\\x01`,
+        "+1s",
+        // A duplicate of the first reply is no reply to the second.
+        pong(first),
+        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${first}`,
+        pong(second),
+        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${second}`
+      ),
+    ]);
+
+    expect(first).not.toBe(second);
   });
 
   it("gives no round trip to a reply with another token, from another User, or unasked for", () => {
@@ -647,21 +736,21 @@ describe("a PING the Owner sends", () => {
       ...inChannel,
       lines(
         "!! ping peer",
-        `>>\\ PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
         "+1s",
         pong("1767225600001"),
         "?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :1767225600001",
-        pong(sentAt, "other"),
-        `?? activity CtcpReply other iirc PING in=existing-direct:other in=network :${sentAt}`,
-        `<<\\ :irc.test NOTICE iirc :\\x01PING ${sentAt}\\x01`,
-        `?? activity CtcpReply irc.test iirc PING in=network :${sentAt}`,
-        `<<\\ :peer!u@h NOTICE iirc :\\x01VERSION ${sentAt}\\x01`,
-        `?? activity CtcpReply peer iirc VERSION in=existing-direct:peer in=network :${sentAt}`,
-        pong(sentAt),
-        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${sentAt}`,
+        pong(first, "other"),
+        `?? activity CtcpReply other iirc PING in=existing-direct:other in=network :${first}`,
+        `<<\\ :irc.test NOTICE iirc :\\x01PING ${first}\\x01`,
+        `?? activity CtcpReply irc.test iirc PING in=network :${first}`,
+        `<<\\ :peer!u@h NOTICE iirc :\\x01VERSION ${first}\\x01`,
+        `?? activity CtcpReply peer iirc VERSION in=existing-direct:peer in=network :${first}`,
+        pong(first),
+        `?? activity CtcpReply peer iirc PING round-trip=1000ms in=existing-direct:peer in=network :${first}`,
         // Its round trip is told once.
-        pong(sentAt),
-        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${sentAt}`
+        pong(first),
+        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${first}`
       ),
     ]);
 
@@ -685,10 +774,10 @@ describe("a PING the Owner sends", () => {
         joined(base, "#iirc", ["peer"]),
         lines(
           "!! ping peer",
-          `>>\\ PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
+          `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
           "<< :irc.test BATCH +h chathistory iirc",
-          `<<\\ @batch=h :peer!u@h NOTICE iirc :\\x01PING ${sentAt}\\x01`,
-          `?? activity CtcpReply peer iirc PING history in=existing-direct:peer in=network :${sentAt}`,
+          `<<\\ @batch=h :peer!u@h NOTICE iirc :\\x01PING ${first}\\x01`,
+          `?? activity CtcpReply peer iirc PING history in=existing-direct:peer in=network :${first}`,
           "<< :irc.test BATCH -h"
         ),
       ],
@@ -702,11 +791,11 @@ describe("a PING the Owner sends", () => {
 
     const pinged = played([
       ...inChannel,
-      lines("!! ping peer", `>>\\ PRIVMSG peer :\\x01PING ${sentAt}\\x01`),
+      lines("!! ping peer", `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`),
     ]);
 
     expect(pinged.timers).toStrictEqual(quiet.timers);
-    expect(remembered(pinged)).toStrictEqual([sentAt]);
+    expect(remembered(pinged)).toStrictEqual([first]);
 
     const many = played([
       ...inChannel,
@@ -714,7 +803,7 @@ describe("a PING the Owner sends", () => {
     ]);
 
     expect(remembered(many)).toHaveLength(64);
-    expect(remembered(many)[0]).toBe("1767225600001");
+    expect(remembered(many)[0]).toBe("1767225600001-1");
   });
 
   it("forgets every PING when the Session ends, so a reply in the next gives no round trip", () => {
@@ -722,7 +811,7 @@ describe("a PING the Owner sends", () => {
       ...inChannel,
       lines(
         "!! ping peer",
-        `>>\\ PRIVMSG peer :\\x01PING ${sentAt}\\x01`,
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
         "== closed Reset",
         "...",
         "+2s",
@@ -731,8 +820,8 @@ describe("a PING the Owner sends", () => {
         "...",
         "<< :irc.test 001 iirc :Welcome",
         "...",
-        pong(sentAt),
-        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${sentAt}`
+        pong(first),
+        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${first}`
       ),
     ]);
 

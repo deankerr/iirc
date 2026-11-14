@@ -158,6 +158,7 @@ export const begin = (run: Run): void => {
     modesQuery: undefined,
     opened: run.at,
     pings: [],
+    pingsSent: 0,
     presence: {
       _tag: "Registering",
       account: { _tag: "Unknown" },
