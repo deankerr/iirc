@@ -33,6 +33,8 @@ const glyphs = {
   offline: "○",
   /** The command palette, where a command starts as it does in the composer. */
   palette: "/",
+  /** Sends what the Composer holds, as a return key is drawn. */
+  send: "↵",
   /** Shows the sidebar again, from the side it comes from. */
   showSidebar: "»",
   /** A Network stopped on purpose: a square, as a stop is drawn. */

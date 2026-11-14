@@ -25,6 +25,7 @@ import type { AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { optionsState, signedOut } from "../options/atoms.ts";
+import { uiInEffect } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
 import { composerState, edit, placeOf } from "./atoms.ts";
@@ -43,7 +44,8 @@ const completing = (registry: AtomRegistry.AtomRegistry, place: Place, event: Co
     registry.get(timelinesState),
     place,
     listed(registry.get(optionsState), ""),
-    registry.get(chantypesState)
+    registry.get(chantypesState),
+    registry.get(uiInEffect).suffix
   );
 
   const step: Completed = reduceCompletion(registry.get(completionState), event, sources);

@@ -137,6 +137,7 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 - **The last binding that applies wins,** so overrides go after the defaults.
 - **Most defaults fire while typing in a field,** as an IRC client keeps the caret in its input. None takes a key a browser uses.
 - **A key that types goes to the composer, unless it is bound.** `typesInComposer` says so from the key, where it was pressed, and the keymap. A printable character, a dead key, the start of an input method's composition, a character AltGr types, a character Option types on a Mac, and the platform's paste chord type. Space, Enter, and any other key with Ctrl, Meta, or Alt held do not. A field that takes text, the palette, an overlay holding the focus, or no composer to write to, leaves the key alone.
+- **Enter in the Composer is not a binding, but `ui.enter`.** `enterPressed` says whether a press sends or begins a new line: under `send`, Enter sends and Shift+Enter begins a line, and under `newline`, Enter or Shift+Enter begins a line and Mod+Enter sends. `sendChord` and `newLineChord` give the chords to show.
 - **The Panes' keys are Alt+Shift and a letter.** Option on a Mac types another character, which a letter's physical key names back and punctuation's does not.
 
 ## Palette
@@ -258,7 +259,7 @@ Tab completion in the composer, as a reducer. It completes the word that ends at
 - **A Channel is told from a nick by the Network's `CHANTYPES`,** as its Session said them, never by a Timeline's name.
 - **A nick is asked of the Daemon's members route, not guessed.** An answer is put in only if the composer still holds the exact text it was asked for.
 - **Who spoke latest comes first,** and Self last.
-- **A nick at the start of a line is followed by `: `,** and anything else by a space.
+- **A nick at the start of a line is followed by `ui.suffix`,** `: ` to start, and anything else by a space.
 - **What is shown is announced** for a screen reader, such as `alex, 1 of 3`.
 
 ## Rendering

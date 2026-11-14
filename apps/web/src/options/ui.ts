@@ -40,6 +40,12 @@ export const sizeShown = Atom.make((get) => get(uiInEffect).size);
 /** The line height on this device, as a multiple of the text's size, alone, as `timeShown` is. */
 export const leadingShown = Atom.make((get) => get(uiInEffect).leading);
 
+/** What Enter does in the Composer on this device, alone, as `timeShown` is. */
+export const enterShown = Atom.make((get) => get(uiInEffect).enter);
+
+/** Whether the Composer checks spelling on this device, alone, as `timeShown` is. */
+export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
+
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older
  * read never replaces a newer one.

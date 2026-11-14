@@ -66,7 +66,12 @@ const covered = (target: EventTarget | null) =>
   document.querySelector(overlays) !== null ||
   (target instanceof Element && target.closest("form") !== null);
 
-const keyOf = (event: KeyboardEvent): KeyEvent => ({
+/**
+ * A key pressed, as the core reads one.
+ * @param event - The key, as the DOM gave it.
+ * @returns The key, as plain data.
+ */
+export const keyOf = (event: KeyboardEvent): KeyEvent => ({
   alt: event.altKey,
   altGraph: event.getModifierState("AltGraph"),
   code: event.code,

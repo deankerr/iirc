@@ -8,6 +8,7 @@
  * @packageDocumentation
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
+import { uiDefaults } from "@iirc/api/ui";
 import { casefold } from "@iirc/protocol/casemapping";
 
 import { commands } from "./commands.ts";
@@ -17,9 +18,6 @@ import { fields, optionName } from "./options.ts";
 import type { Option } from "./options.ts";
 import { resolve } from "./timelines.ts";
 import type { NetworkView, Timelines } from "./timelines.ts";
-
-/** What follows a nick completed at the start of a line, as IRC clients address someone. */
-export const nickSuffix = ": ";
 
 /** How many nicks the members route is asked for. */
 export const nicksLimit = 100;
@@ -47,6 +45,8 @@ export interface Sources {
   readonly recent: readonly string[];
   /** Self's nick, if known, which comes last. */
   readonly self: string | undefined;
+  /** What follows a nick completed at the start of a line, as `ui.suffix` says. */
+  readonly suffix: string;
 }
 
 /** The text and caret the composer shows. */
@@ -383,7 +383,7 @@ const begin = (
     return cycling(state, place, spot, names, " ", backwards);
   }
 
-  const suffix = lineStart ? nickSuffix : " ";
+  const suffix = lineStart ? sources.suffix : " ";
 
   if (sources.nicks._tag === "Members") {
     const request = state.requests + 1;
@@ -469,7 +469,7 @@ export const reduceCompletion = (
         return { edit: undefined, state: { ...state, phase: idle } };
       }
 
-      const suffix = atLineStart(phase.spot.before) ? nickSuffix : " ";
+      const suffix = atLineStart(phase.spot.before) ? sources.suffix : " ";
 
       return cycling(
         state,
@@ -708,19 +708,22 @@ const chantypesNow = (
  * @param place - The composer's place.
  * @param options - The options read.
  * @param chantypes - Each Network's `CHANTYPES`, as read.
+ * @param suffix - What follows a nick completed at the start of a line, `ui.suffix` in effect.
  * @returns The sources.
  */
 export const sourcesOf = (
   state: Timelines,
   place: Place,
   options: readonly Option[],
-  chantypes: ReadonlyMap<NetworkId, Chantypes> = new Map()
+  chantypes: ReadonlyMap<NetworkId, Chantypes> = new Map(),
+  suffix: string = uiDefaults.suffix
 ): Sources => {
   const networks = [...state.networks.keys()];
 
   const at = {
     commands: commandNames,
     options: optionNames(networks, options),
+    suffix,
   };
 
   if (!isTimelinePlace(place)) {

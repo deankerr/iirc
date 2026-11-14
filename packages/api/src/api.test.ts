@@ -37,6 +37,10 @@ import {
   uiOptionNames,
   uiValueKept,
   WidestLine,
+  EnterKey,
+  NickSuffix,
+  nickSuffixMaxLength,
+  SpellcheckShown,
 } from "./ui.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
@@ -321,10 +325,13 @@ describe("the contract", () => {
         activity: "all",
         colours: "theme",
         dark: "dark",
+        enter: "send",
         font: "system",
         leading: 1.45,
         light: "light",
         size: 14,
+        spellcheck: true,
+        suffix: ": ",
         theme: "system",
         themes: [],
         time: "HH:mm",
@@ -334,10 +341,13 @@ describe("the contract", () => {
         "activity",
         "colours",
         "dark",
+        "enter",
         "font",
         "leading",
         "light",
         "size",
+        "spellcheck",
+        "suffix",
         "theme",
         "themes",
         "time",
@@ -480,15 +490,67 @@ describe("the contract", () => {
     ]);
   });
 
+  it("takes the Composer's habits: what Enter does, spellcheck, and a short suffix with no control character", () => {
+    const enter = Schema.decodeUnknownOption(EnterKey);
+    const spellcheck = Schema.decodeUnknownOption(SpellcheckShown);
+    const suffix = Schema.decodeUnknownOption(NickSuffix);
+
+    expect({
+      enter: ["send", "newline", "Send", "shift", "", null].map((each) =>
+        Option.getOrNull(enter(each))
+      ),
+      spellcheck: [true, false, "on", 1, null].map((each) => Option.getOrNull(spellcheck(each))),
+      suffix: [
+        ": ",
+        "",
+        " ",
+        ", ",
+        "x".repeat(nickSuffixMaxLength),
+        "x".repeat(nickSuffixMaxLength + 1),
+        ":\n",
+        ":\r",
+        "\u0003",
+        "\u000F",
+        "\u007F",
+        "\u0085",
+        "\uD800",
+        "→ ",
+        1,
+        null,
+      ].map((each) => Option.getOrNull(suffix(each))),
+    }).toStrictEqual({
+      enter: ["send", "newline", null, null, null, null],
+      spellcheck: [true, false, null, null, null],
+      suffix: [
+        ": ",
+        "",
+        " ",
+        ", ",
+        "x".repeat(nickSuffixMaxLength),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "→ ",
+        null,
+        null,
+      ],
+    });
+  });
+
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","font":"system","leading":1.45,"light":"light","size":14,"theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","enter":"send","font":"system","leading":1.45,"light":"light","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","font":"ibm-plex-mono","leading":1.45,"light":"light","size":16,"theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },
