@@ -57,7 +57,7 @@ Small things, each independent of the rest.
 - **Removing a Network,** not only disabling it. Its Configuration and Credentials go, and whether its Timelines stay readable is the Owner's choice as they remove it.
 - **Closing a Timeline:** a Direct Message, or a Channel the Owner left, out of the Sidebar until something is said there again.
 - **Ignoring a User,** by mask, as Configuration so every Frontend agrees. What they say is still journaled, and is neither shown, counted, nor notified.
-- **CTCP.** `VERSION`, `PING`, `TIME` and `CLIENTINFO` answered, bounded so they cannot be used to flood Self off, with an option to answer nothing. Requests and replies are Activity, and `/ctcp` and `/ping` send them.
+- **CTCP requests of Self's own,** sent with `/ctcp` and `/ping`, each reply shown with its request.
 - **Logging in where there is no SASL:** a Credential said to a service as a Session begins, before its Channels are joined; `OPER` with a Credential; user modes to set; and Lines of the Owner's own to send then.
 - **Taking a nick back.** When a configured nick was taken, Self takes it once its holder is seen to leave it.
 - **A Channel's lists:** its bans, exceptions and invitation masks read as a Lookup, shown, and removed from. `/names` and `/who` beside them.

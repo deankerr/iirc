@@ -80,10 +80,34 @@ const ModeChange = Schema.Struct({
   set: Schema.Boolean,
 });
 
+const ctcp = {
+  args: Schema.String,
+  command: Schema.String,
+  nick: Schema.String,
+  target: Schema.String,
+};
+
 const Activity = Schema.TaggedUnion({
   AwayChanged: {
     away: Schema.NullOr(Schema.Struct({ message: Schema.String })),
     nick: Schema.String,
+  },
+  CtcpReply: ctcp,
+  CtcpRequest: {
+    ...ctcp,
+    answer: Schema.TaggedUnion({
+      Answered: { text: Schema.String },
+      Unanswered: {
+        reason: Schema.Literals([
+          "History",
+          "Unknown",
+          "Off",
+          "Unreachable",
+          "Unsendable",
+          "Limited",
+        ]),
+      },
+    }),
   },
   Joined: { channel: Schema.String, nick: Schema.String },
   Kicked: {

@@ -76,6 +76,22 @@ const Highlights = Schema.Array(
  * annotations, which a Frontend reads to offer every field as an option (ADR 0013).
  */
 export const NetworkConfiguration = Schema.Struct({
+  /**
+   * Whether Self answers the CTCP requests an IRC client is expected to. A Journal written
+   * before the field existed holds `Configured` inputs without it, which decode as on.
+   */
+  answerCtcp: Schema.optionalKey(Schema.Boolean)
+    .pipe(
+      Schema.decodeTo(Schema.Boolean, {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => true)),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: true,
+      description:
+        "Whether to answer CTCP VERSION, PING, TIME, and CLIENTINFO requests. Off, nothing is answered, and each request is still shown.",
+    }),
   channels: Schema.Array(WantedChannel).annotate({
     default: [],
     description: "The Channels to be in, joined on connecting and whenever one is added.",

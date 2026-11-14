@@ -539,6 +539,36 @@ describe("lines", () => {
     ]);
   });
 
+  it("shows a CTCP request with the answer sent or why none was, and a reply, its text only as text", () => {
+    const ctcp = { args: "", command: "VERSION", nick: "peer", target: "iirc" };
+
+    expect(
+      [
+        activity({ _tag: "CtcpRequest", ...ctcp, answer: { _tag: "Answered", text: "iirc" } }),
+        activity({
+          _tag: "CtcpRequest",
+          ...ctcp,
+          answer: { _tag: "Unanswered", reason: "Limited" },
+          args: "\u0002x\u202E",
+          command: "PING",
+        }),
+        activity({ _tag: "CtcpReply", ...ctcp, args: "irssi 1.4" }),
+      ].map((each) => {
+        const line = lineOf(each);
+
+        return [
+          line._tag === "Description" && line.tone,
+          line._tag === "Description" && line.marker,
+          read(line),
+        ];
+      })
+    ).toStrictEqual([
+      ["Activity", "--", "<peer> asked for VERSION, answered iirc"],
+      ["Activity", "--", "<peer> asked for PING x\u202E\u202C, not answered: too many requests"],
+      ["Activity", "--", "<peer> replied to VERSION: irssi 1.4"],
+    ]);
+  });
+
   it("describes a Session's start and end, and a failed Connection, never in an Ircd's words", () => {
     const wire: readonly (typeof ItemContent.Encoded)[] = [
       { _tag: "SessionBegan", at: 0, nick: "iirc" },

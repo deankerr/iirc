@@ -84,7 +84,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 ### News
 
 - **News resumes exactly.** Each `happened` event is one step's News, and its event id is the sequence. A Frontend resumes with `after` or `Last-Event-ID`, misses nothing, and sees nothing twice. `heartbeat` events carry no id, so they never move its place.
-- **News says where it belongs.** Each Message and Activity carries `where`, and says whether it is a `highlight` and whether Self said it. A Frontend reads these and never works them out. A `StandardReply` Activity is where what it answers belongs, or the Network's own Timeline.
+- **News says where it belongs.** Each Message and Activity carries `where`, and says whether it is a `highlight` and whether Self said it. A Frontend reads these and never works them out. A `StandardReply` Activity is where what it answers belongs, or the Network's own Timeline. A `CtcpRequest` carries what became of it: the answer sent, or why none was.
 
 ### Timelines
 

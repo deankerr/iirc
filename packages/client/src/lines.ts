@@ -29,6 +29,7 @@ import {
   refused,
   see,
 } from "./channels.ts";
+import { heardCtcp } from "./ctcp.ts";
 import type { Arrival, Meant } from "./feature.ts";
 import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
@@ -203,7 +204,9 @@ const settled = (run: Run, activity: Activity): void => {
     case "Joined":
     case "Parted":
     case "Quit":
-    case "StandardReply": {
+    case "StandardReply":
+    case "CtcpRequest":
+    case "CtcpReply": {
       break;
     }
 
@@ -842,6 +845,7 @@ export const interpret = (
 
   if (hasMeaning(command)) {
     means(run, arrival);
+    heardCtcp(run, arrival);
   } else if (isStandardReply(command)) {
     // One that refused an intent, or is part of a Lookup's labelled reply, is shown there.
     if (reply === undefined && !labelled) {

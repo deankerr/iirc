@@ -54,6 +54,7 @@ import type {
   News,
   Profile,
   RefusedAction,
+  Ctcp,
   RefusedReason,
   StandardReply,
   TimerTable,
@@ -186,6 +187,13 @@ const standardReply = (source: StandardReply): StandardReply => ({
   kind: source.kind,
 });
 
+const ctcp = (source: Ctcp): Ctcp => ({
+  args: source.args,
+  command: source.command,
+  nick: source.nick,
+  target: source.target,
+});
+
 const activity = (source: Activity): WireActivity => {
   switch (source._tag) {
     case "AwayChanged": {
@@ -257,6 +265,28 @@ const activity = (source: Activity): WireActivity => {
         _tag: "Quit",
         nick: source.nick,
         reason: orNull(source.reason),
+      };
+
+      return wire;
+    }
+
+    case "CtcpReply": {
+      const wire: Case<Activity, WireActivity, "CtcpReply"> = {
+        _tag: "CtcpReply",
+        ...ctcp(source),
+      };
+
+      return wire;
+    }
+
+    case "CtcpRequest": {
+      const wire: Case<Activity, WireActivity, "CtcpRequest"> = {
+        _tag: "CtcpRequest",
+        ...ctcp(source),
+        answer:
+          source.answer._tag === "Answered"
+            ? { _tag: "Answered", text: source.answer.text }
+            : { _tag: "Unanswered", reason: source.answer.reason },
       };
 
       return wire;

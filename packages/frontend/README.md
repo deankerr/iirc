@@ -267,7 +267,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 - **A nick's colour is a slot, not a colour:** a hash of the nick as RFC 1459 folds it, one of 16, which a theme gives its colour.
 - **One of our Messages says its delivery only while it is sending, or if it was not sent or was refused,** with the Ircd's code. Nothing is said once the Ircd confirmed it, nor of `Unconfirmed`, which is all a Message ever becomes where the Ircd does not echo ours. A refused action is a calm line of its own, such as `Your topic change for #iirc was refused (482)`.
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
-- **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone.
+- **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone. A CTCP request shows who asked for what, and the answer sent or why none was.
 
 ## Activity
 

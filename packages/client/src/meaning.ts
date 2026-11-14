@@ -136,7 +136,8 @@ const message: Reader = ({ run, arrival, params: [target, text], by }) => {
 
   const ctcp = parseCtcp(text);
 
-  // CTCP other than `ACTION` is a request or a reply between IRC clients, not something said.
+  // CTCP other than `ACTION` is a request or a reply between IRC clients, not something
+  // said: `heardCtcp` reports it and answers it, and drops a `DCC`.
   if (ctcp._tag === "Dcc" || ctcp._tag === "Other") {
     return [];
   }

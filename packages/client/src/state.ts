@@ -9,7 +9,8 @@ import type { CredentialName } from "@iirc/protocol/line";
 
 import type { StsPolicy } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
-import type { CapName, Instant, IntentId } from "./ids.ts";
+import { Instant } from "./ids.ts";
+import type { CapName, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
 import type { EndReason, Notes, Profile, RefusedAction } from "./news.ts";
@@ -409,6 +410,13 @@ export interface State {
    * labels for one is shown where its Message stands.
    */
   readonly said: ReadonlyMap<IntentId, string>;
+  /**
+   * When the budget for CTCP answers is full again: each answer moves it on by one
+   * interval from now or from where it stood, whichever is later, and an answer is sent
+   * only while it is no more than the burst less one interval ahead of now. It outlives
+   * Connections, so reconnecting refills nothing.
+   */
+  readonly answersFullAt: Instant;
 }
 
 /** How many of the Owner's actions, and labelled `Say`s, the Client remembers, to place what answers them. */
@@ -417,6 +425,7 @@ export const maxActions = 64;
 /** Before anything has happened. */
 export const initialState: State = {
   actions: new Map(),
+  answersFullAt: Instant.make(0),
   attempt: 0,
   away: undefined,
   casemapping: "rfc1459",

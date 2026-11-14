@@ -136,4 +136,33 @@ describe("a played Session", () => {
       libera?.directs.get("bob")
     );
   });
+
+  it("shows a CTCP request in the Network's own Timeline, and the partner's only once it exists", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      lines(
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "<< :peer!u@h PRIVMSG iirc :psst",
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01PING 1\\x01",
+        ">>\\ NOTICE peer :\\x01PING 1\\x01"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" &&
+      change.content._tag === "Activity" &&
+      change.content.activity._tag === "CtcpRequest"
+        ? [[change.content.activity.command, change.timeline]]
+        : []
+    );
+
+    expect(placed).toStrictEqual([
+      ["VERSION", libera?.timeline],
+      ["PING", libera?.directs.get("peer")],
+      ["PING", libera?.timeline],
+    ]);
+  });
 });

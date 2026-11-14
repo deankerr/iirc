@@ -387,7 +387,9 @@ const markerOf = (activity: Activity): Marker => {
     case "TopicChanged":
     case "ModeChanged":
     case "AwayChanged":
-    case "StandardReply": {
+    case "StandardReply":
+    case "CtcpRequest":
+    case "CtcpReply": {
       return "--";
     }
 
@@ -416,6 +418,42 @@ const said = (text: string): Part => ({ _tag: "Said", inlines: formatted(text) }
  */
 const because = (reason: string | null): readonly Part[] =>
   reason === null || reason === "" ? [] : [words(" ("), said(reason), words(")")];
+
+type CtcpAnswer = Extract<Activity, { readonly _tag: "CtcpRequest" }>["answer"];
+
+/** Why a CTCP request went unanswered, in a few words. */
+const unanswered: Readonly<
+  Record<Extract<CtcpAnswer, { readonly _tag: "Unanswered" }>["reason"], string>
+> = {
+  History: "from history",
+  Limited: "too many requests",
+  Off: "answers are off",
+  Unknown: "not understood",
+  Unreachable: "no one to answer",
+  Unsendable: "too long to send",
+};
+
+/**
+ * A CTCP's command and its arguments, which are only ever shown as text.
+ * @param command - The command.
+ * @param args - Its arguments.
+ * @param between - What goes between them.
+ * @returns Their parts.
+ */
+const ctcpParts = (command: string, args: string, between: string): readonly Part[] => [
+  name(command),
+  ...(args === "" ? [] : [words(between), said(args)]),
+];
+
+/**
+ * What became of a CTCP request: the answer sent, or why none was.
+ * @param answer - The answer.
+ * @returns Its parts.
+ */
+const answerParts = (answer: CtcpAnswer): readonly Part[] =>
+  answer._tag === "Answered"
+    ? [words(", answered "), name(answer.text)]
+    : [words(`, not answered: ${unanswered[answer.reason]}`)];
 
 /**
  * An Activity in words.
@@ -504,6 +542,24 @@ const describeActivity = (activity: Activity): readonly Part[] => {
         name(activity.code),
         ...activity.context.flatMap((each) => [words(" "), name(each)]),
         ...(activity.description === "" ? [] : [words(": "), said(activity.description)]),
+      ];
+    }
+
+    // Who asked for what, and the answer sent beside it, or why none was.
+    case "CtcpRequest": {
+      return [
+        nickPart(activity.nick),
+        words(" asked for "),
+        ...ctcpParts(activity.command, activity.args, " "),
+        ...answerParts(activity.answer),
+      ];
+    }
+
+    case "CtcpReply": {
+      return [
+        nickPart(activity.nick),
+        words(" replied to "),
+        ...ctcpParts(activity.command, activity.args, ": "),
       ];
     }
 

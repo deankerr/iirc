@@ -58,7 +58,7 @@ const sameServer = (name: string, server: string): boolean =>
  * @param source - The Line's source, or `undefined` when it has none.
  * @returns Whether it is.
  */
-const isUser = (run: Run, source: Source | undefined): boolean =>
+export const isUser = (run: Run, source: Source | undefined): boolean =>
   source !== undefined &&
   (source.user !== undefined ||
     source.host !== undefined ||
@@ -233,8 +233,11 @@ const activityTimelines = (
       return isSelf(run, activity.nick) ? [network] : theirs(activity.nick);
     }
 
-    // The core places a standard reply where what it answers belongs, before it is routed.
-    case "StandardReply": {
+    // The core places a standard reply where what it answers belongs, and a CTCP by who
+    // sent it, before either is routed.
+    case "StandardReply":
+    case "CtcpRequest":
+    case "CtcpReply": {
       return [network];
     }
 

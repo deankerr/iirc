@@ -108,6 +108,7 @@ describe("the options, derived from the Schema", () => {
       described: true,
       keys,
       kinds: {
+        answerCtcp: "Toggle",
         channels: "Names",
         declined: "Texts",
         enabled: "Toggle",
@@ -132,6 +133,7 @@ describe("the options, derived from the Schema", () => {
       resolved: names.every((name) => resolve(name)._tag === "Parsed"),
     }).toStrictEqual({
       names: [
+        "network.libera.answerCtcp",
         "network.libera.channels",
         "network.libera.channels.#secret.key",
         "network.libera.channels.#iirc.key",
@@ -162,6 +164,7 @@ describe("the options, derived from the Schema", () => {
     );
 
     expect(shown).toStrictEqual({
+      answerCtcp: { starts: "on", value: { _tag: "Shown", text: "on" } },
       channels: { starts: "", value: { _tag: "Shown", text: "#secret,#iirc" } },
       "channels.#iirc.key": { starts: "unset", value: { _tag: "Unset" } },
       "channels.#secret.key": {

@@ -388,13 +388,32 @@ export type StandardReply = typeof StandardReply.Type;
 /** The `WARN` and `NOTE` replies a Lookup's reply held, and each `FAIL` after the first, in order. */
 const Notes = Schema.Array(StandardReply);
 
+/** A CTCP request or reply: who sent it, where, its command, and its arguments, as text. */
+const ctcp = { args: Untrusted, command: Untrusted, nick: Untrusted, target: Untrusted };
+
+/**
+ * What became of a CTCP request: the answer Self sent, as its arguments, or why none was:
+ * read from history, not one Self answers, answers turned off, no User to answer, an answer
+ * that could not be sent whole, or the budget for answers spent.
+ */
+const CtcpAnswer = Schema.TaggedUnion({
+  Answered: { text: Untrusted },
+  Unanswered: {
+    reason: Schema.Literals(["History", "Unknown", "Off", "Unreachable", "Unsendable", "Limited"]),
+  },
+});
+
 /**
  * Something that changed on a Network, rather than something said. A `StandardReply` is
  * what the Network said of something sent, shown where that belongs, or of nothing, shown
- * in the Network's own Timeline: a `WARN`, a `NOTE`, or a `FAIL` that refused nothing.
+ * in the Network's own Timeline: a `WARN`, a `NOTE`, or a `FAIL` that refused nothing. A
+ * `CtcpRequest` is a CTCP request another User sent, with what became of it, and a
+ * `CtcpReply` a CTCP reply.
  */
 export const Activity = Schema.TaggedUnion({
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
+  CtcpReply: ctcp,
+  CtcpRequest: { ...ctcp, answer: CtcpAnswer },
   Joined: { channel: Untrusted, nick: Untrusted },
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },

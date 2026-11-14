@@ -68,13 +68,19 @@ describe("Messages heard", () => {
     expect.assertions(0);
   });
 
-  it("reports no Message for other CTCP, and answers none", () => {
-    const played = play(client, {
+  it("reports other CTCP as Activity, not a Message", () => {
+    play(client, {
       configuration: base,
-      transcript: [...inChannel, lines("<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01")],
+      transcript: [
+        ...inChannel,
+        lines(
+          "<<\\ :peer!u@h PRIVMSG #iirc :\\x01FINGER\\x01",
+          "?? activity CtcpRequest peer #iirc FINGER unanswered=Unknown in=channel:#iirc"
+        ),
+      ],
     });
 
-    expect(played.steps.at(-1)).toMatchObject({ news: [], outputs: [] });
+    expect.assertions(0);
   });
 
   it("keeps client-only tags as data, and the time of receipt without server-time", () => {

@@ -61,3 +61,26 @@ describe("highlight words", () => {
     ]).toStrictEqual([true, false, false]);
   });
 });
+
+describe("answering CTCP", () => {
+  const old = {
+    channels: [],
+    declined: [],
+    enabled: true,
+    fallbackEncoding: "windows-1252",
+    ircds: [{ host: "irc.test", port: 6697, tls: true }],
+    login: { _tag: "None" },
+    nicks: ["iirc"],
+    realname: "iirc",
+    username: "iirc",
+  };
+
+  it("decodes as on from a Configuration written before it existed, and is kept when off", () => {
+    const decode = Schema.decodeUnknownSync(NetworkConfiguration);
+
+    expect([
+      decode(old).answerCtcp,
+      decode({ ...old, answerCtcp: false }).answerCtcp,
+    ]).toStrictEqual([true, false]);
+  });
+});
