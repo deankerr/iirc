@@ -178,9 +178,12 @@ const Members = ({
 
   return (
     <>
+      {/* A row measured once is kept at that height, so a new line height that leaves the
+          estimate the same would leave it stale: each row is watched as it is drawn. */}
       <Virtualizer
         layout={ListLayout}
         layoutOptions={{ estimatedRowSize: rowHeight, loaderSize: rowHeight }}
+        shouldObserveItemSize
       >
         <GridList
           aria-label="Members"

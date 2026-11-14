@@ -1173,17 +1173,16 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.keyboard.press("Escape");
         await query.waitFor({ state: "detached" });
 
-        // A change of the line height too small to change a row's estimate still lays the list
-        // out again: each row's wrapper stays as tall as the row it holds, so none is clipped.
-        const rowsClipped = async () =>
+        // A change of the line height that leaves a row's estimate as it was still lays the
+        // list out again: each row's wrapper is as tall as the row it holds, to the pixel, so
+        // none is clipped or left with a gap under it.
+        const rowsStale = async () =>
           await members.getByRole("row").evaluateAll((rows) =>
             rows.flatMap((row) => {
-              const wrapper = row.parentElement;
-              const wrapperHeight = wrapper?.getBoundingClientRect().height ?? 0;
+              const wrapper = row.parentElement?.getBoundingClientRect().height ?? 0;
+              const { height } = row.getBoundingClientRect();
 
-              return wrapperHeight + 0.5 < row.scrollHeight
-                ? [{ row: row.scrollHeight, wrapper: wrapperHeight }]
-                : [];
+              return Math.abs(wrapper - height) >= 0.5 ? [{ row: height, wrapper }] : [];
             })
           );
 
@@ -1192,11 +1191,19 @@ describe("the web frontend on iirc daemon --web", () => {
             .evaluate(() => getComputedStyle(document.body).lineHeight)
             .then((now) => now === expected);
 
-        const clipped: { row: number; wrapper: number }[][] = [];
+        const stale: { row: number; wrapper: number }[][] = [];
+
+        // The list held at one size, as a sheet of a fixed height is, so nothing but the rows
+        // themselves can lay it out again.
+        await members.evaluate((list) => {
+          const { height, width } = list.getBoundingClientRect();
+
+          Object.assign(list.style, { flex: "none", height: `${height}px`, width: `${width}px` });
+        });
 
         for (const [leading, expected] of [
-          ["1.46", "20.44px"],
-          ["1.47", "20.58px"],
+          ["1.43", "20.02px"],
+          ["1.5", "21px"],
           ["1.45", "20.3px"],
         ] as const) {
           // oxlint-disable-next-line no-await-in-loop -- one change after another
@@ -1217,7 +1224,7 @@ describe("the web frontend on iirc daemon --web", () => {
             await promise;
           });
           // oxlint-disable-next-line no-await-in-loop -- one change after another
-          clipped.push(await rowsClipped());
+          stale.push(await rowsStale());
         }
 
         // The peer ops Self, which the list reads again and shows.
@@ -1249,18 +1256,18 @@ describe("the web frontend on iirc daemon --web", () => {
         );
 
         expect({
-          clipped,
           completed,
           menu,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          stale,
           symbol,
           topic,
           violations,
         }).toStrictEqual({
-          clipped: [[], [], []],
           completed: "peer: ",
           menu: { focused: true, height: true, items: 3 },
           problems: [],
+          stale: [[], [], []],
           symbol: "@peer",
           topic: "700",
           violations: "",
