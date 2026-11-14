@@ -8,7 +8,14 @@
  * @packageDocumentation
  */
 import type { ItemContent } from "@iirc/api";
-import { UiOptionName, ansiCount, themesCap, uiDefaults, uiValueKept } from "@iirc/api/ui";
+import {
+  UiOptionName,
+  ansiCount,
+  fontFamilyMaxLength,
+  themesCap,
+  uiDefaults,
+  uiValueKept,
+} from "@iirc/api/ui";
 import type { UiOptions, ActivityShown, UiInForce } from "@iirc/api/ui";
 import { Option, Schema } from "effect";
 
@@ -23,10 +30,12 @@ export const deviceUiKey = "iirc.ui";
 
 /**
  * The longest a device's overrides can be as `deviceUiText` writes them: every option
- * overridden, with `themesCap` themes of the longest names, each with every colour.
+ * overridden, with the longest font's family, and `themesCap` themes of the longest names,
+ * each with every colour.
  */
 const longestOverrides = JSON.stringify({
   ...uiDefaults,
+  font: "x".repeat(fontFamilyMaxLength),
   theme: "x".repeat(32),
   themes: Array.from({ length: themesCap }, (_, index) => ({
     name: `${index}`.padEnd(32, "x"),

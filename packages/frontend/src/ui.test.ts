@@ -24,6 +24,7 @@ describe("a device's overrides", () => {
     expect({
       back: deviceUiOf(deviceUiText({ theme: "light", time: "none" })),
       empty: deviceUiText(noOverrides),
+      family: deviceUiOf('{"font":"Iosevka Term"}'),
       leading: deviceUiOf('{"leading":1.2}'),
       leadingFine: deviceUiOf('{"leading":1.455,"size":20}'),
       leadings: deviceUiOf('{"leading":3,"size":20}'),
@@ -33,10 +34,11 @@ describe("a device's overrides", () => {
       notAnObject: deviceUiOf("[1,2]"),
       notJson: deviceUiOf("{theme"),
       sized: deviceUiOf('{"size":24,"font":"jetbrains-mono"}'),
-      sizes: deviceUiOf('{"size":9,"font":"iosevka"}'),
+      sizes: deviceUiOf('{"size":9,"font":"Ios\\"evka"}'),
     }).toStrictEqual({
       back: { theme: "light", time: "none" },
       empty: undefined,
+      family: { font: "Iosevka Term" },
       leading: { leading: 1.2 },
       leadingFine: { size: 20 },
       leadings: { size: 20 },

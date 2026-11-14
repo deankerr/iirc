@@ -403,6 +403,9 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                     on this device, over <Shown value={option.shared} />
                   </span>
                 ) : null}
+                {option._tag === "Ui" && option.note !== undefined ? (
+                  <span className={styles.note}>{option.note}</span>
+                ) : null}
               </span>
               <span className={styles.starts}>
                 {option.starts === undefined ? "must be given" : <bdi>{option.starts}</bdi>}

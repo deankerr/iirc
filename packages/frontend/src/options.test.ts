@@ -1,5 +1,5 @@
 import { NetworkId, TimelineId } from "@iirc/api";
-import { UiOptions } from "@iirc/api/ui";
+import { FontFamily, UiOptions } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Option, Schema } from "effect";
 import * as fc from "fast-check";
@@ -25,6 +25,7 @@ import {
   starting,
   uiFields,
   uiOptionsOf,
+  fontMissing,
   unset,
 } from "./options.ts";
 import type { Configuration, Edit, Json, Kind, NetworkOption, OptionsEvent } from "./options.ts";
@@ -965,6 +966,18 @@ const change = (option: string, value: Json | undefined, device: boolean) => ({
   value: [{ _tag: "ChangeUi", device, option, value }],
 });
 
+/**
+ * What the options view lists of ui.font: the value in effect, and what it says of it.
+ * @param args - What `uiOptionsOf` takes.
+ * @returns The row's values.
+ */
+const fontRow = (...args: Parameters<typeof uiOptionsOf>) =>
+  uiOptionsOf(...args)
+    .filter((one) => one.option === "font")
+    .map((one) => [one.value, one.note]);
+
+const fontRefused = (text: string) => `ui.font cannot be "${text}".`;
+
 const leadingRefused = (text: string) =>
   `ui.leading: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
 
@@ -995,7 +1008,7 @@ describe("the options under ui", () => {
         { _tag: "Choice", choices: ["all", "quiet", "none"] },
         { _tag: "Choice", choices: ["theme", "raw"] },
         {
-          _tag: "Choice",
+          _tag: "ChoiceOrText",
           choices: [
             "system",
             "jetbrains-mono",
@@ -1130,6 +1143,32 @@ describe("the options under ui", () => {
     });
   });
 
+  it("say a font's family in effect that this device lacks was not found on it", () => {
+    const family = Schema.decodeUnknownSync(FontFamily);
+    const fira = family("Fira Code");
+    const iosevka = family("Iosevka Term");
+    const sharing = { ...shared, options: { ...shared.options, font: fira } };
+
+    expect({
+      deviceFound: fontRow(sharing, { font: iosevka }, new Set([fira])),
+      deviceLacks: fontRow(sharing, { font: iosevka }, new Set([iosevka])),
+      neither: fontRow(sharing, { font: iosevka }, new Set()),
+      sharedLacked: fontRow(sharing, {}, new Set([fira])),
+      // Only a family is ever lacked: a theme of the same name is no font.
+      theme: uiOptionsOf(shared, {}, new Set([family("dark")]))
+        .filter((one) => one.option === "theme")
+        .map((one) => one.note),
+    }).toStrictEqual({
+      // Every device's family is lacked, but this device draws its own.
+      deviceFound: [[{ _tag: "Shown", text: "Iosevka Term" }, undefined]],
+      deviceLacks: [[{ _tag: "Shown", text: "Iosevka Term" }, fontMissing]],
+      neither: [[{ _tag: "Shown", text: "Iosevka Term" }, undefined]],
+      sharedLacked: [[{ _tag: "Shown", text: "Fira Code" }, fontMissing]],
+      theme: [undefined],
+    });
+    expect(fontMissing).toBe("not found on this device");
+  });
+
   it("are set and unset with /set and /unset, for every device or with -device for this one", () => {
     expect({
       alone: read("/set ui.time"),
@@ -1139,6 +1178,11 @@ describe("the options under ui", () => {
       deviceNetwork: read("/set -device network.libera.nicks a"),
       empty: read("/set ui.time "),
       font: read("/set ui.font IBM-Plex-Mono"),
+      fontFamily: read("/set ui.font  Fira Code "),
+      fontFamilyDevice: read("/set -device ui.font Fira Code"),
+      fontFamilyEscaped: read(String.raw`/set -device ui.font Fira\ Code`),
+      fontFamilyQuoted: read('/set ui.font Fira" Code'),
+      fontFamilyTooLong: read(`/set ui.font ${"x".repeat(65)}`),
       fontSans: read("/set ui.font Inter"),
       fontSystemSans: read("/set ui.font system-sans"),
       fractional: read("/set ui.size 14.5"),
@@ -1172,6 +1216,11 @@ describe("the options under ui", () => {
       },
       empty: { _tag: "Invalid", message: "Give ui.time a value, or use /unset ui.time." },
       font: change("font", "ibm-plex-mono", false),
+      fontFamily: change("font", "Fira Code", false),
+      fontFamilyDevice: change("font", "Fira Code", true),
+      fontFamilyEscaped: { _tag: "Invalid", message: fontRefused(String.raw`Fira\ Code`) },
+      fontFamilyQuoted: { _tag: "Invalid", message: fontRefused('Fira" Code') },
+      fontFamilyTooLong: { _tag: "Invalid", message: fontRefused("x".repeat(65)) },
       fontSans: change("font", "inter", false),
       fontSystemSans: change("font", "system-sans", false),
       fractional: {

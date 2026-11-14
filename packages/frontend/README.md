@@ -141,11 +141,11 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 ## Palette
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read.
+What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
 
 - **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
 - **With no query, recent choices come first,** at most 20.
-- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme or a font is drawn in on every device.
+- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme or a font is drawn in on every device, but a family typed in on this device alone, since each device has its own.
 - **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
 
 ## Composer
@@ -170,6 +170,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `Toggle`           | `on` or `off`                                                |
 | `Text`             | The raw text, exactly                                        |
 | `Choice`, `Tagged` | One of the Schema's literals or tags                         |
+| `ChoiceOrText`     | One of the Schema's literals, else the text, trimmed         |
 | `Integer`          | A whole number within the Schema's bounds                    |
 | `Decimal`          | A number within the Schema's bounds, a multiple of its step  |
 | `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes |
@@ -190,6 +191,7 @@ An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived f
 - **Every device shares them, and one may override any for itself** with `-device`. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.**
+- **A font's family the device lacks is said to be not found,** when it is the one in effect. Only the device can find that out, so it hands the families it lacks to `uiOptionsOf`.
 
 ## Themes
 

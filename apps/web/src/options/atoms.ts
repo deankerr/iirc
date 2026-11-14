@@ -31,6 +31,7 @@ import type { AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { signedIn, signInState } from "../sign-in/atoms.ts";
+import { canvasMeasure, familiesMissing } from "../theme/device-fonts.ts";
 import { timelinesState } from "../timelines/atoms.ts";
 import { deviceUi } from "./device.ts";
 
@@ -51,11 +52,15 @@ export const optionsFilter = Atom.make((get) => {
 
 /**
  * The options the view lists, filtered as the Pane they show in says, those under `ui` as
- * they take effect on this device.
+ * they take effect on this device, with a font's family this device lacks said to be.
  */
-export const optionRows = Atom.make((get) =>
-  listed(get(optionsState), get(optionsFilter) ?? "", get(deviceUi))
-);
+export const optionRows = Atom.make((get) => {
+  const state = get(optionsState);
+  const device = get(deviceUi);
+  const missing = familiesMissing([state.ui?.options.font, device.font], canvasMeasure());
+
+  return listed(state, get(optionsFilter) ?? "", device, missing);
+});
 
 /**
  * Folds one event into the options view.

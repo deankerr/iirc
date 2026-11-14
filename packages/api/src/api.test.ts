@@ -27,9 +27,25 @@ import {
   UiValue,
   WindowQuery,
 } from "./schemas.ts";
-import { UiInForce, UiOptionName, UiOptions, uiDefaults, uiOptionNames } from "./ui.ts";
+import {
+  FontShown,
+  UiInForce,
+  UiOptionName,
+  UiOptions,
+  isFontName,
+  uiDefaults,
+  uiOptionNames,
+  uiValueKept,
+} from "./ui.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
+
+/**
+ * A font decoded from JSON, or null when refused.
+ * @param each - The JSON.
+ * @returns The font.
+ */
+const font = (each: Schema.Json) => Option.getOrNull(Schema.decodeUnknownOption(FontShown)(each));
 
 describe("the contract", () => {
   it("puts every route under /api, and every one but signing in and out behind a key or a sign-in", () => {
@@ -279,7 +295,7 @@ describe("the contract", () => {
         { ...uiDefaults, size: 25 },
         { ...uiDefaults, size: 14.5 },
         { ...uiDefaults, size: "14" },
-        { ...uiDefaults, font: "Comic Sans" },
+        { ...uiDefaults, font: 'Comic "Sans' },
         { ...uiDefaults, leading: 1 },
         { ...uiDefaults, leading: 2 },
         { ...uiDefaults, leading: 1.6 },
@@ -342,6 +358,64 @@ describe("the contract", () => {
       ],
       statuses: ["200", "400", "401", "403", "409", "500"],
       value: [true, true, false, false],
+    });
+  });
+
+  it("takes a font by name, or a family by its own name that is always one quoted CSS family, and refuses the rest", () => {
+    expect({
+      families: [
+        "Fira Code",
+        "DejaVu Sans Mono",
+        "Noto Sans CJK JP",
+        "思源黑体",
+        "x".repeat(64),
+      ].map(font),
+      // A name served is one, never a family, and in another case it is neither, so each
+      // font has one value.
+      named: ["system", "inter", "ibm-plex-mono"].map((each) => {
+        const decoded = font(each);
+
+        return decoded === null ? null : isFontName(decoded);
+      }),
+      namedInAnotherCase: ["Inter", "SYSTEM", "IBM-Plex-Mono", "System-Sans"].map(font),
+      refused: [
+        "",
+        " ",
+        " Fira Code",
+        "Fira Code ",
+        'Fira" Code',
+        String.raw`Fira\ Code`,
+        String.raw`Fira\22 Code`,
+        "Fira\nCode",
+        "Fira\u0000Code",
+        "Fira\u007FCode",
+        "Fira\u0085Code",
+        "Fira\uD800Code",
+        "x".repeat(65),
+        42,
+        null,
+      ].map(font),
+    }).toStrictEqual({
+      families: ["Fira Code", "DejaVu Sans Mono", "Noto Sans CJK JP", "思源黑体", "x".repeat(64)],
+      named: [true, true, true],
+      namedInAnotherCase: [null, null, null, null],
+      refused: Array.from({ length: 15 }, () => null),
+    });
+  });
+
+  it("reads a font journaled before as it was, and a family as written, as plain text both ways", () => {
+    const codec = Schema.toCodecJson(UiOptions.fields.font);
+
+    expect({
+      kept: ["system", "ibm-plex-mono", "inter", "Fira Code", "Inter", 'a"b'].map((each) =>
+        uiValueKept("font", each)
+      ),
+      wire: ["system", "ibm-plex-mono", "Fira Code"].map((each) =>
+        Schema.encodeSync(codec)(Schema.decodeSync(codec)(each))
+      ),
+    }).toStrictEqual({
+      kept: ["system", "ibm-plex-mono", "inter", "Fira Code", undefined, undefined],
+      wire: ["system", "ibm-plex-mono", "Fira Code"],
     });
   });
 

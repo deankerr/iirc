@@ -390,6 +390,55 @@ describe("themes", () => {
     });
   });
 
+  it("draws a family the device has by its name, on this device alone, set by /set or typed in the palette, and previews one typed there", async () => {
+    const fake = signedIn();
+    const { registry, type } = await page(fake);
+    const stop = watchTheme(registry);
+    const root = document.documentElement;
+
+    const read = () => [
+      root.style.getPropertyValue("--font-text"),
+      root.style.getPropertyValue("--font-mono"),
+    ];
+
+    await type("/set -device ui.font Fira Code");
+    const set = read();
+
+    paletteHappened(registry, { _tag: "Opened", scope: "All" });
+    paletteHappened(registry, { _tag: "Queried", query: "font Iosevka Term" });
+
+    const typed = registry
+      .get(paletteSections)
+      .flatMap((section) => section.entries)
+      .find((entry) => entry.key === "font:Iosevka Term");
+
+    registry.set(highlightEntry, { highlighted: true, key: "font:Iosevka Term" });
+    const previewed = read();
+
+    if (typed !== undefined) {
+      registry.set(pickEntry, typed);
+    }
+
+    await until(registry, uiInEffect, (ui) => ui.font === "Iosevka Term");
+    const chosen = read();
+
+    stop();
+
+    expect({
+      chosen,
+      kept: readChoice(deviceUiKey),
+      previewed,
+      set,
+      shared: fake.daemon.ui.options.font,
+    }).toStrictEqual({
+      chosen: ['"Iosevka Term", var(--font-device)', "var(--font-device)"],
+      kept: '{"font":"Iosevka Term"}',
+      previewed: ['"Iosevka Term", var(--font-device)', "var(--font-device)"],
+      set: ['"Fira Code", var(--font-device)', "var(--font-device)"],
+      shared: "system",
+    });
+  });
+
   it("draws the line height on the root at once, lets this device's own win, and falls back as each is unset", async () => {
     const fake = signedIn();
     const { notice, registry, type } = await page(fake);

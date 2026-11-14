@@ -2,14 +2,15 @@
  * The command palette, as data: what it lists for a query, ranked, and what choosing an
  * entry asks for. It lists the commands the registry can run here, every Timeline, every
  * theme, every font, and the options, or the themes alone, as `/theme` opens it, and adds no action of
- * its own: choosing gives the same intents the composer's `/commands` do. Which entries
- * were chosen recently is remembered, at most `recentCap`.
+ * its own: choosing gives the same intents the composer's `/commands` do. A query of
+ * `font` and a family's name offers that family too. Which entries were chosen recently is
+ * remembered, at most `recentCap`.
  *
  * @packageDocumentation
  */
 import type { NetworkId, TimelineId } from "@iirc/api";
-import { fontNames } from "@iirc/api/ui";
-import type { FontShown } from "@iirc/api/ui";
+import { FontFamily, FontShown, fontNames, isFontName } from "@iirc/api/ui";
+import { Option as Maybe, Schema } from "effect";
 
 import { commands, commandWithId, interpret, runIn, unmet } from "./commands.ts";
 import type { CommandContext, Intent } from "./commands.ts";
@@ -281,6 +282,10 @@ export const themeDescription = (theme: { readonly builtIn: boolean }) =>
  * @returns The words.
  */
 export const fontDescription = (font: FontShown) => {
+  if (!isFontName(font)) {
+    return "font: a family on this device";
+  }
+
   switch (font) {
     case "system": {
       return "font: the device's own monospace font";
@@ -346,7 +351,10 @@ const matchedBy = (entry: Entry): Matched => {
     }
 
     case "Font": {
-      return { description: fontDescription(entry.name), names: [entry.name] };
+      return {
+        description: fontDescription(entry.name),
+        names: isFontName(entry.name) ? [entry.name] : [`font ${entry.name}`, entry.name],
+      };
     }
 
     default: {
@@ -355,14 +363,58 @@ const matchedBy = (entry: Entry): Matched => {
   }
 };
 
+const decodeFamily = Schema.decodeUnknownOption(FontFamily);
+
+/**
+ * The family a query names after the word `font`, as in `font Fira Code`, or none when it
+ * names none, or names a font the palette lists already.
+ * @param query - The query, trimmed, without a leading `/`, each run of spaces one.
+ * @returns The family.
+ */
+const familyQueried = (query: string): FontFamily | undefined => {
+  const named = /^font (?<family>.+)$/iu.exec(query)?.groups?.family;
+
+  return named === undefined ? undefined : Maybe.getOrUndefined(decodeFamily(named));
+};
+
+/** What the key of a font's entry in the palette starts with. */
+const fontKeyPrefix = "font:";
+
+const decodeFont = Schema.decodeUnknownOption(FontShown);
+
+/**
+ * The font an entry's key names, as the page previews it while the entry is highlighted.
+ * @param key - The entry's key.
+ * @returns The font, or none when the key names none.
+ */
+export const fontOfKey = (key: string): FontShown | undefined =>
+  key.startsWith(fontKeyPrefix)
+    ? Maybe.getOrUndefined(decodeFont(key.slice(fontKeyPrefix.length)))
+    : undefined;
+
+/**
+ * A font's entry.
+ * @param font - The font.
+ * @param current - The font in effect on this device.
+ * @returns The entry.
+ */
+const fontEntry = (font: FontShown, current: FontShown): Entry => ({
+  _tag: "Font",
+  current: font === current,
+  key: `${fontKeyPrefix}${font}`,
+  name: font,
+});
+
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; every theme; every font; and every option read.
+ * sidebar's order; every theme; every font, and the family the query names, if any; and
+ * every option read.
  * @param listing - What the palette lists from.
+ * @param family - The family the query names, if any.
  * @returns The sections, each with every entry.
  */
-const everything = (listing: Listing): readonly Section[] => [
+const everything = (listing: Listing, family: FontFamily | undefined): readonly Section[] => [
   {
     entries: commands
       .filter((one) => one.id !== "palette.open" && unmet(one.when, listing.context) === undefined)
@@ -401,12 +453,9 @@ const everything = (listing: Listing): readonly Section[] => [
     title: "Themes",
   },
   {
-    entries: fontNames.map((font): Entry => ({
-      _tag: "Font",
-      current: font === listing.font,
-      key: `font:${font}`,
-      name: font,
-    })),
+    entries: [...fontNames, ...(family === undefined ? [] : [family])].map((font) =>
+      fontEntry(font, listing.font)
+    ),
     title: "Fonts",
   },
   {
@@ -425,8 +474,9 @@ const everything = (listing: Listing): readonly Section[] => [
  * What the palette lists for a query. With none, the entries chosen recently come first,
  * newest first, and then each section in its own order. With one, only entries that match,
  * each section ranked best first, and the sections by their best entry. A leading `/` is
- * ignored, so `/set` finds `set`. Scoped to the themes, it lists only them, with nothing
- * recent.
+ * ignored, so `/set` finds `set`, and a run of spaces is one. Scoped to the themes, it lists
+ * only them, with nothing recent. A query of `font` and a family's name, such as
+ * `font Fira Code`, offers that family among the fonts.
  * @param listing - What the palette lists from.
  * @param query - What the Owner typed.
  * @param recent - The keys of entries chosen recently, newest first.
@@ -439,11 +489,14 @@ export const sections = (
   recent: readonly string[],
   scope: Scope = "All"
 ): readonly Section[] => {
-  const all = everything(listing).filter(
+  // Spaces between words count as one, so `font  Fira Code` names the family `Fira Code`.
+  const asked = query.trim().replace(/^\//u, "").replaceAll(/\s+/gu, " ");
+
+  const all = everything(listing, familyQueried(asked)).filter(
     (section) => scope === "All" || section.title === "Themes"
   );
 
-  const wanted = lower(query.trim().replace(/^\//u, ""));
+  const wanted = lower(asked);
 
   if (wanted === "") {
     const byKey = new Map(
@@ -493,7 +546,8 @@ export const sections = (
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
  * `/set <name>` alone does, since its value is never typed into the composer. A theme or a
- * font is drawn in, on every device.
+ * font is drawn in, on every device, but a family the device has, on this device alone,
+ * since another device's fonts are its own.
  * @param entry - The entry chosen.
  * @param context - The context commands are judged in.
  * @returns The intents to carry out.
@@ -534,7 +588,9 @@ export const choose = (entry: Entry, context: CommandContext): readonly Intent[]
     }
 
     case "Font": {
-      return [{ _tag: "ChangeUi", device: false, option: "font", value: entry.name }];
+      return [
+        { _tag: "ChangeUi", device: !isFontName(entry.name), option: "font", value: entry.name },
+      ];
     }
 
     default: {

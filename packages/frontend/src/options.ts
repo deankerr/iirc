@@ -19,7 +19,7 @@
  */
 import type { NetworkId } from "@iirc/api";
 import { UiOptionName, UiOptions, uiDefaults } from "@iirc/api/ui";
-import type { UiInForce } from "@iirc/api/ui";
+import type { FontFamily, UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
@@ -44,6 +44,8 @@ type Record = Schema.JsonObject;
  * - `Toggle`: `on` or `off`, and `true` or `false` too.
  * - `Text`: the text as typed, and `""` for none.
  * - `Choice`: one of `choices`, in any ASCII case.
+ * - `ChoiceOrText`: one of `choices`, in any ASCII case, or else the text as typed, trimmed,
+ *   such as a font: one served by name, or a family the device has by its own.
  * - `Integer`: a whole number from `minimum` to `maximum`, in decimal digits.
  * - `Decimal`: a number from `minimum` to `maximum` that need not be whole, in decimal
  *   digits, and a multiple of `step`, so it is exact however it is written.
@@ -60,6 +62,7 @@ export type Kind =
   | { readonly _tag: "Toggle" }
   | { readonly _tag: "Text" }
   | { readonly _tag: "Choice"; readonly choices: readonly string[] }
+  | { readonly _tag: "ChoiceOrText"; readonly choices: readonly string[] }
   | { readonly _tag: "Integer"; readonly minimum: number; readonly maximum: number }
   | {
       readonly _tag: "Decimal";
@@ -153,6 +156,11 @@ export interface UiOption {
   readonly shared: Value;
   /** This device's override, which wins over the shared value here, or none. */
   readonly device: Value | undefined;
+  /**
+   * What the view says of the value in effect here, if anything: that a font's family was
+   * not found on this device.
+   */
+  readonly note: string | undefined;
   /** What it starts as, in its text syntax. */
   readonly starts: string | undefined;
   /** Whether `/unset` can return it to what it starts as, which every `ui` option can. */
@@ -414,6 +422,16 @@ const kindOf = (ast: SchemaAST.AST): Kind | undefined => {
 
   if (choices !== undefined) {
     return { _tag: "Choice", choices };
+  }
+
+  const [named, text, ...others] = ast.types;
+
+  if (named?._tag === "Union" && text?._tag === "String" && others.length === 0) {
+    const either = literalsOf(named);
+
+    if (either !== undefined && !isCredential(text)) {
+      return { _tag: "ChoiceOrText", choices: either };
+    }
   }
 
   const members = ast.types.flatMap((one) => {
@@ -732,6 +750,12 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
       return choiceOf(kind.choices, text);
     }
 
+    case "ChoiceOrText": {
+      const chosen = choiceOf(kind.choices, text);
+
+      return chosen._tag === "Parsed" ? chosen : parsed(text.trim());
+    }
+
     case "Integer": {
       return integerOf(kind, text);
     }
@@ -791,6 +815,7 @@ export const showText = (kind: Kind, value: Json): string => {
 
     case "Text":
     case "Choice":
+    case "ChoiceOrText":
     case "Credential": {
       return textOf(value) ?? "";
     }
@@ -1010,7 +1035,7 @@ export const parseUiText = (option: UiOptionName, text: string): Parsed<Json> =>
 
   return Maybe.isSome(value)
     ? parsed(Schema.encodeUnknownSync(codec)(value.value))
-    : invalid(`${uiOptionName(option)} cannot be ${text}.`);
+    : invalid(`${uiOptionName(option)} cannot be "${text.trim()}".`);
 };
 
 /**
@@ -1022,27 +1047,59 @@ export const parseUiText = (option: UiOptionName, text: string): Parsed<Json> =>
 const uiValueJson = (option: UiOptionName, value: UiOptions[UiOptionName]): Json =>
   Schema.encodeUnknownSync(Schema.toCodecJson(UiOptions.fields[option]))(value);
 
+/** What the view says of a font's family this device was found to lack. */
+export const fontMissing = "not found on this device";
+
+/** A device that was found to lack no font's family. */
+const noneMissing: ReadonlySet<FontFamily> = new Set();
+
 /**
  * A `ui` option's value, shown in its text syntax.
  * @param field - Its field.
- * @param value - Its value, as JSON.
+ * @param option - The option.
+ * @param value - Its value, decoded.
  * @returns The value as the view shows it.
  */
-const shownUi = (field: Field, value: Json): Value => ({
+const shownUi = (field: Field, option: UiOptionName, value: UiOptions[UiOptionName]): Value => ({
   _tag: "Shown",
-  text: showText(field.kind, value),
+  text: showText(field.kind, uiValueJson(option, value)),
 });
 
 /**
+ * What the view says of a `ui` option's value in effect: that it is a font's family this
+ * device was found to lack, or nothing.
+ * @param option - The option.
+ * @param value - Its value in effect, decoded.
+ * @param missing - The fonts' families this device was found to lack.
+ * @returns The note, or none.
+ */
+const noteOf = (
+  option: UiOptionName,
+  value: UiOptions[UiOptionName],
+  missing: ReadonlySet<FontFamily>
+): string | undefined => {
+  const families: ReadonlySet<string> = missing;
+
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- a font is told apart from the other options' values by its type.
+  return option === "font" && typeof value === "string" && families.has(value)
+    ? fontMissing
+    : undefined;
+};
+
+/**
  * Every option under `ui`, in the Schema's order, each with the value in effect on this
- * device, the shared one, and this device's override.
+ * device, the shared one, and this device's override, and a font's family in effect that
+ * this device was found to lack said to be not found.
  * @param shared - The shared options, once read.
  * @param device - This device's overrides.
+ * @param missing - The fonts' families this device was found to lack, as far as it can
+ *   tell, which only the device can find out.
  * @returns The options.
  */
 export const uiOptionsOf = (
   shared: UiInForce | undefined,
-  device: DeviceUi
+  device: DeviceUi,
+  missing: ReadonlySet<FontFamily> = noneMissing
 ): readonly UiOption[] => {
   const effective = effectiveUi(shared, device);
 
@@ -1060,17 +1117,16 @@ export const uiOptionsOf = (
       {
         _tag: "Ui",
         description: field.description,
-        device: own === undefined ? undefined : shownUi(field, uiValueJson(name, own)),
+        device: own === undefined ? undefined : shownUi(field, name, own),
         kind: field.kind,
         name: uiOptionName(name),
+        note: noteOf(name, effective[name], missing),
         option: name,
         shared:
-          shared === undefined
-            ? { _tag: "Unset" }
-            : shownUi(field, uiValueJson(name, shared.options[name])),
+          shared === undefined ? { _tag: "Unset" } : shownUi(field, name, shared.options[name]),
         starts: showText(field.kind, uiValueJson(name, uiDefaults[name])),
         unsettable: true,
-        value: shownUi(field, uiValueJson(name, effective[name])),
+        value: shownUi(field, name, effective[name]),
       },
     ];
   });
@@ -2099,16 +2155,18 @@ export const reduceOptions = (state: Options, event: OptionsEvent): Options => {
  * @param state - The view.
  * @param filter - What the Owner typed to filter them.
  * @param device - This device's overrides of the options under `ui`.
+ * @param missing - The fonts' families this device was found to lack.
  * @returns The options, by Network in the order listed, then those under `ui`.
  */
 export const listed = (
   state: Options,
   filter: string,
-  device: DeviceUi = noOverrides
+  device: DeviceUi = noOverrides,
+  missing: ReadonlySet<FontFamily> = noneMissing
 ): readonly Option[] =>
   [
     ...[...state.networks].flatMap(([network, reading]) =>
       reading._tag === "Read" ? optionsOf(network, reading.configuration, state.held) : []
     ),
-    ...uiOptionsOf(state.ui, device),
+    ...uiOptionsOf(state.ui, device, missing),
   ].filter((option) => matches(filter, option.name));

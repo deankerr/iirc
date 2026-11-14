@@ -1,4 +1,5 @@
 import { NetworkId, Timeline, TimelineId } from "@iirc/api";
+import { FontFamily } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -8,7 +9,16 @@ import type { CommandContext } from "./commands.ts";
 import { draftOf, initialComposers, reduceComposers, started } from "./composer.ts";
 import { defaultKeymap, formatChord } from "./keymap.ts";
 import { optionsOf } from "./options.ts";
-import { choose, initialPalette, recentCap, reducePalette, remember, sections } from "./palette.ts";
+import {
+  choose,
+  fontDescription,
+  fontOfKey,
+  initialPalette,
+  recentCap,
+  reducePalette,
+  remember,
+  sections,
+} from "./palette.ts";
 import type { Entry, Listing, PaletteEvent, Section } from "./palette.ts";
 import { listedThemes, paletteNamed } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
@@ -423,6 +433,52 @@ describe("the fonts in the palette", () => {
       found: 11,
       scoped: ["Themes"],
     });
+  });
+});
+
+describe("a family typed in the palette", () => {
+  it("is offered after font, unless it names a font listed or no family, and set for this device alone", () => {
+    const fonted = { ...listing(), themes: listedThemes([]) };
+
+    const fontsFor = (query: string) =>
+      sections(fonted, query, []).find((section) => section.title === "Fonts")?.entries ?? [];
+
+    const [typed] = fontsFor("/font  Fira Code ");
+
+    expect({
+      alone: fontsFor("Fira Code").map((one) => one.key),
+      anyCase: fontsFor("FONT fira code").map((one) => one.key),
+      chosen: typed === undefined ? undefined : choose(typed, inChannel),
+      first: titles(sections(fonted, "font Fira Code", [])),
+      named: fontsFor("font Inter").map((one) => one.key),
+      previewed: typed === undefined ? undefined : fontOfKey(typed.key),
+      refused: ['font Fira"Code', String.raw`font Fira\Code`, `font ${"x".repeat(65)}`].map(
+        (query) => fontsFor(query).length
+      ),
+      said: typed?._tag === "Font" ? fontDescription(typed.name) : undefined,
+      themes: titles(sections(fonted, "font Fira Code", [], "Themes")),
+      typed,
+    }).toStrictEqual({
+      alone: [],
+      anyCase: ["font:fira code"],
+      chosen: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      first: ["Fonts"],
+      named: [],
+      previewed: "Fira Code",
+      refused: [0, 0, 0],
+      said: "font: a family on this device",
+      themes: [],
+      typed: { _tag: "Font", current: false, key: "font:Fira Code", name: "Fira Code" },
+    });
+  });
+
+  it("is said to be in effect when it is", () => {
+    const fira = Schema.decodeSync(FontFamily)("Fira Code");
+    const fonted = { ...listing(), font: fira, themes: listedThemes([]) };
+
+    expect(
+      sections(fonted, "font Fira Code", []).find((section) => section.title === "Fonts")?.entries
+    ).toStrictEqual([{ _tag: "Font", current: true, key: "font:Fira Code", name: "Fira Code" }]);
   });
 });
 
