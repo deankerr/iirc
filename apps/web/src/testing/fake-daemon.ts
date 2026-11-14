@@ -557,6 +557,8 @@ export const fakeDaemon = () => {
     knownDown: false,
     /** Says whose request got no answer, journaled only after the next `said`. */
     late,
+    /** Each Network's life, the step that began it: 1 unless it was added again. */
+    lives: new Map<string, number>(),
     /** How many of the next `at/{sequence}` reads get no answer. */
     locateFailures: 0,
     /** Releases each `at/{sequence}` read held, in the order they came. */
@@ -770,8 +772,10 @@ export const fakeDaemon = () => {
     daemon.nextSequence += 1;
     daemon.configurations.set(network, { configuration, sequence });
 
+    // A Network added again after it was removed begins a new life, at this step.
     if (!daemon.timelines.has(network)) {
       daemon.timelines.set(network, []);
+      daemon.lives.set(network, sequence);
     }
 
     return json(200, { sequence });
@@ -796,6 +800,7 @@ export const fakeDaemon = () => {
 
     const sequence = daemon.nextSequence;
     const timelines = held ?? [];
+    const life = daemon.lives.get(network) ?? 1;
 
     daemon.nextSequence += 1;
     daemon.through = sequence;
@@ -803,17 +808,17 @@ export const fakeDaemon = () => {
 
     // Kept again changes nothing.
     if (keep && daemon.kept.has(network)) {
-      return json(200, { life: 1, sequence });
+      return json(200, { life, sequence });
     }
 
     const change = {
       dropped: keep
         ? []
-        : timelines.map((one) => ({ changed: sequence, id: one.timeline.id, life: 1, network })),
+        : timelines.map((one) => ({ changed: sequence, id: one.timeline.id, life, network })),
       gaps: [],
       items: [],
       merged: [],
-      removals: [{ changed: sequence, keep, life: 1, network }],
+      removals: [{ changed: sequence, keep, life, network }],
       sequence,
       timelines: keep
         ? timelines.map((one) => ({ ...one.timeline, changed: sequence, removed: true }))
@@ -833,7 +838,7 @@ export const fakeDaemon = () => {
 
     send({ data: JSON.stringify(change), event: "changed", id: `1.${sequence}` });
 
-    return json(200, { life: 1, sequence });
+    return json(200, { life, sequence });
   };
 
   /**
@@ -984,7 +989,7 @@ export const fakeDaemon = () => {
           channels: [],
           chantypes,
           declared,
-          life: 1,
+          life: daemon.lives.get(known.network ?? "") ?? 1,
           self: daemon.selves.get(known.network ?? "") ?? null,
           session,
           users: [],
@@ -1336,7 +1341,9 @@ export const fakeDaemon = () => {
           json(
             200,
             [...daemon.timelines.keys()].flatMap((network) =>
-              daemon.kept.has(network) ? [] : [{ life: 1, network, status: { _tag: "Running" } }]
+              daemon.kept.has(network)
+                ? []
+                : [{ life: daemon.lives.get(network) ?? 1, network, status: { _tag: "Running" } }]
             )
           )
         );
@@ -1346,7 +1353,7 @@ export const fakeDaemon = () => {
         return signedInOnly(() =>
           json(
             200,
-            [...daemon.kept].map((network) => ({ life: 1, network }))
+            [...daemon.kept].map((network) => ({ life: daemon.lives.get(network) ?? 1, network }))
           )
         );
       }

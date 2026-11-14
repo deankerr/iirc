@@ -214,6 +214,7 @@ const request = (read: Read) =>
 
         return {
           _tag: "StatusRead",
+          life: known.life,
           network: read.network,
           self: known.self,
           session: known.session,

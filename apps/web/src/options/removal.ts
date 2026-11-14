@@ -9,7 +9,7 @@
 import type { NetworkId } from "@iirc/api";
 import { initialRemoval, reduceRemoval, removalOf } from "@iirc/frontend/removal";
 import type { RemovalAnswer, RemovalEvent } from "@iirc/frontend/removal";
-import { lifeNow, reduceTimelines, standingOf } from "@iirc/frontend/timelines";
+import { reduceTimelines, standingOf } from "@iirc/frontend/timelines";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -69,8 +69,7 @@ export const closeRemoval = Atom.fnSync((_: undefined, get) => {
 
 /**
  * Sends the removal the Owner confirmed, once, and takes the Daemon's answer. Removed, the
- * Timelines take it at once, unless a life of the Network began or ended since it was
- * asked, and the options shown are read again.
+ * Timelines take it at once, for the life it ended, and the options shown are read again.
  */
 export const confirmRemoval = runtime
   .fn((_: undefined, get) =>
@@ -92,12 +91,8 @@ export const confirmRemoval = runtime
 
       happened(registry, { _tag: "Sent" });
 
-      // What the Timelines take the answer against: any life of the Network begun or ended
-      // since, as the stream giving the removal itself does, leaves it to the stream.
-      const life = lifeNow(registry.get(timelinesState));
-
       const sent = yield* client.networks.remove({ params: { network }, query: { keep } }).pipe(
-        Effect.map(({ sequence }) => ({ _tag: "Removed", sequence }) as const),
+        Effect.map(({ life }) => ({ _tag: "Removed", life }) as const),
         Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
       );
 
@@ -113,18 +108,17 @@ export const confirmRemoval = runtime
 
       happened(registry, { _tag: "Answered", answer, network });
 
-      // The Timelines take the removal by its step, which they ignore once the stream has
-      // passed it. A removal whose Credentials were not all forgotten names no step, so the
-      // stream alone brings it.
+      // The Timelines take the removal of the life it ended, which changes nothing once
+      // another life is held. A removal whose Credentials were not all forgotten names no
+      // life, so the stream alone brings it.
       if (sent._tag === "Removed") {
         registry.set(
           timelinesState,
           reduceTimelines(registry.get(timelinesState), {
             _tag: "NetworkRemoved",
             keep,
-            life,
+            life: sent.life,
             network,
-            sequence: sent.sequence,
           })
         );
       }

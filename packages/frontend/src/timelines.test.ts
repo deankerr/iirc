@@ -33,7 +33,6 @@ import {
   KeptLayoutSchema,
   layoutKept,
   layoutKeptText,
-  lifeNow,
   longestKept,
   mainOf,
   openOf,
@@ -875,6 +874,7 @@ const simulate = (played: Scenario) => {
       case "Status": {
         return {
           _tag: "StatusRead",
+          life: 1,
           network: read.network,
           self: null,
           session: daemon.known(read.network),
@@ -2197,6 +2197,7 @@ describe("the Timelines' state", () => {
     });
     state = reduceTimelines(state, {
       _tag: "StatusRead",
+      life: 1,
       network: alpha,
       self: null,
       session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 }),
@@ -3799,6 +3800,7 @@ describe("a draft meets its Timeline", () => {
       { _tag: "ReadStarted", read: { _tag: "Status", attempt: 0, network: alpha } },
       {
         _tag: "StatusRead",
+        life: 1,
         network: alpha,
         self: null,
         session: decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 }),
@@ -3969,16 +3971,23 @@ const reading = (state: Timelines) => {
 };
 
 /**
- * A new alpha, configured again under the name: its own Timeline, opened at a step.
+ * A new alpha's own Timeline, in the life begun at a step.
+ * @param sequence - The step.
+ * @returns The Timeline.
+ */
+const newAlpha = (sequence: number) => ({
+  ...timelineOf(idOf(sequence), "Network", "alpha", sequence),
+  life: sequenceOf(sequence),
+});
+
+/**
+ * A new alpha, configured again under the name, in a life of its own: its own Timeline,
+ * opened at a step.
  * @param sequence - The step.
  * @returns The step.
  */
 const alphaAgain = (sequence: number) =>
-  changed(sequence, {
-    timelines: [
-      Schema.encodeSync(Timeline)(timelineOf(idOf(sequence), "Network", "alpha", sequence)),
-    ],
-  });
+  changed(sequence, { timelines: [Schema.encodeSync(Timeline)(newAlpha(sequence))] });
 
 const gamma = networkId("gamma");
 
@@ -4158,12 +4167,7 @@ describe("removing a Network", () => {
 
     const gone = sidebar(state).length;
 
-    state = reduceTimelines(
-      state,
-      changed(8, {
-        timelines: [Schema.encodeSync(Timeline)(timelineOf(idOf(8), "Network", "alpha", 8))],
-      })
-    );
+    state = reduceTimelines(state, alphaAgain(8));
 
     expect({
       again: sidebar(state).map((network) => [
@@ -4179,17 +4183,15 @@ describe("removing a Network", () => {
     const kept = reduceTimelines(following(), {
       _tag: "NetworkRemoved",
       keep: true,
-      life: lifeNow(following()),
+      life: 1,
       network: alpha,
-      sequence: 6,
     });
 
     const dropped = reduceTimelines(following(), {
       _tag: "NetworkRemoved",
       keep: false,
-      life: lifeNow(following()),
+      life: 1,
       network: alpha,
-      sequence: 6,
     });
 
     expect({
@@ -4207,9 +4209,8 @@ describe("removing a Network", () => {
     state = reduceTimelines(state, {
       _tag: "NetworkRemoved",
       keep: false,
-      life: lifeNow(following()),
+      life: 1,
       network: alpha,
-      sequence: 6,
     });
 
     expect({
@@ -4218,9 +4219,9 @@ describe("removing a Network", () => {
     }).toStrictEqual({ open: seven, sidebar: [["alpha", false]] });
   });
 
-  it("reads the Network list again when a Network's life ended while it was read", () => {
-    // Read while alpha was kept, landing after it was dropped and a new alpha made.
-    let replaced = reading(reduceTimelines(following(), keptAt(6)));
+  it("takes an answer of an older life as nothing of the life held", () => {
+    // The list was read while alpha's first life was kept, and lands after a new one began.
+    let replaced = reduceTimelines(following(), keptAt(6));
 
     replaced = reduceTimelines(replaced, dropAt(7));
     replaced = reduceTimelines(replaced, alphaAgain(8));
@@ -4230,10 +4231,9 @@ describe("removing a Network", () => {
       removed: [{ life: sequenceOf(1), network: alpha }],
     });
 
-    // Read while alpha was configured, landing after it was dropped.
-    let restored = reading(following());
+    // The list was read while alpha's first life was live, and lands after it was dropped.
+    let restored = reduceTimelines(following(), dropAt(6));
 
-    restored = reduceTimelines(restored, dropAt(6));
     restored = reduceTimelines(restored, {
       _tag: "NetworksRead",
       entries: decodeEntries([{ life: 1, network: "alpha", status: { _tag: "Running" } }]),
@@ -4241,18 +4241,9 @@ describe("removing a Network", () => {
     });
 
     expect({
-      replaced: [
-        sidebar(replaced).map((network) => [network.network, network.removed]),
-        wanted(replaced).filter((read) => read._tag === "Networks"),
-      ],
-      restored: [
-        sidebar(restored).map((network) => network.network),
-        wanted(restored).filter((read) => read._tag === "Networks"),
-      ],
-    }).toStrictEqual({
-      replaced: [[["alpha", false]], [{ _tag: "Networks", attempt: 1 }]],
-      restored: [[], [{ _tag: "Networks", attempt: 1 }]],
-    });
+      replaced: sidebar(replaced).map((network) => [network.network, network.removed]),
+      restored: sidebar(restored).map((network) => network.network),
+    }).toStrictEqual({ replaced: [["alpha", false]], restored: [] });
   });
 
   it("keeps a Network the stream says was kept when its Session's read finds no Network", () => {
@@ -4266,15 +4257,13 @@ describe("removing a Network", () => {
       reads: wanted(state).map((read) => read._tag),
       sidebar: sidebar(state).map((network) => [network.network, network.removed]),
     }).toStrictEqual({
-      // Its Timelines and the Network list are read again, and never its Session.
-      reads: ["Networks", "List"],
+      // The Network list is read again, and never its Session.
+      reads: ["Networks"],
       sidebar: [["alpha", true]],
     });
   });
 
-  it("applies a removal only to the life of a Network its Timelines were read after", () => {
-    const beta = networkId("beta");
-
+  it("applies a removal only to the life it names, whatever was read when", () => {
     const listing = (network: typeof alpha) =>
       ({ _tag: "List", after: undefined, attempt: 0, network }) as const;
 
@@ -4283,7 +4272,7 @@ describe("removing a Network", () => {
       {
         _tag: "NetworksRead",
         entries: decodeEntries([
-          { life: 1, network: "alpha", status: { _tag: "Running" } },
+          { life: 8, network: "alpha", status: { _tag: "Running" } },
           { life: 1, network: "beta", status: { _tag: "Running" } },
         ]),
         removed: [],
@@ -4297,12 +4286,7 @@ describe("removing a Network", () => {
       },
       { _tag: "ReadStarted", read: listing(alpha) },
       // The alpha configured again at 8, after the old one was dropped at 7.
-      {
-        _tag: "ListRead",
-        after: undefined,
-        network: alpha,
-        page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
-      },
+      { _tag: "ListRead", after: undefined, network: alpha, page: listOf(8, newAlpha(8)) },
     ];
 
     let state = initialTimelines;
@@ -4340,81 +4324,7 @@ describe("removing a Network", () => {
     });
   });
 
-  it("keeps a newer life's snapshot when a late Session read finds no Network before the old life's end arrives", () => {
-    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
-    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
-    const eight = timelineId(idOf(8));
-
-    // An overflow at 6 has alpha's Timelines and Session read again.
-    let state = reduceTimelines(following(), {
-      _tag: "Overflowed",
-      overflow: { sequence: sequenceOf(6), timelines: [three] },
-      place: { sequence: 6, version: 1 },
-    });
-
-    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
-    state = reduceTimelines(state, { _tag: "ReadStarted", read: status });
-    // The Timelines come back through 8: the old alpha removed at 7, a new one made at 8.
-    state = reduceTimelines(state, {
-      _tag: "ListRead",
-      after: undefined,
-      network: alpha,
-      page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
-    });
-    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
-    // The Session, read between the two, found no Network.
-    state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "Status" });
-    state = reduceTimelines(state, dropAt(7));
-    state = reduceTimelines(state, alphaAgain(8));
-
-    expect({
-      open: openOf(state),
-      sidebar: sidebar(state).map((network) => [
-        network.network,
-        network.timelines.map((timeline) => timeline.id),
-      ]),
-    }).toStrictEqual({ open: eight, sidebar: [["alpha", [eight]]] });
-  });
-
-  it("ignores the Daemon's answer to a removal when the Network was read through a newer life", () => {
-    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
-    const eight = timelineId(idOf(8));
-
-    // Following at 6, alpha's Timelines are read through 8: dropped at 7, made again at 8.
-    let state = reduceTimelines(following(), {
-      _tag: "Overflowed",
-      overflow: { sequence: sequenceOf(6), timelines: [three] },
-      place: { sequence: 6, version: 1 },
-    });
-
-    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
-    state = reduceTimelines(state, {
-      _tag: "ListRead",
-      after: undefined,
-      network: alpha,
-      page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
-    });
-    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
-    // The Daemon's answer to the drop at 7 arrives late.
-    state = reduceTimelines(state, {
-      _tag: "NetworkRemoved",
-      keep: false,
-      life: lifeNow(following()),
-      network: alpha,
-      sequence: 7,
-    });
-
-    expect({
-      open: openOf(state),
-      sidebar: sidebar(state).map((network) => [
-        network.network,
-        network.removed,
-        network.timelines.map((timeline) => timeline.id),
-      ]),
-    }).toStrictEqual({ open: eight, sidebar: [["alpha", false, [eight]]] });
-  });
-
-  it("refuses a page of a Network's Timelines read before a step that ended its life", () => {
+  it("refuses a page of a life gone, and reads the life now", () => {
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
 
     let state = reduceTimelines(following(), {
@@ -4424,11 +4334,6 @@ describe("removing a Network", () => {
     });
 
     state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
-    // Another read in flight keeps what the stream gives, to bring answers up to date.
-    state = reduceTimelines(state, {
-      _tag: "ReadStarted",
-      read: { _tag: "Networks", attempt: 0 },
-    });
     state = reduceTimelines(state, dropAt(7));
     state = reduceTimelines(state, alphaAgain(8));
     // The page read through 6, of the life dropped at 7, lands after the new alpha.
@@ -4456,37 +4361,33 @@ describe("removing a Network", () => {
     });
   });
 
-  it("never marks a newer life kept from a Network list read before the old life ended", () => {
+  it("begins a newer life a page reveals before the stream, which an old list never marks kept", () => {
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
-    const eight = timelineId(idOf(8));
-
     const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+    const eight = timelineId(idOf(8));
 
     // alpha's Session is read, then alpha is kept at 6, and the list is read.
     let state = reduceTimelines(following(), { _tag: "ReadStarted", read: status });
 
-    state = reduceTimelines(state, { _tag: "Requesting", read: status });
-    state = reading(reduceTimelines(state, keptAt(6)));
-    const asked = lifeNow(state);
-
-    // The Session found no Network, so alpha's Timelines are read again, through 8: the
-    // alpha made at 8, after the drop at 7, neither of which the stream has given yet.
+    state = reduceTimelines(state, keptAt(6));
+    state = reading(state);
+    // The Session found no Network, and alpha's Timelines, read again, are of the alpha
+    // made at 8, after the drop at 7, neither of which the stream has given yet.
     state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "Status" });
     state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
     state = reduceTimelines(state, {
       _tag: "ListRead",
       after: undefined,
       network: alpha,
-      page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
+      page: listOf(8, newAlpha(8)),
     });
     state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
-    // The Daemon's answer to the drop at 7, then the list, both late.
+    // The Daemon's answer to the drop at 7, then the list read at 6, both late.
     state = reduceTimelines(state, {
       _tag: "NetworkRemoved",
       keep: false,
-      life: asked,
+      life: 1,
       network: alpha,
-      sequence: 7,
     });
     state = reduceTimelines(state, {
       _tag: "NetworksRead",
@@ -4495,17 +4396,73 @@ describe("removing a Network", () => {
     });
 
     expect({
+      life: state.networks.get(alpha)?.life,
       open: openOf(state),
-      reads: wanted(state).filter((read) => read._tag === "Networks"),
+      reads: wanted(state).map((read) => read._tag),
       sidebar: sidebar(state).map((network) => [network.network, network.removed]),
     }).toStrictEqual({
+      life: 8,
       open: eight,
-      reads: [{ _tag: "Networks", attempt: 1 }],
+      // The new life's Session and its open window are read.
+      reads: ["Status", "Latest"],
       sidebar: [["alpha", false]],
     });
   });
 
-  it("never lets a new life go for a read of the old one that found no Network", () => {
+  it("takes a removal's late answer as nothing after a reset begins a newer life", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const eight = timelineId(idOf(8));
+
+    // The projection is rebuilt, and alpha is read again in the life begun at 8.
+    let state = reduceTimelines(following(), {
+      _tag: "Reset",
+      reset: { through: sequenceOf(8), version: 2 },
+    });
+
+    state = reading(state);
+    state = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: decodeEntries([{ life: 8, network: "alpha", status: { _tag: "Running" } }]),
+      removed: [],
+    });
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: decodeList({
+        more: false,
+        projection: { _tag: "Running" },
+        through: 8,
+        timelines: [Schema.encodeSync(Timeline)(newAlpha(8))],
+        version: 2,
+      }),
+    });
+    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+    // A removal sent before the reset is answered only now, for the life it ended.
+    state = reduceTimelines(state, {
+      _tag: "NetworkRemoved",
+      keep: false,
+      life: 1,
+      network: alpha,
+    });
+
+    expect({
+      lists: wanted(state).filter((read) => read._tag === "List" || read._tag === "Networks"),
+      open: openOf(state),
+      sidebar: sidebar(state).map((network) => [
+        network.network,
+        network.removed,
+        network.timelines.map((timeline) => timeline.id),
+      ]),
+    }).toStrictEqual({
+      lists: [],
+      open: eight,
+      sidebar: [["alpha", false, [eight]]],
+    });
+  });
+
+  it("never lets a Network go for a read that found no Network, but reads the list again", () => {
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
     const eight = timelineId(idOf(8));
 
@@ -4519,33 +4476,24 @@ describe("removing a Network", () => {
     state = reduceTimelines(state, dropAt(7));
     state = reduceTimelines(state, alphaAgain(8));
     state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
-
-    // The new alpha's Timelines wait until the old read is answered.
-    const waiting = wanted(state).filter((read) => read._tag === "List");
-
     state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "List" });
 
     expect({
       open: openOf(state),
-      reads: wanted(state).filter((read) => read._tag === "List"),
+      reads: wanted(state).filter((read) => read._tag === "Networks"),
       sidebar: sidebar(state).map((network) => [
         network.network,
         network.timelines.map((timeline) => timeline.id),
       ]),
-      waiting,
     }).toStrictEqual({
       open: eight,
-      reads: [{ _tag: "List", after: undefined, attempt: 1, network: alpha }],
+      reads: [{ _tag: "Networks", attempt: 0 }],
       sidebar: [["alpha", [eight]]],
-      waiting: [],
     });
   });
 
-  it("keeps a new life whatever answer of a read begun in the old one lands after it", () => {
+  it("keeps a new life whatever answer of the old one lands after it", () => {
     const eight = timelineId(idOf(8));
-    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
-    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
-    const networks = { _tag: "Networks", attempt: 0 } as const;
 
     const oldPage = listOf(
       6,
@@ -4555,85 +4503,74 @@ describe("removing a Network", () => {
     );
 
     const registered = decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 });
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
 
-    // Each read kind: what starts it in the old life, and its late answer.
-    const kinds: readonly (readonly [
-      string,
-      readonly Read[],
-      (asked: number) => TimelinesEvent,
-    ])[] = [
+    // Each answer of alpha's first life, and the read it answers, if any.
+    const answers: readonly (readonly [string, Read | undefined, TimelinesEvent])[] = [
       [
         "a Network list naming it kept",
-        [networks],
-        () => ({
+        undefined,
+        {
           _tag: "NetworksRead",
           entries: [],
           removed: [{ life: sequenceOf(1), network: alpha }],
-        }),
+        },
       ],
       [
         "a Network list naming it live",
-        [networks],
-        () => ({
+        undefined,
+        {
           _tag: "NetworksRead",
           entries: decodeEntries([
             { life: 1, network: "alpha", status: { _tag: "Stopped", reason: "old" } },
           ]),
           removed: [],
-        }),
+        },
       ],
       [
         "a page of its Timelines",
-        [list],
-        () => ({ _tag: "ListRead", after: undefined, network: alpha, page: oldPage }),
+        list,
+        { _tag: "ListRead", after: undefined, network: alpha, page: oldPage },
       ],
       [
         "its Timelines finding no Network",
-        [list],
-        () => ({ _tag: "NetworkVanished", network: alpha, of: "List" }),
+        list,
+        { _tag: "NetworkVanished", network: alpha, of: "List" },
       ],
       [
         "its Session",
-        [status],
-        () => ({ _tag: "StatusRead", network: alpha, self: null, session: registered }),
+        status,
+        { _tag: "StatusRead", life: 1, network: alpha, self: null, session: registered },
       ],
       [
         "its Session finding no Network",
-        [status],
-        () => ({ _tag: "NetworkVanished", network: alpha, of: "Status" }),
+        status,
+        { _tag: "NetworkVanished", network: alpha, of: "Status" },
       ],
       [
         "the Daemon's answer to removing it",
-        [],
-        (asked) => ({
-          _tag: "NetworkRemoved",
-          keep: false,
-          life: asked,
-          network: alpha,
-          sequence: 7,
-        }),
+        undefined,
+        { _tag: "NetworkRemoved", keep: false, life: 1, network: alpha },
+      ],
+      [
+        "the changes removing it",
+        undefined,
+        changed(9, { removals: [{ changed: 9, keep: true, life: 1, network: "alpha" }] }),
       ],
     ];
 
-    const survived = kinds.map(([kind, reads, answer]) => {
-      // An overflow at 6 has everything of alpha read again, in the old life.
-      let state = reduceTimelines(following(), {
-        _tag: "Overflowed",
-        overflow: { sequence: sequenceOf(6), timelines: null },
-        place: { sequence: 6, version: 1 },
-      });
+    const survived = answers.map(([kind, read, answer]) => {
+      let state = reading(following());
 
-      for (const read of reads) {
+      if (read !== undefined) {
         state = reduceTimelines(state, { _tag: "ReadStarted", read });
-        state = reduceTimelines(state, { _tag: "Requesting", read });
       }
-
-      const asked = lifeNow(state);
 
       state = reduceTimelines(state, dropAt(7));
       state = reduceTimelines(state, alphaAgain(8));
       state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
-      state = reduceTimelines(state, answer(asked));
+      state = reduceTimelines(state, answer);
 
       const [only] = sidebar(state);
 
@@ -4644,10 +4581,11 @@ describe("removing a Network", () => {
           only?.network === alpha &&
           !only.removed &&
           only.running?._tag !== "Stopped" &&
+          state.networks.get(alpha)?.life === 8 &&
           only.timelines.map((timeline) => timeline.id).join(",") === eight,
       ];
     });
 
-    expect(survived).toStrictEqual(kinds.map(([kind]) => [kind, true]));
+    expect(survived).toStrictEqual(answers.map(([kind]) => [kind, true]));
   });
 });
