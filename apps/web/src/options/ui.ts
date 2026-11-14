@@ -46,6 +46,9 @@ export const enterShown = Atom.make((get) => get(uiInEffect).enter);
 /** Whether the Composer checks spelling on this device, alone, as `timeShown` is. */
 export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
 
+/** When a Timeline is marked read on this device, alone, as `timeShown` is. */
+export const readRule = Atom.make((get) => get(uiInEffect).read);
+
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older
  * read never replaces a newer one.

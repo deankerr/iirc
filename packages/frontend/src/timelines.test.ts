@@ -3172,6 +3172,43 @@ describe("jumping to a result", () => {
     }).toStrictEqual({ again: "Around", ignored: 0, latest: 0, now: 1 });
   });
 
+  it("keeps the last item the view says is in view, scrolled up from the latest or not", () => {
+    const older = message(idOf(3), 30, 3).position;
+    const newest = message(idOf(3), 40, 4).position;
+
+    const back = reduceTimelines(following(), {
+      _tag: "Following",
+      following: false,
+      seen: older,
+      timeline: three,
+    });
+
+    const returned = reduceTimelines(back, {
+      _tag: "Following",
+      following: true,
+      seen: newest,
+      timeline: three,
+    });
+
+    const away = reduceTimelines(returned, {
+      _tag: "Following",
+      following: false,
+      seen: older,
+      timeline: three,
+    });
+
+    expect(
+      [back, returned, away].map((state) => [
+        windowOf(state, three)?.following,
+        windowOf(state, three)?.seen?.sequence,
+      ])
+    ).toStrictEqual([
+      [false, 3],
+      [true, 4],
+      [false, 3],
+    ]);
+  });
+
   it("takes the latest as seen only when the Owner moved there themselves", () => {
     let state = reduceTimelines(following(), {
       _tag: "Jumped",

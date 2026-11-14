@@ -164,8 +164,8 @@ export interface Window extends Load {
    */
   readonly following: boolean;
   /**
-   * The last item the view said is in view while it is at the latest, or none until it says
-   * so. Only the view knows what was shown: opening a Timeline never sets it.
+   * The last item the view said is in view, at the latest or scrolled up from it, or none
+   * until it says so. Only the view knows what was shown: opening a Timeline never sets it.
    */
   readonly seen: Position | undefined;
   /**
@@ -2367,8 +2367,8 @@ const marked = (
     }
 
     case "Following": {
-      // A window read around a result stays where the jump put it, and marks nothing seen,
-      // until the Owner moves it to the latest themselves.
+      // A window read around a result stays where the jump put it, and is not at the latest,
+      // until the Owner moves it there themselves.
       if (window.anchor !== undefined && event.following && event.owned !== true) {
         return state;
       }
@@ -2380,7 +2380,7 @@ const marked = (
           // At the latest, it is read from the latest again.
           anchor: event.following ? undefined : window.anchor,
           following: event.following,
-          seen: event.following ? event.seen : undefined,
+          seen: event.seen,
         }),
       };
     }
@@ -2830,7 +2830,7 @@ const closingSearch = (state: Timelines): Timelines => {
  * which takes the focus. Its window is read again, as a new generation, around the
  * position, never following, so live items wait beyond it and the latest stays a jump
  * away, and the item there is the one to bring into view and mark. Nothing is marked read
- * by it: only the view says what was seen, at the latest.
+ * by it: only the view says what was seen.
  * @param state - The state.
  * @param event - The Timeline and the position.
  * @returns The state.

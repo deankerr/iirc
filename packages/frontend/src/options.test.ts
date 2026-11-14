@@ -1046,6 +1046,7 @@ describe("the options under ui", () => {
       font: "system",
       leading: 1.45,
       light: "light",
+      read: "latest",
       size: 14,
       spellcheck: false,
       suffix: ", ",
@@ -1088,6 +1089,7 @@ describe("the options under ui", () => {
         },
         { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Text" },
+        { _tag: "Choice", choices: ["shown", "latest", "asked"] },
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Toggle" },
         { _tag: "Text" },
@@ -1115,6 +1117,7 @@ describe("the options under ui", () => {
         ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
         ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
+        ["ui.read", { _tag: "Shown", text: "latest" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
         ["ui.spellcheck", { _tag: "Shown", text: "on" }, { _tag: "Unset" }, undefined],
         ["ui.suffix", { _tag: "Shown", text: ": " }, { _tag: "Unset" }, undefined],
@@ -1172,6 +1175,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "light" },
           undefined,
           "light",
+        ],
+        [
+          "ui.read",
+          { _tag: "Shown", text: "latest" },
+          { _tag: "Shown", text: "latest" },
+          undefined,
+          "latest",
         ],
         [
           "ui.size",
@@ -1239,7 +1249,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-15),
+        .slice(-16),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1252,6 +1262,7 @@ describe("the options under ui", () => {
         "ui.font",
         "ui.leading",
         "ui.light",
+        "ui.read",
         "ui.size",
         "ui.spellcheck",
         "ui.suffix",

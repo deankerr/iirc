@@ -137,6 +137,7 @@ export {
   Leading,
   NickSuffix,
   Palette,
+  ReadRule,
   SpellcheckShown,
   Theme,
   ThemeName,

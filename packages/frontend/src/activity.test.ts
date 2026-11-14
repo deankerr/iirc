@@ -405,7 +405,7 @@ describe("marking the open Timeline read", () => {
 
   it("is due when the Owner sees the latest, up to the last item held", () => {
     const state = world([unreadIirc], iirc, items);
-    const due = markDue(state, seeing);
+    const due = markDue(state, seeing, "latest");
 
     expect(due).toStrictEqual({
       _tag: "MarkRead",
@@ -427,11 +427,16 @@ describe("marking the open Timeline read", () => {
           seen: undefined,
           timeline: timelineId(iirc),
         }),
-        seeing
+        seeing,
+        "latest"
       ),
-      hidden: markDue(state, { compact: false, focused: true, visible: false }),
-      options: markDue(reduceTimelines(state, { _tag: "OptionsShown", filter: "" }), seeing),
-      unfocused: markDue(state, { compact: false, focused: false, visible: true }),
+      hidden: markDue(state, { compact: false, focused: true, visible: false }, "latest"),
+      options: markDue(
+        reduceTimelines(state, { _tag: "OptionsShown", filter: "" }),
+        seeing,
+        "latest"
+      ),
+      unfocused: markDue(state, { compact: false, focused: false, visible: true }, "latest"),
     }).toStrictEqual({
       back: undefined,
       hidden: undefined,
@@ -461,11 +466,12 @@ describe("marking the open Timeline read", () => {
     });
 
     expect({
-      ahead: markDue(world([ahead], iirc, items), seeing)?.read,
-      later: markDue(world([later], iirc, items), seeing),
+      ahead: markDue(world([ahead], iirc, items), seeing, "latest")?.read,
+      later: markDue(world([later], iirc, items), seeing, "latest"),
       read: markDue(
         reduceTimelines(world([unreadIirc], iirc, items), changed(11, { timelines: [marked] })),
-        seeing
+        seeing,
+        "latest"
       ),
     }).toStrictEqual({ ahead: 40, later: undefined, read: undefined });
   });
@@ -503,7 +509,7 @@ describe("marking the open Timeline read", () => {
             });
           }
 
-          const due = markDue(state, { compact: false, focused: true, visible });
+          const due = markDue(state, { compact: false, focused: true, visible }, "latest");
           const expected = visible && !back && messages > 0 && (read === null || last > read);
 
           expect(due?.read).toBe(expected ? last : undefined);
@@ -549,8 +555,8 @@ describe("what the view saw", () => {
     });
 
     expect({
-      partly: markDue(partly, seeing)?.read,
-      unconfirmed: markDue(unconfirmed, seeing),
+      partly: markDue(partly, seeing, "latest")?.read,
+      unconfirmed: markDue(unconfirmed, seeing, "latest"),
     }).toStrictEqual({
       partly: 30,
       unconfirmed: undefined,
@@ -569,7 +575,7 @@ describe("what the view saw", () => {
     const shown = opened(again);
 
     expect({
-      due: markDue(again, seeing),
+      due: markDue(again, seeing, "latest"),
       following: shown._tag === "Shown" ? shown.window.following : undefined,
       same: again.windows === back.windows && again.layout === back.layout,
     }).toStrictEqual({ due: undefined, following: false, same: true });
@@ -581,14 +587,137 @@ describe("what the view saw", () => {
     const back = reduceTimelines(away, { _tag: "Opened", timeline: iircId });
 
     expect({
-      back: markDue(back, seeing),
-      before: markDue(state, seeing)?.read,
-      shown: markDue(shownToLatest(back), seeing)?.read,
+      back: markDue(back, seeing, "latest"),
+      before: markDue(state, seeing, "latest")?.read,
+      shown: markDue(shownToLatest(back), seeing, "latest")?.read,
     }).toStrictEqual({
       back: undefined,
       before: 40,
       shown: 40,
     });
+  });
+});
+
+/**
+ * The view saying the open Timeline is scrolled up from its latest, with one item the
+ * last in view.
+ * @param state - The state.
+ * @param index - The item's index among those held.
+ * @returns The state.
+ */
+const scrolledTo = (state: Timelines, index: number): Timelines => {
+  const shown = opened(state);
+
+  return shown._tag === "Shown"
+    ? reduceTimelines(state, {
+        _tag: "Following",
+        following: false,
+        seen: shown.window.items[index]?.position,
+        timeline: shown.timeline,
+      })
+    : state;
+};
+
+describe("when a Timeline is marked read, as ui.read says", () => {
+  const unreadIirc = described({
+    id: iirc,
+    latest: 40,
+    name: "#iirc",
+    read: 10,
+    unread: { messages: 2 },
+  });
+
+  const items = [
+    said({ at: 10, sequence: 1 }),
+    said({ at: 30, sequence: 2 }),
+    said({ at: 40, sequence: 3 }),
+  ];
+
+  const back = scrolledTo(world([unreadIirc], iirc, items), 1);
+
+  it("under latest, marks nothing while the Pane is scrolled up from the latest", () => {
+    expect({
+      back: markDue(back, seeing, "latest"),
+      latest: markDue(world([unreadIirc], iirc, items), seeing, "latest")?.read,
+    }).toStrictEqual({ back: undefined, latest: 40 });
+  });
+
+  it("under shown, marks up to the last item in view while scrolled up, and never past it", () => {
+    expect({
+      back: markDue(back, seeing, "shown"),
+      latest: markDue(world([unreadIirc], iirc, items), seeing, "shown")?.read,
+    }).toStrictEqual({
+      back: { _tag: "MarkRead", network: "libera", read: 30, target: "#iirc", timeline: iirc },
+      latest: 40,
+    });
+  });
+
+  it("under shown, never marks back, nor while the page is hidden or unfocused, or the options show", () => {
+    const read = described({
+      id: iirc,
+      latest: 50,
+      name: "#iirc",
+      read: 40,
+      unread: { messages: 1 },
+    });
+
+    expect({
+      backwards: markDue(scrolledTo(world([read], iirc, items), 1), seeing, "shown"),
+      hidden: markDue(back, { compact: false, focused: true, visible: false }, "shown"),
+      options: markDue(
+        reduceTimelines(back, { _tag: "OptionsShown", filter: "" }),
+        seeing,
+        "shown"
+      ),
+      unfocused: markDue(back, { compact: false, focused: false, visible: true }, "shown"),
+      unsaid: markDue(world([unreadIirc], iirc, items, false), seeing, "shown"),
+    }).toStrictEqual({
+      backwards: undefined,
+      hidden: undefined,
+      options: undefined,
+      unfocused: undefined,
+      unsaid: undefined,
+    });
+  });
+
+  it("under shown, marks up to the last item in view wherever it stands, for any marker and items", () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.integer({ max: 1000, min: 1 }), { maxLength: 6, minLength: 1 }),
+        fc.option(fc.integer({ max: 1000, min: 0 }), { nil: null }),
+        fc.nat({ max: 3 }),
+        fc.nat({ max: 5 }),
+        (ats, read, messages, index) => {
+          const sorted = ats.toSorted((left, right) => left - right);
+          const held = sorted.map((at, one) => said({ at, sequence: one + 1 }));
+          const shown = Math.min(index, sorted.length - 1);
+          const at = sorted[shown] ?? 0;
+
+          const timeline = described({
+            id: iirc,
+            latest: 2000,
+            name: "#iirc",
+            read,
+            unread: { messages },
+          });
+
+          const due = markDue(scrolledTo(world([timeline], iirc, held), shown), seeing, "shown");
+          const expected = messages > 0 && (read === null || at > read);
+
+          expect(due?.read).toBe(expected ? at : undefined);
+        }
+      )
+    );
+  });
+
+  it("under asked, marks nothing, even at the latest in a visible, focused page", () => {
+    const state = world([unreadIirc], iirc, items);
+
+    expect({
+      asked: markDue(state, seeing, "asked"),
+      back: markDue(back, seeing, "asked"),
+      latest: markDue(state, seeing, "latest")?.read,
+    }).toStrictEqual({ asked: undefined, back: undefined, latest: 40 });
   });
 });
 
@@ -900,7 +1029,7 @@ const twoPanes = (): Timelines => {
 describe("several Panes", () => {
   it("marks the focused Pane's Timeline first, and the other Pane's once it is read", () => {
     const state = twoPanes();
-    const first = markDue(state, seeing);
+    const first = markDue(state, seeing, "latest");
 
     // Once the Daemon's marker for `#other` comes back, the other Pane's is due.
     const marked = reduceTimelines(
@@ -910,7 +1039,10 @@ describe("several Panes", () => {
       })
     );
 
-    expect({ first: first?.timeline, next: markDue(marked, seeing)?.timeline }).toStrictEqual({
+    expect({
+      first: first?.timeline,
+      next: markDue(marked, seeing, "latest")?.timeline,
+    }).toStrictEqual({
       first: other,
       next: iirc,
     });
@@ -925,8 +1057,8 @@ describe("several Panes", () => {
     );
 
     expect({
-      compact: markDue(marked, { ...seeing, compact: true }),
-      zoomed: markDue(zoomed(marked), seeing),
+      compact: markDue(marked, { ...seeing, compact: true }, "latest"),
+      zoomed: markDue(zoomed(marked), seeing, "latest"),
     }).toStrictEqual({ compact: undefined, zoomed: undefined });
   });
 

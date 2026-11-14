@@ -7,7 +7,7 @@
  *
  * @packageDocumentation
  */
-import type { Level, ReadRequest, Timeline, Unread } from "@iirc/api";
+import type { Level, ReadRequest, ReadRule, Timeline, Unread } from "@iirc/api";
 import { unreadCap } from "@iirc/timelines";
 
 import type { MarkRead } from "./commands.ts";
@@ -263,17 +263,20 @@ const seenPanes = (state: Timelines, page: Page): readonly string[] => {
 };
 
 /**
- * How far the Owner has seen a Pane's Timeline: the page is visible and focused, the Pane
- * is shown with its Timeline in it, not the options, its window is current with nothing
- * beyond its last item, and the view said it is at the latest, with the last item it shows.
+ * How far the Owner has seen a Pane's Timeline, as the rule says: the Pane is shown with
+ * its Timeline in it, not the options, its window is current, and the view said what is
+ * in view. Under `latest`, the view must also have said it is at the latest, with nothing
+ * beyond its last item; under `shown`, wherever it stands.
  * @param state - The Timelines.
  * @param pane - The Pane.
+ * @param rule - When a Timeline is marked read, `shown` or `latest`.
  * @returns The Timeline's description and the instant of the last item the view showed,
  * when the Owner sees it.
  */
 const seenIn = (
   state: Timelines,
-  pane: string
+  pane: string,
+  rule: Exclude<ReadRule, "asked">
 ): { readonly at: Instant; readonly timeline: Timeline } | undefined => {
   const shown = opened(state, pane);
   const view = panesOf(state.layout.root).find((one) => one.id === pane)?.view;
@@ -283,8 +286,8 @@ const seenIn = (
   }
 
   const { window } = shown;
-
-  const sees = view.main._tag === "Timeline" && window.fresh && window.following && !window.later;
+  const atLatest = window.following && !window.later;
+  const sees = view.main._tag === "Timeline" && window.fresh && (rule === "shown" || atLatest);
 
   return sees && window.seen !== undefined
     ? { at: window.seen.at, timeline: shown.description }
@@ -292,19 +295,26 @@ const seenIn = (
 };
 
 /**
- * Whether a Timeline the Owner sees is due to be marked read, and up to what: when the view
- * said the Owner sees its latest, up to the instant of the last item the view showed, which
- * is never past what was shown and never before its Read Marker. Of several Panes, the
- * focused one's comes first, and the next once that is marked. The runtime waits a moment
- * before it carries this out, and asks again then.
+ * Whether a Timeline the Owner sees is due to be marked read, and up to what, as
+ * `ui.read` says: under `latest`, when the view said the Owner sees its latest; under
+ * `shown`, whenever the view said what is in view, scrolled up or not; under `asked`,
+ * never, so only `/read` marks it. It is up to the instant of the last item the view
+ * showed, which is never past what was shown and never before its Read Marker. Of several
+ * Panes, the focused one's comes first, and the next once that is marked. The runtime
+ * waits a moment before it carries this out, and asks again then.
  * @param state - The Timelines.
  * @param page - The page.
+ * @param rule - When a Timeline is marked read.
  * @returns The intent, or none.
  */
-export const markDue = (state: Timelines, page: Page): MarkRead | undefined => {
+export const markDue = (state: Timelines, page: Page, rule: ReadRule): MarkRead | undefined => {
+  if (rule === "asked") {
+    return undefined;
+  }
+
   for (const pane of seenPanes(state, page)) {
-    const latest = seenIn(state, pane);
-    const mark = latest === undefined ? undefined : markOf(latest.timeline, latest.at);
+    const seen = seenIn(state, pane, rule);
+    const mark = seen === undefined ? undefined : markOf(seen.timeline, seen.at);
 
     if (mark !== undefined) {
       return mark;

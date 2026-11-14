@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import type { TimeShown, Timeline, TimelineItem, WindowGap } from "@iirc/api";
+import { uiDefaults } from "@iirc/api";
+import type { ReadRule, TimeShown, Timeline, TimelineItem, WindowGap } from "@iirc/api";
 import { Effect } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { deviceUi } from "../options/device.ts";
+import { uiRead } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { marking } from "../reading/atoms.ts";
@@ -403,6 +405,32 @@ const press = async (name: string) => {
   });
 };
 
+/**
+ * `#iirc` holding ten Messages, read up to the first, opened while the page is unfocused,
+ * then scrolled up to its top, five rows tall, before the page takes the focus: the start,
+ * the first Message, the "new" divider, and the second and third Messages are in view.
+ * @param shared - `ui.read` for every device.
+ * @param device - `ui.read` on this device, if it overrides it.
+ * @returns What the Daemon was asked to mark read, a moment after.
+ */
+const readScrolledUp = async (shared: ReadRule, device?: ReadRule) => {
+  const items = Array.from({ length: 10 }, (_, index) => message(index + 1));
+  const { daemon, registry } = await signedIn([], items, { read: 1000 });
+
+  uiRead(registry, { options: { ...uiDefaults, read: shared }, sequence: 1 });
+  registry.set(deviceUi, device === undefined ? {} : { read: device });
+  registry.set(pageState, { compact: false, focused: false, visible: true });
+  layout.view = 100;
+  layout.content = 240;
+  await openFromPalette();
+  await settled(() => registry.get(openTimeline)._tag === "Shown");
+  await scrollTo(0, 240);
+  registry.set(pageState, { compact: false, focused: true, visible: true });
+  await pause(250);
+
+  return daemon.reads;
+};
+
 describe("what the view says it shows", () => {
   beforeEach(() => {
     layout.content = 0;
@@ -522,6 +550,37 @@ describe("what the view says it shows", () => {
       gapOnly: 0,
       reads: [{ read: 2000, target: "#iirc" }],
     });
+  });
+
+  it("under ui.read shown, marks read up to the last item on screen while scrolled up", async () => {
+    await expect(readScrolledUp("shown")).resolves.toStrictEqual([{ read: 3000, target: "#iirc" }]);
+  });
+
+  it("under ui.read latest, marks nothing while scrolled up", async () => {
+    await expect(readScrolledUp("latest")).resolves.toStrictEqual([]);
+  });
+
+  it("under ui.read asked, marks nothing at the latest, in a page seen", async () => {
+    const { daemon, registry } = await signedIn();
+
+    uiRead(registry, { options: { ...uiDefaults, read: "asked" }, sequence: 1 });
+    layout.view = 500;
+    layout.content = 500;
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await pause(250);
+
+    expect(daemon.reads).toStrictEqual([]);
+  });
+
+  it("takes this device's ui.read shown over asked, which every device shares", async () => {
+    await expect(readScrolledUp("asked", "shown")).resolves.toStrictEqual([
+      { read: 3000, target: "#iirc" },
+    ]);
+  });
+
+  it("takes this device's ui.read asked over shown, which every device shares", async () => {
+    await expect(readScrolledUp("shown", "asked")).resolves.toStrictEqual([]);
   });
 
   it("reads older pages without scrolling while ui.activity hides every row of the latest, and marks nothing hidden", async () => {
