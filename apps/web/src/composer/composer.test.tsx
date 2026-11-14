@@ -2,6 +2,7 @@
 import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
 import type { Member, Timeline } from "@iirc/api";
+import { draftOf } from "@iirc/frontend/composer";
 import type { DeviceUi } from "@iirc/frontend/ui";
 import { Schema } from "effect";
 import { act } from "react";
@@ -12,8 +13,9 @@ import { App } from "../app/app.tsx";
 import { channelSync } from "../channel/atoms.ts";
 import { deviceUi } from "../options/device.ts";
 import { check } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
+import { eventually, fakeDaemon, holds, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, sync } from "../timelines/atoms.ts";
+import { composerState } from "./atoms.ts";
 import { completer } from "./completion.ts";
 
 // React warns about updates outside `act` unless told this is a test.
@@ -181,6 +183,72 @@ const pressIn = async (container: HTMLElement, key: string, held: KeyboardEventI
 const sendButton = (container: HTMLElement) =>
   container.querySelector<HTMLButtonElement>('button[aria-label="Send"]');
 
+/**
+ * What React DOM's value tracker on the composer holds, the last value it saw, which no walk
+ * reaches.
+ * @param container - The page.
+ * @returns The value it holds, or `undefined` when there is none.
+ */
+const trackedIn = (container: HTMLElement) => {
+  const composer: HTMLTextAreaElement & {
+    // React DOM's internal, not in the DOM's types, and absent from a React without it.
+    readonly _valueTracker?: { readonly getValue: () => string } | null;
+  } = composerOf(container);
+
+  return composer._valueTracker?.getValue() ?? undefined;
+};
+
+/**
+ * Does something to the page, and reads what the composer's textarea and React DOM's tracker
+ * of it hold the instant it is done, before anything else has run.
+ * @param container - The page.
+ * @param act_ - What to do.
+ * @returns What the textarea and its tracker held then.
+ */
+const atOnce = async (container: HTMLElement, act_: () => void) => {
+  const seen = await act(async () => {
+    act_();
+
+    const held = { tracker: trackedIn(container), value: composerOf(container).value };
+
+    await Promise.resolve();
+
+    return held;
+  });
+
+  return seen;
+};
+
+/**
+ * What the composer, its Timeline's draft, and the fake Daemon hold of a secret after a send
+ * that was refused: nothing in the textarea or the tracker React DOM keeps of it, nothing in
+ * the draft or the history of what was sent, and nothing the Daemon was asked.
+ * @param shown - The page, the registry, and the fake, as `signedIn` returns them.
+ * @param secret - The secret.
+ * @returns What each holds.
+ */
+const leftOf = (
+  {
+    container,
+    daemon,
+    registry,
+  }: Pick<Awaited<ReturnType<typeof signedIn>>, "container" | "daemon" | "registry">,
+  secret: string
+) => {
+  const draft = draftOf(registry.get(composerState), Schema.decodeSync(TimelineId)(iirc));
+
+  return {
+    acts: daemon.acts,
+    draft: draft.text,
+    draftHolds: holds(draft, secret),
+    history: draft.history,
+    said: daemon.says,
+    sentToDaemon: holds(daemon, secret),
+    tracker: trackedIn(container),
+    value: composerOf(container).value,
+  };
+};
+
 describe("the Composer's habits", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
@@ -308,6 +376,66 @@ describe("the Composer's habits", () => {
     expect({ plainEnter, said: daemon.says.map((one) => one.text) }).toStrictEqual({
       plainEnter: true,
       said: lines,
+    });
+  });
+
+  it("under ui.enter newline, lets go of a Credential in any line at once on Ctrl+Enter, and sends nothing", async () => {
+    const shown = await signedIn({ enter: "newline" });
+    const secret = "hunter2-held-by-the-vault";
+    const typed = `hello\n/set network.libera.password ${secret}`;
+
+    await typeIn(shown.container, typed);
+    const whileTyped = trackedIn(shown.container);
+
+    let left = true;
+
+    const first = await atOnce(shown.container, () => {
+      left = composerOf(shown.container).dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          code: "Enter",
+          ctrlKey: true,
+          key: "Enter",
+        })
+      );
+    });
+
+    expect({ ...leftOf(shown, secret), first, left, whileTyped }).toStrictEqual({
+      acts: [],
+      draft: "",
+      draftHolds: false,
+      first: { tracker: "", value: "" },
+      history: [],
+      left: false,
+      said: [],
+      sentToDaemon: false,
+      tracker: "",
+      value: "",
+      whileTyped: typed,
+    });
+  });
+
+  it("under ui.enter newline, lets go of a Credential in any line at once on the send button, and sends nothing", async () => {
+    const shown = await signedIn({ enter: "newline" });
+    const secret = "hunter2-held-by-the-vault";
+
+    await typeIn(shown.container, `/set network.libera.password ${secret}\nhello`);
+
+    const first = await atOnce(shown.container, () => {
+      sendButton(shown.container)?.click();
+    });
+
+    expect({ ...leftOf(shown, secret), first }).toStrictEqual({
+      acts: [],
+      draft: "",
+      draftHolds: false,
+      first: { tracker: "", value: "" },
+      history: [],
+      said: [],
+      sentToDaemon: false,
+      tracker: "",
+      value: "",
     });
   });
 
