@@ -23,7 +23,7 @@ for (const face of fontFaces.matchAll(/@font-face \{(?<body>[^}]*)\}/gu)) {
 }
 
 describe("the fonts", () => {
-  it("draw each font named ahead of the device's own, and the device's alone for system", () => {
+  it("draw each font named ahead of the device's own of its kind, and the device's alone for system and system-sans", () => {
     expect(fontNames.map(fontStack)).toStrictEqual([
       "var(--font-device)",
       '"JetBrains Mono Variable", var(--font-device)',
@@ -31,6 +31,11 @@ describe("the fonts", () => {
       '"Source Code Pro Variable", var(--font-device)',
       '"Commit Mono", var(--font-device)',
       '"Atkinson Hyperlegible Mono Variable", var(--font-device)',
+      "var(--font-device-sans)",
+      '"IBM Plex Sans Variable", var(--font-device-sans)',
+      '"Atkinson Hyperlegible Next Variable", var(--font-device-sans)',
+      '"Source Sans 3 Variable", var(--font-device-sans)',
+      '"Inter Variable", var(--font-device-sans)',
     ]);
   });
 
@@ -53,10 +58,14 @@ describe("the fonts", () => {
       display: true,
       faces: {
         "Atkinson Hyperlegible Mono Variable": ["200 800 italic", "200 800 normal"],
+        "Atkinson Hyperlegible Next Variable": ["200 800 italic", "200 800 normal"],
         "Commit Mono": ["400 italic", "400 normal", "700 italic", "700 normal"],
         "IBM Plex Mono": ["400 italic", "400 normal", "700 italic", "700 normal"],
+        "IBM Plex Sans Variable": ["100 700 italic", "100 700 normal"],
+        "Inter Variable": ["100 900 italic", "100 900 normal"],
         "JetBrains Mono Variable": ["100 800 italic", "100 800 normal"],
         "Source Code Pro Variable": ["200 900 italic", "200 900 normal"],
+        "Source Sans 3 Variable": ["200 900 italic", "200 900 normal"],
       },
       sources: true,
     });

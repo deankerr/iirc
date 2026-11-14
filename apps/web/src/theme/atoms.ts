@@ -182,7 +182,7 @@ const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
   return [
     ["--font-size", `${ui.size}px`],
     ["--line-height", String(ui.leading)],
-    ["--font-mono", fontStack(font)],
+    ["--font-text", fontStack(font)],
   ];
 });
 

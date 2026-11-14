@@ -10,10 +10,13 @@
 :root {
   color-scheme: light dark;
 
-  /* The device's own monospace font, which draws whatever glyph a font chosen lacks. */
+  /* The device's own monospace font, which draws whatever glyph a monospace font chosen lacks. */
   --font-device:
     ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  --font-mono: var(--font-device);
+  /* The device's own sans font, which draws whatever glyph a sans font chosen lacks. */
+  --font-device-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-text: var(--font-device);
   --font-size: 14px;
   /* A field's text: as the page's on a desktop, and never under 16px on a touch screen,
      where iOS Safari zooms the page into a field whose text is smaller. */
@@ -142,7 +145,7 @@ body {
 body {
   background: var(--color-background);
   color: var(--color-text);
-  font-family: var(--font-mono);
+  font-family: var(--font-text);
   font-size: var(--font-size);
   line-height: var(--line-height);
   -webkit-font-smoothing: antialiased;

@@ -280,8 +280,36 @@ export const themeDescription = (theme: { readonly builtIn: boolean }) =>
  * @param font - The font.
  * @returns The words.
  */
-export const fontDescription = (font: FontShown) =>
-  font === "system" ? "font: the device's own monospace font" : "font";
+export const fontDescription = (font: FontShown) => {
+  switch (font) {
+    case "system": {
+      return "font: the device's own monospace font";
+    }
+
+    case "system-sans": {
+      return "font: the device's own sans font";
+    }
+
+    case "ibm-plex-sans":
+    case "atkinson-hyperlegible-next":
+    case "source-sans-3":
+    case "inter": {
+      return "font: sans";
+    }
+
+    case "jetbrains-mono":
+    case "ibm-plex-mono":
+    case "source-code-pro":
+    case "commit-mono":
+    case "atkinson-hyperlegible-mono": {
+      return "font: monospace";
+    }
+
+    default: {
+      return font satisfies never;
+    }
+  }
+};
 
 /**
  * What an entry is matched by: its names, best first, and its description.

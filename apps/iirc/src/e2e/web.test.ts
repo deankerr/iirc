@@ -1936,7 +1936,7 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
-    "fetches no font with the device's own, sets the text's size and a bundled font at once, and serves its files from the page's origin, under the policy",
+    "fetches no font with the device's own, either kind, sets the text's size and a bundled font at once, fetches only the ones chosen, and serves their files from the page's origin, under the policy",
     { timeout: 60_000 },
     async () => {
       const { base, channel, child, key, ngircd, peer } = await privateNetwork(
@@ -2015,6 +2015,24 @@ describe("the web frontend on iirc daemon --web", () => {
         // Both answers are in, in whichever order they came.
         await expect.poll(() => fonts.length).toBe(2);
 
+        // The device's own sans font is drawn in its stack's first family, and fetches nothing.
+        await type("/set ui.font system-sans");
+        await expect.poll(drawn).toStrictEqual(["18px", "system-ui"]);
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
+
+        const afterSystemSans = fonts.length;
+
+        // A bundled sans font fetches its own Latin regular and italic, and no other.
+        await type("/set ui.font inter");
+        await expect.poll(drawn).toStrictEqual(["18px", '"Inter Variable"']);
+        await expect.poll(() => fonts.length).toBe(4);
+
+        // Back to the first, which is already fetched, for the rest.
+        await type("/set ui.font jetbrains-mono");
+        await expect.poll(drawn).toStrictEqual(["18px", '"JetBrains Mono Variable"']);
+
         const violations = await page.evaluate(
           () => document.documentElement.dataset.cspViolations ?? ""
         );
@@ -2046,6 +2064,7 @@ describe("the web frontend on iirc daemon --web", () => {
           });
 
         expect({
+          afterSystemSans,
           byDefault,
           fetched: fonts
             .map((font) => ({
@@ -2059,8 +2078,21 @@ describe("the web frontend on iirc daemon --web", () => {
           problems: problems.filter((problem) => !problem.includes("401")),
           violations,
         }).toStrictEqual({
+          afterSystemSans: 2,
           byDefault: { drawn: ["14px", "ui-monospace"], fetched: 0 },
           fetched: [
+            {
+              cache: "public, max-age=31536000, immutable",
+              own: true,
+              path: "/assets/inter-latin-wght-italic.woff2",
+              type: "font/woff2",
+            },
+            {
+              cache: "public, max-age=31536000, immutable",
+              own: true,
+              path: "/assets/inter-latin-wght-normal.woff2",
+              type: "font/woff2",
+            },
             {
               cache: "public, max-age=31536000, immutable",
               own: true,

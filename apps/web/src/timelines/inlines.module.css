@@ -19,7 +19,7 @@
 }
 
 .monospace {
-  font-family: var(--font-mono);
+  font-family: var(--font-text);
   background: var(--color-surface);
 }
 

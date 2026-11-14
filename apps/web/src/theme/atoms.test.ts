@@ -306,7 +306,7 @@ describe("themes", () => {
 
     const read = () => [
       root.style.getPropertyValue("--font-size"),
-      root.style.getPropertyValue("--font-mono"),
+      root.style.getPropertyValue("--font-text"),
     ];
 
     const before = read();
