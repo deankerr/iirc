@@ -416,6 +416,36 @@ describe("an answer that never left, after the Network changed since its request
 
     expect.assertions(0);
   });
+
+  it("is reported in the Network's Timeline alone once later answers pushed it out of memory", () => {
+    // Robert asked as bob, then 64 later answers to peer push his out, then alice takes
+    // `bob`. Placed by the nick that asked, the report would land with alice.
+    const later = Array.from({ length: 64 }, (_, index) =>
+      lines(
+        "+10s",
+        `<<\\ :peer!u@h PRIVMSG iirc :\\x01PING ${index}\\x01`,
+        `>>\\ NOTICE peer :\\x01PING ${index}\\x01`
+      )
+    );
+
+    played([
+      registered(base),
+      joined(base, "#iirc", ["bob", "alice", "peer"]),
+      lines(
+        "<<\\ :bob!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE bob :\\x01VERSION iirc\\x01",
+        "<< :bob!u@h NICK robert"
+      ),
+      ...later,
+      lines(
+        "<< :alice!u@h NICK bob",
+        "== unsent 65",
+        "?? activity CtcpUnsent bob iirc VERSION in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
 });
 
 describe("a CTCP reply", () => {

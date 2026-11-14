@@ -14,8 +14,8 @@ import type { Input } from "./input.ts";
  * were, which is placed from the rest as the `Unsent` arrives.
  */
 export const Answers = Schema.Struct({
-  answer: Schema.optionalKey(Schema.Int),
-  channels: Schema.optionalKey(Schema.Array(Schema.String)),
+  answer: Schema.Int,
+  channels: Schema.Array(Schema.String),
   command: Schema.String,
   nick: Schema.String,
   target: Schema.String,

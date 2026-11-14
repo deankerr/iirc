@@ -45,16 +45,17 @@ describe("inputs", () => {
     }
 
     const send = { _tag: "Send", connection: ConnectionId.make(1), line } as const;
-    const unplaced = { command: "VERSION", nick: "peer", target: "#iirc" };
-    const answers = { ...unplaced, answer: 0, channels: ["#iirc"] };
 
-    expect([
-      read(unsent([{ ...send, answers }])),
-      read(unsent([{ ...send, answers: unplaced }])),
-      read(unsent([send])),
-    ]).toStrictEqual([
+    const answers = {
+      answer: 0,
+      channels: ["#iirc"],
+      command: "VERSION",
+      nick: "peer",
+      target: "#iirc",
+    };
+
+    expect([read(unsent([{ ...send, answers }])), read(unsent([send]))]).toStrictEqual([
       unsent([{ ...send, answers }]),
-      unsent([{ ...send, answers: unplaced }]),
       unsent([send]),
     ]);
   });

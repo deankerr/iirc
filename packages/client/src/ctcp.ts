@@ -241,7 +241,7 @@ const answer = (run: Run, arrival: Arrival, ctcp: Ctcp, fromUser: boolean): Ctcp
  * @param fromUser - Whether a User sent it.
  * @returns The Timelines.
  */
-const ctcpWhere = (run: Run, ctcp: Answers, fromUser: boolean): readonly Where[] => {
+const ctcpWhere = (run: Run, ctcp: Ctcp, fromUser: boolean): readonly Where[] => {
   const channels = channelsIn(run, ctcp.target);
 
   if (channels.length > 0) {
@@ -304,9 +304,8 @@ export const heardCtcp = (run: Run, arrival: Arrival): void => {
  * it arrived, keyed by the casemapping now, as their Timelines are. A request placed by
  * who asked is placed by that partner's nick now, which follows a live rename as their
  * Timeline does, or in the Network's own Timeline alone once another User took it, so the
- * report never lands with someone else. An answer forgotten past the bound is placed by
- * the nick that asked, and one recorded before its placement was is placed as its request
- * would be now. Its request came from a User, or it would not have been answered.
+ * report never lands with someone else. An answer forgotten past the bound is placed the
+ * same way, since its nick may be someone else's by now.
  * @param run - The step.
  * @param answers - The request the answer was for.
  * @returns The Timelines.
@@ -314,21 +313,13 @@ export const heardCtcp = (run: Run, arrival: Arrival): void => {
 const unsentWhere = (run: Run, answers: Answers): readonly Where[] => {
   const { answer: number, channels } = answers;
 
-  if (channels === undefined) {
-    return ctcpWhere(run, answers, true);
-  }
-
   if (channels.length > 0) {
     return channels.map((name) => ({ _tag: "Channel", ...named(run, name) }));
   }
 
-  const partner = number === undefined ? undefined : run.state.answering.get(number);
+  const partner = run.state.answering.get(number);
 
-  if (partner === null) {
-    return [network];
-  }
-
-  return byPartner(run, partner ?? answers.nick);
+  return partner === undefined || partner === null ? [network] : byPartner(run, partner);
 };
 
 /**
@@ -342,7 +333,7 @@ export const answerUnsent = (run: Run, answers: Answers): void => {
   const where = unsentWhere(run, answers);
   const { answer: number, command, nick, target } = answers;
 
-  if (number !== undefined && run.state.answering.has(number)) {
+  if (run.state.answering.has(number)) {
     const answering = new Map(run.state.answering);
 
     answering.delete(number);
