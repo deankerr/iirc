@@ -7,7 +7,7 @@ import { client } from "@iirc/client";
 import type { Client, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
-import { Effect, Fiber, Latch, Redacted, Result, Stream } from "effect";
+import { Effect, Exit, Fiber, Latch, Redacted, Result, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -444,6 +444,45 @@ describe("a removal carried through", () => {
       configured: "shared",
       vault: new Set(["a", "b", "pass", "shared"]),
     });
+  });
+
+  it("lets the Runtime close while a removal waits on a Configuration whose append stalls", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* world.vault.hold(name("shared"), Redacted.make("secret"));
+
+        // `oftc`'s appends wait for good, so only stopping its driver ends its `configure`.
+        const gate = yield* Latch.make(true);
+
+        const journal = wrapJournal(world.journal, {
+          before: (record) => (networkOf(record) === oftc ? gate.await : Effect.void),
+        });
+
+        const { close, runtime } = yield* startRuntime({ ...world, journal }, client);
+
+        yield* runtime.configure(libera, configured({ enabled: false, password: name("shared") }));
+        yield* runtime.configure(oftc, configured({ enabled: false }));
+        yield* gate.close;
+
+        const changing = yield* Effect.forkChild(
+          runtime.configure(oftc, configured({ enabled: false, password: name("shared") }))
+        );
+
+        yield* settle;
+        yield* Fiber.interrupt(changing);
+        const removing = yield* Effect.forkChild(runtime.remove(libera, { keep: false }));
+
+        yield* settle;
+        yield* close;
+
+        return {
+          networks: [...(yield* runtime.networks).values()].map((each) => each._tag),
+          removed: Exit.isSuccess(yield* Effect.exit(Fiber.join(removing))),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ networks: ["Stopped"], removed: true });
   });
 
   it("removes a Network its Client's bug stopped, now and after a restart", async () => {

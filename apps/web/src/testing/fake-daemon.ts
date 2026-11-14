@@ -813,6 +813,7 @@ export const fakeDaemon = () => {
       gaps: [],
       items: [],
       merged: [],
+      removals: [{ changed: sequence, keep, network }],
       sequence,
       timelines: keep
         ? timelines.map((one) => ({ ...one.timeline, changed: sequence, removed: true }))

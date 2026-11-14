@@ -110,7 +110,15 @@ const changed = (
   items: readonly (typeof TimelineItem.Encoded)[],
   timelines: readonly (typeof Timeline.Encoded)[]
 ): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ dropped: [], gaps: [], items, merged: [], sequence, timelines }),
+  data: JSON.stringify({
+    dropped: [],
+    gaps: [],
+    items,
+    merged: [],
+    removals: [],
+    sequence,
+    timelines,
+  }),
   event: "changed",
   id: `1.${sequence}`,
 });

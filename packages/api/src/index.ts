@@ -86,6 +86,7 @@ export {
   RemovedNetwork,
   Keep,
   DroppedTimeline,
+  NetworkRemoval,
   Acted,
   ActionRequest,
   ActRequest,

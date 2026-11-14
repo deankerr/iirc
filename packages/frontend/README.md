@@ -37,7 +37,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **An overflow reads again what it touched, and a reset reads everything again.** A merged Timeline resolves to the one it went to.
 - **A Network's connection and Self's away are derived, never polled.** They come from `known`, and then from the Session items and `AwayChanged` the changes carry.
 - **A removed Network is derived too.** One removed with its Timelines kept is read with the Network list from `GET /api/removed-networks`, or known by its Timelines flagged `removed`, and `isRemoved` reads both. Its Timelines are read and searched as any other, but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
-- **A dropped Timeline is let go of at once.** The changes name it, and its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream, and nothing once the stream has passed its step.
+- **A dropped Timeline is let go of at once.** The changes name it, or name its Network as removed without keeping its Timelines, which reaches a Network that never had one too. Its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. A Network the changes name as removed with its Timelines kept is only read from then on. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream, and nothing once the stream has passed its step.
 
 ### Windows
 

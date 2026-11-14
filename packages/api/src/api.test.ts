@@ -595,7 +595,15 @@ describe("the contract", () => {
   });
 
   it("carries where a folded step leaves a follower as its event id, and a reset or heartbeat with none", () => {
-    const data = { dropped: [], gaps: [], items: [], merged: [], sequence: 9, timelines: [] };
+    const data = {
+      dropped: [],
+      gaps: [],
+      items: [],
+      merged: [],
+      removals: [],
+      sequence: 9,
+      timelines: [],
+    };
 
     const wire = [
       { data: JSON.stringify(data), event: "changed", id: "1.9" },

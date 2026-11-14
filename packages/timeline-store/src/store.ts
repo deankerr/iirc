@@ -108,6 +108,16 @@ export interface Dropped {
   readonly changed: number;
 }
 
+/**
+ * A Network's last removal, kept by the Network's id whether or not it had Timelines, so a
+ * reader learns of it from the changes alone: `keep` whether its Timelines stay readable.
+ */
+export interface NetworkRemoval {
+  readonly network: string;
+  readonly keep: boolean;
+  readonly changed: number;
+}
+
 /** A Gap, from where it began to where it ended, or `undefined` while it goes on. */
 export interface Gap {
   readonly network: string;
@@ -158,6 +168,7 @@ export interface Overflowed {
  *   one's.
  * - `items` by their Timeline's id, then by position.
  * - `gaps` by Network id, compared by code point, then by where they began.
+ * - `removals` by Network id, compared by code point.
  *
  * Each order is total, so every adapter gives the same lists. Each sequence is given whole,
  * or, when it alone is more than the page holds, as `overflowed` with every list empty.
@@ -168,6 +179,7 @@ export interface Changed {
   readonly items: readonly Item[];
   readonly merged: readonly Tombstone[];
   readonly dropped: readonly Dropped[];
+  readonly removals: readonly NetworkRemoval[];
   readonly gaps: readonly Gap[];
   /** The one step this page gives, when it changed more than the page holds. */
   readonly overflowed: Overflowed | undefined;
@@ -317,7 +329,8 @@ export interface TimelineStoreService {
     }
   ) => Effect.Effect<readonly CollapsedGap[], TimelineStoreFailed>;
   /**
-   * The Timelines, items, tombstones, dropped Timelines, and Gaps changed after a sequence,
+   * The Timelines, items, tombstones, dropped Timelines, removals, and Gaps changed after a
+   * sequence,
    * as they stand now,
    * each list ordered by `changed` and then as {@link Changed} says. With a limit, whole
    * sequences are given while they come to at most `limit` things together, and a first

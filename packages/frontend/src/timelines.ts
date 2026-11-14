@@ -1413,13 +1413,28 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
   const search =
     change.merged.length > 0 ? reduceSearch(state.search, { _tag: "Restarted" }) : state.search;
 
+  // A Network removed, whether or not it had Timelines: kept, it is only read from now on,
+  // and not kept, it goes with everything held of it.
+  for (const removal of change.removals) {
+    const held = networks.get(removal.network);
+
+    if (removal.keep && held !== undefined) {
+      networks = setIn(networks, removal.network, { ...held, kept: true });
+    }
+  }
+
   const changed = { ...state, merged, networks, search, windows };
 
-  return change.dropped.length === 0
+  const gone = new Set([
+    ...change.dropped.map((one) => one.network),
+    ...change.removals.flatMap((one) => (one.keep ? [] : [one.network])),
+  ]);
+
+  return gone.size === 0
     ? changed
     : dropped(
         changed,
-        new Set(change.dropped.map((one) => one.network)),
+        gone,
         change.dropped.map((one) => one.id)
       );
 };
@@ -1476,7 +1491,9 @@ const invalidates = (state: Timelines, overflow: TimelineOverflow, subject: Subj
  * @returns Whether it did.
  */
 const endsALife = (change: TimelineChange): boolean =>
-  change.dropped.length > 0 || change.timelines.some((timeline) => timeline.removed);
+  change.removals.length > 0 ||
+  change.dropped.length > 0 ||
+  change.timelines.some((timeline) => timeline.removed);
 
 /**
  * The one rule every answer is taken by: it is current only if nothing that invalidates

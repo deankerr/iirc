@@ -421,7 +421,7 @@ export const makeRuntime = <S>(
     const lookTimeout = millisOf(options.lookTimeout, defaultLookTimeout);
     const held = yield* Ref.make<ReadonlyMap<NetworkId, Network<S>>>(new Map());
     // Admission and shutdown take the same permit, so a Network is either added before
-    // shutdown begins, and stopped by it, or refused.
+    // shutdown is done, and stopped by it, or refused.
     const adding = yield* Semaphore.make(1);
     const closed = yield* Ref.make(false);
     // Every driver lives here. Shutdown closes it under the permit, whatever order the
@@ -437,23 +437,35 @@ export const makeRuntime = <S>(
     // in a fiber of its own. Making this fiber interruptible instead would end the waiting
     // at once whenever the fiber closing the Runtime had itself been interrupted, which is
     // how a signal stops a process: no `Stopping` would be stepped, and no `QUIT` said.
-    const stopAll = Effect.gen(function* () {
-      yield* Ref.set(closed, true);
-
-      const stopping = yield* Effect.forkDetach(
-        Effect.forEach(
-          (yield* Ref.get(held)).values(),
-          (network) =>
-            Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
-          { concurrency: "unbounded", discard: true }
-        )
+    const stopEach = (networks: Iterable<Network<S>>) =>
+      Effect.flatMap(
+        Effect.forkDetach(
+          Effect.forEach(
+            networks,
+            (network) =>
+              Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
+            { concurrency: "unbounded", discard: true }
+          )
+        ),
+        Fiber.await
       );
 
-      yield* Fiber.await(stopping);
-      yield* Scope.close(drivers, Exit.void);
+    // Shutdown refuses what comes after it, and stops the Networks held before it waits on
+    // what was admitted already, such as a removal waiting on a `Configured` whose driver
+    // only stopping ends. Under the permit, it then stops any Network an admission in
+    // flight added, and closes every driver.
+    const stopAll = Effect.gen(function* () {
+      yield* Ref.set(closed, true);
+      yield* stopEach((yield* Ref.get(held)).values());
+      yield* adding.withPermit(
+        Effect.gen(function* () {
+          yield* stopEach((yield* Ref.get(held)).values());
+          yield* Scope.close(drivers, Exit.void);
+        })
+      );
     });
 
-    yield* Effect.addFinalizer(() => adding.withPermit(stopAll));
+    yield* Effect.addFinalizer(() => stopAll);
 
     // Every removed Network whose Timelines are kept, which holds its id.
     const kept = yield* Ref.make<ReadonlySet<NetworkId>>(new Set());

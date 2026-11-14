@@ -97,7 +97,15 @@ const network = Schema.decodeSync(TimelineId)(idOf(1));
  * @returns The event.
  */
 const foldedThrough = (sequence: number): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ dropped: [], gaps: [], items: [], merged: [], sequence, timelines: [] }),
+  data: JSON.stringify({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    removals: [],
+    sequence,
+    timelines: [],
+  }),
   event: "changed",
   id: `1.${sequence}`,
 });
@@ -122,6 +130,7 @@ const placing = async () => {
       gaps: [],
       items: [],
       merged: [],
+      removals: [],
       sequence: 2,
       timelines: [
         describeTimeline(idOf(3), "[bob]", "Direct", 2),
@@ -384,6 +393,7 @@ describe("saying", () => {
         gaps: [],
         items: [],
         merged: [],
+        removals: [],
         sequence: 10,
         timelines: [describeTimeline(idOf(4), "{bob}", "Direct", 10)],
       }),
@@ -448,6 +458,7 @@ describe("saying", () => {
             },
           ],
           merged: [],
+          removals: [],
           sequence,
           timelines: [describeTimeline(idOf(sequence), name, "Direct", sequence)],
         }),
@@ -511,6 +522,7 @@ describe("saying", () => {
           gaps: [],
           items: [],
           merged: [],
+          removals: [],
           sequence,
           timelines: [describeTimeline(idOf(sequence), nick, "Direct", sequence)],
         }),
@@ -554,6 +566,7 @@ describe("saying", () => {
         gaps: [],
         items: [],
         merged: [],
+        removals: [],
         sequence: 6,
         timelines: [describeTimeline(idOf(6), "dave", "Direct", 6)],
       }),
@@ -849,6 +862,7 @@ describe("acting", () => {
             },
           ],
           merged: [],
+          removals: [],
           sequence,
           timelines: [],
         }),

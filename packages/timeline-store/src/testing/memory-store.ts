@@ -24,6 +24,7 @@ import type {
   CollapsedGap,
   Dropped,
   Gap,
+  NetworkRemoval,
   Item,
   Search,
   Summary,
@@ -62,6 +63,8 @@ interface Memory {
   readonly items: Map<TimelineId, Map<string, Stored>>;
   readonly merged: Map<TimelineId, Tombstone>;
   readonly dropped: Map<TimelineId, Dropped>;
+  /** Each Network's last removal, by its id. */
+  readonly removals: Map<string, NetworkRemoval>;
   /** Each Network's Gaps, by the cursor of where they began. */
   readonly gaps: Map<string, Map<string, Gap>>;
 }
@@ -72,6 +75,7 @@ const empty = (version: number | undefined): Memory => ({
   gaps: new Map(),
   items: new Map(),
   merged: new Map(),
+  removals: new Map(),
   through: undefined,
   timelines: new Map(),
   version,
@@ -226,6 +230,12 @@ const merge = (memory: Memory, change: Extract<Change, { readonly _tag: "Merged"
 // Kept, its Timelines are marked removed. Not kept, they go with their items, tombstones,
 // and Gaps, and each id is kept dropped.
 const remove = (memory: Memory, change: Extract<Change, { readonly _tag: "Removed" }>) => {
+  memory.removals.set(change.network, {
+    changed: change.sequence,
+    keep: change.keep,
+    network: change.network,
+  });
+
   const of = <T>(all: Map<TimelineId, T>, network: (each: T) => string) =>
     [...all].flatMap(([id, each]) => (network(each) === change.network ? [id] : []));
 
@@ -463,6 +473,7 @@ const changedAfter = (
   const items = allItems(memory).filter(({ changed }) => changed > since);
   const merged = [...memory.merged.values()].filter(({ changed }) => changed > since);
   const dropped = [...memory.dropped.values()].filter(({ changed }) => changed > since);
+  const removals = [...memory.removals.values()].filter(({ changed }) => changed > since);
 
   const gaps = [...memory.gaps.values()].flatMap((each) =>
     [...each.values()].filter(({ changed }) => changed > since)
@@ -470,12 +481,14 @@ const changedAfter = (
 
   const sequences = [
     ...new Set(
-      [...timelines, ...items, ...merged, ...dropped, ...gaps].map(({ changed }) => changed)
+      [...timelines, ...items, ...merged, ...dropped, ...removals, ...gaps].map(
+        ({ changed }) => changed
+      )
     ),
   ].toSorted((left, right) => left - right);
 
   const countOf = (sequence: number) =>
-    [...timelines, ...items, ...merged, ...dropped, ...gaps].filter(
+    [...timelines, ...items, ...merged, ...dropped, ...removals, ...gaps].filter(
       ({ changed }) => changed === sequence
     ).length;
 
@@ -545,8 +558,16 @@ const changedAfter = (
         ? undefined
         : {
             sequence: overflowed,
-            timelines: limit !== undefined && touched.length > limit ? undefined : touched,
+            // A removal names a Network, not a Timeline, so it says to read everything again.
+            timelines:
+              (limit !== undefined && touched.length > limit) ||
+              removals.some(({ changed }) => changed === overflowed)
+                ? undefined
+                : touched,
           },
+    removals: within(removals).toSorted(
+      (left, right) => left.changed - right.changed || networkOrder(left.network, right.network)
+    ),
     through: upTo,
     timelines: within(timelines).toSorted(
       (left, right) => left.changed - right.changed || textOrder(left.id, right.id)

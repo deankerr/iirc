@@ -13,7 +13,7 @@ Both open the file, creating it when it does not exist, and close it when their 
 
 ## The file
 
-One row of how far it has folded, five tables, each with the indexes its reads need, and a full-text index of what Messages say, in a file of its own.
+One row of how far it has folded, six tables, each with the indexes its reads need, and a full-text index of what Messages say, in a file of its own.
 
 ```sql
 CREATE TABLE folded (only INTEGER PRIMARY KEY CHECK (only = 1), version INTEGER, through INTEGER,
@@ -32,9 +32,10 @@ CREATE TABLE tombstones (id TEXT PRIMARY KEY, network TEXT NOT NULL, into_id TEX
 CREATE TABLE gaps (network TEXT NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT,
   changed INTEGER NOT NULL, PRIMARY KEY (network, from_cursor)) STRICT;
 CREATE TABLE dropped (id TEXT PRIMARY KEY, network TEXT NOT NULL, changed INTEGER NOT NULL) STRICT;
+CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed INTEGER NOT NULL) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 5;  -- the layout's version
+PRAGMA user_version = 6;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.
@@ -55,7 +56,7 @@ PRAGMA user_version = 5;  -- the layout's version
 | `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and the primary key of `items` for each one's latest position. Each row holds its Read Marker and unread counts |
 | counting a level again, after a Read Marker moves or a merge | `items_by_level` on `(timeline, level, cursor)` where there is a level, above `cursorsAfter` of the Read Marker, `LIMIT unreadCap + 1`, from the index alone |
 | `gaps`, and each run of `collapsedGaps` | the primary key `(network, from_cursor)`, bounded below. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended, so one seek finds the last Gap that began strictly before the range's start, which is kept if it reaches the start, and every Gap that began at or after the start is in. Every other condition is on the key, except for a page read before a cursor, which keeps only the Gaps that ended before it: that run is bounded above on the key too, by the cursor, since a Gap that ended before it began before it, and only then filtered on `to_cursor` for which Gaps are the page's, so it never reads the Gaps after the cursor. A run is one statement that counts its Gaps from the index alone, and takes the first's start and the last's end from either end of the key's range |
-| `changedAfter` | `timelines_by_changed`, `items_by_changed`, `tombstones_by_changed`, `dropped_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |
+| `changedAfter` | `timelines_by_changed`, `items_by_changed`, `tombstones_by_changed`, `dropped_by_changed`, `removals_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |
 | where a page of `changedAfter` ends | the same indexes: the next sequence by one seek each, and how much it changed by a count that stops at what the page has left, so a page costs at most `limit + 1` of each however big a step is |
 | an overflowed step's Timelines | `timelines_by_changed`, `tombstones_by_changed`, and `dropped_by_changed`, up to the limit, and `items_by_changed` one seek from each Timeline to the next, never reading its items |
 | a tombstone moved on by a later merge | `tombstones_by_into` |

@@ -1166,6 +1166,20 @@ export const DroppedTimeline = Schema.Struct({
 /** The decoded form of {@link DroppedTimeline}. */
 export type DroppedTimeline = typeof DroppedTimeline.Type;
 
+/**
+ * A Network's removal, whether or not it had Timelines: `keep` whether its Timelines stay
+ * readable. A Frontend takes it out of what it shows as live, and drops what it held of it
+ * when they do not stay.
+ */
+export const NetworkRemoval = Schema.Struct({
+  changed: Sequence,
+  keep: Schema.Boolean,
+  network: NetworkId,
+});
+
+/** The decoded form of {@link NetworkRemoval}. */
+export type NetworkRemoval = typeof NetworkRemoval.Type;
+
 /** Whether the Daemon is folding News into Timelines, or why it stopped until it restarts. */
 export const Projection = Schema.TaggedUnion({
   Running: {},
@@ -1250,13 +1264,14 @@ export type SearchResults = typeof SearchResults.Type;
 
 /**
  * What one step changed in the Timelines, as each thing stands now: the Timelines, items,
- * tombstones, dropped Timelines, and Gaps whose last change it was.
+ * tombstones, dropped Timelines, Networks removed, and Gaps whose last change it was.
  */
 export const TimelineChange = Schema.Struct({
   dropped: Schema.Array(DroppedTimeline),
   gaps: Schema.Array(Gap),
   items: Schema.Array(TimelineItem),
   merged: Schema.Array(Tombstone),
+  removals: Schema.Array(NetworkRemoval),
   sequence: Sequence,
   timelines: Schema.Array(Timeline),
 });

@@ -393,6 +393,7 @@ const fold = (
       gaps: [],
       items,
       merged: [],
+      removals: [],
       sequence,
       timelines: [timeline],
     }),

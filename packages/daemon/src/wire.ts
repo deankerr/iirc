@@ -19,6 +19,7 @@ import type {
   TimelineItem as WireTimelineItem,
   Tombstone as WireTombstone,
   DroppedTimeline as WireDroppedTimeline,
+  NetworkRemoval as WireNetworkRemoval,
   WindowGap as WireWindowGap,
   ChannelHeader as WireChannelHeader,
   ChannelKnowledge as WireChannelKnowledge,
@@ -79,6 +80,7 @@ import type {
   Dropped,
   Gap,
   Item,
+  NetworkRemoval,
   Summary,
   Tombstone,
   Unread,
@@ -1369,6 +1371,17 @@ export const tombstone = (source: Tombstone): Fields<Tombstone, WireTombstone> =
 export const dropped = (source: Dropped): Fields<Dropped, WireDroppedTimeline> => ({
   changed: WireSequence.make(source.changed),
   id: source.id,
+  network: networkOf(source.network),
+});
+
+/**
+ * A Network's removal.
+ * @param source - What the store keeps of it.
+ * @returns Its wire form.
+ */
+export const removal = (source: NetworkRemoval): Fields<NetworkRemoval, WireNetworkRemoval> => ({
+  changed: WireSequence.make(source.changed),
+  keep: source.keep,
   network: networkOf(source.network),
 });
 

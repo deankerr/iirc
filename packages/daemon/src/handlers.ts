@@ -84,6 +84,7 @@ import {
   networkInspection,
   networkStatus,
   projection,
+  removal,
   throughOf,
   timeline,
   timelineItem,
@@ -627,6 +628,7 @@ const eventsOf = (changed: Changed, version: number): readonly TimelineChangesEv
         ...changed.items,
         ...changed.merged,
         ...changed.dropped,
+        ...changed.removals,
         ...changed.gaps,
       ].map((each) => each.changed)
     ),
@@ -638,6 +640,7 @@ const eventsOf = (changed: Changed, version: number): readonly TimelineChangesEv
       gaps: changed.gaps.filter(at(sequence)).map(gap),
       items: changed.items.filter(at(sequence)).map(timelineItem),
       merged: changed.merged.filter(at(sequence)).map(tombstone),
+      removals: changed.removals.filter(at(sequence)).map(removal),
       sequence: WireSequence.make(sequence),
       timelines: changed.timelines.filter(at(sequence)).map(timeline),
     },

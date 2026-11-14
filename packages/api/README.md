@@ -110,7 +110,7 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 
 ### The changes stream
 
-- **It resumes exactly, by an opaque place,** `<version>.<sequence>`: what a read gave, or an event's id. Each `changed` event is what one folded step changed, as it stands now, and `dropped` the Timelines a removal took with it, which a Frontend lets go. Something changed again comes again, so a Frontend keeps each thing by its id or position and takes the latest.
+- **It resumes exactly, by an opaque place,** `<version>.<sequence>`: what a read gave, or an event's id. Each `changed` event is what one folded step changed, as it stands now, `removals` each Network removed, with `keep`, whether or not it had Timelines, and `dropped` the Timelines a removal took with it, which a Frontend lets go. Something changed again comes again, so a Frontend keeps each thing by its id or position and takes the latest.
 - **An event is bounded,** at 500 things. A step that changed more comes as `overflowed`, naming the Timelines to read again, or none, which says to read every one.
 - **A place that cannot be resumed is reset.** A place stays good across a restart. One of another projection version, or ahead of what the store has folded, gets one `reset` event, which says to drop what is held, read again, and follow from its place.
 - **It waits on the Daemon's folding, never polls, and never ends.**

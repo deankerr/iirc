@@ -108,6 +108,7 @@ const merged = (sequence: number): typeof TimelineChangesEvent.Encoded => ({
     gaps: [],
     items: [],
     merged: [{ changed: sequence, id: other, into: channel, network: "libera" }],
+    removals: [],
     sequence,
     timelines: [],
   }),

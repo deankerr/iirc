@@ -37,6 +37,7 @@ import type {
   Dropped,
   Gap,
   Item,
+  NetworkRemoval,
   Search,
   Summary,
   TimelineStoreFailed,
@@ -220,6 +221,7 @@ const snapshot = (store: TimelineStoreService) =>
       gapsRead: yield* store.gaps(libera, {}),
       items: changed.items,
       merged: changed.merged,
+      removals: changed.removals,
       searched,
       timelines,
       windows,
@@ -246,6 +248,7 @@ interface Model {
   readonly gaps: readonly Gap[];
   readonly items: readonly Item[];
   readonly merged: readonly Tombstone[];
+  readonly removals: readonly NetworkRemoval[];
   readonly timelines: readonly Summary[];
 }
 
@@ -256,6 +259,7 @@ const modelOf = (shown: Snapshot): Model => ({
   gaps: shown.gaps,
   items: shown.items,
   merged: shown.merged,
+  removals: shown.removals,
   timelines: shown.timelines,
 });
 
@@ -319,6 +323,9 @@ const project = (model: Model): Snapshot => {
     ),
     merged: model.merged.toSorted(
       (left, right) => left.changed - right.changed || compareText(left.id, right.id)
+    ),
+    removals: model.removals.toSorted(
+      (left, right) => left.changed - right.changed || compareText(left.network, right.network)
     ),
     searched: searchTexts(model.items).map(
       (text) =>
@@ -669,6 +676,7 @@ const removal = (sequence: number, keep: boolean, on = libera): Change => ({
 const keeping: Interruption = {
   edit: (before, sequence) => ({
     ...before,
+    removals: [{ changed: sequence, keep: true, network: libera }],
     timelines: before.timelines.map((each) => ({ ...each, changed: sequence, removed: true })),
   }),
   seed: (sequence) => [
@@ -704,6 +712,7 @@ const dropping: Interruption = {
     gaps: before.gaps.filter(({ network: on }) => on !== libera),
     items: before.items.filter(({ network: on }) => on !== libera),
     merged: before.merged.filter(({ network: on }) => on !== libera),
+    removals: [{ changed: sequence, keep: false, network: libera }],
     timelines: before.timelines.filter(({ network: on }) => on !== libera),
   }),
   seed: (sequence) => {
@@ -1314,6 +1323,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           merged: [],
           more: false,
           overflowed: undefined,
+          removals: [],
           through: undefined,
           timelines: [],
         });
@@ -1419,6 +1429,7 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
           merged: [],
           more: false,
           overflowed: undefined,
+          removals: [],
           through: undefined,
           timelines: [],
         });
@@ -2931,6 +2942,41 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         );
       }),
     name: "counts what lies after each Read Marker as counting one by one does, after any steps",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        // `oftc` never had a Timeline: it was configured disabled, and nothing happened.
+        yield* apply(store, 2, [...opened(2)]);
+        yield* apply(store, 3, [removal(3, true, oftc)]);
+        yield* same(
+          "a removal alone, of a Network with no Timeline",
+          (yield* store.changedAfter(2, 1)).removals,
+          [{ changed: 3, keep: true, network: oftc }]
+        );
+        yield* apply(store, 4, [removal(4, true), removal(4, false, oftc)]);
+
+        const kept = yield* store.changedAfter(2);
+
+        yield* same(
+          "each Network's last removal, as it stands, by sequence and then Network",
+          kept.removals,
+          [
+            { changed: 4, keep: true, network: libera },
+            { changed: 4, keep: false, network: oftc },
+          ]
+        );
+        yield* same("given whole with its step", (yield* store.changedAfter(3)).removals, [
+          { changed: 4, keep: true, network: libera },
+          { changed: 4, keep: false, network: oftc },
+        ]);
+        yield* same(
+          "a step with a removal too big for the page, read everything again",
+          (yield* store.changedAfter(3, 1)).overflowed,
+          { sequence: 4, timelines: undefined }
+        );
+      }),
+    name: "gives a Network's removal among the changes, whether or not it had Timelines",
   },
   {
     check: (store) =>

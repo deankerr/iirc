@@ -269,6 +269,11 @@ export const DroppedRow = Schema.toCodecJson(
   Schema.Struct({ changed: Int, id: TimelineId, network: Schema.String })
 );
 
+/** A Network's last removal. */
+export const RemovalRow = Schema.toCodecJson(
+  Schema.Struct({ changed: Int, keep: Schema.BooleanFromBit, network: Schema.String })
+);
+
 /** A tombstone. */
 export const TombstoneRow = Schema.toCodecJson(
   Schema.Struct({ changed: Int, id: TimelineId, into: TimelineId, network: Schema.String })

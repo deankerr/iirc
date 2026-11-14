@@ -171,6 +171,7 @@ const everything = (store: TimelineStoreService) =>
       gaps: changed.gaps,
       items: changed.items,
       merged: changed.merged,
+      removals: changed.removals,
       timelines: changed.timelines,
     };
   });

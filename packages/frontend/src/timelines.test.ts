@@ -606,6 +606,7 @@ const changeAt = (world: World, sequence: number) => {
     gaps: gaps.map(wireGap),
     items: items.map((item) => Schema.encodeSync(TimelineItem)(wireItem(item))),
     merged: [],
+    removals: [],
     sequence,
     timelines: timelines.map((one) => Schema.encodeSync(Timeline)(wireTimeline(one))),
   });
@@ -1398,6 +1399,7 @@ const changed = (sequence: number, change: Partial<typeof TimelineChange.Encoded
       gaps: [],
       items: [],
       merged: [],
+      removals: [],
       sequence,
       timelines: [],
       ...change,
@@ -3969,6 +3971,43 @@ const alphaAgain = (sequence: number) =>
     ],
   });
 
+const gamma = networkId("gamma");
+
+/**
+ * A state following the stream, with gamma configured beside alpha, disabled and with no
+ * Channels, so it has no Timeline at all.
+ * @returns The state.
+ */
+const withQuiet = () => {
+  let state = reading(following());
+
+  state = reduceTimelines(state, {
+    _tag: "NetworksRead",
+    entries: decodeEntries([
+      { network: "alpha", status: { _tag: "Running" } },
+      { network: "gamma", status: { _tag: "Running" } },
+    ]),
+    removed: [],
+  });
+  state = reduceTimelines(state, {
+    _tag: "ReadStarted",
+    read: { _tag: "List", after: undefined, attempt: 0, network: gamma },
+  });
+
+  return reduceTimelines(state, {
+    _tag: "ListRead",
+    after: undefined,
+    network: gamma,
+    page: listOf(5),
+  });
+};
+
+const removalOf = (sequence: number, keep: boolean) =>
+  changed(sequence, { removals: [{ changed: sequence, keep, network: "gamma" }] });
+
+const shownRemoved = (state: Timelines) =>
+  sidebar(state).map((network) => [network.network, network.removed]);
+
 describe("removing a Network", () => {
   const beta = networkId("beta");
 
@@ -4012,6 +4051,28 @@ describe("removing a Network", () => {
       sidebar: [
         ["beta", false],
         ["alpha", true],
+      ],
+    });
+  });
+
+  it("learns from the stream alone of a Network removed that had no Timeline, kept or not", () => {
+    const quiet = withQuiet();
+    const kept = reduceTimelines(quiet, removalOf(6, true));
+    const dropped = reduceTimelines(quiet, removalOf(6, false));
+
+    expect({
+      before: shownRemoved(quiet),
+      dropped: shownRemoved(dropped),
+      kept: shownRemoved(kept),
+    }).toStrictEqual({
+      before: [
+        ["alpha", false],
+        ["gamma", false],
+      ],
+      dropped: [["alpha", false]],
+      kept: [
+        ["alpha", false],
+        ["gamma", true],
       ],
     });
   });

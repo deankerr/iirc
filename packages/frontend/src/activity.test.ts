@@ -252,6 +252,7 @@ const changed = (
     gaps: [],
     items: [],
     merged: [],
+    removals: [],
     sequence,
     timelines: [],
     ...change,
