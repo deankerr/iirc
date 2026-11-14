@@ -11,7 +11,7 @@
 import type { UiInForce, UiOptionName } from "@iirc/api";
 import type { Json } from "@iirc/frontend/options";
 import { reduceOptions } from "@iirc/frontend/options";
-import { deviceUiKey, deviceUiText, effectiveUi, overridden } from "@iirc/frontend/ui";
+import { deviceUiKey, deviceUiText, effectiveUi, overridden, readRuleOf } from "@iirc/frontend/ui";
 import { Effect, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -46,8 +46,11 @@ export const enterShown = Atom.make((get) => get(uiInEffect).enter);
 /** Whether the Composer checks spelling on this device, alone, as `timeShown` is. */
 export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
 
-/** When a Timeline is marked read on this device, alone, as `timeShown` is. */
-export const readRule = Atom.make((get) => get(uiInEffect).read);
+/**
+ * When a Timeline is marked read on this device, as `timeShown` is, but none until it is
+ * known: this device's override, or the shared options once read.
+ */
+export const readRule = Atom.make((get) => readRuleOf(get(optionsState).ui, get(deviceUi)));
 
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older

@@ -25,9 +25,13 @@ export const documentTitle = Atom.make((get) => titleOf(get(sidebarNetworks)));
 
 /**
  * Whether the open Timeline is due to be marked read, and up to what, as the core says by
- * `ui.read` on this device.
+ * `ui.read` on this device, and never while that is not yet known.
  */
-const dueMark = Atom.make((get) => markDue(get(timelinesState), get(pageState), get(readRule)));
+const dueMark = Atom.make((get) => {
+  const rule = get(readRule);
+
+  return rule === undefined ? undefined : markDue(get(timelinesState), get(pageState), rule);
+});
 
 /**
  * Why the Daemon did not mark a Timeline read, in words, from its error's tag.

@@ -7,6 +7,7 @@ import {
   deviceUiOf,
   deviceUiText,
   effectiveUi,
+  readRuleOf,
   noOverrides,
   overridden,
   showsItem,
@@ -160,6 +161,22 @@ describe("a device's overrides", () => {
       device: { ...shared.options, size: 20, theme: "light" },
       leading: 1.8,
       shared: shared.options,
+    });
+  });
+
+  it("know when a Timeline is marked read only once this device or the shared options say", () => {
+    const asked = { ...shared, options: { ...shared.options, read: "asked" as const } };
+
+    expect({
+      before: readRuleOf(undefined, noOverrides),
+      device: readRuleOf(asked, { read: "shown" }),
+      deviceBefore: readRuleOf(undefined, { read: "shown" }),
+      shared: readRuleOf(asked, noOverrides),
+    }).toStrictEqual({
+      before: undefined,
+      device: "shown",
+      deviceBefore: "shown",
+      shared: "asked",
     });
   });
 });

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { deviceUi } from "../options/device.ts";
+import { uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { marking } from "../reading/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
@@ -195,6 +196,7 @@ const signedIn = async (unread = 0, at?: (sequence: number) => number) => {
   await run(registry, check, undefined);
   registry.mount(sync);
   registry.mount(marking);
+  registry.mount(uiSync);
 
   const container = document.createElement("div");
 

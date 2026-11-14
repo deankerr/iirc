@@ -1,4 +1,4 @@
-import { TimelineId } from "@iirc/api";
+import { TimelineId, uiDefaults } from "@iirc/api";
 import type { Timeline, TimelineChangesEvent, TimelineItem } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import type { Place } from "@iirc/frontend/composer";
@@ -7,6 +7,8 @@ import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { composerState, edit, send } from "../composer/atoms.ts";
+import { optionsState } from "../options/atoms.ts";
+import { uiRead, uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run, until } from "../testing/fake-daemon.ts";
@@ -118,11 +120,13 @@ const away = { compact: false, focused: false, visible: false };
 /**
  * A Daemon with libera's own Timeline, `#iirc` holding two unread Messages, `#other`, and a
  * Direct Message with `peer`, folded through step 2, and a browser signed in to it, its page
- * as given, following the Timelines and marking read.
+ * as given, following the Timelines and, unless told not to, the shared `ui` options, and
+ * marking read.
  * @param page - Whether the Owner can see the page.
+ * @param shared - Whether the shared `ui` options are followed, as a page signed in does.
  * @returns The fake, the registry, and the test's Notifier.
  */
-const reading = async (page = seeing) => {
+const reading = async (page = seeing, shared = true) => {
   const fake = fakeDaemon();
   const notifier = testNotifier();
 
@@ -146,6 +150,11 @@ const reading = async (page = seeing) => {
   registry.mount(sync);
   registry.mount(marking);
   await eventually(() => fake.daemon.followers.length === 1);
+
+  if (shared) {
+    registry.mount(uiSync);
+    await until(registry, optionsState, (options) => options.ui !== undefined);
+  }
 
   /**
    * Types a line into a composer and presses Enter.
@@ -275,6 +284,35 @@ describe("marking read", () => {
     expect({ reads: daemon.reads, unconfirmed }).toStrictEqual({
       reads: [{ read: 2000, target: "#iirc" }],
       unconfirmed: 0,
+    });
+  });
+
+  it("marks nothing until the shared ui.read is known, and nothing once it says asked", async () => {
+    const { daemon, opening, registry } = await reading(seeing, false);
+
+    await opening(iirc);
+    await wait(150);
+    const unknown = daemon.reads.length;
+
+    uiRead(registry, { options: { ...uiDefaults, read: "asked" }, sequence: 1 });
+    await wait(150);
+
+    expect({ reads: daemon.reads, unknown }).toStrictEqual({ reads: [], unknown: 0 });
+  });
+
+  it("marks once the shared ui.read is known to be latest, having marked nothing before", async () => {
+    const { daemon, opening, registry } = await reading(seeing, false);
+
+    await opening(iirc);
+    await wait(150);
+    const unknown = daemon.reads.length;
+
+    uiRead(registry, { options: uiDefaults, sequence: 0 });
+    await eventually(() => daemon.reads.length === 1);
+
+    expect({ reads: daemon.reads, unknown }).toStrictEqual({
+      reads: [{ read: 2000, target: "#iirc" }],
+      unknown: 0,
     });
   });
 
