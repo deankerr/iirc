@@ -2,7 +2,7 @@
  * The theme, as atoms: the one in effect on this device, drawn by the core from its
  * palette, or one previewed, while the palette highlights a theme or the import dialog
  * reads one, in a Worker through the `ThemeReader` port, one text at a time and for at most
- * a second; the text's size and font, or a font the palette highlights; drawing them as CSS
+ * a second; the text's size, line height, and font, or a font the palette highlights; drawing them as CSS
  * custom properties on the document's root; choosing a theme, and importing and removing
  * themes for every device, each made from the options read.
  *
@@ -170,8 +170,9 @@ const fontKeys: ReadonlyMap<string, FontShown> = new Map(
 );
 
 /**
- * The text's size and font in effect on this device, as the root's custom properties: the
- * font the open palette highlights, while it highlights one, else the one in effect.
+ * The text's size, line height, and font in effect on this device, as the root's custom
+ * properties: the font the open palette highlights, while it highlights one, else the one
+ * in effect.
  */
 const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
   const ui = get(uiInEffect);
@@ -180,6 +181,7 @@ const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
 
   return [
     ["--font-size", `${ui.size}px`],
+    ["--line-height", String(ui.leading)],
     ["--font-mono", fontStack(font)],
   ];
 });
@@ -438,7 +440,7 @@ export const saveImport = runtime
  * derived as a custom property on the root's style, which a Content Security Policy that
  * refuses inline styles allows, since it is set through the CSSOM, the root's
  * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect. The
- * text's size and font are custom properties there too. Whether the device prefers dark is
+ * text's size, line height, and font are custom properties there too. Whether the device prefers dark is
  * followed, for `system`.
  * @param registry - The registry.
  * @returns How to stop.

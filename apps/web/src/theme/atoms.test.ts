@@ -113,6 +113,8 @@ const settle = async () => {
   await Effect.runPromise(Effect.sleep("20 millis"));
 };
 
+const lineHeight = () => document.documentElement.style.getPropertyValue("--line-height");
+
 describe("themes", () => {
   it("imports one through the dialog, previewing it, for every device, and another page uses it", async () => {
     const fake = signedIn();
@@ -363,6 +365,48 @@ describe("themes", () => {
       previewed: ["18px", '"IBM Plex Mono", var(--font-device)'],
       refused: 'ui.size: Give a whole number from 10 to 24, not "30".',
       sized: ["18px", "var(--font-device)"],
+    });
+  });
+
+  it("draws the line height on the root at once, lets this device's own win, and falls back as each is unset", async () => {
+    const fake = signedIn();
+    const { notice, registry, type } = await page(fake);
+    const stop = watchTheme(registry);
+    const before = lineHeight();
+
+    await type("/set ui.leading 1.8");
+    await until(registry, uiInEffect, (ui) => ui.leading === 1.8);
+    const shared = lineHeight();
+
+    await type("/set -device ui.leading 1.2");
+    await until(registry, uiInEffect, (ui) => ui.leading === 1.2);
+    const device = lineHeight();
+
+    await type("/set ui.leading 1.9");
+    await eventually(() => fake.daemon.ui.options.leading === 1.9);
+    const stillDevice = lineHeight();
+
+    await type("/set ui.leading 3");
+    const refused = notice();
+
+    await type("/unset -device ui.leading");
+    await until(registry, uiInEffect, (ui) => ui.leading === 1.9);
+    const unsetDevice = lineHeight();
+
+    await type("/unset ui.leading");
+    await until(registry, uiInEffect, (ui) => ui.leading === 1.45);
+    const unset = lineHeight();
+
+    stop();
+
+    expect({ before, device, refused, shared, stillDevice, unset, unsetDevice }).toStrictEqual({
+      before: "1.45",
+      device: "1.2",
+      refused: 'ui.leading: Give a number from 1 to 2, with at most two decimal places, not "3".',
+      shared: "1.8",
+      stillDevice: "1.2",
+      unset: "1.45",
+      unsetDevice: "1.9",
     });
   });
 

@@ -726,6 +726,16 @@ describe("the API over a real server", () => {
           ...json('{"value":"loud"}'),
         });
 
+        const tooTall = yield* served.request("/api/ui/leading", {
+          method: "PUT",
+          ...json('{"value":2.5}'),
+        });
+
+        const tooShort = yield* served.request("/api/ui/leading", {
+          method: "PUT",
+          ...json('{"value":0.9}'),
+        });
+
         // An import may not take a built-in theme's name, so it never hides that theme.
         const palette = JSON.stringify({
           ansi: Array.from({ length: 16 }, () => "#808080"),
@@ -751,6 +761,8 @@ describe("the API over a real server", () => {
           resumed: resumed.filter((event) => event.event === "changed"),
           set: [set.status, yield* textOf(set)],
           stale: [stale.status, yield* textOf(stale)],
+          tooShort: [tooShort.status, yield* textOf(tooShort)],
+          tooTall: [tooTall.status, yield* textOf(tooTall)],
           unknown: [
             unknown.status,
             (yield* textOf(unknown)).includes('"path":["params","option"]'),
@@ -766,7 +778,7 @@ describe("the API over a real server", () => {
       ],
       first: [
         {
-          data: '{"options":{"activity":"all","colours":"theme","font":"system","size":14,"theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
+          data: '{"options":{"activity":"all","colours":"theme","font":"system","leading":1.45,"size":14,"theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
           event: "changed",
           id: "0",
         },
@@ -777,13 +789,21 @@ describe("the API over a real server", () => {
       ],
       resumed: [
         {
-          data: '{"options":{"activity":"all","colours":"theme","font":"system","size":14,"theme":"system","themes":[],"time":"HH:mm:ss"},"sequence":1}',
+          data: '{"options":{"activity":"all","colours":"theme","font":"system","leading":1.45,"size":14,"theme":"system","themes":[],"time":"HH:mm:ss"},"sequence":1}',
           event: "changed",
           id: "1",
         },
       ],
       set: [200, '{"sequence":1}'],
       stale: [409, '{"_tag":"UiChanged","sequence":1}'],
+      tooShort: [
+        400,
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+      ],
+      tooTall: [
+        400,
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+      ],
       unknown: [400, true],
     });
   });

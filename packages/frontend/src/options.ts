@@ -45,6 +45,8 @@ type Record = Schema.JsonObject;
  * - `Text`: the text as typed, and `""` for none.
  * - `Choice`: one of `choices`, in any ASCII case.
  * - `Integer`: a whole number from `minimum` to `maximum`, in decimal digits.
+ * - `Decimal`: a number from `minimum` to `maximum` that need not be whole, in decimal
+ *   digits with at most two places after the point.
  * - `Credential`: the name of a Credential, set by giving its value, which the Vault holds.
  * - `Texts`: a list, comma-separated, as WeeChat's are, never empty when `nonEmpty`.
  * - `Ircds`: Ircds, comma-separated, each `host/port`, TLS unless followed by the word
@@ -59,6 +61,7 @@ export type Kind =
   | { readonly _tag: "Text" }
   | { readonly _tag: "Choice"; readonly choices: readonly string[] }
   | { readonly _tag: "Integer"; readonly minimum: number; readonly maximum: number }
+  | { readonly _tag: "Decimal"; readonly minimum: number; readonly maximum: number }
   | { readonly _tag: "Credential" }
   | { readonly _tag: "Texts"; readonly nonEmpty: boolean }
   | { readonly _tag: "Ircds" }
@@ -251,17 +254,19 @@ const numberChecks = (
 };
 
 /**
- * The kind of a number, from its checks: whole and bounded, or none, since no option is
- * yet any other number.
+ * The kind of a number, from its checks: bounded, and whole or not, or none, since no
+ * option is yet any other number.
  * @param ast - The number.
  * @returns Its kind, or none.
  */
 const numberKindOf = (ast: SchemaAST.AST): Kind | undefined => {
   const { maximum, minimum, whole } = numberChecks(ast.checks ?? [], nothingChecked);
 
-  return whole && minimum !== undefined && maximum !== undefined
-    ? { _tag: "Integer", maximum, minimum }
-    : undefined;
+  if (minimum === undefined || maximum === undefined) {
+    return undefined;
+  }
+
+  return { _tag: whole ? "Integer" : "Decimal", maximum, minimum };
 };
 
 const tagOf = (ast: SchemaAST.Objects): string | undefined => {
@@ -658,6 +663,28 @@ const integerOf = (
 };
 
 /**
+ * A number within a `Decimal`'s bounds, in decimal digits with at most two places after
+ * the point.
+ * @param bounds - The least and the most it may be.
+ * @param text - The text.
+ * @returns The number, or why not.
+ */
+const decimalOf = (
+  bounds: { readonly minimum: number; readonly maximum: number },
+  text: string
+): Parsed<number> => {
+  const { maximum, minimum } = bounds;
+  const trimmed = text.trim();
+  const value = /^\d{1,16}(?:\.\d{1,2})?$/u.test(trimmed) ? Number(trimmed) : undefined;
+
+  return value === undefined || value < minimum || value > maximum
+    ? invalid(
+        `Give a number from ${minimum} to ${maximum}, with at most two decimal places, not "${text}".`
+      )
+    : parsed(value);
+};
+
+/**
  * A value of a kind, from its text syntax. A `Names` list gives its names, and a `Tagged`
  * one its tag.
  * @param kind - The kind.
@@ -682,6 +709,10 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
 
     case "Integer": {
       return integerOf(kind, text);
+    }
+
+    case "Decimal": {
+      return decimalOf(kind, text);
     }
 
     case "Credential": {
@@ -739,7 +770,8 @@ export const showText = (kind: Kind, value: Json): string => {
       return textOf(value) ?? "";
     }
 
-    case "Integer": {
+    case "Integer":
+    case "Decimal": {
       // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
       return typeof value === "number" ? String(value) : "";
     }

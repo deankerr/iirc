@@ -37,6 +37,7 @@ import {
 import type { Key } from "react-aria-components";
 
 import { commandContext, perform } from "../composer/atoms.ts";
+import { leadingShown, sizeShown } from "../options/ui.ts";
 import { compact } from "../page/drawer.ts";
 import { Nick } from "../timelines/line.tsx";
 import { IconButton } from "../ui/button.tsx";
@@ -44,9 +45,6 @@ import { channelOpen, moreMembers, roster } from "./atoms.ts";
 import { membersDismissed, membersOpen, paneNarrow, toggleMembers } from "./state.ts";
 
 import styles from "./members-panel.module.css";
-
-/** How tall a member's row is, in pixels, for the virtualizer to estimate them by. */
-const rowHeight = 19;
 
 /**
  * One member: their rank's symbol, and their nick in its colour.
@@ -169,6 +167,11 @@ const Members = ({
   const askMore = useAtomSet(moreMembers);
   const drawn = useRef(new Map<string, HTMLElement>());
   const anchor = useRef<HTMLElement | null>(null);
+  const size = useAtomValue(sizeShown);
+  const leading = useAtomValue(leadingShown);
+
+  // A member's row is a line of text, as `--line-height` sets it, until it is measured.
+  const rowHeight = Math.ceil(size * leading);
 
   // A key is read back as the member it names, never cast.
   const nickOf = (key: Key) => rows.find((row) => row.nick === String(key))?.nick;

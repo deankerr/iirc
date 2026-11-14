@@ -541,4 +541,36 @@ describe("the palette and the keys", () => {
 
     expect(field).toStrictEqual(["number", "10", "24", "1", "14"]);
   });
+
+  it("edits the line height in a number field within its bounds, set for every device on Enter", async () => {
+    const { container, daemon, registry } = await signedIn();
+    const name = "ui.leading";
+    const selector = `input[aria-label="Value of ${name}"]`;
+
+    await run(registry, openOptions, "ui.leading");
+    await act(async () => {
+      registry.set(editing, name);
+      await Promise.resolve();
+    });
+    await settled(() => container.querySelector(selector) !== null);
+
+    const editor = container.querySelector<HTMLInputElement>(selector);
+
+    if (editor === null) {
+      throw new Error("no editor");
+    }
+
+    const field = [editor.type, editor.min, editor.max, editor.step, editor.value];
+
+    await act(async () => {
+      editor.focus();
+      editor.value = "1.6";
+      await Promise.resolve();
+    });
+
+    await press(editor, { key: "Enter" });
+    await settled(() => daemon.ui.options.leading === 1.6);
+
+    expect(field).toStrictEqual(["number", "1", "2", "0.05", "1.45"]);
+  });
 });

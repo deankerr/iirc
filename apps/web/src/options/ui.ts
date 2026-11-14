@@ -37,6 +37,9 @@ export const activityShown = Atom.make((get) => get(uiInEffect).activity);
 /** The text's size on this device, in pixels, alone, as `timeShown` is. */
 export const sizeShown = Atom.make((get) => get(uiInEffect).size);
 
+/** The line height on this device, as a multiple of the text's size, alone, as `timeShown` is. */
+export const leadingShown = Atom.make((get) => get(uiInEffect).leading);
+
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older
  * read never replaces a newer one.

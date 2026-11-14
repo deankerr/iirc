@@ -2896,9 +2896,34 @@ describe("the web frontend on iirc daemon --web", () => {
         await expect.poll(sized).toBe("14px");
         const readingSized = await settledWhere(held);
 
+        // And as the line height changes, which makes every row taller or shorter.
+        const lineHeight = async () =>
+          await page.evaluate(() => getComputedStyle(document.body).lineHeight);
+
+        await composer.fill("/set ui.leading 2");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("28px");
+        const readingTaller = await settledWhere(held);
+
+        await composer.fill("/set ui.leading 1.45");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("20.3px");
+        const readingLeaded = await settledWhere(held);
+
         // Back to the latest.
         await page.mouse.wheel(0, 100_000);
         await expect.poll(fromEnd).toBeLessThanOrEqual(1);
+
+        // At the latest, it stays at the latest as the line height changes there and back.
+        await composer.fill("/set ui.leading 2");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("28px");
+        const latestTaller = await settledWhere(atLatest);
+
+        await composer.fill("/set ui.leading 1.45");
+        await composer.press("Enter");
+        await expect.poll(lineHeight).toBe("20.3px");
+        const latestLeaded = await settledWhere(atLatest);
 
         /**
          * Following the latest, the Owner wheels up by 300 pixels as the log's box is made
@@ -2969,16 +2994,23 @@ describe("the web frontend on iirc daemon --web", () => {
         }
 
         expect({
-          latest: [latestNarrow, latestAfter, latestBack].map(atLatest),
+          latest: [latestNarrow, latestAfter, latestBack, latestTaller, latestLeaded].map(atLatest),
           left: [leftAsScrolled, leftAsWheeled],
           modesPast,
           narrow: drawn[390]?.layout,
           problems,
-          reading: [readingNarrow, readingBack, readingLarger, readingSized].map(held),
+          reading: [
+            readingNarrow,
+            readingBack,
+            readingLarger,
+            readingSized,
+            readingTaller,
+            readingLeaded,
+          ].map(held),
           sideways: Object.entries(drawn).filter(([, one]) => one.sideways > 0),
           wide: drawn[1280]?.layout,
         }).toStrictEqual({
-          latest: [true, true, true],
+          latest: [true, true, true, true, true],
           // Where they wheeled to from the end, and kept there as a Message is said.
           left: [
             { after: 300, drawn: 0, left: 300 },
@@ -2987,7 +3019,7 @@ describe("the web frontend on iirc daemon --web", () => {
           modesPast: [0, 0],
           narrow: "block",
           problems: [],
-          reading: [true, true, true, true],
+          reading: [true, true, true, true, true, true],
           sideways: [],
           wide: "grid",
         });
