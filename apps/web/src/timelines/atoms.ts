@@ -318,7 +318,11 @@ const perform = (registry: AtomRegistry.AtomRegistry, read: Read) =>
           } else if (error._tag === "UnknownTimeline" && "timeline" in read) {
             happened(registry, { _tag: "Vanished", timeline: read.timeline });
           } else if (error._tag === "UnknownNetwork" && "network" in read) {
-            happened(registry, { _tag: "NetworkVanished", network: read.network });
+            happened(registry, {
+              _tag: "NetworkVanished",
+              network: read.network,
+              of: read._tag === "Status" ? "Status" : "List",
+            });
           }
         },
         onSuccess: (event) => {

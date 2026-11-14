@@ -486,7 +486,8 @@ export type WindowRequest =
  *   Network list is read with the Networks removed whose Timelines are kept.
  * - `NetworkRemoved`: the Daemon answered that it removed a Network at a step, keeping its
  *   Timelines or not, ahead of the step the changes stream gives for it.
- * - `Vanished`: a window's read was `UnknownTimeline`. `NetworkVanished`: `UnknownNetwork`.
+ * - `Vanished`: a window's read was `UnknownTimeline`. `NetworkVanished`: a read of a
+ *   Network's Timelines or its Session was `UnknownNetwork`.
  * - `Changed`, `Overflowed`, `Reset`: the changes stream's events, with the place each left.
  * - `Located`: the Daemon placed a Message the Owner said, as `/msg` does, in this Timeline,
  *   with the `navigation` its Say was submitted at, ignored once the Owner opened another,
@@ -542,7 +543,12 @@ export type TimelinesEvent =
       readonly window: TimelineWindow;
     }
   | { readonly _tag: "Vanished"; readonly timeline: TimelineId }
-  | { readonly _tag: "NetworkVanished"; readonly network: NetworkId }
+  | {
+      readonly _tag: "NetworkVanished";
+      readonly network: NetworkId;
+      /** The read the Daemon answered `UnknownNetwork`: its Timelines, or its Session. */
+      readonly of: "List" | "Status";
+    }
   | { readonly _tag: "Changed"; readonly place: Place; readonly change: TimelineChange }
   | { readonly _tag: "Overflowed"; readonly place: Place; readonly overflow: TimelineOverflow }
   | { readonly _tag: "Reset"; readonly reset: TimelineReset }
@@ -1392,11 +1398,20 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
     ...change.items.map((item) => item.network),
   ]);
 
-  networks = mapValues(networks, (network) =>
-    touched.has(network.network)
-      ? changeConnection(changeList(network, change, merged), change)
-      : network
-  );
+  // A Network's Timelines as a page read through this step already show it, and what it
+  // ended, which was another life of the Network if it began again since.
+  const behind = (network: NetworkId) =>
+    change.sequence <= (state.networks.get(network)?.list.through ?? Number.NEGATIVE_INFINITY);
+
+  networks = mapValues(networks, (network) => {
+    if (!touched.has(network.network)) {
+      return network;
+    }
+
+    const listed = behind(network.network) ? network : changeList(network, change, merged);
+
+    return changeConnection(listed, change);
+  });
 
   const windows = new Map<TimelineId, Window>();
 
@@ -1418,19 +1433,23 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
   for (const removal of change.removals) {
     const held = networks.get(removal.network);
 
-    if (removal.keep && held !== undefined) {
+    if (removal.keep && held !== undefined && !behind(removal.network)) {
       networks = setIn(networks, removal.network, { ...held, kept: true });
     }
   }
 
   const changed = { ...state, merged, networks, search, windows };
 
-  const gone = new Set([
-    ...change.dropped.map((one) => one.network),
-    ...change.removals.flatMap((one) => (one.keep ? [] : [one.network])),
-  ]);
+  const gone = new Set(
+    [
+      ...change.dropped.map((one) => one.network),
+      ...change.removals.flatMap((one) => (one.keep ? [] : [one.network])),
+    ].filter((network) => !behind(network))
+  );
 
-  return gone.size === 0
+  // The Timelines it names go whatever life their Network is in now, since none of them is
+  // a newer life's.
+  return gone.size === 0 && change.dropped.length === 0
     ? changed
     : dropped(
         changed,
@@ -3301,6 +3320,30 @@ const searched = (state: Timelines, event: Searching): Timelines => {
   }
 };
 
+/**
+ * Takes `known` answering `UnknownNetwork`: the Network has no Session any more, which a
+ * removal, kept or not, also says, so it is not let go of on that alone. Its Timelines and
+ * the Network list are read again, which say whether it is gone, kept, or live, and a live
+ * one's Session is asked again after a wait.
+ * @param state - The state.
+ * @param id - The Network.
+ * @returns The state.
+ */
+const sessionGone = (state: Timelines, id: NetworkId): Timelines => {
+  const network = state.networks.get(id);
+
+  return network === undefined
+    ? state
+    : {
+        ...state,
+        entries: { ...state.entries, fresh: false },
+        networks: setIn(state.networks, id, {
+          ...staleList(network),
+          status: { ...network.status, attempt: network.status.attempt + 1, reading: false },
+        }),
+      };
+};
+
 type Gone = Extract<
   TimelinesEvent,
   { readonly _tag: "Vanished" | "NetworkVanished" | "NetworkRemoved" }
@@ -3328,7 +3371,9 @@ const gone = (state: Timelines, event: Gone): Timelines => {
     }
 
     case "NetworkVanished": {
-      return startFollowing({ ...state, networks: deleteIn(state.networks, event.network) });
+      return event.of === "List"
+        ? startFollowing({ ...state, networks: deleteIn(state.networks, event.network) })
+        : sessionGone(state, event.network);
     }
 
     case "NetworkRemoved": {

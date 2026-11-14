@@ -4242,4 +4242,89 @@ describe("removing a Network", () => {
       restored: [[], [{ _tag: "Networks", attempt: 1 }]],
     });
   });
+
+  it("keeps a Network the stream says was kept when its Session's read finds no Network", () => {
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+    let state = reduceTimelines(following(), { _tag: "ReadStarted", read: status });
+
+    state = reduceTimelines(state, keptAt(6));
+    state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "Status" });
+
+    expect({
+      reads: wanted(state).map((read) => read._tag),
+      sidebar: sidebar(state).map((network) => [network.network, network.removed]),
+    }).toStrictEqual({
+      // Its Timelines and the Network list are read again, and never its Session.
+      reads: ["Networks", "List"],
+      sidebar: [["alpha", true]],
+    });
+  });
+
+  it("applies a removal only to the life of a Network its Timelines were read after", () => {
+    const beta = networkId("beta");
+
+    const listing = (network: typeof alpha) =>
+      ({ _tag: "List", after: undefined, attempt: 0, network }) as const;
+
+    const events: TimelinesEvent[] = [
+      { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
+      {
+        _tag: "NetworksRead",
+        entries: decodeEntries([
+          { network: "alpha", status: { _tag: "Running" } },
+          { network: "beta", status: { _tag: "Running" } },
+        ]),
+        removed: [],
+      },
+      { _tag: "ReadStarted", read: listing(beta) },
+      {
+        _tag: "ListRead",
+        after: undefined,
+        network: beta,
+        page: listOf(5, { ...timelineOf(idOf(2), "Network", "beta", 2), network: beta }),
+      },
+      { _tag: "ReadStarted", read: listing(alpha) },
+      // The alpha configured again at 8, after the old one was dropped at 7.
+      {
+        _tag: "ListRead",
+        after: undefined,
+        network: alpha,
+        page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
+      },
+    ];
+
+    let state = initialTimelines;
+
+    for (const event of events) {
+      state = reduceTimelines(state, event);
+    }
+
+    const eight = timelineId(idOf(8));
+
+    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+    const from = followFrom(state);
+
+    // The stream, from 5, gives the old alpha's drop, then the new alpha's first step.
+    state = reduceTimelines(
+      state,
+      changed(7, { dropped: [{ changed: 7, id: idOf(1), network: "alpha" }] })
+    );
+    state = reduceTimelines(state, alphaAgain(8));
+
+    expect({
+      from,
+      open: openOf(state),
+      sidebar: sidebar(state).map((network) => [
+        network.network,
+        network.timelines.map((timeline) => timeline.id),
+      ]),
+    }).toStrictEqual({
+      from: { sequence: 5, version: 1 },
+      open: eight,
+      sidebar: [
+        ["alpha", [eight]],
+        ["beta", [timelineId(idOf(2))]],
+      ],
+    });
+  });
 });
