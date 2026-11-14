@@ -663,6 +663,7 @@ const removed = (open: string) =>
   reduceTimelines(world(open), {
     _tag: "NetworkRemoved",
     keep: true,
+    life: 0,
     network,
     sequence: 11,
   });

@@ -9,7 +9,7 @@
 import type { NetworkId } from "@iirc/api";
 import { initialRemoval, reduceRemoval, removalOf } from "@iirc/frontend/removal";
 import type { RemovalAnswer, RemovalEvent } from "@iirc/frontend/removal";
-import { reduceTimelines, standingOf } from "@iirc/frontend/timelines";
+import { lifeNow, reduceTimelines, standingOf } from "@iirc/frontend/timelines";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -69,8 +69,8 @@ export const closeRemoval = Atom.fnSync((_: undefined, get) => {
 
 /**
  * Sends the removal the Owner confirmed, once, and takes the Daemon's answer. Removed, the
- * Timelines take it at once, unless the stream passed its step already, and the options
- * shown are read again.
+ * Timelines take it at once, unless a life of the Network began or ended since it was
+ * asked, and the options shown are read again.
  */
 export const confirmRemoval = runtime
   .fn((_: undefined, get) =>
@@ -91,6 +91,10 @@ export const confirmRemoval = runtime
       const client = yield* DaemonClient;
 
       happened(registry, { _tag: "Sent" });
+
+      // What the Timelines take the answer against: any life of the Network begun or ended
+      // since, as the stream giving the removal itself does, leaves it to the stream.
+      const life = lifeNow(registry.get(timelinesState));
 
       const sent = yield* client.networks.remove({ params: { network }, query: { keep } }).pipe(
         Effect.map(({ sequence }) => ({ _tag: "Removed", sequence }) as const),
@@ -118,6 +122,7 @@ export const confirmRemoval = runtime
           reduceTimelines(registry.get(timelinesState), {
             _tag: "NetworkRemoved",
             keep,
+            life,
             network,
             sequence: sent.sequence,
           })

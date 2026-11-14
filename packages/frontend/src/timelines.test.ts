@@ -33,6 +33,7 @@ import {
   KeptLayoutSchema,
   layoutKept,
   layoutKeptText,
+  lifeNow,
   longestKept,
   mainOf,
   openOf,
@@ -1556,6 +1557,7 @@ describe("the Timelines' state", () => {
         ]),
         removed: [],
       },
+      { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
       {
         _tag: "ListRead",
         after: undefined,
@@ -1568,6 +1570,10 @@ describe("the Timelines' state", () => {
 
     const waiting = followFrom(state);
 
+    state = reduceTimelines(state, {
+      _tag: "ReadStarted",
+      read: { _tag: "List", after: undefined, attempt: 0, network: networkId("beta") },
+    });
     state = reduceTimelines(state, {
       _tag: "ListRead",
       after: undefined,
@@ -4170,6 +4176,7 @@ describe("removing a Network", () => {
     const kept = reduceTimelines(following(), {
       _tag: "NetworkRemoved",
       keep: true,
+      life: lifeNow(following()),
       network: alpha,
       sequence: 6,
     });
@@ -4177,6 +4184,7 @@ describe("removing a Network", () => {
     const dropped = reduceTimelines(following(), {
       _tag: "NetworkRemoved",
       keep: false,
+      life: lifeNow(following()),
       network: alpha,
       sequence: 6,
     });
@@ -4196,6 +4204,7 @@ describe("removing a Network", () => {
     state = reduceTimelines(state, {
       _tag: "NetworkRemoved",
       keep: false,
+      life: lifeNow(following()),
       network: alpha,
       sequence: 6,
     });
@@ -4387,6 +4396,7 @@ describe("removing a Network", () => {
     state = reduceTimelines(state, {
       _tag: "NetworkRemoved",
       keep: false,
+      life: lifeNow(following()),
       network: alpha,
       sequence: 7,
     });
@@ -4441,5 +4451,196 @@ describe("removing a Network", () => {
       reads: [{ _tag: "List", after: undefined, attempt: 1, network: alpha }],
       sidebar: [["alpha", [timelineId(idOf(8))]]],
     });
+  });
+
+  it("never marks a newer life kept from a Network list read before the old life ended", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const eight = timelineId(idOf(8));
+
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+
+    // alpha's Session is read, then alpha is kept at 6, and the list is read.
+    let state = reduceTimelines(following(), { _tag: "ReadStarted", read: status });
+
+    state = reduceTimelines(state, { _tag: "Requesting", read: status });
+    state = reading(reduceTimelines(state, keptAt(6)));
+    const asked = lifeNow(state);
+
+    // The Session found no Network, so alpha's Timelines are read again, through 8: the
+    // alpha made at 8, after the drop at 7, neither of which the stream has given yet.
+    state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "Status" });
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
+    });
+    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+    // The Daemon's answer to the drop at 7, then the list, both late.
+    state = reduceTimelines(state, {
+      _tag: "NetworkRemoved",
+      keep: false,
+      life: asked,
+      network: alpha,
+      sequence: 7,
+    });
+    state = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: [],
+      removed: [{ network: alpha }],
+    });
+
+    expect({
+      open: openOf(state),
+      reads: wanted(state).filter((read) => read._tag === "Networks"),
+      sidebar: sidebar(state).map((network) => [network.network, network.removed]),
+    }).toStrictEqual({
+      open: eight,
+      reads: [{ _tag: "Networks", attempt: 1 }],
+      sidebar: [["alpha", false]],
+    });
+  });
+
+  it("never lets a new life go for a read of the old one that found no Network", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const eight = timelineId(idOf(8));
+
+    let state = reduceTimelines(following(), {
+      _tag: "Overflowed",
+      overflow: { sequence: sequenceOf(6), timelines: [three] },
+      place: { sequence: 6, version: 1 },
+    });
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    state = reduceTimelines(state, dropAt(7));
+    state = reduceTimelines(state, alphaAgain(8));
+    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+
+    // The new alpha's Timelines wait until the old read is answered.
+    const waiting = wanted(state).filter((read) => read._tag === "List");
+
+    state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "List" });
+
+    expect({
+      open: openOf(state),
+      reads: wanted(state).filter((read) => read._tag === "List"),
+      sidebar: sidebar(state).map((network) => [
+        network.network,
+        network.timelines.map((timeline) => timeline.id),
+      ]),
+      waiting,
+    }).toStrictEqual({
+      open: eight,
+      reads: [{ _tag: "List", after: undefined, attempt: 1, network: alpha }],
+      sidebar: [["alpha", [eight]]],
+      waiting: [],
+    });
+  });
+
+  it("keeps a new life whatever answer of a read begun in the old one lands after it", () => {
+    const eight = timelineId(idOf(8));
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+    const networks = { _tag: "Networks", attempt: 0 } as const;
+
+    const oldPage = listOf(
+      6,
+      timelineOf(idOf(1), "Network", "alpha", 1),
+      timelineOf(idOf(2), "Channel", "#b", 2),
+      timelineOf(idOf(3), "Channel", "#a", 4)
+    );
+
+    const registered = decodeSession({ _tag: "Registered", ircd: "ircd.test", since: 1 });
+
+    // Each read kind: what starts it in the old life, and its late answer.
+    const kinds: readonly (readonly [
+      string,
+      readonly Read[],
+      (asked: number) => TimelinesEvent,
+    ])[] = [
+      [
+        "a Network list naming it kept",
+        [networks],
+        () => ({ _tag: "NetworksRead", entries: [], removed: [{ network: alpha }] }),
+      ],
+      [
+        "a Network list naming it live",
+        [networks],
+        () => ({
+          _tag: "NetworksRead",
+          entries: decodeEntries([
+            { network: "alpha", status: { _tag: "Stopped", reason: "old" } },
+          ]),
+          removed: [],
+        }),
+      ],
+      [
+        "a page of its Timelines",
+        [list],
+        () => ({ _tag: "ListRead", after: undefined, network: alpha, page: oldPage }),
+      ],
+      [
+        "its Timelines finding no Network",
+        [list],
+        () => ({ _tag: "NetworkVanished", network: alpha, of: "List" }),
+      ],
+      [
+        "its Session",
+        [status],
+        () => ({ _tag: "StatusRead", network: alpha, self: null, session: registered }),
+      ],
+      [
+        "its Session finding no Network",
+        [status],
+        () => ({ _tag: "NetworkVanished", network: alpha, of: "Status" }),
+      ],
+      [
+        "the Daemon's answer to removing it",
+        [],
+        (asked) => ({
+          _tag: "NetworkRemoved",
+          keep: false,
+          life: asked,
+          network: alpha,
+          sequence: 7,
+        }),
+      ],
+    ];
+
+    const survived = kinds.map(([kind, reads, answer]) => {
+      // An overflow at 6 has everything of alpha read again, in the old life.
+      let state = reduceTimelines(following(), {
+        _tag: "Overflowed",
+        overflow: { sequence: sequenceOf(6), timelines: null },
+        place: { sequence: 6, version: 1 },
+      });
+
+      for (const read of reads) {
+        state = reduceTimelines(state, { _tag: "ReadStarted", read });
+        state = reduceTimelines(state, { _tag: "Requesting", read });
+      }
+
+      const asked = lifeNow(state);
+
+      state = reduceTimelines(state, dropAt(7));
+      state = reduceTimelines(state, alphaAgain(8));
+      state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+      state = reduceTimelines(state, answer(asked));
+
+      const [only] = sidebar(state);
+
+      return [
+        kind,
+        openOf(state) === eight &&
+          sidebar(state).length === 1 &&
+          only?.network === alpha &&
+          !only.removed &&
+          only.running?._tag !== "Stopped" &&
+          only.timelines.map((timeline) => timeline.id).join(",") === eight,
+      ];
+    });
+
+    expect(survived).toStrictEqual(kinds.map(([kind]) => [kind, true]));
   });
 });
