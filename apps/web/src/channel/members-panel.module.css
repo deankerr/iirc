@@ -46,6 +46,8 @@
   position: absolute;
   inset: 0 0 0 auto;
   z-index: 2;
+  /* Its eighteen columns too, but never past the Pane's width, which bounds it here. */
+  min-width: min(18ch, 80%);
   max-width: 80%;
   box-shadow: 0 0 var(--space-5) var(--color-shadow);
 }

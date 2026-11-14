@@ -2448,6 +2448,38 @@ describe("the web frontend on iirc daemon --web", () => {
           }
         }
 
+        // In a Pane split on a narrow desktop screen, some 200px wide at the largest size, the
+        // members lie over its Timeline, and stay inside it in either kind of font.
+        await page.setViewportSize({ height: 800, width: 660 });
+        await page.keyboard.press("Alt+Shift+S");
+        await page.getByRole("row", { name: channel }).click();
+        await composer.click();
+        await page.keyboard.press("Alt+m");
+
+        const floating = page.getByRole("dialog", { name: "Members" });
+        const floatingPast = [];
+
+        for (const font of ["inter", "system"]) {
+          // oxlint-disable-next-line no-await-in-loop -- one font after another
+          await type(`/set ui.font ${font}`);
+          // oxlint-disable-next-line no-await-in-loop -- once it is drawn
+          await settled(page);
+
+          // oxlint-disable-next-line no-await-in-loop -- one font after another
+          const past = await floating.evaluate((panel) => {
+            const pane = panel.closest("[data-pane]")?.getBoundingClientRect();
+            const box = panel.getBoundingClientRect();
+
+            return {
+              left: Math.max(0, Math.round((pane?.left ?? 0) - box.left)),
+              pane: Math.round(pane?.width ?? 0) < 600,
+              right: Math.max(0, Math.round(box.right - (pane?.right ?? 0))),
+            };
+          });
+
+          floatingPast.push({ font, ...past });
+        }
+
         // What monospace showed whole it shows still, and every font shows it whole too: the
         // Timeline cuts only nicks past fourteen letters, the members only past fifteen, and the
         // prompt on a wide screen none. On a phone monospace's prompt still holds the widest
@@ -2458,10 +2490,15 @@ describe("the web frontend on iirc daemon --web", () => {
         );
 
         expect({
+          floatingPast,
           problems: problems.filter((problem) => !problem.includes("401")),
           rest,
           timelines,
         }).toStrictEqual({
+          floatingPast: [
+            { font: "inter", left: 0, pane: true, right: 0 },
+            { font: "system", left: 0, pane: true, right: 0 },
+          ],
           problems: [],
           rest: rest.map(({ font, prompt: drawn, size }) => ({
             font,
