@@ -4327,4 +4327,82 @@ describe("removing a Network", () => {
       ],
     });
   });
+
+  it("keeps a newer life's snapshot when a late Session read finds no Network before the old life's end arrives", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+    const eight = timelineId(idOf(8));
+
+    // An overflow at 6 has alpha's Timelines and Session read again.
+    let state = reduceTimelines(following(), {
+      _tag: "Overflowed",
+      overflow: { sequence: sequenceOf(6), timelines: [three] },
+      place: { sequence: 6, version: 1 },
+    });
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: status });
+    // The Timelines come back through 8: the old alpha removed at 7, a new one made at 8.
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
+    });
+    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+    // The Session, read between the two, found no Network.
+    state = reduceTimelines(state, { _tag: "NetworkVanished", network: alpha, of: "Status" });
+    state = reduceTimelines(state, dropAt(7));
+    state = reduceTimelines(state, alphaAgain(8));
+
+    expect({
+      open: openOf(state),
+      sidebar: sidebar(state).map((network) => [
+        network.network,
+        network.timelines.map((timeline) => timeline.id),
+      ]),
+    }).toStrictEqual({ open: eight, sidebar: [["alpha", [eight]]] });
+  });
+
+  it("refuses a page of a Network's Timelines read before a step that ended its life", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+
+    let state = reduceTimelines(following(), {
+      _tag: "Overflowed",
+      overflow: { sequence: sequenceOf(6), timelines: [three] },
+      place: { sequence: 6, version: 1 },
+    });
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    // Another read in flight keeps what the stream gives, to bring answers up to date.
+    state = reduceTimelines(state, {
+      _tag: "ReadStarted",
+      read: { _tag: "Networks", attempt: 0 },
+    });
+    state = reduceTimelines(state, dropAt(7));
+    state = reduceTimelines(state, alphaAgain(8));
+    // The page read through 6, of the life dropped at 7, lands after the new alpha.
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: listOf(
+        6,
+        timelineOf(idOf(1), "Network", "alpha", 1),
+        timelineOf(idOf(2), "Channel", "#b", 2),
+        timelineOf(idOf(3), "Channel", "#a", 4)
+      ),
+    });
+
+    expect({
+      reads: wanted(state).filter((read) => read._tag === "List"),
+      sidebar: sidebar(state).map((network) => [
+        network.network,
+        network.timelines.map((timeline) => timeline.id),
+      ]),
+    }).toStrictEqual({
+      reads: [{ _tag: "List", after: undefined, attempt: 1, network: alpha }],
+      sidebar: [["alpha", [timelineId(idOf(8))]]],
+    });
+  });
 });

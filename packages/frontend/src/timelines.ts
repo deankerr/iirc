@@ -139,6 +139,12 @@ export interface NetworkView {
   readonly awayAt: number;
   readonly timelines: ReadonlyMap<TimelineId, Timeline>;
   readonly list: ListLoad;
+  /**
+   * The step the Timelines held were last read through, as a whole round of pages: what
+   * they show already holds every step up to it. It only moves forward while the Network
+   * is held, whatever reads are asked again, so a step it holds is never applied twice.
+   */
+  readonly readThrough: number | undefined;
   readonly status: StatusLoad;
 }
 
@@ -337,6 +343,12 @@ export interface Timelines {
   readonly merged: ReadonlyMap<TimelineId, TimelineId>;
   /** Timelines the Daemon said it never had. */
   readonly vanished: ReadonlySet<TimelineId>;
+  /**
+   * The last step that ended a life of each Network, removing it, kept or not, as the
+   * stream or the Daemon's answer to a removal said. A page of a Network's Timelines read
+   * through an earlier step is of a life gone, and is read again.
+   */
+  readonly ended: ReadonlyMap<NetworkId, number>;
   /** The Timelines closed most recently, latest first, whose windows are kept. */
   readonly closed: readonly TimelineId[];
   /**
@@ -618,6 +630,7 @@ const unreadStatus: StatusLoad = { ...unread, from: 0 };
 export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   closed: [],
   considered: 0,
+  ended: new Map(),
   entries: unreadStatus,
   follow: { _tag: "Waiting", version: undefined },
   kept,
@@ -645,6 +658,7 @@ const newNetwork = (network: NetworkId): NetworkView => ({
   kept: false,
   list: unreadList,
   network,
+  readThrough: undefined,
   running: undefined,
   status: unreadStatus,
   timelines: new Map(),
@@ -1340,6 +1354,22 @@ const dropped = (
 };
 
 /**
+ * Records that a step ended a life of a Network, keeping the latest.
+ * @param ended - The last step that ended each Network's life.
+ * @param network - The Network.
+ * @param sequence - The step.
+ * @returns The record.
+ */
+const endedAt = (
+  ended: ReadonlyMap<NetworkId, number>,
+  network: NetworkId,
+  sequence: number
+): ReadonlyMap<NetworkId, number> =>
+  (ended.get(network) ?? Number.NEGATIVE_INFINITY) >= sequence
+    ? ended
+    : setIn(ended, network, sequence);
+
+/**
  * Takes the Daemon's answer to removing a Network, ahead of the stream: kept, it is
  * removed, and only read from now on, and not kept, it and its Timelines are let go of. An
  * answer the stream has passed already changes nothing, since the stream gave the removal
@@ -1358,15 +1388,17 @@ const removed = (
     return state;
   }
 
+  const recorded = { ...state, ended: endedAt(state.ended, network, sequence) };
+
   if (!keep) {
-    return dropped(state, new Set([network]), []);
+    return dropped(recorded, new Set([network]), []);
   }
 
   const held = state.networks.get(network);
 
   return held === undefined
-    ? state
-    : { ...state, networks: setIn(state.networks, network, { ...held, kept: true }) };
+    ? recorded
+    : { ...recorded, networks: setIn(state.networks, network, { ...held, kept: true }) };
 };
 
 /**
@@ -1398,10 +1430,10 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
     ...change.items.map((item) => item.network),
   ]);
 
-  // A Network's Timelines as a page read through this step already show it, and what it
-  // ended, which was another life of the Network if it began again since.
+  // A Network's Timelines as read through this step already show it, and what it ended,
+  // which was another life of the Network if it began again since.
   const behind = (network: NetworkId) =>
-    change.sequence <= (state.networks.get(network)?.list.through ?? Number.NEGATIVE_INFINITY);
+    change.sequence <= (state.networks.get(network)?.readThrough ?? Number.NEGATIVE_INFINITY);
 
   networks = mapValues(networks, (network) => {
     if (!touched.has(network.network)) {
@@ -1438,7 +1470,16 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
     }
   }
 
-  const changed = { ...state, merged, networks, search, windows };
+  let { ended } = state;
+
+  for (const network of [
+    ...change.dropped.map((one) => one.network),
+    ...change.removals.map((one) => one.network),
+  ]) {
+    ended = endedAt(ended, network, change.sequence);
+  }
+
+  const changed = { ...state, ended, merged, networks, search, windows };
 
   const gone = new Set(
     [
@@ -1582,6 +1623,7 @@ const applyReset = (state: Timelines, reset: TimelineReset): Timelines => {
     networks: mapValues(state.networks, (network) => ({
       ...network,
       list: { ...unreadList, reading: network.list.reading },
+      readThrough: undefined,
       status: { ...network.status, fresh: false },
       timelines: new Map(),
     })),
@@ -1882,9 +1924,44 @@ const waitingFor = (state: Timelines, version: number): Timelines => {
         : mapValues(state.networks, (network) => ({
             ...network,
             list: { ...unreadList, reading: network.list.reading },
+            readThrough: undefined,
             timelines: new Map(),
           })),
   };
+};
+
+/**
+ * A Network whose page of Timelines is refused, to be read again, or none when it is taken.
+ * One of another version, too old for what the stream kept, or for an edge the round no
+ * longer has, is read again where it was. One read through a step before one that ended a
+ * life of the Network is of a life gone: its Timelines are never installed, and the life
+ * now is read from its first page.
+ * @param state - The state, at the page's version.
+ * @param network - The Network.
+ * @param page - The page.
+ * @param after - The Timeline it was read after, or `undefined` for the first.
+ * @returns The Network, to be read again, or none.
+ */
+const refusedPage = (
+  state: Timelines,
+  network: NetworkView,
+  page: TimelineList,
+  after: TimelineId | undefined
+): NetworkView | undefined => {
+  const through = page.through ?? 0;
+  const attempt = network.list.attempt + 1;
+
+  if (!usable(state, page.version, through) || after !== network.list.next) {
+    return { ...network, list: { ...network.list, attempt, reading: false } };
+  }
+
+  if (through < (state.ended.get(network.network) ?? Number.NEGATIVE_INFINITY)) {
+    const stale = staleList(network);
+
+    return { ...stale, list: { ...stale.list, attempt, reading: false } };
+  }
+
+  return undefined;
 };
 
 /**
@@ -1922,14 +1999,10 @@ const listRead = (
   const versioned = waitingFor(state, page.version);
   const network = versioned.networks.get(id) ?? current;
 
-  if (!usable(versioned, page.version, through) || after !== network.list.next) {
-    return {
-      ...versioned,
-      networks: setIn(versioned.networks, id, {
-        ...network,
-        list: { ...network.list, attempt: network.list.attempt + 1, reading: false },
-      }),
-    };
+  const refusal = refusedPage(versioned, network, page, after);
+
+  if (refusal !== undefined) {
+    return { ...versioned, networks: setIn(versioned.networks, id, refusal) };
   }
 
   const first = after === undefined;
@@ -1949,6 +2022,8 @@ const listRead = (
   const last = page.timelines.at(-1);
   const more = page.more && last !== undefined;
 
+  const roundThrough = minOf(first ? undefined : network.list.through, through);
+
   const read: NetworkView = {
     ...network,
     list: {
@@ -1956,8 +2031,10 @@ const listRead = (
       fresh: !more,
       next: more ? last.id : undefined,
       reading: false,
-      through: minOf(first ? undefined : network.list.through, through),
+      through: roundThrough,
     },
+    // A whole round read is a snapshot, and only a later one moves it.
+    readThrough: more ? network.readThrough : Math.max(network.readThrough ?? 0, roundThrough),
     timelines,
   };
 
