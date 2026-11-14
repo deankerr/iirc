@@ -658,7 +658,12 @@ const touchesIirc = (change: Partial<typeof TimelineChange.Encoded>, headSeen: n
  * @returns The state.
  */
 const removed = (open: string) =>
-  reduceTimelines(world(open), { _tag: "NetworkRemoved", keep: true, network });
+  reduceTimelines(world(open), {
+    _tag: "NetworkRemoved",
+    keep: true,
+    network,
+    sequence: 11,
+  });
 
 describe("the header", () => {
   it("shows a Channel's topic, formatted, who set it and when, its modes, and how many are in it", () => {

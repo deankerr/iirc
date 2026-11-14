@@ -3941,6 +3941,34 @@ const dropAt = (sequence: number) =>
     dropped: [one, two, three].map((id) => ({ changed: sequence, id, network: "alpha" })),
   });
 
+const seven = timelineId(idOf(7));
+
+/**
+ * The Network list asked for now.
+ * @param state - The state.
+ * @returns The state.
+ */
+const reading = (state: Timelines) => {
+  const networks = { _tag: "Networks", attempt: 0 } as const;
+
+  return reduceTimelines(reduceTimelines(state, { _tag: "ReadStarted", read: networks }), {
+    _tag: "Requesting",
+    read: networks,
+  });
+};
+
+/**
+ * A new alpha, configured again under the name: its own Timeline, opened at a step.
+ * @param sequence - The step.
+ * @returns The step.
+ */
+const alphaAgain = (sequence: number) =>
+  changed(sequence, {
+    timelines: [
+      Schema.encodeSync(Timeline)(timelineOf(idOf(sequence), "Network", "alpha", sequence)),
+    ],
+  });
+
 describe("removing a Network", () => {
   const beta = networkId("beta");
 
@@ -4082,17 +4110,75 @@ describe("removing a Network", () => {
       _tag: "NetworkRemoved",
       keep: true,
       network: alpha,
+      sequence: 6,
     });
 
     const dropped = reduceTimelines(following(), {
       _tag: "NetworkRemoved",
       keep: false,
       network: alpha,
+      sequence: 6,
     });
 
     expect({
       dropped: [sidebar(dropped).length, opened(dropped)._tag],
       kept: [sidebar(kept)[0]?.removed, contextOf(kept).focus?.removed],
     }).toStrictEqual({ dropped: [0, "Closed"], kept: [true, true] });
+  });
+
+  it("ignores the Daemon's answer to a removal once the stream gave it and a new Network of the name", () => {
+    let state = reduceTimelines(following(), dropAt(6));
+
+    state = reduceTimelines(state, alphaAgain(7));
+    state = reduceTimelines(state, { _tag: "Opened", timeline: seven });
+
+    state = reduceTimelines(state, {
+      _tag: "NetworkRemoved",
+      keep: false,
+      network: alpha,
+      sequence: 6,
+    });
+
+    expect({
+      open: openOf(state),
+      sidebar: sidebar(state).map((network) => [network.network, network.removed]),
+    }).toStrictEqual({ open: seven, sidebar: [["alpha", false]] });
+  });
+
+  it("reads the Network list again when a Network's life ended while it was read", () => {
+    // Read while alpha was kept, landing after it was dropped and a new alpha made.
+    let replaced = reading(reduceTimelines(following(), keptAt(6)));
+
+    replaced = reduceTimelines(replaced, dropAt(7));
+    replaced = reduceTimelines(replaced, alphaAgain(8));
+    replaced = reduceTimelines(replaced, {
+      _tag: "NetworksRead",
+      entries: [],
+      removed: [{ network: alpha }],
+    });
+
+    // Read while alpha was configured, landing after it was dropped.
+    let restored = reading(following());
+
+    restored = reduceTimelines(restored, dropAt(6));
+    restored = reduceTimelines(restored, {
+      _tag: "NetworksRead",
+      entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+      removed: [],
+    });
+
+    expect({
+      replaced: [
+        sidebar(replaced).map((network) => [network.network, network.removed]),
+        wanted(replaced).filter((read) => read._tag === "Networks"),
+      ],
+      restored: [
+        sidebar(restored).map((network) => network.network),
+        wanted(restored).filter((read) => read._tag === "Networks"),
+      ],
+    }).toStrictEqual({
+      replaced: [[["alpha", false]], [{ _tag: "Networks", attempt: 1 }]],
+      restored: [[], [{ _tag: "Networks", attempt: 1 }]],
+    });
   });
 });

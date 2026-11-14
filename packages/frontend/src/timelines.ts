@@ -484,8 +484,8 @@ export type WindowRequest =
  *   attempt after a failure: where the stream is then is where the answer is current from.
  * - `NetworksRead`, `ListRead`, `StatusRead`, `WindowRead`: what a read answered. The
  *   Network list is read with the Networks removed whose Timelines are kept.
- * - `NetworkRemoved`: the Daemon answered that it removed a Network, keeping its Timelines
- *   or not, ahead of the step the changes stream gives for it.
+ * - `NetworkRemoved`: the Daemon answered that it removed a Network at a step, keeping its
+ *   Timelines or not, ahead of the step the changes stream gives for it.
  * - `Vanished`: a window's read was `UnknownTimeline`. `NetworkVanished`: `UnknownNetwork`.
  * - `Changed`, `Overflowed`, `Reset`: the changes stream's events, with the place each left.
  * - `Located`: the Daemon placed a Message the Owner said, as `/msg` does, in this Timeline,
@@ -517,7 +517,13 @@ export type TimelinesEvent =
       readonly entries: readonly NetworkEntry[];
       readonly removed: readonly RemovedNetwork[];
     }
-  | { readonly _tag: "NetworkRemoved"; readonly network: NetworkId; readonly keep: boolean }
+  | {
+      readonly _tag: "NetworkRemoved";
+      readonly network: NetworkId;
+      readonly keep: boolean;
+      /** The step the removal was journaled at. */
+      readonly sequence: number;
+    }
   | {
       readonly _tag: "ListRead";
       readonly network: NetworkId;
@@ -1328,15 +1334,24 @@ const dropped = (
 };
 
 /**
- * Takes the Daemon's answer to removing a Network: kept, it is removed, and only read from
- * now on, and not kept, it and its Timelines are let go of, as the step the changes stream
- * gives for it does too.
+ * Takes the Daemon's answer to removing a Network, ahead of the stream: kept, it is
+ * removed, and only read from now on, and not kept, it and its Timelines are let go of. An
+ * answer the stream has passed already changes nothing, since the stream gave the removal
+ * and whatever followed it, such as another Network of the same name.
  * @param state - The state.
- * @param network - The Network.
- * @param keep - Whether its Timelines were kept.
+ * @param event - The answer: the Network, whether its Timelines were kept, and its step.
  * @returns The state.
  */
-const removed = (state: Timelines, network: NetworkId, keep: boolean): Timelines => {
+const removed = (
+  state: Timelines,
+  { keep, network, sequence }: Extract<TimelinesEvent, { readonly _tag: "NetworkRemoved" }>
+): Timelines => {
+  const { follow } = state;
+
+  if (follow._tag !== "Following" || (follow.place?.sequence ?? 0) >= sequence) {
+    return state;
+  }
+
   if (!keep) {
     return dropped(state, new Set([network]), []);
   }
@@ -1454,10 +1469,21 @@ const invalidates = (state: Timelines, overflow: TimelineOverflow, subject: Subj
 };
 
 /**
+ * Whether a step ended a Network's life: removed it, keeping its Timelines or dropping
+ * them. The Network list read before it says what the Network was then, which may be
+ * another Network of the same name by the time it lands, so it is read again.
+ * @param change - The step's changes.
+ * @returns Whether it did.
+ */
+const endsALife = (change: TimelineChange): boolean =>
+  change.dropped.length > 0 || change.timelines.some((timeline) => timeline.removed);
+
+/**
  * The one rule every answer is taken by: it is current only if nothing that invalidates
  * what it is of happened after its read began at `since`, neither a reset nor the stream
  * forgetting what it gave since then, which leave no record of what changed, nor an
- * overflow that touched it, whose changes never came. An answer that is not current
+ * overflow that touched it, whose changes never came, nor, for the Network list, a step that
+ * ended a Network's life, after which a Network of that name may be another. An answer that is not current
  * leaves what it is of stale, to be read again.
  * @param state - The state.
  * @param since - The stream's place the answer reflects: its `through`, or where the
@@ -1468,8 +1494,10 @@ const invalidates = (state: Timelines, overflow: TimelineOverflow, subject: Subj
 const isCurrent = (state: Timelines, since: number, subject: Subject): boolean =>
   state.follow._tag !== "Following" ||
   (since >= state.follow.recentFrom &&
-    !recentAfter(state, since).some(
-      (recorded) => recorded._tag === "Overflowed" && invalidates(state, recorded.overflow, subject)
+    !recentAfter(state, since).some((recorded) =>
+      recorded._tag === "Overflowed"
+        ? invalidates(state, recorded.overflow, subject)
+        : subject._tag === "NetworkList" && endsALife(recorded.change)
     ));
 
 /**
@@ -3287,7 +3315,7 @@ const gone = (state: Timelines, event: Gone): Timelines => {
     }
 
     case "NetworkRemoved": {
-      return removed(state, event.network, event.keep);
+      return removed(state, event);
     }
 
     default: {

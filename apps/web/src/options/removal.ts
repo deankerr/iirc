@@ -8,7 +8,7 @@
  */
 import type { NetworkId } from "@iirc/api";
 import { initialRemoval, reduceRemoval, removalOf } from "@iirc/frontend/removal";
-import type { RemovalEvent } from "@iirc/frontend/removal";
+import type { RemovalAnswer, RemovalEvent } from "@iirc/frontend/removal";
 import { reduceTimelines, standingOf } from "@iirc/frontend/timelines";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
@@ -68,9 +68,9 @@ export const closeRemoval = Atom.fnSync((_: undefined, get) => {
 }).pipe(Atom.keepAlive);
 
 /**
- * Sends the removal the Owner confirmed, once, and takes the Daemon's answer. Removed, or
- * removed with its Credentials not all forgotten, the Timelines take it at once, and the
- * options shown are read again.
+ * Sends the removal the Owner confirmed, once, and takes the Daemon's answer. Removed, the
+ * Timelines take it at once, unless the stream passed its step already, and the options
+ * shown are read again.
  */
 export const confirmRemoval = runtime
   .fn((_: undefined, get) =>
@@ -92,10 +92,12 @@ export const confirmRemoval = runtime
 
       happened(registry, { _tag: "Sent" });
 
-      const answer = yield* client.networks.remove({ params: { network }, query: { keep } }).pipe(
-        Effect.as({ _tag: "Removed" } as const),
+      const sent = yield* client.networks.remove({ params: { network }, query: { keep } }).pipe(
+        Effect.map(({ sequence }) => ({ _tag: "Removed", sequence }) as const),
         Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
       );
+
+      const answer: RemovalAnswer = sent._tag === "Removed" ? { _tag: "Removed" } : sent;
 
       if (answer._tag === "Failed" && answer.error === "Unauthorized") {
         happened(registry, { _tag: "Answered", answer, network });
@@ -107,15 +109,26 @@ export const confirmRemoval = runtime
 
       happened(registry, { _tag: "Answered", answer, network });
 
-      if (answer._tag === "Removed" || answer.error === "VaultFailed") {
+      // The Timelines take the removal by its step, which they ignore once the stream has
+      // passed it. A removal whose Credentials were not all forgotten names no step, so the
+      // stream alone brings it.
+      if (sent._tag === "Removed") {
         registry.set(
           timelinesState,
-          reduceTimelines(registry.get(timelinesState), { _tag: "NetworkRemoved", keep, network })
+          reduceTimelines(registry.get(timelinesState), {
+            _tag: "NetworkRemoved",
+            keep,
+            network,
+            sequence: sent.sequence,
+          })
         );
+      }
 
-        if (registry.get(optionsFilter) !== undefined) {
-          yield* refresh(registry);
-        }
+      if (
+        (sent._tag === "Removed" || sent.error === "VaultFailed") &&
+        registry.get(optionsFilter) !== undefined
+      ) {
+        yield* refresh(registry);
       }
     })
   )
