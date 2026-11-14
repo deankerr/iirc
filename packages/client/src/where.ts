@@ -17,7 +17,7 @@ import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
 import type { Run } from "./run.ts";
-import { folder } from "./run.ts";
+import { folder, updateOpen } from "./run.ts";
 import { sessionOf } from "./views.ts";
 
 type MessageNews = Extract<News, { readonly _tag: "Message" }>;
@@ -338,3 +338,42 @@ export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): Activ
   ...activity,
   where: activityWhere(run, activity.activity, activity.live),
 });
+
+/**
+ * Moves what the Client remembers of where Self said something to a partner who changed
+ * nick, as their Timeline follows the nick, so a reply that comes later is shown where the
+ * Message stands. A Target is one Channel or one nick, since a `Say` has no list, and a
+ * Target that names the old nick, by the Network's casemapping now, names the new one.
+ * Channels never move. What is remembered stays as many as it was.
+ * @param run - The step.
+ * @param where - Where an Activity belongs.
+ */
+export const followSays = (run: Run, where: readonly Where[]): void => {
+  const moves = where.flatMap((each) => (each._tag === "DirectRenamed" ? [each] : []));
+
+  if (moves.length === 0) {
+    return;
+  }
+
+  const naming = namingNow(run);
+
+  const follow = (target: string): string => {
+    const [only] = parseTargets(naming, target);
+    const key = only?._tag === "Nick" ? named(run, target).key : undefined;
+
+    return moves.find((move) => move.key === key)?.to.name ?? target;
+  };
+
+  run.state = {
+    ...run.state,
+    said: new Map([...run.state.said].map(([intent, target]) => [intent, follow(target)])),
+  };
+
+  updateOpen(run, (open) => ({
+    ...open,
+    lastSaid: {
+      NOTICE: open.lastSaid.NOTICE === undefined ? undefined : follow(open.lastSaid.NOTICE),
+      PRIVMSG: open.lastSaid.PRIVMSG === undefined ? undefined : follow(open.lastSaid.PRIVMSG),
+    },
+  }));
+};

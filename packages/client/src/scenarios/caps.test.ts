@@ -212,6 +212,34 @@ describe("answers", () => {
   });
 });
 
+describe("the standard-replies cap", () => {
+  it("is asked for when it is offered, and turns its Feature on", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: registered(base, { offered: ["multi-prefix", "standard-replies"] }),
+    });
+
+    expect(client.inspect(played.state).features).toStrictEqual([
+      "multi-prefix",
+      "standard-replies",
+    ]);
+  });
+
+  it("is not asked for when the Owner declined it", () => {
+    const declined = configured({ declined: [FeatureName.make("standard-replies")] });
+
+    play(client, {
+      configuration: declined,
+      transcript: registered(declined, {
+        offered: ["multi-prefix", "standard-replies"],
+        requested: ["multi-prefix"],
+      }),
+    });
+
+    expect.assertions(0);
+  });
+});
+
 describe("caps changing mid-Session", () => {
   const steady = [
     registered(base, { offered: ["cap-notify", "multi-prefix"] }),

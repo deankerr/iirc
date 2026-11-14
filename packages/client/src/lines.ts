@@ -64,7 +64,7 @@ import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf, sessionOf } from "./views.ts";
-import { named, routeActivity, routeMessage, saidWhere } from "./where.ts";
+import { followSays, named, routeActivity, routeMessage, saidWhere } from "./where.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
 const refusals: ReadonlySet<string> = new Set([
@@ -274,6 +274,7 @@ const fold = (
 
     run.news.push(routed);
     followRenames(run, routed.where);
+    followSays(run, routed.where);
   } else {
     run.news.push(meant);
   }

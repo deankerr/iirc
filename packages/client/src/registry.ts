@@ -13,6 +13,7 @@ import { messageTags } from "./features/message-tags.ts";
 import { multiPrefix } from "./features/multi-prefix.ts";
 import { saslPlain } from "./features/sasl.ts";
 import { serverTime } from "./features/server-time.ts";
+import { standardReplies } from "./features/standard-replies.ts";
 import { utf8Only } from "./features/utf8-only.ts";
 
 /** A Feature as the core holds it, with its own state's type forgotten. */
@@ -46,4 +47,5 @@ export const registry: readonly Registered[] = [
   register(multiPrefix),
   register(awayNotify),
   register(utf8Only),
+  register(standardReplies),
 ];

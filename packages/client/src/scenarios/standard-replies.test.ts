@@ -428,6 +428,61 @@ describe("a standard reply for a PRIVMSG or NOTICE, without a label", () => {
   });
 });
 
+describe("a standard reply for a Say to a partner who changed nick since", () => {
+  it("is shown in the renamed Timeline, by label", () => {
+    played([
+      ...inChannel(echo),
+      lines(
+        "!! say peer :psst",
+        ">> @label=l1 PRIVMSG peer psst",
+        "?? message Privmsg iirc peer at=ours:t+0s in=direct:peer ours=i1 echo :psst",
+        "<< :peer!u@h NICK peer2",
+        "?? activity NickChanged peer peer2 in=channel:#iirc in=renamed:peer>peer2",
+        "<< @label=l1 :irc.test WARN PRIVMSG QUEUED peer :Held for a moment",
+        "?? activity StandardReply WARN PRIVMSG QUEUED context=peer in=direct:peer2 :Held for a moment"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is shown in the renamed Timeline, without a label", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! say peer :psst",
+        ">> PRIVMSG peer psst",
+        "?? message Privmsg iirc peer at=ours:t+0s in=direct:peer ours=i1 :psst",
+        "<< :peer!u@h NICK PEER2",
+        "?? activity NickChanged peer PEER2 in=channel:#iirc in=renamed:peer>peer2:PEER2",
+        "<< :irc.test FAIL PRIVMSG CANNOT_SEND :Not allowed",
+        "?? activity StandardReply FAIL PRIVMSG CANNOT_SEND in=direct:peer2:PEER2 :Not allowed"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("goes on following it through another rename", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! say peer :psst",
+        ">> PRIVMSG peer psst",
+        "?? message Privmsg iirc peer at=ours:t+0s in=direct:peer ours=i1 :psst",
+        "<< :peer!u@h NICK peer2",
+        "?? activity NickChanged peer peer2 in=channel:#iirc in=renamed:peer>peer2",
+        "<< :peer2!u@h NICK peer3",
+        "?? activity NickChanged peer2 peer3 in=channel:#iirc in=renamed:peer2>peer3",
+        "<< :irc.test WARN PRIVMSG QUEUED :Held",
+        "?? activity StandardReply WARN PRIVMSG QUEUED in=direct:peer3 :Held"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+});
+
 describe("a FAIL nothing else reads", () => {
   it("is shown in the Network's Timeline, never dropped", () => {
     played([
