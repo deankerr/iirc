@@ -8,10 +8,11 @@
  *
  * @packageDocumentation
  */
-import { Themes, fontNames } from "@iirc/api";
-import type { FontShown, Palette, ThemeName, UiInForce } from "@iirc/api";
+import { Themes } from "@iirc/api";
+import type { Palette, ThemeName, UiInForce } from "@iirc/api";
 import type { Parsed } from "@iirc/frontend/commands";
 import type { Json } from "@iirc/frontend/options";
+import { fontOfKey } from "@iirc/frontend/palette";
 import {
   cssVariables,
   drawn,
@@ -164,11 +165,6 @@ export const drawnTheme = Atom.make((get) => {
   return drawn(palette, ui.colours);
 });
 
-/** Each font, by the key of its entry in the palette. */
-const fontKeys: ReadonlyMap<string, FontShown> = new Map(
-  fontNames.map((font) => [`font:${font}`, font])
-);
-
 /**
  * The text's size, line height, and font in effect on this device, as the root's custom
  * properties, with the monospace font IRC's formatting asks for beside it: the font the
@@ -177,7 +173,7 @@ const fontKeys: ReadonlyMap<string, FontShown> = new Map(
 const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
   const ui = get(uiInEffect);
   const highlighted = get(paletteState).open ? get(paletteHighlight) : undefined;
-  const font = (highlighted === undefined ? undefined : fontKeys.get(highlighted)) ?? ui.font;
+  const font = (highlighted === undefined ? undefined : fontOfKey(highlighted)) ?? ui.font;
 
   return [
     ["--font-size", `${ui.size}px`],

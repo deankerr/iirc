@@ -12,6 +12,7 @@ declare const styles: {
   readonly missing: string;
   readonly muted: string;
   readonly name: string;
+  readonly note: string;
   readonly notice: string;
   readonly row: string;
   readonly scroller: string;

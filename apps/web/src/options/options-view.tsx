@@ -14,6 +14,7 @@
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
 import { parseUiText } from "@iirc/frontend/options";
 import type { Option, Value } from "@iirc/frontend/options";
+import { writtenOnDevice } from "@iirc/frontend/ui";
 import type { KeyboardEvent } from "react";
 import { useContext, useId, useRef } from "react";
 import { GridList, GridListItem, Input, SearchField } from "react-aria-components";
@@ -74,7 +75,8 @@ const Shown = ({ value }: { readonly value: Value }) => {
 
 /**
  * Sets an option to a value in its text syntax: a Network's through its Configuration, and
- * one under `ui` for every device, or for this device alone while it overrides it here.
+ * one under `ui` for every device, or for this device alone while it overrides it here, and
+ * a font's family always for this device alone.
  * @returns How to set one.
  */
 const useSetTo = () => {
@@ -97,7 +99,11 @@ const useSetTo = () => {
       return;
     }
 
-    changeUi({ device: option.device !== undefined, option: option.option, value: value.value });
+    changeUi({
+      device: writtenOnDevice(option.option, value.value, option.device !== undefined),
+      option: option.option,
+      value: value.value,
+    });
   };
 };
 
@@ -402,6 +408,9 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
                     {" "}
                     on this device, over <Shown value={option.shared} />
                   </span>
+                ) : null}
+                {option._tag === "Ui" && option.note !== undefined ? (
+                  <span className={styles.note}>{option.note}</span>
                 ) : null}
               </span>
               <span className={styles.starts}>

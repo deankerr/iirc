@@ -347,7 +347,8 @@ describe("themes", () => {
       registry.set(pickEntry, commit);
     }
 
-    await eventually(() => fake.daemon.ui.options.font === "commit-mono");
+    // This device overrides the font, so the choice is its own: a shared one would not win.
+    await until(registry, uiInEffect, (ui) => ui.font === "commit-mono");
 
     stop();
 
@@ -355,11 +356,13 @@ describe("themes", () => {
       before,
       closed,
       device,
+      kept: readChoice(deviceUiKey),
       otherRow,
       picked: commit?.key,
       previewed,
       refused,
       sans,
+      shared: fake.daemon.ui.options.font,
       sized,
     }).toStrictEqual({
       before: ["14px", "var(--font-device)", "var(--font-device)"],
@@ -373,6 +376,7 @@ describe("themes", () => {
         '"JetBrains Mono Variable", var(--font-device)',
         '"JetBrains Mono Variable", var(--font-device)',
       ],
+      kept: '{"font":"commit-mono"}',
       otherRow: [
         "18px",
         '"JetBrains Mono Variable", var(--font-device)',
@@ -386,7 +390,95 @@ describe("themes", () => {
       ],
       refused: 'ui.size: Give a whole number from 10 to 24, not "30".',
       sans: ["18px", '"Inter Variable", var(--font-device-sans)', "var(--font-device)"],
+      shared: "system",
       sized: ["18px", "var(--font-device)", "var(--font-device)"],
+    });
+  });
+
+  it("draws a family the device has by its name, on this device alone, set by /set or typed in the palette, and previews one typed there", async () => {
+    const fake = signedIn();
+    const { registry, type } = await page(fake);
+    const stop = watchTheme(registry);
+    const root = document.documentElement;
+
+    const read = () => [
+      root.style.getPropertyValue("--font-text"),
+      root.style.getPropertyValue("--font-mono"),
+    ];
+
+    await type("/set -device ui.font Fira Code");
+    const set = read();
+
+    paletteHappened(registry, { _tag: "Opened", scope: "All" });
+    paletteHappened(registry, { _tag: "Queried", query: "font Iosevka Term" });
+
+    const typed = registry
+      .get(paletteSections)
+      .flatMap((section) => section.entries)
+      .find((entry) => entry.key === "font:Iosevka Term");
+
+    registry.set(highlightEntry, { highlighted: true, key: "font:Iosevka Term" });
+    const previewed = read();
+
+    if (typed !== undefined) {
+      registry.set(pickEntry, typed);
+    }
+
+    await until(registry, uiInEffect, (ui) => ui.font === "Iosevka Term");
+    const chosen = read();
+
+    stop();
+
+    expect({
+      chosen,
+      kept: readChoice(deviceUiKey),
+      previewed,
+      set,
+      shared: fake.daemon.ui.options.font,
+    }).toStrictEqual({
+      chosen: ['"Iosevka Term", var(--font-device)', "var(--font-device)"],
+      kept: '{"font":"Iosevka Term"}',
+      previewed: ['"Iosevka Term", var(--font-device)', "var(--font-device)"],
+      set: ['"Fira Code", var(--font-device)', "var(--font-device)"],
+      shared: "system",
+    });
+  });
+
+  it("draws a bundled font chosen in the palette after a family typed there, since this device's override would win over the shared one", async () => {
+    const fake = signedIn();
+    const { registry } = await page(fake);
+
+    const choose = async (query: string, key: string, font: string) => {
+      paletteHappened(registry, { _tag: "Opened", scope: "All" });
+      paletteHappened(registry, { _tag: "Queried", query });
+
+      const entry = registry
+        .get(paletteSections)
+        .flatMap((section) => section.entries)
+        .find((one) => one.key === key);
+
+      if (entry !== undefined) {
+        registry.set(pickEntry, entry);
+      }
+
+      await until(registry, uiInEffect, (ui) => ui.font === font);
+    };
+
+    await choose("font Fira Code", "font:Fira Code", "Fira Code");
+    const family = readChoice(deviceUiKey);
+
+    await choose("inter", "font:inter", "inter");
+
+    expect({
+      family,
+      inEffect: registry.get(uiInEffect).font,
+      kept: readChoice(deviceUiKey),
+      shared: fake.daemon.ui.options.font,
+    }).toStrictEqual({
+      family: '{"font":"Fira Code"}',
+      inEffect: "inter",
+      kept: '{"font":"inter"}',
+      shared: "system",
     });
   });
 

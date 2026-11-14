@@ -3,7 +3,15 @@ import type { Activity } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { deviceUiOf, deviceUiText, effectiveUi, noOverrides, overridden, showsItem } from "./ui.ts";
+import {
+  deviceUiOf,
+  deviceUiText,
+  effectiveUi,
+  noOverrides,
+  overridden,
+  showsItem,
+  writtenOnDevice,
+} from "./ui.ts";
 
 const shared = {
   options: {
@@ -24,6 +32,7 @@ describe("a device's overrides", () => {
     expect({
       back: deviceUiOf(deviceUiText({ theme: "light", time: "none" })),
       empty: deviceUiText(noOverrides),
+      family: deviceUiOf('{"font":"Iosevka Term"}'),
       leading: deviceUiOf('{"leading":1.2}'),
       leadingFine: deviceUiOf('{"leading":1.455,"size":20}'),
       leadings: deviceUiOf('{"leading":3,"size":20}'),
@@ -33,10 +42,11 @@ describe("a device's overrides", () => {
       notAnObject: deviceUiOf("[1,2]"),
       notJson: deviceUiOf("{theme"),
       sized: deviceUiOf('{"size":24,"font":"jetbrains-mono"}'),
-      sizes: deviceUiOf('{"size":9,"font":"iosevka"}'),
+      sizes: deviceUiOf('{"size":9,"font":"Ios\\"evka"}'),
     }).toStrictEqual({
       back: { theme: "light", time: "none" },
       empty: undefined,
+      family: { font: "Iosevka Term" },
       leading: { leading: 1.2 },
       leadingFine: { size: 20 },
       leadings: { size: 20 },
@@ -162,5 +172,31 @@ describe("which items a Timeline shows", () => {
       [false, false, false, true, true, true, true],
       [false, false, false, false, true, true, true],
     ]);
+  });
+});
+
+describe("where a change of an option is written", () => {
+  it("is this device's for a font's family, and for any option this device overrides, and every device's otherwise", () => {
+    expect({
+      bundled: writtenOnDevice("font", "inter", false),
+      bundledAnyCase: writtenOnDevice("font", "Inter", false),
+      bundledOverridden: writtenOnDevice("font", "inter", true),
+      family: writtenOnDevice("font", "Fira Code", false),
+      familyOverridden: writtenOnDevice("font", "Fira Code", true),
+      other: writtenOnDevice("size", 20, false),
+      otherOverridden: writtenOnDevice("size", 20, true),
+      unset: writtenOnDevice("font", undefined, false),
+      unsetOverridden: writtenOnDevice("font", undefined, true),
+    }).toStrictEqual({
+      bundled: false,
+      bundledAnyCase: false,
+      bundledOverridden: true,
+      family: true,
+      familyOverridden: true,
+      other: false,
+      otherOverridden: true,
+      unset: false,
+      unsetOverridden: true,
+    });
   });
 });

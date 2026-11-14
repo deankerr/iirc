@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
-import { fontNames } from "@iirc/api";
+import { FontFamily, fontNames } from "@iirc/api";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { fontStack, monoStack } from "./fonts.ts";
@@ -53,6 +54,21 @@ describe("the fonts", () => {
       system: "var(--font-device)",
       "system-sans": "var(--font-device)",
     });
+  });
+
+  it("draw a family the device has as exactly one quoted family, then the device's own monospace font, which draws it when the device lacks it", () => {
+    const family = Schema.decodeSync(FontFamily);
+
+    expect(
+      ["Fira Code", "Noto Sans CJK JP", "a;b)}"].map((name) => [
+        fontStack(family(name)),
+        monoStack(family(name)),
+      ])
+    ).toStrictEqual([
+      ['"Fira Code", var(--font-device)', "var(--font-device)"],
+      ['"Noto Sans CJK JP", var(--font-device)', "var(--font-device)"],
+      ['"a;b)}", var(--font-device)', "var(--font-device)"],
+    ]);
   });
 
   it("each have a regular, a bold, and both italic, declared once per range, in WOFF2 alone, swapped in as they load", () => {

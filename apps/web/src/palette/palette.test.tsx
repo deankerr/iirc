@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import type { Timeline } from "@iirc/api";
+import { deviceUiKey } from "@iirc/frontend/ui";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { editing, openOptions, optionsSync } from "../options/atoms.ts";
+import { readChoice } from "../page/device.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { openTimeline, sync, timelinesState } from "../timelines/atoms.ts";
@@ -572,5 +574,38 @@ describe("the palette and the keys", () => {
     await settled(() => daemon.ui.options.leading === 1.6);
 
     expect(field).toStrictEqual(["number", "1", "2", "0.01", "1.45"]);
+  });
+
+  it("edits a font's family in place for this device alone, though it overrides nothing, and leaves every device's font", async () => {
+    const { container, daemon, registry } = await signedIn();
+    const name = "ui.font";
+    const selector = `input[aria-label="Value of ${name}"]`;
+
+    await run(registry, openOptions, "ui.font");
+    await act(async () => {
+      registry.set(editing, name);
+      await Promise.resolve();
+    });
+    await settled(() => container.querySelector(selector) !== null);
+
+    const editor = container.querySelector<HTMLInputElement>(selector);
+
+    if (editor === null) {
+      throw new Error("no editor");
+    }
+
+    await act(async () => {
+      editor.focus();
+      editor.value = "Fira Code";
+      await Promise.resolve();
+    });
+
+    await press(editor, { key: "Enter" });
+    await settled(() => readChoice(deviceUiKey) !== undefined);
+
+    expect({ kept: readChoice(deviceUiKey), shared: daemon.ui.options.font }).toStrictEqual({
+      kept: '{"font":"Fira Code"}',
+      shared: "system",
+    });
   });
 });

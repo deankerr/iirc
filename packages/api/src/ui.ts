@@ -250,19 +250,68 @@ export const fontNames = [
   "inter",
 ] as const;
 
+/** A font named in {@link fontNames}: one of those the Frontend draws without being told. */
+export type FontName = (typeof fontNames)[number];
+
+const fontNamesFolded: ReadonlySet<string> = new Set(fontNames);
+
 /**
- * The font text is drawn in, by name, one of {@link fontNames}. A glyph it lacks is drawn
- * in the device's own font of the same kind, monospace or sans. A name stored as `system`
- * before sans fonts were offered still means the device's own monospace font.
+ * Text with its ASCII capitals made small, as a font's name is matched.
+ * @param text - The text.
+ * @returns The text, folded.
  */
-export const FontShown = Schema.Literals(fontNames).annotate({
+const folded = (text: string) => text.replaceAll(/[A-Z]/gu, (letter) => letter.toLowerCase());
+
+/** The most UTF-16 code units a family's name may take. */
+export const fontFamilyMaxLength = 64;
+
+/**
+ * The name of a font family the device has, such as `Fira Code`, as the Owner wrote it:
+ * trimmed, 1 to {@link fontFamilyMaxLength} long, with no control character, lone surrogate,
+ * `"`, or `\`, so set between double quotes it is always exactly one CSS family and nothing
+ * else. It is never a name of {@link fontNames} in any case, so each font has one value.
+ */
+export const FontFamily = Schema.String.check(
+  Schema.isTrimmed({ message: "must not start or end with a space" }),
+  Schema.isMinLength(1),
+  Schema.isMaxLength(fontFamilyMaxLength),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}"\\]*$/u, {
+    message: 'must hold no control character, ", or \\',
+  }),
+  Schema.makeFilter(
+    (name: string) =>
+      !fontNamesFolded.has(folded(name)) || "is a font's name, which names that font instead"
+  )
+)
+  .pipe(Schema.brand("FontFamily"))
+  .annotate({ identifier: "FontFamily" });
+
+/** The decoded form of {@link FontFamily}. */
+export type FontFamily = typeof FontFamily.Type;
+
+/**
+ * The font text is drawn in: one of {@link fontNames}, by name, or a family the device has,
+ * by its own name. A glyph it lacks is drawn in the device's own font of the same kind,
+ * monospace or sans, and a family the device lacks in the device's own monospace font, as
+ * `system`. A name stored as `system` before sans fonts were offered still means the
+ * device's own monospace font. Either is plain text on the wire, told apart by
+ * {@link fontNames}.
+ */
+export const FontShown = Schema.Union([Schema.Literals(fontNames), FontFamily]).annotate({
   default: "system",
   description:
-    "The font text is drawn in. Monospace: system, the device's own, or jetbrains-mono, ibm-plex-mono, source-code-pro, commit-mono, or atkinson-hyperlegible-mono. Sans: system-sans, the device's own, or ibm-plex-sans, atkinson-hyperlegible-next, source-sans-3, or inter. A glyph a font lacks is drawn in the device's own font of the same kind.",
+    "The font text is drawn in. Monospace: system, the device's own, or jetbrains-mono, ibm-plex-mono, source-code-pro, commit-mono, or atkinson-hyperlegible-mono. Sans: system-sans, the device's own, or ibm-plex-sans, atkinson-hyperlegible-next, source-sans-3, or inter. Or any family the device has, by its name, such as Fira Code, up to 64 characters with no \", \\, or control character. A glyph a font lacks is drawn in the device's own font of the same kind, and a family the device lacks in its own monospace font.",
 });
 
 /** The decoded form of {@link FontShown}. */
 export type FontShown = typeof FontShown.Type;
+
+/**
+ * Whether a font is one of {@link fontNames}, rather than a family the device has.
+ * @param font - The font.
+ * @returns Whether it is named.
+ */
+export const isFontName = (font: FontShown): font is FontName => fontNamesFolded.has(font);
 
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({

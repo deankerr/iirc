@@ -2245,6 +2245,153 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "draws in a family the device has, named in a command or the options, on this device alone, falls back to the default font for one it lacks, and says in the options that it was not found",
+    { timeout: 60_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "family"),
+        "#iirc-family"
+      );
+
+      // A family this machine's browser has, as fontconfig lists it, and one no device has.
+      const present = "Noto Serif";
+      const absent = "No Such Font Here";
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByRole("row", { name: channel }).click();
+
+        const composer = page.getByRole("textbox", { name: channel });
+        const log = page.getByRole("log", { name: channel });
+
+        const type = async (text: string) => {
+          await composer.fill(text);
+          await composer.press("Enter");
+        };
+
+        const sample = "mmmmmmmmmm lllll WWWWW 00000";
+
+        peer.send(`PRIVMSG ${channel} :${sample}`);
+        await log.getByText(sample).waitFor();
+
+        // The fonts the root draws text in, and how wide the sample is drawn.
+        const drawn = async () =>
+          await page.evaluate(async (text) => {
+            await document.fonts.ready;
+            const root = document.documentElement.style;
+
+            const shown = [...document.querySelectorAll("[role=log] *")].find(
+              (one) => one.textContent === text
+            );
+
+            return {
+              font: root.getPropertyValue("--font-text"),
+              width: Math.round(shown?.getBoundingClientRect().width ?? 0),
+            };
+          }, sample);
+
+        const byDefault = await drawn();
+
+        const fontDrawn = async () => {
+          const { font } = await drawn();
+
+          return font;
+        };
+
+        const sharedFont = async () => {
+          const answered = await fetch(`${base}/api/ui`, {
+            headers: { authorization: `Bearer ${key}` },
+          });
+
+          const text = await answered.text();
+
+          return text.includes('"font":"system"');
+        };
+
+        // A family typed in place on a device that overrides nothing is this device's, and
+        // never every device's.
+        await page.keyboard.press("Control+,");
+        await page.getByRole("searchbox", { name: "Filter options" }).fill("ui.font");
+        const fresh = page.getByRole("row", { name: "ui.font" });
+
+        await fresh.focus();
+        await page.keyboard.press("Enter");
+        const typed = page.getByRole("textbox", { name: "Value of ui.font" });
+
+        await typed.fill(absent);
+        await typed.press("Enter");
+        await fresh.getByText("not found on this device").first().waitFor();
+
+        const freshly = {
+          kept: await page.evaluate(() => localStorage.getItem("iirc.ui")),
+          shared: await sharedFont(),
+        };
+
+        await page.getByRole("row", { name: channel }).click();
+
+        await expect.poll(fontDrawn).toContain(absent);
+        const lacked = await drawn();
+
+        await type(`/set -device ui.font ${present}`);
+        await expect.poll(fontDrawn).toContain(present);
+        const had = await drawn();
+
+        await type(`/set -device ui.font ${absent}`);
+        await expect.poll(fontDrawn).toContain(absent);
+
+        // The options say the family in effect here was not found, beside every device's.
+        await page.keyboard.press("Control+,");
+        await page.getByRole("searchbox", { name: "Filter options" }).fill("ui.font");
+        const row = page.getByRole("row", { name: "ui.font" });
+
+        await row.getByText("not found on this device").first().waitFor();
+        const missingRow = await row.textContent();
+
+        // A family typed in place, where this device overrides it, is this device's too, and found.
+        await row.focus();
+        await page.keyboard.press("Enter");
+        const editor = page.getByRole("textbox", { name: "Value of ui.font" });
+
+        await editor.fill(present);
+        await editor.press("Enter");
+        await row.getByText(present, { exact: true }).first().waitFor();
+        const foundRow = await row.textContent();
+
+        const shared = await sharedFont();
+
+        expect({
+          fresh: freshly,
+          had: had.width === byDefault.width,
+          kept: await page.evaluate(() => localStorage.getItem("iirc.ui")),
+          lacked: lacked.width === byDefault.width,
+          lackedFont: lacked.font,
+          problems: problems.filter((problem) => !problem.includes("401")),
+          rows: [missingRow, foundRow].map((text) => text?.includes("not found")),
+          shared,
+        }).toStrictEqual({
+          fresh: { kept: JSON.stringify({ font: absent }), shared: true },
+          had: false,
+          kept: JSON.stringify({ font: present }),
+          lacked: true,
+          lackedFont: `"${absent}", var(--font-device)`,
+          problems: [],
+          rows: [true, false],
+          shared: true,
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "lines up and clips no more in a sans font than in monospace did: the times, the nicks, a refusal, the members, the composer's prompt, the sidebar, and a Lookup's card, at two sizes and on a phone",
     { timeout: 420_000 },
     async () => {

@@ -131,6 +131,7 @@ export {
   ActivityShown,
   Colour,
   ColoursShown,
+  FontFamily,
   FontShown,
   Leading,
   Palette,
@@ -144,12 +145,16 @@ export {
   UiOptions,
   UiSequence,
   builtInThemeNames,
+  fontFamilyMaxLength,
   fontNames,
+  isFontName,
   leadingBounds,
   textSizeBounds,
   uiDefaults,
   uiOptionNames,
   uiValueKept,
 } from "./ui.ts";
+
+export type { FontName } from "./ui.ts";
 
 export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";

@@ -14,6 +14,7 @@ import { Atom } from "effect/reactivity";
 import { channelState } from "../channel/state.ts";
 import { perform } from "../composer/atoms.ts";
 import { optionsState } from "../options/atoms.ts";
+import { deviceUi } from "../options/device.ts";
 import { uiInEffect } from "../options/ui.ts";
 import { themesListed } from "../theme/atoms.ts";
 import { sidebarNetworks, timelinesState } from "../timelines/atoms.ts";
@@ -79,7 +80,8 @@ export const pickEntry = Atom.fnSync((entry: Entry, get) => {
 
   const intents = choose(
     entry,
-    contextOf(registry.get(timelinesState), registry.get(channelState))
+    contextOf(registry.get(timelinesState), registry.get(channelState)),
+    registry.get(deviceUi).font !== undefined
   );
 
   registry.set(paletteHighlight, undefined);

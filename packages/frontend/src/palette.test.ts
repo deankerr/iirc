@@ -1,4 +1,5 @@
 import { NetworkId, Timeline, TimelineId } from "@iirc/api";
+import { FontFamily } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Schema } from "effect";
 import * as fc from "fast-check";
@@ -8,7 +9,16 @@ import type { CommandContext } from "./commands.ts";
 import { draftOf, initialComposers, reduceComposers, started } from "./composer.ts";
 import { defaultKeymap, formatChord } from "./keymap.ts";
 import { optionsOf } from "./options.ts";
-import { choose, initialPalette, recentCap, reducePalette, remember, sections } from "./palette.ts";
+import {
+  choose,
+  fontDescription,
+  fontOfKey,
+  initialPalette,
+  recentCap,
+  reducePalette,
+  remember,
+  sections,
+} from "./palette.ts";
 import type { Entry, Listing, PaletteEvent, Section } from "./palette.ts";
 import { listedThemes, paletteNamed } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
@@ -293,7 +303,7 @@ describe("the palette's entries", () => {
 
 const all = sections(listing(), "", []);
 
-const pick = (key: string, context = inChannel) => choose(entryOf(all, key), context);
+const pick = (key: string, context = inChannel) => choose(entryOf(all, key), context, false);
 
 describe("choosing an entry", () => {
   it("runs a command that needs no arguments, and starts one that does in the composer", () => {
@@ -321,9 +331,9 @@ describe("choosing an entry", () => {
 
   it("opens a Timeline, starts /set for an option, and asks for a Credential in the prompt", () => {
     expect({
-      credential: choose(entryOf(all, "option:network.libera.password"), inChannel),
-      option: choose(entryOf(all, "option:network.libera.nicks"), inChannel),
-      timeline: choose(entryOf(all, `timeline:${own}`), inChannel),
+      credential: choose(entryOf(all, "option:network.libera.password"), inChannel, false),
+      option: choose(entryOf(all, "option:network.libera.nicks"), inChannel, false),
+      timeline: choose(entryOf(all, `timeline:${own}`), inChannel, false),
     }).toStrictEqual({
       credential: [{ _tag: "PromptCredential", network: libera, path: ["password"] }],
       option: [{ _tag: "FocusComposer", text: "/set network.libera.nicks " }],
@@ -346,7 +356,7 @@ describe("the themes in the palette", () => {
     expect({
       all: titles(sections(themed, "", [])),
       byName: keys(sections(themed, "dracu", [])),
-      chosen: choose(nord, inChannel),
+      chosen: choose(nord, inChannel, false),
       current: nord._tag === "Theme" && nord.current,
       scoped: keys(scoped),
       themes: first(sections(themed, "theme", [])),
@@ -388,7 +398,7 @@ describe("the fonts in the palette", () => {
       bySans: keys(sections(fonted, "sans", []))
         .find(([title]) => title === "Fonts")?.[1]
         .toSorted(),
-      chosen: choose(commit, inChannel),
+      chosen: choose(commit, inChannel, false),
       current: commit._tag === "Font" && commit.current,
       fonts: keys(all).find(([title]) => title === "Fonts"),
       found: keys(sections(fonted, "font", [])).find(([title]) => title === "Fonts")?.[1].length,
@@ -423,6 +433,64 @@ describe("the fonts in the palette", () => {
       found: 11,
       scoped: ["Themes"],
     });
+  });
+});
+
+describe("a family typed in the palette", () => {
+  it("is offered after font, unless it names a font listed or no family, and set for this device alone", () => {
+    const fonted = { ...listing(), themes: listedThemes([]) };
+
+    const fontsFor = (query: string) =>
+      sections(fonted, query, []).find((section) => section.title === "Fonts")?.entries ?? [];
+
+    const [typed] = fontsFor("/font  Fira Code ");
+
+    expect({
+      alone: fontsFor("Fira Code").map((one) => one.key),
+      anyCase: fontsFor("FONT fira code").map((one) => one.key),
+      chosen: typed === undefined ? undefined : choose(typed, inChannel, false),
+      first: titles(sections(fonted, "font Fira Code", [])),
+      named: fontsFor("font Inter").map((one) => one.key),
+      previewed: typed === undefined ? undefined : fontOfKey(typed.key),
+      refused: ['font Fira"Code', String.raw`font Fira\Code`, `font ${"x".repeat(65)}`].map(
+        (query) => fontsFor(query).length
+      ),
+      said: typed?._tag === "Font" ? fontDescription(typed.name) : undefined,
+      themes: titles(sections(fonted, "font Fira Code", [], "Themes")),
+      typed,
+    }).toStrictEqual({
+      alone: [],
+      anyCase: ["font:fira code"],
+      chosen: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      first: ["Fonts"],
+      named: [],
+      previewed: "Fira Code",
+      refused: [0, 0, 0],
+      said: "font: a family on this device",
+      themes: [],
+      typed: { _tag: "Font", current: false, key: "font:Fira Code", name: "Fira Code" },
+    });
+  });
+
+  it("is said to be in effect when it is", () => {
+    const fira = Schema.decodeSync(FontFamily)("Fira Code");
+    const fonted = { ...listing(), font: fira, themes: listedThemes([]) };
+
+    expect(
+      sections(fonted, "font Fira Code", []).find((section) => section.title === "Fonts")?.entries
+    ).toStrictEqual([{ _tag: "Font", current: true, key: "font:Fira Code", name: "Fira Code" }]);
+  });
+
+  it("is listed among the recent once chosen, with no query naming it, and is not made from a key no family has", () => {
+    const fonted = { ...listing(), themes: listedThemes([]) };
+    const recent = ["font:Fira Code", 'font:Fira"Code', "font:inter"];
+
+    expect(
+      sections(fonted, "", recent).find((section) => section.title === "Recent")?.entries
+    ).toStrictEqual([
+      { _tag: "Font", current: false, key: "font:Fira Code", name: "Fira Code" },
+      { _tag: "Font", current: false, key: "font:inter", name: "inter" },
+    ]);
   });
 });
 
@@ -475,7 +543,7 @@ const everyEntry = all.flatMap((section) => section.entries);
 const afterChoosing = (text: string, entry: Entry) => {
   let state = reduceComposers(initialComposers, { _tag: "Edited", text, timeline: channel });
 
-  for (const intent of choose(entry, inChannel)) {
+  for (const intent of choose(entry, inChannel, false)) {
     if (intent._tag === "FocusComposer") {
       state = started(state, channel, intent.text);
     }
@@ -518,6 +586,31 @@ describe("a choice and the draft", () => {
         recalled: undefined,
         text: "half a thought",
       },
+    });
+  });
+});
+
+const written = (entry: Entry | undefined, overridesFont: boolean) =>
+  entry === undefined ? undefined : choose(entry, inChannel, overridesFont);
+
+describe("where choosing a font is written", () => {
+  it("is this device's for a family, and for a bundled font while this device overrides ui.font, and every device's otherwise", () => {
+    const fonted = { ...listing(), themes: listedThemes([]) };
+
+    const entries = sections(fonted, "font Fira Code", []).flatMap((section) => section.entries);
+    const family = entries.find((entry) => entry.key === "font:Fira Code");
+    const inter = entryOf(sections(fonted, "", []), "font:inter");
+
+    expect({
+      familyAlone: written(family, false),
+      familyOverriding: written(family, true),
+      interAlone: written(inter, false),
+      interOverriding: written(inter, true),
+    }).toStrictEqual({
+      familyAlone: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      familyOverriding: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      interAlone: [{ _tag: "ChangeUi", device: false, option: "font", value: "inter" }],
+      interOverriding: [{ _tag: "ChangeUi", device: true, option: "font", value: "inter" }],
     });
   });
 });
