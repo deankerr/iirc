@@ -19,6 +19,7 @@ import type { Chord, Keymap } from "./keymap.ts";
 import type { Option } from "./options.ts";
 import type { ListedTheme } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
+import { writtenOnDevice } from "./ui.ts";
 
 /** How many entries chosen recently the palette remembers. */
 export const recentCap = 20;
@@ -546,13 +547,18 @@ export const sections = (
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
  * `/set <name>` alone does, since its value is never typed into the composer. A theme or a
- * font is drawn in, on every device, but a family the device has, on this device alone,
- * since another device's fonts are its own.
+ * font is drawn in, on every device, unless this device overrides the font, but a family
+ * the device has is always on this device alone, since another device's fonts are its own.
  * @param entry - The entry chosen.
  * @param context - The context commands are judged in.
+ * @param overridesFont - Whether this device overrides `ui.font`.
  * @returns The intents to carry out.
  */
-export const choose = (entry: Entry, context: CommandContext): readonly Intent[] => {
+export const choose = (
+  entry: Entry,
+  context: CommandContext,
+  overridesFont: boolean
+): readonly Intent[] => {
   switch (entry._tag) {
     case "Command": {
       const command = commandWithId(entry.id);
@@ -589,7 +595,12 @@ export const choose = (entry: Entry, context: CommandContext): readonly Intent[]
 
     case "Font": {
       return [
-        { _tag: "ChangeUi", device: !isFontName(entry.name), option: "font", value: entry.name },
+        {
+          _tag: "ChangeUi",
+          device: writtenOnDevice("font", entry.name, overridesFont),
+          option: "font",
+          value: entry.name,
+        },
       ];
     }
 

@@ -2296,13 +2296,42 @@ describe("the web frontend on iirc daemon --web", () => {
 
         const byDefault = await drawn();
 
-        await type(`/set -device ui.font ${absent}`);
-
         const fontDrawn = async () => {
           const { font } = await drawn();
 
           return font;
         };
+
+        const sharedFont = async () => {
+          const answered = await fetch(`${base}/api/ui`, {
+            headers: { authorization: `Bearer ${key}` },
+          });
+
+          const text = await answered.text();
+
+          return text.includes('"font":"system"');
+        };
+
+        // A family typed in place on a device that overrides nothing is this device's, and
+        // never every device's.
+        await page.keyboard.press("Control+,");
+        await page.getByRole("searchbox", { name: "Filter options" }).fill("ui.font");
+        const fresh = page.getByRole("row", { name: "ui.font" });
+
+        await fresh.focus();
+        await page.keyboard.press("Enter");
+        const typed = page.getByRole("textbox", { name: "Value of ui.font" });
+
+        await typed.fill(absent);
+        await typed.press("Enter");
+        await fresh.getByText("not found on this device").first().waitFor();
+
+        const freshly = {
+          kept: await page.evaluate(() => localStorage.getItem("iirc.ui")),
+          shared: await sharedFont(),
+        };
+
+        await page.getByRole("row", { name: channel }).click();
 
         await expect.poll(fontDrawn).toContain(absent);
         const lacked = await drawn();
@@ -2322,7 +2351,7 @@ describe("the web frontend on iirc daemon --web", () => {
         await row.getByText("not found on this device").first().waitFor();
         const missingRow = await row.textContent();
 
-        // A family typed in place, here, is this device's too, and found.
+        // A family typed in place, where this device overrides it, is this device's too, and found.
         await row.focus();
         await page.keyboard.press("Enter");
         const editor = page.getByRole("textbox", { name: "Value of ui.font" });
@@ -2332,21 +2361,19 @@ describe("the web frontend on iirc daemon --web", () => {
         await row.getByText(present, { exact: true }).first().waitFor();
         const foundRow = await row.textContent();
 
-        const answered = await fetch(`${base}/api/ui`, {
-          headers: { authorization: `Bearer ${key}` },
-        });
-
-        const sharedUi = await answered.text();
+        const shared = await sharedFont();
 
         expect({
+          fresh: freshly,
           had: had.width === byDefault.width,
           kept: await page.evaluate(() => localStorage.getItem("iirc.ui")),
           lacked: lacked.width === byDefault.width,
           lackedFont: lacked.font,
           problems: problems.filter((problem) => !problem.includes("401")),
           rows: [missingRow, foundRow].map((text) => text?.includes("not found")),
-          shared: sharedUi.includes('"font":"system"'),
+          shared,
         }).toStrictEqual({
+          fresh: { kept: JSON.stringify({ font: absent }), shared: true },
           had: false,
           kept: JSON.stringify({ font: present }),
           lacked: true,

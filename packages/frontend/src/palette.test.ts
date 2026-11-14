@@ -303,7 +303,7 @@ describe("the palette's entries", () => {
 
 const all = sections(listing(), "", []);
 
-const pick = (key: string, context = inChannel) => choose(entryOf(all, key), context);
+const pick = (key: string, context = inChannel) => choose(entryOf(all, key), context, false);
 
 describe("choosing an entry", () => {
   it("runs a command that needs no arguments, and starts one that does in the composer", () => {
@@ -331,9 +331,9 @@ describe("choosing an entry", () => {
 
   it("opens a Timeline, starts /set for an option, and asks for a Credential in the prompt", () => {
     expect({
-      credential: choose(entryOf(all, "option:network.libera.password"), inChannel),
-      option: choose(entryOf(all, "option:network.libera.nicks"), inChannel),
-      timeline: choose(entryOf(all, `timeline:${own}`), inChannel),
+      credential: choose(entryOf(all, "option:network.libera.password"), inChannel, false),
+      option: choose(entryOf(all, "option:network.libera.nicks"), inChannel, false),
+      timeline: choose(entryOf(all, `timeline:${own}`), inChannel, false),
     }).toStrictEqual({
       credential: [{ _tag: "PromptCredential", network: libera, path: ["password"] }],
       option: [{ _tag: "FocusComposer", text: "/set network.libera.nicks " }],
@@ -356,7 +356,7 @@ describe("the themes in the palette", () => {
     expect({
       all: titles(sections(themed, "", [])),
       byName: keys(sections(themed, "dracu", [])),
-      chosen: choose(nord, inChannel),
+      chosen: choose(nord, inChannel, false),
       current: nord._tag === "Theme" && nord.current,
       scoped: keys(scoped),
       themes: first(sections(themed, "theme", [])),
@@ -398,7 +398,7 @@ describe("the fonts in the palette", () => {
       bySans: keys(sections(fonted, "sans", []))
         .find(([title]) => title === "Fonts")?.[1]
         .toSorted(),
-      chosen: choose(commit, inChannel),
+      chosen: choose(commit, inChannel, false),
       current: commit._tag === "Font" && commit.current,
       fonts: keys(all).find(([title]) => title === "Fonts"),
       found: keys(sections(fonted, "font", [])).find(([title]) => title === "Fonts")?.[1].length,
@@ -448,7 +448,7 @@ describe("a family typed in the palette", () => {
     expect({
       alone: fontsFor("Fira Code").map((one) => one.key),
       anyCase: fontsFor("FONT fira code").map((one) => one.key),
-      chosen: typed === undefined ? undefined : choose(typed, inChannel),
+      chosen: typed === undefined ? undefined : choose(typed, inChannel, false),
       first: titles(sections(fonted, "font Fira Code", [])),
       named: fontsFor("font Inter").map((one) => one.key),
       previewed: typed === undefined ? undefined : fontOfKey(typed.key),
@@ -531,7 +531,7 @@ const everyEntry = all.flatMap((section) => section.entries);
 const afterChoosing = (text: string, entry: Entry) => {
   let state = reduceComposers(initialComposers, { _tag: "Edited", text, timeline: channel });
 
-  for (const intent of choose(entry, inChannel)) {
+  for (const intent of choose(entry, inChannel, false)) {
     if (intent._tag === "FocusComposer") {
       state = started(state, channel, intent.text);
     }
@@ -574,6 +574,31 @@ describe("a choice and the draft", () => {
         recalled: undefined,
         text: "half a thought",
       },
+    });
+  });
+});
+
+const written = (entry: Entry | undefined, overridesFont: boolean) =>
+  entry === undefined ? undefined : choose(entry, inChannel, overridesFont);
+
+describe("where choosing a font is written", () => {
+  it("is this device's for a family, and for a bundled font while this device overrides ui.font, and every device's otherwise", () => {
+    const fonted = { ...listing(), themes: listedThemes([]) };
+
+    const entries = sections(fonted, "font Fira Code", []).flatMap((section) => section.entries);
+    const family = entries.find((entry) => entry.key === "font:Fira Code");
+    const inter = entryOf(sections(fonted, "", []), "font:inter");
+
+    expect({
+      familyAlone: written(family, false),
+      familyOverriding: written(family, true),
+      interAlone: written(inter, false),
+      interOverriding: written(inter, true),
+    }).toStrictEqual({
+      familyAlone: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      familyOverriding: [{ _tag: "ChangeUi", device: true, option: "font", value: "Fira Code" }],
+      interAlone: [{ _tag: "ChangeUi", device: false, option: "font", value: "inter" }],
+      interOverriding: [{ _tag: "ChangeUi", device: true, option: "font", value: "inter" }],
     });
   });
 });

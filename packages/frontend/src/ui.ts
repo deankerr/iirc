@@ -9,9 +9,11 @@
  */
 import type { ItemContent } from "@iirc/api";
 import {
+  FontShown,
   UiOptionName,
   ansiCount,
   fontFamilyMaxLength,
+  isFontName,
   themesCap,
   uiDefaults,
   uiValueKept,
@@ -114,6 +116,32 @@ export const overridden = (
   const entries = value === undefined ? others : [...others, [option, value] as const];
 
   return deviceUiOf(JSON.stringify(Object.fromEntries(entries)));
+};
+
+const decodeFont = Schema.decodeUnknownOption(FontShown);
+
+/**
+ * Whether a change of an option under `ui` is written as this device's own value, rather
+ * than the one every device shares. A font's family is always a device's own, since each
+ * device has its own fonts. Any other value is the shared one's, unless this device
+ * overrides the option already, since its override would win over the change here.
+ * @param option - The option.
+ * @param value - The value it is set to, as JSON, or none to unset it.
+ * @param overridden - Whether this device overrides the option.
+ * @returns Whether this device's value is the one written.
+ */
+export const writtenOnDevice = (
+  option: UiOptionName,
+  value: Schema.Json | undefined,
+  overridden: boolean
+): boolean => {
+  if (overridden || option !== "font") {
+    return overridden;
+  }
+
+  const font = decodeFont(value);
+
+  return Option.isSome(font) && !isFontName(font.value);
 };
 
 /**
