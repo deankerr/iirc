@@ -9,15 +9,18 @@
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import type { TimeShown } from "@iirc/api";
 import type { Header, TopicShown } from "@iirc/frontend/channel";
 import { useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
+import { timeShown } from "../options/ui.ts";
 import { paneNameOf } from "../panes/atoms.ts";
 import { BarText, PaneBar } from "../panes/pane-bar.tsx";
 import { paneTimeline } from "../timelines/atoms.ts";
 import { Inlines } from "../timelines/inlines.tsx";
 import { Tip, ToggleButton } from "../ui/button.tsx";
+import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
 import { Icon } from "../ui/icon.tsx";
 import { timelineHeader } from "./atoms.ts";
@@ -25,16 +28,14 @@ import { membersOpen, toggleMembers } from "./state.ts";
 
 import styles from "./timeline-header.module.css";
 
-// The Owner's own clock and time zone, which only the view reads.
-const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
 /**
  * Who set a topic, and when, in a few dim words.
  * @param topic - The topic.
+ * @param shown - How a line's time shows, which says how the time reads.
  * @returns The words, or none when neither is known.
  */
-const setText = (topic: Extract<TopicShown, { readonly _tag: "Set" }>) => {
-  const when = topic.at === undefined ? undefined : formattedAt(day, topic.at);
+const setText = (topic: Extract<TopicShown, { readonly _tag: "Set" }>, shown: TimeShown) => {
+  const when = topic.at === undefined ? undefined : formattedAt(datedClockFor(shown), topic.at);
 
   if (topic.by === undefined) {
     return when === undefined ? undefined : `set ${when}`;
@@ -70,6 +71,8 @@ const TopicPanel = ({ topic }: { readonly topic: TopicShown | undefined }) => (
  * @returns The topic's part of the bar.
  */
 const TopicLine = ({ open, topic }: { readonly topic: TopicShown; readonly open: boolean }) => {
+  const shown = useAtomValue(timeShown);
+
   switch (topic._tag) {
     case "Unknown": {
       return null;
@@ -83,7 +86,7 @@ const TopicLine = ({ open, topic }: { readonly topic: TopicShown; readonly open:
       return (
         <AriaButton className={styles.topic} slot="trigger">
           {open ? (
-            <bdi className={styles.dim}>{setText(topic) ?? "the topic"}</bdi>
+            <bdi className={styles.dim}>{setText(topic, shown) ?? "the topic"}</bdi>
           ) : (
             // The line is a button, so a link in it is text here, and a link once disclosed.
             <bdi>

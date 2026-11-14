@@ -1081,7 +1081,7 @@ describe("the options under ui", () => {
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
-        { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "none"] },
+        { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "h:mm a", "h:mm:ss a", "none"] },
         { _tag: "IntegerOrChoice", choices: ["none"], maximum: 400, minimum: 40 },
       ],
     });
@@ -1260,6 +1260,8 @@ describe("the options under ui", () => {
       size: read("/set -device ui.size 20"),
       tooBig: read("/set ui.size 25"),
       tooSmall: read("/set ui.size 9"),
+      twelveHour: read("/set ui.time h:mm:ss a"),
+      twelveHourAnyCase: read("/set ui.time H:MM A"),
       unknown: read("/set ui.palette dusk"),
       unset: read("/unset ui.activity"),
       unsetDevice: read("/unset -device ui.theme"),
@@ -1271,6 +1273,7 @@ describe("the options under ui", () => {
       widthTooSmall: read("/set ui.width 39"),
       widthWord: read("/set ui.width auto"),
       wrong: read("/set ui.activity loud"),
+      wrongTime: read("/set ui.time noon"),
     }).toStrictEqual({
       alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.time" }] },
       anyCase: change("time", "HH:mm:ss", false),
@@ -1311,6 +1314,8 @@ describe("the options under ui", () => {
         _tag: "Invalid",
         message: 'ui.size: Give a whole number from 10 to 24, not "9".',
       },
+      twelveHour: change("time", "h:mm:ss a", false),
+      twelveHourAnyCase: change("time", "h:mm a", false),
       unknown: {
         _tag: "Invalid",
         message:
@@ -1328,6 +1333,11 @@ describe("the options under ui", () => {
       wrong: {
         _tag: "Invalid",
         message: 'ui.activity: Choose one of all, quiet, none, not "loud".',
+      },
+      // The choices as written, so HH:mm is never read as a 12-hour hh:mm.
+      wrongTime: {
+        _tag: "Invalid",
+        message: 'ui.time: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
       },
     });
   });

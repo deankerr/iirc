@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
-import type { Timeline, TimelineItem } from "@iirc/api";
+import type { TimeShown, Timeline, TimelineItem } from "@iirc/api";
 import { mainOf } from "@iirc/frontend/timelines";
 import { Effect, Schema } from "effect";
 import { act } from "react";
@@ -58,7 +58,7 @@ const listed = (
   unread: { activity: 0, direct: 0, highlights: 0, messages },
 });
 
-const message = (sequence: number): typeof TimelineItem.Encoded => ({
+const message = (sequence: number, at = sequence * 1000): typeof TimelineItem.Encoded => ({
   changed: sequence,
   content: {
     _tag: "Message",
@@ -74,7 +74,7 @@ const message = (sequence: number): typeof TimelineItem.Encoded => ({
   },
   level: "Message",
   network: "libera",
-  position: cursor(sequence * 1000, sequence),
+  position: cursor(at, sequence),
   sequence,
   timeline: iirc,
 });
@@ -170,9 +170,10 @@ const layOut = () => {
  * The Frontend signed in, its page seen, marking read, with `#iirc` holding sixty
  * Messages, the tenth hostile, open.
  * @param unread - How many of them the Daemon counts unread.
+ * @param at - When each was said, by its sequence, if not a second apiece from the epoch.
  * @returns The fake, the registry, and the page.
  */
-const signedIn = async (unread = 0) => {
+const signedIn = async (unread = 0, at?: (sequence: number) => number) => {
   const fake = fakeDaemon();
 
   fake.daemon.signedIn = true;
@@ -181,7 +182,9 @@ const signedIn = async (unread = 0) => {
     { gaps: [], items: [], timeline: listed(own, "libera", "Network") },
     {
       gaps: [],
-      items: Array.from({ length: 60 }, (_, index) => message(index + 1)),
+      items: Array.from({ length: 60 }, (_, index) =>
+        message(index + 1, at === undefined ? undefined : at(index + 1))
+      ),
       timeline: listed(iirc, "#iirc", "Channel", unread),
     },
   ]);
@@ -514,6 +517,62 @@ describe("the search view", () => {
       // The start, then items 1 to 10: the tenth's middle, 210, in the middle of 400.
       target: [true, 10],
     });
+  });
+
+  it("draws each result's time as ui.time says, and HH:mm under none", async () => {
+    // Local mid-afternoon, so no form of the clock writes it as another does.
+    const said = new Date(2026, 10, 15, 15, 7, 9);
+    const { container, registry } = await signedIn(0, () => said.getTime());
+
+    await searchFor(container, registry, "word", 60);
+
+    const date = { day: "numeric", month: "short", year: "numeric" } as const;
+
+    const drawn = async (time: TimeShown | undefined) => {
+      await act(async () => {
+        registry.set(deviceUi, time === undefined ? {} : { time });
+        await Promise.resolve();
+      });
+
+      return container.querySelector('[role="option"] time')?.textContent;
+    };
+
+    const written = (options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat(undefined, { ...date, ...options }).format(said);
+
+    const [twentyFour, withSeconds, twelve, twelveWithSeconds, none] = [
+      await drawn(undefined),
+      await drawn("HH:mm:ss"),
+      await drawn("h:mm a"),
+      await drawn("h:mm:ss a"),
+      await drawn("none"),
+    ];
+
+    expect({
+      none,
+      twelve,
+      twelveWithSeconds,
+      twentyFour,
+      withSeconds,
+    }).toStrictEqual({
+      none: written({ hour: "2-digit", hourCycle: "h23", minute: "2-digit" }),
+      twelve: written({ hour: "numeric", hourCycle: "h12", minute: "2-digit" }),
+      twelveWithSeconds: written({
+        hour: "numeric",
+        hourCycle: "h12",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      twentyFour: written({ hour: "2-digit", hourCycle: "h23", minute: "2-digit" }),
+      withSeconds: written({
+        hour: "2-digit",
+        hourCycle: "h23",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    });
+    expect(twelve).not.toBe(twentyFour);
+    expect(twelveWithSeconds).not.toBe(withSeconds);
   });
 
   it("closes with Escape, showing the Timeline again, and shows what it found when opened again", async () => {

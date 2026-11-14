@@ -718,7 +718,7 @@ const choiceOf = (choices: readonly string[], text: string): Parsed<string> => {
   const found = choices.find((one) => lower(one) === wanted);
 
   return found === undefined
-    ? invalid(`Choose one of ${choices.map(lower).join(", ")}, not "${text}".`)
+    ? invalid(`Choose one of ${choices.join(", ")}, not "${text}".`)
     : parsed(found);
 };
 

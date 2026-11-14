@@ -491,6 +491,85 @@ const timelineDrawn = async (log: ReturnType<Page["getByRole"]>) =>
   });
 
 /**
+ * Each form of `ui.time`, with how the web frontend's clock draws a time of day in it, a copy
+ * here as the spec the clock is held to, and the text of any one such time.
+ */
+const clockForms = [
+  {
+    options: { hour: "2-digit", hourCycle: "h23", minute: "2-digit" },
+    text: /^\d{2}:\d{2}$/u,
+    time: "HH:mm",
+  },
+  {
+    options: { hour: "2-digit", hourCycle: "h23", minute: "2-digit", second: "2-digit" },
+    text: /^\d{2}:\d{2}:\d{2}$/u,
+    time: "HH:mm:ss",
+  },
+  {
+    options: { hour: "numeric", hourCycle: "h12", minute: "2-digit" },
+    text: /^\d{1,2}:\d{2}[^\d:]+$/u,
+    time: "h:mm a",
+  },
+  {
+    options: { hour: "numeric", hourCycle: "h12", minute: "2-digit", second: "2-digit" },
+    text: /^\d{1,2}:\d{2}:\d{2}[^\d:]+$/u,
+    time: "h:mm:ss a",
+  },
+] as const satisfies readonly {
+  readonly options: Intl.DateTimeFormatOptions;
+  readonly text: RegExp;
+  readonly time: string;
+}[];
+
+/**
+ * How far a Timeline's time column is from as wide as it needs and no wider: its width less
+ * the widest time of the form, at any hour of the day, drawn in the same font in an element
+ * like a time. Zero when it is exactly as wide, within half a pixel.
+ * @param log - The Timeline's log.
+ * @param options - The form's Intl options.
+ * @returns The difference, in pixels, and the two widths.
+ */
+const timeColumnDrawn = async (
+  log: ReturnType<Page["getByRole"]>,
+  options: Intl.DateTimeFormatOptions
+) =>
+  await log.evaluate((element, formOptions) => {
+    const time = element.querySelector("time");
+    const parent = time?.parentElement;
+
+    if (time === null || parent === null || parent === undefined) {
+      throw new Error("no time to measure");
+    }
+
+    const format = new Intl.DateTimeFormat(undefined, formOptions);
+    const probe = time.cloneNode();
+
+    if (!(probe instanceof HTMLElement)) {
+      throw new TypeError("a time is an element");
+    }
+
+    // A time's own samples would make the probe as wide as the column, not as wide as its text.
+    delete probe.dataset.sample;
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.width = "max-content";
+    parent.append(probe);
+
+    const widths = Array.from({ length: 24 }, (_, hour) => {
+      probe.textContent = format.format(new Date(2000, 0, 1, hour, 59, 59));
+
+      return probe.getBoundingClientRect().width;
+    });
+
+    probe.remove();
+
+    const column = time.getBoundingClientRect().width;
+    const widest = Math.max(...widths);
+
+    return { column, difference: Math.abs(column - widest) <= 0.5 ? 0 : column - widest, widest };
+  }, options);
+
+/**
  * How the members' rows lie: whose nicks are cut, how many places the nicks start, and how
  * tall each row is.
  * @param members - The members' list.
@@ -2400,7 +2479,7 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
-    "lines up and clips no more in a sans font than in monospace did: the times, the nicks, a refusal, the members, the composer's prompt, the sidebar, and a Lookup's card, at two sizes and on a phone",
+    "lines up and clips no more in a sans font than in monospace did: the times, in each form and no wider than it needs, the nicks, a refusal, the members, the composer's prompt, the sidebar, and a Lookup's card, at two sizes and on a phone",
     { timeout: 420_000 },
     async () => {
       // Ergo, whose nicks run to 32 characters, past RFC 2812's nine.
@@ -2545,6 +2624,7 @@ describe("the web frontend on iirc daemon --web", () => {
           readonly font: string;
           readonly size: number;
           readonly time: string;
+          readonly timeColumn: Awaited<ReturnType<typeof timeColumnDrawn>>;
         })[] = [];
 
         const rest = [];
@@ -2566,19 +2646,21 @@ describe("the web frontend on iirc daemon --web", () => {
               )
               .toContain(font.startsWith("system") ? "var(--font-device" : "Variable");
 
-            for (const time of ["HH:mm", "HH:mm:ss"]) {
+            for (const { options, text, time } of clockForms) {
               // oxlint-disable-next-line no-await-in-loop -- one format after another
               await type(`/set ui.time ${time}`);
               // oxlint-disable-next-line no-await-in-loop -- one format after another
               await expect
                 .poll(async () => await log.locator("time").first().textContent())
-                .toHaveLength(time.length);
+                .toMatch(text);
               // oxlint-disable-next-line no-await-in-loop -- once it is drawn
               await settled(page);
               // oxlint-disable-next-line no-await-in-loop -- one format after another
               const drawn = await timelineDrawn(log);
+              // oxlint-disable-next-line no-await-in-loop -- one format after another
+              const timeColumn = await timeColumnDrawn(log, options);
 
-              timelines.push({ font, size, time, ...drawn });
+              timelines.push({ font, size, time, timeColumn, ...drawn });
             }
 
             // oxlint-disable-next-line no-await-in-loop -- one font after another
@@ -2682,7 +2764,7 @@ describe("the web frontend on iirc daemon --web", () => {
           })),
           // A sans font may show whole the fifteen letters monospace cut, as Source Sans 3's
           // wide "m" leaves room for, and cuts nothing shorter.
-          timelines: timelines.map(({ clipped, font, rows, size, time }) => ({
+          timelines: timelines.map(({ clipped, font, rows, size, time, timeColumn }) => ({
             clipped:
               monospace.has(font) || clipped.length > 1
                 ? ["WWWWWWWWWWWWWWW", "WWWWWWWWWWWWWWWWWWWW"]
@@ -2694,6 +2776,7 @@ describe("the web frontend on iirc daemon --web", () => {
             taller: 0,
             textStarts: 1,
             time,
+            timeColumn: { column: timeColumn.column, difference: 0, widest: timeColumn.widest },
             timeEnds: 1,
           })),
         });

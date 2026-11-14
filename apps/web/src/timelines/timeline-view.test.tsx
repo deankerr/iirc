@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import type { Timeline, TimelineItem, WindowGap } from "@iirc/api";
+import type { TimeShown, Timeline, TimelineItem, WindowGap } from "@iirc/api";
 import { Effect } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -961,6 +961,60 @@ describe("what the view says it shows", () => {
     );
 
     expect(row?.textContent).toMatch(/^\S+ <\S+> line 2$/u);
+  });
+
+  it("says a line's date and time on hover as ui.time says, and no time under none", async () => {
+    // Local mid-afternoon, so no form of the clock writes it as another does.
+    const said = new Date(2026, 10, 15, 15, 7, 9);
+
+    const at = (item: typeof TimelineItem.Encoded) => ({
+      ...item,
+      position: cursor(said.getTime(), item.sequence),
+    });
+
+    const { registry } = await signedIn([], [at(message(1)), at(message(2))]);
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("line 2"));
+
+    const drawn = async (time: TimeShown) => {
+      await act(async () => {
+        registry.set(deviceUi, { time });
+        await Promise.resolve();
+      });
+
+      return logOf().querySelector("time")?.title;
+    };
+
+    const written = (options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        ...options,
+      }).format(said);
+
+    const twentyFour = { hour: "2-digit", hourCycle: "h23", minute: "2-digit" } as const;
+    const twelve = { hour: "numeric", hourCycle: "h12", minute: "2-digit" } as const;
+
+    const titles = {
+      none: await drawn("none"),
+      twelve: await drawn("h:mm a"),
+      twelveWithSeconds: await drawn("h:mm:ss a"),
+      twentyFour: await drawn("HH:mm"),
+      withSeconds: await drawn("HH:mm:ss"),
+    };
+
+    expect(titles).toStrictEqual({
+      // Under none a line has no time to hover.
+      none: undefined,
+      twelve: written(twelve),
+      twelveWithSeconds: written({ ...twelve, second: "2-digit" }),
+      twentyFour: written(twentyFour),
+      withSeconds: written({ ...twentyFour, second: "2-digit" }),
+    });
+    expect(titles.twelve).not.toBe(titles.twentyFour);
   });
 });
 

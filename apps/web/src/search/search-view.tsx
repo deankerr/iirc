@@ -14,9 +14,11 @@ import type { KeyboardEvent } from "react";
 import { Fragment, useContext, useId, useLayoutEffect, useRef } from "react";
 
 import { composerFocus } from "../composer/atoms.ts";
+import { timeShown } from "../options/ui.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { Nick } from "../timelines/line.tsx";
 import { IconButton } from "../ui/button.tsx";
+import { datedClockFor } from "../ui/clock.ts";
 import { dateOf } from "../ui/dates.ts";
 import {
   closeSearch,
@@ -34,16 +36,6 @@ import type { ResultRow } from "./atoms.ts";
 
 import styles from "./search-view.module.css";
 
-// The Owner's own clock and time zone, which only the view reads.
-const when = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  hour: "2-digit",
-  hourCycle: "h23",
-  minute: "2-digit",
-  month: "short",
-  year: "numeric",
-});
-
 /** How near the end of the results, in rows, the next page is asked for. */
 const nearEnd = 8;
 
@@ -58,6 +50,7 @@ const pageRows = 10;
  */
 const Result = ({ row }: { readonly row: ResultRow }) => {
   const { found, place } = row;
+  const when = datedClockFor(useAtomValue(timeShown));
   const date = dateOf(found.item.position.at);
   const nick = <Nick colour={found.colour} nick={found.nick} />;
 
