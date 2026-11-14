@@ -4364,6 +4364,43 @@ describe("removing a Network", () => {
     }).toStrictEqual({ open: eight, sidebar: [["alpha", [eight]]] });
   });
 
+  it("ignores the Daemon's answer to a removal when the Network was read through a newer life", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const eight = timelineId(idOf(8));
+
+    // Following at 6, alpha's Timelines are read through 8: dropped at 7, made again at 8.
+    let state = reduceTimelines(following(), {
+      _tag: "Overflowed",
+      overflow: { sequence: sequenceOf(6), timelines: [three] },
+      place: { sequence: 6, version: 1 },
+    });
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: listOf(8, timelineOf(idOf(8), "Network", "alpha", 8)),
+    });
+    state = reduceTimelines(state, { _tag: "Opened", timeline: eight });
+    // The Daemon's answer to the drop at 7 arrives late.
+    state = reduceTimelines(state, {
+      _tag: "NetworkRemoved",
+      keep: false,
+      network: alpha,
+      sequence: 7,
+    });
+
+    expect({
+      open: openOf(state),
+      sidebar: sidebar(state).map((network) => [
+        network.network,
+        network.removed,
+        network.timelines.map((timeline) => timeline.id),
+      ]),
+    }).toStrictEqual({ open: eight, sidebar: [["alpha", false, [eight]]] });
+  });
+
   it("refuses a page of a Network's Timelines read before a step that ended its life", () => {
     const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
 

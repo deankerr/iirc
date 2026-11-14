@@ -1390,6 +1390,12 @@ const removed = (
 
   const recorded = { ...state, ended: endedAt(state.ended, network, sequence) };
 
+  // A Network read through the removal or later is a newer life, which the answer must
+  // not touch.
+  if ((state.networks.get(network)?.readThrough ?? Number.NEGATIVE_INFINITY) >= sequence) {
+    return recorded;
+  }
+
   if (!keep) {
     return dropped(recorded, new Set([network]), []);
   }
