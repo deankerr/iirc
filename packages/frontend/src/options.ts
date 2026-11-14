@@ -23,7 +23,7 @@ import type { UiInForce } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
 import type { Casemapping } from "@iirc/protocol/casemapping";
-import { Exit, Option as Maybe, Predicate, Schema, SchemaAST } from "effect";
+import { Exit, Number as Numbers, Option as Maybe, Predicate, Schema, SchemaAST } from "effect";
 
 import type { Parsed } from "./commands.ts";
 import { effectiveUi, noOverrides } from "./ui.ts";
@@ -46,7 +46,7 @@ type Record = Schema.JsonObject;
  * - `Choice`: one of `choices`, in any ASCII case.
  * - `Integer`: a whole number from `minimum` to `maximum`, in decimal digits.
  * - `Decimal`: a number from `minimum` to `maximum` that need not be whole, in decimal
- *   digits with at most two places after the point.
+ *   digits, and a multiple of `step`, so it is exact however it is written.
  * - `Credential`: the name of a Credential, set by giving its value, which the Vault holds.
  * - `Texts`: a list, comma-separated, as WeeChat's are, never empty when `nonEmpty`.
  * - `Ircds`: Ircds, comma-separated, each `host/port`, TLS unless followed by the word
@@ -61,7 +61,12 @@ export type Kind =
   | { readonly _tag: "Text" }
   | { readonly _tag: "Choice"; readonly choices: readonly string[] }
   | { readonly _tag: "Integer"; readonly minimum: number; readonly maximum: number }
-  | { readonly _tag: "Decimal"; readonly minimum: number; readonly maximum: number }
+  | {
+      readonly _tag: "Decimal";
+      readonly minimum: number;
+      readonly maximum: number;
+      readonly step: number;
+    }
   | { readonly _tag: "Credential" }
   | { readonly _tag: "Texts"; readonly nonEmpty: boolean }
   | { readonly _tag: "Ircds" }
@@ -205,19 +210,28 @@ const literalsOf = (ast: SchemaAST.Union): readonly string[] | undefined => {
   return values.every((one) => one !== undefined) ? values : undefined;
 };
 
-/** What a number's checks say of it: whether it is whole, and its bounds, when given. */
+/**
+ * What a number's checks say of it: whether it is whole, the step it is a multiple of, and
+ * its bounds, when given.
+ */
 interface NumberChecks {
   whole: boolean;
+  step: number | undefined;
   minimum: number | undefined;
   maximum: number | undefined;
 }
 
 /** What a number with no checks is: not known to be whole, and unbounded. */
-const nothingChecked: NumberChecks = { maximum: undefined, minimum: undefined, whole: false };
+const nothingChecked: NumberChecks = {
+  maximum: undefined,
+  minimum: undefined,
+  step: undefined,
+  whole: false,
+};
 
 /**
- * What a number's checks say of it, from Effect's own `isInt` and `isBetween`, read by the
- * ids they describe themselves with.
+ * What a number's checks say of it, from Effect's own `isInt`, `isMultipleOf`, and
+ * `isBetween`, read by the ids they describe themselves with.
  * @param checks - The checks.
  * @param found - What was found before them.
  * @returns What they say, with what was found before.
@@ -240,6 +254,12 @@ const numberChecks = (
     if (representation?.id === "effect/schema/isInt") {
       said = { ...said, whole: true };
     } else if (
+      representation?.id === "effect/schema/isMultipleOf" &&
+      Predicate.hasProperty(payload, "divisor") &&
+      Predicate.isNumber(payload.divisor)
+    ) {
+      said = { ...said, step: payload.divisor };
+    } else if (
       representation?.id === "effect/schema/isBetween" &&
       Predicate.hasProperty(payload, "minimum") &&
       Predicate.hasProperty(payload, "maximum") &&
@@ -254,19 +274,23 @@ const numberChecks = (
 };
 
 /**
- * The kind of a number, from its checks: bounded, and whole or not, or none, since no
- * option is yet any other number.
+ * The kind of a number, from its checks: bounded, and whole, or a multiple of a step, or
+ * none, since no option is yet any other number.
  * @param ast - The number.
  * @returns Its kind, or none.
  */
 const numberKindOf = (ast: SchemaAST.AST): Kind | undefined => {
-  const { maximum, minimum, whole } = numberChecks(ast.checks ?? [], nothingChecked);
+  const { maximum, minimum, step, whole } = numberChecks(ast.checks ?? [], nothingChecked);
 
   if (minimum === undefined || maximum === undefined) {
     return undefined;
   }
 
-  return { _tag: whole ? "Integer" : "Decimal", maximum, minimum };
+  if (whole) {
+    return { _tag: "Integer", maximum, minimum };
+  }
+
+  return step === undefined ? undefined : { _tag: "Decimal", maximum, minimum, step };
 };
 
 const tagOf = (ast: SchemaAST.Objects): string | undefined => {
@@ -663,24 +687,25 @@ const integerOf = (
 };
 
 /**
- * A number within a `Decimal`'s bounds, in decimal digits with at most two places after
- * the point.
- * @param bounds - The least and the most it may be.
+ * A number within a `Decimal`'s bounds, in decimal digits, that is a multiple of its step.
+ * Effect's own `remainder` is exact in decimal, so no rounding of binary fractions decides.
+ * @param bounds - The least and the most it may be, and the step.
  * @param text - The text.
  * @returns The number, or why not.
  */
 const decimalOf = (
-  bounds: { readonly minimum: number; readonly maximum: number },
+  bounds: { readonly minimum: number; readonly maximum: number; readonly step: number },
   text: string
 ): Parsed<number> => {
-  const { maximum, minimum } = bounds;
+  const { maximum, minimum, step } = bounds;
   const trimmed = text.trim();
-  const value = /^\d{1,16}(?:\.\d{1,2})?$/u.test(trimmed) ? Number(trimmed) : undefined;
+  const value = /^\d{1,16}(?:\.\d{1,16})?$/u.test(trimmed) ? Number(trimmed) : undefined;
 
-  return value === undefined || value < minimum || value > maximum
-    ? invalid(
-        `Give a number from ${minimum} to ${maximum}, with at most two decimal places, not "${text}".`
-      )
+  return value === undefined ||
+    value < minimum ||
+    value > maximum ||
+    Numbers.remainder(value, step) !== 0
+    ? invalid(`Give a number from ${minimum} to ${maximum}, in steps of ${step}, not "${text}".`)
     : parsed(value);
 };
 

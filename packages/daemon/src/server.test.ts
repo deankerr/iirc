@@ -736,6 +736,17 @@ describe("the API over a real server", () => {
           ...json('{"value":0.9}'),
         });
 
+        // A value no step of a hundredth makes is refused, as a sum in binary makes one.
+        const offStep = yield* served.request("/api/ui/leading", {
+          method: "PUT",
+          ...json(`{"value":${1.1 + 0.05}}`),
+        });
+
+        const finer = yield* served.request("/api/ui/leading", {
+          method: "PUT",
+          ...json('{"value":1.455}'),
+        });
+
         // An import may not take a built-in theme's name, so it never hides that theme.
         const palette = JSON.stringify({
           ansi: Array.from({ length: 16 }, () => "#808080"),
@@ -756,7 +767,9 @@ describe("the API over a real server", () => {
 
         return {
           badValue: [badValue.status, yield* textOf(badValue)],
+          finer: [finer.status, yield* textOf(finer)],
           first: first.filter((event) => event.event === "changed"),
+          offStep: [offStep.status, yield* textOf(offStep)],
           reserved: [reserved.status, yield* textOf(reserved)],
           resumed: resumed.filter((event) => event.event === "changed"),
           set: [set.status, yield* textOf(set)],
@@ -776,12 +789,20 @@ describe("the API over a real server", () => {
         400,
         '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.activity","path":["payload","value"]}]}',
       ],
+      finer: [
+        400,
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
+      ],
       first: [
         {
           data: '{"options":{"activity":"all","colours":"theme","font":"system","leading":1.45,"size":14,"theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
           event: "changed",
           id: "0",
         },
+      ],
+      offStep: [
+        400,
+        '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
       ],
       reserved: [
         400,

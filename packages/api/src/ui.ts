@@ -212,11 +212,18 @@ export type TextSize = typeof TextSize.Type;
 /** The least and the most a line of text may be tall, as a multiple of the text's size. */
 export const leadingBounds = { maximum: 2, minimum: 1 } as const;
 
+/** The step the line height moves in, a hundredth of the text's size. */
+const leadingStep = 0.01;
+
 /**
  * The line height: how tall a line of text is, as a multiple of the text's size, within
- * {@link leadingBounds}, so a line too short to read or too tall to fit cannot be given.
+ * {@link leadingBounds} and a multiple of {@link leadingStep}, so a line too short to read
+ * or too tall to fit cannot be given, and every value is exact however it is written.
  */
-export const Leading = Schema.Finite.check(Schema.isBetween(leadingBounds)).annotate({
+export const Leading = Schema.Finite.check(
+  Schema.isBetween(leadingBounds),
+  Schema.isMultipleOf(leadingStep)
+).annotate({
   default: 1.45,
   description: `The line height: how tall a line of text is, as a multiple of the text's size, from ${leadingBounds.minimum} to ${leadingBounds.maximum}.`,
 });

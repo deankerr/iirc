@@ -171,7 +171,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `Text`             | The raw text, exactly                                        |
 | `Choice`, `Tagged` | One of the Schema's literals or tags                         |
 | `Integer`          | A whole number within the Schema's bounds                    |
-| `Decimal`          | A number within the Schema's bounds, to two decimal places   |
+| `Decimal`          | A number within the Schema's bounds, a multiple of its step  |
 | `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes |
 | `Ircds`            | A list of `host` or `host/port`, TLS unless `plain` follows  |
 | `Credential`       | Never text: its Credential's name, and whether it is held    |

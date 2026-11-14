@@ -1173,6 +1173,53 @@ describe("the web frontend on iirc daemon --web", () => {
         await page.keyboard.press("Escape");
         await query.waitFor({ state: "detached" });
 
+        // A change of the line height too small to change a row's estimate still lays the list
+        // out again: each row's wrapper stays as tall as the row it holds, so none is clipped.
+        const rowsClipped = async () =>
+          await members.getByRole("row").evaluateAll((rows) =>
+            rows.flatMap((row) => {
+              const wrapper = row.parentElement;
+              const wrapperHeight = wrapper?.getBoundingClientRect().height ?? 0;
+
+              return wrapperHeight + 0.5 < row.scrollHeight
+                ? [{ row: row.scrollHeight, wrapper: wrapperHeight }]
+                : [];
+            })
+          );
+
+        const lineHeightIs = async (expected: string) =>
+          await page
+            .evaluate(() => getComputedStyle(document.body).lineHeight)
+            .then((now) => now === expected);
+
+        const clipped: { row: number; wrapper: number }[][] = [];
+
+        for (const [leading, expected] of [
+          ["1.46", "20.44px"],
+          ["1.47", "20.58px"],
+          ["1.45", "20.3px"],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await composer.fill(`/set ui.leading ${leading}`);
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await composer.press("Enter");
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await expect.poll(async () => await lineHeightIs(expected)).toBe(true);
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          await page.evaluate(async () => {
+            const { promise, resolve } = Promise.withResolvers<undefined>();
+
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                resolve(undefined);
+              });
+            });
+            await promise;
+          });
+          // oxlint-disable-next-line no-await-in-loop -- one change after another
+          clipped.push(await rowsClipped());
+        }
+
         // The peer ops Self, which the list reads again and shows.
         peer.send(`MODE ${channel} +o iirc`);
         await members.getByRole("row", { name: "iirc, operator" }).waitFor();
@@ -1202,6 +1249,7 @@ describe("the web frontend on iirc daemon --web", () => {
         );
 
         expect({
+          clipped,
           completed,
           menu,
           problems: problems.filter((problem) => problem.includes("Content Security Policy")),
@@ -1209,6 +1257,7 @@ describe("the web frontend on iirc daemon --web", () => {
           topic,
           violations,
         }).toStrictEqual({
+          clipped: [[], [], []],
           completed: "peer: ",
           menu: { focused: true, height: true, items: 3 },
           problems: [],

@@ -179,13 +179,13 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
   };
 
   // A number is a number field within its bounds, so Up and Down step it: by one for a
-  // whole number, and by a twentieth for a decimal.
+  // whole number, and by its own step for a decimal.
   const number =
     option.kind._tag === "Integer" || option.kind._tag === "Decimal"
       ? {
           max: option.kind.maximum,
           min: option.kind.minimum,
-          step: option.kind._tag === "Integer" ? 1 : 0.05,
+          step: option.kind._tag === "Integer" ? 1 : option.kind.step,
           type: "number",
         }
       : { type: "text" };

@@ -1,7 +1,7 @@
 import { NetworkId, TimelineId } from "@iirc/api";
 import { UiOptions } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -345,19 +345,35 @@ describe("the text syntax", () => {
     );
   });
 
-  it("reads back a decimal it shows, with at most two places, within its bounds, and refuses the rest", () => {
-    const kind: Kind = { _tag: "Decimal", maximum: 2, minimum: 1 };
+  it("reads back every value the Schema takes for a decimal, whatever sum made it, and refuses the rest", () => {
+    const kind = uiFields.find((field) => field.key === "leading")?.kind ?? { _tag: "Text" };
+    const taken = Schema.decodeUnknownOption(UiOptions.fields.leading);
+
+    // Values made by sums and products, as arithmetic in binary leaves them, as well as
+    // those written in hundredths, and whatever the Schema takes of them.
+    const made = fc.oneof(
+      fc.integer({ max: 200, min: 100 }).map((hundredths) => hundredths / 100),
+      fc
+        .tuple(fc.integer({ max: 199, min: 100 }), fc.integer({ max: 100, min: 0 }))
+        .map(([base, more]) => base / 100 + more / 100),
+      fc.double({ max: 2, min: 1, noNaN: true })
+    );
 
     fc.assert(
-      fc.property(fc.integer({ max: 200, min: 100 }), (hundredths) => {
-        const value = hundredths / 100;
-
-        expect(parseText(kind, showText(kind, value))).toStrictEqual({
-          _tag: "Parsed",
-          value,
-        });
-      })
+      fc.property(
+        made.filter((value) => Option.isSome(taken(value))),
+        (value) => {
+          expect(parseText(kind, showText(kind, value))).toStrictEqual({ _tag: "Parsed", value });
+        }
+      ),
+      { numRuns: 500 }
     );
+
+    expect({
+      binarySum: Option.isSome(taken(1.1 + 0.05)),
+      fine: Option.isSome(taken(1.455)),
+      step: Option.isSome(taken(1.15)),
+    }).toStrictEqual({ binarySum: false, fine: false, step: true });
 
     expect(
       [
@@ -950,7 +966,7 @@ const change = (option: string, value: Json | undefined, device: boolean) => ({
 });
 
 const leadingRefused = (text: string) =>
-  `ui.leading: Give a number from 1 to 2, with at most two decimal places, not "${text}".`;
+  `ui.leading: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
 
 describe("the options under ui", () => {
   const shared = {
@@ -989,7 +1005,7 @@ describe("the options under ui", () => {
             "atkinson-hyperlegible-mono",
           ],
         },
-        { _tag: "Decimal", maximum: 2, minimum: 1 },
+        { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },

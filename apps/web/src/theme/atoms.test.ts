@@ -402,7 +402,7 @@ describe("themes", () => {
     expect({ before, device, refused, shared, stillDevice, unset, unsetDevice }).toStrictEqual({
       before: "1.45",
       device: "1.2",
-      refused: 'ui.leading: Give a number from 1 to 2, with at most two decimal places, not "3".',
+      refused: 'ui.leading: Give a number from 1 to 2, in steps of 0.01, not "3".',
       shared: "1.8",
       stillDevice: "1.2",
       unset: "1.45",

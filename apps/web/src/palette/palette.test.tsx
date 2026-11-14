@@ -571,6 +571,6 @@ describe("the palette and the keys", () => {
     await press(editor, { key: "Enter" });
     await settled(() => daemon.ui.options.leading === 1.6);
 
-    expect(field).toStrictEqual(["number", "1", "2", "0.05", "1.45"]);
+    expect(field).toStrictEqual(["number", "1", "2", "0.01", "1.45"]);
   });
 });
