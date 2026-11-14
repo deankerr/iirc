@@ -3882,8 +3882,12 @@ describe("the web frontend on iirc daemon --web", () => {
       // Long enough to run the width of a wide Pane more than once.
       const said = Array.from({ length: 60 }, (_, index) => `word${index}`).join(" ");
 
+      // The same, calling Self by nick, so that it is a Highlight, whose tint runs the row.
+      const shouted = `iirc: ${said.replaceAll("word", "call")}`;
+
       try {
         peer.send(`PRIVMSG ${channel} :${said}`);
+        peer.send(`PRIVMSG ${channel} :${shouted}`);
 
         const { page, problems } = await watchedPage(browser);
 
@@ -3958,6 +3962,99 @@ describe("the web frontend on iirc daemon --web", () => {
           };
         };
 
+        /**
+         * How a row reads as one run: whether the Timeline is narrow enough for it, how its
+         * text reaches from where its row's content starts, how tall it is, where it starts,
+         * whether its row was laid out again to its height, and whether the row, with its
+         * tint, runs the Timeline's width.
+         * @param words - What was said, as a whole.
+         * @returns The measures.
+         */
+        const run = async (words: typeof text) => {
+          await settled(page);
+
+          return await words.evaluate((element) => {
+            const probe = document.createElement("span");
+
+            probe.textContent = "0".repeat(100);
+            Object.assign(probe.style, {
+              position: "absolute",
+              visibility: "hidden",
+              whiteSpace: "pre",
+            });
+            element.append(probe);
+            const ch = probe.getBoundingClientRect().width / 100;
+
+            probe.remove();
+
+            const row = element.closest("[data-index]");
+            const line = row?.firstElementChild;
+            // What tints and pads the row, inside the box that holds it.
+            const body = line?.firstElementChild;
+
+            if (!row || !line || !body) {
+              throw new Error("No row holds what was said.");
+            }
+
+            let container = element.parentElement;
+
+            while (container && getComputedStyle(container).containerType !== "inline-size") {
+              container = container.parentElement;
+            }
+
+            if (!container) {
+              throw new Error("No Timeline holds the row.");
+            }
+
+            const style = getComputedStyle(body);
+            const box = body.getBoundingClientRect();
+            const said = element.getBoundingClientRect();
+            const rowBox = row.getBoundingClientRect();
+
+            return {
+              ch,
+              display: style.display,
+              height: said.height,
+              left: said.left,
+              // The query's em is the Timeline's own text size.
+              narrow:
+                container.clientWidth <=
+                36 * Number(getComputedStyle(container).fontSize.replace("px", "")),
+              reach: said.right - (box.left + Number(style.paddingLeft.replace("px", ""))),
+              // The room the run has, between the row's paddings.
+              room:
+                box.width -
+                Number(style.paddingLeft.replace("px", "")) -
+                Number(style.paddingRight.replace("px", "")),
+              stale: Math.abs(rowBox.height - line.getBoundingClientRect().height) >= 0.5,
+              tinted: style.backgroundColor !== "rgba(0, 0, 0, 0)",
+              whole: Math.abs(box.width - rowBox.width) < 0.5,
+              width: box.width,
+            };
+          });
+        };
+
+        /**
+         * How a row read as one run differs with a bound from with none.
+         * @param none - The row with none.
+         * @param bound - The same row with the bound of 40.
+         * @returns What differs, each as it should.
+         */
+        const against = (none: Awaited<ReturnType<typeof run>>, bound: typeof none) => ({
+          // The Timeline is narrow enough for a row to read as one run, in both.
+          asRun: [none.display, bound.display, none.narrow, bound.narrow],
+          // The bound is well within the room the run had, and is the room it has now.
+          atBound: near(bound.room, 40 * bound.ch) && 40 * bound.ch < none.room - 40,
+          left: near(bound.left, none.left),
+          // The text reaches no further than the bound from where its row's content starts,
+          // bar the space a line ends on, which hangs past it, and with none reaches past it.
+          reach: bound.reach <= 41 * bound.ch + 0.5 && none.reach > 41 * bound.ch + 40,
+          stale: [none.stale, bound.stale],
+          taller: bound.height > none.height,
+          // The row runs the Timeline's width as it did with none.
+          whole: [none.whole, bound.whole, near(bound.width, none.width)],
+        });
+
         const widthNow = async () => {
           const now = await drawn();
 
@@ -4000,6 +4097,22 @@ describe("the web frontend on iirc daemon --web", () => {
         await settled(page);
         const phoneBounded = await drawn();
 
+        // A Timeline just narrow enough for a row to read as one run, with a bound well
+        // within it: the run wraps at the bound from its start, and the row, with its tint,
+        // still runs the width. Each is seen with none and with the bound.
+        const called = log.locator("bdi", { hasText: "call59" }).first();
+
+        await called.waitFor();
+        await set("width", "none");
+        await page.setViewportSize({ height: 800, width: 500 });
+        const narrowSaid = await run(text);
+        const narrowCalled = await run(called);
+
+        await set("width", "40");
+        await settled(page);
+        const narrowSaidBounded = await run(text);
+        const narrowCalledBounded = await run(called);
+
         expect({
           bounded: {
             atBound: near(bounded.width, 40 * bounded.ch),
@@ -4015,6 +4128,11 @@ describe("the web frontend on iirc daemon --web", () => {
             stale: larger.stale,
             wider: larger.width > bounded.width,
           },
+          narrow: [
+            against(narrowSaid, narrowSaidBounded),
+            against(narrowCalled, narrowCalledBounded),
+          ],
+          narrowTint: [narrowCalled.tinted, narrowCalledBounded.tinted],
           phone: [phone.left, phone.width, phone.height, phone.stale],
           phoneBounded: [
             phoneBounded.left,
@@ -4036,6 +4154,27 @@ describe("the web frontend on iirc daemon --web", () => {
             taller: true,
           },
           larger: { atBound: true, stale: false, wider: true },
+          narrow: [
+            {
+              asRun: ["block", "block", true, true],
+              atBound: true,
+              left: true,
+              reach: true,
+              stale: [false, false],
+              taller: true,
+              whole: [true, true, true],
+            },
+            {
+              asRun: ["block", "block", true, true],
+              atBound: true,
+              left: true,
+              reach: true,
+              stale: [false, false],
+              taller: true,
+              whole: [true, true, true],
+            },
+          ],
+          narrowTint: [true, true],
           phone: [phone.left, phone.width, phone.height, false],
           phoneBounded: [phone.left, phone.width, phone.height, false],
           problems: [],
