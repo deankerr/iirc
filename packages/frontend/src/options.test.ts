@@ -1273,6 +1273,7 @@ describe("the options under ui", () => {
       widthTooSmall: read("/set ui.width 39"),
       widthWord: read("/set ui.width auto"),
       wrong: read("/set ui.activity loud"),
+      wrongTime: read("/set ui.time noon"),
     }).toStrictEqual({
       alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.time" }] },
       anyCase: change("time", "HH:mm:ss", false),
@@ -1332,6 +1333,11 @@ describe("the options under ui", () => {
       wrong: {
         _tag: "Invalid",
         message: 'ui.activity: Choose one of all, quiet, none, not "loud".',
+      },
+      // The choices as written, so HH:mm is never read as a 12-hour hh:mm.
+      wrongTime: {
+        _tag: "Invalid",
+        message: 'ui.time: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
       },
     });
   });
