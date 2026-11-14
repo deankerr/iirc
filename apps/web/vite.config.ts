@@ -8,8 +8,12 @@ import type { Plugin } from "vite";
 /** The packages of the fonts `src/theme/fonts.css` declares, each with its licence. */
 const fontPackages = [
   "@fontsource-variable/atkinson-hyperlegible-mono",
+  "@fontsource-variable/atkinson-hyperlegible-next",
+  "@fontsource-variable/ibm-plex-sans",
+  "@fontsource-variable/inter",
   "@fontsource-variable/jetbrains-mono",
   "@fontsource-variable/source-code-pro",
+  "@fontsource-variable/source-sans-3",
   "@fontsource/commit-mono",
   "@fontsource/ibm-plex-mono",
 ];

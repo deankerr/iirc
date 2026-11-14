@@ -232,8 +232,9 @@ export const Leading = Schema.Finite.check(
 export type Leading = typeof Leading.Type;
 
 /**
- * The fonts text can be drawn in: `system`, the device's own monospace font, which needs
- * nothing fetched, or a freely licensed monospace font the Frontend serves itself.
+ * The fonts text can be drawn in. Two are the device's own, which need nothing fetched:
+ * `system`, its monospace font, and `system-sans`, its sans font. The rest are freely
+ * licensed fonts the Frontend serves itself: five monospace, then four sans.
  */
 export const fontNames = [
   "system",
@@ -242,16 +243,22 @@ export const fontNames = [
   "source-code-pro",
   "commit-mono",
   "atkinson-hyperlegible-mono",
+  "system-sans",
+  "ibm-plex-sans",
+  "atkinson-hyperlegible-next",
+  "source-sans-3",
+  "inter",
 ] as const;
 
 /**
  * The font text is drawn in, by name, one of {@link fontNames}. A glyph it lacks is drawn
- * in the device's own monospace font.
+ * in the device's own font of the same kind, monospace or sans. A name stored as `system`
+ * before sans fonts were offered still means the device's own monospace font.
  */
 export const FontShown = Schema.Literals(fontNames).annotate({
   default: "system",
   description:
-    "The font text is drawn in: system, the device's own monospace font, or jetbrains-mono, ibm-plex-mono, source-code-pro, commit-mono, or atkinson-hyperlegible-mono.",
+    "The font text is drawn in. Monospace: system, the device's own, or jetbrains-mono, ibm-plex-mono, source-code-pro, commit-mono, or atkinson-hyperlegible-mono. Sans: system-sans, the device's own, or ibm-plex-sans, atkinson-hyperlegible-next, source-sans-3, or inter. A glyph a font lacks is drawn in the device's own font of the same kind.",
 });
 
 /** The decoded form of {@link FontShown}. */

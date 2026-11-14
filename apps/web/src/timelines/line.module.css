@@ -10,20 +10,13 @@
 /*
  * The columns every row shares, so an Activity's words start where a Message's text does,
  * while the Timeline is wide enough for them. Its own width decides, not the screen's, as
- * Panes split. Below it, the next block says how a row reads as one run of text instead.
+ * Panes split. Below it, the container query says how a row reads as one run of text instead.
+ *
+ * Each row is a grid of its own, as the rows are placed one by one, so each sizes its time
+ * and sender columns from the same unseen samples, drawn in the font the text is: a time of
+ * the format shown, and the widest nick monospace shows whole. Every row's columns are then
+ * as wide as every other's, in any font, and no count of characters decides them.
  */
-.timed {
-  --time-column: 5ch;
-}
-
-.seconds {
-  --time-column: 8ch;
-}
-
-.untimed {
-  --time-column: 0;
-}
-
 .message,
 .highlight,
 .unsent,
@@ -32,10 +25,40 @@
 .session,
 .gap {
   display: grid;
-  grid-template-columns: var(--time-column) minmax(0, 16ch) minmax(0, 1fr) auto;
+  grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) auto;
   column-gap: var(--space-3);
   padding: 0 var(--space-3);
   line-height: var(--line-height);
+}
+
+/*
+ * The samples a row's columns are measured by: as wide as they are, and drawn as nothing,
+ * in one style whatever the row's, so a refusal's italic moves no column.
+ */
+.time::before,
+.sender::before,
+.marker::before,
+.rule::before {
+  display: block;
+  height: 0;
+  overflow: hidden;
+  font-style: normal;
+  font-weight: normal;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+/* A time of the format shown, which the line gives, as every digit is as wide as the next. */
+.time[data-sample]::before {
+  content: attr(data-sample);
+}
+
+.sender::before,
+.marker::before,
+.rule::before {
+  white-space: pre;
+  content: "<" var(--nick-sample-upper-w) ">\A<" var(--nick-sample-upper-m) ">\A<"
+    var(--nick-sample-lower-m) ">";
 }
 
 .activity,
@@ -71,16 +94,24 @@
   box-shadow: inset var(--edge-width) 0 0 var(--color-level-highlight);
 }
 
+/* Upright in every row, a refusal's too, so its own width is every other time's. */
 .time {
   color: var(--color-muted);
+  font-style: normal;
   font-variant-numeric: tabular-nums;
 }
 
 .sender {
-  overflow: hidden;
   text-align: right;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The sender as said, cut to the column its sample sets, which a longer nick never widens. */
+.said {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  contain: inline-size;
 }
 
 .text {
@@ -154,10 +185,12 @@
 /*
  * A Timeline narrower than a row's shared columns can hold with room left for its text,
  * which would shrink to a character a line: each row stops using them and reads as one run
- * that wraps under itself, as the time, the sender, then the text. Sixty characters leaves
- * the text at least thirty beside the widest columns, so above it nothing changes.
+ * that wraps under itself, as the time, the sender, then the text. The columns take up to
+ * seventeen em in monospace and twenty-one in the widest sans font, so thirty-six em, sixty
+ * characters of monospace, leaves the text at least fifteen em, some thirty characters,
+ * above it. A query's em is the Timeline's own text size, so this holds at any size.
  */
-@container (max-width: 60ch) {
+@container (max-width: 36em) {
   .message,
   .highlight,
   .unsent,
@@ -166,6 +199,21 @@
   .session,
   .gap {
     display: block;
+  }
+
+  /* With no columns, no sample measures one. */
+  .time::before,
+  .sender::before,
+  .marker::before,
+  .rule::before {
+    display: none;
+  }
+
+  .said {
+    display: inline;
+    overflow: visible;
+    text-overflow: clip;
+    contain: none;
   }
 
   /* With no time shown, its empty span leaves no space before the sender. */
@@ -181,9 +229,7 @@
   }
 
   .sender {
-    overflow: visible;
     text-align: start;
-    text-overflow: clip;
     white-space: normal;
   }
 

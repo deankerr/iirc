@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fontNames } from "@iirc/api";
 import { describe, expect, it } from "vitest";
 
-import { fontStack } from "./fonts.ts";
+import { fontStack, monoStack } from "./fonts.ts";
 
 // Vitest hands a stylesheet to a test as nothing, even with `?raw`, so it is read as a file.
 const fontFaces = readFileSync(new URL("fonts.css", import.meta.url), "utf-8");
@@ -23,7 +23,7 @@ for (const face of fontFaces.matchAll(/@font-face \{(?<body>[^}]*)\}/gu)) {
 }
 
 describe("the fonts", () => {
-  it("draw each font named ahead of the device's own, and the device's alone for system", () => {
+  it("draw each font named ahead of the device's own of its kind, and the device's alone for system and system-sans", () => {
     expect(fontNames.map(fontStack)).toStrictEqual([
       "var(--font-device)",
       '"JetBrains Mono Variable", var(--font-device)',
@@ -31,7 +31,28 @@ describe("the fonts", () => {
       '"Source Code Pro Variable", var(--font-device)',
       '"Commit Mono", var(--font-device)',
       '"Atkinson Hyperlegible Mono Variable", var(--font-device)',
+      "var(--font-device-sans)",
+      '"IBM Plex Sans Variable", var(--font-device-sans)',
+      '"Atkinson Hyperlegible Next Variable", var(--font-device-sans)',
+      '"Source Sans 3 Variable", var(--font-device-sans)',
+      '"Inter Variable", var(--font-device-sans)',
     ]);
+  });
+
+  it("draw IRC's monospace formatting in the font chosen when it is monospace, and in the device's own monospace font beside a sans one", () => {
+    expect(Object.fromEntries(fontNames.map((font) => [font, monoStack(font)]))).toStrictEqual({
+      "atkinson-hyperlegible-mono": '"Atkinson Hyperlegible Mono Variable", var(--font-device)',
+      "atkinson-hyperlegible-next": "var(--font-device)",
+      "commit-mono": '"Commit Mono", var(--font-device)',
+      "ibm-plex-mono": '"IBM Plex Mono", var(--font-device)',
+      "ibm-plex-sans": "var(--font-device)",
+      inter: "var(--font-device)",
+      "jetbrains-mono": '"JetBrains Mono Variable", var(--font-device)',
+      "source-code-pro": '"Source Code Pro Variable", var(--font-device)',
+      "source-sans-3": "var(--font-device)",
+      system: "var(--font-device)",
+      "system-sans": "var(--font-device)",
+    });
   });
 
   it("each have a regular, a bold, and both italic, declared once per range, in WOFF2 alone, swapped in as they load", () => {
@@ -53,10 +74,14 @@ describe("the fonts", () => {
       display: true,
       faces: {
         "Atkinson Hyperlegible Mono Variable": ["200 800 italic", "200 800 normal"],
+        "Atkinson Hyperlegible Next Variable": ["200 800 italic", "200 800 normal"],
         "Commit Mono": ["400 italic", "400 normal", "700 italic", "700 normal"],
         "IBM Plex Mono": ["400 italic", "400 normal", "700 italic", "700 normal"],
+        "IBM Plex Sans Variable": ["100 700 italic", "100 700 normal"],
+        "Inter Variable": ["100 900 italic", "100 900 normal"],
         "JetBrains Mono Variable": ["100 800 italic", "100 800 normal"],
         "Source Code Pro Variable": ["200 900 italic", "200 900 normal"],
+        "Source Sans 3 Variable": ["200 900 italic", "200 900 normal"],
       },
       sources: true,
     });

@@ -18,9 +18,10 @@ import { focusedId, layoutState } from "../panes/atoms.ts";
 export { channelHappened, channelState } from "./channels.ts";
 
 /**
- * The narrowest a Pane is, in pixels, and still holds its members beside its Timeline:
- * about eighteen characters of members and sixty of Timeline, its times and nicks with
- * room to say something. A narrower Pane shows its members over its Timeline instead.
+ * The narrowest a Pane is, in pixels, and still holds its members beside its Timeline: the
+ * members, as wide as the widest nick they show whole, and a Timeline with its times and
+ * nicks and room to say something. A narrower Pane shows its members over its Timeline
+ * instead.
  */
 const narrowBelow = 600;
 

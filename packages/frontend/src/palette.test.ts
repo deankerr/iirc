@@ -285,7 +285,7 @@ describe("the palette's entries", () => {
   });
 
   it("ignores recent choices once there is a query", () => {
-    expect(titles(sections(listing(), "next", ["command:timeline.next"]))).toStrictEqual([
+    expect(titles(sections(listing(), "next tim", ["command:timeline.next"]))).toStrictEqual([
       "Commands",
     ]);
   });
@@ -384,14 +384,24 @@ describe("the fonts in the palette", () => {
     const commit = entryOf(all, "font:commit-mono");
 
     expect({
-      byName: keys(sections(fonted, "plex", [])),
+      byName: keys(sections(fonted, "ibm-plex", [])),
+      bySans: keys(sections(fonted, "sans", []))
+        .find(([title]) => title === "Fonts")?.[1]
+        .toSorted(),
       chosen: choose(commit, inChannel),
       current: commit._tag === "Font" && commit.current,
       fonts: keys(all).find(([title]) => title === "Fonts"),
       found: keys(sections(fonted, "font", [])).find(([title]) => title === "Fonts")?.[1].length,
       scoped: titles(sections(fonted, "", [], "Themes")),
     }).toStrictEqual({
-      byName: [["Fonts", ["font:ibm-plex-mono"]]],
+      byName: [["Fonts", ["font:ibm-plex-mono", "font:ibm-plex-sans"]]],
+      bySans: [
+        "font:atkinson-hyperlegible-next",
+        "font:ibm-plex-sans",
+        "font:inter",
+        "font:source-sans-3",
+        "font:system-sans",
+      ],
       chosen: [{ _tag: "ChangeUi", device: false, option: "font", value: "commit-mono" }],
       current: true,
       fonts: [
@@ -403,9 +413,14 @@ describe("the fonts in the palette", () => {
           "font:source-code-pro",
           "font:commit-mono",
           "font:atkinson-hyperlegible-mono",
+          "font:system-sans",
+          "font:ibm-plex-sans",
+          "font:atkinson-hyperlegible-next",
+          "font:source-sans-3",
+          "font:inter",
         ],
       ],
-      found: 6,
+      found: 11,
       scoped: ["Themes"],
     });
   });

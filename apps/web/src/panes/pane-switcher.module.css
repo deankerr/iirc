@@ -19,9 +19,10 @@
   min-width: 0;
 }
 
-/* A Pane's number and its name, cut to a few words. */
+/* A Pane's number and its name: up to half the row, as the composer's prompt is, and never
+   less than the sixteen columns it had in monospace. */
 .choice {
-  max-width: 16ch;
+  max-width: max(16ch, 50%);
 }
 
 .number {

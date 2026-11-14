@@ -18,6 +18,7 @@
   text-decoration: underline line-through;
 }
 
+/* Fixed pitch as the sender asked, beside a sans font too. */
 .monospace {
   font-family: var(--font-mono);
   background: var(--color-surface);

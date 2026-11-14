@@ -14,6 +14,7 @@ declare const styles: {
   readonly menu: string;
   readonly panel: string;
   readonly popover: string;
+  readonly reference: string;
   readonly scrim: string;
   readonly sheet: string;
   readonly symbol: string;
