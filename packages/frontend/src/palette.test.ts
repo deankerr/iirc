@@ -364,7 +364,7 @@ describe("choosing an entry", () => {
     const networks = sections(withRemoved, "", []).find((one) => one.title === "Networks");
 
     expect({
-      choices: networks?.entries.map((entry) => choose(entry, inChannel)),
+      choices: networks?.entries.map((entry) => choose(entry, inChannel, false)),
       dropFound: first(sections(withRemoved, "drop", [])),
       names: networks?.entries.map((entry) => entry.key),
       removeFound: first(sections(withRemoved, "remove lib", [])),

@@ -1,10 +1,10 @@
 /**
  * The command palette, as data: what it lists for a query, ranked, and what choosing an
  * entry asks for. It lists the commands the registry can run here, every Timeline, every
- * Network to remove, every theme, every font, and the options, or the themes alone, as `/theme` opens it, and adds no
- * action of its own: choosing gives the same intents the composer's `/commands` do. A query of
- * `font` and a family's name offers that family too. Which entries were chosen recently is
- * remembered, at most `recentCap`.
+ * Network to remove, every theme, every font, and the options, or the themes alone, as
+ * `/theme` opens it, and adds no action of its own: choosing gives the same intents the
+ * composer's `/commands` do. A query of `font` and a family's name offers that family too.
+ * Which entries were chosen recently is remembered, at most `recentCap`.
  *
  * @packageDocumentation
  */
@@ -446,9 +446,9 @@ const fontEntry = (font: FontShown, current: FontShown): Entry => ({
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; every Network, to remove it; every theme, to set the option given, but `system` only as `theme`,
- * since it follows the device; every font, and the family the query names, if any; and
- * every option read.
+ * sidebar's order; every Network, to remove it; every theme, to set the option given, but
+ * `system` only as `theme`, since it follows the device; every font, and the family the
+ * query names, if any; and every option read.
  * @param listing - What the palette lists from.
  * @param family - The family the query names, if any.
  * @param option - The option choosing a theme sets.
@@ -613,9 +613,9 @@ export const sections = (
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
  * `/set <name>` alone does, since its value is never typed into the composer. A Network
- * asks to remove it, as `/network remove <id>` does. A theme sets
- * the option its entry says on every device: `theme`, to draw in it, or, listed by
- * `/theme -light` or `-dark`, the one `system` draws while the device is light or dark. A
+ * asks to remove it, as `/network remove <id>` does. A theme sets the option its entry says
+ * on every device: `theme`, to draw in it, or, listed by `/theme -light` or `-dark`, the
+ * one `system` draws while the device is light or dark. A
  * font is drawn in, on every device, unless this device overrides the font, but a family
  * the device has is always on this device alone, since another device's fonts are its own.
  * @param entry - The entry chosen.
