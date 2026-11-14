@@ -23,6 +23,7 @@ const shared = {
     theme: "dark",
     themes: [],
     time: "HH:mm:ss",
+    width: "none",
   },
   sequence: 4,
 } as const;
@@ -43,6 +44,9 @@ describe("a device's overrides", () => {
       notJson: deviceUiOf("{theme"),
       sized: deviceUiOf('{"size":24,"font":"jetbrains-mono"}'),
       sizes: deviceUiOf('{"size":9,"font":"Ios\\"evka"}'),
+      widths: deviceUiOf('{"width":"none","size":20}'),
+      widthsOut: deviceUiOf('{"width":0,"size":20}'),
+      widthsSet: deviceUiOf('{"width":72}'),
     }).toStrictEqual({
       back: { theme: "light", time: "none" },
       empty: undefined,
@@ -57,6 +61,9 @@ describe("a device's overrides", () => {
       notJson: {},
       sized: { font: "jetbrains-mono", size: 24 },
       sizes: {},
+      widths: { size: 20, width: "none" },
+      widthsOut: { size: 20 },
+      widthsSet: { width: 72 },
     });
   });
 
@@ -130,6 +137,7 @@ describe("a device's overrides", () => {
         theme: "system",
         themes: [],
         time: "HH:mm",
+        width: "none",
       },
       device: { ...shared.options, size: 20, theme: "light" },
       leading: 1.8,

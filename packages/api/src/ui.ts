@@ -232,6 +232,30 @@ export const Leading = Schema.Finite.check(
 export type Leading = typeof Leading.Type;
 
 /**
+ * The least and the most characters the widest line may hold. Under forty, a line of a
+ * Timeline holds too few words to read as one; four hundred is wider than any screen at the
+ * smallest text, so no wider bound is a bound at all, and `none` says that instead.
+ */
+export const widestLineBounds = { maximum: 400, minimum: 40 } as const;
+
+/**
+ * The widest line: how many characters what was said in a Timeline runs before it wraps,
+ * a whole number within {@link widestLineBounds}, or `none`, so it runs the width of its
+ * Pane. A character is the font's own `0` at the text's size, so a bound holds as many
+ * words at any size and in any font.
+ */
+export const WidestLine = Schema.Union([
+  Schema.Literal("none"),
+  Schema.Int.check(Schema.isBetween(widestLineBounds)),
+]).annotate({
+  default: "none",
+  description: `The widest a line of a Timeline's text runs, in characters, from ${widestLineBounds.minimum} to ${widestLineBounds.maximum}, or none to run the width of its Pane. A character is as wide as the font's 0, so the bound grows with the text's size.`,
+});
+
+/** The decoded form of {@link WidestLine}. */
+export type WidestLine = typeof WidestLine.Type;
+
+/**
  * The fonts text can be drawn in. Two are the device's own, which need nothing fetched:
  * `system`, its monospace font, and `system-sans`, its sans font. The rest are freely
  * licensed fonts the Frontend serves itself: five monospace, then four sans.
@@ -323,6 +347,7 @@ export const UiOptions = Schema.Struct({
   theme: ThemeShown,
   themes: Themes,
   time: TimeShown,
+  width: WidestLine,
 });
 
 /** The decoded form of {@link UiOptions}. */

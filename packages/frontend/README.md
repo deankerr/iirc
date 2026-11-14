@@ -172,6 +172,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 | `Choice`, `Tagged` | One of the Schema's literals or tags                         |
 | `ChoiceOrText`     | One of the Schema's literals, else the text, trimmed         |
 | `Integer`          | A whole number within the Schema's bounds                    |
+| `IntegerOrChoice`  | One of the Schema's literals, else a whole number as above   |
 | `Decimal`          | A number within the Schema's bounds, a multiple of its step  |
 | `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes |
 | `Ircds`            | A list of `host` or `host/port`, TLS unless `plain` follows  |
