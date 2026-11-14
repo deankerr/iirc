@@ -43,7 +43,9 @@ export type CtcpAnswer =
  * a CTCP request in a `PRIVMSG` from a User other than Self, other than `ACTION` and
  * `DCC`, with what became of it, and a `CtcpReply` one in a `NOTICE`. `nick` is who sent
  * it, `target` where it was sent, and `args` everything after the command, as text to
- * show and nothing more. A `StandardReply`
+ * show and nothing more. A `CtcpUnsent` is an answer Self reported as `Answered` that never
+ * left, placed where its request was, which it names by who asked, where, and the command.
+ * A `StandardReply`
  * is what the Network said of something sent, or of nothing: a `WARN` or a `NOTE`, or a
  * `FAIL` that refused no intent.
  */
@@ -83,7 +85,8 @@ export type Activity =
     }
   | ({ readonly _tag: "StandardReply" } & StandardReply)
   | ({ readonly _tag: "CtcpRequest"; readonly answer: CtcpAnswer } & Ctcp)
-  | ({ readonly _tag: "CtcpReply" } & Ctcp);
+  | ({ readonly _tag: "CtcpReply" } & Ctcp)
+  | ({ readonly _tag: "CtcpUnsent" } & Omit<Ctcp, "args">);
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
 export interface Ctcp {

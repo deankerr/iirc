@@ -276,6 +276,75 @@ describe("the budget for answers", () => {
   });
 });
 
+describe("an answer that never left", () => {
+  it("is reported where the request was, in the Network's Timeline for one sent to Self", () => {
+    played([
+      ...inChannel,
+      lines(
+        "<<\\ :peer!u@h PRIVMSG iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "?? activity CtcpRequest peer iirc VERSION answered=iirc in=existing-direct:peer in=network",
+        "== unsent 1",
+        "?? activity CtcpUnsent peer iirc VERSION in=existing-direct:peer in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is reported in the Channel a request to a Channel was sent to", () => {
+    played([
+      ...inChannel,
+      lines(
+        "<<\\ :peer!u@h PRIVMSG #iirc :\\x01PING 1\\x01",
+        ">>\\ NOTICE peer :\\x01PING 1\\x01",
+        "?? activity CtcpRequest peer #iirc PING answered=1 in=channel:#iirc :1",
+        "== unsent 1",
+        "?? activity CtcpUnsent peer #iirc PING in=channel:#iirc"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is reported after its Connection ended, since it still never left", () => {
+    played([
+      ...inChannel,
+      lines(
+        "<<\\ :peer!u@h PRIVMSG #iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "...",
+        "== closed Reset",
+        "...",
+        "== connection 1",
+        "== unsent 1",
+        "?? activity CtcpUnsent peer #iirc VERSION in=channel:#iirc"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("sends nothing, and leaves a Say's Unsent as it was", () => {
+    const run = played([
+      ...inChannel,
+      lines(
+        "!! say #iirc :hi",
+        ">> PRIVMSG #iirc hi",
+        "...",
+        "<<\\ :peer!u@h PRIVMSG #iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "...",
+        "== unsent 2",
+        "?? refused i1 Unsent",
+        "?? activity CtcpUnsent peer #iirc VERSION in=channel:#iirc"
+      ),
+    ]);
+
+    expect(run.steps.at(-1)?.outputs).toStrictEqual([]);
+  });
+});
+
 describe("a CTCP reply", () => {
   it("is Activity that names who replied, and with what, and answers nothing", () => {
     played([

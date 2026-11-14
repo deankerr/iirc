@@ -133,7 +133,7 @@ const replied = (sequence: number): Change => ({
   timeline: network,
 });
 
-// A CTCP request, with the answer Self sent, and a reply, in the Network's own Timeline.
+// A CTCP request, with the answer Self sent, a reply, and an answer that never left, in the Network's own Timeline.
 const asked = (sequence: number): readonly Change[] =>
   (
     [
@@ -146,6 +146,7 @@ const asked = (sequence: number): readonly Change[] =>
         target: "iirc",
       },
       { _tag: "CtcpReply", args: "irssi", command: "VERSION", nick: "peer", target: "iirc" },
+      { _tag: "CtcpUnsent", command: "PING", nick: "peer", target: "iirc" },
     ] as const
   ).map((activity, index) => ({
     _tag: "Added",
@@ -282,12 +283,12 @@ describe("reopening the file", () => {
         expect(Option.isSome(before.merged)).toBeTruthy();
         expect(before.changed.items.length).toBeGreaterThan(0);
         expect(
-          ["StandardReply", "CtcpRequest", "CtcpReply"].map((tag) =>
+          ["StandardReply", "CtcpRequest", "CtcpReply", "CtcpUnsent"].map((tag) =>
             before.changed.items.some(
               (item) => item.content._tag === "Activity" && item.content.activity._tag === tag
             )
           )
-        ).toStrictEqual([true, true, true]);
+        ).toStrictEqual([true, true, true, true]);
         expect(after).toStrictEqual(before);
       })
     );

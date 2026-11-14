@@ -408,12 +408,14 @@ const CtcpAnswer = Schema.TaggedUnion({
  * what the Network said of something sent, shown where that belongs, or of nothing, shown
  * in the Network's own Timeline: a `WARN`, a `NOTE`, or a `FAIL` that refused nothing. A
  * `CtcpRequest` is a CTCP request another User sent, with what became of it, and a
- * `CtcpReply` a CTCP reply.
+ * `CtcpReply` a CTCP reply. A `CtcpUnsent` is an answer Self sent to a request, by who
+ * asked, where, and its command, that never left after all, shown where the request was.
  */
 export const Activity = Schema.TaggedUnion({
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
   CtcpReply: ctcp,
   CtcpRequest: { ...ctcp, answer: CtcpAnswer },
+  CtcpUnsent: { command: Untrusted, nick: Untrusted, target: Untrusted },
   Joined: { channel: Untrusted, nick: Untrusted },
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },

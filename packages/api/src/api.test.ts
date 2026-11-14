@@ -564,7 +564,7 @@ describe("the contract", () => {
     ]).toStrictEqual([activity, result, false, []]);
   });
 
-  it("carries a CTCP request with its answer, and a reply, each field its own, every word Untrusted", () => {
+  it("carries a CTCP request with its answer, a reply, and an answer that never left, each field its own, every word Untrusted", () => {
     const request = {
       _tag: "CtcpRequest",
       answer: { _tag: "Answered", text: "1 2" },
@@ -584,12 +584,15 @@ describe("the contract", () => {
       target: "iirc",
     } as const;
 
+    const unsent = { _tag: "CtcpUnsent", command: "PING", nick: "peer", target: "iirc" } as const;
+
     expect([
       roundTrip(request),
       roundTrip(refused),
       roundTrip(reply),
+      roundTrip(unsent),
       Schema.is(Activity)({ ...refused, answer: { _tag: "Unanswered", reason: "Bored" } }),
-    ]).toStrictEqual([request, refused, reply, false]);
+    ]).toStrictEqual([request, refused, reply, unsent, false]);
   });
 
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {

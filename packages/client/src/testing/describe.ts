@@ -336,6 +336,13 @@ const writeActivity = (activity: Activity): ActivityParts => {
       };
     }
 
+    case "CtcpUnsent": {
+      return {
+        head: [atom(activity.nick), atom(activity.target), atom(activity.command)],
+        tail: [],
+      };
+    }
+
     case "CtcpRequest":
     case "CtcpReply": {
       const { answer } = activity._tag === "CtcpRequest" ? activity : { answer: undefined };

@@ -279,6 +279,17 @@ const activity = (source: Activity): WireActivity => {
       return wire;
     }
 
+    case "CtcpUnsent": {
+      const wire: Case<Activity, WireActivity, "CtcpUnsent"> = {
+        _tag: "CtcpUnsent",
+        command: source.command,
+        nick: source.nick,
+        target: source.target,
+      };
+
+      return wire;
+    }
+
     case "CtcpRequest": {
       const wire: Case<Activity, WireActivity, "CtcpRequest"> = {
         _tag: "CtcpRequest",

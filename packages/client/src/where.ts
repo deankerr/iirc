@@ -237,7 +237,8 @@ const activityTimelines = (
     // sent it, before either is routed.
     case "StandardReply":
     case "CtcpRequest":
-    case "CtcpReply": {
+    case "CtcpReply":
+    case "CtcpUnsent": {
       return [network];
     }
 

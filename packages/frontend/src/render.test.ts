@@ -539,7 +539,7 @@ describe("lines", () => {
     ]);
   });
 
-  it("shows a CTCP request with the answer sent or why none was, and a reply, its text only as text", () => {
+  it("shows a CTCP request with the answer sent or why none was, a reply, its text only as text, and an answer that never left", () => {
     const ctcp = { args: "", command: "VERSION", nick: "peer", target: "iirc" };
 
     expect(
@@ -553,6 +553,7 @@ describe("lines", () => {
           command: "PING",
         }),
         activity({ _tag: "CtcpReply", ...ctcp, args: "irssi 1.4" }),
+        activity({ _tag: "CtcpUnsent", command: "VERSION", nick: "peer", target: "iirc" }),
       ].map((each) => {
         const line = lineOf(each);
 
@@ -566,6 +567,7 @@ describe("lines", () => {
       ["Activity", "--", "<peer> asked for VERSION, answered iirc"],
       ["Activity", "--", "<peer> asked for PING x\u202E\u202C, not answered: too many requests"],
       ["Activity", "--", "<peer> replied to VERSION: irssi 1.4"],
+      ["Refused", "--", "<peer> asked for VERSION, the answer never left"],
     ]);
   });
 

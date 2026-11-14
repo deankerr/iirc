@@ -206,7 +206,8 @@ const settled = (run: Run, activity: Activity): void => {
     case "Quit":
     case "StandardReply":
     case "CtcpRequest":
-    case "CtcpReply": {
+    case "CtcpReply":
+    case "CtcpUnsent": {
       break;
     }
 

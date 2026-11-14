@@ -18,6 +18,7 @@ import { Instant } from "./ids.ts";
 import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { parseNick, parseTargets } from "./names.ts";
 import type { Ctcp, CtcpAnswer, Unanswered, Where } from "./news.ts";
+import type { Answers } from "./output.ts";
 import type { Run } from "./run.ts";
 import { send } from "./run.ts";
 import { isUser, named } from "./where.ts";
@@ -150,7 +151,9 @@ const answer = (run: Run, arrival: Arrival, ctcp: Ctcp, fromUser: boolean): Ctcp
     return unanswered("Limited");
   }
 
-  if (send(run, line, "NOTICE") === undefined) {
+  const request: Answers = { command: ctcp.command, nick: ctcp.nick, target: ctcp.target };
+
+  if (send(run, line, "NOTICE", undefined, request) === undefined) {
     return unanswered("Unsendable");
   }
 
@@ -169,7 +172,7 @@ const answer = (run: Run, arrival: Arrival, ctcp: Ctcp, fromUser: boolean): Ctcp
  * @param fromUser - Whether a User sent it.
  * @returns The Timelines.
  */
-const ctcpWhere = (run: Run, ctcp: Ctcp, fromUser: boolean): readonly Where[] => {
+const ctcpWhere = (run: Run, ctcp: Answers, fromUser: boolean): readonly Where[] => {
   const naming = namingNow(run);
   const channels = new Map<string, Where>();
 
@@ -233,5 +236,23 @@ export const heardCtcp = (run: Run, arrival: Arrival): void => {
     id: arrival.id,
     live: arrival.live,
     where,
+  });
+};
+
+/**
+ * Reports an answer that never left, where its request was, so a request reported as
+ * `Answered` is not left standing alone. Its request came from a User, or it would not have
+ * been answered. Nothing is sent, and the budget it spent stays spent.
+ * @param run - The step.
+ * @param answers - The request the answer was for.
+ */
+export const answerUnsent = (run: Run, answers: Answers): void => {
+  run.news.push({
+    _tag: "Activity",
+    activity: { _tag: "CtcpUnsent", ...answers },
+    at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+    id: { _tag: "Unknown" },
+    live: true,
+    where: ctcpWhere(run, answers, true),
   });
 };

@@ -476,7 +476,8 @@ export const foldActivity = (
     // What the Network said of something sent, and a CTCP, change no Channel.
     case "StandardReply":
     case "CtcpRequest":
-    case "CtcpReply": {
+    case "CtcpReply":
+    case "CtcpUnsent": {
       return;
     }
 

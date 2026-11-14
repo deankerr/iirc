@@ -389,7 +389,8 @@ const markerOf = (activity: Activity): Marker => {
     case "AwayChanged":
     case "StandardReply":
     case "CtcpRequest":
-    case "CtcpReply": {
+    case "CtcpReply":
+    case "CtcpUnsent": {
       return "--";
     }
 
@@ -552,6 +553,16 @@ const describeActivity = (activity: Activity): readonly Part[] => {
         words(" asked for "),
         ...ctcpParts(activity.command, activity.args, " "),
         ...answerParts(activity.answer),
+      ];
+    }
+
+    // The request again, by who asked and for what, and that its answer never left.
+    case "CtcpUnsent": {
+      return [
+        nickPart(activity.nick),
+        words(" asked for "),
+        name(activity.command),
+        words(", the answer never left"),
       ];
     }
 
@@ -903,7 +914,10 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
         marker: markerOf(activity),
         parts: describeActivity(activity),
         tone:
-          activity._tag === "StandardReply" && activity.kind === "FAIL" ? "Refused" : "Activity",
+          (activity._tag === "StandardReply" && activity.kind === "FAIL") ||
+          activity._tag === "CtcpUnsent"
+            ? "Refused"
+            : "Activity",
       };
     }
 

@@ -165,4 +165,29 @@ describe("a played Session", () => {
       ["PING", libera?.timeline],
     ]);
   });
+
+  it("shows an answer that never left beside its request, in the Channel it was asked in", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      joined(base, "#iirc", ["peer"]),
+      lines(
+        "<<\\ :peer!u@h PRIVMSG #iirc :\\x01VERSION\\x01",
+        ">>\\ NOTICE peer :\\x01VERSION iirc\\x01",
+        "== unsent 1"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" && change.content._tag === "Activity"
+        ? [[change.content.activity._tag, change.timeline, change.level]]
+        : []
+    );
+
+    expect(placed.slice(-2)).toStrictEqual([
+      ["CtcpRequest", libera?.channels.get("#iirc"), "Activity"],
+      ["CtcpUnsent", libera?.channels.get("#iirc"), "Activity"],
+    ]);
+  });
 });

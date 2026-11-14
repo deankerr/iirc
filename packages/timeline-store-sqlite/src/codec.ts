@@ -109,6 +109,7 @@ const Activity = Schema.TaggedUnion({
       },
     }),
   },
+  CtcpUnsent: { command: Schema.String, nick: Schema.String, target: Schema.String },
   Joined: { channel: Schema.String, nick: Schema.String },
   Kicked: {
     by: Schema.String,
