@@ -75,12 +75,17 @@ describe("answering CTCP", () => {
     username: "iirc",
   };
 
-  it("decodes as on from a Configuration written before it existed, and is kept when off", () => {
+  it("decodes as off from a Configuration written before it existed, which answered nothing", () => {
     const decode = Schema.decodeUnknownSync(NetworkConfiguration);
 
     expect([
       decode(old).answerCtcp,
+      decode({ ...old, answerCtcp: true }).answerCtcp,
       decode({ ...old, answerCtcp: false }).answerCtcp,
-    ]).toStrictEqual([true, false]);
+    ]).toStrictEqual([false, true, false]);
+  });
+
+  it("starts on for a new Network", () => {
+    expect(NetworkConfiguration.fields.answerCtcp.ast.annotations).toMatchObject({ default: true });
   });
 });

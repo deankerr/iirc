@@ -56,7 +56,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 `NetworkConfiguration` is the Schema of what `Configured` carries. It is also exported alone from `@iirc/client/configuration`, as pure data a Frontend may import.
 
 - **A Frontend derives every option from the Schema alone**. Each field has a description and says what a new Network starts with, and each Credential field is marked as one. A field added here is an option there with no other work.
-- **A field added later decodes old Journals as its default,** so a Journal written before it still replays.
+- **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` starts on and decodes as off, since no answer was sent then.
 
 ### When the Client dials
 

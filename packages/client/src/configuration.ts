@@ -77,13 +77,15 @@ const Highlights = Schema.Array(
  */
 export const NetworkConfiguration = Schema.Struct({
   /**
-   * Whether Self answers the CTCP requests an IRC client is expected to. A Journal written
-   * before the field existed holds `Configured` inputs without it, which decode as on.
+   * Whether Self answers the CTCP requests an IRC client is expected to. A new Network
+   * starts with it on. A `Configured` written before the field existed decodes as off,
+   * since the Client then answered nothing, so replaying an old Journal never shows a
+   * request as answered that was not.
    */
   answerCtcp: Schema.optionalKey(Schema.Boolean)
     .pipe(
       Schema.decodeTo(Schema.Boolean, {
-        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => true)),
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => false)),
         encode: SchemaGetter.passthrough(),
       })
     )

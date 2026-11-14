@@ -35,6 +35,7 @@ const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000
 const decode = Schema.decodeSync(NetworkConfiguration);
 
 const plain: Configuration = decode({
+  answerCtcp: true,
   channels: [{ name: "#iirc" }],
   declined: [],
   enabled: true,
@@ -829,6 +830,7 @@ describe("the commands", () => {
           {
             _tag: "AddNetwork",
             configuration: decode({
+              answerCtcp: true,
               channels: [],
               declined: [],
               enabled: true,
@@ -873,6 +875,7 @@ describe("the commands", () => {
       started: {
         _tag: "Parsed",
         value: decode({
+          answerCtcp: true,
           channels: [],
           declined: [],
           enabled: true,
