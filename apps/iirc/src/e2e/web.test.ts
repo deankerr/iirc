@@ -2245,8 +2245,8 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
-    "lines up and clips no more in a sans font than in monospace: the times, the nicks, the members, the composer's prompt, the sidebar, and a Lookup's card",
-    { timeout: 240_000 },
+    "lines up and clips no more in a sans font than in monospace did: the times, the nicks, a refusal, the members, the composer's prompt, the sidebar, and a Lookup's card, at two sizes and on a phone",
+    { timeout: 420_000 },
     async () => {
       // Ergo, whose nicks run to 32 characters, past RFC 2812's nine.
       const { base, channel, child, key, ngircd, peer } = await privateNetwork(
@@ -2255,10 +2255,11 @@ describe("the web frontend on iirc daemon --web", () => {
         { start: startErgo }
       );
 
-      // The widest nick monospace shows whole, in brackets in its sixteen columns, in a wide
-      // letter and a narrow one, one past it, a short one, and one far past it.
+      // The widest nick monospace showed whole in a Timeline's column, in a wide letter and a
+      // narrow one; the widest its members' column showed whole at the largest size; a short
+      // one; and one past every column.
       const widest = "WWWWWWWWWWWWWW";
-      const nicks = [widest, "mmmmmmmmmmmmmm", "WWWWWWWWWWWWWWWW", "ab", "WWWWWWWWWWWWWWWWWWWW"];
+      const nicks = [widest, "mmmmmmmmmmmmmm", "WWWWWWWWWWWWWWW", "ab", "WWWWWWWWWWWWWWWWWWWW"];
       const others: Peer[] = [];
 
       try {
@@ -2280,8 +2281,9 @@ describe("the web frontend on iirc daemon --web", () => {
         peer.send(`MODE ${channel} +v ab`);
 
         const { page, problems } = await watchedPage(browser);
+        const wide = { height: 1000, width: 1920 };
 
-        await page.setViewportSize({ height: 900, width: 1400 });
+        await page.setViewportSize(wide);
         await page.goto(base);
         await page.getByLabel("Key").fill(key);
         await page.getByRole("button", { name: "Sign in" }).click();
@@ -2299,33 +2301,61 @@ describe("the web frontend on iirc daemon --web", () => {
         };
 
         await log.getByText("hello from 20").waitFor();
+
+        // Without the operator rank, the Ircd refuses a kick: a row in italic, in the columns.
+        await type("/kick ab");
+        await log.getByText(/was refused \(482\)$/u).waitFor();
+
         await composer.click();
         await page.keyboard.press("Alt+m");
         await members.getByRole("row", { name: "ab, voice" }).waitFor();
 
-        // The composer's prompt for a Direct Message not yet begun with the widest nick: cut
-        // or not, and how tall its line is. Then back to the Channel.
+        // The composer's prompt for a Direct Message not yet begun with the widest nick, on a
+        // wide screen and on a phone: cut or not, how tall its line is, and how far anything
+        // reaches past it. Then back to the Channel.
         const prompt = async () => {
           await type(`/query ${widest}`);
 
           const textbox = page.getByRole("textbox", { name: widest });
 
           await textbox.waitFor();
-          await settled(page);
 
           const id = (await textbox.getAttribute("id")) ?? "";
+          const label = page.locator(`label[for="${id}"]`);
 
-          const drawn = await page.locator(`label[for="${id}"]`).evaluate((label) => ({
-            clipped: [label, ...label.querySelectorAll("*")].some(
-              (one) => one.scrollWidth > one.clientWidth
-            ),
-            height: Math.round(label.parentElement?.getBoundingClientRect().height ?? 0),
-          }));
+          const drawn = async () => {
+            await settled(page);
 
+            return await label.evaluate((element) => {
+              const line = element.parentElement;
+              const { right } = line?.getBoundingClientRect() ?? { right: 0 };
+
+              return {
+                clipped: [element, ...element.querySelectorAll("*")].some(
+                  (one) => one.scrollWidth > one.clientWidth
+                ),
+                height: Math.round(line?.getBoundingClientRect().height ?? 0),
+                past: Math.max(
+                  0,
+                  ...[...(line?.querySelectorAll("*") ?? [])].map((one) =>
+                    Math.round(one.getBoundingClientRect().right - right)
+                  )
+                ),
+              };
+            });
+          };
+
+          const onWide = await drawn();
+
+          await page.setViewportSize({ height: 800, width: 360 });
+
+          const onPhone = await drawn();
+
+          await page.setViewportSize(wide);
           await page.getByRole("row", { name: channel }).click();
           await composer.waitFor();
 
-          return drawn;
+          return { onPhone, onWide };
         };
 
         // How far anything in the widest nick's Lookup reaches past its card, then put away.
@@ -2345,9 +2375,10 @@ describe("the web frontend on iirc daemon --web", () => {
           return past;
         };
 
+        const monospace = new Set(["system", "jetbrains-mono"]);
+
         const fonts = [
-          "system",
-          "jetbrains-mono",
+          ...monospace,
           "system-sans",
           "ibm-plex-sans",
           "atkinson-hyperlegible-next",
@@ -2357,97 +2388,124 @@ describe("the web frontend on iirc daemon --web", () => {
 
         const timelines: (Awaited<ReturnType<typeof timelineDrawn>> & {
           readonly font: string;
+          readonly size: number;
           readonly time: string;
         })[] = [];
 
         const rest = [];
 
-        for (const font of fonts) {
-          // oxlint-disable-next-line no-await-in-loop -- one font after another
-          await type(`/set ui.font ${font}`);
-          // oxlint-disable-next-line no-await-in-loop -- one font after another
-          await expect
-            .poll(
-              async () =>
-                await page.evaluate(() =>
-                  document.documentElement.style.getPropertyValue("--font-text")
-                )
-            )
-            .toContain(font.startsWith("system") ? "var(--font-device" : "Variable");
+        for (const size of [14, 24]) {
+          // oxlint-disable-next-line no-await-in-loop -- one size after another
+          await type(`/set ui.size ${size}`);
 
-          for (const time of ["HH:mm", "HH:mm:ss"]) {
-            // oxlint-disable-next-line no-await-in-loop -- one format after another
-            await type(`/set ui.time ${time}`);
-            // oxlint-disable-next-line no-await-in-loop -- one format after another
+          for (const font of fonts) {
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            await type(`/set ui.font ${font}`);
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
             await expect
-              .poll(async () => await log.locator("time").first().textContent())
-              .toHaveLength(time.length);
-            // oxlint-disable-next-line no-await-in-loop -- once it is drawn
-            await settled(page);
-            // oxlint-disable-next-line no-await-in-loop -- one format after another
-            const drawn = await timelineDrawn(log);
+              .poll(
+                async () =>
+                  await page.evaluate(() =>
+                    document.documentElement.style.getPropertyValue("--font-text")
+                  )
+              )
+              .toContain(font.startsWith("system") ? "var(--font-device" : "Variable");
 
-            timelines.push({ font, time, ...drawn });
+            for (const time of ["HH:mm", "HH:mm:ss"]) {
+              // oxlint-disable-next-line no-await-in-loop -- one format after another
+              await type(`/set ui.time ${time}`);
+              // oxlint-disable-next-line no-await-in-loop -- one format after another
+              await expect
+                .poll(async () => await log.locator("time").first().textContent())
+                .toHaveLength(time.length);
+              // oxlint-disable-next-line no-await-in-loop -- once it is drawn
+              await settled(page);
+              // oxlint-disable-next-line no-await-in-loop -- one format after another
+              const drawn = await timelineDrawn(log);
+
+              timelines.push({ font, size, time, ...drawn });
+            }
+
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            const promptDrawn = await prompt();
+            // oxlint-disable-next-line no-await-in-loop -- one font after another
+            const lookupPast = await lookup();
+
+            rest.push({
+              font,
+              lookupPast,
+              // oxlint-disable-next-line no-await-in-loop -- one font after another
+              members: await membersDrawn(members),
+              // oxlint-disable-next-line no-await-in-loop -- one font after another
+              membersPast: await pastOf(members),
+              prompt: promptDrawn,
+              // oxlint-disable-next-line no-await-in-loop -- one font after another
+              sidebar: await rowHeights(sidebar),
+              // oxlint-disable-next-line no-await-in-loop -- one font after another
+              sidebarPast: await pastOf(sidebar),
+              size,
+            });
           }
-
-          // oxlint-disable-next-line no-await-in-loop -- one font after another
-          const promptDrawn = await prompt();
-          // oxlint-disable-next-line no-await-in-loop -- one font after another
-          const lookupPast = await lookup();
-
-          rest.push({
-            font,
-            lookupPast,
-            // oxlint-disable-next-line no-await-in-loop -- one font after another
-            members: await membersDrawn(members),
-            // oxlint-disable-next-line no-await-in-loop -- one font after another
-            membersPast: await pastOf(members),
-            prompt: promptDrawn,
-            // oxlint-disable-next-line no-await-in-loop -- one font after another
-            sidebar: await rowHeights(sidebar),
-            // oxlint-disable-next-line no-await-in-loop -- one font after another
-            sidebarPast: await pastOf(sidebar),
-          });
         }
 
-        // Monospace is the measure: it cuts only nicks past its sixteen columns, and each sans
-        // font cuts only what it cuts, with every row, the sidebar's, the members', and the
-        // composer's, as tall as it is there.
-        const [mono] = timelines;
-        const [monoRest] = rest;
+        // What monospace showed whole it shows still, and every font shows it whole too: the
+        // Timeline cuts only nicks past fourteen letters, the members only past fifteen, and the
+        // prompt on a wide screen none. On a phone monospace's prompt still holds the widest
+        // nick, and no prompt reaches past its line. Every row, the refusal's too, lines up,
+        // and is as tall as monospace's at its size.
+        const heightsAt = new Map(
+          rest.flatMap((one) => (one.font === "system" ? [[one.size, one]] : []))
+        );
 
         expect({
-          mono: [mono?.clipped, monoRest?.members.clipped, monoRest?.members.starts],
           problems: problems.filter((problem) => !problem.includes("401")),
           rest,
           timelines,
         }).toStrictEqual({
-          mono: [
-            ["WWWWWWWWWWWWWWWW", "WWWWWWWWWWWWWWWWWWWW"],
-            ["WWWWWWWWWWWWWWWW", "WWWWWWWWWWWWWWWWWWWW"],
-            1,
-          ],
           problems: [],
-          rest: rest.map(({ font }) => ({
+          rest: rest.map(({ font, prompt: drawn, size }) => ({
             font,
             lookupPast: 0,
-            members: monoRest?.members,
+            members: {
+              clipped: ["WWWWWWWWWWWWWWWWWWWW"],
+              heights: heightsAt.get(size)?.members.heights,
+              starts: 1,
+            },
             membersPast: 0,
-            prompt: { clipped: false, height: monoRest?.prompt.height },
-            sidebar: monoRest?.sidebar,
+            prompt: {
+              onPhone: {
+                clipped: monospace.has(font) ? false : drawn.onPhone.clipped,
+                height: heightsAt.get(size)?.prompt.onPhone.height,
+                past: 0,
+              },
+              onWide: {
+                clipped: false,
+                height: heightsAt.get(size)?.prompt.onWide.height,
+                past: 0,
+              },
+            },
+            sidebar: heightsAt.get(size)?.sidebar,
             sidebarPast: 0,
+            size,
           })),
-          timelines: timelines.map(({ font, time }) => ({
-            clipped: mono?.clipped,
+          // A sans font may show whole the fifteen letters monospace cut, as Source Sans 3's
+          // wide "m" leaves room for, and cuts nothing shorter.
+          timelines: timelines.map(({ clipped, font, rows, size, time }) => ({
+            clipped:
+              monospace.has(font) || clipped.length > 1
+                ? ["WWWWWWWWWWWWWWW", "WWWWWWWWWWWWWWWWWWWW"]
+                : ["WWWWWWWWWWWWWWWWWWWW"],
             font,
             past: 0,
-            rows: mono?.rows,
+            rows,
+            size,
             taller: 0,
             textStarts: 1,
             time,
             timeEnds: 1,
           })),
         });
+        expect(timelines[0]?.rows).toBe(13);
       } finally {
         for (const other of others) {
           other.close();

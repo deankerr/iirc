@@ -31,7 +31,10 @@
   line-height: var(--line-height);
 }
 
-/* The samples a row's columns are measured by: as wide as they are, and drawn as nothing. */
+/*
+ * The samples a row's columns are measured by: as wide as they are, and drawn as nothing,
+ * in one style whatever the row's, so a refusal's italic moves no column.
+ */
 .time::before,
 .sender::before,
 .marker::before,
@@ -39,6 +42,8 @@
   display: block;
   height: 0;
   overflow: hidden;
+  font-style: normal;
+  font-weight: normal;
   visibility: hidden;
   white-space: nowrap;
 }
@@ -89,8 +94,10 @@
   box-shadow: inset var(--edge-width) 0 0 var(--color-level-highlight);
 }
 
+/* Upright in every row, a refusal's too, so its own width is every other time's. */
 .time {
   color: var(--color-muted);
+  font-style: normal;
   font-variant-numeric: tabular-nums;
 }
 
