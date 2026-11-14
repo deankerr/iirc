@@ -160,7 +160,22 @@ type LinkPhase =
        * ends with the Connection.
        */
       readonly lastSaid: LastSaid;
+      /**
+       * The CTCP `PING`s the Owner sent on this Connection whose replies have not come,
+       * oldest first, at most {@link maxActions}: who each went to, its token, and when it
+       * was sent, so a reply that matches one tells its round trip. Nothing waits on them:
+       * the oldest is forgotten past the bound, a reply forgets its own, and the rest end
+       * with the Connection.
+       */
+      readonly pings: readonly Pinged[];
     };
+
+/** A CTCP `PING` the Owner sent: who to, as said, its token, and the instant it was sent. */
+export interface Pinged {
+  readonly nick: string;
+  readonly token: string;
+  readonly at: Instant;
+}
 
 /** The commands a `Say` sends. */
 type SayCommand = "NOTICE" | "PRIVMSG";

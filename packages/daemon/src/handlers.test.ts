@@ -777,6 +777,81 @@ describe("the handlers", () => {
     expect(result.unsendable).toStrictEqual(["Refused", { _tag: "Unsendable" }]);
   });
 
+  it("sends a PING through the API, and gives its reply's round trip by when the Daemon journaled each", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* api.networks.configure({ params: { network: libera }, payload: floor, query: {} });
+        yield* settle;
+
+        const call = yield* registerOnFloor(world.memory);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        expect(yield* heard(call)).toBe("MODE #iirc");
+        yield* say(call, ":irc.test 324 iirc #iirc +nt");
+        yield* say(call, ":irc.test 366 iirc #iirc :End of /NAMES list.");
+        yield* settle;
+
+        const acted = yield* api.networks.act({
+          params: { network: libera },
+          payload: { action: { _tag: "Ping", nick: "peer" }, intent: CallerIntent.make("ping") },
+        });
+
+        const channel = yield* api.networks.act({
+          params: { network: libera },
+          payload: { action: { _tag: "Ctcp", args: "", command: "VERSION", nick: "#iirc" } },
+        });
+
+        // Registration and the join spent the burst, so the PING waits its turn.
+        yield* settle;
+        yield* TestClock.adjust(2000);
+        const line = yield* heard(call);
+        const asked = "PRIVMSG peer :\u0001PING ";
+        const token = line.startsWith(asked) ? line.slice(asked.length, -1) : undefined;
+
+        yield* TestClock.adjust(1500);
+        yield* say(call, `:peer!u@h NOTICE iirc :\u0001PING ${token ?? ""}\u0001`);
+
+        const stream = yield* api.news.follow({ headers: {}, query: {} });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) =>
+              event.event === "happened" &&
+              event.data.news.some(
+                (one) => one._tag === "Activity" && one.activity._tag === "CtcpReply"
+              )
+          ),
+          Stream.runCollect
+        );
+
+        const ctcp = happenings(events).flatMap((event) =>
+          event.data.news.flatMap((one) =>
+            one._tag === "Activity" && one.activity._tag.startsWith("Ctcp")
+              ? [{ activity: one.activity, at: event.data.at }]
+              : []
+          )
+        );
+
+        return { acted: acted._tag, channel, ctcp, line, token };
+      })
+    );
+
+    const [sent, reply] = result.ctcp;
+
+    expect(result).toMatchObject({
+      acted: "Acted",
+      channel: { _tag: "Refused", reason: { _tag: "Unsendable" } },
+      ctcp: [
+        { activity: { _tag: "CtcpSent", args: result.token, command: "PING", nick: "peer" } },
+        { activity: { _tag: "CtcpReply", args: result.token, command: "PING", nick: "peer" } },
+      ],
+    });
+    expect(result.token).toBe(String(sent?.at));
+    expect(reply?.activity).toHaveProperty("roundTrip", (reply?.at ?? 0) - (sent?.at ?? 0));
+    expect(reply?.at).toBeGreaterThanOrEqual((sent?.at ?? 0) + 3500);
+  });
+
   it("looks a User up and answers with what it found, which `looked` and News give too", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

@@ -480,6 +480,7 @@ export const foldActivity = (
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
+    case "CtcpSent":
     case "CtcpUnsent": {
       return;
     }

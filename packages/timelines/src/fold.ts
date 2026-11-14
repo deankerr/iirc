@@ -19,7 +19,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 10;
+export const projectionVersion = 11;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its

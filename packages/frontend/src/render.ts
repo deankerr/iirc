@@ -390,6 +390,7 @@ const markerOf = (activity: Activity): Marker => {
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
+    case "CtcpSent":
     case "CtcpUnsent": {
       return "--";
     }
@@ -455,6 +456,14 @@ const answerParts = (answer: CtcpAnswer): readonly Part[] =>
   answer._tag === "Answered"
     ? [words(", answered "), name(answer.text)]
     : [words(`, not answered: ${unanswered[answer.reason]}`)];
+
+/**
+ * A round trip in seconds, to the millisecond, as `0.250 s`, worked out by arithmetic, so
+ * no locale writes it.
+ * @param milliseconds - The round trip.
+ * @returns The words.
+ */
+const seconds = (milliseconds: number): string => `${(milliseconds / 1000).toFixed(3)} s`;
 
 /**
  * An Activity in words.
@@ -566,11 +575,28 @@ const describeActivity = (activity: Activity): readonly Part[] => {
       ];
     }
 
+    // A reply to the Owner's own PING says how long it took, and not the token it echoed.
     case "CtcpReply": {
+      return activity.roundTrip === null
+        ? [
+            nickPart(activity.nick),
+            words(" replied to "),
+            ...ctcpParts(activity.command, activity.args, ": "),
+          ]
+        : [
+            nickPart(activity.nick),
+            words(" replied to "),
+            name(activity.command),
+            words(` in ${seconds(activity.roundTrip)}`),
+          ];
+    }
+
+    case "CtcpSent": {
       return [
+        words("You asked "),
         nickPart(activity.nick),
-        words(" replied to "),
-        ...ctcpParts(activity.command, activity.args, ": "),
+        words(" for "),
+        ...ctcpParts(activity.command, activity.args, " "),
       ];
     }
 
@@ -624,6 +650,17 @@ export const requested = (action: ActionRequest): Attempted => {
       const [command = ""] = action.line.replace(/^@\S*\s+/u, "").split(" ");
 
       return { _tag: "Raw", command: command === "" ? null : command.toUpperCase() };
+    }
+
+    case "Ctcp": {
+      // As the Client upper-cases a CTCP command: ASCII letters alone.
+      const command = action.command.replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
+
+      return { _tag: "Ctcp", command, nick: action.nick };
+    }
+
+    case "Ping": {
+      return { _tag: "Ping", nick: action.nick };
     }
 
     default: {
@@ -684,6 +721,19 @@ const attemptedParts = (attempted: Attempted): readonly Part[] => {
       return attempted.command === null
         ? [words("Your raw line")]
         : [words("Your raw "), name(attempted.command)];
+    }
+
+    case "Ctcp": {
+      return [
+        words("Your CTCP "),
+        name(attempted.command),
+        words(" to "),
+        nickPart(attempted.nick),
+      ];
+    }
+
+    case "Ping": {
+      return [words("Your PING of "), nickPart(attempted.nick)];
     }
 
     default: {

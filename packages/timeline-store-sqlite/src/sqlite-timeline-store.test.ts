@@ -137,7 +137,8 @@ const replied = (sequence: number): Change => ({
   timeline: network,
 });
 
-// A CTCP request, with the answer Self sent, a reply, and an answer that never left, in the Network's own Timeline.
+// A CTCP request, with the answer Self sent, a reply, an answer that never left, and the
+// Owner's own PING and its reply with the round trip, in the Network's own Timeline.
 const asked = (sequence: number): readonly Change[] =>
   (
     [
@@ -149,8 +150,24 @@ const asked = (sequence: number): readonly Change[] =>
         nick: "peer",
         target: "iirc",
       },
-      { _tag: "CtcpReply", args: "irssi", command: "VERSION", nick: "peer", target: "iirc" },
+      {
+        _tag: "CtcpReply",
+        args: "irssi",
+        command: "VERSION",
+        nick: "peer",
+        roundTrip: null,
+        target: "iirc",
+      },
       { _tag: "CtcpUnsent", command: "PING", nick: "peer", target: "iirc" },
+      { _tag: "CtcpSent", args: "1", command: "PING", nick: "peer" },
+      {
+        _tag: "CtcpReply",
+        args: "1",
+        command: "PING",
+        nick: "peer",
+        roundTrip: 250,
+        target: "iirc",
+      },
     ] as const
   ).map((activity, index) => ({
     _tag: "Added",
@@ -294,13 +311,18 @@ describe("reopening the file", () => {
         expect(before.folded).toStrictEqual({ through: 4, version: 1 });
         expect(Option.isSome(before.merged)).toBeTruthy();
         expect(before.changed.items.length).toBeGreaterThan(0);
-        expect(
-          ["StandardReply", "CtcpRequest", "CtcpReply", "CtcpUnsent"].map((tag) =>
+        expect({
+          kept: ["StandardReply", "CtcpRequest", "CtcpReply", "CtcpUnsent", "CtcpSent"].map((tag) =>
             before.changed.items.some(
               (item) => item.content._tag === "Activity" && item.content.activity._tag === tag
             )
-          )
-        ).toStrictEqual([true, true, true, true]);
+          ),
+          roundTrips: before.changed.items.flatMap((item) =>
+            item.content._tag === "Activity" && item.content.activity._tag === "CtcpReply"
+              ? [item.content.activity.roundTrip]
+              : []
+          ),
+        }).toStrictEqual({ kept: [true, true, true, true, true], roundTrips: [null, 250] });
         expect(after).toStrictEqual(before);
       })
     );

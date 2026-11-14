@@ -191,6 +191,40 @@ describe("a played Session", () => {
     ]);
   });
 
+  it("shows the Owner's PING and its reply, with the round trip, together where the User's replies go", () => {
+    const { changes, directory } = folded([
+      registered(base),
+      joined(base, "#iirc", ["peer"]),
+      lines(
+        "<< :peer!u@h PRIVMSG iirc :psst",
+        "!! ping peer",
+        ">>\\ PRIVMSG peer :\\x01PING 1767225600000\\x01",
+        "+1500ms",
+        "<<\\ :peer!u@h NOTICE iirc :\\x01PING 1767225600000\\x01"
+      ),
+    ]);
+
+    const libera = directory.networks.get("libera");
+
+    const placed = changes.flatMap((change) =>
+      change._tag === "Added" &&
+      change.content._tag === "Activity" &&
+      change.content.activity._tag.startsWith("Ctcp")
+        ? [[change.content.activity, change.timeline]]
+        : []
+    );
+
+    const sent = { _tag: "CtcpSent", args: "1767225600000", command: "PING", nick: "peer" };
+    const reply = { ...sent, _tag: "CtcpReply", roundTrip: 1500, target: "iirc" };
+
+    expect(placed).toStrictEqual([
+      [sent, libera?.directs.get("peer")],
+      [sent, libera?.timeline],
+      [reply, libera?.directs.get("peer")],
+      [reply, libera?.timeline],
+    ]);
+  });
+
   it("shows an answer that never left in its partner's Timeline after they changed nick", () => {
     const { changes, directory } = folded([
       registered(base),

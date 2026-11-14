@@ -285,6 +285,18 @@ const activity = (source: Activity): WireActivity => {
       const wire: Case<Activity, WireActivity, "CtcpReply"> = {
         _tag: "CtcpReply",
         ...ctcp(source),
+        roundTrip: source.roundTrip,
+      };
+
+      return wire;
+    }
+
+    case "CtcpSent": {
+      const wire: Case<Activity, WireActivity, "CtcpSent"> = {
+        _tag: "CtcpSent",
+        args: source.args,
+        command: source.command,
+        nick: source.nick,
       };
 
       return wire;
@@ -443,6 +455,22 @@ const attempted = (source: Attempted): WireAttempted => {
 
     case "Nick": {
       const wire: Case<Attempted, WireAttempted, "Nick"> = { _tag: "Nick", nick: source.nick };
+
+      return wire;
+    }
+
+    case "Ctcp": {
+      const wire: Case<Attempted, WireAttempted, "Ctcp"> = {
+        _tag: "Ctcp",
+        command: source.command,
+        nick: source.nick,
+      };
+
+      return wire;
+    }
+
+    case "Ping": {
+      const wire: Case<Attempted, WireAttempted, "Ping"> = { _tag: "Ping", nick: source.nick };
 
       return wire;
     }

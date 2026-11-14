@@ -37,6 +37,19 @@ export const named = (run: Run, name: string): Named => ({
   name,
 });
 
+/**
+ * Where a CTCP to or from a User belongs: their Direct Messages, if they already exist,
+ * and the Network's own Timeline. A CTCP is no reason to start a Direct Message Timeline,
+ * and is worth showing where Self and the User talk.
+ * @param run - The step.
+ * @param nick - The User.
+ * @returns The Timelines.
+ */
+export const byPartner = (run: Run, nick: string): readonly Where[] => [
+  { _tag: "Direct", existing: true, ...named(run, nick) },
+  network,
+];
+
 const channel = (run: Run, name: string): Where => ({ _tag: "Channel", ...named(run, name) });
 
 const direct = (run: Run, nick: string, existing: boolean): Where => ({
@@ -238,6 +251,7 @@ const activityTimelines = (
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
+    case "CtcpSent":
     case "CtcpUnsent": {
       return [network];
     }

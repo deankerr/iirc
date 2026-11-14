@@ -32,6 +32,7 @@ The core decides and this package draws and does the I/O.
 - **Shows who is here.** A Pane's status bar is one line: its number, the Timeline's name, a Channel's modes and its topic, cut to the line, and the members' toggle, which says how many there are. A press on the topic discloses it in full under the bar. The toggle, `/members`, or Alt+M shows the members under the bar, by rank, and a press, a tap, or Enter on one opens a menu of `query`, `whois`, and `mention`, Query first, so Enter twice opens their Direct Message.
 - **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
 - **Looks a User up,** with `/whois` and `/whowas`, as a card under the Pane's status bar.
+- **Sends a CTCP request to a User,** with `/ctcp <nick> <command> [text]`, or `/ping <nick>`, which shows how long the reply took. The request and its reply show in the Network's Timeline, and in the User's Direct Messages when those exist.
 - **Notifies, when the Owner asks,** with `/notify on`: a Highlight or a Direct Message in a Timeline they are not looking at.
 - **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with one slim bar holding the sidebar's button and the Panes' switcher, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
 

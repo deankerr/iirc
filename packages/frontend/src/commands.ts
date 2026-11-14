@@ -13,7 +13,7 @@ import type { Casemapping } from "@iirc/protocol/casemapping";
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
 import type { Axis, Direction } from "./layout.ts";
-import { lookOf, nickRulesOf, parseLookupNick } from "./lookup.ts";
+import { isLookupNick, lookOf, nickRulesOf, parseLookupNick } from "./lookup.ts";
 import type { Look, LookupKind } from "./lookup.ts";
 import {
   channelsOf,
@@ -128,7 +128,8 @@ export interface Say {
 
 /**
  * Act on a Network, as the Daemon's `act` does: set a topic, kick, change modes, invite,
- * change Self's nick, be away or back, or send a Line written as text. It is carried out
+ * change Self's nick, be away or back, send a CTCP request or a `PING` to a nick, or send
+ * a Line written as text. It is carried out
  * as a Say is, under an intent the runtime names, and never sent twice.
  */
 export interface Act {
@@ -1612,6 +1613,99 @@ const inviteArguments = (args: string, focus: Focus): Parsed<ActionRequest> => {
     : parsed({ _tag: "Invite", channel: to.value, nick: who.value });
 };
 
+const ctcpUsage = "/ctcp <nick> <command> [text]";
+const pingUsage = "/ping <nick>";
+
+/**
+ * The nick a CTCP request goes to, read as the Client reads one, or why it is none, in
+ * words: never a Channel, a mask, a list, or a nick with a membership prefix before it.
+ * @param nick - The nick, as typed.
+ * @param head - The head of the Channel in focus, if read, whose `CHANTYPES` and ranks it
+ * is read by.
+ * @param usage - The command's usage, to end a refusal with.
+ * @returns The nick.
+ */
+const ctcpNick = (nick: string, head: ChannelHeader | undefined, usage: string): Parsed<string> => {
+  const rules = nickRulesOf(head);
+  const first = nick.charAt(0);
+
+  if (rules.symbols.includes(first)) {
+    return invalid(`Leave off the prefix ${first}: a nick does not start with it. ${usage}`);
+  }
+
+  return isLookupNick(rules, nick)
+    ? parsed(nick)
+    : invalid(`A CTCP request goes to one nick, never a Channel, a mask, or a list. ${usage}`);
+};
+
+/**
+ * What `/ctcp` was given: a nick, a command, upper-cased, and the rest of the line after
+ * the one space that follows the command, as its text.
+ * @param args - The text after `/ctcp`.
+ * @param _focus - The Timeline in focus.
+ * @param head - The head of the Channel in focus, if read.
+ * @returns The action.
+ */
+const ctcpArguments = (
+  args: string,
+  _focus: Focus,
+  head: ChannelHeader | undefined
+): Parsed<ActionRequest> => {
+  const read = /^\s*(?<nick>\S*)\s*(?<command>\S*)(?: (?<text>.*))?$/su.exec(args)?.groups;
+  const { nick = "", command = "", text = "" } = read ?? {};
+
+  if (nick === "") {
+    return invalid(`To whom? ${ctcpUsage}`);
+  }
+
+  if (command === "") {
+    return invalid(`Which request? ${ctcpUsage}`);
+  }
+
+  const verb = command.replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
+
+  if (verb === "ACTION") {
+    return invalid("ACTION is what /me sends: /me <text>");
+  }
+
+  if (verb === "DCC") {
+    return invalid(`DCC is not sent. ${ctcpUsage}`);
+  }
+
+  const to = ctcpNick(nick, head, ctcpUsage);
+
+  return to._tag === "Invalid"
+    ? to
+    : parsed({ _tag: "Ctcp", args: text, command: verb, nick: to.value });
+};
+
+/**
+ * What `/ping` was given: one nick.
+ * @param args - The text after `/ping`.
+ * @param _focus - The Timeline in focus.
+ * @param head - The head of the Channel in focus, if read.
+ * @returns The action.
+ */
+const pingArguments = (
+  args: string,
+  _focus: Focus,
+  head: ChannelHeader | undefined
+): Parsed<ActionRequest> => {
+  const [nick, ...rest] = wordsOf(args);
+
+  if (nick === undefined) {
+    return invalid(`To whom? ${pingUsage}`);
+  }
+
+  if (rest.length > 0) {
+    return invalid(`Give one nick. ${pingUsage}`);
+  }
+
+  const to = ctcpNick(nick, head, pingUsage);
+
+  return to._tag === "Invalid" ? to : parsed({ _tag: "Ping", nick: to.value });
+};
+
 /** Sending a Line written as text, which never carries a Credential. */
 const quoteCommand = acting({
   aliases: ["raw"],
@@ -1736,6 +1830,28 @@ const actions: readonly Command[] = [
     name: "invite",
     parse: inviteArguments,
     usage: "/invite <nick> [channel]",
+    when: anywhereActing,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Send a CTCP request, such as VERSION or TIME, to a nick on the open Timeline's Network, and show its reply.",
+    id: "act.ctcp",
+    name: "ctcp",
+    parse: ctcpArguments,
+    usage: ctcpUsage,
+    when: anywhereActing,
+  }),
+  acting({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Send a CTCP PING to a nick on the open Timeline's Network, and show how long its reply took.",
+    id: "act.ping",
+    name: "ping",
+    parse: pingArguments,
+    usage: pingUsage,
     when: anywhereActing,
   }),
   acting({

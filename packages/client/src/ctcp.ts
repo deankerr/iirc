@@ -4,7 +4,8 @@
  * Activity, and Self answers a live request for `VERSION`, `PING`, `TIME`, or
  * `CLIENTINFO` with a `NOTICE` to the User who asked, never to a Channel, within a budget,
  * unless the Configuration turns answers off. Nothing is decided from the arguments, which
- * are only ever echoed back, by `PING`, and shown.
+ * are only ever echoed back, by `PING`, and shown, but for a reply to a `PING` the Owner
+ * sent, whose token tells its round trip.
  *
  * @packageDocumentation
  */
@@ -20,9 +21,10 @@ import { parseNick, parseTargets } from "./names.ts";
 import type { Ctcp, CtcpAnswer, Named, Unanswered, Where } from "./news.ts";
 import type { Answers } from "./output.ts";
 import type { Run } from "./run.ts";
-import { send } from "./run.ts";
+import { folder, send, updateOpen } from "./run.ts";
 import { maxActions } from "./state.ts";
-import { isUser, named } from "./where.ts";
+import { openOf } from "./views.ts";
+import { byPartner, isUser, named } from "./where.ts";
 
 /**
  * How many answers may go at once. With {@link answerInterval}, a flood of requests sends
@@ -151,12 +153,6 @@ const channelsIn = (run: Run, target: string): readonly Named[] => {
 
 const network: Where = { _tag: "Network" };
 
-// A partner's Direct Messages, if they exist, and the Network's own Timeline.
-const byPartner = (run: Run, nick: string): readonly Where[] => [
-  { _tag: "Direct", existing: true, ...named(run, nick) },
-  network,
-];
-
 /**
  * Answers a request, if Self may, and says what became of it. It sends the answer and
  * spends the budget, so it is called once for each request, as it arrives.
@@ -254,6 +250,36 @@ const ctcpWhere = (run: Run, ctcp: Ctcp, fromUser: boolean): readonly Where[] =>
 };
 
 /**
+ * How long a reply to one of the Owner's `PING`s took: from the instant its request was
+ * sent to this step's, both as the Runtime journaled them, in milliseconds. Only a live
+ * reply from the User the `PING` went to, by the casemapping now, with its token, tells
+ * one, and only once, since the `PING` is forgotten as it does.
+ * @param run - The step.
+ * @param ctcp - The reply.
+ * @returns The round trip, or `null` for a reply to no `PING` Self remembers.
+ */
+const roundTripOf = (run: Run, ctcp: Ctcp): number | null => {
+  const pings = openOf(run.state)?.pings ?? [];
+  const fold = folder(run.state);
+
+  const index =
+    ctcp.command === "PING"
+      ? pings.findIndex((ping) => ping.token === ctcp.args && fold(ping.nick) === fold(ctcp.nick))
+      : -1;
+
+  const ping = pings[index];
+
+  if (ping === undefined) {
+    return null;
+  }
+
+  updateOpen(run, (open) => ({ ...open, pings: open.pings.filter((_each, at) => at !== index) }));
+
+  // The Runtime's clock is the wall clock, which may have been set back between the two.
+  return Math.max(0, run.at - ping.at);
+};
+
+/**
  * Reads a CTCP request or reply from a `PRIVMSG` or `NOTICE`, reports it, and answers a
  * request Self may. `ACTION` is a Message, read elsewhere, and `DCC` is dropped. One Self
  * sent, such as the echo of an answer, is neither reported nor answered, so Self never
@@ -291,7 +317,11 @@ export const heardCtcp = (run: Run, arrival: Arrival): void => {
     _tag: "Activity",
     activity: request
       ? { _tag: "CtcpRequest", ...ctcp, answer: answer(run, arrival, ctcp, fromUser) }
-      : { _tag: "CtcpReply", ...ctcp },
+      : {
+          _tag: "CtcpReply",
+          ...ctcp,
+          roundTrip: arrival.live && fromUser ? roundTripOf(run, ctcp) : null,
+        },
     at: arrival.time,
     id: arrival.id,
     live: arrival.live,

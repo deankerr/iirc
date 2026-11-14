@@ -3,7 +3,15 @@ import { Yaml } from "effect/encoding";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { action, CtcpText, ctcpReply, ctcpText, parseCtcp, parseReplyTarget } from "./ctcp.ts";
+import {
+  action,
+  CtcpText,
+  ctcpReply,
+  ctcpRequest,
+  ctcpText,
+  parseCtcp,
+  parseReplyTarget,
+} from "./ctcp.ts";
 import type { Ctcp, ReplyTarget } from "./ctcp.ts";
 import { encode, isRejected, upperCaseAscii } from "./line.ts";
 import type { OutboundLine, Rejected } from "./line.ts";
@@ -171,6 +179,14 @@ describe(parseReplyTarget, () => {
   it("refuses a nick starting with a prefix the Network has in force", () => {
     expect(parseReplyTarget("=odd", { chantypes: "#=", statusmsg: "" })).toBeUndefined();
     expect(parseReplyTarget("^odd", { chantypes: "#", statusmsg: "^" })).toBeUndefined();
+  });
+});
+
+describe(ctcpRequest, () => {
+  it("goes out as a PRIVMSG, on one Line", () => {
+    expect(wire(ctcpRequest(userNamed("alice"), safeText("PING", "1767225600000")))).toBe(
+      "PRIVMSG alice :\u0001PING 1767225600000\u0001\r\n"
+    );
   });
 });
 

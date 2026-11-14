@@ -642,6 +642,13 @@ const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefine
 >([
   ["away", readAway],
   [
+    "ctcp",
+    ({ words: [nick = "", command, ...more], trailing }) =>
+      command === undefined || more.length > 0 || trailing === ""
+        ? undefined
+        : { _tag: "Ctcp", args: trailing ?? "", command, nick },
+  ],
+  [
     "invite",
     ({ words: [nick = "", channel, ...more], trailing }) =>
       channel === undefined || more.length > 0 || trailing !== null
@@ -654,6 +661,11 @@ const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefine
     "nick",
     ({ words: [nick = "", ...more], trailing }) =>
       more.length > 0 || trailing !== null || nick === "" ? undefined : { _tag: "Nick", nick },
+  ],
+  [
+    "ping",
+    ({ words: [nick = "", ...more], trailing }) =>
+      more.length > 0 || trailing !== null || nick === "" ? undefined : { _tag: "Ping", nick },
   ],
   ["quote", ({ rest }) => (rest === "" ? undefined : { _tag: "Raw", line: rest })],
   [
@@ -689,6 +701,16 @@ const writeAction = (action: Action): string => {
 
     case "Nick": {
       return `nick ${action.nick}`;
+    }
+
+    case "Ctcp": {
+      const sent = `ctcp ${action.nick} ${action.command}`;
+
+      return action.args === "" ? sent : `${sent} :${action.args}`;
+    }
+
+    case "Ping": {
+      return `ping ${action.nick}`;
     }
 
     case "Mode": {

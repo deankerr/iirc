@@ -186,6 +186,15 @@ export const parseReplyTarget = (
 };
 
 /**
+ * The `PRIVMSG` that carries a CTCP request, to a User and nothing else.
+ * @param target - The User to ask, from {@link parseReplyTarget}.
+ * @param text - The request, from {@link ctcpText}.
+ * @returns The Line, or why it cannot be sent, such as a request too long to fit.
+ */
+export const ctcpRequest = (target: ReplyTarget, text: CtcpText): OutboundLine | Rejected =>
+  privmsg(target, text);
+
+/**
  * The `NOTICE` that carries a CTCP reply, to a User and nothing else.
  * @param target - The User to answer, from {@link parseReplyTarget}.
  * @param text - The reply, from {@link ctcpText}.

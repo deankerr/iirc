@@ -170,6 +170,12 @@ export const ModeRequest = Schema.Struct({
 export const ActionRequest = Schema.TaggedUnion({
   /** Away with a message, or back with `null` or `""`. It outlives Sessions. */
   Away: { message: Schema.NullOr(SayText) },
+  /**
+   * Send a CTCP request to a nick, never a Channel, as `VERSION` or `FINGER`: its command,
+   * upper-cased as it goes, and its arguments, which may be empty. Never `ACTION`, which is
+   * a Say, or `DCC`.
+   */
+  Ctcp: { args: SayText, command: OwnerName, nick: OwnerName },
   /** Invite a nick to a Channel. */
   Invite: { channel: OwnerName, nick: OwnerName },
   /** Kick one or more nicks from a Channel, split across Lines as `TARGMAX` allows. */
@@ -182,6 +188,8 @@ export const ActionRequest = Schema.TaggedUnion({
   Mode: { changes: Schema.NonEmptyArray(ModeRequest), target: OwnerName },
   /** Change Self's nick for this Session. */
   Nick: { nick: OwnerName },
+  /** Send a CTCP `PING` to a nick, whose reply's Activity tells the round trip. */
+  Ping: { nick: OwnerName },
   /** A Line written as text, sent as it reads, as `/quote` sends it. */
   Raw: { line: OwnerName },
   /** Set a Channel's topic, or clear it with `""`. */
@@ -432,13 +440,21 @@ const CtcpAnswer = Schema.TaggedUnion({
  * what the Network said of something sent, shown where that belongs, or of nothing, shown
  * in the Network's own Timeline: a `WARN`, a `NOTE`, or a `FAIL` that refused nothing. A
  * `CtcpRequest` is a CTCP request another User sent, with what became of it, and a
- * `CtcpReply` a CTCP reply. A `CtcpUnsent` is an answer Self sent to a request, by who
- * asked, where, and its command, that never left after all, shown where the request was.
+ * `CtcpReply` a CTCP reply, with `roundTrip`, the milliseconds between when the Daemon
+ * journaled the Owner's `PING` it answers and when it journaled the reply, or `null` for a
+ * reply to no `PING` the Owner sent. A `CtcpSent` is a request the Owner sent to a nick,
+ * shown where that User's replies are. A `CtcpUnsent` is an answer Self sent to a request,
+ * by who asked, where, and its command, that never left after all, shown where the request
+ * was.
  */
 export const Activity = Schema.TaggedUnion({
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
-  CtcpReply: ctcp,
+  CtcpReply: {
+    ...ctcp,
+    roundTrip: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  },
   CtcpRequest: { ...ctcp, answer: CtcpAnswer },
+  CtcpSent: { args: Untrusted, command: Untrusted, nick: Untrusted },
   CtcpUnsent: { command: Untrusted, nick: Untrusted, target: Untrusted },
   Joined: { channel: Untrusted, nick: Untrusted },
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
@@ -558,15 +574,18 @@ export type Marked = typeof Marked.Type;
 /**
  * What an action of the Owner's tried, in short: its kind and the names the Owner gave
  * it, never a topic, a reason, an away message, a mode's parameter, or the rest of a raw
- * Line. A `Mode` names each change by its sign and letter, as `+o-v`, and a `Raw` its
- * command, or `null` when it did not parse.
+ * Line. A `Mode` names each change by its sign and letter, as `+o-v`, a `Raw` its
+ * command, or `null` when it did not parse, and a `Ctcp` its nick and command, never its
+ * arguments.
  */
 export const Attempted = Schema.TaggedUnion({
   Away: { away: Schema.Boolean },
+  Ctcp: { command: Untrusted, nick: Untrusted },
   Invite: { channel: Untrusted, nick: Untrusted },
   Kick: { channel: Untrusted, nicks: Schema.Array(Untrusted) },
   Mode: { modes: Untrusted, target: Untrusted },
   Nick: { nick: Untrusted },
+  Ping: { nick: Untrusted },
   Raw: { command: Schema.NullOr(Untrusted) },
   Topic: { channel: Untrusted },
 });
