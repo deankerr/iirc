@@ -1081,7 +1081,7 @@ describe("the options under ui", () => {
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
-        { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "none"] },
+        { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "h:mm a", "h:mm:ss a", "none"] },
         { _tag: "IntegerOrChoice", choices: ["none"], maximum: 400, minimum: 40 },
       ],
     });
@@ -1260,6 +1260,8 @@ describe("the options under ui", () => {
       size: read("/set -device ui.size 20"),
       tooBig: read("/set ui.size 25"),
       tooSmall: read("/set ui.size 9"),
+      twelveHour: read("/set ui.time h:mm:ss a"),
+      twelveHourAnyCase: read("/set ui.time H:MM A"),
       unknown: read("/set ui.palette dusk"),
       unset: read("/unset ui.activity"),
       unsetDevice: read("/unset -device ui.theme"),
@@ -1311,6 +1313,8 @@ describe("the options under ui", () => {
         _tag: "Invalid",
         message: 'ui.size: Give a whole number from 10 to 24, not "9".',
       },
+      twelveHour: change("time", "h:mm:ss a", false),
+      twelveHourAnyCase: change("time", "h:mm a", false),
       unknown: {
         _tag: "Invalid",
         message:

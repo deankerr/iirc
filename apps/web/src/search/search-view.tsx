@@ -14,9 +14,12 @@ import type { KeyboardEvent } from "react";
 import { Fragment, useContext, useId, useLayoutEffect, useRef } from "react";
 
 import { composerFocus } from "../composer/atoms.ts";
+import { timeShown } from "../options/ui.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
 import { Nick } from "../timelines/line.tsx";
 import { IconButton } from "../ui/button.tsx";
+import { clockOptions, formOf } from "../ui/clock.ts";
+import type { ClockForm } from "../ui/clock.ts";
 import { dateOf } from "../ui/dates.ts";
 import {
   closeSearch,
@@ -34,15 +37,22 @@ import type { ResultRow } from "./atoms.ts";
 
 import styles from "./search-view.module.css";
 
-// The Owner's own clock and time zone, which only the view reads.
-const when = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  hour: "2-digit",
-  hourCycle: "h23",
-  minute: "2-digit",
-  month: "short",
-  year: "numeric",
-});
+// The Owner's own calendar, clock, and time zone, which only the view reads. A result's time
+// follows `ui.time`, as `HH:mm` under `none`, as a time that must show does.
+const whenOf = (form: ClockForm) =>
+  new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    ...clockOptions[form],
+  });
+
+const whens: Readonly<Record<ClockForm, Intl.DateTimeFormat>> = {
+  "HH:mm": whenOf("HH:mm"),
+  "HH:mm:ss": whenOf("HH:mm:ss"),
+  "h:mm a": whenOf("h:mm a"),
+  "h:mm:ss a": whenOf("h:mm:ss a"),
+};
 
 /** How near the end of the results, in rows, the next page is asked for. */
 const nearEnd = 8;
@@ -58,6 +68,7 @@ const pageRows = 10;
  */
 const Result = ({ row }: { readonly row: ResultRow }) => {
   const { found, place } = row;
+  const when = whens[formOf(useAtomValue(timeShown))];
   const date = dateOf(found.item.position.at);
   const nick = <Nick colour={found.colour} nick={found.nick} />;
 

@@ -9,48 +9,19 @@
  * @packageDocumentation
  */
 import { useAtomValue } from "@effect/atom-react";
-import type { TimeShown } from "@iirc/api";
 import { lineOf } from "@iirc/frontend/render";
 import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
 import { timeShown } from "../options/ui.ts";
+import { clockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
 
-// The Owner's own clock and time zone, which only the view reads.
-const clock = new Intl.DateTimeFormat(undefined, {
-  hour: "2-digit",
-  hourCycle: "h23",
-  minute: "2-digit",
-});
-
-const clockWithSeconds = new Intl.DateTimeFormat(undefined, {
-  hour: "2-digit",
-  hourCycle: "h23",
-  minute: "2-digit",
-  second: "2-digit",
-});
-
+// The Owner's own calendar and time zone, which only the view reads.
 const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
-/**
- * The clock a time is shown by, as `ui.time` says: with seconds for `HH:mm:ss`, and
- * without them otherwise, as a Gap's times always show.
- * @param shown - How a line's time shows.
- * @returns The clock.
- */
-const clockFor = (shown: TimeShown) => (shown === "HH:mm:ss" ? clockWithSeconds : clock);
-
-/**
- * The sample a time column is measured by: any time of the format, as the clock writes it,
- * since every digit it shows is as wide as the next. None for `none`, whose column is empty.
- * @param shown - How a line's time shows.
- * @returns The sample, or nothing.
- */
-const sampleOf = (shown: TimeShown) => (shown === "none" ? undefined : clockFor(shown).format(0));
 
 /**
  * A time as the line shows it, as `ui.time` says, or nothing for `none`.
@@ -73,7 +44,7 @@ const Time = ({ at }: { readonly at: number }) => {
   if (date === undefined) {
     return (
       <span className={styles.time} data-sample={sample} title="Time unavailable">
-        {shown === "HH:mm:ss" ? "--:--:--" : "--:--"}
+        {hasSeconds(shown) ? "--:--:--" : "--:--"}
       </span>
     );
   }

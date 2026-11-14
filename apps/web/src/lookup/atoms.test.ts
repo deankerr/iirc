@@ -1,10 +1,11 @@
 import { TimelineId } from "@iirc/api";
-import type { Timeline } from "@iirc/api";
+import type { TimeShown, Timeline } from "@iirc/api";
 import { draftOf } from "@iirc/frontend/composer";
 import { Effect, Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { composerState, edit, send } from "../composer/atoms.ts";
+import { deviceUi } from "../options/device.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
 import {
   eventually,
@@ -279,6 +280,54 @@ describe("a Lookup", () => {
       "sign-on time unavailable",
       "Peer Pal",
     ]);
+  });
+
+  it("shows a signon in the form ui.time gives, as HH:mm under none", async () => {
+    // Local mid-afternoon, so no form of the clock writes it as another does.
+    const signon = new Date(2026, 10, 15, 15, 7, 9);
+
+    const { registry } = await inChannel({
+      answer: "LookedUp",
+      pending: 0,
+      result: {
+        _tag: "Found",
+        notes: [],
+        profiles: [profileOf({ realname: "Peer Pal", signon: signon.getTime() })],
+      },
+    });
+
+    await typeAndSend(registry, "/whois peer");
+    await until(registry, paneCard("p0"), (shown) => shown?.body._tag === "Profiles");
+
+    const drawn = (time: TimeShown) => {
+      registry.set(deviceUi, { time });
+      const card = registry.get(paneCard("p0"));
+
+      return card?.body._tag === "Profiles" ? card.body.profiles[0]?.signon : undefined;
+    };
+
+    const day = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(signon);
+
+    const written = (options: Intl.DateTimeFormatOptions) =>
+      `signed on ${day}, ${new Intl.DateTimeFormat(undefined, options).format(signon)}`;
+
+    const twentyFour = { hour: "2-digit", hourCycle: "h23", minute: "2-digit" } as const;
+    const twelve = { hour: "numeric", hourCycle: "h12", minute: "2-digit" } as const;
+
+    expect({
+      none: drawn("none"),
+      twelve: drawn("h:mm a"),
+      twelveWithSeconds: drawn("h:mm:ss a"),
+      twentyFour: drawn("HH:mm"),
+      withSeconds: drawn("HH:mm:ss"),
+    }).toStrictEqual({
+      none: written(twentyFour),
+      twelve: written(twelve),
+      twelveWithSeconds: written({ ...twelve, second: "2-digit" }),
+      twentyFour: written(twentyFour),
+      withSeconds: written({ ...twentyFour, second: "2-digit" }),
+    });
+    expect(drawn("h:mm a")).not.toBe(drawn("HH:mm"));
   });
 
   it("whose look is never answered gives up at its deadline, and asks after it by intent once its request times out", async () => {

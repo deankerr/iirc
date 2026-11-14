@@ -172,10 +172,21 @@ export const ColoursShown = Schema.Literals(["theme", "raw"]).annotate({
 /** The decoded form of {@link ColoursShown}. */
 export type ColoursShown = typeof ColoursShown.Type;
 
-/** How a line's time shows: hours and minutes, with seconds too, or not at all. */
-export const TimeShown = Schema.Literals(["HH:mm", "HH:mm:ss", "none"]).annotate({
+/**
+ * How a line's time shows: hours and minutes, with seconds too or not, on a 24-hour clock
+ * or a 12-hour one, or not at all. The values are CLDR's patterns: `HH` is the hour from
+ * 00 to 23, `h` the hour from 1 to 12, and `a` says AM or PM, in the device's language.
+ */
+export const TimeShown = Schema.Literals([
+  "HH:mm",
+  "HH:mm:ss",
+  "h:mm a",
+  "h:mm:ss a",
+  "none",
+]).annotate({
   default: "HH:mm",
-  description: "How a line's time shows: HH:mm, HH:mm:ss, or none.",
+  description:
+    "How a line's time shows: HH:mm or HH:mm:ss on a 24-hour clock, h:mm a or h:mm:ss a on a 12-hour one, or none.",
 });
 
 /** The decoded form of {@link TimeShown}. */

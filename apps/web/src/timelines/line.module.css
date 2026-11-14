@@ -13,8 +13,8 @@
  * Panes split. Below it, the container query says how a row reads as one run of text instead.
  *
  * Each row is a grid of its own, as the rows are placed one by one, so each sizes its time
- * and sender columns from the same unseen samples, drawn in the font the text is: a time of
- * the format shown, and the widest nick monospace shows whole. Every row's columns are then
+ * and sender columns from the same unseen samples, drawn in the font the text is: the times
+ * of the format shown, and the widest nick monospace shows whole. Every row's columns are then
  * as wide as every other's, in any font, and no count of characters decides them.
  */
 .message,
@@ -48,8 +48,13 @@
   white-space: nowrap;
 }
 
-/* A time of the format shown, which the line gives, as every digit is as wide as the next. */
+/*
+ * The times of the format shown, one to a line, which the line gives: the column is as wide
+ * as the widest, as every digit is as wide as the next, and a 12-hour time's AM and PM may
+ * not be.
+ */
 .time[data-sample]::before {
+  white-space: pre;
   content: attr(data-sample);
 }
 
@@ -99,6 +104,7 @@
   color: var(--color-muted);
   font-style: normal;
   font-variant-numeric: tabular-nums;
+  text-align: end;
 }
 
 .sender {
