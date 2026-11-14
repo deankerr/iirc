@@ -140,6 +140,7 @@ export {
   TextSize,
   Themes,
   TimeShown,
+  WidestLine,
   UiInForce,
   UiOptionName,
   UiOptions,
@@ -153,6 +154,7 @@ export {
   uiDefaults,
   uiOptionNames,
   uiValueKept,
+  widestLineBounds,
 } from "./ui.ts";
 
 export type { FontName } from "./ui.ts";

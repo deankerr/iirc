@@ -5,7 +5,8 @@
  * height, and font are `ui.size`, `ui.leading`, and `ui.font`, each set on the root's own
  * style, which wins over these. Until then each colour is light-dark(), so the first
  * paint follows the device's own setting, and the text is in the defaults' size, line
- * height, and font.
+ * height, and font. The widest line, `ui.width`, is `--widest-line` there too, in `ch`, and
+ * is never set here or while it is `none`, so a line then runs the width of its Pane.
  */
 :root {
   color-scheme: light dark;

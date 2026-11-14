@@ -115,6 +115,8 @@ const settle = async () => {
 
 const lineHeight = () => document.documentElement.style.getPropertyValue("--line-height");
 
+const widestLine = () => document.documentElement.style.getPropertyValue("--widest-line");
+
 describe("themes", () => {
   it("imports one through the dialog, previewing it, for every device, and another page uses it", async () => {
     const fake = signedIn();
@@ -479,6 +481,43 @@ describe("themes", () => {
       inEffect: "inter",
       kept: '{"font":"inter"}',
       shared: "system",
+    });
+  });
+
+  it("draws the widest line on the root in characters, lets this device's own win, and draws none as no property", async () => {
+    const fake = signedIn();
+    const { notice, registry, type } = await page(fake);
+    const stop = watchTheme(registry);
+    const before = widestLine();
+
+    await type("/set ui.width 72");
+    await until(registry, uiInEffect, (ui) => ui.width === 72);
+    const shared = widestLine();
+
+    await type("/set -device ui.width none");
+    await until(registry, uiInEffect, (ui) => ui.width === "none");
+    const deviceNone = widestLine();
+
+    await type("/set ui.width 39");
+    const refused = notice();
+
+    await type("/unset -device ui.width");
+    await until(registry, uiInEffect, (ui) => ui.width === 72);
+    const unsetDevice = widestLine();
+
+    await type("/unset ui.width");
+    await until(registry, uiInEffect, (ui) => ui.width === "none");
+    const unset = widestLine();
+
+    stop();
+
+    expect({ before, deviceNone, refused, shared, unset, unsetDevice }).toStrictEqual({
+      before: "",
+      deviceNone: "",
+      refused: 'ui.width: Give a whole number from 40 to 400, or none, not "39".',
+      shared: "72ch",
+      unset: "",
+      unsetDevice: "72ch",
     });
   });
 

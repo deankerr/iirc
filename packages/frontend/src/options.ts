@@ -47,6 +47,8 @@ type Record = Schema.JsonObject;
  * - `ChoiceOrText`: one of `choices`, in any ASCII case, or else the text as typed, trimmed,
  *   such as a font: one served by name, or a family the device has by its own.
  * - `Integer`: a whole number from `minimum` to `maximum`, in decimal digits.
+ * - `IntegerOrChoice`: one of `choices`, in any ASCII case, or else a whole number from
+ *   `minimum` to `maximum`, in decimal digits, such as the widest line: `none`, or a count.
  * - `Decimal`: a number from `minimum` to `maximum` that need not be whole, in decimal
  *   digits, and a multiple of `step`, so it is exact however it is written.
  * - `Credential`: the name of a Credential, set by giving its value, which the Vault holds.
@@ -64,6 +66,12 @@ export type Kind =
   | { readonly _tag: "Choice"; readonly choices: readonly string[] }
   | { readonly _tag: "ChoiceOrText"; readonly choices: readonly string[] }
   | { readonly _tag: "Integer"; readonly minimum: number; readonly maximum: number }
+  | {
+      readonly _tag: "IntegerOrChoice";
+      readonly choices: readonly string[];
+      readonly minimum: number;
+      readonly maximum: number;
+    }
   | {
       readonly _tag: "Decimal";
       readonly minimum: number;
@@ -301,6 +309,29 @@ const numberKindOf = (ast: SchemaAST.AST): Kind | undefined => {
   return step === undefined ? undefined : { _tag: "Decimal", maximum, minimum, step };
 };
 
+/**
+ * The kind of a union of words and one whole number, such as `none` or a count, or none for
+ * any other union.
+ * @param ast - The union.
+ * @returns Its kind, or none.
+ */
+const integerOrChoiceOf = (ast: SchemaAST.Union): Kind | undefined => {
+  const numbers = ast.types.filter((one) => one._tag === "Number");
+  const words = ast.types.filter((one) => one._tag !== "Number").map(stringLiteral);
+  const [number, ...more] = numbers;
+  const kind = number === undefined || more.length > 0 ? undefined : numberKindOf(number);
+
+  if (kind?._tag !== "Integer" || words.length === 0) {
+    return undefined;
+  }
+
+  const choices = words.filter((one) => one !== undefined);
+
+  return choices.length === words.length
+    ? { _tag: "IntegerOrChoice", choices, maximum: kind.maximum, minimum: kind.minimum }
+    : undefined;
+};
+
 const tagOf = (ast: SchemaAST.Objects): string | undefined => {
   const tag = ast.propertySignatures.find((one) => one.name === "_tag")?.type;
 
@@ -422,6 +453,12 @@ const kindOf = (ast: SchemaAST.AST): Kind | undefined => {
 
   if (choices !== undefined) {
     return { _tag: "Choice", choices };
+  }
+
+  const counted = integerOrChoiceOf(ast);
+
+  if (counted !== undefined) {
+    return counted;
   }
 
   const [named, text, ...others] = ast.types;
@@ -760,6 +797,17 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
       return integerOf(kind, text);
     }
 
+    case "IntegerOrChoice": {
+      const chosen = choiceOf(kind.choices, text);
+      const counted = chosen._tag === "Parsed" ? chosen : integerOf(kind, text);
+
+      return counted._tag === "Parsed"
+        ? counted
+        : invalid(
+            `Give a whole number from ${kind.minimum} to ${kind.maximum}, or ${kind.choices.map(lower).join(", ")}, not "${text}".`
+          );
+    }
+
     case "Decimal": {
       return decimalOf(kind, text);
     }
@@ -824,6 +872,11 @@ export const showText = (kind: Kind, value: Json): string => {
     case "Decimal": {
       // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
       return typeof value === "number" ? String(value) : "";
+    }
+
+    case "IntegerOrChoice": {
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
+      return typeof value === "number" ? String(value) : (textOf(value) ?? "");
     }
 
     case "Texts": {

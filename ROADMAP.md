@@ -9,7 +9,6 @@ The order bends to what the Owner finds in daily use. Refining what is built com
 Options under `ui`, shared by every device and overridable on one, as `ui.size` and `ui.font` are.
 
 - **How a line is laid out:** the nick in a column of its own, in the line, or above what was said, with a run of Messages from one User under one nick.
-- **A widest line,** so text in a wide Pane does not run the width of the screen.
 - **A 12-hour clock,** and how a day is written.
 - **A theme for light and one for dark,** when `system` follows the device.
 - **The Composer's habits:** whether Enter sends, spellcheck, and what follows a completed nick.

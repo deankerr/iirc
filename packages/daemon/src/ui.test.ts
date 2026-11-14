@@ -43,6 +43,7 @@ describe("folding the ui options", () => {
         theme: "system",
         themes: [],
         time: "HH:mm",
+        width: "none",
       },
       sequence: 0,
     });
@@ -67,6 +68,7 @@ describe("folding the ui options", () => {
         theme: "system",
         themes: [],
         time: "none",
+        width: "none",
       },
       sequence: 5,
     });
@@ -85,6 +87,7 @@ describe("folding the ui options", () => {
         theme: "system",
         themes: [],
         time: "HH:mm:ss",
+        width: "none",
       },
       sequence: 4,
     });
@@ -159,6 +162,7 @@ describe("the ui options, kept", () => {
           theme: "light",
           themes: [],
           time: "HH:mm:ss",
+          width: "none",
         },
         sequence: 3,
       },
@@ -173,6 +177,7 @@ describe("the ui options, kept", () => {
             theme: "light",
             themes: [],
             time: "HH:mm:ss",
+            width: "none",
           },
           sequence: 3,
         },

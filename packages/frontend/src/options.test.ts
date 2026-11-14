@@ -350,6 +350,50 @@ describe("the text syntax", () => {
     );
   });
 
+  it("reads back a whole number or a word, for every value the Schema takes, and refuses the rest", () => {
+    const kind = uiFields.find((field) => field.key === "width")?.kind ?? { _tag: "Text" };
+    const taken = Schema.decodeUnknownOption(UiOptions.fields.width);
+    const made = fc.oneof(fc.constant("none"), fc.integer({ max: 450, min: 0 }));
+
+    fc.assert(
+      fc.property(
+        made.filter((value) => Option.isSome(taken(value))),
+        (value) => {
+          expect(parseText(kind, showText(kind, value))).toStrictEqual({ _tag: "Parsed", value });
+        }
+      )
+    );
+
+    expect(
+      [
+        "none",
+        " None ",
+        "NONE",
+        "40",
+        " 80 ",
+        "400",
+        "39",
+        "401",
+        "80.5",
+        "-80",
+        "1e2",
+        "auto",
+        "",
+      ].map((text) => parseText(kind, text))
+    ).toStrictEqual([
+      { _tag: "Parsed", value: "none" },
+      { _tag: "Parsed", value: "none" },
+      { _tag: "Parsed", value: "none" },
+      { _tag: "Parsed", value: 40 },
+      { _tag: "Parsed", value: 80 },
+      { _tag: "Parsed", value: 400 },
+      ...["39", "401", "80.5", "-80", "1e2", "auto", ""].map((text) => ({
+        _tag: "Invalid",
+        message: `Give a whole number from 40 to 400, or none, not "${text}".`,
+      })),
+    ]);
+  });
+
   it("reads back every value the Schema takes for a decimal, whatever sum made it, and refuses the rest", () => {
     const kind = uiFields.find((field) => field.key === "leading")?.kind ?? { _tag: "Text" };
     const taken = Schema.decodeUnknownOption(UiOptions.fields.leading);
@@ -987,6 +1031,9 @@ const fontRefused = (text: string) => `ui.font cannot be "${text}".`;
 const leadingRefused = (text: string) =>
   `ui.leading: Give a number from 1 to 2, in steps of 0.01, not "${text}".`;
 
+const widthRefused = (text: string) =>
+  `ui.width: Give a whole number from 40 to 400, or none, not "${text}".`;
+
 describe("the options under ui", () => {
   const shared = {
     options: {
@@ -998,6 +1045,7 @@ describe("the options under ui", () => {
       theme: "dark",
       themes: [],
       time: "HH:mm",
+      width: "none",
     },
     sequence: 7,
   } as const;
@@ -1034,6 +1082,7 @@ describe("the options under ui", () => {
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
         { _tag: "Choice", choices: ["HH:mm", "HH:mm:ss", "none"] },
+        { _tag: "IntegerOrChoice", choices: ["none"], maximum: 400, minimum: 40 },
       ],
     });
   });
@@ -1055,6 +1104,7 @@ describe("the options under ui", () => {
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.time", { _tag: "Shown", text: "HH:mm" }, { _tag: "Unset" }, undefined],
+        ["ui.width", { _tag: "Shown", text: "none" }, { _tag: "Unset" }, undefined],
       ],
       options: [
         [
@@ -1107,6 +1157,13 @@ describe("the options under ui", () => {
           undefined,
           "HH:mm",
         ],
+        [
+          "ui.width",
+          { _tag: "Shown", text: "none" },
+          { _tag: "Shown", text: "none" },
+          undefined,
+          "none",
+        ],
       ],
     });
   });
@@ -1130,7 +1187,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-9),
+        .slice(-10),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1144,6 +1201,7 @@ describe("the options under ui", () => {
         "ui.theme",
         "ui.themes",
         "ui.time",
+        "ui.width",
       ],
       time: [{ _tag: "Shown", text: "HH:mm:ss" }],
     });
@@ -1205,6 +1263,13 @@ describe("the options under ui", () => {
       unknown: read("/set ui.palette dusk"),
       unset: read("/unset ui.activity"),
       unsetDevice: read("/unset -device ui.theme"),
+      width: read("/set ui.width 80"),
+      widthDevice: read("/set -device ui.width 120"),
+      widthFractional: read("/set ui.width 80.5"),
+      widthNone: read("/set ui.width NONE"),
+      widthTooBig: read("/set ui.width 401"),
+      widthTooSmall: read("/set ui.width 39"),
+      widthWord: read("/set ui.width auto"),
       wrong: read("/set ui.activity loud"),
     }).toStrictEqual({
       alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "ui.time" }] },
@@ -1253,6 +1318,13 @@ describe("the options under ui", () => {
       },
       unset: change("activity", undefined, false),
       unsetDevice: change("theme", undefined, true),
+      width: change("width", 80, false),
+      widthDevice: change("width", 120, true),
+      widthFractional: { _tag: "Invalid", message: widthRefused("80.5") },
+      widthNone: change("width", "none", false),
+      widthTooBig: { _tag: "Invalid", message: widthRefused("401") },
+      widthTooSmall: { _tag: "Invalid", message: widthRefused("39") },
+      widthWord: { _tag: "Invalid", message: widthRefused("auto") },
       wrong: {
         _tag: "Invalid",
         message: 'ui.activity: Choose one of all, quiet, none, not "loud".',

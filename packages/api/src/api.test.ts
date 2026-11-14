@@ -36,6 +36,7 @@ import {
   uiDefaults,
   uiOptionNames,
   uiValueKept,
+  WidestLine,
 } from "./ui.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
@@ -325,8 +326,9 @@ describe("the contract", () => {
         theme: "system",
         themes: [],
         time: "HH:mm",
+        width: "none",
       },
-      names: ["activity", "colours", "font", "leading", "size", "theme", "themes", "time"],
+      names: ["activity", "colours", "font", "leading", "size", "theme", "themes", "time", "width"],
       option: ["time", "theme", "activity", null, null, null],
       options: [
         true,
@@ -422,15 +424,57 @@ describe("the contract", () => {
     });
   });
 
+  it("takes the widest line as none or a whole count of characters from 40 to 400, and no other", () => {
+    const widest = Schema.decodeUnknownOption(WidestLine);
+
+    expect(
+      [
+        "none",
+        40,
+        80,
+        400,
+        39,
+        401,
+        0,
+        -80,
+        80.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        "80",
+        "None",
+        "auto",
+        "",
+        null,
+      ].map((each) => Option.getOrNull(widest(each)))
+    ).toStrictEqual([
+      "none",
+      40,
+      80,
+      400,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","font":"system","leading":1.45,"size":14,"theme":"system","themes":[],"time":"HH:mm"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","font":"system","leading":1.45,"size":14,"theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","font":"ibm-plex-mono","leading":1.45,"size":16,"theme":"dark","themes":[],"time":"HH:mm:ss"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","font":"ibm-plex-mono","leading":1.45,"size":16,"theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },

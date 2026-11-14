@@ -185,7 +185,8 @@ const Editor = ({ option, done }: { readonly option: Option; readonly done: () =
   };
 
   // A number is a number field within its bounds, so Up and Down step it: by one for a
-  // whole number, and by its own step for a decimal.
+  // whole number, and by its own step for a decimal. A number or a word is a text field, as
+  // a number field takes no word.
   const number =
     option.kind._tag === "Integer" || option.kind._tag === "Decimal"
       ? {

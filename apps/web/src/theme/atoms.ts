@@ -2,9 +2,10 @@
  * The theme, as atoms: the one in effect on this device, drawn by the core from its
  * palette, or one previewed, while the palette highlights a theme or the import dialog
  * reads one, in a Worker through the `ThemeReader` port, one text at a time and for at most
- * a second; the text's size, line height, and font, or a font the palette highlights; drawing them as CSS
- * custom properties on the document's root; choosing a theme, and importing and removing
- * themes for every device, each made from the options read.
+ * a second; the text's size, line height, font, and widest line, or a font the palette
+ * highlights; drawing them as CSS custom properties on the document's root; choosing a
+ * theme, and importing and removing themes for every device, each made from the options
+ * read.
  *
  * @packageDocumentation
  */
@@ -166,11 +167,13 @@ export const drawnTheme = Atom.make((get) => {
 });
 
 /**
- * The text's size, line height, and font in effect on this device, as the root's custom
- * properties, with the monospace font IRC's formatting asks for beside it: the font the
- * open palette highlights, while it highlights one, else the one in effect.
+ * The text's size, line height, font, and widest line in effect on this device, as the
+ * root's custom properties, with the monospace font IRC's formatting asks for beside it:
+ * the font the open palette highlights, while it highlights one, else the one in effect.
+ * The widest line is in `ch`, the font's own `0` at the text's size, so it follows both,
+ * and no bound is no property at all, which leaves a line as wide as its Pane.
  */
-const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
+const drawnType = Atom.make((get): readonly (readonly [string, string | undefined])[] => {
   const ui = get(uiInEffect);
   const highlighted = get(paletteState).open ? get(paletteHighlight) : undefined;
   const font = (highlighted === undefined ? undefined : fontOfKey(highlighted)) ?? ui.font;
@@ -180,6 +183,7 @@ const drawnType = Atom.make((get): readonly (readonly [string, string])[] => {
     ["--line-height", String(ui.leading)],
     ["--font-text", fontStack(font)],
     ["--font-mono", monoStack(font)],
+    ["--widest-line", ui.width === "none" ? undefined : `${ui.width}ch`],
   ];
 });
 
@@ -437,8 +441,8 @@ export const saveImport = runtime
  * derived as a custom property on the root's style, which a Content Security Policy that
  * refuses inline styles allows, since it is set through the CSSOM, the root's
  * `color-scheme` as the theme is light or dark, and `data-theme` as the name in effect. The
- * text's size, line height, and font are custom properties there too. Whether the device prefers dark is
- * followed, for `system`.
+ * text's size, line height, font, and widest line are custom properties there too. Whether
+ * the device prefers dark is followed, for `system`.
  * @param registry - The registry.
  * @returns How to stop.
  */
@@ -463,7 +467,11 @@ export const watchTheme = (registry: AtomRegistry.AtomRegistry): (() => void) =>
 
   const drawType = () => {
     for (const [name, value] of registry.get(drawnType)) {
-      root.style.setProperty(name, value);
+      if (value === undefined) {
+        root.style.removeProperty(name);
+      } else {
+        root.style.setProperty(name, value);
+      }
     }
   };
 
