@@ -7,7 +7,7 @@
  */
 import { casemappingOf, defaultCasemapping } from "@iirc/protocol/casemapping";
 import { isupportTokens } from "@iirc/protocol/isupport";
-import { parseSource, pong } from "@iirc/protocol/line";
+import { parseSource, pong, upperCaseAscii } from "@iirc/protocol/line";
 import type { Line, RawParam } from "@iirc/protocol/line";
 
 import {
@@ -741,13 +741,32 @@ const reportReply = (
 };
 
 /**
+ * Where the latest `Say` of a command stands, for a standard reply that names `PRIVMSG` or
+ * `NOTICE`, compared without regard to ASCII case. Only a `Say` sent on this Connection
+ * with no label is remembered, so a reply without one is a guess, which the Message it is
+ * shown with does not claim to settle.
+ * @param run - The step.
+ * @param command - The command the reply names.
+ * @returns The Timelines, or `undefined` for a command no `Say` sent, or none said yet.
+ */
+const latestSayWhere = (run: Run, command: string): readonly Where[] | undefined => {
+  const verb = upperCaseAscii(command);
+  const lastSaid = openOf(run.state)?.lastSaid;
+  const target = verb === "PRIVMSG" || verb === "NOTICE" ? lastSaid?.[verb] : undefined;
+
+  return target === undefined ? undefined : saidWhere(run, target);
+};
+
+/**
  * A standard reply that refused no intent, shown with what it answers. A labelled one is
  * shown where its intent belongs, as `labeled-response` marked it. One live outside any
  * batch or label is tied by the command it names to the oldest of what awaits an answer
  * with that command: a Lookup collects it, a `FAIL` refuses an action as `421` does, by its
  * code, and a `WARN` or a `NOTE` is shown where the action belongs and settles nothing.
- * Anything else, history included, is shown in the Network's own Timeline. Nothing is
- * decided from its description.
+ * One that names `PRIVMSG` or `NOTICE` is shown where the latest `Say` of that command sent
+ * on this Connection without a label stands. Nothing says which Message it answers, so that
+ * is a guess, and it settles nothing, a `FAIL` included. Anything else, history included,
+ * is shown in the Network's own Timeline. Nothing is decided from its description.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
  */
@@ -767,9 +786,10 @@ const standardReply = (run: Run, arrival: Arrival): void => {
     return;
   }
 
-  // A labelled `FAIL` here rejects an intent already refused, which only uses up its label.
+  // A labelled `FAIL` of an action here rejects an intent already refused, which only uses
+  // up its label.
   if (arrival.about !== undefined) {
-    if (reply.kind !== "FAIL") {
+    if (reply.kind !== "FAIL" || rememberedAction(run, arrival.about) === undefined) {
       reportReply(run, arrival, reply, intentWhere(run, arrival.about));
     }
 
@@ -784,13 +804,12 @@ const standardReply = (run: Run, arrival: Arrival): void => {
     collectFloor(run, looking, line);
   } else if (acting !== undefined && reply.kind === "FAIL") {
     tieRejection(run, line, acting, reply.code);
+  } else if (acting === undefined) {
+    const said = floor ? latestSayWhere(run, reply.command) : undefined;
+
+    reportReply(run, arrival, reply, said ?? [{ _tag: "Network" }]);
   } else {
-    reportReply(
-      run,
-      arrival,
-      reply,
-      acting === undefined ? [{ _tag: "Network" }] : intentWhere(run, acting.intent)
-    );
+    reportReply(run, arrival, reply, intentWhere(run, acting.intent));
   }
 };
 

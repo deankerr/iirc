@@ -495,6 +495,15 @@ const say = (run: Run, input: Input & { readonly _tag: "Say" }): void => {
 
   if (sent.echo) {
     rememberSaid(run, input.intent, input.target);
+  } else {
+    // Nothing ties a standard reply to this Say, but the latest of its command is the best
+    // guess, so its Target is kept for the Connection.
+    const command = input.kind === "Notice" ? "NOTICE" : "PRIVMSG";
+
+    updateOpen(run, (open) => ({
+      ...open,
+      lastSaid: { ...open.lastSaid, [command]: input.target },
+    }));
   }
 
   run.news.push(

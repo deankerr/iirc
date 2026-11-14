@@ -146,7 +146,21 @@ type LinkPhase =
        * back, or `undefined` before any, which a `306` confirms.
        */
       readonly asked: string | null | undefined;
+      /**
+       * The Target of the latest `Say` sent on this Connection with no label, as the Owner
+       * named it, for each command a `Say` sends. Without labels nothing says which Message
+       * a standard reply answers, so one that names `PRIVMSG` or `NOTICE` is shown with the
+       * latest. It is one Target for each command, so it is bounded by construction, and it
+       * ends with the Connection.
+       */
+      readonly lastSaid: LastSaid;
     };
+
+/** The commands a `Say` sends. */
+type SayCommand = "NOTICE" | "PRIVMSG";
+
+/** The Target of the latest unlabelled `Say` for each command, or `undefined` for none yet. */
+type LastSaid = Readonly<Record<SayCommand, string | undefined>>;
 
 /**
  * One target of a Line of an action, awaiting its own answer: a nick of a `KICK`, or a

@@ -288,7 +288,10 @@ describe("the projector", () => {
     expect(result.same).toStrictEqual(result.want);
   });
 
-  it("folds again from the start a store built by another projection version", async () => {
+  it.each([
+    ["an older", projectionVersion - 1],
+    ["a newer", projectionVersion + 1],
+  ])("folds again from the start a store built by %s projection version", async (_, left) => {
     const result = await run(
       Effect.gen(function* () {
         const world = yield* makeWorld();
@@ -303,7 +306,7 @@ describe("the projector", () => {
 
         // As another version left it: something no fold of this Journal makes, and
         // further on than the Journal goes.
-        yield* store.reset(projectionVersion + 1);
+        yield* store.reset(left);
         yield* store.apply({
           changes: [
             {

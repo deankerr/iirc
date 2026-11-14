@@ -35,6 +35,12 @@ const replies = (run: Played<State>): readonly Extract<News, { _tag: "Activity" 
     )
   );
 
+const refusals = (run: Played<State>): readonly Extract<News, { _tag: "Refused" }>[] =>
+  run.steps.flatMap((step) => step.news.flatMap((news) => (news._tag === "Refused" ? [news] : [])));
+
+const confirmations = (run: Played<State>): number =>
+  run.steps.flatMap((step) => step.news.filter((news) => news._tag === "Confirmed")).length;
+
 describe("a WARN or NOTE answering what Self sent, by label", () => {
   it("is shown in the Timeline a Say's Message stands in, and neither confirms nor refuses it", () => {
     played([
@@ -118,6 +124,88 @@ describe("a WARN or NOTE answering what Self sent, by label", () => {
   });
 });
 
+describe("a standard reply after the echo, in the same labelled answer", () => {
+  it("is shown in the Say's Timeline, and confirms the Message only once", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! say #iirc :hello",
+        ">> @label=l1 PRIVMSG #iirc hello",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 echo :hello",
+        "<< @label=l1 :irc.test BATCH +r labeled-response",
+        "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
+        "?? confirmed i1 :hello",
+        "<< @batch=r :irc.test WARN PRIVMSG INVALID_UTF8 :Modified",
+        "?? activity StandardReply WARN PRIVMSG INVALID_UTF8 in=channel:#iirc :Modified",
+        "<< @batch=r :irc.test NOTE PRIVMSG QUEUED #iirc :Held for a moment",
+        "?? activity StandardReply NOTE PRIVMSG QUEUED context=#iirc in=channel:#iirc :Held for a moment",
+        "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello again",
+        "<< :irc.test BATCH -r"
+      ),
+    ]);
+
+    expect(confirmations(run)).toBe(1);
+    expect(refusals(run)).toHaveLength(0);
+  });
+
+  it("shows a FAIL after the echo too, and refuses nothing", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! say #iirc :hello",
+        ">> @label=l1 PRIVMSG #iirc hello",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 echo :hello",
+        "<< @label=l1 :irc.test BATCH +r labeled-response",
+        "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
+        "?? confirmed i1 :hello",
+        "<< @batch=r :irc.test FAIL PRIVMSG TOO_LATE :Late",
+        "?? activity StandardReply FAIL PRIVMSG TOO_LATE in=channel:#iirc :Late",
+        "<< :irc.test BATCH -r"
+      ),
+    ]);
+
+    expect(refusals(run)).toHaveLength(0);
+  });
+
+  it("is shown where an action belongs after its FAIL, which refuses it once", () => {
+    const run = played([
+      ...inChannel(echo),
+      lines(
+        "!! topic #iirc :one",
+        ">> @label=l1 TOPIC #iirc one",
+        "<< @label=l1 :irc.test BATCH +r labeled-response",
+        "<< @batch=r :irc.test FAIL TOPIC NO_PERMISSION #iirc :Not allowed",
+        "?? refused i1 Rejected NO_PERMISSION topic=#iirc in=channel:#iirc",
+        "<< @batch=r :irc.test FAIL TOPIC STILL_NO #iirc :Really not",
+        "<< @batch=r :irc.test NOTE TOPIC ADVICE #iirc :Ask an operator",
+        "?? activity StandardReply NOTE TOPIC ADVICE context=#iirc in=channel:#iirc :Ask an operator",
+        "<< :irc.test BATCH -r"
+      ),
+    ]);
+
+    expect(refusals(run)).toHaveLength(1);
+  });
+
+  it("stops being tied to the Say once the batch ends", () => {
+    played([
+      ...inChannel(echo),
+      lines(
+        "!! say #iirc :hello",
+        ">> @label=l1 PRIVMSG #iirc hello",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 echo :hello",
+        "<< @label=l1 :irc.test BATCH +r labeled-response",
+        "<< @batch=r :iirc!u@h PRIVMSG #iirc :hello",
+        "?? confirmed i1 :hello",
+        "<< :irc.test BATCH -r",
+        "<< @label=l1 :irc.test WARN PRIVMSG LATE :Long after",
+        "?? activity StandardReply WARN PRIVMSG LATE in=network :Long after"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+});
+
 describe("a FAIL answering what Self sent", () => {
   it("still refuses a labelled action, by its code", () => {
     played([
@@ -191,6 +279,148 @@ describe("a WARN or NOTE without a label", () => {
         "<< :irc.test 311 iirc peer ~u peer.test * :Peer",
         "<< :irc.test 318 iirc peer :End",
         "?? looked-up i1 whois=peer found profiles=1 note=NOTE:CACHED"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+});
+
+describe("a standard reply for a PRIVMSG or NOTICE, without a label", () => {
+  it("is shown in the Channel the latest Say of that command went to", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! say #iirc :one",
+        ">> PRIVMSG #iirc one",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :one",
+        "<< :irc.test WARN PRIVMSG MODIFIED :Changed",
+        "?? activity StandardReply WARN PRIVMSG MODIFIED in=channel:#iirc :Changed"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is shown with the Direct partner of the latest NOTICE, and not with a PRIVMSG's", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! notice peer :psst",
+        ">> NOTICE peer psst",
+        "?? message Notice iirc peer at=ours:t+0s in=direct:peer ours=i1 :psst",
+        "!! say #iirc :loud",
+        ">> PRIVMSG #iirc loud",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i2 :loud",
+        "<< :irc.test NOTE NOTICE QUEUED :Held",
+        "?? activity StandardReply NOTE NOTICE QUEUED in=direct:peer :Held",
+        "<< :irc.test NOTE PRIVMSG QUEUED :Held",
+        "?? activity StandardReply NOTE PRIVMSG QUEUED in=channel:#iirc :Held"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("follows the Say most recent for its command, and the casemapping now in force", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! say #iirc :one",
+        ">> PRIVMSG #iirc one",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :one",
+        "!! say peer :two",
+        ">> PRIVMSG peer two",
+        "?? message Privmsg iirc peer at=ours:t+0s in=direct:peer ours=i2 :two",
+        "<< :irc.test WARN privmsg MODIFIED :Changed",
+        "?? activity StandardReply WARN privmsg MODIFIED in=direct:peer :Changed"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("shows a FAIL there, and refuses nothing", () => {
+    const run = played([
+      ...inChannel(),
+      lines(
+        "!! say peer :psst",
+        ">> PRIVMSG peer psst",
+        "?? message Privmsg iirc peer at=ours:t+0s in=direct:peer ours=i1 :psst",
+        "<< :irc.test FAIL PRIVMSG CANNOT_SEND :Not allowed",
+        "?? activity StandardReply FAIL PRIVMSG CANNOT_SEND in=direct:peer :Not allowed"
+      ),
+    ]);
+
+    expect(refusals(run)).toHaveLength(0);
+  });
+
+  it("is shown in the Network's Timeline when nothing of that command was said", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "<< :irc.test WARN PRIVMSG MODIFIED :Changed",
+        "?? activity StandardReply WARN PRIVMSG MODIFIED in=network :Changed",
+        "!! notice peer :psst",
+        ">> NOTICE peer psst",
+        "?? message Notice iirc peer at=ours:t+0s in=direct:peer ours=i1 :psst",
+        "<< :irc.test WARN PRIVMSG MODIFIED :Changed",
+        "?? activity StandardReply WARN PRIVMSG MODIFIED in=network :Changed"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is shown in the Network's Timeline when it is history", () => {
+    const history: Feature = {
+      label: (arrival) => ({
+        value: arrival.batch === undefined ? arrival : { ...arrival, live: false },
+      }),
+      name: FeatureName.make("history"),
+      needs: {},
+      own: undefined,
+    };
+
+    play(makeClient([...registry, register(history)]), {
+      configuration: base,
+      transcript: [
+        ...inChannel(["batch"]),
+        lines(
+          "!! say #iirc :one",
+          ">> PRIVMSG #iirc one",
+          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :one",
+          "<< :irc.test BATCH +h chathistory #iirc",
+          "<< @batch=h :irc.test WARN PRIVMSG MODIFIED :Long ago",
+          "?? activity StandardReply WARN PRIVMSG MODIFIED history in=network :Long ago",
+          "<< :irc.test BATCH -h"
+        ),
+      ],
+    });
+
+    expect.assertions(0);
+  });
+
+  it("is forgotten when the Connection ends", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! say #iirc :one",
+        ">> PRIVMSG #iirc one",
+        "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 :one",
+        "== closed Reset",
+        "?? session-ended Closed Reset",
+        "+2s",
+        "-> dial irc.test:6697 tls",
+        "== opened",
+        ">> CAP LS 302",
+        ">> NICK iirc",
+        ">> USER iirc 0 * iirc",
+        "<< :irc.test 421 * CAP :Unknown command",
+        "<< :irc.test 001 iirc :Welcome",
+        ">> JOIN #iirc",
+        "<< :irc.test WARN PRIVMSG MODIFIED :Changed",
+        "?? activity StandardReply WARN PRIVMSG MODIFIED in=network :Changed"
       ),
     ]);
 
