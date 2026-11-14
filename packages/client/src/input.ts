@@ -3,6 +3,7 @@ import { Schema } from "effect";
 
 import { NetworkConfiguration } from "./configuration.ts";
 import { ConnectionId, Instant, IntentId, TimerId } from "./ids.ts";
+import { Answers } from "./output.ts";
 
 /**
  * How a Connection ended, as the Transport saw it. `HungUp` is the end the Client asked
@@ -98,6 +99,7 @@ export type Lookup = typeof Lookup.Type;
  */
 export const UnsentLine = Schema.TaggedUnion({
   Send: {
+    answers: Schema.optionalKey(Answers),
     connection: ConnectionId,
     intent: Schema.optionalKey(IntentId),
     line: OutboundLine,

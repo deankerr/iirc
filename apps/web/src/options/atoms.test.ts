@@ -109,7 +109,7 @@ describe("the options", () => {
 
     expect({ closed: registry.get(mainView), first, opened }).toStrictEqual({
       closed: { _tag: "Timeline" },
-      first: "network.libera.channels",
+      first: "network.libera.answerCtcp",
       opened: { _tag: "Options", back: { _tag: "Timeline" }, filter: "network.libera.*" },
     });
   });
@@ -196,6 +196,7 @@ describe("the options", () => {
       puts: daemon.puts,
     }).toStrictEqual({
       added: {
+        answerCtcp: true,
         channels: [],
         declined: [],
         enabled: true,

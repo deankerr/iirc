@@ -58,7 +58,7 @@ const sameServer = (name: string, server: string): boolean =>
  * @param source - The Line's source, or `undefined` when it has none.
  * @returns Whether it is.
  */
-const isUser = (run: Run, source: Source | undefined): boolean =>
+export const isUser = (run: Run, source: Source | undefined): boolean =>
   source !== undefined &&
   (source.user !== undefined ||
     source.host !== undefined ||
@@ -233,8 +233,12 @@ const activityTimelines = (
       return isSelf(run, activity.nick) ? [network] : theirs(activity.nick);
     }
 
-    // The core places a standard reply where what it answers belongs, before it is routed.
-    case "StandardReply": {
+    // The core places a standard reply where what it answers belongs, and a CTCP by who
+    // sent it, before either is routed.
+    case "StandardReply":
+    case "CtcpRequest":
+    case "CtcpReply":
+    case "CtcpUnsent": {
       return [network];
     }
 
@@ -342,13 +346,15 @@ export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): Activ
 /**
  * Moves what the Client remembers of where Self said something to a partner who changed
  * nick, as their Timeline follows the nick, so a reply that comes later is shown where the
- * Message stands. A Target is one Channel or one nick, since a `Say` has no list, and a
+ * Message stands, and of who asked for each CTCP answer, so an `Unsent` of it is reported
+ * where its request is. A Target is one Channel or one nick, since a `Say` has no list, and a
  * Target that names the old nick, by the Network's casemapping now, names the new one.
  * Channels never move.
  *
  * A projection that moves a Timeline onto a nick detaches the Timeline already keyed by it,
  * since nothing says it is the same person, so what is remembered of a Say to that nick is
- * forgotten: a reply to it is shown in the Network's own Timeline, never in another User's.
+ * forgotten: a reply to it is shown in the Network's own Timeline, never in another User's,
+ * and so is an answer's `Unsent`.
  * The Client cannot know whether the Timeline that moved exists, so it forgets whenever a
  * partner is renamed onto a nick said to. What is remembered never grows.
  * @param run - The step.
@@ -380,8 +386,15 @@ export const followSays = (run: Run, where: readonly Where[]): void => {
     return moves.find((move) => move.key === key)?.to.name ?? target;
   };
 
+  // An answer's partner is a nick, and `null` once taken, which nothing moves.
+  const followNick = (nick: string | null): string | null =>
+    nick === null ? null : (follow(nick) ?? null);
+
   run.state = {
     ...run.state,
+    answering: new Map(
+      [...run.state.answering].map(([number, nick]) => [number, followNick(nick)])
+    ),
     said: new Map(
       [...run.state.said].flatMap(([intent, target]) => {
         const followed = follow(target);

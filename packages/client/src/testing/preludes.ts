@@ -29,12 +29,13 @@ const decodeConfiguration = Schema.decodeUnknownSync(NetworkConfiguration);
 
 /**
  * A base Configuration: `iirc` on `irc.test:6697` over TLS, enabled, in no Channels,
- * with no login and nothing declined. `!! configure` items change it as a scenario goes.
+ * with no login, nothing declined, and CTCP answered. `!! configure` items change it as a scenario goes.
  * @param overrides - What to set instead.
  * @returns The Configuration, decoded, so a bad override fails here.
  */
 export const configured = (overrides: Overrides = {}): NetworkConfiguration =>
   decodeConfiguration({
+    answerCtcp: true,
     channels: [],
     declined: [],
     enabled: true,

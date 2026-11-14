@@ -26,7 +26,26 @@ export interface StandardReply {
 }
 
 /**
- * Something that changed on the Network, rather than something said. A `StandardReply`
+ * Why Self did not answer a CTCP request: it was read from history (`History`), it is not
+ * one Self answers (`Unknown`), the Configuration turns answers off (`Off`), its sender
+ * is no User a reply can safely go to (`Unreachable`), the answer could not be built or
+ * sent whole (`Unsendable`), or the budget for answers was spent (`Limited`).
+ */
+export type Unanswered = "History" | "Unknown" | "Off" | "Unreachable" | "Unsendable" | "Limited";
+
+/** What became of a CTCP request: the answer Self sent, as its arguments, or why none. */
+export type CtcpAnswer =
+  | { readonly _tag: "Answered"; readonly text: string }
+  | { readonly _tag: "Unanswered"; readonly reason: Unanswered };
+
+/**
+ * Something that changed on the Network, rather than something said. A `CtcpRequest` is
+ * a CTCP request in a `PRIVMSG` from a User other than Self, other than `ACTION` and
+ * `DCC`, with what became of it, and a `CtcpReply` one in a `NOTICE`. `nick` is who sent
+ * it, `target` where it was sent, and `args` everything after the command, as text to
+ * show and nothing more. A `CtcpUnsent` is an answer Self reported as `Answered` that never
+ * left, placed where its request was, which it names by who asked, where, and the command.
+ * A `StandardReply`
  * is what the Network said of something sent, or of nothing: a `WARN` or a `NOTE`, or a
  * `FAIL` that refused no intent.
  */
@@ -64,7 +83,18 @@ export type Activity =
       readonly nick: string;
       readonly away: { readonly message: string } | null;
     }
-  | ({ readonly _tag: "StandardReply" } & StandardReply);
+  | ({ readonly _tag: "StandardReply" } & StandardReply)
+  | ({ readonly _tag: "CtcpRequest"; readonly answer: CtcpAnswer } & Ctcp)
+  | ({ readonly _tag: "CtcpReply" } & Ctcp)
+  | ({ readonly _tag: "CtcpUnsent" } & Omit<Ctcp, "args">);
+
+/** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
+export interface Ctcp {
+  readonly nick: string;
+  readonly target: string;
+  readonly command: string;
+  readonly args: string;
+}
 
 /**
  * A name as it was said, and its key: the name folded by the casemapping the Network last

@@ -120,6 +120,30 @@ const reply = (
 });
 
 /**
+ * A CTCP request in `#iirc`, as an item, with what became of it.
+ * @param sequence - Its sequence.
+ * @param command - Its command.
+ * @param answer - The answer sent, or why none was.
+ * @returns The item.
+ */
+const asked = (
+  sequence: number,
+  command: string,
+  answer:
+    | { readonly _tag: "Answered"; readonly text: string }
+    | { readonly _tag: "Unanswered"; readonly reason: "Limited" | "Unknown" }
+): typeof TimelineItem.Encoded => ({
+  ...joined(sequence),
+  content: {
+    _tag: "Activity",
+    activity: { _tag: "CtcpRequest", answer, args: "", command, nick: "peer", target: "#iirc" },
+    at: { _tag: "Unknown" },
+    id: { _tag: "Unknown" },
+    live: true,
+  },
+});
+
+/**
  * Waits until something holds, letting React render what changed meanwhile.
  * @param holds - What must hold.
  */
@@ -897,6 +921,31 @@ describe("what the view says it shows", () => {
       ["-- WARN PRIVMSG INVALID_UTF8 #iirc: Modified", false],
       ["-- NOTE PRIVMSG QUEUED: Held", false],
       ["-- FAIL PRIVMSG TOO_FAST #iirc: Slow down", true],
+    ]);
+  });
+
+  it("shows a CTCP request with the answer sent beside it, or why none was", async () => {
+    const { registry } = await signedIn(
+      [],
+      [
+        asked(1, "VERSION", { _tag: "Answered", text: "iirc" }),
+        asked(2, "TIME", { _tag: "Unanswered", reason: "Limited" }),
+        asked(3, "FINGER", { _tag: "Unanswered", reason: "Unknown" }),
+      ]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("FINGER"));
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("asked for")
+    );
+
+    expect(rows.map((row) => row.textContent?.replace(/^\S+ /u, ""))).toStrictEqual([
+      "-- peer asked for VERSION, answered iirc",
+      "-- peer asked for TIME, not answered: too many requests",
+      "-- peer asked for FINGER, not answered: not understood",
     ]);
   });
 

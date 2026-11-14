@@ -25,6 +25,7 @@ import { backoff, lasting } from "./backoff.ts";
 import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
 import type { Client, Step } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
+import { answerUnsent } from "./ctcp.ts";
 import type { Arrival, Refined } from "./feature.ts";
 import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
@@ -647,8 +648,9 @@ const unfilledHeld = (run: Run, line: SecretLine): void => {
 };
 
 // Lines that never left. A `Say` or an `Act` with one among them is refused, once, unless
-// the Ircd already confirmed it, and a Lookup reports `Unsent`. Any other Line changes
-// nothing: its Connection is ending.
+// the Ircd already confirmed it, a Lookup reports `Unsent`, and a CTCP answer is reported
+// where its request was, from any Connection, since it never left either way. Any other
+// Line changes nothing: its Connection is ending.
 const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
   const link = linkOf(run);
   const open = link?.id === input.connection ? openOf(run.state) : undefined;
@@ -670,6 +672,10 @@ const unsent = (run: Run, input: Input & { readonly _tag: "Unsent" }): void => {
 
   for (const output of input.outputs) {
     const intent = output._tag === "Send" ? output.intent : undefined;
+
+    if (output._tag === "Send" && output.answers !== undefined) {
+      answerUnsent(run, output.answers);
+    }
 
     if (intent !== undefined && !confirmed.has(intent) && !refused.has(intent)) {
       refused.add(intent);

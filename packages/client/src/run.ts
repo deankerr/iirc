@@ -13,7 +13,7 @@ import type { Departure, KnownBefore, Refusal, Sendable } from "./feature.ts";
 import type { Instant, IntentId } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
 import type { EndReason, IgnoredReason, News, RefusedAction, RefusedReason } from "./news.ts";
-import type { Output } from "./output.ts";
+import type { Answers, Output } from "./output.ts";
 import type { Registered } from "./registry.ts";
 import type { Reading } from "./seam.ts";
 import { runStage } from "./seam.ts";
@@ -200,6 +200,12 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
   }
 };
 
+/** What a `Send` is tied back to, for an `Unsent` to read: an intent, a CTCP request, or nothing. */
+interface Tied {
+  intent?: IntentId;
+  answers?: Answers;
+}
+
 /**
  * Sends a Line on the Connection, through each Feature's `egress`. A Line that cannot be
  * built is not sent, and is recorded as `Malformed` with its command. One a Feature
@@ -210,6 +216,7 @@ export const sendAll = (run: Run, lines: readonly Sendable[]): void => {
  * @param line - The Line, or why it cannot be built.
  * @param command - Its command, to report if it cannot be built.
  * @param purpose - What it is for, if it is the Owner's, else a protocol Line.
+ * @param answers - The CTCP request it answers, if it is an answer.
  * @returns The Line as it was sent, with whether the Ircd will echo it, or `undefined`
  * if it was not sent.
  */
@@ -217,7 +224,8 @@ export const send = (
   run: Run,
   line: OutboundLine | Rejected,
   command: string,
-  purpose?: Departure["for"]
+  purpose?: Departure["for"],
+  answers?: Answers
 ): Departure | undefined => {
   const id = connection(run);
 
@@ -236,12 +244,20 @@ export const send = (
   const reading = features.length === 0 ? undefined : readingOf(run);
   const open = openOf(run.state);
 
-  // Every Line of a `Say` or an action names its intent, so an `Unsent` can be tied back
-  // to it.
-  const intent = departure.for._tag === "Protocol" ? {} : { intent: departure.for.intent };
+  // Every Line of a `Say` or an action names its intent, and an answer its request, so an
+  // `Unsent` can be tied back to it.
+  const tied: Tied = {};
+
+  if (departure.for._tag !== "Protocol") {
+    tied.intent = departure.for.intent;
+  }
+
+  if (answers !== undefined) {
+    tied.answers = answers;
+  }
 
   if (reading === undefined || open === undefined) {
-    run.outputs.push({ _tag: "Send", connection: id, line, ...intent });
+    run.outputs.push({ _tag: "Send", connection: id, line, ...tied });
 
     return departure;
   }
@@ -267,7 +283,7 @@ export const send = (
     return undefined;
   }
 
-  run.outputs.push({ _tag: "Send", connection: id, line: ran.value.line, ...intent });
+  run.outputs.push({ _tag: "Send", connection: id, line: ran.value.line, ...tied });
   sendAll(run, ran.send);
 
   return ran.value;

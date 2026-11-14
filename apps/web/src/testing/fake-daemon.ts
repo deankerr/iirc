@@ -329,6 +329,7 @@ const ReadBody = Schema.fromJsonString(
 
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
+  answerCtcp: true,
   channels: [{ name: "#iirc" }],
   declined: [],
   enabled: true,
