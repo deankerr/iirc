@@ -52,6 +52,7 @@ import {
   signedOut,
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
+import { askRemoval } from "../options/removal.ts";
 import { changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
 import { openPalette } from "../palette/state.ts";
@@ -298,6 +299,7 @@ type Local = Extract<
       | "Pane"
       | "ListThemes"
       | "ImportTheme"
+      | "AskRemoval"
       | "Search"
       | "Look"
       | "Draft";
@@ -305,6 +307,7 @@ type Local = Extract<
 >;
 
 const localTags: ReadonlySet<string> = new Set<Local["_tag"]>([
+  "AskRemoval",
   "Draft",
   "FocusComposer",
   "ImportTheme",
@@ -366,6 +369,12 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
     case "ImportTheme": {
       showImport(registry, true);
+      break;
+    }
+
+    // Removing a Network is asked first, in a dialog, which sends it once confirmed.
+    case "AskRemoval": {
+      askRemoval(registry, intent.network, intent.keep);
       break;
     }
 

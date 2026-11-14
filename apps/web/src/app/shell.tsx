@@ -22,6 +22,7 @@ import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 import { composerFocus } from "../composer/atoms.ts";
 import { MainComposer } from "../composer/composer.tsx";
 import { CredentialPrompt } from "../options/credential-prompt.tsx";
+import { RemoveDialog } from "../options/remove-dialog.tsx";
 import { compact, drawerShown } from "../page/drawer.ts";
 import {
   defaultWidth,
@@ -335,6 +336,7 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
       {drawn ? <SidebarDrawer signOut={attempt} /> : null}
       <Palette />
       <ImportDialog />
+      <RemoveDialog />
       <Keys />
     </div>
   );

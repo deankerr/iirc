@@ -19,6 +19,7 @@ import type {
   MemberPage,
   Located,
   NetworkEntry,
+  RemovedNetwork,
   Timeline,
   TimelineChangesEvent,
   TimelineItem,
@@ -58,6 +59,7 @@ export const theKey = "iirc_the-key";
 type Answer =
   | Readonly<Record<string, string>>
   | (typeof NetworkEntry.Encoded)[]
+  | (typeof RemovedNetwork.Encoded)[]
   | typeof Knowledge.Encoded
   | typeof TimelineList.Encoded
   | typeof TimelineWindow.Encoded
@@ -466,6 +468,7 @@ export const fakeDaemon = () => {
   const hung: string[] = [];
   const networksHeld: (() => void)[] = [];
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
+  const removals: { readonly network: string; readonly keep: boolean }[] = [];
   const reads: (typeof ReadBody.Type)[] = [];
   const channelsRead: string[] = [];
   const channelsHeld: (() => void)[] = [];
@@ -539,6 +542,8 @@ export const fakeDaemon = () => {
     interject: 0,
     /** Each intent journaled, and its sequence, which `said` answers from. */
     journaled,
+    /** The Networks removed with their Timelines kept, which still hold them. */
+    kept: new Set<string>(),
     keysSent,
     /** What each Network's Ircd declared, as `known` gives it: none until a test says. */
     known: new Map<
@@ -584,6 +589,8 @@ export const fakeDaemon = () => {
     readFailures: 0,
     /** Each Timeline marked read, as its body said it, in order. */
     reads,
+    /** Each removal of a Network, with whether its Timelines were kept. */
+    removals,
     /** Whether `said` answers at all. */
     saidDown: false,
     /** How the next `say`s are answered, first to last; past them, each is said. */
@@ -735,6 +742,10 @@ export const fakeDaemon = () => {
 
     daemon.puts.push({ ifSequence, network });
 
+    if (daemon.kept.has(network)) {
+      return json(409, { _tag: "TimelinesKept", network });
+    }
+
     if (daemon.interject > 0 && before !== undefined) {
       daemon.interject -= 1;
       daemon.configurations.set(network, {
@@ -762,6 +773,64 @@ export const fakeDaemon = () => {
     if (!daemon.timelines.has(network)) {
       daemon.timelines.set(network, []);
     }
+
+    return json(200, { sequence });
+  };
+
+  /**
+   * Removes a Network, as the Daemon does: its Configuration goes, and its Timelines are
+   * flagged removed and kept, or dropped, which the changes stream says in one step. One
+   * removed with them kept is removed again to drop them.
+   * @param network - The Network.
+   * @param keep - Whether its Timelines are kept.
+   * @returns The answer.
+   */
+  const remove = (network: string, keep: boolean) => {
+    const held = daemon.timelines.get(network);
+
+    if (held === undefined && !daemon.configurations.has(network)) {
+      return json(404, { _tag: "UnknownNetwork", network });
+    }
+
+    daemon.removals.push({ keep, network });
+
+    const sequence = daemon.nextSequence;
+    const timelines = held ?? [];
+
+    daemon.nextSequence += 1;
+    daemon.through = sequence;
+    daemon.configurations.delete(network);
+
+    // Kept again changes nothing.
+    if (keep && daemon.kept.has(network)) {
+      return json(200, { sequence });
+    }
+
+    const change = {
+      dropped: keep
+        ? []
+        : timelines.map((one) => ({ changed: sequence, id: one.timeline.id, network })),
+      gaps: [],
+      items: [],
+      merged: [],
+      sequence,
+      timelines: keep
+        ? timelines.map((one) => ({ ...one.timeline, changed: sequence, removed: true }))
+        : [],
+    };
+
+    if (keep) {
+      daemon.kept.add(network);
+
+      for (const one of timelines) {
+        Object.assign(one, { timeline: { ...one.timeline, changed: sequence, removed: true } });
+      }
+    } else {
+      daemon.kept.delete(network);
+      daemon.timelines.delete(network);
+    }
+
+    send({ data: JSON.stringify(change), event: "changed", id: `1.${sequence}` });
 
     return json(200, { sequence });
   };
@@ -1156,7 +1225,26 @@ export const fakeDaemon = () => {
     }
   };
 
+  /**
+   * Removing a Network, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const removeRoute = (url: URL, init: RequestInit): Response | undefined => {
+    const whole = /^\/api\/networks\/(?<network>[^/]+)$/u.exec(url.pathname)?.groups;
+
+    if (init.method !== "DELETE" || whole?.network === undefined) {
+      return undefined;
+    }
+
+    const { network } = whole;
+
+    return signedInOnly(() => remove(network, url.searchParams.get("keep") === "true"));
+  };
+
   const elsewhere = async (url: URL, init: RequestInit) =>
+    removeRoute(url, init) ??
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
@@ -1245,10 +1333,18 @@ export const fakeDaemon = () => {
         return signedInOnly(() =>
           json(
             200,
-            [...daemon.timelines.keys()].map((network) => ({
-              network,
-              status: { _tag: "Running" },
-            }))
+            [...daemon.timelines.keys()].flatMap((network) =>
+              daemon.kept.has(network) ? [] : [{ network, status: { _tag: "Running" } }]
+            )
+          )
+        );
+      }
+
+      case "GET /api/removed-networks": {
+        return signedInOnly(() =>
+          json(
+            200,
+            [...daemon.kept].map((network) => ({ network }))
           )
         );
       }

@@ -857,7 +857,7 @@ const simulate = (played: Scenario) => {
 
     switch (read._tag) {
       case "Networks": {
-        return { _tag: "NetworksRead", entries: daemon.entries() };
+        return { _tag: "NetworksRead", entries: daemon.entries(), removed: [] };
       }
 
       case "List": {
@@ -1349,6 +1349,7 @@ const following = (): Timelines => {
     {
       _tag: "NetworksRead",
       entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+      removed: [],
     },
     { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
     {
@@ -1551,6 +1552,7 @@ describe("the Timelines' state", () => {
           { network: "alpha", status: { _tag: "Running" } },
           { network: "beta", status: { _tag: "Running" } },
         ]),
+        removed: [],
       },
       {
         _tag: "ListRead",
@@ -1892,27 +1894,31 @@ describe("the Timelines' state", () => {
 
     for (const event of [
       { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-      { _tag: "NetworksRead", entries: entries() },
+      { _tag: "NetworksRead", entries: entries(), removed: [] },
       { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
     ] as const satisfies readonly TimelinesEvent[]) {
       state = reduceTimelines(state, event);
     }
 
     // A read started before the reset, which lands after it.
-    const settled = reduceTimelines(state, { _tag: "NetworksRead", entries: entries() });
+    const settled = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: entries(),
+      removed: [],
+    });
 
     state = reduceTimelines(state, {
       _tag: "Reset",
       reset: { through: sequenceOf(9), version: 1 },
     });
-    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries() });
+    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries(), removed: [] });
     const late = wanted(state);
 
     state = reduceTimelines(state, {
       _tag: "ReadStarted",
       read: { _tag: "Networks", attempt: 1 },
     });
-    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries("beta") });
+    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries("beta"), removed: [] });
 
     expect({
       afterReset: wanted(
@@ -2010,7 +2016,11 @@ describe("the Timelines' state", () => {
       overflow: { sequence: sequenceOf(6), timelines: null },
       place: { sequence: 6, version: 1 },
     });
-    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries("alpha") });
+    state = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: entries("alpha"),
+      removed: [],
+    });
 
     const late = {
       fresh: state.entries.fresh,
@@ -2019,7 +2029,11 @@ describe("the Timelines' state", () => {
 
     // Read again, it finds the Network the overflow hid.
     state = reduceTimelines(state, { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 1 } });
-    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries("alpha", "beta") });
+    state = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: entries("alpha", "beta"),
+      removed: [],
+    });
 
     expect({
       found: wanted(state).filter(
@@ -2048,7 +2062,11 @@ describe("the Timelines' state", () => {
       _tag: "Requesting",
       read: { _tag: "Networks", attempt: 1 },
     });
-    state = reduceTimelines(state, { _tag: "NetworksRead", entries: entries("alpha", "beta") });
+    state = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: entries("alpha", "beta"),
+      removed: [],
+    });
 
     expect({ fresh: state.entries.fresh, networks: [...state.networks.keys()] }).toStrictEqual({
       fresh: true,
@@ -2532,6 +2550,7 @@ describe("the Panes", () => {
       {
         _tag: "NetworksRead",
         entries: decodeEntries([{ network: "alpha", status: { _tag: "Running" } }]),
+        removed: [],
       },
       { _tag: "ReadStarted", read: { _tag: "List", after: undefined, attempt: 0, network: alpha } },
       {
@@ -3896,5 +3915,184 @@ describe("what a Pane is called, and what the composer counts as open", () => {
       ],
       shown: { _tag: "Parsed", value: [] },
     });
+  });
+});
+
+/**
+ * alpha's Timelines as the step that removed it with them kept gives them: flagged.
+ * @param sequence - The step.
+ * @returns The step.
+ */
+const keptAt = (sequence: number) =>
+  changed(sequence, {
+    timelines: [
+      timelineOf(idOf(1), "Network", "alpha", 1),
+      timelineOf(idOf(2), "Channel", "#b", 2),
+      timelineOf(idOf(3), "Channel", "#a", 4),
+    ].map((timeline) => ({
+      ...Schema.encodeSync(Timeline)(timeline),
+      changed: sequence,
+      removed: true,
+    })),
+  });
+
+const dropAt = (sequence: number) =>
+  changed(sequence, {
+    dropped: [one, two, three].map((id) => ({ changed: sequence, id, network: "alpha" })),
+  });
+
+describe("removing a Network", () => {
+  const beta = networkId("beta");
+
+  /**
+   * A state following the stream, with beta configured beside alpha.
+   * @returns The state.
+   */
+  const withBeta = () =>
+    reduceTimelines(
+      following(),
+      changed(5, {
+        timelines: [
+          Schema.encodeSync(Timeline)({
+            ...timelineOf(idOf(5), "Network", "beta", 5),
+            network: beta,
+          }),
+        ],
+      })
+    );
+
+  it("keeps a Network removed with its Timelines kept, apart from the rest, read and never said to", () => {
+    const state = reduceTimelines(withBeta(), keptAt(6));
+    const context = contextOf(state);
+
+    expect({
+      focus: context.focus?.removed,
+      reads: wanted(state).filter((read) => read._tag === "Status"),
+      say: interpret("hello", context),
+      shown: opened(state)._tag,
+      sidebar: sidebar(state).map((network) => [network.network, network.removed]),
+    }).toStrictEqual({
+      focus: true,
+      // Only beta's Session is read: a removed Network has none.
+      reads: [{ _tag: "Status", attempt: 0, network: beta }],
+      say: {
+        _tag: "Invalid",
+        message:
+          "alpha was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove alpha drops them.",
+      },
+      shown: "Shown",
+      sidebar: [
+        ["beta", false],
+        ["alpha", true],
+      ],
+    });
+  });
+
+  it("reads the Networks removed with their Timelines kept with the Network list, but for their Session", () => {
+    let state = reduceTimelines(initialTimelines, {
+      _tag: "ReadStarted",
+      read: { _tag: "Networks", attempt: 0 },
+    });
+
+    state = reduceTimelines(state, {
+      _tag: "NetworksRead",
+      entries: [],
+      removed: [{ network: alpha }],
+    });
+
+    const listing = wanted(state);
+
+    state = reduceTimelines(state, {
+      _tag: "ReadStarted",
+      read: { _tag: "List", after: undefined, attempt: 0, network: alpha },
+    });
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: listOf(5, timelineOf(idOf(1), "Network", "alpha", 1)),
+    });
+
+    expect({
+      following: followFrom(state),
+      listing,
+      reads: wanted(state).map((read) => read._tag),
+      removed: sidebar(state).map((network) => network.removed),
+    }).toStrictEqual({
+      following: { sequence: 5, version: 1 },
+      listing: [{ _tag: "List", after: undefined, attempt: 0, network: alpha }],
+      reads: ["Networks"],
+      removed: [true],
+    });
+  });
+
+  it("lets go of dropped Timelines: their windows, the Panes that showed them, and the search", () => {
+    let state = reduceTimelines(withBeta(), {
+      _tag: "Pane",
+      change: { _tag: "Split", axis: "Horizontal", timeline: two },
+    });
+
+    state = searching(state, "m2 word");
+
+    const { generation } = state.search;
+
+    state = reduceTimelines(state, dropAt(6));
+
+    expect({
+      generation: state.search.generation > generation,
+      open: panesOf(state.layout.root).map((pane) => pane.view.open),
+      reads: wanted(state).filter((read) => "timeline" in read),
+      sidebar: sidebar(state).map((network) => network.network),
+      windows: [...state.windows.keys()],
+    }).toStrictEqual({
+      generation: true,
+      open: [undefined, undefined],
+      reads: [],
+      sidebar: ["beta"],
+      windows: [],
+    });
+  });
+
+  it("drops kept Timelines too, and frees the name for a new Network at once", () => {
+    let state = reduceTimelines(following(), keptAt(6));
+
+    state = reduceTimelines(state, dropAt(7));
+
+    const gone = sidebar(state).length;
+
+    state = reduceTimelines(
+      state,
+      changed(8, {
+        timelines: [Schema.encodeSync(Timeline)(timelineOf(idOf(8), "Network", "alpha", 8))],
+      })
+    );
+
+    expect({
+      again: sidebar(state).map((network) => [
+        network.network,
+        network.removed,
+        network.timelines.length,
+      ]),
+      gone,
+    }).toStrictEqual({ again: [["alpha", false, 1]], gone: 0 });
+  });
+
+  it("takes the Daemon's answer to a removal ahead of the stream's step", () => {
+    const kept = reduceTimelines(following(), {
+      _tag: "NetworkRemoved",
+      keep: true,
+      network: alpha,
+    });
+
+    const dropped = reduceTimelines(following(), {
+      _tag: "NetworkRemoved",
+      keep: false,
+      network: alpha,
+    });
+
+    expect({
+      dropped: [sidebar(dropped).length, opened(dropped)._tag],
+      kept: [sidebar(kept)[0]?.removed, contextOf(kept).focus?.removed],
+    }).toStrictEqual({ dropped: [0, "Closed"], kept: [true, true] });
   });
 });

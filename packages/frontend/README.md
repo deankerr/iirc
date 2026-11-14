@@ -36,6 +36,8 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **No change is lost or applied twice.** A Timeline is kept by its id and an item by its position, so a change given again changes nothing. A read that lands after the stream passed it is brought up to date from what the stream gave.
 - **An overflow reads again what it touched, and a reset reads everything again.** A merged Timeline resolves to the one it went to.
 - **A Network's connection and Self's away are derived, never polled.** They come from `known`, and then from the Session items and `AwayChanged` the changes carry.
+- **A removed Network is derived too.** One removed with its Timelines kept is read with the Network list from `GET /api/removed-networks`, or known by its Timelines flagged `removed`, and `isRemoved` reads both. Its Timelines are read and searched as any other, but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
+- **A dropped Timeline is let go of at once.** The changes name it, and its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream.
 
 ### Windows
 
@@ -95,7 +97,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Saying | `/say`, `/me`, `/msg`, `/notice`, `/query` |
 | Acting | `/topic`, `/kick`, `/mode`, `/op`, `/deop`, `/voice`, `/devoice`, `/ban`, `/unban`, `/invite`, `/away`, `/back`, `/nick`, `/quote` |
 | Lookups | `/whois`, `/whowas` |
-| Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/connect`, `/disconnect` |
+| Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
 | Reading | `/read`, `/read all`, `/notify`, `/members`, `/sidebar` |
@@ -105,10 +107,11 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 
 - **A line is read one way.** Plain text is `/say` to the open Timeline, `//text` says `/text`, and `/name args` runs the command named. An unknown command sends nothing.
 - **Arguments are parsed into typed values,** or the command says why not, naming its usage. The text after a Target is kept exactly.
-- **Each command says when it can run,** and an unmet condition says why in words: no Target in the Network's own Timeline, no Session, or one Pane with nothing to close.
+- **Each command says when it can run,** and an unmet condition says why in words: no Target in the Network's own Timeline, no Session, a removed Network, whose Timelines are only read, or one Pane with nothing to close.
 - **Acting is parsed as the Client checks it.** What depends on the Network, such as which modes take a parameter, is read from `PREFIX`, `CHANMODES`, and `CHANTYPES` in the focused Channel's head. Before a head is read, a command that needs them says so and does not guess.
 - **Configuration is changed by intents, never in place.** `/join`, `/part`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
 - **`/query` opens a Timeline by name and never makes one.** It folds the name by the casemapping `known` reports. When `known` cannot be read it opens nothing, since a guessed mapping could open another User's Direct Message.
+- **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused.
 - **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
 - **A new command is one entry.** The palette and the keymap add no actions of their own.
@@ -142,11 +145,11 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 ## Palette
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
+What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every Network, to remove it or drop what it kept, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
 
 - **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
 - **With no query, recent choices come first,** at most 20.
-- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme is drawn in on every device, or, listed by `/theme -light` or `-dark`, set as `ui.light` or `ui.dark`, and a bundled font is drawn in on every device too, unless this device overrides `ui.font`, but a family typed in is always this device's own, since each device has its own.
+- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Network asks to remove it, as `/network remove` does. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme is drawn in on every device, or, listed by `/theme -light` or `-dark`, set as `ui.light` or `ui.dark`, and a bundled font is drawn in on every device too, unless this device overrides `ui.font`, but a family typed in is always this device's own, since each device has its own.
 - **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
 
 ## Composer
@@ -283,6 +286,15 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 - **Activity is a dimmer name, never a number.** Counts and labels say what was said. The page's title counts only Highlights and Direct Messages.
 - **A mark is due only for what the Owner can see:** a Pane that is shown, with the page visible and focused, and under `latest`, at the latest, as the view said.
 - **A mark is never back, and never past what was shown.** It goes up to the last item the view named, even when the Daemon holds a later one.
+- **A removed Network's Timelines are never marked, and call for nothing.** No Client moves their Read Markers, so what is unread there counts toward neither the title nor `/next-unread`.
+
+## Removing a Network
+
+`@iirc/frontend/removal`: the question asked before a Network is removed, as a reducer, `reduceRemoval`, over what the Owner chose and what the Daemon answered.
+
+- **Nothing is removed until the Owner confirms.** Cancelling sends nothing, and a removal in flight is sent once and takes only its own answer.
+- **The Timelines are kept unless the Owner chooses to drop them,** since kept ones can still be dropped later. A Network removed with them kept is asked about only to drop them, which frees its name.
+- **What failed is said in words from the error's tag.** A removal that stands with its Credentials not all forgotten says so, and closes.
 
 ## Notifications
 
@@ -299,4 +311,3 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 - **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone opens the palette, so a sequence beginning with it would make the palette wait.
 - **A divider for what came while the Owner was away from an open Timeline.** The divider is taken when a Timeline opens. One left open in a hidden page gathers unread items, which the counts show, but no divider until it is opened again.
 - **Marking a detached Direct Message read.** No Target names it, so its counts stay until the API can mark a Timeline by its id.
-- **Removing a Network,** which the API cannot do yet. `/network add` only adds.

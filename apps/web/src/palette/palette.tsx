@@ -12,7 +12,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { showChord } from "@iirc/frontend/keymap";
 import type { Entry, Scope } from "@iirc/frontend/palette";
-import { fontDescription, themeDescription } from "@iirc/frontend/palette";
+import { fontDescription, networkDescription, themeDescription } from "@iirc/frontend/palette";
 import { useEffect } from "react";
 import {
   Autocomplete,
@@ -79,6 +79,19 @@ const Row = ({ entry }: { readonly entry: Entry }) => {
           </Text>
           <Text className={styles.description} slot="description">
             {kinds[entry.kind]} on {entry.network}
+          </Text>
+        </>
+      );
+    }
+
+    case "Network": {
+      return (
+        <>
+          <Text className={styles.name} slot="label">
+            <bdi>{entry.name}</bdi>
+          </Text>
+          <Text className={styles.description} slot="description">
+            {networkDescription(entry)}
           </Text>
         </>
       );

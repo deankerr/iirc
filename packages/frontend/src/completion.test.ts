@@ -498,6 +498,7 @@ describe("the sources", () => {
         entries: [
           Schema.decodeSync(NetworkEntry)({ network: "libera", status: { _tag: "Running" } }),
         ],
+        removed: [],
       },
       { _tag: "ReadStarted", read: list },
       {

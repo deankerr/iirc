@@ -125,6 +125,7 @@
 }
 
 .muted {
+  padding: 0 var(--space-3);
   color: var(--color-muted);
 }
 

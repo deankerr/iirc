@@ -150,7 +150,7 @@ const world = (
 
   const events: TimelinesEvent[] = [
     { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-    { _tag: "NetworksRead", entries: [libera] },
+    { _tag: "NetworksRead", entries: [libera], removed: [] },
     { _tag: "ReadStarted", read: list },
     {
       _tag: "ListRead",
@@ -652,6 +652,14 @@ const touchesIirc = (change: Partial<typeof TimelineChange.Encoded>, headSeen: n
     headSeen
   );
 
+/**
+ * The world with a Timeline open, its Network removed with its Timelines kept.
+ * @param open - The Timeline open.
+ * @returns The state.
+ */
+const removed = (open: string) =>
+  reduceTimelines(world(open), { _tag: "NetworkRemoved", keep: true, network });
+
 describe("the header", () => {
   it("shows a Channel's topic, formatted, who set it and when, its modes, and how many are in it", () => {
     const topic = {
@@ -723,6 +731,18 @@ describe("the header", () => {
     }).toStrictEqual({
       none: { _tag: "None" },
       stale: { _tag: "Set", at: undefined, by: undefined, inlines: formatted("old"), stale: true },
+    });
+  });
+
+  it("says a removed Network's Timelines are removed, and never to join or connect", () => {
+    const channel = headerOf(removed(iirc), withHead(null));
+
+    expect({
+      channel: channel?._tag === "Channel" ? channel.note : channel,
+      network: headerOf(removed(own), initialChannel),
+    }).toStrictEqual({
+      channel: undefined,
+      network: { _tag: "Network", name: "libera", status: "removed", timeline: own },
     });
   });
 

@@ -24,7 +24,7 @@ import type { Intent } from "./commands.ts";
 import { panesOf } from "./layout.ts";
 import { endReason, formatted, nickColour } from "./render.ts";
 import type { Inline } from "./render.ts";
-import { opened, resolve } from "./timelines.ts";
+import { isRemoved, opened, resolve } from "./timelines.ts";
 import type { Connection, Timelines } from "./timelines.ts";
 
 /** Where Self stands with a Channel the Client holds. */
@@ -859,20 +859,23 @@ export const headerOf = (
 
   const { description } = shown;
   const { id: timeline, name } = description;
+  const network = state.networks.get(description.network);
+
+  // A removed Network's Timelines are only read: no Session or Channel stands for them, so
+  // nothing here says to connect or join.
+  const removed = description.removed || (network !== undefined && isRemoved(network));
 
   switch (description.kind) {
     case "Network": {
-      const network = state.networks.get(description.network);
+      let status = "…";
 
-      return {
-        _tag: "Network",
-        name,
-        status:
-          network === undefined
-            ? "…"
-            : connectionText(network.running ?? { _tag: "Running" }, network.connection),
-        timeline,
-      };
+      if (removed) {
+        status = "removed";
+      } else if (network !== undefined) {
+        status = connectionText(network.running ?? { _tag: "Running" }, network.connection);
+      }
+
+      return { _tag: "Network", name, status, timeline };
     }
 
     case "Direct": {
@@ -910,7 +913,7 @@ export const headerOf = (
         members: joined ? header.members : undefined,
         modes: joined ? modeString(modes) : undefined,
         name: header.name,
-        note: standingText(header.standing),
+        note: removed ? undefined : standingText(header.standing),
         timeline,
         topic: joined ? topicShown(header.topic) : { _tag: "Unknown" },
       };

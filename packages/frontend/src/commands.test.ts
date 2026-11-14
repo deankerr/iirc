@@ -15,6 +15,7 @@ const focus = (kind: Focus["kind"], name: string, detached = false): Focus => ({
   kind,
   name,
   network,
+  removed: false,
   timeline,
 });
 
@@ -34,6 +35,7 @@ const inDirect: CommandContext = { ...around, focus: focus("Direct", "peer"), se
 const inNetwork: CommandContext = { ...around, focus: focus("Network", "libera"), session: true };
 const offline: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: false };
 const nowhere: CommandContext = { ...around, focus: undefined, session: false };
+const removedFocus: Focus = { ...focus("Channel", "#iirc"), removed: true };
 
 const say = (target: string, text: string, kind = "Privmsg", opens = false) => ({
   _tag: "Say",
@@ -149,6 +151,63 @@ describe("reading a line", () => {
       named: enabled("on", oftc),
       namedOff: enabled("off", oftc),
       none: "Name a Network, or open one of its Timelines first. /connect [id]",
+    });
+  });
+
+  it("asks to remove a Network, the focused one unless named, starting on keep or drop when given", () => {
+    const oftc = Schema.decodeSync(NetworkId)("oftc");
+
+    const asks = (on: typeof network, keep: boolean | undefined) => ({
+      _tag: "Parsed",
+      value: [{ _tag: "AskRemoval", keep, network: on }],
+    });
+
+    expect({
+      bad: message("/network remove Not-An-Id", inChannel),
+      drafting: interpret("/network remove", { ...nowhere, draft: { network, nick: "bob" } }),
+      dropping: interpret("/network remove oftc drop", nowhere),
+      focused: interpret("/network remove", inChannel),
+      keeping: interpret("/network  remove  oftc  keep ", nowhere),
+      // A removed Network's own Timeline asks again, which drops what was kept.
+      kept: interpret("/network remove", { ...inChannel, focus: removedFocus }),
+      named: interpret("/network remove oftc", inChannel),
+      none: message("/network remove", nowhere),
+      unknownChoice: message("/network remove oftc forget", nowhere),
+    }).toStrictEqual({
+      bad: 'A Network\'s id is 1 to 64 lower-case letters, digits, ., _, or -, not "Not-An-Id". /network remove [id] [keep|drop]',
+      drafting: asks(network, undefined),
+      dropping: asks(oftc, false),
+      focused: asks(network, undefined),
+      keeping: asks(oftc, true),
+      kept: asks(network, undefined),
+      named: asks(oftc, undefined),
+      none: "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
+      unknownChoice: "Usage: /network remove [id] [keep|drop]",
+    });
+  });
+
+  it("says and does nothing in a removed Network's Timeline, but reads it and moves on", () => {
+    const removed: CommandContext = { ...inChannel, focus: removedFocus, session: false };
+
+    const refusal =
+      "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.";
+
+    expect({
+      connect: message("/connect", removed),
+      join: message("/join #more", removed),
+      latest: interpret("/latest", removed)._tag,
+      next: interpret("/next", { ...removed, timelines: [timeline] })._tag,
+      say: message("hello", removed),
+      topic: message("/topic new", removed),
+      whois: message("/whois bob", removed),
+    }).toStrictEqual({
+      connect: refusal,
+      join: refusal,
+      latest: "Parsed",
+      next: "Parsed",
+      say: refusal,
+      topic: refusal,
+      whois: refusal,
     });
   });
 
@@ -313,9 +372,9 @@ describe("reading a line", () => {
       "lookup.whois": "Required",
       "lookup.whowas": "Required",
       "members.toggle": "Optional",
-      "network.add": "Required",
       "network.connect": "Optional",
       "network.disconnect": "Optional",
+      "network.manage": "Required",
       "notify.set": "Required",
       "options.set": "Optional",
       "options.unset": "Required",

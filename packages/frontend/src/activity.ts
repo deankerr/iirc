@@ -165,14 +165,15 @@ const appName = "iirc";
 
 /**
  * The page's title: how many Highlights and Direct Messages are unread across every
- * Network, such as `(3) iirc`, or the name alone when none are.
+ * Network not removed, such as `(3) iirc`, or the name alone when none are. A removed
+ * Network's Timelines can no longer be marked read, so they call for nothing.
  * @param networks - The sidebar.
  * @returns The title.
  */
 export const titleOf = (networks: readonly SidebarNetwork[]): string => {
   let calling = 0;
 
-  for (const network of networks) {
+  for (const network of networks.filter((one) => !one.removed)) {
     calling = plus(calling, callingCount(networkActivity(network).unread));
   }
 
@@ -181,7 +182,7 @@ export const titleOf = (networks: readonly SidebarNetwork[]): string => {
 
 /**
  * The highest level of anything said that is unread, across every Network: Highlight,
- * then Direct, then Message, or none when nothing said is unread. Activity alone is none,
+ * then Direct, then Message, or none when nothing said is unread, but in a removed Network. Activity alone is none,
  * as a view shows it only as a dimmer name. A compact screen's sidebar button marks it.
  * @param networks - The sidebar.
  * @returns The level, or none.
@@ -189,7 +190,7 @@ export const titleOf = (networks: readonly SidebarNetwork[]): string => {
 export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefined => {
   let highest: Level | undefined;
 
-  for (const network of networks) {
+  for (const network of networks.filter((one) => !one.removed)) {
     const { level } = networkActivity(network);
 
     if (level !== "Activity" && rank(level) > rank(highest)) {
@@ -203,8 +204,9 @@ export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefine
 /**
  * How the Daemon is asked to mark a Timeline read up to an instant, or nothing when that
  * would change nothing: the Timeline has nothing unread, its Read Marker is already there
- * or later, or it is a detached Direct Message, whose partner's nick now names another
- * Timeline, if any, so no Target names it.
+ * or later, it is a detached Direct Message, whose partner's nick now names another
+ * Timeline, if any, so no Target names it, or its Network was removed, so no Client moves
+ * its Read Marker.
  * @param timeline - The Timeline, as its Network lists it.
  * @param read - The instant to mark it read up to.
  * @returns The intent, or none.
@@ -212,6 +214,7 @@ export const saidLevel = (networks: readonly SidebarNetwork[]): Level | undefine
 export const markOf = (timeline: Timeline, read: Instant): MarkRead | undefined => {
   const nothing =
     timeline.detached ||
+    timeline.removed ||
     (timeline.read !== null && read <= timeline.read) ||
     (saidCount(timeline.unread) === 0 && timeline.unread.activity === 0);
 

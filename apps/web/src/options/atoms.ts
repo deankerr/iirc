@@ -113,6 +113,12 @@ const failedWith = (tag: string, network: NetworkId): Outcome => {
       return notDone("The Daemon could not read this as a Configuration.");
     }
 
+    case "TimelinesKept": {
+      return notDone(
+        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove ${network} drops them.`
+      );
+    }
+
     case "ConfigurationChanged": {
       return notDone(
         `${network}'s Configuration changed while this was being made, twice, so nothing was changed. Try again.`

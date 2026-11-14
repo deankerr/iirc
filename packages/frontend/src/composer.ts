@@ -16,7 +16,7 @@ import { credentialRefusal, interpret } from "./commands.ts";
 import type { CommandContext, Focus, Intent } from "./commands.ts";
 import { panesOf } from "./layout.ts";
 import { attemptedText, contained, requested } from "./render.ts";
-import { mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
+import { isRemoved, mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
 import type { Timelines } from "./timelines.ts";
 
 /**
@@ -278,7 +278,12 @@ export const contextOf = (
   const open = openOf(timelines);
   const main = mainOf(timelines);
 
-  const listed = sidebar(timelines).flatMap((one) => one.timelines);
+  const networks = sidebar(timelines);
+  const listed = networks.flatMap((one) => one.timelines);
+
+  // A removed Network's Timelines are read, never marked, so what is unread there calls
+  // for nothing.
+  const calling = networks.flatMap((one) => (one.removed ? [] : one.timelines));
 
   // A Timeline behind the options, the search, or a draft is not the one shown, so
   // `/next-unread` may go to it, which shows it.
@@ -290,7 +295,7 @@ export const contextOf = (
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
     timelines: listed.map((timeline) => timeline.id),
-    unread: listed.flatMap((timeline) => {
+    unread: calling.flatMap((timeline) => {
       const level = levelOf(timeline.unread);
 
       return level === undefined
@@ -320,12 +325,15 @@ export const contextOf = (
   const { description } = shown;
   const network = timelines.networks.get(description.network);
 
+  const removed = description.removed || (network !== undefined && isRemoved(network));
+
   const focus: Focus = {
     detached: description.detached,
     key: description.key ?? undefined,
     kind: description.kind,
     name: description.name,
     network: description.network,
+    removed,
     timeline: description.id,
   };
 
@@ -337,7 +345,8 @@ export const contextOf = (
     focus,
     head:
       description.kind === "Channel" && header?.timeline === description.id ? header : undefined,
-    session: network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
+    session:
+      !removed && network?.connection._tag === "Connected" && network.running?._tag !== "Stopped",
   };
 };
 

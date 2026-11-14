@@ -72,6 +72,7 @@ const inChannel: CommandContext = {
     kind: "Channel",
     name: "#iirc",
     network: libera,
+    removed: false,
     timeline,
   },
   head: undefined,
@@ -867,7 +868,7 @@ describe("the commands", () => {
       badId: read("/network add Test irc.test bot"),
       noNick: read("/network add test irc.test"),
       oldFlag: read("/network add test 127.0.0.1/6670 -tls bot"),
-      verb: read("/network remove test"),
+      verb: read("/network rename test"),
     }).toStrictEqual({
       added: {
         _tag: "Parsed",
@@ -904,7 +905,11 @@ describe("the commands", () => {
         message:
           'Write host/port for TLS, or host/port plain for plaintext: -tls and +tls are not read, in "127.0.0.1/6670 -tls".',
       },
-      verb: { _tag: "Invalid", message: "Use /network add <id> <host>[/port] [plain] <nick>." },
+      verb: {
+        _tag: "Invalid",
+        message:
+          "Use /network add <id> <host>[/port] [plain] <nick>, or /network remove [id] [keep|drop].",
+      },
     });
   });
 

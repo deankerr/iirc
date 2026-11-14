@@ -44,6 +44,8 @@ export interface Focus {
   readonly detached: boolean;
   /** Its key, its name as the Daemon folded it, or none for the Network's own or a detached one. */
   readonly key: string | undefined;
+  /** Its Network was removed with its Timelines kept, so it is only read. */
+  readonly removed: boolean;
 }
 
 /** A Direct Message not yet begun: the nick it is to, on a Network. */
@@ -145,6 +147,9 @@ export interface Act {
  *   of it back, made from the one read. On a conflict, read it again and apply the same
  *   edit once more, since an edit is a pure function of the Configuration.
  * - `AddNetwork`: configure a Network that must not exist yet, as a new one starts.
+ * - `AskRemoval`: ask the Owner to confirm removing a Network, and whether its Timelines
+ *   stay readable, `keep` chosen to start with when given. Removed with them kept, removing
+ *   it again drops them. Nothing is removed until the Owner confirms.
  * - `ChangeUi`: set an option under `ui` to a value, as JSON its Schema took, or unset it
  *   with none: for every device, through the Daemon, made from the options read, or with
  *   `device`, for this device alone, which keeps it and never sends it.
@@ -191,6 +196,7 @@ export type Intent =
       readonly network: NetworkId;
       readonly configuration: Configuration;
     }
+  | { readonly _tag: "AskRemoval"; readonly network: NetworkId; readonly keep: boolean | undefined }
   | {
       readonly _tag: "ChangeUi";
       readonly option: UiOptionName;
@@ -240,6 +246,8 @@ export type Parsed<A> =
  *   partner's it still follows.
  * - `Channel`: the Timeline in focus is a Channel's.
  * - `Session`: the focused Timeline's Network has a Session.
+ * - `Live`: the Timeline in focus, if any, is not of a Network removed with its Timelines
+ *   kept, where nothing is said or done any more.
  * - `Panes`: there is more than one Pane.
  */
 export type Condition =
@@ -247,6 +255,7 @@ export type Condition =
   | { readonly _tag: "Target" }
   | { readonly _tag: "Channel" }
   | { readonly _tag: "Session" }
+  | { readonly _tag: "Live" }
   | { readonly _tag: "Panes" };
 
 /** A command: how it is named and described, when it can run, and what it gives. */
@@ -361,6 +370,14 @@ const unfocused = <A>(
     },
   };
 };
+
+/**
+ * Why nothing is said or done in a removed Network's Timeline, in words.
+ * @param network - The Network.
+ * @returns The words.
+ */
+const removedRefusal = (network: NetworkId) =>
+  `${network} was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove ${network} drops them.`;
 
 /**
  * Why a Credential's value typed after `/set` is refused, in words.
@@ -541,7 +558,13 @@ const enabledArguments =
     const id = args.trim();
 
     if (id === "") {
-      const network = context.focus?.network ?? context.draft?.network;
+      const { draft, focus } = context;
+
+      if (focus?.removed === true) {
+        return invalid(removedRefusal(focus.network));
+      }
+
+      const network = focus?.network ?? draft?.network;
 
       return network === undefined
         ? invalid(`Name a Network, or open one of its Timelines first. ${usage}`)
@@ -571,19 +594,64 @@ const enabling = (network: NetworkId, on: boolean): Intent => ({
 });
 
 const networkUsage = "/network add <id> <host>[/port] [plain] <nick>";
+const removeUsage = "/network remove [id] [keep|drop]";
 
 /**
- * What `/network add` was given: an id, an Ircd, and a nick.
- * @param args - The text after `/network`.
+ * What `/network remove` was given: the Network, the focused one unless named, and whether
+ * its Timelines are to be kept, `keep` or `drop`, which the question starts with.
+ * @param words - The words after `remove`.
+ * @param context - The context, for the focused Network.
  * @returns The intent, or why there is none.
  */
-const networkArguments = (args: string): Parsed<Intent> => {
-  const [verb, id = "", ...rest] = args.split(/\s+/u).filter((one) => one !== "");
+const removeArguments = (words: readonly string[], context: CommandContext): Parsed<Intent> => {
+  const [first, second, ...rest] = words;
+
+  const choices: ReadonlyMap<string | undefined, boolean | undefined> = new Map([
+    [undefined, undefined],
+    ["keep", true],
+    ["drop", false],
+  ]);
+
+  if (rest.length > 0 || !choices.has(second)) {
+    return invalid(`Usage: ${removeUsage}`);
+  }
+
+  if (first === undefined) {
+    const network = context.focus?.network ?? context.draft?.network;
+
+    return network === undefined
+      ? invalid(`Name a Network, or open one of its Timelines first. ${removeUsage}`)
+      : parsed({ _tag: "AskRemoval", keep: undefined, network });
+  }
+
+  const network = networkIdOf(first);
+
+  return network === undefined
+    ? invalid(
+        `A Network's id is 1 to 64 lower-case letters, digits, ., _, or -, not "${first}". ${removeUsage}`
+      )
+    : parsed({ _tag: "AskRemoval", keep: choices.get(second), network });
+};
+
+/**
+ * What `/network` was given: `add` with an id, an Ircd, and a nick, or `remove`, with what
+ * `removeArguments` reads.
+ * @param args - The text after `/network`.
+ * @param context - The context.
+ * @returns The intent, or why there is none.
+ */
+const networkArguments = (args: string, context: CommandContext): Parsed<Intent> => {
+  const words = args.split(/\s+/u).filter((one) => one !== "");
+  const [verb, id = "", ...rest] = words;
   const nick = rest.at(-1);
   const ircdText = rest.slice(0, -1).join(" ");
 
+  if (verb === "remove") {
+    return removeArguments(words.slice(1), context);
+  }
+
   if (verb !== "add") {
-    return invalid(`Use ${networkUsage}.`);
+    return invalid(`Use ${networkUsage}, or ${removeUsage}.`);
   }
 
   const network = networkIdOf(id);
@@ -1004,7 +1072,7 @@ const queryArguments = (args: string): Parsed<string> => {
   return parsed(name);
 };
 
-const target: readonly Condition[] = [{ _tag: "Target" }, { _tag: "Session" }];
+const target: readonly Condition[] = [{ _tag: "Live" }, { _tag: "Target" }, { _tag: "Session" }];
 
 /**
  * A Lookup's command: `/whois` or `/whowas` of one nick, read as the Client reads one, on
@@ -1036,13 +1104,16 @@ const lookupCommand = (kind: LookupKind, description: string): Command => {
         : parsed([lookOf(kind, nick.value, focus.network, focus.timeline, head)]);
     },
     usage: `/${name} <nick>`,
-    when: [{ _tag: "Focused" }, { _tag: "Session" }],
+    when: [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }],
   };
 };
 
-const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Session" }];
+const anywhere: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }];
 const anywhereActing = anywhere;
 const focused: readonly Condition[] = [{ _tag: "Focused" }];
+
+/** A Timeline in focus whose Network can still be changed. */
+const live: readonly Condition[] = [{ _tag: "Focused" }, { _tag: "Live" }];
 
 // Acting.
 
@@ -1562,7 +1633,7 @@ const quoteCommand = acting({
   when: anywhereActing,
 });
 
-const actingOn: readonly Condition[] = [{ _tag: "Channel" }, { _tag: "Session" }];
+const actingOn: readonly Condition[] = [{ _tag: "Live" }, { _tag: "Channel" }, { _tag: "Session" }];
 
 /** The commands that act on a Network: each gives an `Act`, as `act` takes it. */
 const actions: readonly Command[] = [
@@ -1676,7 +1747,7 @@ const actions: readonly Command[] = [
     name: "away",
     parse: (args) => parsed({ _tag: "Away", message: args.trim() === "" ? null : args }),
     usage: "/away [message]",
-    when: focused,
+    when: live,
   }),
   acting({
     aliases: [],
@@ -1689,7 +1760,7 @@ const actions: readonly Command[] = [
         ? parsed({ _tag: "Away", message: null })
         : invalid("/back takes nothing after it. To be away with a message, use /away <message>."),
     usage: "/back",
-    when: focused,
+    when: live,
   }),
   acting({
     aliases: [],
@@ -1846,7 +1917,7 @@ export const commands: readonly Command[] = [
           )
         : channelsOf(args),
     usage: "/join <#channel>[,<#channel>…]",
-    when: focused,
+    when: live,
   }),
   command({
     aliases: ["leave"],
@@ -1857,7 +1928,7 @@ export const commands: readonly Command[] = [
     name: "part",
     parse: partArguments,
     usage: "/part [#channel[,#channel…]]",
-    when: focused,
+    when: live,
   }),
   ...actions,
   setCommand,
@@ -1889,12 +1960,12 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Required",
     description:
-      "Add a Network, enabled, with one Ircd and one nick, and everything else as a new Network starts.",
-    id: "network.add",
+      "Add a Network, enabled, with one Ircd and one nick, and everything else as a new Network starts, or remove one, asking first whether its Timelines stay readable.",
+    id: "network.manage",
     intents: (intent: Intent) => [intent],
     name: "network",
     parse: networkArguments,
-    usage: networkUsage,
+    usage: `${networkUsage} | remove [id] [keep|drop]`,
     when: [],
   }),
   unfocused({
@@ -2004,7 +2075,7 @@ export const commands: readonly Command[] = [
     name: "query",
     parse: queryArguments,
     usage: "/query <nick>",
-    when: focused,
+    when: live,
   }),
   lookupCommand(
     "Whois",
@@ -2258,6 +2329,14 @@ export const unmet = (when: readonly Condition[], context: CommandContext): stri
       case "Session": {
         if (!context.session) {
           return `${focus?.network ?? "The Network"} is not connected, so nothing can be said there now.`;
+        }
+
+        break;
+      }
+
+      case "Live": {
+        if (focus?.removed === true) {
+          return removedRefusal(focus.network);
         }
 
         break;

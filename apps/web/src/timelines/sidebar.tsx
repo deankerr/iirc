@@ -74,6 +74,10 @@ interface Standing {
  * @returns Its standing.
  */
 const standingOf = (network: SidebarNetwork): Standing => {
+  if (network.removed) {
+    return { className: styles.offline, icon: "removed", why: undefined, word: "removed" };
+  }
+
   if (network.running?._tag === "Stopped") {
     return {
       className: styles.offline,
@@ -360,12 +364,17 @@ const Footer = ({
 };
 
 /**
- * The tree of Networks and their Timelines, and the footer.
- * @param props - The attempt to sign out.
- * @returns The sidebar.
+ * A tree of Networks and their Timelines, each Network its own Timeline's row.
+ * @param props - The Networks, and what the tree is called.
+ * @returns The tree.
  */
-export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
-  const networks = useAtomValue(sidebarNetworks);
+const NetworkTrees = ({
+  label,
+  networks,
+}: {
+  readonly label: string;
+  readonly networks: readonly SidebarNetwork[];
+}) => {
   const hidden = useAtomValue(collapsed);
   const chosen = useAtomValue(selected);
   const others = useAtomValue(elsewhere);
@@ -397,65 +406,93 @@ export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => 
     setDrawer("None");
   };
 
+  // Only this tree's Networks are expanded or collapsed by it.
   const onExpandedChange = (keys: Set<Key>) => {
-    setCollapsed(trees.filter((one) => !keys.has(rowKey(one))).map((one) => one.network.network));
+    const mine = new Set<string>(trees.map((one) => one.network.network));
+
+    setCollapsed([
+      ...hidden.filter((network) => !mine.has(network)),
+      ...trees.filter((one) => !keys.has(rowKey(one))).map((one) => one.network.network),
+    ]);
   };
+
+  return (
+    <Tree
+      aria-label={label}
+      className={styles.tree}
+      disabledBehavior="selection"
+      disabledKeys={trees.filter((one) => one.tree.own === undefined).map(rowKey)}
+      expandedKeys={trees.filter((one) => !hidden.includes(one.network.network)).map(rowKey)}
+      onExpandedChange={onExpandedChange}
+      onSelectionChange={onSelectionChange}
+      selectedKeys={chosen._tag === "Timeline" ? [chosen.timeline] : []}
+      selectionMode="single"
+    >
+      {trees.map((one) => {
+        const { network, tree } = one;
+        const pane = tree.own === undefined ? undefined : others.get(tree.own.id);
+        const expanded = !hidden.includes(network.network) && tree.children.length > 0;
+        const { activity } = networkUnread(network, tree.own, expanded);
+
+        return (
+          <TreeItem
+            aria-label={`${rowLabel(network.network, activity, pane)}, ${standingWords(standingOf(network))}`}
+            className={`${styles.network} ${pane === undefined ? "" : styles.elsewhere}`}
+            id={rowKey(one)}
+            // React Aria never changes an item's id, so a row that gains its own Timeline is drawn anew.
+            key={rowKey(one)}
+            textValue={network.network}
+          >
+            <TreeItemContent>
+              {({ hasChildItems, isExpanded }) => (
+                <NetworkRow
+                  expandable={hasChildItems}
+                  expanded={isExpanded}
+                  network={network}
+                  own={tree.own}
+                  pane={pane}
+                />
+              )}
+            </TreeItemContent>
+            {tree.children.map((timeline) => (
+              <TimelineItem key={timeline.id} pane={others.get(timeline.id)} timeline={timeline} />
+            ))}
+          </TreeItem>
+        );
+      })}
+    </Tree>
+  );
+};
+
+/**
+ * The tree of Networks and their Timelines, those removed with their Timelines kept apart
+ * under their own heading, and the footer.
+ * @param props - The attempt to sign out.
+ * @returns The sidebar.
+ */
+export const Sidebar = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
+  const networks = useAtomValue(sidebarNetworks);
+  const chosen = useAtomValue(selected);
+  const live = networks.filter((network) => !network.removed);
+  const removed = networks.filter((network) => network.removed);
 
   return (
     <nav aria-label="Networks" className={styles.sidebar}>
       <div className={styles.scroll}>
         <h2 className={styles.heading}>Networks</h2>
-        {networks.length === 0 ? (
+        {live.length === 0 ? (
           <p className={styles.muted}>No Networks are configured yet.</p>
         ) : (
-          <Tree
-            aria-label="Networks and their Timelines"
-            className={styles.tree}
-            disabledBehavior="selection"
-            disabledKeys={trees.filter((one) => one.tree.own === undefined).map(rowKey)}
-            expandedKeys={trees.filter((one) => !hidden.includes(one.network.network)).map(rowKey)}
-            onExpandedChange={onExpandedChange}
-            onSelectionChange={onSelectionChange}
-            selectedKeys={chosen._tag === "Timeline" ? [chosen.timeline] : []}
-            selectionMode="single"
-          >
-            {trees.map((one) => {
-              const { network, tree } = one;
-              const pane = tree.own === undefined ? undefined : others.get(tree.own.id);
-              const expanded = !hidden.includes(network.network) && tree.children.length > 0;
-              const { activity } = networkUnread(network, tree.own, expanded);
-
-              return (
-                <TreeItem
-                  aria-label={`${rowLabel(network.network, activity, pane)}, ${standingWords(standingOf(network))}`}
-                  className={`${styles.network} ${pane === undefined ? "" : styles.elsewhere}`}
-                  id={rowKey(one)}
-                  // React Aria never changes an item's id, so a row that gains its own Timeline is drawn anew.
-                  key={rowKey(one)}
-                  textValue={network.network}
-                >
-                  <TreeItemContent>
-                    {({ hasChildItems, isExpanded }) => (
-                      <NetworkRow
-                        expandable={hasChildItems}
-                        expanded={isExpanded}
-                        network={network}
-                        own={tree.own}
-                        pane={pane}
-                      />
-                    )}
-                  </TreeItemContent>
-                  {tree.children.map((timeline) => (
-                    <TimelineItem
-                      key={timeline.id}
-                      pane={others.get(timeline.id)}
-                      timeline={timeline}
-                    />
-                  ))}
-                </TreeItem>
-              );
-            })}
-          </Tree>
+          <NetworkTrees label="Networks and their Timelines" networks={live} />
+        )}
+        {removed.length === 0 ? null : (
+          <>
+            <h2 className={styles.heading}>Removed</h2>
+            <NetworkTrees
+              label="Removed Networks and their Timelines, kept to read"
+              networks={removed}
+            />
+          </>
         )}
       </div>
       <Footer attempt={attempt} optionsShown={chosen._tag === "Options"} />

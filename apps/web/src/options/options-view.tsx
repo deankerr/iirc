@@ -5,9 +5,11 @@
  * GridList gives it its keyboard: arrows move, Enter edits the focused value in place as
  * its raw text, or a whole number in a number field, turns a toggle over, or opens the
  * password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
- * unset it. Escape anywhere else in it, or the close button on its Pane's status bar, shows
- * what the Pane showed before. An edit is a plain, uncontrolled input read once when Enter
- * is pressed. A Credential's value is never edited here.
+ * unset it. Beside the filter, a button for each Network asks to remove it, or, removed
+ * with its Timelines kept, to drop them. Escape anywhere else in it, or the close button on
+ * its Pane's status bar, shows what the Pane showed before. An edit is a plain,
+ * uncontrolled input read once when Enter is pressed. A Credential's value is never edited
+ * here.
  *
  * @packageDocumentation
  */
@@ -23,6 +25,7 @@ import type { Key } from "react-aria-components";
 import { composerFocus } from "../composer/atoms.ts";
 import { pressed } from "../palette/press.ts";
 import { PaneBar } from "../panes/pane-bar.tsx";
+import { sidebarNetworks } from "../timelines/atoms.ts";
 import { Button, IconButton } from "../ui/button.tsx";
 import {
   change,
@@ -36,6 +39,7 @@ import {
   optionsState,
   promptCredential,
 } from "./atoms.ts";
+import { askToRemove } from "./removal.ts";
 import { changeUiOption } from "./ui.ts";
 
 import styles from "./options-view.module.css";
@@ -262,6 +266,33 @@ const Confirm = ({ option, done }: { readonly option: Option; readonly done: () 
 };
 
 /**
+ * A button for each Network, which asks to remove it, and for each removed with its
+ * Timelines kept, which asks to drop them, as `/network remove` does.
+ * @returns The buttons, or nothing with no Network.
+ */
+const NetworkRemovals = () => {
+  const networks = useAtomValue(sidebarNetworks);
+  const ask = useAtomSet(askToRemove);
+
+  return networks.length === 0 ? null : (
+    <div className={styles.networks}>
+      {networks.map(({ network, removed }) => (
+        <Button
+          key={network}
+          onPress={() => {
+            ask(network);
+          }}
+          size="small"
+        >
+          {/* A Network's id is ASCII, so it needs no isolating. */}
+          {`${removed ? "Drop" : "Remove"} ${network}…`}
+        </Button>
+      ))}
+    </div>
+  );
+};
+
+/**
  * The options view, filtered, in a Pane.
  * @param props - The Pane.
  * @returns The view.
@@ -376,6 +407,7 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
         >
           <Input className={styles.filterInput} placeholder="network.libera.* or *nick*" />
         </SearchField>
+        <NetworkRemovals />
       </div>
       {notice === undefined ? null : (
         <p className={styles.notice} id={noticeId} role="alert">

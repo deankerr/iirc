@@ -66,6 +66,7 @@ interface Described {
   readonly latest?: number | null;
   readonly detached?: boolean;
   readonly changed?: number;
+  readonly removed?: boolean;
 }
 
 const described = ({
@@ -76,6 +77,7 @@ const described = ({
   latest = null,
   name,
   read = null,
+  removed = false,
   unread = {},
 }: Described): typeof Timeline.Encoded => ({
   changed,
@@ -88,7 +90,7 @@ const described = ({
   name,
   network: "libera",
   read,
-  removed: false,
+  removed,
   unread: { ...nothing, ...unread },
 });
 
@@ -180,7 +182,7 @@ const world = (
 
   const events: TimelinesEvent[] = [
     { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-    { _tag: "NetworksRead", entries: [libera] },
+    { _tag: "NetworksRead", entries: [libera], removed: [] },
     { _tag: "ReadStarted", read: list },
     {
       _tag: "ListRead",
@@ -340,7 +342,16 @@ describe("what is unread", () => {
         described({ id: iirc, name: "#iirc", unread: { highlights: 1000 } }),
         described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 1 } })
       ),
-    }).toStrictEqual({ calling: "(3) iirc", calm: "iirc", capped: "(999+) iirc" });
+      removed: titled(
+        described({ id: iirc, name: "#iirc", removed: true, unread: { highlights: 2 } })
+      ),
+    }).toStrictEqual({
+      calling: "(3) iirc",
+      calm: "iirc",
+      capped: "(999+) iirc",
+      // A removed Network's Timelines are never marked read, so they call for nothing.
+      removed: "iirc",
+    });
   });
 
   it("gives the highest level said and unread anywhere, and none for Activity alone", () => {
@@ -383,12 +394,15 @@ describe("what is unread", () => {
         name: "peer",
         unread: { direct: 1 },
       }),
+      described({ id: iirc, latest: 50, name: "#iirc", removed: true, unread: { messages: 1 } }),
     ].map((one) => markLatest(decodeTimeline(one)));
 
     expect(marks.map((mark) => mark && { read: mark.read, target: mark.target })).toStrictEqual([
       { read: 50, target: null },
       { read: 50, target: "#iirc" },
-      // Already read that far, nothing unread, no item, or a detached Direct Message.
+      // Already read that far, nothing unread, no item, a detached Direct Message, or a
+      // removed Network's, which no Client marks.
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -869,7 +883,7 @@ describe("notifications", () => {
     const reloaded = [
       { _tag: "Reset", reset: Schema.decodeSync(TimelineReset)({ through: 10, version: 1 }) },
       { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-      { _tag: "NetworksRead", entries: [libera] },
+      { _tag: "NetworksRead", entries: [libera], removed: [] },
       {
         _tag: "ReadStarted",
         read: { _tag: "List", after: undefined, attempt: 0, network: libera.network },

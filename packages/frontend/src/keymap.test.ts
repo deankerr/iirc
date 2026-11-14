@@ -39,6 +39,7 @@ const inChannel: CommandContext = {
     kind: "Channel",
     name: "#iirc",
     network,
+    removed: false,
     timeline: channel,
   },
   head: undefined,

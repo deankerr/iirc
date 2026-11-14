@@ -96,7 +96,7 @@ const world = (open: string | undefined): Timelines => {
 
   const events: TimelinesEvent[] = [
     { _tag: "ReadStarted", read: { _tag: "Networks", attempt: 0 } },
-    { _tag: "NetworksRead", entries: [libera] },
+    { _tag: "NetworksRead", entries: [libera], removed: [] },
     { _tag: "ReadStarted", read: list },
     {
       _tag: "ListRead",
