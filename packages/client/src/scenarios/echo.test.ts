@@ -246,7 +246,7 @@ describe("our Message, refused", () => {
     expect.assertions(0);
   });
 
-  it("is neither confirmed nor refused by a WARN, which answers the label all the same", () => {
+  it("is neither confirmed nor refused by a WARN, which is shown with it and answers the label all the same", () => {
     const played = play(client, {
       configuration: base,
       transcript: [
@@ -254,6 +254,7 @@ describe("our Message, refused", () => {
         say(1),
         lines(
           "<< @label=l1 :irc.test WARN PRIVMSG INVALID_UTF8 :Modified",
+          "?? activity StandardReply WARN PRIVMSG INVALID_UTF8 in=channel:#iirc :Modified",
           "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
           "?? message Privmsg iirc #iirc self in=channel:#iirc :hello"
         ),

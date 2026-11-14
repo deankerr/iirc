@@ -9,7 +9,7 @@
  *
  * @packageDocumentation
  */
-import { whois, whowas } from "@iirc/protocol/line";
+import { upperCaseAscii, whois, whowas } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
 
 import { fits, online } from "./acts.ts";
@@ -21,7 +21,8 @@ import type { Input, Lookup } from "./input.ts";
 import type { Fact } from "./known.ts";
 import { isSelf, namingNow, rulesNow } from "./meaning.ts";
 import { parseChannel, parseNick } from "./names.ts";
-import type { LookResult, PartialReason, Profile, ProfileChannel } from "./news.ts";
+import type { LookResult, PartialReason, Profile, ProfileChannel, StandardReply } from "./news.ts";
+import { readReply } from "./replies.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
 import type { Link, Looking, Refreshed } from "./state.ts";
@@ -122,6 +123,7 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
       labelled: sent.echo,
       lines: 0,
       lookup,
+      notes: [],
       order: phase.awaited,
       profiles: [],
     };
@@ -475,28 +477,30 @@ const learn = (run: Run, looking: Looking, profile: Profile): void => {
 type Ending = "End" | Extract<PartialReason, "TimedOut" | "Ended">;
 
 const resultOf = (looking: Looking, ending: Ending, reply: string): LookResult => {
+  const { notes } = looking;
+
   if (looking.error !== undefined) {
-    return looking.error;
+    return { ...looking.error, notes };
   }
 
   if (looking.bounded) {
-    return { _tag: "Partial", profiles: looking.profiles, reason: "Bounded" };
+    return { _tag: "Partial", notes, profiles: looking.profiles, reason: "Bounded" };
   }
 
   if (ending !== "End") {
-    return { _tag: "Partial", profiles: looking.profiles, reason: ending };
+    return { _tag: "Partial", notes, profiles: looking.profiles, reason: ending };
   }
 
   if (looking.profiles.length > 0) {
-    return { _tag: "Found", profiles: looking.profiles };
+    return { _tag: "Found", notes, profiles: looking.profiles };
   }
 
   // An end numeric with no User before it says there is none. A labelled answer that
   // ended without one, such as a lone `NOTICE`, said nothing the Client can read, so it
   // failed, named by the command that ended it.
   return looking.labelled && !looking.ended
-    ? { _tag: "Failed", reply }
-    : { _tag: "NotFound", reply };
+    ? { _tag: "Failed", notes, reply }
+    : { _tag: "NotFound", notes, reply };
 };
 
 // Reports a Lookup once, and forgets it. A `WHOIS` found whole refreshes what is known.
@@ -557,6 +561,24 @@ const take = (run: Run, looking: Looking, line: Line): void => {
       change(run, intent, (each) => ({ ...each, ended: true }));
     } else {
       finish(run, intent, "End", command);
+    }
+
+    return;
+  }
+
+  // A `WARN` or a `NOTE` says something of the Lookup, and ends nothing. Past the Lines one
+  // Lookup keeps, it is not kept.
+  if (command === "WARN" || command === "NOTE") {
+    const note = readReply(line);
+
+    if (note === undefined) {
+      ignore(run, { _tag: "Malformed", command });
+    } else {
+      change(run, intent, (each) =>
+        each.lines >= maxLookupLines
+          ? { ...each, bounded: each.error === undefined }
+          : { ...each, lines: each.lines + 1, notes: [...each.notes, note] }
+      );
     }
 
     return;
@@ -685,7 +707,27 @@ export const floorLookup = (run: Run, line: Line): Looking | undefined =>
     : undefined;
 
 /**
- * Collects a Line into a Lookup's reply, as {@link floorLookup} found it.
+ * The oldest Lookup sent without a label that a standard reply, outside any batch or label,
+ * names by its command, `WHOIS` or `WHOWAS`, compared without regard to ASCII case. A
+ * Lookup that has its error leaves a `FAIL` to the next, as an error numeric does.
+ * @param run - The step.
+ * @param reply - The standard reply.
+ * @returns The Lookup, or `undefined` for none.
+ */
+export const lookupByCommand = (run: Run, reply: StandardReply): Looking | undefined => {
+  const verb = upperCaseAscii(reply.command);
+
+  return openOf(run.state)?.lookups.find(
+    (each) =>
+      !each.labelled &&
+      upperCaseAscii(each.lookup._tag) === verb &&
+      (reply.kind !== "FAIL" || each.error === undefined)
+  );
+};
+
+/**
+ * Collects a Line into a Lookup's reply, as {@link floorLookup} or
+ * {@link lookupByCommand} found it.
  * @param run - The step.
  * @param looking - The Lookup.
  * @param line - The Line.

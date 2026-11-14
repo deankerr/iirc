@@ -100,6 +100,13 @@ const Activity = Schema.TaggedUnion({
     reason: Schema.UndefinedOr(Schema.String),
   },
   Quit: { nick: Schema.String, reason: Schema.UndefinedOr(Schema.String) },
+  StandardReply: {
+    code: Schema.String,
+    command: Schema.String,
+    context: Schema.Array(Schema.String),
+    description: Schema.String,
+    kind: Schema.Literals(["FAIL", "WARN", "NOTE"]),
+  },
   TopicChanged: { by: Schema.String, channel: Schema.String, topic: Schema.NullOr(Topic) },
 });
 

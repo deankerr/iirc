@@ -75,7 +75,7 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | --- | --- |
 | `Ignored` | `?? ignored Unparseable Empty`, `?? ignored StaleConnection 1`, `?? ignored StaleTimer ping`, `?? ignored NotNow Opened`, `?? ignored FeatureFailed sasl`, `?? ignored Unsendable PONG`, `?? ignored UnmatchedEcho`, `?? ignored NoTimeline` |
 | `Refused` | `?? refused i1 Offline`, `?? refused i2 Rejected 404`, `?? refused i3 Unsent`, and for an action, what it tried and where it belongs: `?? refused i4 Rejected 482 topic=#iirc in=channel:#iirc`, with `kick=#iirc:a,b`, `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `raw=WHOIS`, or `raw` for a Line that did not parse |
-| `LookedUp` | `?? looked-up i1 whois=peer found profiles=1`, with `partial=TimedOut profiles=0`, `not-found=401`, `failed=402`, `refused=Offline`, or `unsent`. What was found is read from the News itself. |
+| `LookedUp` | `?? looked-up i1 whois=peer found profiles=1`, with `partial=TimedOut profiles=0`, `not-found=401`, `failed=402`, `refused=Offline`, or `unsent`, then each note by its kind and code, as `note=WARN:SLOW`. What was found is read from the News itself. |
 | `SessionBegan` | `?? session-began iirc`, or `… at=t+5s` when not now |
 | `SessionEnded` | `?? session-ended Closed Ended`, `?? session-ended Upgrading 6697` |
 | `ConnectionFailed` | `?? connection-failed Closed Refused` |
@@ -83,7 +83,7 @@ A `??` matches a News when its text is exactly what `describeNews(news, at)` wri
 | `ReadMarker` | `?? read-marker t+5s in=channel:#iirc`, `?? read-marker t+1s in=network` |
 | `Message` | `?? message Privmsg peer #iirc at=ircd:t+1s id=ircd:m1 history in=channel:#iirc tags=+draft/reply="m0" ours=i1 echo :hi`, and `highlight` after the time, id, and `history` for a Highlight: `?? message Privmsg peer #iirc highlight in=channel:#iirc :iirc: hi`, or `self` there for one Self said that is not ours: `?? message Privmsg iirc #iirc self in=channel:#iirc :from my phone` |
 | `Confirmed` | `?? confirmed i1 at=ircd:t+1s id=ircd:m4 :hello` |
-| `Activity` | `?? activity Joined #iirc peer in=channel:#iirc`, `?? activity Kicked #iirc peer by=op in=channel:#iirc :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc`, `?? activity TopicChanged #iirc by=op setBy=op in=channel:#iirc :topic`, `?? activity AwayChanged peer back in=existing-direct:peer` |
+| `Activity` | `?? activity Joined #iirc peer in=channel:#iirc`, `?? activity Kicked #iirc peer by=op in=channel:#iirc :bye`, `?? activity ModeChanged #iirc by=op +o=peer -k in=channel:#iirc`, `?? activity TopicChanged #iirc by=op setBy=op in=channel:#iirc :topic`, `?? activity AwayChanged peer back in=existing-direct:peer`, `?? activity StandardReply WARN TOPIC TRUNCATED context=#iirc in=channel:#iirc :shortened` |
 
 A Message's or Activity's `where` is never left out: each Timeline is one `in=`, in order, after the time, id, `history`, `highlight`, and `self`. A Read Marker's one `where` is written the same way, after its instant.
 

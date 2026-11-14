@@ -62,6 +62,7 @@ const hostilePeer: LookScript = {
   pending: 0,
   result: {
     _tag: "Found",
+    notes: [],
     profiles: [
       profileOf({
         channels: [{ name: "#iirc", prefixes: ["o"] }],
@@ -233,7 +234,7 @@ describe("the Lookup card", () => {
     const { container } = await signedIn({
       answer: "LookedUp",
       pending: 0,
-      result: { _tag: "NotFound", reply: "401" },
+      result: { _tag: "NotFound", notes: [], reply: "401" },
     });
 
     await inComposer(container, "/whois nobody", "Enter");
@@ -250,6 +251,33 @@ describe("the Lookup card", () => {
       after: null,
       words: "whois nobody×No one uses the nick nobody now (401).",
     });
+  });
+
+  it("shows the WARN and NOTE the Network gave with its result, under it", async () => {
+    const { container } = await signedIn({
+      answer: "LookedUp",
+      pending: 0,
+      result: {
+        _tag: "NotFound",
+        notes: [
+          {
+            code: "CACHED",
+            command: "WHOIS",
+            context: ["nobody"],
+            description: "From cache",
+            kind: "NOTE",
+          },
+        ],
+        reply: "401",
+      },
+    });
+
+    await inComposer(container, "/whois nobody", "Enter");
+    await settled(() => card()?.textContent.includes("No one uses") === true);
+
+    expect(card()?.textContent).toBe(
+      "whois nobody×No one uses the nick nobody now (401).NOTE WHOIS CACHED nobody: From cache"
+    );
   });
 
   it("is asked from a member's menu in the members, by their Whois, Query first", async () => {

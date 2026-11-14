@@ -94,6 +94,32 @@ const joined = (sequence: number): typeof TimelineItem.Encoded => ({
 });
 
 /**
+ * A standard reply about `PRIVMSG` in `#iirc`, as an item.
+ * @param sequence - Its sequence.
+ * @param kind - Its kind.
+ * @param code - Its code.
+ * @param context - Its context.
+ * @param description - Its description.
+ * @returns The item.
+ */
+const reply = (
+  sequence: number,
+  kind: "FAIL" | "WARN" | "NOTE",
+  code: string,
+  context: readonly string[],
+  description: string
+): typeof TimelineItem.Encoded => ({
+  ...joined(sequence),
+  content: {
+    _tag: "Activity",
+    activity: { _tag: "StandardReply", code, command: "PRIVMSG", context, description, kind },
+    at: { _tag: "Unknown" },
+    id: { _tag: "Unknown" },
+    live: true,
+  },
+});
+
+/**
  * Waits until something holds, letting React render what changed meanwhile.
  * @param holds - What must hold.
  */
@@ -842,6 +868,36 @@ describe("what the view says it shows", () => {
       notSent: text.includes("not sent"),
       unconfirmed: text.includes("unconfirmed"),
     }).toStrictEqual({ notSent: true, unconfirmed: false });
+  });
+
+  it("shows a WARN, a NOTE, and a FAIL by their fields, the FAIL as a refusal", async () => {
+    const { registry } = await signedIn(
+      [],
+      [
+        reply(1, "WARN", "INVALID_UTF8", ["#iirc"], "Modified"),
+        reply(2, "NOTE", "QUEUED", [], "Held"),
+        reply(3, "FAIL", "TOO_FAST", ["#iirc"], "Slow down"),
+      ]
+    );
+
+    await openFromPalette();
+    await settled(() => registry.get(openTimeline)._tag === "Shown");
+    await settled(() => logOf().textContent?.includes("Slow down"));
+
+    const rows = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].filter((one) =>
+      one.textContent?.includes("PRIVMSG")
+    );
+
+    expect(
+      rows.map((row) => [
+        row.textContent?.replace(/^\S+ /u, ""),
+        row.querySelector("[class*='refused']") !== null,
+      ])
+    ).toStrictEqual([
+      ["-- WARN PRIVMSG INVALID_UTF8 #iirc: Modified", false],
+      ["-- NOTE PRIVMSG QUEUED: Held", false],
+      ["-- FAIL PRIVMSG TOO_FAST #iirc: Slow down", true],
+    ]);
   });
 
   it("keeps a space between the parts of a row, so it reads as one run when the columns go", async () => {

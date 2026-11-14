@@ -51,6 +51,7 @@ const listed = (
 /** `peer`, as a `WHOIS` describes them, in `#iirc` as an operator and in `#elsewhere`. */
 const found: LookScript["result"] = {
   _tag: "Found",
+  notes: [],
   profiles: [
     profileOf({
       channels: [
@@ -167,7 +168,7 @@ describe("a Lookup", () => {
 
   it("says in words what found no one, and what the Client refused", async () => {
     const { registry } = await inChannel(
-      { answer: "LookedUp", pending: 0, result: { _tag: "NotFound", reply: "401" } },
+      { answer: "LookedUp", pending: 0, result: { _tag: "NotFound", notes: [], reply: "401" } },
       { answer: "LookedUp", pending: 0, result: { _tag: "Refused", reason: "Offline" } }
     );
 
@@ -262,7 +263,11 @@ describe("a Lookup", () => {
     const { registry } = await inChannel({
       answer: "LookedUp",
       pending: 0,
-      result: { _tag: "Found", profiles: [profileOf({ realname: "Peer Pal", signon: 9e15 })] },
+      result: {
+        _tag: "Found",
+        notes: [],
+        profiles: [profileOf({ realname: "Peer Pal", signon: 9e15 })],
+      },
     });
 
     await typeAndSend(registry, "/whois peer");

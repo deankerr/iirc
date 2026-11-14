@@ -245,6 +245,42 @@ describe("items", () => {
   });
 });
 
+describe("a standard reply", () => {
+  it("is an Activity item where the Client placed it, with each field its own", () => {
+    const reply = {
+      _tag: "StandardReply",
+      code: "INVALID_UTF8",
+      command: "PRIVMSG",
+      context: ["#a"],
+      description: "Modified",
+      kind: "WARN",
+    } as const;
+
+    const { changes } = fold([
+      happened(1, [
+        {
+          _tag: "Activity",
+          activity: reply,
+          at: known(t0),
+          id: unknown,
+          live: true,
+          where: [channel("#a")],
+        },
+      ]),
+    ]);
+
+    expect(
+      ofTag(changes, "Added").map(({ content, level, timeline }) => [timeline, level, content])
+    ).toStrictEqual([
+      [
+        timelineIdOf(1, 0, 1),
+        "Activity",
+        { _tag: "Activity", activity: reply, at: known(t0), id: unknown, live: true },
+      ],
+    ]);
+  });
+});
+
 describe("levels", () => {
   it("rank each item by how much it calls for the Owner in its Timeline", () => {
     const { changes } = fold([

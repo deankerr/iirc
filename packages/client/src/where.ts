@@ -18,6 +18,7 @@ import { parseChannel, parseNick, parseTargets } from "./names.ts";
 import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder } from "./run.ts";
+import { sessionOf } from "./views.ts";
 
 type MessageNews = Extract<News, { readonly _tag: "Message" }>;
 
@@ -232,6 +233,11 @@ const activityTimelines = (
       return isSelf(run, activity.nick) ? [network] : theirs(activity.nick);
     }
 
+    // The core places a standard reply where what it answers belongs, before it is routed.
+    case "StandardReply": {
+      return [network];
+    }
+
     default: {
       return activity satisfies never;
     }
@@ -282,6 +288,15 @@ export const routeOurs = (run: Run, message: Unrouted<MessageNews>): MessageNews
   self: true,
   where: messageWhere(run, message.sender, true, message.target),
 });
+
+/**
+ * Where a Message Self said to a Target stands now, as {@link routeOurs} places it.
+ * @param run - The step.
+ * @param target - The Target, as the Owner named it.
+ * @returns The Timelines.
+ */
+export const saidWhere = (run: Run, target: string): readonly Where[] =>
+  messageWhere(run, sessionOf(run.state)?.nick ?? "", true, target);
 
 /**
  * The Timeline an Owner's `Read` marks: the Network's own for no Target, else the one

@@ -1084,7 +1084,7 @@ export const fakeDaemon = () => {
     const script = daemon.lookScripts.shift() ?? {
       answer: "LookedUp",
       pending: 0,
-      result: { _tag: "NotFound", reply: "401" },
+      result: { _tag: "NotFound", notes: [], reply: "401" },
     };
 
     daemon.looks.push({ ...body, network });

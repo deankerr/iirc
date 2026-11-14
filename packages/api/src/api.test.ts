@@ -7,10 +7,12 @@ import { describe, expect, it } from "vitest";
 import { DaemonApi, requestParseOptions } from "./api.ts";
 import {
   ActRequest,
+  Activity,
   CallerIntent,
   Cursor,
   IfSequence,
   ItemAfter,
+  LookResult,
   MemberPage,
   MembersAfter,
   MembersQuery,
@@ -506,10 +508,34 @@ describe("the contract", () => {
         `"properties":{"info":${untrusted},"name":${untrusted}}`,
         `"properties":{"name":${untrusted},"prefixes":{"type":"array","items":${untrusted}}}`,
         `"properties":{"numeric":${untrusted},"params":{"type":"array","items":${untrusted}}}`,
-        `"enum":["Failed"]},"reply":${untrusted}}`,
-        `"enum":["NotFound"]},"reply":${untrusted}}`,
+        `"reply":${untrusted}},"required":["_tag","notes","reply"]`,
+        `"context":{"type":"array","items":${untrusted}}`,
       ].filter((field) => !looked.includes(field))
     ).toStrictEqual([]);
+  });
+
+  it("carries a standard reply and a Lookup's notes whole, each field its own, and only the three kinds", () => {
+    const reply = {
+      code: "SLOW",
+      command: "WHOIS",
+      context: ["peer", "*"],
+      description: "Took a while",
+      kind: "WARN",
+    } as const;
+
+    const activity = { _tag: "StandardReply", ...reply } as const;
+    const result = { _tag: "Found", notes: [reply], profiles: [] } as const;
+    const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
+    const looked = JSON.stringify(document.paths["/api/networks/{network}/lookups/{intent}"]);
+
+    expect([
+      Schema.decodeSync(Activity)(Schema.encodeSync(Activity)(activity)),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(result)),
+      Schema.is(Activity)({ ...activity, kind: "INFO" }),
+      [`"code":${untrusted}`, `"command":${untrusted}`, `"description":${untrusted}`].filter(
+        (field) => !looked.includes(field)
+      ),
+    ]).toStrictEqual([activity, result, false, []]);
   });
 
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {

@@ -12,10 +12,12 @@
  *   it, with batches opened inside that one. Its first `PRIVMSG` or `NOTICE` is the echo,
  *   which the core reports as `Confirmed`. Its first `FAIL`, `ACK`, or error numeric
  *   rejects the intent, and the core reports it `Refused`. A Line in it that is neither,
- *   such as a `WARN`, answers nothing. An action's answer is only ever its first `FAIL`
- *   or error numeric, which rejects it: an `ACK` ends it with nothing to report, and what
- *   the Ircd relays of it, such as a `TOPIC`, is read as any Line is. An action split over
- *   several labelled Lines is refused once, and each later rejection only uses up its label.
+ *   such as a `WARN`, settles nothing, and is marked `about` the intent, so the core shows
+ *   it where the intent belongs. An action's answer is only ever its first `FAIL` or error
+ *   numeric, which rejects it: an `ACK` ends it with nothing to report, and what the Ircd
+ *   relays of it, such as a `TOPIC`, is read as any Line is. An action split over several
+ *   labelled Lines is refused once, and each later rejection only uses up its label, marked
+ *   `about` the intent it would have refused.
  * - **Never one without the other.** `labeled-response` depends on `batch`, which must be
  *   negotiated to use it, so labels need all three. The Feature is on while
  *   `echo-message` is enabled, and uses `labeled-response` and `batch`, asked for only
@@ -265,7 +267,7 @@ export const echo: Feature<Echoes> = {
       // An action split over several Lines is refused once: the first rejection answers
       // its intent, and the rest only use up their labels.
       if (awaited.reported) {
-        return { own: { ...own, pending }, value: arrival };
+        return { own: { ...own, pending }, value: { ...arrival, about: awaited.intent } };
       }
 
       return {
@@ -274,9 +276,13 @@ export const echo: Feature<Echoes> = {
       };
     }
 
+    // Anything else, such as a `WARN`, is about the intent and settles nothing. A labelled
+    // Line on its own is still the whole answer.
+    const about = { ...arrival, about: awaited.intent };
+
     return label === undefined
-      ? { value: arrival }
-      : { own: { ...own, pending: without(own.pending, answers) }, value: arrival };
+      ? { value: about }
+      : { own: { ...own, pending: without(own.pending, answers) }, value: about };
   },
   // Until `echo-message` is gone, an echo of ours cannot be told from a new Message.
   meaning: (meant, _arrival, context) => ({

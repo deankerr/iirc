@@ -12,7 +12,7 @@ import type { OutboundLine, Rejected, SecretLine } from "@iirc/protocol/line";
 import type { Departure, KnownBefore, Refusal, Sendable } from "./feature.ts";
 import type { Instant, IntentId } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
-import type { EndReason, IgnoredReason, News, RefusedReason } from "./news.ts";
+import type { EndReason, IgnoredReason, News, RefusedAction, RefusedReason } from "./news.ts";
 import type { Output } from "./output.ts";
 import type { Registered } from "./registry.ts";
 import type { Reading } from "./seam.ts";
@@ -52,30 +52,42 @@ export const ignore = (run: Run, reason: IgnoredReason): void => {
 };
 
 /**
+ * One of the actions the Client remembers: what it tried and where it belongs. Its
+ * Channel's name is folded now, by the casemapping the Network last declared, so a mapping
+ * declared since the action began keys it as the projection keys that Channel's Timeline
+ * now, and it never opens a second one.
+ * @param run - The step.
+ * @param intent - The action's intent.
+ * @returns The action, or `undefined` for one the Client does not remember.
+ */
+export const rememberedAction = (run: Run, intent: IntentId): RefusedAction | undefined => {
+  const remembered = run.state.actions.get(intent);
+
+  return remembered?.where._tag === "Channel"
+    ? {
+        ...remembered,
+        where: {
+          ...remembered.where,
+          key: casefold(run.state.declared ?? defaultCasemapping, remembered.where.name),
+        },
+      }
+    : remembered;
+};
+
+/**
  * Reports an Owner intent not carried out. One of the actions the Client remembers says
- * what it tried and where it belongs, so its refusal can be shown there. Its Channel's
- * name is folded as the refusal is reported, by the casemapping the Network last declared
- * then, so a mapping declared since the action began keys it as the projection keys that
- * Channel's Timeline now, and it never opens a second one.
+ * what it tried and where it belongs, so its refusal can be shown there.
  * @param run - The step.
  * @param intent - The intent.
  * @param reason - Why.
  */
 export const refuseIntent = (run: Run, intent: IntentId, reason: RefusedReason): void => {
-  const remembered = run.state.actions.get(intent);
-
-  const action =
-    remembered?.where._tag === "Channel"
-      ? {
-          ...remembered,
-          where: {
-            ...remembered.where,
-            key: casefold(run.state.declared ?? defaultCasemapping, remembered.where.name),
-          },
-        }
-      : remembered;
-
-  run.news.push({ _tag: "Refused", action, intent, reason });
+  run.news.push({
+    _tag: "Refused",
+    action: rememberedAction(run, intent),
+    intent,
+    reason,
+  });
 };
 
 /**

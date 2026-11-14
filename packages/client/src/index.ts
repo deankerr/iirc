@@ -58,6 +58,7 @@ export type {
   ProfileChannel,
   RefusedAction,
   RefusedReason,
+  StandardReply,
   Where,
 } from "./news.ts";
 

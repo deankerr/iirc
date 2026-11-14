@@ -193,6 +193,13 @@ export const LookupCard = ({ pane }: { readonly pane: string }) => {
         ) : (
           <p className={body._tag === "Waiting" ? styles.dim : styles.note}>{body.words}</p>
         )}
+        {shown.notes.map((note, index) => (
+          // A note's place in the reply tells two apart, and it never moves.
+          // oxlint-disable-next-line react/no-array-index-key
+          <p className={styles.dim} key={index}>
+            {note}
+          </p>
+        ))}
       </div>
     </section>
   );

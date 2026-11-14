@@ -76,6 +76,7 @@ describe("a WHOIS on the floor", () => {
 
     expect(resultOf(run)).toStrictEqual({
       _tag: "Found",
+      notes: [],
       profiles: [
         {
           account: undefined,

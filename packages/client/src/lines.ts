@@ -10,7 +10,15 @@ import { isupportTokens } from "@iirc/protocol/isupport";
 import { parseSource, pong } from "@iirc/protocol/line";
 import type { Line, RawParam } from "@iirc/protocol/line";
 
-import { answered, modeAnswer, nickAnswer, resendAway, tiedAction, tieRejection } from "./acts.ts";
+import {
+  actionByCommand,
+  answered,
+  modeAnswer,
+  nickAnswer,
+  resendAway,
+  tiedAction,
+  tieRejection,
+} from "./acts.ts";
 import {
   changeJoined,
   endOfNames,
@@ -23,12 +31,13 @@ import {
 } from "./channels.ts";
 import type { Arrival, Meant } from "./feature.ts";
 import { Instant } from "./ids.ts";
-import { collectFloor, collectLabelled, floorLookup } from "./lookups.ts";
+import type { IntentId } from "./ids.ts";
+import { collectFloor, collectLabelled, floorLookup, lookupByCommand } from "./lookups.ts";
 import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { askModes, modesQueryOver, queryAnswered } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
-import type { Activity, ModeChange } from "./news.ts";
+import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import {
   abandon,
   capLine,
@@ -39,13 +48,23 @@ import {
   unknownCommand,
   welcomed,
 } from "./registration.ts";
+import { isStandardReply, readReply } from "./replies.ts";
 import type { Run } from "./run.ts";
-import { folder, ignore, linkOf, readingOf, refuseIntent, send, updateOpen } from "./run.ts";
+import {
+  folder,
+  ignore,
+  linkOf,
+  readingOf,
+  refuseIntent,
+  rememberedAction,
+  send,
+  updateOpen,
+} from "./run.ts";
 import { runStage } from "./seam.ts";
 import { maxConfirmed } from "./state.ts";
 import { lagAfter } from "./timers.ts";
 import { onNow, openOf, sessionOf } from "./views.ts";
-import { named, routeActivity, routeMessage } from "./where.ts";
+import { named, routeActivity, routeMessage, saidWhere } from "./where.ts";
 
 /** The numerics that refuse a `JOIN`, naming the Channel in their second parameter. */
 const refusals: ReadonlySet<string> = new Set([
@@ -183,7 +202,8 @@ const settled = (run: Run, activity: Activity): void => {
 
     case "Joined":
     case "Parted":
-    case "Quit": {
+    case "Quit":
+    case "StandardReply": {
       break;
     }
 
@@ -687,6 +707,94 @@ const floor = (run: Run, line: Line): void => {
 };
 
 /**
+ * Where what answers an intent belongs: where the action belongs, or where the Message of
+ * a `Say` stands, and otherwise the Network's own Timeline.
+ * @param run - The step.
+ * @param intent - The intent.
+ * @returns The Timelines.
+ */
+const intentWhere = (run: Run, intent: IntentId): readonly Where[] => {
+  const action = rememberedAction(run, intent);
+  const target = run.state.said.get(intent);
+
+  if (action !== undefined) {
+    return [action.where];
+  }
+
+  return target === undefined ? [{ _tag: "Network" }] : saidWhere(run, target);
+};
+
+const reportReply = (
+  run: Run,
+  arrival: Arrival,
+  reply: StandardReply,
+  where: readonly Where[]
+): void => {
+  run.news.push({
+    _tag: "Activity",
+    activity: { _tag: "StandardReply", ...reply },
+    at: arrival.time,
+    id: arrival.id,
+    live: arrival.live,
+    where,
+  });
+};
+
+/**
+ * A standard reply that refused no intent, shown with what it answers. A labelled one is
+ * shown where its intent belongs, as `labeled-response` marked it. One live outside any
+ * batch or label is tied by the command it names to the oldest of what awaits an answer
+ * with that command: a Lookup collects it, a `FAIL` refuses an action as `421` does, by its
+ * code, and a `WARN` or a `NOTE` is shown where the action belongs and settles nothing.
+ * Anything else, history included, is shown in the Network's own Timeline. Nothing is
+ * decided from its description.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it.
+ */
+const standardReply = (run: Run, arrival: Arrival): void => {
+  const { line } = arrival;
+  const reply = readReply(line);
+
+  if (reply === undefined) {
+    malformed(run, line);
+
+    return;
+  }
+
+  if (!arrival.live) {
+    reportReply(run, arrival, reply, [{ _tag: "Network" }]);
+
+    return;
+  }
+
+  // A labelled `FAIL` here rejects an intent already refused, which only uses up its label.
+  if (arrival.about !== undefined) {
+    if (reply.kind !== "FAIL") {
+      reportReply(run, arrival, reply, intentWhere(run, arrival.about));
+    }
+
+    return;
+  }
+
+  const floor = arrival.batch === undefined && !line.tags.has("label");
+  const looking = floor ? lookupByCommand(run, reply) : undefined;
+  const acting = floor ? actionByCommand(run, reply.command) : undefined;
+
+  if (looking !== undefined && (acting === undefined || looking.order < acting.order)) {
+    collectFloor(run, looking, line);
+  } else if (acting !== undefined && reply.kind === "FAIL") {
+    tieRejection(run, line, acting, reply.code);
+  } else {
+    reportReply(
+      run,
+      arrival,
+      reply,
+      acting === undefined ? [{ _tag: "Network" }] : intentWhere(run, acting.intent)
+    );
+  }
+};
+
+/**
  * Does what one Line says, once it has been through the Features' ingress stages.
  * @param run - The step.
  * @param arrival - The Line, as ingress refined it.
@@ -713,6 +821,11 @@ export const interpret = (
 
   if (hasMeaning(command)) {
     means(run, arrival);
+  } else if (isStandardReply(command)) {
+    // One that refused an intent, or is part of a Lookup's labelled reply, is shown there.
+    if (reply === undefined && !labelled) {
+      standardReply(run, arrival);
+    }
   } else if (arrival.live) {
     // A numeric no label tied goes to whichever was sent first of the Lookup and the
     // action's Line it names.
