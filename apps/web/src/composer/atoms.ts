@@ -31,6 +31,7 @@ import type {
   Place,
   SayFailure,
 } from "@iirc/frontend/composer";
+import { allScope } from "@iirc/frontend/palette";
 import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Origin, Timelines } from "@iirc/frontend/timelines";
 import { Effect, Option, Schedule, Semaphore, Stream } from "effect";
@@ -354,12 +355,12 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
     }
 
     case "OpenPalette": {
-      registry.set(openPalette, "All");
+      registry.set(openPalette, allScope);
       break;
     }
 
     case "ListThemes": {
-      registry.set(openPalette, "Themes");
+      registry.set(openPalette, { _tag: "Themes", option: intent.option });
       break;
     }
 
@@ -458,7 +459,7 @@ const changeOne = (
     }
 
     case "UseTheme": {
-      return chooseTheme(registry, intent.name, intent.device);
+      return chooseTheme(registry, intent);
     }
 
     case "EditThemes": {

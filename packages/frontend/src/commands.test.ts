@@ -369,7 +369,8 @@ describe("themes", () => {
   it("lists, imports, draws in, and removes themes by /theme", () => {
     const usage = {
       _tag: "Invalid",
-      message: "Usage: /theme [[-device] <name> | import | remove <name>]",
+      message:
+        "Usage: /theme [[-device] [-light | -dark] <name> | -light | -dark | import | remove <name>]",
     };
 
     expect({
@@ -389,21 +390,57 @@ describe("themes", () => {
         message:
           "tokyo_night is not a theme's name: 1 to 32 letters and digits, in words joined by -, such as tokyo-night.",
       },
-      device: { _tag: "Parsed", value: [{ _tag: "UseTheme", device: true, name: "dracula" }] },
+      device: {
+        _tag: "Parsed",
+        value: [{ _tag: "UseTheme", device: true, name: "dracula", option: "theme" }],
+      },
       deviceAlone: usage,
       importAfter: {
         _tag: "Invalid",
         message: "/theme import takes nothing after it: paste the theme into the dialog it opens.",
       },
       imported: { _tag: "Parsed", value: [{ _tag: "ImportTheme" }] },
-      listed: { _tag: "Parsed", value: [{ _tag: "ListThemes" }] },
-      named: { _tag: "Parsed", value: [{ _tag: "UseTheme", device: false, name: "nord" }] },
+      listed: { _tag: "Parsed", value: [{ _tag: "ListThemes", option: "theme" }] },
+      named: {
+        _tag: "Parsed",
+        value: [{ _tag: "UseTheme", device: false, name: "nord", option: "theme" }],
+      },
       removeAlone: usage,
       removed: {
         _tag: "Parsed",
         value: [{ _tag: "EditThemes", edit: { _tag: "Remove", name: "mine" } }],
       },
       twoWords: usage,
+    });
+  });
+
+  it("chooses the theme system draws while the device is light or dark by /theme -light and -dark, or by /set, never system", () => {
+    const usage =
+      "Usage: /theme [[-device] [-light | -dark] <name> | -light | -dark | import | remove <name>]";
+
+    expect({
+      both: outcome("/theme -light -dark nord", nowhere),
+      dark: outcome("/theme -device -dark Dracula", nowhere),
+      darkFirst: outcome("/theme -DARK -device mine", nowhere),
+      deviceAlone: outcome("/theme -device -light", nowhere),
+      light: outcome("/theme -light nord", nowhere),
+      listed: outcome("/theme -dark", nowhere),
+      set: outcome("/set -device ui.light nord", nowhere),
+      setSystem: outcome("/set ui.dark system", nowhere),
+      system: outcome("/theme -light system", nowhere),
+      twice: outcome("/theme -device -device nord", nowhere),
+    }).toStrictEqual({
+      both: usage,
+      dark: [{ _tag: "UseTheme", device: true, name: "dracula", option: "dark" }],
+      darkFirst: [{ _tag: "UseTheme", device: true, name: "mine", option: "dark" }],
+      deviceAlone: usage,
+      light: [{ _tag: "UseTheme", device: false, name: "nord", option: "light" }],
+      listed: [{ _tag: "ListThemes", option: "dark" }],
+      set: [{ _tag: "ChangeUi", device: true, option: "light", value: "nord" }],
+      setSystem: 'ui.dark cannot be "system".',
+      system:
+        "system follows the device, so it is never the theme drawn while the device is light. Name a theme, such as light.",
+      twice: usage,
     });
   });
 });

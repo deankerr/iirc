@@ -16,7 +16,7 @@ import {
   themeCommandWords,
   themesCap,
 } from "@iirc/api/ui";
-import type { Colour, ColoursShown, Palette, Theme } from "@iirc/api/ui";
+import type { Colour, ColoursShown, Palette, Theme, UiOptionName, UiOptions } from "@iirc/api/ui";
 import type { Colour as RunColour, Style } from "@iirc/protocol/format";
 import { Option, Schema } from "effect";
 
@@ -499,6 +499,12 @@ export const runColours = (style: Style, theme: Drawn): RunStyle => {
 /** The name that follows the device's light or dark setting. */
 export const systemTheme = "system";
 
+/**
+ * An option under `ui` that names a theme: `theme`, the one drawn, or `light` or `dark`,
+ * the one `system` draws while the device is light or dark.
+ */
+export type ThemeOption = Extract<UiOptionName, "dark" | "light" | "theme">;
+
 /** A theme a list shows: its name, and whether it is built in or imported. */
 export interface ListedTheme {
   readonly name: ThemeName;
@@ -527,26 +533,42 @@ const fallback: Palette = {
 const builtInNamed = (name: string) => builtInThemes.find((one) => one.name === name);
 
 /**
- * The palette a theme's name draws: `system`'s is the built-in dark or light, as the device
- * prefers, a built-in one its own, an imported one its own, and a name that names none, as
- * one removed since, `system`'s.
+ * The options a theme's name is drawn from: the themes imported, and the theme `system`
+ * draws while the device is light, and while it is dark.
+ */
+export type ThemesShown = Pick<UiOptions, "dark" | "light" | "themes">;
+
+/**
+ * The palette of a theme other than `system`: a built-in one's own, or an imported one's.
  * @param name - The theme's name.
  * @param imported - The themes imported.
+ * @returns The palette, or none for `system` or a name that names no theme.
+ */
+const ownPalette = (name: string, imported: readonly Theme[]): Palette | undefined =>
+  name === systemTheme
+    ? undefined
+    : (builtInNamed(name) ?? imported.find((one) => one.name === name))?.palette;
+
+/**
+ * The palette a theme's name draws: a built-in one its own, an imported one its own, and
+ * `system`'s that of `ui.dark` or `ui.light`, as the device prefers. A name that names no
+ * theme, as one removed since, draws as `system`, and `system` draws the built-in dark or
+ * light when the theme it names for the device's setting is none there is.
+ * @param name - The theme's name.
+ * @param shown - The themes imported, and the themes `system` draws.
  * @param prefersDark - Whether the device prefers dark.
  * @returns The palette.
  */
-export const paletteNamed = (
-  name: string,
-  imported: readonly Theme[],
-  prefersDark: boolean
-): Palette => {
-  const found = builtInNamed(name) ?? imported.find((one) => one.name === name);
+export const paletteNamed = (name: string, shown: ThemesShown, prefersDark: boolean): Palette => {
+  const scheme = prefersDark ? "dark" : "light";
 
-  if (found !== undefined && name !== systemTheme) {
-    return found.palette;
-  }
-
-  return (builtInNamed(prefersDark ? "dark" : "light") ?? builtInThemes[0])?.palette ?? fallback;
+  return (
+    ownPalette(name, shown.themes) ??
+    ownPalette(shown[scheme], shown.themes) ??
+    builtInNamed(scheme)?.palette ??
+    builtInThemes[0]?.palette ??
+    fallback
+  );
 };
 
 const parsed = <A>(value: A): Parsed<A> => ({ _tag: "Parsed", value });

@@ -32,12 +32,14 @@ export const deviceUiKey = "iirc.ui";
 
 /**
  * The longest a device's overrides can be as `deviceUiText` writes them: every option
- * overridden, with the longest font's family, and `themesCap` themes of the longest names,
+ * overridden, with the longest font's family, themes' longest names, and `themesCap` themes of the longest names,
  * each with every colour.
  */
 const longestOverrides = JSON.stringify({
   ...uiDefaults,
+  dark: "x".repeat(32),
   font: "x".repeat(fontFamilyMaxLength),
+  light: "x".repeat(32),
   theme: "x".repeat(32),
   themes: Array.from({ length: themesCap }, (_, index) => ({
     name: `${index}`.padEnd(32, "x"),

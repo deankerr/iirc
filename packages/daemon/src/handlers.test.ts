@@ -403,8 +403,10 @@ describe("the handlers", () => {
         options: {
           activity: "all",
           colours: "theme",
+          dark: "dark",
           font: "system",
           leading: 1.45,
+          light: "light",
           size: 14,
           theme: "light",
           themes: [],
@@ -417,8 +419,10 @@ describe("the handlers", () => {
         options: {
           activity: "all",
           colours: "theme",
+          dark: "dark",
           font: "system",
           leading: 1.45,
+          light: "light",
           size: 14,
           theme: "dark",
           themes: [],
@@ -431,8 +435,10 @@ describe("the handlers", () => {
         options: {
           activity: "all",
           colours: "theme",
+          dark: "dark",
           font: "system",
           leading: 1.45,
+          light: "light",
           size: 14,
           theme: "system",
           themes: [],

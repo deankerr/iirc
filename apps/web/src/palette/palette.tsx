@@ -11,7 +11,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { showChord } from "@iirc/frontend/keymap";
-import type { Entry } from "@iirc/frontend/palette";
+import type { Entry, Scope } from "@iirc/frontend/palette";
 import { fontDescription, themeDescription } from "@iirc/frontend/palette";
 import { useEffect } from "react";
 import {
@@ -173,12 +173,24 @@ const resultsText = (count: number) => {
 };
 
 /**
+ * What the palette's field asks for, as it is scoped.
+ * @param scope - What the palette lists.
+ * @returns The words.
+ */
+const placeholderOf = (scope: Scope) => {
+  if (scope._tag === "All") {
+    return "a command, a Timeline, or an option";
+  }
+
+  return scope.option === "theme" ? "a theme" : `a theme for while the device is ${scope.option}`;
+};
+
+/**
  * The palette, open while the core says so.
  * @returns The palette.
  */
 export const Palette = () => {
   const { open, query, scope } = useAtomValue(paletteState);
-  const themesOnly = scope === "Themes";
   const shown = useAtomValue(paletteSections);
   const close = useAtomSet(closePalette);
   const setQuery = useAtomSet(queryPalette);
@@ -222,10 +234,7 @@ export const Palette = () => {
               <span aria-hidden="true" className={styles.prompt}>
                 &gt;
               </span>
-              <Input
-                className={styles.input}
-                placeholder={themesOnly ? "a theme" : "a command, a Timeline, or an option"}
-              />
+              <Input className={styles.input} placeholder={placeholderOf(scope)} />
             </SearchField>
             <Menu
               aria-label="Commands, Timelines, and options"

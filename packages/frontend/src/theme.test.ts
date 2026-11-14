@@ -1,4 +1,4 @@
-import { Palette, Themes, builtInThemeNames } from "@iirc/api/ui";
+import { Palette, Themes, builtInThemeNames, uiDefaults } from "@iirc/api/ui";
 import type { Colour, Theme } from "@iirc/api/ui";
 import { plainStyle } from "@iirc/protocol/format";
 import { Schema } from "effect";
@@ -164,8 +164,8 @@ describe("a theme drawn from a palette", () => {
   });
 
   it("is dark or light by which reads better on its background, and its tokens are CSS variables", () => {
-    const dark = drawn(paletteNamed("dark", [], false), "theme");
-    const light = drawn(paletteNamed("light", [], true), "theme");
+    const dark = drawn(paletteNamed("dark", uiDefaults, false), "theme");
+    const light = drawn(paletteNamed("light", uiDefaults, true), "theme");
     const names = cssVariables(dark).map(([name]) => name);
 
     expect({
@@ -188,7 +188,7 @@ describe("a theme drawn from a palette", () => {
   });
 
   it("spreads nicks over sixteen slots drawn from the palette's hues", () => {
-    const nord = paletteNamed("nord", [], true);
+    const nord = paletteNamed("nord", uiDefaults, true);
     const grey: Palette = { ...nord, ansi: Array.from({ length: 16 }, () => "#888888") };
 
     expect({
@@ -199,7 +199,7 @@ describe("a theme drawn from a palette", () => {
 });
 
 describe("a run's colours", () => {
-  const theme = drawn(paletteNamed("dark", [], true), "theme");
+  const theme = drawn(paletteNamed("dark", uiDefaults, true), "theme");
   const black = { _tag: "Palette", index: 1 } as const;
   const yellow = { _tag: "Palette", index: 8 } as const;
 
@@ -232,7 +232,7 @@ describe("a run's colours", () => {
 
 describe("the themes there are", () => {
   const tokyo = builtInThemes.find((one) => one.name === "tokyo-night");
-  const mine: Theme = { name: "mine", palette: paletteNamed("nord", [], true) };
+  const mine: Theme = { name: "mine", palette: paletteNamed("nord", uiDefaults, true) };
 
   it("are built in, valid, and listed after system, then those imported", () => {
     expect({
@@ -257,17 +257,40 @@ describe("the themes there are", () => {
 
   it("draw a name as its own palette, system as the device prefers, and a name gone as system", () => {
     expect({
-      builtIn: paletteNamed("tokyo-night", [], true),
-      gone: paletteNamed("removed", [mine], false).background,
-      imported: paletteNamed("mine", [mine], false),
-      systemDark: paletteNamed("system", [], true).background,
-      systemLight: paletteNamed("system", [], false).background,
+      builtIn: paletteNamed("tokyo-night", uiDefaults, true),
+      gone: paletteNamed("removed", { ...uiDefaults, themes: [mine] }, false).background,
+      imported: paletteNamed("mine", { ...uiDefaults, themes: [mine] }, false),
+      systemDark: paletteNamed("system", uiDefaults, true).background,
+      systemLight: paletteNamed("system", uiDefaults, false).background,
     }).toStrictEqual({
       builtIn: tokyo?.palette,
       gone: "#f6f5f1",
       imported: mine.palette,
       systemDark: "#111314",
       systemLight: "#f6f5f1",
+    });
+  });
+
+  it("draw system as ui.light or ui.dark as the device prefers, an imported one too, and the built-in one when it names no theme", () => {
+    const shown = { ...uiDefaults, dark: "mine", light: "solarized-light", themes: [mine] };
+    const solarized = builtInThemes.find((one) => one.name === "solarized-light");
+
+    expect({
+      dark: paletteNamed("system", shown, true),
+      gone: paletteNamed("gone", shown, false),
+      light: paletteNamed("system", shown, false),
+      named: paletteNamed("tokyo-night", shown, true),
+      removed: paletteNamed("system", { ...shown, themes: [] }, true).background,
+      system: paletteNamed("system", { ...shown, light: "system" }, false).background,
+      unknown: paletteNamed("system", { ...shown, light: "nope" }, false).background,
+    }).toStrictEqual({
+      dark: mine.palette,
+      gone: solarized?.palette,
+      light: solarized?.palette,
+      named: tokyo?.palette,
+      removed: "#111314",
+      system: "#f6f5f1",
+      unknown: "#f6f5f1",
     });
   });
 
@@ -299,7 +322,7 @@ describe("the themes there are", () => {
   });
 
   it("are imported and removed by edits, never built-in ones, nor more than 32", () => {
-    const other: Theme = { ...mine, palette: paletteNamed("dracula", [], true) };
+    const other: Theme = { ...mine, palette: paletteNamed("dracula", uiDefaults, true) };
     const full = Array.from({ length: 32 }, (_, index) => ({ ...mine, name: `t${index}` }));
 
     expect({

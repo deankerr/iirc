@@ -1,8 +1,8 @@
 /**
  * The command palette, as data: what it lists for a query, ranked, and what choosing an
  * entry asks for. It lists the commands the registry can run here, every Timeline, every
- * theme, every font, and the options, or the themes alone, as `/theme` opens it, and adds no action of
- * its own: choosing gives the same intents the composer's `/commands` do. A query of
+ * theme, every font, and the options, or the themes alone, as `/theme` opens it, and adds no
+ * action of its own: choosing gives the same intents the composer's `/commands` do. A query of
  * `font` and a family's name offers that family too. Which entries were chosen recently is
  * remembered, at most `recentCap`.
  *
@@ -17,7 +17,8 @@ import type { CommandContext, Intent } from "./commands.ts";
 import { chordsFor } from "./keymap.ts";
 import type { Chord, Keymap } from "./keymap.ts";
 import type { Option } from "./options.ts";
-import type { ListedTheme } from "./theme.ts";
+import { systemTheme } from "./theme.ts";
+import type { ListedTheme, ThemeOption } from "./theme.ts";
 import type { SidebarNetwork } from "./timelines.ts";
 import { writtenOnDevice } from "./ui.ts";
 
@@ -56,7 +57,9 @@ export type Entry =
       readonly key: string;
       readonly name: string;
       readonly builtIn: boolean;
-      /** Whether it is the one in effect on this device. */
+      /** The option choosing it sets. */
+      readonly option: ThemeOption;
+      /** Whether it is the one that option names on this device. */
       readonly current: boolean;
     }
   | {
@@ -79,15 +82,23 @@ export interface Listing {
   readonly sidebar: readonly SidebarNetwork[];
   readonly options: readonly Option[];
   readonly keymap: Keymap;
-  /** Every theme, and the name of the one in effect on this device. */
+  /** Every theme, and the one each option that names a theme names on this device. */
   readonly themes: readonly ListedTheme[];
-  readonly theme: string;
+  readonly chosen: Readonly<Record<ThemeOption, string>>;
   /** The font in effect on this device. */
   readonly font: FontShown;
 }
 
-/** What the palette lists: everything, or the themes alone, as `/theme` opens it. */
-export type Scope = "All" | "Themes";
+/**
+ * What the palette lists: everything, or the themes alone, as `/theme` opens it, to set the
+ * option it says. Everything sets `theme`.
+ */
+export type Scope =
+  | { readonly _tag: "All" }
+  | { readonly _tag: "Themes"; readonly option: ThemeOption };
+
+/** The palette listing everything. */
+export const allScope: Scope = { _tag: "All" };
 
 /**
  * Whether the palette is open, what it lists, its query, and the keys of entries chosen,
@@ -115,7 +126,7 @@ export type PaletteEvent =
   | { readonly _tag: "Chosen"; readonly key: string };
 
 /** The palette closed, with nothing chosen yet. */
-export const initialPalette: Palette = { open: false, query: "", recent: [], scope: "All" };
+export const initialPalette: Palette = { open: false, query: "", recent: [], scope: allScope };
 
 /**
  * Remembers a key as the newest chosen, once, keeping at most `recentCap`.
@@ -409,13 +420,19 @@ const fontEntry = (font: FontShown, current: FontShown): Entry => ({
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; every theme; every font, and the family the query names, if any; and
+ * sidebar's order; every theme, to set the option given, but `system` only as `theme`,
+ * since it follows the device; every font, and the family the query names, if any; and
  * every option read.
  * @param listing - What the palette lists from.
  * @param family - The family the query names, if any.
+ * @param option - The option choosing a theme sets.
  * @returns The sections, each with every entry.
  */
-const everything = (listing: Listing, family: FontFamily | undefined): readonly Section[] => [
+const everything = (
+  listing: Listing,
+  family: FontFamily | undefined,
+  option: ThemeOption
+): readonly Section[] => [
   {
     entries: commands
       .filter((one) => one.id !== "palette.open" && unmet(one.when, listing.context) === undefined)
@@ -444,13 +461,16 @@ const everything = (listing: Listing, family: FontFamily | undefined): readonly 
     title: "Timelines",
   },
   {
-    entries: listing.themes.map((theme): Entry => ({
-      _tag: "Theme",
-      builtIn: theme.builtIn,
-      current: theme.name === listing.theme,
-      key: `theme:${theme.name}`,
-      name: theme.name,
-    })),
+    entries: listing.themes
+      .filter((theme) => option === "theme" || theme.name !== systemTheme)
+      .map((theme): Entry => ({
+        _tag: "Theme",
+        builtIn: theme.builtIn,
+        current: theme.name === listing.chosen[option],
+        key: `theme:${theme.name}`,
+        name: theme.name,
+        option,
+      })),
     title: "Themes",
   },
   {
@@ -476,7 +496,7 @@ const everything = (listing: Listing, family: FontFamily | undefined): readonly 
  * newest first, and then each section in its own order. With one, only entries that match,
  * each section ranked best first, and the sections by their best entry. A leading `/` is
  * ignored, so `/set` finds `set`, and a run of spaces is one. Scoped to the themes, it lists
- * only them, with nothing recent. A query of `font` and a family's name, such as
+ * only them, to set the option it says, with nothing recent. A query of `font` and a family's name, such as
  * `font Fira Code`, offers that family among the fonts.
  * @param listing - What the palette lists from.
  * @param query - What the Owner typed.
@@ -488,14 +508,16 @@ export const sections = (
   listing: Listing,
   query: string,
   recent: readonly string[],
-  scope: Scope = "All"
+  scope: Scope = allScope
 ): readonly Section[] => {
   // Spaces between words count as one, so `font  Fira Code` names the family `Fira Code`.
   const asked = query.trim().replace(/^\//u, "").replaceAll(/\s+/gu, " ");
 
-  const all = everything(listing, familyQueried(asked)).filter(
-    (section) => scope === "All" || section.title === "Themes"
-  );
+  const all = everything(
+    listing,
+    familyQueried(asked),
+    scope._tag === "All" ? "theme" : scope.option
+  ).filter((section) => scope._tag === "All" || section.title === "Themes");
 
   const wanted = lower(asked);
 
@@ -512,7 +534,7 @@ export const sections = (
       return byKey.get(key) ?? (font === undefined ? undefined : fontEntry(font, listing.font));
     };
 
-    const recently = scope === "All" ? recent.flatMap((key) => recentEntry(key) ?? []) : [];
+    const recently = scope._tag === "All" ? recent.flatMap((key) => recentEntry(key) ?? []) : [];
     const shown = new Set(recently.map((one) => one.key));
 
     return [
@@ -554,7 +576,9 @@ export const sections = (
  * name would; one that needs them, or that cannot run with none, starts in the composer
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
- * `/set <name>` alone does, since its value is never typed into the composer. A theme or a
+ * `/set <name>` alone does, since its value is never typed into the composer. A theme sets
+ * the option its entry says on every device: `theme`, to draw in it, or, listed by
+ * `/theme -light` or `-dark`, the one `system` draws while the device is light or dark. A
  * font is drawn in, on every device, unless this device overrides the font, but a family
  * the device has is always on this device alone, since another device's fonts are its own.
  * @param entry - The entry chosen.
@@ -598,7 +622,7 @@ export const choose = (
     }
 
     case "Theme": {
-      return [{ _tag: "UseTheme", device: false, name: entry.name }];
+      return [{ _tag: "UseTheme", device: false, name: entry.name, option: entry.option }];
     }
 
     case "Font": {

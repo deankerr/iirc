@@ -1039,8 +1039,10 @@ describe("the options under ui", () => {
     options: {
       activity: "quiet",
       colours: "theme",
+      dark: "dark",
       font: "system",
       leading: 1.45,
+      light: "light",
       size: 14,
       theme: "dark",
       themes: [],
@@ -1061,6 +1063,7 @@ describe("the options under ui", () => {
       kinds: [
         { _tag: "Choice", choices: ["all", "quiet", "none"] },
         { _tag: "Choice", choices: ["theme", "raw"] },
+        { _tag: "Text" },
         {
           _tag: "ChoiceOrText",
           choices: [
@@ -1078,6 +1081,7 @@ describe("the options under ui", () => {
           ],
         },
         { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
+        { _tag: "Text" },
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Text" },
         { _tag: "Names", fields: [] },
@@ -1098,8 +1102,10 @@ describe("the options under ui", () => {
       before: [
         ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
         ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
+        ["ui.dark", { _tag: "Shown", text: "dark" }, { _tag: "Unset" }, undefined],
         ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
+        ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
         ["ui.theme", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.themes", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
@@ -1122,6 +1128,13 @@ describe("the options under ui", () => {
           "theme",
         ],
         [
+          "ui.dark",
+          { _tag: "Shown", text: "dark" },
+          { _tag: "Shown", text: "dark" },
+          undefined,
+          "dark",
+        ],
+        [
           "ui.font",
           { _tag: "Shown", text: "system" },
           { _tag: "Shown", text: "system" },
@@ -1134,6 +1147,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "1.45" },
           undefined,
           "1.45",
+        ],
+        [
+          "ui.light",
+          { _tag: "Shown", text: "light" },
+          { _tag: "Shown", text: "light" },
+          undefined,
+          "light",
         ],
         [
           "ui.size",
@@ -1187,7 +1207,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-10),
+        .slice(-12),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1195,8 +1215,10 @@ describe("the options under ui", () => {
         "network.libera.username",
         "ui.activity",
         "ui.colours",
+        "ui.dark",
         "ui.font",
         "ui.leading",
+        "ui.light",
         "ui.size",
         "ui.theme",
         "ui.themes",

@@ -96,7 +96,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Acting | `/topic`, `/kick`, `/mode`, `/op`, `/deop`, `/voice`, `/devoice`, `/ban`, `/unban`, `/invite`, `/away`, `/back`, `/nick`, `/quote` |
 | Lookups | `/whois`, `/whowas` |
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/connect`, `/disconnect` |
-| Themes | `/theme`, `/theme import`, `/theme remove` |
+| Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
 | Reading | `/read`, `/read all`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
@@ -141,11 +141,11 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 ## Palette
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
+What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
 
 - **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
 - **With no query, recent choices come first,** at most 20.
-- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme is drawn in on every device, and so is a bundled font, unless this device overrides `ui.font`, but a family typed in is always this device's own, since each device has its own.
+- **Choosing a command that needs no arguments runs it.** One that needs them starts in the composer. A Timeline opens, an option starts `/set <name> `, a Credential option opens the password prompt, and a theme is drawn in on every device, or, listed by `/theme -light` or `-dark`, set as `ui.light` or `ui.dark`, and a bundled font is drawn in on every device too, unless this device overrides `ui.font`, but a family typed in is always this device's own, since each device has its own.
 - **A choice never replaces a draft with text in it.** The draft is kept, and a notice says what was not put in.
 
 ## Composer
@@ -203,7 +203,8 @@ Every colour a Frontend draws, derived from a terminal's palette of a foreground
 - **The floor is WCAG 2's contrast ratio:** 4.5 for text, and 3 for dim text and the focus ring. APCA judges dark themes better, but it is still a draft and its licence restricts its use.
 - **Nicks are spread over 16 slots drawn from the palette's own hues.**
 - **mIRC's first 16 colours are the theme's ANSI colours, or mIRC's own,** as `ui.colours` says. Colours 16 to 98 are always mIRC's own.
-- **Themes are built in or imported.** `system` draws `dark` or `light` as the device prefers. The built-in ones are in `src/builtin-themes.ts`, each with its source and licence. A name that names no theme draws as `system`.
+- **Themes are built in or imported.** The built-in ones are in `src/builtin-themes.ts`, each with its source and licence. A name that names no theme draws as `system`.
+- **`system` draws `ui.light` or `ui.dark` as the device prefers,** each the built-in one of its name until set, by `/theme -light` or `/theme -dark`, to any theme but `system`. One that names no theme, as one imported and removed since, draws the built-in one again. A theme named in `ui.theme` wins over both.
 - **A theme's name is one word,** such as `tokyo-night`. The names no import may take are the contract's, so the Daemon refuses them too.
 - **Deterministic.** The same palette draws the same colours every time.
 

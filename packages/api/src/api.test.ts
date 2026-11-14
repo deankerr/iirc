@@ -320,15 +320,29 @@ describe("the contract", () => {
       defaults: {
         activity: "all",
         colours: "theme",
+        dark: "dark",
         font: "system",
         leading: 1.45,
+        light: "light",
         size: 14,
         theme: "system",
         themes: [],
         time: "HH:mm",
         width: "none",
       },
-      names: ["activity", "colours", "font", "leading", "size", "theme", "themes", "time", "width"],
+      names: [
+        "activity",
+        "colours",
+        "dark",
+        "font",
+        "leading",
+        "light",
+        "size",
+        "theme",
+        "themes",
+        "time",
+        "width",
+      ],
       option: ["time", "theme", "activity", null, null, null],
       options: [
         true,
@@ -469,12 +483,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","font":"system","leading":1.45,"size":14,"theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","font":"system","leading":1.45,"light":"light","size":14,"theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","font":"ibm-plex-mono","leading":1.45,"size":16,"theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","font":"ibm-plex-mono","leading":1.45,"light":"light","size":16,"theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },

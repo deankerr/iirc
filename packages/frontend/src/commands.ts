@@ -27,8 +27,8 @@ import {
   starting,
 } from "./options.ts";
 import type { Configuration, Edit, Json, Path } from "./options.ts";
-import { parseThemeName } from "./theme.ts";
-import type { ThemesEdit } from "./theme.ts";
+import { parseThemeName, systemTheme } from "./theme.ts";
+import type { ThemeOption, ThemesEdit } from "./theme.ts";
 import type { PaneChange } from "./timelines.ts";
 
 /** What a Message is said as: a `PRIVMSG`, a `NOTICE`, or a CTCP `ACTION`. */
@@ -148,12 +148,13 @@ export interface Act {
  * - `ChangeUi`: set an option under `ui` to a value, as JSON its Schema took, or unset it
  *   with none: for every device, through the Daemon, made from the options read, or with
  *   `device`, for this device alone, which keeps it and never sends it.
- * - `UseTheme`: draw in the theme named, for every device, or with `device`, for this one,
- *   once the runtime has found it among the themes there are.
+ * - `UseTheme`: set `option` to the theme named, for every device, or with `device`, for
+ *   this one, once the runtime has found it among the themes there are: `theme` to draw in
+ *   it, or `light` or `dark` to have `system` draw it while the device is light or dark.
  * - `EditThemes`: read the themes imported, apply the edit, and send them whole, made from
  *   the options read, applying it once more after a conflict, as `Configure` does.
  * - `ListThemes`: open the palette on the themes alone, each drawn while it is
- *   highlighted.
+ *   highlighted, where choosing one sets `option` to it.
  * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it. A value never goes through the
@@ -196,9 +197,14 @@ export type Intent =
       readonly value: Json | undefined;
       readonly device: boolean;
     }
-  | { readonly _tag: "UseTheme"; readonly name: ThemeName; readonly device: boolean }
+  | {
+      readonly _tag: "UseTheme";
+      readonly option: ThemeOption;
+      readonly name: ThemeName;
+      readonly device: boolean;
+    }
   | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
-  | { readonly _tag: "ListThemes" }
+  | { readonly _tag: "ListThemes"; readonly option: ThemeOption }
   | { readonly _tag: "ImportTheme" }
   | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path }
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
@@ -651,12 +657,55 @@ const stepped =
     return parsed(to === open ? undefined : to);
   };
 
-const themeUsage = "/theme [[-device] <name> | import | remove <name>]";
+const themeUsage =
+  "/theme [[-device] [-light | -dark] <name> | -light | -dark | import | remove <name>]";
+
+/** The flags `/theme` reads before a theme's name, each naming the option it sets. */
+const schemeFlags: ReadonlyMap<string, ThemeOption> = new Map([
+  ["-dark", "dark"],
+  ["-light", "light"],
+]);
 
 /**
- * What `/theme` was given: nothing, to list the themes; `import`, to read one from a file;
- * `remove` and a name, to remove one imported; or a name, perhaps after `-device`, to draw
- * in it.
+ * What `/theme` was given before a theme's name: `-device`, and `-light` or `-dark`, in
+ * either order, each at most once.
+ * @param words - The words after `/theme`, lower-cased.
+ * @returns The flags, and how many words they took, or none for a flag given twice.
+ */
+const themeFlags = (
+  words: readonly string[]
+):
+  | { readonly device: boolean; readonly option: ThemeOption; readonly taken: number }
+  | undefined => {
+  let device = false;
+  let option: ThemeOption = "theme";
+  let taken = 0;
+
+  for (const word of words) {
+    const scheme = schemeFlags.get(word);
+
+    if (word === deviceFlag && !device) {
+      device = true;
+    } else if (scheme !== undefined && option === "theme") {
+      option = scheme;
+    } else if (word === deviceFlag || scheme !== undefined) {
+      return undefined;
+    } else {
+      break;
+    }
+
+    taken += 1;
+  }
+
+  return { device, option, taken };
+};
+
+/**
+ * What `/theme` was given: nothing, to list the themes; `-light` or `-dark` alone, to list
+ * them to choose the one `system` draws while the device is light or dark; `import`, to read
+ * one from a file; `remove` and a name, to remove one imported; or a name, perhaps after
+ * `-device`, `-light`, or `-dark`, to draw in it, or to have `system` draw it. `system` is
+ * never the theme `system` draws.
  * @param args - The text after `/theme`.
  * @returns The intent, or why there is none.
  */
@@ -670,7 +719,7 @@ const themeArguments = (args: string): Parsed<Intent> => {
   const lowered = first?.toLowerCase();
 
   if (first === undefined) {
-    return parsed({ _tag: "ListThemes" });
+    return parsed({ _tag: "ListThemes", option: "theme" });
   }
 
   if (lowered === "import") {
@@ -679,32 +728,45 @@ const themeArguments = (args: string): Parsed<Intent> => {
       : invalid("/theme import takes nothing after it: paste the theme into the dialog it opens.");
   }
 
-  const one = second === undefined || rest.length > 0 ? undefined : second;
-  const device = lowered === deviceFlag;
+  if (lowered === "remove") {
+    const name =
+      second === undefined || rest.length > 0
+        ? invalid<ThemeName>(`Usage: ${themeUsage}`)
+        : parseThemeName(second);
 
-  if (lowered === "remove" || device) {
-    const name = one === undefined ? invalid<string>(`Usage: ${themeUsage}`) : parseThemeName(one);
-
-    if (name._tag === "Invalid") {
-      return name;
-    }
-
-    return parsed(
-      device
-        ? { _tag: "UseTheme", device: true, name: name.value }
-        : { _tag: "EditThemes", edit: { _tag: "Remove", name: name.value } }
-    );
+    return name._tag === "Invalid"
+      ? name
+      : parsed({ _tag: "EditThemes", edit: { _tag: "Remove", name: name.value } });
   }
 
-  if (second !== undefined) {
+  const flags = themeFlags(words.map((one) => one.toLowerCase()));
+  const named = flags === undefined ? [] : words.slice(flags.taken);
+
+  if (flags === undefined || named.length > 1) {
     return invalid(`Usage: ${themeUsage}`);
   }
 
-  const name = parseThemeName(first);
+  const [one] = named;
 
-  return name._tag === "Invalid"
-    ? name
-    : parsed({ _tag: "UseTheme", device: false, name: name.value });
+  if (one === undefined) {
+    return flags.option === "theme" || flags.device
+      ? invalid(`Usage: ${themeUsage}`)
+      : parsed({ _tag: "ListThemes", option: flags.option });
+  }
+
+  const name = parseThemeName(one);
+
+  if (name._tag === "Invalid") {
+    return name;
+  }
+
+  if (flags.option !== "theme" && name.value === systemTheme) {
+    return invalid(
+      `system follows the device, so it is never the theme drawn while the device is ${flags.option}. Name a theme, such as ${flags.option}.`
+    );
+  }
+
+  return parsed({ _tag: "UseTheme", device: flags.device, name: name.value, option: flags.option });
 };
 
 /**
@@ -1801,7 +1863,7 @@ export const commands: readonly Command[] = [
     aliases: [],
     arguments: "Optional",
     description:
-      "List the themes, draw in one for every device or with -device for this one, import one from a terminal's theme file, or remove one imported.",
+      "List the themes, draw in one for every device or with -device for this one, choose with -light or -dark the one system draws while the device is light or dark, import one from a terminal's theme file, or remove one imported.",
     id: "theme.set",
     intents: (intent: Intent) => [intent],
     name: "theme",
