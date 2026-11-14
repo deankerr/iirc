@@ -40,8 +40,8 @@ import {
 } from "effect";
 
 import { now } from "./clock.ts";
-import { Journal, NetworkId } from "./journal.ts";
-import type { JournalFailed, Sequence } from "./journal.ts";
+import { Journal, NetworkId, Sequence } from "./journal.ts";
+import type { JournalFailed } from "./journal.ts";
 import {
   awaitLookup,
   changedSince,
@@ -369,6 +369,15 @@ export interface RuntimeService {
 /** The Runtime. */
 export class Runtime extends Context.Service<Runtime, RuntimeService>()("@iirc/runtime/Runtime") {}
 
+// A map without one key.
+const without = <K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> => {
+  const next = new Map(map);
+
+  next.delete(key);
+
+  return next;
+};
+
 // 128 bits from Effect's Random, as hex. An intent id is unique, not secret.
 const intentId = Effect.map(
   Effect.all(Array.from({ length: 8 }, () => Random.nextIntBetween(0, 0xff_ff))),
@@ -446,18 +455,26 @@ export const makeRuntime = <S>(
 
     yield* Effect.addFinalizer(() => adding.withPermit(stopAll));
 
-    // A removed Network whose Timelines are kept, with the Configuration it had, whose
-    // Credentials a removal forgets.
-    const kept = yield* Ref.make<ReadonlyMap<NetworkId, NetworkConfiguration | undefined>>(
+    // Every removed Network whose Timelines are kept, which holds its id.
+    const kept = yield* Ref.make<ReadonlySet<NetworkId>>(new Set());
+
+    // The Configurations of removals whose Credentials are not yet known to be forgotten,
+    // by Network, folded from the Journal, so a removal cut short by a crash or a Vault that
+    // failed is finished on the next start.
+    const unforgotten = yield* Ref.make<ReadonlyMap<NetworkId, readonly NetworkConfiguration[]>>(
       new Map()
     );
 
     const folded = yield* refold(client, ports.journal);
 
     for (const [id, network] of folded) {
+      if (network.unforgotten.length > 0) {
+        yield* Ref.update(unforgotten, (all) => new Map(all).set(id, network.unforgotten));
+      }
+
       if (network.removed !== undefined) {
         if (network.removed.keep) {
-          yield* Ref.update(kept, (all) => new Map(all).set(id, network.configured?.configuration));
+          yield* Ref.update(kept, (all) => new Set(all).add(id));
         }
 
         continue;
@@ -478,133 +495,224 @@ export const makeRuntime = <S>(
       });
 
     // A Network that does not exist is added only by a `configure` made from none, so a
-    // refused precondition adds nothing.
+    // refused precondition adds nothing. The caller holds the permit.
     const findOrAdd = (id: NetworkId, ifSequence: ConfiguredAt | undefined) =>
-      adding.withPermit(
-        Effect.flatMap(
-          Effect.all([Ref.get(held), Ref.get(closed), Ref.get(kept)]),
-          ([networks, over, keeping]): Effect.Effect<
-            Network<S>,
-            NetworkStopped | ConfigurationChanged | TimelinesKept
-          > => {
-            const network = networks.get(id);
+      Effect.flatMap(
+        Effect.all([Ref.get(held), Ref.get(closed), Ref.get(kept)]),
+        ([networks, over, keeping]): Effect.Effect<
+          Network<S>,
+          NetworkStopped | ConfigurationChanged | TimelinesKept
+        > => {
+          const network = networks.get(id);
 
-            if (network !== undefined) {
-              return Effect.succeed(network);
-            }
-
-            if (over) {
-              return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
-            }
-
-            if (keeping.has(id)) {
-              return Effect.fail(new TimelinesKept({ network: id }));
-            }
-
-            const changed = changedSince(id, undefined, ifSequence);
-
-            if (changed !== undefined) {
-              return Effect.fail(changed);
-            }
-
-            return startNetwork(ports, id, fresh(client), false).pipe(
-              Scope.provide(drivers),
-              Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
-              Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
-            );
+          if (network !== undefined) {
+            return Effect.succeed(network);
           }
+
+          if (over) {
+            return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
+          }
+
+          if (keeping.has(id)) {
+            return Effect.fail(new TimelinesKept({ network: id }));
+          }
+
+          const changed = changedSince(id, undefined, ifSequence);
+
+          if (changed !== undefined) {
+            return Effect.fail(changed);
+          }
+
+          return startNetwork(ports, id, fresh(client), false).pipe(
+            Scope.provide(drivers),
+            Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
+            Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
+          );
+        }
+      );
+
+    // Held by a `configure` until its `Configured` is stepped, and by forgetting a removed
+    // Network's Credentials, so no Configuration changes while that checks which a Network
+    // still names. Taken after `adding`, never before it.
+    const configuring = yield* Semaphore.make(1);
+
+    // Forgets the Credentials the Network's removals named, but those a Network still held
+    // names, and journals that it did.
+    const forgetCredentials = (id: NetworkId) =>
+      configuring.withPermit(
+        Effect.gen(function* () {
+          const configurations = (yield* Ref.get(unforgotten)).get(id);
+
+          if (configurations === undefined) {
+            return;
+          }
+
+          const still = new Set<CredentialName>();
+
+          for (const network of (yield* Ref.get(held)).values()) {
+            const { configured } = yield* Ref.get(network.current);
+
+            for (const name of configured === undefined
+              ? []
+              : credentialsOf(configured.configuration)) {
+              still.add(name);
+            }
+          }
+
+          const named = new Set(configurations.flatMap((each) => [...credentialsOf(each)]));
+          const forgotten = [...named].filter((each) => !still.has(each)).toSorted();
+
+          for (const name of forgotten) {
+            yield* ports.vault.forget(name);
+            yield* Effect.logInfo("Forgot a Credential", { credential: name, network: id });
+          }
+
+          yield* ports.journal.append({ _tag: "Forgotten", credentials: forgotten, network: id });
+          yield* Ref.update(unforgotten, (all) => without(all, id));
+        })
+      );
+
+    // The sequence of the `Removed` that ended the Network's last life in the Journal, if
+    // one did: a `Removed` after its last `Configured`.
+    const removedAt = (id: NetworkId) =>
+      ports.journal.read({ network: id }).pipe(
+        Stream.runFold(
+          () => ({ configured: 0, removed: 0 }),
+          (last, { record, sequence }) => {
+            if (record._tag !== "Input") {
+              return last;
+            }
+
+            if (record.input._tag === "Configured") {
+              return { ...last, configured: sequence };
+            }
+
+            return record.input._tag === "Removed" ? { ...last, removed: sequence } : last;
+          }
+        ),
+        Effect.map(({ configured, removed }) =>
+          removed > configured ? Sequence.make(removed) : undefined
         )
       );
 
-    // Forgets the Credentials a removed Network's Configuration named, but those a Network
-    // still held names.
-    const forgetCredentials = (id: NetworkId, configuration: NetworkConfiguration | undefined) =>
+    const appendRemoved = (id: NetworkId, keep: boolean) =>
       Effect.gen(function* () {
-        const still = new Set<CredentialName>();
+        const at = yield* now;
 
-        for (const network of (yield* Ref.get(held)).values()) {
-          const { configured } = yield* Ref.get(network.current);
-
-          for (const name of configured === undefined
-            ? []
-            : credentialsOf(configured.configuration)) {
-            still.add(name);
-          }
-        }
-
-        const named = configuration === undefined ? [] : [...credentialsOf(configuration)];
-
-        for (const name of named.filter((each) => !still.has(each))) {
-          yield* ports.vault.forget(name);
-          yield* Effect.logInfo("Forgot a Credential", { credential: name, network: id });
-        }
+        return yield* ports.journal.append({
+          _tag: "Input",
+          input: { _tag: "Removed", at, keep },
+          network: id,
+        });
       });
 
-    // A Network running is told, drained, and stopped. One whose Timelines are kept has no
-    // driver, so its `Removed` is journaled alone, and folded as any input is on restart.
-    // Both hold the permit that adds a Network, so no `configure` takes the id meanwhile.
-    const remove = (id: NetworkId, keep: boolean) =>
-      adding.withPermit(
-        Effect.gen(function* () {
-          if (yield* Ref.get(closed)) {
-            return yield* new NetworkStopped({ network: id, reason: runtimeClosed });
-          }
+    // A running Network is told, and its driver steps the `Removed`. One stopped, before
+    // it was told or by the step itself, has its `Removed` journaled here, unless the
+    // Journal already holds it, and a restart folds it as any other. Either way it is then
+    // held no more, drained within the bound, and its Credentials forgotten, by the
+    // Configuration in force when it was removed.
+    const removeHeld = (id: NetworkId, network: Network<S>, keep: boolean) =>
+      Effect.gen(function* () {
+        const running = (yield* Ref.get(network.status))._tag === "Running";
 
-          const network = (yield* Ref.get(held)).get(id);
+        const told = running
+          ? yield* tellRemoved(network, keep).pipe(
+              Effect.map(({ sequence }) => sequence),
+              Effect.catchTag("NetworkStopped", () => Effect.void)
+            )
+          : undefined;
 
-          if (network !== undefined) {
-            const { configured } = yield* Ref.get(network.current);
-            const { sequence } = yield* tellRemoved(network, keep);
+        const sequence = told ?? (yield* removedAt(id)) ?? (yield* appendRemoved(id, keep));
+        const { configured } = yield* Ref.get(network.current);
 
-            yield* Ref.update(held, (all) => {
-              const next = new Map(all);
+        yield* Ref.update(held, (all) => without(all, id));
 
-              next.delete(id);
+        if (keep) {
+          yield* Ref.update(kept, (all) => new Set(all).add(id));
+        }
 
-              return next;
-            });
+        if (configured !== undefined) {
+          yield* Ref.update(unforgotten, (all) =>
+            new Map(all).set(id, [...(all.get(id) ?? []), configured.configuration])
+          );
+        }
 
-            if (keep) {
-              yield* Ref.update(kept, (all) => new Map(all).set(id, configured?.configuration));
-            }
+        yield* Effect.logInfo("Removed a Network", { keep, network: id });
+        yield* retire(network, ports.timing.stopTimeout);
+        yield* forgetCredentials(id);
 
-            yield* Effect.logInfo("Removed a Network", { keep, network: id });
-            yield* retire(network, ports.timing.stopTimeout);
-            yield* forgetCredentials(id, configured?.configuration);
+        return sequence;
+      });
 
-            return sequence;
-          }
+    // A removed Network whose Timelines are kept has no driver, so its `Removed` is
+    // journaled alone, and folded as any input is on restart.
+    const removeKept = (id: NetworkId, keep: boolean) =>
+      Effect.gen(function* () {
+        const sequence = yield* appendRemoved(id, keep);
 
-          const keeping = yield* Ref.get(kept);
+        if (!keep) {
+          yield* Ref.update(kept, (all) => {
+            const next = new Set(all);
 
-          if (!keeping.has(id)) {
-            return yield* new UnknownNetwork({ network: id });
-          }
+            next.delete(id);
 
-          const at = yield* now;
-
-          const sequence = yield* ports.journal.append({
-            _tag: "Input",
-            input: { _tag: "Removed", at, keep },
-            network: id,
+            return next;
           });
+          yield* Effect.logInfo("Dropped a removed Network's Timelines", { network: id });
+        }
 
-          if (!keep) {
-            yield* Ref.update(kept, (all) => {
-              const next = new Map(all);
+        yield* forgetCredentials(id);
 
-              next.delete(id);
+        return sequence;
+      });
 
-              return next;
-            });
-            yield* Effect.logInfo("Dropped a removed Network's Timelines", { network: id });
-          }
+    // Once admitted, a removal runs to its end in a fiber of its own, holding the permit
+    // that adds a Network, so a caller that goes away never leaves one journaled and half
+    // done, and no `configure` takes the id or changes a Configuration meanwhile.
+    const remove = (id: NetworkId, keep: boolean) =>
+      Effect.flatMap(
+        Effect.forkDetach(
+          adding.withPermit(
+            Effect.gen(function* () {
+              if (yield* Ref.get(closed)) {
+                return yield* new NetworkStopped({ network: id, reason: runtimeClosed });
+              }
 
-          yield* forgetCredentials(id, keeping.get(id));
+              const network = (yield* Ref.get(held)).get(id);
 
-          return sequence;
+              if (network !== undefined) {
+                return yield* removeHeld(id, network, keep);
+              }
+
+              if (!(yield* Ref.get(kept)).has(id)) {
+                return yield* new UnknownNetwork({ network: id });
+              }
+
+              return yield* removeKept(id, keep);
+            })
+          )
+        ),
+        Fiber.join
+      );
+
+    // A removal cut short before its Credentials were forgotten is finished now, once
+    // every Network is held, so those a Network names are spared.
+    for (const id of (yield* Ref.get(unforgotten)).keys()) {
+      yield* adding.withPermit(forgetCredentials(id)).pipe(
+        Effect.catchTags({
+          JournalFailed: (error) =>
+            Effect.logWarning("A removed Network's Credentials were not forgotten", {
+              network: id,
+              reason: error.reason,
+            }),
+          VaultFailed: (error) =>
+            Effect.logWarning("A removed Network's Credentials were not forgotten", {
+              network: id,
+              reason: error.reason,
+            }),
         })
       );
+    }
 
     const service: RuntimeService = {
       act: (id, acting) =>
@@ -639,11 +747,15 @@ export const makeRuntime = <S>(
               : Effect.succeed(configured)
           )
         ),
+      // `configuring` is held until the `Configured` is stepped, so a removal's check of
+      // which Credentials a Network still names never races a change of Configuration.
       configure: (id, configuration, ifSequence) =>
-        Effect.flatMap(findOrAdd(id, ifSequence), (network) =>
-          Effect.map(
-            tellConfiguration(network, configuration, ifSequence),
-            ({ sequence }) => sequence
+        Effect.flatMap(adding.withPermit(findOrAdd(id, ifSequence)), (network) =>
+          configuring.withPermit(
+            Effect.map(
+              tellConfiguration(network, configuration, ifSequence),
+              ({ sequence }) => sequence
+            )
           )
         ),
       inspect: (id) =>
@@ -660,7 +772,7 @@ export const makeRuntime = <S>(
             timers: status._tag === "Running" ? table : new Map(),
           };
         }),
-      kept: Effect.map(Ref.get(kept), (all) => new Set(all.keys())),
+      kept: Ref.get(kept),
       known: (id) =>
         Effect.map(
           Effect.flatMap(find(id), (network) => Ref.get(network.current)),

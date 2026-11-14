@@ -4,19 +4,20 @@
  * Timelines are kept.
  */
 import { client } from "@iirc/client";
-import type { NetworkConfiguration } from "@iirc/client";
+import type { Client, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
-import { Effect, Fiber, Redacted, Result, Stream } from "effect";
+import { Effect, Fiber, Latch, Redacted, Result, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { NetworkId } from "./journal.ts";
 import { TimelinesKept, UnknownNetwork } from "./runtime.ts";
 import type { RuntimeService } from "./runtime.ts";
-import { outline, runTest, settle, startRuntime } from "./testing/harness.ts";
+import { outline, runTest, settle, startRuntime, wrapJournal } from "./testing/harness.ts";
 import type { World } from "./testing/harness.ts";
 import type { TestCall } from "./testing/memory-transport.ts";
+import { VaultFailed } from "./vault.ts";
 
 const libera = NetworkId.make("libera");
 const oftc = NetworkId.make("oftc");
@@ -81,7 +82,7 @@ describe("removing a Network", () => {
           heard: yield* heardText(call),
           kept: yield* runtime.kept,
           networks: [...(yield* runtime.networks).keys()],
-          outline: (yield* outline(world.journal)).slice(-3),
+          outline: (yield* outline(world.journal)).slice(-4),
           say: yield* Effect.flip(
             runtime.say(libera, { kind: "Privmsg", target: "#iirc", text: "hi" })
           ),
@@ -104,6 +105,7 @@ describe("removing a Network", () => {
       `${result.sequence} libera Removed`,
       `${result.sequence + 1} libera of ${result.sequence}: Send Hangup Wake`,
       `${result.sequence + 2} libera Closed`,
+      `${result.sequence + 3} libera Forgotten `,
     ]);
   });
 
@@ -267,6 +269,196 @@ describe("removing a Network", () => {
     expect(result).toStrictEqual({
       outline: [],
       refused: new UnknownNetwork({ network: libera }),
+    });
+  });
+});
+
+// The Client, but one that throws on a Line saying `BOOM`, as a Client with a bug would.
+const fragile = <S>(inner: Client<S>): Client<S> => ({
+  ...inner,
+  step: (state, input) => {
+    if (input._tag === "Received" && text.decode(input.bytes) === "BOOM") {
+      throw new Error("boom");
+    }
+
+    return inner.step(state, input);
+  },
+});
+
+const held = (world: World) =>
+  Effect.gen(function* () {
+    for (const each of ["a", "b", "pass"]) {
+      yield* world.vault.hold(name(each), Redacted.make("secret"));
+    }
+  });
+
+describe("a removal carried through", () => {
+  it("goes on to its end when its caller goes away", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* held(world);
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* online(world, runtime, configured({ password: name("pass") }));
+        const removing = yield* Effect.forkChild(runtime.remove(libera, { keep: false }));
+
+        yield* settle;
+        yield* Fiber.interrupt(removing);
+        yield* TestClock.adjust(5000);
+        yield* settle;
+
+        return {
+          networks: [...(yield* runtime.networks).keys()],
+          outline: (yield* outline(world.journal))
+            .filter((each) => !each.includes(" of "))
+            .slice(-3),
+          vault: yield* world.vault.names,
+        };
+      })
+    );
+
+    expect(result.networks).toStrictEqual([]);
+    expect(result.vault).toStrictEqual(new Set(["a", "b"]));
+    expect(result.outline.map((each) => each.replace(/^\d+ /u, ""))).toStrictEqual([
+      "libera Removed",
+      "libera Closed",
+      "libera Forgotten pass",
+    ]);
+  });
+
+  it("forgets on the next start the Credentials a failed Vault kept, and only once", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* held(world);
+
+        const failing = {
+          ...world,
+          vault: {
+            ...world.vault,
+            forget: () => Effect.fail(new VaultFailed({ reason: "the test failed it" })),
+          },
+        };
+
+        const first = yield* startRuntime(failing, client);
+
+        yield* first.runtime.configure(
+          libera,
+          configured({ enabled: false, password: name("pass") })
+        );
+        const failed = yield* Effect.flip(first.runtime.remove(libera, { keep: false }));
+
+        yield* first.close;
+        const second = yield* startRuntime(world, client);
+        const afterStart = yield* world.vault.names;
+
+        // Held again under the same name, for whatever comes next, it is left alone.
+        yield* world.vault.hold(name("pass"), Redacted.make("again"));
+        yield* second.close;
+        yield* startRuntime(world, client);
+
+        return { afterStart, failed: failed._tag, later: yield* world.vault.names };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      afterStart: new Set(["a", "b"]),
+      failed: "VaultFailed",
+      later: new Set(["a", "b", "pass"]),
+    });
+  });
+
+  it("forgets by the Configuration in force when it is stepped, not when it was asked", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* held(world);
+
+        const gate = yield* Latch.make(true);
+        const journal = wrapJournal(world.journal, { before: () => gate.await });
+        const { runtime } = yield* startRuntime({ ...world, journal }, client);
+
+        yield* runtime.configure(libera, configured({ enabled: false, password: name("a") }));
+        // The next append waits, so this Configured is still to be stepped when the removal
+        // is asked for, and is stepped before it.
+        yield* gate.close;
+
+        const changing = yield* Effect.forkChild(
+          runtime.configure(libera, configured({ enabled: false, password: name("b") }))
+        );
+
+        yield* settle;
+        const removing = yield* Effect.forkChild(runtime.remove(libera, { keep: false }));
+
+        yield* settle;
+        yield* gate.open;
+        yield* Fiber.join(changing);
+        yield* Fiber.join(removing);
+
+        return yield* world.vault.names;
+      })
+    );
+
+    expect(result).toStrictEqual(new Set(["a", "pass"]));
+  });
+
+  it("removes a Network its Client's bug stopped, now and after a restart", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* held(world);
+
+        const breaking = (runtime: RuntimeService, network: NetworkId) =>
+          Effect.gen(function* () {
+            yield* runtime.configure(network, configured({ password: name("pass") }));
+            const call = yield* world.memory.ircd.accept;
+
+            yield* call.open;
+            yield* call.say(new TextEncoder().encode("BOOM"));
+            yield* settle;
+          });
+
+        const first = yield* startRuntime(world, fragile(client));
+
+        yield* breaking(first.runtime, libera);
+        yield* breaking(first.runtime, oftc);
+        const stopped = [...(yield* first.runtime.networks).values()].map((each) => each._tag);
+
+        // Stopped as it runs.
+        yield* first.runtime.remove(libera, { keep: false });
+        yield* first.close;
+
+        // Stopped by its refold, which stops at the same Line.
+        const second = yield* startRuntime(world, fragile(client));
+        const before = [...(yield* second.runtime.networks).keys()];
+        const sequence = yield* second.runtime.remove(oftc, { keep: true });
+
+        yield* second.close;
+        const third = yield* startRuntime(world, fragile(client));
+
+        const news = yield* Stream.runCollect(
+          Stream.takeUntil(third.runtime.news(), (one) => one.sequence >= sequence)
+        );
+
+        return {
+          before,
+          kept: yield* third.runtime.kept,
+          networks: [...(yield* third.runtime.networks).keys()],
+          removals: news.flatMap((one) =>
+            one.news.flatMap((each) =>
+              each._tag === "NetworkRemoved" ? [`${one.network} ${each.keep}`] : []
+            )
+          ),
+          stopped,
+          vault: yield* world.vault.names,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      before: [oftc],
+      kept: new Set([oftc]),
+      networks: [],
+      removals: ["libera false", "oftc true"],
+      stopped: ["Stopped", "Stopped"],
+      vault: new Set(["a", "b"]),
     });
   });
 });

@@ -12,7 +12,6 @@ Remove an entry in the change that fixes it. A defect someone means to fix is an
 - **A scroll still coasting a second after its last input is not taken as the Owner's if the Timeline's size changes then,** as when a Pane is resized mid-glide. The view stays where it stood rather than where the glide would have ended, never nearer the latest. Scrolling again goes on.
 - **A detached Direct Message Timeline cannot be marked read,** since no Target names it. Its counts stay until the API can mark a Timeline by its id.
 - **A removed Network's kept Timelines cannot be marked read,** since a Read Marker moves through the Network's Client, which is gone. Their counts stay until they are dropped.
-- **A Network stopped by a failure cannot be removed** until the Daemon starts again, and one whose Client threw on replay stays stopped, so it cannot be removed at all.
 - **The Panes' keys do nothing while the sidebar's tree has focus,** because the tree takes Alt+Shift and an arrow itself. They work from the composer or a Pane.
 - **Search keeps diacritics and does not join composed and decomposed forms,** so `cafe` finds neither `café` nor `cafe` written with a combining accent. `from:` compares the sender folded for search, not by the Network's casemapping, so under `rfc1459` `[a` does not find `{a`.
 - **A merge between two pages of search results can repeat a result.** The web frontend starts the search again when one happens.

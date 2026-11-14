@@ -79,7 +79,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 
 - **A removed Network is gone from every route that acts on it.** It leaves `GET /api/networks`, and every route that acts on it or reads what its Client knows answers `UnknownNetwork`, as for a Network never configured. `said` and a Lookup by its intent still answer from the Journal. A Frontend following News learns of it from one `NetworkRemoved`, after which no News of it comes.
 - **The Owner chooses whether its Timelines stay.** Kept, they are read and searched as before, listed by `GET /api/removed-networks` and `GET /api/networks/{network}/timelines`, and each says `removed`, so a Frontend shows them apart and never says to them. Its id stays taken while they are kept: a `PUT` of it is `TimelinesKept`. Not kept, no route reads or finds them, the changes stream gives each as `dropped`, and the id is free at once.
-- **Its Credentials go once its removal is journaled,** but those another Network's Configuration names. A `VaultFailed` leaves the removal standing, and the Credentials can be forgotten by name.
+- **Its Credentials go once its removal is journaled,** but those another Network's Configuration names. A `VaultFailed` leaves the removal standing, and the Daemon forgets them when it next starts.
 
 ### Saying, acting, and looking up
 

@@ -45,6 +45,7 @@ export type Folded<S> =
       readonly table: TimerTable;
       readonly configured: InForce | undefined;
       readonly removed: Removal | undefined;
+      readonly unforgotten: readonly NetworkConfiguration[];
     }
   | {
       readonly _tag: "Broken";
@@ -52,6 +53,7 @@ export type Folded<S> =
       readonly table: TimerTable;
       readonly configured: InForce | undefined;
       readonly removed: Removal | undefined;
+      readonly unforgotten: readonly NetworkConfiguration[];
       readonly reason: string;
     };
 
@@ -106,7 +108,21 @@ export const fresh = <S>(client: Client<S>): Folded<S> => ({
   removed: undefined,
   state: client.initial,
   table: new Map(),
+  unforgotten: [],
 });
+
+/**
+ * The Configurations of removals whose Credentials are not yet known to be forgotten,
+ * after one more removal: the first `Removed` of a life adds the Configuration in force,
+ * and another, which only drops kept Timelines, adds nothing. They outlive the life, so a
+ * Network given the id again does not lose them, and a `Forgotten` clears them.
+ * @param folded - The Network before the `Removed`.
+ * @returns What is left to forget after it.
+ */
+const unforgottenAfter = <S>(folded: Folded<S>): readonly NetworkConfiguration[] =>
+  folded.removed === undefined && folded.configured !== undefined
+    ? [...folded.unforgotten, folded.configured.configuration]
+    : folded.unforgotten;
 
 /**
  * Folds one more Input. A `Broken` Network stays broken. A `Configured` stepped is the
@@ -115,7 +131,9 @@ export const fresh = <S>(client: Client<S>): Folded<S> => ({
  * A `Removed` ends the Network's life in the Journal. The Inputs that trail it, such as its
  * Connection's `Closed`, are stepped and give no News, and another `Removed` gives its own.
  * A `Configured` after it begins a new Network under the same id, from `initial`, so
- * nothing of the removed one reaches it.
+ * nothing of the removed one reaches it. A `Removed` ends even a `Broken` Network, or one
+ * whose Client throws on it, with the News the Client gives of a removal, so a Network
+ * whose Client has a bug can still be removed.
  * @param client - The Client.
  * @param folded - The Network so far.
  * @param input - The next Input.
@@ -128,11 +146,23 @@ const foldOne = <S>(
   input: Input,
   sequence: Sequence
 ): Effect.Effect<readonly [Folded<S>, readonly News[]]> => {
-  const begun =
-    folded.removed !== undefined && input._tag === "Configured" ? fresh(client) : folded;
+  const begun: Folded<S> =
+    folded.removed !== undefined && input._tag === "Configured"
+      ? { ...fresh(client), unforgotten: folded.unforgotten }
+      : folded;
+
+  // Removed whatever its Client could step: the Client reports a removal so, and nothing
+  // of a removed Network is stepped again but another removal.
+  const endedBroken = (broken: Extract<Folded<S>, { readonly _tag: "Broken" }>, keep: boolean) =>
+    [
+      { ...broken, removed: { keep }, unforgotten: unforgottenAfter(broken) },
+      [{ _tag: "NetworkRemoved", keep } as const],
+    ] as const;
 
   if (begun._tag === "Broken") {
-    return Effect.succeed([begun, []] as const);
+    return Effect.succeed(
+      input._tag === "Removed" ? endedBroken(begun, input.keep) : ([begun, []] as const)
+    );
   }
 
   const told = begun.removed === undefined || input._tag === "Removed";
@@ -150,14 +180,17 @@ const foldOne = <S>(
             removed: input._tag === "Removed" ? { keep: input.keep } : begun.removed,
             state: step.state,
             table: timers(begun.table, input, step.outputs),
+            unforgotten: input._tag === "Removed" ? unforgottenAfter(begun) : begun.unforgotten,
           },
           told ? step.news : [],
         ] as const
     ),
     Effect.catch((error) => {
-      const broken: Folded<S> = { ...begun, _tag: "Broken", reason: error.reason };
+      const broken = { ...begun, _tag: "Broken", reason: error.reason } as const;
 
-      return Effect.succeed([broken, []] as const);
+      return Effect.succeed(
+        input._tag === "Removed" ? endedBroken(broken, input.keep) : ([broken, []] as const)
+      );
     })
   );
 };
@@ -177,11 +210,24 @@ export const refold = <S>(
     Stream.runFoldEffect(
       () => new Map<NetworkId, Folded<S>>(),
       (networks, entry) => {
-        if (entry.record._tag !== "Input") {
+        const { record } = entry;
+
+        // The Credentials of every removal before it were forgotten.
+        if (record._tag === "Forgotten") {
+          const folded = networks.get(record.network);
+
+          return Effect.succeed(
+            folded === undefined
+              ? networks
+              : networks.set(record.network, { ...folded, unforgotten: [] })
+          );
+        }
+
+        if (record._tag !== "Input") {
           return Effect.succeed(networks);
         }
 
-        const { input, network } = entry.record;
+        const { input, network } = record;
 
         return foldOne(client, networks.get(network) ?? fresh(client), input, entry.sequence).pipe(
           Effect.map(([folded]) => networks.set(network, folded))

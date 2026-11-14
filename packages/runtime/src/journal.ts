@@ -6,6 +6,7 @@
  * @packageDocumentation
  */
 import { Input, Output } from "@iirc/client";
+import { CredentialName } from "@iirc/protocol/line";
 import { Context, Schema } from "effect";
 import type { Effect, Stream } from "effect";
 
@@ -53,6 +54,12 @@ export type Change = typeof Change.Type;
 export const JournalRecord = Schema.TaggedUnion({
   /** A Change the Owner made that belongs to no Network. The Runtime never steps one. */
   Change: { change: Change },
+  /**
+   * The Credentials a removed Network's Configuration named were forgotten, but those a
+   * Network still held named, which were spared. Journaled once the Vault has let go of
+   * them, so a removal whose Credentials were never forgotten is found on restart.
+   */
+  Forgotten: { credentials: Schema.Array(CredentialName), network: NetworkId },
   /** An input to a Network's Client, journaled before it is stepped. */
   Input: { input: Input, network: NetworkId },
   /** What the Client asked for when it stepped the input at `of`, as it was carried out. */
