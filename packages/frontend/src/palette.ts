@@ -504,7 +504,15 @@ export const sections = (
       all.flatMap((section) => section.entries.map((one) => [one.key, one] as const))
     );
 
-    const recently = scope === "All" ? recent.flatMap((key) => byKey.get(key) ?? []) : [];
+    // A family is listed only while a query names it, so one chosen recently is made again
+    // from its key.
+    const recentEntry = (key: string): Entry | undefined => {
+      const font = fontOfKey(key);
+
+      return byKey.get(key) ?? (font === undefined ? undefined : fontEntry(font, listing.font));
+    };
+
+    const recently = scope === "All" ? recent.flatMap((key) => recentEntry(key) ?? []) : [];
     const shown = new Set(recently.map((one) => one.key));
 
     return [

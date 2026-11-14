@@ -480,6 +480,18 @@ describe("a family typed in the palette", () => {
       sections(fonted, "font Fira Code", []).find((section) => section.title === "Fonts")?.entries
     ).toStrictEqual([{ _tag: "Font", current: true, key: "font:Fira Code", name: "Fira Code" }]);
   });
+
+  it("is listed among the recent once chosen, with no query naming it, and is not made from a key no family has", () => {
+    const fonted = { ...listing(), themes: listedThemes([]) };
+    const recent = ["font:Fira Code", 'font:Fira"Code', "font:inter"];
+
+    expect(
+      sections(fonted, "", recent).find((section) => section.title === "Recent")?.entries
+    ).toStrictEqual([
+      { _tag: "Font", current: false, key: "font:Fira Code", name: "Fira Code" },
+      { _tag: "Font", current: false, key: "font:inter", name: "inter" },
+    ]);
+  });
 });
 
 describe("the palette's state", () => {
