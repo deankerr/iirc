@@ -54,12 +54,15 @@ export const readRule = Atom.make((get) => readRuleOf(get(optionsState).ui, get(
 
 /**
  * Folds the shared options, as read or followed, into the options' state, where an older
- * read never replaces a newer one.
+ * read never replaces a newer one. A read that lands once the page is signed out, as one
+ * begun before it was, is dropped, so what signing out forgot stays forgotten.
  * @param registry - The registry.
  * @param ui - The options, and the sequence of the last Change.
  */
 export const uiRead = (registry: AtomRegistry.AtomRegistry, ui: UiInForce) => {
-  registry.set(optionsState, reduceOptions(registry.get(optionsState), { _tag: "UiRead", ui }));
+  if (registry.get(signedIn)) {
+    registry.set(optionsState, reduceOptions(registry.get(optionsState), { _tag: "UiRead", ui }));
+  }
 };
 
 /**

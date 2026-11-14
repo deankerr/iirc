@@ -321,6 +321,8 @@ describe("marking read", () => {
     const before = registry.get(readRule);
 
     await run(registry, signOut, undefined);
+    // A read begun before signing out lands after it.
+    uiRead(registry, { options: uiDefaults, sequence: 5 });
     const out = registry.get(readRule);
 
     // Changed on another device while this page was signed out.
