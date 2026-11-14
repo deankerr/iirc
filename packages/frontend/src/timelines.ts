@@ -1236,16 +1236,26 @@ const awayOfConnection = (connection: Connection): SelfAway => {
 
 /**
  * Brings a Network's connection up to date with the Session items of one step, when they
- * are later than what set it.
+ * are later than what set it and of the life held: an item of a Timeline of an older life,
+ * as the step names it or as one let go of when that life ended, says nothing of it.
  * @param network - The Network.
  * @param change - The step's changes.
+ * @param vanished - The Timelines let go of, those of lives over among them.
  * @returns The Network.
  */
-const changeConnection = (network: NetworkView, change: TimelineChange): NetworkView => {
+const changeConnection = (
+  network: NetworkView,
+  change: TimelineChange,
+  vanished: ReadonlySet<TimelineId>
+): NetworkView => {
   let { awayAt, connection, connectionAt } = network;
 
+  const older = (timeline: TimelineId) =>
+    vanished.has(timeline) ||
+    change.timelines.some((one) => one.id === timeline && one.life < network.life);
+
   for (const item of change.items) {
-    const ours = item.network === network.network;
+    const ours = item.network === network.network && !older(item.timeline);
     const said = ours ? connectionFromItem(item) : undefined;
 
     if (said !== undefined && item.sequence > connectionAt) {
@@ -1490,7 +1500,7 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
 
   networks = mapValues(networks, (network) =>
     touched.has(network.network)
-      ? changeConnection(changeList(network, change, merged), change)
+      ? changeConnection(changeList(network, change, merged), change, lived.vanished)
       : network
   );
 
@@ -2116,18 +2126,19 @@ const statusRead = (
   state: Timelines,
   { life, network: id, self, session }: Extract<TimelinesEvent, { readonly _tag: "StatusRead" }>
 ): Timelines => {
-  const network = state.networks.get(id);
-
-  if (network === undefined) {
-    return state;
-  }
-
-  // Of a newer life, it begins that life, whose Session is read again. Of an older one, it
-  // says nothing of the life held, whose Session is read again.
+  // Of a newer life, held or not, it begins that life, whose Timelines and Session are
+  // read afresh. Of an older one, it says nothing of the life held, whose Session is read
+  // again.
   const comparison = compareLife(state, id, life);
 
   if (comparison === "Newer") {
     return living(state, id, life).state;
+  }
+
+  const network = state.networks.get(id);
+
+  if (network === undefined) {
+    return state;
   }
 
   const { from } = network.status;

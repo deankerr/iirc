@@ -4588,4 +4588,89 @@ describe("removing a Network", () => {
 
     expect(survived).toStrictEqual(answers.map(([kind]) => [kind, true]));
   });
+
+  it("begins a newer life a Session read reveals after the old one was dropped", () => {
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+    let state = reduceTimelines(following(), { _tag: "ReadStarted", read: status });
+
+    state = reduceTimelines(state, { _tag: "Requesting", read: status });
+    state = reduceTimelines(state, dropAt(7));
+
+    const gone = sidebar(state).length;
+
+    // A disabled alpha, added again in a life begun at 9, which says nothing on the stream.
+    state = reduceTimelines(state, {
+      _tag: "StatusRead",
+      life: 9,
+      network: alpha,
+      self: null,
+      session: decodeSession({ _tag: "Offline", since: null }),
+    });
+
+    expect({
+      gone,
+      life: state.networks.get(alpha)?.life,
+      // Its Timelines and Session are read afresh.
+      reads: wanted(state)
+        .filter((read) => read._tag === "List" || read._tag === "Status")
+        .map((read) => read._tag),
+    }).toStrictEqual({ gone: 0, life: 9, reads: ["List", "Status"] });
+  });
+
+  it("never takes an old life's Session item as the new life's connection", () => {
+    const list = { _tag: "List", after: undefined, attempt: 0, network: alpha } as const;
+    const status = { _tag: "Status", attempt: 0, network: alpha } as const;
+
+    // At 6, alpha's Timelines and Session are read again, and reveal a life begun at 9,
+    // disabled and offline, while the stream has not given the old life's end.
+    let state = reduceTimelines(following(), {
+      _tag: "Overflowed",
+      overflow: { sequence: sequenceOf(6), timelines: [three] },
+      place: { sequence: 6, version: 1 },
+    });
+
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: list });
+    state = reduceTimelines(state, {
+      _tag: "ListRead",
+      after: undefined,
+      network: alpha,
+      page: listOf(9, newAlpha(9)),
+    });
+    state = reduceTimelines(state, { _tag: "ReadStarted", read: status });
+    state = reduceTimelines(state, { _tag: "Requesting", read: status });
+    state = reduceTimelines(state, {
+      _tag: "StatusRead",
+      life: 9,
+      network: alpha,
+      self: null,
+      session: decodeSession({ _tag: "Offline", since: 90 }),
+    });
+
+    const before = state.networks.get(alpha)?.connection;
+
+    // The old life's Session ends at 7, in its own Timeline.
+    state = reduceTimelines(
+      state,
+      changed(7, {
+        items: [
+          Schema.encodeSync(TimelineItem)(
+            decodeItem({
+              changed: 7,
+              content: { _tag: "SessionEnded", at: 70, reason: { _tag: "Error" } },
+              level: null,
+              network: "alpha",
+              position: cursor(70, 7),
+              sequence: 7,
+              timeline: idOf(1),
+            })
+          ),
+        ],
+      })
+    );
+
+    expect({ after: state.networks.get(alpha)?.connection, before }).toStrictEqual({
+      after: { _tag: "Offline", reason: undefined, since: 90 },
+      before: { _tag: "Offline", reason: undefined, since: 90 },
+    });
+  });
 });
