@@ -1,8 +1,9 @@
 /**
  * The Uploads, as a list the options show beside them: every one held, newest first, as
- * pages read and the stream of their Changes give them, and where the next page begins. An
- * Upload is held by its id, so one given again, by a page or the stream, replaces what is
- * held in place and is never held twice. Its link, whether it gets a thumbnail, and its
+ * pages read and the stream of their Changes give them, where the next page begins, and the
+ * sequence of the last Change folded in, which the stream is followed after. A page only
+ * ever extends the list at its end, and the stream only ever gives what is newer than
+ * everything held, so an Upload is held once. Its link, whether it gets a thumbnail, and its
  * size are derived as it is drawn, never held.
  *
  * @packageDocumentation
@@ -10,93 +11,66 @@
 import type { Upload, UploadId } from "@iirc/api";
 
 /**
- * The Uploads held, newest first, and where the next page begins: an Upload's id, as a page
- * gave it, `null` once the last page was read, or none before any was.
+ * The Uploads held, newest first, where the next page begins, and how far they were
+ * folded: `next` is an Upload's id, as a page gave it, or `null` once the last page was
+ * read, and `through` the sequence of the last Upload Change folded in. Both are none
+ * before the first page was read.
  */
 export interface Uploads {
   readonly uploads: readonly Upload[];
   readonly next: UploadId | null | undefined;
+  readonly through: number | undefined;
 }
 
 /** Nothing held, and no page read. */
-export const initialUploads: Uploads = { next: undefined, uploads: [] };
+export const initialUploads: Uploads = { next: undefined, through: undefined, uploads: [] };
 
 /** A page of the Uploads, newest first, as the API gives it. */
 export interface UploadsPage {
   readonly uploads: readonly Upload[];
   readonly next: UploadId | null;
+  readonly through: number;
 }
 
 /**
  * What happened.
  *
  * - `Paged`: a page was read, from just after `after`, or the first page when none.
- * - `Changed`: the stream gave an Upload whole, as it is now.
+ * - `Changed`: the stream gave an Upload whole, as it is now, by the Change at `sequence`.
  * - `Forgotten`: the page signed out, so nothing is held.
  */
 export type UploadsEvent =
   | { readonly _tag: "Paged"; readonly after: UploadId | undefined; readonly page: UploadsPage }
-  | { readonly _tag: "Changed"; readonly upload: Upload }
+  | { readonly _tag: "Changed"; readonly sequence: number; readonly upload: Upload }
   | { readonly _tag: "Forgotten" };
 
 /**
- * A page's Uploads folded into those held. One held is replaced in place. One not held goes
- * just before the next of the page's that is held, so the first page read again puts what
- * is new above what was held, and the rest go after everything held, so a later page goes
- * at the end.
+ * A page's Uploads after those held, passing over any already held.
  * @param held - The Uploads held.
  * @param page - The page's Uploads, newest first.
  * @returns The Uploads held now.
  */
-const merged = (held: readonly Upload[], page: readonly Upload[]): readonly Upload[] => {
-  const heldIds = new Set(held.map((upload) => upload.id));
-  const given = new Map<UploadId, Upload>();
-  const before = new Map<UploadId, readonly Upload[]>();
-  let waiting: Upload[] = [];
+const extended = (held: readonly Upload[], page: readonly Upload[]): readonly Upload[] => {
+  const ids = new Set(held.map((upload) => upload.id));
+  const added: Upload[] = [];
 
   for (const upload of page) {
-    if (!given.has(upload.id)) {
-      given.set(upload.id, upload);
-
-      if (heldIds.has(upload.id)) {
-        before.set(upload.id, waiting);
-        waiting = [];
-      } else {
-        waiting.push(upload);
-      }
+    if (!ids.has(upload.id)) {
+      ids.add(upload.id);
+      added.push(upload);
     }
   }
 
-  return [
-    ...held.flatMap((upload) => [...(before.get(upload.id) ?? []), given.get(upload.id) ?? upload]),
-    ...waiting,
-  ];
+  return [...held, ...added];
 };
 
 /**
- * Where the next page begins once a page is read. The first page sets it only before any
- * page was read, since reading it again, as following the stream again does, says nothing
- * of the pages after it. A later page sets it only when it was read from where the list
- * stands, so one asked for twice moves it once.
- * @param state - The Uploads held.
- * @param after - Where the page was read from.
- * @param page - The page.
- * @returns Where the next page begins.
- */
-const nextAfter = (
-  state: Uploads,
-  after: UploadId | undefined,
-  page: UploadsPage
-): UploadId | null | undefined => {
-  if (after === undefined) {
-    return state.next === undefined ? page.next : state.next;
-  }
-
-  return after === state.next ? page.next : state.next;
-};
-
-/**
- * Folds one event into the Uploads held.
+ * Folds one event into the Uploads held. A page is folded only when it was read from where
+ * the list stands, the first page into an empty list and each later one from `next`, so one
+ * read twice, or late, is folded once. Only the first page says how far the list was folded,
+ * since the stream gives what is newer than any later page. A Change is folded only when it
+ * is after the last folded in: one not held is newer than all, so it goes first, and one
+ * held is replaced in place.
  * @param state - The Uploads held.
  * @param event - What happened.
  * @returns The Uploads held now.
@@ -104,18 +78,31 @@ const nextAfter = (
 export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
   switch (event._tag) {
     case "Paged": {
+      const { after, page } = event;
+
+      if (after !== state.next) {
+        return state;
+      }
+
       return {
-        next: nextAfter(state, event.after, event.page),
-        uploads: merged(state.uploads, event.page.uploads),
+        next: page.next,
+        through: state.through ?? page.through,
+        uploads: extended(state.uploads, page.uploads),
       };
     }
 
     case "Changed": {
-      const { upload } = event;
+      const { sequence, upload } = event;
+
+      if (state.through === undefined || sequence <= state.through) {
+        return state;
+      }
+
       const known = state.uploads.some((one) => one.id === upload.id);
 
       return {
         ...state,
+        through: sequence,
         uploads: known
           ? state.uploads.map((one) => (one.id === upload.id ? upload : one))
           : [upload, ...state.uploads],

@@ -1235,9 +1235,10 @@ const uploads = HttpApiBuilder.group(
       )
       .handle("list", ({ query }) =>
         held.page(query.after, query.limit ?? windowLimit.default).pipe(
-          Effect.map(({ next, uploads: page }) => ({
+          Effect.map(({ next, through, uploads: page }) => ({
             more: next !== undefined,
             next: next ?? null,
+            through,
             uploads: page.map(upload),
           })),
           Effect.catchTags({

@@ -51,91 +51,95 @@ const after = (...events: readonly UploadsEvent[]): Uploads => {
 const ids = (state: Uploads) => state.uploads.map((one) => one.id[0]);
 
 describe("the Uploads held", () => {
-  it("holds the first page newest first, with where the next begins", () => {
+  it("holds the first page newest first, with where the next begins and how far it was read", () => {
     const state = after({
       _tag: "Paged",
       after: undefined,
-      page: { next: c.id, uploads: [e, d, c] },
+      page: { next: c.id, through: 7, uploads: [e, d, c] },
     });
 
-    expect({ ids: ids(state), next: state.next }).toStrictEqual({
+    expect({ ids: ids(state), next: state.next, through: state.through }).toStrictEqual({
       ids: ["e", "d", "c"],
       next: c.id,
+      through: 7,
     });
   });
 
-  it("puts a later page after those held, and holds nothing twice", () => {
+  it("puts a later page after those held, keeping how far the first was read, and holds nothing twice", () => {
     const state = after(
-      { _tag: "Paged", after: undefined, page: { next: c.id, uploads: [e, d, c] } },
-      { _tag: "Paged", after: c.id, page: { next: null, uploads: [c, b, a] } }
+      { _tag: "Paged", after: undefined, page: { next: c.id, through: 7, uploads: [e, d, c] } },
+      { _tag: "Paged", after: c.id, page: { next: null, through: 9, uploads: [c, b, a] } }
     );
 
-    expect({ ids: ids(state), next: state.next }).toStrictEqual({
+    expect({ ids: ids(state), next: state.next, through: state.through }).toStrictEqual({
       ids: ["e", "d", "c", "b", "a"],
       next: null,
+      through: 7,
     });
   });
 
-  it("moves where the next page begins once for a page read twice", () => {
+  it("folds a page read twice, or the first page read again, once", () => {
     const first = {
       _tag: "Paged",
       after: undefined,
-      page: { next: d.id, uploads: [e, d] },
+      page: { next: d.id, through: 5, uploads: [e, d] },
     } as const;
 
-    const second = { _tag: "Paged", after: d.id, page: { next: b.id, uploads: [c, b] } } as const;
-    const state = after(first, second, second);
+    const second = {
+      _tag: "Paged",
+      after: d.id,
+      page: { next: b.id, through: 5, uploads: [c, b] },
+    } as const;
 
-    expect({ ids: ids(state), next: state.next }).toStrictEqual({
+    const state = after(first, second, second, first);
+
+    expect({ ids: ids(state), next: state.next, through: state.through }).toStrictEqual({
       ids: ["e", "d", "c", "b"],
       next: b.id,
+      through: 5,
     });
   });
 
-  it("keeps where the next page begins when the first page is read again, with what is new above", () => {
-    const state = after(
-      { _tag: "Paged", after: undefined, page: { next: c.id, uploads: [d, c] } },
-      { _tag: "Paged", after: c.id, page: { next: b.id, uploads: [b] } },
-      { _tag: "Paged", after: undefined, page: { next: d.id, uploads: [e, d] } }
-    );
-
-    expect({ ids: ids(state), next: state.next }).toStrictEqual({
-      ids: ["e", "d", "c", "b"],
-      next: b.id,
-    });
-  });
-
-  it("puts a new Upload from the stream first, and one held in its place", () => {
+  it("puts a new Upload from the stream first, one held in its place, and follows from the latest", () => {
     const renamed = upload("d", "renamed.png");
 
     const state = after(
-      { _tag: "Paged", after: undefined, page: { next: null, uploads: [d, c] } },
-      { _tag: "Changed", upload: e },
-      { _tag: "Changed", upload: renamed }
+      { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [d, c] } },
+      { _tag: "Changed", sequence: 4, upload: e },
+      { _tag: "Changed", sequence: 6, upload: renamed }
     );
 
-    expect({ ids: ids(state), shown: state.uploads.map(shownName) }).toStrictEqual({
+    expect({
+      ids: ids(state),
+      shown: state.uploads.map(shownName),
+      through: state.through,
+    }).toStrictEqual({
       ids: ["e", "d", "c"],
       shown: ["e.png", "renamed.png", "c.png"],
+      through: 6,
     });
   });
 
-  it("holds an Upload the stream gave before the first page once, where the page puts it", () => {
-    const state = after(
-      { _tag: "Changed", upload: e },
-      { _tag: "Paged", after: undefined, page: { next: c.id, uploads: [e, d, c] } }
+  it("passes over a Change no later than the last folded in", () => {
+    const folded = after(
+      { _tag: "Paged", after: undefined, page: { next: null, through: 5, uploads: [d, c] } },
+      { _tag: "Changed", sequence: 6, upload: e }
     );
 
-    expect({ ids: ids(state), next: state.next }).toStrictEqual({
-      ids: ["e", "d", "c"],
-      next: c.id,
-    });
+    const old = reduceUploads(folded, { _tag: "Changed", sequence: 5, upload: a });
+
+    expect(reduceUploads(old, { _tag: "Changed", sequence: 6, upload: b })).toStrictEqual(folded);
   });
 
-  it("forgets everything", () => {
+  it("folds no Change before the first page, which says how far to follow", () => {
+    expect(after({ _tag: "Changed", sequence: 4, upload: e })).toStrictEqual(initialUploads);
+  });
+
+  it("forgets everything, how far it was folded too", () => {
     expect(
       after(
-        { _tag: "Paged", after: undefined, page: { next: null, uploads: [a] } },
+        { _tag: "Paged", after: undefined, page: { next: null, through: 2, uploads: [a] } },
+        { _tag: "Changed", sequence: 3, upload: b },
         { _tag: "Forgotten" }
       )
     ).toStrictEqual(initialUploads);

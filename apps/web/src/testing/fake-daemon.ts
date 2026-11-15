@@ -512,6 +512,9 @@ export const fakeDaemon = () => {
   const uploads: (typeof Upload.Encoded)[] = [];
   const uploadFollowers: Follower[] = [];
   const uploadPagesRead: (string | undefined)[] = [];
+  const uploadPagesHeld: (() => void)[] = [];
+  // Each Upload `upload` made, as its event, at its Change's sequence, oldest first.
+  const uploadChanges: { readonly sequence: number; readonly text: string }[] = [];
 
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
@@ -584,6 +587,8 @@ export const fakeDaemon = () => {
     holdSays: false,
     /** Whether each read of the `ui` options waits until released, then answers as they were when asked. */
     holdUiReads: false,
+    /** Whether each page of the Uploads waits until released, then answers as they are then. */
+    holdUploadPages: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
     /**
@@ -685,6 +690,8 @@ export const fakeDaemon = () => {
     uiReadsHeld,
     /** Each follower of the Uploads' Changes. */
     uploadFollowers,
+    /** Releases each page of the Uploads held, in the order they came. */
+    uploadPagesHeld,
     /** Each page of the Uploads read, by the `after` it was read from. */
     uploadPagesRead,
     /** The Uploads held, newest first, as the wire carries them. */
@@ -696,16 +703,28 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * A stream of Server-Sent Events, kept in a list of followers while it is open.
+   * A stream of Server-Sent Events, kept in a list of followers while it is open, which
+   * sends what is replayed first.
    * @param list - The followers.
    * @param url - The request's URL.
    * @param headers - Its headers.
    * @param init - The request.
+   * @param replayed - The events sent before any live one, as the wire carries them.
    * @returns The response.
    */
-  const following = (list: Follower[], url: URL, headers: Headers, init: RequestInit) => {
+  const following = (
+    list: Follower[],
+    url: URL,
+    headers: Headers,
+    init: RequestInit,
+    replayed: readonly string[] = []
+  ) => {
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
+        for (const text of replayed) {
+          controller.enqueue(encoder.encode(text));
+        }
+
         const follower = {
           after: url.searchParams.get("after") ?? undefined,
           controller,
@@ -1359,14 +1378,17 @@ export const fakeDaemon = () => {
 
   /**
    * Holds a new Upload, newest of all, and sends it to every follower of the Uploads'
-   * Changes, as another device's upload would, at the next sequence.
+   * Changes, as another device's upload would, at the next sequence, which a follower
+   * resuming before it is sent too.
    * @param added - The Upload, as the wire carries it.
    */
   const upload = (added: typeof Upload.Encoded) => {
     uploads.unshift(added);
 
-    const text = `event: changed\nid: ${daemon.nextSequence}\ndata: ${JSON.stringify(added)}\n\n`;
+    const sequence = daemon.nextSequence;
+    const text = `event: changed\nid: ${sequence}\ndata: ${JSON.stringify(added)}\n\n`;
 
+    uploadChanges.push({ sequence, text });
     daemon.nextSequence += 1;
 
     for (const follower of uploadFollowers) {
@@ -1376,13 +1398,15 @@ export const fakeDaemon = () => {
 
   /**
    * The Uploads: a page of them, newest first, from just after one, refusing a cursor that
-   * names none held; their Changes, followed live from now; and an Upload's bytes, or
-   * nothing for any other route.
+   * names none held, through the last Change `upload` made, or `0`; their Changes, each
+   * `upload` made after `Last-Event-ID` or `after`, then live, or live from now with
+   * neither; and an Upload's bytes, or nothing for any other route. Uploads a test holds
+   * from the start were made before any Change the fake replays.
    * @param url - The request's URL.
    * @param init - The request.
    * @returns The answer, or nothing.
    */
-  const uploadsRoute = (url: URL, init: RequestInit): Response | undefined => {
+  const uploadsRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
     const method = init.method ?? "GET";
     const content = /^\/api\/uploads\/(?<id>[^/]+)\/content$/u.exec(url.pathname)?.groups;
 
@@ -1391,10 +1415,22 @@ export const fakeDaemon = () => {
     }
 
     if (url.pathname === "/api/uploads/changes") {
-      return signedInOnly(() => following(uploadFollowers, url, new Headers(init.headers), init));
+      const headers = new Headers(init.headers);
+      const after = headers.get("last-event-id") ?? url.searchParams.get("after");
+
+      const replayed =
+        after === null
+          ? []
+          : uploadChanges.flatMap((one) => (one.sequence > Number(after) ? [one.text] : []));
+
+      return signedInOnly(() => following(uploadFollowers, url, headers, init, replayed));
     }
 
     if (url.pathname === "/api/uploads") {
+      if (daemon.holdUploadPages) {
+        await heldUntilReleased(uploadPagesHeld, init);
+      }
+
       return signedInOnly(() => {
         const after = url.searchParams.get("after") ?? undefined;
         const limit = Number(url.searchParams.get("limit") ?? daemon.uploadsPage);
@@ -1412,6 +1448,7 @@ export const fakeDaemon = () => {
         return Response.json({
           more,
           next: more ? (page.at(-1)?.id ?? null) : null,
+          through: uploadChanges.at(-1)?.sequence ?? 0,
           uploads: page,
         });
       });
@@ -1572,7 +1609,7 @@ export const fakeDaemon = () => {
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
     (await ownerRoute(url, init)) ??
-    uploadsRoute(url, init) ??
+    (await uploadsRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??
     new Response(null, { status: 404 });

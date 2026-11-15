@@ -66,7 +66,7 @@ The core decides and this package draws and does the I/O.
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
   | `uiSync` | Follows the options under `ui` |
   | `ownerSync` | Follows the options under `store` and `uploads` while the options show |
-  | `uploadsSync` | Follows the Uploads' Changes while the options show, then reads their first page, so none made between the two is missed |
+  | `uploadsSync` | Reads the Uploads' first page while the options show, then follows their Changes after it, and after the last one folded in whenever it follows again |
   | `channelSync` | Reads each shown Channel's head and members, and the head of each Channel whose list a Lookup card is |
   | `marking` | Marks read what `markDue` says, after a second |
   | `completer`, `chantypesSync` | Ask for the nicks and the `CHANTYPES` that completion needs |

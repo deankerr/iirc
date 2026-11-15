@@ -94,11 +94,16 @@ export const UploadsQuery = Schema.Struct({
 /** The decoded form of {@link UploadsQuery}. */
 export type UploadsQuery = typeof UploadsQuery.Type;
 
-/** A page of the Uploads, newest first, and whether more follow. */
+/** A page of the Uploads, newest first, whether more follow, and how far it was read. */
 export const UploadPage = Schema.Struct({
   more: Schema.Boolean,
   /** Where the next page begins, to give as `after`, or `null` when no more follow. */
   next: Schema.NullOr(UploadsAfter),
+  /**
+   * The sequence of the latest Upload Change the page was read from, or `0` before any.
+   * Follow `GET /api/uploads/changes` with it as `after` to miss nothing since.
+   */
+  through: Schema.Int.check(Schema.isBetween({ maximum: Number.MAX_SAFE_INTEGER, minimum: 0 })),
   uploads: Schema.Array(Upload),
 });
 

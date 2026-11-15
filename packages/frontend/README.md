@@ -214,10 +214,10 @@ An option under `store` or `uploads` is named in full, such as `store.s3.bucket`
 
 ## Uploads
 
-The Uploads the options list, newest first, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins.
+The Uploads the options list, newest first, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
 
-- **An Upload is held by its id, and never twice.** One the stream gives that is held is replaced in place, and one not held goes first. One a page gives that is held is replaced in place, one not held goes just before the next of the page's that is held, and the rest after everything held, so the first page read again, as following again does, puts what is new on top.
-- **Where the next page begins moves only forward.** The first page sets it only before any page was read, and a later page only when it was read from where the list stands, so one asked for twice moves it once.
+- **A page only extends the list at its end.** It is folded only when read from where the list stands, the first page into an empty list and each later one from `next`, so one read twice is folded once. The first page sets `through`.
+- **The stream only gives what is newer.** A Change after `through` moves it on, and one not held goes first, one held is replaced in place. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.
 - **What is shown is derived, never held.** `linkOf` makes a link from the public URL given, as `<publicUrl>/<id>/<safeName>`, or none without one. `thumbnailed` says whether a type is an image every browser draws, `sizeText` a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
 
 ## Themes

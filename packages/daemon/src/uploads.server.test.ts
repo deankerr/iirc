@@ -1238,6 +1238,7 @@ const decodePage = Schema.decodeUnknownSync(
     Schema.Struct({
       more: Schema.Boolean,
       next: Schema.NullOr(Schema.String),
+      through: Schema.Int,
       uploads: Schema.Array(Upload),
     })
   )
@@ -1319,21 +1320,22 @@ describe("the list of Uploads", () => {
       { more: false, next: null, uploads: ["1.png"] },
     ]);
     expect(result.uploads).toStrictEqual([fifth, fourth, third, second, first]);
-    expect(result.whole).toStrictEqual({
+    expect({ ...result.whole, through: undefined }).toStrictEqual({
       more: false,
       next: null,
+      through: undefined,
       uploads: result.records.toReversed(),
     });
   });
 
-  it("gives an empty page with nothing uploaded", async () => {
+  it("gives an empty page through 0 with nothing uploaded", async () => {
     const result = await run((served) =>
       Effect.flatMap(served.request("/api/uploads"), (response) =>
         Effect.map(pageOf(response), (page) => [response.status, page])
       )
     );
 
-    expect(result).toStrictEqual([200, { more: false, next: null, uploads: [] }]);
+    expect(result).toStrictEqual([200, { more: false, next: null, through: 0, uploads: [] }]);
   });
 
   it("refuses a cursor that names no Upload", async () => {
@@ -1736,6 +1738,24 @@ describe("the stream of Upload Changes", () => {
     expect(result.resumed.slice(0, 2).map((event) => event.id)).toStrictEqual(
       result.seen.slice(1).map((event) => event.id)
     );
+  });
+
+  it("follows from a page's through: an Upload made after the page was read arrives, and nothing from the page is replayed", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* uploadedMany(served, 2);
+        const page = yield* pageOf(yield* served.request("/api/uploads"));
+        const third = yield* uploaded(served, png, "3.png");
+        const stream = yield* openChanges(served, { query: `?after=${page.through}` });
+        // One made after it, so the replay is known to be over when it arrives.
+        const fourth = yield* uploaded(served, png, "4.png");
+
+        return { fourth, seen: yield* changesOf(stream, 2), third };
+      })
+    );
+
+    expect(result.seen.map((event) => event.upload)).toStrictEqual([result.third, result.fourth]);
   });
 
   it("resumes after Last-Event-ID over `after`, as a reconnecting EventSource sends both", async () => {

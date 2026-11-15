@@ -191,6 +191,16 @@ const copy = async (container: HTMLElement, name: string) => {
   return await navigator.clipboard.readText();
 };
 
+/**
+ * The button that reads the next page, while there is one.
+ * @param container - The page.
+ * @returns It, or none.
+ */
+const moreButton = (container: HTMLElement) =>
+  [...container.querySelectorAll<HTMLButtonElement>('section[aria-label="Uploads"] button')].find(
+    (button) => button.textContent === "More"
+  );
+
 const cat = uploadOf("a", "image/png", "Cat picture.png");
 const notes = uploadOf("b", "application/pdf");
 
@@ -310,10 +320,7 @@ describe("the Uploads beside the options", () => {
     });
     await settled(() => listed(container).length === 3);
 
-    const more = () =>
-      [
-        ...container.querySelectorAll<HTMLButtonElement>('section[aria-label="Uploads"] button'),
-      ].find((button) => button.textContent === "More");
+    const more = () => moreButton(container);
 
     await doing(() => {
       more()?.click();
@@ -340,6 +347,73 @@ describe("the Uploads beside the options", () => {
       ],
       read: [undefined, "d".repeat(16), "b".repeat(16)],
     });
+  });
+
+  it("keeps every Upload, newest first and none twice, when more than a page were made while the stream was down", async () => {
+    const fake = signedIn(cat);
+
+    fake.daemon.uploadsPage = 2;
+
+    const { container } = await page(fake);
+
+    // The list is whole: one Upload, and no page after it.
+    await settled(() => listed(container).length === 1);
+    await eventually(() => fake.daemon.uploadFollowers.length === 1);
+
+    // The stream drops, and three Uploads are made before it is followed again.
+    await doing(() => {
+      for (const follower of fake.daemon.uploadFollowers.splice(0)) {
+        follower.controller.close();
+      }
+
+      fake.upload(uploadOf("c", "image/png"));
+      fake.upload(uploadOf("d", "image/png"));
+      fake.upload(uploadOf("e", "image/png"));
+    });
+    await settled(() => listed(container).length >= 4);
+
+    expect({
+      more: moreButton(container),
+      names: names(container),
+      read: fake.daemon.uploadPagesRead,
+    }).toStrictEqual({
+      more: undefined,
+      names: ["e-safe.png", "d-safe.png", "c-safe.png", "Cat picture.png"],
+      read: [undefined],
+    });
+  });
+
+  it("lists the Uploads made while the first page was being read in order, none twice", async () => {
+    const fake = signedIn(cat);
+
+    fake.daemon.uploadsPage = 2;
+    fake.daemon.holdUploadPages = true;
+
+    const { container } = await page(fake);
+
+    await eventually(() => fake.daemon.uploadPagesHeld.length === 1);
+    await doing(() => {
+      fake.upload(uploadOf("c", "image/png"));
+      fake.upload(uploadOf("d", "image/png"));
+      fake.upload(uploadOf("e", "image/png"));
+      fake.daemon.holdUploadPages = false;
+
+      for (const release of fake.daemon.uploadPagesHeld.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => moreButton(container) !== undefined);
+    await doing(() => {
+      moreButton(container)?.click();
+    });
+    await settled(() => listed(container).length >= 4 && moreButton(container) === undefined);
+
+    expect(names(container)).toStrictEqual([
+      "e-safe.png",
+      "d-safe.png",
+      "c-safe.png",
+      "Cat picture.png",
+    ]);
   });
 
   it("forgets the Uploads on signing out", async () => {

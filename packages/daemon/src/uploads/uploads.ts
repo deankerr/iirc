@@ -67,10 +67,14 @@ export interface Shown {
   readonly link: string | undefined;
 }
 
-/** A page of the Uploads, newest first, and the id the next begins after, when more follow. */
+/**
+ * A page of the Uploads, newest first, the id the next begins after, when more follow, and
+ * the sequence of the newest Upload's Change when it was read, or `0` with none.
+ */
 export interface Page {
   readonly uploads: readonly Shown[];
   readonly next: UploadId | undefined;
+  readonly through: number;
 }
 
 /** An Upload, as a Frontend is shown it, and the sequence of the Change that made it so. */
@@ -186,7 +190,9 @@ export class Uploads extends Context.Service<
     readonly find: (id: UploadId) => Effect.Effect<Option.Option<Shown>>;
     /**
      * Up to `limit` Uploads, with their links, newest first: the newest, or those older
-     * than the Upload `after` names. One no Upload has is `NoSuchUpload`.
+     * than the Upload `after` names, read with the sequence of the newest Upload's Change,
+     * from the same holdings, so `changes` after it gives exactly what the page could not.
+     * One no Upload has is `NoSuchUpload`.
      */
     readonly page: (
       after: UploadId | undefined,
@@ -528,6 +534,7 @@ export const layerUploads = (dataDir: string) =>
 
           return {
             next: more ? uploads.at(-1)?.record.id : undefined,
+            through: newestOf(all),
             // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
             uploads: yield* Effect.forEach(uploads, ({ record: one }) => shown(one)),
           };

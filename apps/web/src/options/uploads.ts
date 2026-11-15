@@ -1,11 +1,11 @@
 /**
  * The Uploads the options list beside them, as atoms: followed from the Daemon while the
  * page is signed in and the options show, so another device's Upload shows without a
- * reload, read a page at a time, and forgotten on signing out. The stream is opened before
- * the first page is read, so nothing uploaded between the two is missed, and the core holds
- * an Upload by its id, so one both give is held once. An Upload's link is derived from the
- * public URL in force as it is drawn, never held, so a new public URL changes every link
- * copied from then on.
+ * reload, read a page at a time, and forgotten on signing out. The first page says how far
+ * it was read, and the stream is followed after that, or after the last Change folded in
+ * when following again, so nothing is missed and nothing is given twice. An Upload's link
+ * is derived from the public URL in force as it is drawn, never held, so a new public URL
+ * changes every link copied from then on.
  *
  * @packageDocumentation
  */
@@ -73,10 +73,12 @@ const readPage = (registry: AtomRegistry.AtomRegistry, after: UploadId | undefin
   });
 
 /**
- * While the browser is signed in and the options show, follows the Uploads' Changes from
- * now, then reads the first page, so another device's Upload shows. Whenever the stream
- * ends, or gives nothing for longer than three heartbeats, both are done again. A refusal
- * signs the page out, and signed out, the Uploads are forgotten. Mounted once.
+ * While the browser is signed in and the options show, reads the first page, unless one
+ * was, then follows the Uploads' Changes after the last folded in, so another device's
+ * Upload shows. Whenever the stream ends, or gives nothing for longer than three
+ * heartbeats, it is followed again from there, and what is held stays valid, `next` too,
+ * since the Daemon sends exactly the Changes after it. A refusal signs the page out, and
+ * signed out, the Uploads are forgotten. Mounted once.
  */
 export const uploadsSync = runtime
   .atom((get) =>
@@ -99,20 +101,28 @@ export const uploadsSync = runtime
       const schedule = yield* retrying;
 
       const follow = Effect.gen(function* () {
-        const events = yield* client.uploads
-          .changes({ headers: {}, query: {} })
-          .pipe(Effect.timeout(idle));
+        if (registry.get(uploadsState).through === undefined) {
+          yield* readPage(registry, undefined);
+        }
 
-        // The stream is open, so an Upload made from here on reaches it, whether or not the
-        // page has it too.
-        yield* readPage(registry, undefined);
+        const { through } = registry.get(uploadsState);
+
+        // The page was not folded, as signing out meanwhile leaves it, so there is nothing
+        // to follow from yet.
+        if (through === undefined) {
+          return;
+        }
+
+        const events = yield* client.uploads
+          .changes({ headers: {}, query: { after: through } })
+          .pipe(Effect.timeout(idle));
 
         yield* events.pipe(
           Stream.timeout(idle),
           Stream.runForEach((event) =>
             Effect.sync(() => {
               if (event.event === "changed") {
-                happened(registry, { _tag: "Changed", upload: event.data });
+                happened(registry, { _tag: "Changed", sequence: event.id, upload: event.data });
               }
             })
           )
