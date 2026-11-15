@@ -37,9 +37,11 @@ const describeTimeline = (
   key: kind === "Network" ? null : name.toLowerCase(),
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
@@ -96,7 +98,15 @@ const network = Schema.decodeSync(TimelineId)(idOf(1));
  * @returns The event.
  */
 const foldedThrough = (sequence: number): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ gaps: [], items: [], merged: [], sequence, timelines: [] }),
+  data: JSON.stringify({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    removals: [],
+    sequence,
+    timelines: [],
+  }),
   event: "changed",
   id: `1.${sequence}`,
 });
@@ -117,9 +127,11 @@ const placing = async () => {
     );
   composed.send({
     data: JSON.stringify({
+      dropped: [],
       gaps: [],
       items: [],
       merged: [],
+      removals: [],
       sequence: 2,
       timelines: [
         describeTimeline(idOf(3), "[bob]", "Direct", 2),
@@ -378,9 +390,11 @@ describe("saying", () => {
     placeAt10(daemon);
     sendChange({
       data: JSON.stringify({
+        dropped: [],
         gaps: [],
         items: [],
         merged: [],
+        removals: [],
         sequence: 10,
         timelines: [describeTimeline(idOf(4), "{bob}", "Direct", 10)],
       }),
@@ -417,6 +431,7 @@ describe("saying", () => {
     const listed = (sequence: number, name: string, sender: string) => {
       sendChange({
         data: JSON.stringify({
+          dropped: [],
           gaps: [],
           items: [
             {
@@ -444,6 +459,7 @@ describe("saying", () => {
             },
           ],
           merged: [],
+          removals: [],
           sequence,
           timelines: [describeTimeline(idOf(sequence), name, "Direct", sequence)],
         }),
@@ -503,9 +519,11 @@ describe("saying", () => {
 
       sendChange({
         data: JSON.stringify({
+          dropped: [],
           gaps: [],
           items: [],
           merged: [],
+          removals: [],
           sequence,
           timelines: [describeTimeline(idOf(sequence), nick, "Direct", sequence)],
         }),
@@ -545,9 +563,11 @@ describe("saying", () => {
 
     sendChange({
       data: JSON.stringify({
+        dropped: [],
         gaps: [],
         items: [],
         merged: [],
+        removals: [],
         sequence: 6,
         timelines: [describeTimeline(idOf(6), "dave", "Direct", 6)],
       }),
@@ -819,6 +839,7 @@ describe("acting", () => {
       });
       changed({
         data: JSON.stringify({
+          dropped: [],
           gaps: [],
           items: [
             {
@@ -842,6 +863,7 @@ describe("acting", () => {
             },
           ],
           merged: [],
+          removals: [],
           sequence,
           timelines: [],
         }),

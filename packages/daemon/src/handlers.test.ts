@@ -5,10 +5,12 @@ import {
   ConfigurationChanged,
   CredentialPathName,
   DaemonApi,
+  LifeChanged,
   NetworkId,
   SearchText,
   Sequence as WireSequence,
   TimelineId,
+  TimelinesKept,
   UiChanged,
 } from "@iirc/api";
 import type {
@@ -29,7 +31,7 @@ import { TimelineStoreFailed } from "@iirc/timeline-store";
 import type { TimelineStoreService } from "@iirc/timeline-store";
 import { makeMemoryTimelineStore } from "@iirc/timeline-store/testing";
 import { emptyDirectory, projectionVersion } from "@iirc/timelines";
-import { Deferred, Effect, Fiber, Layer, Redacted, Schema, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Redacted, Schema, Stream } from "effect";
 import { HttpServer } from "effect/http";
 import { HttpApiTest } from "effect/http-api";
 import { TestClock } from "effect/testing";
@@ -254,7 +256,13 @@ const stoppedSaying = async (named: "lost" | "kept") =>
         const said = yield* api.networks.said({ params: { intent, network: libera } });
         const listed = yield* api.networks.list();
 
-        return { listed: listed[0]?.status._tag, said, stopped };
+        const [first] = listed;
+
+        return {
+          listed: first?._tag === "Live" ? first.status._tag : first?._tag,
+          said,
+          stopped,
+        };
       }),
     (record: JournalRecord) =>
       // Either the Say itself fails to append, or what it output does.
@@ -598,7 +606,7 @@ describe("the handlers", () => {
         { machine: "channel #iirc", state: "Joined.Synced" },
       ],
       line: "PRIVMSG #iirc hello",
-      listed: [{ network: "libera", status: { _tag: "Running" } }],
+      listed: [{ _tag: "Live", life: 1, network: "libera", status: { _tag: "Running" } }],
       members: [["#iirc", ["iirc", "peer"]]],
       messages: ["iirc #iirc :hello", "peer #iirc :hi there"],
       said: ["Said", 32],
@@ -1641,7 +1649,7 @@ describe("the handlers", () => {
           const networks = yield* api.networks.list();
 
           return {
-            networks: networks.map(({ status }) => status._tag),
+            networks: networks.map((each) => (each._tag === "Live" ? each.status._tag : each._tag)),
             projection: listed.projection,
             through: listed.through,
             timelines: listed.timelines,
@@ -2543,6 +2551,243 @@ describe("a Channel's head and members", () => {
       completing: [ordered.filter((nick) => nick.startsWith("user99")).slice(0, 100), true],
       head: 10_001,
       pages: ordered.slice(0, 600),
+    });
+  });
+});
+
+// The life of `libera` each of these tests configures first, as the Journal's first Entry.
+const firstLife = WireSequence.make(1);
+
+// Removes it, letting the clock run past the pacing its `QUIT` waits on.
+const removing = (api: Effect.Success<typeof makeClient>, keep: boolean) =>
+  Effect.gen(function* () {
+    const removed = yield* api.networks
+      .remove({ params: { network: libera }, query: { keep, life: firstLife } })
+      .pipe(Effect.forkChild);
+
+    yield* settle;
+    yield* TestClock.adjust("5 seconds");
+    yield* settle;
+
+    return yield* Fiber.join(removed);
+  });
+
+// The first event of the changes stream after a sequence that satisfies a predicate.
+const changeAfter = (
+  api: Effect.Success<typeof makeClient>,
+  sequence: number,
+  found: (event: Extract<TimelineChangesEvent, { readonly event: "changed" }>) => boolean
+) =>
+  api.timelines
+    .changes({ headers: {}, query: { after: { sequence, version: projectionVersion } } })
+    .pipe(
+      Effect.flatMap((events) =>
+        events.pipe(
+          Stream.filter(
+            (event): event is Extract<TimelineChangesEvent, { readonly event: "changed" }> =>
+              event.event === "changed" && found(event)
+          ),
+          Stream.take(1),
+          Stream.runCollect
+        )
+      ),
+      Effect.map((events) => events[0])
+    );
+
+describe("removing a Network", () => {
+  it("keeps its Timelines readable and searchable, refuses its id, and acts on it no more", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* directly(world, api, ["kept words"]);
+        const before = yield* api.timelines.list({ params: { network: libera }, query: {} });
+        const { sequence } = yield* removing(api, true);
+
+        const news = yield* api.news
+          .follow({ headers: {}, query: { after: sequence - 1 } })
+          .pipe(Effect.flatMap(Stream.runHead));
+
+        const changed = yield* changeAfter(api, sequence - 1, (event) =>
+          event.data.timelines.some((each) => each.removed)
+        );
+
+        const listed = yield* api.timelines.list({ params: { network: libera }, query: {} });
+        const peer = yield* timelineNamed(api, "peer");
+        const window = yield* api.timelines.window({ params: { timeline: peer }, query: {} });
+
+        const found = yield* api.timelines.search({
+          query: { network: libera, text: SearchText.make("kept") },
+        });
+
+        const params = { network: libera };
+
+        const acting = yield* Effect.all([
+          outcome(api.networks.configuration({ params })),
+          outcome(api.networks.known({ params })),
+          outcome(api.networks.inspect({ params })),
+          outcome(api.networks.retry({ params })),
+          outcome(
+            api.networks.say({ params, payload: { kind: "Privmsg", target: "peer", text: "x" } })
+          ),
+          outcome(
+            api.networks.act({ params, payload: { action: { _tag: "Nick", nick: "other" } } })
+          ),
+          outcome(
+            api.networks.read({ params, payload: { read: Instant.make(epoch), target: null } })
+          ),
+        ]);
+
+        const configured = yield* api.networks
+          .configure({ params, payload: floor, query: {} })
+          .pipe(Effect.flip);
+
+        return {
+          acting,
+          changed: changed?.data.timelines.map((each) => [each.name, each.removed]),
+          configured,
+          found: found.items.map(textOf),
+          listed: listed.timelines.map((each) => [each.name, each.removed]),
+          networks: yield* api.networks.list(),
+          news: Option.isSome(news) && news.value.event === "happened" ? news.value.data.news : [],
+          same: listed.timelines.map((each) => each.id),
+          was: before.timelines.map((each) => each.id),
+          window: window.items.map(textOf),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      acting: Array.from({ length: 7 }).fill("UnknownNetwork"),
+      changed: [
+        ["libera", true],
+        ["peer", true],
+      ],
+      configured: new TimelinesKept({ network: libera }),
+      found: ["kept words"],
+      listed: [
+        ["libera", true],
+        ["peer", true],
+      ],
+      networks: [{ _tag: "Kept", life: 1, network: libera }],
+      news: [{ _tag: "NetworkRemoved", keep: true }],
+      same: result.was,
+      was: result.was,
+      window: ["kept words"],
+    });
+  });
+
+  it("drops what it kept when removed again, says which Timelines went, and frees its id", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        yield* directly(world, api, ["gone words"]);
+        const peer = yield* timelineNamed(api, "peer");
+        const listed = yield* api.timelines.list({ params: { network: libera }, query: {} });
+
+        yield* removing(api, true);
+
+        const { sequence } = yield* api.networks.remove({
+          params: { network: libera },
+          query: { keep: false, life: firstLife },
+        });
+
+        const changed = yield* changeAfter(
+          api,
+          sequence - 1,
+          (event) => event.data.dropped.length > 0
+        );
+
+        const reads = yield* Effect.all([
+          outcome(api.timelines.list({ params: { network: libera }, query: {} })),
+          outcome(api.timelines.window({ params: { timeline: peer }, query: {} })),
+          outcome(
+            api.timelines.search({ query: { network: libera, text: SearchText.make("gone") } })
+          ),
+        ]);
+
+        const found = yield* api.timelines.search({ query: { text: SearchText.make("gone") } });
+
+        const again = yield* outcome(
+          api.networks.remove({
+            params: { network: libera },
+            query: { keep: false, life: firstLife },
+          })
+        );
+
+        yield* api.networks.configure({
+          params: { network: libera },
+          payload: configured({ enabled: false }),
+          query: { ifSequence: 0 },
+        });
+
+        return {
+          again,
+          dropped: changed?.data.dropped.map((each) => each.id).toSorted(),
+          found: found.items,
+          networks: (yield* api.networks.list()).map((each) => [each._tag, each.network]),
+          reads,
+          was: listed.timelines.map((each) => each.id).toSorted(),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: "UnknownNetwork",
+      dropped: result.was,
+      found: [],
+      networks: [["Live", libera]],
+      reads: ["UnknownNetwork", "UnknownTimeline", "UnknownNetwork"],
+      was: result.was,
+    });
+    expect(result.was).toHaveLength(2);
+  });
+
+  it("forgets the Credentials its Configuration names", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        const name = CredentialPathName.make("pass");
+
+        yield* api.credentials.set({ params: { name }, payload: { value: Redacted.make("x") } });
+        yield* api.networks.configure({
+          params: { network: libera },
+          payload: configured({ enabled: false, password: name }),
+          query: {},
+        });
+        yield* api.networks.remove({
+          params: { network: libera },
+          query: { keep: false, life: firstLife },
+        });
+
+        return yield* api.credentials.list();
+      })
+    );
+
+    expect(result).toStrictEqual({ names: [] });
+  });
+
+  it("refuses with 409 a removal made from a life the Network no longer has, and removes nothing", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        const quiet = configured({ enabled: false });
+        const params = { network: libera };
+
+        yield* api.networks.configure({ params, payload: quiet, query: {} });
+        yield* api.networks.remove({ params, query: { keep: false, life: firstLife } });
+        // Another Frontend adds the name again, and this one still asks about the first.
+        const { sequence } = yield* api.networks.configure({ params, payload: quiet, query: {} });
+
+        const refused = yield* api.networks
+          .remove({ params, query: { keep: false, life: firstLife } })
+          .pipe(Effect.flip);
+
+        return { listed: yield* api.networks.list(), refused, sequence };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      listed: [
+        { _tag: "Live", life: result.sequence, network: libera, status: { _tag: "Running" } },
+      ],
+      refused: new LifeChanged({ life: result.sequence, network: libera }),
+      sequence: result.sequence,
     });
   });
 });

@@ -72,6 +72,7 @@ describe("the contract", () => {
 
     expect(routes.map(({ route }) => route).toSorted()).toStrictEqual([
       "DELETE /api/credentials/{name}",
+      "DELETE /api/networks/{network}",
       "DELETE /api/sign-in",
       "DELETE /api/ui/{option}",
       "GET /api/credentials",
@@ -208,7 +209,11 @@ describe("the contract", () => {
 
   it("carries a step's sequence as its event id, and a heartbeat with none", () => {
     const wire = [
-      { data: '{"at":1,"network":"libera","news":[],"sequence":7}', event: "happened", id: "7" },
+      {
+        data: '{"at":1,"life":1,"network":"libera","news":[],"sequence":7}',
+        event: "happened",
+        id: "7",
+      },
       { data: "{}", event: "heartbeat" },
     ];
 
@@ -593,7 +598,15 @@ describe("the contract", () => {
   });
 
   it("carries where a folded step leaves a follower as its event id, and a reset or heartbeat with none", () => {
-    const data = { gaps: [], items: [], merged: [], sequence: 9, timelines: [] };
+    const data = {
+      dropped: [],
+      gaps: [],
+      items: [],
+      merged: [],
+      removals: [],
+      sequence: 9,
+      timelines: [],
+    };
 
     const wire = [
       { data: JSON.stringify(data), event: "changed", id: "1.9" },

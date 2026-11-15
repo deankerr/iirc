@@ -13,7 +13,7 @@ import type { Item, TimelineStoreService } from "@iirc/timeline-store";
 import { makeSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { makeMemoryTimelineStore } from "@iirc/timeline-store/testing";
 import { emptyDirectory, projectionVersion, step, timelineIdOf } from "@iirc/timelines";
-import { Effect, Layer, Logger, Option, Ref, Stream } from "effect";
+import { Effect, Fiber, Layer, Logger, Option, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -166,10 +166,12 @@ const everything = (store: TimelineStoreService) =>
 
     return {
       directory: yield* store.directory,
+      dropped: changed.dropped,
       folded: yield* store.folded,
       gaps: changed.gaps,
       items: changed.items,
       merged: changed.merged,
+      removals: changed.removals,
       timelines: changed.timelines,
     };
   });
@@ -316,6 +318,7 @@ describe("the projector", () => {
                 id: timelineIdOf(999, 0, 1),
                 key: "#stale",
                 kind: "Channel",
+                life: 1,
                 name: "#stale",
                 network: libera,
               },
@@ -351,6 +354,86 @@ describe("the projector", () => {
     expect(result.folded.version).toBe(projectionVersion);
     expect(result.items).toContain("kept");
     expect(result.stale).toStrictEqual([]);
+    expect(result.same).toStrictEqual(result.want);
+  });
+
+  it("folds a removal as a fold from nothing does, across a restart and a Network given the id again", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const world = yield* makeWorld();
+        const store = yield* makeMemoryTimelineStore;
+
+        const kept = yield* Effect.gen(function* () {
+          const runtime = yield* Runtime;
+          const call = yield* joinFloor(world);
+
+          yield* say(call, ":peer!u@h PRIVMSG #iirc :before");
+          yield* eventually(holds(store, "#iirc", "before"));
+
+          const removing = yield* Effect.forkChild(runtime.remove(libera, { keep: true }));
+
+          // The `QUIT` waits its turn in the pacing, and the clock moves only when told.
+          for (let turn = 0; turn < 200; turn += 1) {
+            yield* Effect.yieldNow;
+          }
+
+          yield* TestClock.adjust(5000);
+          const { life, sequence } = yield* Fiber.join(removing);
+
+          yield* eventually(
+            store.folded.pipe(Effect.map(({ through }) => (through ?? 0) >= sequence))
+          );
+
+          return {
+            life,
+            timelines: (yield* store.timelines(libera)).map((each) => [
+              each.name,
+              each.removed,
+              each.life,
+            ]),
+          };
+        }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
+
+        return yield* Effect.gen(function* () {
+          const runtime = yield* Runtime;
+
+          yield* runtime.remove(libera, { keep: false });
+          yield* runtime.configure(libera, floor);
+          const call = yield* registerOnFloor(world.memory);
+
+          expect(yield* heard(call)).toBe("JOIN #iirc");
+          yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+          yield* say(call, ":peer!u@h PRIVMSG #iirc :after");
+          yield* eventually(holds(store, "#iirc", "after"));
+          // Registration and the join spent the burst: a Line refills for the `QUIT`.
+          yield* TestClock.adjust(2000);
+
+          const through = (yield* store.folded).through ?? 0;
+
+          return {
+            items: yield* textsIn(store, "#iirc"),
+            kept,
+            lives: (yield* store.timelines(libera)).map((each) => each.life),
+            living: (yield* runtime.lives).get(libera)?.life,
+            same: yield* everything(store),
+            want: yield* everything(yield* foldedAfresh(through)),
+          };
+        }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
+      })
+    );
+
+    // The kept Timelines keep the life that was removed, and the Network given its id
+    // again has a later one, which its Timelines carry.
+    expect(result.kept.timelines).toStrictEqual([
+      ["libera", true, result.kept.life],
+      ["#iirc", true, result.kept.life],
+    ]);
+    expect({
+      later: (result.living ?? 0) > result.kept.life,
+      lives: result.lives,
+    }).toStrictEqual({ later: true, lives: [result.living, result.living] });
+    expect(result.items).toStrictEqual(["Activity", "after"]);
+    expect(result.same.dropped).toHaveLength(2);
     expect(result.same).toStrictEqual(result.want);
   });
 

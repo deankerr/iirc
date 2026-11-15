@@ -40,9 +40,11 @@ const timeline = (
     key: detached ? null : key,
     kind: name.startsWith("#") ? "Channel" : "Direct",
     latest: null,
+    life: 1,
     name,
     network,
     read: null,
+    removed: false,
     unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 

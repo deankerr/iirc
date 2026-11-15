@@ -57,9 +57,11 @@ import {
   DirectoryRow,
   DirectoryText,
   FoldedRow,
+  DroppedRow,
   GapRow,
   ItemRow,
   OursRow,
+  RemovalRow,
   SummaryRow,
   TombstoneRow,
 } from "./codec.ts";
@@ -68,7 +70,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 4;
+const layoutVersion = 7;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -122,7 +124,9 @@ const layout = [
     unread_highlights INTEGER NOT NULL,
     unread_direct INTEGER NOT NULL,
     unread_messages INTEGER NOT NULL,
-    unread_activity INTEGER NOT NULL
+    unread_activity INTEGER NOT NULL,
+    removed INTEGER NOT NULL,
+    life INTEGER NOT NULL
   ) STRICT`,
   "CREATE INDEX timelines_by_network ON timelines (network, id)",
   "CREATE INDEX timelines_by_changed ON timelines (changed, id)",
@@ -167,6 +171,22 @@ const layout = [
     PRIMARY KEY (network, from_cursor)
   ) STRICT`,
   "CREATE INDEX gaps_by_changed ON gaps (changed, network, from_cursor)",
+  // A Timeline dropped with its Network, kept by id alone, to say it is gone.
+  `CREATE TABLE dropped (
+    id TEXT PRIMARY KEY,
+    network TEXT NOT NULL,
+    changed INTEGER NOT NULL,
+    life INTEGER NOT NULL
+  ) STRICT`,
+  "CREATE INDEX dropped_by_changed ON dropped (changed, id)",
+  // Each Network's last removal, whether or not it had Timelines.
+  `CREATE TABLE removals (
+    network TEXT PRIMARY KEY,
+    keep INTEGER NOT NULL,
+    changed INTEGER NOT NULL,
+    life INTEGER NOT NULL
+  ) STRICT`,
+  "CREATE INDEX removals_by_changed ON removals (changed, network)",
 ];
 
 const emptyDirectoryText = Schema.encodeSync(DirectoryText)(emptyDirectory);
@@ -192,6 +212,10 @@ type Found = "Empty" | "Ready" | "Unusable";
  * `table_info` gives them, tables by name and columns in the order they were declared.
  */
 const columns = [
+  "dropped.id TEXT",
+  "dropped.network TEXT",
+  "dropped.changed INTEGER",
+  "dropped.life INTEGER",
   "folded.only INTEGER",
   "folded.version INTEGER",
   "folded.through INTEGER",
@@ -212,6 +236,10 @@ const columns = [
   "items.changed INTEGER",
   "items.level TEXT",
   "items.sender TEXT",
+  "removals.network TEXT",
+  "removals.keep INTEGER",
+  "removals.changed INTEGER",
+  "removals.life INTEGER",
   "search.text ",
   "timelines.id TEXT",
   "timelines.network TEXT",
@@ -225,6 +253,8 @@ const columns = [
   "timelines.unread_direct INTEGER",
   "timelines.unread_messages INTEGER",
   "timelines.unread_activity INTEGER",
+  "timelines.removed INTEGER",
+  "timelines.life INTEGER",
   "tombstones.id TEXT",
   "tombstones.network TEXT",
   "tombstones.into_id TEXT",
@@ -375,6 +405,8 @@ const decodeSummaries = (rows: readonly unknown[]) =>
 
 const decodeDirectory = decodeAll(DirectoryRow, "the directory");
 const decodeTombstones = decodeAll(TombstoneRow, "a tombstone");
+const decodeDropped = decodeAll(DroppedRow, "a dropped Timeline");
+const decodeRemovals = decodeAll(RemovalRow, "a removal");
 const decodeGaps = decodeAll(GapRow, "a Gap");
 const decodeCollapsed = decodeAll(CollapsedGapRow, "a run of Gaps");
 const decodeRead = decodeAll(Schema.Struct({ read: Schema.NullOr(Instant) }), "a Read Marker");
@@ -709,7 +741,7 @@ export const makeSqliteTimelineStore = (
 
     // Timelines, each with the position of its last item, which the primary key finds.
     const summaries = (where: Fragment, order: Fragment) => sql`
-      SELECT id, network, kind, name, key, changed, read, head,
+      SELECT id, network, kind, name, key, changed, read, head, removed, life,
         unread_highlights AS highlights, unread_direct AS direct,
         unread_messages AS messages, unread_activity AS activity,
         (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest
@@ -852,14 +884,16 @@ export const makeSqliteTimelineStore = (
           case "Described": {
             const { timeline } = change;
 
-            // A Timeline described again keeps its Read Marker, its head, and its counts.
+            // A Timeline described again keeps its Read Marker, its head, its counts, and
+            // whether its Network was removed.
             yield* sql`
               INSERT INTO timelines (id, network, kind, name, key, changed, read,
-                unread_highlights, unread_direct, unread_messages, unread_activity)
+                unread_highlights, unread_direct, unread_messages, unread_activity, removed, life)
               VALUES (${timeline.id}, ${timeline.network}, ${timeline.kind}, ${timeline.name},
-                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0)
+                ${timeline.key}, ${change.sequence}, NULL, 0, 0, 0, 0, 0, ${timeline.life})
               ON CONFLICT (id) DO UPDATE SET network = excluded.network, kind = excluded.kind,
-                name = excluded.name, key = excluded.key, changed = excluded.changed
+                name = excluded.name, key = excluded.key, changed = excluded.changed,
+                life = excluded.life
             `;
             break;
           }
@@ -929,6 +963,49 @@ export const makeSqliteTimelineStore = (
             break;
           }
 
+          case "Removed": {
+            yield* sql`
+              INSERT INTO removals (network, keep, changed, life)
+              VALUES (${change.network}, ${change.keep ? 1 : 0}, ${change.sequence}, ${change.life})
+              ON CONFLICT (network) DO UPDATE SET keep = excluded.keep, changed = excluded.changed,
+                life = excluded.life
+            `;
+
+            if (change.keep) {
+              yield* sql`
+                UPDATE timelines SET removed = 1, changed = ${change.sequence}
+                WHERE network = ${change.network}
+              `;
+              break;
+            }
+
+            // Every id the Network had, merged ones too, is kept as dropped, and the rest
+            // goes: its items, leaving the search index first, its Timelines, its
+            // tombstones, and its Gaps.
+            yield* sql`
+              INSERT INTO dropped (id, network, changed, life)
+              SELECT id, network, ${change.sequence}, ${change.life} FROM timelines
+              WHERE network = ${change.network}
+              UNION ALL
+              SELECT id, network, ${change.sequence}, ${change.life} FROM tombstones
+              WHERE network = ${change.network}
+              ON CONFLICT (id) DO UPDATE SET changed = excluded.changed, life = excluded.life
+            `;
+
+            // In one statement, so a long history is never read out to be dropped.
+            yield* sql`
+              DELETE FROM search WHERE rowid IN (
+                SELECT id FROM items WHERE network = ${change.network} AND sender IS NOT NULL
+              )
+            `;
+
+            yield* sql`DELETE FROM items WHERE network = ${change.network}`;
+            yield* sql`DELETE FROM timelines WHERE network = ${change.network}`;
+            yield* sql`DELETE FROM tombstones WHERE network = ${change.network}`;
+            yield* sql`DELETE FROM gaps WHERE network = ${change.network}`;
+            break;
+          }
+
           case "Gap": {
             yield* sql`
               INSERT INTO gaps (network, from_cursor, to_cursor, changed)
@@ -955,6 +1032,8 @@ export const makeSqliteTimelineStore = (
           SELECT min(changed) AS next FROM timelines WHERE changed > ${since}
           UNION ALL SELECT min(changed) FROM items WHERE changed > ${since}
           UNION ALL SELECT min(changed) FROM tombstones WHERE changed > ${since}
+          UNION ALL SELECT min(changed) FROM dropped WHERE changed > ${since}
+          UNION ALL SELECT min(changed) FROM removals WHERE changed > ${since}
           UNION ALL SELECT min(changed) FROM gaps WHERE changed > ${since}
         )
       `.pipe(Effect.map((rows) => rows[0]?.next ?? undefined));
@@ -967,6 +1046,8 @@ export const makeSqliteTimelineStore = (
           (SELECT count(*) FROM (SELECT 1 FROM timelines WHERE changed = ${sequence} LIMIT ${cap}))
           + (SELECT count(*) FROM (SELECT 1 FROM items WHERE changed = ${sequence} LIMIT ${cap}))
           + (SELECT count(*) FROM (SELECT 1 FROM tombstones WHERE changed = ${sequence} LIMIT ${cap}))
+          + (SELECT count(*) FROM (SELECT 1 FROM dropped WHERE changed = ${sequence} LIMIT ${cap}))
+          + (SELECT count(*) FROM (SELECT 1 FROM removals WHERE changed = ${sequence} LIMIT ${cap}))
           + (SELECT count(*) FROM (SELECT 1 FROM gaps WHERE changed = ${sequence} LIMIT ${cap}))
           AS count
       `.pipe(Effect.map((rows) => rows[0]?.count ?? 0));
@@ -977,6 +1058,8 @@ export const makeSqliteTimelineStore = (
           SELECT max(changed) AS last FROM timelines WHERE changed > ${since}
           UNION ALL SELECT max(changed) FROM items WHERE changed > ${since}
           UNION ALL SELECT max(changed) FROM tombstones WHERE changed > ${since}
+          UNION ALL SELECT max(changed) FROM dropped WHERE changed > ${since}
+          UNION ALL SELECT max(changed) FROM removals WHERE changed > ${since}
           UNION ALL SELECT max(changed) FROM gaps WHERE changed > ${since}
         )
       `.pipe(Effect.map((rows) => rows[0]?.last ?? undefined));
@@ -1025,7 +1108,14 @@ export const makeSqliteTimelineStore = (
           SELECT id FROM tombstones WHERE changed = ${sequence} ORDER BY id LIMIT ${limit + 1}
         `.pipe(Effect.flatMap(decodeIds));
 
-        for (const { id } of [...listed, ...merged]) {
+        const dropped = yield* sql`
+          SELECT id FROM dropped WHERE changed = ${sequence} ORDER BY id LIMIT ${limit + 1}
+        `.pipe(Effect.flatMap(decodeIds));
+
+        // A removal names a Network, not a Timeline, so it says to read everything again.
+        const removal = yield* sql`SELECT 1 FROM removals WHERE changed = ${sequence} LIMIT 1`;
+
+        for (const { id } of [...listed, ...merged, ...dropped]) {
           ids.add(id);
         }
 
@@ -1045,7 +1135,7 @@ export const makeSqliteTimelineStore = (
           after = found.id;
         }
 
-        return ids.size > limit ? undefined : [...ids].toSorted();
+        return removal.length > 0 || ids.size > limit ? undefined : [...ids].toSorted();
       });
 
     const changedAfter = (after: number | undefined, limit: number | undefined) =>
@@ -1084,6 +1174,18 @@ export const makeSqliteTimelineStore = (
           ORDER BY changed, id
         `.pipe(Effect.flatMap(decodeTombstones));
 
+        const dropped = yield* sql`
+          SELECT id, network, changed, life FROM dropped
+          WHERE changed > ${since} AND changed <= ${upTo}
+          ORDER BY changed, id
+        `.pipe(Effect.flatMap(decodeDropped));
+
+        const removals = yield* sql`
+          SELECT network, keep, changed, life FROM removals
+          WHERE changed > ${since} AND changed <= ${upTo}
+          ORDER BY changed, network
+        `.pipe(Effect.flatMap(decodeRemovals));
+
         // Network ids compare as BINARY text, which is UTF-8 bytes, so by code point.
         const gaps = yield* sql`
           SELECT network, from_cursor AS "from", to_cursor AS "to", changed FROM gaps
@@ -1095,11 +1197,13 @@ export const makeSqliteTimelineStore = (
         const folded = [(yield* foldedRow).through, after].filter((each) => each !== undefined);
 
         return {
+          dropped,
           gaps,
           items,
           merged,
           more,
           overflowed,
+          removals,
           through: more || folded.length === 0 ? through : Math.max(...folded),
           timelines,
         } satisfies Changed;
@@ -1451,7 +1555,14 @@ export const makeSqliteTimelineStore = (
         Effect.uninterruptible(
           sql.withTransaction(
             Effect.gen(function* () {
-              for (const table of ["items", "timelines", "tombstones", "gaps"]) {
+              for (const table of [
+                "items",
+                "timelines",
+                "tombstones",
+                "dropped",
+                "removals",
+                "gaps",
+              ]) {
                 yield* sql.unsafe(`DELETE FROM ${table}`);
               }
 

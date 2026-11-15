@@ -15,6 +15,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { typesCredential } from "@iirc/frontend/commands";
+import type { CommandContext } from "@iirc/frontend/commands";
 import { active, announced, completes, cycled } from "@iirc/frontend/completion";
 import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
@@ -106,6 +107,40 @@ const PaletteButton = () => {
   );
 };
 
+/** Why nothing can be said where the composer is: above it, and in it before anything is typed. */
+interface Sayable {
+  readonly offline: string | undefined;
+  readonly placeholder: string | undefined;
+}
+
+/**
+ * Why nothing can be said where the composer is, if it cannot: its Network is not
+ * connected, said above it, or was removed, said in it before anything is typed, while
+ * commands still run there.
+ * @param context - The context commands are judged in.
+ * @returns What is said above it, and in it.
+ */
+const sayable = (context: CommandContext): Sayable => {
+  const { draft, focus, session } = context;
+
+  if (focus?.removed === true) {
+    return {
+      offline: undefined,
+      placeholder: `${focus.network} was removed: nothing can be said here`,
+    };
+  }
+
+  const network = focus?.network ?? draft?.network;
+
+  return {
+    offline:
+      network === undefined || session
+        ? undefined
+        : `${network} is not connected: nothing can be said there until it is.`,
+    placeholder: undefined,
+  };
+};
+
 /**
  * The composer of one Timeline, or the one under no Timeline.
  * @param props - Where it is, the name its prompt shows, and what stands before the prompt.
@@ -180,11 +215,7 @@ const Composer = ({
   }, [completion]);
 
   const network = context.focus?.network ?? context.draft?.network;
-
-  const offline =
-    network !== undefined && !context.session
-      ? `${network} is not connected: nothing can be said there until it is.`
-      : undefined;
+  const { offline, placeholder } = sayable(context);
 
   /**
    * Tab completes the word at the caret, Shift+Tab backwards, and Escape gives back what
@@ -413,6 +444,7 @@ const Composer = ({
             setText({ text: event.currentTarget.value, timeline });
           }}
           onKeyDown={onKeyDown}
+          placeholder={placeholder}
           ref={input}
           rows={1}
           spellCheck={spellcheck}

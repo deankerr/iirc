@@ -44,7 +44,7 @@ import {
 import { now, sleepUntil } from "./clock.ts";
 import { JournalFailed, Sequence } from "./journal.ts";
 import type { JournalService, NetworkId } from "./journal.ts";
-import { ClientThrew, stepContained } from "./replay.ts";
+import { ClientThrew, lifeAfter, stepContained } from "./replay.ts";
 import type { Folded, InForce } from "./replay.ts";
 import type { Link, LinkEvent, TransportService } from "./transport.ts";
 import type { VaultService } from "./vault.ts";
@@ -96,6 +96,9 @@ export const changedSince = (
 /** Why every Network stops when the Runtime's Scope closes. */
 export const runtimeClosed = "The Runtime closed";
 
+/** Why a Network stops once the Owner removed it. */
+const networkRemoved = "The Network was removed";
+
 /** A `SendSecret` that could not be filled, to be stepped as `Unfilled`. */
 interface Unfilled {
   readonly connection: ConnectionId;
@@ -137,7 +140,12 @@ type Pending =
    */
   | { readonly _tag: "Dropped"; readonly connection: ConnectionId }
   /** The Runtime is closing. */
-  | { readonly _tag: "Stopping" };
+  | { readonly _tag: "Stopping" }
+  /**
+   * The Owner removed the Network. Once its `Removed` is stepped, no Owner input after it
+   * is, as after a `Stopping`, and the Network is drained once its Connections close.
+   */
+  | { readonly _tag: "Remove"; readonly keep: boolean; readonly done: Deferred.Deferred<Stepped> };
 
 /** A Connection the Runtime holds, with the Scope that ends it, and its Outbox. */
 interface Live {
@@ -209,6 +217,8 @@ interface Current<S> {
   readonly state: S;
   readonly table: TimerTable;
   readonly configured: InForce | undefined;
+  /** The sequence of the `Configured` that began this life of the Network. */
+  readonly life: Sequence | undefined;
 }
 
 /** The ports and the Client a driver uses. */
@@ -246,9 +256,9 @@ const linkInput = (connection: ConnectionId, event: LinkEvent, at: Instant): Inp
   }
 };
 
-// Each Pending but an Owner's, a `Stopping`, and a `Dropped`, as the input it becomes.
+// Each Pending but an Owner's, a `Stopping`, a `Remove`, and a `Dropped`, as the input it becomes.
 const toInput = (
-  pending: Exclude<Pending, { _tag: "Owner" | "Configure" | "Stopping" | "Dropped" }>,
+  pending: Exclude<Pending, { _tag: "Owner" | "Configure" | "Stopping" | "Remove" | "Dropped" }>,
   at: Instant
 ): Input => {
   switch (pending._tag) {
@@ -400,6 +410,7 @@ const makeNetwork = <S>(id: NetworkId, folded: Folded<S>) =>
     const network: Network<S> = {
       current: yield* Ref.make<Current<S>>({
         configured: folded.configured,
+        life: folded.life,
         state: folded.state,
         table: folded.table,
       }),
@@ -767,6 +778,14 @@ const drive = <S>(
       Effect.gen(function* () {
         const input = make(yield* now);
         const sequence = yield* journal.append({ _tag: "Input", input, network: id });
+
+        // A life begins with its `Configured` once it is journaled, whether or not the
+        // Client can step it.
+        yield* Ref.update(current, (now) => ({
+          ...now,
+          life: lifeAfter(now.life, input, sequence),
+        }));
+
         const before = yield* Ref.get(current);
         const step = yield* stepContained(client, before.state, input);
         const refused: UnsentLine[] = [];
@@ -776,6 +795,7 @@ const drive = <S>(
             input._tag === "Configured"
               ? { configuration: input.configuration, sequence }
               : before.configured,
+          life: lifeAfter(before.life, input, sequence),
           state: step.state,
           table: timers(before.table, input, step.outputs),
         });
@@ -945,6 +965,23 @@ const drive = <S>(
               checkDrained
             )
           );
+        }
+
+        // Removing ends a Session as stopping does, and the Network then drains.
+        case "Remove": {
+          return Effect.gen(function* () {
+            if (yield* Ref.get(network.stopping)) {
+              return;
+            }
+
+            yield* Ref.set(network.stopping, true);
+
+            const { keep } = pending;
+            const stepped = yield* advance((at) => ({ _tag: "Removed", at, keep }));
+
+            yield* Deferred.succeed(pending.done, stepped);
+            yield* checkDrained;
+          });
         }
 
         case "Link": {
@@ -1118,6 +1155,28 @@ export const tellConfiguration = <S>(
   );
 
 /**
+ * Gives a Network its removal, and waits until the `Removed` is journaled and stepped.
+ * After it, the Network steps no Owner input, and its Connections end as they do when it
+ * stops.
+ * @param network - The Network.
+ * @param keep - Whether its Timelines are kept.
+ * @returns The `Removed`'s sequence and its step's News, or `NetworkStopped`.
+ */
+export const tellRemoved = <S>(
+  network: Network<S>,
+  keep: boolean
+): Effect.Effect<Stepped, NetworkStopped> =>
+  Effect.flatMap(Deferred.make<Stepped>(), (done) =>
+    Effect.raceFirst(
+      Effect.andThen(
+        Queue.offer(network.queue, { _tag: "Remove", done, keep }),
+        Deferred.await(done)
+      ),
+      Deferred.await(network.stopped)
+    )
+  );
+
+/**
  * Stops a running Network gracefully: steps a `Stopping`, which the Client answers with a
  * `QUIT` and a `Hangup` on each Connection, and waits for every Connection's `Closed`,
  * for at most `stopTimeout`. A Network already stopped gets no `Stopping`. The caller
@@ -1163,6 +1222,32 @@ export const halt = <S>(network: Network<S>): Effect.Effect<void> =>
   Effect.flatMap(Ref.get(network.driver), (driver) =>
     driver === undefined ? Effect.void : Fiber.interrupt(driver)
   );
+
+/**
+ * Waits for a removed Network's Connections to close, for at most `stopTimeout`, then
+ * stops it and its driver, which ends any Connection left at once. An Owner input still
+ * waiting fails with `NetworkStopped`.
+ * @param network - The Network, its `Removed` stepped.
+ * @param stopTimeout - How long to wait, in milliseconds.
+ * @returns An Effect that completes once the driver has stopped.
+ */
+export const retire = <S>(network: Network<S>, stopTimeout: number): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const finished = yield* Effect.raceFirst(
+      Effect.as(network.drained.await, true),
+      Effect.as(Effect.ignore(Deferred.await(network.stopped)), true)
+    ).pipe(Effect.timeoutOption(stopTimeout));
+
+    if (finished._tag === "None") {
+      yield* Effect.logWarning("A Connection did not close in time, so it is cut off", {
+        network: network.id,
+        stopTimeout,
+      });
+    }
+
+    yield* stop(network, networkRemoved);
+    yield* halt(network);
+  });
 
 /** One Connection the Runtime holds, and how its queue stands. */
 export interface HeldConnection {

@@ -49,7 +49,6 @@ IRC has no attachments, so the Daemon hosts what the Owner wants to show. It is 
 
 Small things, each independent of the rest.
 
-- **Removing a Network,** not only disabling it. Its Configuration and Credentials go, and whether its Timelines stay readable is the Owner's choice as they remove it.
 - **Closing a Timeline:** a Direct Message, or a Channel the Owner left, out of the Sidebar until something is said there again.
 - **Ignoring a User,** by mask, as Configuration so every Frontend agrees. What they say is still journaled, and is neither shown, counted, nor notified.
 - **CTCP requests of Self's own,** sent with `/ctcp` and `/ping`, each reply shown with its request.

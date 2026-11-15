@@ -472,9 +472,11 @@ describe("the sources", () => {
     key: kind === "Network" ? null : name,
     kind,
     latest: null,
+    life: 1,
     name,
     network: "libera",
     read: null,
+    removed: false,
     unread: nothing,
   });
 
@@ -495,7 +497,12 @@ describe("the sources", () => {
       {
         _tag: "NetworksRead",
         entries: [
-          Schema.decodeSync(NetworkEntry)({ network: "libera", status: { _tag: "Running" } }),
+          Schema.decodeSync(NetworkEntry)({
+            _tag: "Live",
+            life: 1,
+            network: "libera",
+            status: { _tag: "Running" },
+          }),
         ],
       },
       { _tag: "ReadStarted", read: list },
@@ -520,6 +527,7 @@ describe("the sources", () => {
       { _tag: "Requesting", read: status },
       {
         _tag: "StatusRead",
+        life: 1,
         network,
         self: null,
         session: Schema.decodeSync(SessionKnowledge)({ _tag: "Registered", ircd: "x", since: 1 }),

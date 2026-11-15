@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { IntentId } from "@iirc/client";
+import { credentialsOf, IntentId } from "@iirc/client";
 import type {
   Action,
   Client,
@@ -22,6 +22,7 @@ import type { ChannelView, Knowledge } from "@iirc/client/known";
 import { defaultCapacity, defaultPacing } from "@iirc/outbox";
 import type { Pacing } from "@iirc/outbox";
 import { FallbackEncoding, missingDecoders } from "@iirc/protocol/line";
+import type { CredentialName } from "@iirc/protocol/line";
 import {
   Context,
   Duration,
@@ -38,19 +39,22 @@ import {
   Stream,
 } from "effect";
 
-import { Journal, NetworkId } from "./journal.ts";
-import type { JournalFailed, Sequence } from "./journal.ts";
+import { now } from "./clock.ts";
+import { Journal, NetworkId, Sequence } from "./journal.ts";
+import type { JournalFailed } from "./journal.ts";
 import {
   awaitLookup,
   changedSince,
   halt,
   heldConnections,
   NetworkStopped,
+  retire,
   runtimeClosed,
   startNetwork,
   stopGracefully,
   tell,
   tellConfiguration,
+  tellRemoved,
 } from "./network.ts";
 import type {
   ConfiguredAt,
@@ -64,6 +68,7 @@ import { fresh, lookedUp, newsAfter, refold } from "./replay.ts";
 import type { Happened, InForce } from "./replay.ts";
 import { Transport } from "./transport.ts";
 import { Vault } from "./vault.ts";
+import type { VaultFailed } from "./vault.ts";
 
 export { ConfigurationChanged, NetworkStopped } from "./network.ts";
 
@@ -71,11 +76,30 @@ export type { ConfiguredAt, HeldConnection, NetworkStatus } from "./network.ts";
 
 export type { Happened, InForce } from "./replay.ts";
 
-/** No Network by this id has been configured. */
+/** No Network by this id has been configured, or it was removed. */
 export class UnknownNetwork extends Schema.TaggedError<
   UnknownNetwork,
   { readonly brand: unique symbol }
 >()("UnknownNetwork", { network: NetworkId }) {}
+
+/**
+ * A removal named the life of the Network it was made from, and the Network holds another:
+ * `life`, live or kept, or `null` while one added has no life yet. It was removed, or added
+ * again, since. Nothing was journaled.
+ */
+export class LifeChanged extends Schema.TaggedError<
+  LifeChanged,
+  { readonly brand: unique symbol }
+>()("LifeChanged", { life: Schema.NullOr(Sequence), network: NetworkId }) {}
+
+/**
+ * A Network removed under this id keeps its Timelines, so no Network can take the id until
+ * it is removed again without them. Nothing was journaled.
+ */
+export class TimelinesKept extends Schema.TaggedError<
+  TimelinesKept,
+  { readonly brand: unique symbol }
+>()("TimelinesKept", { network: NetworkId }) {}
 
 /**
  * This runtime cannot decode some fallback encodings, so it would read a Journal's bytes
@@ -237,6 +261,33 @@ export const defaultLookTimeout: Duration.Duration = Duration.seconds(35);
 const millisOf = (input: Duration.Input | undefined, fallback: Duration.Duration): number =>
   Duration.toMillis(input === undefined ? fallback : Duration.fromInputUnsafe(input));
 
+/**
+ * A life of a Network: the sequence of the `Configured` that began it, the first after the
+ * Network was created or after a `Removed`. It only increases for an id, and a rebuild
+ * gives the same.
+ */
+export type Life = Sequence;
+
+/** A removal: the sequence of its `Removed`, and the life it ended. */
+export interface Removal {
+  readonly sequence: Sequence;
+  readonly life: Life;
+}
+
+/** What a Network's Client knows now, and the life it belongs to. */
+export interface Known {
+  readonly knowledge: Knowledge;
+  readonly life: Life;
+}
+
+/**
+ * A Network the Runtime holds, with its life: `Live`, configured, and whether it is
+ * running, or `Kept`, removed with its Timelines kept.
+ */
+export type Living =
+  | { readonly _tag: "Live"; readonly status: NetworkStatus; readonly life: Life }
+  | { readonly _tag: "Kept"; readonly life: Life };
+
 /** What the Runtime offers. */
 export interface RuntimeService {
   /**
@@ -244,13 +295,33 @@ export interface RuntimeService {
    * the Network. With `ifSequence`, the sequence of the `Configured` it was made from, or
    * `0` for none, it is journaled only if that is still the one in force when its turn
    * comes, and is otherwise `ConfigurationChanged`, with nothing journaled and no Network
-   * added.
+   * added. An id whose removed Network keeps its Timelines is `TimelinesKept`.
    */
   readonly configure: (
     network: NetworkId,
     configuration: NetworkConfiguration,
     ifSequence?: ConfiguredAt
-  ) => Effect.Effect<Sequence, NetworkStopped | ConfigurationChanged>;
+  ) => Effect.Effect<Sequence, NetworkStopped | ConfigurationChanged | TimelinesKept>;
+  /**
+   * Journals a `Removed`, and waits until it is stepped, which ends a Session with a
+   * `QUIT`, then for the Network's Connections to close, within `stopTimeout`, and stops
+   * it. The Network is then unknown, and the Credentials its Configuration names are
+   * forgotten, but those another Network's names. A Network removed with its Timelines
+   * kept can be removed again, which journals another `Removed`, to drop them, and fails
+   * with `JournalFailed` when it cannot be.
+   */
+  readonly remove: (
+    network: NetworkId,
+    removal: { readonly keep: boolean; readonly life?: Life | undefined }
+  ) => Effect.Effect<
+    Removal,
+    UnknownNetwork | LifeChanged | NetworkStopped | JournalFailed | VaultFailed
+  >;
+  /**
+   * Every removed Network whose Timelines are kept, which no Network can take the id of,
+   * with the life that was removed.
+   */
+  readonly kept: Effect.Effect<ReadonlyMap<NetworkId, Sequence>>;
   /** The Configuration in force, and the sequence of the `Configured` that set it. */
   readonly configuration: (network: NetworkId) => Effect.Effect<InForce, UnknownNetwork>;
   /**
@@ -313,7 +384,7 @@ export interface RuntimeService {
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
-  readonly known: (network: NetworkId) => Effect.Effect<Knowledge, UnknownNetwork>;
+  readonly known: (network: NetworkId) => Effect.Effect<Known, UnknownNetwork>;
   /**
    * What the Network's Client knows now of one Channel, by its name as the Connection's
    * casemapping folds it, or `None` when it holds no such Channel. It reads that Channel
@@ -328,6 +399,12 @@ export interface RuntimeService {
   /** Every Network, in the order it was added, with whether it is running. */
   readonly networks: Effect.Effect<ReadonlyMap<NetworkId, NetworkStatus>>;
   /**
+   * Every Network held, live in the order it was added and then each kept, with its life,
+   * read together: a Network removed with its Timelines kept is always one or the other,
+   * never neither, however a removal falls between the reads.
+   */
+  readonly lives: Effect.Effect<ReadonlyMap<NetworkId, Living>>;
+  /**
    * The News of every Network, derived from the Journal: from just after `after`, or from
    * the start, then live. Each element is one step's News, with its Network and the
    * sequence of its Input, so a reader that resumes after the last sequence it has
@@ -340,6 +417,15 @@ export interface RuntimeService {
 
 /** The Runtime. */
 export class Runtime extends Context.Service<Runtime, RuntimeService>()("@iirc/runtime/Runtime") {}
+
+// A map without one key.
+const without = <K, V>(map: ReadonlyMap<K, V>, key: K): ReadonlyMap<K, V> => {
+  const next = new Map(map);
+
+  next.delete(key);
+
+  return next;
+};
 
 // 128 bits from Effect's Random, as hex. An intent id is unique, not secret.
 const intentId = Effect.map(
@@ -384,7 +470,7 @@ export const makeRuntime = <S>(
     const lookTimeout = millisOf(options.lookTimeout, defaultLookTimeout);
     const held = yield* Ref.make<ReadonlyMap<NetworkId, Network<S>>>(new Map());
     // Admission and shutdown take the same permit, so a Network is either added before
-    // shutdown begins, and stopped by it, or refused.
+    // shutdown is done, and stopped by it, or refused.
     const adding = yield* Semaphore.make(1);
     const closed = yield* Ref.make(false);
     // Every driver lives here. Shutdown closes it under the permit, whatever order the
@@ -400,27 +486,65 @@ export const makeRuntime = <S>(
     // in a fiber of its own. Making this fiber interruptible instead would end the waiting
     // at once whenever the fiber closing the Runtime had itself been interrupted, which is
     // how a signal stops a process: no `Stopping` would be stepped, and no `QUIT` said.
-    const stopAll = Effect.gen(function* () {
-      yield* Ref.set(closed, true);
-
-      const stopping = yield* Effect.forkDetach(
-        Effect.forEach(
-          (yield* Ref.get(held)).values(),
-          (network) =>
-            Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
-          { concurrency: "unbounded", discard: true }
-        )
+    const stopEach = (networks: Iterable<Network<S>>) =>
+      Effect.flatMap(
+        Effect.forkDetach(
+          Effect.forEach(
+            networks,
+            (network) =>
+              Effect.andThen(stopGracefully(network, ports.timing.stopTimeout), halt(network)),
+            { concurrency: "unbounded", discard: true }
+          )
+        ),
+        Fiber.await
       );
 
-      yield* Fiber.await(stopping);
-      yield* Scope.close(drivers, Exit.void);
+    // Shutdown refuses what comes after it, and stops the Networks held before it waits on
+    // what was admitted already, such as a removal waiting on a `Configured` whose driver
+    // only stopping ends. Under the permit, it then stops any Network an admission in
+    // flight added, and closes every driver.
+    const stopAll = Effect.gen(function* () {
+      yield* Ref.set(closed, true);
+      yield* stopEach((yield* Ref.get(held)).values());
+      yield* adding.withPermit(
+        Effect.gen(function* () {
+          yield* stopEach((yield* Ref.get(held)).values());
+          yield* Scope.close(drivers, Exit.void);
+        })
+      );
     });
 
-    yield* Effect.addFinalizer(() => adding.withPermit(stopAll));
+    yield* Effect.addFinalizer(() => stopAll);
+
+    // Every removed Network whose Timelines are kept, which holds its id.
+    const kept = yield* Ref.make<ReadonlyMap<NetworkId, Life>>(new Map());
+
+    // The Configurations of removals whose Credentials are not yet known to be forgotten,
+    // by Network, folded from the Journal, so a removal cut short by a crash or a Vault that
+    // failed is finished on the next start.
+    const unforgotten = yield* Ref.make<ReadonlyMap<NetworkId, readonly NetworkConfiguration[]>>(
+      new Map()
+    );
 
     const folded = yield* refold(client, ports.journal);
 
     for (const [id, network] of folded) {
+      if (network.unforgotten.length > 0) {
+        yield* Ref.update(unforgotten, (all) => new Map(all).set(id, network.unforgotten));
+      }
+
+      if (network.removed !== undefined) {
+        if (network.removed.keep) {
+          const { life } = network;
+
+          if (life !== undefined) {
+            yield* Ref.update(kept, (all) => new Map(all).set(id, life));
+          }
+        }
+
+        continue;
+      }
+
       const started = yield* startNetwork(ports, id, network, true).pipe(Scope.provide(drivers));
 
       yield* Ref.update(held, (networks) => new Map(networks).set(id, started));
@@ -436,36 +560,237 @@ export const makeRuntime = <S>(
       });
 
     // A Network that does not exist is added only by a `configure` made from none, so a
-    // refused precondition adds nothing.
+    // refused precondition adds nothing. The caller holds the permit.
     const findOrAdd = (id: NetworkId, ifSequence: ConfiguredAt | undefined) =>
-      adding.withPermit(
-        Effect.flatMap(
-          Effect.all([Ref.get(held), Ref.get(closed)]),
-          ([networks, over]): Effect.Effect<Network<S>, NetworkStopped | ConfigurationChanged> => {
-            const network = networks.get(id);
+      Effect.flatMap(
+        Effect.all([Ref.get(held), Ref.get(closed), Ref.get(kept)]),
+        ([networks, over, keeping]): Effect.Effect<
+          Network<S>,
+          NetworkStopped | ConfigurationChanged | TimelinesKept
+        > => {
+          const network = networks.get(id);
 
-            if (network !== undefined) {
-              return Effect.succeed(network);
-            }
-
-            if (over) {
-              return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
-            }
-
-            const changed = changedSince(id, undefined, ifSequence);
-
-            if (changed !== undefined) {
-              return Effect.fail(changed);
-            }
-
-            return startNetwork(ports, id, fresh(client), false).pipe(
-              Scope.provide(drivers),
-              Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
-              Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
-            );
+          if (network !== undefined) {
+            return Effect.succeed(network);
           }
+
+          if (over) {
+            return Effect.fail(new NetworkStopped({ network: id, reason: runtimeClosed }));
+          }
+
+          if (keeping.has(id)) {
+            return Effect.fail(new TimelinesKept({ network: id }));
+          }
+
+          const changed = changedSince(id, undefined, ifSequence);
+
+          if (changed !== undefined) {
+            return Effect.fail(changed);
+          }
+
+          return startNetwork(ports, id, fresh(client), false).pipe(
+            Scope.provide(drivers),
+            Effect.tap((added) => Ref.update(held, (all) => new Map(all).set(id, added))),
+            Effect.tap(() => Effect.logInfo("Added a Network", { network: id }))
+          );
+        }
+      );
+
+    // Held by a `configure` until its `Configured` is stepped, and by forgetting a removed
+    // Network's Credentials, so no Configuration changes while that checks which a Network
+    // still names. Taken after `adding`, never before it.
+    const configuring = yield* Semaphore.make(1);
+
+    // Forgets the Credentials the Network's removals named, but those a Network still held
+    // names, and journals that it did.
+    const forgetCredentials = (id: NetworkId) =>
+      configuring.withPermit(
+        Effect.gen(function* () {
+          const configurations = (yield* Ref.get(unforgotten)).get(id);
+
+          if (configurations === undefined) {
+            return;
+          }
+
+          const still = new Set<CredentialName>();
+
+          for (const network of (yield* Ref.get(held)).values()) {
+            const { configured } = yield* Ref.get(network.current);
+
+            for (const name of configured === undefined
+              ? []
+              : credentialsOf(configured.configuration)) {
+              still.add(name);
+            }
+          }
+
+          const named = new Set(configurations.flatMap((each) => [...credentialsOf(each)]));
+          const forgotten = [...named].filter((each) => !still.has(each)).toSorted();
+
+          for (const name of forgotten) {
+            yield* ports.vault.forget(name);
+            yield* Effect.logInfo("Forgot a Credential", { credential: name, network: id });
+          }
+
+          yield* ports.journal.append({ _tag: "Forgotten", credentials: forgotten, network: id });
+          yield* Ref.update(unforgotten, (all) => without(all, id));
+        })
+      );
+
+    // The sequence of the `Removed` that ended the Network's last life in the Journal, if
+    // one did: a `Removed` after its last `Configured`.
+    const removedAt = (id: NetworkId) =>
+      ports.journal.read({ network: id }).pipe(
+        Stream.runFold(
+          () => ({ configured: 0, removed: 0 }),
+          (last, { record, sequence }) => {
+            if (record._tag !== "Input") {
+              return last;
+            }
+
+            if (record.input._tag === "Configured") {
+              return { ...last, configured: sequence };
+            }
+
+            return record.input._tag === "Removed" ? { ...last, removed: sequence } : last;
+          }
+        ),
+        Effect.map(({ configured, removed }) =>
+          removed > configured ? Sequence.make(removed) : undefined
         )
       );
+
+    const appendRemoved = (id: NetworkId, keep: boolean) =>
+      Effect.gen(function* () {
+        const at = yield* now;
+
+        return yield* ports.journal.append({
+          _tag: "Input",
+          input: { _tag: "Removed", at, keep },
+          network: id,
+        });
+      });
+
+    // A running Network is told, and its driver steps the `Removed`. One stopped, before
+    // it was told or by the step itself, has its `Removed` journaled here, unless the
+    // Journal already holds it, and a restart folds it as any other. Either way it is then
+    // held no more, drained within the bound, and its Credentials forgotten, by the
+    // Configuration in force when it was removed.
+    const removeHeld = (id: NetworkId, network: Network<S>, keep: boolean) =>
+      Effect.gen(function* () {
+        const running = (yield* Ref.get(network.status))._tag === "Running";
+
+        const told = running
+          ? yield* tellRemoved(network, keep).pipe(
+              Effect.map(({ sequence }) => sequence),
+              Effect.catchTag("NetworkStopped", () => Effect.void)
+            )
+          : undefined;
+
+        const sequence = told ?? (yield* removedAt(id)) ?? (yield* appendRemoved(id, keep));
+        const current = yield* Ref.get(network.current);
+        const { configured } = current;
+        // One removed before its first `Configured` was stepped has a life of its own.
+        const life = current.life ?? sequence;
+
+        // Kept before it is held no more, so `lives`, which reads what is held first, finds
+        // it as one or the other.
+        if (keep) {
+          yield* Ref.update(kept, (all) => new Map(all).set(id, life));
+        }
+
+        yield* Ref.update(held, (all) => without(all, id));
+
+        if (configured !== undefined) {
+          yield* Ref.update(unforgotten, (all) =>
+            new Map(all).set(id, [...(all.get(id) ?? []), configured.configuration])
+          );
+        }
+
+        yield* Effect.logInfo("Removed a Network", { keep, network: id });
+        yield* retire(network, ports.timing.stopTimeout);
+        yield* forgetCredentials(id);
+
+        return { life, sequence };
+      });
+
+    // A removed Network whose Timelines are kept has no driver, so its `Removed` is
+    // journaled alone, and folded as any input is on restart.
+    const removeKept = (id: NetworkId, keep: boolean, life: Life) =>
+      Effect.gen(function* () {
+        const sequence = yield* appendRemoved(id, keep);
+
+        if (!keep) {
+          yield* Ref.update(kept, (all) => without(all, id));
+          yield* Effect.logInfo("Dropped a removed Network's Timelines", { network: id });
+        }
+
+        yield* forgetCredentials(id);
+
+        return { life, sequence };
+      });
+
+    // Once admitted, a removal runs to its end in a fiber of its own, holding the permit
+    // that adds a Network, so a caller that goes away never leaves one journaled and half
+    // done, and no `configure` takes the id or changes a Configuration meanwhile.
+    // The life a removal was made from, when it names one, is checked in the same turn that
+    // removes, so no other removal or `configure` comes between.
+    const remove = (id: NetworkId, keep: boolean, from: Life | undefined) =>
+      Effect.flatMap(
+        Effect.forkDetach(
+          adding.withPermit(
+            Effect.gen(function* () {
+              if (yield* Ref.get(closed)) {
+                return yield* new NetworkStopped({ network: id, reason: runtimeClosed });
+              }
+
+              const network = (yield* Ref.get(held)).get(id);
+
+              if (network !== undefined) {
+                const { life } = yield* Ref.get(network.current);
+
+                if (from !== undefined && from !== life) {
+                  return yield* new LifeChanged({ life: life ?? null, network: id });
+                }
+
+                return yield* removeHeld(id, network, keep);
+              }
+
+              const life = (yield* Ref.get(kept)).get(id);
+
+              if (life === undefined) {
+                return yield* new UnknownNetwork({ network: id });
+              }
+
+              if (from !== undefined && from !== life) {
+                return yield* new LifeChanged({ life, network: id });
+              }
+
+              return yield* removeKept(id, keep, life);
+            })
+          )
+        ),
+        Fiber.join
+      );
+
+    // A removal cut short before its Credentials were forgotten is finished now, once
+    // every Network is held, so those a Network names are spared.
+    for (const id of (yield* Ref.get(unforgotten)).keys()) {
+      yield* adding.withPermit(forgetCredentials(id)).pipe(
+        Effect.catchTags({
+          JournalFailed: (error) =>
+            Effect.logWarning("A removed Network's Credentials were not forgotten", {
+              network: id,
+              reason: error.reason,
+            }),
+          VaultFailed: (error) =>
+            Effect.logWarning("A removed Network's Credentials were not forgotten", {
+              network: id,
+              reason: error.reason,
+            }),
+        })
+      );
+    }
 
     const service: RuntimeService = {
       act: (id, acting) =>
@@ -500,11 +825,23 @@ export const makeRuntime = <S>(
               : Effect.succeed(configured)
           )
         ),
+      // `configuring` is held until the `Configured` is stepped, refused, or its driver
+      // stops, so a removal's check of which Credentials a Network still names never races
+      // a change of Configuration. It is held in a fiber of its own, which the caller only
+      // waits on, so a caller that goes away while its `Configured` is queued never lets go
+      // of it early.
       configure: (id, configuration, ifSequence) =>
-        Effect.flatMap(findOrAdd(id, ifSequence), (network) =>
-          Effect.map(
-            tellConfiguration(network, configuration, ifSequence),
-            ({ sequence }) => sequence
+        Effect.flatMap(adding.withPermit(findOrAdd(id, ifSequence)), (network) =>
+          Effect.flatMap(
+            Effect.forkDetach(
+              configuring.withPermit(
+                Effect.map(
+                  tellConfiguration(network, configuration, ifSequence),
+                  ({ sequence }) => sequence
+                )
+              )
+            ),
+            Fiber.join
           )
         ),
       inspect: (id) =>
@@ -521,11 +858,40 @@ export const makeRuntime = <S>(
             timers: status._tag === "Running" ? table : new Map(),
           };
         }),
+      kept: Ref.get(kept),
+      // Read from one state of the Network, so what is known and its life go together.
       known: (id) =>
-        Effect.map(
+        Effect.flatMap(
           Effect.flatMap(find(id), (network) => Ref.get(network.current)),
-          ({ state }) => client.known(state)
+          ({ life, state }) =>
+            life === undefined
+              ? Effect.fail(new UnknownNetwork({ network: id }))
+              : Effect.succeed({ knowledge: client.known(state), life })
         ),
+      // A Network added whose first `Configured` is not yet stepped has no life yet, and is
+      // left out, as `configuration` leaves it out. What is held is read before what is
+      // kept, and a removal keeps a Network before it lets go of it, so one removed between
+      // the two reads is found kept, or in both, where it is kept, and never in neither.
+      lives: Effect.gen(function* () {
+        const networks = yield* Ref.get(held);
+
+        const live = yield* Effect.forEach([...networks.values()], (network) =>
+          Effect.map(
+            Effect.all([Ref.get(network.status), Ref.get(network.current)]),
+            ([status, { life }]) =>
+              life === undefined ? [] : [[network.id, { _tag: "Live", life, status }] as const]
+          )
+        );
+
+        const keeping = yield* Ref.get(kept);
+        const all = new Map<NetworkId, Living>(live.flat());
+
+        for (const [id, life] of keeping) {
+          all.set(id, { _tag: "Kept", life });
+        }
+
+        return all;
+      }),
       look: (id, looking) =>
         Effect.gen(function* () {
           const network = yield* find(id);
@@ -574,6 +940,7 @@ export const makeRuntime = <S>(
             ({ sequence }) => sequence
           )
         ),
+      remove: (id, { keep, life }) => remove(id, keep, life),
       retry: (id) =>
         Effect.flatMap(find(id), (network) =>
           Effect.map(

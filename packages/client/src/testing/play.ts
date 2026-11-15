@@ -453,6 +453,10 @@ const ownerInput = <State>(at: Driver<State>, owner: Owner): Input => {
       return { _tag: "Retry", at: at.now };
     }
 
+    case "Remove": {
+      return { _tag: "Removed", at: at.now, keep: owner.keep };
+    }
+
     case "Read": {
       return { _tag: "Read", at: at.now, read: Instant.make(owner.read), target: owner.target };
     }

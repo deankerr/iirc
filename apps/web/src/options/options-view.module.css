@@ -9,12 +9,22 @@
   min-height: 0;
 }
 
-/* The filter, under the Pane's status bar. */
+/* The filter, under the Pane's status bar, and removing each Network beside it. */
 .header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: var(--space-2) var(--space-4);
   padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.networks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .filter {

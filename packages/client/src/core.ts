@@ -31,7 +31,7 @@ import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
 import { interpret } from "./lines.ts";
-import { endLookups, expireLookup, look, unsentLookups } from "./lookups.ts";
+import { endLookups, expireLookup, look, removedLookups, unsentLookups } from "./lookups.ts";
 import { read } from "./markers.ts";
 import { modesQueryOver } from "./modes-query.ts";
 import type { EndReason } from "./news.ts";
@@ -143,6 +143,22 @@ const disable = (run: Run): void => {
       network satisfies never;
     }
   }
+};
+
+// The Owner removed the Network: a Session ends as disabling ends one, with a `QUIT`, and
+// nothing is dialled again, since the Configuration in force is no longer enabled. Each
+// Lookup still waiting reports what it has in this step, where the Network's life ends.
+const removed = (run: Run, keep: boolean): void => {
+  const { configuration } = run.state;
+
+  removedLookups(run);
+
+  if (configuration !== undefined) {
+    run.state = { ...run.state, configuration: { ...configuration, enabled: false } };
+  }
+
+  disable(run);
+  run.news.push({ _tag: "NetworkRemoved", keep });
 };
 
 const configure = (run: Run, configuration: NetworkConfiguration): void => {
@@ -747,14 +763,10 @@ const transport = (run: Run, input: FromTransport): void => {
   }
 };
 
-const dispatch = (run: Run, input: Input): void => {
-  // The gate shuts whatever else has happened, so a `Configured` after it dials nothing.
-  if (input._tag === "Stopping") {
-    stopping(run);
+/** Every input but stopping and removal, which are taken whatever came before them. */
+type Routine = Exclude<Input, { readonly _tag: "Stopping" | "Removed" }>;
 
-    return;
-  }
-
+const routine = (run: Run, input: Routine): void => {
   // Every Lookup gets its one result, so one before any Configuration is refused, as with
   // no Session, where anything else is ignored.
   if (input._tag === "Look" && run.state.configuration === undefined) {
@@ -832,6 +844,23 @@ const dispatch = (run: Run, input: Input): void => {
       input satisfies never;
     }
   }
+};
+
+const dispatch = (run: Run, input: Input): void => {
+  // The gate shuts whatever else has happened, so a `Configured` after it dials nothing.
+  if (input._tag === "Stopping") {
+    stopping(run);
+
+    return;
+  }
+
+  if (input._tag === "Removed") {
+    removed(run, input.keep);
+
+    return;
+  }
+
+  routine(run, input);
 };
 
 /**

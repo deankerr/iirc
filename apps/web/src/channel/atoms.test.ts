@@ -46,9 +46,11 @@ const listed = (
   key: kind === "Network" ? null : name.toLowerCase(),
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: none,
 });
 
@@ -96,7 +98,15 @@ const changed = (
   sequence: number,
   items: readonly (typeof TimelineItem.Encoded)[]
 ): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ gaps: [], items, merged: [], sequence, timelines: [] }),
+  data: JSON.stringify({
+    dropped: [],
+    gaps: [],
+    items,
+    merged: [],
+    removals: [],
+    sequence,
+    timelines: [],
+  }),
   event: "changed",
   id: `1.${sequence}`,
 });

@@ -45,9 +45,11 @@ const listed = (
   key: kind === "Network" ? null : name,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   ...more,
 });
@@ -387,7 +389,15 @@ const fold = (
     { gaps: [], items: [...(held?.items ?? []), ...items], timeline },
   ]);
   fake.send({
-    data: JSON.stringify({ gaps: [], items, merged: [], sequence, timelines: [timeline] }),
+    data: JSON.stringify({
+      dropped: [],
+      gaps: [],
+      items,
+      merged: [],
+      removals: [],
+      sequence,
+      timelines: [timeline],
+    }),
     event: "changed",
     id: `1.${sequence}`,
   });

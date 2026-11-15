@@ -113,6 +113,12 @@ const failedWith = (tag: string, network: NetworkId): Outcome => {
       return notDone("The Daemon could not read this as a Configuration.");
     }
 
+    case "TimelinesKept": {
+      return notDone(
+        `${network} was removed with its Timelines kept, so no Network can take its name until they are dropped. /network remove ${network} drops them.`
+      );
+    }
+
     case "ConfigurationChanged": {
       return notDone(
         `${network}'s Configuration changed while this was being made, twice, so nothing was changed. Try again.`
@@ -168,7 +174,8 @@ export const refresh = (registry: AtomRegistry.AtomRegistry) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const entries = yield* client.networks.list();
-    const networks = entries.map((entry) => entry.network);
+    // A Network removed with its Timelines kept has no Configuration to read.
+    const networks = entries.flatMap((entry) => (entry._tag === "Live" ? [entry.network] : []));
 
     happened(registry, { _tag: "Listed", networks });
 

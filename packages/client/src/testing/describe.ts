@@ -455,6 +455,10 @@ export const describeNews = (news: News, now: Instant): string => {
       return `refolded ${news.casemapping}`;
     }
 
+    case "NetworkRemoved": {
+      return words(["network-removed", ...(news.keep ? ["keep"] : [])]);
+    }
+
     case "ReadMarker": {
       return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
     }

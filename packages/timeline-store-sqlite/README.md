@@ -13,7 +13,7 @@ Both open the file, creating it when it does not exist, and close it when their 
 
 ## The file
 
-One row of how far it has folded, four tables, each with the indexes its reads need, and a full-text index of what Messages say, in a file of its own.
+One row of how far it has folded, six tables, each with the indexes its reads need, and a full-text index of what Messages say, in a file of its own.
 
 ```sql
 CREATE TABLE folded (only INTEGER PRIMARY KEY CHECK (only = 1), version INTEGER, through INTEGER,
@@ -21,7 +21,8 @@ CREATE TABLE folded (only INTEGER PRIMARY KEY CHECK (only = 1), version INTEGER,
 CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NOT NULL,
   name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER, head INTEGER,
   unread_highlights INTEGER NOT NULL, unread_direct INTEGER NOT NULL,
-  unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL) STRICT;
+  unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL,
+  removed INTEGER NOT NULL, life INTEGER NOT NULL) STRICT;
 CREATE TABLE items (id INTEGER PRIMARY KEY, timeline TEXT NOT NULL, cursor TEXT NOT NULL,
   network TEXT NOT NULL, step INTEGER NOT NULL, message_id TEXT, intent TEXT,
   content TEXT NOT NULL, changed INTEGER NOT NULL, level TEXT, sender TEXT,
@@ -30,9 +31,13 @@ CREATE TABLE tombstones (id TEXT PRIMARY KEY, network TEXT NOT NULL, into_id TEX
   changed INTEGER NOT NULL) STRICT;
 CREATE TABLE gaps (network TEXT NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT,
   changed INTEGER NOT NULL, PRIMARY KEY (network, from_cursor)) STRICT;
+CREATE TABLE dropped (id TEXT PRIMARY KEY, network TEXT NOT NULL, changed INTEGER NOT NULL,
+  life INTEGER NOT NULL) STRICT;
+CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed INTEGER NOT NULL,
+  life INTEGER NOT NULL) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 4;  -- the layout's version
+PRAGMA user_version = 7;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.
@@ -53,9 +58,9 @@ PRAGMA user_version = 4;  -- the layout's version
 | `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and the primary key of `items` for each one's latest position. Each row holds its Read Marker and unread counts |
 | counting a level again, after a Read Marker moves or a merge | `items_by_level` on `(timeline, level, cursor)` where there is a level, above `cursorsAfter` of the Read Marker, `LIMIT unreadCap + 1`, from the index alone |
 | `gaps`, and each run of `collapsedGaps` | the primary key `(network, from_cursor)`, bounded below. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended, so one seek finds the last Gap that began strictly before the range's start, which is kept if it reaches the start, and every Gap that began at or after the start is in. Every other condition is on the key, except for a page read before a cursor, which keeps only the Gaps that ended before it: that run is bounded above on the key too, by the cursor, since a Gap that ended before it began before it, and only then filtered on `to_cursor` for which Gaps are the page's, so it never reads the Gaps after the cursor. A run is one statement that counts its Gaps from the index alone, and takes the first's start and the last's end from either end of the key's range |
-| `changedAfter` | `timelines_by_changed`, `items_by_changed`, `tombstones_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |
+| `changedAfter` | `timelines_by_changed`, `items_by_changed`, `tombstones_by_changed`, `dropped_by_changed`, `removals_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |
 | where a page of `changedAfter` ends | the same indexes: the next sequence by one seek each, and how much it changed by a count that stops at what the page has left, so a page costs at most `limit + 1` of each however big a step is |
-| an overflowed step's Timelines | `timelines_by_changed` and `tombstones_by_changed`, up to the limit, and `items_by_changed` one seek from each Timeline to the next, never reading its items |
+| an overflowed step's Timelines | `timelines_by_changed`, `tombstones_by_changed`, and `dropped_by_changed`, up to the limit, and `items_by_changed` one seek from each Timeline to the next, never reading its items |
 | a tombstone moved on by a later merge | `tombstones_by_into` |
 | `search` | `search`, by the phrase, and each Message it finds by its item's `id`, then ordered newest first, only the page kept, below |
 
@@ -66,7 +71,7 @@ PRAGMA user_version = 4;  -- the layout's version
 - **The store folds the text, not SQLite.** The tokenizer is `case_sensitive 1`, which keeps text as it is given, and both the text and the search are folded by `foldForSearch` first, from a table pinned to one Unicode version. SQLite's own folding, `case_sensitive 0`, follows tables of its own that differ from that one beyond ASCII, so the memory adapter and this one would find different things. For the same reason `remove_diacritics`, which the trigram tokenizer offers only with SQLite's folding, is not used: diacritics are kept, as the port says.
 - **A file folded another way is folded again.** When the store opens a file whose `folding` is not `searchFolding`, as after the table was generated for another Unicode version, it folds again in the transaction that opens it: it empties the index, folds each item's sender and text again from its content, a thousand items at a time, and records the new folding, with a warning in the log. So no index ever holds text folded two ways, and the Journal need not be folded again.
 - **No text is ever part of a query.** The search's text is bound as a parameter, as one FTS5 string, a phrase, inside double quotes with each double quote doubled, so `"`, `*`, `NEAR`, `AND`, `OR`, `NOT`, `^`, `+`, `-`, parentheses, and a column filter such as `text:` are characters to find, never operators. NUL and line breaks cannot reach it, since `SearchText` holds neither.
-- **It is kept with every `apply`, in its transaction.** `Added` adds a row for each Message kept, under the `id` it was given, and nothing for one dropped as a duplicate. `Confirmed` replaces the row of one of ours whose confirmed text differs from ours, since that is what it is found by from then on. `Unsent` and `Rejected` change no text, so nothing. `Merged` moves items in place, `UPDATE OR IGNORE`, so each moved keeps its row, and each the merge drops, by message id or position, leaves the index before it leaves `items`. `reset` empties it with FTS5's `delete-all`. A store of an older layout is made again, which folds the Journal into it from the start.
+- **It is kept with every `apply`, in its transaction.** `Added` adds a row for each Message kept, under the `id` it was given, and nothing for one dropped as a duplicate. `Confirmed` replaces the row of one of ours whose confirmed text differs from ours, since that is what it is found by from then on. `Unsent` and `Rejected` change no text, so nothing. `Removed` without `keep` takes each of the Network's Messages out of it before their items go, found by `items_by_step`. `Merged` moves items in place, `UPDATE OR IGNORE`, so each moved keeps its row, and each the merge drops, by message id or position, leaves the index before it leaves `items`. `reset` empties it with FTS5's `delete-all`. A store of an older layout is made again, which folds the Journal into it from the start.
 - **What a search costs.** One statement: the index gives every Message holding the phrase, each is found in `items` by its `id`, the filters are checked on that row, a merged id found through `tombstones` once, and the matches are ordered by `(cursor, timeline)` with only `LIMIT` of them kept, the page and one more. `CROSS JOIN` keeps the index first, so a search kept to one Timeline never becomes a walk of its items. So a search costs one step for each Message that holds the phrase, and reads nothing else: measured with 100,000 Messages that hold it, some 60 to 75 ms, and 2 ms for a phrase that one holds. No ranks or ordered copies are kept to make the common phrase cheaper, since a page of a search is a read the Owner asks for, not one made on every change.
 
 ## Counting Gaps

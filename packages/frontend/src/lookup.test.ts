@@ -64,9 +64,11 @@ const described = (
   key,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: nothing,
 });
 
@@ -86,6 +88,8 @@ const timelines = [
  */
 const world = (open: string | undefined): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    _tag: "Live",
+    life: 1,
     network: "libera",
     status: { _tag: "Running" },
   });
@@ -113,6 +117,7 @@ const world = (open: string | undefined): Timelines => {
     { _tag: "Requesting", read: status },
     {
       _tag: "StatusRead",
+      life: 1,
       network,
       self: null,
       session: Schema.decodeSync(SessionKnowledge)({

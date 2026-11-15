@@ -22,6 +22,7 @@ import { DraftView } from "../timelines/draft-view.tsx";
 import { TimelineView } from "../timelines/timeline-view.tsx";
 import { alone, focusedId, focusPane, paneNumber } from "./atoms.ts";
 import { useMeasured } from "./measure.ts";
+import { RemovedNote } from "./removed-note.tsx";
 
 import styles from "./pane.module.css";
 
@@ -87,6 +88,7 @@ export const Pane = ({ pane }: { readonly pane: PaneOf<PaneView> }) => {
       ref={element}
     >
       {pane.view.main._tag === "Timeline" ? <TimelineHeader pane={pane.id} /> : null}
+      {pane.view.main._tag === "Timeline" ? <RemovedNote pane={pane.id} /> : null}
       <div className={styles.body}>
         <div className={styles.main}>{main(pane)}</div>
         <MembersPanel pane={pane.id} />

@@ -1,10 +1,10 @@
 /**
  * The command palette, as data: what it lists for a query, ranked, and what choosing an
  * entry asks for. It lists the commands the registry can run here, every Timeline, every
- * theme, every font, and the options, or the themes alone, as `/theme` opens it, and adds no
- * action of its own: choosing gives the same intents the composer's `/commands` do. A query of
- * `font` and a family's name offers that family too. Which entries were chosen recently is
- * remembered, at most `recentCap`.
+ * Network to remove, every theme, every font, and the options, or the themes alone, as
+ * `/theme` opens it, and adds no action of its own: choosing gives the same intents the
+ * composer's `/commands` do. A query of `font` and a family's name offers that family too.
+ * Which entries were chosen recently is remembered, at most `recentCap`.
  *
  * @packageDocumentation
  */
@@ -46,6 +46,18 @@ export type Entry =
       readonly name: string;
     }
   | {
+      /**
+       * Removing a Network, as `/network remove <id>` asks, or, removed with its Timelines
+       * kept, dropping them.
+       */
+      readonly _tag: "Network";
+      readonly key: string;
+      readonly network: NetworkId;
+      /** Its Timelines are kept from its removal, so choosing it drops them. */
+      readonly removed: boolean;
+      readonly name: string;
+    }
+  | {
       readonly _tag: "Option";
       readonly key: string;
       readonly name: string;
@@ -72,7 +84,7 @@ export type Entry =
 
 /** A section of the palette, with its entries in order. */
 export interface Section {
-  readonly title: "Recent" | "Commands" | "Timelines" | "Themes" | "Fonts" | "Options";
+  readonly title: "Recent" | "Commands" | "Timelines" | "Networks" | "Themes" | "Fonts" | "Options";
   readonly entries: readonly Entry[];
 }
 
@@ -329,6 +341,16 @@ export const fontDescription = (font: FontShown) => {
 };
 
 /**
+ * What choosing a Network's entry does, in a few words, which a query matches too.
+ * @param entry - The Network's entry.
+ * @returns The words.
+ */
+export const networkDescription = (entry: { readonly removed: boolean }) =>
+  entry.removed
+    ? "network: drop the Timelines kept since it was removed, which frees its name"
+    : "network: remove it, asking first whether its Timelines stay readable";
+
+/**
  * What an entry is matched by: its names, best first, and its description.
  * @param entry - The entry.
  * @returns Its names and description.
@@ -352,6 +374,10 @@ const matchedBy = (entry: Entry): Matched => {
 
     case "Timeline": {
       return { description: "", names: [entry.name, `${entry.network} ${entry.name}`] };
+    }
+
+    case "Network": {
+      return { description: networkDescription(entry), names: [entry.name] };
     }
 
     case "Option": {
@@ -420,9 +446,9 @@ const fontEntry = (font: FontShown, current: FontShown): Entry => ({
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; every theme, to set the option given, but `system` only as `theme`,
- * since it follows the device; every font, and the family the query names, if any; and
- * every option read.
+ * sidebar's order; every Network, to remove it; every theme, to set the option given, but
+ * `system` only as `theme`, since it follows the device; every font, and the family the
+ * query names, if any; and every option read.
  * @param listing - What the palette lists from.
  * @param family - The family the query names, if any.
  * @param option - The option choosing a theme sets.
@@ -459,6 +485,16 @@ const everything = (
       }))
     ),
     title: "Timelines",
+  },
+  {
+    entries: listing.sidebar.map((network): Entry => ({
+      _tag: "Network",
+      key: `network:${network.network}`,
+      name: `${network.removed ? "drop" : "remove"} ${network.network}`,
+      network: network.network,
+      removed: network.removed,
+    })),
+    title: "Networks",
   },
   {
     entries: listing.themes
@@ -576,9 +612,10 @@ export const sections = (
  * name would; one that needs them, or that cannot run with none, starts in the composer
  * as `/<name> `, which is focused. A Timeline opens. An option starts `/set <name> ` in the
  * composer, but a Credential option asks for its value in the password prompt, as
- * `/set <name>` alone does, since its value is never typed into the composer. A theme sets
- * the option its entry says on every device: `theme`, to draw in it, or, listed by
- * `/theme -light` or `-dark`, the one `system` draws while the device is light or dark. A
+ * `/set <name>` alone does, since its value is never typed into the composer. A Network
+ * asks to remove it, as `/network remove <id>` does. A theme sets the option its entry says
+ * on every device: `theme`, to draw in it, or, listed by `/theme -light` or `-dark`, the
+ * one `system` draws while the device is light or dark. A
  * font is drawn in, on every device, unless this device overrides the font, but a family
  * the device has is always on this device alone, since another device's fonts are its own.
  * @param entry - The entry chosen.
@@ -619,6 +656,10 @@ export const choose = (
       }
 
       return [{ _tag: "FocusComposer", text: `/set ${entry.name} ` }];
+    }
+
+    case "Network": {
+      return [{ _tag: "AskRemoval", keep: undefined, network: entry.network }];
     }
 
     case "Theme": {

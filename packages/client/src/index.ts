@@ -11,6 +11,7 @@ export { client } from "./core.ts";
 export type { State as ClientState } from "./state.ts";
 
 export {
+  credentialsOf,
   IrcdAddress,
   Login,
   NetworkConfiguration,

@@ -78,8 +78,9 @@ const nickChanged = (where: readonly Where[]): News => ({
 
 const began = (at: Instant): News => ({ _tag: "SessionBegan", at, nick: "iirc" });
 
-const happened = (sequence: number, news: readonly News[], at = t0): Happened => ({
+const happened = (sequence: number, news: readonly News[], at = t0, life = 1): Happened => ({
   at,
+  life,
   network: "libera",
   news,
   sequence,
@@ -132,6 +133,7 @@ describe("opening Timelines", () => {
           id: timelineIdOf(3, 0, 0),
           key: null,
           kind: "Network",
+          life: 1,
           name: "libera",
           network: "libera",
         },
@@ -666,6 +668,7 @@ describe("a Direct Message partner's rename", () => {
       id: peer,
       key: "peer2",
       kind: "Direct",
+      life: 1,
       name: "Peer2",
       network: "libera",
     });
@@ -707,12 +710,26 @@ describe("a Direct Message partner's rename", () => {
       {
         _tag: "Described",
         sequence: 2,
-        timeline: { id: other, key: null, kind: "Direct", name: "Peer2", network: "libera" },
+        timeline: {
+          id: other,
+          key: null,
+          kind: "Direct",
+          life: 1,
+          name: "Peer2",
+          network: "libera",
+        },
       },
       {
         _tag: "Described",
         sequence: 2,
-        timeline: { id: peer, key: "peer2", kind: "Direct", name: "Peer2", network: "libera" },
+        timeline: {
+          id: peer,
+          key: "peer2",
+          kind: "Direct",
+          life: 1,
+          name: "Peer2",
+          network: "libera",
+        },
       },
     ]);
     // The detached one receives nothing more, and the old nick starts afresh.
@@ -761,13 +778,20 @@ describe("a new casemapping", () => {
       {
         _tag: "Described",
         sequence: 2,
-        timeline: { id: first, key: "#a{", kind: "Channel", name: "#a[", network: "libera" },
+        timeline: {
+          id: first,
+          key: "#a{",
+          kind: "Channel",
+          life: 1,
+          name: "#a[",
+          network: "libera",
+        },
       },
       { _tag: "Merged", from: second, into: first, network: "libera", sequence: 2 },
       {
         _tag: "Described",
         sequence: 2,
-        timeline: { id: nick, key: "x^", kind: "Direct", name: "x~", network: "libera" },
+        timeline: { id: nick, key: "x^", kind: "Direct", life: 1, name: "x~", network: "libera" },
       },
     ]);
     expect(ofTag(changes, "Added").at(-1)?.timeline).toBe(first);
@@ -880,5 +904,60 @@ describe("Networks", () => {
 
     expect([...directory.networks.keys()]).toStrictEqual(["libera", "oftc"]);
     expect(directory.networks.get("oftc")?.channels.get("#a")).toBe(timelineIdOf(2, 0, 1));
+  });
+});
+
+const removed = (keep: boolean): News => ({ _tag: "NetworkRemoved", keep });
+
+describe("a Network removed", () => {
+  it("is told to the store, and leaves the directory", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [removed(true)]),
+    ]);
+
+    expect(changes.at(-1)).toStrictEqual({
+      _tag: "Removed",
+      keep: true,
+      life: 1,
+      network: "libera",
+      sequence: 2,
+    });
+    expect(directory.networks.has("libera")).toBeFalsy();
+  });
+
+  it("removed again, to drop what it kept, opens nothing", () => {
+    const { changes, directory } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [removed(true)]),
+      happened(3, [removed(false)]),
+    ]);
+
+    expect(changes.filter((change) => change.sequence === 3)).toStrictEqual([
+      { _tag: "Removed", keep: false, life: 1, network: "libera", sequence: 3 },
+    ]);
+    expect(directory.networks.has("libera")).toBeFalsy();
+  });
+
+  it("gives an id given again to a Network that opens anew, in its new life", () => {
+    const { changes } = fold([
+      happened(1, [message([channel("#iirc")])]),
+      happened(2, [removed(false)]),
+      happened(3, [message([channel("#iirc")])], t0, 3),
+    ]);
+
+    expect(
+      ofTag(changes, "Described").map(({ sequence, timeline }) => [
+        sequence,
+        timeline.id,
+        timeline.life,
+      ])
+    ).toStrictEqual([
+      [1, timelineIdOf(1, 0, 0), 1],
+      [1, timelineIdOf(1, 0, 1), 1],
+      [3, timelineIdOf(3, 0, 0), 3],
+      [3, timelineIdOf(3, 0, 1), 3],
+    ]);
+    expect(ofTag(changes, "Removed").map(({ life }) => life)).toStrictEqual([1]);
   });
 });

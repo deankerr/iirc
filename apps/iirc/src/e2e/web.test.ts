@@ -76,6 +76,13 @@ const decodeInForce = Schema.decodeUnknownSync(
   )
 );
 
+/** The Networks removed with their Timelines kept, as the Daemon lists them. */
+const decodeListed = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ _tag: Schema.String, network: Schema.String }))
+  )
+);
+
 /** What the end-to-end run reads of a Network's Timelines: each one's name and Read Marker. */
 const decodeTimelines = Schema.decodeUnknownSync(
   Schema.fromJsonString(
@@ -1745,6 +1752,130 @@ describe("the web frontend on iirc daemon --web", () => {
           nicks: ["iirc", "iirc_"],
           parted: "#iirc",
           problems: [],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
+    "removes a Network after asking, keeps its Timelines to read apart from the rest, then drops them",
+    { timeout: 90_000 },
+    async () => {
+      const dataDir = path.join(directory, "remove");
+      const ngircd: Ircd = await startNgircd();
+      const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
+      const key = created.stdout.trim();
+      const { base, child } = await startDaemon(dataDir);
+      const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
+
+      const removedNetworks = async () => {
+        const answer = await fetch(`${base}/api/networks`, {
+          headers: { authorization: `Bearer ${key}` },
+        });
+
+        return decodeListed(await answer.text())
+          .filter((entry) => entry._tag === "Kept")
+          .map(({ network }) => ({ network }));
+      };
+
+      try {
+        peer.send("JOIN #iirc");
+        await peer.waitFor((line) => line.command === "JOIN", "the peer's own JOIN");
+
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page.getByText("No Networks are configured yet.").waitFor();
+
+        const nowhere = page.getByRole("textbox", { name: "iirc" });
+
+        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
+        await nowhere.press("Enter");
+        await page.getByRole("row", { name: /^test, .*connected$/u }).waitFor({ timeout: 20_000 });
+        await page.getByRole("row", { name: /^test, /u }).click();
+        await page.getByRole("textbox", { name: "test" }).fill("/join #iirc");
+        await page.getByRole("textbox", { name: "test" }).press("Enter");
+        await peer.waitFor(
+          (line) => line.command === "JOIN" && line.source?.startsWith("iirc!") === true,
+          "Self's JOIN"
+        );
+        peer.send("PRIVMSG #iirc :said before the removal");
+        await page.getByRole("row", { name: /^#iirc/u }).click();
+        await page.getByText("said before the removal").waitFor();
+
+        // The options ask first, keeping the Timelines unless the Owner says otherwise.
+        await page.getByRole("button", { exact: true, name: "Options" }).click();
+        await page.getByRole("button", { name: "Remove test…" }).click();
+        const question = page.getByRole("alertdialog");
+
+        await question.getByRole("heading", { name: "Remove test?" }).waitFor();
+
+        const keepChecked = await question
+          .getByRole("radio", { name: "Keep its Timelines, to read and search" })
+          .isChecked();
+
+        await question.getByRole("button", { name: "Remove" }).click();
+        const quit = await peer.waitFor((line) => line.command === "QUIT", "Self's QUIT");
+
+        // Apart from the rest, read, and never said to.
+        await page.getByRole("row", { name: /^test, .*removed$/u }).waitFor();
+        await page.getByRole("row", { name: /^#iirc/u }).click();
+        await page.getByText("said before the removal").waitFor();
+        const note = await page.getByRole("note").textContent();
+
+        const kept = await removedNetworks();
+
+        const composer = page.getByRole("textbox", { name: "#iirc" });
+
+        await composer.fill("still here?");
+        await composer.press("Enter");
+        await page
+          .getByText(/test was removed, and its Timelines are kept only to read/u)
+          .waitFor();
+
+        // A new Network cannot take the name while they are kept.
+        await composer.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
+        await composer.press("Enter");
+        await page.getByText(/so no Network can take its name until they are dropped/u).waitFor();
+
+        // The Pane's own button asks again, which drops them and frees the name.
+        await page.getByRole("note").getByRole("button", { name: "Drop them…" }).click();
+        await question.getByRole("heading", { name: "Drop test's Timelines?" }).waitFor();
+        await question.getByRole("button", { name: "Drop them" }).click();
+        await page.getByText("No Networks are configured yet.").waitFor();
+        const dropped = await removedNetworks();
+
+        await nowhere.fill(`/network add test ${ngircd.host}/${ngircd.plainPort} plain iirc`);
+        await nowhere.press("Enter");
+        await page.getByRole("row", { name: /^test, /u }).waitFor({ timeout: 20_000 });
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          dropped,
+          keepChecked,
+          kept,
+          note,
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          quit: quit.source?.startsWith("iirc!"),
+          violations,
+        }).toStrictEqual({
+          dropped: [],
+          keepChecked: true,
+          kept: [{ network: "test" }],
+          note: "test was removed. Its Timelines are kept to read and search, and nothing can be said here.Drop them…",
+          problems: [],
+          quit: true,
           violations: "",
         });
       } finally {

@@ -40,9 +40,11 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
     key: kind === "Network" ? null : name,
     kind,
     latest: null,
+    life: 1,
     name,
     network: "libera",
     read: null,
+    removed: false,
     unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
   });
 
@@ -52,6 +54,7 @@ const sidebar: readonly SidebarNetwork[] = [
     connection: { _tag: "Connected", nick: "dean", since: 1 },
     network: libera,
     reading: false,
+    removed: false,
     running: undefined,
     timelines: [
       timelineOf(own, "Network", "libera"),
@@ -83,6 +86,7 @@ const inChannel: CommandContext = {
     kind: "Channel",
     name: "#iirc",
     network: libera,
+    removed: false,
     timeline: channel,
   },
   head: undefined,
@@ -136,6 +140,7 @@ const inNetwork: CommandContext = {
     kind: "Network",
     name: "libera",
     network: libera,
+    removed: false,
     timeline: own,
   },
   open: own,
@@ -176,7 +181,7 @@ describe("the palette's entries", () => {
         "command:options.set",
         "command:theme.set",
         "command:options.unset",
-        "command:network.add",
+        "command:network.manage",
         "command:network.connect",
         "command:network.disconnect",
         "command:timeline.next",
@@ -214,7 +219,7 @@ describe("the palette's entries", () => {
         "command:options.set",
         "command:theme.set",
         "command:options.unset",
-        "command:network.add",
+        "command:network.manage",
         "command:network.connect",
         "command:network.disconnect",
         "command:timeline.latest",
@@ -233,7 +238,7 @@ describe("the palette's entries", () => {
         "command:composer.focus",
       ],
       timelines: 3,
-      titles: ["Commands", "Timelines", "Fonts", "Options"],
+      titles: ["Commands", "Timelines", "Networks", "Fonts", "Options"],
     });
   });
 
@@ -343,6 +348,36 @@ describe("choosing an entry", () => {
       timeline: [{ _tag: "Open", timeline: own }],
     });
   });
+
+  it("asks to remove a Network, or to drop what a removed one kept, found by either word", () => {
+    const removed: SidebarNetwork = {
+      away: { _tag: "Unknown" },
+      connection: { _tag: "Unknown" },
+      network: Schema.decodeSync(NetworkId)("oftc"),
+      reading: false,
+      removed: true,
+      running: undefined,
+      timelines: [],
+    };
+
+    const withRemoved: Listing = { ...listing(), sidebar: [...sidebar, removed] };
+    const networks = sections(withRemoved, "", []).find((one) => one.title === "Networks");
+
+    expect({
+      choices: networks?.entries.map((entry) => choose(entry, inChannel, false)),
+      dropFound: first(sections(withRemoved, "drop", [])),
+      names: networks?.entries.map((entry) => entry.key),
+      removeFound: first(sections(withRemoved, "remove lib", [])),
+    }).toStrictEqual({
+      choices: [
+        [{ _tag: "AskRemoval", keep: undefined, network: libera }],
+        [{ _tag: "AskRemoval", keep: undefined, network: removed.network }],
+      ],
+      dropFound: "network:oftc",
+      names: ["network:libera", "network:oftc"],
+      removeFound: "network:libera",
+    });
+  });
 });
 
 describe("the themes in the palette", () => {
@@ -364,7 +399,7 @@ describe("the themes in the palette", () => {
       scoped: keys(scoped),
       themes: first(sections(themed, "theme", [])),
     }).toStrictEqual({
-      all: ["Commands", "Timelines", "Themes", "Fonts", "Options"],
+      all: ["Commands", "Timelines", "Networks", "Themes", "Fonts", "Options"],
       byName: [["Themes", ["theme:dracula"]]],
       chosen: [{ _tag: "UseTheme", device: false, name: "nord", option: "theme" }],
       current: true,

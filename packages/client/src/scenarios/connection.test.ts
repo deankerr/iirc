@@ -242,6 +242,47 @@ describe("redialling", () => {
   });
 });
 
+describe("removing", () => {
+  it("quits and hangs up a Session as disabling does, and never redials", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base),
+        lines(
+          "!! remove keep",
+          ">> QUIT",
+          "-> hangup",
+          "?? network-removed keep",
+          "== closed HungUp",
+          "?? session-ended Disabled",
+          "+60m"
+        ),
+      ],
+    });
+
+    expect(client.inspect(played.state).states).toStrictEqual({ network: "Idle" });
+  });
+
+  it("ends a wait to redial, and reports whether its Timelines are kept", () => {
+    play(client, {
+      configuration: base,
+      transcript: lines(
+        "!! configure",
+        "-> dial irc.test:6697 tls",
+        "== closed Refused",
+        "?? connection-failed Closed Refused",
+        "!! remove",
+        "?? network-removed",
+        "+60m",
+        "!! remove",
+        "?? network-removed"
+      ),
+    });
+
+    expect.assertions(0);
+  });
+});
+
 describe("disabling", () => {
   it("quits and hangs up a Session, and does not redial", () => {
     const played = play(client, {

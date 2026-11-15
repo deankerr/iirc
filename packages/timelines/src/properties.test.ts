@@ -228,7 +228,9 @@ const steps: fc.Arbitrary<readonly Happened[]> = fc
     }),
     { maxLength: 30 }
   )
-  .map((each) => each.map((happened, index) => ({ ...happened, sequence: index * 2 + 1 })));
+  .map((each) =>
+    each.map((happened, index) => ({ ...happened, life: 1, sequence: index * 2 + 1 }))
+  );
 
 const foldAll = (all: readonly Happened[]) => {
   let directory: Directory = emptyDirectory;

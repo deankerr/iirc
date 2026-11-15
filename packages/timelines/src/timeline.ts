@@ -50,6 +50,11 @@ export type Kind = "Network" | "Channel" | "Direct";
 export interface Descriptor {
   readonly id: TimelineId;
   readonly network: string;
+  /**
+   * The life of its Network it belongs to: the sequence of the `Configured` that began that
+   * life. A Network given its id again after a removal has a later one.
+   */
+  readonly life: number;
   readonly kind: Kind;
   /** The Channel's name, the partner's nick, or the Network's id, to show. */
   readonly name: string;

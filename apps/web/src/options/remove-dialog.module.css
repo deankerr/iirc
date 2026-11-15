@@ -1,0 +1,104 @@
+/* The page behind the question stays visible, dimmed. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh var(--space-3) var(--space-3);
+  background: var(--color-scrim);
+}
+
+.modal {
+  width: min(60ch, 100%);
+  max-height: 100%;
+  display: flex;
+  outline: none;
+}
+
+.dialog {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border: var(--border-width) solid var(--color-danger);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 var(--space-3) var(--space-5) var(--color-shadow);
+  outline: none;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.heading {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.body {
+  margin: 0;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* A radio is its own text after a ring, filled while chosen, as a terminal's [x] is. */
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  cursor: default;
+}
+
+.choice::before {
+  content: "";
+  flex: none;
+  width: 0.9em;
+  height: 0.9em;
+  border: var(--border-width) solid var(--color-muted);
+  border-radius: 50%;
+}
+
+.choice[data-selected]::before {
+  border-color: var(--color-accent);
+  background: radial-gradient(var(--color-accent) 40%, transparent 45%);
+}
+
+.choice[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--space-1);
+}
+
+.choice[data-disabled] {
+  color: var(--color-muted);
+}
+
+.failure {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+@media (pointer: coarse) {
+  .choice {
+    min-height: var(--target-size);
+  }
+}

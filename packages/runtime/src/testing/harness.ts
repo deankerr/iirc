@@ -198,6 +198,10 @@ export const outline = (journal: JournalService): Effect.Effect<readonly string[
           return `${sequence} ${record.change._tag} ${record.change.option}`;
         }
 
+        case "Forgotten": {
+          return `${sequence} ${record.network} Forgotten ${record.credentials.join(",")}`;
+        }
+
         case "Input": {
           return `${sequence} ${record.network} ${record.input._tag}`;
         }

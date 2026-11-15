@@ -47,9 +47,11 @@ const describeTimeline = (
   key: kind === "Network" ? null : name,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 

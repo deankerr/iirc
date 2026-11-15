@@ -426,6 +426,26 @@ describe("a WHOIS on the floor", () => {
     expect.assertions(0);
   });
 
+  it("reports what it has when its Network is removed, in the removal's own step", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! whois peer",
+        ">> WHOIS peer",
+        "<< :irc.test 311 iirc peer ~u peer.test * :Peer",
+        "!! remove keep",
+        ">> QUIT",
+        "-> hangup",
+        "?? looked-up i1 whois=peer partial=Ended profiles=1",
+        "?? network-removed keep",
+        "== closed HungUp",
+        "?? session-ended Disabled"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
   it("reports Unsent when its Line never left", () => {
     const run = played([
       ...inChannel(),

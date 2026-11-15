@@ -382,6 +382,8 @@ export type News =
       /** The Timelines it touches. Never empty. */
       readonly where: readonly Where[];
     }
+  /** The Owner removed the Network, and `keep` is whether its Timelines stay readable. */
+  | { readonly _tag: "NetworkRemoved"; readonly keep: boolean }
   | { readonly _tag: "SessionBegan"; readonly at: Instant; readonly nick: string }
   | { readonly _tag: "SessionEnded"; readonly at: Instant; readonly reason: EndReason }
   /** A Connection ended before its Session began, with the Ircd it was dialled to. */

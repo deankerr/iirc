@@ -44,6 +44,7 @@ import {
   withView,
 } from "./layout.ts";
 import type { Axis, Layout, LayoutChange, Node } from "./layout.ts";
+import type { Standing } from "./removal.ts";
 import { initialSearch, reduceSearch, searchWanted } from "./search.ts";
 import type { Search, SearchEvent, SearchFilters, SearchRequest } from "./search.ts";
 
@@ -117,11 +118,22 @@ export type SelfAway =
   | { readonly _tag: "Here" }
   | { readonly _tag: "Away"; readonly message: string };
 
-/** One Network as the Frontend holds it. */
+/**
+ * One Network as the Frontend holds it, in one life: everything held of it is of that life,
+ * the sequence of the `Configured` that began it, as the API names it. An answer or a step
+ * of an older life changes nothing of it, and one of a newer life replaces it.
+ */
 export interface NetworkView {
   readonly network: NetworkId;
+  readonly life: number;
   /** Whether the Daemon runs it, as `GET /api/networks` said, until it is read. */
   readonly running: NetworkStatus | undefined;
+  /**
+   * Whether its life was removed with its Timelines kept, as the Network list
+   * the changes, or the Daemon's answer to removing it said. Its Timelines flagged
+   * `removed` say so too, and {@link isRemoved} reads both.
+   */
+  readonly kept: boolean;
   readonly connection: Connection;
   /** The sequence of the last Session item that set `connection`, or `known`'s place. */
   readonly connectionAt: number;
@@ -329,6 +341,11 @@ export interface Timelines {
   readonly merged: ReadonlyMap<TimelineId, TimelineId>;
   /** Timelines the Daemon said it never had. */
   readonly vanished: ReadonlySet<TimelineId>;
+  /**
+   * The latest life of each Network known to be over with its Timelines dropped, which
+   * nothing brings back: an answer of it, or of an older life, is of a life gone.
+   */
+  readonly over: ReadonlyMap<NetworkId, number>;
   /** The Timelines closed most recently, latest first, whose windows are kept. */
   readonly closed: readonly TimelineId[];
   /**
@@ -474,8 +491,13 @@ export type WindowRequest =
  *   twice. It may wait before asking, as a read asked for again does.
  * - `Requesting`: the runtime is asking the Daemon now, after any wait, and again for each
  *   attempt after a failure: where the stream is then is where the answer is current from.
- * - `NetworksRead`, `ListRead`, `StatusRead`, `WindowRead`: what a read answered.
- * - `Vanished`: a window's read was `UnknownTimeline`. `NetworkVanished`: `UnknownNetwork`.
+ * - `NetworksRead`, `ListRead`, `StatusRead`, `WindowRead`: what a read answered. The
+ *   Network list is read with the Networks removed whose Timelines are kept.
+ * - `NetworkRemoved`: the Daemon answered that it removed a life of a Network, keeping its
+ *   Timelines or not, ahead of the step the changes stream gives for it.
+ * - `Vanished`: a window's read was `UnknownTimeline`. `NetworkVanished`: a read of a
+ *   Network's Timelines or Session was `UnknownNetwork`, which names no life, so only the
+ *   Network list, read again, says whether the Network is gone.
  * - `Changed`, `Overflowed`, `Reset`: the changes stream's events, with the place each left.
  * - `Located`: the Daemon placed a Message the Owner said, as `/msg` does, in this Timeline,
  *   with the `navigation` its Say was submitted at, ignored once the Owner opened another,
@@ -501,7 +523,17 @@ export type WindowRequest =
 export type TimelinesEvent =
   | { readonly _tag: "ReadStarted"; readonly read: Read }
   | { readonly _tag: "Requesting"; readonly read: Read }
-  | { readonly _tag: "NetworksRead"; readonly entries: readonly NetworkEntry[] }
+  | {
+      readonly _tag: "NetworksRead";
+      readonly entries: readonly NetworkEntry[];
+    }
+  | {
+      readonly _tag: "NetworkRemoved";
+      readonly network: NetworkId;
+      readonly keep: boolean;
+      /** The life it ended. */
+      readonly life: number;
+    }
   | {
       readonly _tag: "ListRead";
       readonly network: NetworkId;
@@ -511,6 +543,8 @@ export type TimelinesEvent =
   | {
       readonly _tag: "StatusRead";
       readonly network: NetworkId;
+      /** The life `known` is of. */
+      readonly life: number;
       readonly session: SessionKnowledge;
       readonly self: UserKnowledge | null;
     }
@@ -520,7 +554,12 @@ export type TimelinesEvent =
       readonly window: TimelineWindow;
     }
   | { readonly _tag: "Vanished"; readonly timeline: TimelineId }
-  | { readonly _tag: "NetworkVanished"; readonly network: NetworkId }
+  | {
+      readonly _tag: "NetworkVanished";
+      readonly network: NetworkId;
+      /** The read the Daemon answered `UnknownNetwork`: its Timelines, or its Session. */
+      readonly of: "List" | "Status";
+    }
   | { readonly _tag: "Changed"; readonly place: Place; readonly change: TimelineChange }
   | { readonly _tag: "Overflowed"; readonly place: Place; readonly overflow: TimelineOverflow }
   | { readonly _tag: "Reset"; readonly reset: TimelineReset }
@@ -599,6 +638,7 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
   navigation: 0,
   networks: new Map(),
   nextGeneration: 0,
+  over: new Map(),
   restoring: undefined,
   search: initialSearch,
   vanished: new Set(),
@@ -609,17 +649,29 @@ export const timelinesWith = (cap: number, kept = keptClosed): Timelines => ({
 /** Before anything is read. */
 export const initialTimelines: Timelines = timelinesWith(windowCap);
 
-const newNetwork = (network: NetworkId): NetworkView => ({
+const newNetwork = (network: NetworkId, life: number): NetworkView => ({
   away: { _tag: "Unknown" },
   awayAt: 0,
   connection: { _tag: "Unknown" },
   connectionAt: 0,
+  kept: false,
+  life,
   list: unreadList,
   network,
   running: undefined,
   status: unreadStatus,
   timelines: new Map(),
 });
+
+/**
+ * Whether a Network was removed with its Timelines kept: the Daemon said so, or its
+ * Timelines are flagged `removed`, as the step that removed it flags them. Nothing further
+ * is said or done there, and its Timelines are only read.
+ * @param network - The Network.
+ * @returns Whether it was.
+ */
+export const isRemoved = (network: NetworkView): boolean =>
+  network.kept || [...network.timelines.values()].some((timeline) => timeline.removed);
 
 /**
  * A copy of a map with one entry set.
@@ -1141,6 +1193,7 @@ const changeList = (
 
     if (
       timeline.network === network.network &&
+      timeline.life === network.life &&
       !merged.has(timeline.id) &&
       (held === undefined || timeline.changed > held.changed)
     ) {
@@ -1181,16 +1234,26 @@ const awayOfConnection = (connection: Connection): SelfAway => {
 
 /**
  * Brings a Network's connection up to date with the Session items of one step, when they
- * are later than what set it.
+ * are later than what set it and of the life held: an item of a Timeline of an older life,
+ * as the step names it or as one let go of when that life ended, says nothing of it.
  * @param network - The Network.
  * @param change - The step's changes.
+ * @param vanished - The Timelines let go of, those of lives over among them.
  * @returns The Network.
  */
-const changeConnection = (network: NetworkView, change: TimelineChange): NetworkView => {
+const changeConnection = (
+  network: NetworkView,
+  change: TimelineChange,
+  vanished: ReadonlySet<TimelineId>
+): NetworkView => {
   let { awayAt, connection, connectionAt } = network;
 
+  const older = (timeline: TimelineId) =>
+    vanished.has(timeline) ||
+    change.timelines.some((one) => one.id === timeline && one.life < network.life);
+
   for (const item of change.items) {
-    const ours = item.network === network.network;
+    const ours = item.network === network.network && !older(item.timeline);
     const said = ours ? connectionFromItem(item) : undefined;
 
     if (said !== undefined && item.sequence > connectionAt) {
@@ -1254,6 +1317,164 @@ const staleList = (network: NetworkView): NetworkView => ({
 // Applying the stream.
 
 /**
+ * Lets go of Networks removed without keeping their Timelines, and of every Timeline of
+ * theirs: no route reads them again. Their windows go, a Pane that showed one shows
+ * nothing, as a split with nothing to show does, and the search begins again, so nothing
+ * it found of them stays.
+ * @param state - The state.
+ * @param gone - The Networks.
+ * @param named - The Timelines the Daemon named as dropped, besides those the Networks hold.
+ * @returns The state.
+ */
+const dropped = (
+  state: Timelines,
+  gone: ReadonlySet<NetworkId>,
+  named: readonly TimelineId[]
+): Timelines => {
+  const ids = new Set(named);
+
+  for (const network of gone) {
+    for (const id of state.networks.get(network)?.timelines.keys() ?? []) {
+      ids.add(id);
+    }
+  }
+
+  for (const [id, window] of state.windows) {
+    if (window.network !== undefined && gone.has(window.network)) {
+      ids.add(id);
+    }
+  }
+
+  const isDropped = (timeline: TimelineId) =>
+    ids.has(timeline) || ids.has(resolve(state, timeline));
+
+  return {
+    ...state,
+    closed: state.closed.filter((one) => !isDropped(one)),
+    layout: mapViews(state.layout, ({ view }) =>
+      view.open !== undefined && isDropped(view.open)
+        ? { ...view, divider: undefined, open: undefined }
+        : view
+    ),
+    networks: new Map([...state.networks].filter(([network]) => !gone.has(network))),
+    search: reduceSearch(state.search, { _tag: "Restarted" }),
+    vanished: new Set([...state.vanished, ...ids]),
+    windows: new Map([...state.windows].filter(([id]) => !ids.has(id))),
+  };
+};
+
+/**
+ * How a life compares with the one held of a Network: `Older`, the `Same`, or `Newer`, as
+ * any life is when none is held.
+ * @param state - The state.
+ * @param network - The Network.
+ * @param life - The life an answer or a step names.
+ * @returns How it compares.
+ */
+const compareLife = (
+  state: Timelines,
+  network: NetworkId,
+  life: number
+): "Older" | "Same" | "Newer" => {
+  const held = state.networks.get(network)?.life;
+
+  if (life <= (state.over.get(network) ?? 0) || (held !== undefined && life < held)) {
+    return "Older";
+  }
+
+  return life === held ? "Same" : "Newer";
+};
+
+/**
+ * Lets go of a life of a Network that is over, with its Timelines, and remembers it is,
+ * so no answer of it brings it back.
+ * @param state - The state.
+ * @param network - The Network.
+ * @param life - The life.
+ * @returns The state.
+ */
+const forgotten = (state: Timelines, network: NetworkId, life: number): Timelines => {
+  const gone = dropped(state, new Set([network]), []);
+
+  return life <= (state.over.get(network) ?? 0)
+    ? gone
+    : { ...gone, over: setIn(state.over, network, life) };
+};
+
+/** The state once a life is held, and whether it is the life held now. */
+interface Lived {
+  readonly state: Timelines;
+  readonly held: boolean;
+}
+
+/**
+ * Holds a life of a Network: an older one than held changes nothing, and a newer one
+ * replaces what is held, its Timelines let go of as a drop does, and begins afresh, to be
+ * read.
+ * @param state - The state.
+ * @param network - The Network.
+ * @param life - The life.
+ * @returns The state, and whether the life is the one held now.
+ */
+const living = (state: Timelines, network: NetworkId, life: number): Lived => {
+  switch (compareLife(state, network, life)) {
+    case "Older": {
+      return { held: false, state };
+    }
+
+    case "Same": {
+      return { held: true, state };
+    }
+
+    case "Newer": {
+      const old = state.networks.get(network);
+      const cleared = old === undefined ? state : forgotten(state, network, old.life);
+
+      return {
+        held: true,
+        state: {
+          ...cleared,
+          networks: setIn(cleared.networks, network, newNetwork(network, life)),
+        },
+      };
+    }
+
+    default: {
+      return { held: false, state };
+    }
+  }
+};
+
+/**
+ * Ends a life of a Network: kept, it is only read from then on, and not kept, it and its
+ * Timelines are let go of. A removal of an older life than the one held changes nothing.
+ * One of a newer life, or of a Network not held, as one added elsewhere disabled and with no
+ * Channels, which no Timeline ever named, holds that life first, so a kept one is read from
+ * now on, and a dropped one is known to be over.
+ * @param state - The state.
+ * @param removal - The Network, the life it ended, and whether its Timelines were kept.
+ * @returns The state.
+ */
+const ended = (
+  state: Timelines,
+  removal: { readonly network: NetworkId; readonly life: number; readonly keep: boolean }
+): Timelines => {
+  const lived = living(state, removal.network, removal.life);
+  const held = lived.state.networks.get(removal.network);
+
+  if (!lived.held || held === undefined) {
+    return state;
+  }
+
+  return removal.keep
+    ? {
+        ...lived.state,
+        networks: setIn(lived.state.networks, removal.network, { ...held, kept: true }),
+      }
+    : forgotten(lived.state, removal.network, removal.life);
+};
+
+/**
  * Applies one step's changes to everything held.
  * @param state - The state.
  * @param change - The step's changes.
@@ -1266,15 +1487,15 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
     merged.set(tombstone.id, tombstone.into);
   }
 
-  let { networks } = state;
+  // A Timeline of a life newer than held, or of a Network not held: that life began since,
+  // so it is held, and its list and connection are read.
+  let lived = state;
 
-  // A Timeline of a Network not held yet: the Network was configured since, so it is
-  // added, and its list and connection are read.
   for (const timeline of change.timelines) {
-    if (!networks.has(timeline.network)) {
-      networks = setIn(networks, timeline.network, newNetwork(timeline.network));
-    }
+    ({ state: lived } = living(lived, timeline.network, timeline.life));
   }
+
+  let { networks } = lived;
 
   const touched = new Set([
     ...change.timelines.map((timeline) => timeline.network),
@@ -1284,7 +1505,7 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
 
   networks = mapValues(networks, (network) =>
     touched.has(network.network)
-      ? changeConnection(changeList(network, change, merged), change)
+      ? changeConnection(changeList(network, change, merged), change, lived.vanished)
       : network
   );
 
@@ -1292,7 +1513,7 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
 
   // The window of a Timeline merged into another goes, and the Timeline it went to is read
   // when it is open.
-  for (const [id, window] of state.windows) {
+  for (const [id, window] of lived.windows) {
     if (!merged.has(id)) {
       windows.set(id, changeWindow(window, change, state.windowCap));
     }
@@ -1301,9 +1522,26 @@ const applyChange = (state: Timelines, change: TimelineChange): Timelines => {
   // A merge moves items into a Timeline with a lower id, so a page read after it may repeat
   // what one read before it found: the search begins again.
   const search =
-    change.merged.length > 0 ? reduceSearch(state.search, { _tag: "Restarted" }) : state.search;
+    change.merged.length > 0 ? reduceSearch(lived.search, { _tag: "Restarted" }) : lived.search;
 
-  return { ...state, merged, networks, search, windows };
+  let changed: Timelines = { ...lived, merged, networks, search, windows };
+
+  // A life removed, whether or not it had Timelines, and the Timelines dropped with one,
+  // which go whatever life is held, since none is of a newer one.
+  for (const removal of [
+    ...change.removals,
+    ...change.dropped.map((one) => ({ keep: false, life: one.life, network: one.network })),
+  ]) {
+    changed = ended(changed, removal);
+  }
+
+  return change.dropped.length === 0
+    ? changed
+    : dropped(
+        changed,
+        new Set(),
+        change.dropped.map((one) => one.id)
+      );
 };
 
 /**
@@ -1354,8 +1592,9 @@ const invalidates = (state: Timelines, overflow: TimelineOverflow, subject: Subj
  * The one rule every answer is taken by: it is current only if nothing that invalidates
  * what it is of happened after its read began at `since`, neither a reset nor the stream
  * forgetting what it gave since then, which leave no record of what changed, nor an
- * overflow that touched it, whose changes never came. An answer that is not current
- * leaves what it is of stale, to be read again.
+ * overflow that touched it, whose changes never came. An answer that is not current leaves
+ * what it is of stale, to be read again. Which life of a Network an answer is of is the
+ * other rule, `living`.
  * @param state - The state.
  * @param since - The stream's place the answer reflects: its `through`, or where the
  * stream was when the read began.
@@ -1614,9 +1853,10 @@ const requesting = (state: Timelines, read: Read): Timelines => {
 };
 
 /**
- * Takes the Network list.
+ * Takes the Network list: every Network the Daemon holds, live or removed with its
+ * Timelines kept, read in one pass.
  * @param state - The state.
- * @param entries - Each Network and whether it runs.
+ * @param entries - Each Network, its life, and whether it runs or is kept.
  * @returns The state.
  */
 const networksRead = (state: Timelines, entries: readonly NetworkEntry[]): Timelines => {
@@ -1629,20 +1869,46 @@ const networksRead = (state: Timelines, entries: readonly NetworkEntry[]): Timel
     };
   }
 
-  const networks = new Map(state.networks);
+  let read = state;
 
+  /**
+   * Takes what the list says of a life of a Network, unless it is of a life gone.
+   * @param network - The Network.
+   * @param life - The life.
+   * @param change - What the list says of it.
+   */
+  const take = (network: NetworkId, life: number, change: (view: NetworkView) => NetworkView) => {
+    const lived = living(read, network, life);
+    const held = lived.state.networks.get(network);
+
+    read =
+      lived.held && held !== undefined
+        ? { ...lived.state, networks: setIn(lived.state.networks, network, change(held)) }
+        : lived.state;
+  };
+
+  // A Network removed with its Timelines kept is read as any other, but for its Session,
+  // which it has no more. A life once removed stays so, whatever an older list said.
   for (const entry of entries) {
-    networks.set(entry.network, {
-      ...(networks.get(entry.network) ?? newNetwork(entry.network)),
-      running: entry.status,
-    });
+    take(entry.network, entry.life, (view) =>
+      entry._tag === "Kept" ? { ...view, kept: true } : { ...view, running: entry.status }
+    );
   }
 
-  return {
-    ...state,
-    entries: { ...state.entries, attempt: 0, fresh: true, reading: false },
-    networks,
-  };
+  // The one list names every Network the Daemon holds, live or kept, as one state of it, so
+  // a Network it does not name, whose life began before the list was asked for, is over,
+  // with its Timelines dropped. One begun since, as the stream gave it, is not in the list
+  // yet. Before the stream is followed, every Network held came of a read.
+  const listed = new Set(entries.map((one) => one.network));
+  const asked = state.follow._tag === "Following" ? state.entries.from : Number.POSITIVE_INFINITY;
+
+  for (const held of read.networks.values()) {
+    if (!listed.has(held.network) && held.life <= asked) {
+      read = forgotten(read, held.network, held.life);
+    }
+  }
+
+  return { ...read, entries: { ...state.entries, attempt: 0, fresh: true, reading: false } };
 };
 
 /**
@@ -1709,6 +1975,72 @@ const waitingFor = (state: Timelines, version: number): Timelines => {
 };
 
 /**
+ * Reads a Network's Timelines again from the first page, after a wait.
+ * @param state - The state.
+ * @param id - The Network.
+ * @returns The state.
+ */
+const readAgain = (state: Timelines, id: NetworkId): Timelines => {
+  const network = state.networks.get(id);
+
+  if (network === undefined) {
+    return state;
+  }
+
+  const stale = staleList(network);
+
+  return {
+    ...state,
+    networks: setIn(state.networks, id, {
+      ...stale,
+      list: { ...stale.list, attempt: network.list.attempt + 1, reading: false },
+    }),
+  };
+};
+
+/**
+ * A Network with a page of its Timelines taken: the first page of a round replacing what
+ * is held, and the rest adding to it, each Timeline the one changed last.
+ * @param network - The Network.
+ * @param page - The page.
+ * @param after - The Timeline the page was read after, or `undefined` for the first.
+ * @param merged - Every Timeline merged so far.
+ * @returns The Network.
+ */
+const pageTaken = (
+  network: NetworkView,
+  page: TimelineList,
+  after: TimelineId | undefined,
+  merged: ReadonlyMap<TimelineId, TimelineId>
+): NetworkView => {
+  const first = after === undefined;
+  const timelines = first ? new Map<TimelineId, Timeline>() : new Map(network.timelines);
+
+  for (const timeline of page.timelines) {
+    const held = timelines.get(timeline.id);
+
+    if (!merged.has(timeline.id) && (held === undefined || timeline.changed > held.changed)) {
+      timelines.set(timeline.id, timeline);
+    }
+  }
+
+  const last = page.timelines.at(-1);
+  const more = page.more && last !== undefined;
+
+  return {
+    ...network,
+    list: {
+      attempt: 0,
+      fresh: !more,
+      next: more ? last.id : undefined,
+      reading: false,
+      through: minOf(first ? undefined : network.list.through, page.through ?? 0),
+    },
+    timelines,
+  };
+};
+
+/**
  * Takes a page of a Network's Timelines. The first page of a round replaces what is held,
  * since a Timeline merged since is not on it, and the rest add to it. What the stream gave
  * after the page's `through` is applied to it again, so nothing between is lost.
@@ -1724,15 +2056,24 @@ const listRead = (
   after: TimelineId | undefined,
   page: TimelineList
 ): Timelines => {
-  const current = state.networks.get(id);
+  // A page of a newer life begins it, and one of an older life is of a life gone: its
+  // Timelines are never installed, and the life now is read from its first page.
+  const life = page.timelines[0]?.life;
+  const lived = life === undefined ? { held: true, state } : living(state, id, life);
+
+  if (!lived.held) {
+    return readAgain(state, id);
+  }
+
+  const current = lived.state.networks.get(id);
 
   // A page of a round given up since, because the list was marked to be read again.
   if (current === undefined || after !== current.list.next) {
     return current === undefined
-      ? state
+      ? lived.state
       : {
-          ...state,
-          networks: setIn(state.networks, id, {
+          ...lived.state,
+          networks: setIn(lived.state.networks, id, {
             ...current,
             list: { ...current.list, reading: false },
           }),
@@ -1740,7 +2081,7 @@ const listRead = (
   }
 
   const through = page.through ?? 0;
-  const versioned = waitingFor(state, page.version);
+  const versioned = waitingFor(lived.state, page.version);
   const network = versioned.networks.get(id) ?? current;
 
   if (!usable(versioned, page.version, through) || after !== network.list.next) {
@@ -1753,36 +2094,7 @@ const listRead = (
     };
   }
 
-  const first = after === undefined;
-  const timelines = first ? new Map<TimelineId, Timeline>() : new Map(network.timelines);
-
-  for (const timeline of page.timelines) {
-    const held = timelines.get(timeline.id);
-
-    if (
-      !versioned.merged.has(timeline.id) &&
-      (held === undefined || timeline.changed > held.changed)
-    ) {
-      timelines.set(timeline.id, timeline);
-    }
-  }
-
-  const last = page.timelines.at(-1);
-  const more = page.more && last !== undefined;
-
-  const read: NetworkView = {
-    ...network,
-    list: {
-      attempt: 0,
-      fresh: !more,
-      next: more ? last.id : undefined,
-      reading: false,
-      through: minOf(first ? undefined : network.list.through, through),
-    },
-    timelines,
-  };
-
-  let caughtUp = read;
+  let caughtUp = pageTaken(network, page, after, versioned.merged);
 
   for (const recorded of recentAfter(versioned, through)) {
     if (recorded._tag === "Changed") {
@@ -1812,8 +2124,17 @@ const listRead = (
  */
 const statusRead = (
   state: Timelines,
-  { network: id, self, session }: Extract<TimelinesEvent, { readonly _tag: "StatusRead" }>
+  { life, network: id, self, session }: Extract<TimelinesEvent, { readonly _tag: "StatusRead" }>
 ): Timelines => {
+  // Of a newer life, held or not, it begins that life, whose Timelines and Session are
+  // read afresh. Of an older one, it says nothing of the life held, whose Session is read
+  // again.
+  const comparison = compareLife(state, id, life);
+
+  if (comparison === "Newer") {
+    return living(state, id, life).state;
+  }
+
   const network = state.networks.get(id);
 
   if (network === undefined) {
@@ -1825,7 +2146,7 @@ const statusRead = (
 
   // Begun before a reset, or an overflow of its Network, either of which may have held a
   // Session item `known` does not reflect and the stream never gave: read it again.
-  if (!isCurrent(state, from, { _tag: "Network", network: id })) {
+  if (comparison === "Older" || !isCurrent(state, from, { _tag: "Network", network: id })) {
     return {
       ...state,
       networks: setIn(state.networks, id, {
@@ -3141,6 +3462,86 @@ const searched = (state: Timelines, event: Searching): Timelines => {
   }
 };
 
+/**
+ * A read asked again after a wait.
+ * @param load - The read.
+ * @returns The read.
+ */
+const again = <L extends Load>(load: L): L => ({
+  ...load,
+  attempt: load.attempt + 1,
+  reading: false,
+});
+
+/**
+ * Takes a read of a Network's Timelines or Session answering `UnknownNetwork`, which names
+ * no life, so lets nothing go on its own: the Network list is read again, and says whether
+ * the Network is gone, and the read is asked again after a wait meanwhile.
+ * @param state - The state.
+ * @param id - The Network.
+ * @param of - The read: its Timelines, or its Session.
+ * @returns The state.
+ */
+const unknownNetwork = (state: Timelines, id: NetworkId, of: "List" | "Status"): Timelines => {
+  const network = state.networks.get(id);
+
+  if (network === undefined) {
+    return state;
+  }
+
+  return {
+    ...state,
+    entries: { ...state.entries, fresh: false },
+    networks: setIn(
+      state.networks,
+      id,
+      of === "List"
+        ? { ...network, list: again(network.list) }
+        : { ...network, status: again(network.status) }
+    ),
+  };
+};
+
+type Gone = Extract<
+  TimelinesEvent,
+  { readonly _tag: "Vanished" | "NetworkVanished" | "NetworkRemoved" }
+>;
+
+const gones: ReadonlySet<string> = new Set(["Vanished", "NetworkVanished", "NetworkRemoved"]);
+
+const isGone = (event: TimelinesEvent): event is Gone => gones.has(event._tag);
+
+/**
+ * The state after the Daemon said a Timeline or a Network is gone, or that it removed a
+ * Network.
+ * @param state - The state.
+ * @param event - What it said.
+ * @returns The state.
+ */
+const gone = (state: Timelines, event: Gone): Timelines => {
+  switch (event._tag) {
+    case "Vanished": {
+      return {
+        ...state,
+        vanished: new Set(state.vanished).add(event.timeline),
+        windows: deleteIn(state.windows, event.timeline),
+      };
+    }
+
+    case "NetworkVanished": {
+      return unknownNetwork(state, event.network, event.of);
+    }
+
+    case "NetworkRemoved": {
+      return ended(state, event);
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
 const apply = (state: Timelines, event: TimelinesEvent): Applied => {
   if (isNavigation(event)) {
     return { state: navigated(state, event) };
@@ -3148,6 +3549,10 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 
   if (isSearching(event)) {
     return { state: searched(state, event) };
+  }
+
+  if (isGone(event)) {
+    return { state: gone(state, event) };
   }
 
   switch (event._tag) {
@@ -3173,22 +3578,6 @@ const apply = (state: Timelines, event: TimelinesEvent): Applied => {
 
     case "WindowRead": {
       return { state: windowRead(state, event) };
-    }
-
-    case "Vanished": {
-      return {
-        state: {
-          ...state,
-          vanished: new Set(state.vanished).add(event.timeline),
-          windows: deleteIn(state.windows, event.timeline),
-        },
-      };
-    }
-
-    case "NetworkVanished": {
-      return {
-        state: startFollowing({ ...state, networks: deleteIn(state.networks, event.network) }),
-      };
     }
 
     case "Changed": {
@@ -3386,7 +3775,13 @@ export const wanted = (state: Timelines): readonly Read[] => {
       });
     }
 
-    if (state.follow._tag === "Following" && !network.status.fresh && !network.status.reading) {
+    // A removed Network has no Session, and `known` no longer answers for it.
+    if (
+      state.follow._tag === "Following" &&
+      !network.status.fresh &&
+      !network.status.reading &&
+      !isRemoved(network)
+    ) {
       reads.push({ _tag: "Status", attempt: network.status.attempt, network: network.network });
     }
   }
@@ -3446,24 +3841,48 @@ export interface SidebarNetwork {
   readonly timelines: readonly Timeline[];
   /** Its Timelines are not all read yet. */
   readonly reading: boolean;
+  /** It was removed with its Timelines kept, so they are only read. */
+  readonly removed: boolean;
 }
 
 /**
- * The Networks, by id, each with its Timelines in sidebar order.
+ * The Networks, each with its Timelines in sidebar order: those not removed by id, then
+ * those removed with their Timelines kept, by id.
  * @param state - The state.
  * @returns The sidebar.
  */
 export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
   [...state.networks.values()]
-    .toSorted((left, right) => byCodeUnits(left.network, right.network))
     .map((network) => ({
       away: network.away,
       connection: network.connection,
       network: network.network,
       reading: !network.list.fresh,
+      removed: isRemoved(network),
       running: network.running,
       timelines: [...network.timelines.values()].toSorted(sidebarOrder),
-    }));
+    }))
+    .toSorted(
+      (left, right) =>
+        Number(left.removed) - Number(right.removed) || byCodeUnits(left.network, right.network)
+    );
+
+/**
+ * How a Network stands, for removing it: `Live`, configured; `Kept`, removed with its
+ * Timelines kept, which removing again drops; or `Unknown`, not held at all.
+ * @param state - The state.
+ * @param network - The Network.
+ * @returns How it stands.
+ */
+export const standingOf = (state: Timelines, network: NetworkId): Standing => {
+  const held = state.networks.get(network);
+
+  if (held === undefined) {
+    return "Unknown";
+  }
+
+  return isRemoved(held) ? "Kept" : "Live";
+};
 
 /**
  * A Network as the sidebar's tree draws it: its row, which is its own Timeline, and the
@@ -3697,6 +4116,26 @@ export const opened = (state: Timelines, pane = state.layout.focused): Opened =>
     timeline,
     window,
   };
+};
+
+/**
+ * The Network a Pane's Timeline belongs to, when it was removed with its Timelines kept,
+ * so the Pane says so and nothing is said there.
+ * @param state - The state.
+ * @param pane - The Pane's id: the focused Pane unless another is named.
+ * @returns The Network, or none.
+ */
+export const removedIn = (state: Timelines, pane = state.layout.focused): NetworkId | undefined => {
+  const shown = opened(state, pane);
+
+  if (shown._tag !== "Shown" || shown.description === undefined) {
+    return undefined;
+  }
+
+  const { network, removed } = shown.description;
+  const held = state.networks.get(network);
+
+  return removed || (held !== undefined && isRemoved(held)) ? network : undefined;
 };
 
 /**

@@ -77,9 +77,11 @@ const described = (
   key,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: nothing,
 });
 
@@ -140,6 +142,8 @@ const world = (
   items: readonly (typeof TimelineItem.Encoded)[] = []
 ): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    _tag: "Live",
+    life: 1,
     network: "libera",
     status: { _tag: "Running" },
   });
@@ -167,6 +171,7 @@ const world = (
     { _tag: "Requesting", read: status },
     {
       _tag: "StatusRead",
+      life: 1,
       network,
       self: null,
       session: Schema.decodeSync(SessionKnowledge)({
@@ -336,7 +341,16 @@ const settled = () => {
 
 const changed = (change: Partial<typeof TimelineChange.Encoded>): ChannelEvent => ({
   _tag: "Changed",
-  change: decodeChange({ gaps: [], items: [], merged: [], sequence: 11, timelines: [], ...change }),
+  change: decodeChange({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    removals: [],
+    sequence: 11,
+    timelines: [],
+    ...change,
+  }),
 });
 
 /**
@@ -629,11 +643,33 @@ const standingShown = (standing: Parameters<typeof header>[0]) => {
  */
 const touchesIirc = (change: Partial<typeof TimelineChange.Encoded>, headSeen: number | null = 4) =>
   touches(
-    decodeChange({ gaps: [], items: [], merged: [], sequence: 11, timelines: [], ...change }),
+    decodeChange({
+      dropped: [],
+      gaps: [],
+      items: [],
+      merged: [],
+      removals: [],
+      sequence: 11,
+      timelines: [],
+      ...change,
+    }),
     timelineId(iirc),
     network,
     headSeen
   );
+
+/**
+ * The world with a Timeline open, its Network removed with its Timelines kept.
+ * @param open - The Timeline open.
+ * @returns The state.
+ */
+const removed = (open: string) =>
+  reduceTimelines(world(open), {
+    _tag: "NetworkRemoved",
+    keep: true,
+    life: 1,
+    network,
+  });
 
 describe("the header", () => {
   it("shows a Channel's topic, formatted, who set it and when, its modes, and how many are in it", () => {
@@ -706,6 +742,18 @@ describe("the header", () => {
     }).toStrictEqual({
       none: { _tag: "None" },
       stale: { _tag: "Set", at: undefined, by: undefined, inlines: formatted("old"), stale: true },
+    });
+  });
+
+  it("says a removed Network's Timelines are removed, and never to join or connect", () => {
+    const channel = headerOf(removed(iirc), withHead(null));
+
+    expect({
+      channel: channel?._tag === "Channel" ? channel.note : channel,
+      network: headerOf(removed(own), initialChannel),
+    }).toStrictEqual({
+      channel: undefined,
+      network: { _tag: "Network", name: "libera", status: "removed", timeline: own },
     });
   });
 

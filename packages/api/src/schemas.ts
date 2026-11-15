@@ -28,7 +28,7 @@ import { CredentialName } from "@iirc/protocol/line";
 import type { UnparseableReason } from "@iirc/protocol/line";
 import { SearchText, TimelineId, cursorOf, parseCursor, unreadCap } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
-import { Effect, Result, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Effect, Result, Schema, SchemaGetter, SchemaIssue, SchemaTransformation } from "effect";
 import { Base64Url } from "effect/encoding";
 
 import { UiInForce } from "./ui.ts";
@@ -86,6 +86,16 @@ export type NetworkId = typeof NetworkId.Type;
 
 /** An Entry's place in the Journal. Sequences only increase, and may skip numbers. */
 export const Sequence = Schema.Int.check(Schema.isGreaterThan(0)).pipe(Schema.brand("Sequence"));
+
+/**
+ * Which life of a Network something belongs to: the sequence of the `Configured` that
+ * began that life, the first after the Network was added or after it was removed. It only
+ * increases for a Network's id, and the Daemon gives the same after a restart or a rebuild,
+ * so an answer from a Network removed and added again under its id is told apart.
+ */
+export const Life = Sequence.annotate({
+  description: "The sequence of the Configured that began this life of the Network.",
+});
 
 /** The decoded form of {@link Sequence}. */
 export type Sequence = typeof Sequence.Type;
@@ -255,6 +265,20 @@ export const Journaled = Schema.Struct({ sequence: Sequence });
 export const IfSequence = Schema.String.check(
   Schema.isPattern(/^(?:0|[1-9]\d{0,14})$/u, { message: "must be a sequence, or 0 for none" })
 ).pipe(Schema.decodeTo(Schema.Int, SchemaTransformation.numberFromString));
+
+/** Whether a removed Network's Timelines stay readable, as `true` or `false` in a query. */
+export const Keep = Schema.Literals(["true", "false"]).pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform((text) => text === "true"),
+    encode: SchemaGetter.transform((keep) => (keep ? "true" : "false")),
+  })
+);
+
+/**
+ * How a Network is removed: whether its Timelines stay readable, and the life of it the
+ * removal was made from, which it removes only while that is the life the Daemon holds.
+ */
+export const RemoveQuery = { keep: Keep, life: SequenceFromString };
 
 /**
  * A Network's Configuration in force, and the sequence of the `Configured` that set it,
@@ -466,6 +490,7 @@ const inputTags = everyOf<Input["_tag"]>()([
   "Opened",
   "Read",
   "Received",
+  "Removed",
   "Retry",
   "Say",
   "Started",
@@ -704,6 +729,11 @@ export const News = Schema.TaggedUnion({
     where: Schema.Array(Where),
   },
   /**
+   * The Owner removed the Network, and `keep` is whether its Timelines stay readable. No
+   * News of it follows, but another removal, which drops Timelines it kept.
+   */
+  NetworkRemoved: { keep: Schema.Boolean },
+  /**
    * The Owner's Read Marker of a Timeline moved forward, to `read`: the Network's own, a
    * Channel's, or a Direct Message partner's, keyed as `where` keys it.
    */
@@ -724,6 +754,7 @@ export type News = typeof News.Type;
 /** What one Input to one Network made happen: its sequence, its time, and its News in order. */
 export const Happened = Schema.Struct({
   at: Instant,
+  life: Life,
   network: NetworkId,
   news: Schema.Array(News),
   sequence: Sequence,
@@ -1079,8 +1110,9 @@ export type Unread = typeof Unread.Type;
  * last item stands, `read` its Read Marker, `null` before any, `unread` how much stands
  * after it, by level, `head` the last step that changed what the Client knows of its
  * Channel in a way no item says, `null` before any, so a Frontend following the changes
- * reads the Channel's head again, and `changed` the last step that changed it, its Read
- * Marker, its head, or any of its items.
+ * reads the Channel's head again, `removed` whether its Network was removed with its
+ * Timelines kept, so it is read and never said to, and `changed` the last step that
+ * changed it, its Read Marker, its head, or any of its items.
  */
 export const Timeline = Schema.Struct({
   changed: Sequence,
@@ -1090,9 +1122,11 @@ export const Timeline = Schema.Struct({
   key: Schema.NullOr(Untrusted),
   kind: Schema.Literals(["Channel", "Direct", "Network"]),
   latest: Schema.NullOr(Cursor),
+  life: Life,
   name: Untrusted,
   network: NetworkId,
   read: Schema.NullOr(Instant),
+  removed: Schema.Boolean,
   unread: Unread,
 });
 
@@ -1133,6 +1167,35 @@ export const Tombstone = Schema.Struct({
 
 /** The decoded form of {@link Tombstone}. */
 export type Tombstone = typeof Tombstone.Type;
+
+/**
+ * A Timeline dropped when its Network was removed without keeping it: no route reads it
+ * again, and a Frontend lets it go.
+ */
+export const DroppedTimeline = Schema.Struct({
+  changed: Sequence,
+  id: TimelineId,
+  life: Life,
+  network: NetworkId,
+});
+
+/** The decoded form of {@link DroppedTimeline}. */
+export type DroppedTimeline = typeof DroppedTimeline.Type;
+
+/**
+ * A Network's removal, whether or not it had Timelines: `keep` whether its Timelines stay
+ * readable. A Frontend takes it out of what it shows as live, and drops what it held of it
+ * when they do not stay.
+ */
+export const NetworkRemoval = Schema.Struct({
+  changed: Sequence,
+  keep: Schema.Boolean,
+  life: Life,
+  network: NetworkId,
+});
+
+/** The decoded form of {@link NetworkRemoval}. */
+export type NetworkRemoval = typeof NetworkRemoval.Type;
 
 /** Whether the Daemon is folding News into Timelines, or why it stopped until it restarts. */
 export const Projection = Schema.TaggedUnion({
@@ -1218,12 +1281,14 @@ export type SearchResults = typeof SearchResults.Type;
 
 /**
  * What one step changed in the Timelines, as each thing stands now: the Timelines, items,
- * tombstones, and Gaps whose last change it was.
+ * tombstones, dropped Timelines, Networks removed, and Gaps whose last change it was.
  */
 export const TimelineChange = Schema.Struct({
+  dropped: Schema.Array(DroppedTimeline),
   gaps: Schema.Array(Gap),
   items: Schema.Array(TimelineItem),
   merged: Schema.Array(Tombstone),
+  removals: Schema.Array(NetworkRemoval),
   sequence: Sequence,
   timelines: Schema.Array(Timeline),
 });
@@ -1352,6 +1417,8 @@ export const Knowledge = Schema.Struct({
    * the keys of Timelines, or `null` until one has, when they are folded by `rfc1459`.
    */
   declared: Schema.NullOr(Casemapping),
+  /** The life of the Network this is known of. */
+  life: Life,
   self: Schema.NullOr(UserKnowledge),
   session: SessionKnowledge,
   users: Schema.Array(KeyedUser),
@@ -1505,11 +1572,26 @@ export const NetworkStatus = Schema.TaggedUnion({
 /** The decoded form of {@link NetworkStatus}. */
 export type NetworkStatus = typeof NetworkStatus.Type;
 
-/** A Network and whether it is running. */
-export const NetworkEntry = Schema.Struct({ network: NetworkId, status: NetworkStatus });
+/**
+ * A Network the Daemon holds, with its life, as one list reads every one together:
+ *
+ * - `Live`: configured, and whether it is running.
+ * - `Kept`: removed with its Timelines kept, which no Network can take the id of until they
+ *   are dropped, and which are only read.
+ */
+export const NetworkEntry = Schema.TaggedUnion({
+  Kept: { life: Life, network: NetworkId },
+  Live: { life: Life, network: NetworkId, status: NetworkStatus },
+});
 
 /** The decoded form of {@link NetworkEntry}. */
 export type NetworkEntry = typeof NetworkEntry.Type;
+
+/** A Network removed: the sequence its removal was journaled at, and the life it ended. */
+export const Removed = Schema.Struct({ life: Life, sequence: Sequence });
+
+/** The decoded form of {@link Removed}. */
+export type Removed = typeof Removed.Type;
 
 /** A timer and when it is due. */
 const Timer = Schema.Struct({ at: Instant, timer: TimerId });

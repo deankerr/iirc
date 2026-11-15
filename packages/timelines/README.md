@@ -6,9 +6,9 @@ Timelines as a pure fold over News. Each step the Runtime's News stream gives go
 import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
-Happened = { network, sequence, at, news }        // the Runtime's Happened fits it
+Happened = { network, life, sequence, at, news }  // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 8
+projectionVersion: number                         // 10
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
@@ -39,6 +39,8 @@ There are three kinds: the **Network**'s own, a **Channel**'s, and a **Direct** 
 - **`DirectRenamed`** finds the Direct Message Timeline keyed by the old nick, which takes the item, and is keyed and named by the new nick from then on. When none has the old nick, it touches nothing. When another Direct Message Timeline already has the new nick's key, that one is **detached**: it keeps its id, name, and items, but no key, so it receives nothing more, since nothing says it is the same person. A Message to the old nick after that opens a new Timeline.
 - **`Refolded`** folds the name of each of the Network's keyed Timelines again, with `casefold` from `@iirc/protocol/casemapping` under the mapping it carries. Of Timelines of one kind whose keys now meet, the one opened first is kept, and each other is **merged** into it.
 
+Each Timeline names the **life** of its Network it belongs to, as each step's `life` gives it when the Timeline opens, which a removal of the Network names too. A Network given its id again after a removal opens its Timelines in its later life.
+
 A **TimelineId** is opaque, and derived from where the Timeline was first opened: the step's sequence, the News's index in it, and which of its `where` entries opened it, or none for the Network's own. Each part is fixed-width lower-case hex, as `0000000000002a-00000003-00000001`, so an id is safe in a URL path, holds no name a Network chose, sorts in the order the Timelines were opened, and is the same on every rebuild. A rename, a refold, or a detach keeps the id.
 
 ## Positions
@@ -63,6 +65,7 @@ Every change carries `sequence`, the step that made it, so the store records for
 | `Refolded` | `Described` for each Timeline whose key changes, and `Merged` for each that meets one opened before it, followed by `ReadMarker` for the one kept when the merged one was read further. |
 | `ReadMarker` | `ReadMarker` for the Timeline its `where` names, when it moves that Timeline's Read Marker forward. |
 | `ChannelLearned` | `HeadChanged` for the Channel's Timeline, when one exists, so a Frontend reads the Channel's head again. It opens no Timeline and adds no item. |
+| `NetworkRemoved` | `Removed` for the Network, with `keep`. The Network leaves the directory, so an id given to a Network again opens its Timelines anew, and a removal of a Network the directory no longer holds, to drop what it kept, opens nothing. |
 | `LookedUp` | Nothing. A Lookup's result is the answer to whoever looked, read through the API, not something said or done on the Network. |
 | `Ignored` | Nothing. |
 

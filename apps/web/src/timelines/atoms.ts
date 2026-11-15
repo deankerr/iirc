@@ -190,6 +190,8 @@ const request = (read: Read) =>
 
     switch (read._tag) {
       case "Networks": {
+        // One list names every Network, live or removed with its Timelines kept, as one
+        // state of the Daemon, so none falls between two reads.
         const entries = yield* client.networks.list();
 
         return { _tag: "NetworksRead", entries } as const;
@@ -209,6 +211,7 @@ const request = (read: Read) =>
 
         return {
           _tag: "StatusRead",
+          life: known.life,
           network: read.network,
           self: known.self,
           session: known.session,
@@ -313,7 +316,11 @@ const perform = (registry: AtomRegistry.AtomRegistry, read: Read) =>
           } else if (error._tag === "UnknownTimeline" && "timeline" in read) {
             happened(registry, { _tag: "Vanished", timeline: read.timeline });
           } else if (error._tag === "UnknownNetwork" && "network" in read) {
-            happened(registry, { _tag: "NetworkVanished", network: read.network });
+            happened(registry, {
+              _tag: "NetworkVanished",
+              network: read.network,
+              of: read._tag === "Status" ? "Status" : "List",
+            });
           }
         },
         onSuccess: (event) => {

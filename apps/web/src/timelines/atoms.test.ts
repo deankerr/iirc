@@ -39,9 +39,11 @@ const describeTimeline = (
   key: kind === "Network" ? null : name,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
@@ -70,7 +72,16 @@ const changed = (
   sequence: number,
   change: Partial<typeof TimelineChange.Encoded>
 ): typeof TimelineChangesEvent.Encoded => ({
-  data: JSON.stringify({ gaps: [], items: [], merged: [], sequence, timelines: [], ...change }),
+  data: JSON.stringify({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    removals: [],
+    sequence,
+    timelines: [],
+    ...change,
+  }),
   event: "changed",
   id: `1.${sequence}`,
 });

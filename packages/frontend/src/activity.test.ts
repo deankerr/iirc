@@ -66,6 +66,7 @@ interface Described {
   readonly latest?: number | null;
   readonly detached?: boolean;
   readonly changed?: number;
+  readonly removed?: boolean;
 }
 
 const described = ({
@@ -76,6 +77,7 @@ const described = ({
   latest = null,
   name,
   read = null,
+  removed = false,
   unread = {},
 }: Described): typeof Timeline.Encoded => ({
   changed,
@@ -85,9 +87,11 @@ const described = ({
   key: kind === "Network" || detached ? null : name,
   kind,
   latest: latest === null ? null : cursor(latest, 1),
+  life: 1,
   name,
   network: "libera",
   read,
+  removed,
   unread: { ...nothing, ...unread },
 });
 
@@ -171,6 +175,8 @@ const world = (
   viewed = true
 ): Timelines => {
   const libera = Schema.decodeSync(NetworkEntry)({
+    _tag: "Live",
+    life: 1,
     network: "libera",
     status: { _tag: "Running" },
   });
@@ -244,7 +250,16 @@ const changed = (
   change: Partial<typeof TimelineChange.Encoded>
 ): Extract<TimelinesEvent, { readonly _tag: "Changed" }> => ({
   _tag: "Changed",
-  change: decodeChange({ gaps: [], items: [], merged: [], sequence, timelines: [], ...change }),
+  change: decodeChange({
+    dropped: [],
+    gaps: [],
+    items: [],
+    merged: [],
+    removals: [],
+    sequence,
+    timelines: [],
+    ...change,
+  }),
   place: { sequence, version: 1 },
 });
 
@@ -331,7 +346,16 @@ describe("what is unread", () => {
         described({ id: iirc, name: "#iirc", unread: { highlights: 1000 } }),
         described({ id: peer, kind: "Direct", name: "peer", unread: { direct: 1 } })
       ),
-    }).toStrictEqual({ calling: "(3) iirc", calm: "iirc", capped: "(999+) iirc" });
+      removed: titled(
+        described({ id: iirc, name: "#iirc", removed: true, unread: { highlights: 2 } })
+      ),
+    }).toStrictEqual({
+      calling: "(3) iirc",
+      calm: "iirc",
+      capped: "(999+) iirc",
+      // A removed Network's Timelines are never marked read, so they call for nothing.
+      removed: "iirc",
+    });
   });
 
   it("gives the highest level said and unread anywhere, and none for Activity alone", () => {
@@ -374,12 +398,15 @@ describe("what is unread", () => {
         name: "peer",
         unread: { direct: 1 },
       }),
+      described({ id: iirc, latest: 50, name: "#iirc", removed: true, unread: { messages: 1 } }),
     ].map((one) => markLatest(decodeTimeline(one)));
 
     expect(marks.map((mark) => mark && { read: mark.read, target: mark.target })).toStrictEqual([
       { read: 50, target: null },
       { read: 50, target: "#iirc" },
-      // Already read that far, nothing unread, no item, or a detached Direct Message.
+      // Already read that far, nothing unread, no item, a detached Direct Message, or a
+      // removed Network's, which no Client marks.
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -852,6 +879,8 @@ describe("notifications", () => {
     const first = reduceTimelines(state, event);
 
     const libera = Schema.decodeSync(NetworkEntry)({
+      _tag: "Live",
+      life: 1,
       network: "libera",
       status: { _tag: "Running" },
     });

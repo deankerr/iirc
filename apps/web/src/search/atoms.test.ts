@@ -32,9 +32,11 @@ const describeTimeline = (
   key: kind === "Network" ? null : name,
   kind,
   latest: null,
+  life: 1,
   name,
   network: "libera",
   read: null,
+  removed: false,
   unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
 });
 
@@ -103,9 +105,11 @@ const following = async () => {
 
 const merged = (sequence: number): typeof TimelineChangesEvent.Encoded => ({
   data: JSON.stringify({
+    dropped: [],
     gaps: [],
     items: [],
     merged: [{ changed: sequence, id: other, into: channel, network: "libera" }],
+    removals: [],
     sequence,
     timelines: [],
   }),

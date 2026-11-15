@@ -142,6 +142,12 @@ export const Input = Schema.TaggedUnion({
   Read: { at: Instant, read: Instant, target: Schema.NullOr(Schema.String) },
   /** One Line's bytes, without its line ending, framed by the Transport. */
   Received: { at: Instant, bytes: Schema.Uint8Array, connection: ConnectionId },
+  /**
+   * The Owner removed the Network. The Client ends a Session as disabling does, with a
+   * `QUIT`, and dials nothing again. `keep` is whether the Network's Timelines stay
+   * readable, which the Client only reports.
+   */
+  Removed: { at: Instant, keep: Schema.Boolean },
   /** The Owner wants to try connecting now, cutting a wait short. */
   Retry: { at: Instant },
   /** The Owner wants to say something to a Target. */

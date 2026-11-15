@@ -13,6 +13,7 @@ import {
   DaemonApi,
   InvalidRequest,
   JournalFailed,
+  LifeChanged,
   NetworkId as WireNetworkId,
   NetworkStopped,
   NotAChannel,
@@ -22,6 +23,7 @@ import {
   SignInsFailed,
   signInCookie,
   TimelinesFailed,
+  TimelinesKept,
   UiChanged,
   Unauthorized,
   UnknownNetwork,
@@ -74,6 +76,7 @@ import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
 import type { UiChangedSince } from "./ui.ts";
 import {
   channelHeader,
+  dropped,
   gap,
   happened,
   knowledge,
@@ -82,6 +85,7 @@ import {
   networkInspection,
   networkStatus,
   projection,
+  removal,
   throughOf,
   timeline,
   timelineItem,
@@ -343,9 +347,18 @@ const networks = HttpApiBuilder.group(
 
     return handlers
       .handle("list", () =>
-        runtime.networks.pipe(
+        runtime.lives.pipe(
           Effect.map((all) =>
-            Array.from(all, ([network, status]) => ({ network, status: networkStatus(status) }))
+            Array.from(all, ([network, living]) =>
+              living._tag === "Kept"
+                ? ({ _tag: "Kept", life: living.life, network } as const)
+                : ({
+                    _tag: "Live",
+                    life: living.life,
+                    network,
+                    status: networkStatus(living.status),
+                  } as const)
+            )
           )
         )
       )
@@ -366,8 +379,22 @@ const networks = HttpApiBuilder.group(
                   new ConfigurationChanged({ network: params.network, sequence: error.sequence })
                 ),
               NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
+              TimelinesKept: () => Effect.fail(new TimelinesKept({ network: params.network })),
             })
           )
+      )
+      .handle("remove", ({ params, query }) =>
+        runtime.remove(NetworkId.make(params.network), { keep: query.keep, life: query.life }).pipe(
+          Effect.map(({ life, sequence }) => ({ life, sequence })),
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            LifeChanged: (error) =>
+              Effect.fail(new LifeChanged({ life: error.life, network: params.network })),
+            NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
+            UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),
+            VaultFailed: (error) => Effect.fail(vaultFailed(error)),
+          })
+        )
       )
       .handle("configuration", ({ params }) =>
         runtime.configuration(NetworkId.make(params.network)).pipe(Effect.mapError(unknownNetwork))
@@ -601,17 +628,24 @@ const eventsOf = (changed: Changed, version: number): readonly TimelineChangesEv
 
   const sequences = [
     ...new Set(
-      [...changed.timelines, ...changed.items, ...changed.merged, ...changed.gaps].map(
-        (each) => each.changed
-      )
+      [
+        ...changed.timelines,
+        ...changed.items,
+        ...changed.merged,
+        ...changed.dropped,
+        ...changed.removals,
+        ...changed.gaps,
+      ].map((each) => each.changed)
     ),
   ].toSorted((left, right) => left - right);
 
   return sequences.map((sequence): TimelineChangesEvent => ({
     data: {
+      dropped: changed.dropped.filter(at(sequence)).map(dropped),
       gaps: changed.gaps.filter(at(sequence)).map(gap),
       items: changed.items.filter(at(sequence)).map(timelineItem),
       merged: changed.merged.filter(at(sequence)).map(tombstone),
+      removals: changed.removals.filter(at(sequence)).map(removal),
       sequence: WireSequence.make(sequence),
       timelines: changed.timelines.filter(at(sequence)).map(timeline),
     },
@@ -641,8 +675,9 @@ const timelines = HttpApiBuilder.group(
     const projector = yield* Projector;
     const page = yield* ChangesPage;
 
+    // A Network removed with its Timelines kept is still known to them.
     const known = (network: WireNetworkId) =>
-      runtime.networks.pipe(
+      runtime.lives.pipe(
         Effect.flatMap((all) =>
           all.has(NetworkId.make(network))
             ? Effect.void
