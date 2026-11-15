@@ -14,6 +14,7 @@ import {
   IfSequence,
   ItemAfter,
   LookResult,
+  LookRequest,
   MemberPage,
   MembersAfter,
   MembersQuery,
@@ -813,6 +814,37 @@ describe("the contract", () => {
         `"context":{"type":"array","items":${untrusted}}`,
       ].filter((field) => !looked.includes(field))
     ).toStrictEqual([]);
+  });
+
+  it("carries a Channel's list asked, and its masks, with who set each and when only where said", () => {
+    const asked = { intent: "c1", lookup: { _tag: "Exceptions", channel: "#iirc" } } as const;
+
+    const listed = {
+      _tag: "Listed",
+      cut: "Bounded",
+      masks: [
+        { mask: "a!*@*", setAt: Instant.make(1_767_225_600_000), setBy: "peer" },
+        { mask: "b!*@*", setAt: null, setBy: null },
+      ],
+      notes: [],
+    } as const;
+
+    const whole = { ...listed, cut: null, masks: [] };
+    const refused = { _tag: "Refused", reason: "NotOffered" } as const;
+    const untrusted = '{"$ref":"#/components/schemas/Untrusted"}';
+    const looked = JSON.stringify(document.paths["/api/networks/{network}/lookups/{intent}"]);
+
+    expect([
+      Schema.decodeSync(LookRequest)(asked),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(listed)),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(whole)),
+      Schema.decodeSync(LookResult)(Schema.encodeSync(LookResult)(refused)),
+      Schema.is(LookRequest)({ lookup: { _tag: "Bans", channel: "#a\r\nQUIT" } }),
+      Schema.is(LookRequest)({ lookup: { _tag: "Bans", channel: "" } }),
+      [`"mask":${untrusted}`, `"setBy":{"anyOf":[${untrusted},{"type":"null"}]}`].filter(
+        (field) => !looked.includes(field)
+      ),
+    ]).toStrictEqual([asked, listed, whole, refused, false, false, []]);
   });
 
   it("carries a standard reply and a Lookup's notes whole, each field its own, and only the three kinds", () => {

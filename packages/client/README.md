@@ -42,7 +42,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Configured` | Owner | The Network's whole Configuration. Joining, parting, and quitting are changes to it. |
 | `Say` | Owner | Say something to a Target, with an intent id from the Runtime. |
 | `Act` | Owner | Act on the Network, with an intent id: set a topic, kick, part a Channel Self is in (which leaves the Configuration alone, so a Channel it wants is joined again), change modes, invite, change Self's nick, be away or back, send a CTCP request or a `PING` to a User, or send a Line written as text. |
-| `Look` | Owner | Look something up, with an intent id: `Whois { nick }` or `Whowas { nick }`. |
+| `Look` | Owner | Look something up, with an intent id: `Whois { nick }`, `Whowas { nick }`, or a Channel's list, `Bans { channel }`, `Exceptions { channel }`, or `Invitations { channel }`. |
 | `Retry` | Owner | Try connecting now, cutting a wait short. |
 | `Removed` | Owner | The Owner removed the Network, keeping its Timelines readable or not, as `keep` says. |
 | `Read` | Owner | The Owner has read a Timeline up to an instant: a Target's, or the Network's own. |
@@ -271,15 +271,16 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **`Part`** parts one Channel the Configuration does not want, such as one the Ircd put Self in. A Channel the Configuration wants is `Unsendable`, since parting it is a change to the Configuration, as for `Raw`. Self's own `PART` of the Channel answers it.
 - **`Raw`** sends a Line written as text. It may not be `CAP`, nor `PASS`, `AUTHENTICATE`, or `OPER`, which carry a Credential. `OPER` is configured instead. A `JOIN` or `PART` of a Channel the Configuration wants is refused, since those are changes to the Configuration. The Client follows whatever the Ircd echoes back, as if another IRC client of the same account had sent it.
 - **A refusal is tied to its action by structure.** With `labeled-response`, by label. On the floor, an error numeric is tied to the oldest Line of an action that names what the numeric names, such as `482` by its Channel. The Client's own `MODE` query of a Channel waits among them in the order it was sent, and takes a `324` of its Channel, an error numeric naming its Channel, or a `421` or `461` naming `MODE`, when it is the oldest.
-- **Some refusals cannot be tied on the floor:** a numeric that names nothing the action named, such as `472`, and anything an Ircd says only in text.
+- **Some refusals cannot be tied on the floor:** a numeric that names nothing the action named, and anything an Ircd says only in text. A `472` names a mode, so it ties to the oldest `MODE` that changes that mode, or a list Lookup asked by it, whichever was sent first.
 
 ### Lookups
 
-`lookups.test.ts`. A `Look` asks the Network something and collects the reply, which may span many Lines, into one `LookedUp`.
+A `Look` asks the Network something and collects the reply, which may span many Lines, into one `LookedUp`.
 
-- **Every `Look` gets exactly one result:** `Found`, `NotFound`, `Failed`, `Partial`, `Refused`, or `Unsent`.
-- **A reply is collected by structure.** With `labeled-response`, by its label. On the floor, a numeric belongs to the oldest Lookup whose nick it names.
-- **Only reply numerics and standard replies are read.** A numeric the Client does not model is kept as it came, so nothing is lost. A `FAIL` ends the Lookup by its code, at once when it was sent without a label, since nothing promises an end numeric after one. A `WARN` or `NOTE`, and each `FAIL` after the first, is kept in the result's `notes`. Nothing is read from free text but the one mode word of a `379`.
+- **Every `Look` gets exactly one result:** `Found` or `Partial` with the Users a `WHOIS` or `WHOWAS` described, `Listed` with a Channel's masks and why it was cut short, if it was, `NotFound`, `Failed`, `Refused`, or `Unsent`.
+- **A Channel's list is asked by the mode ISUPPORT gives it.** Bans are `b` while `CHANMODES` lists it. Exceptions and invitation masks are the modes `EXCEPTS` and `INVEX` name, `e` and `I` when they name none, offered only when the token is sent and `CHANMODES` lists the mode as a list. One the Network does not offer is `Refused` as `NotOffered`, and nothing is sent. Each mask keeps who set it and when, where the Ircd says.
+- **A reply is collected by structure.** With `labeled-response`, by its label. On the floor, a numeric belongs to the oldest Lookup whose nick or Channel it names, or to an action or the Client's own `MODE` query sent before it that it names, as with `482`. A `421` or `461`, and a standard reply, name a command instead, and go to whichever sent with that command was sent first.
+- **Only reply numerics and standard replies are read.** A numeric the Client does not model is kept as it came, so nothing is lost. A `FAIL` ends the Lookup by its code, at once when it was sent without a label, since nothing promises an end numeric after one, and so does an error numeric that refuses a list. A `WARN` or `NOTE`, and each `FAIL` after the first, is kept in the result's `notes`. Nothing is read from free text but the one mode word of a `379`.
 - **Bounded.** At most 8 await their replies on a Connection, at most 64 Lines of one are kept, and one with no end within 30 s reports what it has.
 - **A `WHOIS` refreshes only what the Client already models,** and never undoes something said since. The Client never sends a Lookup itself, so nothing is polled.
 

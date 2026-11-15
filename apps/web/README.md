@@ -32,7 +32,7 @@ The core decides and this package draws and does the I/O.
 - **Draws text in the size, line height, and font the Owner chooses:** `ui.size`, from 10 to 24 pixels, 14 to start, `ui.leading`, the line height as a multiple of the size, from 1 to 2, 1.45 to start, and `ui.font`, the device's own monospace font, its own sans font, one of nine it serves itself, five monospace and four sans, below, or any family the device has, by name. A font highlighted in the palette previews on the whole page, and a change takes effect at once.
 - **Shows who is here.** A Pane's status bar is one line: its number, the Timeline's name, a Channel's modes and its topic, cut to the line, and the members' toggle, which says how many there are. A press on the topic discloses it in full under the bar. The toggle, `/members`, or Alt+M shows the members under the bar, by rank, and a press, a tap, or Enter on one opens a menu of `query`, `whois`, and `mention`, Query first, so Enter twice opens their Direct Message.
 - **Opens a Direct Message by nick,** with `/query`. When nothing was said yet, the Pane shows a Direct Message not yet begun, and the first Message makes its Timeline.
-- **Looks a User up,** with `/whois` and `/whowas`, as a card under the Pane's status bar.
+- **Looks a User up,** with `/whois` and `/whowas`, and a Channel's bans, exceptions, and invitation masks, with `/bans`, `/exceptions`, and `/invexes`, as a card under the Pane's status bar. While Self is an operator there, each mask has a button that removes it.
 - **Sends a CTCP request to a User,** with `/ctcp <nick> <command> [text]`, or `/ping <nick>`, which shows how long the reply took. The request and its reply show in the Network's Timeline, and in the User's Direct Messages when those exist.
 - **Notifies, when the Owner asks,** with `/notify on`: a Highlight or a Direct Message in a Timeline they are not looking at.
 - **Fits a phone.** A screen 640px wide or less shows the focused Pane alone, with one slim bar holding the sidebar's button and the Panes' switcher, the sidebar as a drawer, and the members as a sheet. Where the pointer is coarse, every control is at least 44px and every field's text at least 16px, so iOS Safari does not zoom into it. Pinch zoom is never turned off.
@@ -63,7 +63,7 @@ The core decides and this package draws and does the I/O.
   | --- | --- |
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
   | `uiSync` | Follows the options under `ui` |
-  | `channelSync` | Reads each shown Channel's head and members |
+  | `channelSync` | Reads each shown Channel's head and members, and the head of each Channel whose list a Lookup card is |
   | `marking` | Marks read what `markDue` says, after a second |
   | `completer`, `chantypesSync` | Ask for the nicks and the `CHANTYPES` that completion needs |
   | `lookupSync` | Lets go of the Lookup cards of Panes that are gone |

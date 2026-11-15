@@ -37,7 +37,7 @@ import type { IntentId } from "./ids.ts";
 import { collectFloor, collectLabelled, floorLookup, lookupByCommand } from "./lookups.ts";
 import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
-import { askModes, modesQueryOver, queryAnswered } from "./modes-query.ts";
+import { askModes, modesQueryOver, queryAnswered, queryByCommand } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
 import { isOperAnswer } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
@@ -816,6 +816,35 @@ const latestSayWhere = (run: Run, command: string): readonly Where[] | undefined
 };
 
 /**
+ * Gives a standard reply on the floor to the Client's own `MODE` query, when it names
+ * `MODE` and the query was sent before any Lookup or action it could answer: a `FAIL` ends
+ * the query, and the next Channel is asked. The query is News of nothing, so the reply is
+ * shown in the Network's own Timeline.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it.
+ * @param reply - The standard reply.
+ * @returns Whether the query took it.
+ */
+const toQuery = (run: Run, arrival: Arrival, reply: StandardReply): boolean => {
+  const query = queryByCommand(run, reply.command);
+  const looking = lookupByCommand(run, reply);
+  const acting = actionByCommand(run, reply.command);
+  const first = Math.min(looking?.order ?? Infinity, acting?.order ?? Infinity);
+
+  if (query === undefined || query.order > first) {
+    return false;
+  }
+
+  if (reply.kind === "FAIL") {
+    modesQueryOver(run);
+  }
+
+  reportReply(run, arrival, reply, [{ _tag: "Network" }]);
+
+  return true;
+};
+
+/**
  * A standard reply that refused no intent, shown with what it answers. A labelled one is
  * shown where its intent belongs, as `labeled-response` marked it. One live outside any
  * batch or label is tied by the command it names to the oldest of what awaits an answer
@@ -852,6 +881,11 @@ const standardReply = (run: Run, arrival: Arrival): void => {
   }
 
   const floor = arrival.batch === undefined && !line.tags.has("label");
+
+  if (floor && toQuery(run, arrival, reply)) {
+    return;
+  }
+
   const looking = floor ? lookupByCommand(run, reply) : undefined;
   const acting = floor ? actionByCommand(run, reply.command) : undefined;
 

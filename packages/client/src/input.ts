@@ -99,6 +99,12 @@ export type Action = typeof Action.Type;
  * by structure into one result.
  */
 export const Lookup = Schema.TaggedUnion({
+  /** A Channel's bans, by the `b` list of `CHANMODES`. */
+  Bans: { channel: Schema.String },
+  /** A Channel's ban exceptions, by the list mode `EXCEPTS` names. */
+  Exceptions: { channel: Schema.String },
+  /** A Channel's invitation masks, by the list mode `INVEX` names. */
+  Invitations: { channel: Schema.String },
   /** `WHOIS` of one nick: what the Network says of that User now. */
   Whois: { nick: Schema.String },
   /** `WHOWAS` of one nick: who held it before. */

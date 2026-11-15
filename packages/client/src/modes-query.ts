@@ -9,8 +9,9 @@
  *
  * A reply is tied to the query only by structure, as a floor reply to the Owner's action
  * is, and the oldest of the two takes it: a `324` of its Channel, an error numeric that
- * names its Channel second, or a `421` or `461` that names `MODE`. None of it is News, and
- * an error leaves the modes unknown.
+ * names its Channel second, a `421` or `461` that names `MODE`, or a `FAIL` about `MODE`.
+ * None of it is News, but a standard reply is shown in the Network's own Timeline, and an
+ * error leaves the modes unknown.
  *
  * @packageDocumentation
  */
@@ -106,6 +107,16 @@ export const queryAnswered = (run: Run, line: Line): ModesQuery | undefined => {
     ? query
     : undefined;
 };
+
+/**
+ * The query waiting, when a standard reply names `MODE` as the command it is about,
+ * compared without regard to ASCII case.
+ * @param run - The step.
+ * @param command - The command the reply names.
+ * @returns The query, or `undefined` for none.
+ */
+export const queryByCommand = (run: Run, command: string): ModesQuery | undefined =>
+  upperCaseAscii(command) === "MODE" ? openOf(run.state)?.modesQuery : undefined;
 
 /**
  * The query waiting is over, answered or not: the next Channel is asked.

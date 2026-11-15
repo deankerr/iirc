@@ -817,7 +817,8 @@ export interface Tied {
 
 /**
  * The oldest Line of an action an error numeric names, by its parameters only: a Channel
- * or nick, as each numeric places them, or for `421` and `461`, a command. Names are
+ * or nick, as each numeric places them, for `421` and `461`, a command, or for `472`, a
+ * mode one of its changes makes. Names are
  * compared folded by the Connection's casemapping now.
  * @param run - The step.
  * @param line - The Line, live and tied to nothing by label.
@@ -829,7 +830,25 @@ export const tiedAction = (run: Run, line: Line): Tied | undefined => {
   const tie = ties.get(command);
   const named = command === "421" || command === "461";
 
-  if (open === undefined || open.acting.length === 0 || (tie === undefined && !named)) {
+  if (open === undefined || open.acting.length === 0) {
+    return undefined;
+  }
+
+  // `472 <client> <modechar>`: the oldest `MODE` that changes that mode.
+  if (command === "472") {
+    const [, letter] = params;
+
+    const index = open.acting.findIndex(
+      (each) =>
+        each.command === "MODE" && each.targets.some((target) => target.mode?.slice(1) === letter)
+    );
+
+    const tied = open.acting[index];
+
+    return tied === undefined ? undefined : { index, order: tied.order };
+  }
+
+  if (tie === undefined && !named) {
     return undefined;
   }
 
@@ -880,8 +899,8 @@ export const actionByCommand = (
  * Ties an error numeric to the Line of an action {@link tiedAction} found, and reports the
  * action `Rejected` with the numeric, or a `FAIL`'s code, once for its intent: one for an intent
  * already refused refuses nothing. A numeric that names one of a
- * Line's targets, such as `441` a nick of a `KICK`, answers one occurrence of that target
- * alone, and one that names only what the Line is about, such as `482` its Channel,
+ * Line's targets, such as `441` a nick of a `KICK`, or `472` the mode of one change of a
+ * `MODE`, answers one occurrence of that target alone, and one that names only what the Line is about, such as `482` its Channel,
  * answers the whole Line.
  * @param run - The step.
  * @param line - The Line, live and tied to nothing by label.
@@ -919,8 +938,13 @@ export const tieRejection = (
     refuseIntent(run, tied.intent, { _tag: "Rejected", reply });
   }
 
-  const target = tied.targets.findIndex(
-    (each) => each.name !== undefined && names.has(fold(each.name))
+  // A `472` names the mode of one change, which alone it answers.
+  const [, letter] = line.params;
+
+  const target = tied.targets.findIndex((each) =>
+    line.command === "472"
+      ? each.mode?.slice(1) === letter
+      : each.name !== undefined && names.has(fold(each.name))
   );
 
   updateOpen(run, (phase) => ({

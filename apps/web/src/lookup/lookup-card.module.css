@@ -70,3 +70,22 @@
 .symbol {
   color: var(--color-muted);
 }
+
+.masks {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+}
+
+.remove {
+  margin-left: auto;
+}

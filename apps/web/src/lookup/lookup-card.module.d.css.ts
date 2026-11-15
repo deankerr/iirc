@@ -10,8 +10,11 @@ declare const styles: {
   readonly head: string;
   readonly heading: string;
   readonly line: string;
+  readonly mask: string;
+  readonly masks: string;
   readonly note: string;
   readonly profile: string;
+  readonly remove: string;
   readonly symbol: string;
 };
 

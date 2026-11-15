@@ -13,8 +13,18 @@ import type { Casemapping } from "@iirc/protocol/casemapping";
 import { rank } from "./activity.ts";
 import type { Instant } from "./activity.ts";
 import type { Axis, Direction } from "./layout.ts";
-import { isLookupNick, lookOf, nickRulesOf, parseLookupNick } from "./lookup.ts";
-import type { Look, LookupKind } from "./lookup.ts";
+import {
+  isLookupNick,
+  listCommandNames,
+  listLookOf,
+  listMode,
+  listWords,
+  lookOf,
+  nickRulesOf,
+  parseListChannel,
+  parseLookupNick,
+} from "./lookup.ts";
+import type { ListKind, Look, UserKind } from "./lookup.ts";
 import {
   channelsOf,
   isUiName,
@@ -201,8 +211,8 @@ export interface Act {
  * - `Pane`: change the Panes: split, close, focus, swap, resize, or zoom.
  * - `Search`: show the search, searching the query when there is one, which the runtime
  *   reads against the Timelines and the Owner's time zone, or showing what it last found.
- * - `Look`: look a nick up on a Network, `WHOIS` or `WHOWAS`, under an intent the runtime
- *   names, and show what came back in a card over the Pane that asked.
+ * - `Look`: look a nick up on a Network, `WHOIS` or `WHOWAS`, or a Channel's list, under an
+ *   intent the runtime names, and show what came back in a card over the Pane that asked.
  */
 export type Intent =
   | Say
@@ -271,6 +281,8 @@ export type Parsed<A> =
  */
 export type Condition =
   | { readonly _tag: "Focused" }
+  /** The head of the Channel in focus, when read, does not say its Network keeps no such list. */
+  | { readonly _tag: "Keeps"; readonly list: ListKind }
   | { readonly _tag: "Target" }
   | { readonly _tag: "Channel" }
   | { readonly _tag: "Session" }
@@ -1133,7 +1145,7 @@ const target: readonly Condition[] = [{ _tag: "Live" }, { _tag: "Target" }, { _t
  * @param description - What it does.
  * @returns The command.
  */
-const lookupCommand = (kind: LookupKind, description: string): Command => {
+const lookupCommand = (kind: UserKind, description: string): Command => {
   const name = kind.toLowerCase();
 
   return {
@@ -1157,6 +1169,58 @@ const lookupCommand = (kind: LookupKind, description: string): Command => {
     },
     usage: `/${name} <nick>`,
     when: [{ _tag: "Focused" }, { _tag: "Live" }, { _tag: "Session" }],
+  };
+};
+
+/**
+ * The head of the Channel in focus, when it was read for that Timeline.
+ * @param context - The context.
+ * @returns The head, or none.
+ */
+const focusHead = (context: CommandContext): ChannelHeader | undefined =>
+  context.focus !== undefined && context.head?.timeline === context.focus.timeline
+    ? context.head
+    : undefined;
+
+/**
+ * A list's command: a Channel's bans, ban exceptions, or invitation masks, of the Channel
+ * named, or the one in focus, on the open Timeline's Network. It is offered unless the head
+ * of the Channel in focus says the Network keeps no such list.
+ * @param kind - The list.
+ * @param aliases - Its other names.
+ * @param description - What it does.
+ * @returns The command.
+ */
+const listCommand = (kind: ListKind, aliases: readonly string[], description: string): Command => {
+  const name = listCommandNames[kind];
+
+  return {
+    aliases,
+    arguments: "Optional",
+    description,
+    id: `lookup.${name}`,
+    name,
+    run: (args, context) => {
+      const { focus } = context;
+
+      if (focus === undefined) {
+        return invalid("Open a Timeline first.");
+      }
+
+      const head = focusHead(context);
+      const channel = parseListChannel(kind, args, focus, head?.chantypes ?? undefined);
+
+      return channel._tag === "Invalid"
+        ? channel
+        : parsed([listLookOf(kind, channel.value, focus.network, focus.timeline)]);
+    },
+    usage: `/${name} [channel]`,
+    when: [
+      { _tag: "Focused" },
+      { _tag: "Live" },
+      { _tag: "Session" },
+      { _tag: "Keeps", list: kind },
+    ],
   };
 };
 
@@ -2288,6 +2352,17 @@ export const commands: readonly Command[] = [
     "Look a nick up on the open Timeline's Network: who they are, where, and in which Channels."
   ),
   lookupCommand("Whowas", "Look up who used a nick on the open Timeline's Network before."),
+  listCommand("Bans", [], "List a Channel's bans, the open one or another, and lift them."),
+  listCommand(
+    "Exceptions",
+    ["excepts"],
+    "List a Channel's ban exceptions, the open one or another, and remove them."
+  ),
+  listCommand(
+    "Invitations",
+    ["invitations"],
+    "List a Channel's invitation masks, which let a match join while it is invite-only."
+  ),
   unfocused({
     aliases: [],
     arguments: "Optional",
@@ -2493,75 +2568,84 @@ export const credentialRefusal = (line: string): string | undefined => {
 export const typesCredential = (line: string): boolean => credentialRefusal(line) !== undefined;
 
 /**
+ * Why the Timeline in focus has no Target to say something to, in words, or nothing.
+ * @param focus - The Timeline in focus.
+ * @returns The words, or nothing when it has one.
+ */
+const noTarget = (focus: Focus | undefined): string | undefined => {
+  if (focus === undefined) {
+    return "Open a Channel or a Direct Message first.";
+  }
+
+  if (focus.kind === "Network") {
+    return "The Network's own Timeline has no Target to say it to. Open a Channel or a Direct Message, or use /msg <target> <text>.";
+  }
+
+  return focus.detached
+    ? "This Direct Message no longer follows its partner, who changed nick. Use /msg <nick> <text>."
+    : undefined;
+};
+
+/**
+ * Why one condition does not hold in a context, in words, or nothing when it does.
+ * @param condition - The condition.
+ * @param context - The context.
+ * @returns The words, or nothing.
+ */
+const unmetOne = (condition: Condition, context: CommandContext): string | undefined => {
+  const { focus } = context;
+
+  switch (condition._tag) {
+    case "Focused": {
+      return focus === undefined ? "Open a Timeline first." : undefined;
+    }
+
+    case "Target": {
+      return noTarget(focus);
+    }
+
+    case "Channel": {
+      return focus?.kind === "Channel" ? undefined : "Open a Channel first.";
+    }
+
+    case "Session": {
+      return context.session
+        ? undefined
+        : `${focus?.network ?? "The Network"} is not connected, so nothing can be said there now.`;
+    }
+
+    case "Live": {
+      return focus?.removed === true ? removedRefusal(focus.network) : undefined;
+    }
+
+    case "Panes": {
+      return context.panes < 2 ? "There is only one Pane. /split makes another." : undefined;
+    }
+
+    case "Keeps": {
+      return listMode(focusHead(context), condition.list) === null
+        ? `${focus?.network ?? "The Network"} keeps no ${listWords[condition.list]}, by its ISUPPORT.`
+        : undefined;
+    }
+
+    default: {
+      return condition satisfies never;
+    }
+  }
+};
+
+/**
  * Why a command cannot run in a context, in words, or nothing when it can.
  * @param when - Its conditions.
  * @param context - The context.
  * @returns The first condition that does not hold, in words.
  */
 export const unmet = (when: readonly Condition[], context: CommandContext): string | undefined => {
-  const { focus } = context;
-
   for (const condition of when) {
-    switch (condition._tag) {
-      case "Focused": {
-        if (focus === undefined) {
-          return "Open a Timeline first.";
-        }
+    const reason = unmetOne(condition, context);
 
-        break;
-      }
-
-      case "Target": {
-        if (focus === undefined) {
-          return "Open a Channel or a Direct Message first.";
-        }
-
-        if (focus.kind === "Network") {
-          return "The Network's own Timeline has no Target to say it to. Open a Channel or a Direct Message, or use /msg <target> <text>.";
-        }
-
-        if (focus.detached) {
-          return "This Direct Message no longer follows its partner, who changed nick. Use /msg <nick> <text>.";
-        }
-
-        break;
-      }
-
-      case "Channel": {
-        if (focus?.kind !== "Channel") {
-          return "Open a Channel first.";
-        }
-
-        break;
-      }
-
-      case "Session": {
-        if (!context.session) {
-          return `${focus?.network ?? "The Network"} is not connected, so nothing can be said there now.`;
-        }
-
-        break;
-      }
-
-      case "Live": {
-        if (focus?.removed === true) {
-          return removedRefusal(focus.network);
-        }
-
-        break;
-      }
-
-      case "Panes": {
-        if (context.panes < 2) {
-          return "There is only one Pane. /split makes another.";
-        }
-
-        break;
-      }
-
-      default: {
-        return condition satisfies never;
-      }
+    if (reason !== undefined) {
+      return reason;
     }
   }
 

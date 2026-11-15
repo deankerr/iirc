@@ -133,6 +133,9 @@ export interface ChannelModeKinds {
   readonly flags: string;
 }
 
+/** The lists of masks on a Channel the Owner can look up: its bans, ban exceptions, and invitation masks. */
+export type MaskList = "Bans" | "Exceptions" | "Invitations";
+
 /**
  * One Channel as known, for a View that shows it alone, built from that Channel without
  * the rest of the Network.
@@ -148,6 +151,13 @@ export interface ChannelView {
   readonly chanmodes: ChannelModeKinds;
   /** What starts a Channel's name on the Network, from `CHANTYPES`. */
   readonly chantypes: string;
+  /**
+   * The mode of each list of masks the Network keeps on a Channel, by `CHANMODES`,
+   * `EXCEPTS`, and `INVEX`, or `undefined` for one it does not.
+   */
+  readonly lists: Readonly<Record<MaskList, string | undefined>>;
+  /** The prefix modes Self holds in it, or `undefined` while Self is no member. */
+  readonly held: Fact<ReadonlySet<string>> | undefined;
   readonly channel: ChannelKnowledge;
   /** Each member as a User, Self included, keyed as the members are. */
   readonly users: ReadonlyMap<string, UserKnowledge>;

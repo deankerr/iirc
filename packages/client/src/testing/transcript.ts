@@ -59,7 +59,10 @@ export type Owner =
    * Its intent id is given in order with a `Say`'s.
    */
   | { readonly _tag: "Act"; readonly action: Action }
-  /** `!! whois peer` or `!! whowas peer`: a Lookup. Its intent id is given in order with a `Say`'s. */
+  /**
+   * `!! whois peer`, `!! whowas peer`, `!! bans #iirc`, `!! exceptions #iirc`, or
+   * `!! invitations #iirc`: a Lookup. Its intent id is given in order with a `Say`'s.
+   */
   | { readonly _tag: "Look"; readonly lookup: Lookup }
   /** `!! retry`. */
   | { readonly _tag: "Retry" }
@@ -766,7 +769,15 @@ const writeAction = (action: Action): string => {
   }
 };
 
-// `retry`, `remove [keep]`, `whois <nick>`, and `whowas <nick>`, which take no more than a word.
+/** The Lookups of a Channel's lists, by the word a transcript writes them with. */
+const maskLists: ReadonlyMap<string, "Bans" | "Exceptions" | "Invitations"> = new Map([
+  ["bans", "Bans"],
+  ["exceptions", "Exceptions"],
+  ["invitations", "Invitations"],
+] as const);
+
+// `retry`, `remove [keep]`, `whois <nick>`, `whowas <nick>`, `bans <channel>`,
+// `exceptions <channel>`, and `invitations <channel>`, which take no more than a word.
 const readSimple = (text: string): Owner | undefined => {
   if (text === "retry") {
     return { _tag: "Retry" };
@@ -783,6 +794,12 @@ const readSimple = (text: string): Owner | undefined => {
   }
 
   const looked = /^(?<verb>whois|whowas) (?<nick>\S+)$/u.exec(text)?.groups;
+  const listed = /^(?<verb>bans|exceptions|invitations) (?<channel>\S+)$/u.exec(text)?.groups;
+  const list = maskLists.get(listed?.verb ?? "");
+
+  if (list !== undefined && listed?.channel !== undefined) {
+    return { _tag: "Look", lookup: { _tag: list, channel: listed.channel } };
+  }
 
   return looked?.verb === undefined || looked.nick === undefined
     ? undefined
@@ -873,7 +890,7 @@ const writeOwner = (owner: Owner): string => {
     }
 
     case "Look": {
-      return `${owner.lookup._tag.toLowerCase()} ${owner.lookup.nick}`;
+      return `${owner.lookup._tag.toLowerCase()} ${"nick" in owner.lookup ? owner.lookup.nick : owner.lookup.channel}`;
     }
 
     case "Act": {

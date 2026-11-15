@@ -4,11 +4,17 @@
  *
  * @packageDocumentation
  */
-import { channelModesOf, defaultPrefix, prefixOf } from "@iirc/protocol/isupport";
+import {
+  channelModesOf,
+  defaultPrefix,
+  exceptsOf,
+  invexOf,
+  prefixOf,
+} from "@iirc/protocol/isupport";
 import type { ChannelModes, Membership } from "@iirc/protocol/isupport";
 
 import type { Instant } from "./ids.ts";
-import type { Fact } from "./known.ts";
+import type { Fact, MaskList } from "./known.ts";
 import type { ModeChange } from "./news.ts";
 
 /** How this Network's modes read. */
@@ -28,6 +34,30 @@ export const rulesOf = (isupport: ReadonlyMap<string, string>): ModeRules => ({
   channel: channelModesOf(isupport.get("CHANMODES")),
   prefix: prefixOf(isupport.get("PREFIX")) ?? defaultPrefix,
 });
+
+/**
+ * The mode of each list of masks the Network keeps on its Channels, or `undefined` for one
+ * it does not offer. Bans are `b`, while `CHANMODES` lists it. Exceptions and invitation
+ * masks are offered only when `EXCEPTS` and `INVEX` are sent, as the mode each names, and
+ * only while `CHANMODES` lists that mode, so its reply is a list. `CHANMODES` not sent is
+ * RFC 1459 and 2812's, which lists `b`, `e`, and `I`.
+ * @param isupport - The tokens the Ircd has sent.
+ * @returns Each list's mode, or `undefined`.
+ */
+export const maskListsOf = (
+  isupport: ReadonlyMap<string, string>
+): Readonly<Record<MaskList, string | undefined>> => {
+  const { list } = channelModesOf(isupport.get("CHANMODES"));
+
+  const listed = (mode: string | undefined) =>
+    mode !== undefined && list.includes(mode) ? mode : undefined;
+
+  return {
+    Bans: listed("b"),
+    Exceptions: listed(exceptsOf(isupport.get("EXCEPTS"))),
+    Invitations: listed(invexOf(isupport.get("INVEX"))),
+  };
+};
 
 const takesParameter = (rules: ModeRules, mode: string, set: boolean): boolean =>
   rules.prefix.some((membership) => membership.mode === mode) ||

@@ -1,6 +1,6 @@
 /**
- * Lookups, as atoms: each Pane's card, as the core folds it, and what carries out a `Look`.
- * A Lookup is asked once, under an intent the runtime names, and never sent again: when
+ * Lookups, as atoms: each Pane's card, as the core folds it, what carries out a `Look`, and
+ * removing a mask from a card's list. A Lookup is asked once, under an intent the runtime names, and never sent again: when
  * the Daemon answers `Pending`, the Network stops, or no answer comes, the runtime asks
  * `GET …/lookups/{intent}`, soon and then less often, until its result comes or `lookup`,
  * two minutes, has passed. It runs beside the composer's turn, so a Say never waits behind
@@ -10,15 +10,11 @@
  * @packageDocumentation
  */
 import type { LookedAnswer, NetworkId, TimeShown } from "@iirc/api";
+import { channelIn } from "@iirc/frontend/channel";
+import type { Act } from "@iirc/frontend/commands";
 import { panesOf } from "@iirc/frontend/layout";
-import {
-  cardShown,
-  cardWithId,
-  initialLookups,
-  reduceLookups,
-  shownCard,
-} from "@iirc/frontend/lookup";
-import type { Look, LookFailure, Lookups, LookupsEvent } from "@iirc/frontend/lookup";
+import { cardShown, cardWithId, listTimeline, shownCard } from "@iirc/frontend/lookup";
+import type { Look, LookFailure, LookupsEvent } from "@iirc/frontend/lookup";
 import { paneOf } from "@iirc/frontend/timelines";
 import { Duration, Effect, Option, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -26,24 +22,19 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { decodeIntent, IntentNames } from "../app/intent-names.ts";
 import { runtime } from "../app/runtime.ts";
+import { channelState } from "../channel/state.ts";
 import { signedOut } from "../options/atoms.ts";
 import { timeShown } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { timelinesState, Waits } from "../timelines/atoms.ts";
 import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
+import { lookupsHappened, lookupsState } from "./state.ts";
 
-/** Each Pane's card, as the core folds it. */
-export const lookupsState = Atom.make<Lookups>(initialLookups).pipe(Atom.keepAlive);
+export { lookupsState } from "./state.ts";
 
-/**
- * Folds one event into the Lookups.
- * @param registry - The registry.
- * @param event - What happened.
- */
-const happened = (registry: AtomRegistry.AtomRegistry, event: LookupsEvent) => {
-  registry.set(lookupsState, reduceLookups(registry.get(lookupsState), event));
-};
+const happened: (registry: AtomRegistry.AtomRegistry, event: LookupsEvent) => void =
+  lookupsHappened;
 
 /**
  * An instant as the Owner reads a date and a time, the time as `ui.time` says, or none
@@ -59,16 +50,63 @@ const timeFor =
 
 /**
  * What a Pane's card shows, by the Pane's id, while the Pane has open the Timeline it was
- * asked from, with a signon in the Owner's time zone, as `ui.time` says.
+ * asked from, with a time in the Owner's time zone, as `ui.time` says, and a mask of a
+ * Channel's list removable by the head of that list's own Channel, which is followed as a
+ * Pane's Channel's is while the card lasts.
  */
 export const paneCard = Atom.family((pane: string) =>
   Atom.make((get) => {
     const timelines = get(timelinesState);
     const card = shownCard(get(lookupsState), timelines, pane);
+    const own = card === undefined ? undefined : listTimeline(timelines, card);
+    const live = own === undefined ? undefined : channelIn(get(channelState), own).head.header;
 
-    return card === undefined ? undefined : cardShown(timelines, card, timeFor(get(timeShown)));
+    return card === undefined
+      ? undefined
+      : cardShown(timelines, card, timeFor(get(timeShown)), live);
   })
 );
+
+/**
+ * Removes a mask from the list of a Pane's card: the act that unsets it is sent under an
+ * intent of its own, and the card does not show the mask while it is in flight. The Client's
+ * refusal, an answer that never came within `lookRequest`, or the Ircd's refusal later, which the changes stream
+ * folds in by the intent, shows it again.
+ */
+export const removeMask = runtime
+  .fn(
+    (
+      { act, mask, pane }: { readonly pane: string; readonly mask: string; readonly act: Act },
+      get
+    ) =>
+      Effect.gen(function* () {
+        const { registry } = get;
+        const card = registry.get(lookupsState).cards.get(pane);
+
+        if (card === undefined) {
+          return;
+        }
+
+        const client = yield* DaemonClient;
+        const names = yield* IntentNames;
+        const { lookRequest } = yield* Waits;
+        const intent = decodeIntent(names());
+
+        happened(registry, { _tag: "Removing", id: card.id, intent, mask });
+
+        // An answer that never comes shows the mask again, as a refusal does. It is never
+        // sent again: if it was journaled, the Channel's Timeline says what became of it.
+        const answer = yield* client.networks
+          .act({ params: { network: act.network }, payload: { action: act.action, intent } })
+          .pipe(Effect.timeout(lookRequest), Effect.option);
+
+        if (Option.isNone(answer) || answer.value._tag !== "Acted") {
+          happened(registry, { _tag: "Restored", intent });
+        }
+      }),
+    { concurrent: true }
+  )
+  .pipe(Atom.keepAlive);
 
 /** Puts a Pane's card away, letting go of its Lookup if it is still asked. */
 export const dismissCard = Atom.fnSync((pane: string, get) => {

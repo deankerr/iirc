@@ -81,6 +81,8 @@ const signedIn = async (setAt: number | null = null) => {
     header: {
       chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
       chantypes: "#&",
+      held: null,
+      lists: { bans: "b", exceptions: "e", invitations: "I" },
       members: 2,
       modes: { _tag: "Known", at: 1, from: "ircd", value: [{ mode: "n", param: null }] },
       name: "#iirc",

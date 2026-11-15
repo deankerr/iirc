@@ -38,7 +38,9 @@ const channelOf = (
     wanted: true,
   },
   chantypes: "#&",
+  held: undefined,
   key: "#iirc",
+  lists: { Bans: "b", Exceptions: undefined, Invitations: undefined },
   ranks: [
     { mode: "q", symbol: "~" },
     { mode: "o", symbol: "@" },

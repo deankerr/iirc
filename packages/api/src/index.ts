@@ -116,6 +116,7 @@ export {
   LookRequest,
   LookResult,
   LookupRequest,
+  MaskEntry,
   Profile,
   Timeline,
   TimelineChange,

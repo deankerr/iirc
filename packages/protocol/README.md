@@ -23,7 +23,7 @@ The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it 
 5. **Credentials.** `fillSecret` fills `PASS`, a `JOIN` with a key, and a service's `IDENTIFY`, and `OPER` on the floor, and the SASL `PLAIN` response above it.
 6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, `ctcpRequest`, and `ctcpReply` build CTCP that is safe to send, and a request or a reply only ever to a User.
 7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, and `stripFormatting` removes exactly the codes it reads. Spans are data for a Frontend to draw, never markup.
-8. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
+8. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
 9. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
 10. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
 
@@ -88,6 +88,8 @@ isupportTokens(params: readonly string[]): readonly IsupportToken[]   // Set { n
 unescapeValue(value: string): string
 prefixOf(value?): readonly Membership[] | undefined    // (ov)@+ when not sent, [] when empty, undefined when malformed
 channelModesOf(value?): ChannelModes                   // { list, always, whenSet, flags }
+exceptsOf(value?): string | undefined                  // e when sent empty, undefined when not sent
+invexOf(value?): string | undefined                    // I when sent empty, undefined when not sent
 chantypesOf(value?): string                            // #& when not sent
 statusmsgOf(value?): string                            // "" (none) when not sent
 modesOf(value?): number | undefined                    // 3 when not sent, undefined for no limit
@@ -97,6 +99,8 @@ targetLimitsOf(value?): ReadonlyMap<string, number | undefined>   // TARGMAX
 ```
 
 `prefixOf` reads `PREFIX` as its membership prefixes, most privileged first, and gives `undefined` for a value that is malformed: one not of the form `(modes)symbols`, one whose modes and symbols do not pair one to one, or one that repeats a mode or a symbol, such as `(oov)@%+`, since each names one rank and a repeat leaves the order unclear. A caller then uses `defaultPrefix`, `(ov)@+`, as the Client does, so a symbol only the malformed value named reads as a prefix that cannot be named.
+
+`exceptsOf` and `invexOf` read whether the Network keeps ban exceptions and invitation masks, and the mode each is. A value that is not one mode letter reads as not offered. Whether that mode is a list in `CHANMODES` is the caller's to check.
 
 `isupportTokens` takes all of a `005`'s parameters. The first is Self and the last is text for people, so neither is read. Which tokens a Session holds is the caller's to keep, and to bound.
 

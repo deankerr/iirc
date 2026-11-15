@@ -300,6 +300,17 @@ export interface Profile {
   readonly other: readonly OtherReply[];
 }
 
+/**
+ * One mask on a Channel's list, as a Lookup's reply gave it: the mask, and who set it and
+ * when, where the Ircd says.
+ */
+export interface MaskEntry {
+  readonly mask: string;
+  /** A nick, a nick's mask, or a server's name, as the Ircd gave it. */
+  readonly setBy: string | undefined;
+  readonly setAt: Instant | undefined;
+}
+
 /** The standard replies a Lookup's reply held besides its result: each `WARN` and `NOTE`, and each `FAIL` after the first. */
 export type Notes = readonly StandardReply[];
 
@@ -311,17 +322,27 @@ export type Notes = readonly StandardReply[];
 export type PartialReason = "TimedOut" | "Ended" | "Bounded";
 
 /**
+ * Why a Lookup was not sent: no Session (`Offline`), no Line can carry it (`Unsendable`),
+ * too many Lookups await their replies on the Connection (`Busy`), or the Network keeps no
+ * such list, by its ISUPPORT (`NotOffered`).
+ */
+export type LookRefusal = "Offline" | "Unsendable" | "Busy" | "NotOffered";
+
+/**
  * What a Lookup found.
  *
- * - `Found`: the whole reply, up to its end, `318` or `369`, or its labelled batch's end.
- * - `Partial`: what had come when it stopped, and why.
+ * - `Found`: of a `WHOIS` or `WHOWAS`, the whole reply, up to its end, `318` or `369`, or
+ *   its labelled batch's end.
+ * - `Partial`: of a `WHOIS` or `WHOWAS`, what had come when it stopped, and why.
+ * - `Listed`: of a Channel's list, its masks, in the order they came, with `cut` saying why
+ *   it stopped short of its end, `368`, `349`, or `347`, or its labelled batch's end, or
+ *   `undefined` when it did not. An empty list is `Listed` with no masks.
  * - `NotFound`: the Network has no such User, by `401` or `406`, or ended its reply with
- *   no User in it, by the end numeric.
- * - `Failed`: another error numeric, such as `402` or `431`, a `FAIL` by its code, or a
- *   labelled answer that ended saying nothing the Client reads, such as a lone `NOTICE`,
- *   by the command of the Line that ended it.
- * - `Refused`: not sent: no Session (`Offline`), no Line can carry it (`Unsendable`), or
- *   too many Lookups await their replies on the Connection (`Busy`).
+ *   no User in it, by the end numeric, or no such Channel, by `401` or `403`.
+ * - `Failed`: another error numeric, such as `402`, `431`, or `482`, a `FAIL` by its code,
+ *   or a labelled answer that ended saying nothing the Client reads, such as a lone
+ *   `NOTICE`, by the command of the Line that ended it.
+ * - `Refused`: not sent, and why, as {@link LookRefusal} says.
  * - `Unsent`: its Line never left, because its Connection ended first.
  *
  * A result the Network answered keeps in `notes` each `WARN` and `NOTE` of its reply, and
@@ -336,9 +357,15 @@ export type LookResult =
       readonly reason: PartialReason;
       readonly notes: Notes;
     }
+  | {
+      readonly _tag: "Listed";
+      readonly masks: readonly MaskEntry[];
+      readonly cut: PartialReason | undefined;
+      readonly notes: Notes;
+    }
   | { readonly _tag: "NotFound"; readonly reply: string; readonly notes: Notes }
   | { readonly _tag: "Failed"; readonly reply: string; readonly notes: Notes }
-  | { readonly _tag: "Refused"; readonly reason: "Offline" | "Unsendable" | "Busy" }
+  | { readonly _tag: "Refused"; readonly reason: LookRefusal }
   | { readonly _tag: "Unsent" };
 
 /** Why an input changed nothing. Each is recorded, and none ends a Connection. */
