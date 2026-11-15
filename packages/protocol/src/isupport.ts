@@ -221,6 +221,47 @@ export const channelModesOf = (value: string | undefined): ChannelModes => {
   return { always, flags, list, whenSet };
 };
 
+// A mode is one printable ASCII character that is not a sign, a separator, or a
+// parameter's colon.
+const modeLetter = /^[\u0021-\u007E]$/u;
+const notModeLetter = /[+\-:,]/u;
+
+/**
+ * Reads a token that names the letter of a list mode, sent with no value for the letter
+ * the protocol gives it.
+ * @param value - The token's value, or `undefined` if it was not sent.
+ * @param fallback - The letter an empty value stands for.
+ * @returns The letter, or `undefined` when the token was not sent, or its value is no
+ * one mode letter.
+ */
+const listModeOf = (value: string | undefined, fallback: string): string | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === "") {
+    return fallback;
+  }
+
+  return modeLetter.test(value) && !notModeLetter.test(value) ? value : undefined;
+};
+
+/**
+ * Reads `EXCEPTS`: that the Network keeps ban exceptions, and the mode they are, `e` when
+ * it gives none.
+ * @param value - The token's value, or `undefined` if it was not sent.
+ * @returns The mode, or `undefined` when the token was not sent or names no one mode.
+ */
+export const exceptsOf = (value: string | undefined): string | undefined => listModeOf(value, "e");
+
+/**
+ * Reads `INVEX`: that the Network keeps invitation masks, which let a User matching one
+ * join a Channel that is invite-only, and the mode they are, `I` when it gives none.
+ * @param value - The token's value, or `undefined` if it was not sent.
+ * @returns The mode, or `undefined` when the token was not sent or names no one mode.
+ */
+export const invexOf = (value: string | undefined): string | undefined => listModeOf(value, "I");
+
 /** One pair of a `CHANLIMIT` or `MAXLIST`: what it counts, and the limit, if any. */
 export interface Limit {
   /** The Channel prefixes of a `CHANLIMIT`, or the list modes of a `MAXLIST`. */

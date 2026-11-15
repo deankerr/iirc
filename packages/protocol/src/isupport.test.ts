@@ -7,6 +7,8 @@ import {
   chantypesOf,
   defaultChannelModes,
   defaultPrefix,
+  exceptsOf,
+  invexOf,
   isupportTokens,
   limitOf,
   limitsOf,
@@ -203,6 +205,31 @@ describe("token values", () => {
       list: "b",
       whenSet: "l",
     });
+  });
+
+  it("reads EXCEPTS and INVEX as their mode, the protocol's with no value, and none when not sent", () => {
+    expect([exceptsOf(undefined), exceptsOf(""), exceptsOf("e"), exceptsOf("x")]).toStrictEqual([
+      undefined,
+      "e",
+      "e",
+      "x",
+    ]);
+    expect([invexOf(undefined), invexOf(""), invexOf("I"), invexOf("y")]).toStrictEqual([
+      undefined,
+      "I",
+      "I",
+      "y",
+    ]);
+  });
+
+  it("reads an EXCEPTS or INVEX that names no one mode as not offered", () => {
+    expect([
+      exceptsOf("ex"),
+      exceptsOf("+"),
+      exceptsOf(" "),
+      invexOf(","),
+      invexOf("é"),
+    ]).toStrictEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 
   it("reads a MODES that holds no count as if it were not sent", () => {

@@ -20,7 +20,7 @@ import type {
   Standing,
   UserKnowledge,
 } from "./known.ts";
-import { rulesOf } from "./modes.ts";
+import { maskListsOf, rulesOf } from "./modes.ts";
 import type { Registered } from "./registry.ts";
 import { featuresOn } from "./seam.ts";
 import type {
@@ -249,7 +249,9 @@ export const channelViewOf = (
     chanmodes: rules.channel,
     channel: known,
     chantypes: chantypesOf(isupport.get("CHANTYPES")),
+    held: selfKey === undefined ? undefined : known.members.get(selfKey)?.prefixes,
     key,
+    lists: maskListsOf(isupport),
     ranks: rules.prefix,
     users,
   };

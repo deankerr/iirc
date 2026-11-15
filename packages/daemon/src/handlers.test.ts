@@ -2434,6 +2434,80 @@ describe("a Channel's head and members", () => {
     });
   });
 
+  it("looks a Channel's lists up, as its head says the Network keeps them and Self may hold", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const { call, timeline } = yield* inChannel(
+          world,
+          api,
+          ["@iirc", "peer"],
+          "CASEMAPPING=rfc1459 PREFIX=(qov)~@+ CHANMODES=bey,k,l,imnst EXCEPTS INVEX=Z"
+        );
+
+        const head = yield* api.timelines.channel({ params: { timeline } });
+
+        const looking = yield* Effect.forkChild(
+          api.networks.look({
+            params: { network: libera },
+            payload: {
+              intent: CallerIntent.make("bans"),
+              lookup: { _tag: "Bans", channel: "#IIRC" },
+            },
+          })
+        );
+
+        yield* settle;
+        yield* TestClock.adjust(2000);
+        const line = yield* heard(call);
+
+        yield* say(call, ":irc.test 367 iirc #iirc bad!*@* peer!u@peer.test 1767225600");
+        yield* say(call, ":irc.test 367 iirc #iirc worse!*@*");
+        yield* say(call, ":irc.test 368 iirc #iirc :End of Channel Ban List");
+
+        const answered = yield* Fiber.join(looking);
+
+        const refused = yield* api.networks.look({
+          params: { network: libera },
+          payload: { lookup: { _tag: "Invitations", channel: "#iirc" } },
+        });
+
+        return {
+          answered,
+          head,
+          line,
+          looked: yield* api.networks.looked({
+            params: { intent: CallerIntent.make("bans"), network: libera },
+          }),
+          refused,
+        };
+      })
+    );
+
+    expect(result).toMatchObject({
+      answered: {
+        _tag: "LookedUp",
+        intent: "bans",
+        result: {
+          _tag: "Listed",
+          cut: null,
+          masks: [
+            { mask: "bad!*@*", setAt: 1_767_225_600_000, setBy: "peer!u@peer.test" },
+            { mask: "worse!*@*", setAt: null, setBy: null },
+          ],
+          notes: [],
+        },
+      },
+      head: {
+        // Without `multi-prefix`, a prefix says only the highest mode held.
+        held: { _tag: "Partial", atLeast: ["o"] },
+        lists: { bans: "b", exceptions: "e", invitations: null },
+      },
+      line: "MODE #IIRC +b",
+      refused: { _tag: "LookedUp", result: { _tag: "Refused", reason: "NotOffered" } },
+    });
+    expect(result.looked).toStrictEqual(result.answered);
+  });
+
   it("asks a Channel's modes on joining, and tells a follower of the changes to read its head again", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {

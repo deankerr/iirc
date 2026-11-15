@@ -2,7 +2,7 @@
  * Who is here, as atoms: each Pane's header and its Channel's members, derived from what
  * the core holds, and the reads it calls for. While the browser is signed in,
  * `channelSync` makes each read the core asks for: the head of each Channel a Pane shows,
- * and while the members show, their pages. A change that may have changed the
+ * or whose list a Lookup card is, and while the members show, their pages. A change that may have changed the
  * Channel, which the one changes stream folds in, has it read again, after a moment, each
  * later change superseding the read before.
  *
@@ -20,8 +20,9 @@ import {
   refreshDelay,
   rosterOf,
 } from "@iirc/frontend/channel";
-import type { ChannelEvent, ChannelRead } from "@iirc/frontend/channel";
+import type { ChannelEvent, ChannelRead, OpenChannel } from "@iirc/frontend/channel";
 import type { Intent } from "@iirc/frontend/commands";
+import { listedChannels } from "@iirc/frontend/lookup";
 import { opened } from "@iirc/frontend/timelines";
 import { Clock, Duration, Effect, FiberMap, Stream } from "effect";
 import { Atom } from "effect/reactivity";
@@ -29,6 +30,7 @@ import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
+import { lookupsState } from "../lookup/state.ts";
 import { signedOut } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { retrying, timelinesState, Waits } from "../timelines/atoms.ts";
@@ -79,19 +81,38 @@ const membersRead = Atom.make((get) => {
 });
 
 /**
- * The reads the core calls for now, for every Channel the Panes show.
+ * Every Channel whose head is followed: those the Panes show, and those whose lists the
+ * Lookup cards are, which say whether Self may remove a mask, each once.
+ * @param read - Reads an atom, from the registry or as a derived atom does.
+ * @returns The Channels.
+ */
+const followed = (read: <A>(atom: Atom.Atom<A>) => A): readonly OpenChannel[] => {
+  const timelines = read(timelinesState);
+  const shown = openChannels(timelines);
+
+  return [
+    ...shown,
+    ...listedChannels(read(lookupsState), timelines).filter(
+      (one) => !shown.some((open) => open.timeline === one.timeline)
+    ),
+  ];
+};
+
+/**
+ * The reads the core calls for now, for every Channel followed: its head, and its members
+ * where they show, which a card's Channel's never do.
  * @param read - Reads an atom, from the registry or as a derived atom does.
  * @returns The reads.
  */
 const readsNow = (read: <A>(atom: Atom.Atom<A>) => A) =>
-  channelsReads(read(channelState), openChannels(read(timelinesState)), read(membersRead));
+  channelsReads(read(channelState), followed(read), read(membersRead));
 
 /** The reads the core calls for now. */
 const wanted = Atom.make((get) => readsNow(get));
 
-/** The Channels the Panes show, to keep, as their Timelines' ids. */
+/** The Channels followed, to keep, as their Timelines' ids. */
 const shownChannels = Atom.make((get) =>
-  openChannels(get(timelinesState))
+  followed(get)
     .map((one) => one.timeline)
     .join(" ")
 );
@@ -241,7 +262,7 @@ export const channelSync = runtime
       const keep = get.stream(shownChannels).pipe(
         Stream.runForEach((shown) =>
           Effect.gen(function* () {
-            const timelines = openChannels(registry.get(timelinesState)).map((one) => one.timeline);
+            const timelines = followed((atom) => registry.get(atom)).map((one) => one.timeline);
 
             channelHappened(registry, { _tag: "Kept", timelines });
 

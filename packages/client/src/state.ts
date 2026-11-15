@@ -13,7 +13,7 @@ import { Instant } from "./ids.ts";
 import type { CapName, IntentId } from "./ids.ts";
 import type { Lookup } from "./input.ts";
 import type { Casemapping, Fact, Topic } from "./known.ts";
-import type { EndReason, Notes, Profile, RefusedAction } from "./news.ts";
+import type { EndReason, MaskEntry, Notes, Profile, RefusedAction } from "./news.ts";
 import type { Seam } from "./seam.ts";
 
 /** Cap negotiation, which runs for a whole Connection. */
@@ -248,8 +248,12 @@ export interface Looking {
   readonly deadline: Instant;
   /** How many Lines of its reply have come, counted up to {@link maxLookupLines}. */
   readonly lines: number;
-  /** The Users the reply has described so far, in order. */
+  /** The Users the reply has described so far, in order, for a `WHOIS` or `WHOWAS`. */
   readonly profiles: readonly Profile[];
+  /** The masks the reply has listed so far, in order, for a Channel's list. */
+  readonly masks: readonly MaskEntry[];
+  /** The mode a Channel's list was asked by, which a `472` names, or `undefined` for a User's. */
+  readonly mode: string | undefined;
   /** The error its reply held, which it reports at its end. */
   readonly error: { readonly _tag: "NotFound" | "Failed"; readonly reply: string } | undefined;
   /** The `WARN` and `NOTE` standard replies its reply held, in order. */

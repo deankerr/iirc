@@ -351,7 +351,13 @@ export const liberaConfiguration: ConfigurationOnWire = {
 const LookBody = Schema.fromJsonString(
   Schema.Struct({
     intent: Schema.optionalKey(Schema.String),
-    lookup: Schema.Struct({ _tag: Schema.Literals(["Whois", "Whowas"]), nick: Schema.String }),
+    lookup: Schema.Union([
+      Schema.Struct({ _tag: Schema.Literals(["Whois", "Whowas"]), nick: Schema.String }),
+      Schema.Struct({
+        _tag: Schema.Literals(["Bans", "Exceptions", "Invitations"]),
+        channel: Schema.String,
+      }),
+    ]),
   })
 );
 
@@ -491,6 +497,7 @@ export const fakeDaemon = () => {
   const looked: string[] = [];
   const lookedHeld: (() => void)[] = [];
   const looksHeld: (() => void)[] = [];
+  const actsHeld: (() => void)[] = [];
 
   const lookups = new Map<
     string,
@@ -502,6 +509,8 @@ export const fakeDaemon = () => {
     abandoned: 0,
     /** Each `act` asked for, in order, refused or not, answered as `say`s are. */
     acts,
+    /** The release of each `act` held, in order. */
+    actsHeld,
     /** Each Channel behind a Channel Timeline, by its id, which `channel` and `members` read. */
     channels: new Map<string, FakeChannel>(),
     /** Each read of a Channel's head, by its Timeline. */
@@ -532,6 +541,8 @@ export const fakeDaemon = () => {
       members: membersHeld,
       says: saysHeld,
     },
+    /** Whether each `act` waits, once taken, until released or given up. */
+    holdActs: false,
     /** Whether each read of a Channel's head waits until released. */
     holdChannels: false,
     /** Whether each `close`, once stepped, waits until released before it is answered. */
@@ -1477,6 +1488,10 @@ export const fakeDaemon = () => {
         const body = Schema.decodeSync(ActBody)(await new Response(init.body).text());
 
         daemon.acts.push(body);
+
+        if (daemon.holdActs) {
+          await heldUntilReleased(daemon.actsHeld, init);
+        }
 
         return stepped(body.intent, "Acted");
       }

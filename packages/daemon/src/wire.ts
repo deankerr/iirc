@@ -36,6 +36,8 @@ import type {
   Knowledge as WireKnowledge,
   Looked as WireLooked,
   LookResult as WireLookResult,
+  Lookup as WireLookup,
+  MaskEntry as WireMaskEntry,
   Profile as WireProfile,
   Marked as WireMarked,
   Closable as WireClosable,
@@ -52,8 +54,10 @@ import type {
   IgnoredReason,
   Inspection,
   LookResult,
+  Lookup,
   Marked,
   Closable,
+  MaskEntry,
   ModeChange,
   News,
   Profile,
@@ -89,7 +93,7 @@ import type {
 } from "@iirc/timeline-store";
 import type { Content, Delivery } from "@iirc/timelines";
 
-import { inRankOrder } from "./members.ts";
+import { inRankOrder, rankOrder } from "./members.ts";
 import type { Placed } from "./members.ts";
 import type { ProjectorStatus } from "./projector.ts";
 
@@ -551,6 +555,46 @@ const profile = (source: Profile): Fields<Profile, WireProfile> => ({
   user: source.user ?? null,
 });
 
+const maskEntry = (source: MaskEntry): Fields<MaskEntry, WireMaskEntry> => ({
+  mask: source.mask,
+  setAt: source.setAt ?? null,
+  setBy: source.setBy ?? null,
+});
+
+/**
+ * What was looked up, as the contract says it.
+ * @param source - The Lookup.
+ * @returns Its wire form.
+ */
+const lookupOf = (source: Lookup): WireLookup => {
+  switch (source._tag) {
+    case "Whois":
+    case "Whowas": {
+      const wire: Case<Lookup, WireLookup, typeof source._tag> = {
+        _tag: source._tag,
+        nick: source.nick,
+      };
+
+      return wire;
+    }
+
+    case "Bans":
+    case "Exceptions":
+    case "Invitations": {
+      const wire: Case<Lookup, WireLookup, typeof source._tag> = {
+        _tag: source._tag,
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
 const lookResult = (source: LookResult): WireLookResult => {
   switch (source._tag) {
     case "Found": {
@@ -569,6 +613,17 @@ const lookResult = (source: LookResult): WireLookResult => {
         notes: source.notes.map(standardReply),
         profiles: source.profiles.map(profile),
         reason: source.reason,
+      };
+
+      return wire;
+    }
+
+    case "Listed": {
+      const wire: Case<LookResult, WireLookResult, "Listed"> = {
+        _tag: "Listed",
+        cut: source.cut ?? null,
+        masks: source.masks.map(maskEntry),
+        notes: source.notes.map(standardReply),
       };
 
       return wire;
@@ -992,10 +1047,7 @@ const news = (source: News): WireNews => {
       const wire: Case<News, WireNews, "LookedUp"> = {
         _tag: "LookedUp",
         intent: source.intent,
-        lookup:
-          source.lookup._tag === "Whois"
-            ? { _tag: "Whois", nick: source.lookup.nick }
-            : { _tag: "Whowas", nick: source.lookup.nick },
+        lookup: lookupOf(source.lookup),
         result: lookResult(source.result),
       };
 
@@ -1121,6 +1173,18 @@ export const channelHeader = (
           whenSet: view.chanmodes.whenSet,
         },
   chantypes: view?.chantypes ?? null,
+  held:
+    view?.held === undefined
+      ? null
+      : setFact(view.held, (held) => inRankOrder(held, rankOrder(view))),
+  lists:
+    view === undefined
+      ? null
+      : {
+          bans: view.lists.Bans ?? null,
+          exceptions: view.lists.Exceptions ?? null,
+          invitations: view.lists.Invitations ?? null,
+        },
   members: view?.channel.members.size ?? 0,
   modes:
     view === undefined

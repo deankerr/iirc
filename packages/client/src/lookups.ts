@@ -2,15 +2,15 @@
  * Lookups: the Owner asks the Network for information, and the Client collects the reply,
  * which may span many Lines, into one result for the intent. The reply is tied to the
  * Lookup only by structure: by label, where `labeled-response` ties it, and otherwise by
- * the numerics that name the nick looked up, oldest Lookup first, since an Ircd answers a
- * Connection's commands in the order they came. It ends at its end numeric, `318` or
- * `369`, at the end of its labelled answer, when its time runs out, or when its
+ * the numerics that name the nick or Channel looked up, oldest Lookup first, since an Ircd
+ * answers a Connection's commands in the order they came. It ends at its end numeric, such
+ * as `318` or `368`, at the end of its labelled answer, when its time runs out, or when its
  * Connection ends, and is reported once, as `LookedUp`.
  *
  * @packageDocumentation
  */
-import { upperCaseAscii, whois, whowas } from "@iirc/protocol/line";
-import type { Line } from "@iirc/protocol/line";
+import { mode, upperCaseAscii, whois, whowas } from "@iirc/protocol/line";
+import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
 
 import { fits, online } from "./acts.ts";
 import { see } from "./channels.ts";
@@ -18,10 +18,19 @@ import type { Arrival } from "./feature.ts";
 import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
 import type { Input, Lookup } from "./input.ts";
-import type { Fact } from "./known.ts";
+import type { Fact, MaskList } from "./known.ts";
 import { isSelf, namingNow, rulesNow } from "./meaning.ts";
+import { maskListsOf } from "./modes.ts";
 import { parseChannel, parseNick } from "./names.ts";
-import type { LookResult, PartialReason, Profile, ProfileChannel, StandardReply } from "./news.ts";
+import type {
+  LookRefusal,
+  LookResult,
+  MaskEntry,
+  PartialReason,
+  Profile,
+  ProfileChannel,
+  StandardReply,
+} from "./news.ts";
 import { readReply } from "./replies.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, send, updateOpen } from "./run.ts";
@@ -30,14 +39,53 @@ import { maxLookupLines, maxLookups } from "./state.ts";
 import { lookupTime } from "./timers.ts";
 import { openOf } from "./views.ts";
 
-/** The numerics that end a reply, by the Lookup they end. */
-const ends: Readonly<Record<Lookup["_tag"], string>> = { Whois: "318", Whowas: "369" };
+/** A Lookup of a User: a `WHOIS` or a `WHOWAS`. */
+type UserLookup = Extract<Lookup, { readonly _tag: "Whois" | "Whowas" }>;
 
-/** The error numerics that say there is no such User, by the Lookup they answer. */
-const missing: Readonly<Record<Lookup["_tag"], string>> = { Whois: "401", Whowas: "406" };
+/** A Lookup of a list of masks on a Channel. */
+type ListLookup = Extract<Lookup, { readonly _tag: MaskList }>;
+
+const isList = (lookup: Lookup): lookup is ListLookup =>
+  lookup._tag === "Bans" || lookup._tag === "Exceptions" || lookup._tag === "Invitations";
+
+/** The numerics that end a reply, by the Lookup they end. */
+const ends: Readonly<Record<Lookup["_tag"], string>> = {
+  Bans: "368",
+  Exceptions: "349",
+  Invitations: "347",
+  Whois: "318",
+  Whowas: "369",
+};
+
+/** The numeric that gives one mask of a list, by the list. */
+const entries: Readonly<Record<MaskList, string>> = {
+  Bans: "367",
+  Exceptions: "348",
+  Invitations: "346",
+};
+
+const noChannel: ReadonlySet<string> = new Set(["401", "403"]);
+
+/**
+ * The error numerics that say there is no such User, or no such Channel, by the Lookup they
+ * answer. Some Ircds answer a `MODE` of a name no Channel holds with `401`.
+ */
+const missing: Readonly<Record<Lookup["_tag"], ReadonlySet<string>>> = {
+  Bans: noChannel,
+  Exceptions: noChannel,
+  Invitations: noChannel,
+  Whois: new Set(["401"]),
+  Whowas: new Set(["406"]),
+};
+
+/**
+ * The error numerics that refuse a `MODE` of a Channel by naming it second: no such nick
+ * or Channel, not on it, a name it cannot have, and not its operator.
+ */
+const channelErrors: ReadonlySet<string> = new Set(["401", "403", "442", "476", "479", "482"]);
 
 /** The numerics only a `WHOIS` reply holds, and only a `WHOWAS` reply. `312` is in both. */
-const only: Readonly<Record<Lookup["_tag"], ReadonlySet<string>>> = {
+const only: Readonly<Record<UserLookup["_tag"], ReadonlySet<string>>> = {
   Whois: new Set(["301", "311", "313", "317", "318", "319", "330", "401", "671"]),
   Whowas: new Set(["314", "369", "406"]),
 };
@@ -59,11 +107,7 @@ const report = (run: Run, looking: Looking, result: LookResult): void => {
   run.news.push({ _tag: "LookedUp", intent: looking.intent, lookup: looking.lookup, result });
 };
 
-const refuse = (
-  run: Run,
-  input: Input & { readonly _tag: "Look" },
-  reason: "Offline" | "Unsendable" | "Busy"
-): void => {
+const refuse = (run: Run, input: Input & { readonly _tag: "Look" }, reason: LookRefusal): void => {
   run.news.push({
     _tag: "LookedUp",
     intent: input.intent,
@@ -73,9 +117,38 @@ const refuse = (
 };
 
 /**
- * The Owner looks something up. It needs a Session, and its nick must be a nick by the
- * Network's rules, sent whole. At most {@link maxLookups} await their replies on a
- * Connection at once.
+ * The Line a Lookup sends: a `WHOIS` or `WHOWAS` of a nick by the Network's rules, or a
+ * `MODE` asking a Channel's list, by the mode the Network gives that list, sent whole.
+ * @param run - The step.
+ * @param lookup - The Lookup.
+ * @returns The Line, or why it cannot be sent.
+ */
+const lineOf = (run: Run, lookup: Lookup): OutboundLine | "NotOffered" | "Unsendable" => {
+  const naming = namingNow(run);
+  let line: OutboundLine | Rejected | undefined;
+
+  if (isList(lookup)) {
+    const letter = maskListsOf(openOf(run.state)?.isupport ?? new Map())[lookup._tag];
+
+    if (letter === undefined) {
+      return "NotOffered";
+    }
+
+    line =
+      parseChannel(naming, lookup.channel) === undefined
+        ? undefined
+        : mode(lookup.channel, [`+${letter}`]);
+  } else if (parseNick(naming, lookup.nick) !== undefined) {
+    line = lookup._tag === "Whois" ? whois(lookup.nick) : whowas(lookup.nick);
+  }
+
+  return line !== undefined && fits(run, line) ? line : "Unsendable";
+};
+
+/**
+ * The Owner looks something up. It needs a Session. A nick must be a nick by the Network's
+ * rules, and a Channel's name a Channel's, and a list one the Network keeps, sent whole. At
+ * most {@link maxLookups} await their replies on a Connection at once.
  * @param run - The step.
  * @param input - The Lookup.
  */
@@ -89,10 +162,10 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
     return;
   }
 
-  const line = lookup._tag === "Whois" ? whois(lookup.nick) : whowas(lookup.nick);
+  const line = lineOf(run, lookup);
 
-  if (parseNick(namingNow(run), lookup.nick) === undefined || !fits(run, line)) {
-    refuse(run, input, "Unsendable");
+  if (line === "NotOffered" || line === "Unsendable") {
+    refuse(run, input, line);
 
     return;
   }
@@ -123,6 +196,8 @@ export const look = (run: Run, input: Input & { readonly _tag: "Look" }): void =
       labelled: sent.echo,
       lines: 0,
       lookup,
+      masks: [],
+      mode: isList(lookup) ? maskListsOf(phase.isupport)[lookup._tag] : undefined,
       notes: [],
       order: phase.awaited,
       profiles: [],
@@ -386,6 +461,28 @@ const described = (run: Run, looking: Looking, line: Line): readonly Profile[] |
     : changeLast(profiles, nick, apply);
 };
 
+/**
+ * One mask of a list, from `367`, `348`, or `346`, each
+ * `<client> <channel> <mask> [<who> <set-ts>]`: who set it and when only where the Ircd
+ * gives them, and the time only as a count of seconds.
+ * @param line - The Line.
+ * @returns The mask, or `undefined` when the Line names none.
+ */
+const maskOf = (line: Line): MaskEntry | undefined => {
+  const [mask, setBy, setAt] = line.params.slice(2);
+
+  return mask === undefined || mask === ""
+    ? undefined
+    : {
+        mask,
+        setAt:
+          setAt !== undefined && digits.test(setAt)
+            ? Instant.make(Number(setAt) * 1000)
+            : undefined,
+        setBy: setBy === undefined || setBy === "" ? undefined : setBy,
+      };
+};
+
 /** The facts each numeric of a `WHOIS` speaks of, which a reply found whole refreshes. */
 const speaksOf: ReadonlyMap<string, readonly Refreshed[]> = new Map<string, readonly Refreshed[]>([
   ["301", ["away"]],
@@ -483,6 +580,17 @@ const resultOf = (looking: Looking, ending: Ending, reply: string): LookResult =
     return { ...looking.error, notes };
   }
 
+  // A labelled answer that ended with no mask and no end numeric said nothing the Client
+  // can read, as for a User. An end numeric with none before it is an empty list.
+  if (isList(looking.lookup)) {
+    const stopped = ending === "End" ? undefined : ending;
+    const cut = looking.bounded ? "Bounded" : stopped;
+
+    return ending === "End" && looking.labelled && !looking.ended && looking.masks.length === 0
+      ? { _tag: "Failed", notes, reply }
+      : { _tag: "Listed", cut, masks: looking.masks, notes };
+  }
+
   if (looking.bounded) {
     return { _tag: "Partial", notes, profiles: looking.profiles, reason: "Bounded" };
   }
@@ -544,7 +652,7 @@ const rejectionOf = (looking: Looking, line: Line): Looking["error"] => {
     return { _tag: "Failed", reply: code ?? command };
   }
 
-  return command === missing[looking.lookup._tag]
+  return missing[looking.lookup._tag].has(command)
     ? { _tag: "NotFound", reply: command }
     : { _tag: "Failed", reply: command };
 };
@@ -571,7 +679,49 @@ const keepNote = (run: Run, looking: Looking, line: Line): void => {
   );
 };
 
-// One Line of a Lookup's reply: its end, an error, or something it says of a User.
+// Keeps the mask one Line of a list's reply gives.
+const keepMask = (run: Run, looking: Looking, line: Line): void => {
+  const mask = maskOf(line);
+
+  if (mask === undefined) {
+    ignore(run, { _tag: "Malformed", command: line.command });
+  }
+
+  change(run, looking.intent, (each) => ({
+    ...each,
+    lines: each.lines + 1,
+    masks: mask === undefined ? each.masks : [...each.masks, mask],
+  }));
+};
+
+// Keeps what one Line of a `WHOIS` or `WHOWAS` reply says of a User.
+const keepDescribed = (run: Run, looking: Looking, line: Line): void => {
+  const { command } = line;
+  const profiles = described(run, looking, line);
+
+  if (profiles === undefined) {
+    ignore(run, { _tag: "Malformed", command });
+  }
+
+  // What a `WHOIS` says of a fact Knowledge keeps is stamped with this Line's time, and
+  // with the fact as it stands now.
+  const [, nick] = line.params;
+  const fields = profiles === undefined || nick === undefined ? [] : (speaksOf.get(command) ?? []);
+  const heard = new Map(looking.heard);
+
+  for (const field of looking.lookup._tag === "Whois" ? fields : []) {
+    heard.set(field, { at: run.at, was: factOf(run, nick ?? "", field) });
+  }
+
+  change(run, looking.intent, (each) => ({
+    ...each,
+    heard,
+    lines: each.lines + 1,
+    profiles: profiles ?? each.profiles,
+  }));
+};
+
+// One Line of a Lookup's reply: its end, an error, or something it says of a User or a list.
 const take = (run: Run, looking: Looking, line: Line): void => {
   const { command } = line;
   const { intent } = looking;
@@ -610,6 +760,12 @@ const take = (run: Run, looking: Looking, line: Line): void => {
     return;
   }
 
+  // Only its own numeric gives a list a mask. Any other a labelled answer holds is read
+  // as it is elsewhere.
+  if (isList(looking.lookup) && command !== entries[looking.lookup._tag]) {
+    return;
+  }
+
   // Past its bound, or once an error said what it found, a reply's Lines are not kept.
   if (looking.bounded || looking.error !== undefined || looking.lines >= maxLookupLines) {
     change(run, intent, (each) => ({ ...each, bounded: each.error === undefined }));
@@ -617,43 +773,47 @@ const take = (run: Run, looking: Looking, line: Line): void => {
     return;
   }
 
-  const profiles = described(run, looking, line);
-
-  if (profiles === undefined) {
-    ignore(run, { _tag: "Malformed", command });
+  if (isList(looking.lookup)) {
+    keepMask(run, looking, line);
+  } else {
+    keepDescribed(run, looking, line);
   }
-
-  // What a `WHOIS` says of a fact Knowledge keeps is stamped with this Line's time, and
-  // with the fact as it stands now.
-  const [, nick] = line.params;
-  const fields = profiles === undefined || nick === undefined ? [] : (speaksOf.get(command) ?? []);
-  const heard = new Map(looking.heard);
-
-  for (const field of looking.lookup._tag === "Whois" ? fields : []) {
-    heard.set(field, { at: run.at, was: factOf(run, nick ?? "", field) });
-  }
-
-  change(run, intent, (each) => ({
-    ...each,
-    heard,
-    lines: each.lines + 1,
-    profiles: profiles ?? each.profiles,
-  }));
 };
 
-// Whether a numeric, not tied by label, is part of a Lookup's reply on the floor: one its
+// Whether a numeric is part of a list's reply on the floor: a mask of that list, its end,
+// an error that refuses a `MODE` of a Channel, naming its Channel second, a `421` or
+// `461` naming `MODE`, or a `472` naming the list's mode. Others that
+// name a Channel second, such as `324` or `332`, the Client reads for something else.
+const answersList = (run: Run, looking: Looking, lookup: ListLookup, line: Line): boolean => {
+  const { command, params } = line;
+  const [, named] = params;
+  const fold = folder(run.state);
+
+  // `421` and `461` name the command they refuse, not the Channel.
+  if (command === "421" || command === "461") {
+    return named !== undefined && upperCaseAscii(named) === "MODE";
+  }
+
+  // `472 <client> <modechar>` names the mode it does not know: the list's own.
+  if (command === "472") {
+    return named !== undefined && named === looking.mode;
+  }
+
+  const holds =
+    command === entries[lookup._tag] || command === ends[lookup._tag] || channelErrors.has(command);
+
+  return holds && named !== undefined && fold(named) === fold(lookup.channel);
+};
+
+// Whether a numeric, not tied by label, is part of a User's reply on the floor: one its
 // kind of reply holds, an error, or another reply numeric, that names its nick second,
 // as the protocol says vendors' numerics must. `431` names no nick.
-const answers = (run: Run, looking: Looking, line: Line): boolean => {
+const answersUser = (run: Run, lookup: UserLookup, line: Line): boolean => {
   const { command, params } = line;
-  const kind = looking.lookup._tag;
+  const kind = lookup._tag;
   const other = kind === "Whois" ? "Whowas" : "Whois";
 
-  // A reply holds one error, so a Lookup that has one leaves the next to whoever sent
-  // another Line naming the nick.
-  const another = looking.error !== undefined && (isError(command) || command === "FAIL");
-
-  if (looking.labelled || another || only[other].has(command) || readElsewhere.has(command)) {
+  if (only[other].has(command) || readElsewhere.has(command)) {
     return false;
   }
 
@@ -670,7 +830,23 @@ const answers = (run: Run, looking: Looking, line: Line): boolean => {
     errors.has(command) ||
     /^[23]\d\d$/u.test(command);
 
-  return holds && named !== undefined && fold(named) === fold(looking.lookup.nick);
+  return holds && named !== undefined && fold(named) === fold(lookup.nick);
+};
+
+// Whether a numeric, not tied by label, is part of a Lookup's reply on the floor.
+const answers = (run: Run, looking: Looking, line: Line): boolean => {
+  const { command } = line;
+  const { lookup } = looking;
+
+  // A reply holds one error, so a Lookup that has one leaves the next to whoever sent
+  // another Line naming the nick or Channel.
+  const another = looking.error !== undefined && (isError(command) || command === "FAIL");
+
+  if (looking.labelled || another) {
+    return false;
+  }
+
+  return isList(lookup) ? answersList(run, looking, lookup, line) : answersUser(run, lookup, line);
 };
 
 /**
@@ -718,8 +894,8 @@ export const floorLookup = (run: Run, line: Line): Looking | undefined =>
 
 /**
  * The oldest Lookup sent without a label that a standard reply, outside any batch or label,
- * names by its command, `WHOIS` or `WHOWAS`, compared without regard to ASCII case. One
- * that already has its error keeps a later `FAIL` in its notes.
+ * names by its command, `WHOIS`, `WHOWAS`, or a list's `MODE`, compared without regard to
+ * ASCII case. One that already has its error keeps a later `FAIL` in its notes.
  * @param run - The step.
  * @param reply - The standard reply.
  * @returns The Lookup, or `undefined` for none.
@@ -728,13 +904,15 @@ export const lookupByCommand = (run: Run, reply: StandardReply): Looking | undef
   const verb = upperCaseAscii(reply.command);
 
   return openOf(run.state)?.lookups.find(
-    (each) => !each.labelled && upperCaseAscii(each.lookup._tag) === verb
+    (each) =>
+      !each.labelled && (isList(each.lookup) ? "MODE" : upperCaseAscii(each.lookup._tag)) === verb
   );
 };
 
 /**
  * Collects a Line into a Lookup's reply, as {@link floorLookup} or
- * {@link lookupByCommand} found it. A `FAIL` that gives it its result ends it at once.
+ * {@link lookupByCommand} found it. A `FAIL` that gives it its result ends it at once, and
+ * so does an error numeric that gives a list its result.
  * @param run - The step.
  * @param looking - The Lookup.
  * @param line - The Line.
@@ -742,10 +920,13 @@ export const lookupByCommand = (run: Run, reply: StandardReply): Looking | undef
 export const collectFloor = (run: Run, looking: Looking, line: Line): void => {
   take(run, looking, line);
 
-  // The protocol promises no end numeric after a `FAIL`, so one that gives the Lookup its
-  // result ends it, rather than leaving it to wait out its time. An error numeric is
-  // followed by the end numeric, as it always was.
-  if (line.command === "FAIL" && looking.error === undefined) {
+  // The protocol promises no end numeric after a `FAIL`, or after an error numeric that
+  // refuses a `MODE`, so one that gives the Lookup its result ends it, rather than leaving
+  // it to wait out its time. A `WHOIS` or `WHOWAS` error numeric is followed by its end
+  // numeric, as it always was.
+  const final = line.command === "FAIL" || (isList(looking.lookup) && isError(line.command));
+
+  if (final && looking.error === undefined) {
     finish(run, looking.intent, "End", line.command);
   }
 };

@@ -228,6 +228,8 @@ const header = (
   decodeHeader({
     chanmodes: { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: "#&",
+    held: null,
+    lists: { bans: "b", exceptions: "e", invitations: "I" },
     members: 3,
     modes: {
       _tag: "Known",

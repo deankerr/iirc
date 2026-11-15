@@ -406,6 +406,9 @@ describe("reading a line", () => {
       "channels.join": "Required",
       "channels.part": "Optional",
       "composer.focus": "None",
+      "lookup.bans": "Optional",
+      "lookup.exceptions": "Optional",
+      "lookup.invexes": "Optional",
       "lookup.whois": "Required",
       "lookup.whowas": "Required",
       "members.toggle": "Optional",
@@ -695,6 +698,8 @@ const headOf = (
   Schema.decodeSync(ChannelHeader)({
     chanmodes: options.chanmodes ?? { always: "k", flags: "imnpst", list: "beI", whenSet: "l" },
     chantypes: options.chantypes ?? "#&",
+    held: null,
+    lists: { bans: "b", exceptions: "e", invitations: "I" },
     members: 2,
     modes: { _tag: "Unknown" },
     name: "#iirc",

@@ -114,6 +114,96 @@ const stopGracefully = (ircd: Ircd, nick: string) =>
     return { ended: endings(happened)[0], quit: quit.command, within: took < stopBound };
   });
 
+/**
+ * Sets a ban as a Channel's operator and reads its lists back, and reads another Channel's
+ * as one of its members only, as Lookups. A Peer makes the other Channel, so it is its
+ * operator, and bans a mask there first.
+ * @param ircd - The Ircd, by its plaintext port.
+ * @returns What each Lookup found.
+ */
+const masksOn = (ircd: Ircd) =>
+  Effect.gen(function* () {
+    const ours = "#iirc-lists";
+    const theirs = "#iirc-theirs";
+    const dataDir = yield* temporaryDirectory;
+    const key = yield* makeKey(dataDir);
+    const daemon = yield* startDaemon({ dataDir }, key);
+    const { api } = daemon;
+
+    const peer = yield* Effect.promise(
+      async () => await connectPeer({ host: ircd.host, nick: "owner", port: ircd.plainPort })
+    );
+
+    peer.send(`JOIN ${theirs}`);
+    peer.send(`MODE ${theirs} +b spam!*@*`);
+    yield* Effect.promise(
+      async () => await peer.waitFor((line) => line.command === "MODE", "the Peer's ban")
+    );
+
+    yield* api.networks.configure({
+      params: { network },
+      payload: configured({
+        channels: [{ name: ours }, { name: theirs }],
+        ircds: [{ host: ircd.host, port: ircd.plainPort, tls: false }],
+        nicks: ["lister"],
+      }),
+      query: {},
+    });
+
+    yield* eventually(api.networks.known({ params: { network } }), (known) =>
+      [ours, theirs].every((name) =>
+        known.channels.some((one) => one.name === name && one.standing === "Joined")
+      )
+    );
+
+    // The Ircd answers a Connection's Lines in order, so the list read after it holds the ban.
+    const banned = yield* api.networks.act({
+      params: { network },
+      payload: {
+        action: {
+          _tag: "Mode",
+          changes: [{ mode: "b", param: "bad!*@*", set: true }],
+          target: ours,
+        },
+      },
+    });
+
+    const look = (lookup: LookupRequest) =>
+      api.networks
+        .look({ params: { network }, payload: { lookup } })
+        .pipe(Effect.map((looked) => (looked._tag === "LookedUp" ? looked.result : looked)));
+
+    const bans = yield* look({ _tag: "Bans", channel: ours });
+    const exceptions = yield* look({ _tag: "Exceptions", channel: ours });
+    const invitations = yield* look({ _tag: "Invitations", channel: ours });
+    const others = yield* look({ _tag: "Bans", channel: theirs });
+    const otherExceptions = yield* look({ _tag: "Exceptions", channel: theirs });
+    const nowhere = yield* look({ _tag: "Bans", channel: "#iirc-nowhere" });
+
+    peer.close();
+    yield* daemon.stop;
+
+    // Who set a mask and when vary by Ircd, so only whether each was said is compared.
+    const shown = (result: typeof bans) =>
+      result._tag === "Listed"
+        ? result.masks.map((one) => ({
+            mask: one.mask,
+            setAt: one.setAt !== null,
+            setBy: one.setBy?.split("!")[0] ?? null,
+          }))
+        : result;
+
+    return {
+      banned: banned._tag,
+      bans: shown(bans),
+      exceptions: shown(exceptions),
+      invitations: shown(invitations),
+      nowhere,
+      otherExceptions: shown(otherExceptions),
+      others: shown(others),
+    };
+  });
+
 describe("ngircd, on the floor", () => {
   let ngircd: Ircd;
 
@@ -374,6 +464,21 @@ describe("ngircd, on the floor", () => {
       stored: "Found",
       user: true,
       whowas: { _tag: "NotFound", notes: [], reply: "406" },
+    });
+  }, 60_000);
+
+  it("sets a ban and reads it back, and a Channel's lists as one of its members only", async () => {
+    const result = await run(masksOn(ngircd));
+
+    expect(result).toStrictEqual({
+      banned: "Acted",
+      bans: [{ mask: "bad!*@*", setAt: true, setBy: "lister" }],
+      exceptions: [],
+      invitations: [],
+      nowhere: { _tag: "NotFound", notes: [], reply: "403" },
+      // ngircd shows a Channel's exceptions to any member.
+      otherExceptions: [],
+      others: [{ mask: "spam!*@*", setAt: true, setBy: "owner" }],
     });
   }, 60_000);
 
@@ -855,6 +960,21 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
       shown: false,
     });
   }, 120_000);
+
+  it("sets a ban and reads it back, and a Channel's lists as one of its members only", async () => {
+    const result = await run(masksOn(ergo));
+
+    expect(result).toStrictEqual({
+      banned: "Acted",
+      bans: [{ mask: "bad!*@*", setAt: true, setBy: "lister" }],
+      exceptions: [],
+      invitations: [],
+      nowhere: { _tag: "NotFound", notes: [], reply: "403" },
+      // Ergo shows a Channel's exceptions only to its operators.
+      otherExceptions: { _tag: "Failed", notes: [], reply: "482" },
+      others: [{ mask: "spam!*@*", setAt: true, setBy: "owner" }],
+    });
+  }, 90_000);
 
   // Ergo answers a NickServ login with a NOTICE alone, with no `900` and no `+r`, so the
   // Channel waits out the bound, and Self's account stays unknown to the Session.

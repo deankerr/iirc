@@ -438,6 +438,12 @@ const writeOutcome = (result: LookResult): string => {
       return `partial=${result.reason} profiles=${result.profiles.length}`;
     }
 
+    case "Listed": {
+      return result.cut === undefined
+        ? `listed masks=${result.masks.length}`
+        : `listed=${result.cut} masks=${result.masks.length}`;
+    }
+
     case "NotFound": {
       return `not-found=${atom(result.reply)}`;
     }
@@ -461,8 +467,9 @@ const writeOutcome = (result: LookResult): string => {
 };
 
 // A Lookup's result in short: `found profiles=1`, `partial=TimedOut profiles=0`,
-// `not-found=401`, `failed=402`, `refused=Offline`, or `unsent`, with its notes after. A
-// scenario reads what was found from the News itself.
+// `listed masks=2`, `listed=Bounded masks=64`, `not-found=401`, `failed=402`,
+// `refused=Offline`, or `unsent`, with its notes after. A scenario reads what was found
+// from the News itself.
 const writeLookResult = (result: LookResult): string =>
   words([writeOutcome(result), ...writeNotes(result)]);
 
@@ -561,7 +568,7 @@ export const describeNews = (news: News, now: Instant): string => {
       return words([
         "looked-up",
         atom(news.intent),
-        `${news.lookup._tag.toLowerCase()}=${atom(news.lookup.nick)}`,
+        `${news.lookup._tag.toLowerCase()}=${atom("nick" in news.lookup ? news.lookup.nick : news.lookup.channel)}`,
         writeLookResult(news.result),
       ]);
     }

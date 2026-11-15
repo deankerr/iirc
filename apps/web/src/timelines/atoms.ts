@@ -38,6 +38,7 @@ import { runtime } from "../app/runtime.ts";
 import { channelHappened } from "../channel/channels.ts";
 import { forgetChantypes } from "../composer/chantypes-state.ts";
 import { cancelCompletion } from "../composer/completion-state.ts";
+import { lookupsHappened } from "../lookup/state.ts";
 import { notifyAll } from "../notifications/notifier.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
@@ -355,8 +356,9 @@ const reader = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Time
   });
 
 /**
- * Folds one event of the changes stream into the core, the Timelines and the open Channel,
- * and shows the notifications the core says a change calls for. A heartbeat only says the
+ * Folds one event of the changes stream into the core, the Timelines, the open Channel, and
+ * the Lookup cards, whose masks an act refused, or an overflow or a reset that may have
+ * hidden its refusal, shows again, and shows the notifications the core says a change calls for. A heartbeat only says the
  * stream is alive.
  * @param registry - The registry.
  * @param event - The event.
@@ -369,6 +371,7 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
 
       happened(registry, { _tag: "Changed", change: event.data, place: event.id });
       channelHappened(registry, { _tag: "Changed", change: event.data });
+      lookupsHappened(registry, { _tag: "Changed", change: event.data });
 
       const notifies = notificationsOf(
         before,
@@ -385,6 +388,7 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
     case "overflowed": {
       happened(registry, { _tag: "Overflowed", overflow: event.data, place: event.id });
       channelHappened(registry, { _tag: "Overflowed", overflow: event.data });
+      lookupsHappened(registry, { _tag: "Missed" });
 
       return Effect.void;
     }
@@ -392,6 +396,7 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
     case "reset": {
       happened(registry, { _tag: "Reset", reset: event.data });
       channelHappened(registry, { _tag: "Reset" });
+      lookupsHappened(registry, { _tag: "Missed" });
       forgetChantypes(registry);
 
       return Effect.void;
