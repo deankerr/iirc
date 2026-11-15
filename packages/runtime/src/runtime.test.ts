@@ -934,6 +934,76 @@ describe("marking read", () => {
   });
 });
 
+describe("closing a Timeline", () => {
+  it("journals a CloseTimeline at the Clock's time, steps it, and answers Closed with its sequence", async () => {
+    const closed: News = {
+      _tag: "TimelineClosed",
+      where: { _tag: "Direct", existing: true, key: "peer", name: "peer" },
+    };
+
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([
+          { when: "Configured" },
+          { news: [closed], when: "CloseTimeline" },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+        yield* TestClock.adjust(1000);
+
+        const answer = yield* runtime.close(libera, "peer");
+        const unknown = yield* Effect.flip(runtime.close(oftc, "peer"));
+
+        const news = yield* Stream.runCollect(
+          Stream.take(runtime.news({ after: Sequence.make(1) }), 1)
+        );
+
+        return {
+          answer,
+          inputs: inputs(yield* entries(world.journal)),
+          news: news.map((happened) => happened.news),
+          unknown,
+        };
+      })
+    );
+
+    expect(result.answer).toStrictEqual({ _tag: "Closed", sequence: 2 });
+    expect(result.inputs.slice(1)).toStrictEqual([
+      { _tag: "CloseTimeline", at: at(1000), target: "peer" },
+    ]);
+    expect(result.news).toStrictEqual([[closed]]);
+    expect(result.unknown).toBeInstanceOf(UnknownNetwork);
+  });
+
+  it("answers with what the step decided, Joined or NoTimeline, whatever the caller knew before", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([
+          { when: "Configured" },
+          {
+            news: [{ _tag: "Ignored", reason: { _tag: "Joined", channel: "#iirc" } }],
+            when: "CloseTimeline",
+          },
+          { news: [{ _tag: "Ignored", reason: { _tag: "NoTimeline" } }], when: "CloseTimeline" },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+
+        return [yield* runtime.close(libera, "@#iirc"), yield* runtime.close(libera, "#a,#b")];
+      })
+    );
+
+    expect(result).toStrictEqual([
+      { _tag: "Refused", reason: { _tag: "Joined", channel: "#iirc" }, sequence: 2 },
+      { _tag: "Refused", reason: { _tag: "NoTimeline" }, sequence: 3 },
+    ]);
+  });
+});
+
 /** A Change that names no Network, as the Daemon journals one. */
 const uiChange: JournalRecord = {
   _tag: "Change",

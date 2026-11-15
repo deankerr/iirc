@@ -94,6 +94,7 @@ describe("the contract", () => {
       "GET /api/ui",
       "GET /api/ui/changes",
       "POST /api/networks/{network}/act",
+      "POST /api/networks/{network}/close",
       "POST /api/networks/{network}/lookups",
       "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",
@@ -222,6 +223,24 @@ describe("the contract", () => {
       Schema.is(Attempted)({ _tag: "Ping", nick: "peer" }),
       Schema.is(Attempted)({ _tag: "Ping" }),
     ]).toStrictEqual([true, true, false]);
+  });
+
+  it("takes a part of one Channel, with a reason or none, and refuses one with nothing to send", () => {
+    const act = Schema.decodeUnknownResult(ActRequest);
+
+    expect(
+      [
+        { action: { _tag: "Part", channel: "#iirc", reason: null } },
+        { action: { _tag: "Part", channel: "#iirc", reason: "bye" } },
+        { action: { _tag: "Part", channel: "", reason: null } },
+        { action: { _tag: "Part", channel: "#iirc", reason: "a\nb" } },
+        { action: { _tag: "Part", channel: "#iirc" } },
+      ].map((each) => act(each)._tag)
+    ).toStrictEqual(["Success", "Success", "Failure", "Failure", "Failure"]);
+    expect([
+      Schema.is(Attempted)({ _tag: "Part", channel: "#iirc" }),
+      Schema.is(Attempted)({ _tag: "Part" }),
+    ]).toStrictEqual([true, false]);
   });
 
   it("takes a read up to an instant, of a Target or, with null, the Network's own", () => {

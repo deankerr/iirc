@@ -5,7 +5,16 @@
  *
  * @packageDocumentation
  */
-import type { Instant, Marked, MessageId, Named, News, RefusedAction, Where } from "@iirc/client";
+import type {
+  Closable,
+  Instant,
+  Marked,
+  MessageId,
+  Named,
+  News,
+  RefusedAction,
+  Where,
+} from "@iirc/client";
 import type { Casemapping, Fact } from "@iirc/client/known";
 import { casefold } from "@iirc/protocol/casemapping";
 
@@ -19,7 +28,7 @@ import type { Kind, TimelineId } from "./timeline.ts";
  * The version of the projection. Bump it whenever News or the fold changes what it
  * gives, so a store built by another version is reset and folded again from the Journal.
  */
-export const projectionVersion = 11;
+export const projectionVersion = 12;
 
 /**
  * What one step to one Network made happen, as the Runtime's News stream gives it: its
@@ -461,6 +470,25 @@ const mark = (draft: Draft, where: Marked, read: Instant) => {
 };
 
 /**
+ * Closes the Timeline `where` names. Closing opens nothing, so a key no Timeline has
+ * changes nothing. A store derives whether it stays closed from what is added after.
+ * @param draft - The step.
+ * @param where - The Timeline.
+ */
+const close = (draft: Draft, where: Closable) => {
+  const id = (where._tag === "Channel" ? draft.maps.channels : draft.maps.directs).get(where.key);
+
+  if (id !== undefined && draft.maps.keyed.has(id)) {
+    draft.changes.push({
+      _tag: "Closed",
+      network: draft.network,
+      sequence: draft.sequence,
+      timeline: id,
+    });
+  }
+};
+
+/**
  * Places an action's refusal that came after it left, `Rejected` or `Unsent`, in the
  * Timeline it belongs to, at the step's time, with no level: it is ours, and never
  * unread. One refused in the step that took it, `Offline` or `Unsendable`, places nothing,
@@ -652,6 +680,12 @@ const foldNews = (draft: Draft, news: News, n: number) => {
 
     case "ReadMarker": {
       mark(draft, news.where, news.read);
+
+      break;
+    }
+
+    case "TimelineClosed": {
+      close(draft, news.where);
 
       break;
     }

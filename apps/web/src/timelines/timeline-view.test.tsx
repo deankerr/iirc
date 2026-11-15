@@ -39,6 +39,7 @@ const listed = (
   more: Partial<typeof Timeline.Encoded> = {}
 ): typeof Timeline.Encoded => ({
   changed: 1,
+  closed: false,
   detached: false,
   head: null,
   id,

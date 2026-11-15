@@ -31,6 +31,7 @@ const describeTimeline = (
   changed = 1
 ): typeof Timeline.Encoded => ({
   changed,
+  closed: false,
   detached: false,
   head: null,
   id,

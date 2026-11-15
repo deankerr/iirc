@@ -7,13 +7,20 @@
  *
  * @packageDocumentation
  */
-import type { ActionRequest, CallerIntent, NetworkId, StepRefusal, TimelineId } from "@iirc/api";
+import type {
+  ActionRequest,
+  CallerIntent,
+  NetworkId,
+  StepRefusal,
+  Timeline,
+  TimelineId,
+} from "@iirc/api";
 
 import { levelOf, markLatest } from "./activity.ts";
 import { channelIn, initialChannels } from "./channel.ts";
 import type { Channels } from "./channel.ts";
 import { credentialRefusal, interpret } from "./commands.ts";
-import type { CommandContext, Focus, Intent } from "./commands.ts";
+import type { CommandContext, Focus, Intent, Unseen } from "./commands.ts";
 import { panesOf } from "./layout.ts";
 import { attemptedText, contained, requested } from "./render.ts";
 import { isRemoved, mainOf, opened, openOf, resolve, sidebar } from "./timelines.ts";
@@ -263,6 +270,20 @@ const noticed = (state: Composers, timeline: Place, notice: Notice): Composers =
   withDraft(state, state.carried.get(timeline) ?? timeline, (draft) => ({ ...draft, notice }));
 
 /**
+ * The Timelines with something unread, as a command sees them.
+ * @param timelines - The Timelines.
+ * @returns Those with something unread, in their order.
+ */
+const unseenIn = (timelines: readonly Timeline[]): readonly Unseen[] =>
+  timelines.flatMap((timeline) => {
+    const level = levelOf(timeline.unread);
+
+    return level === undefined
+      ? []
+      : [{ level, mark: markLatest(timeline), timeline: timeline.id }];
+  });
+
+/**
  * The context commands are judged in: the focused Pane's open Timeline as its Network lists
  * it, whether that Network has a Session, every Timeline in the sidebar's order, those open
  * in any Pane, those with something unread, and the head of the Channel in focus, as read.
@@ -283,7 +304,9 @@ export const contextOf = (
 
   // A removed Network's Timelines are read, never marked, so what is unread there calls
   // for nothing.
-  const calling = networks.flatMap((one) => (one.removed ? [] : one.timelines));
+  const marked = networks.filter((one) => !one.removed);
+  const calling = marked.flatMap((one) => one.timelines);
+  const closed = marked.flatMap((one) => one.closed);
 
   // A Timeline behind the options, the search, or a draft is not the one shown, so
   // `/next-unread` may go to it, which shows it.
@@ -295,13 +318,8 @@ export const contextOf = (
       pane.view.open === undefined ? [] : [resolve(timelines, pane.view.open)]
     ),
     timelines: listed.map((timeline) => timeline.id),
-    unread: calling.flatMap((timeline) => {
-      const level = levelOf(timeline.unread);
-
-      return level === undefined
-        ? []
-        : [{ level, mark: markLatest(timeline), timeline: timeline.id }];
-    }),
+    unread: unseenIn(calling),
+    unreadClosed: unseenIn(closed),
   };
 
   // A Direct Message not yet begun stands in front of any Timeline, and has no focus of its

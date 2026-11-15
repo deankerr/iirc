@@ -26,6 +26,7 @@ const describeTimeline = (
   kind: "Network" | "Channel"
 ): typeof Timeline.Encoded => ({
   changed: 1,
+  closed: false,
   detached: false,
   head: null,
   id,

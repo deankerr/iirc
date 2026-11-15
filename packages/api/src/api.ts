@@ -41,6 +41,8 @@ import {
   After,
   CallerIntent,
   ChannelHeader,
+  Closed,
+  CloseRequest,
   ConfigurationInForce,
   CredentialNames,
   CredentialPathName,
@@ -179,6 +181,12 @@ export class NetworksGroup extends HttpApiGroup.make("networks")
       params: NetworkPath,
       payload: ReadRequest,
       success: Journaled,
+    }),
+    HttpApiEndpoint.post("close", "/networks/:network/close", {
+      error: [UnknownNetwork, NetworkStopped],
+      params: NetworkPath,
+      payload: CloseRequest,
+      success: Closed,
     }),
     HttpApiEndpoint.post("retry", "/networks/:network/retry", {
       error: [UnknownNetwork, NetworkStopped],

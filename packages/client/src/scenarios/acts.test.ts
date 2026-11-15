@@ -10,6 +10,7 @@ import type { News } from "../news.ts";
 import type { State } from "../state.ts";
 import { configured, epoch, floorIsupport, joined, play, registered } from "../testing/index.ts";
 import type { Played } from "../testing/index.ts";
+import { openOf } from "../views.ts";
 
 const base = configured();
 
@@ -42,7 +43,9 @@ describe("an action while offline", () => {
         "!! nick other",
         "?? refused i5 Offline nick=other in=network",
         "!! quote WHOIS peer",
-        "?? refused i6 Offline raw=WHOIS in=network"
+        "?? refused i6 Offline raw=WHOIS in=network",
+        "!! part #iirc :bye",
+        "?? refused i7 Offline part=#iirc in=network"
       ),
     ]);
 
@@ -197,6 +200,62 @@ describe("a topic", () => {
     });
 
     expect(refusals(run)).toHaveLength(1);
+  });
+});
+
+describe("a part", () => {
+  // Self put in a Channel the Configuration does not want, as by `SAJOIN`.
+  const putIn = lines("<< :iirc!~iirc@iirc.test JOIN #forced", ">> MODE #forced");
+
+  it("parts one Channel, with a reason or none, as a Line built from its name", () => {
+    played([
+      ...inChannel(),
+      putIn,
+      lines("!! part #forced", ">> PART #forced"),
+      lines("!! part #forced :see you", ">> PART #forced :see you"),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is refused by an error numeric that names its Channel, with no label to tie it", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! part #elsewhere",
+        ">> PART #elsewhere",
+        "<< :irc.test 442 iirc #elsewhere :You're not on that channel",
+        "?? refused i1 Rejected 442 part=#elsewhere in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("waits for nothing more once Self is seen to part", () => {
+    const run = played([
+      ...inChannel(),
+      putIn,
+      lines("!! part #forced", ">> PART #forced", "<< :iirc!~iirc@iirc.test PART #forced"),
+    ]);
+
+    expect(openOf(run.state)?.acting).toStrictEqual([]);
+  });
+
+  it("is refused for a name that is not a Channel's, more than one Channel, or a Channel the Configuration wants", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! part peer",
+        "?? refused i1 Unsendable part=peer in=network",
+        "!! part #a,#b",
+        "?? refused i2 Unsendable part=#a,#b in=network",
+        "!! part #IIRC",
+        "?? refused i3 Unsendable part=#IIRC in=channel:#iirc:#IIRC"
+      ),
+    ]);
+
+    expect.assertions(0);
   });
 });
 

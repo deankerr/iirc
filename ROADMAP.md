@@ -49,7 +49,6 @@ IRC has no attachments, so the Daemon hosts what the Owner wants to show. It is 
 
 Small things, each independent of the rest.
 
-- **Closing a Timeline:** a Direct Message, or a Channel the Owner left, out of the Sidebar until something is said there again.
 - **Ignoring a User,** by mask, as Configuration so every Frontend agrees. What they say is still journaled, and is neither shown, counted, nor notified.
 - **More to do as a Session begins:** user modes to set, and Lines of the Owner's own to send.
 - **Taking a nick back.** When a configured nick was taken, Self takes it once its holder is seen to leave it.

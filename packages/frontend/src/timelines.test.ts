@@ -406,6 +406,7 @@ const wireItem = (item: ModelItem) =>
 const wireTimeline = (timeline: ModelTimeline) =>
   decodeTimeline({
     changed: timeline.changed,
+    closed: false,
     detached: false,
     head: null,
     id: timeline.id,
@@ -1347,6 +1348,7 @@ const three = timelineId(idOf(3));
 const timelineOf = (id: string, kind: "Network" | "Channel", name: string, changed: number) =>
   decodeTimeline({
     changed,
+    closed: false,
     detached: false,
     head: null,
     id,
@@ -1587,6 +1589,7 @@ const direct = (id: string, name: string, detached = false) =>
   Schema.encodeSync(Timeline)(
     decodeTimeline({
       changed: 6,
+      closed: false,
       detached,
       head: null,
       id,
@@ -1601,6 +1604,32 @@ const direct = (id: string, name: string, detached = false) =>
       unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
     })
   );
+
+/**
+ * A Channel's Timeline closed, or not, as a change says it.
+ * @param sequence - The step.
+ * @param id - The Timeline.
+ * @param name - Its name.
+ * @param closed - Whether it is closed.
+ * @returns The change.
+ */
+const closedAt = (sequence: number, id: string, name: string, closed: boolean) =>
+  changed(sequence, {
+    timelines: [
+      Schema.encodeSync(Timeline)({ ...timelineOf(id, "Channel", name, sequence), closed }),
+    ],
+  });
+
+/**
+ * What the sidebar lists of each Network, and what it leaves out as closed.
+ * @param state - The state.
+ * @returns The names.
+ */
+const listedAndClosed = (state: Timelines) =>
+  sidebar(state).map((network) => [
+    network.timelines.map((timeline) => timeline.name),
+    network.closed.map((timeline) => timeline.name),
+  ]);
 
 describe("the Timelines' state", () => {
   it("follows the stream after the smallest `through` it read", () => {
@@ -1675,6 +1704,65 @@ describe("the Timelines' state", () => {
         network.timelines.map((timeline) => timeline.name),
       ])
     ).toStrictEqual([["alpha", ["alpha", "#a", "#b"]]]);
+  });
+
+  it("leaves a closed Timeline out of the sidebar until something arrives in it, and lists it while a Pane has it open", () => {
+    // #b is closed, and #a, open in the Pane, is closed too.
+    const closed = reduceTimelines(
+      reduceTimelines(following(), closedAt(6, idOf(2), "#b", true)),
+      closedAt(7, idOf(3), "#a", true)
+    );
+
+    // The Pane opens #b instead, so #a is open in none.
+    const moved = reduceTimelines(closed, { _tag: "Opened", timeline: two });
+
+    // Something arrives in #b.
+    const arrived = reduceTimelines(moved, closedAt(8, idOf(2), "#b", false));
+
+    expect({
+      arrived: listedAndClosed(reduceTimelines(arrived, { _tag: "Opened", timeline: one })),
+      closed: listedAndClosed(closed),
+      moved: listedAndClosed(moved),
+    }).toStrictEqual({
+      arrived: [[["alpha", "#b"], ["#a"]]],
+      closed: [[["alpha", "#a"], ["#b"]]],
+      moved: [[["alpha", "#b"], ["#a"]]],
+    });
+  });
+
+  it("marks a closed Timeline read with /read all, though navigation and the sidebar leave it out", () => {
+    // #b is closed with a Message unread, and no Pane shows it, so it is not listed.
+    const closed = reduceTimelines(
+      following(),
+      changed(6, {
+        timelines: [
+          {
+            ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)),
+            closed: true,
+            latest: cursor(6000, 6),
+            unread: { activity: 0, direct: 0, highlights: 0, messages: 2 },
+          },
+        ],
+      })
+    );
+
+    const context = contextOf(closed);
+    const all = interpret("/read all", context);
+
+    expect({
+      listed: listedAndClosed(closed),
+      marked:
+        all._tag === "Parsed"
+          ? all.value.map((one) => (one._tag === "MarkRead" ? one.timeline : one))
+          : all,
+      navigation: context.unread,
+      next: interpret("/next-unread", context),
+    }).toStrictEqual({
+      listed: [[["alpha", "#a"], ["#b"]]],
+      marked: [two],
+      navigation: [],
+      next: { _tag: "Parsed", value: [] },
+    });
   });
 
   it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {

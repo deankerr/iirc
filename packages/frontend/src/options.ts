@@ -1569,6 +1569,24 @@ const entryFor = (
 };
 
 /**
+ * Whether a Channel is among those wanted in a Configuration, compared as `/part` compares
+ * them: folded by the casemapping the Daemon reports, or exactly while it reports none.
+ * @param configuration - The Configuration.
+ * @param channel - The Channel's name, as the Daemon has it.
+ * @param naming - What the Daemon reports of the Network.
+ * @returns Whether it is wanted.
+ */
+export const wantsChannel = (
+  configuration: Configuration,
+  channel: string,
+  naming: Naming
+): boolean => {
+  const fold = foldBy(naming);
+
+  return records(configuration.channels).some((entry) => fold(nameOf(entry)) === fold(channel));
+};
+
+/**
  * An option set from its text.
  * @param network - The Network.
  * @param plain - The Configuration, as JSON.

@@ -59,6 +59,7 @@ const listed = (
 
   return {
     changed: more.changed ?? 1,
+    closed: false,
     detached: false,
     head: null,
     id,

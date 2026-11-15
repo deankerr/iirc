@@ -61,6 +61,7 @@ import { showSearch } from "../search/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
+import { closeTimeline } from "../timelines/closing.ts";
 import { cancelCompletion } from "./completion-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
@@ -434,7 +435,7 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
 
 /**
  * Carries out an intent other than a Say: in the page, by changing Configuration, by
- * marking a Timeline read, by turning notifications on or off, or by opening a Timeline by
+ * marking a Timeline read, by closing one, by turning notifications on or off, or by opening a Timeline by
  * name, which reads how the Network folds names first.
  * @param registry - The registry.
  * @param place - Where the intents came from.
@@ -477,6 +478,10 @@ const changeOne = (
 
     case "MarkRead": {
       return markRead(intent);
+    }
+
+    case "CloseTimeline": {
+      return closeTimeline(registry, intent);
     }
 
     case "Notify": {

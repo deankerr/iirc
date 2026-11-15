@@ -40,6 +40,7 @@ import { PaneTree } from "../panes/pane-tree.tsx";
 import { Pane } from "../panes/pane.tsx";
 import { ImportDialog } from "../theme/import-dialog.tsx";
 import { sidebarNetworks } from "../timelines/atoms.ts";
+import { LeaveDialog } from "../timelines/leave-dialog.tsx";
 import { Sidebar } from "../timelines/sidebar.tsx";
 import { IconButton } from "../ui/button.tsx";
 
@@ -337,6 +338,7 @@ export const Shell = ({ signOut: attempt }: { readonly signOut: Attempt }) => {
       <Palette />
       <ImportDialog />
       <RemoveDialog />
+      <LeaveDialog />
       <Keys />
     </div>
   );

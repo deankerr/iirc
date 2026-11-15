@@ -1,5 +1,6 @@
 // The class names in sidebar.module.css, which CSS Modules exports.
 declare const styles: {
+  readonly action: string;
   readonly calling: string;
   readonly chevron: string;
   readonly connected: string;
@@ -19,12 +20,15 @@ declare const styles: {
   readonly levelHighlight: string;
   readonly levelMessage: string;
   readonly levelNone: string;
+  readonly menu: string;
   readonly messages: string;
+  readonly more: string;
   readonly muted: string;
   readonly name: string;
   readonly network: string;
   readonly offline: string;
   readonly pane: string;
+  readonly popover: string;
   readonly scroll: string;
   readonly sidebar: string;
   readonly standing: string;

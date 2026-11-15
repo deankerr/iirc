@@ -38,6 +38,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **`UnknownNetwork` names no life, so it lets nothing go.** The Network list is read again, and a Network it does not name, whose life began before it was asked, is over.
 - **An overflow reads again what it touched, and a reset reads everything again.** A merged Timeline resolves to the one it went to.
 - **A Network's connection and Self's away are derived, never polled.** They come from `known`, and then from the Session items and `AwayChanged` the changes carry.
+- **A closed Timeline is left out of `sidebar` while no Pane has it open.** The Daemon says whether it is closed, and it comes back by itself once something arrives in it. `sidebar` gives it apart, as `closed`, for the palette, and gives it with the rest while a Pane has it open, so one opened from the palette or the search shows there. Nothing here keeps a flag of its own. Moving to the next Timeline, the one that calls most, and the page's title count only what the sidebar lists.
 - **A removed Network is derived too.** One removed with its Timelines kept is named `Kept` by the Network list, which names every Network, live or kept, in one read, or known by its Timelines flagged `removed`, and `isRemoved` reads both. Its Timelines are read and searched as any other, but its Session is never read, nothing is said or done there, and `sidebar` lists it after the rest.
 - **A dropped Timeline is let go of at once.** The changes name it, or name its Network as removed without keeping its Timelines, which reaches a Network that never had one too. Its Network, window, and place among the closed go, a Pane that showed it shows nothing, and the search begins again. A Network the changes name as removed with its Timelines kept is only read from then on. The Daemon's own answer to a removal, `NetworkRemoved`, does the same ahead of the stream, for the life it ended.
 
@@ -102,7 +103,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
-| Reading | `/read`, `/read all`, `/notify`, `/members`, `/sidebar` |
+| Reading | `/read`, `/read all`, `/close-timeline`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 
 Each entry in `src/commands.ts` carries its usage, aliases, and description, which the palette shows.
@@ -113,6 +114,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **Acting is parsed as the Client checks it.** What depends on the Network, such as which modes take a parameter, is read from `PREFIX`, `CHANMODES`, and `CHANTYPES` in the focused Channel's head. Before a head is read, a command that needs them says so and does not guess.
 - **Configuration is changed by intents, never in place.** `/join`, `/part`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
 - **`/query` opens a Timeline by name and never makes one.** It folds the name by the casemapping `known` reports. When `known` cannot be read it opens nothing, since a guessed mapping could open another User's Direct Message.
+- **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused, and so is `/oper`, whose refusal names the `oper` options to set instead.
 - **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
@@ -147,7 +149,7 @@ Keybindings as data over the registry. A binding names a chord, a command, its a
 
 ## Palette
 
-What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, every Network, to remove it or drop what it kept, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
+What the command palette lists for a query (`sections`), and what choosing an entry asks for (`choose`). It lists the commands that can run here, every Timeline, those closed after the rest, every Network, to remove it or drop what it kept, every theme, every font, and every option read, or the themes alone, as `/theme` opens it. A query of `font` and a family's name, such as `font Fira Code`, lists that family among the fonts.
 
 - **A query ranks entries in four tiers:** it begins a name, begins a word of a name, begins a word of the description, or its characters appear in a name in order. Matching is ASCII case-insensitive and reads no locale. It is a small scorer of its own because uFuzzy sorts with `Intl.Collator`.
 - **With no query, recent choices come first,** at most 20.
@@ -298,6 +300,14 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 - **Nothing is removed until the Owner confirms.** Cancelling sends nothing, and a removal in flight is sent once and takes only its own answer.
 - **The Timelines are kept unless the Owner chooses to drop them,** since kept ones can still be dropped later. A Network removed with them kept is asked about only to drop them, which frees its name.
 - **What failed is said in words from the error's tag.** A removal that stands with its Credentials not all forgotten says so, and closes.
+
+## Closing a Timeline
+
+`@iirc/frontend/closing`: what closes a Timeline from its row (`closeOf`), and the offer to leave a Channel Self is in instead, as a reducer, `reduceLeaving`.
+
+- **A Channel Self is in is never closed.** The Daemon decides as it steps the close, and its answer, refused as `Joined`, is what offers to leave it, and names the Channel it checked, so `@#iirc` offers and leaves `#iirc`, so a join just before the close is never missed.
+- **Leaving is sent once, only once the Owner chooses it,** as the edit `/part` sends when the Network's Configuration wants the Channel (`leaveOf`), or it would be joined again, and as the `Part` action when it does not, which the Ircd put Self in or Self joined by hand, and which an edit would refuse. It does not close the Channel, since the part arrives in it.
+- **Only a Channel's or a Direct Message's Timeline has a Target to close it by.** A Network's own, a Direct Message that no longer follows its partner, and a removed Network's have none.
 
 ## Notifications
 

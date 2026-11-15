@@ -45,6 +45,7 @@ const context: CommandContext = {
   shown: [],
   timelines: [channel],
   unread: [],
+  unreadClosed: [],
 };
 
 const fold = (events: readonly ComposerEvent[], from: Composers = initialComposers) => {

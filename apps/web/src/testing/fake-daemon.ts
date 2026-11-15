@@ -13,6 +13,7 @@ import {
 } from "@iirc/api";
 import type {
   ChannelHeader,
+  Closed,
   Knowledge,
   LookResult,
   Member,
@@ -59,6 +60,7 @@ type Answer =
   | Readonly<Record<string, string>>
   | (typeof NetworkEntry.Encoded)[]
   | typeof Knowledge.Encoded
+  | typeof Closed.Encoded
   | typeof TimelineList.Encoded
   | typeof TimelineWindow.Encoded
   | typeof Located.Encoded
@@ -328,6 +330,8 @@ const ReadBody = Schema.fromJsonString(
   Schema.Struct({ read: Schema.Finite, target: Schema.NullOr(Schema.String) })
 );
 
+const CloseBody = Schema.fromJsonString(Schema.Struct({ target: Schema.String }));
+
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
   answerCtcp: true,
@@ -470,11 +474,13 @@ export const fakeDaemon = () => {
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
   const removals: { readonly network: string; readonly keep: boolean }[] = [];
   const reads: (typeof ReadBody.Type)[] = [];
+  const closes: { readonly network: string; readonly target: string }[] = [];
   const channelsRead: string[] = [];
   const channelsHeld: (() => void)[] = [];
   const membersHeld: (() => void)[] = [];
   const knownHeld: (() => void)[] = [];
   const saysHeld: (() => void)[] = [];
+  const closesHeld: (() => void)[] = [];
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
@@ -500,6 +506,8 @@ export const fakeDaemon = () => {
     channels: new Map<string, FakeChannel>(),
     /** Each read of a Channel's head, by its Timeline. */
     channelsRead,
+    /** Each close asked for, joined or not, in order. */
+    closes,
     /** Each Network's Configuration in force, and the sequence that set it. */
     configurations: new Map<string, { configuration: ConfigurationOnWire; sequence: number }>([
       ["libera", { configuration: liberaConfiguration, sequence: 1 }],
@@ -513,10 +521,21 @@ export const fakeDaemon = () => {
     hangChanges: false,
     /** Whether a request to follow the `ui` options never begins its answer. */
     hangUiChanges: false,
-    /** Releases each request held: a read of a Channel's head, its members, or `known`, or a `say`. */
-    held: { channel: channelsHeld, known: knownHeld, members: membersHeld, says: saysHeld },
+    /**
+     * Releases each request held: a read of a Channel's head, its members, or `known`, a
+     * `say`, or a `close`.
+     */
+    held: {
+      channel: channelsHeld,
+      closes: closesHeld,
+      known: knownHeld,
+      members: membersHeld,
+      says: saysHeld,
+    },
     /** Whether each read of a Channel's head waits until released. */
     holdChannels: false,
+    /** Whether each `close`, once stepped, waits until released before it is answered. */
+    holdCloses: false,
     /** Whether each read of `known` waits until released. */
     holdKnown: false,
     /** Whether each `at/{sequence}` read waits until released. */
@@ -540,6 +559,11 @@ export const fakeDaemon = () => {
      * Network's `realname` just before their turn.
      */
     interject: 0,
+    /**
+     * The Channels Self is in on each Network, by name, as `known` gives them: none until a
+     * test says. A `close` of one is refused as `Joined`, as the Client ignores it.
+     */
+    joined: new Map<string, readonly string[]>(),
     /** Each intent journaled, and its sequence, which `said` answers from. */
     journaled,
     /** The Networks removed with their Timelines kept, which still hold them. */
@@ -990,10 +1014,20 @@ export const fakeDaemon = () => {
         declared: null,
       };
 
+      const channels = (daemon.joined.get(known.network) ?? []).map((name) => ({
+        key: lower(name),
+        members: [],
+        modes: { _tag: "Unknown" } as const,
+        name,
+        standing: "Joined" as const,
+        topic: { _tag: "Unknown" } as const,
+        wanted: true,
+      }));
+
       return signedInOnly(() =>
         json(200, {
           casemapping: declared ?? "rfc1459",
-          channels: [],
+          channels,
           chantypes,
           declared,
           life: daemon.lives.get(known.network ?? "") ?? 1,
@@ -1043,6 +1077,70 @@ export const fakeDaemon = () => {
     daemon.nextSequence += 1;
 
     return json(200, { sequence: daemon.nextSequence - 1 });
+  };
+
+  /**
+   * Closes a Timeline, as the Daemon does: a Channel Self is in is refused as `Joined`, and
+   * otherwise the Timeline named, in any ASCII case, is `closed`, which the changes stream
+   * says in one step, and stays so until something arrives in it. The answer waits while
+   * `holdCloses` says, though the close was already stepped.
+   * @param network - The Network.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const close = async (network: string, init: RequestInit) => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const { target: typed } = Schema.decodeSync(CloseBody)(await new Response(init.body).text());
+    // The Client resolves a Target as it does a `Read`'s, so a status prefix names the Channel
+    // without it, and that is what a refusal names.
+    const target = typed.replace(/^[~&@%+]+(?=[#&])/u, "");
+    const sequence = daemon.nextSequence;
+
+    daemon.closes.push({ network, target: typed });
+    daemon.nextSequence += 1;
+    daemon.through = sequence;
+
+    const joined = (daemon.joined.get(network) ?? []).some((name) => lower(name) === lower(target));
+
+    const held = (daemon.timelines.get(network) ?? []).find(
+      (one) => one.timeline.kind !== "Network" && lower(one.timeline.name) === lower(target)
+    );
+
+    if (!joined && held !== undefined) {
+      Object.assign(held, { timeline: { ...held.timeline, changed: sequence, closed: true } });
+
+      send({
+        data: JSON.stringify({
+          dropped: [],
+          gaps: [],
+          items: [],
+          merged: [],
+          removals: [],
+          sequence,
+          timelines: [held.timeline],
+        }),
+        event: "changed",
+        id: `1.${sequence}`,
+      });
+    }
+
+    if (daemon.holdCloses) {
+      const { promise, resolve } = Promise.withResolvers<undefined>();
+
+      closesHeld.push(() => {
+        resolve(undefined);
+      });
+      await promise;
+    }
+
+    const closed: typeof Closed.Encoded = joined
+      ? { _tag: "Refused", reason: { _tag: "Joined", channel: target }, sequence }
+      : { _tag: "Closed", sequence };
+
+    return json(200, closed);
   };
 
   /**
@@ -1365,6 +1463,10 @@ export const fakeDaemon = () => {
 
       case "POST /api/networks/libera/read": {
         return await markRead(init);
+      }
+
+      case "POST /api/networks/libera/close": {
+        return await close("libera", init);
       }
 
       case "POST /api/networks/libera/act": {

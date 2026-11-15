@@ -71,6 +71,7 @@ const described = (
   detached = false
 ): typeof Timeline.Encoded => ({
   changed: 1,
+  closed: false,
   detached,
   head: null,
   id,

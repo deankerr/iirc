@@ -41,11 +41,12 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Started` | Runtime | The Runtime has started. A Connection the Client believed open is over. |
 | `Configured` | Owner | The Network's whole Configuration. Joining, parting, and quitting are changes to it. |
 | `Say` | Owner | Say something to a Target, with an intent id from the Runtime. |
-| `Act` | Owner | Act on the Network, with an intent id: set a topic, kick, change modes, invite, change Self's nick, be away or back, send a CTCP request or a `PING` to a User, or send a Line written as text. |
+| `Act` | Owner | Act on the Network, with an intent id: set a topic, kick, part a Channel Self is in (which leaves the Configuration alone, so a Channel it wants is joined again), change modes, invite, change Self's nick, be away or back, send a CTCP request or a `PING` to a User, or send a Line written as text. |
 | `Look` | Owner | Look something up, with an intent id: `Whois { nick }` or `Whowas { nick }`. |
 | `Retry` | Owner | Try connecting now, cutting a wait short. |
 | `Removed` | Owner | The Owner removed the Network, keeping its Timelines readable or not, as `keep` says. |
 | `Read` | Owner | The Owner has read a Timeline up to an instant: a Target's, or the Network's own. |
+| `CloseTimeline` | Owner | The Owner closed a Target's Timeline: a Channel's Self is not in, or a Direct Message partner's. |
 | `Opened`, `Received`, `Closed` | Transport | A Connection opened, one Line's bytes arrived, or a Connection is over, and how. |
 | `Fired` | Clock | A timer the Client set is due. It consumes the timer. |
 | `Unfilled` | Runtime | A `SendSecret` could not be filled, so nothing was sent. |
@@ -105,6 +106,7 @@ News is what happened in one step, in order. It is derived, so replaying the Jou
 | `Refolded` | An Ircd declared another casemapping, so keys in `where` fold by it from here on. |
 | `NetworkRemoved` | The Owner removed the Network, and `keep` is whether its Timelines stay readable. |
 | `ReadMarker` | The Owner's Read Marker of a Timeline moved forward. |
+| `TimelineClosed` | The Owner closed a Timeline, keyed as `where` keys it. The Client keeps nothing of it: whether a Timeline is still closed is the projection's to derive. |
 | `ChannelLearned` | A reply changed what is known of a Channel Self is in, which no Activity says: its modes or topic, or the end of a `NAMES` listing. It says which Channel, keyed as `where` keys it. |
 | `Refused` | A `Say` or an `Act` that was not carried out: `Offline`, `Unsendable`, `Rejected` by the Ircd with its numeric or code, or `Unsent`. |
 | `LookedUp` | A Lookup is over, with its result. Exactly one comes for each `Look`. |
@@ -211,7 +213,8 @@ A machine that is not running is left out.
 | Input from an old Connection, or a stale `Fired` | `Ignored` with `StaleConnection` or `StaleTimer`. |
 | An input or a Line that makes no sense now, such as a second `001` | `Ignored` with `NotNow`. A Line the Client does not read is not an error. |
 | An Owner intent that cannot be carried out | `Refused` with the intent id. It is not queued. |
-| A `Read` whose Target names no one Timeline | `Ignored` with `NoTimeline`. |
+| A `Read` or a `CloseTimeline` whose Target names no one Timeline | `Ignored` with `NoTimeline`. |
+| A `CloseTimeline` of a Channel Self is in | `Ignored` with `Joined`, naming the Channel as resolved, without a status prefix. |
 | A Line a Feature refuses at egress | A `Say` is `Refused` with `Unsendable`. Any other is `Ignored`. Nothing is sent. |
 | `Unsent` | A `Say` or an `Act` whose Line is among them is `Refused` with `Unsent`, once. A CTCP answer among them, from any Connection, is a `CtcpUnsent`, where its request is. |
 | `Unfilled` | SASL counts it as a failed login. A service login's Channels are joined at once. An `OPER` awaits no answer. A Channel whose key is unfilled is refused. Registration goes on without `PASS`. |
@@ -253,6 +256,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Messages and Activity** (`messages.test.ts`, `where.test.ts`). `PRIVMSG` and `NOTICE` are Messages, and a CTCP `ACTION` an action. A `DCC` is dropped, and other CTCP is Activity, below. `JOIN`, `PART`, `QUIT`, `NICK`, `KICK`, `TOPIC`, `MODE`, and `AWAY` are Activity, and so is a standard reply that refused nothing. A `Say` that the Ircd would cut short relaying it is `Unsendable`, never truncated.
 - **CTCP** (`ctcp.test.ts`). A CTCP in a `PRIVMSG` from another User is a `CtcpRequest`, with what became of it, and one in a `NOTICE` a `CtcpReply`. Self answers a live `VERSION` (`iirc`, and nothing of what it runs), `PING` (its arguments, back), `TIME` (when the request arrived, in UTC), and `CLIENTINFO` with a `NOTICE` to the sender's nick, never to a Channel or a mask, and answers nothing when the Configuration's `answerCtcp` is off. Answers take a budget of three at once and then one every ten seconds, which reconnecting does not refill. A request that is not answered says why, and none is dropped. A request or a reply belongs to each Channel it was sent to, and otherwise to the Network, and to the sender's Direct Messages if those exist. A live reply to Self, never to a Channel, with the token of a `PING` the Owner sent, from the User it went to, carries `roundTrip`: the milliseconds between the instants the Runtime journaled the request and the reply, and every other reply carries `null`. The User a `PING` went to is followed through a change of nick, and the `PING` is forgotten when that User quits or another User takes the nick. An answer that never left is a `CtcpUnsent`, in the Timelines its request is in as they stand then: its Channels as named when it arrived, or its partner's Direct Messages as they followed a live rename. Once another User took that nick, or 64 later answers have pushed it out of memory, it goes to the Network's own Timeline alone, never another User's. Its budget stays spent.
 - **Read Markers** (`read.test.ts`). A `Read` moves one Timeline's Read Marker forward, never back, so two Frontends marking at once cannot undo each other. It needs no Session, and markers outlive Connections.
+- **Closing a Timeline** (`close.test.ts`). A `CloseTimeline` names a Channel or a Direct Message partner as a `Read` does, never the Network's own, and is reported unless Self is in that Channel now. It needs no Session.
 - **Highlights** (`highlight.test.ts`). A live Message from another User is a Highlight when it holds Self's nick, or one of the Configuration's `highlights`, as a whole word. Word boundaries use Unicode 17.0, pinned in `src/word-characters.ts`, so a Journal gives the same Highlights on every runtime. The search is linear in the text, however hostile.
 - **What is ignored** (`ignored.test.ts`). Nothing unreadable ends the Connection.
 
@@ -264,6 +268,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **`Mode`** gives each change a parameter exactly as `PREFIX` and `CHANMODES` say, and splits across Lines by `MODES`. A mode neither names is `Unsendable`.
 - **`Away`** describes the Owner, so it outlives Sessions and is sent again as each begins. It is the one action that needs no Session.
 - **`Ctcp` and `Ping`** send a CTCP request in a `PRIVMSG` to one User, never a Channel, a `STATUSMSG` Target, a list, or a mask, and are reported as a `CtcpSent` where that User's replies go. `Ctcp` sends its command upper-cased, with its arguments as given, and never `ACTION`, which is a `Say`, or `DCC`. `Ping`'s token is the instant it was sent, in milliseconds, and after a hyphen how many `PING`s were sent before it on the Connection, so no two on a Connection share one. Each `PING` is remembered on the Connection, at most 64, so its reply tells its round trip. Nothing waits on a reply: no timer is set, no error numeric is tied to the request by its parameters (only its label can refuse it), the oldest is forgotten past the bound, and the rest end with the Connection.
+- **`Part`** parts one Channel the Configuration does not want, such as one the Ircd put Self in. A Channel the Configuration wants is `Unsendable`, since parting it is a change to the Configuration, as for `Raw`. Self's own `PART` of the Channel answers it.
 - **`Raw`** sends a Line written as text. It may not be `CAP`, nor `PASS`, `AUTHENTICATE`, or `OPER`, which carry a Credential. `OPER` is configured instead. A `JOIN` or `PART` of a Channel the Configuration wants is refused, since those are changes to the Configuration. The Client follows whatever the Ircd echoes back, as if another IRC client of the same account had sent it.
 - **A refusal is tied to its action by structure.** With `labeled-response`, by label. On the floor, an error numeric is tied to the oldest Line of an action that names what the numeric names, such as `482` by its Channel. The Client's own `MODE` query of a Channel waits among them in the order it was sent, and takes a `324` of its Channel, an error numeric naming its Channel, or a `421` or `461` naming `MODE`, when it is the oldest.
 - **Some refusals cannot be tied on the floor:** a numeric that names nothing the action named, such as `472`, and anything an Ircd says only in text.

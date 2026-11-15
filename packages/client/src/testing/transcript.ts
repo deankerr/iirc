@@ -66,7 +66,9 @@ export type Owner =
   /** `!! remove`, or `!! remove keep` to keep its Timelines. */
   | { readonly _tag: "Remove"; readonly keep: boolean }
   /** `!! read #iirc t+5s`, or `!! read t+5s` for the Network's own Timeline. */
-  | { readonly _tag: "Read"; readonly target: string | null; readonly read: number };
+  | { readonly _tag: "Read"; readonly target: string | null; readonly read: number }
+  /** `!! close #iirc`: the Owner closes a Timeline. */
+  | { readonly _tag: "Close"; readonly target: string };
 
 /** One line of a transcript. */
 export type Item =
@@ -688,6 +690,11 @@ const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefine
   ["kick", readKick],
   ["mode", readMode],
   [
+    "part",
+    ({ words: [channel = "", ...more], trailing }) =>
+      channel === "" || more.length > 0 ? undefined : { _tag: "Part", channel, reason: trailing },
+  ],
+  [
     "nick",
     ({ words: [nick = "", ...more], trailing }) =>
       more.length > 0 || trailing !== null || nick === "" ? undefined : { _tag: "Nick", nick },
@@ -723,6 +730,12 @@ const writeAction = (action: Action): string => {
       const kicked = `kick ${action.channel} ${action.nicks.join(",")}`;
 
       return action.reason === null ? kicked : `${kicked} :${action.reason}`;
+    }
+
+    case "Part": {
+      const parted = `part ${action.channel}`;
+
+      return action.reason === null ? parted : `${parted} :${action.reason}`;
     }
 
     case "Invite": {
@@ -761,6 +774,12 @@ const readSimple = (text: string): Owner | undefined => {
 
   if (text === "remove" || text === "remove keep") {
     return { _tag: "Remove", keep: text === "remove keep" };
+  }
+
+  const closing = /^close (?<target>\S+)$/u.exec(text)?.groups?.target;
+
+  if (closing !== undefined) {
+    return { _tag: "Close", target: closing };
   }
 
   const looked = /^(?<verb>whois|whowas) (?<nick>\S+)$/u.exec(text)?.groups;
@@ -861,6 +880,10 @@ const writeOwner = (owner: Owner): string => {
       return writeAction(owner.action);
     }
 
+    case "Close": {
+      return `close ${owner.target}`;
+    }
+
     case "Read": {
       return [
         "read",
@@ -891,6 +914,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["refused", "Refused"],
   ["session-began", "SessionBegan"],
   ["session-ended", "SessionEnded"],
+  ["timeline-closed", "TimelineClosed"],
 ]);
 
 const readExpect = (text: string): Result.Result<Item, string> => {

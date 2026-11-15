@@ -653,6 +653,10 @@ export const requested = (action: ActionRequest): Attempted => {
       return { _tag: "Kick", channel: action.channel, nicks: action.nicks };
     }
 
+    case "Part": {
+      return { _tag: "Part", channel: action.channel };
+    }
+
     case "Mode": {
       let modes = "";
       let sign: boolean | undefined;
@@ -720,6 +724,10 @@ const attemptedParts = (attempted: Attempted): readonly Part[] => {
         words(" from "),
         name(attempted.channel),
       ];
+    }
+
+    case "Part": {
+      return [words("Your leaving of "), name(attempted.channel)];
     }
 
     case "Mode": {

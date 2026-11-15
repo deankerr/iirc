@@ -70,7 +70,7 @@ import {
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is
  * made again. It is not the projection's version, which `folded` gives.
  */
-const layoutVersion = 7;
+const layoutVersion = 8;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is
 // generic, and keeps SQLite's error in its reason's cause. Another error may keep one in
@@ -126,7 +126,8 @@ const layout = [
     unread_messages INTEGER NOT NULL,
     unread_activity INTEGER NOT NULL,
     removed INTEGER NOT NULL,
-    life INTEGER NOT NULL
+    life INTEGER NOT NULL,
+    closed INTEGER
   ) STRICT`,
   "CREATE INDEX timelines_by_network ON timelines (network, id)",
   "CREATE INDEX timelines_by_changed ON timelines (changed, id)",
@@ -150,6 +151,8 @@ const layout = [
   "CREATE INDEX items_by_step ON items (network, step, cursor, timeline)",
   "CREATE INDEX items_by_changed ON items (changed, timeline, cursor)",
   "CREATE INDEX items_by_level ON items (timeline, level, cursor) WHERE level IS NOT NULL",
+  // Whether anything was added to a Timeline after it was closed, by the step that added it.
+  "CREATE INDEX items_by_arrival ON items (timeline, step)",
   // Each Message's text, folded, by its item's id: an index of its runs of three characters,
   // which holds no copy of the text. The store folds it, so SQLite compares it as it is.
   `CREATE VIRTUAL TABLE search USING fts5(
@@ -255,6 +258,7 @@ const columns = [
   "timelines.unread_activity INTEGER",
   "timelines.removed INTEGER",
   "timelines.life INTEGER",
+  "timelines.closed INTEGER",
   "tombstones.id TEXT",
   "tombstones.network TEXT",
   "tombstones.into_id TEXT",
@@ -739,12 +743,21 @@ export const makeSqliteTimelineStore = (
       )
     );
 
+    // Whether a Timeline is closed: it was, and no item stands in it from a later step,
+    // which `items_by_arrival` finds with one seek.
+    const isClosed = sql`
+      (timelines.closed IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM items WHERE items.timeline = timelines.id AND items.step > timelines.closed
+      ))
+    `;
+
     // Timelines, each with the position of its last item, which the primary key finds.
     const summaries = (where: Fragment, order: Fragment) => sql`
       SELECT id, network, kind, name, key, changed, read, head, removed, life,
         unread_highlights AS highlights, unread_direct AS direct,
         unread_messages AS messages, unread_activity AS activity,
-        (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest
+        (SELECT max(cursor) FROM items WHERE items.timeline = timelines.id) AS latest,
+        ${isClosed} AS closed
       FROM timelines ${where} ${order}
     `;
 
@@ -906,6 +919,14 @@ export const makeSqliteTimelineStore = (
             break;
           }
 
+          case "Closed": {
+            yield* sql`
+              UPDATE timelines SET closed = ${change.sequence}, changed = ${change.sequence}
+              WHERE id = ${change.timeline}
+            `;
+            break;
+          }
+
           case "ReadMarker": {
             // Only forward, whatever the change says, and counted again only when it moved.
             const moved = yield* sql`
@@ -929,6 +950,16 @@ export const makeSqliteTimelineStore = (
           }
 
           case "Merged": {
+            // The Timeline kept is closed only when both were, as of the later close, which
+            // is worked out before any item moves.
+            yield* sql`
+              UPDATE timelines SET closed = CASE
+                WHEN ${isClosed} AND (SELECT ${isClosed} FROM timelines WHERE id = ${change.from})
+                THEN max(closed, (SELECT closed FROM timelines WHERE id = ${change.from}))
+              END
+              WHERE id = ${change.into}
+            `;
+
             // Each item moves by the rule `Added` keeps: one whose position or message id
             // `into` already has is dropped. `from`'s items share neither among themselves.
             // An item moved keeps its row, so the search index still finds it, and one

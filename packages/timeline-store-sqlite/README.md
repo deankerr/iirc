@@ -22,7 +22,7 @@ CREATE TABLE timelines (id TEXT PRIMARY KEY, network TEXT NOT NULL, kind TEXT NO
   name TEXT NOT NULL, key TEXT, changed INTEGER NOT NULL, read INTEGER, head INTEGER,
   unread_highlights INTEGER NOT NULL, unread_direct INTEGER NOT NULL,
   unread_messages INTEGER NOT NULL, unread_activity INTEGER NOT NULL,
-  removed INTEGER NOT NULL, life INTEGER NOT NULL) STRICT;
+  removed INTEGER NOT NULL, life INTEGER NOT NULL, closed INTEGER) STRICT;
 CREATE TABLE items (id INTEGER PRIMARY KEY, timeline TEXT NOT NULL, cursor TEXT NOT NULL,
   network TEXT NOT NULL, step INTEGER NOT NULL, message_id TEXT, intent TEXT,
   content TEXT NOT NULL, changed INTEGER NOT NULL, level TEXT, sender TEXT,
@@ -37,7 +37,7 @@ CREATE TABLE removals (network TEXT PRIMARY KEY, keep INTEGER NOT NULL, changed 
   life INTEGER NOT NULL) STRICT;
 CREATE VIRTUAL TABLE search USING fts5(text, content = '', contentless_delete = 1,
   tokenize = 'trigram case_sensitive 1');
-PRAGMA user_version = 7;  -- the layout's version
+PRAGMA user_version = 8;  -- the layout's version
 ```
 
 - **`folded`** holds the projection version, the last sequence folded, the directory, and `folding`, the `searchFolding` that `search` and `sender` were folded by, in one row, so they are written together.
@@ -56,6 +56,7 @@ PRAGMA user_version = 7;  -- the layout's version
 | `locate` | `items_by_step` on `(network, step, cursor, timeline)`, from the page's `after` by the row value `(cursor, timeline)`, covered by the index |
 | `timeline` | the primary key of `tombstones` for where a merged id went, then the primary key of `timelines`, and the primary key of `items` for its latest position |
 | `timelines` | `timelines_by_network` on `(network, id)`, from the page's `after`, and the primary key of `items` for each one's latest position. Each row holds its Read Marker and unread counts |
+| whether a Timeline is closed, on every read of one | `items_by_arrival` on `(timeline, step)`: one seek for an item from a later step than the sequence `closed` keeps |
 | counting a level again, after a Read Marker moves or a merge | `items_by_level` on `(timeline, level, cursor)` where there is a level, above `cursorsAfter` of the Read Marker, `LIMIT unreadCap + 1`, from the index alone |
 | `gaps`, and each run of `collapsedGaps` | the primary key `(network, from_cursor)`, bounded below. A Network's Gaps do not overlap, except that one may begin exactly where the one before it ended, so one seek finds the last Gap that began strictly before the range's start, which is kept if it reaches the start, and every Gap that began at or after the start is in. Every other condition is on the key, except for a page read before a cursor, which keeps only the Gaps that ended before it: that run is bounded above on the key too, by the cursor, since a Gap that ended before it began before it, and only then filtered on `to_cursor` for which Gaps are the page's, so it never reads the Gaps after the cursor. A run is one statement that counts its Gaps from the index alone, and takes the first's start and the last's end from either end of the key's range |
 | `changedAfter` | `timelines_by_changed`, `items_by_changed`, `tombstones_by_changed`, `dropped_by_changed`, `removals_by_changed`, and `gaps_by_changed`, each on `changed` and then the tie-break the port gives |

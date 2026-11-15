@@ -224,3 +224,83 @@
     margin-right: calc(-1 * var(--space-2));
   }
 }
+
+/* The button that opens a row's menu, shown while the row is hovered, focused, or chosen,
+   or its menu is open, and always where the pointer is coarse. */
+.more {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  visibility: hidden;
+}
+
+.item[data-hovered] .more,
+.item[data-focus-visible] .more,
+.item[data-menu] .more,
+.more[data-focus-visible] {
+  visibility: visible;
+}
+
+.more[data-hovered],
+.more[data-focus-visible] {
+  color: var(--color-accent);
+}
+
+.more[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+.item[data-selected] .more {
+  color: inherit;
+}
+
+/* A row's menu, under its row, as dense as the sidebar. */
+.popover {
+  min-width: 12ch;
+  max-width: calc(100vw - 2 * var(--space-4));
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  box-shadow: 0 0 var(--space-4) var(--color-shadow);
+  outline: none;
+}
+
+.menu {
+  padding: var(--space-1) 0;
+  outline: none;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  outline: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.action[data-hovered],
+.action[data-focused] {
+  background: var(--color-surface);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-accent);
+  color: var(--color-accent);
+}
+
+@media (pointer: coarse) {
+  .more {
+    align-self: stretch;
+    width: var(--target-size);
+    visibility: visible;
+  }
+
+  .action {
+    min-height: var(--target-size);
+  }
+}

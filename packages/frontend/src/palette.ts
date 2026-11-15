@@ -446,7 +446,7 @@ const fontEntry = (font: FontShown, current: FontShown): Entry => ({
 /**
  * Every entry the palette can list here, by section, in their own orders: the commands
  * whose conditions hold, but for opening the palette itself; every Timeline, in the
- * sidebar's order; every Network, to remove it; every theme, to set the option given, but
+ * sidebar's order, then those closed, which the sidebar leaves out; every Network, to remove it; every theme, to set the option given, but
  * `system` only as `theme`, since it follows the device; every font, and the family the
  * query names, if any; and every option read.
  * @param listing - What the palette lists from.
@@ -475,7 +475,7 @@ const everything = (
   },
   {
     entries: listing.sidebar.flatMap((network) =>
-      network.timelines.map((timeline): Entry => ({
+      [...network.timelines, ...network.closed].map((timeline): Entry => ({
         _tag: "Timeline",
         key: `timeline:${timeline.id}`,
         kind: timeline.kind,

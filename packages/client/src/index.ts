@@ -49,6 +49,7 @@ export type {
   EndReason,
   IgnoredReason,
   LookResult,
+  Closable,
   Marked,
   ModeChange,
   Named,

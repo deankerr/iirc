@@ -467,6 +467,7 @@ const additions: Interruption = {
   edit: (before, sequence) => {
     const fresh: Summary = {
       changed: sequence,
+      closed: false,
       head: undefined,
       id: timelineIdOf(sequence, 0, 1),
       key: `#new-${sequence}`,
@@ -754,6 +755,13 @@ const marker = (sequence: number, timeline: TimelineId, read: Instant, on = libe
   _tag: "ReadMarker",
   network: on,
   read,
+  sequence,
+  timeline,
+});
+
+const closing = (sequence: number, timeline: TimelineId): Change => ({
+  _tag: "Closed",
+  network: libera,
   sequence,
   timeline,
 });
@@ -2956,6 +2964,155 @@ export const timelineStoreLaws: readonly Law<TimelineStoreService, TimelineStore
         );
       }),
     name: "counts what lies after each Read Marker as counting one by one does, after any steps",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const summary = (timeline: TimelineId) =>
+          Effect.map(store.timelines(libera), (each) => {
+            const found = each.find(({ id }) => id === timeline);
+
+            return found && { changed: found.changed, closed: found.closed, unread: found.unread };
+          });
+
+        yield* apply(store, 2, [
+          ...opened(2),
+          added(2, channel, position(10, 2, 0), said("hello"), "m1", libera, "Message"),
+          added(2, channel, position(11, 2, 1), said("ours", "Pending")),
+        ]);
+        yield* same("open before any close", yield* summary(channel), {
+          changed: 2,
+          closed: false,
+          unread: { ...noneUnread, messages: 1 },
+        });
+
+        yield* apply(store, 3, [closing(3, channel)]);
+        yield* same("closed, its counts as they were", yield* summary(channel), {
+          changed: 3,
+          closed: true,
+          unread: { ...noneUnread, messages: 1 },
+        });
+        yield* same(
+          "the changes carry it",
+          (yield* store.changedAfter(2)).timelines.map(({ closed, id }) => [id, closed]),
+          [[channel, true]]
+        );
+
+        yield* apply(store, 4, [
+          {
+            _tag: "Confirmed",
+            at: known(at(30)),
+            id: known(MessageId.make("m2")),
+            intent: IntentId.make("intent-ours"),
+            messageId: MessageId.make("m2"),
+            network: libera,
+            sequence: 4,
+            text: "ours!",
+          },
+          described(4, channel, "Channel", "#a", "#a"),
+          marker(4, channel, at(10)),
+          // A duplicate is dropped, so nothing arrived.
+          added(4, channel, position(12, 4), said("again"), "m1", libera, "Message"),
+        ]);
+        yield* same(
+          "still closed after a delivery, a description, a Read Marker, and a duplicate",
+          yield* summary(channel),
+          { changed: 4, closed: true, unread: noneUnread }
+        );
+
+        // History from before what it held, at a later step, still arrives.
+        yield* apply(store, 5, [
+          added(5, channel, position(1, 5), said("early"), undefined, libera, "Highlight"),
+        ]);
+        yield* same("open again, with what arrived counted", yield* summary(channel), {
+          changed: 5,
+          closed: false,
+          unread: noneUnread,
+        });
+
+        yield* apply(store, 6, [
+          closing(6, channel),
+          added(6, other, position(40, 6), said("elsewhere"), undefined, libera, "Message"),
+        ]);
+        yield* apply(store, 7, [
+          added(7, channel, position(50, 7), said("later"), undefined, libera, "Message"),
+        ]);
+        yield* same("opened by a later Message, which counts", yield* summary(channel), {
+          changed: 7,
+          closed: false,
+          unread: { ...noneUnread, messages: 1 },
+        });
+        yield* same("another Timeline was never closed", (yield* summary(other))?.closed, false);
+
+        const unknown = timelineIdOf(99, 0, 1);
+
+        yield* apply(store, 8, [closing(8, unknown)]);
+        yield* same(
+          "closing a Timeline never described opens none",
+          Option.isNone(yield* store.timeline(unknown)),
+          true
+        );
+      }),
+    name: "closes a Timeline until something arrives in it at a later step, its counts kept",
+  },
+  {
+    check: (store) =>
+      Effect.gen(function* () {
+        const closedAfterMerge = (before: readonly (readonly Change[])[]) =>
+          Effect.gen(function* () {
+            yield* store.reset(3);
+            yield* apply(store, 1, [
+              ...opened(1),
+              added(1, channel, position(1, 1, 0), said("kept"), undefined, libera, "Message"),
+              added(1, other, position(2, 1, 1), said("moved"), undefined, libera, "Message"),
+            ]);
+
+            for (const [index, changes] of before.entries()) {
+              yield* apply(store, index + 2, changes);
+            }
+
+            const sequence = before.length + 2;
+
+            yield* apply(store, sequence, [
+              { _tag: "Merged", from: other, into: channel, network: libera, sequence },
+            ]);
+
+            const found = (yield* store.timelines(libera)).find(({ id }) => id === channel);
+
+            yield* same("the kept Timeline changed with the merge", found?.changed, sequence);
+
+            return found?.closed;
+          });
+
+        yield* same(
+          "both closed, the moved one after something arrived in it",
+          yield* closedAfterMerge([
+            [closing(2, channel)],
+            [added(3, other, position(3, 3), said("later"), undefined, libera, "Message")],
+            [closing(4, other)],
+          ]),
+          true
+        );
+        yield* same(
+          "only the kept one closed",
+          yield* closedAfterMerge([[closing(2, channel)]]),
+          false
+        );
+        yield* same(
+          "only the moved one closed",
+          yield* closedAfterMerge([[closing(2, other)]]),
+          false
+        );
+        yield* same(
+          "the moved one closed, and opened again",
+          yield* closedAfterMerge([
+            [closing(2, channel), closing(2, other)],
+            [added(3, other, position(3, 3), said("later"), undefined, libera, "Message")],
+          ]),
+          false
+        );
+      }),
+    name: "keeps a merged Timeline closed only when both were, as of the later close",
   },
   {
     check: (store) =>

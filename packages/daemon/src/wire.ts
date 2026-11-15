@@ -38,6 +38,7 @@ import type {
   LookResult as WireLookResult,
   Profile as WireProfile,
   Marked as WireMarked,
+  Closable as WireClosable,
   NetworkInspection as WireNetworkInspection,
   NetworkStatus as WireNetworkStatus,
   News as WireNews,
@@ -52,6 +53,7 @@ import type {
   Inspection,
   LookResult,
   Marked,
+  Closable,
   ModeChange,
   News,
   Profile,
@@ -478,6 +480,15 @@ const attempted = (source: Attempted): WireAttempted => {
       return wire;
     }
 
+    case "Part": {
+      const wire: Case<Attempted, WireAttempted, "Part"> = {
+        _tag: "Part",
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
     case "Ctcp": {
       const wire: Case<Attempted, WireAttempted, "Ctcp"> = {
         _tag: "Ctcp",
@@ -711,6 +722,15 @@ const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
       return wire;
     }
 
+    case "Joined": {
+      const wire: Case<IgnoredReason, WireIgnoredReason, "Joined"> = {
+        _tag: "Joined",
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
     default: {
       return source satisfies never;
     }
@@ -788,6 +808,35 @@ const marked = (source: Marked): WireMarked => {
 
     case "Network": {
       const wire: Case<Marked, WireMarked, "Network"> = { _tag: "Network" };
+
+      return wire;
+    }
+
+    default: {
+      return source satisfies never;
+    }
+  }
+};
+
+const closable = (source: Closable): WireClosable => {
+  switch (source._tag) {
+    case "Channel": {
+      const wire: Case<Closable, WireClosable, "Channel"> = {
+        _tag: "Channel",
+        key: source.key,
+        name: source.name,
+      };
+
+      return wire;
+    }
+
+    case "Direct": {
+      const wire: Case<Closable, WireClosable, "Direct"> = {
+        _tag: "Direct",
+        existing: source.existing,
+        key: source.key,
+        name: source.name,
+      };
 
       return wire;
     }
@@ -914,6 +963,15 @@ const news = (source: News): WireNews => {
         _tag: "ReadMarker",
         read: source.read,
         where: marked(source.where),
+      };
+
+      return wire;
+    }
+
+    case "TimelineClosed": {
+      const wire: Case<News, WireNews, "TimelineClosed"> = {
+        _tag: "TimelineClosed",
+        where: closable(source.where),
       };
 
       return wire;
@@ -1378,6 +1436,7 @@ const unread = (source: Unread): Fields<Unread, WireUnread> => ({
  */
 export const timeline = (source: Summary): Fields<Summary, WireTimeline, "detached"> => ({
   changed: WireSequence.make(source.changed),
+  closed: source.closed,
   detached: source.kind !== "Network" && source.key === null,
   head: source.head === undefined ? null : WireSequence.make(source.head),
   id: source.id,

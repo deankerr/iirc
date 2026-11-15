@@ -186,7 +186,11 @@ const writeIgnored = (reason: IgnoredReason): string => {
     }
 
     case "NoTimeline": {
-      return "NoTimeline";
+      return reason._tag;
+    }
+
+    case "Joined": {
+      return `Joined ${atom(reason.channel)}`;
     }
 
     default: {
@@ -199,7 +203,7 @@ const writeRefused = (reason: RefusedReason): string =>
   reason._tag === "Rejected" ? `Rejected ${atom(reason.reply)}` : reason._tag;
 
 // What an action tried, as one attribute: `topic=#iirc`, `kick=#iirc:a,b`,
-// `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `ctcp=peer:VERSION`,
+// `part=#iirc`, `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `ctcp=peer:VERSION`,
 // `ping=peer`, `raw=WHOIS`, or
 // `raw` for a Line that did not parse.
 const writeAttempted = (attempted: Attempted): string => {
@@ -210,6 +214,10 @@ const writeAttempted = (attempted: Attempted): string => {
 
     case "Kick": {
       return `kick=${atom(attempted.channel)}:${attempted.nicks.map(atom).join(",")}`;
+    }
+
+    case "Part": {
+      return `part=${atom(attempted.channel)}`;
     }
 
     case "Mode": {
@@ -505,6 +513,10 @@ export const describeNews = (news: News, now: Instant): string => {
 
     case "ReadMarker": {
       return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
+    }
+
+    case "TimelineClosed": {
+      return words(["timeline-closed", ...writeWhere([news.where])]);
     }
 
     case "ChannelLearned": {

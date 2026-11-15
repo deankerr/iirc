@@ -49,6 +49,7 @@ const inChannel: CommandContext = {
   shown: [],
   timelines: [own, channel, direct],
   unread: [],
+  unreadClosed: [],
 };
 
 const at = (
