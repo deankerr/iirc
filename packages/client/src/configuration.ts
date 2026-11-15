@@ -1,4 +1,4 @@
-import { CredentialName, FallbackEncoding } from "@iirc/protocol/line";
+import { CredentialName, FallbackEncoding, IdentifyWord, ServiceTarget } from "@iirc/protocol/line";
 import { Option, Schema, SchemaGetter } from "effect";
 
 import { FeatureName } from "./ids.ts";
@@ -24,7 +24,14 @@ export const IrcdAddress = Schema.Struct({
 /** The decoded form of {@link IrcdAddress}. */
 export type IrcdAddress = typeof IrcdAddress.Type;
 
-/** How Self logs in to an account. Whether a failed login ends the Connection is the Owner's choice. */
+/** The most seconds Channels wait on a service login. */
+const maxServiceWait = 60;
+
+/**
+ * How Self logs in to an account: not at all, with SASL before registration ends, or by
+ * telling a service as a Session begins, where there is no SASL. Whether a failed SASL
+ * login ends the Connection is the Owner's choice. A service login never does.
+ */
 export const Login = Schema.TaggedUnion({
   None: {},
   Sasl: {
@@ -38,6 +45,24 @@ export const Login = Schema.TaggedUnion({
     required: Schema.Boolean.annotate({
       default: false,
       description: "Whether a failed login ends the Connection rather than going on without it.",
+    }),
+  },
+  Service: {
+    account: IdentifyWord.annotate({
+      description: "The account to log in to by telling the service, one word.",
+      ...startsAsFirstNick,
+    }),
+    credential: CredentialName.annotate({
+      description: "The Credential holding the account's password.",
+    }),
+    service: ServiceTarget.annotate({
+      default: "NickServ",
+      description: "The nick of the service to tell, such as NickServ or NickServ@services.",
+    }),
+    wait: Schema.Int.check(Schema.isBetween({ maximum: maxServiceWait, minimum: 0 })).annotate({
+      default: 5,
+      description:
+        "How many seconds Channels wait for the Ircd to say Self is logged in, before they are joined anyway.",
     }),
   },
 });
@@ -133,7 +158,8 @@ export const NetworkConfiguration = Schema.Struct({
   }),
   login: Login.annotate({
     default: { _tag: "None" },
-    description: "How to log in to an account: none, or SASL with the options under it.",
+    description:
+      "How to log in to an account: none, SASL, or by telling a service, with the options under it.",
   }),
   nicks: Schema.NonEmptyArray(Schema.String).annotate({
     description: "The nicks to use, the first preferred and the rest tried in turn.",
@@ -156,8 +182,37 @@ export const NetworkConfiguration = Schema.Struct({
 /** The decoded form of {@link NetworkConfiguration}. */
 export type NetworkConfiguration = typeof NetworkConfiguration.Type;
 
+const echoMessage = FeatureName.make("echo-message");
+
 /**
- * The Credentials a Configuration names: its Ircd password, its SASL login's, and each
+ * The Features a Configuration declines: those the Owner named.
+ * @param configuration - The Configuration, if there is one yet.
+ * @returns Their names.
+ */
+export const declinedOf = (
+  configuration: NetworkConfiguration | undefined
+): readonly FeatureName[] => configuration?.declined ?? [];
+
+/**
+ * The Features a Configuration declines when asking for caps: those the Owner named, and
+ * `echo-message` with a service login, since the Ircd would echo the Credential back, and
+ * every Line received is journaled. It only stops the cap being asked for. A Connection
+ * that already has it keeps the Feature on, so each echo is still matched to its Message.
+ * @param configuration - The Configuration, if there is one yet.
+ * @returns Their names.
+ */
+export const declinedToRequest = (
+  configuration: NetworkConfiguration | undefined
+): readonly FeatureName[] => {
+  const declined = declinedOf(configuration);
+
+  return configuration?.login._tag === "Service" && !declined.includes(echoMessage)
+    ? [...declined, echoMessage]
+    : declined;
+};
+
+/**
+ * The Credentials a Configuration names: its Ircd password, its login's, and each
  * Channel's key.
  * @param configuration - The Configuration.
  * @returns Their names.
@@ -165,7 +220,7 @@ export type NetworkConfiguration = typeof NetworkConfiguration.Type;
 export const credentialsOf = (configuration: NetworkConfiguration): ReadonlySet<CredentialName> =>
   new Set([
     ...(configuration.password === undefined ? [] : [configuration.password]),
-    ...(configuration.login._tag === "Sasl" ? [configuration.login.credential] : []),
+    ...(configuration.login._tag === "None" ? [] : [configuration.login.credential]),
     ...configuration.channels.flatMap((channel) =>
       channel.key === undefined ? [] : [channel.key]
     ),

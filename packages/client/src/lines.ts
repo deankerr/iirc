@@ -31,6 +31,7 @@ import {
 } from "./channels.ts";
 import { heardCtcp } from "./ctcp.ts";
 import type { Arrival, Meant } from "./feature.ts";
+import { identified, identify } from "./identify.ts";
 import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
 import { collectFloor, collectLabelled, floorLookup, lookupByCommand } from "./lookups.ts";
@@ -398,6 +399,7 @@ const welcome = (run: Run, line: Line): void => {
       // A User who has just registered is not away, until an `AWAY` of ours says so.
       away: { _tag: "Known", at: run.at, from: "receipt", value: null },
       began: run.at,
+      identifying: undefined,
       keepalive: { check: Instant.make(run.at + lagAfter), heard: run.at, pinged: false },
       // `001`'s text is for people. Self's mask waits for a structured source, such as
       // the echo of our own `JOIN`.
@@ -408,6 +410,8 @@ const welcome = (run: Run, line: Line): void => {
     },
   }));
   run.news.push({ _tag: "SessionBegan", at: run.at, nick });
+  // A service login is told before anything else, so the Channels can wait on it.
+  identify(run);
   // The Owner's away outlives Sessions: each begins by saying it again.
   resendAway(run);
   joinWanted(run);
@@ -599,6 +603,8 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
         malformed(run, line);
       } else {
         account(run, name);
+        // Self is logged in, so Channels waiting on a service login need wait no longer.
+        identified(run);
       }
     },
   ],

@@ -775,6 +775,117 @@ describe("Ergo, over TLS with SASL PLAIN", () => {
     });
   }, 120_000);
 
+  // Ergo answers a NickServ login with a NOTICE alone, with no `900` and no `+r`, so the
+  // Channel waits out the bound, and Self's account stays unknown to the Session.
+  it("logs in by telling NickServ, joins after the bound, and never journals the Credential", async () => {
+    const password = "a-service-password-only-the-vault-holds";
+
+    const result = await run(
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await registerAccount({
+            account: "svcacct",
+            host: ergo.host,
+            password,
+            port: ergo.plainPort,
+          });
+        });
+
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const daemon = yield* startDaemon({ dataDir }, key);
+        const { api } = daemon;
+        const credential = CredentialPathName.make("nickserv-password");
+
+        yield* api.credentials.set({
+          params: { name: credential },
+          payload: { value: Redacted.make(password) },
+        });
+
+        // `extended-join` names the account a User joined with, so the Peer sees whether
+        // Self was logged in when it joined.
+        const peer = yield* Effect.promise(
+          async () =>
+            await connectPeer({
+              caps: ["extended-join"],
+              host: ergo.host,
+              nick: "witness",
+              port: ergo.plainPort,
+            })
+        );
+
+        peer.send(`JOIN ${channel}`);
+        yield* api.networks.configure({
+          params: { network },
+          payload: configured({
+            channels: [{ name: channel }],
+            ircds: [{ host: ergo.host, port: ergo.plainPort, tls: false }],
+            login: {
+              _tag: "Service",
+              account: "svcacct",
+              credential,
+              service: "NickServ",
+              wait: 5,
+            },
+            nicks: ["servicenick"],
+          }),
+          query: {},
+        });
+
+        const join = yield* Effect.promise(
+          async () =>
+            await peer.waitFor(
+              (line) => line.command === "JOIN" && line.source?.split("!")[0] === "servicenick",
+              "the Daemon's JOIN"
+            )
+        );
+
+        const known = yield* joined(api);
+        const happened = yield* followNews(api, 0, (all) => all.length > 0);
+
+        const self = yield* api.networks.look({
+          params: { network },
+          payload: { lookup: { _tag: "Whois", nick: "servicenick" } },
+        });
+
+        peer.close();
+        yield* daemon.stop;
+
+        const stored = yield* Effect.promise(
+          async () =>
+            await Promise.all(
+              ["journal.sqlite", "journal.sqlite-wal", "views.sqlite", "views.sqlite-wal"].map(
+                async (name) => {
+                  const file = Bun.file(`${dataDir}/${name}`);
+
+                  return (await file.exists()) ? await file.text() : "";
+                }
+              )
+            )
+        );
+
+        return {
+          account: known.self?.account,
+          joinedAs: join.params[1],
+          looked:
+            self._tag === "LookedUp" && self.result._tag === "Found"
+              ? self.result.profiles[0]?.account
+              : self,
+          shown: JSON.stringify(happened).includes(password),
+          stored: stored.some((text) => text.includes(password)),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      account: { _tag: "Unknown" },
+      joinedAs: "svcacct",
+      looked: "svcacct",
+      shown: false,
+      stored: false,
+    });
+  }, 120_000);
+
   it("says QUIT on stopping, hangs up, and stops within the bound", async () => {
     const result = await run(stopGracefully(ergo, "watcher"));
 

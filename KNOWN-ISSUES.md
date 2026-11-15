@@ -17,6 +17,7 @@ Remove an entry in the change that fixes it. A defect someone means to fix is an
 - **A merge between two pages of search results can repeat a result.** The web frontend starts the search again when one happens.
 - **Completion of Channel names falls back to `#&+!`** if `CHANTYPES` was read before the Ircd's `005`, until the next Tab reads it again.
 - **The pane layout and notification choice are kept per device,** not shared.
+- **A service login on an Ircd that says nothing of it but a `NOTICE` waits out its bound,** as Ergo's NickServ does, which sends no `900`. Its Channels are joined after the login's `wait`, 5 s by default, and Self's account stays unknown to the Session. A lower `wait` joins sooner, at the risk of joining before the login is done.
 - **A Session that joins many Channels learns their modes one after another,** since one `MODE` query waits at a time. On an Ircd that answers at once, the last of a hundred Channels shows its modes about as long after joining as pacing takes to send a hundred Lines, a few minutes. One that never answers holds each query 30 s.
 
 ## Edges in what the Client works out

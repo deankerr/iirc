@@ -7,6 +7,7 @@
 import { chantypesOf } from "@iirc/protocol/isupport";
 
 import type { Inspection } from "./client.ts";
+import { declinedOf } from "./configuration.ts";
 import type { KnownBefore } from "./feature.ts";
 import type { CapName } from "./ids.ts";
 import { ConnectionId } from "./ids.ts";
@@ -329,7 +330,7 @@ export const onNow = (registry: readonly Registered[], state: State): readonly R
   return featuresOn(
     registry,
     { ...negotiated(open.caps), isupport: open.isupport },
-    state.configuration?.declined ?? [],
+    declinedOf(state.configuration),
     open.seam
   );
 };

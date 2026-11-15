@@ -117,14 +117,34 @@ const sasl = (
   ];
 };
 
+// A service login: the Client tells the service at `001`.
+const told = ({ login }: NetworkConfiguration) =>
+  login._tag === "Service"
+    ? [
+        `>> {Identify credential=${login.credential} account=${login.account} service=${login.service}}`,
+      ]
+    : [];
+
+// After the last `005`, the Ircd says Self is logged in to the service with `900`.
+const identified = (configuration: NetworkConfiguration, nick: string, server: string) => {
+  const { login } = configuration;
+
+  return login._tag === "Service"
+    ? [
+        `<< :${server} 900 ${nick} ${nick}!${configuration.username}@iirc.test ${login.account} :You are now logged in as ${login.account}`,
+      ]
+    : [];
+};
+
 /**
  * Writes a Session's start, from the first `!! configure` to the last `005`. The first
  * `Configured` dials the first Ircd at once, and the Client sends `CAP LS 302`, `PASS`
  * if it has one, `NICK` and `USER`. When the Ircd offers caps, the Client requests
  * `requested`, which the Ircd acknowledges, SASL `PLAIN` logs in when the Configuration
- * has a login and `sasl` is requested, and `CAP END` follows. When it requests
+ * has a SASL login and `sasl` is requested, and `CAP END` follows. When it requests
  * none, `CAP END` follows `LS` at once. When the Ircd offers none, it is the floor and answers `CAP`
- * with `421`. Then `001` to `005`.
+ * with `421`. Then `001`, and the service login when the Configuration has one,
+ * `002` to `005`, and the `900` that answers the service login.
  * @param configuration - The scenario's Configuration, which names the Ircd and Self.
  * @param registration - The caps the Ircd offers, those the Client requests, and the
  * ISUPPORT tokens the Ircd sends.
@@ -170,12 +190,14 @@ export const registered = (
     sent(user(configuration.username, configuration.realname)),
     ...negotiation,
     `<< :${server} 001 ${nick} :Welcome to the iirc-test Network ${nick}`,
+    ...told(configuration),
     `<< :${server} 002 ${nick} :Your host is ${server}, running version test-1`,
     `<< :${server} 003 ${nick} :This server was created at the epoch`,
     `<< :${server} 004 ${nick} ${server} test-1 iow beIklmnostv`,
     ...chunked(isupport, 13).map(
       (tokens) => `<< :${server} 005 ${nick} ${tokens.join(" ")} :are supported by this server`
-    )
+    ),
+    ...identified(configuration, nick, server)
   );
 };
 

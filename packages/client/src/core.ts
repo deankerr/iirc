@@ -27,6 +27,7 @@ import type { Client, Step } from "./client.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import { answerUnsent } from "./ctcp.ts";
 import type { Arrival, Refined } from "./feature.ts";
+import { identified, noLongerIdentifying } from "./identify.ts";
 import { ConnectionId, Instant } from "./ids.ts";
 import type { IntentId, TimerId } from "./ids.ts";
 import type { Input } from "./input.ts";
@@ -178,6 +179,7 @@ const configure = (run: Run, configuration: NetworkConfiguration): void => {
   }
 
   reconcile(run, configuration.channels);
+  noLongerIdentifying(run);
 
   if (configuration.enabled && (network._tag === "Unconfigured" || network._tag === "Idle")) {
     dial(run);
@@ -599,6 +601,11 @@ const fire = (run: Run, purpose: Purpose): void => {
       break;
     }
 
+    case "Identify": {
+      identified(run);
+      break;
+    }
+
     case "Keepalive": {
       keepalive(run);
       break;
@@ -746,12 +753,14 @@ const transport = (run: Run, input: FromTransport): void => {
 
     // A Channel whose key could not be filled is refused for now. Registration goes on
     // without `PASS`, and the Ircd decides. A Feature holding registration hears of a
-    // Line it sent, such as SASL's.
+    // Line it sent, such as SASL's. With no service told, its Channels wait on nothing.
     case "Unfilled": {
       if (input.line._tag === "JoinWithKey") {
         unfilledKey(run, input.line.channel);
       } else if (input.line._tag === "AuthenticatePlain") {
         unfilledHeld(run, input.line);
+      } else if (input.line._tag === "Identify") {
+        identified(run);
       }
 
       break;

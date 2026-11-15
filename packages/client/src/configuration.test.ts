@@ -107,4 +107,66 @@ describe("the Credentials a Configuration names", () => {
 
     expect(credentialsOf(configuration)).toStrictEqual(new Set(["pass", "sasl", "shared"]));
   });
+
+  it("include a service login's", () => {
+    const configuration = Schema.decodeSync(NetworkConfiguration)({
+      channels: [],
+      declined: [],
+      enabled: true,
+      fallbackEncoding: "windows-1252",
+      ircds: [{ host: "irc.test", port: 6697, tls: true }],
+      login: {
+        _tag: "Service",
+        account: "iirc",
+        credential: "nickserv",
+        service: "NickServ",
+        wait: 5,
+      },
+      nicks: ["iirc"],
+      realname: "iirc",
+      username: "iirc",
+    });
+
+    expect(credentialsOf(configuration)).toStrictEqual(new Set(["nickserv"]));
+  });
+});
+
+const serviceLogin = (service: string, account = "acct") => ({
+  channels: [],
+  declined: [],
+  enabled: true,
+  fallbackEncoding: "windows-1252",
+  ircds: [{ host: "irc.test", port: 6697, tls: true }],
+  login: { _tag: "Service", account, credential: "pw", service, wait: 5 },
+  nicks: ["iirc"],
+  realname: "iirc",
+  username: "iirc",
+});
+
+const takesLogin = (service: string, account?: string) =>
+  Result.isSuccess(
+    Schema.decodeUnknownResult(NetworkConfiguration)(serviceLogin(service, account))
+  );
+
+describe("a service login", () => {
+  it("takes a service by its nick, or nick@server", () => {
+    expect([takesLogin("NickServ"), takesLogin("NickServ@services.libera.chat")]).toStrictEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it.each(["@#staff", "%#staff", "~#staff", "+#staff", "#staff", "&local", "$*", "a,b", "a b", ""])(
+    "refuses %j as the service, which is no User",
+    (service) => {
+      expect(takesLogin(service)).toBeFalsy();
+    }
+  );
+
+  it.each(["acct\twrong", "a b", "a b", "a　b", ""])(
+    "refuses %j as the account, which is not one word",
+    (account) => {
+      expect(takesLogin("NickServ", account)).toBeFalsy();
+    }
+  );
 });

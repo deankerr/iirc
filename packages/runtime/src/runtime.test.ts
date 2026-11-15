@@ -396,6 +396,52 @@ describe("a SendSecret", () => {
     expect(result.logged).not.toContain("hunter2");
   });
 
+  it("tells a service the Credential, which is never journaled or logged", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* world.vault.hold(password, Redacted.make("hunter2"));
+
+        const client = scripted([
+          { outputs: [dial], when: "Configured" },
+          {
+            outputs: [
+              {
+                _tag: "SendSecret",
+                connection: first,
+                line: {
+                  _tag: "Identify",
+                  account: "iirc",
+                  credential: password,
+                  service: "NickServ",
+                },
+              },
+            ],
+            when: "Opened",
+          },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+        const call = yield* world.memory.ircd.accept;
+
+        yield* call.open;
+        const heard = text.decode(yield* call.heard);
+
+        const journaled = (yield* entries(world.journal)).map((entry) =>
+          Schema.encodeSync(Schema.fromJsonString(Schema.toCodecJson(Entry)))(entry)
+        );
+
+        return { heard, journaled: journaled.join("\n"), logged: JSON.stringify(world.logged) };
+      })
+    );
+
+    expect(result.heard).toBe("PRIVMSG NickServ :IDENTIFY iirc hunter2\r\n");
+    expect(result.journaled).toContain("libera-password");
+    expect(result.journaled).not.toContain("hunter2");
+    expect(result.logged).not.toContain("hunter2");
+  });
+
   it("that cannot be filled becomes `Unfilled`, in order, after the rest of the outputs", async () => {
     const result = await runTest((world) =>
       Effect.gen(function* () {

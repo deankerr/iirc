@@ -1007,6 +1007,25 @@ export const CredentialName = Schema.String.annotate({ identifier: "CredentialNa
 /** The decoded form of {@link CredentialName}. */
 export type CredentialName = typeof CredentialName.Type;
 
+// A service's nick as RFC 2812 writes a nick, a letter or one of `[]\`_^{|}` and then those
+// or digits or `-`, and optionally `@` and the server it is on, as `NickServ@services.`
+// names it. So it never starts with a Channel's, a membership's, or a `STATUSMSG` prefix,
+// and is never a mask or a list: a password said there would be said to others.
+const serviceNick = /^[A-Za-z[\]\\`_^{|}][\w[\]\\`^{|}-]*(?:@[A-Za-z\d][\w.-]*)?$/u;
+
+/**
+ * The User a service login is told to: a nick, or `nick@server`, and never a Channel, a
+ * `STATUSMSG` Target, a mask, or a list.
+ */
+export const ServiceTarget = Schema.String.check(Schema.isPattern(serviceNick));
+
+// Services split their words on any whitespace, Unicode's included, as Ergo's
+// `strings.Fields` does, so a word holds none, and no NUL or line break either.
+const oneWord = /^[^\s\u0085\0]+$/u;
+
+/** One word of `IDENTIFY`: an account, holding no whitespace of any kind, nor NUL. */
+export const IdentifyWord = Schema.String.check(Schema.isPattern(oneWord));
+
 /**
  * A Line that carries a Credential, written with the Credential's name in place of its
  * value. It is a closed list, so this module knows every place a Credential can go,
@@ -1024,6 +1043,11 @@ export const SecretLine = Schema.TaggedUnion({
     authzid: Schema.String,
     credential: CredentialName,
   },
+  /**
+   * `PRIVMSG <service> :IDENTIFY <account> <credential>`: logging in to an account by
+   * telling a service, where there is no SASL.
+   */
+  Identify: { account: IdentifyWord, credential: CredentialName, service: ServiceTarget },
   /** `JOIN` with a Channel key. */
   JoinWithKey: { channel: Schema.String, credential: CredentialName },
   /** `PASS`, before registration. */
@@ -1063,6 +1087,28 @@ const plain = (
   return sendable.length === lines.length ? sendable : rejected("TooLong");
 };
 
+// Each of `IDENTIFY <account> <credential>`'s words must stay one word, so the service
+// reads them as the Owner meant, and nothing more goes with them. A password may hold
+// anything else, a comma or a colon included.
+const staysOneWord = (text: string) => oneWord.test(text) && text.isWellFormed();
+
+const identify = (
+  { account, service }: { readonly account: string; readonly service: string },
+  value: string
+): readonly OutboundLine[] | Rejected => {
+  if (!serviceNick.test(service)) {
+    return rejected("InvalidTarget");
+  }
+
+  if (!staysOneWord(account) || !staysOneWord(value)) {
+    return rejected("InvalidParameter");
+  }
+
+  const line = outbound("PRIVMSG", [service, `IDENTIFY ${account} ${value}`]);
+
+  return isRejected(line) ? line : [line];
+};
+
 /**
  * Fills a Credential's value into the Line that carries it. This is the only code that
  * puts a Credential into a Line. Its result is sent and never journaled. The SASL PLAIN
@@ -1082,6 +1128,10 @@ export const fillSecret = (
   switch (line._tag) {
     case "AuthenticatePlain": {
       return plain(line, revealed);
+    }
+
+    case "Identify": {
+      return identify(line, revealed);
     }
 
     case "JoinWithKey": {

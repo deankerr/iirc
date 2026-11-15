@@ -149,6 +149,8 @@ describe("the options, derived from the Schema", () => {
         "network.libera.login.account",
         "network.libera.login.credential",
         "network.libera.login.required",
+        "network.libera.login.service",
+        "network.libera.login.wait",
         "network.libera.nicks",
         "network.libera.password",
         "network.libera.realname",
@@ -189,6 +191,8 @@ describe("the options, derived from the Schema", () => {
         value: { _tag: "Credential", held: true, name: "libera.sasl" },
       },
       "login.required": { starts: "off", value: { _tag: "Shown", text: "on" } },
+      "login.service": { starts: "NickServ", value: { _tag: "Unset" } },
+      "login.wait": { starts: "5", value: { _tag: "Unset" } },
       nicks: { starts: undefined, value: { _tag: "Shown", text: "dean,dean_" } },
       password: {
         starts: "unset",
@@ -221,6 +225,37 @@ describe("the options, derived from the Schema", () => {
       { _tag: "Unset" },
       { _tag: "Unset" },
       { _tag: "Unset" },
+      { _tag: "Unset" },
+      { _tag: "Unset" },
+    ]);
+  });
+
+  it("shows a service login's fields, sharing the account and Credential with SASL's", () => {
+    const service = decode({
+      ...plain,
+      login: {
+        _tag: "Service",
+        account: "dean",
+        credential: "libera.login.credential",
+        service: "NickServ",
+        wait: 5,
+      },
+    });
+
+    const login = optionsOf(libera, service, new Set(["libera.login.credential"])).filter(
+      (option) => option.name.startsWith("network.libera.login")
+    );
+
+    expect(login.map((option) => [option.name, option.value])).toStrictEqual([
+      ["network.libera.login", { _tag: "Shown", text: "service" }],
+      ["network.libera.login.account", { _tag: "Shown", text: "dean" }],
+      [
+        "network.libera.login.credential",
+        { _tag: "Credential", held: true, name: "libera.login.credential" },
+      ],
+      ["network.libera.login.required", { _tag: "Unset" }],
+      ["network.libera.login.service", { _tag: "Shown", text: "NickServ" }],
+      ["network.libera.login.wait", { _tag: "Shown", text: "5" }],
     ]);
   });
 });
@@ -641,6 +676,40 @@ describe("editing", () => {
         credential: "libera.login.credential",
         required: false,
       },
+    });
+  });
+
+  it("sets up a service login, keeping a shared field of the member in force", () => {
+    const service = valueOf(set(libera, plain, ["login"], "service"));
+
+    expect({
+      account: valueOf(set(libera, service, ["login", "account"], "other")).login,
+      fromSasl: valueOf(set(libera, full, ["login", "wait"], "10")).login,
+      service: service.login,
+      tooLong: set(libera, service, ["login", "wait"], "61")._tag,
+    }).toStrictEqual({
+      account: {
+        _tag: "Service",
+        account: "other",
+        credential: "libera.login.credential",
+        service: "NickServ",
+        wait: 5,
+      },
+      fromSasl: {
+        _tag: "Service",
+        account: "dean",
+        credential: "libera.login.credential",
+        service: "NickServ",
+        wait: 10,
+      },
+      service: {
+        _tag: "Service",
+        account: "dean",
+        credential: "libera.login.credential",
+        service: "NickServ",
+        wait: 5,
+      },
+      tooLong: "Invalid",
     });
   });
 
