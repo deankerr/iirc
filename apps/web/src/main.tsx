@@ -21,6 +21,7 @@ import { lookupSync } from "./lookup/atoms.ts";
 import { optionsSync } from "./options/atoms.ts";
 import { ownerSync } from "./options/owner.ts";
 import { uiSync } from "./options/ui.ts";
+import { uploadsSync } from "./options/uploads.ts";
 import { watchPage } from "./page/watch.ts";
 import { marking } from "./reading/atoms.ts";
 import { check } from "./sign-in/atoms.ts";
@@ -42,6 +43,9 @@ registry.mount(optionsSync);
 
 // The options under store and uploads are followed while they show, as nothing else draws on them.
 registry.mount(ownerSync);
+
+// The Uploads listed beside them likewise.
+registry.mount(uploadsSync);
 
 registry.mount(marking);
 

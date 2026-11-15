@@ -23,7 +23,8 @@
     "./timelines": "./src/timelines.ts",
     "./theme": "./src/theme.ts",
     "./theme-import": "./src/theme-import.ts",
-    "./ui": "./src/ui.ts"
+    "./ui": "./src/ui.ts",
+    "./uploads": "./src/uploads.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

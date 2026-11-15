@@ -23,6 +23,8 @@ const glyphs = {
   connecting: "◐",
   /** A Network's Timelines show under it. */
   expanded: "▾",
+  /** An Upload of a type no thumbnail is drawn for: a page of lines. */
+  file: "▤",
   /** Hides the sidebar, toward the side it is on. */
   hideSidebar: "«",
   /** The members, a panel at the right, as their column is. */

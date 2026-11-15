@@ -28,6 +28,7 @@ The core decides and this package draws and does the I/O.
 - **Removes a Network after asking,** from `/network remove`, a button for each Network in the options view, or the palette. A dialog asks whether its Timelines stay readable, keeping them unless the Owner chooses otherwise. A Pane showing a kept Timeline says its Network was removed, with a button that asks to drop them, and its composer says nothing can be said there. Adding a Network under a name still held by kept Timelines says why it cannot.
 - **Shares the options under `ui` between devices, and lets one override them** with `-device`.
 - **Lists and sets the Owner's options under `store` and `uploads`** as it does any other, followed from the Daemon while the options show, so another device's change shows. No device overrides them.
+- **Lists the Uploads beside the options,** newest first, a page at a time with "More": an image of a type every browser draws, PNG, JPEG, GIF, WebP, or AVIF, as a thumbnail the browser scales from the `content` route and fetches only near the screen, any other type as an icon, then its name, type, size, and when, and a button that copies its link. The link is made from `uploads.publicUrl` as it is now, so a new public URL changes every link copied from then on, and with none set the list says there is no link to copy. Another device's Upload shows without a reload.
 - **Draws in themes made from terminal palettes,** built in or imported from a theme file. Under `system`, the page draws the theme for light or the one for dark, and follows the device the moment it changes. A theme highlighted in the palette, or being imported, previews on the whole page.
 - **Bounds how wide a Timeline's text runs,** by `ui.width`: what was said wraps at that many characters, from 40 to 400, each as wide as the font's `0`, so the bound grows with the size, or runs the width of its Pane at `none`, which it starts as. The text stays where it starts, and a Pane narrower than the bound is drawn as without one. The Composer and the Sidebar are never bounded.
 - **Draws text in the size, line height, and font the Owner chooses:** `ui.size`, from 10 to 24 pixels, 14 to start, `ui.leading`, the line height as a multiple of the size, from 1 to 2, 1.45 to start, and `ui.font`, the device's own monospace font, its own sans font, one of nine it serves itself, five monospace and four sans, below, or any family the device has, by name. A font highlighted in the palette previews on the whole page, and a change takes effect at once.
@@ -47,7 +48,7 @@ The core decides and this package draws and does the I/O.
 | `src/timelines/` | The Timelines' atoms, the changes stream, the layout kept, the sidebar, closing a Timeline, and the Timeline view |
 | `src/panes/` | The Pane tree, drawn with `react-resizable-panels`, and how wide each Pane is |
 | `src/composer/` | The composer, what carries out its intents, and Tab completion |
-| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, and the options under `ui`, `store`, and `uploads` |
+| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, the options under `ui`, `store`, and `uploads`, and the Uploads listed beside them |
 | `src/search/`, `src/palette/`, `src/channel/`, `src/lookup/` | Each of those views and its atoms. `src/palette/` also holds the one key listener |
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
 | `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the sidebar's width and whether it shows |
@@ -65,6 +66,7 @@ The core decides and this package draws and does the I/O.
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
   | `uiSync` | Follows the options under `ui` |
   | `ownerSync` | Follows the options under `store` and `uploads` while the options show |
+  | `uploadsSync` | Follows the Uploads' Changes while the options show, then reads their first page, so none made between the two is missed |
   | `channelSync` | Reads each shown Channel's head and members, and the head of each Channel whose list a Lookup card is |
   | `marking` | Marks read what `markDue` says, after a second |
   | `completer`, `chantypesSync` | Ask for the nicks and the `CHANTYPES` that completion needs |
