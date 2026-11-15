@@ -197,15 +197,16 @@ const channelSettled = (
   }
 };
 
-// What Self did, live, answers the Line of an action that asked for it, Self's own
-// `AWAY` says whether Self is away, and a User's `QUIT` forgets the `PING`s sent to them.
-// A User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
+// Whether two nicks are one, folded by the Connection's casemapping.
 const isSameNick = (run: Run, first: string, second: string): boolean => {
   const fold = folder(run.state);
 
   return fold(first) === fold(second);
 };
 
+// What Self did, live, answers the Line of an action that asked for it, Self's own
+// `AWAY` says whether Self is away, a User's `QUIT` forgets the `PING`s sent to them, and
+// a User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
 const settled = (run: Run, activity: Activity): void => {
   if (isOperAnswer(activity)) {
     return;
