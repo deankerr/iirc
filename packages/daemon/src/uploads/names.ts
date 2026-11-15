@@ -54,11 +54,12 @@ const extensionFor = (given: string | undefined, kind: Kind): string => {
  */
 export const safeName = (given: string | undefined, kind: Kind): string => {
   const cleaned = clean(given ?? "").replaceAll(/[-.]+$/gu, "");
-  const dot = cleaned.lastIndexOf(".");
+  const last = cleaned.lastIndexOf(".");
+  // Only letters and digits after the last dot make an extension, so in `../../etc/passwd`
+  // the dots are part of the path, not an extension, and the name keeps `etc-passwd`.
+  const dot = last !== -1 && /^[\p{L}\p{N}\p{M}]+$/u.test(cleaned.slice(last + 1)) ? last : -1;
   const stem = trimDashesAndDots(dot === -1 ? cleaned : cleaned.slice(0, dot));
-
-  const givenExtension =
-    dot === -1 ? undefined : cleaned.slice(dot + 1).replaceAll(/^-+|-+$/gu, "");
+  const givenExtension = dot === -1 ? undefined : cleaned.slice(dot + 1);
 
   const extension = extensionFor(givenExtension, kind);
   const room = maxNameLength - 1 - length(extension);

@@ -135,9 +135,7 @@ describe(safeName, () => {
   });
 
   it("flattens path-like names", () => {
-    const name = safeName("../../etc/passwd", text);
-    expect(name).not.toContain("/");
-    expect(name.startsWith(".")).toBeFalsy();
+    expect(safeName("../../etc/passwd", text)).toBe("etc-passwd.txt");
     expect(safeName("C:\\Users\\me\\a.txt", text)).toBe("C-Users-me-a.txt");
   });
 
