@@ -3838,7 +3838,13 @@ export interface SidebarNetwork {
   readonly connection: Connection;
   /** Whether Self is away there, as the Ircd confirmed it. */
   readonly away: SelfAway;
+  /** Its Timelines the sidebar lists: every one but those closed and open in no Pane. */
   readonly timelines: readonly Timeline[];
+  /**
+   * Its Timelines closed, with nothing arrived in them since, that no Pane has open, which
+   * the sidebar leaves out and the palette still lists.
+   */
+  readonly closed: readonly Timeline[];
   /** Its Timelines are not all read yet. */
   readonly reading: boolean;
   /** It was removed with its Timelines kept, so they are only read. */
@@ -3847,25 +3853,36 @@ export interface SidebarNetwork {
 
 /**
  * The Networks, each with its Timelines in sidebar order: those not removed by id, then
- * those removed with their Timelines kept, by id.
+ * those removed with their Timelines kept, by id. A Timeline closed, with nothing arrived
+ * in it since, is left out while no Pane has it open, and listed while one does, so opening
+ * it from the palette or the search shows it for as long as it is open.
  * @param state - The state.
  * @returns The sidebar.
  */
-export const sidebar = (state: Timelines): readonly SidebarNetwork[] =>
-  [...state.networks.values()]
-    .map((network) => ({
-      away: network.away,
-      connection: network.connection,
-      network: network.network,
-      reading: !network.list.fresh,
-      removed: isRemoved(network),
-      running: network.running,
-      timelines: [...network.timelines.values()].toSorted(sidebarOrder),
-    }))
+export const sidebar = (state: Timelines): readonly SidebarNetwork[] => {
+  const open = new Set(openIn(state.layout).map((one) => resolve(state, one)));
+  const hidden = (timeline: Timeline) => timeline.closed && !open.has(timeline.id);
+
+  return [...state.networks.values()]
+    .map((network) => {
+      const all = [...network.timelines.values()].toSorted(sidebarOrder);
+
+      return {
+        away: network.away,
+        closed: all.filter(hidden),
+        connection: network.connection,
+        network: network.network,
+        reading: !network.list.fresh,
+        removed: isRemoved(network),
+        running: network.running,
+        timelines: all.filter((timeline) => !hidden(timeline)),
+      };
+    })
     .toSorted(
       (left, right) =>
         Number(left.removed) - Number(right.removed) || byCodeUnits(left.network, right.network)
     );
+};
 
 /**
  * How a Network stands, for removing it: `Live`, configured; `Kept`, removed with its

@@ -328,6 +328,8 @@ const ReadBody = Schema.fromJsonString(
   Schema.Struct({ read: Schema.Finite, target: Schema.NullOr(Schema.String) })
 );
 
+const CloseBody = Schema.fromJsonString(Schema.Struct({ target: Schema.String }));
+
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
   answerCtcp: true,
@@ -470,6 +472,7 @@ export const fakeDaemon = () => {
   const puts: { readonly network: string; readonly ifSequence: string | null }[] = [];
   const removals: { readonly network: string; readonly keep: boolean }[] = [];
   const reads: (typeof ReadBody.Type)[] = [];
+  const closes: { readonly network: string; readonly target: string }[] = [];
   const channelsRead: string[] = [];
   const channelsHeld: (() => void)[] = [];
   const membersHeld: (() => void)[] = [];
@@ -500,6 +503,8 @@ export const fakeDaemon = () => {
     channels: new Map<string, FakeChannel>(),
     /** Each read of a Channel's head, by its Timeline. */
     channelsRead,
+    /** Each close asked for, joined or not, in order. */
+    closes,
     /** Each Network's Configuration in force, and the sequence that set it. */
     configurations: new Map<string, { configuration: ConfigurationOnWire; sequence: number }>([
       ["libera", { configuration: liberaConfiguration, sequence: 1 }],
@@ -540,6 +545,11 @@ export const fakeDaemon = () => {
      * Network's `realname` just before their turn.
      */
     interject: 0,
+    /**
+     * The Channels Self is in on each Network, by name, as `known` gives them: none until a
+     * test says. A `close` of one is ignored, as the Client ignores it.
+     */
+    joined: new Map<string, readonly string[]>(),
     /** Each intent journaled, and its sequence, which `said` answers from. */
     journaled,
     /** The Networks removed with their Timelines kept, which still hold them. */
@@ -990,10 +1000,20 @@ export const fakeDaemon = () => {
         declared: null,
       };
 
+      const channels = (daemon.joined.get(known.network) ?? []).map((name) => ({
+        key: lower(name),
+        members: [],
+        modes: { _tag: "Unknown" } as const,
+        name,
+        standing: "Joined" as const,
+        topic: { _tag: "Unknown" } as const,
+        wanted: true,
+      }));
+
       return signedInOnly(() =>
         json(200, {
           casemapping: declared ?? "rfc1459",
-          channels: [],
+          channels,
           chantypes,
           declared,
           life: daemon.lives.get(known.network ?? "") ?? 1,
@@ -1043,6 +1063,53 @@ export const fakeDaemon = () => {
     daemon.nextSequence += 1;
 
     return json(200, { sequence: daemon.nextSequence - 1 });
+  };
+
+  /**
+   * Closes a Timeline, as the Daemon does: a Channel Self is in is ignored, and otherwise
+   * the Timeline named, in any ASCII case, is `closed`, which the changes stream says in
+   * one step, and stays so until something arrives in it.
+   * @param network - The Network.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const close = async (network: string, init: RequestInit) => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const { target } = Schema.decodeSync(CloseBody)(await new Response(init.body).text());
+    const sequence = daemon.nextSequence;
+
+    daemon.closes.push({ network, target });
+    daemon.nextSequence += 1;
+    daemon.through = sequence;
+
+    const joined = (daemon.joined.get(network) ?? []).some((name) => lower(name) === lower(target));
+
+    const held = (daemon.timelines.get(network) ?? []).find(
+      (one) => one.timeline.kind !== "Network" && lower(one.timeline.name) === lower(target)
+    );
+
+    if (!joined && held !== undefined) {
+      Object.assign(held, { timeline: { ...held.timeline, changed: sequence, closed: true } });
+
+      send({
+        data: JSON.stringify({
+          dropped: [],
+          gaps: [],
+          items: [],
+          merged: [],
+          removals: [],
+          sequence,
+          timelines: [held.timeline],
+        }),
+        event: "changed",
+        id: `1.${sequence}`,
+      });
+    }
+
+    return json(200, { sequence });
   };
 
   /**
@@ -1365,6 +1432,10 @@ export const fakeDaemon = () => {
 
       case "POST /api/networks/libera/read": {
         return await markRead(init);
+      }
+
+      case "POST /api/networks/libera/close": {
+        return await close("libera", init);
       }
 
       case "POST /api/networks/libera/act": {

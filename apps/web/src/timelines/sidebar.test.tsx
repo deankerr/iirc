@@ -13,6 +13,7 @@ import { App } from "../app/app.tsx";
 import { pageState } from "../page/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
+import { paletteSections, pickEntry } from "../palette/atoms.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { open, paned, sync, timelinesState } from "./atoms.ts";
@@ -28,14 +29,16 @@ const timelineId = Schema.decodeSync(TimelineId);
 const own = timelineId(idOf(1));
 const iirc = timelineId(idOf(2));
 const other = timelineId(idOf(3));
+const peer = timelineId(idOf(4));
 
 const describeTimeline = (
   id: string,
   name: string,
-  kind: "Network" | "Channel"
+  kind: "Network" | "Channel" | "Direct",
+  closed = false
 ): typeof Timeline.Encoded => ({
   changed: 1,
-  closed: false,
+  closed,
   detached: false,
   head: null,
   id,
@@ -93,19 +96,28 @@ const press = async (target: EventTarget, init: KeyboardEventInit) => {
  */
 const rows = () => [...document.querySelectorAll<HTMLElement>('nav [role="row"]')];
 
+/** Timelines beside the three every test has, and how many of them the sidebar lists. */
+interface More {
+  readonly timelines: readonly (typeof Timeline.Encoded)[];
+  readonly listed: number;
+}
+
+const noMore: More = { listed: 0, timelines: [] };
+
 /**
  * The Frontend signed in, on a wide screen, to a Daemon with one Network, connected, with
- * its own Timeline, `#iirc`, and `#other`.
+ * its own Timeline, `#iirc`, and `#other`, and any more given.
+ * @param more - More Timelines, and how many of them the sidebar lists.
+ * @param fake - The fake Daemon.
  * @returns The registry.
  */
-const signedIn = async () => {
-  const fake = fakeDaemon();
-
+const signedIn = async (more = noMore, fake = fakeDaemon()) => {
   fake.daemon.signedIn = true;
   fake.daemon.timelines.set("libera", [
     { gaps: [], items: [], timeline: describeTimeline(own, "libera", "Network") },
     { gaps: [], items: [], timeline: describeTimeline(iirc, "#iirc", "Channel") },
     { gaps: [], items: [], timeline: describeTimeline(other, "#other", "Channel") },
+    ...more.timelines.map((timeline) => ({ gaps: [], items: [], timeline })),
   ]);
 
   const registry = registryFor(fake.fetch);
@@ -132,7 +144,9 @@ const signedIn = async () => {
     container.remove();
   });
 
-  await settled(() => rows().length === 3 && rows()[0]?.getAttribute("aria-label") !== null);
+  await settled(
+    () => rows().length === 3 + more.listed && rows()[0]?.getAttribute("aria-label") !== null
+  );
   await settled(() => (rows()[0]?.getAttribute("aria-label") ?? "").endsWith(", connected"));
 
   return registry;
@@ -292,6 +306,168 @@ describe("the sidebar", () => {
       ["#iirc, in Pane 1", "false", "1"],
       ["#other", "true", null],
     ]);
+  });
+});
+
+/**
+ * The names the sidebar's rows show.
+ * @returns Them, in order.
+ */
+const names = () => rows().map((one) => one.querySelector("bdi")?.textContent);
+
+/**
+ * Chooses an item of the menu open, by its text, with Enter, as a browser's keys do.
+ * @param text - Its text.
+ */
+const chooseFromMenu = async (text: string) => {
+  await settled(() => document.querySelector('[role="menu"]') !== null);
+
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (one) => one.textContent === text
+  );
+
+  await doing(() => {
+    item?.focus();
+  });
+
+  await doing(() => {
+    for (const type of ["keydown", "keyup"]) {
+      item?.dispatchEvent(
+        new KeyboardEvent(type, { bubbles: true, cancelable: true, key: "Enter" })
+      );
+    }
+  });
+
+  await settled(() => document.querySelector('[role="menu"]') === null);
+};
+
+describe("closing a Timeline from the sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  it("closes a Direct Message from its row's menu, out of the sidebar until something arrives in it", async () => {
+    const fake = fakeDaemon();
+
+    await signedIn({ listed: 1, timelines: [describeTimeline(peer, "peer", "Direct")] }, fake);
+
+    const menus = rows().map((one) => one.querySelector('button[aria-label^="More for"]') !== null);
+
+    await pressButton("More for peer");
+    await chooseFromMenu("Close");
+    await settled(() => !names().includes("peer"));
+
+    const closed = names();
+
+    // Something arrives in it, which the Daemon says by `closed` going false.
+    await doing(() => {
+      fake.send({
+        data: JSON.stringify({
+          dropped: [],
+          gaps: [],
+          items: [],
+          merged: [],
+          removals: [],
+          sequence: 20,
+          timelines: [
+            {
+              ...describeTimeline(peer, "peer", "Direct"),
+              changed: 20,
+              unread: { activity: 0, direct: 1, highlights: 0, messages: 0 },
+            },
+          ],
+        }),
+        event: "changed",
+        id: "1.20",
+      });
+    });
+    await settled(() => names().includes("peer"));
+
+    expect({
+      back: [names(), row("peer").getAttribute("aria-label")],
+      closed,
+      closes: fake.daemon.closes,
+      menus,
+    }).toStrictEqual({
+      back: [["libera", "#iirc", "#other", "peer"], "peer, 1 unread"],
+      closed: ["libera", "#iirc", "#other"],
+      closes: [{ network: "libera", target: "peer" }],
+      // A Network's own row has no menu, and every Channel's and Direct Message's does.
+      menus: [false, true, true, true],
+    });
+  });
+
+  it("offers to leave a Channel Self is in, from its context menu, sending no close, and leaves it as /part does", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.joined.set("libera", ["#iirc"]);
+    await signedIn(undefined, fake);
+
+    await doing(() => {
+      row("#iirc").dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+      );
+    });
+    await chooseFromMenu("Close");
+    await settled(() => document.querySelector('[role="alertdialog"]') !== null);
+
+    const offered = document.querySelector('[role="alertdialog"] h2')?.textContent;
+
+    await pressButton("Leave");
+    await settled(() => document.querySelector('[role="alertdialog"]') === null);
+
+    expect({
+      channels: fake.daemon.configurations.get("libera")?.configuration.channels,
+      closes: fake.daemon.closes,
+      listed: names(),
+      offered,
+      puts: fake.daemon.puts.length,
+    }).toStrictEqual({
+      channels: [],
+      closes: [],
+      // Leaving does not close it: the part shows in it, and it is closed once Self has left.
+      listed: ["libera", "#iirc", "#other"],
+      offered: "You are in #iirc. Leave it?",
+      puts: 1,
+    });
+  });
+
+  it("lists a closed Timeline while a Pane has it open from the palette, and not once it moves on", async () => {
+    const registry = await signedIn({
+      listed: 0,
+      timelines: [describeTimeline(peer, "peer", "Direct", true)],
+    });
+
+    const before = names();
+
+    const entry = registry
+      .get(paletteSections)
+      .flatMap((section) => section.entries)
+      .find((one) => one.key === `timeline:${peer}`);
+
+    await doing(() => {
+      if (entry !== undefined) {
+        registry.set(pickEntry, entry);
+      }
+    });
+    await settled(() => names().includes("peer"));
+
+    const opened = [names(), row("peer").getAttribute("aria-selected")];
+
+    await doing(() => {
+      registry.set(open, iirc);
+    });
+    await settled(() => !names().includes("peer"));
+
+    expect({ after: names(), before, opened }).toStrictEqual({
+      after: ["libera", "#iirc", "#other"],
+      before: ["libera", "#iirc", "#other"],
+      opened: [["libera", "#iirc", "#other", "peer"], "true"],
+    });
   });
 });
 

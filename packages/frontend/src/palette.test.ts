@@ -52,6 +52,7 @@ const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: st
 const sidebar: readonly SidebarNetwork[] = [
   {
     away: { _tag: "Unknown" },
+    closed: [],
     connection: { _tag: "Connected", nick: "dean", since: 1 },
     network: libera,
     reading: false,
@@ -203,6 +204,7 @@ describe("the palette's entries", () => {
         "command:say.notice",
         "command:channels.join",
         "command:channels.part",
+        "command:timeline.close",
         "command:act.topic",
         "command:act.kick",
         "command:act.mode",
@@ -345,6 +347,35 @@ describe("choosing an entry", () => {
     });
   });
 
+  it("closes the focused Timeline, and still lists a closed one, after the rest, to open", () => {
+    const hidden = timelineOf(timelineId("00000000000004-00000000-00000000"), "Direct", "gone");
+    const [network] = sidebar;
+
+    const withClosed: Listing = {
+      ...listing(),
+      sidebar: network === undefined ? [] : [{ ...network, closed: [hidden] }],
+    };
+
+    const shown = sections(withClosed, "gone", []);
+
+    expect({
+      close: pick("command:timeline.close"),
+      // On the Network's own Timeline, it names none, so it starts in the composer.
+      closeNetwork: pick("command:timeline.close", inNetwork),
+      found: keys(shown),
+      listed: sections(withClosed, "", [])
+        .find((section) => section.title === "Timelines")
+        ?.entries.map((entry) => (entry._tag === "Timeline" ? entry.name : "")),
+      opened: choose(entryOf(shown, `timeline:${hidden.id}`), inChannel, false),
+    }).toStrictEqual({
+      close: [{ _tag: "CloseTimeline", network: libera, target: "#iirc" }],
+      closeNetwork: [{ _tag: "FocusComposer", text: "/close-timeline " }],
+      found: [["Timelines", [`timeline:${hidden.id}`]]],
+      listed: ["libera", "#iirc", "peer", "gone"],
+      opened: [{ _tag: "Open", timeline: hidden.id }],
+    });
+  });
+
   it("opens a Timeline, starts /set for an option, and asks for a Credential in the prompt", () => {
     expect({
       credential: choose(entryOf(all, "option:network.libera.password"), inChannel, false),
@@ -360,6 +391,7 @@ describe("choosing an entry", () => {
   it("asks to remove a Network, or to drop what a removed one kept, found by either word", () => {
     const removed: SidebarNetwork = {
       away: { _tag: "Unknown" },
+      closed: [],
       connection: { _tag: "Unknown" },
       network: Schema.decodeSync(NetworkId)("oftc"),
       reading: false,

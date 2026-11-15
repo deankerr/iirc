@@ -88,6 +88,11 @@ describe("the command registry", () => {
   });
 });
 
+const closing = (target: string) => ({
+  _tag: "Parsed",
+  value: [{ _tag: "CloseTimeline", network, target }],
+});
+
 describe("reading a line", () => {
   it("says plain text to the open Channel or Direct Message", () => {
     expect([interpret("hello", inChannel), interpret("hi there", inDirect)]).toStrictEqual([
@@ -183,6 +188,35 @@ describe("reading a line", () => {
       named: asks(oftc, undefined),
       none: "Name a Network, or open one of its Timelines first. /network remove [id] [keep|drop]",
       unknownChoice: "Usage: /network remove [id] [keep|drop]",
+    });
+  });
+
+  it("closes a Timeline by its Target, the focused one unless named, never a Network's own or a pane", () => {
+    expect({
+      channel: interpret("/close-timeline", inChannel),
+      detached: message("/close-timeline", { ...inDirect, focus: focus("Direct", "x", true) }),
+      direct: interpret("/close-timeline", inDirect),
+      list: message("/close-timeline #a,#b", inChannel),
+      named: interpret("/close-timeline  bob ", inNetwork),
+      network: message("/close-timeline", inNetwork),
+      // Offline, it is closed all the same: the Daemon journals it.
+      offline: interpret("/close-timeline", offline),
+      // `/close` closes a Pane, and never a Timeline.
+      pane: message("/close", inChannel),
+      removed: message("/close-timeline", { ...inChannel, focus: removedFocus }),
+    }).toStrictEqual({
+      channel: closing("#iirc"),
+      detached:
+        "This Direct Message no longer follows its partner, so it has no Target to close it by.",
+      direct: closing("peer"),
+      list: "Close one Timeline at a time. /close-timeline [#channel|nick]",
+      named: closing("bob"),
+      network:
+        "A Network's own Timeline is never closed. Name a Channel or a nick, or open its Timeline. /close-timeline [#channel|nick]",
+      offline: closing("#iirc"),
+      pane: "There is only one Pane. /split makes another.",
+      removed:
+        "libera was removed, and its Timelines are kept only to read. Nothing can be said or done there. /network remove libera drops them.",
     });
   });
 
@@ -396,6 +430,7 @@ describe("reading a line", () => {
       "search.open": "Optional",
       "sidebar.toggle": "Optional",
       "theme.set": "Optional",
+      "timeline.close": "Optional",
       "timeline.latest": "None",
       "timeline.next": "None",
       "timeline.previous": "None",

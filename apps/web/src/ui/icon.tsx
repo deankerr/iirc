@@ -29,6 +29,8 @@ const glyphs = {
   members: "◨",
   /** The sidebar, as a drawer on a compact screen. */
   menu: "≡",
+  /** Opens a row's menu of what can be done with it. */
+  more: "…",
   /** A Network offline: empty. */
   offline: "○",
   /** The command palette, where a command starts as it does in the composer. */
