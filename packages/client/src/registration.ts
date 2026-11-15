@@ -9,6 +9,7 @@ import { limitOf } from "@iirc/protocol/isupport";
 import { cap, isRejected, nick, quit, upperCaseAscii, user } from "@iirc/protocol/line";
 import type { Line, SecretLine } from "@iirc/protocol/line";
 
+import { declinedOf } from "./configuration.ts";
 import type { Registration } from "./feature.ts";
 import type { CapName, FeatureName } from "./ids.ts";
 import { CapName as CapNameSchema, Instant } from "./ids.ts";
@@ -633,7 +634,7 @@ const wantedNow = (run: Run, held: Negotiated, only?: ReadonlySet<CapName>): rea
   capsWanted(
     run.registry,
     { ...held, isupport: openOf(run.state)?.isupport ?? new Map() },
-    run.state.configuration?.declined ?? [],
+    declinedOf(run.state.configuration),
     (feature) => only === undefined || capsOf(feature).some((name) => only.has(name))
   );
 

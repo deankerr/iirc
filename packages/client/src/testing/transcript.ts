@@ -33,8 +33,9 @@ export type Change =
   /** `accept=multi-prefix`: the Owner stops declining a Feature. */
   | { readonly _tag: "Accept"; readonly feature: FeatureName }
   /**
-   * `login=none`, or `login=required,iirc,pw` and `login=optional,iirc,pw`: how Self logs
-   * in, with the account and the Credential's name.
+   * `login=none`, `login=required,iirc,pw` and `login=optional,iirc,pw`, or
+   * `login=service,NickServ,iirc,pw,5`: how Self logs in, with the account and the
+   * Credential's name, and for a service, its nick first and the seconds to wait last.
    */
   | { readonly _tag: "Login"; readonly login: Login }
   /** `realname=new`: the realname registration sends, with no space in it. */
@@ -236,7 +237,10 @@ const unescapeBytes = (text: string): Uint8Array | undefined => {
 
 type SecretKind = SecretLine["_tag"];
 
-const isSecretKind = Schema.is(Schema.Literals(["AuthenticatePlain", "JoinWithKey", "Pass"]));
+const isSecretKind = Schema.is(
+  Schema.Literals(["AuthenticatePlain", "Identify", "JoinWithKey", "Pass"])
+);
+
 const decodeSecret = Schema.decodeUnknownResult(SecretLine);
 
 // Each case's fields but `credential`, in the order a placeholder writes them.
@@ -393,10 +397,35 @@ const sayVerbs: Readonly<Record<SayKind, string>> = {
   Privmsg: "say",
 };
 
-// `none`, or `required,<account>,<credential>` or `optional,<account>,<credential>`.
+const secondsPattern = /^\d{1,2}$/u;
+
+// `service,<service>,<account>,<credential>,<seconds>`.
+const readService = (text: string): Login | undefined => {
+  const [service, account, credential, wait, ...rest] = text.split(",");
+
+  return [service, account, credential].every((part) => part !== undefined && part !== "") &&
+    wait !== undefined &&
+    secondsPattern.test(wait) &&
+    rest.length === 0
+    ? {
+        _tag: "Service",
+        account: account ?? "",
+        credential: CredentialName.make(credential ?? ""),
+        service: service ?? "",
+        wait: Number(wait),
+      }
+    : undefined;
+};
+
+// `none`, `required,<account>,<credential>` or `optional,<account>,<credential>`, or a
+// service login.
 const readLogin = (text: string): Login | undefined => {
   if (text === "none") {
     return { _tag: "None" };
+  }
+
+  if (text.startsWith("service,")) {
+    return readService(text.slice(8));
   }
 
   const [kind, account, credential, ...rest] = text.split(",");
@@ -526,9 +555,23 @@ const writeChange = (change: Change): string => {
     case "Login": {
       const { login } = change;
 
-      return login._tag === "None"
-        ? "login=none"
-        : `login=${login.required ? "required" : "optional"},${login.account},${login.credential}`;
+      switch (login._tag) {
+        case "None": {
+          return "login=none";
+        }
+
+        case "Service": {
+          return `login=service,${login.service},${login.account},${login.credential},${login.wait}`;
+        }
+
+        case "Sasl": {
+          return `login=${login.required ? "required" : "optional"},${login.account},${login.credential}`;
+        }
+
+        default: {
+          return login satisfies never;
+        }
+      }
     }
 
     default: {

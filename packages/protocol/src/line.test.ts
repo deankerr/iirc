@@ -28,6 +28,7 @@ describe("a secret Line", () => {
   it("names only the places a Credential can go", () => {
     expect(Object.keys(SecretLine.cases)).toStrictEqual([
       "AuthenticatePlain",
+      "Identify",
       "JoinWithKey",
       "Pass",
     ]);

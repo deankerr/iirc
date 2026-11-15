@@ -107,4 +107,26 @@ describe("the Credentials a Configuration names", () => {
 
     expect(credentialsOf(configuration)).toStrictEqual(new Set(["pass", "sasl", "shared"]));
   });
+
+  it("include a service login's", () => {
+    const configuration = Schema.decodeSync(NetworkConfiguration)({
+      channels: [],
+      declined: [],
+      enabled: true,
+      fallbackEncoding: "windows-1252",
+      ircds: [{ host: "irc.test", port: 6697, tls: true }],
+      login: {
+        _tag: "Service",
+        account: "iirc",
+        credential: "nickserv",
+        service: "NickServ",
+        wait: 5,
+      },
+      nicks: ["iirc"],
+      realname: "iirc",
+      username: "iirc",
+    });
+
+    expect(credentialsOf(configuration)).toStrictEqual(new Set(["nickserv"]));
+  });
 });

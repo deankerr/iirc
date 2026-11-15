@@ -1024,6 +1024,11 @@ export const SecretLine = Schema.TaggedUnion({
     authzid: Schema.String,
     credential: CredentialName,
   },
+  /**
+   * `PRIVMSG <service> :IDENTIFY <account> <credential>`: logging in to an account by
+   * telling a service, where there is no SASL.
+   */
+  Identify: { account: Schema.String, credential: CredentialName, service: Schema.String },
   /** `JOIN` with a Channel key. */
   JoinWithKey: { channel: Schema.String, credential: CredentialName },
   /** `PASS`, before registration. */
@@ -1063,6 +1068,33 @@ const plain = (
   return sendable.length === lines.length ? sendable : rejected("TooLong");
 };
 
+// A service is told in a `PRIVMSG` to one User, so a name that could be a Channel, a mask,
+// or a list is no service: a password said there would be said to others.
+const notService = /^[#&+!$]|[,*?!]/u;
+
+// Each of `IDENTIFY <account> <credential>`'s words must stay one word, so the service
+// reads them as the Owner meant, and nothing more goes with them. A password may hold
+// anything else, a comma or a colon included.
+const staysOneWord = (text: string) =>
+  text !== "" && !/[ \r\n\0]/u.test(text) && text.isWellFormed();
+
+const identify = (
+  { account, service }: { readonly account: string; readonly service: string },
+  value: string
+): readonly OutboundLine[] | Rejected => {
+  if (!isOne(service) || notService.test(service)) {
+    return rejected("InvalidTarget");
+  }
+
+  if (!staysOneWord(account) || !staysOneWord(value)) {
+    return rejected("InvalidParameter");
+  }
+
+  const line = outbound("PRIVMSG", [service, `IDENTIFY ${account} ${value}`]);
+
+  return isRejected(line) ? line : [line];
+};
+
 /**
  * Fills a Credential's value into the Line that carries it. This is the only code that
  * puts a Credential into a Line. Its result is sent and never journaled. The SASL PLAIN
@@ -1082,6 +1114,10 @@ export const fillSecret = (
   switch (line._tag) {
     case "AuthenticatePlain": {
       return plain(line, revealed);
+    }
+
+    case "Identify": {
+      return identify(line, revealed);
     }
 
     case "JoinWithKey": {

@@ -187,6 +187,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 - **The syntax reads back what it shows,** for every value the Schema admits.
 - **An edit is a pure function of the Configuration** (`apply`), parsed again by the Schema, so the runtime applies the same edit again after a conflict.
 - **What a new Network starts with is the Schema's,** and `unset` returns an option to it.
+- **A field members of a union share is one option,** such as `login.account`, set in the member in force when it has the field, and otherwise in the first that does, which it puts in force.
 - **A Credential option is write-only.** Its value is given in the password prompt, and the option only names the Credential, by a name derived from the option's own so that two options never share one.
 - **Channels are compared as the Daemon reports the Network folds them,** so `/part` never parts more than one entry for a name.
 - **A Channel's prefix is never guessed.** A bare name takes the Network's first `CHANTYPES` character, and is refused while `CHANTYPES` is unknown.

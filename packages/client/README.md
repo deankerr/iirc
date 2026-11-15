@@ -57,7 +57,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 `NetworkConfiguration` is the Schema of what `Configured` carries. It is also exported alone from `@iirc/client/configuration`, as pure data a Frontend may import.
 
 - **A Frontend derives every option from the Schema alone**. Each field has a description and says what a new Network starts with, and each Credential field is marked as one. A field added here is an option there with no other work.
-- **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its SASL login's, and each Channel's key.
+- **`credentialsOf(configuration)`** gives the names of the Credentials a Configuration names: its Ircd password, its login's, and each Channel's key.
 - **A field added later decodes old Journals as the Client behaved before it,** so a Journal written before it still replays as it happened. That is usually what a new Network starts with, but `answerCtcp` starts on and decodes as off, since no answer was sent then.
 
 ### When the Client dials
@@ -86,6 +86,7 @@ The State holds no timer table. Each machine's state names the instants it waits
 | `register` | registering, 60 s from `Opened` | hangs up |
 | `hold` | a Feature holds registration, 30 s | asks each holding Feature whether to go on |
 | `keepalive` | in a Session | a `PING` after 60 s of silence, a hang-up after 90 s |
+| `identify` | Channels wait on a service login, its `wait` | joins them |
 | `rejoin <channel>` | a Channel is refused or kicked | joins it again |
 | `lookup <intent>` | a Lookup awaits its reply, 30 s | reports what it has |
 | `modes` | the Client's own `MODE` query awaits its answer, 30 s | asks the next Channel |
@@ -213,7 +214,7 @@ A machine that is not running is left out.
 | A `Read` whose Target names no one Timeline | `Ignored` with `NoTimeline`. |
 | A Line a Feature refuses at egress | A `Say` is `Refused` with `Unsendable`. Any other is `Ignored`. Nothing is sent. |
 | `Unsent` | A `Say` or an `Act` whose Line is among them is `Refused` with `Unsent`, once. A CTCP answer among them, from any Connection, is a `CtcpUnsent`, where its request is. |
-| `Unfilled` | SASL counts it as a failed login. A Channel whose key is unfilled is refused. Registration goes on without `PASS`. |
+| `Unfilled` | SASL counts it as a failed login. A service login's Channels are joined at once. A Channel whose key is unfilled is refused. Registration goes on without `PASS`. |
 | A Feature hook that throws | That Feature is off for the rest of the Connection, and `Ignored` with `FeatureFailed` records it. |
 
 ## The Feature seam
@@ -244,6 +245,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 - **Connecting and redialling** (`connection.test.ts`). The backoff is 2 s doubling to 5 minutes, and starts again after a Session that lasted 5 minutes. It takes no randomness, since one Daemon serves one Owner and there is no herd to spread out.
 - **Registration** (`registration.test.ts`). Sends `CAP LS 302`, `PASS` when configured, `NICK`, and `USER` at once. An Ircd with no cap negotiation answers `421` or goes straight to `001`. When a nick is taken, it offers the configured nicks in order, then the first with `_`, `2`, `3`, and on, within `NICKLEN`.
 - **The Session and ISUPPORT** (`session.test.ts`). `001` begins a Session. ISUPPORT accumulates over every `005`, at most 256 tokens. Self's mask is never read from `001`, whose text is for people.
+- **A service login** (`service-login.test.ts`). With a `Service` login, each Session begins by telling the service `IDENTIFY <account> <credential>` in a `PRIVMSG`, and its Channels wait. A `900`, which also makes Self's account known, or a `MODE` that sets `+r` on Self once the service was told, lets them be joined, and so do the Configuration's `wait` running out, an unfilled Credential, and a Configuration with no service login. A `NOTICE` from the service never does, whatever it says. RFC 2812's user mode `r` is "restricted", so a `+r` alone is a hint the bound backs up. `echo-message` is declined with a service login, since the Ircd would echo the Credential back to be journaled.
 - **Keepalive** (`keepalive.test.ts`). Answers `PING` at once, byte for byte. After 60 s of silence it sends a `PING`, and after 90 s it hangs up.
 - **A Channel's modes** (`modes.test.ts`). Each time Self's join is confirmed, the Client asks the Channel's modes once with `MODE <channel>`, and folds the `324` that answers. One query waits at a time on a Connection, so a hundred Channels are asked one after another, each when the last is answered or after 30 s, and the Owner's Lines never queue behind them all. A Channel whose modes are already known by its turn is not asked. An error in answer leaves the modes unknown. A `MODE` while they are known keeps them true, by `CHANMODES`, with `PREFIX`'s modes as membership; one while they are unknown leaves them unknown, never a partial set. A key is kept only as set.
 - **Channels** (`channels.test.ts`). Each Channel the Owner wants is a machine. Wanted Channels share `JOIN` Lines as `TARGMAX` allows, and one with a key goes alone. A refused Channel, a kick, or a `PART` the Owner did not ask for is joined again on the backoff. A Channel Self was put in without asking is followed with `wanted` false and never joined again. Without `multi-prefix`, a member's prefixes are partial.
@@ -287,7 +289,7 @@ These need nothing from the Ircd beyond RFC 1459 and 2812.
 | Feature | Needs | Changes | Scenarios |
 | --- | --- | --- | --- |
 | Cap negotiation | caps from the Ircd | Asks for each Feature's caps, whole or not at all. Only what the Ircd acknowledges is enabled. `CAP NEW` and `CAP DEL` are followed for the rest of the Connection. | `caps.test.ts` |
-| SASL | `sasl`, and a login in the Configuration | Logs in with `PLAIN`, holding registration until `903`. A failed login goes on when it is optional, and gives up the Connection with `LoginFailed` when it is required. | `sasl.test.ts`, `login.test.ts` |
+| SASL | `sasl`, and a SASL login in the Configuration | Logs in with `PLAIN`, holding registration until `903`. A failed login goes on when it is optional, and gives up the Connection with `LoginFailed` when it is required. | `sasl.test.ts`, `login.test.ts` |
 | Message tags | `message-tags` | A Line's `msgid` is its Message's id. Client-only tags are reported with the Message. | `tags.test.ts` |
 | Server time | `server-time` | A Line's `time` tag is when it happened. Without it, or when malformed, the time is when the Line arrived. | `tags.test.ts` |
 | Batches | `batch` | Tracks open batches, nested or interleaved. Lines are read as they arrive, never held back. | `batch.test.ts` |

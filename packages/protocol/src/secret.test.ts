@@ -42,6 +42,13 @@ const plain = (authcid: string, authzid = ""): SecretLine => ({
   credential,
 });
 
+const identify = (service: string, account = "iirc"): SecretLine => ({
+  _tag: "Identify",
+  account,
+  credential,
+  service,
+});
+
 describe(fillSecret, () => {
   it("fills PASS, as a trailing parameter when it must be", () => {
     expect(wires(fillSecret({ _tag: "Pass", credential }, Redacted.make("hunter2")))).toStrictEqual(
@@ -58,6 +65,15 @@ describe(fillSecret, () => {
         fillSecret({ _tag: "JoinWithKey", channel: "#secret", credential }, Redacted.make("k3y"))
       )
     ).toStrictEqual(["JOIN #secret k3y\r\n"]);
+  });
+
+  it("tells a service to identify Self, in one PRIVMSG", () => {
+    expect(wires(fillSecret(identify("NickServ"), Redacted.make("hunter2")))).toStrictEqual([
+      "PRIVMSG NickServ :IDENTIFY iirc hunter2\r\n",
+    ]);
+    expect(
+      wires(fillSecret(identify("NickServ@services.test"), Redacted.make(":a,b")))
+    ).toStrictEqual(["PRIVMSG NickServ@services.test :IDENTIFY iirc :a,b\r\n"]);
   });
 
   it("fills the SASL PLAIN response as authzid, authcid, and password", () => {
@@ -100,6 +116,23 @@ describe(fillSecret, () => {
     ],
     ["a key for JOIN 0", { _tag: "JoinWithKey", channel: "0", credential }, "k", "InvalidTarget"],
     ["a password with NUL", plain("iirc"), "a\0b", "InvalidParameter"],
+    ["an identify to a Channel", identify("#iirc"), "pw", "InvalidTarget"],
+    ["an identify to a mask", identify("$*"), "pw", "InvalidTarget"],
+    ["an identify to two Users", identify("NickServ,peer"), "pw", "InvalidTarget"],
+    ["an identify to a service with a space", identify("Nick Serv"), "pw", "InvalidTarget"],
+    ["an identify to no service", identify(""), "pw", "InvalidTarget"],
+    ["an identify with a space in its password", identify("NickServ"), "a b", "InvalidParameter"],
+    ["an identify with a line break", identify("NickServ"), "a\r\nQUIT", "InvalidParameter"],
+    ["an identify with NUL", identify("NickServ"), "a\0", "InvalidParameter"],
+    ["an identify with no password", identify("NickServ"), "", "InvalidParameter"],
+    [
+      "an identify with a space in its account",
+      identify("NickServ", "a b"),
+      "pw",
+      "InvalidParameter",
+    ],
+    ["an identify with no account", identify("NickServ", ""), "pw", "InvalidParameter"],
+    ["an identify too long to fit", identify("NickServ"), "x".repeat(600), "TooLong"],
     ["an authcid with NUL", plain("ii\0rc"), "x", "InvalidParameter"],
   ] as const)("refuses %s", (_name, line, value, reason) => {
     expect(fillSecret(line, Redacted.make(value))).toStrictEqual({ _tag: "Rejected", reason });

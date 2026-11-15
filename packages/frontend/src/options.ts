@@ -1361,8 +1361,10 @@ const noOption = (network: string, path: Path) =>
   invalid<Record>(`There is no option ${optionName(network, path)}.`);
 
 /**
- * A value set at a path of a member's field. A field of a member not in force puts that
- * member in force first, with its fields at what they start with.
+ * A value set at a path of a member's field. Members may share a field, such as an
+ * account, which is the one in force when it has the field. A field of a member not in
+ * force puts the first member with it in force first, with its fields at what they
+ * start with.
  * @param network - The Network.
  * @param plain - The Configuration, as JSON.
  * @param path - The path.
@@ -1378,8 +1380,10 @@ const setInMember = (
   const [key, second] = path;
   const top = fieldNamed(fields, key);
   const members = top?.kind._tag === "Tagged" ? top.kind.members : [];
-  const member = members.find((one) => fieldNamed(one.fields, second) !== undefined);
   const current = plain[key];
+  const having = members.filter((one) => fieldNamed(one.fields, second) !== undefined);
+
+  const member = having.find((one) => isRecord(current) && current._tag === one.tag) ?? having[0];
 
   if (member === undefined) {
     return noOption(network, path);
@@ -1944,6 +1948,48 @@ const optionOf = (
 };
 
 /**
+ * The options of a union's members, each field once, in the order the members first name
+ * them. A field members share, such as an account, is the in-force member's, holding its
+ * value, and any other field shows as unset.
+ * @param network - The Network.
+ * @param key - The union's field.
+ * @param members - Its members.
+ * @param value - The member in force.
+ * @param held - The Credentials the Vault holds, when known.
+ * @returns The options.
+ */
+const memberOptions = (
+  network: NetworkId,
+  key: string,
+  members: readonly Member[],
+  value: Json | undefined,
+  held: ReadonlySet<string> | undefined
+): readonly NetworkOption[] => {
+  const inForce = isRecord(value) ? value : undefined;
+  const own = members.find((member) => member.tag === inForce?._tag);
+  const keys = [...new Set(members.flatMap((member) => member.fields.map((sub) => sub.key)))];
+
+  return keys.flatMap((subKey) => {
+    const mine = own === undefined ? undefined : fieldNamed(own.fields, subKey);
+
+    const sub =
+      mine ?? members.flatMap((member) => member.fields).find((field) => field.key === subKey);
+
+    return sub === undefined
+      ? []
+      : [
+          optionOf(
+            network,
+            sub,
+            [key, subKey],
+            mine === undefined ? undefined : inForce?.[subKey],
+            held
+          ),
+        ];
+  });
+};
+
+/**
  * Every option of a Network's Configuration, in the Schema's order: each field, each
  * member's fields under a tagged union, and each record's fields under its name.
  * @param network - The Network.
@@ -1964,22 +2010,7 @@ export const optionsOf = (
     const { kind } = field;
 
     if (kind._tag === "Tagged") {
-      const inForce = isRecord(value) ? value : undefined;
-
-      return [
-        own,
-        ...kind.members.flatMap((member) =>
-          member.fields.map((sub) =>
-            optionOf(
-              network,
-              sub,
-              [field.key, sub.key],
-              inForce?._tag === member.tag ? inForce[sub.key] : undefined,
-              held
-            )
-          )
-        ),
-      ];
+      return [own, ...memberOptions(network, field.key, kind.members, value, held)];
     }
 
     if (kind._tag === "Names") {

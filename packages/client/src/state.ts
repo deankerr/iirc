@@ -88,6 +88,11 @@ type Presence =
       /** Whether Self is away, as the Ircd confirmed it: not away as the Session begins. */
       readonly away: Fact<{ readonly message: string } | null>;
       readonly keepalive: Keepalive;
+      /**
+       * While Channels wait on a service login, when they are joined anyway, or
+       * `undefined` once they need not wait.
+       */
+      readonly identifying: Instant | undefined;
     };
 
 /** One Connection, from `Dial` to `Closed`. */

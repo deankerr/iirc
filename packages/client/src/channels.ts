@@ -138,15 +138,18 @@ export const reconcile = (run: Run, wanted: readonly WantedChannel[], fresh = tr
  * Joins every Channel that is Wanted, while in a Session. Channels without a key share
  * `JOIN` Lines, as many to a Line as fit and as `TARGMAX` allows. A Channel with a key
  * goes alone, as a `JoinWithKey` with its Credential named. A name that cannot be sent
- * is refused until the Configuration changes.
+ * is refused until the Configuration changes. Nothing is joined while the Channels wait
+ * on a service login.
  * @param run - The step.
  */
 export const joinWanted = (run: Run): void => {
   const open = openOf(run.state);
+  const session = sessionOf(run.state);
 
   if (
     open === undefined ||
-    sessionOf(run.state) === undefined ||
+    session === undefined ||
+    session.identifying !== undefined ||
     run.state.configuration?.enabled !== true ||
     linkOf(run)?.closing !== undefined
   ) {

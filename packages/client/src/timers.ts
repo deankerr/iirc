@@ -34,6 +34,7 @@ export type Purpose =
   | { readonly _tag: "Redial" }
   | { readonly _tag: "Register" }
   | { readonly _tag: "Hold" }
+  | { readonly _tag: "Identify" }
   | { readonly _tag: "Keepalive" }
   | { readonly _tag: "Rejoin"; readonly channel: string }
   | { readonly _tag: "Lookup"; readonly intent: IntentId }
@@ -80,6 +81,13 @@ export const timersOf = (state: State): ReadonlyMap<TimerId, Timer> => {
         due: presence.keepalive.check,
         purpose: { _tag: "Keepalive" },
       });
+
+      if (presence.identifying !== undefined) {
+        table.set(TimerId.make("identify"), {
+          due: presence.identifying,
+          purpose: { _tag: "Identify" },
+        });
+      }
 
       for (const looking of phase.lookups) {
         table.set(TimerId.make(`lookup ${looking.intent}`), {
