@@ -290,6 +290,36 @@ describe("taking a nick back", () => {
       expect(refusals(run)).toHaveLength(1);
     });
 
+    it("takes a 438 as a refusal of the ask, so a later numeric is the Owner's", () => {
+      const run = played(
+        lines(
+          "<< :iirc!u@h QUIT :gone",
+          ">> NICK iirc",
+          "<< :irc.test 438 other iirc :Nick change too fast",
+          "!! nick iirc",
+          ">> NICK iirc",
+          "<< :irc.test 433 other iirc :Nickname is already in use",
+          "?? refused i1 Rejected 433 nick=iirc in=network"
+        )
+      );
+
+      expect(refusals(run)).toHaveLength(1);
+      expect(selfNick(run)).toBe("other");
+    });
+
+    it("refuses the Owner's own NICK with a 438", () => {
+      const run = played(
+        lines(
+          "!! nick iirc",
+          ">> NICK iirc",
+          "<< :irc.test 438 other iirc :Nick change too fast",
+          "?? refused i1 Rejected 438 nick=iirc in=network"
+        )
+      );
+
+      expect(refusals(run)).toHaveLength(1);
+    });
+
     it("forgets the ask, so a later numeric is the Owner's", () => {
       const run = played(
         failed,

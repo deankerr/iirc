@@ -789,11 +789,13 @@ const ties: ReadonlyMap<string, Tie> = new Map([
   ["441", { commands: new Set(["KICK", "MODE"]), params: [1, 2] }],
   // `443 <client> <nick> <channel>`
   ["443", { commands: new Set(["INVITE"]), params: [1, 2] }],
-  // `432`, `433`, `436`, and `437 <client> <nick>`
+  // `432`, `433`, `436`, `437`, and `438 <client> <nick>`: `438`, a change refused for
+  // coming too fast, is no RFC's, but many Ircds send it.
   ["432", nicks],
   ["433", nicks],
   ["436", nicks],
   ["437", nicks],
+  ["438", nicks],
 ]);
 
 // The Line at `index` with what an answer resolved: one target, at `target`, or with

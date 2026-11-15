@@ -56,8 +56,9 @@ export const reclaim = (run: Run, left: string): void => {
   }));
 };
 
-// The numerics that refuse a `NICK`, by the nick they name second.
-const refusals: ReadonlySet<string> = new Set(["432", "433", "436", "437"]);
+// The numerics that refuse a `NICK`, by the nick they name second: RFC 2812's, and `438`,
+// a change refused for coming too fast, as many Ircds send it.
+const refusals: ReadonlySet<string> = new Set(["432", "433", "436", "437", "438"]);
 
 /**
  * The ask a Line refuses, by its structure alone: an error numeric that refuses a `NICK`
