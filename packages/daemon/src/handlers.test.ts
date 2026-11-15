@@ -1151,7 +1151,12 @@ describe("the handlers", () => {
           .pipe(Effect.flip);
 
         return {
-          answers: [peer, joined, listed].map(({ sequence }) => sequence),
+          answers: {
+            sequences: new Set([peer, joined, listed].map(({ sequence }) => sequence)).size,
+            tags: [peer, joined, listed].map((answer) =>
+              answer._tag === "Refused" ? answer.reason._tag : answer._tag
+            ),
+          },
           closed,
           news: happenings(events).flatMap((event) =>
             event.data.news.flatMap((one): readonly unknown[] => {
@@ -1170,7 +1175,10 @@ describe("the handlers", () => {
 
     const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
 
-    expect(new Set(result.answers).size).toBe(3);
+    expect(result.answers).toStrictEqual({
+      sequences: 3,
+      tags: ["Closed", "Joined", "NoTimeline"],
+    });
     expect(result.news).toStrictEqual([
       {
         _tag: "TimelineClosed",
@@ -1190,6 +1198,41 @@ describe("the handlers", () => {
       unread: { ...none, direct: 2 },
     });
     expect(result.unknown).toBe("UnknownNetwork");
+  });
+
+  it("answers a close with the step's own decision, so a Channel joined after the caller looked is refused as Joined", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, []);
+        const params = { network: libera };
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+
+        // What the caller saw: Self not yet in #iirc.
+        const looked = yield* api.networks.known({ params });
+
+        // The JOIN is stepped between the caller's look and its close.
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* settle;
+
+        const answer = yield* api.networks.close({ params, payload: { target: "#iirc" } });
+        const listed = yield* api.timelines.list({ params, query: {} });
+
+        return {
+          answer: answer._tag === "Refused" ? answer.reason : answer._tag,
+          closed: listed.timelines.find(({ name }) => name === "#iirc")?.closed,
+          looked: looked.channels
+            .filter((channel) => channel.standing === "Joined")
+            .map((channel) => channel.name),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      answer: { _tag: "Joined" },
+      closed: false,
+      looked: [],
+    });
   });
 
   it("refuses a Network it does not know", async () => {

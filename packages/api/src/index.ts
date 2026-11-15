@@ -92,6 +92,8 @@ export {
   DroppedTimeline,
   NetworkRemoval,
   Acted,
+  Closed,
+  CloseRefusal,
   ActionRequest,
   ActRequest,
   Resume,

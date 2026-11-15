@@ -114,8 +114,8 @@ export interface MarkRead {
 
 /**
  * Close a Timeline: the Daemon's `close`, with `target` a Channel's name or a Direct Message
- * partner's nick. A Channel Self is in is never closed, so the runtime asks whether Self is
- * in it first, and offers to leave it instead.
+ * partner's nick. A Channel Self is in is never closed: the Daemon answers so, and the
+ * runtime offers to leave it instead.
  */
 export interface CloseTimeline {
   readonly _tag: "CloseTimeline";

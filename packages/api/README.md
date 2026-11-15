@@ -31,7 +31,7 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `POST /api/networks/{network}/lookups` | Looks something up, `{ lookup, intent? }`: `Whois { nick }` or `Whowas { nick }`, and waits for the result | `LookedUp { intent, sequence, result }` or `Pending { intent, sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `GET /api/networks/{network}/lookups/{intent}` | A Lookup by its intent, from the Journal | `LookedUp { intent, sequence, result }`, `Pending { intent, sequence }`, or `NotJournaled` | `JournalFailed` |
 | `POST /api/networks/{network}/read` | Marks a Timeline read up to `{ read, target }`: an instant, and a Target, or `null` for the Network's own | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
-| `POST /api/networks/{network}/close` | Closes the Timeline of `{ target }`: a Channel Self is not in, or a Direct Message partner | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
+| `POST /api/networks/{network}/close` | Closes the Timeline of `{ target }`: a Channel Self is not in, or a Direct Message partner | `Closed`, or `Refused` with `Joined` or `NoTimeline`, each with `sequence` | `UnknownNetwork`, `NetworkStopped` |
 | `POST /api/networks/{network}/retry` | Tries connecting now | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `GET /api/networks/{network}/known` | What the Client knows: Session, Self, Channels, members, Users, the Connection's casemapping, the one an Ircd last declared (`declared`, `null` until one has), and `CHANTYPES` while a Session has said it (`chantypes`, `null` otherwise), and the life it is of | `Knowledge` | `UnknownNetwork` |
 | `GET /api/networks/{network}/inspect` | Machine states, caps, ISUPPORT, STS, Features, timers, and Connections, each with how many Lines wait to leave and when the next may | `NetworkInspection` | `UnknownNetwork` |
@@ -92,7 +92,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **A CTCP request goes to one nick, never a Channel,** and `Ping` sends a `PING` whose reply tells the round trip. Nothing waits for a reply, so one that never comes holds nothing open.
 - **A Lookup answers with what it found,** with any `WARN` or `NOTE` its reply held, and any `FAIL` after the first, in `notes`, waiting up to 35 s. `Pending` means no result came in that time: ask again by its intent. A Lookup changes nothing on the Network, so one whose outcome is uncertain can be asked again freely.
 - **A Read Marker only moves forward, and every Frontend shares it**. Marking read is a Frontend's decision, and the Daemon only records it.
-- **A closed Timeline comes back by itself.** A `close` is journaled, so every Frontend agrees and a restart keeps it. A Channel Self is in is never closed, and its `close` is News `Ignored` with `Joined`. A Timeline stays closed until a Message or an Activity arrives in it, which shows it again with its counts. Closing deletes nothing.
+- **A closed Timeline comes back by itself.** A `close` is journaled, so every Frontend agrees and a restart keeps it. A Channel Self is in is never closed: its `close` answers `Refused` with `Joined`, decided in the step that took it, so a Channel joined after the caller last looked is refused too, and a Target that names no one Timeline, such as a list, answers `NoTimeline`. Either is also News `Ignored`. A Timeline stays closed until a Message or an Activity arrives in it, which shows it again with its counts. Closing deletes nothing.
 
 ### News
 

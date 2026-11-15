@@ -114,7 +114,7 @@ Each entry in `src/commands.ts` carries its usage, aliases, and description, whi
 - **Acting is parsed as the Client checks it.** What depends on the Network, such as which modes take a parameter, is read from `PREFIX`, `CHANMODES`, and `CHANTYPES` in the focused Channel's head. Before a head is read, a command that needs them says so and does not guess.
 - **Configuration is changed by intents, never in place.** `/join`, `/part`, `/set`, and `/unset` name an edit, which the runtime applies to the Configuration in force then.
 - **`/query` opens a Timeline by name and never makes one.** It folds the name by the casemapping `known` reports. When `known` cannot be read it opens nothing, since a guessed mapping could open another User's Direct Message.
-- **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the runtime's to ask before anything is sent.
+- **`/close-timeline [#channel|nick]` closes a Timeline by its Target,** the focused one unless named, never a Network's own, and never a Pane, which `/close` closes. Whether Self is in a Channel is the Daemon's to answer.
 - **`/network remove [id] [keep|drop]` only asks.** It names the Network, the focused one unless given, and whether to start on keeping its Timelines or dropping them, and nothing is removed until the Owner confirms.
 - **A Credential's value never goes through the composer, nor any intent.** `/set <credential option>` alone opens a password prompt. A value typed after it, or a raw `PASS`, `AUTHENTICATE`, or `OPER`, is refused, and so is `/oper`, whose refusal names the `oper` options to set instead.
 - **`/next-unread` goes to the Timeline that calls most,** as WeeChat's smart jump does: Highlights, then Direct Messages, then Messages. Activity alone is not enough.
@@ -303,9 +303,9 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 
 ## Closing a Timeline
 
-`@iirc/frontend/closing`: what closes a Timeline from its row (`closeOf`), whether a Target names a Channel Self is in (`isJoined`), and the offer to leave it instead, as a reducer, `reduceLeaving`.
+`@iirc/frontend/closing`: what closes a Timeline from its row (`closeOf`), and the offer to leave a Channel Self is in instead, as a reducer, `reduceLeaving`.
 
-- **A Channel Self is in is never closed.** `isJoined` decides from what the Client knows, its name folded as the Connection folds names, as the Daemon decides, so the Owner is offered to leave it and nothing is sent.
+- **A Channel Self is in is never closed.** The Daemon decides as it steps the close, and its answer, refused as `Joined`, is what offers to leave it, so a join just before the close is never missed.
 - **Leaving is `/part` with its name,** sent once, only once the Owner chooses it, and it does not close the Channel, since the part arrives in it.
 - **Only a Channel's or a Direct Message's Timeline has a Target to close it by.** A Network's own, a Direct Message that no longer follows its partner, and a removed Network's have none.
 

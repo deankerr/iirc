@@ -1,8 +1,8 @@
-import { Knowledge, NetworkId, Timeline } from "@iirc/api";
+import { NetworkId, Timeline } from "@iirc/api";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { closeOf, initialLeaving, isJoined, leaveOf, reduceLeaving } from "./closing.ts";
+import { closeOf, initialLeaving, leaveOf, reduceLeaving } from "./closing.ts";
 import type { Leaving, LeavingEvent } from "./closing.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
@@ -28,29 +28,6 @@ const timelineOf = (
     removed: false,
     unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
     ...more,
-  });
-
-const known = (
-  casemapping: "ascii" | "rfc1459",
-  channels: readonly (readonly [string, "Joined" | "Kicked" | "Wanted"])[]
-) =>
-  Schema.decodeSync(Knowledge)({
-    casemapping,
-    channels: channels.map(([name, standing]) => ({
-      key: name.toLowerCase(),
-      members: [],
-      modes: { _tag: "Unknown" },
-      name,
-      standing,
-      topic: { _tag: "Unknown" },
-      wanted: true,
-    })),
-    chantypes: "#",
-    declared: casemapping,
-    life: 1,
-    self: null,
-    session: { _tag: "Offline", since: null },
-    users: [],
   });
 
 const folded = (events: readonly LeavingEvent[], from: Leaving = initialLeaving) => {
@@ -79,28 +56,6 @@ describe("closing a Timeline", () => {
       direct: { _tag: "CloseTimeline", network: libera, target: "peer" },
       network: undefined,
       removed: undefined,
-    });
-  });
-
-  it("finds a Channel Self is in by its name as the Connection folds it, and only one joined", () => {
-    const held = known("rfc1459", [
-      ["#iirc{a}", "Joined"],
-      ["#gone", "Kicked"],
-      ["#later", "Wanted"],
-    ]);
-
-    expect({
-      folded: isJoined(held, "#IIRC[A]"),
-      kicked: isJoined(held, "#gone"),
-      nick: isJoined(held, "peer"),
-      notHeld: isJoined(held, "#other"),
-      wanted: isJoined(held, "#later"),
-    }).toStrictEqual({
-      folded: true,
-      kicked: false,
-      nick: false,
-      notHeld: false,
-      wanted: false,
     });
   });
 });

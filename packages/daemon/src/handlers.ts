@@ -485,7 +485,6 @@ const networks = HttpApiBuilder.group(
       )
       .handle("close", ({ params, payload }) =>
         runtime.close(NetworkId.make(params.network), payload.target).pipe(
-          Effect.map((sequence) => ({ sequence })),
           Effect.catchTags({
             NetworkStopped: (error) => Effect.fail(networkStopped(params.network, error)),
             UnknownNetwork: (error) => Effect.fail(unknownNetwork(error)),

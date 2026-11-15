@@ -306,7 +306,7 @@ describe("the projector", () => {
           yield* say(call, ":peer!u@h PRIVMSG iirc :psst");
           yield* eventually(holds(store, "peer", "psst"));
 
-          const sequence = yield* Runtime.use((runtime) => runtime.close(libera, "peer"));
+          const { sequence } = yield* Runtime.use((runtime) => runtime.close(libera, "peer"));
 
           yield* eventually(
             store.folded.pipe(Effect.map(({ through }) => (through ?? 0) >= sequence))

@@ -935,7 +935,7 @@ describe("marking read", () => {
 });
 
 describe("closing a Timeline", () => {
-  it("journals a CloseTimeline at the Clock's time, steps it, and answers with its sequence", async () => {
+  it("journals a CloseTimeline at the Clock's time, steps it, and answers Closed with its sequence", async () => {
     const closed: News = {
       _tag: "TimelineClosed",
       where: { _tag: "Direct", existing: true, key: "peer", name: "peer" },
@@ -969,12 +969,35 @@ describe("closing a Timeline", () => {
       })
     );
 
-    expect(result.answer).toBe(2);
+    expect(result.answer).toStrictEqual({ _tag: "Closed", sequence: 2 });
     expect(result.inputs.slice(1)).toStrictEqual([
       { _tag: "CloseTimeline", at: at(1000), target: "peer" },
     ]);
     expect(result.news).toStrictEqual([[closed]]);
     expect(result.unknown).toBeInstanceOf(UnknownNetwork);
+  });
+
+  it("answers with what the step decided, Joined or NoTimeline, whatever the caller knew before", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        const client = scripted([
+          { when: "Configured" },
+          { news: [{ _tag: "Ignored", reason: { _tag: "Joined" } }], when: "CloseTimeline" },
+          { news: [{ _tag: "Ignored", reason: { _tag: "NoTimeline" } }], when: "CloseTimeline" },
+        ]);
+
+        const { runtime } = yield* startRuntime(world, client);
+
+        yield* runtime.configure(libera, configuration);
+
+        return [yield* runtime.close(libera, "#iirc"), yield* runtime.close(libera, "#a,#b")];
+      })
+    );
+
+    expect(result).toStrictEqual([
+      { _tag: "Refused", reason: { _tag: "Joined" }, sequence: 2 },
+      { _tag: "Refused", reason: { _tag: "NoTimeline" }, sequence: 3 },
+    ]);
   });
 });
 

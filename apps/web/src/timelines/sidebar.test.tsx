@@ -3,7 +3,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { TimelineId } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
 import { openOf } from "@iirc/frontend/timelines";
-import { Schema } from "effect";
+import { Redacted, Schema } from "effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,9 +14,10 @@ import { pageState } from "../page/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
 import { paletteSections, pickEntry } from "../palette/atoms.ts";
-import { check } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
+import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
+import { eventually, fakeDaemon, registryFor, run, theKey } from "../testing/fake-daemon.ts";
 import { open, paned, sync, timelinesState } from "./atoms.ts";
+import { leavingState } from "./closing.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -401,7 +402,7 @@ describe("closing a Timeline from the sidebar", () => {
     });
   });
 
-  it("offers to leave a Channel Self is in, from its context menu, sending no close, and leaves it as /part does", async () => {
+  it("offers to leave a Channel the Daemon answers is joined, from its context menu, and leaves it as /part does", async () => {
     const fake = fakeDaemon();
 
     fake.daemon.joined.set("libera", ["#iirc"]);
@@ -428,11 +429,83 @@ describe("closing a Timeline from the sidebar", () => {
       puts: fake.daemon.puts.length,
     }).toStrictEqual({
       channels: [],
-      closes: [],
+      // The close is sent, and the Daemon's `Joined` answer is what opens the offer.
+      closes: [{ network: "libera", target: "#iirc" }],
       // Leaving does not close it: the part shows in it, and it is closed once Self has left.
       listed: ["libera", "#iirc", "#other"],
       offered: "You are in #iirc. Leave it?",
       puts: 1,
+    });
+  });
+
+  it("lets an offer go on signing out", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.joined.set("libera", ["#iirc"]);
+    const registry = await signedIn(undefined, fake);
+
+    await pressButton("More for #iirc");
+    await chooseFromMenu("Close");
+    await settled(() => document.querySelector('[role="alertdialog"]') !== null);
+
+    await act(async () => {
+      await run(registry, signOut, undefined);
+    });
+
+    const out = registry.get(leavingState)._tag;
+
+    await act(async () => {
+      await run(registry, signInWithKey, Redacted.make(theKey));
+    });
+    await settled(() => rows().length === 3);
+
+    expect({
+      dialog: document.querySelector('[role="alertdialog"]'),
+      leaving: registry.get(leavingState)._tag,
+      out,
+    }).toStrictEqual({ dialog: null, leaving: "Idle", out: "Idle" });
+  });
+
+  it("offers nothing from a close's answer that lands after signing out and in again", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.joined.set("libera", ["#iirc"]);
+    fake.daemon.holdCloses = true;
+    const registry = await signedIn(undefined, fake);
+
+    await pressButton("More for #iirc");
+    await chooseFromMenu("Close");
+    await settled(() => fake.daemon.held.closes.length === 1);
+
+    await act(async () => {
+      await run(registry, signOut, undefined);
+      await run(registry, signInWithKey, Redacted.make(theKey));
+    });
+    await settled(() => rows().length === 3);
+
+    // The Daemon answers `Joined` for the close asked under the earlier sign-in. A close
+    // asked after it waits its turn behind it, so once that one is done, so is the first.
+    fake.daemon.holdCloses = false;
+    await doing(() => {
+      for (const release of fake.daemon.held.closes) {
+        release();
+      }
+    });
+    await pressButton("More for #other");
+    await chooseFromMenu("Close");
+    await settled(() => !names().includes("#other"));
+
+    expect({
+      closes: fake.daemon.closes,
+      dialog: document.querySelector('[role="alertdialog"]'),
+      leaving: registry.get(leavingState)._tag,
+    }).toStrictEqual({
+      closes: [
+        { network: "libera", target: "#iirc" },
+        { network: "libera", target: "#other" },
+      ],
+      dialog: null,
+      leaving: "Idle",
     });
   });
 

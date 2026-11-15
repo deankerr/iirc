@@ -1,14 +1,15 @@
 /**
  * Closing a Timeline, as atoms: what carries out a close, and the offer to leave a Channel
- * Self is in, which the core folds. The Daemon never closes a Channel Self is in, so before
- * a close is sent, what the Client knows of the Network is read, and a Channel joined is
- * offered to be left instead, with nothing sent until the Owner chooses. Whether a Timeline
- * is closed comes back on the changes stream, and the sidebar derives it from there.
+ * Self is in, which the core folds. The Daemon never closes a Channel Self is in, and says
+ * so in its answer, decided as the close was stepped, so the page asks nothing first: a
+ * close refused as `Joined` offers to leave the Channel instead, with nothing sent until the
+ * Owner chooses. Whether a Timeline is closed comes back on the changes stream, and the
+ * sidebar derives it from there.
  *
  * @packageDocumentation
  */
-import { initialLeaving, isJoined, leaveOf, reduceLeaving } from "@iirc/frontend/closing";
-import type { LeavingEvent } from "@iirc/frontend/closing";
+import { initialLeaving, leaveOf, reduceLeaving } from "@iirc/frontend/closing";
+import type { Leaving, LeavingEvent } from "@iirc/frontend/closing";
 import type { CloseTimeline } from "@iirc/frontend/commands";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
@@ -18,9 +19,22 @@ import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { configure, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
+import { signedIn } from "../sign-in/atoms.ts";
 
-/** The offer to leave a Channel, as the core folds it. */
-export const leavingState = Atom.make(initialLeaving).pipe(Atom.keepAlive);
+/**
+ * The offer to leave a Channel, as the core folds it, which begins again as nothing offered
+ * whenever the page signs in or out, so an offer never outlives the sign-in it was made in.
+ */
+export const leavingState = Atom.writable(
+  (get) => {
+    get(signedIn);
+
+    return initialLeaving;
+  },
+  (ctx, value: Leaving) => {
+    ctx.setSelf(value);
+  }
+).pipe(Atom.keepAlive);
 
 /**
  * Folds one event into the offer.
@@ -58,8 +72,9 @@ const refusedWith = (close: CloseTimeline, tag: string): Outcome => {
 };
 
 /**
- * Closes a Timeline: reads what the Client knows of its Network, and offers to leave a
- * Channel Self is in, sending nothing, or asks the Daemon to close any other.
+ * Asks the Daemon to close a Timeline, and offers to leave a Channel it refused to close
+ * because Self is in it. An answer that lands once the page signed out, or signed in again,
+ * offers nothing, since its offer would outlive the sign-in it was asked in.
  * @param registry - The registry.
  * @param close - The close.
  * @returns What it came to, in words when it was not done.
@@ -70,32 +85,46 @@ export const closeTimeline = (
 ): Effect.Effect<Outcome, never, DaemonClient> =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
-    const params = { network: close.network };
+    let stayed = registry.get(signedIn);
 
-    const known = yield* client.networks.known({ params }).pipe(
-      Effect.map((knowledge) => ({ _tag: "Known", knowledge }) as const),
-      Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
+    const answer = yield* Effect.acquireUseRelease(
+      Effect.sync(() =>
+        registry.subscribe(signedIn, (now) => {
+          stayed &&= now;
+        })
+      ),
+      () =>
+        client.networks
+          .close({ params: { network: close.network }, payload: { target: close.target } })
+          .pipe(
+            Effect.map((closed) => ({ _tag: "Answered", closed }) as const),
+            Effect.catch((error) => Effect.succeed({ _tag: "Failed", error: error._tag } as const))
+          ),
+      (unsubscribe) => Effect.sync(unsubscribe)
     );
 
-    if (known._tag === "Failed") {
-      return known.error === "Unauthorized" || known.error === "UnknownNetwork"
-        ? refusedWith(close, known.error)
-        : ({
-            _tag: "NotDone",
-            message: `The Daemon did not say whether you are in ${close.target}, so nothing was closed. Try again.`,
-          } satisfies Outcome);
+    if (answer._tag === "Failed") {
+      return refusedWith(close, answer.error);
     }
 
-    if (isJoined(known.knowledge, close.target)) {
-      happened(registry, { _tag: "Offered", channel: close.target, network: close.network });
+    const { closed } = answer;
 
+    if (closed._tag === "Closed") {
       return { _tag: "Done" } satisfies Outcome;
     }
 
-    return yield* client.networks.close({ params, payload: { target: close.target } }).pipe(
-      Effect.as<Outcome>({ _tag: "Done" }),
-      Effect.catch((error) => Effect.succeed(refusedWith(close, error._tag)))
-    );
+    if (closed.reason._tag === "NoTimeline") {
+      return {
+        _tag: "NotDone",
+        message: `${close.target} names no one Timeline, so nothing was closed.`,
+      } satisfies Outcome;
+    }
+
+    if (stayed) {
+      happened(registry, { _tag: "Offered", channel: close.target, network: close.network });
+    }
+
+    return { _tag: "Done" } satisfies Outcome;
   });
 
 /** The Owner let the offer go. */

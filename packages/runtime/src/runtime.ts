@@ -8,6 +8,7 @@ import { credentialsOf, IntentId } from "@iirc/client";
 import type {
   Action,
   Client,
+  IgnoredReason,
   Inspection,
   Instant,
   Lookup,
@@ -182,6 +183,41 @@ export interface Reading {
   /** The instant read up to. */
   readonly read: Instant;
 }
+
+/**
+ * Why the Client closed nothing in the step that took a `CloseTimeline`: `Joined`, a
+ * Channel Self is in, or `NoTimeline`, a Target that names no one Timeline.
+ */
+export type CloseRefusal = Extract<IgnoredReason, { readonly _tag: "Joined" | "NoTimeline" }>;
+
+/**
+ * What a `close` answers: the `CloseTimeline` stepped and the Timeline reported closed, or
+ * refused by the Client in that same step. Either way it was journaled at `sequence`.
+ */
+export type CloseOutcome =
+  | { readonly _tag: "Closed"; readonly sequence: Sequence }
+  | { readonly _tag: "Refused"; readonly sequence: Sequence; readonly reason: CloseRefusal };
+
+/**
+ * What the step that took a `CloseTimeline` came to, from its News: `TimelineClosed`, or
+ * why it was ignored. A step ignored for another reason, as one before any Configuration
+ * is, which the Runtime never steps for a Network it holds, closed no Timeline either.
+ * @param news - The step's News.
+ * @returns Why nothing was closed, or none when the Timeline was.
+ */
+const closeRefusalIn = (news: readonly News[]): CloseRefusal | undefined => {
+  if (news.some((one) => one._tag === "TimelineClosed")) {
+    return undefined;
+  }
+
+  for (const one of news) {
+    if (one._tag === "Ignored" && one.reason._tag === "Joined") {
+      return one.reason;
+    }
+  }
+
+  return { _tag: "NoTimeline" };
+};
 
 /** Why the Client refused a `Say` or an `Act` in the step that took it: no Session, or no Line can carry it. */
 export type StepRefusal = Extract<RefusedReason, { readonly _tag: "Offline" | "Unsendable" }>;
@@ -383,13 +419,15 @@ export interface RuntimeService {
   ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /**
    * Journals a `CloseTimeline`: the Owner closed the Timeline of a Target, a Channel or a
-   * Direct Message partner named as a `Say`'s Target is. It waits until it is stepped. The
-   * Client reports it as News unless Self is in that Channel, and keeps nothing of it.
+   * Direct Message partner named as a `Say`'s Target is. It waits until it is stepped, and
+   * answers with what that step decided: `Closed`, or `Refused` with `Joined` when Self is
+   * in that Channel as it is stepped, or `NoTimeline` when the Target names no one Timeline.
+   * The Client keeps nothing of it.
    */
   readonly close: (
     network: NetworkId,
     target: string
-  ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
+  ) => Effect.Effect<CloseOutcome, UnknownNetwork | NetworkStopped>;
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
@@ -830,7 +868,13 @@ export const makeRuntime = <S>(
         Effect.flatMap(find(id), (network) =>
           Effect.map(
             tell(network, (at) => ({ _tag: "CloseTimeline", at, target })),
-            ({ sequence }) => sequence
+            ({ news, sequence }) => {
+              const reason = closeRefusalIn(news);
+
+              return reason === undefined
+                ? ({ _tag: "Closed", sequence } as const)
+                : ({ _tag: "Refused", reason, sequence } as const);
+            }
           )
         ),
       configuration: (id) =>

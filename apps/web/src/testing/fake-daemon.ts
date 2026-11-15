@@ -13,6 +13,7 @@ import {
 } from "@iirc/api";
 import type {
   ChannelHeader,
+  Closed,
   Knowledge,
   LookResult,
   Member,
@@ -59,6 +60,7 @@ type Answer =
   | Readonly<Record<string, string>>
   | (typeof NetworkEntry.Encoded)[]
   | typeof Knowledge.Encoded
+  | typeof Closed.Encoded
   | typeof TimelineList.Encoded
   | typeof TimelineWindow.Encoded
   | typeof Located.Encoded
@@ -478,6 +480,7 @@ export const fakeDaemon = () => {
   const membersHeld: (() => void)[] = [];
   const knownHeld: (() => void)[] = [];
   const saysHeld: (() => void)[] = [];
+  const closesHeld: (() => void)[] = [];
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
@@ -518,10 +521,21 @@ export const fakeDaemon = () => {
     hangChanges: false,
     /** Whether a request to follow the `ui` options never begins its answer. */
     hangUiChanges: false,
-    /** Releases each request held: a read of a Channel's head, its members, or `known`, or a `say`. */
-    held: { channel: channelsHeld, known: knownHeld, members: membersHeld, says: saysHeld },
+    /**
+     * Releases each request held: a read of a Channel's head, its members, or `known`, a
+     * `say`, or a `close`.
+     */
+    held: {
+      channel: channelsHeld,
+      closes: closesHeld,
+      known: knownHeld,
+      members: membersHeld,
+      says: saysHeld,
+    },
     /** Whether each read of a Channel's head waits until released. */
     holdChannels: false,
+    /** Whether each `close`, once stepped, waits until released before it is answered. */
+    holdCloses: false,
     /** Whether each read of `known` waits until released. */
     holdKnown: false,
     /** Whether each `at/{sequence}` read waits until released. */
@@ -547,7 +561,7 @@ export const fakeDaemon = () => {
     interject: 0,
     /**
      * The Channels Self is in on each Network, by name, as `known` gives them: none until a
-     * test says. A `close` of one is ignored, as the Client ignores it.
+     * test says. A `close` of one is refused as `Joined`, as the Client ignores it.
      */
     joined: new Map<string, readonly string[]>(),
     /** Each intent journaled, and its sequence, which `said` answers from. */
@@ -1066,9 +1080,10 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * Closes a Timeline, as the Daemon does: a Channel Self is in is ignored, and otherwise
-   * the Timeline named, in any ASCII case, is `closed`, which the changes stream says in
-   * one step, and stays so until something arrives in it.
+   * Closes a Timeline, as the Daemon does: a Channel Self is in is refused as `Joined`, and
+   * otherwise the Timeline named, in any ASCII case, is `closed`, which the changes stream
+   * says in one step, and stays so until something arrives in it. The answer waits while
+   * `holdCloses` says, though the close was already stepped.
    * @param network - The Network.
    * @param init - The request.
    * @returns The answer.
@@ -1109,7 +1124,20 @@ export const fakeDaemon = () => {
       });
     }
 
-    return json(200, { sequence });
+    if (daemon.holdCloses) {
+      const { promise, resolve } = Promise.withResolvers<undefined>();
+
+      closesHeld.push(() => {
+        resolve(undefined);
+      });
+      await promise;
+    }
+
+    const closed: typeof Closed.Encoded = joined
+      ? { _tag: "Refused", reason: { _tag: "Joined" }, sequence }
+      : { _tag: "Closed", sequence };
+
+    return json(200, closed);
   };
 
   /**

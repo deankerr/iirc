@@ -344,6 +344,28 @@ export const Acted = Schema.Union([
 export type Acted = typeof Acted.Type;
 
 /**
+ * Why the Client closed nothing in the step that took a `close`: `Joined`, a Channel Self
+ * is in as it was stepped, or `NoTimeline`, a Target that names no one Timeline.
+ */
+export const CloseRefusal = Schema.TaggedUnion({ Joined: {}, NoTimeline: {} });
+
+/** The decoded form of {@link CloseRefusal}. */
+export type CloseRefusal = typeof CloseRefusal.Type;
+
+/**
+ * What a `close` answers, once it is journaled and stepped: `Closed`, its Timeline reported
+ * closed, or `Refused`, by the Client in that same step. It is the step's own decision, so
+ * a Channel joined after the caller last looked is `Refused` with `Joined`.
+ */
+export const Closed = Schema.Union([
+  Schema.TaggedStruct("Closed", { sequence: Sequence }),
+  Schema.TaggedStruct("Refused", { reason: CloseRefusal, sequence: Sequence }),
+]);
+
+/** The decoded form of {@link Closed}. */
+export type Closed = typeof Closed.Type;
+
+/**
  * Whether a `say` or an `act` under an intent was journaled. `Journaled` means it is
  * stepped on every restart, so it must not be given again, though its Lines may not have
  * reached the Ircd. `NotJournaled` means it never was, and giving it again under the same
