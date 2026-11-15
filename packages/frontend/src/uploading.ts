@@ -498,10 +498,14 @@ export const followed = (
     return state;
   }
 
+  const carriedTo = (place: Place) => after.carried.get(place) ?? place;
+
   return settled({
-    ...state,
+    // A send held back stays held with the files it waits on.
+    held: new Set([...state.held].map(carriedTo)),
+    notes: state.notes,
     pending: state.pending.map((one) => {
-      const place = after.carried.get(one.place) ?? one.place;
+      const place = carriedTo(one.place);
       const was = draftOf(before, one.place).text;
       const now = draftOf(after, place).text;
       const typed = place === one.place && typing?.place === place ? typing : undefined;

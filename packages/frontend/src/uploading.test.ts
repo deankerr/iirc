@@ -570,6 +570,24 @@ describe("what a composer says of a send held back", () => {
     ]).toStrictEqual([0, undefined, undefined]);
   });
 
+  it("stays with a draft carried to its Timeline while its file uploads", () => {
+    const draft: Place = "draft libera peer";
+    const before = typed(initialComposers, "hi", draft);
+
+    const atDraft = fold(initialUploading, ...arrived(2, [file("a")], on, draft), {
+      _tag: "HeldBack",
+      place: draft,
+    });
+
+    const after = reduceComposers(before, { _tag: "Carried", from: draft, to: elsewhere });
+    const carried = followed(atDraft, before, after);
+
+    expect([heldNoteIn(carried, after, elsewhere), carried.held.has(draft)]).toStrictEqual([
+      "Wait for a.png to finish uploading, or cancel it.",
+      false,
+    ]);
+  });
+
   it("is of one composer, and goes with a dismissed note", () => {
     const state = fold(addedAt(4, file("a")), held, { _tag: "HeldBack", place: elsewhere });
     const dismissed = fold(state, { _tag: "NoteDismissed", place });
