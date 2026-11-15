@@ -5,7 +5,18 @@ import { Upload, UploadsStatus } from "@iirc/api";
 import { ByteStoreUnavailable } from "@iirc/byte-store";
 import type { ByteStoreService } from "@iirc/byte-store";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
-import { Context, Effect, Exit, Latch, Layer, Option, Schema, Scope, Stream } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Latch,
+  Layer,
+  Option,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
 import { describe, expect, it } from "vitest";
 
@@ -1147,6 +1158,36 @@ describe("the link listener", () => {
     ];
 
     expect(result).toStrictEqual([expected, expected]);
+  });
+
+  it("serves every chunk of a read the store gives in parts, after the first", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        // A store that gives the bytes a few at a time, with a pause between each part.
+        const parted: ByteStoreService = {
+          ...served.world.bytes.store,
+          read: () =>
+            Effect.succeed(
+              Stream.fromIterable(
+                Array.from({ length: Math.ceil(png.length / 8) }, (_, index) =>
+                  png.slice(index * 8, index * 8 + 8)
+                )
+              ).pipe(Stream.tap(() => Effect.sleep(Duration.millis(5))))
+            ),
+        };
+
+        Object.assign(served.world.bytes, { store: parted });
+
+        return yield* bytesOf(yield* fromLinks(port, pathOf(record.link)));
+      })
+    );
+
+    expect(result).toStrictEqual(png);
   });
 
   it("binds at uploads.listen while Uploads are on, rebinds when it changes, and closes when they go off", async () => {
