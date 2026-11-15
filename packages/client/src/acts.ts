@@ -130,8 +130,12 @@ const inviteLines = (run: Run, { nick: name, channel }: Of<"Invite">) =>
     ? one(run, invite(name, channel), [name, channel])
     : undefined;
 
+// A Channel the Configuration wants is parted by changing the Configuration, since a
+// `PART` of one would be undone as a kick is, as a raw `PART` of one is refused.
 const partLines = (run: Run, { channel, reason }: Of<"Part">) =>
-  isChannel(run, channel) ? one(run, part(channel, reason ?? undefined), [channel]) : undefined;
+  isChannel(run, channel) && run.state.channels.get(folder(run.state)(channel))?.wanted !== true
+    ? one(run, part(channel, reason ?? undefined), [channel])
+    : undefined;
 
 const nickLines = (run: Run, { nick: name }: Of<"Nick">) =>
   isNick(run, name) && within(run, "NICKLEN", name, rfcNickLength)
@@ -750,7 +754,7 @@ interface Tie {
   readonly params: readonly number[];
 }
 
-const onChannels: ReadonlySet<string> = new Set(["INVITE", "KICK", "MODE", "TOPIC"]);
+const onChannels: ReadonlySet<string> = new Set(["INVITE", "KICK", "MODE", "PART", "TOPIC"]);
 const nicks: Tie = { commands: new Set(["NICK"]), params: [1] };
 
 /**

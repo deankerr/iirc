@@ -160,13 +160,11 @@ const modesAnswered = (run: Run, target: string, changes: readonly ModeChange[])
   }
 };
 
-// What Self did, live, answers the Line of an action that asked for it, Self's own
-// `AWAY` says whether Self is away, and a User's `QUIT` forgets the `PING`s sent to them.
-const settled = (run: Run, activity: Activity): void => {
-  if (isOperAnswer(activity)) {
-    return;
-  }
-
+// Self's own topic change, kick, or part answers the Line of an action on its Channel.
+const channelSettled = (
+  run: Run,
+  activity: Activity & { readonly _tag: "TopicChanged" | "Kicked" | "Parted" }
+): void => {
   switch (activity._tag) {
     case "TopicChanged": {
       if (isSelf(run, activity.by)) {
@@ -180,6 +178,36 @@ const settled = (run: Run, activity: Activity): void => {
       if (isSelf(run, activity.by)) {
         answered(run, "KICK", [activity.channel], nickAnswer(activity.nick));
       }
+
+      break;
+    }
+
+    case "Parted": {
+      if (isSelf(run, activity.nick)) {
+        answered(run, "PART", [activity.channel]);
+      }
+
+      break;
+    }
+
+    default: {
+      activity satisfies never;
+    }
+  }
+};
+
+// What Self did, live, answers the Line of an action that asked for it, Self's own
+// `AWAY` says whether Self is away, and a User's `QUIT` forgets the `PING`s sent to them.
+const settled = (run: Run, activity: Activity): void => {
+  if (isOperAnswer(activity)) {
+    return;
+  }
+
+  switch (activity._tag) {
+    case "TopicChanged":
+    case "Kicked":
+    case "Parted": {
+      channelSettled(run, activity);
 
       break;
     }
@@ -215,7 +243,6 @@ const settled = (run: Run, activity: Activity): void => {
     }
 
     case "Joined":
-    case "Parted":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
