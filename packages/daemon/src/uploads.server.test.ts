@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 
 import { BunHttpServer } from "@effect/platform-bun";
 import { Upload, UploadsStatus } from "@iirc/api";
+import { ByteStoreUnavailable } from "@iirc/byte-store";
 import type { ByteStoreService } from "@iirc/byte-store";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
 import { Context, Effect, Exit, Latch, Layer, Option, Schema, Scope, Stream } from "effect";
@@ -1108,6 +1109,44 @@ describe("the link listener", () => {
         "content-type": "text/plain; charset=utf-8",
       },
     ]);
+  });
+
+  it("answers 503 with no-store, for GET and HEAD, when the store fails before the first byte", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        // A store that holds the bytes, and then fails the read before any arrives.
+        const failing: ByteStoreService = {
+          ...served.world.bytes.store,
+          read: () => Effect.succeed(Stream.fail(new ByteStoreUnavailable({ reason: "reset" }))),
+        };
+
+        Object.assign(served.world.bytes, { store: failing });
+
+        const path = pathOf(record.link);
+        const get = yield* fromLinks(port, path);
+        const head = yield* fromLinks(port, path, { method: "HEAD" });
+
+        return [get, head].map((got) => [statusOf(got), headersOf(got)]);
+      })
+    );
+
+    const expected = [
+      503,
+      {
+        ...safety,
+        "cache-control": "no-store",
+        "content-disposition": "inline",
+        "content-length": "25",
+        "content-type": "text/plain; charset=utf-8",
+      },
+    ];
+
+    expect(result).toStrictEqual([expected, expected]);
   });
 
   it("binds at uploads.listen while Uploads are on, rebinds when it changes, and closes when they go off", async () => {

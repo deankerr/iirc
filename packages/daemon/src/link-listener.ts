@@ -14,7 +14,7 @@
 import { BunHttpServer } from "@effect/platform-bun";
 import { UploadId } from "@iirc/api";
 import type { ListenAddress } from "@iirc/api";
-import { Duration, Effect, Exit, Layer, Option, Ref, Scope, Stream } from "effect";
+import { Duration, Effect, Exit, Layer, Option, Ref, Scope, Sink, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { OwnerConfiguration } from "./options.ts";
@@ -99,19 +99,25 @@ const answer = Effect.gen(function* () {
     return notFound;
   }
 
-  return yield* uploads.open(UploadId.make(id)).pipe(
-    Effect.map(({ bytes, record }) =>
-      // A `HEAD` is answered with the same headers, and the server sends no body.
-      HttpServerResponse.stream(bytes, {
-        contentLength: record.size,
-        contentType: record.type,
-        headers: {
-          ...safety,
-          "cache-control": "no-cache",
-          "content-disposition": contentDisposition(shownInPlace(record.type), record.safeName),
-        },
-      })
-    ),
+  return yield* Effect.gen(function* () {
+    const { bytes, record } = yield* uploads.open(UploadId.make(id));
+
+    // The first chunk is read here, inside the error boundary, so a store that is found to
+    // be unreachable before any byte arrives answers 503 rather than resetting the
+    // Connection. A failure after the first byte can only end the body early, as the
+    // status and headers are already sent.
+    const [first, rest] = yield* Stream.peel(bytes, Sink.take<Uint8Array>(1));
+
+    return HttpServerResponse.stream(Stream.concat(Stream.fromIterable(first), rest), {
+      contentLength: record.size,
+      contentType: record.type,
+      headers: {
+        ...safety,
+        "cache-control": "no-cache",
+        "content-disposition": contentDisposition(shownInPlace(record.type), record.safeName),
+      },
+    });
+  }).pipe(
     Effect.catchTags({
       ByteStoreUnavailable: () => Effect.succeed(unavailable),
       NoSuchUpload: () => Effect.succeed(notFound),

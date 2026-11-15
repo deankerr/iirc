@@ -164,7 +164,7 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 | `UnknownUpload` | 404 | No Upload has that id. |
 | `UploadsOff` | 409 | Uploads are off, and `missing` names the options that are not set. Nothing was read or kept. |
 | `UploadTooLarge` | 413 | The body passed `maxSize`, so it was cut off there, and nothing was kept. |
-| `StoreUnavailable` | 503 | The bucket could not be reached, refused what was asked, or a key the options name is not held, or the Daemon began to stop, so nothing was kept. |
+| `StoreUnavailable` | 503 | The bucket could not be reached, refused what was asked, or a key the options name is not held, so nothing was kept. It is also the answer when the Daemon began to stop, and then the Upload may or may not have been kept, if the Daemon was already journaling it. |
 | `NetworkStopped` | 503 | The Network stopped, so its outcome is `Uncertain`, below. |
 | `TimelinesFailed` | 503 | The Timelines could not be read. They are derived, and a read that waited on a lock may succeed when asked again, while a damaged store is made again from the Journal when the Daemon restarts. |
 | `VaultFailed` | 503 | The Vault could not read or write its file. It tries again on the next call, so once the Owner fixes the file or its directory, the same request succeeds. |
