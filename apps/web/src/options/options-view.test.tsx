@@ -317,6 +317,38 @@ describe("the options view, under store and uploads", () => {
     ]);
   });
 
+  it("shows a Credential another device held and named as held, followed from the Daemon", async () => {
+    const fake = signedIn();
+    const first = await page(fake);
+    const second = await page(fake);
+
+    await first.type("/set store.s3.access*");
+    await second.type("/set store.s3.access*");
+    await eventually(() => fake.daemon.ownerFollowers.length === 2);
+    await readAt(first.registry, 0);
+    await readAt(second.registry, 0);
+    await second.type("/set store.s3.accessKeyId");
+
+    const field = second.container.querySelector<HTMLInputElement>('input[name="value"]');
+
+    if (field === null) {
+      throw new Error("no prompt");
+    }
+
+    await typeInto(field, "the-bucket's-access-key-id");
+    await doing(() => {
+      field.form?.requestSubmit();
+    });
+    await settled(
+      () =>
+        rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
+    );
+
+    expect(rowOf(first.container, "store.s3.accessKeyId")?.[1]).toBe(
+      "Owner.store.s3.accessKeyId held"
+    );
+  });
+
   it("holds a Credential option's value in the Vault, sets the option to its name, and shows only whether it is held", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);

@@ -108,12 +108,17 @@ export const ownerSync = runtime
 
         yield* events.pipe(
           Stream.timeout(idle),
+          // A Change may name a Credential another device just held, and the Vault is not
+          // followed, so the names held are read again with it.
           Stream.runForEach((event) =>
-            Effect.sync(() => {
-              if (event.event === "changed") {
-                ownerRead(registry, event.data);
-              }
-            })
+            event.event === "changed"
+              ? Effect.andThen(
+                  Effect.sync(() => {
+                    ownerRead(registry, event.data);
+                  }),
+                  readHeld(registry)
+                )
+              : Effect.void
           )
         );
       });
