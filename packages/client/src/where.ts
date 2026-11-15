@@ -361,7 +361,8 @@ export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): Activ
  * Moves what the Client remembers of where Self said something to a partner who changed
  * nick, as their Timeline follows the nick, so a reply that comes later is shown where the
  * Message stands, and of who asked for each CTCP answer, so an `Unsent` of it is reported
- * where its request is. A Target is one Channel or one nick, since a `Say` has no list, and a
+ * where its request is, and of the remembered `PING`s, so a reply from the nick it went to
+ * is still measured. A Target is one Channel or one nick, since a `Say` has no list, and a
  * Target that names the old nick, by the Network's casemapping now, names the new one.
  * Channels never move.
  *
@@ -421,5 +422,11 @@ export const followSays = (run: Run, where: readonly Where[]): void => {
   updateOpen(run, (open) => ({
     ...open,
     lastSaid: { NOTICE: follow(open.lastSaid.NOTICE), PRIVMSG: follow(open.lastSaid.PRIVMSG) },
+    // A `PING` follows the User it went to. One whose nick another User took is forgotten.
+    pings: open.pings.flatMap((ping) => {
+      const nick = follow(ping.nick);
+
+      return nick === undefined ? [] : [{ ...ping, nick }];
+    }),
   }));
 };

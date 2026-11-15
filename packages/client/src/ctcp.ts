@@ -252,8 +252,8 @@ const ctcpWhere = (run: Run, ctcp: Ctcp, fromUser: boolean): readonly Where[] =>
 /**
  * How long a reply to one of the Owner's `PING`s took: from the instant its request was
  * sent to this step's, both as the Runtime journaled them, in milliseconds. Only a live
- * reply from the User the `PING` went to, by the casemapping now, with its token, tells
- * one, and only once, since the `PING` is forgotten as it does.
+ * reply to Self from the User the `PING` went to, by the casemapping now, with its token,
+ * tells one, and only once, since the `PING` is forgotten as it does.
  * @param run - The step.
  * @param ctcp - The reply.
  * @returns The round trip, or `null` for a reply to no `PING` Self remembers.
@@ -263,7 +263,7 @@ const roundTripOf = (run: Run, ctcp: Ctcp): number | null => {
   const fold = folder(run.state);
 
   const index =
-    ctcp.command === "PING"
+    ctcp.command === "PING" && isSelf(run, ctcp.target)
       ? pings.findIndex((ping) => ping.token === ctcp.args && fold(ping.nick) === fold(ctcp.nick))
       : -1;
 

@@ -731,6 +731,60 @@ describe("a PING the Owner sends", () => {
     expect(first).not.toBe(second);
   });
 
+  it("is measured by a reply from the User who asked after they changed nick", () => {
+    const run = played([
+      ...inChannel,
+      lines(
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
+        "<< :peer!u@h NICK other",
+        "+1s",
+        pong(first, "other"),
+        `?? activity CtcpReply other iirc PING round-trip=1000ms in=existing-direct:other in=network :${first}`
+      ),
+    ]);
+
+    expect(remembered(run)).toStrictEqual([]);
+  });
+
+  it("is not measured by another User who took the nick it was sent to", () => {
+    const run = played([
+      registered(base),
+      joined(base, "#iirc", ["peer", "bob"]),
+      lines(
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
+        "<< :peer!u@h NICK other",
+        "<< :bob!u@h NICK peer",
+        "+1s",
+        pong(first),
+        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${first}`,
+        pong(first, "other"),
+        `?? activity CtcpReply other iirc PING round-trip=1000ms in=existing-direct:other in=network :${first}`
+      ),
+    ]);
+
+    expect(remembered(run)).toStrictEqual([]);
+  });
+
+  it("is not measured by a reply to a Channel, which leaves it for the direct reply", () => {
+    const run = played([
+      ...inChannel,
+      lines(
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
+        "+1s",
+        `<<\\ :peer!u@h NOTICE #iirc :\\x01PING ${first}\\x01`,
+        `?? activity CtcpReply peer #iirc PING in=channel:#iirc :${first}`,
+        "+1s",
+        pong(first),
+        `?? activity CtcpReply peer iirc PING round-trip=2000ms in=existing-direct:peer in=network :${first}`
+      ),
+    ]);
+
+    expect(remembered(run)).toStrictEqual([]);
+  });
+
   it("gives no round trip to a reply with another token, from another User, or unasked for", () => {
     played([
       ...inChannel,
