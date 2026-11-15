@@ -42,7 +42,7 @@ import { applyModes, readModes } from "./modes.ts";
 import { isOperAnswer } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import { oper, operAnswered } from "./oper.ts";
-import { reclaim } from "./reclaim.ts";
+import { reclaim, reclaimAsked, reclaimOver, reclaimRefused, reclaimTaken } from "./reclaim.ts";
 import {
   abandon,
   capLine,
@@ -231,7 +231,10 @@ const settled = (run: Run, activity: Activity): void => {
 
     case "NickChanged": {
       if (isSelf(run, activity.from)) {
-        answered(run, "NICK", [activity.to]);
+        // The Client's own ask answers a change to its nick when it was sent first.
+        if (!reclaimTaken(run, activity.to)) {
+          answered(run, "NICK", [activity.to]);
+        }
       } else if (!isSameNick(run, activity.from, activity.to)) {
         // A case-only change keeps the nick, so it leaves nothing to take.
         reclaim(run, activity.from);
@@ -759,7 +762,8 @@ const rejection = (line: Line): string | undefined => {
 /**
  * Gives a numeric tied to nothing by label to the oldest of what waits for it on the
  * floor: a Lookup whose reply it can be part of, an action's Line whose error it names,
- * or the Client's own `MODE` query it answers, by the order they were sent.
+ * the Client's own `MODE` query it answers, or the Client's own ask for a nick it refuses,
+ * by the order they were sent. The ask settles no intent.
  * @param run - The step.
  * @param line - The Line, live, outside any batch, and with no label.
  */
@@ -767,9 +771,12 @@ const floor = (run: Run, line: Line): void => {
   const looking = floorLookup(run, line);
   const tied = tiedAction(run, line);
   const query = queryAnswered(run, line);
+  const asked = reclaimRefused(run, line);
   const first = Math.min(looking?.order ?? Infinity, tied?.order ?? Infinity);
 
-  if (query !== undefined && query.order < first) {
+  if (asked !== undefined && asked.order < Math.min(first, query?.order ?? Infinity)) {
+    reclaimOver(run);
+  } else if (query !== undefined && query.order < first) {
     modesQueryOver(run);
   } else if (looking !== undefined && (tied === undefined || looking.order < tied.order)) {
     collectFloor(run, looking, line);
@@ -859,6 +866,35 @@ const toQuery = (run: Run, arrival: Arrival, reply: StandardReply): boolean => {
 };
 
 /**
+ * Gives a standard reply on the floor to the Client's own ask for a nick, when it names
+ * `NICK` and the ask was sent before any Lookup or action it could answer: a `FAIL` ends
+ * the ask, and a `WARN` or `NOTE` settles nothing. The ask is News of nothing, so the reply
+ * is shown in the Network's own Timeline.
+ * @param run - The step.
+ * @param arrival - The Line, as ingress refined it.
+ * @param reply - The standard reply.
+ * @returns Whether the ask took it.
+ */
+const toReclaim = (run: Run, arrival: Arrival, reply: StandardReply): boolean => {
+  const asked = reclaimAsked(run);
+  const looking = lookupByCommand(run, reply);
+  const acting = actionByCommand(run, reply.command);
+  const first = Math.min(looking?.order ?? Infinity, acting?.order ?? Infinity);
+
+  if (asked === undefined || upperCaseAscii(reply.command) !== "NICK" || asked.order > first) {
+    return false;
+  }
+
+  if (reply.kind === "FAIL") {
+    reclaimOver(run);
+  }
+
+  reportReply(run, arrival, reply, [{ _tag: "Network" }]);
+
+  return true;
+};
+
+/**
  * A standard reply that refused no intent, shown with what it answers. A labelled one is
  * shown where its intent belongs, as `labeled-response` marked it. One live outside any
  * batch or label is tied by the command it names to the oldest of what awaits an answer
@@ -896,7 +932,7 @@ const standardReply = (run: Run, arrival: Arrival): void => {
 
   const floor = arrival.batch === undefined && !line.tags.has("label");
 
-  if (floor && toQuery(run, arrival, reply)) {
+  if (floor && (toQuery(run, arrival, reply) || toReclaim(run, arrival, reply))) {
     return;
   }
 

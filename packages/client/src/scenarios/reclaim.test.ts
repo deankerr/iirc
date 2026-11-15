@@ -50,6 +50,9 @@ const asks = (run: Played<State>): readonly (readonly Param[])[] =>
     )
     .slice(2);
 
+const refusals = (run: Played<State>) =>
+  run.steps.flatMap((step) => step.news.filter((news) => news._tag === "Refused"));
+
 const selfNick = (run: Played<State>) => client.known(run.state).self?.nick;
 
 describe("taking a nick back", () => {
@@ -211,5 +214,94 @@ describe("taking a nick back", () => {
 
     expect(after.timers).toStrictEqual(before.timers);
     expect(after.steps.at(-1)?.outputs.map((output) => output._tag)).toStrictEqual(["Send"]);
+  });
+
+  describe("while the Owner sends a `NICK` of their own", () => {
+    const asked = lines("<< :iirc!u@h QUIT :gone", ">> NICK iirc", "!! nick iirc", ">> NICK iirc");
+
+    it("answers a refusal to the ask, and a second to the Owner's line", () => {
+      const run = played(asked, lines("<< :irc.test 433 other iirc :Nickname is already in use"));
+
+      expect(refusals(run)).toStrictEqual([]);
+
+      const second = played(
+        asked,
+        lines(
+          "<< :irc.test 433 other iirc :Nickname is already in use",
+          "<< :irc.test 433 other iirc :Nickname is already in use",
+          "?? refused i1 Rejected 433 nick=iirc in=network"
+        )
+      );
+
+      expect(refusals(second)).toHaveLength(1);
+    });
+
+    it("answers a success to the ask, and leaves the Owner's line awaited", () => {
+      const run = played(
+        asked,
+        lines(
+          "<< :other!u@h NICK :iirc",
+          "<< :irc.test 433 iirc iirc :Nickname is already in use",
+          "?? refused i1 Rejected 433 nick=iirc in=network"
+        )
+      );
+
+      expect(selfNick(run)).toBe("iirc");
+      expect(refusals(run)).toHaveLength(1);
+    });
+  });
+
+  describe("when the Ircd answers the ask with a standard reply", () => {
+    const failed = lines(
+      "<< :iirc!u@h QUIT :gone",
+      ">> NICK iirc",
+      "<< :irc.test FAIL NICK NICKNAME_IN_USE iirc :Nickname is already in use"
+    );
+
+    it("settles no intent for a FAIL, and shows it in the Network's own Timeline", () => {
+      const run = played(failed);
+
+      const shown = run.steps
+        .flatMap((step) => step.news)
+        .filter((news) => news._tag === "Activity");
+
+      expect(
+        run.steps.flatMap((step) => step.news).filter((news) => news._tag === "Refused")
+      ).toStrictEqual([]);
+      expect(shown.at(-1)).toMatchObject({
+        activity: { _tag: "StandardReply", command: "NICK", kind: "FAIL" },
+        where: [{ _tag: "Network" }],
+      });
+    });
+
+    it("goes to the ask and not to the Owner's line sent after it", () => {
+      const run = played(
+        lines(
+          "<< :iirc!u@h QUIT :gone",
+          ">> NICK iirc",
+          "!! nick iirc",
+          ">> NICK iirc",
+          "<< :irc.test FAIL NICK NICKNAME_IN_USE iirc :Nickname is already in use",
+          "<< :irc.test 433 other iirc :Nickname is already in use",
+          "?? refused i1 Rejected 433 nick=iirc in=network"
+        )
+      );
+
+      expect(refusals(run)).toHaveLength(1);
+    });
+
+    it("forgets the ask, so a later numeric is the Owner's", () => {
+      const run = played(
+        failed,
+        lines(
+          "!! nick iirc",
+          ">> NICK iirc",
+          "<< :irc.test 433 other iirc :Nickname is already in use",
+          "?? refused i1 Rejected 433 nick=iirc in=network"
+        )
+      );
+
+      expect(selfNick(run)).toBe("other");
+    });
   });
 });
