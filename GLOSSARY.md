@@ -14,11 +14,13 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
 
-**Change**: Something the Owner altered, such as Configuration or a Read Marker. _Avoid_: Update, mutation
+**Change**: Something altered by the Owner, or by the Daemon on the Owner's behalf, such as Configuration, a Read Marker, or an Upload. _Avoid_: Update, mutation
 
 **Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
 
 **Credential**: A secret the Owner gives the Daemon to use on their behalf, which it can use but never reveal. Nothing a Network sends is a Credential. _Avoid_: Password, secret
+
+**Upload**: A file the Owner gave the Daemon to host, reached by a link anyone can open. _Avoid_: Attachment, file, media item, asset
 
 **Sign-in**: A browser's proof that it was given a key, which it holds as a cookie so that no script ever holds the key. _Avoid_: Session, login
 
