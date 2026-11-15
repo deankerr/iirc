@@ -71,16 +71,19 @@ export interface Pending extends AddedFile {
 }
 
 /**
- * Every file pending, in the order added, and the note each composer shows while Uploads
- * are off, naming the options not set.
+ * Every file pending, in the order added, the note each composer shows while Uploads are
+ * off, naming the options not set, and the composers whose Owner tried to send while a file
+ * added to them was still uploading. That is all that is kept of it: what it says is
+ * derived from the files pending, by `heldNoteIn`, and it is let go of once none waits.
  */
 export interface Uploading {
   readonly pending: readonly Pending[];
   readonly notes: ReadonlyMap<Place, readonly OwnerOptionName[]>;
+  readonly held: ReadonlySet<Place>;
 }
 
 /** Nothing pending, and no note. */
-export const initialUploading: Uploading = { notes: new Map(), pending: [] };
+export const initialUploading: Uploading = { held: new Set(), notes: new Map(), pending: [] };
 
 /**
  * Whether Uploads were on as files were added, as the Daemon said, or that it did not say.
@@ -101,7 +104,10 @@ export type Readiness = UploadsStatus | { readonly _tag: "NoAnswer" };
  * - `Failed`: a file was not kept, or might not have been.
  * - `Off`: the Daemon said Uploads are off as a file was sent, so it was not kept.
  * - `Dropped`: a file was cancelled, or its failure dismissed.
- * - `NoteDismissed`: the note under a composer was dismissed.
+ * - `HeldBack`: the Owner tried to send a draft while a file added to it was uploading, and
+ *   it was not sent. The composer says why for as long as a file added to it waits.
+ * - `NoteDismissed`: the note under a composer was dismissed, and what it says of a draft
+ *   held back.
  */
 export type UploadingEvent =
   | {
@@ -120,6 +126,7 @@ export type UploadingEvent =
   | { readonly _tag: "Failed"; readonly key: string; readonly failure: UploadFailure }
   | { readonly _tag: "Off"; readonly key: string; readonly missing: readonly OwnerOptionName[] }
   | { readonly _tag: "Dropped"; readonly key: string }
+  | { readonly _tag: "HeldBack"; readonly place: Place }
   | { readonly _tag: "NoteDismissed"; readonly place: Place };
 
 /**
@@ -179,6 +186,23 @@ const withNote = (
   }
 
   return { ...state, notes };
+};
+
+/**
+ * A state with no composer held back that has no file waiting, so a draft held back once
+ * says nothing once its files are in, failed, or cancelled, and nothing later brings it
+ * back.
+ * @param state - What is pending.
+ * @returns What is pending now.
+ */
+const settled = (state: Uploading): Uploading => {
+  const waiting = new Set(
+    state.pending.filter((one) => one.stage._tag !== "Failed").map((one) => one.place)
+  );
+
+  return [...state.held].every((place) => waiting.has(place))
+    ? state
+    : { ...state, held: new Set([...state.held].filter((place) => waiting.has(place))) };
 };
 
 const without = (state: Uploading, key: string): Uploading => ({
@@ -257,15 +281,7 @@ const checked = (state: Uploading, keys: readonly string[], readiness: Readiness
   return after;
 };
 
-/**
- * Folds one event into what is pending. Files added are pending at once, checking, and
- * those found while Uploads are off are let go of: the composer notes it instead, naming
- * the options to set, and the note goes once files are found there while they are on.
- * @param state - What is pending.
- * @param event - What happened.
- * @returns What is pending now.
- */
-export const reduceUploading = (state: Uploading, event: UploadingEvent): Uploading => {
+const folded = (state: Uploading, event: UploadingEvent): Uploading => {
   switch (event._tag) {
     case "Added": {
       const { anchor, files, place } = event;
@@ -319,8 +335,16 @@ export const reduceUploading = (state: Uploading, event: UploadingEvent): Upload
       return without(state, event.key);
     }
 
+    case "HeldBack": {
+      return { ...state, held: new Set(state.held).add(event.place) };
+    }
+
     case "NoteDismissed": {
-      return withNote(state, event.place, undefined);
+      const held = new Set(state.held);
+
+      held.delete(event.place);
+
+      return withNote({ ...state, held }, event.place, undefined);
     }
 
     default: {
@@ -328,6 +352,17 @@ export const reduceUploading = (state: Uploading, event: UploadingEvent): Upload
     }
   }
 };
+
+/**
+ * Folds one event into what is pending. Files added are pending at once, checking, and
+ * those found while Uploads are off are let go of: the composer notes it instead, naming
+ * the options to set, and the note goes once files are found there while they are on.
+ * @param state - What is pending.
+ * @param event - What happened.
+ * @returns What is pending now.
+ */
+export const reduceUploading = (state: Uploading, event: UploadingEvent): Uploading =>
+  settled(folded(state, event));
 
 /**
  * One edit of a draft's text: what lay from `start` to `oldEnd` before lies from `start` to
@@ -463,7 +498,7 @@ export const followed = (
     return state;
   }
 
-  return {
+  return settled({
     ...state,
     pending: state.pending.map((one) => {
       const place = after.carried.get(one.place) ?? one.place;
@@ -475,7 +510,7 @@ export const followed = (
         ? one
         : { ...one, anchor: anchorAfter(one.anchor, was, now, typed), place };
     }),
-  };
+  });
 };
 
 /** A link put into a draft: the text after, and where and how much was put in. */
@@ -553,7 +588,7 @@ export const uploaded = (
     return {
       composers,
       inserted: undefined,
-      state: withNote(without(state, key), file.place, ["uploads.publicUrl"]),
+      state: settled(withNote(without(state, key), file.place, ["uploads.publicUrl"])),
     };
   }
 
@@ -579,7 +614,7 @@ export const uploaded = (
       timeline: place,
     }),
     inserted: { ...insertion, place },
-    state: { ...state, pending },
+    state: settled({ ...state, pending }),
   };
 };
 
@@ -636,6 +671,20 @@ export const heldBack = (
 
   return `Wait for ${names} to finish uploading, or cancel ${waiting.length === 1 ? "it" : "them"}.`;
 };
+
+/**
+ * What a composer says of a send held back, or none: while the Owner's attempt stands, why
+ * the draft cannot be sent now, which names only the files still checking or being sent.
+ * @param state - What is pending.
+ * @param composers - The composers.
+ * @param place - The composer's place.
+ * @returns Why, in words, or none.
+ */
+export const heldNoteIn = (
+  state: Uploading,
+  composers: Composers,
+  place: Place
+): string | undefined => (state.held.has(place) ? heldBack(state, composers, place) : undefined);
 
 /**
  * Why a file was not kept, or might not have been, in words.

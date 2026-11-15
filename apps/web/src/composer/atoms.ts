@@ -34,7 +34,7 @@ import type {
 import { allScope } from "@iirc/frontend/palette";
 import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Origin, Timelines } from "@iirc/frontend/timelines";
-import { heldBack } from "@iirc/frontend/uploading";
+import { heldBack, reduceUploading } from "@iirc/frontend/uploading";
 import type { Typing } from "@iirc/frontend/uploading";
 import { Effect, Option, Schedule, Semaphore, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -835,20 +835,24 @@ const letGoOfTyped = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
 };
 
 /**
- * Says under a composer why its draft cannot be sent while a file added to it is still
- * uploading, as the core decides, if it cannot.
+ * Remembers that a draft was not sent while a file added to it is still uploading, as the
+ * core decides, if it was not. The composer says why while any file still waits, which the
+ * core derives from the files pending, so the words are never kept.
  * @param registry - The registry.
  * @param timeline - Where the draft is.
  * @returns Whether it was held back.
  */
 const heldBackNow = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
-  const message = heldBack(registry.get(uploadingState), registry.get(composerState), timeline);
+  const held = heldBack(registry.get(uploadingState), registry.get(composerState), timeline);
 
-  if (message !== undefined) {
-    happened(registry, { _tag: "Noticed", message, timeline });
+  if (held !== undefined) {
+    registry.set(
+      uploadingState,
+      reduceUploading(registry.get(uploadingState), { _tag: "HeldBack", place: timeline })
+    );
   }
 
-  return message !== undefined;
+  return held !== undefined;
 };
 
 /**

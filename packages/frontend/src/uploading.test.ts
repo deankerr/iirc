@@ -14,6 +14,7 @@ import {
   failureText,
   followed,
   heldBack,
+  heldNoteIn,
   initialUploading,
   insertLink,
   noteIn,
@@ -510,6 +511,73 @@ describe("sending a draft while its files upload", () => {
     const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
 
     expect(heldBack(addedAt(0, file("a")), credential, place)).toBeUndefined();
+  });
+});
+
+describe("what a composer says of a send held back", () => {
+  const composers = typed(initialComposers, "look");
+  const held: UploadingEvent = { _tag: "HeldBack", place };
+
+  it("says nothing until a send was held back", () => {
+    expect(heldNoteIn(addedAt(4, file("a")), composers, place)).toBeUndefined();
+  });
+
+  it("says why, as heldBack does, for the files waiting then", () => {
+    const state = fold(addedAt(4, file("a"), file("b")), held);
+
+    expect(heldNoteIn(state, composers, place)).toBe(heldBack(state, composers, place));
+  });
+
+  it("names only the files still waiting, as each is kept, fails, or is cancelled", () => {
+    const state = fold(addedAt(4, file("a"), file("b"), file("c")), held);
+    const kept = uploaded(state, composers, "a", "https://f.test/a.png");
+
+    const failed = fold(kept.state, {
+      _tag: "Failed",
+      failure: { _tag: "StoreUnavailable" },
+      key: "b",
+    });
+
+    expect([
+      heldNoteIn(kept.state, kept.composers, place),
+      heldNoteIn(failed, kept.composers, place),
+    ]).toStrictEqual([
+      "Wait for b.png and c.png to finish uploading, or cancel them.",
+      "Wait for c.png to finish uploading, or cancel it.",
+    ]);
+  });
+
+  it.each([
+    ["kept", (state: Uploading) => uploaded(state, composers, "a", "https://f.test/a.png").state],
+    [
+      "failed",
+      (state: Uploading) =>
+        fold(state, { _tag: "Failed", failure: { _tag: "StoreUnavailable" }, key: "a" }),
+    ],
+    ["cancelled", (state: Uploading) => fold(state, { _tag: "Dropped", key: "a" })],
+    [
+      "refused as Uploads turned off",
+      (state: Uploading) => fold(state, { _tag: "Off", key: "a", missing: [] }),
+    ],
+  ])("lets go of it once the last file is %s, and no file added later brings it back", (_, end) => {
+    const done = end(fold(addedAt(4, file("a")), held));
+    const later = fold(done, ...arrived(0, [file("b")], on));
+
+    expect([
+      done.held.size,
+      heldNoteIn(done, composers, place),
+      heldNoteIn(later, composers, place),
+    ]).toStrictEqual([0, undefined, undefined]);
+  });
+
+  it("is of one composer, and goes with a dismissed note", () => {
+    const state = fold(addedAt(4, file("a")), held, { _tag: "HeldBack", place: elsewhere });
+    const dismissed = fold(state, { _tag: "NoteDismissed", place });
+
+    expect([
+      heldNoteIn(state, composers, elsewhere),
+      heldNoteIn(dismissed, composers, place),
+    ]).toStrictEqual([undefined, undefined]);
   });
 });
 

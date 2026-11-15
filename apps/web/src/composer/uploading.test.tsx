@@ -253,6 +253,16 @@ const alerts = (container: HTMLElement) =>
     (one) => one.textContent
   );
 
+/**
+ * What a composer says of a send held back while a file uploads.
+ * @param container - The page.
+ * @returns Each such notice, in words.
+ */
+const waitNotices = (container: HTMLElement) =>
+  [...container.querySelectorAll('[role="alert"] p')].flatMap((one) =>
+    one.textContent?.startsWith("Wait for") ? [one.textContent] : []
+  );
+
 const linkOf = (id: number, name: string) => `${publicUrl}/${String(id).padStart(16, "0")}/${name}`;
 
 describe("uploading from the Composer", () => {
@@ -617,7 +627,7 @@ describe("uploading from the Composer", () => {
     await settled(() => uploader.sending.length === 1);
     await enter(container);
 
-    const notice = container.querySelector('[role="alert"] p')?.textContent;
+    const notice = waitNotices(container);
     const held = { said: daemon.says.length, value: composerOf(container).value };
 
     uploader.sending[0]?.release();
@@ -627,9 +637,114 @@ describe("uploading from the Composer", () => {
 
     expect({ held, notice, said: daemon.says.map((one) => one.text) }).toStrictEqual({
       held: { said: 0, value: "look" },
-      notice: "Wait for cat.png to finish uploading, or cancel it.",
+      notice: ["Wait for cat.png to finish uploading, or cancel it."],
       said: [`look ${linkOf(10, "cat.png")}`],
     });
+  });
+
+  it("lets go of the notice once the upload finishes, without sending again", async () => {
+    const { container, daemon, uploader } = await signedIn();
+
+    uploader.hold = true;
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    await enter(container);
+
+    const while_ = waitNotices(container);
+
+    uploader.sending[0]?.release();
+    await settled(() => composerOf(container).value.includes(publicUrl));
+
+    expect({ after: waitNotices(container), said: daemon.says.length, while_ }).toStrictEqual({
+      after: [],
+      said: 0,
+      while_: ["Wait for cat.png to finish uploading, or cancel it."],
+    });
+  });
+
+  it("lets go of the notice once the upload is cancelled", async () => {
+    const { container, uploader } = await signedIn();
+
+    uploader.hold = true;
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    await enter(container);
+
+    const while_ = waitNotices(container);
+
+    await press(button(container, "Cancel upload of cat.png"));
+
+    expect({ after: waitNotices(container), while_ }).toStrictEqual({
+      after: [],
+      while_: ["Wait for cat.png to finish uploading, or cancel it."],
+    });
+  });
+
+  it("lets go of the notice once the upload fails", async () => {
+    const { container, daemon, uploader } = await signedIn();
+
+    daemon.uploadRefusals.push({
+      body: { _tag: "StoreUnavailable", reason: "the bucket did not answer" },
+      status: 503,
+    });
+    uploader.hold = true;
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    await enter(container);
+
+    const while_ = waitNotices(container);
+
+    uploader.sending[0]?.release();
+    await settled(() => alerts(container).length === 1);
+
+    expect({ after: waitNotices(container), while_ }).toStrictEqual({
+      after: [],
+      while_: ["Wait for cat.png to finish uploading, or cancel it."],
+    });
+  });
+
+  it("names only the files still uploading, as each is done", async () => {
+    const { container, uploader } = await signedIn();
+
+    uploader.hold = true;
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"), image("dog.png"));
+    await settled(() => uploader.sending.length === 2);
+    await enter(container);
+
+    const both = waitNotices(container);
+
+    uploader.sending[0]?.release();
+    await settled(() => composerOf(container).value.includes("cat.png"));
+
+    const one = waitNotices(container);
+
+    uploader.sending[1]?.release();
+    await settled(() => composerOf(container).value.includes("dog.png"));
+
+    expect({ both, none: waitNotices(container), one }).toStrictEqual({
+      both: ["Wait for cat.png and dog.png to finish uploading, or cancel them."],
+      none: [],
+      one: ["Wait for dog.png to finish uploading, or cancel it."],
+    });
+  });
+
+  it("does not bring the notice back for a file added later", async () => {
+    const { container, uploader } = await signedIn();
+
+    uploader.hold = true;
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    await enter(container);
+    await press(button(container, "Cancel upload of cat.png"));
+    await paste(container, image("dog.png"));
+    await settled(() => uploader.sending.length === 2);
+
+    expect(waitNotices(container)).toStrictEqual([]);
   });
 
   it("sends with a failed file still shown, as it holds nothing back", async () => {
@@ -681,7 +796,7 @@ describe("uploading from the Composer", () => {
       shown: shown.length,
     }).toStrictEqual({
       aborted: [true],
-      pending: { notes: new Map(), pending: [] },
+      pending: { held: new Set(), notes: new Map(), pending: [] },
       previews: 0,
       revoked: true,
       sending: 1,

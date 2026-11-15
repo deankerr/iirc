@@ -3,19 +3,27 @@
  * read in the page, for an image every browser draws, else an icon, its name and size, and
  * how much was sent, with a button that cancels it, or, once it failed, why, with one that
  * dismisses it. And the note while Uploads are off, with a way to the options that turn
- * them on.
+ * them on, and why a send was held back while any file waits.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Place } from "@iirc/frontend/composer";
-import { failureOf, failureText, noteIn, offNote, pendingIn } from "@iirc/frontend/uploading";
+import {
+  failureOf,
+  failureText,
+  heldNoteIn,
+  noteIn,
+  offNote,
+  pendingIn,
+} from "@iirc/frontend/uploading";
 import type { Pending } from "@iirc/frontend/uploading";
 import { sizeText } from "@iirc/frontend/uploads";
 
 import { openOptions } from "../options/atoms.ts";
 import { Button, IconButton } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
+import { composerState } from "./atoms.ts";
 import { uploadingState } from "./uploading-state.ts";
 import { dismissUploadNote, dropUpload, previews } from "./uploading.ts";
 
@@ -83,11 +91,28 @@ export const PendingUploads = ({ place }: { readonly place: Place }) => {
   const state = useAtomValue(uploadingState);
   const options = useAtomSet(openOptions);
   const dismissNote = useAtomSet(dismissUploadNote);
+  const composers = useAtomValue(composerState);
   const files = pendingIn(state, place);
   const missing = noteIn(state, place);
+  // Derived as it is drawn from the files still pending, so it names only those, and goes
+  // with the last of them, whichever way it went.
+  const held = heldNoteIn(state, composers, place);
 
   return (
     <>
+      {held === undefined ? null : (
+        <div className={`${styles.notice} ${styles.failure}`} role="alert">
+          <p>{held}</p>
+          <IconButton
+            icon="close"
+            label="Dismiss the note"
+            onPress={() => {
+              dismissNote(place);
+            }}
+            size="small"
+          />
+        </div>
+      )}
       {missing === undefined ? null : (
         <div className={styles.notice}>
           <output className={styles.note}>{offNote(missing)}</output>
