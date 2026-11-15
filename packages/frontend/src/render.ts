@@ -217,8 +217,8 @@ const linked = (text: string, style: Style): readonly Inline[] => {
 /**
  * Text a Network sent, as a view draws it: mIRC formatting read into styles, links found in
  * each run, control characters shown as symbols, and bidirectional formatting closed at
- * the end of each run. A link inside a run of one style is found, and one that formatting
- * splits is shown as text.
+ * the end of each run. Links are found in each run of one style on its own, so a link
+ * that formatting splits is a link only up to the split.
  * @param text - The text, as it arrived.
  * @returns Its inlines, in order.
  */

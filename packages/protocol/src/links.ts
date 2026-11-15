@@ -133,8 +133,8 @@ export const linksInRun = (run: string): readonly LinkInRun[] => {
 
 /**
  * Finds the links in a Message's text, which may hold mIRC formatting codes. Each span of
- * one style is searched on its own, so a link that formatting splits is not found, as a
- * Frontend draws it.
+ * one style is searched on its own, as a Frontend draws it, so a link that formatting
+ * splits is found only up to the split.
  * @param text - The Message's text, as it arrived.
  * @returns Its links in order.
  */
