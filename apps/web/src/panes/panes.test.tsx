@@ -680,12 +680,12 @@ describe("the Panes", () => {
         logNamed("#other") !== null
     );
 
-    // The Owner scrolls `#other` back, to the row at 120 pixels, and focuses its log.
+    // The Owner scrolls `#other` back, to the row at 140 pixels, and focuses its log.
     const log = logNamed("#other");
 
     await act(async () => {
       if (log !== null) {
-        log.scrollTop = 120;
+        log.scrollTop = 140;
         log.dispatchEvent(new Event("scroll"));
         log.focus();
       }
@@ -732,7 +732,7 @@ describe("the Panes", () => {
       reads: [],
       row: true,
       same: true,
-      scrolled: 120,
+      scrolled: 140,
     });
   });
 

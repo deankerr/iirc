@@ -147,6 +147,7 @@ export {
   ActivityShown,
   Colour,
   ColoursShown,
+  DayShown,
   EnterKey,
   FontFamily,
   FontShown,

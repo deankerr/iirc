@@ -214,6 +214,20 @@ export const TimeShown = Schema.Literals([
 export type TimeShown = typeof TimeShown.Type;
 
 /**
+ * How a day is written where a Timeline's day changes: `full`, `long`, `medium`, or
+ * `short`, as the device's language writes a date at that length, or `iso`, as
+ * `2026-11-15`. The first four are the `dateStyle`s of `Intl.DateTimeFormat`.
+ */
+export const DayShown = Schema.Literals(["full", "long", "medium", "short", "iso"]).annotate({
+  default: "full",
+  description:
+    "How a day is written where the day changes: full, long, medium, or short, as the device's language writes a date, or iso, as 2026-11-15.",
+});
+
+/** The decoded form of {@link DayShown}. */
+export type DayShown = typeof DayShown.Type;
+
+/**
  * Which Activity a Channel's Timeline shows: all of it, all but joins, parts, and quits
  * (`quiet`), or none. It changes what is drawn, never what is counted.
  */
@@ -431,6 +445,7 @@ export const UiOptions = Schema.Struct({
   activity: ActivityShown,
   colours: ColoursShown,
   dark: themeForScheme("dark", "solarized-dark"),
+  day: DayShown,
   enter: EnterKey,
   font: FontShown,
   leading: Leading,

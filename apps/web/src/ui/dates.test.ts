@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dateOf, formattedAt } from "./dates.ts";
+import { dateOf, formattedAt, zone } from "./dates.ts";
 
 const clock = new Intl.DateTimeFormat("en-GB", {
   hour: "2-digit",
@@ -24,5 +24,49 @@ describe("an instant shown", () => {
       negative: undefined,
       ordinary: "01:00",
     });
+  });
+});
+
+/**
+ * The date of an instant in the device's zone, as numbers.
+ * @param at - The instant.
+ * @returns Its year, month, and day.
+ */
+const asLocal = (at: number) => {
+  const date = new Date(at);
+
+  return [date.getFullYear(), date.getMonth(), date.getDate()];
+};
+
+/**
+ * The date of an instant moved by the device's zone, read in UTC, as numbers.
+ * @param at - The instant.
+ * @returns Its year, month, and day.
+ */
+const asUtc = (at: number) => {
+  const shifted = new Date(at + (zone(at) ?? Number.NaN));
+
+  return [shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()];
+};
+
+describe("the device's zone", () => {
+  it("gives the offset in force at an instant in milliseconds east, and none past a Date's range", () => {
+    const at = new Date(2026, 10, 15, 12).getTime();
+
+    expect({
+      hostile: zone(9_000_000_000_000_000),
+      ordinary: zone(at),
+    }).toStrictEqual({
+      hostile: undefined,
+      ordinary: -new Date(at).getTimezoneOffset() * 60_000,
+    });
+  });
+
+  it("keeps the seconds of a historical offset, so the instant plus it is the local time", () => {
+    // Paris kept its mean time, 9 minutes 21 seconds east, until 1911: under TZ=Europe/Paris
+    // these two fall either side of local midnight, which an offset in minutes would miss.
+    const instants = [Date.UTC(1890, 0, 1, 23, 50, 38), Date.UTC(1890, 0, 1, 23, 50, 39)];
+
+    expect(instants.map(asUtc)).toStrictEqual(instants.map(asLocal));
   });
 });

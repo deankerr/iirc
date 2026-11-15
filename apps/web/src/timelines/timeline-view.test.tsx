@@ -246,6 +246,16 @@ const logOf = () => {
 };
 
 /**
+ * Each day line's words and the day it is dated, in the order the log draws them.
+ * @returns The lines.
+ */
+const dayLines = () =>
+  [...logOf().querySelectorAll<HTMLElement>("p time[datetime]")].map((one) => [
+    one.textContent,
+    one.getAttribute("datetime"),
+  ]);
+
+/**
  * How the log is laid out, as a browser would and happy-dom does not: how tall its view is,
  * and how tall what it holds is, which a test changes to scroll back, how tall each row is,
  * and how wide the view is, which a test changes to wrap the rows again.
@@ -432,11 +442,13 @@ const readScrolledUp = async (shared: ReadRule, device?: ReadRule) => {
   uiRead(registry, { options: { ...uiDefaults, read: shared }, sequence: 1 });
   registry.set(deviceUi, device === undefined ? {} : { read: device });
   registry.set(pageState, { compact: false, focused: false, visible: true });
-  layout.view = 100;
-  layout.content = 240;
+  // The start, the day, ten items, and the "new" divider, each a row of 20, of which the
+  // view shows the first six: up to the third item.
+  layout.view = 120;
+  layout.content = 260;
   await openFromPalette();
   await settled(() => registry.get(openTimeline)._tag === "Shown");
-  await scrollTo(0, 240);
+  await scrollTo(0, 260);
   registry.set(pageState, { compact: false, focused: true, visible: true });
   await pause(250);
 
@@ -543,19 +555,19 @@ describe("what the view says it shows", () => {
   it("marks nothing when only a Gap after the last item is in view", async () => {
     const { daemon, registry } = await signedIn([{ count: 1, from: cursor(2500, 3), to: null }]);
 
-    // The start, the "new" divider, two items, and the Gap, each a row of 20: the view
-    // shows the Gap alone.
+    // The start, the day, the "new" divider, two items, and the Gap, each a row of 20: the
+    // view shows the Gap alone.
     layout.view = 15;
-    layout.content = 100;
+    layout.content = 120;
     await openFromPalette();
     await settled(() => registry.get(openTimeline)._tag === "Shown");
-    await scrollTo(85, 100);
+    await scrollTo(105, 120);
     await pause(200);
     const gapOnly = daemon.reads.length;
 
     // Taller, the view shows the last item above the Gap too.
     layout.view = 40;
-    await scrollTo(60, 100);
+    await scrollTo(80, 120);
     await settled(() => daemon.reads.length === 1);
 
     expect({ gapOnly, reads: daemon.reads }).toStrictEqual({
@@ -618,7 +630,7 @@ describe("what the view says it shows", () => {
 
   it("keeps the line read where it was when ui.activity hides or shows rows above it", async () => {
     // Messages at odd steps, joins at even ones, 60 in all: the start of the Timeline is
-    // the first row, so step `n` is row `n`.
+    // the first row, then the day, so step `n` is row `n + 1`.
     const items = Array.from({ length: 60 }, (_, index) =>
       index % 2 === 0 ? message(index + 1) : joined(index + 1)
     );
@@ -630,7 +642,7 @@ describe("what the view says it shows", () => {
 
     // Scrolled back, with the join at step 20 at the top of the view, and line 21 below it,
     // past the "new" divider above the first unread row.
-    await scrollTo(420, 100_000);
+    await scrollTo(440, 100_000);
 
     const offsetOf = (text: string) => {
       const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
@@ -663,7 +675,7 @@ describe("what the view says it shows", () => {
       before: 20,
       // The join at the top hidden, line 19 before it takes its place, so line 21 stays
       // where it was, and the view stands ten rows higher with the joins above hidden.
-      quiet: { offset: 20, top: 220 },
+      quiet: { offset: 20, top: 240 },
     });
   });
 
@@ -746,8 +758,8 @@ describe("what the view says it shows", () => {
     await openFromPalette();
     await settled(() => registry.get(openTimeline)._tag === "Shown");
 
-    // Join 59, row 38, at the top of the view, and line 61 two rows below it.
-    await scrollTo(760, 100_000);
+    // Join 59, row 39, at the top of the view, and line 61 two rows below it.
+    await scrollTo(780, 100_000);
 
     const offsetOf = (text: string) => {
       const row = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].find((one) =>
@@ -777,11 +789,12 @@ describe("what the view says it shows", () => {
       await Promise.resolve();
     });
 
-    // Every row before it hidden, line 61 is the first row, scrolled no higher than the top.
+    // Every row before it hidden, line 61 is the first after the day's, scrolled no higher
+    // than the top. The day's row, new to the view, is as tall as a line is estimated to be.
     expect({ before, clamped, quiet: offsetOf("line 61") }).toStrictEqual({
       before: 40,
       clamped: 0,
-      quiet: 0,
+      quiet: 21,
     });
   });
 
@@ -1055,7 +1068,7 @@ describe("what the view says it shows", () => {
         await Promise.resolve();
       });
 
-      return logOf().querySelector("time")?.title;
+      return logOf().querySelector<HTMLElement>("time[title]")?.title;
     };
 
     const written = (options: Intl.DateTimeFormatOptions) =>
@@ -1086,6 +1099,85 @@ describe("what the view says it shows", () => {
       withSeconds: written({ ...twentyFour, second: "2-digit" }),
     });
     expect(titles.twelve).not.toBe(titles.twentyFour);
+  });
+
+  describe("where the day changes", () => {
+    // Local noon on three days, the last two on consecutive days, so no zone moves one across midnight.
+    const days = [
+      new Date(2026, 10, 14, 12),
+      new Date(2026, 10, 15, 12),
+      new Date(2026, 10, 15, 13),
+    ];
+
+    const onDays = days.map((day, index) => ({
+      ...message(index + 1),
+      position: cursor(day.getTime(), index + 1),
+    }));
+
+    const opened = async () => {
+      const found = await signedIn([], onDays);
+
+      await openFromPalette();
+      await settled(() => found.registry.get(openTimeline)._tag === "Shown");
+      await settled(() => logOf().textContent?.includes("line 3"));
+
+      return found;
+    };
+
+    it("is a line at the top and between items of different days, in the Owner's words for a day", async () => {
+      await opened();
+
+      const full = new Intl.DateTimeFormat(undefined, { dateStyle: "full" });
+
+      expect(dayLines()).toStrictEqual([
+        [full.format(days[0]), "2026-11-14"],
+        [full.format(days[1]), "2026-11-15"],
+      ]);
+
+      // The rows that are a day or a line, in order, apart from the start and the "new" divider.
+      const order = [...logOf().querySelectorAll<HTMLElement>("[data-index]")].flatMap((row) => {
+        if (row.querySelector("p time[datetime]") !== null) {
+          return ["day"];
+        }
+
+        const text = row.textContent?.replace(/^\S+ /u, "") ?? "";
+
+        return text.startsWith("<peer>") ? [text] : [];
+      });
+
+      expect(order).toStrictEqual([
+        "day",
+        "<peer> line 1",
+        "day",
+        "<peer> line 2",
+        "<peer> line 3",
+      ]);
+    });
+
+    it("is still a line when no line shows a time", async () => {
+      const { registry } = await opened();
+
+      await act(async () => {
+        registry.set(deviceUi, { time: "none" });
+        await Promise.resolve();
+      });
+
+      expect(dayLines().map(([, dated]) => dated)).toStrictEqual(["2026-11-14", "2026-11-15"]);
+    });
+
+    it("is written as ui.day says", async () => {
+      const { registry } = await opened();
+
+      await act(async () => {
+        registry.set(deviceUi, { day: "iso" });
+        await Promise.resolve();
+      });
+
+      expect(dayLines()).toStrictEqual([
+        ["2026-11-14", "2026-11-14"],
+        ["2026-11-15", "2026-11-15"],
+      ]);
+    });
   });
 });
 
