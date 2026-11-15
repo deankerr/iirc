@@ -43,6 +43,7 @@ import type {
   TimelineChangesEvent,
   UiEvent,
   Upload,
+  UploadsEvent,
   WindowQuery,
 } from "@iirc/api";
 import { IntentId } from "@iirc/client";
@@ -1165,11 +1166,6 @@ const upload = ({ link, record }: Shown): Upload => ({
   type: record.type,
   ...(record.name !== undefined && { name: record.name }),
 });
-
-/** An event of the stream of Upload Changes, as the contract's `changes` takes it. */
-type UploadsEvent =
-  | { readonly data: Upload; readonly event: "changed"; readonly id: number }
-  | { readonly data: object; readonly event: "heartbeat" };
 
 const storeUnavailable = (error: { readonly reason: string }) =>
   new StoreUnavailable({ reason: error.reason });
