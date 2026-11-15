@@ -591,6 +591,26 @@ describe("lines", () => {
     ]);
   });
 
+  it("shows an answer to Self's OPER by its numeric alone, a refusal as refused", () => {
+    expect(
+      [
+        activity({ _tag: "OperGranted", nick: "iirc" }),
+        activity({ _tag: "OperRefused", nick: "iirc", reply: "491" }),
+      ].map((each) => {
+        const line = lineOf(each);
+
+        return [
+          line._tag === "Description" && line.tone,
+          line._tag === "Description" && line.marker,
+          read(line),
+        ];
+      })
+    ).toStrictEqual([
+      ["Activity", "--", "<iirc> is now an IRC operator"],
+      ["Refused", "--", "<iirc> was refused as an IRC operator (491)"],
+    ]);
+  });
+
   it("describes a Session's start and end, and a failed Connection, never in an Ircd's words", () => {
     const wire: readonly (typeof ItemContent.Encoded)[] = [
       { _tag: "SessionBegan", at: 0, nick: "iirc" },

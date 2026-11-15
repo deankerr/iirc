@@ -445,7 +445,9 @@ const CtcpAnswer = Schema.TaggedUnion({
  * reply to no `PING` the Owner sent. A `CtcpSent` is a request the Owner sent to a nick,
  * shown where that User's replies are. A `CtcpUnsent` is an answer Self sent to a request,
  * by who asked, where, and its command, that never left after all, shown where the request
- * was.
+ * was. `OperGranted` and `OperRefused` answer the `OPER` Self sent as its Session began, in
+ * the Network's own Timeline: Self, by its nick, is an IRC operator now, or the Ircd refused
+ * it with the numeric `reply`: `464` for the password, `491` for Self's host, or `461`.
  */
 export const Activity = Schema.TaggedUnion({
   AwayChanged: { away: Schema.NullOr(Schema.Struct({ message: Untrusted })), nick: Untrusted },
@@ -460,6 +462,8 @@ export const Activity = Schema.TaggedUnion({
   Kicked: { by: Untrusted, channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   ModeChanged: { by: Untrusted, changes: Schema.Array(ModeChange), target: Untrusted },
   NickChanged: { from: Untrusted, to: Untrusted },
+  OperGranted: { nick: Untrusted },
+  OperRefused: { nick: Untrusted, reply: Schema.Literals(["461", "464", "491"]) },
   Parted: { channel: Untrusted, nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   Quit: { nick: Untrusted, reason: Schema.NullOr(Untrusted) },
   StandardReply: standardReply,

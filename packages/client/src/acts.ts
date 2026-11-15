@@ -334,7 +334,8 @@ const modeLines = (run: Run, { target, changes }: Of<"Mode">) => {
  * Commands a Line written as text may not carry. Cap negotiation is the Client's own,
  * and an `ACK` it did not ask for is ignored, so the Ircd and the Client would disagree.
  * `PASS`, `AUTHENTICATE`, and `OPER` carry a Credential, and a Line written as text is
- * journaled as it was written.
+ * journaled as it was written. `OPER` is sent from the Configuration instead, as each
+ * Session begins.
  */
 const unquotable: ReadonlySet<string> = new Set(["AUTHENTICATE", "CAP", "OPER", "PASS"]);
 

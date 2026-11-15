@@ -39,7 +39,9 @@ import { followRenames, refoldMarkers } from "./markers.ts";
 import { channelTest, derive, hasMeaning, isSelf, rulesNow, unfit } from "./meaning.ts";
 import { askModes, modesQueryOver, queryAnswered } from "./modes-query.ts";
 import { applyModes, readModes } from "./modes.ts";
+import { isOperAnswer } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
+import { oper, operAnswered } from "./oper.ts";
 import {
   abandon,
   capLine,
@@ -161,6 +163,10 @@ const modesAnswered = (run: Run, target: string, changes: readonly ModeChange[])
 // What Self did, live, answers the Line of an action that asked for it, Self's own
 // `AWAY` says whether Self is away, and a User's `QUIT` forgets the `PING`s sent to them.
 const settled = (run: Run, activity: Activity): void => {
+  if (isOperAnswer(activity)) {
+    return;
+  }
+
   switch (activity._tag) {
     case "TopicChanged": {
       if (isSelf(run, activity.by)) {
@@ -411,6 +417,7 @@ const welcome = (run: Run, line: Line): void => {
       // the echo of our own `JOIN`.
       mask: { _tag: "Unknown" },
       nick,
+      opering: false,
       realname: { _tag: "Known", at: phase.opened, from: "ours", value: realname },
       server: line.source ?? link.ircd.host,
     },
@@ -418,6 +425,8 @@ const welcome = (run: Run, line: Line): void => {
   run.news.push({ _tag: "SessionBegan", at: run.at, nick });
   // A service login is told before anything else, so the Channels can wait on it.
   identify(run);
+  // An operator login is sent as each Session begins, and its answer awaited.
+  oper(run);
   // The Owner's away outlives Sessions: each begins by saying it again.
   resendAway(run);
   joinWanted(run);
@@ -652,6 +661,11 @@ const handlers: ReadonlyMap<string, Handler> = new Map<string, Handler>([
       }
     },
   ],
+  // `381` grants the `OPER` sent as the Session began, and `464`, `491`, or `461` refuse it.
+  ["381", operAnswered],
+  ["461", operAnswered],
+  ["464", operAnswered],
+  ["491", operAnswered],
   ["331", topicReply],
   ["332", topicReply],
   ["333", topicReply],

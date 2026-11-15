@@ -36,6 +36,7 @@ import { endLookups, expireLookup, look, removedLookups, unsentLookups } from ".
 import { read } from "./markers.ts";
 import { modesQueryOver } from "./modes-query.ts";
 import type { EndReason } from "./news.ts";
+import { operUnsent } from "./oper.ts";
 import {
   before,
   begin,
@@ -753,7 +754,8 @@ const transport = (run: Run, input: FromTransport): void => {
 
     // A Channel whose key could not be filled is refused for now. Registration goes on
     // without `PASS`, and the Ircd decides. A Feature holding registration hears of a
-    // Line it sent, such as SASL's. With no service told, its Channels wait on nothing.
+    // Line it sent, such as SASL's. With no service told, its Channels wait on nothing,
+    // and with no `OPER` sent, nothing answers it.
     case "Unfilled": {
       if (input.line._tag === "JoinWithKey") {
         unfilledKey(run, input.line.channel);
@@ -761,6 +763,8 @@ const transport = (run: Run, input: FromTransport): void => {
         unfilledHeld(run, input.line);
       } else if (input.line._tag === "Identify") {
         identified(run);
+      } else if (input.line._tag === "Oper") {
+        operUnsent(run);
       }
 
       break;

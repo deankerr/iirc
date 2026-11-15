@@ -49,7 +49,21 @@ const identify = (service: string, account = "iirc"): SecretLine => ({
   service,
 });
 
+const oper = (name: string): SecretLine => ({ _tag: "Oper", credential, name });
+
 describe(fillSecret, () => {
+  it("fills OPER, with the password trailing when it must be", () => {
+    expect(wires(fillSecret(oper("admin"), Redacted.make("hunter2")))).toStrictEqual([
+      "OPER admin hunter2\r\n",
+    ]);
+    expect(wires(fillSecret(oper("admin"), Redacted.make("two words")))).toStrictEqual([
+      "OPER admin :two words\r\n",
+    ]);
+    expect(wires(fillSecret(oper("a:b,c"), Redacted.make(":pw")))).toStrictEqual([
+      "OPER a:b,c ::pw\r\n",
+    ]);
+  });
+
   it("fills PASS, as a trailing parameter when it must be", () => {
     expect(wires(fillSecret({ _tag: "Pass", credential }, Redacted.make("hunter2")))).toStrictEqual(
       ["PASS hunter2\r\n"]
@@ -166,6 +180,20 @@ describe(fillSecret, () => {
       "InvalidParameter",
     ],
     ["an authcid with NUL", plain("ii\0rc"), "x", "InvalidParameter"],
+    ["an OPER with no name", oper(""), "pw", "InvalidParameter"],
+    ["an OPER with a space in its name", oper("ad min"), "pw", "InvalidParameter"],
+    ["an OPER with a tab in its name", oper("ad\tmin"), "pw", "InvalidParameter"],
+    ["an OPER with a no-break space in its name", oper("ad\u00A0min"), "pw", "InvalidParameter"],
+    ["an OPER with a line break in its name", oper("a\r\nQUIT"), "pw", "InvalidParameter"],
+    ["an OPER with NUL in its name", oper("a\0"), "pw", "InvalidParameter"],
+    ["an OPER whose name starts with a colon", oper(":admin"), "pw", "InvalidParameter"],
+    ["an OPER whose name is a lone surrogate", oper("\uD800"), "pw", "InvalidParameter"],
+    ["an OPER with a line break in its password", oper("admin"), "a\r\nQUIT", "InvalidParameter"],
+    ["an OPER with a CR in its password", oper("admin"), "a\rb", "InvalidParameter"],
+    ["an OPER with NUL in its password", oper("admin"), "a\0b", "InvalidParameter"],
+    ["an OPER with a lone surrogate in its password", oper("admin"), "a\uDC00", "InvalidParameter"],
+    ["an OPER with no password", oper("admin"), "", "InvalidParameter"],
+    ["an OPER too long to fit", oper("admin"), "x".repeat(600), "TooLong"],
   ] as const)("refuses %s", (_name, line, value, reason) => {
     expect(fillSecret(line, Redacted.make(value))).toStrictEqual({ _tag: "Rejected", reason });
   });

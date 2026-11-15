@@ -9,7 +9,7 @@
 import { CredentialName, SecretLine } from "@iirc/protocol/line";
 import { Result, Schema } from "effect";
 
-import { Login } from "../configuration.ts";
+import { Login, Oper } from "../configuration.ts";
 import { FeatureName } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
 import type { Action, Lookup, ModeRequest, SayKind } from "../input.ts";
@@ -38,6 +38,8 @@ export type Change =
    * Credential's name, and for a service, its nick first and the seconds to wait last.
    */
   | { readonly _tag: "Login"; readonly login: Login }
+  /** `oper=none`, or `oper=admin,pw`: whether Self opers, as a name with its Credential's name. */
+  | { readonly _tag: "Oper"; readonly oper: Oper }
   /** `realname=new`: the realname registration sends, with no space in it. */
   | { readonly _tag: "Realname"; readonly realname: string }
   /** `nicks=one,two`: the nicks registration offers, in order. */
@@ -238,7 +240,7 @@ const unescapeBytes = (text: string): Uint8Array | undefined => {
 type SecretKind = SecretLine["_tag"];
 
 const isSecretKind = Schema.is(
-  Schema.Literals(["AuthenticatePlain", "Identify", "JoinWithKey", "Pass"])
+  Schema.Literals(["AuthenticatePlain", "Identify", "JoinWithKey", "Oper", "Pass"])
 );
 
 const decodeSecret = Schema.decodeUnknownResult(SecretLine);
@@ -446,8 +448,24 @@ const readLogin = (text: string): Login | undefined => {
     : undefined;
 };
 
+const decodeOper = Schema.decodeUnknownResult(Oper);
+
+// `none`, or `<name>,<credential>`, as the Oper schema accepts it.
+const readOper = (text: string): Oper | undefined => {
+  if (text === "none") {
+    return { _tag: "None" };
+  }
+
+  const [name, credential, ...rest] = text.split(",");
+  const decoded = decodeOper({ _tag: "Login", credential, name });
+
+  return [name, credential].every(present) && rest.length === 0 && Result.isSuccess(decoded)
+    ? decoded.success
+    : undefined;
+};
+
 // A change that is a setting rather than a Channel: `enable`, `disable`, `decline=`,
-// `accept=`, `realname=`, `nicks=`, or `login=`.
+// `accept=`, `realname=`, `nicks=`, `login=`, or `oper=`.
 const readSetting = (token: string): Change | undefined => {
   if (token === "enable" || token === "disable") {
     return { _tag: token === "enable" ? "Enable" : "Disable" };
@@ -475,6 +493,12 @@ const readSetting = (token: string): Change | undefined => {
 
   if (first !== undefined && first !== "" && rest.every((each) => each !== "")) {
     return { _tag: "Nicks", nicks: [first, ...rest] };
+  }
+
+  const oper = token.startsWith("oper=") ? readOper(token.slice(5)) : undefined;
+
+  if (oper !== undefined) {
+    return { _tag: "Oper", oper };
   }
 
   const login = token.startsWith("login=") ? readLogin(token.slice(6)) : undefined;
@@ -573,6 +597,12 @@ const writeChange = (change: Change): string => {
           return login satisfies never;
         }
       }
+    }
+
+    case "Oper": {
+      const { oper } = change;
+
+      return oper._tag === "None" ? "oper=none" : `oper=${oper.name},${oper.credential}`;
     }
 
     default: {

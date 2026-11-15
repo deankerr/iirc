@@ -33,6 +33,12 @@ export interface StandardReply {
  */
 export type Unanswered = "History" | "Unknown" | "Off" | "Unreachable" | "Unsendable" | "Limited";
 
+/**
+ * The numerics that refuse an `OPER`: a wrong password (`464`), no operator block for
+ * Self's host (`491`), or too few parameters (`461`).
+ */
+export type OperRefusal = "461" | "464" | "491";
+
 /** What became of a CTCP request: the answer Self sent, as its arguments, or why none. */
 export type CtcpAnswer =
   | { readonly _tag: "Answered"; readonly text: string }
@@ -51,7 +57,9 @@ export type CtcpAnswer =
  * it names by who asked, where, and the command.
  * A `StandardReply`
  * is what the Network said of something sent, or of nothing: a `WARN` or a `NOTE`, or a
- * `FAIL` that refused no intent.
+ * `FAIL` that refused no intent. `OperGranted` and `OperRefused` answer the `OPER` Self
+ * sent as its Session began, by the numeric alone: Self, by `nick`, is now an IRC
+ * operator, or the Ircd refused with `reply`.
  */
 export type Activity =
   | { readonly _tag: "Joined"; readonly channel: string; readonly nick: string }
@@ -87,11 +95,25 @@ export type Activity =
       readonly nick: string;
       readonly away: { readonly message: string } | null;
     }
+  | { readonly _tag: "OperGranted"; readonly nick: string }
+  | { readonly _tag: "OperRefused"; readonly nick: string; readonly reply: OperRefusal }
   | ({ readonly _tag: "StandardReply" } & StandardReply)
   | ({ readonly _tag: "CtcpRequest"; readonly answer: CtcpAnswer } & Ctcp)
   | ({ readonly _tag: "CtcpReply"; readonly roundTrip: number | null } & Ctcp)
   | ({ readonly _tag: "CtcpSent" } & Omit<Ctcp, "target">)
   | ({ readonly _tag: "CtcpUnsent" } & Omit<Ctcp, "args">);
+
+/** An answer to the `OPER` Self sent as its Session began. */
+export type OperAnswer = Extract<Activity, { readonly _tag: "OperGranted" | "OperRefused" }>;
+
+/**
+ * Whether an Activity answers Self's `OPER`, which always belongs to the Network's own
+ * Timeline and settles nothing else.
+ * @param activity - The Activity.
+ * @returns Whether it does.
+ */
+export const isOperAnswer = (activity: Activity): activity is OperAnswer =>
+  activity._tag === "OperGranted" || activity._tag === "OperRefused";
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
 export interface Ctcp {

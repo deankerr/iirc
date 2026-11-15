@@ -259,6 +259,10 @@ const apply = (configuration: NetworkConfiguration, change: Change): NetworkConf
       return { ...configuration, login: change.login };
     }
 
+    case "Oper": {
+      return { ...configuration, oper: change.oper };
+    }
+
     case "Realname": {
       return { ...configuration, realname: change.realname };
     }

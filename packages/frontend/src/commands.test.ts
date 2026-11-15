@@ -823,10 +823,28 @@ describe("acting on a Network", () => {
       typesCredential("/quote PRIVMSG #a :pass"),
       typesCredential("//quote PASS x"),
     ]).toStrictEqual([
-      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
-      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
-      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.",
+      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
       true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("refuses /oper, which is configured instead, and clears it like a raw OPER", () => {
+    expect([
+      words("/oper admin pw", inNetwork),
+      words("/OPER", inNetwork),
+      typesCredential("/Oper admin pw"),
+      typesCredential("/pass x"),
+      typesCredential("/operator x"),
+      typesCredential("//oper admin pw"),
+    ]).toStrictEqual([
+      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
+      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.",
       true,
       true,
       false,

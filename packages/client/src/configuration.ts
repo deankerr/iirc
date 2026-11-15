@@ -1,4 +1,10 @@
-import { CredentialName, FallbackEncoding, IdentifyWord, ServiceTarget } from "@iirc/protocol/line";
+import {
+  CredentialName,
+  FallbackEncoding,
+  IdentifyWord,
+  OperName,
+  ServiceTarget,
+} from "@iirc/protocol/line";
 import { Option, Schema, SchemaGetter } from "effect";
 
 import { FeatureName } from "./ids.ts";
@@ -69,6 +75,28 @@ export const Login = Schema.TaggedUnion({
 
 /** The decoded form of {@link Login}. */
 export type Login = typeof Login.Type;
+
+/**
+ * Whether Self logs in as an IRC operator, with `OPER`, as each Session begins: not at all,
+ * or as a name, with its Credential.
+ */
+export const Oper = Schema.TaggedUnion({
+  Login: {
+    credential: CredentialName.annotate({
+      description: "The Credential holding the operator's password.",
+    }),
+    name: OperName.annotate({
+      description: "The operator name to send with OPER, one word.",
+      ...startsAsFirstNick,
+    }),
+  },
+  None: {},
+});
+
+/** The decoded form of {@link Oper}. */
+export type Oper = typeof Oper.Type;
+
+const noOper: Oper = { _tag: "None" };
 
 /** A Channel the Owner wants Self in, with its key named as a Credential. */
 export const WantedChannel = Schema.Struct({
@@ -164,6 +192,22 @@ export const NetworkConfiguration = Schema.Struct({
   nicks: Schema.NonEmptyArray(Schema.String).annotate({
     description: "The nicks to use, the first preferred and the rest tried in turn.",
   }),
+  /**
+   * Whether Self opers as each Session begins. A `Configured` written before the field
+   * existed decodes as none, since the Client then sent no `OPER`.
+   */
+  oper: Schema.optionalKey(Oper)
+    .pipe(
+      Schema.decodeTo(Schema.toType(Oper), {
+        decode: SchemaGetter.transformOptional((given) => Option.orElseSome(given, () => noOper)),
+        encode: SchemaGetter.passthrough(),
+      })
+    )
+    .annotate({
+      default: noOper,
+      description:
+        "Whether to log in as an IRC operator with OPER as each Session begins: none, or login with the options under it.",
+    }),
   password: Schema.optionalKey(
     CredentialName.annotate({
       description: "The Credential holding the Ircd's password, sent as PASS, if it needs one.",
@@ -212,8 +256,8 @@ export const declinedToRequest = (
 };
 
 /**
- * The Credentials a Configuration names: its Ircd password, its login's, and each
- * Channel's key.
+ * The Credentials a Configuration names: its Ircd password, its login's, its operator's,
+ * and each Channel's key.
  * @param configuration - The Configuration.
  * @returns Their names.
  */
@@ -221,6 +265,7 @@ export const credentialsOf = (configuration: NetworkConfiguration): ReadonlySet<
   new Set([
     ...(configuration.password === undefined ? [] : [configuration.password]),
     ...(configuration.login._tag === "None" ? [] : [configuration.login.credential]),
+    ...(configuration.oper._tag === "None" ? [] : [configuration.oper.credential]),
     ...configuration.channels.flatMap((channel) =>
       channel.key === undefined ? [] : [channel.key]
     ),
