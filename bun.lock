@@ -80,6 +80,25 @@
         "vitest": "catalog:",
       },
     },
+    "packages/byte-store": {
+      "name": "@iirc/byte-store",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/runtime": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
+    "packages/byte-store-s3": {
+      "name": "@iirc/byte-store-s3",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/byte-store": "workspace:*",
+        "effect": "catalog:",
+      },
+    },
     "packages/client": {
       "name": "@iirc/client",
       "version": "0.0.0",
@@ -111,6 +130,8 @@
         "effect": "catalog:",
       },
       "devDependencies": {
+        "@iirc/byte-store": "workspace:*",
+        "@iirc/byte-store-s3": "workspace:*",
         "vitest": "catalog:",
       },
     },
@@ -351,6 +372,10 @@
     "@humanwhocodes/retry": ["@humanwhocodes/retry@0.4.3", "", {}, "sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ=="],
 
     "@iirc/api": ["@iirc/api@workspace:packages/api"],
+
+    "@iirc/byte-store": ["@iirc/byte-store@workspace:packages/byte-store"],
+
+    "@iirc/byte-store-s3": ["@iirc/byte-store-s3@workspace:packages/byte-store-s3"],
 
     "@iirc/client": ["@iirc/client@workspace:packages/client"],
 

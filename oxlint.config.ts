@@ -161,6 +161,13 @@ const toTimelineStore = (production: boolean) =>
 
 const storeAlone = "A Timeline store reaches the world only through an adapter of its own.";
 
+// The byte store port depends on nothing of ours, and only its test kit, which hashes in
+// memory and is checked with the Runtime's `holds`, reaches anything else.
+const toByteStore = ours(
+  ["@iirc/runtime/testing"],
+  "`@iirc/byte-store` depends on no other package of ours."
+);
+
 const viewless =
   "The web frontend's core is pure: no React, no DOM, no Effect services, and no clock. Its state is plain data, and React renders it from `apps/web`.";
 
@@ -225,6 +232,9 @@ const coreFence: OxlintOverride[] = [
     "no-restricted-globals": globals(storeAlone),
     "no-restricted-imports": imports(production, adapters, toTimelineStore(production)),
     "no-restricted-properties": noMathRandom(storeAlone),
+  })),
+  ...layer(["packages/byte-store/src/**"], (production) => ({
+    "no-restricted-imports": imports(production, ...(production ? [adapters] : []), toByteStore),
   })),
   ...layer(["packages/frontend/src/**"], (production) => ({
     "no-restricted-globals": globals(viewless, browser),
