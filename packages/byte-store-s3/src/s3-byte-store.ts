@@ -5,6 +5,7 @@
  */
 import { ByteStore, ByteStoreNotFound, ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
 import type { ByteStoreService, Stored } from "@iirc/byte-store";
+import type { Cause } from "effect";
 import { Effect, Exit, FiberSet, Layer, Option, Pull, Redacted, Ref, Schema, Stream } from "effect";
 
 /** Where the bucket is, and the keys to it. */
@@ -106,7 +107,7 @@ export const makeS3ByteStore = (options: S3Options): Effect.Effect<ByteStoreServ
     const bucketThere = attempt(async () => await client.list({ maxKeys: 1, prefix }));
 
     // Runs the stream again into the bucket, hashing what it gives as it goes. A failure of
-    // the stream is the caller's, and anything else is the bucket's.
+    // the stream is the caller's, a defect as much as a failure, and anything else is the bucket's.
     //
     // Bun's `write` takes no signal, so the body is the only way to stop it: erroring the body
     // makes Bun abandon the request, or abort a multipart upload. The stream is pulled in this
@@ -119,7 +120,7 @@ export const makeS3ByteStore = (options: S3Options): Effect.Effect<ByteStoreServ
       Effect.scoped(
         Effect.gen(function* () {
           const seen = tally();
-          const failed = yield* Ref.make(Option.none<E>());
+          const failed = yield* Ref.make(Option.none<Cause.Cause<E>>());
 
           // Finalizers run last first: a pull in flight is interrupted, then the stream closes.
           const pull = yield* Stream.toPull(
@@ -129,7 +130,7 @@ export const makeS3ByteStore = (options: S3Options): Effect.Effect<ByteStoreServ
                   seen.add(chunk);
                 })
               ),
-              Stream.tapError((error) => Ref.set(failed, Option.some(error)))
+              Stream.tapCause((cause) => Ref.set(failed, Option.some(cause)))
             )
           );
 
@@ -184,7 +185,11 @@ export const makeS3ByteStore = (options: S3Options): Effect.Effect<ByteStoreServ
           ).pipe(
             Effect.catch((error) =>
               Ref.get(failed).pipe(
-                Effect.flatMap((own) => Effect.fail(Option.getOrElse(own, () => error)))
+                Effect.flatMap((own) =>
+                  Option.isSome(own)
+                    ? Effect.failCause(own.value)
+                    : Effect.fail<E | ByteStoreUnavailable>(error)
+                )
               )
             )
           );

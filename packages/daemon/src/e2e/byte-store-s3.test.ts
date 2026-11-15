@@ -8,7 +8,7 @@ import { makeS3ByteStore } from "@iirc/byte-store-s3";
 import type { S3Options } from "@iirc/byte-store-s3";
 import { byteStoreLaws } from "@iirc/byte-store/testing";
 import { holds } from "@iirc/runtime/testing";
-import { Deferred, Effect, Exit, Fiber, Redacted, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Redacted, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { freePort, loopback } from "../testing/children.ts";
@@ -148,6 +148,25 @@ describe("the S3 byte store", () => {
     await expect(Effect.runPromise(Effect.flip(store.put(failing)))).resolves.toBe(
       "the caller's own"
     );
+    await expect(Effect.runPromise(store.held)).resolves.toBe(0);
+  });
+
+  it("a stream that dies when run again dies the put, never an outage, and leaves nothing held", async () => {
+    const bucket = await minio.freshBucket();
+    const store = await make(optionsFor(bucket));
+    let runs = 0;
+    const bug = new Error("the caller's bug");
+
+    const dying = Stream.suspend(() => {
+      runs += 1;
+
+      return runs === 1 ? bytes() : Stream.concat(bytes(), Stream.die(bug));
+    });
+
+    const exit = await Effect.runPromiseExit(store.put(dying));
+
+    expect(Exit.hasDies(exit)).toBeTruthy();
+    expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBeFalsy();
     await expect(Effect.runPromise(store.held)).resolves.toBe(0);
   });
 
