@@ -1152,6 +1152,7 @@ describe("the options under ui", () => {
       activity: "quiet",
       colours: "theme",
       dark: "dark",
+      day: "full",
       enter: "send",
       font: "system",
       leading: 1.45,
@@ -1180,6 +1181,7 @@ describe("the options under ui", () => {
         { _tag: "Choice", choices: ["all", "quiet", "none"] },
         { _tag: "Choice", choices: ["theme", "raw"] },
         { _tag: "Text" },
+        { _tag: "Choice", choices: ["full", "long", "medium", "short", "iso"] },
         { _tag: "Choice", choices: ["send", "newline"] },
         {
           _tag: "ChoiceOrText",
@@ -1223,6 +1225,7 @@ describe("the options under ui", () => {
         ["ui.activity", { _tag: "Shown", text: "all" }, { _tag: "Unset" }, undefined],
         ["ui.colours", { _tag: "Shown", text: "theme" }, { _tag: "Unset" }, undefined],
         ["ui.dark", { _tag: "Shown", text: "dark" }, { _tag: "Unset" }, undefined],
+        ["ui.day", { _tag: "Shown", text: "full" }, { _tag: "Unset" }, undefined],
         ["ui.enter", { _tag: "Shown", text: "send" }, { _tag: "Unset" }, undefined],
         ["ui.font", { _tag: "Shown", text: "system" }, { _tag: "Unset" }, undefined],
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
@@ -1257,6 +1260,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "dark" },
           undefined,
           "dark",
+        ],
+        [
+          "ui.day",
+          { _tag: "Shown", text: "full" },
+          { _tag: "Shown", text: "full" },
+          undefined,
+          "full",
         ],
         [
           "ui.enter",
@@ -1372,7 +1382,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-16),
+        .slice(-17),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1381,6 +1391,7 @@ describe("the options under ui", () => {
         "ui.activity",
         "ui.colours",
         "ui.dark",
+        "ui.day",
         "ui.enter",
         "ui.font",
         "ui.leading",

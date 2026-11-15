@@ -22,6 +22,7 @@ import { activityShown, leadingShown, sizeShown } from "../options/ui.ts";
 import { movedEvent } from "../panes/atoms.ts";
 import { leaveTarget } from "../search/atoms.ts";
 import { Button } from "../ui/button.tsx";
+import { zone } from "../ui/dates.ts";
 import { following, latest, newer, older, paneTimeline, windowCapOf } from "./atoms.ts";
 import { Line } from "./line.tsx";
 
@@ -199,7 +200,8 @@ const ShownRow = ({ row, timeline }: { readonly row: Shown; readonly timeline: T
 
     case "Item":
     case "Gap":
-    case "New": {
+    case "New":
+    case "Day": {
       return <Line row={row} />;
     }
 
@@ -232,7 +234,7 @@ const JumpToLatest = ({ timeline }: { readonly timeline: TimelineId }) => {
 };
 
 /**
- * The rows of a window, virtualized, with the "new" divider where the core puts it.
+ * The rows of a window, virtualized, with the "new" divider and where the day changes, as the core puts them.
  * @param props - The window, its Timeline, and its divider.
  * @returns The log.
  */
@@ -263,7 +265,7 @@ const Lines = ({
   // counted all the same.
   const rows: readonly Shown[] = useMemo(() => {
     const shows = (item: TimelineItem) => showsItem(activity, kind, item.content);
-    const drawn = rowsOf(window, divider, shows);
+    const drawn = rowsOf(window, divider, shows, zone);
 
     if (!window.earlier) {
       return [start, ...drawn];

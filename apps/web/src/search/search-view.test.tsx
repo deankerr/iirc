@@ -519,8 +519,8 @@ describe("the search view", () => {
         },
       },
       status: "60 found, newest first.",
-      // The start, then items 1 to 10: the tenth's middle, 210, in the middle of 400.
-      target: [true, 10],
+      // The start, the day, then items 1 to 10: the tenth's middle, 230, in the middle of 400.
+      target: [true, 30],
     });
   });
 

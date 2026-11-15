@@ -31,6 +31,9 @@ export const uiInEffect = Atom.make((get) => effectiveUi(get(optionsState).ui, g
 /** How a line's time shows on this device, alone, so a line draws again only when it changes. */
 export const timeShown = Atom.make((get) => get(uiInEffect).time);
 
+/** How a day is written where the day changes on this device, alone, as `timeShown` is. */
+export const dayShown = Atom.make((get) => get(uiInEffect).day);
+
 /** Which Activity a Channel shows on this device, alone, as `timeShown` is. */
 export const activityShown = Atom.make((get) => get(uiInEffect).activity);
 
