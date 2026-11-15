@@ -3925,8 +3925,9 @@ export const treeOf = (network: SidebarNetwork): NetworkTree => {
 
 /**
  * A time zone, as the core is given it: the offset from UTC in force at an instant, in
- * minutes east of it, or none when the instant cannot be placed, as one outside the range a
- * `Date` holds. The core reads no zone itself, so a Frontend gives it the device's.
+ * milliseconds east of it, exact even for a historical offset of seconds, or none when the
+ * instant cannot be placed, as one outside the range a `Date` holds. The core reads no zone
+ * itself, so a Frontend gives it the device's.
  */
 export type Zone = (at: number) => number | undefined;
 
@@ -4018,7 +4019,6 @@ const isNew = (divider: Divider, item: TimelineItem): boolean =>
 const gapRow = (gap: WindowGap): Row => ({ _tag: "Gap", gap, key: `gap-${cursorOf(gap.from)}` });
 
 const msPerDay = 86_400_000;
-const msPerMinute = 60_000;
 
 /**
  * The day an instant falls on in a zone, as a count of days since the epoch's.
@@ -4029,7 +4029,7 @@ const msPerMinute = 60_000;
 const dayOf = (zone: Zone, at: number): number | undefined => {
   const offset = zone(at);
 
-  return offset === undefined ? undefined : Math.floor((at + offset * msPerMinute) / msPerDay);
+  return offset === undefined ? undefined : Math.floor((at + offset) / msPerDay);
 };
 
 /**

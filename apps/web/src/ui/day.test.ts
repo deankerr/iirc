@@ -30,4 +30,18 @@ describe("a day written", () => {
     }).toStrictEqual({ iso: undefined, none: true });
     expect(dayIso(noon)).toBe("2026-11-05");
   });
+
+  it("writes a year before 0 with its sign, and gives HTML no date for it", () => {
+    const ancient = new Date(2026, 0, 2, 12);
+
+    ancient.setFullYear(-1);
+
+    expect({
+      iso: dayWritten("iso", ancient.getTime()),
+      machine: dayIso(ancient.getTime()),
+    }).toStrictEqual({
+      iso: "-0001-01-02",
+      machine: undefined,
+    });
+  });
 });

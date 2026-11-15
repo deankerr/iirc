@@ -4888,13 +4888,13 @@ const hoursIn = (hours: number) => midnightUtc + hours * hour;
 
 /**
  * A zone that is the same offset at every instant.
- * @param offset - The offset, in minutes east of UTC.
+ * @param minutes - The offset, in minutes east of UTC.
  * @returns The zone.
  */
 const fixed =
-  (offset: number): Zone =>
+  (minutes: number): Zone =>
   () =>
-    offset;
+    minutes * 60_000;
 
 /**
  * A zone that is UTC, but cannot place one instant.
@@ -4999,7 +4999,7 @@ describe("where the day changes", () => {
 
   it("reads the offset in force at each instant, as a zone that changes it does", () => {
     // Twelve hours ahead of UTC from noon on the 15th, as when a zone moves its clocks.
-    const moved: Zone = (at) => (at >= hoursIn(12) ? 720 : 0);
+    const moved: Zone = (at) => (at >= hoursIn(12) ? 12 * hour : 0);
     const first = hoursIn(11);
     const second = hoursIn(12.5);
     const third = hoursIn(23);
