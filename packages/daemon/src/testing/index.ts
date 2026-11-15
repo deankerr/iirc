@@ -8,6 +8,8 @@ export { startErgo, startNgircd } from "./ircd.ts";
 
 export type { Ircd } from "./ircd.ts";
 
+export { freePort, loopback } from "./children.ts";
+
 export { startMinio } from "./minio.ts";
 
 export type { Minio } from "./minio.ts";
