@@ -287,10 +287,9 @@ const holdOwnerCredential = (
       .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(value))));
     yield* readHeld(registry);
 
-    // The name is already the option's when it named one, and nothing changes.
-    return read.options[option] === name.value
-      ? ({ _tag: "Done" } satisfies Outcome)
-      : yield* changeOwner(registry, { option, value: name.value });
+    // Set even when the option already names it: the Vault is not followed, so this Change,
+    // the same value again, is what tells every other device to read the names held again.
+    return yield* changeOwner(registry, { option, value: name.value });
   }).pipe(
     Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(value))),
     Effect.catch((error) => Effect.succeed(ownerFailed(error._tag)))

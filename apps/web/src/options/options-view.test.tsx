@@ -349,6 +349,56 @@ describe("the options view, under store and uploads", () => {
     );
   });
 
+  it("shows a Credential another device held again under the name an option already gave it as held", async () => {
+    const fake = signedIn();
+
+    fake.daemon.owner = {
+      options: {
+        "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
+        "uploads.maxSize": 104_857_600,
+      },
+      sequence: 1,
+    };
+
+    const first = await page(fake);
+    const second = await page(fake);
+
+    await first.type("/set store.s3.access*");
+    await second.type("/set store.s3.access*");
+    await eventually(() => fake.daemon.ownerFollowers.length === 2);
+    await readAt(first.registry, 1);
+    await readAt(second.registry, 1);
+    await settled(
+      () =>
+        rowOf(first.container, "store.s3.accessKeyId")?.[1] ===
+        "Owner.store.s3.accessKeyId not held"
+    );
+    await second.type("/set store.s3.accessKeyId");
+
+    const field = second.container.querySelector<HTMLInputElement>('input[name="value"]');
+
+    if (field === null) {
+      throw new Error("no prompt");
+    }
+
+    await typeInto(field, "the-bucket's-access-key-id");
+    await doing(() => {
+      field.form?.requestSubmit();
+    });
+    await settled(
+      () =>
+        rowOf(first.container, "store.s3.accessKeyId")?.[1] === "Owner.store.s3.accessKeyId held"
+    );
+
+    expect({
+      changes: fake.daemon.ownerChanges,
+      row: rowOf(first.container, "store.s3.accessKeyId")?.[1],
+    }).toStrictEqual({
+      changes: [{ ifSequence: "1", route: "PUT store.s3.accessKeyId" }],
+      row: "Owner.store.s3.accessKeyId held",
+    });
+  });
+
   it("holds a Credential option's value in the Vault, sets the option to its name, and shows only whether it is held", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
