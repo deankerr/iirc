@@ -4,20 +4,39 @@
  * logged in, or until the Configuration's bound runs out. The wait is the Session's
  * `identifying`, and its timer is derived from it.
  *
- * Only the protocol's structure ends the wait: a `900`, which says Self's account, or a
- * `MODE` on Self that sets `r`, which Ircds with services use for a registered nick. RFC
- * 2812 gives user mode `r` as "restricted", so only a `+r` that comes once the service was
- * told counts, and the bound covers an Ircd that says neither. A `NOTICE` from the service
- * is text for people, and ends nothing.
+ * Only the protocol's structure ends the wait early: a `900`, which says Self's account.
+ * No user mode counts, since none means "logged in" across the protocol: RFC 2812 gives
+ * `r` as "restricted", which an Ircd may set as a Session begins, and a release cannot be
+ * taken back. A `NOTICE` from the service is text for people, and ends nothing. The
+ * bound covers an Ircd that says nothing.
+ *
+ * The Credential is never told while `echo-message` is on or asked for on the Connection,
+ * since the Ircd would echo it back, and every Line received is journaled. A service login
+ * declines `echo-message` from the next Connection, but one configured while registering
+ * finds it already on: that Session joins at once without telling the service.
  *
  * @packageDocumentation
  */
 import { joinWanted } from "./channels.ts";
-import { Instant } from "./ids.ts";
-import type { ModeChange } from "./news.ts";
+import { CapName, Instant } from "./ids.ts";
 import type { Run } from "./run.ts";
 import { sendSecret, updateOpen } from "./run.ts";
-import { sessionOf } from "./views.ts";
+import { negotiated, openOf, sessionOf } from "./views.ts";
+
+const echoMessage = "echo-message";
+
+// Whether the Ircd may echo what is said now: `echo-message` is on, or a change to it
+// is still to be answered, which the Ircd may yet refuse.
+const mayEcho = (run: Run): boolean => {
+  const caps = openOf(run.state)?.caps;
+  const pending = caps !== undefined && "requested" in caps ? caps.requested : new Set<string>();
+
+  return (
+    negotiated(caps).enabled.has(CapName.make(echoMessage)) ||
+    pending.has(echoMessage) ||
+    pending.has(`-${echoMessage}`)
+  );
+};
 
 // Sets or ends the wait.
 const waitUntil = (run: Run, until: Instant | undefined): void => {
@@ -30,13 +49,14 @@ const waitUntil = (run: Run, until: Instant | undefined): void => {
 
 /**
  * A Session began: with a service login, tell the service, and hold the Channels for the
- * Configuration's bound. With a bound of 0, they do not wait.
+ * Configuration's bound. With a bound of 0, they do not wait. While the Ircd may echo,
+ * nothing is told and nothing waits.
  * @param run - The step, just after the Session began.
  */
 export const identify = (run: Run): void => {
   const login = run.state.configuration?.login;
 
-  if (login?._tag !== "Service") {
+  if (login?._tag !== "Service" || mayEcho(run)) {
     return;
   }
 
@@ -73,11 +93,3 @@ export const noLongerIdentifying = (run: Run): void => {
     waitUntil(run, undefined);
   }
 };
-
-/**
- * Whether a `MODE` on Self sets `r`.
- * @param changes - What it changed.
- * @returns Whether one sets `r`.
- */
-export const setsRegistered = (changes: readonly ModeChange[]): boolean =>
-  changes.some((change) => change.set && change.mode === "r");

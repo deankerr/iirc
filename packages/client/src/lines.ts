@@ -31,7 +31,7 @@ import {
 } from "./channels.ts";
 import { heardCtcp } from "./ctcp.ts";
 import type { Arrival, Meant } from "./feature.ts";
-import { identified, identify, setsRegistered } from "./identify.ts";
+import { identified, identify } from "./identify.ts";
 import { Instant } from "./ids.ts";
 import type { IntentId } from "./ids.ts";
 import { collectFloor, collectLabelled, floorLookup, lookupByCommand } from "./lookups.ts";
@@ -181,11 +181,6 @@ const settled = (run: Run, activity: Activity): void => {
     case "ModeChanged": {
       if (isSelf(run, activity.by)) {
         modesAnswered(run, activity.target, activity.changes);
-      }
-
-      // `+r` on Self, once the service was told, says Self is logged in.
-      if (isSelf(run, activity.target) && setsRegistered(activity.changes)) {
-        identified(run);
       }
 
       break;

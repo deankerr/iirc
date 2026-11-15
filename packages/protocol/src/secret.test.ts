@@ -74,6 +74,9 @@ describe(fillSecret, () => {
     expect(
       wires(fillSecret(identify("NickServ@services.test"), Redacted.make(":a,b")))
     ).toStrictEqual(["PRIVMSG NickServ@services.test :IDENTIFY iirc :a,b\r\n"]);
+    expect(
+      wires(fillSecret(identify("[Nick_Serv]^`{|}-2", "a.b-c"), Redacted.make("é!#@")))
+    ).toStrictEqual(["PRIVMSG [Nick_Serv]^`{|}-2 :IDENTIFY a.b-c é!#@\r\n"]);
   });
 
   it("fills the SASL PLAIN response as authzid, authcid, and password", () => {
@@ -133,6 +136,35 @@ describe(fillSecret, () => {
     ],
     ["an identify with no account", identify("NickServ", ""), "pw", "InvalidParameter"],
     ["an identify too long to fit", identify("NickServ"), "x".repeat(600), "TooLong"],
+    ["an identify to a STATUSMSG Target", identify("@#staff"), "pw", "InvalidTarget"],
+    ["an identify to a halfop STATUSMSG Target", identify("%#staff"), "pw", "InvalidTarget"],
+    ["an identify to an owner STATUSMSG Target", identify("~#staff"), "pw", "InvalidTarget"],
+    ["an identify to a voiced STATUSMSG Target", identify("+#staff"), "pw", "InvalidTarget"],
+    ["an identify to a & Channel", identify("&local"), "pw", "InvalidTarget"],
+    ["an identify to a nick starting with a digit", identify("1NickServ"), "pw", "InvalidTarget"],
+    ["an identify to a nick with a !", identify("NickServ!s@h"), "pw", "InvalidTarget"],
+    ["an identify to a server mask", identify("NickServ@*.test"), "pw", "InvalidTarget"],
+    [
+      "an identify with a tab in its account",
+      identify("NickServ", "acct\twrong"),
+      "pw",
+      "InvalidParameter",
+    ],
+    ["an identify with a tab in its password", identify("NickServ"), "a\tb", "InvalidParameter"],
+    ["an identify with a vertical tab", identify("NickServ"), "a\vb", "InvalidParameter"],
+    ["an identify with a form feed", identify("NickServ"), "a\fb", "InvalidParameter"],
+    ["an identify with a no-break space", identify("NickServ"), "a\u00A0b", "InvalidParameter"],
+    ["an identify with an en space", identify("NickServ"), "a\u2002b", "InvalidParameter"],
+    ["an identify with a hair space", identify("NickServ"), "a\u200Ab", "InvalidParameter"],
+    ["an identify with an ideographic space", identify("NickServ"), "a\u3000b", "InvalidParameter"],
+    ["an identify with a next line", identify("NickServ"), "a\u0085b", "InvalidParameter"],
+    ["an identify with a line separator", identify("NickServ"), "a\u2028b", "InvalidParameter"],
+    [
+      "an identify with an ogham space in its account",
+      identify("NickServ", "a\u1680b"),
+      "pw",
+      "InvalidParameter",
+    ],
     ["an authcid with NUL", plain("ii\0rc"), "x", "InvalidParameter"],
   ] as const)("refuses %s", (_name, line, value, reason) => {
     expect(fillSecret(line, Redacted.make(value))).toStrictEqual({ _tag: "Rejected", reason });

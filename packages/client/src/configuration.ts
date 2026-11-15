@@ -1,4 +1,4 @@
-import { CredentialName, FallbackEncoding } from "@iirc/protocol/line";
+import { CredentialName, FallbackEncoding, IdentifyWord, ServiceTarget } from "@iirc/protocol/line";
 import { Option, Schema, SchemaGetter } from "effect";
 
 import { FeatureName } from "./ids.ts";
@@ -48,16 +48,16 @@ export const Login = Schema.TaggedUnion({
     }),
   },
   Service: {
-    account: Schema.String.check(Schema.isNonEmpty()).annotate({
-      description: "The account to log in to by telling the service.",
+    account: IdentifyWord.annotate({
+      description: "The account to log in to by telling the service, one word.",
       ...startsAsFirstNick,
     }),
     credential: CredentialName.annotate({
       description: "The Credential holding the account's password.",
     }),
-    service: Schema.String.check(Schema.isNonEmpty()).annotate({
+    service: ServiceTarget.annotate({
       default: "NickServ",
-      description: "The nick of the service to tell, such as NickServ.",
+      description: "The nick of the service to tell, such as NickServ or NickServ@services.",
     }),
     wait: Schema.Int.check(Schema.isBetween({ maximum: maxServiceWait, minimum: 0 })).annotate({
       default: 5,
