@@ -636,6 +636,15 @@ const requested = (run: Run, ctcp: Requested): void => {
   }
 };
 
+// A `NICK` of the Owner's went out: Self's nick is theirs for the rest of the Session.
+const chose = (run: Run): void => {
+  updateOpen(run, (open) =>
+    open.presence._tag === "Session"
+      ? { ...open, presence: { ...open.presence, chosen: true } }
+      : open
+  );
+};
+
 // An `AWAY` went out with a message, or `null` for none: a `306` confirms it.
 const asked = (run: Run, message: string | null): void => {
   updateOpen(run, (open) => ({ ...open, asked: message }));
@@ -730,6 +739,11 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
     // A Feature refused it at egress, and `send` reported it.
     if (sent === undefined) {
       return;
+    }
+
+    // Whatever Line of the Owner's changes Self's nick makes the nick theirs.
+    if (line.command === "NICK") {
+      chose(run);
     }
 
     if (message !== undefined) {

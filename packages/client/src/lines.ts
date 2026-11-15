@@ -42,6 +42,7 @@ import { applyModes, readModes } from "./modes.ts";
 import { isOperAnswer } from "./news.ts";
 import type { Activity, ModeChange, StandardReply, Where } from "./news.ts";
 import { oper, operAnswered } from "./oper.ts";
+import { reclaim } from "./reclaim.ts";
 import {
   abandon,
   capLine,
@@ -198,6 +199,13 @@ const channelSettled = (
 
 // What Self did, live, answers the Line of an action that asked for it, Self's own
 // `AWAY` says whether Self is away, and a User's `QUIT` forgets the `PING`s sent to them.
+// A User seen leaving a nick, by `QUIT` or `NICK`, may free the nick Self wants back.
+const isSameNick = (run: Run, first: string, second: string): boolean => {
+  const fold = folder(run.state);
+
+  return fold(first) === fold(second);
+};
+
 const settled = (run: Run, activity: Activity): void => {
   if (isOperAnswer(activity)) {
     return;
@@ -223,6 +231,9 @@ const settled = (run: Run, activity: Activity): void => {
     case "NickChanged": {
       if (isSelf(run, activity.from)) {
         answered(run, "NICK", [activity.to]);
+      } else if (!isSameNick(run, activity.from, activity.to)) {
+        // A case-only change keeps the nick, so it leaves nothing to take.
+        reclaim(run, activity.from);
       }
 
       break;
@@ -238,6 +249,7 @@ const settled = (run: Run, activity: Activity): void => {
 
     case "Quit": {
       forgetPings(run, activity.nick);
+      reclaim(run, activity.nick);
 
       break;
     }
@@ -438,6 +450,7 @@ const welcome = (run: Run, line: Line): void => {
       // A User who has just registered is not away, until an `AWAY` of ours says so.
       away: { _tag: "Known", at: run.at, from: "receipt", value: null },
       began: run.at,
+      chosen: false,
       identifying: undefined,
       keepalive: { check: Instant.make(run.at + lagAfter), heard: run.at, pinged: false },
       // `001`'s text is for people. Self's mask waits for a structured source, such as

@@ -89,6 +89,11 @@ type Presence =
       readonly away: Fact<{ readonly message: string } | null>;
       readonly keepalive: Keepalive;
       /**
+       * Whether the Owner has sent a `NICK` in this Session: from then Self's nick is theirs,
+       * and never taken back.
+       */
+      readonly chosen: boolean;
+      /**
        * While Channels wait on a service login, when they are joined anyway, or
        * `undefined` once they need not wait.
        */

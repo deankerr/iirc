@@ -51,7 +51,6 @@ Small things, each independent of the rest.
 
 - **Ignoring a User,** by mask, as Configuration so every Frontend agrees. What they say is still journaled, and is neither shown, counted, nor notified.
 - **More to do as a Session begins:** user modes to set, and Lines of the Owner's own to send.
-- **Taking a nick back.** When a configured nick was taken, Self takes it once its holder is seen to leave it.
 - **`/names` and `/who`** as Lookups, beside a Channel's bans, exceptions and invitation masks.
 - **`LIST`** as a Lookup: a Channel directory, filtered on the Ircd with `ELIST` where it can, bounded and paged, with `/join` from a result.
 - **Invitations:** an invite shown with an offer to join.
