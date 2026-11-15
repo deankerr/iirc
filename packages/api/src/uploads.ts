@@ -8,6 +8,7 @@ import { Instant } from "@iirc/client";
 import { Schema } from "effect";
 
 import { ByteCount, OwnerOptionName } from "./options.ts";
+import { After, Limit } from "./schemas.ts";
 
 /**
  * An Upload's id: 16 lower-case characters of Crockford's base32, 80 random bits, which
@@ -73,3 +74,53 @@ export const UploadsStatus = Schema.TaggedUnion({
 
 /** The decoded form of {@link UploadsStatus}. */
 export type UploadsStatus = typeof UploadsStatus.Type;
+
+/**
+ * Where the next page of Uploads begins: just after an Upload, as the text a page gave as
+ * `next`. A Frontend never reads anything into it, and one naming no Upload the Daemon
+ * holds is refused.
+ */
+export const UploadsAfter = UploadId.annotate({
+  description: "Where the next page of Uploads begins, as a page gave it in `next`.",
+  identifier: "UploadsAfter",
+});
+
+/** A page of the Uploads: those after `after`, newest first, up to `limit`. */
+export const UploadsQuery = Schema.Struct({
+  after: Schema.optionalKey(UploadsAfter),
+  limit: Schema.optionalKey(Limit),
+});
+
+/** The decoded form of {@link UploadsQuery}. */
+export type UploadsQuery = typeof UploadsQuery.Type;
+
+/** A page of the Uploads, newest first, and whether more follow. */
+export const UploadPage = Schema.Struct({
+  more: Schema.Boolean,
+  /** Where the next page begins, to give as `after`, or `null` when no more follow. */
+  next: Schema.NullOr(UploadsAfter),
+  uploads: Schema.Array(Upload),
+});
+
+/** The decoded form of {@link UploadPage}. */
+export type UploadPage = typeof UploadPage.Type;
+
+/**
+ * One event of the stream of Upload Changes: `changed` carries an Upload whole, as it is
+ * after the Change, with the Change's sequence as its id, so a Frontend replaces what it
+ * holds under that id; and `heartbeat` says the stream is alive.
+ */
+export const UploadsEvent = Schema.Union([
+  Schema.Struct({
+    data: Schema.fromJsonString(Upload),
+    event: Schema.Literal("changed"),
+    id: After,
+  }),
+  Schema.Struct({
+    data: Schema.fromJsonString(Schema.Struct({})),
+    event: Schema.Literal("heartbeat"),
+  }),
+]);
+
+/** The decoded form of {@link UploadsEvent}. */
+export type UploadsEvent = typeof UploadsEvent.Type;
