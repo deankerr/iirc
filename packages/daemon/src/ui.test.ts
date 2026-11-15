@@ -15,9 +15,9 @@ import {
   nothingHeld,
 } from "./ui.ts";
 
-const set = (option: string, value: string): Change => ({ _tag: "UiSet", option, value });
+const set = (option: string, value: string) => ({ _tag: "UiSet", option, value }) as const;
 
-const unset = (option: string): Change => ({ _tag: "UiUnset", option });
+const unset = (option: string) => ({ _tag: "UiUnset", option }) as const;
 
 const themes = (value: Schema.Json): Change => ({ _tag: "UiSet", option: "themes", value });
 
@@ -259,7 +259,9 @@ describe("the ui options, kept", () => {
           const outcomes = { first: yield* Fiber.await(first), second: yield* Fiber.await(second) };
 
           const changes = (yield* Stream.runCollect(journal.read({}))).flatMap(({ record }) =>
-            record._tag === "Change" ? [`${record.change._tag} ${record.change.option}`] : []
+            record._tag === "Change" && "option" in record.change
+              ? [`${record.change._tag} ${record.change.option}`]
+              : []
           );
 
           return { changes, ...outcomes };

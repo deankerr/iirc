@@ -23,3 +23,7 @@ export { UiChangedSince, UiConfiguration, layerUiConfiguration } from "./ui.ts";
 export type { Progress, ProjectorStatus } from "./projector.ts";
 
 export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./lock.ts";
+
+export { ByteStoreMaker, Uploads, layerUploads } from "./uploads/uploads.ts";
+
+export { layerLinkListener } from "./link-listener.ts";

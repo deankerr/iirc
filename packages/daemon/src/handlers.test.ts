@@ -451,7 +451,9 @@ describe("the handlers", () => {
 
         const journaled = (yield* Stream.runCollect(world.journal.read({}))).flatMap(
           ({ record }) =>
-            record._tag === "Change" ? [`${record.change._tag} ${record.change.option}`] : []
+            record._tag === "Change" && "option" in record.change
+              ? [`${record.change._tag} ${record.change.option}`]
+              : []
         );
 
         return {

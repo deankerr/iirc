@@ -1,10 +1,12 @@
 /**
  * The composition root: the data directory, the production adapters, the Runtime driving
- * the real Client, the keys and sign-ins, and the API served over HTTP.
+ * the real Client, the Uploads and their link listener, the keys and sign-ins, and the API
+ * served over HTTP.
  *
  * @packageDocumentation
  */
 import { BunFileSystem, BunHttpServer, BunPath } from "@effect/platform-bun";
+import { makeS3ByteStore } from "@iirc/byte-store-s3";
 import { client } from "@iirc/client";
 import { layerSqliteJournal } from "@iirc/journal-sqlite";
 import type { Pacing } from "@iirc/outbox";
@@ -21,11 +23,13 @@ import type { HttpPlatform } from "effect/http";
 
 import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
+import { layerLinkListener } from "./link-listener.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
 import { OwnerConfiguration, layerOwnerConfiguration } from "./options.ts";
 import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import { layerUiConfiguration } from "./ui.ts";
+import { ByteStoreMaker, layerUploads } from "./uploads/uploads.ts";
 
 /** What a Daemon needs besides where to listen. */
 export interface DaemonOptions {
@@ -132,9 +136,9 @@ const runtimeFirstToStop = (options: DaemonOptions) =>
   );
 
 /**
- * Everything but HTTP: the data directory held, the Journal, the Vault, the Transport,
- * the Runtime, the Timeline store and its projector, the keys, and the sign-ins. Each is
- * opened only once the directory is held.
+ * Everything but the API's HTTP: the data directory held, the Journal, the Vault, the
+ * Transport, the Runtime, the Timeline store and its projector, the Uploads and their link
+ * listener, the keys, and the sign-ins. Each is opened only once the directory is held.
  * @param options - The data directory and the Transport's options.
  * @returns The core.
  */
@@ -172,10 +176,17 @@ const layerCore = (options: DaemonOptions) => {
     )
   );
 
-  // The `ui` options are folded from the Journal's Changes, beside the Runtime. The options
-  // under `store` and `uploads` are folded before it starts, since it spares the
-  // Credentials they name, even as it finishes a removal cut short.
-  const owned = Layer.merge(timelines, layerUiConfiguration);
+  // The Uploads keep their bytes in the bucket the options name, and the link listener
+  // follows the options, binding while Uploads are on.
+  const uploads = layerLinkListener.pipe(
+    Layer.provideMerge(layerUploads(dataDir)),
+    Layer.provide(Layer.merge(Layer.succeed(ByteStoreMaker, makeS3ByteStore), platform))
+  );
+
+  // The `ui` options are folded from the Journal's Changes, beside the Runtime, and so are
+  // the Uploads. The options under `store` and `uploads` are folded before it starts, since
+  // it spares the Credentials they name, even as it finishes a removal cut short.
+  const owned = Layer.mergeAll(timelines, layerUiConfiguration, uploads);
 
   const runtime = runtimeFirstToStop(options).pipe(
     Layer.provideMerge(layerOwnerConfiguration),

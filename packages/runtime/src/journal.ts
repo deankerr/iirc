@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { Input, Output } from "@iirc/client";
+import { Input, Instant, Output } from "@iirc/client";
 import { CredentialName } from "@iirc/protocol/line";
 import { Context, Schema } from "effect";
 import type { Effect, Stream } from "effect";
@@ -33,23 +33,40 @@ export const Sequence = Schema.Int.pipe(
 export type Sequence = typeof Sequence.Type;
 
 /**
- * Something the Owner altered that belongs to no Network, as the whole value of one
- * option, so applying it twice is applying it once and the latest for an option wins
- * (ADR 0015). The Journal holds an option by its name and its value as JSON, and knows
- * nothing of which options exist: the Daemon parses a value by the contract's Schema before
- * it is journaled, and folds Changes into the Owner's Configuration.
+ * Something the Owner altered that belongs to no Network, or that the Daemon altered on the
+ * Owner's behalf. The Journal knows nothing of which options exist, nor what an Upload's
+ * fields mean: the Daemon parses them by the contract's Schemas before it journals them,
+ * and folds the Changes.
+ *
+ * Options are each the whole value of one option, so applying one twice is applying it
+ * once and the latest for an option wins (ADR 0015):
  *
  * - `UiSet`: an option under `ui` set to a value, by its name under `ui`, such as `time`.
  * - `UiUnset`: an option under `ui` back to its default.
  * - `OptionSet`: an option under another root set to a value, by its full name, such as
  *   `store.s3.bucket`.
  * - `OptionUnset`: an option under another root back to its default, or to none.
+ *
+ * An Upload's Changes are records keyed by its id instead (ADR 0016):
+ *
+ * - `Uploaded`: an Upload was kept. Its `id`, the `name` it was given, if any, the
+ *   `safeName` its link uses, the `type` read from its bytes, their `size` and SHA-256
+ *   `hash`, and `at`, when it was uploaded, since an Entry carries no time of its own.
  */
 export const Change = Schema.TaggedUnion({
   OptionSet: { option: Schema.String, value: Schema.Json },
   OptionUnset: { option: Schema.String },
   UiSet: { option: Schema.String, value: Schema.Json },
   UiUnset: { option: Schema.String },
+  Uploaded: {
+    at: Instant,
+    hash: Schema.String,
+    id: Schema.String,
+    name: Schema.optionalKey(Schema.String),
+    safeName: Schema.String,
+    size: Schema.Int,
+    type: Schema.String,
+  },
 });
 
 /** The decoded form of {@link Change}. */

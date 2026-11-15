@@ -11,6 +11,8 @@ import path from "node:path";
 
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Authorization, signInCookie } from "@iirc/api";
+import { makeMemoryByteStore } from "@iirc/byte-store/testing";
+import type { ByteStoreHarness } from "@iirc/byte-store/testing";
 import { client } from "@iirc/client";
 import { layerRuntime } from "@iirc/runtime";
 import { Journal, JournalFailed } from "@iirc/runtime/journal";
@@ -29,10 +31,12 @@ import { HttpClientRequest } from "effect/http";
 import { HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys, createKey } from "../keys.ts";
+import { layerLinkListener } from "../link-listener.ts";
 import { OwnerConfiguration, layerOwnerConfiguration } from "../options.ts";
 import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
 import { layerUiConfiguration } from "../ui.ts";
+import { ByteStoreMaker, layerUploads } from "../uploads/uploads.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -91,8 +95,13 @@ export interface World {
   readonly memory: MemoryTransport;
   readonly vault: VaultService;
   readonly store: TimelineStoreService;
+  /** The byte store, in memory, reached from any bucket but {@link unreachableEndpoint}. */
+  readonly bytes: ByteStoreHarness;
   readonly logged: string[];
 }
+
+/** A bucket endpoint the world's byte store cannot reach, failing everything as unavailable. */
+export const unreachableEndpoint = "http://unreachable.invalid";
 
 /**
  * Fresh in-memory ports, and somewhere to keep what is logged.
@@ -106,6 +115,7 @@ export const makeWorld = (
 ): Effect.Effect<World> =>
   Effect.gen(function* () {
     return {
+      bytes: yield* makeMemoryByteStore,
       journal: journal ?? (yield* makeMemoryJournal),
       logged: [],
       memory: yield* makeMemoryTransport,
@@ -117,15 +127,32 @@ export const makeWorld = (
 /**
  * The Runtime, on the world's ports, with the real Client, the projector folding its News
  * into the world's Timeline store, the `ui` options and those under `store` and `uploads`
- * folded from the Journal's Changes, the Runtime sparing the Credentials those name, and the
- * keys and browser sign-ins of a data directory.
+ * folded from the Journal's Changes, the Runtime sparing the Credentials those name, the
+ * Uploads on the world's byte store, staged in a data directory, and their link listener,
+ * and the keys and browser sign-ins of that directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
  * @returns The Layer.
  */
 export const layerWorld = (world: World, dataDir: string) =>
   Layer.mergeAll(
-    Layer.merge(layerProjector, layerUiConfiguration).pipe(
+    Layer.mergeAll(
+      layerProjector,
+      layerUiConfiguration,
+      layerLinkListener.pipe(
+        Layer.provideMerge(layerUploads(dataDir)),
+        Layer.provide(
+          Layer.merge(
+            Layer.succeed(ByteStoreMaker, ({ endpoint }) =>
+              Effect.succeed(
+                endpoint === unreachableEndpoint ? world.bytes.unreachable : world.bytes.store
+              )
+            ),
+            platform
+          )
+        )
+      )
+    ).pipe(
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
         Layer.unwrap(
