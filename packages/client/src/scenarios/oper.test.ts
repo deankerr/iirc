@@ -97,6 +97,27 @@ describe("an operator login", () => {
     expect(activities(played)).toStrictEqual(["OperRefused"]);
   });
 
+  it("takes no numeric addressed to another User, or to no one, as the answer", () => {
+    const played = play(client, {
+      configuration: opering,
+      transcript: [
+        opened,
+        welcomed,
+        lines(
+          "<< :irc.test 381 othernick :You are now an IRC operator",
+          "<< :irc.test 381",
+          "<< :irc.test 491 * :No O-lines for your host"
+        ),
+        lines(
+          "<< :irc.test 464 IIRC :Password incorrect",
+          "?? activity OperRefused iirc reply=464 in=network"
+        ),
+      ],
+    });
+
+    expect(activities(played)).toStrictEqual(["OperRefused"]);
+  });
+
   it("reports one answer, and none for a numeric when nothing awaits it", () => {
     const played = play(client, {
       configuration: opering,

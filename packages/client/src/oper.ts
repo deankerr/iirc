@@ -2,7 +2,7 @@
  * An operator login: as each Session begins, Self sends `OPER` with the Configuration's
  * name and Credential, and the Session awaits the answer. The answer is read from its
  * numeric alone, never its text: `381` grants it, and `464`, `491`, or a `461` that names
- * `OPER` refuse it. Each is reported once, as Activity in the Network's own Timeline. A
+ * `OPER` refuse it, when addressed to Self. Each is reported once, as Activity in the Network's own Timeline. A
  * numeric that arrives when nothing awaits it is no answer to Self's `OPER`.
  *
  * `echo-message` echoes only `PRIVMSG`, `NOTICE`, and `TAGMSG`, so the Ircd never sends
@@ -13,6 +13,7 @@
 import { upperCaseAscii } from "@iirc/protocol/line";
 import type { Line } from "@iirc/protocol/line";
 
+import { isSelf } from "./meaning.ts";
 import type { OperRefusal } from "./news.ts";
 import type { Run } from "./run.ts";
 import { sendSecret, updateOpen } from "./run.ts";
@@ -55,8 +56,16 @@ const refusals: ReadonlySet<string> = new Set<OperRefusal>(["464", "491"]);
 
 const isRefusal = (command: string): command is OperRefusal => refusals.has(command);
 
-// What a numeric says of an `OPER`: granted, refused with it, or nothing.
-const answerOf = (line: Line): "Granted" | OperRefusal | undefined => {
+// What a numeric says of an `OPER`: granted, refused with it, or nothing. A numeric is
+// addressed to its first parameter, so one with none, or addressed to another User, says
+// nothing of Self's.
+const answerOf = (run: Run, line: Line): "Granted" | OperRefusal | undefined => {
+  const [recipient] = line.params;
+
+  if (recipient === undefined || !isSelf(run, recipient)) {
+    return undefined;
+  }
+
   if (line.command === "381") {
     return "Granted";
   }
@@ -78,7 +87,7 @@ const answerOf = (line: Line): "Granted" | OperRefusal | undefined => {
  */
 export const operAnswered = (run: Run, line: Line): void => {
   const session = sessionOf(run.state);
-  const answer = answerOf(line);
+  const answer = answerOf(run, line);
 
   if (session?.opering !== true || answer === undefined) {
     return;
