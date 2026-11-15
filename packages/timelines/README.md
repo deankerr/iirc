@@ -8,7 +8,7 @@ import { emptyDirectory, projectionVersion, step } from "@iirc/timelines";
 step(directory: Directory, happened: Happened): { directory: Directory, changes: readonly Change[] }
 Happened = { network, life, sequence, at, news }  // the Runtime's Happened fits it
 emptyDirectory: Directory
-projectionVersion: number                         // 11
+projectionVersion: number                         // 12
 comparePositions(left, right): number
 cursorOf(position): string
 cursorsAfter(at): string                          // above every cursor later than `at`, below the rest
