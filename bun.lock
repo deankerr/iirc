@@ -163,6 +163,27 @@
         "vitest": "catalog:",
       },
     },
+    "packages/link-fetch": {
+      "name": "@iirc/link-fetch",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
+    "packages/link-fetch-bun": {
+      "name": "@iirc/link-fetch-bun",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/link-fetch": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
     "packages/outbox": {
       "name": "@iirc/outbox",
       "version": "0.0.0",
@@ -384,6 +405,10 @@
     "@iirc/frontend": ["@iirc/frontend@workspace:packages/frontend"],
 
     "@iirc/journal-sqlite": ["@iirc/journal-sqlite@workspace:packages/journal-sqlite"],
+
+    "@iirc/link-fetch": ["@iirc/link-fetch@workspace:packages/link-fetch"],
+
+    "@iirc/link-fetch-bun": ["@iirc/link-fetch-bun@workspace:packages/link-fetch-bun"],
 
     "@iirc/outbox": ["@iirc/outbox@workspace:packages/outbox"],
 

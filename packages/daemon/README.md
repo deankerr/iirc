@@ -174,4 +174,5 @@ The link listener, in `src/link-listener.ts`, is a second HTTP server, never a r
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB to a route other than an upload, or one that has stopped reading a stream it follows, could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
 - **Key scopes, keys through the API, and ending sign-ins other than by signing out.**
+- **Previews.** The Daemon will fetch a stranger's link only through the link fetch port, `@iirc/link-fetch`, and nothing composes it yet.
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.
