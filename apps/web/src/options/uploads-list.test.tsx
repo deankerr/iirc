@@ -402,18 +402,18 @@ describe("the Uploads beside the options", () => {
         release();
       }
     });
-    await settled(() => moreButton(container) !== undefined);
-    await doing(() => {
-      moreButton(container)?.click();
-    });
-    await settled(() => listed(container).length >= 4 && moreButton(container) === undefined);
+    await settled(() => listed(container).length >= 4);
 
+    // The page was taken before they were made, so only the stream, followed from how far
+    // that page was read, can have brought them.
     expect(names(container)).toStrictEqual([
       "e-safe.png",
       "d-safe.png",
       "c-safe.png",
       "Cat picture.png",
     ]);
+    expect(moreButton(container)).toBeUndefined();
+    expect(fake.daemon.uploadPagesRead).toStrictEqual([undefined]);
   });
 
   it("forgets the Uploads on signing out", async () => {

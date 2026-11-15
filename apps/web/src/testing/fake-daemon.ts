@@ -587,7 +587,7 @@ export const fakeDaemon = () => {
     holdSays: false,
     /** Whether each read of the `ui` options waits until released, then answers as they were when asked. */
     holdUiReads: false,
-    /** Whether each page of the Uploads waits until released, then answers as they are then. */
+    /** Whether each page of the Uploads, taken as it is asked for, waits until released to answer. */
     holdUploadPages: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
@@ -1427,11 +1427,9 @@ export const fakeDaemon = () => {
     }
 
     if (url.pathname === "/api/uploads") {
-      if (daemon.holdUploadPages) {
-        await heldUntilReleased(uploadPagesHeld, init);
-      }
-
-      return signedInOnly(() => {
+      // The page is taken as the request arrives, and a held one is only delivered late, so
+      // what is made meanwhile is in no page and reaches the list only by the stream.
+      const answer = signedInOnly(() => {
         const after = url.searchParams.get("after") ?? undefined;
         const limit = Number(url.searchParams.get("limit") ?? daemon.uploadsPage);
         const start = after === undefined ? 0 : uploads.findIndex((one) => one.id === after) + 1;
@@ -1452,6 +1450,12 @@ export const fakeDaemon = () => {
           uploads: page,
         });
       });
+
+      if (daemon.holdUploadPages) {
+        await heldUntilReleased(uploadPagesHeld, init);
+      }
+
+      return answer;
     }
 
     if (content?.id !== undefined) {
