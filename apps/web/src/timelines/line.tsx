@@ -1,10 +1,11 @@
 /**
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
- * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each one's
- * words starting where a Message's text does. In a Timeline too narrow for those columns, a row is one
- * run of text that wraps under itself. Failed Connections in a row say how many and when.
- * Every name and every text a Network sent sits in its own isolate, as a text node.
+ * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each
+ * one's words starting where a Message's text does. In a Timeline too narrow for those
+ * columns, a row is one run of text that wraps under itself. Failed Connections in a row
+ * say how many and when. Every name and every text a Network sent sits in its own isolate,
+ * as a text node.
  *
  * @packageDocumentation
  */
