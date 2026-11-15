@@ -2,8 +2,9 @@ import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 
 import { BunHttpServer } from "@effect/platform-bun";
 import { Upload, UploadsStatus } from "@iirc/api";
+import type { ByteStoreService } from "@iirc/byte-store";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
-import { Context, Effect, Exit, Latch, Layer, Schema, Scope, Stream } from "effect";
+import { Context, Effect, Exit, Latch, Layer, Option, Schema, Scope, Stream } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
 import { describe, expect, it } from "vitest";
 
@@ -639,6 +640,50 @@ describe("Uploads over the API", () => {
     });
   });
 
+  it("answers 503 at once when the Daemon begins to stop, though the store's write cannot be stopped", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+
+        // A store that reads the whole body, then never answers and cannot be interrupted.
+        const hung: ByteStoreService = {
+          ...served.world.bytes.store,
+          put: (body) =>
+            Stream.runDrain(body).pipe(
+              Effect.orDie,
+              Effect.andThen(Effect.uninterruptible(Effect.never))
+            ),
+        };
+
+        Object.assign(served.world.bytes, { store: hung });
+
+        const request = yield* raw(
+          served,
+          "POST /api/uploads HTTP/1.1\r\nhost: daemon\r\ncontent-length: 5000"
+        );
+
+        yield* request.send(new Uint8Array(5000));
+        yield* Effect.sleep("200 millis");
+        yield* served.beginStopping;
+
+        const answered = yield* request.answered.pipe(Effect.timeoutOption("3 seconds"));
+        const closed = yield* served.restart.pipe(Effect.timeoutOption("3 seconds"));
+
+        return {
+          answer: Option.isSome(answered) ? answered.value.split("\r\n")[0] : "no answer",
+          closed: Option.isSome(closed),
+          journaled: yield* journaledUploads(served.world),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      answer: "HTTP/1.1 503 Service Unavailable",
+      closed: true,
+      journaled: [],
+    });
+  });
+
   it("keeps staging owner-only", async () => {
     const mode = await run((served) =>
       Effect.sync(() => statSync(`${served.dataDir}/staging`).mode % 0o1000)
@@ -1003,6 +1048,7 @@ describe("the link listener", () => {
         {
           ...safety,
           "cache-control": "no-cache",
+          "content-disposition": "inline",
           "content-length": "10",
           "content-type": "text/plain; charset=utf-8",
         },
@@ -1057,6 +1103,7 @@ describe("the link listener", () => {
       {
         ...safety,
         "cache-control": "no-store",
+        "content-disposition": "inline",
         "content-length": "25",
         "content-type": "text/plain; charset=utf-8",
       },

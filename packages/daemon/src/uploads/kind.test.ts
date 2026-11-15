@@ -72,11 +72,30 @@ describe("detectKind images", () => {
 
 describe("detectKind video", () => {
   it("reads MP4 by its brands", () => {
-    for (const brand of ["isom", "iso2", "mp41", "mp42", "avc1", "dash", "M4V "]) {
+    for (const brand of [
+      "isom",
+      "iso2",
+      "iso9",
+      "mp41",
+      "mp42",
+      "avc1",
+      "dash",
+      "M4V ",
+      "f4v ",
+      "3gp4",
+    ]) {
       expect(label(ftyp(brand))).toBe("video/mp4 inline");
     }
 
+    expect(label(ftyp("mif9", "isom"))).toBe("video/mp4 inline");
+
     expect(detectKind(ftyp("isom")).extensions).toStrictEqual(["mp4", "m4v"]);
+  });
+
+  it("does not call an unrecognised ftyp brand MP4", () => {
+    expect(label(ftyp("jp2 "))).toBe("application/octet-stream attachment");
+    expect(label(ftyp("jp2 ", "jpx "))).toBe("application/octet-stream attachment");
+    expect(detectKind(ftyp("jp2 ")).extensions).toStrictEqual([]);
   });
 
   it("reads QuickTime", () => {

@@ -60,6 +60,8 @@ import {
   Context,
   Duration,
   Effect,
+  Exit,
+  Fiber,
   Layer,
   Option,
   Predicate,
@@ -1195,14 +1197,25 @@ const uploads = HttpApiBuilder.group(
               ? Stream.empty
               : request.stream.pipe(Stream.orDie);
 
-          const kept = held.upload(body, query.name);
+          // The upload runs in a fiber of its own, so that cutting it off never waits for it:
+          // a store write whose body is fully read cannot be stopped, and nothing bounds how
+          // long the store takes to answer it. Its interruption is forked off, so neither this
+          // answer nor serving's stop nor any Layer's closing awaits it. What it staged may
+          // outlive the process, which is fine, since staging is cleared at start.
+          const fiber = yield* Effect.forkDetach(held.upload(body, query.name));
 
           const stopped = Effect.andThen(
             stopping,
             Effect.fail(new StoreUnavailable({ reason: "the Daemon is stopping" }))
           );
 
-          return upload(yield* Effect.raceFirst(kept, stopped));
+          return upload(
+            yield* Effect.raceFirst(Fiber.join(fiber), stopped).pipe(
+              Effect.onExit((exit) =>
+                Exit.isSuccess(exit) ? Effect.void : Effect.forkDetach(Fiber.interrupt(fiber))
+              )
+            )
+          );
         }).pipe(
           Effect.catchTags({
             BodyTooLarge: (error) => Effect.fail(new UploadTooLarge({ maxSize: error.maxSize })),

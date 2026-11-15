@@ -153,6 +153,36 @@ const brandsOf = (head: Uint8Array) => {
   return { all, major };
 };
 
+// The brands, major or compatible, of an ISO base media file that plays as MP4: the ISO
+// and MPEG-4 families, AVC, DASH segments, iTunes and Adobe video, and 3GPP, which is
+// MP4's profile. Any other brand, such as JPEG 2000's `jp2 `, is not shown as video.
+const mp4Brands = [
+  "isom",
+  "iso2",
+  "iso3",
+  "iso4",
+  "iso5",
+  "iso6",
+  "iso7",
+  "iso8",
+  "iso9",
+  "mp41",
+  "mp42",
+  "mp71",
+  "avc1",
+  "dash",
+  "M4V ",
+  "M4VH",
+  "M4VP",
+  "mmp4",
+  "msnv",
+  "f4v ",
+  "3gp4",
+  "3gp5",
+  "3gp6",
+  "3g2a",
+];
+
 const isoBaseMedia = (head: Uint8Array): Kind => {
   const { all, major } = brandsOf(head);
   const has = (...brands: readonly string[]) => brands.some((brand) => all.has(brand));
@@ -173,7 +203,7 @@ const isoBaseMedia = (head: Uint8Array): Kind => {
     return m4a;
   }
 
-  return mp4;
+  return has(...mp4Brands) ? mp4 : unknownKind;
 };
 
 const ebml = (head: Uint8Array): Kind => {

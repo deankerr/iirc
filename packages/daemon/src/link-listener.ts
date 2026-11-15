@@ -45,7 +45,7 @@ const safety = {
 const plain = (status: number, text: string, cache: string) =>
   HttpServerResponse.text(text, {
     contentType: "text/plain; charset=utf-8",
-    headers: { ...safety, "cache-control": cache },
+    headers: { ...safety, "cache-control": cache, "content-disposition": "inline" },
     status,
   });
 
