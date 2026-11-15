@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -483,6 +484,85 @@ describe("stripping a WebP", () => {
       )
     ).toBe("Unreadable");
   });
+});
+
+// Peak memory is read in a process of its own, where nothing else has raised it, from the
+// resource usage the operating system keeps, so that what a walk retains for each part of an
+// image shows however the collector is timed.
+const imagesModule = new URL("../../testing/images.ts", import.meta.url).href;
+const stripModule = new URL("strip.ts", import.meta.url).href;
+
+const measuring = `
+import * as images from ${JSON.stringify(imagesModule)};
+import { stripperFor } from ${JSON.stringify(stripModule)};
+
+const [kind, count] = [process.argv[1], Number(process.argv[2])];
+const cat = (...parts) => {
+  const whole = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let at = 0;
+  for (const part of parts) { whole.set(part, at); at += part.length; }
+  return whole;
+};
+const repeat = (unit, times) => {
+  const whole = new Uint8Array(unit.length * times);
+  for (let i = 0; i < times; i += 1) whole.set(unit, i * unit.length);
+  return whole;
+};
+const frame = images.riffChunk("ANMF", cat(new Uint8Array(16), images.riffChunk("VP8 ", images.vp8First)));
+const looping = Uint8Array.of(0x21, 0xff, 11, ...new TextEncoder().encode("NETSCAPE2.0"), 3, 1, 0, 0, 0);
+const inputs = {
+  "image/gif": () => images.gifOf(repeat(looping, count), images.gifImage([0, 1, 2, 3])),
+  "image/jpeg": () => cat(images.jpeg.subarray(0, 2), repeat(images.jpegSegment(0xdb, new Uint8Array()), count), images.jpeg.subarray(2)),
+  "image/png": () => cat(images.png.subarray(0, 33), repeat(images.pngChunk("IDAT", new Uint8Array()), count), images.png.subarray(33)),
+  "image/webp": () => images.webpOf(images.vp8x(0x02), repeat(frame, count)),
+};
+const input = inputs[kind]();
+Bun.gc(true);
+const before = process.resourceUsage().maxRSS;
+const result = stripperFor(kind)(input);
+const after = process.resourceUsage().maxRSS;
+console.log(JSON.stringify({ grew: (after - before) * 1024, input: input.length, tag: result._tag }));
+`;
+
+const decodeMeasure = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ grew: Schema.Finite, input: Schema.Finite, tag: Schema.String })
+  )
+);
+
+const peakGrowth = async (type: string, count: number) => {
+  const child = Bun.spawn([process.execPath, "-e", measuring, type, String(count)], {
+    stderr: "inherit",
+    stdout: "pipe",
+  });
+
+  const text = await new Response(child.stdout).text();
+
+  await child.exited;
+
+  return decodeMeasure(text);
+};
+
+describe("stripping an image of very many small parts", () => {
+  // A part, an empty `IDAT` of 12 bytes at the smallest, costs a walker that keeps an object
+  // for it a hundred bytes more, so a few million parts in a file of tens of megabytes would
+  // cost it gigabytes. Stripping holds one output buffer the size of the input, whatever the
+  // parts, so it may peak above the input by that and a constant, never by a multiple of it.
+  it.each([
+    ["image/gif", 1_000_000],
+    ["image/jpeg", 1_000_000],
+    ["image/png", 1_000_000],
+    ["image/webp", 200_000],
+  ] as const)(
+    "holds nothing for each part of a %s of %i parts",
+    async (type, count) => {
+      const { grew, input, tag } = await peakGrowth(type, count);
+
+      expect(tag).toBe("Stripped");
+      expect(grew).toBeLessThan(input + 24 * 1024 * 1024);
+    },
+    30_000
+  );
 });
 
 describe("stripping in general", () => {

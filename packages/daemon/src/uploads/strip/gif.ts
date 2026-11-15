@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { asciiAt, concat, hasFlag } from "./bytes.ts";
+import { asciiAt, copy, hasFlag, makeWriter, written } from "./bytes.ts";
 import { stripped, unreadable } from "./result.ts";
 import type { Stripped } from "./result.ts";
 
@@ -68,21 +68,26 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
     return unreadable("a GIF's colour table runs past the end");
   }
 
-  const kept: Uint8Array[] = [bytes.subarray(0, screenEnd)];
-  // The graphic control awaiting the block it applies to: none, or one.
-  let pendingControl: Uint8Array[] = [];
+  // Everything kept is copied, in order, from disjoint parts of the GIF, so no more than the
+  // GIF is ever written.
+  const out = makeWriter(bytes.length);
+  // Where the graphic control awaiting the block it applies to is: none when they meet.
+  let pendingFrom = 0;
+  let pendingTo = 0;
   let imaged = false;
   let at = screenEnd;
 
-  const broken = (reason: string) => (imaged ? stripped(concat(kept)) : unreadable(reason));
+  copy(out, bytes, 0, screenEnd);
+
+  const broken = (reason: string) => (imaged ? stripped(written(out)) : unreadable(reason));
 
   for (;;) {
     const introducer = bytes[at];
 
     if (introducer === 0x3b) {
-      kept.push(bytes.subarray(at, at + 1));
+      copy(out, bytes, at, at + 1);
 
-      return imaged ? stripped(concat(kept)) : unreadable("a GIF ends before its image data");
+      return imaged ? stripped(written(out)) : unreadable("a GIF ends before its image data");
     }
 
     if (introducer === 0x2c) {
@@ -94,8 +99,10 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
         return broken("a GIF image runs past the end");
       }
 
-      kept.push(...pendingControl, bytes.subarray(at, end));
-      pendingControl = [];
+      copy(out, bytes, pendingFrom, pendingTo);
+      copy(out, bytes, at, end);
+      pendingFrom = 0;
+      pendingTo = 0;
       imaged = true;
       at = end;
     } else if (introducer === 0x21) {
@@ -107,11 +114,13 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
       }
 
       if (label === 0xf9) {
-        pendingControl = [bytes.subarray(at, end)];
+        pendingFrom = at;
+        pendingTo = end;
       } else if (label === 0x01) {
-        pendingControl = [];
+        pendingFrom = 0;
+        pendingTo = 0;
       } else if (isKeptApplication(bytes, at)) {
-        kept.push(bytes.subarray(at, end));
+        copy(out, bytes, at, end);
       }
 
       at = end;

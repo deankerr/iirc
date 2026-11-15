@@ -6,7 +6,21 @@
  *
  * @packageDocumentation
  */
-import { ascii, asciiAt, concat, hasFlag, le, readLe } from "./bytes.ts";
+import {
+  asciiAt,
+  copy,
+  hasFlag,
+  makeWriter,
+  patch,
+  patchLe,
+  put,
+  putAscii,
+  putLe,
+  readLe,
+  reserve,
+  written,
+} from "./bytes.ts";
+import type { Writer } from "./bytes.ts";
 import { orientationOfPayload, orientationTiff } from "./exif.ts";
 import { stripped, unreadable } from "./result.ts";
 import type { Stripped } from "./result.ts";
@@ -31,152 +45,199 @@ const fileParts: ReadonlySet<string> = new Set([
 
 const fileOnce: ReadonlySet<string> = new Set(["VP8X", "ICCP", "ANIM", "EXIF", ...frameParts]);
 
-/** One chunk as walked: its FourCC and its data. */
-interface Chunk {
-  readonly fourCC: string;
-  readonly data: Uint8Array;
-}
+// The `VP8X` chunk's data: flags, then the canvas size.
+const vp8xDataSize = 10;
+
+// The `ANMF` chunk's data before its image data: a frame's position, size, duration and flags.
+const frameHeaderSize = 16;
+
+// An `EXIF` chunk, rebuilt from nothing: its header and a TIFF of 26 bytes.
+const exifChunkSize = 8 + 26;
 
 /**
- * A chunk with its padding byte when its size is odd.
- * @param fourCC - Its FourCC.
- * @param data - Its data.
- * @returns The chunk.
+ * The most a stripped WebP outgrows the WebP. Every chunk but the `EXIF` is copied from a part
+ * of the WebP no other chunk is, or is no longer than that part, but for the padding byte of
+ * the last chunk, which a WebP may leave off.
  */
-const riffChunk = (fourCC: string, data: Uint8Array) =>
-  concat([ascii(fourCC), le(data.length, 4), data, new Uint8Array(data.length % 2)]);
+const outgrowth = exifChunkSize + 1;
 
 /**
- * Walks the chunks between `from` and `end`, holding only those on the keep-list, so that
- * what is held is bounded by what is kept and never by how many chunks a hostile file
- * strings together. A chunk that runs past `end` stops the walk; its last padding byte
- * alone may be missing.
+ * Walks the chunks between `from` and `end`, calling `visit` with each, so that what is held
+ * is what `visit` holds and never how many chunks a hostile file strings together. A chunk
+ * that runs past `end` stops the walk; its last padding byte alone may be missing.
  * @param bytes - The bytes.
  * @param from - Where the first chunk begins.
  * @param end - Where the chunks end.
- * @param keep - The FourCCs to hold.
- * @param once - The FourCCs, among those, to hold only the first of.
- * @returns The chunks kept, the first chunk's FourCC whether kept or not, and whether the
- * walk reached `end`.
+ * @param visit - Called with each whole chunk's FourCC, and where its data begins and ends.
+ * @returns Whether the walk reached `end`.
  */
-const chunksOf = (
+const walkChunks = (
   bytes: Uint8Array,
   from: number,
   end: number,
-  keep: ReadonlySet<string>,
-  once: ReadonlySet<string>
-) => {
-  const chunks: Chunk[] = [];
-  const seen = new Set<string>();
-  let first;
+  visit: (fourCC: string, dataAt: number, dataEnd: number) => void
+): boolean => {
   let at = from;
 
   while (at + 8 <= end) {
     const size = readLe(bytes, at + 4, 4);
 
     if (at + 8 + size > end) {
-      return { chunks, first, whole: false };
+      return false;
     }
 
-    const fourCC = String.fromCodePoint(...bytes.subarray(at, at + 4));
-
-    first ??= fourCC;
-
-    if (keep.has(fourCC) && !(once.has(fourCC) && seen.has(fourCC))) {
-      seen.add(fourCC);
-      chunks.push({ data: bytes.subarray(at + 8, at + 8 + size), fourCC });
-    }
-
+    visit(
+      String.fromCodePoint(
+        bytes[at] ?? 0,
+        bytes[at + 1] ?? 0,
+        bytes[at + 2] ?? 0,
+        bytes[at + 3] ?? 0
+      ),
+      at + 8,
+      at + 8 + size
+    );
     at += 8 + size + (size % 2);
   }
 
-  return { chunks, first, whole: at >= end };
+  return at >= end;
 };
 
 /**
- * A frame of an animation, keeping its header and only its image data.
- * @param frame - The `ANMF` chunk's data.
- * @returns The frame, or none if its parts cannot be walked or hold no image data.
+ * Whether a chunk is on the keep-list and, if it is held once, the first of its FourCC.
+ * @param seen - The FourCCs already kept, which this adds to.
+ * @param keep - The FourCCs to keep.
+ * @param once - The FourCCs, among those, to keep only the first of.
+ * @param fourCC - The chunk's FourCC.
+ * @returns Whether to keep it.
  */
-const frameOf = (frame: Uint8Array): Uint8Array | undefined => {
-  if (frame.length < 16) {
-    return undefined;
+const admits = (
+  seen: Set<string>,
+  keep: ReadonlySet<string>,
+  once: ReadonlySet<string>,
+  fourCC: string
+) => {
+  if (!keep.has(fourCC) || (once.has(fourCC) && seen.has(fourCC))) {
+    return false;
   }
 
-  const { chunks: kept, whole } = chunksOf(frame, 16, frame.length, frameParts, frameParts);
+  seen.add(fourCC);
 
-  if (!whole || !kept.some((chunk) => chunk.fourCC !== "ALPH")) {
-    return undefined;
-  }
-
-  return riffChunk(
-    "ANMF",
-    concat([frame.subarray(0, 16), ...kept.map((chunk) => riffChunk(chunk.fourCC, chunk.data))])
-  );
+  return true;
 };
 
-/** What the chunks after `VP8X` keep. */
-interface Extended {
-  readonly kept: readonly Uint8Array[];
-  readonly orientation: number | undefined;
-  readonly icc: boolean;
-  readonly imaged: boolean;
+/**
+ * Writes a chunk, with its padding byte when its size is odd.
+ * @param out - The writer.
+ * @param fourCC - Its FourCC.
+ * @param bytes - The bytes its data is in.
+ * @param from - Where its data begins.
+ * @param to - Where its data ends.
+ */
+const putChunk = (out: Writer, fourCC: string, bytes: Uint8Array, from: number, to: number) => {
+  putAscii(out, fourCC);
+  putLe(out, to - from, 4);
+  copy(out, bytes, from, to);
+  reserve(out, (to - from) % 2);
+};
+
+/**
+ * Writes a frame of an animation, keeping its header and only its image data. Its size is
+ * written once its image data is, and a frame that cannot be walked, or holds no image data,
+ * is taken back out.
+ * @param out - The writer.
+ * @param frame - The `ANMF` chunk's data.
+ * @returns Whether the frame was written.
+ */
+const putFrame = (out: Writer, frame: Uint8Array): boolean => {
+  if (frame.length < frameHeaderSize) {
+    return false;
+  }
+
+  const start = out.length;
+  const seen = new Set<string>();
+  let imaged = false;
+
+  putAscii(out, "ANMF");
+
+  const sizeAt = reserve(out, 4);
+
+  put(out, frame.subarray(0, frameHeaderSize));
+
+  const whole = walkChunks(frame, frameHeaderSize, frame.length, (fourCC, dataAt, dataEnd) => {
+    if (admits(seen, frameParts, frameParts, fourCC)) {
+      putChunk(out, fourCC, frame, dataAt, dataEnd);
+      imaged ||= fourCC !== "ALPH";
+    }
+  });
+
+  if (!whole || !imaged) {
+    out.length = start;
+
+    return false;
+  }
+
+  patchLe(out, sizeAt, out.length - sizeAt - 4, 4);
+  reserve(out, (out.length - sizeAt - 4) % 2);
+
+  return true;
+};
+
+/**
+ * What the walk has found, which the chunks after the first are written by.
+ */
+interface Walk {
+  /** What the first chunk makes the WebP, or none before it is walked. */
+  kind: "simple" | "extended" | "refused" | undefined;
+  /** The `VP8X` flags as they were, and where its flags are written. */
+  vp8xFlags: number;
+  vp8xAt: number;
+  orientation: number | undefined;
+  icc: boolean;
+  imaged: boolean;
+  /** Whether a frame that cannot be walked has ended what is kept. */
+  ended: boolean;
 }
 
 /**
- * Walks the chunks after `VP8X`. A frame that cannot be walked ends them.
- * @param chunks - The chunks.
- * @returns What they keep.
+ * Writes a chunk after the first of an extended WebP, or drops it.
+ * @param walk - The walk so far.
+ * @param out - The writer.
+ * @param fourCC - The chunk's FourCC.
+ * @param bytes - The bytes its data is in.
+ * @param from - Where its data begins.
+ * @param to - Where its data ends.
  */
-const extendedOf = (chunks: readonly Chunk[]): Extended => {
-  const kept: Uint8Array[] = [];
-  let orientation: number | undefined = undefined;
-
-  for (const chunk of chunks) {
-    if (chunk.fourCC === "ANMF") {
-      const frame = frameOf(chunk.data);
-
-      if (frame === undefined) {
-        break;
-      }
-
-      kept.push(frame);
-    } else if (chunk.fourCC === "EXIF") {
-      orientation ??= orientationOfPayload(chunk.data);
-    } else if (chunk.fourCC === "ICCP" || chunk.fourCC === "ANIM" || frameParts.has(chunk.fourCC)) {
-      kept.push(riffChunk(chunk.fourCC, chunk.data));
-    }
+const putExtended = (
+  walk: Walk,
+  out: Writer,
+  fourCC: string,
+  bytes: Uint8Array,
+  from: number,
+  to: number
+) => {
+  if (fourCC === "ANMF") {
+    walk.ended = !putFrame(out, bytes.subarray(from, to));
+    walk.imaged ||= !walk.ended;
+  } else if (fourCC === "EXIF") {
+    walk.orientation ??= orientationOfPayload(bytes.subarray(from, to));
+  } else if (fourCC === "ICCP" || fourCC === "ANIM" || frameParts.has(fourCC)) {
+    putChunk(out, fourCC, bytes, from, to);
+    walk.icc ||= fourCC === "ICCP";
+    walk.imaged ||= frameParts.has(fourCC) && fourCC !== "ALPH";
   }
-
-  const fourCCs = new Set(kept.map((chunk) => String.fromCodePoint(...chunk.subarray(0, 4))));
-
-  return {
-    icc: fourCCs.has("ICCP"),
-    imaged: fourCCs.has("ANMF") || fourCCs.has("VP8 ") || fourCCs.has("VP8L"),
-    kept,
-    orientation,
-  };
 };
 
 /**
- * `VP8X` rewritten to say what is kept: alpha and animation as they were, ICC and EXIF as
- * kept, and XMP never.
- * @param header - The original `VP8X` data.
- * @param icc - Whether ICC is kept.
- * @param exif - Whether an EXIF is kept.
- * @returns The chunk.
+ * `VP8X`'s flags as kept: alpha and animation as they were, ICC and EXIF as kept, and XMP
+ * never.
+ * @param walk - The walk.
+ * @returns The flags.
  */
-const vp8xOf = (header: Uint8Array, icc: boolean, exif: boolean) => {
-  const flags = header[0] ?? 0;
-
-  const kept =
-    (hasFlag(flags, alphaFlag) ? alphaFlag : 0) +
-    (hasFlag(flags, animationFlag) ? animationFlag : 0) +
-    (icc ? iccFlag : 0) +
-    (exif ? exifFlag : 0);
-
-  return riffChunk("VP8X", concat([Uint8Array.of(kept, 0, 0, 0), header.subarray(4, 10)]));
-};
+const keptFlags = (walk: Walk) =>
+  (hasFlag(walk.vp8xFlags, alphaFlag) ? alphaFlag : 0) +
+  (hasFlag(walk.vp8xFlags, animationFlag) ? animationFlag : 0) +
+  (walk.icc ? iccFlag : 0) +
+  (walk.orientation === undefined ? 0 : exifFlag);
 
 /**
  * Strips a WebP. XMP, the original EXIF, and every unknown chunk are dropped.
@@ -188,40 +249,78 @@ export const stripWebp = (bytes: Uint8Array): Stripped => {
     return unreadable("a WebP begins with its RIFF header");
   }
 
-  const {
-    chunks,
-    first: firstFourCC,
-    whole,
-  } = chunksOf(bytes, 12, Math.min(8 + readLe(bytes, 4, 4), bytes.length), fileParts, fileOnce);
+  // The RIFF header, then each kept chunk as the walk reaches it, with the sizes of the RIFF
+  // and of each frame, and `VP8X`'s flags, written once they are known.
+  const out = makeWriter(bytes.length + outgrowth);
+  const seen = new Set<string>();
 
-  const [first, ...rest] = chunks;
-  let parts: readonly Uint8Array[] = [];
+  const walk: Walk = {
+    ended: false,
+    icc: false,
+    imaged: false,
+    kind: undefined,
+    orientation: undefined,
+    vp8xAt: 0,
+    vp8xFlags: 0,
+  };
 
-  if (first === undefined || first.fourCC !== firstFourCC) {
+  putAscii(out, "RIFF");
+
+  const riffSizeAt = reserve(out, 4);
+
+  putAscii(out, "WEBP");
+
+  const whole = walkChunks(
+    bytes,
+    12,
+    Math.min(8 + readLe(bytes, 4, 4), bytes.length),
+    (fourCC, dataAt, dataEnd) => {
+      if (walk.kind === undefined) {
+        if (!admits(seen, fileParts, fileOnce, fourCC)) {
+          walk.kind = "refused";
+        } else if (fourCC === "VP8 " || fourCC === "VP8L") {
+          // A simple file holds its image and nothing else.
+          walk.kind = "simple";
+          putChunk(out, fourCC, bytes, dataAt, dataEnd);
+        } else if (fourCC === "VP8X" && dataEnd - dataAt >= vp8xDataSize) {
+          walk.kind = "extended";
+          walk.vp8xFlags = bytes[dataAt] ?? 0;
+          putAscii(out, "VP8X");
+          putLe(out, vp8xDataSize, 4);
+          walk.vp8xAt = reserve(out, vp8xDataSize);
+          patch(out, walk.vp8xAt + 4, bytes.subarray(dataAt + 4, dataAt + vp8xDataSize));
+        } else {
+          walk.kind = "refused";
+        }
+      } else if (
+        walk.kind === "extended" &&
+        !walk.ended &&
+        admits(seen, fileParts, fileOnce, fourCC)
+      ) {
+        putExtended(walk, out, fourCC, bytes, dataAt, dataEnd);
+      }
+    }
+  );
+
+  if (walk.kind === undefined || walk.kind === "refused") {
     return unreadable("a WebP begins with VP8, VP8L, or a whole VP8X");
   }
 
-  if (first.fourCC === "VP8 " || first.fourCC === "VP8L") {
-    // A simple file holds its image and nothing else.
-    parts = [riffChunk(first.fourCC, first.data)];
-  } else if (first.fourCC === "VP8X" && first.data.length >= 10) {
-    const extended = extendedOf(rest);
-    const { orientation } = extended;
+  if (walk.kind === "extended") {
+    if (!walk.imaged) {
+      return unreadable(whole ? "a WebP holds no image data" : "a WebP chunk runs past the end");
+    }
 
-    const exif = orientation === undefined ? [] : [riffChunk("EXIF", orientationTiff(orientation))];
+    patch(out, walk.vp8xAt, Uint8Array.of(keptFlags(walk)));
 
-    parts = extended.imaged
-      ? [vp8xOf(first.data, extended.icc, exif.length > 0), ...extended.kept, ...exif]
-      : [];
-  } else {
-    return unreadable("a WebP begins with VP8, VP8L, or a whole VP8X");
+    if (walk.orientation !== undefined) {
+      const tiff = orientationTiff(walk.orientation);
+
+      putChunk(out, "EXIF", tiff, 0, tiff.length);
+    }
   }
 
-  if (parts.length === 0) {
-    return unreadable(whole ? "a WebP holds no image data" : "a WebP chunk runs past the end");
-  }
+  patchLe(out, riffSizeAt, out.length - 8, 4);
 
-  const body = concat([ascii("WEBP"), ...parts]);
-
-  return stripped(concat([ascii("RIFF"), le(body.length, 4), body]));
+  return stripped(written(out));
 };

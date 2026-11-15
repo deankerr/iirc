@@ -5,35 +5,65 @@
  *
  * @packageDocumentation
  */
-import { ascii, asciiAt, be, concat, readBe } from "./bytes.ts";
+import {
+  ascii,
+  asciiAt,
+  be,
+  closeGap,
+  concat,
+  copy,
+  makeWriter,
+  patch,
+  put,
+  readBe,
+  reserve,
+  written,
+} from "./bytes.ts";
 import { orientationOfPayload, orientationTiff } from "./exif.ts";
 import { stripped, unreadable } from "./result.ts";
 import type { Stripped } from "./result.ts";
+
+/**
+ * A chunk type as the number its four bytes make, which is how the walk compares them, so that
+ * reading one makes nothing for the collector to sweep.
+ * @param name - The type's four ASCII letters.
+ * @returns The number.
+ */
+const chunkType = (name: string) => readBe(ascii(name), 0, 4);
+
+const exifType = chunkType("eXIf");
+const idatType = chunkType("IDAT");
+const iendType = chunkType("IEND");
 
 const signature = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 
 // Image data and its palette and transparency; colour, `bKGD` for what shows where nothing
 // is drawn; `pHYs`, a pixel density that says nothing of who or where; and APNG's frames.
-const keep: ReadonlySet<string> = new Set([
-  "IHDR",
-  "PLTE",
-  "IDAT",
-  "IEND",
-  "tRNS",
-  "iCCP",
-  "cICP",
-  "gAMA",
-  "cHRM",
-  "sRGB",
-  "sBIT",
-  "mDCV",
-  "cLLI",
-  "bKGD",
-  "pHYs",
-  "acTL",
-  "fcTL",
-  "fdAT",
-]);
+const keep: ReadonlySet<number> = new Set(
+  [
+    "IHDR",
+    "PLTE",
+    "IDAT",
+    "IEND",
+    "tRNS",
+    "iCCP",
+    "cICP",
+    "gAMA",
+    "cHRM",
+    "sRGB",
+    "sBIT",
+    "mDCV",
+    "cLLI",
+    "bKGD",
+    "pHYs",
+    "acTL",
+    "fcTL",
+    "fdAT",
+  ].map(chunkType)
+);
+
+// A chunk's length, type, an `eXIf`'s 26 bytes of TIFF, and CRC.
+const exifSize = 38;
 
 /* oxlint-disable no-bitwise -- CRC-32 is defined on bits */
 const crcTable = Uint32Array.from({ length: 256 }, (_, n) => {
@@ -85,18 +115,23 @@ export const stripPng = (bytes: Uint8Array): Stripped => {
     return unreadable("a PNG begins with its signature");
   }
 
-  const kept: Uint8Array[] = [];
-  let orientation: number | undefined = undefined;
+  // Every chunk is copied from the PNG, but the `eXIf`, rebuilt from nothing, whose 38 bytes
+  // are left after `IHDR` and closed over if no Orientation is found, so no more than the PNG
+  // and `exifSize` is ever written.
+  const out = makeWriter(bytes.length + exifSize);
+  let headerEnd = 0;
+  let exif = false;
   let imaged = false;
   let at = signature.length;
 
-  const assemble = () => {
-    const [header, ...rest] = kept;
-    const exif = orientation === undefined ? [] : [pngChunk("eXIf", orientationTiff(orientation))];
+  put(out, signature);
 
-    return stripped(
-      concat([signature, ...(header === undefined ? [] : [header]), ...exif, ...rest])
-    );
+  const assemble = () => {
+    if (!exif) {
+      closeGap(out, headerEnd, exifSize);
+    }
+
+    return stripped(written(out));
   };
 
   for (;;) {
@@ -107,23 +142,33 @@ export const stripPng = (bytes: Uint8Array): Stripped => {
       return imaged ? assemble() : unreadable("a PNG chunk runs past the end");
     }
 
-    if (kept.length === 0 && !asciiAt(bytes, at + 4, "IHDR")) {
+    if (headerEnd === 0 && !asciiAt(bytes, at + 4, "IHDR")) {
       return unreadable("a PNG begins with IHDR");
     }
 
-    const type = String.fromCodePoint(...bytes.subarray(at + 4, at + 8));
+    const type = readBe(bytes, at + 4, 4);
 
-    if (type === "eXIf") {
-      orientation ??= orientationOfPayload(bytes.subarray(at + 8, end - 4));
+    if (type === exifType) {
+      const orientation = exif ? undefined : orientationOfPayload(bytes.subarray(at + 8, end - 4));
+
+      if (orientation !== undefined) {
+        patch(out, headerEnd, pngChunk("eXIf", orientationTiff(orientation)));
+        exif = true;
+      }
     } else if (keep.has(type)) {
-      kept.push(bytes.subarray(at, end));
+      copy(out, bytes, at, end);
+
+      if (headerEnd === 0) {
+        headerEnd = out.length;
+        reserve(out, exifSize);
+      }
     }
 
-    if (type === "IDAT") {
+    if (type === idatType) {
       imaged = true;
     }
 
-    if (type === "IEND") {
+    if (type === iendType) {
       return imaged ? assemble() : unreadable("a PNG ends before its image data");
     }
 
