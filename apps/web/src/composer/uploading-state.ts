@@ -14,11 +14,21 @@ import type { AtomRegistry } from "effect/reactivity";
 /** Every file pending, as the core folds them. */
 export const uploadingState = Atom.make(initialUploading).pipe(Atom.keepAlive);
 
+/** Where the composer's selection is: its ends, and which way it was made. */
+export interface Selection {
+  readonly start: number;
+  readonly end: number;
+  readonly direction: "forward" | "backward" | "none";
+}
+
 /**
- * Where the composer's caret goes once a link was put in its draft, and how many times one
- * was, so the composer moves it each time this changes, and never as it mounts.
+ * Where the composer's selection goes once a link was put in its draft, and how many times
+ * one was, so the composer moves it each time this changes, and never as it mounts.
  */
-export const caretAsked = Atom.make({ asked: 0, caret: 0 }).pipe(Atom.keepAlive);
+export const caretAsked = Atom.make<{ readonly asked: number; readonly selection: Selection }>({
+  asked: 0,
+  selection: { direction: "none", end: 0, start: 0 },
+}).pipe(Atom.keepAlive);
 
 /**
  * Carries the anchors of the files pending along as the composers change, however they

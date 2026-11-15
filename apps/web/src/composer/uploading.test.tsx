@@ -349,6 +349,26 @@ describe("uploading from the Composer", () => {
     expect(composerOf(container).selectionStart).toBe(1);
   });
 
+  it("keeps both ends of a selection in the text around the link, while the Owner writes", async () => {
+    const { container, uploader } = await signedIn();
+
+    uploader.hold = true;
+    composerOf(container).focus();
+    await typeIn(container, "hi there");
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    composerOf(container).setSelectionRange(0, 2, "backward");
+    uploader.sending[0]?.release();
+    await settled(() => composerOf(container).value.includes(publicUrl));
+
+    const { selectionDirection, selectionEnd, selectionStart, value } = composerOf(container);
+
+    expect({
+      selected: value.slice(selectionStart, selectionEnd),
+      selectionDirection,
+    }).toStrictEqual({ selected: "hi", selectionDirection: "backward" });
+  });
+
   it("shows how much was sent, as the browser's upload events say", async () => {
     const { container, uploader } = await signedIn();
 

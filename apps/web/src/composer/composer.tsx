@@ -324,15 +324,17 @@ const Composer = ({
     };
   }, []);
 
-  // Each time a link goes into the draft while the Owner writes in it, the caret goes where
-  // the core says, once the new text is in the textarea.
+  // Each time a link goes into the draft while the Owner writes in it, the selection goes
+  // where the core says, both its ends, once the new text is in the textarea.
   useLayoutEffect(() => {
     if (caretWanted.asked === caretSeen.current) {
       return;
     }
 
     caretSeen.current = caretWanted.asked;
-    input.current?.setSelectionRange(caretWanted.caret, caretWanted.caret);
+    const { direction, end, start } = caretWanted.selection;
+
+    input.current?.setSelectionRange(start, end, direction);
   }, [caretWanted]);
 
   /**

@@ -103,8 +103,8 @@ const noneChecking = (registry: AtomRegistry.AtomRegistry, keys: readonly string
   );
 
 /**
- * A file kept: its link goes into its draft, and the caret, when the Owner is writing
- * there, stays where it was in the text around the link.
+ * A file kept: its link goes into its draft, and the selection, when the Owner is writing
+ * there, stays where it was in the text around the link, both its ends.
  * @param registry - The registry.
  * @param key - The file's key.
  * @param link - Its link, or `null` without a public URL.
@@ -114,13 +114,17 @@ const kept = (registry: AtomRegistry.AtomRegistry, key: string, link: string | n
   const { inserted } = step;
   const input = composerInput(document);
 
-  // The caret is read before the text changes under it.
-  const caret =
+  // The selection is read before the text changes under it.
+  const selection =
     inserted !== undefined &&
     input !== undefined &&
     document.activeElement === input &&
     placeOf(registry) === inserted.place
-      ? caretAfter(input.selectionStart, inserted)
+      ? {
+          direction: input.selectionDirection ?? "none",
+          end: caretAfter(input.selectionEnd, inserted),
+          start: caretAfter(input.selectionStart, inserted),
+        }
       : undefined;
 
   // The core moved every other anchor past the link already, so the composers are set
@@ -133,8 +137,8 @@ const kept = (registry: AtomRegistry.AtomRegistry, key: string, link: string | n
   registry.set(uploadingState, step.state);
   letGoOfPreviews(registry);
 
-  if (caret !== undefined) {
-    registry.set(caretAsked, { asked: registry.get(caretAsked).asked + 1, caret });
+  if (selection !== undefined) {
+    registry.set(caretAsked, { asked: registry.get(caretAsked).asked + 1, selection });
   }
 };
 
