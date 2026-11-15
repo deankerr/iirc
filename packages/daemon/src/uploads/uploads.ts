@@ -155,6 +155,9 @@ export class UploadsAreOff extends Data.TaggedError("UploadsAreOff")<{
   readonly missing: readonly OwnerOptionName[];
 }> {}
 
+/** The body held no bytes, however it was sent. */
+export class EmptyUpload extends Data.TaggedError("EmptyUpload") {}
+
 /** No Upload has the id, or its bytes are confirmed gone from the store. */
 export class NoSuchUpload extends Data.TaggedError("NoSuchUpload") {}
 
@@ -177,7 +180,7 @@ export class Uploads extends Context.Service<
       name: string | undefined
     ) => Effect.Effect<
       Shown,
-      E | UploadsAreOff | BodyTooLarge | ByteStoreUnavailable | JournalFailed
+      E | UploadsAreOff | EmptyUpload | BodyTooLarge | ByteStoreUnavailable | JournalFailed
     >;
     /**
      * An Upload's record and bytes, for its link. Whether the bytes are held is decided
@@ -316,6 +319,11 @@ export const layerUploads = (dataDir: string) =>
           }
 
           const staged = yield* stage(dataDir, body, now.maxSize);
+
+          if (staged.size === 0) {
+            return yield* new EmptyUpload();
+          }
+
           const kind = detectKind(staged.head);
           const store = yield* storeOf(now.bucket);
           const stored = yield* store.put(fs.stream(staged.path).pipe(Stream.orDie));

@@ -1175,8 +1175,7 @@ const isUpload = (request: HttpServerRequest.HttpServerRequest) =>
   request.method === "POST" && request.url.split("?")[0] === "/api/uploads";
 
 // An upload's body is read by its handler alone, as a stream, which no limit but
-// `uploads.maxSize` bounds. It has no body at all unless it says how long the body is, or
-// that it is chunked. An upload in flight when the Daemon begins to stop is cut off, so it
+// `uploads.maxSize` bounds. A body with no bytes, however it was sent, is refused. An upload in flight when the Daemon begins to stop is cut off, so it
 // never holds up serving's stop.
 const uploads = HttpApiBuilder.group(
   DaemonApi,
@@ -1188,18 +1187,15 @@ const uploads = HttpApiBuilder.group(
       .handleRaw("upload", ({ query, request }) =>
         Effect.gen(function* () {
           const stopping = yield* Stopping;
-          const length = request.headers["content-length"];
 
-          if (
-            request.headers["transfer-encoding"] === undefined &&
-            (length === undefined || Number(length) === 0)
-          ) {
-            return yield* new InvalidRequest({
-              issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
-            });
-          }
+          // A request with no body at all, as an empty one may come, has no stream to read,
+          // so it is an empty Upload rather than a failure of the stream.
+          const body =
+            request.source instanceof Request && request.source.body === null
+              ? Stream.empty
+              : request.stream.pipe(Stream.orDie);
 
-          const kept = held.upload(request.stream.pipe(Stream.orDie), query.name);
+          const kept = held.upload(body, query.name);
 
           const stopped = Effect.andThen(
             stopping,
@@ -1211,6 +1207,12 @@ const uploads = HttpApiBuilder.group(
           Effect.catchTags({
             BodyTooLarge: (error) => Effect.fail(new UploadTooLarge({ maxSize: error.maxSize })),
             ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
+            EmptyUpload: () =>
+              Effect.fail(
+                new InvalidRequest({
+                  issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
+                })
+              ),
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
             UploadsAreOff: (error) => Effect.fail(new UploadsOff({ missing: error.missing })),
           })

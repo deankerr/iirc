@@ -5,7 +5,7 @@ export const idBytes = 10;
 export const idLength = 16;
 
 /** Crockford's base32, lower case: no `i`, `l`, `o` or `u`, so an id is hard to misread. */
-export const crockfordAlphabet = "0123456789abcdefghjkmnpqrstvwxyz";
+const crockfordAlphabet = "0123456789abcdefghjkmnpqrstvwxyz";
 
 const bitsPerCharacter = 5;
 

@@ -35,7 +35,7 @@ const decodeStatus = Schema.decodeUnknownSync(Schema.fromJsonString(UploadsStatu
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 
 /** A request's body, as these tests send it. */
-type Body = Uint8Array | string;
+type Body = Uint8Array | string | ReadableStream<Uint8Array>;
 
 /** A Daemon's API and link listener over real servers, which a test may stop and start again. */
 interface Served {
@@ -510,23 +510,39 @@ describe("Uploads over the API", () => {
     });
   });
 
-  it("refuses an empty body", async () => {
+  it("refuses an empty body, whether it says its length or is chunked, and keeps nothing", async () => {
+    const empty = {
+      _tag: "InvalidRequest",
+      issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
+    };
+
     const result = await run((served) =>
       Effect.gen(function* () {
         yield* turnOn(served);
-        const response = yield* upload(served, "");
+        const sized = yield* upload(served, "");
 
-        return [response.status, yield* jsonOf(response)];
+        const chunked = yield* upload(
+          served,
+          new ReadableStream({
+            start: (c) => {
+              c.close();
+            },
+          })
+        );
+
+        return {
+          chunked: [chunked.status, yield* jsonOf(chunked)],
+          journaled: yield* journaledUploads(served.world),
+          sized: [sized.status, yield* jsonOf(sized)],
+        };
       })
     );
 
-    expect(result).toStrictEqual([
-      400,
-      {
-        _tag: "InvalidRequest",
-        issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
-      },
-    ]);
+    expect(result).toStrictEqual({
+      chunked: [400, empty],
+      journaled: [],
+      sized: [400, empty],
+    });
   });
 
   it("cuts a body off with 413 once it passes uploads.maxSize, before the rest is sent, and keeps nothing", async () => {
