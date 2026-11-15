@@ -44,4 +44,38 @@ describe("a day written", () => {
       machine: undefined,
     });
   });
+
+  it("is written in the zone in force when it is drawn, as its row is placed", () => {
+    // 01:00 UTC on the 15th is the 14th in Los Angeles.
+    const at = Date.UTC(2026, 10, 15, 1);
+    const before = process.env.TZ;
+
+    try {
+      process.env.TZ = "UTC";
+      const first = [dayWritten("full", at), dayWritten("iso", at)];
+
+      process.env.TZ = "America/Los_Angeles";
+      const moved = [dayWritten("full", at), dayWritten("iso", at)];
+
+      expect({ first, moved }).toStrictEqual({
+        first: [
+          new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeZone: "UTC" }).format(at),
+          "2026-11-15",
+        ],
+        moved: [
+          new Intl.DateTimeFormat(undefined, {
+            dateStyle: "full",
+            timeZone: "America/Los_Angeles",
+          }).format(at),
+          "2026-11-14",
+        ],
+      });
+    } finally {
+      if (before === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = before;
+      }
+    }
+  });
 });

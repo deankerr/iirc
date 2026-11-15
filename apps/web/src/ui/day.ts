@@ -9,17 +9,6 @@ import type { DayShown } from "@iirc/api";
 
 import { dateOf } from "./dates.ts";
 
-/** The forms that are the device's own way of writing a date, by their `dateStyle`. */
-type Styled = Exclude<DayShown, "iso">;
-
-/** Each form's format, built once, as a format is costly to build and cheap to use. */
-const formats: Readonly<Record<Styled, Intl.DateTimeFormat>> = {
-  full: new Intl.DateTimeFormat(undefined, { dateStyle: "full" }),
-  long: new Intl.DateTimeFormat(undefined, { dateStyle: "long" }),
-  medium: new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }),
-  short: new Intl.DateTimeFormat(undefined, { dateStyle: "short" }),
-};
-
 /**
  * A number as digits, at least as long as a width.
  * @param value - The number.
@@ -54,7 +43,9 @@ export const dayWritten = (shown: DayShown, at: number): string | undefined => {
     return undefined;
   }
 
-  return shown === "iso" ? isoOf(date) : formats[shown].format(date);
+  // Written in the zone in force now, as the day's row is placed, so a device that moves zone
+  // with the page open writes a day as it places it. Day rows are few, so nothing is kept.
+  return shown === "iso" ? isoOf(date) : date.toLocaleDateString(undefined, { dateStyle: shown });
 };
 
 /**
