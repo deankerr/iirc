@@ -93,6 +93,8 @@ type Presence =
        * `undefined` once they need not wait.
        */
       readonly identifying: Instant | undefined;
+      /** Whether an `OPER` sent as the Session began still awaits the Ircd's answer. */
+      readonly opering: boolean;
     };
 
 /** One Connection, from `Dial` to `Closed`. */

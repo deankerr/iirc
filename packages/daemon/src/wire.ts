@@ -302,6 +302,25 @@ const activity = (source: Activity): WireActivity => {
       return wire;
     }
 
+    case "OperGranted": {
+      const wire: Case<Activity, WireActivity, "OperGranted"> = {
+        _tag: "OperGranted",
+        nick: source.nick,
+      };
+
+      return wire;
+    }
+
+    case "OperRefused": {
+      const wire: Case<Activity, WireActivity, "OperRefused"> = {
+        _tag: "OperRefused",
+        nick: source.nick,
+        reply: source.reply,
+      };
+
+      return wire;
+    }
+
     case "CtcpUnsent": {
       const wire: Case<Activity, WireActivity, "CtcpUnsent"> = {
         _tag: "CtcpUnsent",

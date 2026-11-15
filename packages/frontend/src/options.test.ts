@@ -120,6 +120,7 @@ describe("the options, derived from the Schema", () => {
         ircds: "Ircds",
         login: "Tagged",
         nicks: "Texts",
+        oper: "Tagged",
         password: "Credential",
         realname: "Text",
         username: "Text",
@@ -152,6 +153,9 @@ describe("the options, derived from the Schema", () => {
         "network.libera.login.service",
         "network.libera.login.wait",
         "network.libera.nicks",
+        "network.libera.oper",
+        "network.libera.oper.credential",
+        "network.libera.oper.name",
         "network.libera.password",
         "network.libera.realname",
         "network.libera.username",
@@ -194,6 +198,9 @@ describe("the options, derived from the Schema", () => {
       "login.service": { starts: "NickServ", value: { _tag: "Unset" } },
       "login.wait": { starts: "5", value: { _tag: "Unset" } },
       nicks: { starts: undefined, value: { _tag: "Shown", text: "dean,dean_" } },
+      oper: { starts: "none", value: { _tag: "Shown", text: "none" } },
+      "oper.credential": { starts: "libera.oper.credential", value: { _tag: "Unset" } },
+      "oper.name": { starts: "the first nick", value: { _tag: "Unset" } },
       password: {
         starts: "unset",
         value: { _tag: "Credential", held: false, name: "libera.password" },
@@ -212,6 +219,7 @@ describe("the options, derived from the Schema", () => {
       "Credential",
       "Unset",
       "Credential",
+      "Unset",
       "Credential",
     ]);
   });
@@ -676,6 +684,24 @@ describe("editing", () => {
         credential: "libera.login.credential",
         required: false,
       },
+    });
+  });
+
+  it("sets up an operator login by its name, starting with the first nick and a named Credential", () => {
+    const named = valueOf(set(libera, plain, ["oper", "name"], "admin"));
+
+    expect({
+      colon: set(libera, plain, ["oper", "name"], ":admin")._tag,
+      login: valueOf(set(libera, plain, ["oper"], "login")).oper,
+      named: named.oper,
+      none: valueOf(set(libera, named, ["oper"], "none")).oper,
+      spaced: set(libera, plain, ["oper", "name"], "two words")._tag,
+    }).toStrictEqual({
+      colon: "Invalid",
+      login: { _tag: "Login", credential: "libera.oper.credential", name: "dean" },
+      named: { _tag: "Login", credential: "libera.oper.credential", name: "admin" },
+      none: { _tag: "None" },
+      spaced: "Invalid",
     });
   });
 

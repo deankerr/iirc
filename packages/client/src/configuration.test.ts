@@ -91,6 +91,23 @@ describe("answering CTCP", () => {
 });
 
 describe("the Credentials a Configuration names", () => {
+  it("include an operator login's", () => {
+    const configuration = Schema.decodeSync(NetworkConfiguration)({
+      channels: [],
+      declined: [],
+      enabled: true,
+      fallbackEncoding: "windows-1252",
+      ircds: [{ host: "irc.test", port: 6697, tls: true }],
+      login: { _tag: "None" },
+      nicks: ["iirc"],
+      oper: { _tag: "Login", credential: "operpw", name: "admin" },
+      realname: "iirc",
+      username: "iirc",
+    });
+
+    expect(credentialsOf(configuration)).toStrictEqual(new Set(["operpw"]));
+  });
+
   it("are its password, its SASL login's, and each Channel's key, once each", () => {
     const configuration = Schema.decodeSync(NetworkConfiguration)({
       channels: [{ name: "#a" }, { key: "shared", name: "#b" }, { key: "shared", name: "#c" }],

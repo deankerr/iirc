@@ -117,13 +117,16 @@ const sasl = (
   ];
 };
 
-// A service login: the Client tells the service at `001`.
-const told = ({ login }: NetworkConfiguration) =>
-  login._tag === "Service"
+// A service login and an operator login: the Client tells the service and sends `OPER`
+// at `001`, in that order.
+const told = ({ login, oper }: NetworkConfiguration) => [
+  ...(login._tag === "Service"
     ? [
         `>> {Identify credential=${login.credential} account=${login.account} service=${login.service}}`,
       ]
-    : [];
+    : []),
+  ...(oper._tag === "Login" ? [`>> {Oper credential=${oper.credential} name=${oper.name}}`] : []),
+];
 
 // After the last `005`, the Ircd says Self is logged in to the service with `900`.
 const identified = (configuration: NetworkConfiguration, nick: string, server: string) => {
@@ -143,8 +146,9 @@ const identified = (configuration: NetworkConfiguration, nick: string, server: s
  * `requested`, which the Ircd acknowledges, SASL `PLAIN` logs in when the Configuration
  * has a SASL login and `sasl` is requested, and `CAP END` follows. When it requests
  * none, `CAP END` follows `LS` at once. When the Ircd offers none, it is the floor and answers `CAP`
- * with `421`. Then `001`, and the service login when the Configuration has one,
- * `002` to `005`, and the `900` that answers the service login.
+ * with `421`. Then `001`, and the service login and `OPER` when the Configuration has
+ * them, `002` to `005`, and the `900` that answers the service login. Nothing answers
+ * `OPER`, so a scenario says how the Ircd does.
  * @param configuration - The scenario's Configuration, which names the Ircd and Self.
  * @param registration - The caps the Ircd offers, those the Client requests, and the
  * ISUPPORT tokens the Ircd sends.

@@ -393,6 +393,14 @@ const writeActivity = (activity: Activity): ActivityParts => {
       };
     }
 
+    case "OperGranted": {
+      return { head: [atom(activity.nick)], tail: [] };
+    }
+
+    case "OperRefused": {
+      return { head: [atom(activity.nick), `reply=${activity.reply}`], tail: [] };
+    }
+
     case "CtcpUnsent":
     case "CtcpSent":
     case "CtcpRequest":

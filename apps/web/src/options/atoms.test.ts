@@ -207,6 +207,7 @@ describe("the options", () => {
         ircds: [{ host: "irc.oftc.net", port: 6697, tls: true }],
         login: { _tag: "None" },
         nicks: ["bot"],
+        oper: { _tag: "None" },
         realname: "bot",
         username: "bot",
       },

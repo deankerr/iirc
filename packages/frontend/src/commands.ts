@@ -1179,7 +1179,32 @@ const wordsOf = (text: string): readonly string[] => text.split(/\s+/u).filter((
 const credentialCommands: ReadonlySet<string> = new Set(["AUTHENTICATE", "OPER", "PASS"]);
 
 const rawCredentialRefused =
-  "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+  "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+
+const rawOperRefused =
+  "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.";
+
+/**
+ * Why a raw Line with a command is refused, or nothing when it is not: `OPER` is
+ * configured instead, and `PASS` and `AUTHENTICATE` are never typed.
+ * @param command - The raw Line's command, in upper case.
+ * @returns The words, or none.
+ */
+const rawRefusalOf = (command: string): string | undefined => {
+  if (command === "OPER") {
+    return rawOperRefused;
+  }
+
+  return credentialCommands.has(command) ? rawCredentialRefused : undefined;
+};
+
+/**
+ * A text in upper case, ASCII letters only, as an Ircd reads a command.
+ * @param text - The text.
+ * @returns It, upper-cased.
+ */
+const upperCaseAscii = (text: string): string =>
+  text.replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
 
 /**
  * A raw Line's command, as an Ircd reads it: after any tags and source, in upper case.
@@ -1191,7 +1216,7 @@ const rawCommandOf = (line: string): string => {
   const tags = words[0]?.startsWith("@") === true ? 1 : 0;
   const start = tags + (words[tags]?.startsWith(":") === true ? 1 : 0);
 
-  return (words[start] ?? "").replaceAll(/[a-z]/gu, (letter) => letter.toUpperCase());
+  return upperCaseAscii(words[start] ?? "");
 };
 
 /**
@@ -1719,9 +1744,9 @@ const quoteCommand = acting({
       return invalid("Send what? /quote <raw line>");
     }
 
-    return credentialCommands.has(rawCommandOf(args))
-      ? invalid(rawCredentialRefused)
-      : parsed({ _tag: "Raw", line: args });
+    const refusal = rawRefusalOf(rawCommandOf(args));
+
+    return refusal === undefined ? parsed({ _tag: "Raw", line: args }) : invalid(refusal);
   },
   usage: "/quote <raw line>",
   when: anywhereActing,
@@ -2376,9 +2401,12 @@ export const credentialRefusal = (line: string): string | undefined => {
   }
 
   if (found === quoteCommand) {
-    return credentialCommands.has(rawCommandOf(line.slice(command.length)))
-      ? rawCredentialRefused
-      : undefined;
+    return rawRefusalOf(rawCommandOf(line.slice(command.length)));
+  }
+
+  // `/oper`, `/pass`, and `/authenticate` are no commands, and would carry a Credential.
+  if (found === undefined) {
+    return rawRefusalOf(upperCaseAscii(command.slice(1)));
   }
 
   const option = resolve(name);
@@ -2523,7 +2551,10 @@ export const interpret = (line: string, context: CommandContext): Parsed<readonl
   const found = commandNamed(name);
 
   if (found === undefined) {
-    return invalid(`There is no command /${name}. Start with // to say text that begins with /.`);
+    return invalid(
+      rawRefusalOf(upperCaseAscii(name)) ??
+        `There is no command /${name}. Start with // to say text that begins with /.`
+    );
   }
 
   return runIn(found, args, context);

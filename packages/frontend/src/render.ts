@@ -387,6 +387,8 @@ const markerOf = (activity: Activity): Marker => {
     case "TopicChanged":
     case "ModeChanged":
     case "AwayChanged":
+    case "OperGranted":
+    case "OperRefused":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
@@ -465,12 +467,33 @@ const answerParts = (answer: CtcpAnswer): readonly Part[] =>
  */
 const seconds = (milliseconds: number): string => `${(milliseconds / 1000).toFixed(3)} s`;
 
+type OperAnswer = Extract<Activity, { readonly _tag: "OperGranted" | "OperRefused" }>;
+
+const isOperAnswer = (activity: Activity): activity is OperAnswer =>
+  activity._tag === "OperGranted" || activity._tag === "OperRefused";
+
 /**
- * An Activity in words.
+ * An answer to Self's `OPER` in words: a refusal by the numeric that refused it, never its
+ * text.
+ * @param activity - The answer.
+ * @returns Its parts.
+ */
+const describeOperAnswer = (activity: OperAnswer): readonly Part[] =>
+  activity._tag === "OperGranted"
+    ? [nickPart(activity.nick), words(" is now an IRC operator")]
+    : [
+        nickPart(activity.nick),
+        words(" was refused as an IRC operator ("),
+        name(activity.reply),
+        words(")"),
+      ];
+
+/**
+ * Any other Activity in words.
  * @param activity - The Activity.
  * @returns Its parts.
  */
-const describeActivity = (activity: Activity): readonly Part[] => {
+const describeOtherActivity = (activity: Exclude<Activity, OperAnswer>): readonly Part[] => {
   switch (activity._tag) {
     case "Joined": {
       return [nickPart(activity.nick), words(" joined "), name(activity.channel)];
@@ -605,6 +628,14 @@ const describeActivity = (activity: Activity): readonly Part[] => {
     }
   }
 };
+
+/**
+ * An Activity in words.
+ * @param activity - The Activity.
+ * @returns Its parts.
+ */
+const describeActivity = (activity: Activity): readonly Part[] =>
+  isOperAnswer(activity) ? describeOperAnswer(activity) : describeOtherActivity(activity);
 
 /**
  * What an action asked for comes to, in short, as the Client says what an action tried:
@@ -965,7 +996,8 @@ export const lineOf = (content: ItemContent, network: NetworkId): Line => {
         parts: describeActivity(activity),
         tone:
           (activity._tag === "StandardReply" && activity.kind === "FAIL") ||
-          activity._tag === "CtcpUnsent"
+          activity._tag === "CtcpUnsent" ||
+          activity._tag === "OperRefused"
             ? "Refused"
             : "Activity",
       };

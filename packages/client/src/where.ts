@@ -15,6 +15,7 @@ import { isSelf, namingNow, serverName } from "./meaning.ts";
 import { inListing } from "./members.ts";
 import type { Naming, Target } from "./names.ts";
 import { parseChannel, parseNick, parseTargets } from "./names.ts";
+import { isOperAnswer } from "./news.ts";
 import type { Activity, Marked, Named, News, Unrouted, Where } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, updateOpen } from "./run.ts";
@@ -207,6 +208,11 @@ const activityTimelines = (
   // Another User's Direct Messages, when their name is a nick, as a Message's sender is.
   const theirs = (nick: string): readonly Where[] =>
     parseNick(naming, nick) === undefined ? [] : [direct(run, nick, true)];
+
+  // An answer to Self's `OPER` is the Network's.
+  if (isOperAnswer(activity)) {
+    return [network];
+  }
 
   switch (activity._tag) {
     case "Joined":

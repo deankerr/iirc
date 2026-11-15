@@ -1026,6 +1026,16 @@ const oneWord = /^[^\s\u0085\0]+$/u;
 /** One word of `IDENTIFY`: an account, holding no whitespace of any kind, nor NUL. */
 export const IdentifyWord = Schema.String.check(Schema.isPattern(oneWord));
 
+// An operator's name is one middle parameter of `OPER`: one word, as `oneWord` says, that
+// does not start with `:`, so it is never read as the trailing parameter.
+const operWord = /^[^\s\u0085\0:][^\s\u0085\0]*$/u;
+
+/**
+ * The name `OPER` logs in as: one word, holding no whitespace of any kind, nor NUL, and
+ * not starting with `:`.
+ */
+export const OperName = Schema.String.check(Schema.isPattern(operWord));
+
 /**
  * A Line that carries a Credential, written with the Credential's name in place of its
  * value. It is a closed list, so this module knows every place a Credential can go,
@@ -1050,6 +1060,8 @@ export const SecretLine = Schema.TaggedUnion({
   Identify: { account: IdentifyWord, credential: CredentialName, service: ServiceTarget },
   /** `JOIN` with a Channel key. */
   JoinWithKey: { channel: Schema.String, credential: CredentialName },
+  /** `OPER <name> <credential>`: logging in as an IRC operator. */
+  Oper: { credential: CredentialName, name: OperName },
   /** `PASS`, before registration. */
   Pass: { credential: CredentialName },
 });
@@ -1109,6 +1121,22 @@ const identify = (
   return isRejected(line) ? line : [line];
 };
 
+// `OPER <name> <credential>`: the name stays one middle parameter, and the password is the
+// last, written as trailing when it must be, so a space or a colon in it is carried whole.
+// An empty password logs in as nothing.
+const oper = (
+  { name }: { readonly name: string },
+  value: string
+): readonly OutboundLine[] | Rejected => {
+  if (!operWord.test(name) || !name.isWellFormed() || value === "") {
+    return rejected("InvalidParameter");
+  }
+
+  const line = outbound("OPER", [name, value]);
+
+  return isRejected(line) ? line : [line];
+};
+
 /**
  * Fills a Credential's value into the Line that carries it. This is the only code that
  * puts a Credential into a Line. Its result is sent and never journaled. The SASL PLAIN
@@ -1142,6 +1170,10 @@ export const fillSecret = (
       const join = outbound("JOIN", [line.channel, revealed]);
 
       return isRejected(join) ? join : [join];
+    }
+
+    case "Oper": {
+      return oper(line, revealed);
     }
 
     case "Pass": {

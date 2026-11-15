@@ -30,6 +30,7 @@ describe("a secret Line", () => {
       "AuthenticatePlain",
       "Identify",
       "JoinWithKey",
+      "Oper",
       "Pass",
     ]);
   });

@@ -26,6 +26,12 @@ const cacheDir = path.join(repoRoot, ".cache/ergo");
 
 const ngircdBinary = process.env.IIRC_NGIRCD ?? path.join(homedir(), ".local/opt/ngircd/ngircd");
 
+/** The operator name a private ngircd grants, from any host. */
+export const ngircdOperName = "e2eoper";
+
+/** The password of {@link ngircdOperName}. */
+export const ngircdOperPassword = "an-oper-password-only-the-vault-holds";
+
 /** A running private Ircd. */
 export interface Ircd {
   readonly kind: "ergo" | "ngircd";
@@ -440,6 +446,9 @@ export const startNgircd = async (): Promise<Ircd> => {
       "DNS = no",
       "Ident = no",
       "PAM = no",
+      "[Operator]",
+      `Name = ${ngircdOperName}`,
+      `Password = ${ngircdOperPassword}`,
       "",
     ].join("\n")
   );

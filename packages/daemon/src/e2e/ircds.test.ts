@@ -10,7 +10,7 @@ import { Effect, Fiber, Redacted } from "effect";
 import type { Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { startErgo, startNgircd } from "../testing/ircd.ts";
+import { ngircdOperName, ngircdOperPassword, startErgo, startNgircd } from "../testing/ircd.ts";
 import type { Ircd } from "../testing/ircd.ts";
 import { connectPeer, registerAccount } from "../testing/peer.ts";
 import type { Parsed } from "../testing/peer.ts";
@@ -28,6 +28,11 @@ const said = (happened: readonly Happened[], sender: string, text: string) =>
   happened.some(({ news }) =>
     news.some((one) => one._tag === "Message" && one.sender === sender && one.text === text)
   );
+
+// An answer to Self's `OPER`, as News.
+const answered = (news: Happened["news"][number]) =>
+  news._tag === "Activity" &&
+  (news.activity._tag === "OperGranted" || news.activity._tag === "OperRefused");
 
 const sequences = (happened: readonly Happened[]) => happened.map((one) => one.sequence);
 
@@ -126,6 +131,82 @@ describe("ngircd, on the floor", () => {
       ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
       nicks: ["iirc"],
     });
+
+  // Opers with a Credential set through the API, and reads the answer from News. The
+  // password reaches neither News nor any file of the data directory.
+  const operWith = (password: string, nick: string) =>
+    Effect.gen(function* () {
+      const dataDir = yield* temporaryDirectory;
+      const key = yield* makeKey(dataDir);
+      const daemon = yield* startDaemon({ dataDir }, key);
+      const { api } = daemon;
+      const credential = CredentialPathName.make("oper-password");
+
+      yield* api.credentials.set({
+        params: { name: credential },
+        payload: { value: Redacted.make(password) },
+      });
+      yield* api.networks.configure({
+        params: { network },
+        payload: configured({
+          ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
+          nicks: [nick],
+          oper: { _tag: "Login", credential, name: ngircdOperName },
+        }),
+        query: {},
+      });
+
+      const happened = yield* followNews(api, 0, (all) =>
+        all.some((one) => one.news.some(answered))
+      );
+
+      yield* daemon.stop;
+
+      const stored = yield* Effect.promise(
+        async () =>
+          await Promise.all(
+            ["journal.sqlite", "journal.sqlite-wal", "views.sqlite", "views.sqlite-wal"].map(
+              async (name) => {
+                const file = Bun.file(`${dataDir}/${name}`);
+
+                return (await file.exists()) ? await file.text() : "";
+              }
+            )
+          )
+      );
+
+      return {
+        answer: happened.flatMap(({ news }) =>
+          news.flatMap((one) =>
+            one._tag === "Activity" && answered(one) ? [{ ...one.activity, where: one.where }] : []
+          )
+        ),
+        shown: JSON.stringify(happened).includes(password),
+        stored: stored.some((text) => text.includes(password)),
+      };
+    });
+
+  it("opers as the Session begins, reports it granted, and never journals the Credential", async () => {
+    const result = await run(operWith(ngircdOperPassword, "operator"));
+
+    expect(result).toStrictEqual({
+      answer: [{ _tag: "OperGranted", nick: "operator", where: [{ _tag: "Network" }] }],
+      shown: false,
+      stored: false,
+    });
+  }, 60_000);
+
+  it("reports an OPER the Ircd refused by its numeric, and never journals the Credential", async () => {
+    const result = await run(operWith("not-the-oper-password", "refused"));
+
+    expect(result).toStrictEqual({
+      answer: [
+        { _tag: "OperRefused", nick: "refused", reply: "464", where: [{ _tag: "Network" }] },
+      ],
+      shown: false,
+      stored: false,
+    });
+  }, 60_000);
 
   it("configures, registers, joins, says, and hears the other User as News and in its Timeline", async () => {
     const result = await run(

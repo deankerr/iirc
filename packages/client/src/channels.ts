@@ -476,7 +476,10 @@ export const foldActivity = (
   const fold = folder(run.state);
 
   switch (activity._tag) {
-    // What the Network said of something sent, and a CTCP, change no Channel.
+    // What the Network said of something sent, a CTCP, and an answer to `OPER` change no
+    // Channel.
+    case "OperGranted":
+    case "OperRefused":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":

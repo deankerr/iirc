@@ -115,7 +115,10 @@ describe("submitting", () => {
     };
 
     const words =
-      "A Credential never goes in a raw Line: PASS, AUTHENTICATE, and OPER carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+      "A Credential never goes in a raw Line: PASS and AUTHENTICATE carry one, and a raw Line is journaled whole. It was cleared, and nothing was sent.";
+
+    const oper =
+      "OPER carries a Credential, and a raw Line is journaled whole. Set network.<id>.oper.name and network.<id>.oper.credential instead, and Self opers as each Session begins. It was cleared, and nothing was sent.";
 
     expect([
       refusedOne("/quote PASS one"),
@@ -124,13 +127,15 @@ describe("submitting", () => {
       refusedOne("hi\n/raw AuThEnTiCaTe four"),
       refusedOne("/quote Oper admin five"),
       refusedOne("/raw OPER admin six"),
+      refusedOne("/oper admin seven"),
     ]).toStrictEqual([
       [0, "", ["hello"], words],
       [0, "", ["hello"], words],
       [0, "", ["hello"], words],
       [0, "", ["hello"], words],
-      [0, "", ["hello"], words],
-      [0, "", ["hello"], words],
+      [0, "", ["hello"], oper],
+      [0, "", ["hello"], oper],
+      [0, "", ["hello"], oper],
     ]);
   });
 
