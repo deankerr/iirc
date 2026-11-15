@@ -63,7 +63,7 @@ The changes `!! configure` takes, separated by one space:
 | `decline=multi-prefix`, `accept=multi-prefix` | Decline a Feature, or stop declining it. |
 | `realname=new`, `nicks=one,two` | The realname registration sends, with no space, or the nicks it offers, in order. |
 | `highlights=release,iirc`, `highlights=` | The words that make a Message a Highlight, or none. |
-| `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw`, `login=service,NickServ,iirc,pw,5` | How Self logs in: not at all, with SASL to an account, with its Credential's name, required or optional, or by telling a service, named first, with the seconds Channels wait last. |
+| `login=none`, `login=required,iirc,pw`, `login=optional,iirc,pw`, `login=service,NickServ,iirc,pw,5` | How Self logs in: not at all, with SASL to an account, with its Credential's name, required or optional, or by telling a service, named first, with the seconds Channels wait last. A login the Configuration's schema would refuse, such as a wait over its bound, is a transcript error. |
 
 Instants are written against the clock, which starts at the epoch, 2026-01-01T00:00:00.000Z: `t+13s`, `t+1500ms`, `t-5s`.
 

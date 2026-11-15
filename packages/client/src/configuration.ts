@@ -185,16 +185,26 @@ export type NetworkConfiguration = typeof NetworkConfiguration.Type;
 const echoMessage = FeatureName.make("echo-message");
 
 /**
- * The Features a Configuration declines: those the Owner named, and `echo-message` with a
- * service login, since the Ircd would echo the Credential back, and every Line received
- * is journaled.
+ * The Features a Configuration declines: those the Owner named.
  * @param configuration - The Configuration, if there is one yet.
  * @returns Their names.
  */
 export const declinedOf = (
   configuration: NetworkConfiguration | undefined
+): readonly FeatureName[] => configuration?.declined ?? [];
+
+/**
+ * The Features a Configuration declines when asking for caps: those the Owner named, and
+ * `echo-message` with a service login, since the Ircd would echo the Credential back, and
+ * every Line received is journaled. It only stops the cap being asked for. A Connection
+ * that already has it keeps the Feature on, so each echo is still matched to its Message.
+ * @param configuration - The Configuration, if there is one yet.
+ * @returns Their names.
+ */
+export const declinedToRequest = (
+  configuration: NetworkConfiguration | undefined
 ): readonly FeatureName[] => {
-  const declined = configuration?.declined ?? [];
+  const declined = declinedOf(configuration);
 
   return configuration?.login._tag === "Service" && !declined.includes(echoMessage)
     ? [...declined, echoMessage]

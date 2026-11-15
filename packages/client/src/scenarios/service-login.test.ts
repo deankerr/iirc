@@ -8,7 +8,7 @@ import { CredentialName } from "@iirc/protocol/line";
 import { describe, expect, it } from "vitest";
 
 import { client } from "../core.ts";
-import { configured, play, registered } from "../testing/index.ts";
+import { configured, joined, play, registered } from "../testing/index.ts";
 
 const lines = (...rows: readonly string[]): string => rows.map((row) => `${row}\n`).join("");
 
@@ -295,6 +295,32 @@ describe("a service login", () => {
     });
 
     expect(sentSecrets(played)).toStrictEqual([]);
+  });
+
+  it("keeps matching an echo to its Message when the login is configured while echo-message is on", () => {
+    const none = configured();
+
+    const played = play(client, {
+      configuration: none,
+      transcript: [
+        registered(none, { offered: ["batch", "echo-message", "labeled-response"] }),
+        joined(none, "#iirc", ["peer"]),
+        lines(
+          "!! configure login=service,NickServ,acct,pw,5",
+          "!! say #iirc :hello",
+          "?? message Privmsg iirc #iirc at=ours:t+0s in=channel:#iirc ours=i1 echo :hello",
+          ">> @label=l1 PRIVMSG #iirc hello",
+          "<< @label=l1 :iirc!u@h PRIVMSG #iirc :hello",
+          "?? confirmed i1 :hello"
+        ),
+      ],
+    });
+
+    const said = played.steps.flatMap((step) =>
+      step.news.filter((news) => news._tag === "Message")
+    );
+
+    expect(said).toHaveLength(1);
   });
 
   it("is told and answered in the registered prelude", () => {

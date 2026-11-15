@@ -9,7 +9,7 @@
 import { CredentialName, SecretLine } from "@iirc/protocol/line";
 import { Result, Schema } from "effect";
 
-import type { Login } from "../configuration.ts";
+import { Login } from "../configuration.ts";
 import { FeatureName } from "../ids.ts";
 import { CloseReason, UnfilledReason } from "../input.ts";
 import type { Action, Lookup, ModeRequest, SayKind } from "../input.ts";
@@ -399,21 +399,30 @@ const sayVerbs: Readonly<Record<SayKind, string>> = {
 
 const secondsPattern = /^\d{1,2}$/u;
 
+const decodeLogin = Schema.decodeUnknownResult(Login);
+
+// What the Login schema accepts, so a value the Client would refuse never reaches a
+// `Configured`.
+const asLogin = (
+  candidate: Readonly<Record<string, boolean | number | string | undefined>>
+): Login | undefined => {
+  const decoded = decodeLogin(candidate);
+
+  return Result.isSuccess(decoded) ? decoded.success : undefined;
+};
+
+// A part of a login that is written, which the schema may accept empty.
+const present = (part: string | undefined): boolean => part !== undefined && part !== "";
+
 // `service,<service>,<account>,<credential>,<seconds>`.
 const readService = (text: string): Login | undefined => {
   const [service, account, credential, wait, ...rest] = text.split(",");
 
-  return [service, account, credential].every((part) => part !== undefined && part !== "") &&
+  return [service, account, credential].every(present) &&
     wait !== undefined &&
     secondsPattern.test(wait) &&
     rest.length === 0
-    ? {
-        _tag: "Service",
-        account: account ?? "",
-        credential: CredentialName.make(credential ?? ""),
-        service: service ?? "",
-        wait: Number(wait),
-      }
+    ? asLogin({ _tag: "Service", account, credential, service, wait: Number(wait) })
     : undefined;
 };
 
@@ -431,17 +440,9 @@ const readLogin = (text: string): Login | undefined => {
   const [kind, account, credential, ...rest] = text.split(",");
 
   return (kind === "required" || kind === "optional") &&
-    account !== undefined &&
-    account !== "" &&
-    credential !== undefined &&
-    credential !== "" &&
+    [account, credential].every(present) &&
     rest.length === 0
-    ? {
-        _tag: "Sasl",
-        account,
-        credential: CredentialName.make(credential),
-        required: kind === "required",
-      }
+    ? asLogin({ _tag: "Sasl", account, credential, required: kind === "required" })
     : undefined;
 };
 
