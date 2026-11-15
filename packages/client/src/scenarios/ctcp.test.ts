@@ -767,6 +767,24 @@ describe("a PING the Owner sends", () => {
     expect(remembered(run)).toStrictEqual([]);
   });
 
+  it("is not measured by another User who took the nick once the User it went to quit", () => {
+    const run = played([
+      registered(base),
+      joined(base, "#iirc", ["peer"]),
+      lines(
+        "!! ping peer",
+        `>>\\ PRIVMSG peer :\\x01PING ${first}\\x01`,
+        "<< :peer!u@h QUIT :gone",
+        "<< :peer!u2@h2 JOIN #iirc",
+        "+1s",
+        pong(first),
+        `?? activity CtcpReply peer iirc PING in=existing-direct:peer in=network :${first}`
+      ),
+    ]);
+
+    expect(remembered(run)).toStrictEqual([]);
+  });
+
   it("is not measured by a reply to a Channel, which leaves it for the direct reply", () => {
     const run = played([
       ...inChannel,

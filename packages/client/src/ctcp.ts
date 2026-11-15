@@ -250,6 +250,21 @@ const ctcpWhere = (run: Run, ctcp: Ctcp, fromUser: boolean): readonly Where[] =>
 };
 
 /**
+ * Forgets the `PING`s sent to a User who quit, so whoever takes their nick next cannot
+ * answer for them, even with a token the Owner chose.
+ * @param run - The step.
+ * @param nick - Who quit.
+ */
+export const forgetPings = (run: Run, nick: string): void => {
+  const fold = folder(run.state);
+
+  updateOpen(run, (open) => ({
+    ...open,
+    pings: open.pings.filter((ping) => fold(ping.nick) !== fold(nick)),
+  }));
+};
+
+/**
  * How long a reply to one of the Owner's `PING`s took: from the instant its request was
  * sent to this step's, both as the Runtime journaled them, in milliseconds. Only a live
  * reply to Self from the User the `PING` went to, by the casemapping now, with its token,
