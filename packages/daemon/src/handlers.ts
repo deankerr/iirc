@@ -43,6 +43,7 @@ import type {
   TimelineChangesEvent,
   UiEvent,
   Upload,
+  UploadsEvent,
   WindowQuery,
 } from "@iirc/api";
 import { IntentId } from "@iirc/client";
@@ -91,6 +92,7 @@ import { SignIns } from "./sign-ins.ts";
 import type { SignInsUnwritable } from "./sign-ins.ts";
 import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
 import type { UiChangedSince } from "./ui.ts";
+import { servedUpload } from "./uploads/serving.ts";
 import { Uploads } from "./uploads/uploads.ts";
 import type { Shown } from "./uploads/uploads.ts";
 import {
@@ -1231,12 +1233,57 @@ const uploads = HttpApiBuilder.group(
           })
         )
       )
+      .handle("list", ({ query }) =>
+        held.page(query.after, query.limit ?? windowLimit.default).pipe(
+          Effect.map(({ next, through, uploads: page }) => ({
+            more: next !== undefined,
+            next: next ?? null,
+            through,
+            uploads: page.map(upload),
+          })),
+          Effect.catchTags({
+            NoSuchUpload: () =>
+              Effect.fail(
+                new InvalidRequest({
+                  issues: [{ message: "Names no Upload", path: ["query", "after"] }],
+                })
+              ),
+          })
+        )
+      )
       .handle("status", () => held.status)
+      .handle("changes", ({ headers, query }) =>
+        Effect.suspend(() => {
+          // As for News, the header comes with the URL first used, so it wins.
+          const after = headers["last-event-id"] ?? query.after;
+
+          // Each event is an Upload whole, as it is now, so a Frontend replaces what it holds.
+          const changed = held.changes(after).pipe(
+            Stream.map(({ sequence, shown }): UploadsEvent => ({
+              data: upload(shown),
+              event: "changed",
+              id: sequence,
+            }))
+          );
+
+          return followed(changed, { data: {}, event: "heartbeat" });
+        })
+      )
       .handle("read", ({ params }) =>
         Effect.flatMap(held.find(params.id), (found) =>
           Option.isNone(found)
             ? Effect.fail(new UnknownUpload({ id: params.id }))
             : Effect.succeed(upload(found.value))
+        )
+      )
+      .handleRaw("content", ({ params }) =>
+        held.open(params.id).pipe(
+          // Answered as the link listener answers them, safety headers and all.
+          Effect.flatMap(servedUpload),
+          Effect.catchTags({
+            ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
+            NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),
+          })
         )
       );
   })
@@ -1269,6 +1316,24 @@ const bodyLimit = HttpRouter.middleware(
   { global: true }
 );
 
+// `/api/uploads/<id>/content`.
+const contentPath = /^\/api\/uploads\/[^/]+\/content$/u;
+
+// An Upload's bytes the store could not give are never kept by a cache, as at its link. The
+// contract's errors carry no headers, so this is set on the way out.
+const contentUnavailable = HttpRouter.middleware(
+  (app) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const response = yield* app;
+
+      return response.status === 503 && contentPath.test(request.url.split("?")[0] ?? "")
+        ? HttpServerResponse.setHeader(response, "cache-control", "no-store")
+        : response;
+    }),
+  { global: true }
+);
+
 /**
  * The handler groups, with the key and sign-in check and request validation, needing the
  * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the options
@@ -1288,5 +1353,6 @@ export const ApiHandlers = Layer.mergeAll(
 /** The API, as routes on the enclosing `HttpRouter`, with the body limit. */
 export const ApiRoutes = HttpApiBuilder.layer(DaemonApi).pipe(
   Layer.provide(ApiHandlers),
-  Layer.merge(bodyLimit)
+  Layer.merge(bodyLimit),
+  Layer.merge(contentUnavailable)
 );

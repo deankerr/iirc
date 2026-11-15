@@ -14,26 +14,13 @@
 import { BunHttpServer } from "@effect/platform-bun";
 import { UploadId } from "@iirc/api";
 import type { ListenAddress } from "@iirc/api";
-import { Duration, Effect, Exit, Layer, Option, Ref, Scope, Sink, Stream } from "effect";
+import { Duration, Effect, Exit, Layer, Option, Ref, Scope, Stream } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { OwnerConfiguration } from "./options.ts";
 import { isUploadId } from "./uploads/id.ts";
-import { knownKinds } from "./uploads/kind.ts";
+import { safety, servedUpload } from "./uploads/serving.ts";
 import { Uploads, switchOf } from "./uploads/uploads.ts";
-
-/**
- * What every answer carries, whatever it is: no sniffing, a sandbox with nothing allowed
- * but downloads, no referrer, and readable from any origin, since Chromium plays top-level
- * media under a sandbox only so, and the listener reads no cookie to give away.
- */
-const safety = {
-  "access-control-allow-origin": "*",
-  "content-security-policy": "sandbox allow-downloads; default-src 'none'",
-  "cross-origin-resource-policy": "cross-origin",
-  "referrer-policy": "no-referrer",
-  "x-content-type-options": "nosniff",
-} as const;
 
 /**
  * A plain answer with no Upload in it.
@@ -53,34 +40,6 @@ const notFound = plain(404, "Not found\n", "no-cache");
 
 const unavailable = plain(503, "The store is unavailable\n", "no-store");
 
-/**
- * A `Content-Disposition` naming a file, as RFC 6266 says: an ASCII `filename` for old
- * readers, every other character `_`, and the name itself in `filename*`, as RFC 5987
- * encodes it.
- * @param inline - Whether it is shown in place, rather than downloaded.
- * @param name - The name.
- * @returns The header's value.
- */
-const contentDisposition = (inline: boolean, name: string) => {
-  const ascii = name.replaceAll(/[^\u0020-\u007E]|["\\]/gu, "_");
-
-  const encoded = encodeURIComponent(name).replaceAll(
-    /['()*]/gu,
-    (character) => `%${character.codePointAt(0)?.toString(16).toUpperCase()}`
-  );
-
-  return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
-};
-
-/**
- * Whether a type is shown in place: raster images, common audio and video, and plain
- * text. Anything else, and any type no kind has, downloads.
- * @param type - The type the record holds.
- * @returns Whether it is.
- */
-const shownInPlace = (type: string) =>
-  knownKinds.find((kind) => kind.type === type)?.inline ?? false;
-
 // `/<id>/<anything>`, with the id the first segment and something after it.
 const linkPath = /^\/(?<id>[^/]+)\/.+$/u;
 
@@ -99,25 +58,8 @@ const answer = Effect.gen(function* () {
     return notFound;
   }
 
-  return yield* Effect.gen(function* () {
-    const { bytes, record } = yield* uploads.open(UploadId.make(id));
-
-    // The first chunk is read here, inside the error boundary, so a store that is found to
-    // be unreachable before any byte arrives answers 503 rather than resetting the
-    // Connection. A failure after the first byte can only end the body early, as the
-    // status and headers are already sent.
-    const [first, rest] = yield* Stream.peel(bytes, Sink.take<Uint8Array>(1));
-
-    return HttpServerResponse.stream(Stream.concat(Stream.fromIterable(first), rest), {
-      contentLength: record.size,
-      contentType: record.type,
-      headers: {
-        ...safety,
-        "cache-control": "no-cache",
-        "content-disposition": contentDisposition(shownInPlace(record.type), record.safeName),
-      },
-    });
-  }).pipe(
+  return yield* uploads.open(UploadId.make(id)).pipe(
+    Effect.flatMap(servedUpload),
     Effect.catchTags({
       ByteStoreUnavailable: () => Effect.succeed(unavailable),
       NoSuchUpload: () => Effect.succeed(notFound),

@@ -34,6 +34,7 @@ import type {
   WindowGap,
   OwnerInForce,
   UiInForce,
+  Upload,
 } from "@iirc/api";
 import { importTheme } from "@iirc/frontend/theme-import";
 import { Effect, Layer, Redacted, Result, Schema } from "effect";
@@ -508,6 +509,12 @@ export const fakeDaemon = () => {
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
   const ownerFollowers: Follower[] = [];
   const ownerChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
+  const uploads: (typeof Upload.Encoded)[] = [];
+  const uploadFollowers: Follower[] = [];
+  const uploadPagesRead: (string | undefined)[] = [];
+  const uploadPagesHeld: (() => void)[] = [];
+  // Each Upload `upload` made, as its event, at its Change's sequence, oldest first.
+  const uploadChanges: { readonly sequence: number; readonly text: string }[] = [];
 
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
@@ -580,6 +587,8 @@ export const fakeDaemon = () => {
     holdSays: false,
     /** Whether each read of the `ui` options waits until released, then answers as they were when asked. */
     holdUiReads: false,
+    /** Whether each page of the Uploads, taken as it is asked for, waits until released to answer. */
+    holdUploadPages: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
     /**
@@ -679,21 +688,43 @@ export const fakeDaemon = () => {
     uiFollowers,
     /** Releases each read of the `ui` options held, in the order they came. */
     uiReadsHeld,
+    /** Each follower of the Uploads' Changes. */
+    uploadFollowers,
+    /** Releases each page of the Uploads held, in the order they came. */
+    uploadPagesHeld,
+    /** Each page of the Uploads read, by the `after` it was read from. */
+    uploadPagesRead,
+    /** The Uploads held, newest first, as the wire carries them. */
+    uploads,
+    /** How many Uploads a page holds when its request gives no `limit`. */
+    uploadsPage: 50,
     /** Each read of a window, by its query, for a test to look at. */
     windowsRead,
   };
 
   /**
-   * A stream of Server-Sent Events, kept in a list of followers while it is open.
+   * A stream of Server-Sent Events, kept in a list of followers while it is open, which
+   * sends what is replayed first.
    * @param list - The followers.
    * @param url - The request's URL.
    * @param headers - Its headers.
    * @param init - The request.
+   * @param replayed - The events sent before any live one, as the wire carries them.
    * @returns The response.
    */
-  const following = (list: Follower[], url: URL, headers: Headers, init: RequestInit) => {
+  const following = (
+    list: Follower[],
+    url: URL,
+    headers: Headers,
+    init: RequestInit,
+    replayed: readonly string[] = []
+  ) => {
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
+        for (const text of replayed) {
+          controller.enqueue(encoder.encode(text));
+        }
+
         const follower = {
           after: url.searchParams.get("after") ?? undefined,
           controller,
@@ -1346,6 +1377,103 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * Holds a new Upload, newest of all, and sends it to every follower of the Uploads'
+   * Changes, as another device's upload would, at the next sequence, which a follower
+   * resuming before it is sent too.
+   * @param added - The Upload, as the wire carries it.
+   */
+  const upload = (added: typeof Upload.Encoded) => {
+    uploads.unshift(added);
+
+    const sequence = daemon.nextSequence;
+    const text = `event: changed\nid: ${sequence}\ndata: ${JSON.stringify(added)}\n\n`;
+
+    uploadChanges.push({ sequence, text });
+    daemon.nextSequence += 1;
+
+    for (const follower of uploadFollowers) {
+      follower.controller.enqueue(encoder.encode(text));
+    }
+  };
+
+  /**
+   * The Uploads: a page of them, newest first, from just after one, refusing a cursor that
+   * names none held, through the last Change `upload` made, or `0`; their Changes, each
+   * `upload` made after `Last-Event-ID` or `after`, then live, or live from now with
+   * neither; and an Upload's bytes, or nothing for any other route. Uploads a test holds
+   * from the start were made before any Change the fake replays.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const uploadsRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const method = init.method ?? "GET";
+    const content = /^\/api\/uploads\/(?<id>[^/]+)\/content$/u.exec(url.pathname)?.groups;
+
+    if (method !== "GET") {
+      return undefined;
+    }
+
+    if (url.pathname === "/api/uploads/changes") {
+      const headers = new Headers(init.headers);
+      const after = headers.get("last-event-id") ?? url.searchParams.get("after");
+
+      const replayed =
+        after === null
+          ? []
+          : uploadChanges.flatMap((one) => (one.sequence > Number(after) ? [one.text] : []));
+
+      return signedInOnly(() => following(uploadFollowers, url, headers, init, replayed));
+    }
+
+    if (url.pathname === "/api/uploads") {
+      // The page is taken as the request arrives, and a held one is only delivered late, so
+      // what is made meanwhile is in no page and reaches the list only by the stream.
+      const answer = signedInOnly(() => {
+        const after = url.searchParams.get("after") ?? undefined;
+        const limit = Number(url.searchParams.get("limit") ?? daemon.uploadsPage);
+        const start = after === undefined ? 0 : uploads.findIndex((one) => one.id === after) + 1;
+
+        uploadPagesRead.push(after);
+
+        if (start === 0 && after !== undefined) {
+          return Response.json({ _tag: "InvalidRequest", issues: [] }, { status: 400 });
+        }
+
+        const page = uploads.slice(start, start + limit);
+        const more = start + limit < uploads.length;
+
+        return Response.json({
+          more,
+          next: more ? (page.at(-1)?.id ?? null) : null,
+          through: uploadChanges.at(-1)?.sequence ?? 0,
+          uploads: page,
+        });
+      });
+
+      if (daemon.holdUploadPages) {
+        await heldUntilReleased(uploadPagesHeld, init);
+      }
+
+      return answer;
+    }
+
+    if (content?.id !== undefined) {
+      const { id } = content;
+
+      return signedInOnly(() =>
+        uploads.some((one) => one.id === id)
+          ? new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+              headers: { "content-type": "application/octet-stream" },
+            })
+          : json(404, { _tag: "UnknownUpload", id })
+      );
+    }
+
+    return undefined;
+  };
+
+  /**
    * A Lookup asked after by its intent: `Pending` as many times as it was given, then
    * `LookedUp`, or `NotJournaled` for one never journaled. It waits until a test releases it
    * when `holdLooked` says.
@@ -1485,6 +1613,7 @@ export const fakeDaemon = () => {
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
     (await ownerRoute(url, init)) ??
+    (await uploadsRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??
     new Response(null, { status: 404 });
@@ -1734,7 +1863,7 @@ export const fakeDaemon = () => {
     return daemon.gatewayOnly ? new Response(null, { status: 502 }) : await answer(url, init);
   };
 
-  return { daemon, endStreams, fetch, send, sendUi };
+  return { daemon, endStreams, fetch, send, sendUi, upload };
 };
 
 /**

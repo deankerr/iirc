@@ -1,0 +1,89 @@
+/* The Uploads beside the options: a heading, then one dense row each. */
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+}
+
+.heading {
+  color: var(--color-muted);
+  font: inherit;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The thumbnail, what the Upload is, and copying its link. */
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-1) 0;
+}
+
+/* Two lines tall, and square, at any size of text. */
+.thumbnail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2lh;
+  block-size: 2lh;
+  overflow: hidden;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+/* The browser scales the bytes down; nothing smaller is made of them. */
+.image {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.icon {
+  color: var(--color-muted);
+}
+
+.about {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+}
+
+.details {
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.copy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.copied {
+  color: var(--color-ok);
+}
+
+.more {
+  align-self: flex-start;
+}

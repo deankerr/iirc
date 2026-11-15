@@ -52,8 +52,11 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `DELETE /api/options/{option}?ifSequence=` | Unsets one, back to its default or to none, likewise | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
 | `GET /api/options/changes?after=` | Server-Sent Events of them, whole, as for `ui` | `changed` and `heartbeat` events |  |
 | `POST /api/uploads?name=` | Keeps a file: its bytes as the raw body, with no multipart and any `Content-Type`, and the name it was given, if any | `Upload` | `UploadsOff`, `UploadTooLarge`, `StoreUnavailable`, `JournalFailed` |
+| `GET /api/uploads?after=&limit=` | A page of the Uploads, newest first, and how far it was read | `{ uploads, more, next, through }` |  |
 | `GET /api/uploads/status` | Whether Uploads are on, and the largest one may be | `On { maxSize }` or `Off { maxSize, missing }` |  |
+| `GET /api/uploads/changes?after=` | Server-Sent Events of each Upload a Change makes, whole, then live | `changed` and `heartbeat` events | `JournalFailed`, in the stream |
 | `GET /api/uploads/{id}` | One Upload | `Upload` | `UnknownUpload` |
+| `GET /api/uploads/{id}/content` | An Upload's bytes, with its link's headers | the bytes | `UnknownUpload`, `StoreUnavailable` |
 | `GET /api/credentials` | The names of the Credentials held | `{ names }` | `VaultFailed` |
 | `PUT /api/credentials/{name}` | Holds a value, `{ value }`, replacing any before | `204` | `VaultFailed` |
 | `DELETE /api/credentials/{name}` | Forgets one. Forgetting one not held does nothing | `204` | `VaultFailed` |
@@ -88,6 +91,9 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **Uploads are on exactly when the bucket, its two keys, and `uploads.publicUrl` are set.** Otherwise the status is `Off`, naming each of those options that is not, and an upload is `UploadsOff`. The status always says `maxSize`, `uploads.maxSize` in force.
 - **An upload's body is the file, whatever it is.** It is never multipart, and its `Content-Type` is never read: the type is read from the bytes. It must have at least one byte, and it may be as large as `uploads.maxSize` when the upload began, past which it is cut off unread with `UploadTooLarge` and nothing is kept. An upload answered with any error closes its Connection, since its body may be unread.
 - **An `Upload` is its record and its link.** `id` is 16 lower-case Crockford base32 characters, `UploadId`, 80 random bits, never the hash. `name` is the name given, when one was, `safeName` the name its link and download use, made from it and from the type, `type` the `Content-Type` it is served with, `size` and `hash` the bytes' count and SHA-256, and `at` when it was kept. `link` is `<uploads.publicUrl>/<id>/<safeName>`, built from the public URL in force when it is read, or `null` while none is set.
+- **The Uploads are listed newest first,** in the order they were kept, as every list is paged. `next` is an Upload's id, and the page after it holds those older than it. `through` is the sequence of the latest Upload Change the page was read from, or `0` before any, so a Frontend that follows `GET /api/uploads/changes` with it as `after` misses nothing since, and is sent nothing the page gave.
+- **An Upload's bytes are served on the API's own origin too,** under a key or a sign-in, for a Frontend whose page allows only its own origin. They carry exactly the headers its link does, so they act no more in a browser here than there, and `StoreUnavailable` for them carries `Cache-Control: no-store`.
+- **Upload Changes resume exactly.** Each `changed` event is one Upload, whole, as it is now, with its link from the public URL in force as it is sent, and its id is the sequence of the Change. A Frontend keeps each Upload by its id and takes the latest. It resumes with `after` or `Last-Event-ID`, which wins, and is sent every Upload changed since, then live, with nothing missed and nothing twice. Without either, it is sent only what changes from now.
 - **Uploading needs what saying needs, and reading needs a read.** Key scopes do not exist yet, so every key and sign-in may do both, and an upload by cookie must come from the Daemon's own origin, as every write must.
 
 ### Removing
@@ -161,10 +167,10 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 | `TimelinesKept` | 409 | A `PUT` of Configuration named a Network removed with its Timelines kept. Its id is free once they are dropped. Nothing was journaled. |
 | `UiChanged` | 409 | A change of an option under `ui` was made from other options than those in force: another Change was journaled since, at `sequence`, the last. Nothing was journaled. |
 | `OptionsChanged` | 409 | The same, for an option under `store` or `uploads`. |
-| `UnknownUpload` | 404 | No Upload has that id. |
+| `UnknownUpload` | 404 | No Upload has that id, or, asked for its bytes, the store confirms they are gone. |
 | `UploadsOff` | 409 | Uploads are off, and `missing` names the options that are not set. Nothing was read or kept. |
 | `UploadTooLarge` | 413 | The body passed `maxSize`, so it was cut off there, and nothing was kept. |
-| `StoreUnavailable` | 503 | The bucket could not be reached, refused what was asked, or a key the options name is not held, so nothing was kept. It is also the answer when the Daemon began to stop, and then the Upload may or may not have been kept, if the Daemon was already journaling it. |
+| `StoreUnavailable` | 503 | The bucket could not be reached, refused what was asked, or a key the options name is not held, so nothing was kept or read. Bytes asked for while Uploads are off are this too. It is also the answer when the Daemon began to stop, and then the Upload may or may not have been kept, if the Daemon was already journaling it. |
 | `NetworkStopped` | 503 | The Network stopped, so its outcome is `Uncertain`, below. |
 | `TimelinesFailed` | 503 | The Timelines could not be read. They are derived, and a read that waited on a lock may succeed when asked again, while a damaged store is made again from the Journal when the Daemon restarts. |
 | `VaultFailed` | 503 | The Vault could not read or write its file. It tries again on the next call, so once the Owner fixes the file or its directory, the same request succeeds. |
