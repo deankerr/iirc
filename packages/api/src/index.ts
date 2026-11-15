@@ -213,7 +213,11 @@ export {
   Upload,
   UploadId,
   UploadName,
+  UploadPage,
   UploadQuery,
+  UploadsAfter,
+  UploadsEvent,
+  UploadsQuery,
   UploadsStatus,
   uploadNameMaxLength,
 } from "./uploads.ts";

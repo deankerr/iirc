@@ -1075,7 +1075,7 @@ export type Resume = typeof Resume.Type;
 export const windowLimit = { default: 100, maximum: 500 } as const;
 
 /** How many to give, as text in a query: 1 to {@link windowLimit}'s maximum. */
-const Limit = Schema.FiniteFromString.check(
+export const Limit = Schema.FiniteFromString.check(
   Schema.isInt(),
   Schema.isBetween({ maximum: windowLimit.maximum, minimum: 1 })
 );

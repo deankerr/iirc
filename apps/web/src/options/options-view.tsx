@@ -10,7 +10,8 @@
  * with its Timelines kept, to drop them. Escape anywhere else in it, or the close button on
  * its Pane's status bar, shows what the Pane showed before. An edit is a plain,
  * uncontrolled input read once when Enter is pressed. A Credential's value is never edited
- * here.
+ * here. The Uploads are listed beside the options where the view is wide, and under them
+ * where it is not.
  *
  * @packageDocumentation
  */
@@ -43,6 +44,7 @@ import {
 import { changeOwnerOption } from "./owner.ts";
 import { askToRemove } from "./removal.ts";
 import { changeUiOption } from "./ui.ts";
+import { UploadsList } from "./uploads-list.tsx";
 
 import styles from "./options-view.module.css";
 
@@ -436,44 +438,49 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
         </p>
       )}
       {asked === undefined ? null : <Confirm done={focusRow(asked.name)} option={asked} />}
-      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the GridList's own rows take the keys; this only hears Delete from them. */}
-      <div className={styles.scroller} onKeyDown={onKeyDown} ref={list}>
-        <GridList
-          {...(notice === undefined ? {} : { "aria-describedby": noticeId })}
-          aria-label="Options"
-          className={styles.list}
-          items={rows}
-          onAction={onAction}
-          renderEmptyState={() => <p className={styles.muted}>No option matches.</p>}
-        >
-          {(option) => (
-            <GridListItem className={styles.row} id={option.name} textValue={option.name}>
-              <span className={styles.name}>
-                <bdi>{option.name}</bdi>
-              </span>
-              <span className={styles.value}>
-                {editing === option.name ? (
-                  <Editor done={focusRow(option.name)} option={option} />
-                ) : (
-                  <Shown value={option.value} />
-                )}
-                {option._tag === "Ui" && option.device !== undefined ? (
-                  <span className={styles.device}>
-                    {" "}
-                    on this device, over <Shown value={option.shared} />
-                  </span>
-                ) : null}
-                {option._tag === "Ui" && option.note !== undefined ? (
-                  <span className={styles.note}>{option.note}</span>
-                ) : null}
-              </span>
-              <span className={styles.starts}>
-                {option.starts === undefined ? "must be given" : <bdi>{option.starts}</bdi>}
-              </span>
-              <span className={styles.description}>{option.description}</span>
-            </GridListItem>
-          )}
-        </GridList>
+      <div className={styles.body}>
+        {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the GridList's own rows take the keys; this only hears Delete from them. */}
+        <div className={styles.scroller} onKeyDown={onKeyDown} ref={list}>
+          <GridList
+            {...(notice === undefined ? {} : { "aria-describedby": noticeId })}
+            aria-label="Options"
+            className={styles.list}
+            items={rows}
+            onAction={onAction}
+            renderEmptyState={() => <p className={styles.muted}>No option matches.</p>}
+          >
+            {(option) => (
+              <GridListItem className={styles.row} id={option.name} textValue={option.name}>
+                <span className={styles.name}>
+                  <bdi>{option.name}</bdi>
+                </span>
+                <span className={styles.value}>
+                  {editing === option.name ? (
+                    <Editor done={focusRow(option.name)} option={option} />
+                  ) : (
+                    <Shown value={option.value} />
+                  )}
+                  {option._tag === "Ui" && option.device !== undefined ? (
+                    <span className={styles.device}>
+                      {" "}
+                      on this device, over <Shown value={option.shared} />
+                    </span>
+                  ) : null}
+                  {option._tag === "Ui" && option.note !== undefined ? (
+                    <span className={styles.note}>{option.note}</span>
+                  ) : null}
+                </span>
+                <span className={styles.starts}>
+                  {option.starts === undefined ? "must be given" : <bdi>{option.starts}</bdi>}
+                </span>
+                <span className={styles.description}>{option.description}</span>
+              </GridListItem>
+            )}
+          </GridList>
+        </div>
+        <div className={styles.uploads}>
+          <UploadsList />
+        </div>
       </div>
     </section>
   );

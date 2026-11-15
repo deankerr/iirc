@@ -90,7 +90,15 @@ import {
   WindowQuery,
 } from "./schemas.ts";
 import { UiInForce, UiOptionName } from "./ui.ts";
-import { Upload, UploadId, UploadQuery, UploadsStatus } from "./uploads.ts";
+import {
+  Upload,
+  UploadId,
+  UploadPage,
+  UploadQuery,
+  UploadsEvent,
+  UploadsQuery,
+  UploadsStatus,
+} from "./uploads.ts";
 
 /**
  * How the API parses a request: a key nothing reads, such as a misspelt field of a
@@ -347,8 +355,10 @@ export class OptionsGroup extends HttpApiGroup.make("options")
 
 /**
  * Uploads: a file's bytes as the raw body, with no multipart, whatever its `Content-Type`,
- * which is never read, kept and recorded, and answered with its record and link; one
- * Upload by its id; and whether Uploads are on.
+ * which is never read, kept and recorded, and answered with its record and link; the
+ * Uploads, newest first, a page at a time; one Upload by its id, and its bytes, on the
+ * API's own origin with the link's safety headers; whether Uploads are on; and their
+ * Changes, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
  */
 export class UploadsGroup extends HttpApiGroup.make("uploads")
   .add(
@@ -358,11 +368,22 @@ export class UploadsGroup extends HttpApiGroup.make("uploads")
       query: UploadQuery,
       success: Upload,
     }),
+    HttpApiEndpoint.get("list", "/uploads", { query: UploadsQuery, success: UploadPage }),
     HttpApiEndpoint.get("status", "/uploads/status", { success: UploadsStatus }),
+    HttpApiEndpoint.get("changes", "/uploads/changes", {
+      headers: { "last-event-id": Schema.optionalKey(After) },
+      query: { after: Schema.optionalKey(After) },
+      success: HttpApiSchema.StreamSse({ error: JournalFailed, events: UploadsEvent }),
+    }),
     HttpApiEndpoint.get("read", "/uploads/:id", {
       error: UnknownUpload,
       params: { id: UploadId },
       success: Upload,
+    }),
+    HttpApiEndpoint.get("content", "/uploads/:id/content", {
+      error: [UnknownUpload, StoreUnavailable],
+      params: { id: UploadId },
+      success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
     })
   )
   .middleware(Authorization) {}

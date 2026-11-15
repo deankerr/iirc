@@ -212,6 +212,14 @@ An option under `store` or `uploads` is named in full, such as `store.s3.bucket`
 - **They are the Owner's, not a device's,** so no device overrides one, and `-device` refuses them. A change is made from the options read, and `unset` returns one to its default, or leaves it unset.
 - **A Credential option names a Credential, `Owner.` and the option's name** until it names another, such as `Owner.store.s3.accessKeyId`. A Network's id starts with a lower-case letter or a digit, so no Network's Credential is ever named so.
 
+## Uploads
+
+The Uploads the options list, newest first, as a reducer (`reduceUploads`) over the pages read and the Changes streamed, with where the next page begins and `through`, the sequence of the last Change folded in, which the stream is followed after.
+
+- **A page only extends the list at its end.** It is folded only when read from where the list stands, the first page into an empty list and each later one from `next`, so one read twice is folded once. The first page sets `through`.
+- **The stream only gives what is newer.** A Change after `through` moves it on, and one not held goes first, one held is replaced in place. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.
+- **What is shown is derived, never held.** `linkOf` makes a link from the public URL given, as `<publicUrl>/<id>/<safeName>`, or none without one. `thumbnailed` says whether a type is an image every browser draws, `sizeText` a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
+
 ## Themes
 
 Every colour a Frontend draws, derived from a terminal's palette of a foreground, a background, and 16 ANSI colours. `drawn` gives the colours and `cssVariables` their names.
