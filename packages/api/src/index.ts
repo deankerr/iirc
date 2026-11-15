@@ -11,6 +11,7 @@ export {
   DaemonApi,
   NetworksGroup,
   NewsGroup,
+  OptionsGroup,
   RequestValidation,
   requestParseOptions,
   SignInGroup,
@@ -28,6 +29,7 @@ export {
   NetworkStopped,
   NotAChannel,
   NotInChannel,
+  OptionsChanged,
   SignInsFailed,
   TimelinesFailed,
   TimelinesKept,
@@ -130,6 +132,8 @@ export {
   Topic,
   Untrusted,
   Unread,
+  OptionValue,
+  OptionsEvent,
   UiEvent,
   UiValue,
   UserKnowledge,
@@ -175,5 +179,27 @@ export {
 } from "./ui.ts";
 
 export type { FontName } from "./ui.ts";
+
+export {
+  BucketName,
+  ByteCount,
+  HttpUrl,
+  ListenAddress,
+  OwnerInForce,
+  OwnerOptionName,
+  OwnerOptions,
+  OwnerSequence,
+  RegionName,
+  byteCountBounds,
+  credentialsNamed,
+  defaultMaxSize,
+  expireAfterBounds,
+  ownerCredentialOptions,
+  ownerDefaults,
+  ownerOptionNames,
+  ownerValueKept,
+} from "./options.ts";
+
+export type { OwnerOptionValue } from "./options.ts";
 
 export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";

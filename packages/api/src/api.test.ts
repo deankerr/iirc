@@ -75,6 +75,7 @@ describe("the contract", () => {
     expect(routes.map(({ route }) => route).toSorted()).toStrictEqual([
       "DELETE /api/credentials/{name}",
       "DELETE /api/networks/{network}",
+      "DELETE /api/options/{option}",
       "DELETE /api/sign-in",
       "DELETE /api/ui/{option}",
       "GET /api/credentials",
@@ -87,6 +88,8 @@ describe("the contract", () => {
       "GET /api/networks/{network}/said/{intent}",
       "GET /api/networks/{network}/timelines",
       "GET /api/news",
+      "GET /api/options",
+      "GET /api/options/changes",
       "GET /api/search",
       "GET /api/timelines/changes",
       "GET /api/timelines/{timeline}",
@@ -103,6 +106,7 @@ describe("the contract", () => {
       "POST /api/sign-in",
       "PUT /api/credentials/{name}",
       "PUT /api/networks/{network}",
+      "PUT /api/options/{option}",
       "PUT /api/ui/{option}",
     ]);
     expect(new Set(guarded.map(({ security }) => JSON.stringify(security)))).toStrictEqual(

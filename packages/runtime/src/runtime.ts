@@ -283,6 +283,12 @@ export interface RuntimeOptions {
    * that never ends still answers with what came.
    */
   readonly lookTimeout?: Duration.Input | undefined;
+  /**
+   * The Credentials named outside the Networks, such as by the Owner's options, which
+   * removing a Network never forgets. Read each time a removal decides which to forget.
+   * None unless given.
+   */
+  readonly spared?: Effect.Effect<ReadonlySet<CredentialName>> | undefined;
 }
 
 /** How long a `Hangup` drains by default. */
@@ -515,6 +521,7 @@ export const makeRuntime = <S>(
     };
 
     const lookTimeout = millisOf(options.lookTimeout, defaultLookTimeout);
+    const spared = options.spared ?? Effect.succeed(new Set<CredentialName>());
     const held = yield* Ref.make<ReadonlyMap<NetworkId, Network<S>>>(new Map());
     // Admission and shutdown take the same permit, so a Network is either added before
     // shutdown is done, and stopped by it, or refused.
@@ -649,7 +656,7 @@ export const makeRuntime = <S>(
     const configuring = yield* Semaphore.make(1);
 
     // Forgets the Credentials the Network's removals named, but those a Network still held
-    // names, and journals that it did.
+    // names or that are named outside the Networks, and journals that it did.
     const forgetCredentials = (id: NetworkId) =>
       configuring.withPermit(
         Effect.gen(function* () {
@@ -659,7 +666,7 @@ export const makeRuntime = <S>(
             return;
           }
 
-          const still = new Set<CredentialName>();
+          const still = new Set<CredentialName>(yield* spared);
 
           for (const network of (yield* Ref.get(held)).values()) {
             const { configured } = yield* Ref.get(network.current);
@@ -821,7 +828,8 @@ export const makeRuntime = <S>(
       );
 
     // A removal cut short before its Credentials were forgotten is finished now, once
-    // every Network is held, so those a Network names are spared.
+    // every Network is held, so those a Network names are spared, as are those named
+    // outside the Networks.
     for (const id of (yield* Ref.get(unforgotten)).keys()) {
       yield* adding.withPermit(forgetCredentials(id)).pipe(
         Effect.catchTags({

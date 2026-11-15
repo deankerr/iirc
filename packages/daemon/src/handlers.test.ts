@@ -7,6 +7,7 @@ import {
   DaemonApi,
   LifeChanged,
   NetworkId,
+  OptionsChanged,
   SearchText,
   Sequence as WireSequence,
   TimelineId,
@@ -70,6 +71,7 @@ const makeClient = HttpApiTest.groups(DaemonApi, [
   "news",
   "timelines",
   "ui",
+  "options",
   "credentials",
 ]);
 
@@ -347,6 +349,61 @@ describe("the handlers", () => {
       read: 1,
       stale: new ConfigurationChanged({ network: libera, sequence: WireSequence.make(3) }),
       unknown: "UnknownNetwork",
+    });
+  });
+
+  it("journals an option under store or uploads by its full name and its value, apart from the ui options", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const ui = yield* api.ui.set({
+          params: { option: "time" },
+          payload: { value: "none" },
+          query: { ifSequence: 0 },
+        });
+
+        // The ui option's Change is not one of these options', so it leaves their sequence.
+        const set = yield* api.options.set({
+          params: { option: "uploads.expireAfter" },
+          payload: { value: 30 },
+          query: { ifSequence: 0 },
+        });
+
+        const stale = yield* api.options
+          .unset({ params: { option: "uploads.expireAfter" }, query: { ifSequence: 0 } })
+          .pipe(Effect.flip);
+
+        const unset = yield* api.options.unset({
+          params: { option: "uploads.maxSize" },
+          query: { ifSequence: set.sequence },
+        });
+
+        const journaled = (yield* Stream.runCollect(world.journal.read({}))).flatMap(
+          ({ record }) => (record._tag === "Change" ? [record.change] : [])
+        );
+
+        return {
+          inForce: yield* api.options.read(),
+          journaled,
+          sequences: [ui.sequence, set.sequence, unset.sequence],
+          stale,
+          ui: (yield* api.ui.read()).sequence,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      inForce: {
+        options: { "uploads.expireAfter": 30, "uploads.maxSize": 104_857_600 },
+        sequence: 3,
+      },
+      journaled: [
+        { _tag: "UiSet", option: "time", value: "none" },
+        { _tag: "OptionSet", option: "uploads.expireAfter", value: 30 },
+        { _tag: "OptionUnset", option: "uploads.maxSize" },
+      ],
+      sequences: [1, 2, 3],
+      stale: new OptionsChanged({ sequence: 2 }),
+      ui: 1,
     });
   });
 
@@ -3037,6 +3094,41 @@ describe("removing a Network", () => {
     );
 
     expect(result).toStrictEqual({ names: [] });
+  });
+
+  it("spares a Credential an option under store names, as the bucket's keys", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        const pass = CredentialPathName.make("pass");
+        const key = CredentialPathName.make("bucket-key");
+
+        for (const name of [pass, key]) {
+          yield* api.credentials.set({ params: { name }, payload: { value: Redacted.make("x") } });
+        }
+
+        yield* api.options.set({
+          params: { option: "store.s3.accessKeyId" },
+          payload: { value: key },
+          query: {},
+        });
+
+        const { sequence: life } = yield* api.networks.configure({
+          params: { network: libera },
+          payload: configured({
+            channels: [{ key, name: "#iirc" }],
+            enabled: false,
+            password: pass,
+          }),
+          query: {},
+        });
+
+        yield* api.networks.remove({ params: { network: libera }, query: { keep: false, life } });
+
+        return yield* api.credentials.list();
+      })
+    );
+
+    expect(result).toStrictEqual({ names: ["bucket-key"] });
   });
 
   it("refuses with 409 a removal made from a life the Network no longer has, and removes nothing", async () => {

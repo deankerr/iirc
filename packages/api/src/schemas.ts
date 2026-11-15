@@ -31,6 +31,7 @@ import type { Position } from "@iirc/timelines";
 import { Effect, Result, Schema, SchemaGetter, SchemaIssue, SchemaTransformation } from "effect";
 import { Base64Url } from "effect/encoding";
 
+import { OwnerInForce } from "./options.ts";
 import { UiInForce } from "./ui.ts";
 
 /**
@@ -929,6 +930,31 @@ export const UiEvent = Schema.Union([
 
 /** The decoded form of {@link UiEvent}. */
 export type UiEvent = typeof UiEvent.Type;
+
+// The options under `store` and `uploads`.
+
+/** A value for one option, as JSON, which the Daemon parses by that option's Schema. */
+export const OptionValue = Schema.Struct({ value: Schema.Json });
+
+/**
+ * One event of the stream of the options under `store` and `uploads`, as {@link UiEvent}'s
+ * are: `changed` carries the options in force, whole, with the sequence of the last Change
+ * of one as its id, and `heartbeat` says the stream is alive.
+ */
+export const OptionsEvent = Schema.Union([
+  Schema.Struct({
+    data: Schema.fromJsonString(OwnerInForce),
+    event: Schema.Literal("changed"),
+    id: After,
+  }),
+  Schema.Struct({
+    data: Schema.fromJsonString(Schema.Struct({})),
+    event: Schema.Literal("heartbeat"),
+  }),
+]);
+
+/** The decoded form of {@link OptionsEvent}. */
+export type OptionsEvent = typeof OptionsEvent.Type;
 
 // Timelines.
 

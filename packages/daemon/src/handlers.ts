@@ -18,6 +18,7 @@ import {
   NetworkStopped,
   NotAChannel,
   NotInChannel,
+  OptionsChanged,
   RequestValidation,
   Sequence as WireSequence,
   SignInsFailed,
@@ -29,9 +30,16 @@ import {
   UnknownNetwork,
   UnknownTimeline,
   VaultFailed,
+  ownerValueKept,
   windowLimit,
 } from "@iirc/api";
-import type { NewsEvent, TimelineChangesEvent, UiEvent, WindowQuery } from "@iirc/api";
+import type {
+  NewsEvent,
+  OptionsEvent,
+  TimelineChangesEvent,
+  UiEvent,
+  WindowQuery,
+} from "@iirc/api";
 import { IntentId } from "@iirc/client";
 import { Runtime } from "@iirc/runtime";
 import type { NetworkStopped as RuntimeNetworkStopped } from "@iirc/runtime";
@@ -68,6 +76,8 @@ import { HttpApiBuilder, HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys } from "./keys.ts";
 import { membersPage, rankOrder } from "./members.ts";
+import { OwnerConfiguration, optionValueJson } from "./options.ts";
+import type { OptionsChangedSince } from "./options.ts";
 import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
@@ -1032,6 +1042,74 @@ const ui = HttpApiBuilder.group(
   })
 );
 
+const optionsChanged = (error: OptionsChangedSince) =>
+  new OptionsChanged({ sequence: error.sequence });
+
+// The options under `store` and `uploads`, as the `ui` options are: a value is parsed by its
+// option's Schema before it is journaled, and journaled in its encoding.
+const options = HttpApiBuilder.group(
+  DaemonApi,
+  "options",
+  Effect.fn(function* (handlers) {
+    const owner = yield* OwnerConfiguration;
+
+    return handlers
+      .handle("read", () => owner.inForce)
+      .handle("set", ({ params, payload, query }) =>
+        Effect.gen(function* () {
+          const value = ownerValueKept(params.option, payload.value);
+
+          if (value === undefined) {
+            return yield* new InvalidRequest({
+              issues: [
+                { message: `Is not a value of ${params.option}`, path: ["payload", "value"] },
+              ],
+            });
+          }
+
+          const sequence = yield* owner.change(
+            {
+              _tag: "OptionSet",
+              option: params.option,
+              value: optionValueJson(params.option, value),
+            },
+            query.ifSequence
+          );
+
+          return { sequence };
+        }).pipe(
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            OptionsChangedSince: (error) => Effect.fail(optionsChanged(error)),
+          })
+        )
+      )
+      .handle("unset", ({ params, query }) =>
+        owner.change({ _tag: "OptionUnset", option: params.option }, query.ifSequence).pipe(
+          Effect.map((sequence) => ({ sequence })),
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            OptionsChangedSince: (error) => Effect.fail(optionsChanged(error)),
+          })
+        )
+      )
+      .handle("changes", ({ headers, query }) =>
+        Effect.suspend(() => {
+          const after = headers["last-event-id"] ?? query.after;
+
+          // As for `ui`: each event is the options whole, so one newer than `after` says
+          // all a Frontend missed.
+          const changed = owner.changes.pipe(
+            Stream.filter((now) => after === undefined || now.sequence > after),
+            Stream.map((now): OptionsEvent => ({ data: now, event: "changed", id: now.sequence }))
+          );
+
+          return followed(changed, { data: {}, event: "heartbeat" });
+        })
+      );
+  })
+);
+
 // A value arrives `Redacted` and goes straight to the Vault, and nothing comes back but
 // names.
 const credentials = HttpApiBuilder.group(
@@ -1084,12 +1162,18 @@ const bodyLimit = HttpRouter.middleware(
 
 /**
  * The handler groups, with the key and sign-in check and request validation, needing the
- * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the keys, and
- * the sign-ins.
+ * Runtime, the Vault, the Timeline store and its projector, the `ui` options, the options
+ * under `store` and `uploads`, the keys, and the sign-ins.
  */
-export const ApiHandlers = Layer.mergeAll(signIn, networks, news, timelines, ui, credentials).pipe(
-  Layer.provideMerge(Layer.mergeAll(requestValidation, authorization))
-);
+export const ApiHandlers = Layer.mergeAll(
+  signIn,
+  networks,
+  news,
+  timelines,
+  ui,
+  options,
+  credentials
+).pipe(Layer.provideMerge(Layer.mergeAll(requestValidation, authorization)));
 
 /** The API, as routes on the enclosing `HttpRouter`, with the body limit. */
 export const ApiRoutes = HttpApiBuilder.layer(DaemonApi).pipe(

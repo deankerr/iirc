@@ -29,12 +29,14 @@ import {
   SignInsFailed,
   TimelinesFailed,
   TimelinesKept,
+  OptionsChanged,
   UiChanged,
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
   VaultFailed,
 } from "./errors.ts";
+import { OwnerInForce, OwnerOptionName } from "./options.ts";
 import {
   Acted,
   ActRequest,
@@ -76,6 +78,8 @@ import {
   TimelineChangesEvent,
   TimelineList,
   TimelineWindow,
+  OptionValue,
+  OptionsEvent,
   UiEvent,
   UiValue,
   WindowQuery,
@@ -273,6 +277,7 @@ export class TimelinesGroup extends HttpApiGroup.make("timelines")
   )
   .middleware(Authorization) {}
 
+// A change of an option names the sequence it was made from, under `ui` or elsewhere.
 const UiQuery = { ifSequence: Schema.optionalKey(IfSequence) };
 
 /**
@@ -298,6 +303,36 @@ export class UiGroup extends HttpApiGroup.make("ui")
     HttpApiEndpoint.delete("unset", "/ui/:option", {
       error: [UiChanged, JournalFailed],
       params: { option: UiOptionName },
+      query: UiQuery,
+      success: Journaled,
+    })
+  )
+  .middleware(Authorization) {}
+
+/**
+ * The Owner's options under `store` and `uploads`, each by its full name, such as
+ * `store.s3.bucket`, as the `ui` group's are: read whole, set or unset one at a time, made
+ * from the options read, and followed as Server-Sent Events, the options whole each time
+ * they change.
+ */
+export class OptionsGroup extends HttpApiGroup.make("options")
+  .add(
+    HttpApiEndpoint.get("read", "/options", { success: OwnerInForce }),
+    HttpApiEndpoint.get("changes", "/options/changes", {
+      headers: { "last-event-id": Schema.optionalKey(After) },
+      query: { after: Schema.optionalKey(After) },
+      success: HttpApiSchema.StreamSse({ error: JournalFailed, events: OptionsEvent }),
+    }),
+    HttpApiEndpoint.put("set", "/options/:option", {
+      error: [OptionsChanged, JournalFailed],
+      params: { option: OwnerOptionName },
+      payload: OptionValue,
+      query: UiQuery,
+      success: Journaled,
+    }),
+    HttpApiEndpoint.delete("unset", "/options/:option", {
+      error: [OptionsChanged, JournalFailed],
+      params: { option: OwnerOptionName },
       query: UiQuery,
       success: Journaled,
     })
@@ -347,6 +382,7 @@ export class DaemonApi extends HttpApi.make("iirc")
   .add(NewsGroup)
   .add(TimelinesGroup)
   .add(UiGroup)
+  .add(OptionsGroup)
   .add(CredentialsGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)

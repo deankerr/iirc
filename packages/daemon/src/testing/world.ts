@@ -29,6 +29,7 @@ import { HttpClientRequest } from "effect/http";
 import { HttpApiMiddleware } from "effect/http-api";
 
 import { ApiKeys, createKey } from "../keys.ts";
+import { OwnerConfiguration, layerOwnerConfiguration } from "../options.ts";
 import { layerProjector } from "../projector.ts";
 import { SignIns } from "../sign-ins.ts";
 import { layerUiConfiguration } from "../ui.ts";
@@ -115,8 +116,9 @@ export const makeWorld = (
 
 /**
  * The Runtime, on the world's ports, with the real Client, the projector folding its News
- * into the world's Timeline store, the `ui` options folded from the Journal's Changes, and
- * the keys and browser sign-ins of a data directory.
+ * into the world's Timeline store, the `ui` options and those under `store` and `uploads`
+ * folded from the Journal's Changes, the Runtime sparing the Credentials those name, and the
+ * keys and browser sign-ins of a data directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
  * @returns The Layer.
@@ -126,7 +128,12 @@ export const layerWorld = (world: World, dataDir: string) =>
     Layer.merge(layerProjector, layerUiConfiguration).pipe(
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
-        layerRuntime(client).pipe(
+        Layer.unwrap(
+          OwnerConfiguration.useSync((owner) =>
+            layerRuntime(client, { spared: owner.credentialsNamed })
+          )
+        ).pipe(
+          Layer.provideMerge(layerOwnerConfiguration),
           Layer.provideMerge(
             Layer.mergeAll(
               Layer.succeed(Journal, world.journal),

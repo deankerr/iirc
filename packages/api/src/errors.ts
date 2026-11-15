@@ -6,6 +6,7 @@
 import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
+import { OwnerSequence } from "./options.ts";
 import { CallerIntent, NetworkId, Sequence } from "./schemas.ts";
 import { UiSequence } from "./ui.ts";
 
@@ -132,6 +133,16 @@ export class UiChanged extends Schema.TaggedError<UiChanged, { readonly brand: u
   { sequence: UiSequence },
   { httpApiStatus: 409 }
 ) {}
+
+/**
+ * A change of an option under `store` or `uploads` was made from other options than those
+ * now in force: another Change of one was journaled since, at `sequence`, the last one.
+ * Nothing was journaled: a 409.
+ */
+export class OptionsChanged extends Schema.TaggedError<
+  OptionsChanged,
+  { readonly brand: unique symbol }
+>()("OptionsChanged", { sequence: OwnerSequence }, { httpApiStatus: 409 }) {}
 
 /**
  * The Journal could not be written or read. Its Network stays stopped until the Daemon

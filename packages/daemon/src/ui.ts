@@ -48,7 +48,7 @@ export const uiValueJson = (option: UiOptionName, value: UiValue): Schema.Json =
   Schema.encodeSync(Schema.toCodecJson(UiOptions.fields[option]))(value);
 
 /**
- * Folds one Change. The whole value of one option wins over what it held, and an unset
+ * Folds one Change of an option under `ui`, and passes over any other. The whole value of one option wins over what it held, and an unset
  * returns it to its default. A Change of an option this Daemon does not have, or of a value
  * its Schema does not take, changes no option, though its sequence is the last, but for
  * `themes`, whose entries are read one by one, so a theme it cannot take is dropped alone.
@@ -58,6 +58,11 @@ export const uiValueJson = (option: UiOptionName, value: UiValue): Schema.Json =
  * @returns What is held after it.
  */
 export const foldChange = (held: Held, change: Change, sequence: number): Held => {
+  // A Change of an option under another root is not this fold's, nor is its sequence.
+  if (change._tag !== "UiSet" && change._tag !== "UiUnset") {
+    return held;
+  }
+
   const option = optionName(change.option);
 
   if (Option.isNone(option)) {

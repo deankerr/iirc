@@ -22,6 +22,7 @@ import type { HttpPlatform } from "effect/http";
 import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
 import { ApiKeys } from "./keys.ts";
 import { DataDirectoryFailed, holdDataDirectory } from "./lock.ts";
+import { OwnerConfiguration, layerOwnerConfiguration } from "./options.ts";
 import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import { layerUiConfiguration } from "./ui.ts";
@@ -102,7 +103,8 @@ const dataDirectory = (dataDir: string) =>
 
 /**
  * The Runtime in a Scope of its own, which {@link StopRuntime} closes, so the Daemon can
- * stop it before serving stops.
+ * stop it before serving stops. It spares the Credentials the Owner's options name when it
+ * forgets a removed Network's, so it needs those options, folded before it starts.
  * @param options - The pacing, and how long endings may take.
  * @returns The Layer.
  */
@@ -114,9 +116,12 @@ const runtimeFirstToStop = (options: DaemonOptions) =>
 
       yield* Effect.addFinalizer(() => close);
 
+      const owner = yield* OwnerConfiguration;
+
       const runtime = layerRuntime(client, {
         hangupDrain: options.hangupDrain,
         pacing: options.pacing,
+        spared: owner.credentialsNamed,
         stopTimeout: options.stopTimeout,
       });
 
@@ -167,11 +172,18 @@ const layerCore = (options: DaemonOptions) => {
     )
   );
 
-  // The `ui` options are folded from the Journal's Changes, beside the Runtime.
+  // The `ui` options are folded from the Journal's Changes, beside the Runtime. The options
+  // under `store` and `uploads` are folded before it starts, since it spares the
+  // Credentials they name, even as it finishes a removal cut short.
   const owned = Layer.merge(timelines, layerUiConfiguration);
 
+  const runtime = runtimeFirstToStop(options).pipe(
+    Layer.provideMerge(layerOwnerConfiguration),
+    Layer.provideMerge(ports)
+  );
+
   return Layer.mergeAll(
-    owned.pipe(Layer.provideMerge(runtimeFirstToStop(options).pipe(Layer.provideMerge(ports)))),
+    owned.pipe(Layer.provideMerge(runtime)),
     access,
     heartbeat,
     layerStopping
