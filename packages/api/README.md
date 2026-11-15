@@ -47,6 +47,10 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `PUT /api/ui/{option}?ifSequence=` | Sets one option under `ui` to `{ value }`, for every device. With `ifSequence`, only if it was made from the options in force | `{ sequence }` | `UiChanged`, `JournalFailed` |
 | `DELETE /api/ui/{option}?ifSequence=` | Unsets one, back to its default, likewise | `{ sequence }` | `UiChanged`, `JournalFailed` |
 | `GET /api/ui/changes?after=` | Server-Sent Events of the options under `ui`, whole, each time they change, then live | `changed` and `heartbeat` events |  |
+| `GET /api/options` | The options under `store` and `uploads` in force, by full name, such as `store.s3.bucket`: each one set, or with a default, and none other. The sequence is of the last Change of one, `0` before any | `{ options, sequence }` |  |
+| `PUT /api/options/{option}?ifSequence=` | Sets one to `{ value }`, as for `ui` | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
+| `DELETE /api/options/{option}?ifSequence=` | Unsets one, back to its default or to none, likewise | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
+| `GET /api/options/changes?after=` | Server-Sent Events of them, whole, as for `ui` | `changed` and `heartbeat` events |  |
 | `GET /api/credentials` | The names of the Credentials held | `{ names }` | `VaultFailed` |
 | `PUT /api/credentials/{name}` | Holds a value, `{ value }`, replacing any before | `204` | `VaultFailed` |
 | `DELETE /api/credentials/{name}` | Forgets one. Forgetting one not held does nothing | `204` | `VaultFailed` |
@@ -70,10 +74,11 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 
 ### Changing
 
-- **A change names what it was made from.** A `PUT` of Configuration, or of an option under `ui`, with `ifSequence` is refused when another change was journaled since, and nothing is journaled: read again and send it again. The check and the append are one step, so two changes made from the same state never both pass. Without `ifSequence`, the last wins.
+- **A change names what it was made from.** A `PUT` of Configuration, or of an option, with `ifSequence` is refused when another change was journaled since, and nothing is journaled: read again and send it again. The check and the append are one step, so two changes made from the same state never both pass. Without `ifSequence`, the last wins.
 - **Configuration is an option tree, and the Schema says what each option is**. A Frontend walks `NetworkConfiguration` to offer every field as an option, so a new field needs no work in any Frontend.
 - **The options under `ui` are the Owner's, shared by every device**. `UiOptions`, in `@iirc/api/ui`, describes each with its default: `theme`, `light`, `dark`, `themes`, `colours`, `font`, `size`, `leading`, `time`, `activity`, `width`, `read`, which says when a Timeline is marked read, and the Composer's habits, `enter`, `spellcheck`, and `suffix`. A value is parsed by its option's Schema before it is journaled. `light` and `dark` name the themes `system` draws, and are never `system`. At most 32 themes are held, and an import may not take `system`, a built-in theme's name, or a word `/theme` reads. `font` is a font's name or a family's, which holds no `"`, `\`, or control character, so it is always one quoted CSS family. `suffix` is at most 8 characters, empty allowed, with no control character, so it never puts a line break or IRC formatting into the Composer.
-- **The options under `ui` are streamed whole.** Each `changed` event is every option in force, so a Frontend that follows needs no read first, and one that reconnects misses nothing.
+- **The options under `store` and `uploads` are the Owner's too, and no device overrides them**. `OwnerOptions`, in `@iirc/api/options`, is one flat Struct keyed by each option's full name: the bucket, `store.s3.endpoint`, `bucket`, `region`, and its keys, `accessKeyId` and `secretAccessKey`, which name Credentials by the `CredentialName` Schema, and how Uploads are served, `uploads.listen`, `publicUrl`, `maxSize`, `maxTotal`, and `expireAfter`, in days. Only `maxSize` has a default, 100 MiB. Each is parsed by its Schema before it is journaled, so a URL is journaled as the one form it reads as, such as `https://files.example.com/uploads` for any spelling of it with the default port, an upper-case host, or a trailing `/`, and an address is `host:port` with a name, an IPv4 address, or a bracketed IPv6 one, and the sequence they are changed from is their own, apart from `ui`'s. They do nothing yet.
+- **The options are streamed whole.** Each `changed` event is every option in force under its roots, so a Frontend that follows needs no read first, and one that reconnects misses nothing.
 
 ### Removing
 
@@ -82,7 +87,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **A removed Network is gone from every route that acts on it.** It leaves `GET /api/networks`, and every route that acts on it or reads what its Client knows answers `UnknownNetwork`, as for a Network never configured. `said` and a Lookup by its intent still answer from the Journal. A Frontend following News learns of it from one `NetworkRemoved`, after which no News of it comes.
 - **The Owner chooses whether its Timelines stay.** Kept, they are read and searched as before, listed by `GET /api/networks` as `Kept` and read by `GET /api/networks/{network}/timelines`, and each says `removed`, so a Frontend shows them apart and never says to them. Its id stays taken while they are kept: a `PUT` of it is `TimelinesKept`. Not kept, no route reads or finds them, the changes stream gives each as `dropped`, and the id is free at once.
 - **A removal names the life it was made from,** so one asked about a Network that another Frontend removed or added again since is `LifeChanged`, and removes nothing.
-- **Its Credentials go once its removal is journaled,** but those another Network's Configuration names. A `VaultFailed` leaves the removal standing, and the Daemon forgets them when it next starts. A `JournalFailed` may too, since the removal may be journaled before what follows it fails: read the Network list to learn where it stands.
+- **Its Credentials go once its removal is journaled,** but those another Network's Configuration or an option under `store` names. A `VaultFailed` leaves the removal standing, and the Daemon forgets them when it next starts. A `JournalFailed` may too, since the removal may be journaled before what follows it fails: read the Network list to learn where it stands.
 
 ### Saying, acting, and looking up
 
@@ -145,11 +150,12 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 | `LifeChanged` | 409 | A removal named a life of the Network the Daemon no longer holds: it was removed, or added again, since. It names the life held, or `null`. Nothing was journaled. |
 | `TimelinesKept` | 409 | A `PUT` of Configuration named a Network removed with its Timelines kept. Its id is free once they are dropped. Nothing was journaled. |
 | `UiChanged` | 409 | A change of an option under `ui` was made from other options than those in force: another Change was journaled since, at `sequence`, the last. Nothing was journaled. |
+| `OptionsChanged` | 409 | The same, for an option under `store` or `uploads`. |
 | `NetworkStopped` | 503 | The Network stopped, so its outcome is `Uncertain`, below. |
 | `TimelinesFailed` | 503 | The Timelines could not be read. They are derived, and a read that waited on a lock may succeed when asked again, while a damaged store is made again from the Journal when the Daemon restarts. |
 | `VaultFailed` | 503 | The Vault could not read or write its file. It tries again on the next call, so once the Owner fixes the file or its directory, the same request succeeds. |
 | `SignInsFailed` | 503 | The Daemon could not write its sign-ins, so nothing changed. It tries again on the next call. |
-| `JournalFailed` | 500 | The Journal could not be read or written. A Network whose Journal failed stays stopped until the Daemon starts again, so asking again does not help. A change under `ui` that could not be journaled changed nothing, and stops nothing. |
+| `JournalFailed` | 500 | The Journal could not be read or written. A Network whose Journal failed stays stopped until the Daemon starts again, so asking again does not help. A change of an option that could not be journaled changed nothing, and stops nothing. |
 
 A body over 1 MiB is refused with 413 before it is read.
 
@@ -164,7 +170,8 @@ A body over 1 MiB is refused with 413 before it is read.
 - **A Lookup answers with its result, within a bound.** A Frontend asking `WHOIS` wants the answer, not a sequence to follow News for, so `POST` waits for it, and `Pending` past the bound keeps a request from hanging on an Ircd that never ends its reply. `GET` by intent answers 200 with a tagged union, as `said` does, since whether a Lookup was journaled is the answer to the question asked.
 - **The Owner's actions are one route with a tagged action,** not a route each. Each is journaled, stepped, answered, and recovered alike, so one route says that once, and a new action is a new tag.
 - **Configuration is one `PUT` of the whole of it,** as the Client takes it whole. There is no `PATCH` and no separate join or part.
-- **An option under `ui` is a route of its own,** `PUT` to set it and `DELETE` to unset it, since a Change is the whole value of one option. Its value travels as JSON and is parsed by the option's Schema in the Daemon, so the contract need not list a body for each option, and a new option needs no new route.
+- **An option is a route of its own,** `PUT` to set it and `DELETE` to unset it, since a Change is the whole value of one option. Its value travels as JSON and is parsed by the option's Schema in the Daemon, so the contract need not list a body for each option, and a new option needs no new route.
+- **The options under `store` and `uploads` are one flat Struct, their own route and stream,** apart from `ui`'s. A Frontend lists them by the Struct's fields with no tree to walk, and finds the Credential options by their Schema's identifier. A name in a path is the full one, so a new root needs no new route. They get their own sequence, and `OptionsChanged`, since `UiChanged` would misname them and a write under one root should not go stale for a change under another.
 - **The options under `ui` are their own stream, sent whole,** not News, which is each Network's, nor the Timelines' changes, whose places are the projection's. A Frontend that follows them needs no read, and one that reconnects misses nothing, at the cost of the options on each change: a few dozen bytes, and some 20 KB with 32 themes imported.
 - **The brands are the Runtime's.** `NetworkId`, `Sequence`, `IntentId`, and `CredentialName` here carry the same brands as the Runtime's and the Client's, with stricter checks, so the Daemon passes them through without casts.
 - **`TimelineId` and positions are the fold's.** The contract takes `TimelineId` and the cursor's parsing from `@iirc/timelines`, so a cursor is read one way everywhere, and the Daemon passes positions to the store as they were parsed.

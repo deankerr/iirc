@@ -178,6 +178,12 @@ const textOf = (response: Response) => Effect.promise(async () => await response
 
 const happened = (events: readonly Sse[]) => events.filter((event) => event.event === "happened");
 
+// What refusing a value of an option says, as the wire carries it.
+const refused = (option: string) => [
+  400,
+  `{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ${option}","path":["payload","value"]}]}`,
+];
+
 const json = (body: string): RequestInit => ({
   body,
   headers: { "content-type": "application/json" },
@@ -826,6 +832,122 @@ describe("the API over a real server", () => {
         '{"_tag":"InvalidRequest","issues":[{"message":"Is not a value of ui.leading","path":["payload","value"]}]}',
       ],
       unknown: [400, true],
+    });
+  });
+
+  it("sets a store or uploads option over the wire, refuses an option it has not, a value it cannot take, and a stale write, and streams the options", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        const first = yield* Effect.flatMap(served.request("/api/options/changes"), (response) =>
+          readEvents(response, (events) => events.some((event) => event.event === "changed"))
+        );
+
+        const bucket = yield* served.request("/api/options/store.s3.bucket?ifSequence=0", {
+          method: "PUT",
+          ...json('{"value":"uploads"}'),
+        });
+
+        const key = yield* served.request("/api/options/store.s3.accessKeyId?ifSequence=1", {
+          method: "PUT",
+          ...json('{"value":"bucket-key"}'),
+        });
+
+        const stale = yield* served.request("/api/options/uploads.maxSize?ifSequence=1", {
+          method: "PUT",
+          ...json('{"value":1024}'),
+        });
+
+        const unknown = yield* served.request("/api/options/store.s3.colour", {
+          method: "PUT",
+          ...json('{"value":"blue"}'),
+        });
+
+        const uiByName = yield* served.request("/api/options/ui.time", {
+          method: "PUT",
+          ...json('{"value":"none"}'),
+        });
+
+        const notWhole = yield* served.request("/api/options/uploads.maxSize", {
+          method: "PUT",
+          ...json('{"value":1.5}'),
+        });
+
+        const notHttp = yield* served.request("/api/options/uploads.publicUrl", {
+          method: "PUT",
+          ...json('{"value":"ftp://files.example.com"}'),
+        });
+
+        const withQuery = yield* served.request("/api/options/uploads.publicUrl", {
+          method: "PUT",
+          ...json('{"value":"https://files.example.com/?x=1"}'),
+        });
+
+        const unset = yield* served.request("/api/options/store.s3.bucket?ifSequence=2", {
+          method: "DELETE",
+        });
+
+        const read = yield* served.request("/api/options");
+        const ui = yield* served.request("/api/ui");
+
+        const resumed = yield* Effect.flatMap(
+          served.request("/api/options/changes", { headers: { "last-event-id": "2" } }),
+          (response) =>
+            readEvents(response, (events) => events.some((event) => event.event === "changed"))
+        );
+
+        return {
+          bucket: [bucket.status, yield* textOf(bucket)],
+          first: changed(first),
+          key: [key.status, yield* textOf(key)],
+          notHttp: [notHttp.status, yield* textOf(notHttp)],
+          notWhole: [notWhole.status, yield* textOf(notWhole)],
+          read: [read.status, yield* textOf(read)],
+          resumed: changed(resumed),
+          stale: [stale.status, yield* textOf(stale)],
+          ui: (yield* textOf(ui)).endsWith('"sequence":0}'),
+          uiByName: [
+            uiByName.status,
+            (yield* textOf(uiByName)).includes('"path":["params","option"]'),
+          ],
+          unknown: [
+            unknown.status,
+            (yield* textOf(unknown)).includes('"path":["params","option"]'),
+          ],
+          unset: [unset.status, yield* textOf(unset)],
+          withQuery: [withQuery.status, yield* textOf(withQuery)],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      bucket: [200, '{"sequence":1}'],
+      first: [
+        {
+          data: '{"options":{"uploads.maxSize":104857600},"sequence":0}',
+          event: "changed",
+          id: "0",
+        },
+      ],
+      key: [200, '{"sequence":2}'],
+      notHttp: refused("uploads.publicUrl"),
+      notWhole: refused("uploads.maxSize"),
+      read: [
+        200,
+        '{"options":{"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
+      ],
+      resumed: [
+        {
+          data: '{"options":{"store.s3.accessKeyId":"bucket-key","uploads.maxSize":104857600},"sequence":3}',
+          event: "changed",
+          id: "3",
+        },
+      ],
+      stale: [409, '{"_tag":"OptionsChanged","sequence":2}'],
+      ui: true,
+      uiByName: [400, true],
+      unknown: [400, true],
+      unset: [200, '{"sequence":3}'],
+      withQuery: refused("uploads.publicUrl"),
     });
   });
 

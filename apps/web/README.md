@@ -27,6 +27,7 @@ The core decides and this package draws and does the I/O.
 - **Changes Configuration as an option tree**, by `/set` and its kin or in the options view, which edits each option in place. A Credential is given only in a password prompt.
 - **Removes a Network after asking,** from `/network remove`, a button for each Network in the options view, or the palette. A dialog asks whether its Timelines stay readable, keeping them unless the Owner chooses otherwise. A Pane showing a kept Timeline says its Network was removed, with a button that asks to drop them, and its composer says nothing can be said there. Adding a Network under a name still held by kept Timelines says why it cannot.
 - **Shares the options under `ui` between devices, and lets one override them** with `-device`.
+- **Lists and sets the Owner's options under `store` and `uploads`** as it does any other, followed from the Daemon while the options show, so another device's change shows. No device overrides them.
 - **Draws in themes made from terminal palettes,** built in or imported from a theme file. Under `system`, the page draws the theme for light or the one for dark, and follows the device the moment it changes. A theme highlighted in the palette, or being imported, previews on the whole page.
 - **Bounds how wide a Timeline's text runs,** by `ui.width`: what was said wraps at that many characters, from 40 to 400, each as wide as the font's `0`, so the bound grows with the size, or runs the width of its Pane at `none`, which it starts as. The text stays where it starts, and a Pane narrower than the bound is drawn as without one. The Composer and the Sidebar are never bounded.
 - **Draws text in the size, line height, and font the Owner chooses:** `ui.size`, from 10 to 24 pixels, 14 to start, `ui.leading`, the line height as a multiple of the size, from 1 to 2, 1.45 to start, and `ui.font`, the device's own monospace font, its own sans font, one of nine it serves itself, five monospace and four sans, below, or any family the device has, by name. A font highlighted in the palette previews on the whole page, and a change takes effect at once.
@@ -46,7 +47,7 @@ The core decides and this package draws and does the I/O.
 | `src/timelines/` | The Timelines' atoms, the changes stream, the layout kept, the sidebar, closing a Timeline, and the Timeline view |
 | `src/panes/` | The Pane tree, drawn with `react-resizable-panels`, and how wide each Pane is |
 | `src/composer/` | The composer, what carries out its intents, and Tab completion |
-| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, and the options under `ui` |
+| `src/options/` | The options view, changing a Configuration, holding a Credential, removing a Network, and the options under `ui`, `store`, and `uploads` |
 | `src/search/`, `src/palette/`, `src/channel/`, `src/lookup/` | Each of those views and its atoms. `src/palette/` also holds the one key listener |
 | `src/reading/`, `src/notifications/` | Marking read, the page's title, and the `Notifier` port |
 | `src/page/` | Whether the Owner can see the page, what this device keeps, what lies over a compact screen, and the sidebar's width and whether it shows |
@@ -63,6 +64,7 @@ The core decides and this package draws and does the I/O.
   | --- | --- |
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
   | `uiSync` | Follows the options under `ui` |
+  | `ownerSync` | Follows the options under `store` and `uploads` while the options show |
   | `channelSync` | Reads each shown Channel's head and members, and the head of each Channel whose list a Lookup card is |
   | `marking` | Marks read what `markDue` says, after a second |
   | `completer`, `chantypesSync` | Ask for the nicks and the `CHANTYPES` that completion needs |
@@ -77,9 +79,9 @@ The core decides and this package draws and does the I/O.
 - **Nothing is sent twice.** A Say, an Act, or a Lookup is made under an intent the runtime names, `web-` and a random UUID, since the core makes no randomness. After a failure the runtime asks `said` under that intent, and the composer offers to send again only when the Daemon says it was not journaled. After no answer at all, it offers only to check again.
 - **Submissions go one at a time,** in order, and a failure stops the intents after it. What only changes the page, such as opening a Timeline or the palette, is done at once and never waits behind a Say.
 - **Our own Message appears once, when the Daemon folds it,** never drawn ahead. What became of it is its item's delivery.
-- **A change is made from what was read.** A change of Configuration, of an option under `ui`, or of the themes reads the current value, applies the core's edit, and sends the whole with `ifSequence`. On a conflict it reads again and applies the same edit once more. A second conflict is said in words.
+- **A change is made from what was read.** A change of Configuration, of an option under `ui`, `store`, or `uploads`, or of the themes reads the current value, applies the core's edit, and sends the whole with `ifSequence`. On a conflict it reads again and applies the same edit once more. A second conflict is said in words.
 - **`/msg` opens where the Daemon put its Message.** Once the changes say its step was folded, the runtime reads which Timeline it was placed in. The Frontend never matches a name itself.
-- **A Credential's value goes straight from the password prompt to the Vault.** The prompt's field is the sign-in's, below. A value typed into the composer is refused and the textarea cleared as Enter is pressed.
+- **A Credential's value goes straight from the password prompt to the Vault,** and the option is then pointed at it, or set to its name under `store`. The prompt's field is the sign-in's, below. A value typed into the composer is refused and the textarea cleared as Enter is pressed.
 - **A Lookup has one deadline,** two minutes from when the Owner asked. Until then a pending one is asked after by its intent.
 
 ### Drawing

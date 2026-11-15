@@ -7,6 +7,7 @@ import {
   DaemonApi,
   LifeChanged,
   NetworkId,
+  OptionsChanged,
   SearchText,
   Sequence as WireSequence,
   TimelineId,
@@ -27,6 +28,7 @@ import { configured } from "@iirc/client/testing";
 import { Entry } from "@iirc/runtime/journal";
 import type { JournalRecord } from "@iirc/runtime/journal";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
+import type { VaultService } from "@iirc/runtime/vault";
 import { TimelineStoreFailed } from "@iirc/timeline-store";
 import type { TimelineStoreService } from "@iirc/timeline-store";
 import { makeMemoryTimelineStore } from "@iirc/timeline-store/testing";
@@ -70,6 +72,7 @@ const makeClient = HttpApiTest.groups(DaemonApi, [
   "news",
   "timelines",
   "ui",
+  "options",
   "credentials",
 ]);
 
@@ -80,6 +83,7 @@ const makeClient = HttpApiTest.groups(DaemonApi, [
  * @param fault - Which Journal appends to fail.
  * @param store - The Timeline store, instead of a fresh one in memory.
  * @param page - How many things one event of the Timelines' changes holds at most.
+ * @param vault - How to wrap the world's Vault, to make it slow or to watch it.
  * @returns A promise of its result.
  */
 // What a test may ask of its context: what the client needs, the key check's client side,
@@ -99,7 +103,8 @@ const run = async <A, E>(
   ) => Effect.Effect<A, E, Provided>,
   fault?: AppendFault,
   store?: TimelineStoreService,
-  page?: number
+  page?: number,
+  vault?: (inner: VaultService) => VaultService
 ): Promise<A> =>
   await Effect.runPromise(
     Effect.scoped(
@@ -109,10 +114,12 @@ const run = async <A, E>(
         const key = yield* makeKey(dataDir);
         const memory = yield* makeMemoryJournal;
 
-        const world = yield* makeWorld(
+        const made = yield* makeWorld(
           fault === undefined ? memory : faultyJournal(memory, fault),
           store
         );
+
+        const world = vault === undefined ? made : { ...made, vault: vault(made.vault) };
 
         const handlers = ApiHandlers.pipe(
           Layer.provide(page === undefined ? Layer.empty : Layer.succeed(ChangesPage, page)),
@@ -347,6 +354,61 @@ describe("the handlers", () => {
       read: 1,
       stale: new ConfigurationChanged({ network: libera, sequence: WireSequence.make(3) }),
       unknown: "UnknownNetwork",
+    });
+  });
+
+  it("journals an option under store or uploads by its full name and its value, apart from the ui options", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const ui = yield* api.ui.set({
+          params: { option: "time" },
+          payload: { value: "none" },
+          query: { ifSequence: 0 },
+        });
+
+        // The ui option's Change is not one of these options', so it leaves their sequence.
+        const set = yield* api.options.set({
+          params: { option: "uploads.expireAfter" },
+          payload: { value: 30 },
+          query: { ifSequence: 0 },
+        });
+
+        const stale = yield* api.options
+          .unset({ params: { option: "uploads.expireAfter" }, query: { ifSequence: 0 } })
+          .pipe(Effect.flip);
+
+        const unset = yield* api.options.unset({
+          params: { option: "uploads.maxSize" },
+          query: { ifSequence: set.sequence },
+        });
+
+        const journaled = (yield* Stream.runCollect(world.journal.read({}))).flatMap(
+          ({ record }) => (record._tag === "Change" ? [record.change] : [])
+        );
+
+        return {
+          inForce: yield* api.options.read(),
+          journaled,
+          sequences: [ui.sequence, set.sequence, unset.sequence],
+          stale,
+          ui: (yield* api.ui.read()).sequence,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      inForce: {
+        options: { "uploads.expireAfter": 30, "uploads.maxSize": 104_857_600 },
+        sequence: 3,
+      },
+      journaled: [
+        { _tag: "UiSet", option: "time", value: "none" },
+        { _tag: "OptionSet", option: "uploads.expireAfter", value: 30 },
+        { _tag: "OptionUnset", option: "uploads.maxSize" },
+      ],
+      sequences: [1, 2, 3],
+      stale: new OptionsChanged({ sequence: 2 }),
+      ui: 1,
     });
   });
 
@@ -3037,6 +3099,129 @@ describe("removing a Network", () => {
     );
 
     expect(result).toStrictEqual({ names: [] });
+  });
+
+  it("spares a Credential an option under store names, as the bucket's keys", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        const pass = CredentialPathName.make("pass");
+        const key = CredentialPathName.make("bucket-key");
+
+        for (const name of [pass, key]) {
+          yield* api.credentials.set({ params: { name }, payload: { value: Redacted.make("x") } });
+        }
+
+        yield* api.options.set({
+          params: { option: "store.s3.accessKeyId" },
+          payload: { value: key },
+          query: {},
+        });
+
+        const { sequence: life } = yield* api.networks.configure({
+          params: { network: libera },
+          payload: configured({
+            channels: [{ key, name: "#iirc" }],
+            enabled: false,
+            password: pass,
+          }),
+          query: {},
+        });
+
+        yield* api.networks.remove({ params: { network: libera }, query: { keep: false, life } });
+
+        return yield* api.credentials.list();
+      })
+    );
+
+    expect(result).toStrictEqual({ names: ["bucket-key"] });
+  });
+
+  it("journals a URL option as the one form it is read as, whatever its spelling", async () => {
+    const result = await run((_, api) =>
+      Effect.gen(function* () {
+        yield* api.options.set({
+          params: { option: "uploads.publicUrl" },
+          payload: { value: "HTTPS://Files.Example.com:443/up/" },
+          query: {},
+        });
+
+        return (yield* api.options.read()).options["uploads.publicUrl"];
+      })
+    );
+
+    expect(result).toBe("https://files.example.com/up");
+  });
+
+  it("makes a change of an option wait for a removal that is deciding which Credentials to forget", async () => {
+    const paused = Deferred.makeUnsafe<boolean>();
+    const release = Deferred.makeUnsafe<boolean>();
+
+    const result = await run(
+      (world, api) =>
+        Effect.gen(function* () {
+          const pass = CredentialPathName.make("pass");
+          const key = CredentialPathName.make("bucket-key");
+
+          for (const name of [pass, key]) {
+            yield* api.credentials.set({
+              params: { name },
+              payload: { value: Redacted.make("x") },
+            });
+          }
+
+          const { sequence: life } = yield* api.networks.configure({
+            params: { network: libera },
+            payload: configured({
+              channels: [{ key, name: "#iirc" }],
+              enabled: false,
+              password: pass,
+            }),
+            query: {},
+          });
+
+          // The removal has read that no option names `bucket-key`, and waits to forget.
+          const removal = yield* Effect.forkChild(
+            api.networks.remove({ params: { network: libera }, query: { keep: false, life } })
+          );
+
+          yield* Deferred.await(paused);
+
+          const setting = yield* Effect.forkChild(
+            api.options.set({
+              params: { option: "store.s3.accessKeyId" },
+              payload: { value: key },
+              query: {},
+            })
+          );
+
+          yield* settle;
+          const waiting = setting.pollUnsafe() === undefined;
+
+          yield* Deferred.succeed(release, true);
+          yield* Fiber.join(removal);
+          yield* Fiber.join(setting);
+
+          return {
+            option: (yield* api.options.read()).options["store.s3.accessKeyId"],
+            vault: yield* world.vault.names,
+            waiting,
+          };
+        }),
+      undefined,
+      undefined,
+      undefined,
+      (inner) => ({
+        ...inner,
+        forget: (name) =>
+          Deferred.succeed(paused, true).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(inner.forget(name))
+          ),
+      })
+    );
+
+    // The write waited for the removal, and went in once it was over, as a write made after it.
+    expect(result).toStrictEqual({ option: "bucket-key", vault: new Set(), waiting: true });
   });
 
   it("refuses with 409 a removal made from a life the Network no longer has, and removes nothing", async () => {

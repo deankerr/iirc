@@ -11,7 +11,14 @@
 import { CredentialPathName } from "@iirc/api";
 import type { NetworkId } from "@iirc/api";
 import { panesOf } from "@iirc/frontend/layout";
-import type { Edit, Naming, OptionsEvent, Path, Configuration } from "@iirc/frontend/options";
+import type {
+  Asked,
+  Edit,
+  Naming,
+  OptionsEvent,
+  Path,
+  Configuration,
+} from "@iirc/frontend/options";
 import {
   apply,
   credentialFor,
@@ -67,7 +74,7 @@ export const optionRows = Atom.make((get) => {
  * @param registry - The registry.
  * @param event - What happened.
  */
-const happened = (registry: AtomRegistry.AtomRegistry, event: OptionsEvent) => {
+export const happened = (registry: AtomRegistry.AtomRegistry, event: OptionsEvent) => {
   registry.set(optionsState, reduceOptions(registry.get(optionsState), event));
 };
 
@@ -157,7 +164,7 @@ const readConfiguration = (registry: AtomRegistry.AtomRegistry, network: Network
  * @param registry - The registry.
  * @returns Once read, or not.
  */
-const readHeld = (registry: AtomRegistry.AtomRegistry) =>
+export const readHeld = (registry: AtomRegistry.AtomRegistry) =>
   Effect.gen(function* () {
     const client = yield* DaemonClient;
     const { names } = yield* client.credentials.list();
@@ -428,7 +435,7 @@ const navigated = (registry: AtomRegistry.AtomRegistry, event: TimelinesEvent) =
 };
 
 /** Whether a Pane shows the options, however they came to show. */
-const optionsShown = Atom.make((get) => get(optionsFilter) !== undefined);
+export const optionsShown = Atom.make((get) => get(optionsFilter) !== undefined);
 
 /**
  * Reads every Network's Configuration, and the Credentials held, each time the options come
@@ -496,11 +503,9 @@ export const confirming = Atom.fnSync((name: string | undefined, get) => {
 }).pipe(Atom.keepAlive);
 
 /** Opens the password prompt for a Credential option, or closes it. */
-export const promptCredential = Atom.fnSync(
-  (prompt: { readonly network: NetworkId; readonly path: Path } | undefined, get) => {
-    happened(get.registry, { _tag: "Prompting", prompt });
-  }
-).pipe(Atom.keepAlive);
+export const promptCredential = Atom.fnSync((prompt: Asked | undefined, get) => {
+  happened(get.registry, { _tag: "Prompting", prompt });
+}).pipe(Atom.keepAlive);
 
 /** Makes a change from the options view, and says there what it came to. */
 export const change = runtime

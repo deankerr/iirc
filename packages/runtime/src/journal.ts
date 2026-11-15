@@ -39,10 +39,15 @@ export type Sequence = typeof Sequence.Type;
  * nothing of which options exist: the Daemon parses a value by the contract's Schema before
  * it is journaled, and folds Changes into the Owner's Configuration.
  *
- * - `UiSet`: an option under `ui` set to a value.
+ * - `UiSet`: an option under `ui` set to a value, by its name under `ui`, such as `time`.
  * - `UiUnset`: an option under `ui` back to its default.
+ * - `OptionSet`: an option under another root set to a value, by its full name, such as
+ *   `store.s3.bucket`.
+ * - `OptionUnset`: an option under another root back to its default, or to none.
  */
 export const Change = Schema.TaggedUnion({
+  OptionSet: { option: Schema.String, value: Schema.Json },
+  OptionUnset: { option: Schema.String },
   UiSet: { option: Schema.String, value: Schema.Json },
   UiUnset: { option: Schema.String },
 });

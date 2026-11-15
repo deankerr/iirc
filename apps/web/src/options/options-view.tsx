@@ -1,7 +1,8 @@
 /**
- * The options view: every option of every Network, and every option under `ui`, as the
- * core derives them from the Schemas, filtered as the Owner types. An option under `ui`
- * this device overrides says so, beside the value every device shares. React Aria's
+ * The options view: every option under `store` and `uploads`, every option of every
+ * Network, and every option under `ui`, as the core derives them from the Schemas, filtered
+ * as the Owner types. An option under `ui` this device overrides says so, beside the value
+ * every device shares. No device overrides one under `store` or `uploads`. React Aria's
  * GridList gives it its keyboard: arrows move, Enter edits the focused value in place as
  * its raw text, or a whole number in a number field, turns a toggle over, or opens the
  * password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
@@ -14,7 +15,7 @@
  * @packageDocumentation
  */
 import { RegistryContext, useAtomSet, useAtomValue } from "@effect/atom-react";
-import { parseUiText } from "@iirc/frontend/options";
+import { parseOwnerText, parseUiText } from "@iirc/frontend/options";
 import type { Option, Value } from "@iirc/frontend/options";
 import { writtenOnDevice } from "@iirc/frontend/ui";
 import type { KeyboardEvent } from "react";
@@ -39,6 +40,7 @@ import {
   optionsState,
   promptCredential,
 } from "./atoms.ts";
+import { changeOwnerOption } from "./owner.ts";
 import { askToRemove } from "./removal.ts";
 import { changeUiOption } from "./ui.ts";
 
@@ -78,19 +80,33 @@ const Shown = ({ value }: { readonly value: Value }) => {
 };
 
 /**
- * Sets an option to a value in its text syntax: a Network's through its Configuration, and
- * one under `ui` for every device, or for this device alone while it overrides it here, and
- * a font's family always for this device alone.
+ * Sets an option to a value in its text syntax: a Network's through its Configuration, one
+ * under `store` or `uploads` through the Daemon, and one under `ui` for every device, or for
+ * this device alone while it overrides it here, and a font's family always for this device
+ * alone.
  * @returns How to set one.
  */
 const useSetTo = () => {
   const configure = useAtomSet(change);
   const changeUi = useAtomSet(changeUiOption);
+  const changeOwner = useAtomSet(changeOwnerOption);
   const notice = useAtomSet(noticeAtom);
 
   return (option: Option, text: string) => {
     if (option._tag === "Network") {
       configure({ edit: { _tag: "Set", path: option.path, text }, network: option.network });
+
+      return;
+    }
+
+    if (option._tag === "Owner") {
+      const owned = parseOwnerText(option.option, text);
+
+      if (owned._tag === "Invalid") {
+        notice(owned.message);
+      } else {
+        changeOwner({ option: option.option, value: owned.value });
+      }
 
       return;
     }
@@ -112,18 +128,21 @@ const useSetTo = () => {
 };
 
 /**
- * Unsets an option: a Network's back to what a new Network starts with, and one under `ui`
- * back to its default for every device, or, while this device overrides it, back to the
- * value every device shares.
+ * Unsets an option: a Network's back to what a new Network starts with, one under `store`
+ * or `uploads` back to its default or unset, and one under `ui` back to its default for
+ * every device, or, while this device overrides it, back to the value every device shares.
  * @returns How to unset one.
  */
 const useUnset = () => {
   const configure = useAtomSet(change);
   const changeUi = useAtomSet(changeUiOption);
+  const changeOwner = useAtomSet(changeOwnerOption);
 
   return (option: Option) => {
     if (option._tag === "Network") {
       configure({ edit: { _tag: "Unset", path: option.path }, network: option.network });
+    } else if (option._tag === "Owner") {
+      changeOwner({ option: option.option, value: undefined });
     } else {
       changeUi({ device: option.device !== undefined, option: option.option, value: undefined });
     }
@@ -358,6 +377,8 @@ export const OptionsView = ({ pane }: { readonly pane: string }) => {
       setTo(option, on ? "off" : "on");
     } else if (option._tag === "Network" && option.kind._tag === "Credential") {
       prompt({ network: option.network, path: option.path });
+    } else if (option._tag === "Owner" && option.kind._tag === "Credential") {
+      prompt({ option: option.option });
     } else {
       edit(option.name);
     }

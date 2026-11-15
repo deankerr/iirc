@@ -283,7 +283,23 @@ export interface RuntimeOptions {
    * that never ends still answers with what came.
    */
   readonly lookTimeout?: Duration.Input | undefined;
+  /**
+   * The Credentials named outside the Networks, such as by the Owner's options, which
+   * removing a Network never forgets. Given as a way to hold them: it runs what a removal
+   * decides and does with them, with the names as they stand, and lets none be named anew
+   * until that is done, so a name that was not spared when the removal read it is never
+   * forgotten once it is. None unless given.
+   */
+  readonly spared?: Spared | undefined;
 }
+
+/**
+ * Runs `decide` with the Credentials named outside the Networks, while no other is named,
+ * and answers what it does.
+ */
+export type Spared = <A, E>(
+  decide: (names: ReadonlySet<CredentialName>) => Effect.Effect<A, E>
+) => Effect.Effect<A, E>;
 
 /** How long a `Hangup` drains by default. */
 export const defaultHangupDrain: Duration.Duration = Duration.seconds(5);
@@ -515,6 +531,7 @@ export const makeRuntime = <S>(
     };
 
     const lookTimeout = millisOf(options.lookTimeout, defaultLookTimeout);
+    const spared: Spared = options.spared ?? ((decide) => decide(new Set<CredentialName>()));
     const held = yield* Ref.make<ReadonlyMap<NetworkId, Network<S>>>(new Map());
     // Admission and shutdown take the same permit, so a Network is either added before
     // shutdown is done, and stopped by it, or refused.
@@ -645,11 +662,14 @@ export const makeRuntime = <S>(
 
     // Held by a `configure` until its `Configured` is stepped, and by forgetting a removed
     // Network's Credentials, so no Configuration changes while that checks which a Network
-    // still names. Taken after `adding`, never before it.
+    // still names. Taken after `adding`, never before it. Forgetting then holds what
+    // `spared` holds, from reading the names to the last one forgotten, so the order of
+    // permits is `adding`, then `configuring`, then `spared`'s own, and nothing taken
+    // after that takes one before it.
     const configuring = yield* Semaphore.make(1);
 
     // Forgets the Credentials the Network's removals named, but those a Network still held
-    // names, and journals that it did.
+    // names or that are named outside the Networks, and journals that it did.
     const forgetCredentials = (id: NetworkId) =>
       configuring.withPermit(
         Effect.gen(function* () {
@@ -659,25 +679,31 @@ export const makeRuntime = <S>(
             return;
           }
 
-          const still = new Set<CredentialName>();
+          const forgotten = yield* spared((outside) =>
+            Effect.gen(function* () {
+              const still = new Set<CredentialName>(outside);
 
-          for (const network of (yield* Ref.get(held)).values()) {
-            const { configured } = yield* Ref.get(network.current);
+              for (const network of (yield* Ref.get(held)).values()) {
+                const { configured } = yield* Ref.get(network.current);
 
-            for (const name of configured === undefined
-              ? []
-              : credentialsOf(configured.configuration)) {
-              still.add(name);
-            }
-          }
+                for (const name of configured === undefined
+                  ? []
+                  : credentialsOf(configured.configuration)) {
+                  still.add(name);
+                }
+              }
 
-          const named = new Set(configurations.flatMap((each) => [...credentialsOf(each)]));
-          const forgotten = [...named].filter((each) => !still.has(each)).toSorted();
+              const named = new Set(configurations.flatMap((each) => [...credentialsOf(each)]));
+              const gone = [...named].filter((each) => !still.has(each)).toSorted();
 
-          for (const name of forgotten) {
-            yield* ports.vault.forget(name);
-            yield* Effect.logInfo("Forgot a Credential", { credential: name, network: id });
-          }
+              for (const name of gone) {
+                yield* ports.vault.forget(name);
+                yield* Effect.logInfo("Forgot a Credential", { credential: name, network: id });
+              }
+
+              return gone;
+            })
+          );
 
           yield* ports.journal.append({ _tag: "Forgotten", credentials: forgotten, network: id });
           yield* Ref.update(unforgotten, (all) => without(all, id));
@@ -821,7 +847,8 @@ export const makeRuntime = <S>(
       );
 
     // A removal cut short before its Credentials were forgotten is finished now, once
-    // every Network is held, so those a Network names are spared.
+    // every Network is held, so those a Network names are spared, as are those named
+    // outside the Networks.
     for (const id of (yield* Ref.get(unforgotten)).keys()) {
       yield* adding.withPermit(forgetCredentials(id)).pipe(
         Effect.catchTags({

@@ -18,7 +18,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `Beside` | The type of those routes: a Layer that adds to the `HttpRouter`, and may use the server's `FileSystem`, `Path`, and file responses. |
 | `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s). |
 | `layerLogger` | logfmt on stderr, so stdout holds only what a command was asked for. |
-| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `ApiKeys`, and `SignIns`. |
+| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `OwnerConfiguration`, `ApiKeys`, and `SignIns`. |
 | `Heartbeat`, `ChangesPage` | How often the News and Timeline changes streams say they are alive (15 s), and how many things one event of the Timeline changes holds at most (500). Each is a reference a test may set. |
 | `createKey(dataDir, name)` | `iirc key create`: makes a key, stores its hash, and gives the key once. Call it with the data directory held. |
 | `ApiKeys` | Checks a presented key against `keys.json`, read once at start. |
@@ -27,6 +27,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `Projector`, `ProjectorStatus` | Whether the Timelines are being folded: `Running`, or `Stopped { reason }` once a failure stopped it. And `folded`, the projection version and the last sequence folded, together, now and each time either changes. |
 | `layerProjector` | The projector alone, given a `Runtime` and a `TimelineStore`. |
 | `UiConfiguration`, `layerUiConfiguration`, `UiChangedSince` | The options under `ui`, folded from the Journal's Changes, and how a Change is checked and journaled, failing with `UiChangedSince` when made from other options than those in force. The Layer needs the `Journal`. |
+| `OwnerConfiguration`, `layerOwnerConfiguration`, `OptionsChangedSince` | The options under `store` and `uploads`, likewise, with `OptionsChangedSince`, and the Credentials they name now, in `credentialsNamed`. |
 
 ## The data directory
 
@@ -56,13 +57,14 @@ The projector keeps `views.sqlite` folded up to the Journal, with the fold of `@
 - **Whether a Timeline is closed is the projection's.** A `close` is journaled and stepped like any input, the fold tells the store which Timeline the `TimelineClosed` News names, and the store derives `closed` from that and what was added since, so a restart, or a store folded again, keeps it. The `close` route answers with what the step decided, so a Channel Self joined just before is refused as `Joined`, never only ignored.
 - **It says how far it has folded, to whoever waits.** `Projector.folded` gives `{ version, through }` from one `SubscriptionRef`, so the two always go together: from where it resumed, or the version it reset the store to with no `through`, and again once each step is kept. It knows nothing of HTTP: the changes route waits on it rather than polling the store.
 
-## The options under `ui`
+## The options
 
-The options under `ui` are a projection of the Journal's `Change`s, in `src/ui.ts`.
+The options under `ui` are a projection of the Journal's `UiSet` and `UiUnset` Changes, in `src/ui.ts`, and those under `store` and `uploads` of its `OptionSet` and `OptionUnset`, in `src/options.ts`, folded and kept the same way. Each passes over the other's Changes, so each has a sequence of its own, and a change of one never makes a write to the other stale. Of those under `store` and `uploads`, one with no default is absent until set.
 
-- **On start, they are folded from the Journal.** Every `Change` is read once, in order, and the latest of each option wins, an unset returning it to its default, so a restart gives the same options. A Change of an option this Daemon does not have, or of a value its Schema does not take, changes no option, though its sequence is still the last. `themes` is read theme by theme, by the contract's `uiValueKept`, so a theme its Schema now refuses, as one named for a built-in theme, is dropped alone and the rest kept.
+- **On start, they are folded from the Journal.** Every `Change` is read once, in order, and the latest of each option wins, an unset returning it to its default, or to none, so a restart gives the same options. A Change of an option this Daemon does not have, or of a value its Schema does not take, changes no option, though its sequence is still the last. `themes` is read theme by theme, by the contract's `uiValueKept`, so a theme its Schema now refuses, as one named for a built-in theme, is dropped alone and the rest kept.
 - **A change is checked and journaled in one turn.** One turn at a time compares `ifSequence` with the sequence of the last Change, appends the `Change`, and holds what it appended, uninterruptibly, so what is held never differs from the Journal and two changes made from the same options never both pass. It is the only way a `Change` is journaled. A `Change` holds the value as its option's Schema encodes it, after the handler parsed it.
 - **The stream is the options, whole, from what is held.** `changes` gives the options in force, then again each time a Change is held, from a `SubscriptionRef`, so the stream reads nothing from the Journal. The handler leaves out those at or before `after`, and merges in the heartbeat.
+- **The Runtime spares the Credentials they name.** The options under `store` and `uploads` are folded before the Runtime starts, and give it `spared`, so a removal never forgets the bucket's keys, even one cut short and finished as the Runtime starts. A change of an option and a removal deciding which Credentials to forget, through forgetting them, take one turn each, so a key named while a removal is deciding waits for it.
 
 ## API keys
 
@@ -114,7 +116,7 @@ The options under `ui` are a projection of the Journal's `Change`s, in `src/ui.t
 ## The handlers
 
 - **Errors are mapped, never leaked.** The Runtime's `UnknownNetwork`, `NetworkStopped`, `ConfigurationChanged`, `TimelinesKept`, `JournalFailed`, the Vault's `VaultFailed`, and the Timeline store's `TimelineStoreFailed`, as `TimelinesFailed`, become the contract's own. `NetworkStopped` names the Network from the request and, for a `say`, an `act`, or a Lookup, the intent.
-- **A change under `ui` is parsed, then checked and journaled.** The handler parses `value` by the option's Schema, refusing one it does not take with `InvalidRequest` at `["payload", "value"]`, and hands the `Change` and `ifSequence` to `UiConfiguration`, whose `UiChangedSince` becomes `UiChanged`.
+- **A change of an option is parsed, then checked and journaled.** The handler parses `value` by the option's Schema, refusing one it does not take with `InvalidRequest` at `["payload", "value"]`, and hands the `Change` and `ifSequence` to `UiConfiguration`, whose `UiChangedSince` becomes `UiChanged`, or to `OwnerConfiguration`, whose `OptionsChangedSince` becomes `OptionsChanged`.
 - **A `DELETE` of a Network is the Runtime's `remove`,** which journals the removal, ends the Session, and forgets the Credentials, and `GET /api/networks` is its `lives`, the live and the kept in one read.
 - **A `PUT` of Configuration hands its `ifSequence` to the Runtime,** which checks it in the Network's own turn, so the handler holds no lock and two racing `PUT`s cannot both pass. `GET …/configuration` is the Runtime's `configuration`.
 - **The Daemon names a `say`'s, an `act`'s, or a Lookup's intent** when the caller does not: 128 bits from Effect's `Random`, as hex, as the Runtime would. So the intent is known before the `Say` is stepped, and a `NetworkStopped` can say which to ask `said` about.

@@ -52,6 +52,7 @@ import {
   signedOut,
 } from "../options/atoms.ts";
 import type { Outcome as Changed } from "../options/atoms.ts";
+import { changeOwner } from "../options/owner.ts";
 import { askRemoval } from "../options/removal.ts";
 import { changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
@@ -349,7 +350,9 @@ const carryOutHere = (registry: AtomRegistry.AtomRegistry, place: Place, intent:
     }
 
     case "PromptCredential": {
-      registry.set(promptCredential, { network: intent.network, path: intent.path });
+      const { _tag, ...asked } = intent;
+
+      registry.set(promptCredential, asked);
       break;
     }
 
@@ -466,6 +469,10 @@ const changeOne = (
 
     case "ChangeUi": {
       return changeUi(registry, intent);
+    }
+
+    case "ChangeOwner": {
+      return changeOwner(registry, intent);
     }
 
     case "UseTheme": {

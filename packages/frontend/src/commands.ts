@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
+import type { OwnerOptionName } from "@iirc/api/options";
 import type { ThemeName, UiOptionName } from "@iirc/api/ui";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 
@@ -27,16 +28,19 @@ import {
 import type { ListKind, Look, UserKind } from "./lookup.ts";
 import {
   channelsOf,
+  isOwnerName,
   isUiName,
   networkIdOf,
   parseIrcd,
+  parseOwnerText,
   parseText,
   parseUiText,
   resolve,
+  resolveOwner,
   resolveUi,
   starting,
 } from "./options.ts";
-import type { Configuration, Edit, Json, Path } from "./options.ts";
+import type { Asked, Configuration, Edit, Json } from "./options.ts";
 import { parseThemeName, systemTheme } from "./theme.ts";
 import type { ThemeOption, ThemesEdit } from "./theme.ts";
 import type { PaneChange } from "./timelines.ts";
@@ -180,6 +184,9 @@ export interface Act {
  * - `ChangeUi`: set an option under `ui` to a value, as JSON its Schema took, or unset it
  *   with none: for every device, through the Daemon, made from the options read, or with
  *   `device`, for this device alone, which keeps it and never sends it.
+ * - `ChangeOwner`: set an option under `store` or `uploads` to a value, as JSON its Schema
+ *   took, or unset it with none, through the Daemon, made from the options read. No device
+ *   overrides one.
  * - `UseTheme`: set `option` to the theme named, for every device, or with `device`, for
  *   this one, once the runtime has found it among the themes there are: `theme` to draw in
  *   it, or `light` or `dark` to have `system` draw it while the device is light or dark.
@@ -189,7 +196,8 @@ export interface Act {
  *   highlighted, where choosing one sets `option` to it.
  * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
- *   gives it to the Vault and points the option at it. A value never goes through the
+ *   gives it to the Vault and points the option at it: a Network's, by its Network and
+ *   path, or one under `store` or `uploads`, by its name. A value never goes through the
  *   composer, nor through an intent.
  * - `Open`: open a Timeline in the focused Pane, or focus the Pane it is open in.
  * - `Latest`: read a Timeline's latest again and follow it, wherever its window stands.
@@ -232,6 +240,11 @@ export type Intent =
       readonly device: boolean;
     }
   | {
+      readonly _tag: "ChangeOwner";
+      readonly option: OwnerOptionName;
+      readonly value: Json | undefined;
+    }
+  | {
       readonly _tag: "UseTheme";
       readonly option: ThemeOption;
       readonly name: ThemeName;
@@ -240,7 +253,7 @@ export type Intent =
   | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
   | { readonly _tag: "ListThemes"; readonly option: ThemeOption }
   | { readonly _tag: "ImportTheme" }
-  | { readonly _tag: "PromptCredential"; readonly network: NetworkId; readonly path: Path }
+  | ({ readonly _tag: "PromptCredential" } & Asked)
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "Latest"; readonly timeline: TimelineId }
   | { readonly _tag: "OpenPalette" }
@@ -461,6 +474,38 @@ const setUi = (name: string, text: string | undefined, device: boolean): Parsed<
 };
 
 /**
+ * An option under `store` or `uploads` set to a value given as text. A Credential option's
+ * value is never typed: `/set` and its name alone asks for it in a password prompt.
+ * @param name - The option's name.
+ * @param text - The value.
+ * @returns The intent, or why there is none.
+ */
+const setOwner = (name: string, text: string): Parsed<Intent> => {
+  const found = resolveOwner(name);
+
+  if (found._tag === "Invalid") {
+    return found;
+  }
+
+  const { field, option } = found.value;
+
+  if (field.kind._tag === "Credential") {
+    return invalid(credentialRefused(name));
+  }
+
+  // Text takes the rest of the line as it is, as under `ui`. Anything else needs more.
+  if (text.trim() === "" && field.kind._tag !== "Text") {
+    return invalid(`Give ${name} a value, or use /unset ${name}.`);
+  }
+
+  const value = parseOwnerText(option, text);
+
+  return value._tag === "Invalid"
+    ? value
+    : parsed({ _tag: "ChangeOwner", option, value: value.value });
+};
+
+/**
  * What `/set -device` was given: an option under `ui` and a value, for this device.
  * @param args - The text after `-device`.
  * @returns The intent, or why there is none.
@@ -501,6 +546,14 @@ const unsetArguments = (args: string): Parsed<Intent> => {
         });
   }
 
+  if (isOwnerName(name)) {
+    const found = resolveOwner(name);
+
+    return found._tag === "Invalid"
+      ? found
+      : parsed({ _tag: "ChangeOwner", option: found.value.option, value: undefined });
+  }
+
   const found = resolve(name);
 
   return found._tag === "Invalid"
@@ -528,6 +581,7 @@ const setArguments = (args: string): Parsed<Intent> => {
 
   const space = args.indexOf(" ");
   const alone = space === -1 ? resolve(args) : undefined;
+  const owner = space === -1 ? resolveOwner(args) : undefined;
 
   if (alone?._tag === "Parsed" && alone.value.field.kind._tag === "Credential") {
     return parsed({
@@ -535,6 +589,10 @@ const setArguments = (args: string): Parsed<Intent> => {
       network: alone.value.network,
       path: alone.value.path,
     });
+  }
+
+  if (owner?._tag === "Parsed" && owner.value.field.kind._tag === "Credential") {
+    return parsed({ _tag: "PromptCredential", option: owner.value.option });
   }
 
   if (space === -1) {
@@ -546,6 +604,10 @@ const setArguments = (args: string): Parsed<Intent> => {
 
   if (isUiName(name)) {
     return setUi(name, text, false);
+  }
+
+  if (isOwnerName(name)) {
+    return setOwner(name, text);
   }
 
   const found = resolve(name);
@@ -2549,7 +2611,7 @@ export const credentialRefusal = (line: string): string | undefined => {
     return rawRefusalOf(upperCaseAscii(command.slice(1)));
   }
 
-  const option = resolve(name);
+  const option = isOwnerName(name) ? resolveOwner(name) : resolve(name);
 
   return found === setCommand &&
     rest.join(" ") !== "" &&

@@ -7,7 +7,18 @@ import { client, Instant, IntentId } from "@iirc/client";
 import type { Client, ClientState, NetworkConfiguration } from "@iirc/client";
 import { configured, parse, registered } from "@iirc/client/testing";
 import { CredentialName } from "@iirc/protocol/line";
-import { Effect, Exit, Fiber, Latch, Option, Redacted, Result, Scheduler, Stream } from "effect";
+import {
+  Effect,
+  Exit,
+  Fiber,
+  Latch,
+  Option,
+  Redacted,
+  Ref,
+  Result,
+  Scheduler,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
@@ -257,6 +268,43 @@ describe("removing a Network", () => {
     );
 
     expect(result).toStrictEqual(new Set(["shared", "unrelated"]));
+  });
+
+  it("spares a Credential named outside the Networks, as it stands when the removal decides", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        for (const each of ["pass", "bucket-key"]) {
+          yield* world.vault.hold(name(each), Redacted.make("secret"));
+        }
+
+        const outside = yield* Ref.make<ReadonlySet<CredentialName>>(new Set());
+
+        const { runtime } = yield* startRuntime(world, client, {
+          spared: (decide) => Effect.flatMap(Ref.get(outside), decide),
+        });
+
+        yield* runtime.configure(
+          libera,
+          configured({
+            channels: [{ key: name("bucket-key"), name: "#a" }],
+            enabled: false,
+            password: name("pass"),
+          })
+        );
+        yield* Ref.set(outside, new Set([name("bucket-key")]));
+        yield* runtime.remove(libera, { keep: false });
+
+        return {
+          outline: (yield* outline(world.journal)).at(-1),
+          vault: yield* world.vault.names,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      outline: "3 libera Forgotten pass",
+      vault: new Set(["bucket-key"]),
+    });
   });
 
   it("of a Network never configured is UnknownNetwork, and journals nothing", async () => {
@@ -659,6 +707,46 @@ describe("a removal carried through", () => {
       afterStart: new Set(["a", "b"]),
       failed: "VaultFailed",
       later: new Set(["a", "b", "pass"]),
+    });
+  });
+
+  it("spares on the next start a Credential named outside the Networks by then", async () => {
+    const result = await runTest((world) =>
+      Effect.gen(function* () {
+        yield* held(world);
+
+        const failing = {
+          ...world,
+          vault: {
+            ...world.vault,
+            forget: () => Effect.fail(new VaultFailed({ reason: "the test failed it" })),
+          },
+        };
+
+        const first = yield* startRuntime(failing, client);
+
+        yield* first.runtime.configure(
+          libera,
+          configured({
+            channels: [{ key: name("a"), name: "#a" }],
+            enabled: false,
+            password: name("pass"),
+          })
+        );
+        yield* Effect.flip(first.runtime.remove(libera, { keep: false }));
+        yield* first.close;
+        yield* startRuntime(world, client, { spared: (decide) => decide(new Set([name("a")])) });
+
+        return {
+          outline: (yield* outline(world.journal)).at(-1),
+          vault: yield* world.vault.names,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      outline: "3 libera Forgotten pass",
+      vault: new Set(["a", "b"]),
     });
   });
 
