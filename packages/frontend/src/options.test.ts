@@ -1,25 +1,33 @@
 import { NetworkId, TimelineId } from "@iirc/api";
+import { OwnerOptions, ownerDefaults, ownerOptionNames } from "@iirc/api/options";
+import type { OwnerInForce } from "@iirc/api/options";
 import { FontFamily, UiOptions } from "@iirc/api/ui";
 import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Option, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { interpret } from "./commands.ts";
+import { interpret, typesCredential } from "./commands.ts";
 import type { CommandContext, Intent } from "./commands.ts";
 import { submit, initialComposers, reduceComposers, draftOf } from "./composer.ts";
 import {
   apply,
   credentialFor,
   derivedCredential,
+  derivedOwnerCredential,
   fields,
   initialOptions,
   listed,
   matches,
   optionsOf,
+  ownerCredentialFor,
+  ownerFields,
+  ownerOptionsOf,
+  parseOwnerText,
   parseText,
   reduceOptions,
   resolve,
+  resolveOwner,
   set,
   showText,
   starting,
@@ -290,7 +298,7 @@ describe("names", () => {
       dotted: [dotted, "nicks"],
       member: [dotted, "login", "account"],
       noNetwork:
-        "There is no option libera.nicks. Options are named network.<id>.<option> or ui.<option>.",
+        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
       none: "There is no option network.libera.nope.",
       uppercase: "There is no option network.Libera.nicks.",
     });
@@ -1537,7 +1545,7 @@ describe("the options under ui", () => {
       unknown: {
         _tag: "Invalid",
         message:
-          "There is no option ui.palette. Options are named network.<id>.<option> or ui.<option>.",
+          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
       },
       unset: change("activity", undefined, false),
       unsetDevice: change("theme", undefined, true),
@@ -1557,6 +1565,274 @@ describe("the options under ui", () => {
         _tag: "Invalid",
         message: 'ui.time: Choose one of HH:mm, HH:mm:ss, h:mm a, h:mm:ss a, none, not "noon".',
       },
+    });
+  });
+});
+
+const owned = (option: string, value: Json | undefined) => ({
+  _tag: "Parsed",
+  value: [{ _tag: "ChangeOwner", option, value }],
+});
+
+const owner: OwnerInForce = {
+  options: Schema.decodeSync(OwnerOptions)({
+    "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
+    "store.s3.bucket": "uploads",
+    "uploads.maxSize": 1024,
+    "uploads.publicUrl": "https://files.example.com",
+  }),
+  sequence: 4,
+};
+
+/**
+ * What the options view lists under `store` and `uploads`: each one's name, value, and what
+ * it starts as.
+ * @param inForce - The options in force, once read.
+ * @param held - The Credentials the Vault holds, when known.
+ * @returns The rows.
+ */
+const ownerRows = (inForce: OwnerInForce | undefined, held: ReadonlySet<string> | undefined) =>
+  ownerOptionsOf(inForce, held).map((option) => [option.name, option.value, option.starts]);
+
+describe("the options under store and uploads", () => {
+  it("are every field of the contract's Schema, by its full name, each described, with its kind", () => {
+    expect({
+      described: ownerFields.every((field) => field.description !== ""),
+      kinds: Object.fromEntries(ownerFields.map((field) => [field.key, field.kind._tag])),
+      names: ownerFields.map((field) => field.key),
+    }).toStrictEqual({
+      described: true,
+      kinds: {
+        "store.s3.accessKeyId": "Credential",
+        "store.s3.bucket": "Text",
+        "store.s3.endpoint": "Text",
+        "store.s3.region": "Text",
+        "store.s3.secretAccessKey": "Credential",
+        "uploads.expireAfter": "Integer",
+        "uploads.listen": "Text",
+        "uploads.maxSize": "Integer",
+        "uploads.maxTotal": "Integer",
+        "uploads.publicUrl": "Text",
+      },
+      names: ownerOptionNames,
+    });
+  });
+
+  it("list each value in force, its default or unset, and a Credential's name and whether it is held", () => {
+    expect({
+      held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(0, 2),
+      notHeld: ownerRows(owner, new Set()).slice(0, 1),
+      read: ownerRows(owner, undefined),
+      unread: ownerOptionsOf(undefined, undefined)
+        .filter((option) => option.value._tag !== "Unset")
+        .map((option) => [option.name, option.value, option.starts]),
+    }).toStrictEqual({
+      held: [
+        [
+          "store.s3.accessKeyId",
+          { _tag: "Credential", held: true, name: "Owner.store.s3.accessKeyId" },
+          "unset",
+        ],
+        ["store.s3.bucket", { _tag: "Shown", text: "uploads" }, "unset"],
+      ],
+      notHeld: [
+        [
+          "store.s3.accessKeyId",
+          { _tag: "Credential", held: false, name: "Owner.store.s3.accessKeyId" },
+          "unset",
+        ],
+      ],
+      read: [
+        [
+          "store.s3.accessKeyId",
+          { _tag: "Credential", held: undefined, name: "Owner.store.s3.accessKeyId" },
+          "unset",
+        ],
+        ["store.s3.bucket", { _tag: "Shown", text: "uploads" }, "unset"],
+        ["store.s3.endpoint", { _tag: "Unset" }, "unset"],
+        ["store.s3.region", { _tag: "Unset" }, "unset"],
+        ["store.s3.secretAccessKey", { _tag: "Unset" }, "unset"],
+        ["uploads.expireAfter", { _tag: "Unset" }, "unset"],
+        ["uploads.listen", { _tag: "Unset" }, "unset"],
+        ["uploads.maxSize", { _tag: "Shown", text: "1024" }, "104857600"],
+        ["uploads.maxTotal", { _tag: "Unset" }, "unset"],
+        ["uploads.publicUrl", { _tag: "Shown", text: "https://files.example.com" }, "unset"],
+      ],
+      // Before they are read, each is what it starts as.
+      unread: [["uploads.maxSize", { _tag: "Shown", text: "104857600" }, "104857600"]],
+    });
+  });
+
+  it("are listed first, filtered, never overridden by a device, and keep the newest read", () => {
+    let state = initialOptions;
+
+    for (const event of [
+      { _tag: "OwnerRead", owner },
+      { _tag: "OwnerRead", owner: { options: ownerDefaults, sequence: 2 } },
+    ] satisfies readonly OptionsEvent[]) {
+      state = reduceOptions(state, event);
+    }
+
+    const forgotten = reduceOptions(state, { _tag: "OwnerForgotten" });
+
+    expect({
+      first: listed(state, "")[0]?.name,
+      forgotten: forgotten.owner,
+      kept: state.owner,
+      store: listed(state, "store.s3.b*").map((option) => [option._tag, option.name]),
+      uploads: listed(state, "uploads").length,
+    }).toStrictEqual({
+      first: "store.s3.accessKeyId",
+      forgotten: undefined,
+      kept: owner,
+      store: [["Owner", "store.s3.bucket"]],
+      uploads: 5,
+    });
+  });
+
+  it("resolve only a full name the Schema has", () => {
+    expect({
+      bucket: resolveOwner("store.s3.bucket")._tag,
+      root: resolveOwner("store"),
+      typo: resolveOwner("uploads.maxsize"),
+    }).toStrictEqual({
+      bucket: "Parsed",
+      root: {
+        _tag: "Invalid",
+        message:
+          "There is no option store. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
+      },
+      typo: {
+        _tag: "Invalid",
+        message:
+          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
+      },
+    });
+  });
+
+  it("parse text by each kind, then by the Schema, saying why it refuses", () => {
+    expect({
+      bucket: parseOwnerText("store.s3.bucket", "my-bucket"),
+      bucketBad: parseOwnerText("store.s3.bucket", "My_Bucket"),
+      credential: parseOwnerText("store.s3.secretAccessKey", "hunter2"),
+      days: parseOwnerText("uploads.expireAfter", " 30 "),
+      daysTooMany: parseOwnerText("uploads.expireAfter", "36501"),
+      endpointSlash: parseOwnerText("store.s3.endpoint", "https://s3.example.com/"),
+      listen: parseOwnerText("uploads.listen", "127.0.0.1:7668"),
+      listenBad: parseOwnerText("uploads.listen", "localhost"),
+      maxSize: parseOwnerText("uploads.maxSize", "1048576"),
+      maxSizeWord: parseOwnerText("uploads.maxSize", "1MiB"),
+      maxSizeZero: parseOwnerText("uploads.maxSize", "0"),
+    }).toStrictEqual({
+      bucket: { _tag: "Parsed", value: "my-bucket" },
+      bucketBad: {
+        _tag: "Invalid",
+        message:
+          "store.s3.bucket must be 3 to 63 lower-case letters, digits, . and -, starting and ending with a letter or digit.",
+      },
+      credential: {
+        _tag: "Invalid",
+        message:
+          "store.s3.secretAccessKey: A Credential is set by giving its value, which the Vault holds.",
+      },
+      days: { _tag: "Parsed", value: 30 },
+      daysTooMany: {
+        _tag: "Invalid",
+        message: 'uploads.expireAfter: Give a whole number from 1 to 36500, not "36501".',
+      },
+      endpointSlash: {
+        _tag: "Invalid",
+        message:
+          "store.s3.endpoint must be an http or https URL, with no trailing /, query, or fragment.",
+      },
+      listen: { _tag: "Parsed", value: "127.0.0.1:7668" },
+      listenBad: {
+        _tag: "Invalid",
+        message:
+          "uploads.listen must be host:port, such as 127.0.0.1:7668, with an IPv6 host in brackets.",
+      },
+      maxSize: { _tag: "Parsed", value: 1_048_576 },
+      maxSizeWord: {
+        _tag: "Invalid",
+        message: `uploads.maxSize: Give a whole number from 1 to ${Number.MAX_SAFE_INTEGER}, not "1MiB".`,
+      },
+      maxSizeZero: {
+        _tag: "Invalid",
+        message: `uploads.maxSize: Give a whole number from 1 to ${Number.MAX_SAFE_INTEGER}, not "0".`,
+      },
+    });
+  });
+
+  it("are set and unset with /set and /unset, never for one device, and a Credential's value only in a prompt", () => {
+    const secret = "/set store.s3.secretAccessKey hunter2";
+
+    expect({
+      alone: read("/set store.s3.bucket"),
+      bucket: read("/set store.s3.bucket my-bucket"),
+      bucketBad: read("/set store.s3.bucket My_Bucket")._tag,
+      credential: read("/set store.s3.accessKeyId"),
+      credentialTyped: read(secret),
+      device: read("/set -device uploads.maxSize 1024"),
+      empty: read("/set uploads.maxSize "),
+      filter: read("/set uploads.*"),
+      refused: typesCredential(secret),
+      unknown: read("/set store.s3.colour blue")._tag,
+      unset: read("/unset uploads.maxSize"),
+      unsetDevice: read("/unset -device uploads.maxSize"),
+    }).toStrictEqual({
+      alone: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "store.s3.bucket" }] },
+      bucket: owned("store.s3.bucket", "my-bucket"),
+      bucketBad: "Invalid",
+      credential: {
+        _tag: "Parsed",
+        value: [{ _tag: "PromptCredential", option: "store.s3.accessKeyId" }],
+      },
+      credentialTyped: {
+        _tag: "Invalid",
+        message:
+          "A Credential's value is never typed into the composer. It was cleared, and nothing was sent. Use /set store.s3.secretAccessKey alone, which asks for it in a password prompt.",
+      },
+      device: {
+        _tag: "Invalid",
+        message:
+          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+      },
+      empty: {
+        _tag: "Invalid",
+        message: "Give uploads.maxSize a value, or use /unset uploads.maxSize.",
+      },
+      filter: { _tag: "Parsed", value: [{ _tag: "OpenOptions", filter: "uploads.*" }] },
+      refused: true,
+      unknown: "Invalid",
+      unset: owned("uploads.maxSize", undefined),
+      unsetDevice: {
+        _tag: "Invalid",
+        message:
+          "Only an option under ui is kept for this device, as in /set -device ui.theme light.",
+      },
+    });
+  });
+
+  it("name a Credential the option names, or one no Network's could ever be named", () => {
+    expect({
+      derived: derivedOwnerCredential("store.s3.secretAccessKey"),
+      named: ownerCredentialFor(
+        Schema.decodeSync(OwnerOptions)({ "store.s3.accessKeyId": "kept", "uploads.maxSize": 1 }),
+        "store.s3.accessKeyId"
+      ),
+      // A Network's derived names start with its id, which never starts upper-case.
+      network: derivedCredential(Schema.decodeSync(NetworkId)("owner"), ["password"]),
+      prompt: reduceOptions(initialOptions, {
+        _tag: "Prompting",
+        prompt: { option: "store.s3.secretAccessKey" },
+      }).prompting,
+      unnamed: ownerCredentialFor(owner.options, "store.s3.secretAccessKey"),
+    }).toStrictEqual({
+      derived: "Owner.store.s3.secretAccessKey",
+      named: "kept",
+      network: { _tag: "Parsed", value: "owner.password" },
+      prompt: { name: "store.s3.secretAccessKey", option: "store.s3.secretAccessKey" },
+      unnamed: "Owner.store.s3.secretAccessKey",
     });
   });
 });

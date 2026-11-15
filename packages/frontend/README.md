@@ -204,6 +204,13 @@ An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived f
 - **`ui.activity` changes what is drawn, never what is counted.**
 - **A font's family the device lacks is said to be not found,** when it is the one in effect. Only the device can find that out, so it hands the families it lacks to `uiOptionsOf`.
 
+### The options under `store` and `uploads`
+
+An option under `store` or `uploads` is named in full, such as `store.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options` the same way. They are listed first, ahead of every Network's.
+
+- **They are the Owner's, not a device's,** so no device overrides one, and `-device` refuses them. A change is made from the options read, and `unset` returns one to its default, or leaves it unset.
+- **A Credential option names a Credential, `Owner.` and the option's name** until it names another, such as `Owner.store.s3.accessKeyId`. A Network's id starts with a lower-case letter or a digit, so no Network's Credential is ever named so.
+
 ## Themes
 
 Every colour a Frontend draws, derived from a terminal's palette of a foreground, a background, and 16 ANSI colours. `drawn` gives the colours and `cssVariables` their names.
@@ -322,7 +329,7 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 
 - **One Timeline in two Panes,** at two places, as WeeChat and tmux allow. A Pane opens what no other Pane shows.
 - **A layout kept under `ui`,** shared by every device. It is kept per device, and a phone's screen shows one Pane at a time whatever it holds.
-- **More options under `ui`,** such as overrides of the keymap, and options of the Daemon's own. `keymapOf` is ready to read them, dropping what does not parse.
+- **More options under `ui`,** such as overrides of the keymap. `keymapOf` is ready to read them, dropping what does not parse.
 - **Chords in sequence,** such as `mod+k mod+o`. None of the defaults needs one, and `mod+k` alone opens the palette, so a sequence beginning with it would make the palette wait.
 - **A divider for what came while the Owner was away from an open Timeline.** The divider is taken when a Timeline opens. One left open in a hidden page gathers unread items, which the counts show, but no divider until it is opened again.
 - **Marking a detached Direct Message read.** No Target names it, so its counts stay until the API can mark a Timeline by its id.

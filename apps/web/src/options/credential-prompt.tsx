@@ -4,7 +4,8 @@
  * The field is sign-in's: a plain, uncontrolled `<input type="password">`, read once as the
  * form is submitted, parsed as the API's own `CredentialValue`, straight to `Redacted`,
  * then emptied, which clears React DOM's tracker too, and the form reset. The value goes
- * to `PUT /api/credentials/{name}` and the option is pointed at it.
+ * to `PUT /api/credentials/{name}` and the option is pointed at it: a Network's through its
+ * Configuration, and one under `store` or `uploads` by setting it to the Credential's name.
  *
  * @packageDocumentation
  */
@@ -20,6 +21,7 @@ import type { FormProps } from "react-aria-components";
 import { Button } from "../ui/button.tsx";
 import { PasswordField } from "../ui/password-field.tsx";
 import { hold, optionsState, promptCredential } from "./atoms.ts";
+import { holdOwner } from "./owner.ts";
 
 import styles from "./credential-prompt.module.css";
 
@@ -38,6 +40,7 @@ const Asking = ({
   readonly notice: string | undefined;
 }) => {
   const holdNow = useAtomSet(hold);
+  const holdOwnerNow = useAtomSet(holdOwner);
   const close = useAtomSet(promptCredential);
   const noticeId = useId();
 
@@ -54,7 +57,13 @@ const Asking = ({
 
     form.reset();
 
-    if (Option.isSome(entered)) {
+    if (Option.isNone(entered)) {
+      return;
+    }
+
+    if ("option" in prompt) {
+      holdOwnerNow({ option: prompt.option, value: entered.value.value });
+    } else {
       holdNow({ network: prompt.network, path: prompt.path, value: entered.value.value });
     }
   };

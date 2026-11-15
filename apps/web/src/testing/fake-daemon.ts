@@ -6,6 +6,11 @@
  */
 import {
   ConfigurationInForce,
+  OwnerOptionName,
+  OwnerOptions,
+  ownerDefaults,
+  ownerOptionNames,
+  ownerValueKept,
   UiOptionName,
   UiOptions,
   uiDefaults,
@@ -27,6 +32,7 @@ import type {
   SearchResults,
   TimelineWindow,
   WindowGap,
+  OwnerInForce,
   UiInForce,
 } from "@iirc/api";
 import { importTheme } from "@iirc/frontend/theme-import";
@@ -326,6 +332,15 @@ const uiOptionRoute = new RegExp(`^/api/ui/(?<option>${uiOptionNames.join("|")})
 
 const UiBody = Schema.fromJsonString(Schema.Struct({ value: Schema.Json }));
 
+/** The options under `store` and `uploads` before any Change: each at its default, if any. */
+const noOwnerChange: typeof OwnerInForce.Encoded = { options: ownerDefaults, sequence: 0 };
+
+/** The route of one option under `store` or `uploads`, for each option the contract has. */
+const ownerOptionRoute = new RegExp(
+  `^/api/options/(?<option>${ownerOptionNames.map((name) => name.replaceAll(".", String.raw`\.`)).join("|")})$`,
+  "u"
+);
+
 const ReadBody = Schema.fromJsonString(
   Schema.Struct({ read: Schema.Finite, target: Schema.NullOr(Schema.String) })
 );
@@ -491,6 +506,8 @@ export const fakeDaemon = () => {
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
+  const ownerFollowers: Follower[] = [];
+  const ownerChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
 
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
@@ -618,6 +635,12 @@ export const fakeDaemon = () => {
     networksHeld,
     /** The sequence the next `say` is journaled at. */
     nextSequence: 10,
+    /** The options under `store` and `uploads` in force, as the wire carries them, and the sequence of the last Change. */
+    owner: noOwnerChange,
+    /** Each change of an option under `store` or `uploads` asked for, as `PUT` or `DELETE` and its option, and its `ifSequence`. */
+    ownerChanges,
+    /** Each follower of the options under `store` and `uploads`. */
+    ownerFollowers,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
     /** Each `PUT` of Configuration, with the sequence it was made from. */
@@ -1234,6 +1257,95 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * Sends the options under `store` and `uploads` in force to every follower of them, as one
+   * `changed` event.
+   */
+  const sendOwner = () => {
+    const text = `event: changed\nid: ${daemon.owner.sequence}\ndata: ${JSON.stringify(daemon.owner)}\n\n`;
+
+    for (const follower of ownerFollowers) {
+      follower.controller.enqueue(encoder.encode(text));
+    }
+  };
+
+  /**
+   * The options under `store` and `uploads`: read, changed one at a time made from a
+   * sequence, a value their Schema refuses refused, and followed, the options in force
+   * first, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const ownerRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const method = init.method ?? "GET";
+    const one = ownerOptionRoute.exec(url.pathname)?.groups;
+
+    if (url.pathname === "/api/options" && method === "GET") {
+      return signedInOnly(() => json(200, daemon.owner));
+    }
+
+    if (url.pathname === "/api/options/changes") {
+      return signedInOnly(() => {
+        const response = following(ownerFollowers, url, new Headers(init.headers), init);
+
+        queueMicrotask(sendOwner);
+
+        return response;
+      });
+    }
+
+    if (one?.option === undefined || !daemon.signedIn) {
+      return one === undefined ? undefined : json(401, { _tag: "Unauthorized" });
+    }
+
+    const ifSequence = url.searchParams.get("ifSequence");
+
+    ownerChanges.push({ ifSequence, route: `${method} ${one.option}` });
+
+    if (ifSequence !== null && Number(ifSequence) !== daemon.owner.sequence) {
+      return json(409, { _tag: "OptionsChanged", sequence: daemon.owner.sequence });
+    }
+
+    const option = Schema.decodeUnknownSync(OwnerOptionName)(one.option);
+
+    const { value } =
+      method === "PUT"
+        ? Schema.decodeSync(UiBody)(await new Response(init.body).text())
+        : { value: undefined };
+
+    if (value !== undefined && ownerValueKept(option, value) === undefined) {
+      return Response.json(
+        {
+          _tag: "InvalidRequest",
+          issues: [{ message: "refused by its Schema", path: ["payload", "value"] }],
+        },
+        { status: 400 }
+      );
+    }
+
+    // Unset, an option is back to its default, or absent with none.
+    const kept = new Map<string, unknown>([
+      ...Object.entries(ownerDefaults),
+      ...Object.entries(daemon.owner.options).filter(([name]) => name !== option),
+    ]);
+
+    if (value !== undefined) {
+      kept.set(option, value);
+    }
+
+    daemon.owner = {
+      options: Schema.encodeSync(OwnerOptions)(
+        Schema.decodeUnknownSync(OwnerOptions)(Object.fromEntries(kept))
+      ),
+      sequence: daemon.nextSequence,
+    };
+    daemon.nextSequence += 1;
+    sendOwner();
+
+    return json(200, { sequence: daemon.owner.sequence });
+  };
+
+  /**
    * A Lookup asked after by its intent: `Pending` as many times as it was given, then
    * `LookedUp`, or `NotJournaled` for one never journaled. It waits until a test releases it
    * when `holdLooked` says.
@@ -1372,6 +1484,7 @@ export const fakeDaemon = () => {
     removeRoute(url, init) ??
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
+    (await ownerRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??
     new Response(null, { status: 404 });

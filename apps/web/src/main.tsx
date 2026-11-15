@@ -19,6 +19,7 @@ import { draftsCarried } from "./composer/atoms.ts";
 import { chantypesSync, completer } from "./composer/completion.ts";
 import { lookupSync } from "./lookup/atoms.ts";
 import { optionsSync } from "./options/atoms.ts";
+import { ownerSync } from "./options/owner.ts";
 import { uiSync } from "./options/ui.ts";
 import { watchPage } from "./page/watch.ts";
 import { marking } from "./reading/atoms.ts";
@@ -38,6 +39,9 @@ registry.mount(uiSync);
 
 // What the options show is read each time they come to show, however they came to.
 registry.mount(optionsSync);
+
+// The options under store and uploads are followed while they show, as nothing else draws on them.
+registry.mount(ownerSync);
 
 registry.mount(marking);
 
