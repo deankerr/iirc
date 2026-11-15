@@ -14,7 +14,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
 
-**Change**: Something the Owner altered, such as Configuration, a Read Marker, or an Upload. _Avoid_: Update, mutation
+**Change**: Something altered by the Owner, or by the Daemon on the Owner's behalf, such as Configuration, a Read Marker, or an Upload. _Avoid_: Update, mutation
 
 **Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
 
