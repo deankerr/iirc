@@ -8,7 +8,8 @@
     "./ctcp": "./src/ctcp.ts",
     "./format": "./src/format.ts",
     "./isupport": "./src/isupport.ts",
-    "./line": "./src/line.ts"
+    "./line": "./src/line.ts",
+    "./links": "./src/links.ts"
   },
   "scripts": {
     "test": "bun --bun vitest run"

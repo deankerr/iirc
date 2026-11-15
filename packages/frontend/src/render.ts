@@ -19,6 +19,7 @@ import type { IrcdAddress } from "@iirc/client/configuration";
 import { casefold } from "@iirc/protocol/casemapping";
 import { parseFormatting, stripFormatting } from "@iirc/protocol/format";
 import type { Style } from "@iirc/protocol/format";
+import { linkSchemes as schemes, linksInRun } from "@iirc/protocol/links";
 
 import { optionName, showText } from "./options.ts";
 import type { Kind } from "./options.ts";
@@ -34,7 +35,7 @@ export type Inline =
   | { readonly _tag: "Link"; readonly text: string; readonly href: string; readonly style: Style };
 
 /** The schemes a link may have. Anything else stays text. */
-export const linkSchemes: ReadonlySet<string> = new Set(["http:", "https:", "irc:", "ircs:"]);
+export const linkSchemes: ReadonlySet<string> = new Set(schemes.map((scheme) => `${scheme}:`));
 
 // The bidirectional formatting characters: embeddings and overrides, their pop, isolates,
 // their pop, and the marks.
@@ -186,70 +187,6 @@ export const plainText = (text: string, limit = plainLimit): string => {
   return `${firstStrongIsolate}${cut}${popDirectionalIsolate}`;
 };
 
-// A link starts at a scheme we allow and runs to whitespace, a control, a bidirectional
-// formatting character, or a character a URL never holds unescaped.
-const linkPattern =
-  // oxlint-disable-next-line no-control-regex -- control characters end a link, so the pattern names them
-  /\b(?:https?|ircs?):\/\/[^\s<>"`{}|\\^\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]+/giu;
-
-const trailing = new Set([".", ",", ";", ":", "!", "?", "'", '"', "*"]);
-
-const closers: ReadonlyMap<string, string> = new Map([
-  [")", "("],
-  ["]", "["],
-  ["}", "{"],
-]);
-
-const openers: ReadonlySet<string> = new Set(closers.values());
-
-/**
- * A link candidate without the punctuation that ends a sentence around it: trailing stops
- * and quotes, and a closing bracket the link did not open.
- * @param candidate - What the pattern matched.
- * @returns The link's text.
- */
-const trimmed = (candidate: string): string => {
-  // Each bracket counted once, and the counts kept as the end moves, so hostile text of
-  // many brackets is trimmed in one pass.
-  const counts = new Map<string, number>();
-
-  for (const character of candidate) {
-    if (closers.has(character) || openers.has(character)) {
-      counts.set(character, (counts.get(character) ?? 0) + 1);
-    }
-  }
-
-  let end = candidate.length;
-
-  for (;;) {
-    const last = candidate.charAt(end - 1);
-    const opener = closers.get(last);
-
-    const unbalanced = opener !== undefined && (counts.get(opener) ?? 0) < (counts.get(last) ?? 0);
-
-    if (end > 0 && (trailing.has(last) || unbalanced)) {
-      if (opener !== undefined) {
-        counts.set(last, (counts.get(last) ?? 0) - 1);
-      }
-
-      end -= 1;
-    } else {
-      return candidate.slice(0, end);
-    }
-  }
-};
-
-/**
- * The link a candidate is, if the URL parser reads it and its scheme is allowed.
- * @param text - The candidate's text.
- * @returns Its `href`, as the parser wrote it, or `undefined`.
- */
-const hrefOf = (text: string): string | undefined => {
-  const url = URL.parse(text);
-
-  return url !== null && linkSchemes.has(url.protocol) && url.host !== "" ? url.href : undefined;
-};
-
 /**
  * One run of formatted text, split into text and links.
  * @param text - The run's text, with no formatting codes left.
@@ -266,15 +203,10 @@ const linked = (text: string, style: Style): readonly Inline[] => {
     }
   };
 
-  for (const match of text.matchAll(linkPattern)) {
-    const candidate = trimmed(match[0]);
-    const href = hrefOf(candidate);
-
-    if (href !== undefined && candidate.length > 0) {
-      textUpTo(match.index);
-      inlines.push({ _tag: "Link", href, style, text: candidate });
-      from = match.index + candidate.length;
-    }
+  for (const link of linksInRun(text)) {
+    textUpTo(link.index);
+    inlines.push({ _tag: "Link", href: link.href, style, text: link.text });
+    from = link.index + link.text.length;
   }
 
   textUpTo(text.length);
@@ -285,8 +217,8 @@ const linked = (text: string, style: Style): readonly Inline[] => {
 /**
  * Text a Network sent, as a view draws it: mIRC formatting read into styles, links found in
  * each run, control characters shown as symbols, and bidirectional formatting closed at
- * the end of each run. A link inside a run of one style is found, and one that formatting
- * splits is shown as text.
+ * the end of each run. Links are found in each run of one style on its own, so a link
+ * that formatting splits is a link only up to the split.
  * @param text - The text, as it arrived.
  * @returns Its inlines, in order.
  */

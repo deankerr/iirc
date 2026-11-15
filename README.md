@@ -75,7 +75,7 @@ Each package's README says what it does, what it guarantees, and what it does no
 
 | Path | Pure | What |
 | --- | --- | --- |
-| `packages/protocol` | yes | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, and formatting |
+| `packages/protocol` | yes | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, formatting, and links |
 | `packages/client` | yes | The IRC client for one Network, and its transcript test kit |
 | `packages/outbox` | yes | Pacing: which Line leaves next, and when |
 | `packages/timelines` | yes | Timelines as a fold over News |

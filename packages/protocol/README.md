@@ -11,6 +11,7 @@ Each subpath is its own module, and there is no root export.
 | `@iirc/protocol/casemapping` | How a Network compares nicks and Channel names |
 | `@iirc/protocol/ctcp` | CTCP read out of a Message's text, and CTCP text and Lines to send |
 | `@iirc/protocol/format` | mIRC formatting codes as spans of text and style, or stripped |
+| `@iirc/protocol/links` | The links a Message holds, in order, and the first three that may be previewed |
 
 ## Features, from the floor up
 
@@ -23,9 +24,10 @@ The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it 
 5. **Credentials.** `fillSecret` fills `PASS`, a `JOIN` with a key, and a service's `IDENTIFY`, and `OPER` on the floor, and the SASL `PLAIN` response above it.
 6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, `ctcpRequest`, and `ctcpReply` build CTCP that is safe to send, and a request or a reply only ever to a User.
 7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, and `stripFormatting` removes exactly the codes it reads. Spans are data for a Frontend to draw, never markup.
-8. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
-9. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
-10. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
+8. **Links.** `linksOf` finds the links in a Message's text, and `previewableLinksOf` the first three distinct `http` or `https` ones, so the Daemon and every Frontend agree on which they are.
+9. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `exceptsOf`, `invexOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
+10. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
+11. **Message tags** (IRCv3 `message-tags`). `parse` reads tags in any order, as UTF-8, with their escapes undone. A key is an opaque name that is never refused, and the last of a repeated key wins. An `OutboundLine` carries client-only tags, and `label`, `batch`, and `draft/multiline-concat`, which `labeled-response` and `draft/multiline` need.
 
 ## `@iirc/protocol/line`
 
@@ -136,6 +138,17 @@ plainStyle: Style
 ```
 
 A colour of `99` is the default colour, so it is `undefined` in a `Style`. A colour code with no colour after it resets both colours and takes nothing else, so `\x03,` shows the comma. A `\x04` needs exactly six hex digits. Reverse is a flag, and does not swap the colours.
+
+## `@iirc/protocol/links`
+
+```ts
+linksOf(text: string): readonly Link[]                      // { href, scheme }
+previewableLinksOf(text: string): readonly Previewable[]    // the same, http and https only
+linksInRun(run: string): readonly LinkInRun[]               // { href, scheme, index, text }
+previewLimit: 3
+```
+
+A link starts at `http://`, `https://`, `irc://`, or `ircs://`, in any case, and its `href` is as the URL parser wrote it. It ends at whitespace, a control, or a bidirectional formatting character, and loses the stops, commas, and quotes that end a sentence and any closing bracket it did not open. Anything else with a scheme, `javascript:` and `data:` included, is text. `linksOf` searches each span of one style on its own, so a link that formatting splits is found only up to the split. `linksInRun` takes text with no formatting codes, and gives where each link starts and how it was written, for a Frontend that draws them. `previewableLinksOf` never gives an `irc` or `ircs` link, and counts a link once however often it repeats, so the three are distinct and a later link takes the place of a repeat.
 
 ## Invariants
 
