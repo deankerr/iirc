@@ -9,7 +9,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { makeBunLinkFetch } from "./link-fetch-bun.ts";
 import type { BunLinkFetchOptions } from "./link-fetch-bun.ts";
-import { environment, makeCertificate, pour, scripted, serve, tripwire } from "./testing/sites.ts";
+import {
+  closes,
+  environment,
+  makeCertificate,
+  pour,
+  scripted,
+  serve,
+  tripwire,
+} from "./testing/sites.ts";
 import type { Handler, Site } from "./testing/sites.ts";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -439,9 +447,7 @@ describe("bounds are on the decompressed stream", () => {
             })
           ).pipe(Effect.match({ onFailure: (failure) => failure._tag, onSuccess: () => "ended" }));
 
-          yield* Effect.sleep("200 millis");
-
-          return { end, site, size };
+          return { closed: yield* closes(site), end, size };
         })
       );
 
@@ -452,7 +458,7 @@ describe("bounds are on the decompressed stream", () => {
       expect(result.size).toBeGreaterThan(limits.page - 1);
       // Read whole, it takes about 2 GB. Cut at its cap, it takes tens of MB.
       expect(rss() - before).toBeLessThan(256 * 1024 * 1024);
-      expect(result.site.connections.closed).toBe(1);
+      expect(result.closed).toBe(1);
     }
   );
 
@@ -472,22 +478,67 @@ describe("bounds are on the decompressed stream", () => {
           `http://127.0.0.1:${site.port}/`
         );
 
-        yield* Effect.sleep("200 millis");
-
-        return { outcome, site };
+        return { closed: yield* closes(site), outcome };
       })
     );
 
     expect(result.outcome).toMatchObject({ answer: { status: 200 } });
     expect("answer" in result.outcome && result.outcome.answer.body.length).toBe(limits.page);
     expect(written[0]?.chunks ?? 0).toBeLessThan(1024);
-    expect(result.site.connections.closed).toBe(1);
+    expect(result.closed).toBe(1);
   });
 
   it("a page ends at the end of its head", async () => {
     await expect(
-      head(["<html><HEAD><title>t</title></Head >", "</HEAD><body>secret</body>"])
-    ).resolves.toBe("<html><HEAD><title>t</title></Head ></HEAD>");
+      head(["<html><HEAD><title>t</title></HEAD>", "<body>secret</body>"])
+    ).resolves.toBe("<html><HEAD><title>t</title></HEAD>");
+  });
+
+  it("a head's end tag may hold whitespace", async () => {
+    await expect(
+      head(["<html><head><title>t</title></Head >", "<meta name=late></head><body>secret"])
+    ).resolves.toBe("<html><head><title>t</title></Head >");
+  });
+
+  it("a <body> in a script's string ends nothing", async () => {
+    await expect(
+      head([
+        "<html><head><script>var s = '<body></head>';</script>",
+        "<meta property=og:title content=T></head><body>secret",
+      ])
+    ).resolves.toBe(
+      "<html><head><script>var s = '<body></head>';</script><meta property=og:title content=T></head>"
+    );
+  });
+
+  it("a <body> in a comment or a style ends nothing", async () => {
+    await expect(
+      head([
+        "<head><!-- <body> --><style>p:after{content:'</head>'}</style><title>T</title><body>x",
+      ])
+    ).resolves.toBe(
+      "<head><!-- <body> --><style>p:after{content:'</head>'}</style><title>T</title>"
+    );
+  });
+
+  it("a tag whose name only starts like body ends nothing", async () => {
+    await expect(head(["<head><bodyguard>", "<title>T</title></head>x"])).resolves.toBe(
+      "<head><bodyguard><title>T</title></head>"
+    );
+  });
+
+  it("comments and scripts are skipped across chunks", async () => {
+    await expect(
+      head([
+        "<head><!",
+        "-- <body> -",
+        "-><scr",
+        "ipt>'<body>'</scr",
+        "ipt ><title>T</title></he",
+        "ad",
+        " >x",
+      ])
+    ).resolves.toBe("<head><!-- <body> --><script>'<body>'</script ><title>T</title></head >");
   });
 
   it("a page ends at its body when its head is never closed", async () => {
@@ -525,6 +576,96 @@ describe("bounds are on the decompressed stream", () => {
     );
 
     expect(outcome).toMatchObject({ failed: { _tag: "LinkTooLarge", limit: limits.oembed } });
+  });
+
+  // A body that has reached its cap and not yet ended may have more to come, and waiting to
+  // find out could wait for ever, so the guard counts it too large unless its declared length
+  // says it is whole.
+  it("a body of exactly its cap that never ends is cut at once", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const site = yield* serve((_, response) => {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.write(new Uint8Array(limits.oembed).fill(0x20));
+        });
+
+        const outcome = yield* fetched(
+          { policy: loopbackPolicy(site.port) },
+          `http://127.0.0.1:${site.port}/`,
+          { kind: "oembed" }
+        ).pipe(
+          Effect.timeoutOrElse({ duration: "3 seconds", orElse: () => Effect.succeed("hung") })
+        );
+
+        return { closed: yield* closes(site), outcome };
+      })
+    );
+
+    expect(result).toMatchObject({
+      closed: 1,
+      outcome: { failed: { _tag: "LinkTooLarge", limit: limits.oembed } },
+    });
+  });
+
+  it("a body of exactly its cap whose length says so is taken whole", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const site = yield* serve((_, response) => {
+          response.writeHead(200, {
+            "content-length": String(limits.oembed),
+            "content-type": "application/json",
+          });
+          response.end(new Uint8Array(limits.oembed).fill(0x20));
+        });
+
+        return yield* fetched(
+          { policy: loopbackPolicy(site.port) },
+          `http://127.0.0.1:${site.port}/`,
+          { kind: "oembed" }
+        );
+      })
+    );
+
+    expect("answer" in outcome && outcome.answer.body.length).toBe(limits.oembed);
+  });
+
+  it("closing the caller's Scope mid-body closes the connection", async () => {
+    const closed = await run(
+      Effect.gen(function* () {
+        const site = yield* serve((_, response) => {
+          response.writeHead(200, { "content-type": "video/mp4" });
+          response.write("....");
+        });
+
+        const service = makeBunLinkFetch({ policy: loopbackPolicy(site.port), version: "1.2.3" });
+
+        yield* Effect.scoped(service.fetch(`http://127.0.0.1:${site.port}/`, { kind: "stream" }));
+
+        return yield* closes(site);
+      })
+    );
+
+    expect(closed).toBe(1);
+  });
+
+  it("a reader that stops early closes the connection", async () => {
+    const closed = await run(
+      Effect.gen(function* () {
+        const site = yield* serve((_, response) => {
+          response.writeHead(200, { "content-type": "video/mp4" });
+          response.write("....");
+        });
+
+        const service = makeBunLinkFetch({ policy: loopbackPolicy(site.port), version: "1.2.3" });
+        const answer = yield* service.fetch(`http://127.0.0.1:${site.port}/`, { kind: "stream" });
+
+        yield* Stream.runHead(answer.body);
+
+        return yield* closes(site);
+      })
+    );
+
+    expect(closed).toBe(1);
   });
 
   it("a declared length over the cap is refused before the body is read", async () => {
@@ -577,6 +718,10 @@ const avif = Uint8Array.from([
 
 const svg = encoder.encode('﻿  <?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>');
 
+const prologSvg = encoder.encode(
+  `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Generator: an editor -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [\n  <!ENTITY ns "http://www.w3.org/2000/svg">\n]>\n${" ".repeat(400)}<svg\n  xmlns="http://www.w3.org/2000/svg"/>`
+);
+
 describe("types", () => {
   it.each([
     ["a page", "text/html; charset=utf-8", encoder.encode("<p>"), page, "text/html"],
@@ -593,6 +738,7 @@ describe("types", () => {
     ["a WebP", "image/webp", webp, image, "image/webp"],
     ["an AVIF", "image/avif", avif, image, "image/avif"],
     ["an SVG", "image/svg+xml", svg, image, "image/svg+xml"],
+    ["an SVG after a prolog", "image/svg+xml", prologSvg, image, "image/svg+xml"],
     ["an oEmbed", "application/json", encoder.encode("{}"), { kind: "oembed" }, "application/json"],
     ["a video", "video/mp4", encoder.encode("...."), { kind: "stream" }, "video/mp4"],
     ["a sound", "audio/ogg", encoder.encode("OggS"), { kind: "stream" }, "audio/ogg"],
@@ -615,6 +761,13 @@ describe("types", () => {
     ["an SVG named a PNG", "image/png", svg, image],
     ["an empty image", "image/gif", new Uint8Array(), image],
     ["HTML named an SVG", "image/svg+xml", encoder.encode("<html><svg></svg></html>"), image],
+    [
+      "HTML after an XML declaration named an SVG",
+      "image/svg+xml",
+      encoder.encode('<?xml version="1.0"?><html><body>not svg</body></html>'),
+      image,
+    ],
+    ["a root that only starts like svg", "image/svg+xml", encoder.encode("<svgx/>"), image],
     ["a BMP", "image/bmp", encoder.encode("BM...."), image],
     ["an oEmbed as HTML", "text/html", encoder.encode("{}"), { kind: "oembed" }],
     ["a stream as HTML", "text/html", encoder.encode("<p>"), { kind: "stream" }],

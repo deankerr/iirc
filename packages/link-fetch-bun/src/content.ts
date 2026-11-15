@@ -97,17 +97,66 @@ const isAvif = (bytes: Uint8Array) => {
 
 const decoder = new TextDecoder();
 
-const isSvg = (bytes: Uint8Array) => {
-  const head = decoder
-    .decode(bytes)
-    .replace(/^﻿?\s*/u, "")
-    .toLowerCase();
+const whitespace = /^[\t\n\f\r ]*/u;
 
-  return head.startsWith("<?xml") || head.startsWith("<svg") || head.startsWith("<!doctype svg");
+/**
+ * What follows a prolog item that starts a text: an XML declaration, a comment, or a DOCTYPE,
+ * which may hold an internal subset in brackets.
+ * @param text - The text, lower-cased, starting at an item.
+ * @returns The text after the item, or nothing when it is not one or does not end in the text.
+ */
+const afterProlog = (text: string): string | undefined => {
+  const past = (opening: string, closing: string) => {
+    const at = text.indexOf(closing, opening.length);
+
+    return at === -1 ? undefined : text.slice(at + closing.length);
+  };
+
+  if (text.startsWith("<?xml")) {
+    return past("<?xml", "?>");
+  }
+
+  if (text.startsWith("<!--")) {
+    return past("<!--", "-->");
+  }
+
+  if (!text.startsWith("<!doctype")) {
+    return undefined;
+  }
+
+  const bracket = text.indexOf("[");
+  const end = text.indexOf(">");
+
+  return bracket !== -1 && bracket < end ? past("<!doctype", "]>") : past("<!doctype", ">");
 };
 
-/** How many leading bytes are read before an image's type is decided. */
-export const sniffed = 64;
+/**
+ * Whether bytes begin an SVG: after an optional BOM, whitespace, an XML declaration, comments,
+ * and a DOCTYPE, the root element must be `<svg` and the end of its name, all within the bytes.
+ * @param bytes - The first bytes.
+ * @returns Whether they do.
+ */
+const isSvg = (bytes: Uint8Array) => {
+  let text: string | undefined = decoder.decode(bytes).replace(/^﻿/u, "").toLowerCase();
+
+  while (text !== undefined) {
+    text = text.replace(whitespace, "");
+
+    if (/^<svg[\t\n\f\r />]/u.test(text)) {
+      return true;
+    }
+
+    text = afterProlog(text);
+  }
+
+  return false;
+};
+
+/**
+ * How many leading bytes are read before an image's type is decided: enough for an SVG's
+ * prolog, of which a raster image's magic number needs far less.
+ */
+export const sniffed = 1024;
 
 /**
  * The image type an image's leading bytes show.
@@ -140,9 +189,75 @@ export const sniff = (bytes: Uint8Array): string | undefined => {
 
 const lower = (byte: number) => (byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte);
 
-const indexOf = (haystack: Uint8Array, needle: readonly number[]) => {
-  for (let at = 0; at + needle.length <= haystack.length; at += 1) {
-    if (needle.every((byte, offset) => lower(haystack[at + offset] ?? 0) === byte)) {
+const codes = (text: string) => Array.from(text, (character) => character.codePointAt(0) ?? 0);
+
+const boundaries = new Set(codes("\t\n\f\r />"));
+
+const lessThan = 0x3c;
+const greaterThan = 0x3e;
+
+// Elements whose content is text, in which a `<body>` or `</head>` is no tag. A title and a
+// textarea are escapable raw text in HTML, which reads the same way here.
+const rawText = ["script", "style", "title", "textarea", "noscript"].map((name) => ({
+  close: codes(`</${name}`),
+  open: codes(`<${name}`),
+}));
+
+const commentOpen = codes("<!--");
+const commentClose = codes("-->");
+const headClose = codes("</head");
+const bodyOpen = codes("<body");
+
+type Mode =
+  | { readonly in: "text" }
+  | { readonly in: "comment" }
+  | { readonly in: "raw"; readonly close: readonly number[] }
+  | { readonly in: "head end" };
+
+/**
+ * Whether bytes hold a pattern at a place, in any case.
+ * @param bytes - The bytes.
+ * @param at - Where.
+ * @param pattern - The pattern, lower-case.
+ * @returns Whether they do.
+ */
+const holds = (bytes: Uint8Array, at: number, pattern: readonly number[]) =>
+  pattern.every((byte, offset) => lower(bytes[at + offset] ?? -1) === byte);
+
+/**
+ * Whether bytes hold a tag's name at a place, and then the end of the name.
+ * @param bytes - The bytes.
+ * @param at - Where.
+ * @param name - `<` or `</` and the name, lower-case.
+ * @returns Whether they do.
+ */
+const isTag = (bytes: Uint8Array, at: number, name: readonly number[]) =>
+  holds(bytes, at, name) && boundaries.has(bytes[at + name.length] ?? -1);
+
+// What a `<` may begin that the scanner acts on, each with the bytes needed to tell it.
+const wanted = [
+  ...[bodyOpen, headClose, ...rawText.map((each) => each.open)].map((name) => ({
+    name,
+    needs: name.length + 1,
+  })),
+  { name: commentOpen, needs: commentOpen.length },
+];
+
+/**
+ * Whether the bytes after a `<` are too few to tell what it begins, so the next chunk must.
+ * @param bytes - The bytes.
+ * @param at - Where the `<` is.
+ * @returns Whether they are.
+ */
+const undecided = (bytes: Uint8Array, at: number) => {
+  const left = bytes.length - at;
+
+  return wanted.some(({ name, needs }) => left < needs && holds(bytes, at, name.slice(0, left)));
+};
+
+const find = (bytes: Uint8Array, from: number, pattern: readonly number[]) => {
+  for (let at = from; at + pattern.length <= bytes.length; at += 1) {
+    if (holds(bytes, at, pattern)) {
       return at;
     }
   }
@@ -150,37 +265,96 @@ const indexOf = (haystack: Uint8Array, needle: readonly number[]) => {
   return -1;
 };
 
-const codes = (text: string) => Array.from(text, (character) => character.codePointAt(0) ?? 0);
-
-const headClose = codes("</head>");
-const bodyOpen = codes("<body");
-const kept = headClose.length - 1;
-
 /**
- * Finds where a page's head ends: after `</head>`, or before `<body`, whichever comes first,
- * in any case, across chunks.
+ * Finds where a page's head ends: after the `>` of its `</head`, or before its `<body`,
+ * whichever comes first, in any case, across chunks. Comments and the text of raw text
+ * elements, such as a script, are skipped, so a `<body>` in a string ends nothing. It is no
+ * HTML tokenizer: it looks only for what ends a head, and carries at most a few bytes from one
+ * chunk to the next.
  * @returns A function that takes each chunk and gives where in it the page ends, or -1.
  */
 export const headEnd = () => {
-  let tail = new Uint8Array();
+  let mode: Mode = { in: "text" };
+  let carry = new Uint8Array();
 
   return (chunk: Uint8Array) => {
-    const prior = tail.length;
-    const seen = new Uint8Array(prior + chunk.length);
+    const offset = carry.length;
+    const bytes = new Uint8Array(offset + chunk.length);
 
-    seen.set(tail);
-    seen.set(chunk, prior);
-    tail = seen.slice(Math.max(0, seen.length - kept));
+    bytes.set(carry);
+    bytes.set(chunk, offset);
+    carry = new Uint8Array();
 
-    const close = indexOf(seen, headClose);
-    const open = indexOf(seen, bodyOpen);
+    // The carried bytes were given with the chunk before, so a page that ends in them ends
+    // at the start of this one.
+    const ended = (at: number) => Math.max(0, at - offset);
 
-    const ends = [
-      ...(close === -1 ? [] : [close + headClose.length]),
-      ...(open === -1 ? [] : [open]),
-    ];
+    // Looks again, with the next chunk, from a place this one cannot decide.
+    const later = (from: number) => {
+      carry = bytes.slice(Math.max(from, 0));
 
-    // A `<body` begun in the chunk before cannot be taken back, so the page ends at once.
-    return ends.length === 0 ? -1 : Math.max(0, Math.min(...ends) - prior);
+      return -1;
+    };
+
+    let at = 0;
+
+    for (;;) {
+      if (mode.in === "comment") {
+        const end = find(bytes, at, commentClose);
+
+        if (end === -1) {
+          return later(bytes.length - commentClose.length + 1);
+        }
+
+        mode = { in: "text" };
+        at = end + commentClose.length;
+      } else if (mode.in === "raw") {
+        const { length } = mode.close;
+        const end = find(bytes, at, mode.close);
+
+        if (end === -1 || end + length >= bytes.length) {
+          return later(end === -1 ? bytes.length - length : end);
+        }
+
+        if (boundaries.has(bytes[end + length] ?? -1)) {
+          mode = { in: "text" };
+        }
+
+        at = end + length;
+      } else if (mode.in === "head end") {
+        const end = bytes.indexOf(greaterThan, at);
+
+        return end === -1 ? -1 : ended(end + 1);
+      } else {
+        const open = bytes.indexOf(lessThan, at);
+
+        if (open === -1) {
+          return -1;
+        }
+
+        if (undecided(bytes, open)) {
+          return later(open);
+        }
+
+        if (isTag(bytes, open, bodyOpen)) {
+          return ended(open);
+        }
+
+        const raw = rawText.find((each) => isTag(bytes, open, each.open));
+
+        if (isTag(bytes, open, headClose)) {
+          mode = { in: "head end" };
+          at = open + headClose.length;
+        } else if (holds(bytes, open, commentOpen)) {
+          mode = { in: "comment" };
+          at = open + commentOpen.length;
+        } else if (raw === undefined) {
+          at = open + 1;
+        } else {
+          mode = { close: raw.close, in: "raw" };
+          at = open + raw.open.length;
+        }
+      }
+    }
   };
 };

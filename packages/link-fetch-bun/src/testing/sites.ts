@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { LinkUnreachable } from "@iirc/link-fetch";
-import { Effect, Schema } from "effect";
+import { Effect, Schedule, Schema } from "effect";
 import type { Scope } from "effect";
 
 import type { Resolver } from "../link-fetch-bun.ts";
@@ -163,6 +163,26 @@ export const serve = (
         });
       })
   ).pipe(Effect.map(({ site }) => site));
+
+/**
+ * How many of a site's connections have closed, read while the site still runs, so a close the
+ * site's own cleanup makes is never counted. It waits until at least `count` have closed, for at
+ * most two seconds.
+ * @param site - The site.
+ * @param count - How many closes to wait for.
+ * @returns How many have closed.
+ */
+export const closes = (site: Site, count = 1) =>
+  Effect.suspend(() => Effect.succeed(site.connections.closed)).pipe(
+    Effect.repeat({
+      schedule: Schedule.spaced("10 millis"),
+      until: (closed) => closed >= count,
+    }),
+    Effect.timeoutOrElse({
+      duration: "2 seconds",
+      orElse: () => Effect.succeed(site.connections.closed),
+    })
+  );
 
 /**
  * A listener that hangs up on every connection, counting them, as a proxy that must never be

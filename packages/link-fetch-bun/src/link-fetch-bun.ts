@@ -220,6 +220,7 @@ const lead = (reader: Reader, purpose: Purpose, connection: Connection) =>
  * @param reader - The body, after its first bytes.
  * @param first - Its first bytes, already read.
  * @param cap - The most it may give.
+ * @param length - The length it declared, when that is of the bytes it gives.
  * @param page - Whether it is a page, which ends cleanly at the end of its head or its cap.
  * @param connection - Its connection.
  * @returns The body, which runs once.
@@ -228,6 +229,7 @@ const bounded = (
   reader: Reader | undefined,
   first: Uint8Array,
   cap: number,
+  length: number | undefined,
   page: boolean,
   connection: Connection
 ): Stream.Stream<Uint8Array, BodyFailure> => {
@@ -265,9 +267,14 @@ const bounded = (
     if (ends === undefined) {
       total += chunk.length;
 
-      return total > cap
-        ? Effect.andThen(stop, Effect.fail(new LinkTooLarge({ limit: cap })))
-        : Effect.succeed(chunk);
+      // A body that reaches its cap without ending may have more to come, and reading on to
+      // find out could wait for ever, since a stream's time limit ends at its first byte. So
+      // reaching the cap is too large, unless the declared length says the body is whole.
+      if (total > cap || (total === cap && length !== cap)) {
+        return Effect.andThen(stop, Effect.fail(new LinkTooLarge({ limit: cap })));
+      }
+
+      return total === cap ? Effect.as(stop, chunk) : Effect.succeed(chunk);
     }
 
     // A page ends cleanly at the end of its head, or at its cap.
@@ -435,7 +442,7 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
         }
 
         return {
-          body: bounded(reader, first, cap, purpose.kind === "page", connection),
+          body: bounded(reader, first, cap, length, purpose.kind === "page", connection),
           headers: Object.fromEntries(response.headers),
           link: target.href,
           status: response.status,

@@ -5,7 +5,7 @@ import { Effect, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { makeBunLinkFetch } from "../link-fetch-bun.ts";
-import { serve } from "../testing/sites.ts";
+import { closes, serve } from "../testing/sites.ts";
 import type { Handler } from "../testing/sites.ts";
 
 // Each of these waits out the real ten seconds a fetch is held to, which is why they run in
@@ -56,10 +56,8 @@ const timed = async (handler: Handler, purpose: Purpose) =>
           Effect.match({ onFailure: (failure) => failure._tag, onSuccess: () => "ended" })
         );
 
-        yield* Effect.sleep("200 millis");
-
         return {
-          closed: site.connections.closed,
+          closed: yield* closes(site),
           end,
           seconds: (performance.now() - started) / 1000,
           size,
