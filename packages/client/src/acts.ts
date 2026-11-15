@@ -636,6 +636,15 @@ const requested = (run: Run, ctcp: Requested): void => {
   }
 };
 
+// A `NICK` of the Owner's went out: Self's nick is theirs for the rest of the Session.
+const chose = (run: Run): void => {
+  updateOpen(run, (open) =>
+    open.presence._tag === "Session"
+      ? { ...open, presence: { ...open.presence, chosen: true } }
+      : open
+  );
+};
+
 // An `AWAY` went out with a message, or `null` for none: a `306` confirms it.
 const asked = (run: Run, message: string | null): void => {
   updateOpen(run, (open) => ({ ...open, asked: message }));
@@ -732,6 +741,11 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
       return;
     }
 
+    // Whatever Line of the Owner's changes Self's nick makes the nick theirs.
+    if (line.command === "NICK") {
+      chose(run);
+    }
+
     if (message !== undefined) {
       asked(run, message);
     }
@@ -775,11 +789,13 @@ const ties: ReadonlyMap<string, Tie> = new Map([
   ["441", { commands: new Set(["KICK", "MODE"]), params: [1, 2] }],
   // `443 <client> <nick> <channel>`
   ["443", { commands: new Set(["INVITE"]), params: [1, 2] }],
-  // `432`, `433`, `436`, and `437 <client> <nick>`
+  // `432`, `433`, `436`, `437`, and `438 <client> <nick>`: `438`, a change refused for
+  // coming too fast, is no RFC's, but many Ircds send it.
   ["432", nicks],
   ["433", nicks],
   ["436", nicks],
   ["437", nicks],
+  ["438", nicks],
 ]);
 
 // The Line at `index` with what an answer resolved: one target, at `target`, or with

@@ -89,6 +89,11 @@ type Presence =
       readonly away: Fact<{ readonly message: string } | null>;
       readonly keepalive: Keepalive;
       /**
+       * Whether the Owner has sent a `NICK` in this Session: from then Self's nick is theirs,
+       * and never taken back.
+       */
+      readonly chosen: boolean;
+      /**
        * While Channels wait on a service login, when they are joined anyway, or
        * `undefined` once they need not wait.
        */
@@ -144,8 +149,14 @@ type LinkPhase =
        */
       readonly modesQuery: ModesQuery | undefined;
       /**
-       * How many of the Owner's Lines awaiting an answer by their parameters, actions' and
-       * Lookups' alike, have been sent on this Connection: each takes the next as its
+       * The `NICK`s the Client sent of its own to take a nick back, whose answers have not
+       * come, oldest first, at most {@link maxReclaims}. The Ircd answers every `NICK`, so one
+       * lingers only until the Connection ends if nothing answers it.
+       */
+      readonly reclaims: readonly Reclaiming[];
+      /**
+       * How many Lines awaiting an answer by their parameters, the Owner's actions' and
+       * Lookups' and the Client's own asks for a nick alike, have been sent on this Connection: each takes the next as its
        * `order`, so a reply tied to neither by label goes to the one sent first.
        */
       readonly awaited: number;
@@ -220,6 +231,18 @@ export interface Acting {
 }
 
 /**
+ * A `NICK` the Client sent of its own to take a nick back, awaiting its answer. It takes
+ * an `order` as the Owner's Lines do, so whichever was sent first takes a reply that could
+ * answer either.
+ */
+export interface Reclaiming {
+  /** The nick asked for, as it was sent. */
+  readonly nick: string;
+  /** When it was sent among the Lines awaiting an answer on the Connection, as an action's `order` is. */
+  readonly order: number;
+}
+
+/**
  * A `MODE` query the Client sent of its own, awaiting its answer: a `324`, or an error
  * that names its Channel or its command. It takes an `order` as the Owner's Lines do, so
  * whichever was sent first takes a reply that could answer either.
@@ -286,6 +309,9 @@ export const maxLookupLines = 64;
 
 /** How many Lines of actions a Connection keeps awaiting an answer. */
 export const maxActing = 64;
+
+/** How many of the Client's own asks for a nick a Connection keeps awaiting an answer. */
+export const maxReclaims = 8;
 
 /** How many confirmed intents a Connection remembers. */
 export const maxConfirmed = 64;

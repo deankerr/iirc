@@ -168,6 +168,7 @@ export const begin = (run: Run): void => {
       offer: 0,
       realname: configuration.realname,
     },
+    reclaims: [],
     seam: freshSeam,
     users: new Map(),
   };
