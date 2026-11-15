@@ -16,7 +16,14 @@ import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
 import { paletteSections, pickEntry } from "../palette/atoms.ts";
 import { check, signInWithKey, signOut } from "../sign-in/atoms.ts";
-import { eventually, fakeDaemon, registryFor, run, theKey } from "../testing/fake-daemon.ts";
+import {
+  eventually,
+  fakeDaemon,
+  liberaConfiguration,
+  registryFor,
+  run,
+  theKey,
+} from "../testing/fake-daemon.ts";
 import { open, paned, sync, timelinesState } from "./atoms.ts";
 import { leavingState } from "./closing.ts";
 
@@ -436,6 +443,34 @@ describe("closing a Timeline from the sidebar", () => {
       listed: ["libera", "#iirc", "#other"],
       offered: "You are in #iirc. Leave it?",
       puts: 1,
+    });
+  });
+
+  it("leaves a joined Channel the Configuration does not want by parting it, never by an edit that would refuse it", async () => {
+    const fake = fakeDaemon();
+
+    // The Ircd put Self there, or Self joined it by hand: it is not among those saved.
+    fake.daemon.joined.set("libera", ["#iirc"]);
+    fake.daemon.configurations.set("libera", {
+      configuration: { ...liberaConfiguration, channels: [] },
+      sequence: 1,
+    });
+    await signedIn(undefined, fake);
+
+    await pressButton("More for #iirc");
+    await chooseFromMenu("Close");
+    await settled(() => document.querySelector('[role="alertdialog"]') !== null);
+    await pressButton("Leave");
+    await settled(() => document.querySelector('[role="alertdialog"]') === null);
+
+    expect({
+      acts: fake.daemon.acts.map((one) => one.action),
+      closes: fake.daemon.closes,
+      puts: fake.daemon.puts.length,
+    }).toStrictEqual({
+      acts: [{ _tag: "Part", channel: "#iirc", reason: null }],
+      closes: [{ network: "libera", target: "#iirc" }],
+      puts: 0,
     });
   });
 

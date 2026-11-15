@@ -1,5 +1,5 @@
 /**
- * The Owner's actions beyond saying: a topic, a kick, modes, an invite, a nick, away, a
+ * The Owner's actions beyond saying: a topic, a kick, a part, modes, an invite, a nick, away, a
  * CTCP request or `PING` to a User, and a Line written as text. Each is built only through `@iirc/protocol`'s builders, and
  * checked against what the Client knows of the Network, by `CHANTYPES`, `PREFIX`,
  * `CHANMODES`, `MODES`, `TARGMAX`, and the lengths ISUPPORT gives. One that cannot be
@@ -23,6 +23,7 @@ import {
   mode,
   nick,
   parse,
+  part,
   quote,
   topic,
   upperCaseAscii,
@@ -128,6 +129,9 @@ const inviteLines = (run: Run, { nick: name, channel }: Of<"Invite">) =>
   isChannel(run, channel) && isNick(run, name)
     ? one(run, invite(name, channel), [name, channel])
     : undefined;
+
+const partLines = (run: Run, { channel, reason }: Of<"Part">) =>
+  isChannel(run, channel) ? one(run, part(channel, reason ?? undefined), [channel]) : undefined;
 
 const nickLines = (run: Run, { nick: name }: Of<"Nick">) =>
   isNick(run, name) && within(run, "NICKLEN", name, rfcNickLength)
@@ -405,6 +409,10 @@ const plan = (
       return kickLines(run, action);
     }
 
+    case "Part": {
+      return partLines(run, action);
+    }
+
     case "Mode": {
       return modeLines(run, action);
     }
@@ -460,6 +468,10 @@ const attemptedOf = (action: Action): Attempted => {
       return { _tag: "Kick", channel: action.channel, nicks: action.nicks };
     }
 
+    case "Part": {
+      return { _tag: "Part", channel: action.channel };
+    }
+
     case "Mode": {
       const [modes = ""] = modeArgs(action.changes.map((change) => ({ ...change, param: null })));
 
@@ -509,7 +521,12 @@ const attemptedOf = (action: Action): Attempted => {
 const actionWhere = (run: Run, action: Action): ActionWhere => {
   let name: string | undefined;
 
-  if (action._tag === "Topic" || action._tag === "Kick" || action._tag === "Invite") {
+  if (
+    action._tag === "Topic" ||
+    action._tag === "Kick" ||
+    action._tag === "Invite" ||
+    action._tag === "Part"
+  ) {
     name = action.channel;
   } else if (action._tag === "Mode") {
     name = action.target;

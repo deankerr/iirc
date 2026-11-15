@@ -1,9 +1,11 @@
 import { NetworkId, Timeline } from "@iirc/api";
+import { NetworkConfiguration } from "@iirc/client/configuration";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { closeOf, initialLeaving, leaveOf, reduceLeaving } from "./closing.ts";
 import type { Leaving, LeavingEvent } from "./closing.ts";
+import type { Naming } from "./options.ts";
 
 const libera = Schema.decodeSync(NetworkId)("libera");
 
@@ -40,6 +42,22 @@ const folded = (events: readonly LeavingEvent[], from: Leaving = initialLeaving)
   return state;
 };
 
+const configurationOf = (...channels: readonly string[]) =>
+  Schema.decodeSync(NetworkConfiguration)({
+    answerCtcp: true,
+    channels: channels.map((name) => ({ name })),
+    declined: [],
+    enabled: true,
+    fallbackEncoding: "windows-1252",
+    ircds: [{ host: "irc.libera.chat", port: 6697, tls: true }],
+    login: { _tag: "None" },
+    nicks: ["dean"],
+    realname: "Dean",
+    username: "dean",
+  });
+
+const rfc: Naming = { casemapping: "rfc1459", chantypes: "#" };
+
 const offered: LeavingEvent = { _tag: "Offered", channel: "#iirc", network: libera };
 
 describe("closing a Timeline", () => {
@@ -64,18 +82,56 @@ describe("the offer to leave a Channel instead", () => {
   it("offers to leave it, and leaves it as `/part` with its name does, once", () => {
     const asked = folded([offered]);
     const sent = folded([{ _tag: "Sent" }], asked);
+    const saved = configurationOf("#iirc");
 
     expect({
       // An edit in flight is sent once, and holds the offer until it is answered.
-      again: leaveOf(sent),
-      asked: leaveOf(asked),
+      again: leaveOf(sent, saved, rfc),
+      asked: leaveOf(asked, saved, rfc),
       dismissed: folded([{ _tag: "Dismissed" }], sent)._tag,
       left: folded([{ _tag: "Answered", failure: undefined }], sent),
     }).toStrictEqual({
       again: undefined,
-      asked: { edit: { _tag: "Part", channels: ["#iirc"] }, network: libera },
+      asked: { _tag: "Configure", edit: { _tag: "Part", channels: ["#iirc"] }, network: libera },
       dismissed: "Offered",
       left: initialLeaving,
+    });
+  });
+
+  it("leaves a Channel the Configuration wants by the edit, saved with other case or not, and one it does not by parting it", () => {
+    const asked = folded([{ _tag: "Offered", channel: "#[Iirc]", network: libera }]);
+
+    const edit = {
+      _tag: "Configure",
+      edit: { _tag: "Part", channels: ["#[Iirc]"] },
+      network: libera,
+    };
+
+    expect({
+      // Folded as the Network folds them: `[` and `{` are one letter in rfc1459.
+      folded: leaveOf(asked, configurationOf("#{iirc}"), rfc),
+      // While no casemapping is known, names are compared exactly.
+      inexact: leaveOf(asked, configurationOf("#{iirc}"), {
+        casemapping: undefined,
+        chantypes: "#",
+      })?._tag,
+      none: leaveOf(asked, configurationOf(), rfc),
+      other: leaveOf(asked, configurationOf("#other"), rfc),
+      same: leaveOf(asked, configurationOf("#[Iirc]"), rfc),
+    }).toStrictEqual({
+      folded: edit,
+      inexact: "Act",
+      none: {
+        _tag: "Act",
+        action: { _tag: "Part", channel: "#[Iirc]", reason: null },
+        network: libera,
+      },
+      other: {
+        _tag: "Act",
+        action: { _tag: "Part", channel: "#[Iirc]", reason: null },
+        network: libera,
+      },
+      same: edit,
     });
   });
 

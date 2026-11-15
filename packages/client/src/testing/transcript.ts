@@ -690,6 +690,11 @@ const actionReaders: ReadonlyMap<string, (text: ActionText) => Action | undefine
   ["kick", readKick],
   ["mode", readMode],
   [
+    "part",
+    ({ words: [channel = "", ...more], trailing }) =>
+      channel === "" || more.length > 0 ? undefined : { _tag: "Part", channel, reason: trailing },
+  ],
+  [
     "nick",
     ({ words: [nick = "", ...more], trailing }) =>
       more.length > 0 || trailing !== null || nick === "" ? undefined : { _tag: "Nick", nick },
@@ -725,6 +730,12 @@ const writeAction = (action: Action): string => {
       const kicked = `kick ${action.channel} ${action.nicks.join(",")}`;
 
       return action.reason === null ? kicked : `${kicked} :${action.reason}`;
+    }
+
+    case "Part": {
+      const parted = `part ${action.channel}`;
+
+      return action.reason === null ? parted : `${parted} :${action.reason}`;
     }
 
     case "Invite": {

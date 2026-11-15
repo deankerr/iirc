@@ -684,6 +684,7 @@ describe("lines", () => {
         { _tag: "Rejected", reply: "401" }
       ),
       refused({ _tag: "Ping", nick: "peer" }, { _tag: "Unsent" }),
+      refused({ _tag: "Part", channel: "#iirc" }, { _tag: "Unsent" }),
     ];
 
     expect(
@@ -701,6 +702,7 @@ describe("lines", () => {
       ["Refused", "Your raw line was refused (\u202E1\u202C)"],
       ["Refused", "Your CTCP VERSION to <nobody> was refused (401)"],
       ["Refused", "Your PING of <peer> was not sent: its connection ended first"],
+      ["Refused", "Your leaving of #iirc was not sent: its connection ended first"],
     ]);
   });
 
@@ -721,12 +723,14 @@ describe("lines", () => {
       attemptedText(requested({ _tag: "Away", message: "" })),
       attemptedText(requested({ _tag: "Ctcp", args: "secret", command: "finger", nick: "peer" })),
       attemptedText(requested({ _tag: "Ping", nick: "peer" })),
+      attemptedText(requested({ _tag: "Part", channel: "#iirc", reason: "secret" })),
     ]).toStrictEqual([
       "Your mode change +ov-k on #iirc",
       "Your raw WHOIS",
       "Marking you back",
       "Your CTCP FINGER to peer",
       "Your PING of peer",
+      "Your leaving of #iirc",
     ]);
   });
 });

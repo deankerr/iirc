@@ -201,19 +201,14 @@ export const refresh = (registry: AtomRegistry.AtomRegistry) =>
   }).pipe(Effect.ignore);
 
 /**
- * What the Daemon reports of a Network that bears on its Channels' names, read only for an
- * edit of its Channels: the casemapping an Ircd declared, and `CHANTYPES`. A read that
- * fails is taken as knowing neither, so names are compared exactly and none is prefixed.
+ * What the Daemon reports of a Network that bears on its Channels' names: the casemapping
+ * an Ircd declared, and `CHANTYPES`. A read that fails is taken as knowing neither, so
+ * names are compared exactly and none is prefixed.
  * @param network - The Network.
- * @param edit - The edit.
  * @returns What it reports.
  */
-const namingOf = (network: NetworkId, edit: Edit) =>
+const reportedNaming = (network: NetworkId) =>
   Effect.gen(function* () {
-    if (edit._tag !== "Join" && edit._tag !== "Part" && edit._tag !== "PartTimeline") {
-      return unknownNaming;
-    }
-
     const client = yield* DaemonClient;
     const known = yield* client.networks.known({ params: { network } });
 
@@ -224,6 +219,32 @@ const namingOf = (network: NetworkId, edit: Edit) =>
 
     return naming;
   }).pipe(Effect.orElseSucceed(() => unknownNaming));
+
+/**
+ * What the Daemon reports of a Network, read only for an edit of its Channels.
+ * @param network - The Network.
+ * @param edit - The edit.
+ * @returns What it reports.
+ */
+const namingOf = (network: NetworkId, edit: Edit) =>
+  edit._tag === "Join" || edit._tag === "Part" || edit._tag === "PartTimeline"
+    ? reportedNaming(network)
+    : Effect.succeed(unknownNaming);
+
+/**
+ * A Network's Configuration in force, read into the view, and what the Daemon reports of
+ * its Channels' names, which tell whether a Channel is among those it wants.
+ * @param registry - The registry.
+ * @param network - The Network.
+ * @returns The Configuration and the naming, or why they were not read, in words.
+ */
+export const readChannels = (registry: AtomRegistry.AtomRegistry, network: NetworkId) =>
+  Effect.gen(function* () {
+    const read = yield* readConfiguration(registry, network);
+    const naming = yield* reportedNaming(network);
+
+    return { _tag: "Read", configuration: read.configuration, naming } as const;
+  }).pipe(Effect.catch((error) => Effect.succeed(failedWith(error._tag, network))));
 
 /** A conflict: the Configuration in force was not the one the change was made from. */
 const conflict = { _tag: "Conflict" } as const;

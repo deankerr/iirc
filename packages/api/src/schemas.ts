@@ -188,6 +188,12 @@ export const ActionRequest = Schema.TaggedUnion({
   Mode: { changes: Schema.NonEmptyArray(ModeRequest), target: OwnerName },
   /** Change Self's nick for this Session. */
   Nick: { nick: OwnerName },
+  /**
+   * Part one Channel, with a reason or none. It leaves the Configuration alone, so a
+   * Channel the Configuration wants is joined again: that one is parted by editing the
+   * Configuration instead.
+   */
+  Part: { channel: OwnerName, reason: Schema.NullOr(SayText) },
   /** Send a CTCP `PING` to a nick, whose reply's Activity tells the round trip. */
   Ping: { nick: OwnerName },
   /** A Line written as text, sent as it reads, as `/quote` sends it. */
@@ -637,6 +643,7 @@ export const Attempted = Schema.TaggedUnion({
   Kick: { channel: Untrusted, nicks: Schema.Array(Untrusted) },
   Mode: { modes: Untrusted, target: Untrusted },
   Nick: { nick: Untrusted },
+  Part: { channel: Untrusted },
   Ping: { nick: Untrusted },
   Raw: { command: Schema.NullOr(Untrusted) },
   Topic: { channel: Untrusted },

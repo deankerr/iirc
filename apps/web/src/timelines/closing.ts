@@ -9,15 +9,16 @@
  * @packageDocumentation
  */
 import { initialLeaving, leaveOf, reduceLeaving } from "@iirc/frontend/closing";
-import type { Leaving, LeavingEvent } from "@iirc/frontend/closing";
+import type { Leave, Leaving, LeavingEvent } from "@iirc/frontend/closing";
 import type { CloseTimeline } from "@iirc/frontend/commands";
 import { Effect } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
 import { DaemonClient } from "../app/daemon-client.ts";
+import { decodeIntent, IntentNames } from "../app/intent-names.ts";
 import { runtime } from "../app/runtime.ts";
-import { configure, signedOut } from "../options/atoms.ts";
+import { configure, readChannels, signedOut } from "../options/atoms.ts";
 import type { Outcome } from "../options/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 
@@ -137,23 +138,105 @@ export const dismissLeaving = Atom.fnSync((_: undefined, get) => {
 }).pipe(Atom.keepAlive);
 
 /**
- * Leaves the Channel offered, once, as `/part` with its name does, and takes what came of
- * it. Leaving does not close it: the part is Activity in its Timeline, which would show it
- * again, so the Owner closes it once Self has left.
+ * Why leaving was not done, in words, from its error's tag, never its text.
+ * @param leave - What leaves the Channel.
+ * @param tag - The error's tag.
+ * @returns What it came to.
+ */
+const unleftWith = (leave: Extract<Leave, { readonly _tag: "Act" }>, tag: string): Outcome => {
+  if (tag === "Unauthorized") {
+    return { _tag: "SignedOut" };
+  }
+
+  const channel = leave.action._tag === "Part" ? leave.action.channel : "the Channel";
+
+  return {
+    _tag: "NotDone",
+    message:
+      tag === "UnknownNetwork"
+        ? `The Daemon has no Network ${leave.network}, so ${channel} was not left.`
+        : `The Daemon did not answer, so whether ${channel} was left is unknown. Check before leaving it again.`,
+  };
+};
+
+/**
+ * Parts a Channel with the `Part` action, under an intent the runtime names, and reads what
+ * the Client did with it in that step.
+ * @param leave - The action.
+ * @returns What it came to, in words when it was not done.
+ */
+const parted = (leave: Extract<Leave, { readonly _tag: "Act" }>) =>
+  Effect.gen(function* () {
+    const client = yield* DaemonClient;
+    const name = yield* IntentNames;
+
+    const answer = yield* client.networks.act({
+      params: { network: leave.network },
+      payload: { action: leave.action, intent: decodeIntent(name()) },
+    });
+
+    if (answer._tag === "Acted") {
+      return { _tag: "Done" } satisfies Outcome;
+    }
+
+    return {
+      _tag: "NotDone",
+      message:
+        answer.reason._tag === "Offline"
+          ? `${leave.network} is not connected, so nothing was sent. Leave it once it is.`
+          : "The Channel's name could not be sent as it is, so it was not left.",
+    } satisfies Outcome;
+  }).pipe(Effect.catch((error) => Effect.succeed(unleftWith(leave, error._tag))));
+
+/**
+ * Leaves the Channel offered: as `/part` with its name does, by editing the Network's
+ * Configuration, when it wants the Channel, or it would be joined again, and otherwise by
+ * parting it and leaving the Configuration alone, since an edit refuses a Channel that is
+ * not among those wanted.
+ * @param registry - The registry.
+ * @param offered - The offer.
+ * @returns What it came to, in words when it was not done.
+ */
+const leaveOffered = (
+  registry: AtomRegistry.AtomRegistry,
+  offered: Extract<Leaving, { readonly _tag: "Offered" }>
+) =>
+  Effect.gen(function* () {
+    const read = yield* readChannels(registry, offered.network);
+
+    if (read._tag !== "Read") {
+      return read;
+    }
+
+    const leave = leaveOf(offered, read.configuration, read.naming);
+
+    if (leave === undefined) {
+      return { _tag: "Done" } satisfies Outcome;
+    }
+
+    return leave._tag === "Configure"
+      ? yield* configure(registry, leave.network, leave.edit)
+      : yield* parted(leave);
+  });
+
+/**
+ * Leaves the Channel offered, once, and takes what came of it. Leaving does not close it:
+ * the part is Activity in its Timeline, which would show it again, so the Owner closes it
+ * once Self has left.
  */
 export const confirmLeaving = runtime
   .fn((_: undefined, get) =>
     Effect.gen(function* () {
       const { registry } = get;
-      const leave = leaveOf(registry.get(leavingState));
+      const offered = registry.get(leavingState);
 
-      if (leave === undefined) {
+      if (offered._tag !== "Offered" || offered.sending) {
         return;
       }
 
       happened(registry, { _tag: "Sent" });
 
-      const outcome = yield* configure(registry, leave.network, leave.edit);
+      const outcome = yield* leaveOffered(registry, offered);
 
       happened(registry, {
         _tag: "Answered",

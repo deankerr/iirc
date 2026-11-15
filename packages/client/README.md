@@ -41,7 +41,7 @@ Each input carries `at`, the instant it happened as the Runtime saw it.
 | `Started` | Runtime | The Runtime has started. A Connection the Client believed open is over. |
 | `Configured` | Owner | The Network's whole Configuration. Joining, parting, and quitting are changes to it. |
 | `Say` | Owner | Say something to a Target, with an intent id from the Runtime. |
-| `Act` | Owner | Act on the Network, with an intent id: set a topic, kick, change modes, invite, change Self's nick, be away or back, send a CTCP request or a `PING` to a User, or send a Line written as text. |
+| `Act` | Owner | Act on the Network, with an intent id: set a topic, kick, part a Channel Self is in (which leaves the Configuration alone, so a Channel it wants is joined again), change modes, invite, change Self's nick, be away or back, send a CTCP request or a `PING` to a User, or send a Line written as text. |
 | `Look` | Owner | Look something up, with an intent id: `Whois { nick }` or `Whowas { nick }`. |
 | `Retry` | Owner | Try connecting now, cutting a wait short. |
 | `Removed` | Owner | The Owner removed the Network, keeping its Timelines readable or not, as `keep` says. |

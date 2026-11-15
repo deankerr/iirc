@@ -164,6 +164,7 @@ const Attempted = Schema.TaggedUnion({
   Kick: { channel: Schema.String, nicks: Schema.Array(Schema.String) },
   Mode: { modes: Schema.String, target: Schema.String },
   Nick: { nick: Schema.String },
+  Part: { channel: Schema.String },
   Ping: { nick: Schema.String },
   Raw: { command: Schema.NullOr(Schema.String) },
   Topic: { channel: Schema.String },

@@ -480,6 +480,15 @@ const attempted = (source: Attempted): WireAttempted => {
       return wire;
     }
 
+    case "Part": {
+      const wire: Case<Attempted, WireAttempted, "Part"> = {
+        _tag: "Part",
+        channel: source.channel,
+      };
+
+      return wire;
+    }
+
     case "Ctcp": {
       const wire: Case<Attempted, WireAttempted, "Ctcp"> = {
         _tag: "Ctcp",

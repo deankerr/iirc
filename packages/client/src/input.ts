@@ -74,6 +74,12 @@ export const Action = Schema.TaggedUnion({
   /** Change Self's nick for this Session. */
   Nick: { nick: Schema.String },
   /**
+   * Part one Channel, with a reason or none. It leaves the Configuration alone, so a
+   * Channel the Configuration wants is joined again: that one is parted by editing the
+   * Configuration instead.
+   */
+  Part: { channel: Schema.String, reason: Schema.NullOr(Schema.String) },
+  /**
    * Send a CTCP `PING` to a User, with a token the Client chooses, so the reply's round
    * trip can be worked out.
    */

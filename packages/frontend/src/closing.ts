@@ -6,10 +6,11 @@
  *
  * @packageDocumentation
  */
-import type { NetworkId, Timeline } from "@iirc/api";
+import type { ActionRequest, NetworkId, Timeline } from "@iirc/api";
 
 import type { CloseTimeline } from "./commands.ts";
-import type { Edit } from "./options.ts";
+import { wantsChannel } from "./options.ts";
+import type { Configuration, Edit, Naming } from "./options.ts";
 
 /**
  * What closes a Timeline from its row: its Target, a Channel's name or a Direct Message
@@ -107,17 +108,38 @@ export const reduceLeaving = (state: Leaving, event: LeavingEvent): Leaving => {
 };
 
 /**
- * The edit that leaves the Channel offered, as `/part` with its name does: it taken from
- * the Channels wanted in its Network's Configuration.
+ * How the Channel offered is left: by the edit `/part` sends, for a Channel the Network's
+ * Configuration wants, since the Client would join it again if only parted, or, for one it
+ * does not, which the Ircd put Self in or Self joined by hand, by the action that parts it
+ * and leaves the Configuration alone.
+ */
+export type Leave =
+  | { readonly _tag: "Configure"; readonly network: NetworkId; readonly edit: Edit }
+  | { readonly _tag: "Act"; readonly network: NetworkId; readonly action: ActionRequest };
+
+/**
+ * What leaves the Channel offered.
  * @param state - The offer.
- * @returns The Network and the edit, or none when nothing is offered or one is in flight.
+ * @param configuration - The offer's Network's Configuration in force.
+ * @param naming - What the Daemon reports of the Network, which Channels' names are
+ * compared by.
+ * @returns How to leave it, or none when nothing is offered or one is in flight.
  */
 export const leaveOf = (
-  state: Leaving
-): { readonly network: NetworkId; readonly edit: Edit } | undefined =>
-  state._tag === "Offered" && !state.sending
-    ? { edit: { _tag: "Part", channels: [state.channel] }, network: state.network }
-    : undefined;
+  state: Leaving,
+  configuration: Configuration,
+  naming: Naming
+): Leave | undefined => {
+  if (state._tag !== "Offered" || state.sending) {
+    return undefined;
+  }
+
+  const { channel, network } = state;
+
+  return wantsChannel(configuration, channel, naming)
+    ? { _tag: "Configure", edit: { _tag: "Part", channels: [channel] }, network }
+    : { _tag: "Act", action: { _tag: "Part", channel, reason: null }, network };
+};
 
 /**
  * What the Owner is offered, in words.
@@ -126,6 +148,6 @@ export const leaveOf = (
  * @returns The title and the body.
  */
 export const offerOf = (channel: string, network: NetworkId) => ({
-  body: `A Channel you are in stays in the sidebar. Leaving parts it and takes it from ${network}'s Channels. Once you have left, it can be closed.`,
+  body: `A Channel you are in stays in the sidebar. Leaving parts it, and takes it from ${network}'s Channels if it is among them. Once you have left, it can be closed.`,
   title: `You are in ${channel}. Leave it?`,
 });

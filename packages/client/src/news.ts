@@ -208,6 +208,7 @@ export type RefusedReason =
  * - `Raw`: a Line written as text, by its command, or `null` when it did not parse.
  * - `Ctcp`: a CTCP request to a nick, by its command, upper-cased.
  * - `Ping`: a CTCP `PING` to a nick.
+ * - `Part`: one Channel.
  */
 export type Attempted =
   | { readonly _tag: "Topic"; readonly channel: string }
@@ -218,7 +219,8 @@ export type Attempted =
   | { readonly _tag: "Away"; readonly away: boolean }
   | { readonly _tag: "Raw"; readonly command: string | null }
   | { readonly _tag: "Ctcp"; readonly nick: string; readonly command: string }
-  | { readonly _tag: "Ping"; readonly nick: string };
+  | { readonly _tag: "Ping"; readonly nick: string }
+  | { readonly _tag: "Part"; readonly channel: string };
 
 /**
  * Where an action of the Owner's belongs, to show its refusal: the Channel it was about,

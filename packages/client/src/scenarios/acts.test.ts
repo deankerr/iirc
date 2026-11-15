@@ -42,7 +42,9 @@ describe("an action while offline", () => {
         "!! nick other",
         "?? refused i5 Offline nick=other in=network",
         "!! quote WHOIS peer",
-        "?? refused i6 Offline raw=WHOIS in=network"
+        "?? refused i6 Offline raw=WHOIS in=network",
+        "!! part #iirc :bye",
+        "?? refused i7 Offline part=#iirc in=network"
       ),
     ]);
 
@@ -197,6 +199,32 @@ describe("a topic", () => {
     });
 
     expect(refusals(run)).toHaveLength(1);
+  });
+});
+
+describe("a part", () => {
+  it("parts one Channel, with a reason or none, as a Line built from its name", () => {
+    played([
+      ...inChannel(),
+      lines("!! part #iirc", ">> PART #iirc"),
+      lines("!! part #iirc :see you", ">> PART #iirc :see you"),
+    ]);
+
+    expect.assertions(0);
+  });
+
+  it("is refused for a name that is not a Channel's, or for more than one Channel", () => {
+    played([
+      ...inChannel(),
+      lines(
+        "!! part peer",
+        "?? refused i1 Unsendable part=peer in=network",
+        "!! part #a,#b",
+        "?? refused i2 Unsendable part=#a,#b in=network"
+      ),
+    ]);
+
+    expect.assertions(0);
   });
 });
 
