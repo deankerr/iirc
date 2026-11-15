@@ -199,7 +199,7 @@ describe("the options view, under store and uploads", () => {
         "uploads.publicUrl",
         "unset",
         "unset",
-        "The base of every Upload's link, an http or https URL with no trailing /, such as https://files.example.com.",
+        "The base of every Upload's link, an http or https URL, such as https://files.example.com, kept without a trailing /.",
       ],
     ]);
   });

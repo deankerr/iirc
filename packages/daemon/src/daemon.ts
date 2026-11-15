@@ -121,7 +121,7 @@ const runtimeFirstToStop = (options: DaemonOptions) =>
       const runtime = layerRuntime(client, {
         hangupDrain: options.hangupDrain,
         pacing: options.pacing,
-        spared: owner.credentialsNamed,
+        spared: owner.spared,
         stopTimeout: options.stopTimeout,
       });
 

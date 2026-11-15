@@ -278,7 +278,10 @@ describe("removing a Network", () => {
         }
 
         const outside = yield* Ref.make<ReadonlySet<CredentialName>>(new Set());
-        const { runtime } = yield* startRuntime(world, client, { spared: Ref.get(outside) });
+
+        const { runtime } = yield* startRuntime(world, client, {
+          spared: (decide) => Effect.flatMap(Ref.get(outside), decide),
+        });
 
         yield* runtime.configure(
           libera,
@@ -732,7 +735,7 @@ describe("a removal carried through", () => {
         );
         yield* Effect.flip(first.runtime.remove(libera, { keep: false }));
         yield* first.close;
-        yield* startRuntime(world, client, { spared: Effect.succeed(new Set([name("a")])) });
+        yield* startRuntime(world, client, { spared: (decide) => decide(new Set([name("a")])) });
 
         return {
           outline: (yield* outline(world.journal)).at(-1),

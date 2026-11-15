@@ -877,9 +877,9 @@ describe("the API over a real server", () => {
           ...json('{"value":"ftp://files.example.com"}'),
         });
 
-        const trailing = yield* served.request("/api/options/uploads.publicUrl", {
+        const withQuery = yield* served.request("/api/options/uploads.publicUrl", {
           method: "PUT",
-          ...json('{"value":"https://files.example.com/"}'),
+          ...json('{"value":"https://files.example.com/?x=1"}'),
         });
 
         const unset = yield* served.request("/api/options/store.s3.bucket?ifSequence=2", {
@@ -904,7 +904,6 @@ describe("the API over a real server", () => {
           read: [read.status, yield* textOf(read)],
           resumed: changed(resumed),
           stale: [stale.status, yield* textOf(stale)],
-          trailing: [trailing.status, yield* textOf(trailing)],
           ui: (yield* textOf(ui)).endsWith('"sequence":0}'),
           uiByName: [
             uiByName.status,
@@ -915,6 +914,7 @@ describe("the API over a real server", () => {
             (yield* textOf(unknown)).includes('"path":["params","option"]'),
           ],
           unset: [unset.status, yield* textOf(unset)],
+          withQuery: [withQuery.status, yield* textOf(withQuery)],
         };
       })
     );
@@ -943,11 +943,11 @@ describe("the API over a real server", () => {
         },
       ],
       stale: [409, '{"_tag":"OptionsChanged","sequence":2}'],
-      trailing: refused("uploads.publicUrl"),
       ui: true,
       uiByName: [400, true],
       unknown: [400, true],
       unset: [200, '{"sequence":3}'],
+      withQuery: refused("uploads.publicUrl"),
     });
   });
 

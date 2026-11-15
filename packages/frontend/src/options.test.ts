@@ -1717,7 +1717,8 @@ describe("the options under store and uploads", () => {
       credential: parseOwnerText("store.s3.secretAccessKey", "hunter2"),
       days: parseOwnerText("uploads.expireAfter", " 30 "),
       daysTooMany: parseOwnerText("uploads.expireAfter", "36501"),
-      endpointSlash: parseOwnerText("store.s3.endpoint", "https://s3.example.com/"),
+      endpointQuery: parseOwnerText("store.s3.endpoint", "https://s3.example.com/?x=1"),
+      endpointSlash: parseOwnerText("store.s3.endpoint", "https://S3.example.com:443/"),
       listen: parseOwnerText("uploads.listen", "127.0.0.1:7668"),
       listenBad: parseOwnerText("uploads.listen", "localhost"),
       maxSize: parseOwnerText("uploads.maxSize", "1048576"),
@@ -1740,11 +1741,12 @@ describe("the options under store and uploads", () => {
         _tag: "Invalid",
         message: 'uploads.expireAfter: Give a whole number from 1 to 36500, not "36501".',
       },
-      endpointSlash: {
+      endpointQuery: {
         _tag: "Invalid",
         message:
-          "store.s3.endpoint must be an http or https URL, with no trailing /, query, or fragment.",
+          "store.s3.endpoint must be an absolute http or https URL, such as https://files.example.com/uploads, with no user, query, or fragment.",
       },
+      endpointSlash: { _tag: "Parsed", value: "https://s3.example.com" },
       listen: { _tag: "Parsed", value: "127.0.0.1:7668" },
       listenBad: {
         _tag: "Invalid",

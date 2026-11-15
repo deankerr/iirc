@@ -129,9 +129,7 @@ export const layerWorld = (world: World, dataDir: string) =>
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
       Layer.provideMerge(
         Layer.unwrap(
-          OwnerConfiguration.useSync((owner) =>
-            layerRuntime(client, { spared: owner.credentialsNamed })
-          )
+          OwnerConfiguration.useSync((owner) => layerRuntime(client, { spared: owner.spared }))
         ).pipe(
           Layer.provideMerge(layerOwnerConfiguration),
           Layer.provideMerge(

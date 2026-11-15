@@ -16,6 +16,7 @@ import {
 } from "@iirc/api";
 import type { OwnerInForce, OwnerOptionValue } from "@iirc/api";
 import type { CredentialName } from "@iirc/protocol/line";
+import type { Spared } from "@iirc/runtime";
 import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed, Sequence } from "@iirc/runtime/journal";
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream, SubscriptionRef } from "effect";
@@ -114,6 +115,12 @@ export class OwnerConfiguration extends Context.Service<
     readonly changes: Stream.Stream<OwnerInForce>;
     /** The Credentials the options in force name now, such as the bucket's keys. */
     readonly credentialsNamed: Effect.Effect<ReadonlySet<CredentialName>>;
+    /**
+     * Runs `decide` with the Credentials the options in force name, while no change of an
+     * option is made, as the Runtime's `spared` takes it: a change waits for `decide` to
+     * finish, and one made before it began is named in what it reads.
+     */
+    readonly spared: Spared;
   }
 >()("@iirc/daemon/OwnerConfiguration") {}
 
@@ -159,11 +166,20 @@ export const layerOwnerConfiguration = Layer.effect(OwnerConfiguration)(
         )
       );
 
+    // The change's own turn, so a removal deciding which Credentials to forget, and
+    // forgetting them, and a change naming one, cannot interleave. Its permit is the last
+    // the Runtime takes, and nothing in a turn takes another.
+    const spared: Spared = (decide) =>
+      turn.withPermit(
+        inForce.pipe(Effect.flatMap(({ options }) => decide(credentialsNamed(options))))
+      );
+
     return {
       change,
       changes: SubscriptionRef.changes(held).pipe(Stream.map(ownerInForceOf)),
       credentialsNamed: inForce.pipe(Effect.map(({ options }) => credentialsNamed(options))),
       inForce,
+      spared,
     };
   })
 );

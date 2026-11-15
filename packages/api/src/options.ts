@@ -10,59 +10,150 @@
  * @packageDocumentation
  */
 import { CredentialName } from "@iirc/protocol/line";
-import { Schema, SchemaAST, Struct } from "effect";
+import { Effect, Schema, SchemaAST, SchemaIssue, SchemaTransformation, Struct } from "effect";
 
 /** What a Frontend reads of a URL the options name, where it is not the right kind of URL. */
-const httpUrlMessage = "must be an http or https URL, with no trailing /, query, or fragment";
+const httpUrlMessage =
+  "must be an absolute http or https URL, such as https://files.example.com/uploads, with no user, query, or fragment";
 
-/**
- * Whether a text is an absolute `http` or `https` URL, with a host, and with no user, no
- * trailing `/`, no query, and no fragment, written as the URL itself would write it, so a
- * path may be joined to it with `/` and two that look alike are alike.
- * @param text - The text.
- * @returns Whether it is one.
- */
-const isHttpUrl = (text: string): boolean => {
-  const url = URL.parse(text);
+// A control character or a space, which the URL parser would strip or encode away.
+const hasControlOrSpace = (text: string): boolean => {
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.codePointAt(index) ?? 0;
 
-  return (
-    url !== null &&
-    (url.protocol === "http:" || url.protocol === "https:") &&
-    url.host !== "" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.search === "" &&
-    url.hash === "" &&
-    !text.endsWith("/") &&
-    (url.pathname === "/" ? url.origin : `${url.origin}${url.pathname}`) === text
-  );
+    if (code <= 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 /**
- * An absolute `http` or `https` URL with no trailing `/`, query, or fragment, such as
- * `https://files.example.com`, in the form the URL itself writes, so a path joins it with
- * `/`.
+ * Reads an absolute `http` or `https` URL, with a host, and with no user, no query, and no
+ * fragment, in the form the URL itself writes it: its origin, which has the host in lower
+ * case and the default port dropped, then its path with no trailing `/`, so a path may be
+ * joined to it with `/` and two spellings of one URL are one text.
+ * @param text - The text.
+ * @returns The URL in that form, or none if it is not one.
  */
-export const HttpUrl = Schema.String.check(
-  Schema.makeFilter((text: string) => isHttpUrl(text) || httpUrlMessage)
+const httpUrlOf = (text: string): string | undefined => {
+  if (text.includes("?") || text.includes("#") || hasControlOrSpace(text)) {
+    return undefined;
+  }
+
+  const url = URL.parse(text);
+
+  if (
+    url === null ||
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.host === "" ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    return undefined;
+  }
+
+  return `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
+};
+
+const isHttpUrlForm = (text: string): boolean => httpUrlOf(text) === text;
+
+/**
+ * An absolute `http` or `https` URL with no user, query, or fragment, such as
+ * `https://files.example.com/uploads`. Any spelling of one is read as the URL itself writes
+ * it, with the host in lower case, the default port dropped, and no trailing `/`, so a path
+ * joins it with `/`, and what is held and journaled is the same for every spelling.
+ */
+export const HttpUrl = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.String.check(Schema.makeFilter((text: string) => isHttpUrlForm(text) || httpUrlMessage)),
+    SchemaTransformation.transformEffect<string, string>({
+      decode: (text, options) => {
+        const url = httpUrlOf(text);
+
+        return url === undefined
+          ? Effect.fail(new SchemaIssue.InvalidValue({ message: httpUrlMessage }, text, options))
+          : Effect.succeed(url);
+      },
+      encode: (url) => Effect.succeed(url),
+    })
+  )
 ).annotate({ identifier: "HttpUrl" });
 
 /** The decoded form of {@link HttpUrl}. */
 export type HttpUrl = typeof HttpUrl.Type;
 
-// A host as a name or an IPv4 address, or an IPv6 address in brackets, then a port from 1
-// to 65535 with no leading zero.
-const listenPattern =
-  /^(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?):(?:[1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$/u;
+const isLabel = (label: string): boolean =>
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/u.test(label);
+
+const isIpv4 = (host: string): boolean => {
+  const parts = host.split(".");
+
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^(?:0|[1-9]\d{0,2})$/u.test(part) && Number(part) <= 255)
+  );
+};
 
 /**
- * Where a listener listens, as `host:port`: a host's name or IPv4 address, or an IPv6
- * address in brackets, and a port from 1 to 65535, such as `127.0.0.1:7668`.
+ * Whether a host is a domain name, with at most one trailing dot, or an IPv4 address in
+ * dotted quads, or an IPv6 address in brackets. Nothing is looked up.
+ * @param host - The host.
+ * @returns Whether it is one.
+ */
+const isListenHost = (host: string): boolean => {
+  if (host.startsWith("[")) {
+    const inside = host.slice(1, -1);
+
+    return (
+      host.endsWith("]") &&
+      /^[0-9A-Fa-f:.]+$/u.test(inside) &&
+      inside.includes(":") &&
+      URL.canParse(`http://[${inside}]/`)
+    );
+  }
+
+  const name = host.endsWith(".") ? host.slice(0, -1) : host;
+  const labels = name.split(".");
+
+  // A last label of digits only is an address, never a name.
+  if (/^\d+$/u.test(labels.at(-1) ?? "")) {
+    return isIpv4(name);
+  }
+
+  return name.length <= 253 && labels.every(isLabel);
+};
+
+/**
+ * Whether a text is `host:port`: a host as {@link isListenHost} says, and a port from 1 to
+ * 65535 with no leading zero.
+ * @param text - The text.
+ * @returns Whether it is one.
+ */
+const isListenAddress = (text: string): boolean => {
+  const colon = text.lastIndexOf(":");
+  const port = text.slice(colon + 1);
+
+  return (
+    colon > 0 &&
+    /^[1-9]\d{0,4}$/u.test(port) &&
+    Number(port) <= 65_535 &&
+    isListenHost(text.slice(0, colon))
+  );
+};
+
+/**
+ * Where a listener listens, as `host:port`: a domain name, which may end with one dot, or an
+ * IPv4 address, or an IPv6 address in brackets, and a port from 1 to 65535, such as
+ * `127.0.0.1:7668`.
  */
 export const ListenAddress = Schema.String.check(
-  Schema.isPattern(listenPattern, {
-    message: "must be host:port, such as 127.0.0.1:7668, with an IPv6 host in brackets",
-  })
+  Schema.makeFilter(
+    (text: string) =>
+      isListenAddress(text) ||
+      "must be host:port, such as 127.0.0.1:7668, with an IPv6 host in brackets"
+  )
 ).annotate({ identifier: "ListenAddress" });
 
 /** The decoded form of {@link ListenAddress}. */
@@ -164,7 +255,7 @@ export const OwnerOptions = Schema.Struct({
   "uploads.publicUrl": Schema.optionalKey(
     HttpUrl.annotate({
       description:
-        "The base of every Upload's link, an http or https URL with no trailing /, such as https://files.example.com.",
+        "The base of every Upload's link, an http or https URL, such as https://files.example.com, kept without a trailing /.",
     })
   ),
 });

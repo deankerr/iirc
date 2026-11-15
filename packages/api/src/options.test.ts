@@ -12,7 +12,15 @@ import {
   ownerValueKept,
 } from "./options.ts";
 
-const takesUrl = Schema.is(HttpUrl);
+const all = <T>(length: number, value: T): T[] => Array.from({ length }, () => value);
+
+const readUrl = Schema.decodeUnknownOption(HttpUrl);
+
+const readsUrl = (text: string): string | undefined => {
+  const read = readUrl(text);
+
+  return read._tag === "Some" ? read.value : undefined;
+};
 
 const takesListen = Schema.is(ListenAddress);
 
@@ -63,20 +71,65 @@ describe("the options under store and uploads", () => {
     ]).toStrictEqual([1, undefined, undefined, undefined, undefined, 30, undefined]);
   });
 
-  it("takes an http or https URL with nothing after its path, in the form the URL writes", () => {
+  it("reads any spelling of an http or https URL as the one form the URL writes, with its path", () => {
     expect(
       [
         "https://files.example.com",
-        "http://127.0.0.1:9000/bucket/links",
         "https://files.example.com/",
+        "HTTPS://Files.Example.com",
+        "https://files.example.com:443",
+        "https://files.example.com:443/",
+        "https://s3.us-east-1.amazonaws.com/",
+        "http://localhost:9000/",
+        "http://localhost:80/",
+        "https://files.example.com/uploads/",
+        "https://files.example.com/uploads",
+        "http://127.0.0.1:9000/bucket/links/",
+        "https://files.example.com/a/./b/../c",
+      ].map((each) => readsUrl(each))
+    ).toStrictEqual([
+      "https://files.example.com",
+      "https://files.example.com",
+      "https://files.example.com",
+      "https://files.example.com",
+      "https://files.example.com",
+      "https://s3.us-east-1.amazonaws.com",
+      "http://localhost:9000",
+      "http://localhost",
+      "https://files.example.com/uploads",
+      "https://files.example.com/uploads",
+      "http://127.0.0.1:9000/bucket/links",
+      "https://files.example.com/a/c",
+    ]);
+  });
+
+  it("writes a URL it read as it was read, so what is journaled is what the Schema reads again", () => {
+    const written = ["https://x.example:443", "https://files.example.com/uploads/"].map((each) =>
+      Schema.encodeSync(HttpUrl)(Schema.decodeSync(HttpUrl)(each))
+    );
+
+    expect([written, written.map((each) => readsUrl(each))]).toStrictEqual([
+      ["https://x.example", "https://files.example.com/uploads"],
+      ["https://x.example", "https://files.example.com/uploads"],
+    ]);
+  });
+
+  it("refuses a URL of another scheme, with a user, a query, or a fragment, or not absolute", () => {
+    expect(
+      [
         "ftp://files.example.com",
         "https://files.example.com?x=1",
+        "https://files.example.com/?",
         "https://files.example.com#top",
         "https://user:pass@files.example.com",
-        "HTTPS://Files.Example.com",
+        "https://user@files.example.com",
         "files.example.com",
-      ].map((each) => takesUrl(each))
-    ).toStrictEqual([true, true, false, false, false, false, false, false, false]);
+        "/uploads",
+        "https://",
+        "https://files.example.com /x",
+        "",
+      ].map((each) => readsUrl(each))
+    ).toStrictEqual(all(11, undefined));
   });
 
   it("takes a listener's address as host:port, with an IPv6 host in brackets", () => {
@@ -84,14 +137,45 @@ describe("the options under store and uploads", () => {
       [
         "127.0.0.1:7668",
         "localhost:80",
+        "localhost.:7668",
         "[::1]:7668",
+        "[2001:db8::1]:443",
+        "[::ffff:1.2.3.4]:80",
+        "0.0.0.0:80",
+        "uploads.example.com:443",
         "files.example.com:65535",
+        "a-b.example:1",
+      ].map((each) => takesListen(each))
+    ).toStrictEqual(all(10, true));
+  });
+
+  it("refuses a listener's address with no port, a port out of range, or a host that is none", () => {
+    expect(
+      [
         "127.0.0.1",
         "127.0.0.1:0",
         "127.0.0.1:65536",
-        "::1:7668",
         "127.0.0.1:07668",
+        "::1:7668",
+        "[.]:7668",
+        "[::::]:7668",
+        "[1:2:3]:7668",
+        "[::1:7668",
+        "[]:7668",
+        "256.0.0.1:80",
+        "1.2.3:80",
+        "1.2.3.4.5:80",
+        "01.2.3.4:80",
+        "-a.example:80",
+        "a-.example:80",
+        "a..example:80",
+        "a.example..:80",
+        ".example:80",
+        "a_b.example:80",
+        `${"a".repeat(64)}.example:80`,
+        ":80",
+        "",
       ].map((each) => takesListen(each))
-    ).toStrictEqual([true, true, true, true, false, false, false, false, false]);
+    ).toStrictEqual(all(23, false));
   });
 });
