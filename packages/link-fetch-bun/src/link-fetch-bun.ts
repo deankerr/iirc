@@ -437,7 +437,9 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
         const first =
           reader === undefined ? new Uint8Array() : yield* lead(reader, purpose, connection);
 
-        if (purpose.kind === "image" && sniff(first) !== type) {
+        // Only the first bytes are looked at, however many the first chunks held, so the type
+        // never depends on how the body was split.
+        if (purpose.kind === "image" && sniff(first.subarray(0, sniffed)) !== type) {
           return yield* new LinkWrongType({ type: header });
         }
 

@@ -247,7 +247,12 @@ type Mode =
   | { readonly in: "comment" }
   | { readonly in: "raw"; readonly close: readonly number[] }
   | { readonly in: "head end" }
-  | { readonly in: "tag"; readonly quote: number | undefined };
+  | {
+      readonly in: "tag";
+      readonly quote: number | undefined;
+      /** What follows the tag's `>`: a raw text element's text, or else text. */
+      readonly next?: { readonly in: "raw"; readonly close: readonly number[] };
+    };
 
 /**
  * Whether bytes hold a pattern at a place, in any case.
@@ -360,7 +365,11 @@ const opened = (bytes: Uint8Array, open: number): Step => {
   }
 
   if (raw !== undefined) {
-    return { at: open + raw.open.length, mode: { close: raw.close, in: "raw" } };
+    // Its opening tag is finished first, so its attributes never open or close it.
+    return {
+      at: open + raw.open.length,
+      mode: { in: "tag", next: { close: raw.close, in: "raw" }, quote: undefined },
+    };
   }
 
   // Any other tag is skipped whole, so what its quoted attributes hold is never a tag. A `<`
@@ -422,8 +431,9 @@ export const headEnd = () => {
           return later(end === -1 ? bytes.length - length : end);
         }
 
+        // The closing tag is finished to its `>` before text goes on.
         if (boundaries.has(bytes[end + length] ?? -1)) {
-          mode = { in: "text" };
+          mode = { in: "tag", quote: undefined };
         }
 
         at = end + length;
@@ -431,12 +441,12 @@ export const headEnd = () => {
         const skipped = skipTag(bytes, at, mode.quote);
 
         if (skipped.end === -1) {
-          mode = { in: "tag", quote: skipped.quote };
+          mode = { ...mode, quote: skipped.quote };
 
           return -1;
         }
 
-        mode = { in: "text" };
+        mode = mode.next ?? { in: "text" };
         at = skipped.end;
       } else if (mode.in === "head end") {
         const end = bytes.indexOf(greaterThan, at);

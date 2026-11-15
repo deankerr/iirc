@@ -425,6 +425,9 @@ const head = async (chunks: readonly string[]) =>
     })
   );
 
+const rawAttribute = (name: string) =>
+  `<head><${name} data-x="</${name}><body>">ignored</${name}><title>Real title</title></head><body>x`;
+
 describe("bounds are on the decompressed stream", () => {
   it.each([
     ["a page ends cleanly at its limit", "text/html", new Uint8Array(), page, "ended"],
@@ -520,6 +523,20 @@ describe("bounds are on the decompressed stream", () => {
       "<head><!-- <body> --><style>p:after{content:'</head>'}</style><title>T</title>"
     );
   });
+
+  it.each(["script", "style"])(
+    "a %s's quoted attribute ends nothing, at every split",
+    async (name) => {
+      const page = rawAttribute(name);
+      const read = page.slice(0, page.indexOf("<body>x"));
+
+      for (let at = 1; at < page.length; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one split at a time, each its own server.
+        await expect(head([page.slice(0, at), page.slice(at)])).resolves.toBe(read);
+      }
+    },
+    60_000
+  );
 
   it("a <body> in a quoted attribute ends nothing", async () => {
     await expect(
@@ -739,6 +756,41 @@ const svg = encoder.encode('﻿  <?xml version="1.0"?><svg xmlns="http://www.w3.
 const prologSvg = encoder.encode(
   `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Generator: an editor -->\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [\n  <!ENTITY ns "http://www.w3.org/2000/svg">\n]>\n${" ".repeat(400)}<svg\n  xmlns="http://www.w3.org/2000/svg"/>`
 );
+
+const chunked =
+  (chunks: readonly Uint8Array[]): Handler =>
+  (_, response) => {
+    response.writeHead(200, { "content-type": "image/svg+xml" });
+
+    const write = (index: number) => {
+      if (index === chunks.length) {
+        response.end();
+      } else {
+        response.write(chunks[index]);
+        setTimeout(() => {
+          write(index + 1);
+        }, 20);
+      }
+    };
+
+    write(0);
+  };
+
+describe("an image's type is told from its first KiB however it arrives", () => {
+  const late = encoder.encode(`${" ".repeat(1500)}<svg/>`);
+  const early = encoder.encode(`${" ".repeat(900)}<svg/>`);
+
+  it.each([
+    ["past it, in one chunk", [late], "LinkWrongType"],
+    ["past it, in two chunks", [late.subarray(0, 700), late.subarray(700)], "LinkWrongType"],
+    ["within it, in one chunk", [early], "image/svg+xml"],
+    ["within it, in two chunks", [early.subarray(0, 450), early.subarray(450)], "image/svg+xml"],
+  ] as const)("an SVG root %s", async (_, chunks, expected) => {
+    const outcome = await answered(chunked(chunks), image);
+
+    expect("answer" in outcome ? outcome.answer.type : outcome.failed._tag).toBe(expected);
+  });
+});
 
 describe("types", () => {
   it.each([
