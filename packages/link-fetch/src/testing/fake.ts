@@ -33,7 +33,22 @@ export interface FakeLinkFetch {
   readonly asked: Effect.Effect<readonly Asked[]>;
 }
 
-const normalised = (link: string) => URL.parse(link)?.href ?? link;
+/**
+ * A link as the guard reads it: as the URL parser normalises it, without its fragment.
+ * @param link - The link.
+ * @returns The link, normalised.
+ */
+const normalised = (link: string) => {
+  const url = URL.parse(link);
+
+  if (url === null) {
+    return link;
+  }
+
+  url.hash = "";
+
+  return url.href;
+};
 
 const isFailure = (answer: Answer): answer is LinkFetchFailure => "_tag" in answer;
 

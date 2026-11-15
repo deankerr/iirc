@@ -278,12 +278,22 @@ const bounded = (
     }
 
     // A page ends cleanly at the end of its head, or at its cap.
-    const at = ends(chunk);
-    const end = Math.min(at === -1 ? chunk.length : at, cap - total);
+    const { done, give } = ends.feed(chunk);
+    const end = Math.min(give.length, cap - total);
 
     total += end;
 
-    return Effect.as(at !== -1 || total >= cap ? stop : Effect.void, chunk.subarray(0, end));
+    return Effect.as(done || total >= cap ? stop : Effect.void, give.subarray(0, end));
+  };
+
+  // What a page held back to decide is given once its body ends, within the cap.
+  const held = () => {
+    const rest = ends?.flush() ?? new Uint8Array();
+    const end = Math.min(rest.length, cap - total);
+
+    total += end;
+
+    return rest.subarray(0, end);
   };
 
   const pull: Pull.Pull<Arr.NonEmptyReadonlyArray<Uint8Array>, BodyFailure> = Effect.gen(
@@ -292,7 +302,9 @@ const bounded = (
         const chunk = yield* next;
 
         if (Option.isNone(chunk)) {
-          return yield* Cause.done();
+          const rest = held();
+
+          return rest.length > 0 ? Arr.of(rest) : yield* Cause.done();
         }
 
         const kept = yield* step(chunk.value);

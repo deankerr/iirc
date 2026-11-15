@@ -538,6 +538,24 @@ describe("bounds are on the decompressed stream", () => {
     60_000
   );
 
+  it.each([
+    ["before its <body>", "<head><title>T</title><body>x", "<head><title>T</title>"],
+    ["after its </head >", "<head><title>T</title></head >x", "<head><title>T</title></head >"],
+  ])(
+    "a page ends %s however it is split",
+    async (_, page, read) => {
+      for (let at = 1; at < page.length; at += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one split at a time, each its own server.
+        await expect(head([page.slice(0, at), page.slice(at)])).resolves.toBe(read);
+      }
+    },
+    60_000
+  );
+
+  it("a tag held back at a chunk's end is given when the page ends", async () => {
+    await expect(head(["<p>one <b", "o"])).resolves.toBe("<p>one <bo");
+  });
+
   it("a <body> in a quoted attribute ends nothing", async () => {
     await expect(
       head(['<head><meta content="Use <body> here"><title>Real title</title></head><body>x'])

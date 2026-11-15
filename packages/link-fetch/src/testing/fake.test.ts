@@ -33,6 +33,19 @@ describe("the fake link fetch", () => {
     ]);
   });
 
+  it("a link's fragment is dropped, as the guard drops it", async () => {
+    const fetched = await Effect.runPromise(
+      Effect.scoped(
+        Effect.flatMap(
+          makeFakeLinkFetch({ "https://example.com/a": { type: "text/html" } }),
+          (fake) => fake.service.fetch("https://example.com/a#section", { kind: "page" })
+        )
+      )
+    );
+
+    expect(fetched).toMatchObject({ link: "https://example.com/a", status: 200 });
+  });
+
   it("answers a recorded failure", async () => {
     const exit = await Effect.runPromiseExit(
       Effect.scoped(

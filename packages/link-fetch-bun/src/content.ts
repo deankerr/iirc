@@ -380,35 +380,52 @@ const opened = (bytes: Uint8Array, open: number): Step => {
   };
 };
 
+/** What of a page may be given now, and whether the page has ended. */
+interface Fed {
+  readonly give: Uint8Array;
+  readonly done: boolean;
+}
+
 /**
  * Finds where a page's head ends: after the `>` of its `</head`, or before its `<body`,
  * whichever comes first, in any case, across chunks. Comments and the text of raw text
  * elements, such as a script, are skipped, so a `<body>` in a string ends nothing. It is no
- * HTML tokenizer: it looks only for what ends a head, and carries at most a few bytes from one
- * chunk to the next.
- * @returns A function that takes each chunk and gives where in it the page ends, or -1.
+ * HTML tokenizer: it looks only for what ends a head.
+ *
+ * Bytes it cannot yet decide, such as a `<bo` at the end of a chunk, are held back until the
+ * next chunk decides them, so the page is the same however the network split it.
+ * @returns `feed`, which takes each chunk and gives what of the page may be given now, and
+ * whether the page ended, and `flush`, which gives what is held back once the body ends.
  */
 export const headEnd = () => {
   let mode: Mode = { in: "text" };
   let carry = new Uint8Array();
 
-  return (chunk: Uint8Array) => {
-    const offset = carry.length;
-    const bytes = new Uint8Array(offset + chunk.length);
+  const flush = () => {
+    const held = carry;
 
-    bytes.set(carry);
-    bytes.set(chunk, offset);
     carry = new Uint8Array();
 
-    // The carried bytes were given with the chunk before, so a page that ends in them ends
-    // at the start of this one.
-    const ended = (at: number) => Math.max(0, at - offset);
+    return held;
+  };
 
-    // Looks again, with the next chunk, from a place this one cannot decide.
-    const later = (from: number) => {
-      carry = bytes.slice(Math.max(from, 0));
+  const feed = (chunk: Uint8Array): Fed => {
+    const bytes = new Uint8Array(carry.length + chunk.length);
 
-      return -1;
+    bytes.set(carry);
+    bytes.set(chunk, carry.length);
+    carry = new Uint8Array();
+
+    const ended = (at: number): Fed => ({ done: true, give: bytes.subarray(0, at) });
+    const goOn: Fed = { done: false, give: bytes };
+
+    // Holds back what this chunk cannot decide, to look at again with the next.
+    const later = (from: number): Fed => {
+      const held = Math.max(from, 0);
+
+      carry = bytes.slice(held);
+
+      return { done: false, give: bytes.subarray(0, held) };
     };
 
     let at = 0;
@@ -443,7 +460,7 @@ export const headEnd = () => {
         if (skipped.end === -1) {
           mode = { ...mode, quote: skipped.quote };
 
-          return -1;
+          return goOn;
         }
 
         mode = mode.next ?? { in: "text" };
@@ -451,12 +468,12 @@ export const headEnd = () => {
       } else if (mode.in === "head end") {
         const end = bytes.indexOf(greaterThan, at);
 
-        return end === -1 ? -1 : ended(end + 1);
+        return end === -1 ? goOn : ended(end + 1);
       } else {
         const open = bytes.indexOf(lessThan, at);
 
         if (open === -1) {
-          return -1;
+          return goOn;
         }
 
         if (undecided(bytes, open)) {
@@ -471,4 +488,6 @@ export const headEnd = () => {
       }
     }
   };
+
+  return { feed, flush };
 };
