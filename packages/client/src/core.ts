@@ -24,6 +24,7 @@ import { act, online, relayed } from "./acts.ts";
 import { backoff, lasting } from "./backoff.ts";
 import { allWanted, joinWanted, reconcile, rejoin, remap, unfilledKey } from "./channels.ts";
 import type { Client, Step } from "./client.ts";
+import { closeTimeline } from "./close.ts";
 import type { IrcdAddress, NetworkConfiguration } from "./configuration.ts";
 import { answerUnsent } from "./ctcp.ts";
 import type { Arrival, Refined } from "./feature.ts";
@@ -832,6 +833,11 @@ const routine = (run: Run, input: Routine): void => {
 
     case "Read": {
       read(run, input);
+      break;
+    }
+
+    case "CloseTimeline": {
+      closeTimeline(run, input);
       break;
     }
 

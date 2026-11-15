@@ -31,6 +31,7 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `POST /api/networks/{network}/lookups` | Looks something up, `{ lookup, intent? }`: `Whois { nick }` or `Whowas { nick }`, and waits for the result | `LookedUp { intent, sequence, result }` or `Pending { intent, sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `GET /api/networks/{network}/lookups/{intent}` | A Lookup by its intent, from the Journal | `LookedUp { intent, sequence, result }`, `Pending { intent, sequence }`, or `NotJournaled` | `JournalFailed` |
 | `POST /api/networks/{network}/read` | Marks a Timeline read up to `{ read, target }`: an instant, and a Target, or `null` for the Network's own | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
+| `POST /api/networks/{network}/close` | Closes the Timeline of `{ target }`: a Channel Self is not in, or a Direct Message partner | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `POST /api/networks/{network}/retry` | Tries connecting now | `{ sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `GET /api/networks/{network}/known` | What the Client knows: Session, Self, Channels, members, Users, the Connection's casemapping, the one an Ircd last declared (`declared`, `null` until one has), and `CHANTYPES` while a Session has said it (`chantypes`, `null` otherwise), and the life it is of | `Knowledge` | `UnknownNetwork` |
 | `GET /api/networks/{network}/inspect` | Machine states, caps, ISUPPORT, STS, Features, timers, and Connections, each with how many Lines wait to leave and when the next may | `NetworkInspection` | `UnknownNetwork` |
@@ -91,6 +92,7 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **A CTCP request goes to one nick, never a Channel,** and `Ping` sends a `PING` whose reply tells the round trip. Nothing waits for a reply, so one that never comes holds nothing open.
 - **A Lookup answers with what it found,** with any `WARN` or `NOTE` its reply held, and any `FAIL` after the first, in `notes`, waiting up to 35 s. `Pending` means no result came in that time: ask again by its intent. A Lookup changes nothing on the Network, so one whose outcome is uncertain can be asked again freely.
 - **A Read Marker only moves forward, and every Frontend shares it**. Marking read is a Frontend's decision, and the Daemon only records it.
+- **A closed Timeline comes back by itself.** A `close` is journaled, so every Frontend agrees and a restart keeps it. A Channel Self is in is never closed, and its `close` is News `Ignored` with `Joined`. A Timeline stays closed until a Message or an Activity arrives in it, which shows it again with its counts. Closing deletes nothing.
 
 ### News
 
@@ -107,6 +109,7 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 - **A position travels as a cursor,** opaque text that compares exactly as positions do, so a Frontend places a Gap among items by comparing cursors.
 - **A window's Gaps are bounded by its items.** Consecutive Gaps with no item between them come as one, counted, so a quiet Timeline that spans every reconnect gives one Gap, never a list of them all. Pages read at a cursor split a run at the cursor, so pages fitted together give every Gap once.
 - **A removed Network's Timelines say so.** Each Timeline carries `removed`, set once its Network was removed with its Timelines kept.
+- **A closed Timeline says so.** Each Timeline carries `closed`, set from its `close` until something arrives in it. A Frontend leaves it out of the Sidebar while it is set, and never works out whether it should be.
 - **The Daemon counts what is unread.** Each Timeline carries `read`, its Read Marker, and `unread`, a count for each level of what stands after it, exact up to `unreadCap`, 999. Each item says its `level`. A Frontend shows the counts and never counts the items it holds, which are never all of them.
 - **One of our Messages says how its delivery stands:** `Pending`, `Unconfirmed`, `Confirmed`, `Unsent`, or `Rejected` with the Ircd's numeric or code, never its text.
 - **Every list comes a page at a time,** up to `limit`, 1 to 500 and 100 when left out, with `more` and an opaque `next` to give back as `after`. A `next` the Daemon did not give is `InvalidRequest`.
@@ -150,7 +153,7 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 
 A body over 1 MiB is refused with 413 before it is read.
 
-**`NetworkStopped` does not mean the input was refused.** The Network may have stopped after the input was journaled and before the Daemon answered, and a restart steps it. Its body says `outcome: "Uncertain"`, and for a `say`, the `intent` it was given under, even one the Daemon named. A `PUT` of Configuration, a `read`, and a `retry` can be sent again freely. A `say` or an `act` must not be: ask `said` with that intent, on this Daemon or the one started after it. `Journaled` means it must not be said again. `NotJournaled` means saying it again under the same intent is safe. An intent must be unique for its Network across the whole Journal, which is the caller's to keep.
+**`NetworkStopped` does not mean the input was refused.** The Network may have stopped after the input was journaled and before the Daemon answered, and a restart steps it. Its body says `outcome: "Uncertain"`, and for a `say`, the `intent` it was given under, even one the Daemon named. A `PUT` of Configuration, a `read`, a `close`, and a `retry` can be sent again freely. A `say` or an `act` must not be: ask `said` with that intent, on this Daemon or the one started after it. `Journaled` means it must not be said again. `NotJournaled` means saying it again under the same intent is safe. An intent must be unique for its Network across the whole Journal, which is the caller's to keep.
 
 ## Choices
 

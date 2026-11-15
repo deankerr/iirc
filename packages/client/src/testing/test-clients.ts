@@ -509,6 +509,7 @@ const step =
       }
 
       case "Act":
+      case "CloseTimeline":
       case "Look":
       case "Read":
       case "Removed":

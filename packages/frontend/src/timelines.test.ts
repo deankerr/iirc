@@ -406,6 +406,7 @@ const wireItem = (item: ModelItem) =>
 const wireTimeline = (timeline: ModelTimeline) =>
   decodeTimeline({
     changed: timeline.changed,
+    closed: false,
     detached: false,
     head: null,
     id: timeline.id,
@@ -1347,6 +1348,7 @@ const three = timelineId(idOf(3));
 const timelineOf = (id: string, kind: "Network" | "Channel", name: string, changed: number) =>
   decodeTimeline({
     changed,
+    closed: false,
     detached: false,
     head: null,
     id,
@@ -1587,6 +1589,7 @@ const direct = (id: string, name: string, detached = false) =>
   Schema.encodeSync(Timeline)(
     decodeTimeline({
       changed: 6,
+      closed: false,
       detached,
       head: null,
       id,

@@ -81,6 +81,7 @@ const described = ({
   unread = {},
 }: Described): typeof Timeline.Encoded => ({
   changed,
+  closed: false,
   detached,
   head: null,
   id,

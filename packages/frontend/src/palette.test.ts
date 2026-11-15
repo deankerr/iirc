@@ -34,6 +34,7 @@ const direct = timelineId("00000000000003-00000000-00000000");
 const timelineOf = (id: string, kind: "Network" | "Channel" | "Direct", name: string) =>
   decodeTimeline({
     changed: 1,
+    closed: false,
     detached: false,
     head: null,
     id,

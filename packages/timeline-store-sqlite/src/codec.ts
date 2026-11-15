@@ -249,12 +249,13 @@ const Count = Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 
 /**
  * A Timeline, with its latest item's position, its Read Marker, its head's last change,
- * whether its Network was removed, and its counts, flat.
+ * whether its Network was removed, whether it is closed, and its counts, flat.
  */
 export const SummaryRow = Schema.toCodecJson(
   Schema.Struct({
     activity: Count,
     changed: Int,
+    closed: Schema.BooleanFromBit,
     direct: Count,
     head: Schema.UndefinedOr(Int),
     highlights: Count,

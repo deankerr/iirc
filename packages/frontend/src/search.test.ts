@@ -34,6 +34,7 @@ const timeline = (
 ) =>
   decodeTimeline({
     changed: sequence,
+    closed: false,
     detached,
     head: null,
     id: idOf(sequence),

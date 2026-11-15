@@ -94,6 +94,7 @@ describe("the contract", () => {
       "GET /api/ui",
       "GET /api/ui/changes",
       "POST /api/networks/{network}/act",
+      "POST /api/networks/{network}/close",
       "POST /api/networks/{network}/lookups",
       "POST /api/networks/{network}/read",
       "POST /api/networks/{network}/retry",

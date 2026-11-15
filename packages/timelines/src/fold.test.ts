@@ -3,7 +3,7 @@
  * what a store is told.
  */
 import { Instant, IntentId, MessageId } from "@iirc/client";
-import type { Marked, News, Where } from "@iirc/client";
+import type { Closable, Marked, News, Where } from "@iirc/client";
 import type { Fact } from "@iirc/client/known";
 import { describe, expect, it } from "vitest";
 
@@ -473,6 +473,59 @@ describe("Read Markers", () => {
     ]);
 
     expect(ofTag(changes, "ReadMarker").filter(({ sequence }) => sequence === 3)).toStrictEqual([]);
+  });
+});
+
+const closed = (where: Closable): News => ({ _tag: "TimelineClosed", where });
+
+const partner = (name: string): Closable => ({
+  _tag: "Direct",
+  existing: true,
+  key: name.toLowerCase(),
+  name,
+});
+
+describe("closing a Timeline", () => {
+  it("closes the Channel's or the partner's it names, before anything arrives after", () => {
+    const { changes } = fold([
+      happened(1, [message([channel("#a"), direct("peer")])]),
+      happened(2, [closed(channel("#a")), closed(partner("Peer"))]),
+      happened(3, [message([channel("#a")], { at: known(later(-5)) })]),
+    ]);
+
+    expect(ofTag(changes, "Closed")).toStrictEqual([
+      { _tag: "Closed", network: "libera", sequence: 2, timeline: timelineIdOf(1, 0, 1) },
+      { _tag: "Closed", network: "libera", sequence: 2, timeline: timelineIdOf(1, 0, 2) },
+    ]);
+    // What arrives later is added at a later step, whatever its time, so a store opens it.
+    expect(
+      ofTag(changes, "Added")
+        .filter(({ timeline }) => timeline === timelineIdOf(1, 0, 1))
+        .map(({ sequence }) => sequence)
+    ).toStrictEqual([1, 3]);
+  });
+
+  it("opens no Timeline", () => {
+    const { changes } = fold([happened(1, [closed(channel("#a")), closed(partner("peer"))])]);
+
+    expect(changes.map(({ _tag }) => _tag)).toStrictEqual(["Described"]);
+  });
+
+  it("follows a Direct Message partner's rename", () => {
+    const { changes } = fold([
+      happened(1, [message([direct("peer")]), message([direct("Peer2")])]),
+      happened(2, [
+        nickChanged([
+          { _tag: "DirectRenamed", key: "peer", name: "peer", to: { key: "peer2", name: "Peer2" } },
+        ]),
+      ]),
+      // The old nick names no Timeline now, and the new one names the moved Timeline.
+      happened(3, [closed(partner("peer")), closed(partner("Peer2"))]),
+    ]);
+
+    expect(ofTag(changes, "Closed").map(({ timeline }) => timeline)).toStrictEqual([
+      timelineIdOf(1, 0, 1),
+    ]);
   });
 });
 

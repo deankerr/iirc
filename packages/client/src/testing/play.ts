@@ -465,6 +465,10 @@ const ownerInput = <State>(at: Driver<State>, owner: Owner): Input => {
       return { _tag: "Read", at: at.now, read: Instant.make(owner.read), target: owner.target };
     }
 
+    case "Close": {
+      return { _tag: "CloseTimeline", at: at.now, target: owner.target };
+    }
+
     default: {
       return owner satisfies never;
     }

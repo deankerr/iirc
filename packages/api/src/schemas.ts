@@ -247,6 +247,17 @@ export const ReadRequest = Schema.Struct({
 /** The decoded form of {@link ReadRequest}. */
 export type ReadRequest = typeof ReadRequest.Type;
 
+/**
+ * Which Timeline the Owner closes: a Target, a Channel or a Direct Message partner named as
+ * a `say` names one. The Network's own is never closed.
+ */
+export const CloseRequest = Schema.Struct({
+  target: SayText.check(Schema.isNonEmpty()),
+});
+
+/** The decoded form of {@link CloseRequest}. */
+export type CloseRequest = typeof CloseRequest.Type;
+
 /** A Credential's value, `Redacted` from the moment it is decoded, and never sent back. */
 export const CredentialValue = Schema.Struct({
   value: Schema.RedactedFromValue(Schema.String.check(Schema.isNonEmpty())),
@@ -503,6 +514,7 @@ const unparseableReasons = everyOf<UnparseableReason>()(["Empty", "NoCommand"]);
 
 const inputTags = everyOf<Input["_tag"]>()([
   "Act",
+  "CloseTimeline",
   "Closed",
   "Configured",
   "Fired",
@@ -523,8 +535,10 @@ const inputTags = everyOf<Input["_tag"]>()([
 export const IgnoredReason = Schema.TaggedUnion({
   Endless: { command: Untrusted },
   FeatureFailed: { feature: Schema.String },
+  /** A `close` of a Channel Self is in, which stays open while Self is there. */
+  Joined: {},
   Malformed: { command: Untrusted },
-  /** A `read` whose Target names no one Timeline, such as a list or a mask. */
+  /** A `read` or a `close` whose Target names no one Timeline, such as a list or a mask. */
   NoTimeline: {},
   NotNow: { input: Schema.Literals(inputTags) },
   StaleConnection: { connection: ConnectionId },
@@ -574,6 +588,18 @@ export const Marked = Schema.TaggedUnion({
 
 /** The decoded form of {@link Marked}. */
 export type Marked = typeof Marked.Type;
+
+/**
+ * A Timeline the Owner can close: a Channel's, or a Direct Message partner's, which is
+ * always `existing`, since closing starts no Timeline.
+ */
+export const Closable = Schema.TaggedUnion({
+  Channel: Named.fields,
+  Direct: { ...Named.fields, existing: Schema.Boolean },
+});
+
+/** The decoded form of {@link Closable}. */
+export type Closable = typeof Closable.Type;
 
 /**
  * What an action of the Owner's tried, in short: its kind and the names the Owner gave
@@ -769,6 +795,11 @@ export const News = Schema.TaggedUnion({
   Refused: { action: Schema.NullOr(RefusedAction), intent: IntentId, reason: RefusedReason },
   SessionBegan: { at: Instant, nick: Untrusted },
   SessionEnded: { at: Instant, reason: EndReason },
+  /**
+   * The Owner closed a Timeline: a Channel's or a Direct Message partner's, keyed as
+   * `where` keys it. A Timeline's `closed` says whether it still is.
+   */
+  TimelineClosed: { where: Closable },
 });
 
 /** The decoded form of {@link News}. */
@@ -1134,11 +1165,14 @@ export type Unread = typeof Unread.Type;
  * after it, by level, `head` the last step that changed what the Client knows of its
  * Channel in a way no item says, `null` before any, so a Frontend following the changes
  * reads the Channel's head again, `removed` whether its Network was removed with its
- * Timelines kept, so it is read and never said to, and `changed` the last step that
- * changed it, its Read Marker, its head, or any of its items.
+ * Timelines kept, so it is read and never said to, `closed` whether the Owner closed it
+ * and nothing has arrived in it since, so a Frontend leaves it out of the Sidebar until
+ * something does, and `changed` the last step that changed it, its Read Marker, its head,
+ * whether it is closed, or any of its items.
  */
 export const Timeline = Schema.Struct({
   changed: Sequence,
+  closed: Schema.Boolean,
   detached: Schema.Boolean,
   head: Schema.NullOr(Sequence),
   id: TimelineId,

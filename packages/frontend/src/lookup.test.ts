@@ -58,6 +58,7 @@ const described = (
   key: string | null = kind === "Network" ? null : name.toLowerCase()
 ): typeof Timeline.Encoded => ({
   changed: 1,
+  closed: false,
   detached: false,
   head: null,
   id,

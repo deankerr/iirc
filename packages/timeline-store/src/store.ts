@@ -77,7 +77,12 @@ export interface Summary extends Descriptor {
   readonly head: number | undefined;
   /** Whether its Network was removed, and its Timelines kept: it is read, and never said to. */
   readonly removed: boolean;
-  /** The last sequence that changed it, its Read Marker, its head, or any of its items. */
+  /**
+   * Whether the Owner closed it and nothing has been added to it since: no item stands in it
+   * from a later step than the last `Closed`.
+   */
+  readonly closed: boolean;
+  /** The last sequence that changed it, its Read Marker, its head, whether it is closed, or any of its items. */
   readonly changed: number;
 }
 

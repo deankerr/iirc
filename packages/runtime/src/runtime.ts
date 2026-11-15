@@ -381,6 +381,15 @@ export interface RuntimeService {
     network: NetworkId,
     reading: Reading
   ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
+  /**
+   * Journals a `CloseTimeline`: the Owner closed the Timeline of a Target, a Channel or a
+   * Direct Message partner named as a `Say`'s Target is. It waits until it is stepped. The
+   * Client reports it as News unless Self is in that Channel, and keeps nothing of it.
+   */
+  readonly close: (
+    network: NetworkId,
+    target: string
+  ) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** Journals a `Retry`, and waits until it is stepped. */
   readonly retry: (network: NetworkId) => Effect.Effect<Sequence, UnknownNetwork | NetworkStopped>;
   /** What the Network's Client knows now. */
@@ -816,6 +825,13 @@ export const makeRuntime = <S>(
         Effect.map(
           Effect.flatMap(find(id), (network) => Ref.get(network.current)),
           ({ state }) => Option.fromUndefinedOr(client.channel(state, name))
+        ),
+      close: (id, target) =>
+        Effect.flatMap(find(id), (network) =>
+          Effect.map(
+            tell(network, (at) => ({ _tag: "CloseTimeline", at, target })),
+            ({ sequence }) => sequence
+          )
         ),
       configuration: (id) =>
         Effect.flatMap(find(id), (network) =>

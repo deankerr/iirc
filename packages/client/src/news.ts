@@ -159,6 +159,9 @@ export type Where =
 /** A Timeline a Read Marker belongs to: the Network's own, a Channel's, or a Direct Message partner's. */
 export type Marked = Exclude<Where, { readonly _tag: "DirectRenamed" }>;
 
+/** A Timeline the Owner can close: a Channel's, or a Direct Message partner's, never the Network's own. */
+export type Closable = Exclude<Marked, { readonly _tag: "Network" }>;
+
 /** One mode set or unset. A key's parameter is never shown. */
 export interface ModeChange {
   readonly set: boolean;
@@ -350,8 +353,10 @@ export type IgnoredReason =
   | { readonly _tag: "Endless"; readonly command: string }
   /** An echo of what Self said that nothing can tie to what we sent, while `echo-message` is being given up. */
   | { readonly _tag: "UnmatchedEcho" }
-  /** A `Read` whose Target names no one Timeline, such as a list or a mask. */
-  | { readonly _tag: "NoTimeline" };
+  /** A `Read` or a `CloseTimeline` whose Target names no one Timeline, such as a list or a mask. */
+  | { readonly _tag: "NoTimeline" }
+  /** A `CloseTimeline` of a Channel Self is in, which stays open while Self is there. */
+  | { readonly _tag: "Joined" };
 
 /**
  * What happened in one step, in order.
@@ -449,6 +454,13 @@ export type News =
    * a Message's is, and a `Direct` is `existing`, since marking read starts no Timeline.
    */
   | { readonly _tag: "ReadMarker"; readonly where: Marked; readonly read: Instant }
+  /**
+   * The Owner closed a Timeline, putting it out of the Sidebar until something arrives in
+   * it again. `where` is keyed as a Message's is, and a `Direct` is `existing`, since
+   * closing starts no Timeline. The Client keeps nothing of it: whether a Timeline is
+   * closed is the projection's to derive.
+   */
+  | { readonly _tag: "TimelineClosed"; readonly where: Closable }
   /**
    * What is known of a Channel Self is in changed in a way no Activity reports: a reply
    * gave its modes or its topic, or a `NAMES` listing of its members ended. A projection

@@ -66,7 +66,9 @@ export type Owner =
   /** `!! remove`, or `!! remove keep` to keep its Timelines. */
   | { readonly _tag: "Remove"; readonly keep: boolean }
   /** `!! read #iirc t+5s`, or `!! read t+5s` for the Network's own Timeline. */
-  | { readonly _tag: "Read"; readonly target: string | null; readonly read: number };
+  | { readonly _tag: "Read"; readonly target: string | null; readonly read: number }
+  /** `!! close #iirc`: the Owner closes a Timeline. */
+  | { readonly _tag: "Close"; readonly target: string };
 
 /** One line of a transcript. */
 export type Item =
@@ -763,6 +765,12 @@ const readSimple = (text: string): Owner | undefined => {
     return { _tag: "Remove", keep: text === "remove keep" };
   }
 
+  const closing = /^close (?<target>\S+)$/u.exec(text)?.groups?.target;
+
+  if (closing !== undefined) {
+    return { _tag: "Close", target: closing };
+  }
+
   const looked = /^(?<verb>whois|whowas) (?<nick>\S+)$/u.exec(text)?.groups;
 
   return looked?.verb === undefined || looked.nick === undefined
@@ -861,6 +869,10 @@ const writeOwner = (owner: Owner): string => {
       return writeAction(owner.action);
     }
 
+    case "Close": {
+      return `close ${owner.target}`;
+    }
+
     case "Read": {
       return [
         "read",
@@ -891,6 +903,7 @@ const expectations = new Map<string, News["_tag"]>([
   ["refused", "Refused"],
   ["session-began", "SessionBegan"],
   ["session-ended", "SessionEnded"],
+  ["timeline-closed", "TimelineClosed"],
 ]);
 
 const readExpect = (text: string): Result.Result<Item, string> => {

@@ -127,6 +127,11 @@ export type UnsentLine = typeof UnsentLine.Type;
 export const Input = Schema.TaggedUnion({
   /** The Owner wants to act on the Network, with an intent id from the Runtime. */
   Act: { action: Action, at: Instant, intent: IntentId },
+  /**
+   * The Owner closed a Timeline: a Channel's or a Direct Message partner's, named as `Say`
+   * names one. The Network's own, and a Channel Self is in, cannot be closed.
+   */
+  CloseTimeline: { at: Instant, target: Schema.String },
   /** A Connection is over. */
   Closed: { at: Instant, connection: ConnectionId, reason: CloseReason },
   /** The Owner's Configuration for this Network, whole. */

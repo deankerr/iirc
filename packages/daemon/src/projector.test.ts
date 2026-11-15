@@ -139,6 +139,10 @@ const textsIn = (store: TimelineStoreService, name: string) =>
 const holds = (store: TimelineStoreService, name: string, text: string) =>
   textsIn(store, name).pipe(Effect.map((texts) => texts.includes(text)));
 
+// Whether the Network's Timeline named `name` is closed, or `undefined` when none is.
+const closedOf = (store: TimelineStoreService, name: string) =>
+  Effect.map(store.timelines(libera), (all) => all.find((one) => one.name === name)?.closed);
+
 // The last sequence the Journal holds.
 const lastSequence = (world: World) =>
   world.journal.read({}).pipe(
@@ -288,6 +292,52 @@ describe("the projector", () => {
     expect(result.items.filter((text) => text === "before")).toHaveLength(1);
     expect(result.items.filter((text) => text === "after")).toHaveLength(1);
     expect(result.same).toStrictEqual(result.want);
+  });
+
+  it("keeps a closed Timeline closed across a restart, and when folded again from nothing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const world = yield* makeWorld();
+        const store = yield* makeMemoryTimelineStore;
+
+        const before = yield* Effect.gen(function* () {
+          const call = yield* joinFloor(world);
+
+          yield* say(call, ":peer!u@h PRIVMSG iirc :psst");
+          yield* eventually(holds(store, "peer", "psst"));
+
+          const sequence = yield* Runtime.use((runtime) => runtime.close(libera, "peer"));
+
+          yield* eventually(
+            store.folded.pipe(Effect.map(({ through }) => (through ?? 0) >= sequence))
+          );
+
+          return yield* closedOf(store, "peer");
+        }).pipe(Effect.provide(layerDaemonish(world, store)), Effect.scoped);
+
+        // A fresh store, as when views.sqlite is deleted, is folded again from the Journal.
+        const rebuilt = yield* makeMemoryTimelineStore;
+
+        return yield* Effect.gen(function* () {
+          yield* registerOnFloor(world.memory);
+          const last = yield* lastSequence(world);
+
+          yield* eventually(
+            rebuilt.folded.pipe(
+              Effect.map(({ through }) => through !== undefined && through >= last - 1)
+            )
+          );
+
+          return {
+            after: yield* closedOf(rebuilt, "peer"),
+            before,
+            channel: yield* closedOf(rebuilt, "#iirc"),
+          };
+        }).pipe(Effect.provide(layerDaemonish(world, rebuilt)), Effect.scoped);
+      })
+    );
+
+    expect(result).toStrictEqual({ after: true, before: true, channel: false });
   });
 
   it.each([

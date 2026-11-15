@@ -1108,6 +1108,90 @@ describe("the handlers", () => {
     expect(result.unknown).toBe("UnknownNetwork");
   });
 
+  it("closes a Timeline until something arrives in it, and never a Channel Self is in", async () => {
+    const result = await run((world, api) =>
+      Effect.gen(function* () {
+        const call = yield* directly(world, api, ["psst"]);
+
+        expect(yield* heard(call)).toBe("JOIN #iirc");
+        yield* say(call, ":iirc!~iirc@iirc.test JOIN #iirc");
+        yield* settle;
+
+        const params = { network: libera };
+
+        const shown = api.timelines
+          .list({ params, query: {} })
+          .pipe(
+            Effect.map((listed) =>
+              listed.timelines.map(({ closed, name, unread }) => ({ closed, name, unread }))
+            )
+          );
+
+        const peer = yield* api.networks.close({ params, payload: { target: "Peer" } });
+        const joined = yield* api.networks.close({ params, payload: { target: "#IIRC" } });
+        const listed = yield* api.networks.close({ params, payload: { target: "#a,#b" } });
+        const stream = yield* api.news.follow({ headers: {}, query: { after: peer.sequence - 1 } });
+
+        const events = yield* stream.pipe(
+          Stream.takeUntil(
+            (event) => event.event === "happened" && event.data.sequence === listed.sequence
+          ),
+          Stream.runCollect
+        );
+
+        yield* settle;
+        const closed = yield* shown;
+
+        yield* say(call, ":peer!u@h PRIVMSG iirc :again");
+        yield* settle;
+        const reopened = yield* shown;
+
+        const unknown = yield* api.networks
+          .close({ params: { network: NetworkId.make("oftc") }, payload: { target: "peer" } })
+          .pipe(Effect.flip);
+
+        return {
+          answers: [peer, joined, listed].map(({ sequence }) => sequence),
+          closed,
+          news: happenings(events).flatMap((event) =>
+            event.data.news.flatMap((one): readonly unknown[] => {
+              if (one._tag === "Ignored") {
+                return [one.reason._tag];
+              }
+
+              return one._tag === "TimelineClosed" ? [one] : [];
+            })
+          ),
+          reopened,
+          unknown: unknown._tag,
+        };
+      })
+    );
+
+    const none = { activity: 0, direct: 0, highlights: 0, messages: 0 };
+
+    expect(new Set(result.answers).size).toBe(3);
+    expect(result.news).toStrictEqual([
+      {
+        _tag: "TimelineClosed",
+        where: { _tag: "Direct", existing: true, key: "peer", name: "Peer" },
+      },
+      "Joined",
+      "NoTimeline",
+    ]);
+    expect(result.closed).toStrictEqual([
+      { closed: false, name: "libera", unread: { ...none, activity: 1 } },
+      { closed: true, name: "peer", unread: { ...none, direct: 1 } },
+      { closed: false, name: "#iirc", unread: { ...none, activity: 1 } },
+    ]);
+    expect(result.reopened.find(({ name }) => name === "peer")).toStrictEqual({
+      closed: false,
+      name: "peer",
+      unread: { ...none, direct: 2 },
+    });
+    expect(result.unknown).toBe("UnknownNetwork");
+  });
+
   it("refuses a Network it does not know", async () => {
     const result = await run((_, api) =>
       Effect.gen(function* () {

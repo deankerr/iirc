@@ -149,6 +149,15 @@ describe("the format", () => {
     ]);
   });
 
+  it("reads a close of a Timeline, and writes it back", () => {
+    const text = "!! close #iirc\n";
+
+    expect(items(text)).toStrictEqual([
+      { _tag: "Owner", owner: { _tag: "Close", target: "#iirc" } },
+    ]);
+    expect(print(items(text))).toBe(text);
+  });
+
   it("reads Owner inputs into what they mean", () => {
     expect(
       items("!! configure +#secret key=chankey -#old decline=multi-prefix\n!! notice peer :a :b\n")

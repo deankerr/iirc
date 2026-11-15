@@ -32,6 +32,8 @@ import type { Descriptor, TimelineId } from "./timeline.ts";
  * - `Gap`: a period when the Network was not on, from `from`, to `to` once it is back on.
  * - `ReadMarker`: the Owner has read `timeline` up to `read`, which is always later than
  *   any Read Marker it had. What stands after it counts as unread.
+ * - `Closed`: the Owner closed `timeline`. It stays closed until an item is added to it
+ *   at a later sequence than this one, which a store derives: nothing is cleared.
  * - `HeadChanged`: what the Client knows of the Channel `timeline` is changed in a way no
  *   item says, such as its modes becoming known, so a Frontend reads it again.
  * - `Removed`: the Owner removed `network`. With `keep`, its Timelines stay readable and
@@ -98,6 +100,12 @@ export type Change =
       readonly network: string;
       readonly timeline: TimelineId;
       readonly read: Instant;
+    }
+  | {
+      readonly _tag: "Closed";
+      readonly sequence: number;
+      readonly network: string;
+      readonly timeline: TimelineId;
     }
   | {
       readonly _tag: "HeadChanged";

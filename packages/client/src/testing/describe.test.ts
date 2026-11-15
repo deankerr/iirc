@@ -42,6 +42,11 @@ describe(describeNews, () => {
     ],
     [{ _tag: "ReadMarker", read: now, where: { _tag: "Network" } }, "read-marker t+1s in=network"],
     [{ _tag: "Ignored", reason: { _tag: "NoTimeline" } }, "ignored NoTimeline"],
+    [{ _tag: "Ignored", reason: { _tag: "Joined" } }, "ignored Joined"],
+    [
+      { _tag: "TimelineClosed", where: { _tag: "Channel", key: "#iirc", name: "#IIRC" } },
+      "timeline-closed in=channel:#iirc:#IIRC",
+    ],
     [
       {
         ...message,

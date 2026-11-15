@@ -44,7 +44,7 @@ interface Stored {
 
 /**
  * A Timeline, its Read Marker, when its head last changed, whether its Network was removed,
- * and the last sequence that changed it.
+ * the sequence it was last closed at, and the last sequence that changed it.
  */
 interface Entry {
   descriptor: Descriptor;
@@ -52,6 +52,7 @@ interface Entry {
   read: Instant | undefined;
   head: number | undefined;
   removed: boolean;
+  closed: number | undefined;
 }
 
 interface Memory {
@@ -197,7 +198,54 @@ const deliver = (memory: Memory, change: DeliveryChange) => {
   }
 };
 
+/**
+ * Whether a Timeline is closed: it was closed, and no item stands in it from a later step.
+ * @param memory - The store.
+ * @param entry - The Timeline.
+ * @returns Whether it is.
+ */
+const isClosed = (memory: Memory, { closed, descriptor }: Entry) =>
+  closed !== undefined &&
+  [...(memory.items.get(descriptor.id)?.values() ?? [])].every(
+    ({ item }) => item.position.sequence <= closed
+  );
+
+// Only forward, whatever the change says.
+const markRead = (memory: Memory, change: Extract<Change, { readonly _tag: "ReadMarker" }>) => {
+  const found = memory.timelines.get(change.timeline);
+
+  if (found !== undefined && (found.read === undefined || change.read > found.read)) {
+    found.read = change.read;
+    found.changed = change.sequence;
+  }
+};
+
+// Kept by the sequence it was closed at, and closed for as long as nothing arrives after.
+const close = (memory: Memory, change: Extract<Change, { readonly _tag: "Closed" }>) => {
+  const found = memory.timelines.get(change.timeline);
+
+  if (found !== undefined) {
+    found.closed = change.sequence;
+    found.changed = change.sequence;
+  }
+};
+
 const merge = (memory: Memory, change: Extract<Change, { readonly _tag: "Merged" }>) => {
+  const from = memory.timelines.get(change.from);
+  const into = memory.timelines.get(change.into);
+
+  // The Timeline kept is closed only when both were, as of the later close.
+  if (into !== undefined) {
+    into.closed =
+      from !== undefined &&
+      from.closed !== undefined &&
+      into.closed !== undefined &&
+      isClosed(memory, from) &&
+      isClosed(memory, into)
+        ? Math.max(from.closed, into.closed)
+        : undefined;
+  }
+
   const moving = [...(memory.items.get(change.from) ?? new Map<string, Stored>())].toSorted(
     ([left], [right]) => textOrder(left, right)
   );
@@ -280,6 +328,7 @@ const applyChange = (memory: Memory, change: Change) => {
 
       memory.timelines.set(change.timeline.id, {
         changed: change.sequence,
+        closed: was?.closed,
         descriptor: change.timeline,
         head: was?.head,
         read: was?.read,
@@ -299,15 +348,13 @@ const applyChange = (memory: Memory, change: Change) => {
       break;
     }
 
+    case "Closed": {
+      close(memory, change);
+      break;
+    }
+
     case "ReadMarker": {
-      const found = memory.timelines.get(change.timeline);
-
-      // Only forward, whatever the change says.
-      if (found !== undefined && (found.read === undefined || change.read > found.read)) {
-        found.read = change.read;
-        found.changed = change.sequence;
-      }
-
+      markRead(memory, change);
       break;
     }
 
@@ -384,15 +431,14 @@ const unreadIn = (items: readonly Item[], read: Instant | undefined): Unread => 
   return counts;
 };
 
-const summaryOf = (
-  memory: Memory,
-  { descriptor, changed, head, read, removed }: Entry
-): Summary => {
+const summaryOf = (memory: Memory, entry: Entry): Summary => {
+  const { descriptor, changed, head, read, removed } = entry;
   const items = sortedItems(memory, descriptor.id);
 
   return {
     ...descriptor,
     changed,
+    closed: isClosed(memory, entry),
     head,
     latest: items.at(-1)?.position,
     read,

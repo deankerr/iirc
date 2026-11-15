@@ -185,8 +185,9 @@ const writeIgnored = (reason: IgnoredReason): string => {
       return "UnmatchedEcho";
     }
 
-    case "NoTimeline": {
-      return "NoTimeline";
+    case "NoTimeline":
+    case "Joined": {
+      return reason._tag;
     }
 
     default: {
@@ -505,6 +506,10 @@ export const describeNews = (news: News, now: Instant): string => {
 
     case "ReadMarker": {
       return words(["read-marker", writeInstant(news.read), ...writeWhere([news.where])]);
+    }
+
+    case "TimelineClosed": {
+      return words(["timeline-closed", ...writeWhere([news.where])]);
     }
 
     case "ChannelLearned": {
