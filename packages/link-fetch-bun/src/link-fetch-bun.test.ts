@@ -521,6 +521,24 @@ describe("bounds are on the decompressed stream", () => {
     );
   });
 
+  it("a <body> in a quoted attribute ends nothing", async () => {
+    await expect(
+      head(['<head><meta content="Use <body> here"><title>Real title</title></head><body>x'])
+    ).resolves.toBe('<head><meta content="Use <body> here"><title>Real title</title></head>');
+  });
+
+  it("a quoted attribute is skipped across chunks", async () => {
+    await expect(
+      head([
+        "<head><meta content='Use <bo",
+        "dy> and </he",
+        "ad> here' x=\"'\"><title>T</title></head>x",
+      ])
+    ).resolves.toBe(
+      "<head><meta content='Use <body> and </head> here' x=\"'\"><title>T</title></head>"
+    );
+  });
+
   it("a tag whose name only starts like body ends nothing", async () => {
     await expect(head(["<head><bodyguard>", "<title>T</title></head>x"])).resolves.toBe(
       "<head><bodyguard><title>T</title></head>"
@@ -768,6 +786,12 @@ describe("types", () => {
       image,
     ],
     ["a root that only starts like svg", "image/svg+xml", encoder.encode("<svgx/>"), image],
+    [
+      "HTML behind a quoted ]> in a DOCTYPE named an SVG",
+      "image/svg+xml",
+      encoder.encode('<?xml version="1.0"?><!DOCTYPE html [<!ENTITY bait "]><svg/>">]><html/>'),
+      image,
+    ],
     ["a BMP", "image/bmp", encoder.encode("BM...."), image],
     ["an oEmbed as HTML", "text/html", encoder.encode("{}"), { kind: "oembed" }],
     ["a stream as HTML", "text/html", encoder.encode("<p>"), { kind: "stream" }],

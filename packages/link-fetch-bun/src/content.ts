@@ -100,6 +100,43 @@ const decoder = new TextDecoder();
 const whitespace = /^[\t\n\f\r ]*/u;
 
 /**
+ * What follows a DOCTYPE that starts a text. Its end is the first `>` outside quotes and
+ * outside its internal subset, in brackets, where comments and processing instructions are
+ * skipped whole, so no quoted or commented `]>` ends it.
+ * @param text - The text, lower-cased, starting at `<!doctype`.
+ * @returns The text after it, or nothing when it does not end in the text.
+ */
+const afterDoctype = (text: string): string | undefined => {
+  let quote: string | undefined;
+  let subset = false;
+
+  for (let at = "<!doctype".length; at < text.length; at += 1) {
+    const character = text[at];
+
+    if (quote !== undefined) {
+      quote = character === quote ? undefined : quote;
+    } else if (subset && (text.startsWith("<!--", at) || text.startsWith("<?", at))) {
+      const closing = text.startsWith("<!--", at) ? "-->" : "?>";
+      const end = text.indexOf(closing, at + 2);
+
+      if (end === -1) {
+        return undefined;
+      }
+
+      at = end + closing.length - 1;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === "[" || character === "]") {
+      subset = character === "[";
+    } else if (character === ">" && !subset) {
+      return text.slice(at + 1);
+    }
+  }
+
+  return undefined;
+};
+
+/**
  * What follows a prolog item that starts a text: an XML declaration, a comment, or a DOCTYPE,
  * which may hold an internal subset in brackets.
  * @param text - The text, lower-cased, starting at an item.
@@ -124,10 +161,7 @@ const afterProlog = (text: string): string | undefined => {
     return undefined;
   }
 
-  const bracket = text.indexOf("[");
-  const end = text.indexOf(">");
-
-  return bracket !== -1 && bracket < end ? past("<!doctype", "]>") : past("<!doctype", ">");
+  return afterDoctype(text);
 };
 
 /**
@@ -212,7 +246,8 @@ type Mode =
   | { readonly in: "text" }
   | { readonly in: "comment" }
   | { readonly in: "raw"; readonly close: readonly number[] }
-  | { readonly in: "head end" };
+  | { readonly in: "head end" }
+  | { readonly in: "tag"; readonly quote: number | undefined };
 
 /**
  * Whether bytes hold a pattern at a place, in any case.
@@ -263,6 +298,77 @@ const find = (bytes: Uint8Array, from: number, pattern: readonly number[]) => {
   }
 
   return -1;
+};
+
+const quotes = new Set(codes(`"'`));
+
+/**
+ * Whether the byte after a `<` makes it a tag, a comment, a DOCTYPE, or a processing
+ * instruction: a letter, `/`, `!`, or `?`.
+ * @param byte - The byte.
+ * @returns Whether it does.
+ */
+const startsTag = (byte: number) =>
+  (lower(byte) >= 0x61 && lower(byte) <= 0x7a) || codes("/!?").includes(byte);
+
+/**
+ * Skips a tag to its `>`, honouring quoted attribute values.
+ * @param bytes - The bytes.
+ * @param from - Where to go on from, inside the tag.
+ * @param quote - The quote open there, if any.
+ * @returns Where the tag ends, after its `>`, or -1 and the quote still open at the end.
+ */
+const skipTag = (bytes: Uint8Array, from: number, quote: number | undefined) => {
+  let open = quote;
+
+  for (let at = from; at < bytes.length; at += 1) {
+    const byte = bytes[at] ?? -1;
+
+    if (open !== undefined) {
+      open = byte === open ? undefined : open;
+    } else if (quotes.has(byte)) {
+      open = byte;
+    } else if (byte === greaterThan) {
+      return { end: at + 1, quote: undefined };
+    }
+  }
+
+  return { end: -1, quote: open };
+};
+
+/** Where the scanner is, and where it goes on from. */
+interface Step {
+  readonly mode: Mode;
+  readonly at: number;
+}
+
+/**
+ * What a `<` in text begins, other than a body, and where to go on from.
+ * @param bytes - The bytes.
+ * @param open - Where the `<` is.
+ * @returns The mode after it, and where to go on from.
+ */
+const opened = (bytes: Uint8Array, open: number): Step => {
+  const raw = rawText.find((each) => isTag(bytes, open, each.open));
+
+  if (isTag(bytes, open, headClose)) {
+    return { at: open + headClose.length, mode: { in: "head end" } };
+  }
+
+  if (holds(bytes, open, commentOpen)) {
+    return { at: open + commentOpen.length, mode: { in: "comment" } };
+  }
+
+  if (raw !== undefined) {
+    return { at: open + raw.open.length, mode: { close: raw.close, in: "raw" } };
+  }
+
+  // Any other tag is skipped whole, so what its quoted attributes hold is never a tag. A `<`
+  // that starts no tag, as in `a < b`, is text.
+  return {
+    at: open + 1,
+    mode: startsTag(bytes[open + 1] ?? -1) ? { in: "tag", quote: undefined } : { in: "text" },
+  };
 };
 
 /**
@@ -321,6 +427,17 @@ export const headEnd = () => {
         }
 
         at = end + length;
+      } else if (mode.in === "tag") {
+        const skipped = skipTag(bytes, at, mode.quote);
+
+        if (skipped.end === -1) {
+          mode = { in: "tag", quote: skipped.quote };
+
+          return -1;
+        }
+
+        mode = { in: "text" };
+        at = skipped.end;
       } else if (mode.in === "head end") {
         const end = bytes.indexOf(greaterThan, at);
 
@@ -340,20 +457,7 @@ export const headEnd = () => {
           return ended(open);
         }
 
-        const raw = rawText.find((each) => isTag(bytes, open, each.open));
-
-        if (isTag(bytes, open, headClose)) {
-          mode = { in: "head end" };
-          at = open + headClose.length;
-        } else if (holds(bytes, open, commentOpen)) {
-          mode = { in: "comment" };
-          at = open + commentOpen.length;
-        } else if (raw === undefined) {
-          at = open + 1;
-        } else {
-          mode = { close: raw.close, in: "raw" };
-          at = open + raw.open.length;
-        }
+        ({ at, mode } = opened(bytes, open));
       }
     }
   };
