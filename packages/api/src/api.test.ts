@@ -45,6 +45,7 @@ import {
   SpellcheckShown,
   ReadRule,
 } from "./ui.ts";
+import { UploadId, UploadName } from "./uploads.ts";
 
 const document = OpenApi.fromApi(DaemonApi);
 
@@ -97,6 +98,8 @@ describe("the contract", () => {
       "GET /api/timelines/{timeline}/members",
       "GET /api/ui",
       "GET /api/ui/changes",
+      "GET /api/uploads/status",
+      "GET /api/uploads/{id}",
       "POST /api/networks/{network}/act",
       "POST /api/networks/{network}/close",
       "POST /api/networks/{network}/lookups",
@@ -104,6 +107,7 @@ describe("the contract", () => {
       "POST /api/networks/{network}/retry",
       "POST /api/networks/{network}/say",
       "POST /api/sign-in",
+      "POST /api/uploads",
       "PUT /api/credentials/{name}",
       "PUT /api/networks/{network}",
       "PUT /api/options/{option}",
@@ -151,6 +155,27 @@ describe("the contract", () => {
       intent("."),
       intent(".."),
     ]).toStrictEqual([true, true, false, false, false, false]);
+  });
+
+  it("parses an Upload's id as 16 lower-case Crockford base32 characters, and a name of 1 to 1024", () => {
+    const upload = Schema.is(UploadId);
+    const name = Schema.is(UploadName);
+
+    expect([
+      upload("0123456789abcdef"),
+      upload("ghjkmnpqrstvwxyz"),
+      upload("0123456789ABCDEF"),
+      upload("0123456789abcdei"),
+      upload("0123456789abcdeu"),
+      upload("0123456789abcde"),
+      upload("0123456789abcdef0"),
+    ]).toStrictEqual([true, true, false, false, false, false, false]);
+    expect([
+      name("cat.png"),
+      name(""),
+      name("x".repeat(1024)),
+      name("x".repeat(1025)),
+    ]).toStrictEqual([true, false, true, false]);
   });
 
   it("refuses to say text no Line can carry", () => {

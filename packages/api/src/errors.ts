@@ -6,9 +6,10 @@
 import { TimelineId } from "@iirc/timelines";
 import { Schema } from "effect";
 
-import { OwnerSequence } from "./options.ts";
+import { ByteCount, OwnerOptionName, OwnerSequence } from "./options.ts";
 import { CallerIntent, NetworkId, Sequence } from "./schemas.ts";
 import { UiSequence } from "./ui.ts";
+import { UploadId } from "./uploads.ts";
 
 /** No Network by this id has been configured. */
 export class UnknownNetwork extends Schema.TaggedError<
@@ -143,6 +144,40 @@ export class OptionsChanged extends Schema.TaggedError<
   OptionsChanged,
   { readonly brand: unique symbol }
 >()("OptionsChanged", { sequence: OwnerSequence }, { httpApiStatus: 409 }) {}
+
+/** No Upload has this id: a 404. */
+export class UnknownUpload extends Schema.TaggedError<
+  UnknownUpload,
+  { readonly brand: unique symbol }
+>()("UnknownUpload", { id: UploadId }, { httpApiStatus: 404 }) {}
+
+/**
+ * Uploads are off, since `missing` names options that are not set, so nothing was read or
+ * kept. Uploading again once they are set succeeds: a 409.
+ */
+export class UploadsOff extends Schema.TaggedError<UploadsOff, { readonly brand: unique symbol }>()(
+  "UploadsOff",
+  { missing: Schema.Array(OwnerOptionName) },
+  { httpApiStatus: 409 }
+) {}
+
+/**
+ * The body passed `maxSize` bytes, `uploads.maxSize` when it began, so it was cut off there
+ * and nothing was kept: a 413.
+ */
+export class UploadTooLarge extends Schema.TaggedError<
+  UploadTooLarge,
+  { readonly brand: unique symbol }
+>()("UploadTooLarge", { maxSize: ByteCount }, { httpApiStatus: 413 }) {}
+
+/**
+ * The store that keeps Uploads' bytes could not be reached, refused what was asked, or
+ * holds no key the options name, so nothing was kept. Asking again may succeed: a 503.
+ */
+export class StoreUnavailable extends Schema.TaggedError<
+  StoreUnavailable,
+  { readonly brand: unique symbol }
+>()("StoreUnavailable", { reason: Schema.String }, { httpApiStatus: 503 }) {}
 
 /**
  * The Journal could not be written or read. Its Network stays stopped until the Daemon

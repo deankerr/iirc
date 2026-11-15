@@ -29,6 +29,10 @@ import {
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
+  UnknownUpload,
+  UploadTooLarge,
+  UploadsOff,
+  StoreUnavailable,
   VaultFailed,
   ownerValueKept,
   windowLimit,
@@ -38,6 +42,7 @@ import type {
   OptionsEvent,
   TimelineChangesEvent,
   UiEvent,
+  Upload,
   WindowQuery,
 } from "@iirc/api";
 import { IntentId } from "@iirc/client";
@@ -84,6 +89,8 @@ import { SignIns } from "./sign-ins.ts";
 import type { SignInsUnwritable } from "./sign-ins.ts";
 import { UiConfiguration, parseUiValue, uiValueJson } from "./ui.ts";
 import type { UiChangedSince } from "./ui.ts";
+import { Uploads } from "./uploads/uploads.ts";
+import type { Shown } from "./uploads/uploads.ts";
 import {
   channelHeader,
   dropped,
@@ -1140,23 +1147,110 @@ const credentials = HttpApiBuilder.group(
   })
 );
 
+/**
+ * An Upload as the wire carries it.
+ * @param shown - Its record, and its link while there is a public URL.
+ * @returns The wire form.
+ */
+const upload = ({ link, record }: Shown): Upload => ({
+  at: record.at,
+  hash: record.hash,
+  id: record.id,
+  link: link ?? null,
+  safeName: record.safeName,
+  size: record.size,
+  type: record.type,
+  ...(record.name !== undefined && { name: record.name }),
+});
+
+const storeUnavailable = (error: { readonly reason: string }) =>
+  new StoreUnavailable({ reason: error.reason });
+
+/**
+ * Whether a request is an upload, whose body only its handler reads.
+ * @param request - The request.
+ * @returns Whether it is.
+ */
+const isUpload = (request: HttpServerRequest.HttpServerRequest) =>
+  request.method === "POST" && request.url.split("?")[0] === "/api/uploads";
+
+// An upload's body is read by its handler alone, as a stream, which no limit but
+// `uploads.maxSize` bounds. It has no body at all unless it says how long the body is, or
+// that it is chunked. An upload in flight when the Daemon begins to stop is cut off, so it
+// never holds up serving's stop.
+const uploads = HttpApiBuilder.group(
+  DaemonApi,
+  "uploads",
+  Effect.fn(function* (handlers) {
+    const held = yield* Uploads;
+
+    return handlers
+      .handleRaw("upload", ({ query, request }) =>
+        Effect.gen(function* () {
+          const stopping = yield* Stopping;
+          const length = request.headers["content-length"];
+
+          if (
+            request.headers["transfer-encoding"] === undefined &&
+            (length === undefined || Number(length) === 0)
+          ) {
+            return yield* new InvalidRequest({
+              issues: [{ message: "An Upload has at least one byte", path: ["payload"] }],
+            });
+          }
+
+          const kept = held.upload(request.stream.pipe(Stream.orDie), query.name);
+
+          const stopped = Effect.andThen(
+            stopping,
+            Effect.fail(new StoreUnavailable({ reason: "the Daemon is stopping" }))
+          );
+
+          return upload(yield* Effect.raceFirst(kept, stopped));
+        }).pipe(
+          Effect.catchTags({
+            BodyTooLarge: (error) => Effect.fail(new UploadTooLarge({ maxSize: error.maxSize })),
+            ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            UploadsAreOff: (error) => Effect.fail(new UploadsOff({ missing: error.missing })),
+          })
+        )
+      )
+      .handle("status", () => held.status)
+      .handle("read", ({ params }) =>
+        Effect.flatMap(held.find(params.id), (found) =>
+          Option.isNone(found)
+            ? Effect.fail(new UnknownUpload({ id: params.id }))
+            : Effect.succeed(upload(found.value))
+        )
+      );
+  })
+);
+
 // A body over the limit is refused unread, and Bun's graceful stop waits for a client
 // still sending one, so the 413 closes its Connection rather than hold up the Daemon's
-// shutdown. The limit's error reaches here as a defect.
+// shutdown. The limit's error reaches here as a defect. An upload answered with an error may
+// have left its body unread too, so it closes its Connection likewise.
 const bodyLimit = HttpRouter.middleware(
   (app) =>
-    app.pipe(
-      Effect.provideService(HttpIncomingMessage.MaxBodySize, maxBodySize),
-      Effect.catchDefect((defect) =>
-        defect instanceof HttpServerError.HttpServerError &&
-        defect.reason._tag === "RequestParseError" &&
-        defect.reason.reason === "BodyTooLarge"
-          ? Effect.succeed(
-              HttpServerResponse.empty({ headers: { connection: "close" }, status: 413 })
-            )
-          : Effect.die(defect)
-      )
-    ),
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+
+      const response = yield* app.pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, maxBodySize),
+        Effect.catchDefect((defect) =>
+          defect instanceof HttpServerError.HttpServerError &&
+          defect.reason._tag === "RequestParseError" &&
+          defect.reason.reason === "BodyTooLarge"
+            ? Effect.succeed(HttpServerResponse.empty({ status: 413 }))
+            : Effect.die(defect)
+        )
+      );
+
+      return response.status === 413 || (isUpload(request) && response.status >= 400)
+        ? HttpServerResponse.setHeader(response, "connection", "close")
+        : response;
+    }),
   { global: true }
 );
 
@@ -1172,6 +1266,7 @@ export const ApiHandlers = Layer.mergeAll(
   timelines,
   ui,
   options,
+  uploads,
   credentials
 ).pipe(Layer.provideMerge(Layer.mergeAll(requestValidation, authorization)));
 

@@ -117,6 +117,8 @@
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@iirc/api": "workspace:*",
+        "@iirc/byte-store": "workspace:*",
+        "@iirc/byte-store-s3": "workspace:*",
         "@iirc/client": "workspace:*",
         "@iirc/journal-sqlite": "workspace:*",
         "@iirc/outbox": "workspace:*",
@@ -130,8 +132,6 @@
         "effect": "catalog:",
       },
       "devDependencies": {
-        "@iirc/byte-store": "workspace:*",
-        "@iirc/byte-store-s3": "workspace:*",
         "vitest": "catalog:",
       },
     },

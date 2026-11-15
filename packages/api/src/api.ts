@@ -34,6 +34,10 @@ import {
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
+  UnknownUpload,
+  UploadTooLarge,
+  UploadsOff,
+  StoreUnavailable,
   VaultFailed,
 } from "./errors.ts";
 import { OwnerInForce, OwnerOptionName } from "./options.ts";
@@ -85,6 +89,7 @@ import {
   WindowQuery,
 } from "./schemas.ts";
 import { UiInForce, UiOptionName } from "./ui.ts";
+import { Upload, UploadId, UploadQuery, UploadsStatus } from "./uploads.ts";
 
 /**
  * How the API parses a request: a key nothing reads, such as a misspelt field of a
@@ -339,6 +344,28 @@ export class OptionsGroup extends HttpApiGroup.make("options")
   )
   .middleware(Authorization) {}
 
+/**
+ * Uploads: a file's bytes as the raw body, with no multipart, whatever its `Content-Type`,
+ * which is never read, kept and recorded, and answered with its record and link; one
+ * Upload by its id; and whether Uploads are on.
+ */
+export class UploadsGroup extends HttpApiGroup.make("uploads")
+  .add(
+    HttpApiEndpoint.post("upload", "/uploads", {
+      error: [UploadsOff, UploadTooLarge, StoreUnavailable, JournalFailed],
+      payload: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
+      query: UploadQuery,
+      success: Upload,
+    }),
+    HttpApiEndpoint.get("status", "/uploads/status", { success: UploadsStatus }),
+    HttpApiEndpoint.get("read", "/uploads/:id", {
+      error: UnknownUpload,
+      params: { id: UploadId },
+      success: Upload,
+    })
+  )
+  .middleware(Authorization) {}
+
 /** Credentials, by name. A value goes in, and only names come out. */
 export class CredentialsGroup extends HttpApiGroup.make("credentials")
   .add(
@@ -383,6 +410,7 @@ export class DaemonApi extends HttpApi.make("iirc")
   .add(TimelinesGroup)
   .add(UiGroup)
   .add(OptionsGroup)
+  .add(UploadsGroup)
   .add(CredentialsGroup)
   .middleware(RequestValidation)
   .annotate(HttpApi.PayloadParseOptions, requestParseOptions)

@@ -51,6 +51,9 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `PUT /api/options/{option}?ifSequence=` | Sets one to `{ value }`, as for `ui` | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
 | `DELETE /api/options/{option}?ifSequence=` | Unsets one, back to its default or to none, likewise | `{ sequence }` | `OptionsChanged`, `JournalFailed` |
 | `GET /api/options/changes?after=` | Server-Sent Events of them, whole, as for `ui` | `changed` and `heartbeat` events |  |
+| `POST /api/uploads?name=` | Keeps a file: its bytes as the raw body, with no multipart and any `Content-Type`, and the name it was given, if any | `Upload` | `UploadsOff`, `UploadTooLarge`, `StoreUnavailable`, `JournalFailed` |
+| `GET /api/uploads/status` | Whether Uploads are on, and the largest one may be | `On { maxSize }` or `Off { maxSize, missing }` |  |
+| `GET /api/uploads/{id}` | One Upload | `Upload` | `UnknownUpload` |
 | `GET /api/credentials` | The names of the Credentials held | `{ names }` | `VaultFailed` |
 | `PUT /api/credentials/{name}` | Holds a value, `{ value }`, replacing any before | `204` | `VaultFailed` |
 | `DELETE /api/credentials/{name}` | Forgets one. Forgetting one not held does nothing | `204` | `VaultFailed` |
@@ -77,8 +80,15 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **A change names what it was made from.** A `PUT` of Configuration, or of an option, with `ifSequence` is refused when another change was journaled since, and nothing is journaled: read again and send it again. The check and the append are one step, so two changes made from the same state never both pass. Without `ifSequence`, the last wins.
 - **Configuration is an option tree, and the Schema says what each option is**. A Frontend walks `NetworkConfiguration` to offer every field as an option, so a new field needs no work in any Frontend.
 - **The options under `ui` are the Owner's, shared by every device**. `UiOptions`, in `@iirc/api/ui`, describes each with its default: `theme`, `light`, `dark`, `themes`, `colours`, `font`, `size`, `leading`, `time`, `activity`, `width`, `read`, which says when a Timeline is marked read, and the Composer's habits, `enter`, `spellcheck`, and `suffix`. A value is parsed by its option's Schema before it is journaled. `light` and `dark` name the themes `system` draws, and are never `system`. At most 32 themes are held, and an import may not take `system`, a built-in theme's name, or a word `/theme` reads. `font` is a font's name or a family's, which holds no `"`, `\`, or control character, so it is always one quoted CSS family. `suffix` is at most 8 characters, empty allowed, with no control character, so it never puts a line break or IRC formatting into the Composer.
-- **The options under `store` and `uploads` are the Owner's too, and no device overrides them**. `OwnerOptions`, in `@iirc/api/options`, is one flat Struct keyed by each option's full name: the bucket, `store.s3.endpoint`, `bucket`, `region`, and its keys, `accessKeyId` and `secretAccessKey`, which name Credentials by the `CredentialName` Schema, and how Uploads are served, `uploads.listen`, `publicUrl`, `maxSize`, `maxTotal`, and `expireAfter`, in days. Only `maxSize` has a default, 100 MiB. Each is parsed by its Schema before it is journaled, so a URL is journaled as the one form it reads as, such as `https://files.example.com/uploads` for any spelling of it with the default port, an upper-case host, or a trailing `/`, and an address is `host:port` with a name, an IPv4 address, or a bracketed IPv6 one, and the sequence they are changed from is their own, apart from `ui`'s. They do nothing yet.
+- **The options under `store` and `uploads` are the Owner's too, and no device overrides them**. `OwnerOptions`, in `@iirc/api/options`, is one flat Struct keyed by each option's full name: the bucket, `store.s3.endpoint`, `bucket`, `region`, and its keys, `accessKeyId` and `secretAccessKey`, which name Credentials by the `CredentialName` Schema, and how Uploads are served, `uploads.listen`, `publicUrl`, `maxSize`, `maxTotal`, and `expireAfter`, in days. Only `maxSize` has a default, 100 MiB. Each is parsed by its Schema before it is journaled, so a URL is journaled as the one form it reads as, such as `https://files.example.com/uploads` for any spelling of it with the default port, an upper-case host, or a trailing `/`, and an address is `host:port` with a name, an IPv4 address, or a bracketed IPv6 one, and the sequence they are changed from is their own, apart from `ui`'s.
 - **The options are streamed whole.** Each `changed` event is every option in force under its roots, so a Frontend that follows needs no read first, and one that reconnects misses nothing.
+
+### Uploads
+
+- **Uploads are on exactly when the bucket, its two keys, and `uploads.publicUrl` are set.** Otherwise the status is `Off`, naming each of those options that is not, and an upload is `UploadsOff`. The status always says `maxSize`, `uploads.maxSize` in force.
+- **An upload's body is the file, whatever it is.** It is never multipart, and its `Content-Type` is never read: the type is read from the bytes. It must have at least one byte, and it may be as large as `uploads.maxSize` when the upload began, past which it is cut off unread with `UploadTooLarge` and nothing is kept. An upload answered with any error closes its Connection, since its body may be unread.
+- **An `Upload` is its record and its link.** `id` is 16 lower-case Crockford base32 characters, `UploadId`, 80 random bits, never the hash. `name` is the name given, when one was, `safeName` the name its link and download use, made from it and from the type, `type` the `Content-Type` it is served with, `size` and `hash` the bytes' count and SHA-256, and `at` when it was kept. `link` is `<uploads.publicUrl>/<id>/<safeName>`, built from the public URL in force when it is read, or `null` while none is set.
+- **Uploading needs what saying needs, and reading needs a read.** Key scopes do not exist yet, so every key and sign-in may do both, and an upload by cookie must come from the Daemon's own origin, as every write must.
 
 ### Removing
 
@@ -151,13 +161,17 @@ A Frontend reads Timelines and never folds News. The Daemon folds them.
 | `TimelinesKept` | 409 | A `PUT` of Configuration named a Network removed with its Timelines kept. Its id is free once they are dropped. Nothing was journaled. |
 | `UiChanged` | 409 | A change of an option under `ui` was made from other options than those in force: another Change was journaled since, at `sequence`, the last. Nothing was journaled. |
 | `OptionsChanged` | 409 | The same, for an option under `store` or `uploads`. |
+| `UnknownUpload` | 404 | No Upload has that id. |
+| `UploadsOff` | 409 | Uploads are off, and `missing` names the options that are not set. Nothing was read or kept. |
+| `UploadTooLarge` | 413 | The body passed `maxSize`, so it was cut off there, and nothing was kept. |
+| `StoreUnavailable` | 503 | The bucket could not be reached, refused what was asked, or a key the options name is not held, or the Daemon began to stop, so nothing was kept. |
 | `NetworkStopped` | 503 | The Network stopped, so its outcome is `Uncertain`, below. |
 | `TimelinesFailed` | 503 | The Timelines could not be read. They are derived, and a read that waited on a lock may succeed when asked again, while a damaged store is made again from the Journal when the Daemon restarts. |
 | `VaultFailed` | 503 | The Vault could not read or write its file. It tries again on the next call, so once the Owner fixes the file or its directory, the same request succeeds. |
 | `SignInsFailed` | 503 | The Daemon could not write its sign-ins, so nothing changed. It tries again on the next call. |
 | `JournalFailed` | 500 | The Journal could not be read or written. A Network whose Journal failed stays stopped until the Daemon starts again, so asking again does not help. A change of an option that could not be journaled changed nothing, and stops nothing. |
 
-A body over 1 MiB is refused with 413 before it is read.
+A body over 1 MiB is refused with 413 before it is read, on every route but an upload's.
 
 **`NetworkStopped` does not mean the input was refused.** The Network may have stopped after the input was journaled and before the Daemon answered, and a restart steps it. Its body says `outcome: "Uncertain"`, and for a `say`, the `intent` it was given under, even one the Daemon named. A `PUT` of Configuration, a `read`, a `close`, and a `retry` can be sent again freely. A `say` or an `act` must not be: ask `said` with that intent, on this Daemon or the one started after it. `Journaled` means it must not be said again. `NotJournaled` means saying it again under the same intent is safe. An intent must be unique for its Network across the whole Journal, which is the caller's to keep.
 

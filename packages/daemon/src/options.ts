@@ -21,6 +21,9 @@ import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed, Sequence } from "@iirc/runtime/journal";
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream, SubscriptionRef } from "effect";
 
+/** A Change of an option under `store` or `uploads`, the only kind this fold journals. */
+type OptionChange = Extract<Change, { readonly _tag: "OptionSet" | "OptionUnset" }>;
+
 /**
  * What the Changes folded so far hold: each option set, by its full name, and the sequence
  * of the last Change of one, `0` before any.
@@ -108,7 +111,7 @@ export class OwnerConfiguration extends Context.Service<
      * the last Change of one. The check and the append are one turn.
      */
     readonly change: (
-      change: Change,
+      change: OptionChange,
       ifSequence: number | undefined
     ) => Effect.Effect<Sequence, OptionsChangedSince | JournalFailed>;
     /** The options in force now, then again each time a Change is held. */
@@ -146,7 +149,7 @@ export const layerOwnerConfiguration = Layer.effect(OwnerConfiguration)(
 
     // The check, the append, and holding what was appended are one turn, and an append is
     // whole or absent, so what is held never differs from the Journal.
-    const change = (one: Change, ifSequence: number | undefined) =>
+    const change = (one: OptionChange, ifSequence: number | undefined) =>
       turn.withPermit(
         Effect.uninterruptible(
           Effect.gen(function* () {

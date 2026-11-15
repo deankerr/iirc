@@ -18,7 +18,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `Beside` | The type of those routes: a Layer that adds to the `HttpRouter`, and may use the server's `FileSystem`, `Path`, and file responses. |
 | `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s). |
 | `layerLogger` | logfmt on stderr, so stdout holds only what a command was asked for. |
-| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `OwnerConfiguration`, `ApiKeys`, and `SignIns`. |
+| `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `OwnerConfiguration`, `Uploads`, `ApiKeys`, and `SignIns`. |
 | `Heartbeat`, `ChangesPage` | How often the News and Timeline changes streams say they are alive (15 s), and how many things one event of the Timeline changes holds at most (500). Each is a reference a test may set. |
 | `createKey(dataDir, name)` | `iirc key create`: makes a key, stores its hash, and gives the key once. Call it with the data directory held. |
 | `ApiKeys` | Checks a presented key against `keys.json`, read once at start. |
@@ -28,6 +28,8 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `layerProjector` | The projector alone, given a `Runtime` and a `TimelineStore`. |
 | `UiConfiguration`, `layerUiConfiguration`, `UiChangedSince` | The options under `ui`, folded from the Journal's Changes, and how a Change is checked and journaled, failing with `UiChangedSince` when made from other options than those in force. The Layer needs the `Journal`. |
 | `OwnerConfiguration`, `layerOwnerConfiguration`, `OptionsChangedSince` | The options under `store` and `uploads`, likewise, with `OptionsChangedSince`, and the Credentials they name now, in `credentialsNamed`. |
+| `Uploads`, `layerUploads(dataDir)`, `ByteStoreMaker` | The Uploads folded from the Journal's `Uploaded` Changes, whether they are on, and how a body becomes a kept Upload, below. The Layer needs the `Journal`, the `Vault`, `OwnerConfiguration`, the file system, `SecureRandom`, and a `ByteStoreMaker`, which makes the byte store from where a bucket is and its keys: `makeS3ByteStore` in the Daemon. |
+| `layerLinkListener` | The link listener, below, given `Uploads` and `OwnerConfiguration`. |
 
 ## The data directory
 
@@ -39,6 +41,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `keys.json` | The API keys as SHA-256 hashes | `iirc key create` |
 | `sign-ins.json` | The sign-ins as SHA-256 hashes | the Daemon |
 | `daemon.lock` | The lock below. It holds nothing | the Daemon and `iirc key create` |
+| `staging/` | Uploads' bodies as they arrive, a file each, mode `0600`, in a directory of mode `0700`. Each lives only as long as its upload, and the Daemon empties it as it starts | the Daemon |
 
 The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is read at start: there is no configuration file. `views.sqlite` is derived: removing it while the Daemon is stopped rebuilds it on the next start.
 
@@ -65,6 +68,28 @@ The options under `ui` are a projection of the Journal's `UiSet` and `UiUnset` C
 - **A change is checked and journaled in one turn.** One turn at a time compares `ifSequence` with the sequence of the last Change, appends the `Change`, and holds what it appended, uninterruptibly, so what is held never differs from the Journal and two changes made from the same options never both pass. It is the only way a `Change` is journaled. A `Change` holds the value as its option's Schema encodes it, after the handler parsed it.
 - **The stream is the options, whole, from what is held.** `changes` gives the options in force, then again each time a Change is held, from a `SubscriptionRef`, so the stream reads nothing from the Journal. The handler leaves out those at or before `after`, and merges in the heartbeat.
 - **The Runtime spares the Credentials they name.** The options under `store` and `uploads` are folded before the Runtime starts, and give it `spared`, so a removal never forgets the bucket's keys, even one cut short and finished as the Runtime starts. A change of an option and a removal deciding which Credentials to forget, through forgetting them, take one turn each, so a key named while a removal is deciding waits for it.
+
+## Uploads
+
+The Uploads are a projection of the Journal's `Uploaded` Changes, in `src/uploads/`, and their bytes are kept in a bucket by their hash (ADR 0016).
+
+- **On start, they are folded from the Journal.** Every `Uploaded` is read once and held by its id, so a restart gives the same Uploads. One applied twice is applied once.
+- **An Upload is journaled through the projection.** Appending its `Uploaded` and holding it are one uninterruptible step, so what is held never differs from the Journal. The Change carries `at`, from Effect's `Clock`, since an Entry has no time of its own.
+- **Whether Uploads are on is derived from the options in force,** never held apart from them: on exactly when the bucket's endpoint, name, region, and two keys, and `uploads.publicUrl`, are all set.
+- **The store follows the options.** It is made from the options and the two Credentials, read from the Vault, each time it is used, and never kept, so a change of either reaches the next upload or link. A Credential the options name that is not held, or a Vault that cannot be read, is an unavailable store.
+- **A body streams to staging.** Its handler reads it as a stream, which the 1 MiB limit never bounds, and writes it to a file of its own under `staging/`, hashing and counting each chunk as it arrives. `uploads.maxSize` is read once, as it begins, and the chunk that would pass it is never written: the upload stops reading and answers 413. An upload answered with any error closes its Connection, so a body left unread never holds up the server.
+- **Then it is kept, in order.** The type is read from the first 4 KiB of what was staged, the name is made safe, the id drawn, 80 bits from `SecureRandom`, since the id is all that makes a link unguessable, the staged file put to the store, which may read it twice, and the `Uploaded` journaled. The staged file is removed however that ends, so a failure, an interruption, or a client that goes away leaves nothing in staging and nothing journaled. One a crash left is removed at start.
+- **An upload in flight when the Daemon begins to stop is cut off** with 503, as `Stopping` completes, so it never holds up serving's stop.
+
+### The link listener
+
+The link listener, in `src/link-listener.ts`, is a second HTTP server, never a route of the API, which serves each Upload at its link and nothing else.
+
+- **It follows the options.** It is bound at `uploads.listen` while Uploads are on and that is set, rebound when it changes, and closed when either stops being so. Each change closes the binding before it, so a rebind finds its port free. A binding that fails, as at an address in use, is logged, and the listener stays closed until the options change again.
+- **It answers `GET` and `HEAD` of `/<id>/<anything>`, by the id alone.** The name after it is decoration. Everything else is 404. It reads no cookie and no key, ignores the host a request names, and offers no listing or index.
+- **Every answer carries** `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox allow-downloads; default-src 'none'`, `Access-Control-Allow-Origin: *`, since Chromium plays top-level media under a sandbox only so, and the listener reads no cookie to give away, `Referrer-Policy: no-referrer`, and `Cross-Origin-Resource-Policy: cross-origin`.
+- **An Upload is served as its record says.** Its `Content-Type` is the type read from its bytes, with a charset where one applies, and its `Content-Disposition` names its safe name, as an ASCII `filename` and as `filename*`. Raster images, common audio and video, and plain text are `inline`, and everything else, SVG, HTML, XML, and PDF among them, an `attachment`. It is `Cache-Control: no-cache`.
+- **What it cannot serve is plain text.** An Upload no one has, or whose bytes the store confirms are gone, is 404, and a store that cannot be reached is 503 with `Cache-Control: no-store`.
 
 ## API keys
 
@@ -107,7 +132,7 @@ The options under `ui` are a projection of the Journal's `UiSet` and `UiUnset` C
 ## Composition
 
 - **The core is provided outside `HttpRouter.serve`.** `serve` forks the MemoMap, so anything shared built inside it would be built twice, and the Journal and the lock would each be opened again.
-- **The Runtime stops first, gracefully.** It lives in a Scope of its own, which a Layer built after serving closes. Layers close in reverse, so on SIGINT or SIGTERM the Runtime stops: each Network steps a `Stopping`, the Client says `QUIT` and hangs up, and the Runtime waits for each Connection's `Closed` within `stopTimeout`. Every Owner input still waiting fails with `NetworkStopped`. Then every stream a Frontend is still reading ends. Only then does serving stop, then the projector, then the Timeline store, and then the Journal, the Vault, and the lock.
+- **The Runtime stops first, gracefully.** It lives in a Scope of its own, which a Layer built after serving closes. Layers close in reverse, so on SIGINT or SIGTERM the Runtime stops: each Network steps a `Stopping`, the Client says `QUIT` and hangs up, and the Runtime waits for each Connection's `Closed` within `stopTimeout`. Every Owner input still waiting fails with `NetworkStopped`. Then every stream a Frontend is still reading ends, and every upload in flight is cut off. Only then does serving stop, then the link listener and the projector, then the Timeline store, and then the Journal, the Vault, and the lock.
 - **The projector stops before what it reads and writes.** It is built after the Runtime, the Journal, and the store, so it is interrupted before any of them closes. It goes on folding while the Runtime stops, since it follows the Journal rather than the Runtime, and an apply in flight when it is interrupted is kept whole or not at all.
 - **`gracefulShutdownTimeout` is 500 ms.** By then the Runtime has stopped and the streams being read have ended, so it covers only reads in flight and a stream whose reader has stopped reading, which are cut.
 - **A stop is bounded, well inside a service manager's.** The Runtime waits on Ircds for at most `stopTimeout`, 5 s by default, however many Networks there are, since they stop side by side. It then lets a Journal append already in flight settle, which on a healthy disk is a few milliseconds but which the Journal port does not bound, and closes the Connections still open at once, without waiting on the Ircd. Serving then takes at most `gracefulShutdownTimeout`, 500 ms, for requests in flight. So with storage that answers promptly, a stop takes about 5.5 s, far inside systemd's default of 90 s. That is the usual time, not a guarantee: the total also includes settling an append already in flight, which nothing bounds, so a slow or stalled disk lengthens it, and so does the case "Not yet" names, where Effect's Bun server waits on a client still sending a body. Within the Runtime's bound, a hang-up drains for at most half of it, 2.5 s, and the Transport's own close takes at most its `hangupTimeout`, 2 s, so the `QUIT` fits. Raising `stopTimeout` raises the stop with it, and the service's stop timeout must stay above it plus 500 ms.
@@ -122,7 +147,7 @@ The options under `ui` are a projection of the Journal's `UiSet` and `UiUnset` C
 - **The Daemon names a `say`'s, an `act`'s, or a Lookup's intent** when the caller does not: 128 bits from Effect's `Random`, as hex, as the Runtime would. So the intent is known before the `Say` is stepped, and a `NetworkStopped` can say which to ask `said` about.
 - **The wire forms are total maps** in `src/wire.ts`. Each return type is checked by `Fields`, so a field the Client adds to News, Knowledge, or the inspection, or a field the contract has and the Client does not, fails to compile there until the contract catches up, and a new variant fails the `switch` that ends in `satisfies never`.
 - **A request that does not decode** is `InvalidRequest` with the path of each issue. Its messages never quote the input, since a body can carry a Credential's value.
-- **A body over 1 MiB is refused unread,** with 413 and `Connection: close`. Bun's graceful stop waits for a client still sending a body, so without the close, one oversized upload could hold up shutdown.
+- **A body over 1 MiB is refused unread,** with 413 and `Connection: close`, on every route but an upload's, whose handler streams its body. Bun's graceful stop waits for a client still sending a body, so without the close, one oversized body could hold up shutdown.
 - **A request may present a key or a sign-in.** The key in `Authorization: Bearer` is tried first, then the `iirc_sign_in` cookie, and either gives the handler the key's name as its `Caller`. A request the cookie carries that is not `GET` or `HEAD` must say it is same-origin, and so must signing in and out.
 - **The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/api`, and `Max-Age` 400 days,** the most a browser keeps a cookie. It is `Secure` only when `X-Forwarded-Proto` says the browser's connection was `https`. The API listens on loopback only, so the header comes from the Owner's own reverse proxy, which ADR 0006 trusts. On plain `http` to loopback the cookie is not `Secure`, because WebKit refuses a `Secure` cookie over `http://localhost`. Signing out clears the cookie with the same attributes, whether or not its sign-in existed.
 - **The News stream** is the Runtime's `news`, from `after` or `Last-Event-ID`, mapped to the wire and merged with a heartbeat every 15 s that stops when it does. Each reader follows the Journal on its own, so a reader that reads nothing holds back only its own response, never the Runtime or another reader.
@@ -146,7 +171,7 @@ The options under `ui` are a projection of the Journal's `UiSet` and `UiUnset` C
 ## Not yet
 
 - **Recording transcripts from the Journal.** The end-to-end runs are where fixtures will come from, through a normaliser that follows the fixtures' rules.
-- **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB, or one that has stopped reading a stream it follows, could still hold up shutdown.
+- **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB to a route other than an upload, or one that has stopped reading a stream it follows, could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
 - **Key scopes, keys through the API, and ending sign-ins other than by signing out.**
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.

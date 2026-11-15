@@ -12,6 +12,9 @@ import { Journal } from "@iirc/runtime/journal";
 import type { Change, JournalFailed, Sequence } from "@iirc/runtime/journal";
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream, SubscriptionRef } from "effect";
 
+/** A Change of an option under `ui`, the only kind this fold journals. */
+type UiChange = Extract<Change, { readonly _tag: "UiSet" | "UiUnset" }>;
+
 /** A `ui` option's value, decoded by its Schema. */
 type UiValue = UiOptions[UiOptionName];
 
@@ -111,7 +114,7 @@ export class UiConfiguration extends Context.Service<
      * the last Change. The check and the append are one turn.
      */
     readonly change: (
-      change: Change,
+      change: UiChange,
       ifSequence: number | undefined
     ) => Effect.Effect<Sequence, UiChangedSince | JournalFailed>;
     /** The options in force now, then again each time a Change is held. */
@@ -140,7 +143,7 @@ export const layerUiConfiguration = Layer.effect(UiConfiguration)(
 
     // The check, the append, and holding what was appended are one turn, and an append is
     // whole or absent, so what is held never differs from the Journal.
-    const change = (one: Change, ifSequence: number | undefined) =>
+    const change = (one: UiChange, ifSequence: number | undefined) =>
       turn.withPermit(
         Effect.uninterruptible(
           Effect.gen(function* () {

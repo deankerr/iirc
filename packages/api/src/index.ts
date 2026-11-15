@@ -18,6 +18,7 @@ export {
   signInCookie,
   TimelinesGroup,
   UiGroup,
+  UploadsGroup,
 } from "./api.ts";
 
 export {
@@ -37,6 +38,10 @@ export {
   Unauthorized,
   UnknownNetwork,
   UnknownTimeline,
+  UnknownUpload,
+  UploadTooLarge,
+  UploadsOff,
+  StoreUnavailable,
   VaultFailed,
 } from "./errors.ts";
 
@@ -201,5 +206,14 @@ export {
 } from "./options.ts";
 
 export type { OwnerOptionValue } from "./options.ts";
+
+export {
+  Upload,
+  UploadId,
+  UploadName,
+  UploadQuery,
+  UploadsStatus,
+  uploadNameMaxLength,
+} from "./uploads.ts";
 
 export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";

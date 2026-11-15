@@ -16,9 +16,9 @@ import {
 } from "./options.ts";
 import { UiConfiguration, layerUiConfiguration } from "./ui.ts";
 
-const set = (option: string, value: Schema.Json): Change => ({ _tag: "OptionSet", option, value });
+const set = (option: string, value: Schema.Json) => ({ _tag: "OptionSet", option, value }) as const;
 
-const unset = (option: string): Change => ({ _tag: "OptionUnset", option });
+const unset = (option: string) => ({ _tag: "OptionUnset", option }) as const;
 
 const fold = (changes: readonly Change[]) => {
   let held = nothingSet;
