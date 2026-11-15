@@ -51,7 +51,6 @@ Small things, each independent of the rest.
 
 - **Closing a Timeline:** a Direct Message, or a Channel the Owner left, out of the Sidebar until something is said there again.
 - **Ignoring a User,** by mask, as Configuration so every Frontend agrees. What they say is still journaled, and is neither shown, counted, nor notified.
-- **CTCP requests of Self's own,** sent with `/ctcp` and `/ping`, each reply shown with its request.
 - **More to do as a Session begins:** `OPER` with a Credential, user modes to set, and Lines of the Owner's own to send.
 - **Taking a nick back.** When a configured nick was taken, Self takes it once its holder is seen to leave it.
 - **A Channel's lists:** its bans, exceptions and invitation masks read as a Lookup, shown, and removed from. `/names` and `/who` beside them.

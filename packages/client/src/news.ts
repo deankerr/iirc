@@ -43,8 +43,12 @@ export type CtcpAnswer =
  * a CTCP request in a `PRIVMSG` from a User other than Self, other than `ACTION` and
  * `DCC`, with what became of it, and a `CtcpReply` one in a `NOTICE`. `nick` is who sent
  * it, `target` where it was sent, and `args` everything after the command, as text to
- * show and nothing more. A `CtcpUnsent` is an answer Self reported as `Answered` that never
- * left, placed where its request was, which it names by who asked, where, and the command.
+ * show and nothing more. A `CtcpReply` to a `PING` Self sent carries `roundTrip`, the
+ * milliseconds between the instants the request and the reply were journaled, and every
+ * other reply `null`. A `CtcpSent` is a request the Owner sent to a User, by their nick, its
+ * command, and its arguments, placed where that User's replies are. A `CtcpUnsent` is an
+ * answer Self reported as `Answered` that never left, placed where its request was, which
+ * it names by who asked, where, and the command.
  * A `StandardReply`
  * is what the Network said of something sent, or of nothing: a `WARN` or a `NOTE`, or a
  * `FAIL` that refused no intent.
@@ -85,7 +89,8 @@ export type Activity =
     }
   | ({ readonly _tag: "StandardReply" } & StandardReply)
   | ({ readonly _tag: "CtcpRequest"; readonly answer: CtcpAnswer } & Ctcp)
-  | ({ readonly _tag: "CtcpReply" } & Ctcp)
+  | ({ readonly _tag: "CtcpReply"; readonly roundTrip: number | null } & Ctcp)
+  | ({ readonly _tag: "CtcpSent" } & Omit<Ctcp, "target">)
   | ({ readonly _tag: "CtcpUnsent" } & Omit<Ctcp, "args">);
 
 /** A CTCP request or reply: who sent it, where, its command, upper-cased, and its arguments. */
@@ -176,6 +181,8 @@ export type RefusedReason =
  * - `Nick`: Self's nick.
  * - `Away`: away, or back with `away` false.
  * - `Raw`: a Line written as text, by its command, or `null` when it did not parse.
+ * - `Ctcp`: a CTCP request to a nick, by its command, upper-cased.
+ * - `Ping`: a CTCP `PING` to a nick.
  */
 export type Attempted =
   | { readonly _tag: "Topic"; readonly channel: string }
@@ -184,7 +191,9 @@ export type Attempted =
   | { readonly _tag: "Invite"; readonly nick: string; readonly channel: string }
   | { readonly _tag: "Nick"; readonly nick: string }
   | { readonly _tag: "Away"; readonly away: boolean }
-  | { readonly _tag: "Raw"; readonly command: string | null };
+  | { readonly _tag: "Raw"; readonly command: string | null }
+  | { readonly _tag: "Ctcp"; readonly nick: string; readonly command: string }
+  | { readonly _tag: "Ping"; readonly nick: string };
 
 /**
  * Where an action of the Owner's belongs, to show its refusal: the Channel it was about,

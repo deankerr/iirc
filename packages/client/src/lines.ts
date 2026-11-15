@@ -29,7 +29,7 @@ import {
   refused,
   see,
 } from "./channels.ts";
-import { heardCtcp } from "./ctcp.ts";
+import { forgetPings, heardCtcp } from "./ctcp.ts";
 import type { Arrival, Meant } from "./feature.ts";
 import { identified, identify } from "./identify.ts";
 import { Instant } from "./ids.ts";
@@ -158,8 +158,8 @@ const modesAnswered = (run: Run, target: string, changes: readonly ModeChange[])
   }
 };
 
-// What Self did, live, answers the Line of an action that asked for it, and Self's own
-// `AWAY` says whether Self is away.
+// What Self did, live, answers the Line of an action that asked for it, Self's own
+// `AWAY` says whether Self is away, and a User's `QUIT` forgets the `PING`s sent to them.
 const settled = (run: Run, activity: Activity): void => {
   switch (activity._tag) {
     case "TopicChanged": {
@@ -202,12 +202,18 @@ const settled = (run: Run, activity: Activity): void => {
       break;
     }
 
+    case "Quit": {
+      forgetPings(run, activity.nick);
+
+      break;
+    }
+
     case "Joined":
     case "Parted":
-    case "Quit":
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
+    case "CtcpSent":
     case "CtcpUnsent": {
       break;
     }

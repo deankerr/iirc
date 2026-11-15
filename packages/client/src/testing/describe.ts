@@ -199,7 +199,8 @@ const writeRefused = (reason: RefusedReason): string =>
   reason._tag === "Rejected" ? `Rejected ${atom(reason.reply)}` : reason._tag;
 
 // What an action tried, as one attribute: `topic=#iirc`, `kick=#iirc:a,b`,
-// `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `raw=WHOIS`, or
+// `mode=#iirc:+o-v`, `invite=peer:#iirc`, `nick=new`, `away`, `back`, `ctcp=peer:VERSION`,
+// `ping=peer`, `raw=WHOIS`, or
 // `raw` for a Line that did not parse.
 const writeAttempted = (attempted: Attempted): string => {
   switch (attempted._tag) {
@@ -231,6 +232,14 @@ const writeAttempted = (attempted: Attempted): string => {
       return attempted.command === null ? "raw" : `raw=${atom(attempted.command)}`;
     }
 
+    case "Ctcp": {
+      return `ctcp=${atom(attempted.nick)}:${atom(attempted.command)}`;
+    }
+
+    case "Ping": {
+      return `ping=${atom(attempted.nick)}`;
+    }
+
     default: {
       return attempted satisfies never;
     }
@@ -254,6 +263,54 @@ interface ActivityParts {
   readonly head: readonly string[];
   readonly tail: readonly string[];
 }
+
+type CtcpActivity = Extract<Activity, { readonly _tag: `Ctcp${string}` }>;
+
+// A CTCP Activity's positional fields, attributes, and trailing text.
+const writeCtcp = (activity: CtcpActivity): ActivityParts => {
+  switch (activity._tag) {
+    case "CtcpUnsent": {
+      return {
+        head: [atom(activity.nick), atom(activity.target), atom(activity.command)],
+        tail: [],
+      };
+    }
+
+    case "CtcpSent": {
+      return {
+        head: [atom(activity.nick), atom(activity.command)],
+        tail: activity.args === "" ? [] : trailing(activity.args),
+      };
+    }
+
+    case "CtcpRequest":
+    case "CtcpReply": {
+      const { answer } = activity._tag === "CtcpRequest" ? activity : { answer: undefined };
+      const roundTrip = activity._tag === "CtcpReply" ? activity.roundTrip : null;
+
+      return {
+        head: [
+          atom(activity.nick),
+          atom(activity.target),
+          atom(activity.command),
+          ...(roundTrip === null ? [] : [`round-trip=${roundTrip}ms`]),
+          ...(answer === undefined
+            ? []
+            : [
+                answer._tag === "Answered"
+                  ? `answered=${atom(answer.text)}`
+                  : `unanswered=${answer.reason}`,
+              ]),
+        ],
+        tail: activity.args === "" ? [] : trailing(activity.args),
+      };
+    }
+
+    default: {
+      return activity satisfies never;
+    }
+  }
+};
 
 // An Activity's positional fields and trailing text, before and after its attributes.
 const writeActivity = (activity: Activity): ActivityParts => {
@@ -336,32 +393,11 @@ const writeActivity = (activity: Activity): ActivityParts => {
       };
     }
 
-    case "CtcpUnsent": {
-      return {
-        head: [atom(activity.nick), atom(activity.target), atom(activity.command)],
-        tail: [],
-      };
-    }
-
+    case "CtcpUnsent":
+    case "CtcpSent":
     case "CtcpRequest":
     case "CtcpReply": {
-      const { answer } = activity._tag === "CtcpRequest" ? activity : { answer: undefined };
-
-      return {
-        head: [
-          atom(activity.nick),
-          atom(activity.target),
-          atom(activity.command),
-          ...(answer === undefined
-            ? []
-            : [
-                answer._tag === "Answered"
-                  ? `answered=${atom(answer.text)}`
-                  : `unanswered=${answer.reason}`,
-              ]),
-        ],
-        tail: activity.args === "" ? [] : trailing(activity.args),
-      };
+      return writeCtcp(activity);
     }
 
     default: {

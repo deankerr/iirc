@@ -1142,6 +1142,105 @@ describe("the web frontend on iirc daemon --web", () => {
   );
 
   it(
+    "sends /ping and /ctcp from the composer, and shows each request beside its reply and the round trip",
+    { timeout: 90_000 },
+    async () => {
+      const { base, channel, child, key, ngircd, peer } = await privateNetwork(
+        path.join(directory, "ctcp"),
+        "#iirc-ctcp"
+      );
+
+      try {
+        const { page, problems } = await watchedPage(browser);
+
+        await page.goto(base);
+        await page.getByLabel("Key").fill(key);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await networkRow(page);
+        await page.getByRole("row", { name: channel }).click();
+
+        // The peer speaks first, so their Direct Messages exist, where CTCP with them shows.
+        peer.send("PRIVMSG iirc :hello");
+        const composer = page.getByRole("textbox", { name: channel });
+
+        await composer.fill("/query peer");
+        await composer.press("Enter");
+        const log = page.getByRole("log", { name: "peer" });
+        const direct = page.getByRole("textbox", { name: "peer" });
+
+        await log.getByText("hello", { exact: true }).waitFor();
+
+        // A PING, which the peer answers a moment later with its token.
+        await direct.fill("/ping peer");
+        await direct.press("Enter");
+
+        const ping = await peer.waitFor(
+          (line) =>
+            line.command === "PRIVMSG" && line.params[1]?.startsWith("\u0001PING ") === true,
+          "the PING"
+        );
+
+        const token = (ping.params[1] ?? "").slice(6, -1);
+
+        await Bun.sleep(300);
+        peer.send(`NOTICE iirc :\u0001PING ${token}\u0001`);
+
+        const pinged = log.getByText(`You asked peer for PING ${token}`, { exact: true });
+        const replied = log.getByText(/^peer replied to PING in \d+\.\d{3} s$/u);
+
+        await pinged.waitFor();
+        await replied.waitFor();
+
+        const roundTrip = Number(
+          /in (?<s>[\d.]+) s/u.exec((await replied.textContent()) ?? "")?.groups?.s
+        );
+
+        // Any other request, whose reply shows as its text.
+        await direct.fill("/ctcp peer version");
+        await direct.press("Enter");
+
+        const version = await peer.waitFor(
+          (line) =>
+            line.command === "PRIVMSG" && line.params[1]?.startsWith("\u0001VERSION") === true,
+          "the VERSION request"
+        );
+
+        peer.send("NOTICE iirc :\u0001VERSION a test peer 1.0\u0001");
+        await log.getByText("You asked peer for VERSION", { exact: true }).waitFor();
+        await log.getByText("peer replied to VERSION: a test peer 1.0", { exact: true }).waitFor();
+
+        // To a Channel, nothing is sent, and the composer says why.
+        await direct.fill(`/ctcp ${channel} VERSION`);
+        await direct.press("Enter");
+        await page.getByText(/^A CTCP request goes to one nick, never a Channel/u).waitFor();
+
+        const violations = await page.evaluate(
+          () => document.documentElement.dataset.cspViolations ?? ""
+        );
+
+        expect({
+          problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+          roundTrip: roundTrip >= 0.3 && roundTrip < 20,
+          token: /^\d+-\d+$/u.test(token),
+          version: version.params,
+          violations,
+        }).toStrictEqual({
+          problems: [],
+          roundTrip: true,
+          token: true,
+          version: ["peer", "\u0001VERSION\u0001"],
+          violations: "",
+        });
+      } finally {
+        peer.close();
+        child.kill("SIGTERM");
+        await child.exited;
+        await ngircd.stop();
+      }
+    }
+  );
+
+  it(
     "acts on the Network from the composer: a refusal shown calmly, the topic, ranks, away, and a kick",
     { timeout: 90_000 },
     async () => {

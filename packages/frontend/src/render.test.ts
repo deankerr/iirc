@@ -552,8 +552,21 @@ describe("lines", () => {
           args: "\u0002x\u202E",
           command: "PING",
         }),
-        activity({ _tag: "CtcpReply", ...ctcp, args: "irssi 1.4" }),
+        activity({ _tag: "CtcpReply", ...ctcp, args: "irssi 1.4", roundTrip: null }),
         activity({ _tag: "CtcpUnsent", command: "VERSION", nick: "peer", target: "iirc" }),
+        activity({ _tag: "CtcpSent", args: "", command: "VERSION", nick: "peer" }),
+        activity({ _tag: "CtcpSent", args: "are you there", command: "FINGER", nick: "peer" }),
+        activity({ _tag: "CtcpSent", args: "1767225600000", command: "PING", nick: "peer" }),
+        activity({
+          _tag: "CtcpReply",
+          ...ctcp,
+          args: "1767225600000",
+          command: "PING",
+          roundTrip: 250,
+        }),
+        activity({ _tag: "CtcpReply", ...ctcp, args: "x", command: "PING", roundTrip: 61_005 }),
+        activity({ _tag: "CtcpReply", ...ctcp, args: "x", command: "PING", roundTrip: 0 }),
+        activity({ _tag: "CtcpReply", ...ctcp, args: "forged", command: "PING", roundTrip: null }),
       ].map((each) => {
         const line = lineOf(each);
 
@@ -568,6 +581,13 @@ describe("lines", () => {
       ["Activity", "--", "<peer> asked for PING x\u202E\u202C, not answered: too many requests"],
       ["Activity", "--", "<peer> replied to VERSION: irssi 1.4"],
       ["Refused", "--", "<peer> asked for VERSION, the answer never left"],
+      ["Activity", "--", "You asked <peer> for VERSION"],
+      ["Activity", "--", "You asked <peer> for FINGER are you there"],
+      ["Activity", "--", "You asked <peer> for PING 1767225600000"],
+      ["Activity", "--", "<peer> replied to PING in 0.250 s"],
+      ["Activity", "--", "<peer> replied to PING in 61.005 s"],
+      ["Activity", "--", "<peer> replied to PING in 0.000 s"],
+      ["Activity", "--", "<peer> replied to PING: forged"],
     ]);
   });
 
@@ -639,6 +659,11 @@ describe("lines", () => {
       refused({ _tag: "Away", away: true }, { _tag: "Unsent" }),
       refused({ _tag: "Raw", command: "FROB" }, { _tag: "Rejected", reply: "421" }),
       refused({ _tag: "Raw", command: null }, { _tag: "Rejected", reply: "\u202E1" }),
+      refused(
+        { _tag: "Ctcp", command: "VERSION", nick: "nobody" },
+        { _tag: "Rejected", reply: "401" }
+      ),
+      refused({ _tag: "Ping", nick: "peer" }, { _tag: "Unsent" }),
     ];
 
     expect(
@@ -654,6 +679,8 @@ describe("lines", () => {
       ["Refused", "Marking you away was not sent: its connection ended first"],
       ["Refused", "Your raw FROB was refused (421)"],
       ["Refused", "Your raw line was refused (\u202E1\u202C)"],
+      ["Refused", "Your CTCP VERSION to <nobody> was refused (401)"],
+      ["Refused", "Your PING of <peer> was not sent: its connection ended first"],
     ]);
   });
 
@@ -672,7 +699,15 @@ describe("lines", () => {
       ),
       attemptedText(requested({ _tag: "Raw", line: "@+x=y whois peer" })),
       attemptedText(requested({ _tag: "Away", message: "" })),
-    ]).toStrictEqual(["Your mode change +ov-k on #iirc", "Your raw WHOIS", "Marking you back"]);
+      attemptedText(requested({ _tag: "Ctcp", args: "secret", command: "finger", nick: "peer" })),
+      attemptedText(requested({ _tag: "Ping", nick: "peer" })),
+    ]).toStrictEqual([
+      "Your mode change +ov-k on #iirc",
+      "Your raw WHOIS",
+      "Marking you back",
+      "Your CTCP FINGER to peer",
+      "Your PING of peer",
+    ]);
   });
 });
 

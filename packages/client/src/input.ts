@@ -56,6 +56,11 @@ export type ModeRequest = typeof ModeRequest.Type;
 export const Action = Schema.TaggedUnion({
   /** Mark Self away with a message, or back with `null`. It outlives Sessions. */
   Away: { message: Schema.NullOr(Schema.String) },
+  /**
+   * Send a CTCP request to a User, never a Channel: its command, upper-cased as it goes,
+   * and its arguments, which may be empty. `ACTION` is a `Say`, and `DCC` is never sent.
+   */
+  Ctcp: { args: Schema.String, command: Schema.String, nick: Schema.String },
   /** Invite a nick to a Channel. */
   Invite: { channel: Schema.String, nick: Schema.String },
   /** Kick one or more nicks from a Channel, with a reason or none. */
@@ -68,6 +73,11 @@ export const Action = Schema.TaggedUnion({
   Mode: { changes: Schema.NonEmptyArray(ModeRequest), target: Schema.String },
   /** Change Self's nick for this Session. */
   Nick: { nick: Schema.String },
+  /**
+   * Send a CTCP `PING` to a User, with a token the Client chooses, so the reply's round
+   * trip can be worked out.
+   */
+  Ping: { nick: Schema.String },
   /** A Line written as text, sent as it reads, as `/quote` sends it. */
   Raw: { line: Schema.String },
   /** Set a Channel's topic, or clear it with `""`. */

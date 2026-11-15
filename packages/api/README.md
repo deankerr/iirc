@@ -26,7 +26,7 @@ Every route is under `/api`. Every one but signing a browser in and out needs a 
 | `DELETE /api/networks/{network}?keep=true\|false&life=` | Removes the Network: its Session ends with a `QUIT`, and its Configuration and Credentials go. `keep` is whether its Timelines stay readable. `life` is the life of it the removal was made from, and it removes nothing unless the Daemon holds that life, live or kept. A Network removed with its Timelines kept is removed again with `keep=false` to drop them | `{ sequence, life }`, the life it ended | `UnknownNetwork`, `LifeChanged`, `NetworkStopped`, `JournalFailed`, `VaultFailed` |
 | `GET /api/networks/{network}/configuration` | The Configuration in force, and the sequence of the `Configured` that set it | `{ configuration, sequence }` | `UnknownNetwork` |
 | `POST /api/networks/{network}/say` | `{ kind, target, text, intent? }` | `Said { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
-| `POST /api/networks/{network}/act` | `{ action, intent? }`: one of `Topic`, `Kick`, `Mode`, `Invite`, `Nick`, `Away`, and `Raw`, below | `Acted { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
+| `POST /api/networks/{network}/act` | `{ action, intent? }`: one of `Topic`, `Kick`, `Mode`, `Invite`, `Nick`, `Away`, `Ctcp`, `Ping`, and `Raw`, below | `Acted { intent, sequence }` or `Refused { intent, sequence, reason }` | `UnknownNetwork`, `NetworkStopped` |
 | `GET /api/networks/{network}/said/{intent}` | Whether a `say` or an `act` under the intent was journaled | `Journaled { sequence }` or `NotJournaled` | `JournalFailed` |
 | `POST /api/networks/{network}/lookups` | Looks something up, `{ lookup, intent? }`: `Whois { nick }` or `Whowas { nick }`, and waits for the result | `LookedUp { intent, sequence, result }` or `Pending { intent, sequence }` | `UnknownNetwork`, `NetworkStopped` |
 | `GET /api/networks/{network}/lookups/{intent}` | A Lookup by its intent, from the Journal | `LookedUp { intent, sequence, result }`, `Pending { intent, sequence }`, or `NotJournaled` | `JournalFailed` |
@@ -88,13 +88,14 @@ Every route can also answer `InvalidRequest` (400), and every route behind the k
 - **A `say` or an `act` answers with what its step knew.** `Said` or `Acted` means it was sent, not that it reached the Ircd. `Refused` means the Client refused it in that step, as `Offline` or `Unsendable`. Either way it was journaled, at `sequence`, under `intent`.
 - **What happens after comes through the Timelines.** A Message's item says how its delivery stands, and an action the Ircd refuses later becomes an `ActionRefused` item, so a Frontend learns every outcome without reading News.
 - **The wire refuses little, and the Client checks the rest.** The wire refuses a line break or NUL, and an empty name. The Client checks an action against the Network, and never cuts a Line short.
+- **A CTCP request goes to one nick, never a Channel,** and `Ping` sends a `PING` whose reply tells the round trip. Nothing waits for a reply, so one that never comes holds nothing open.
 - **A Lookup answers with what it found,** with any `WARN` or `NOTE` its reply held, and any `FAIL` after the first, in `notes`, waiting up to 35 s. `Pending` means no result came in that time: ask again by its intent. A Lookup changes nothing on the Network, so one whose outcome is uncertain can be asked again freely.
 - **A Read Marker only moves forward, and every Frontend shares it**. Marking read is a Frontend's decision, and the Daemon only records it.
 
 ### News
 
 - **News resumes exactly.** Each `happened` event is one step's News, and its event id is the sequence. A Frontend resumes with `after` or `Last-Event-ID`, misses nothing, and sees nothing twice. `heartbeat` events carry no id, so they never move its place.
-- **News says where it belongs.** Each Message and Activity carries `where`, and says whether it is a `highlight` and whether Self said it. A Frontend reads these and never works them out. A `StandardReply` Activity is where what it answers belongs, or the Network's own Timeline. A `CtcpRequest` carries what became of it: the answer sent, or why none was, and a `CtcpUnsent` follows where it was if that answer never left.
+- **News says where it belongs.** Each Message and Activity carries `where`, and says whether it is a `highlight` and whether Self said it. A Frontend reads these and never works them out. A `StandardReply` Activity is where what it answers belongs, or the Network's own Timeline. A `CtcpRequest` carries what became of it: the answer sent, or why none was, and a `CtcpUnsent` follows where it was if that answer never left. A `CtcpSent` is a request the Owner sent, where that User's replies are, and a `CtcpReply` to the Owner's `PING` carries `roundTrip`, the milliseconds between when the Daemon journaled the request and the reply, and otherwise `null`.
 
 ### Timelines
 

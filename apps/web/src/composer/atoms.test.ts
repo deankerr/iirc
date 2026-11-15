@@ -748,6 +748,23 @@ describe("acting", () => {
     });
   });
 
+  it("sends a CTCP request and a PING as `act`s, each to a nick", async () => {
+    const { daemon, notice, type } = await composing();
+
+    await type("/ctcp peer version\n/ping peer");
+
+    expect({ acts: daemon.acts, notice: notice() }).toStrictEqual({
+      acts: [
+        {
+          action: { _tag: "Ctcp", args: "", command: "VERSION", nick: "peer" },
+          intent: "web-1",
+        },
+        { action: { _tag: "Ping", nick: "peer" }, intent: "web-2" },
+      ],
+      notice: undefined,
+    });
+  });
+
   it("says a refusal `act` answered with in words, and sends nothing after it", async () => {
     const { daemon, notice, type } = await composing();
 

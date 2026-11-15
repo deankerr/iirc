@@ -212,6 +212,8 @@ describe("the palette's entries", () => {
         "command:act.ban",
         "command:act.unban",
         "command:act.invite",
+        "command:act.ctcp",
+        "command:act.ping",
         "command:act.away",
         "command:act.back",
         "command:act.nick",
@@ -265,8 +267,8 @@ describe("the palette's entries", () => {
       none: sections(listing(), "zzzz", []),
       // `nxt` is only in `next` as characters in order.
       nxt: first(sections(listing(), "nxt", [])),
-      // `p`: `part` and `previous` by length, then `msg`, whose alias `privmsg` it starts.
-      p: keysOf("p").slice(0, 3),
+      // `p`: `part`, `ping`, and `previous` by length, then `msg`, whose alias `privmsg` it starts.
+      p: keysOf("p").slice(0, 4),
       // A slash before a command's name is ignored.
       slash: first(sections(listing(), "/me", [])),
     }).toStrictEqual({
@@ -275,7 +277,12 @@ describe("the palette's entries", () => {
       nick: "option:network.libera.nicks",
       none: [],
       nxt: "command:timeline.next",
-      p: ["command:channels.part", "command:timeline.previous", "command:say.to"],
+      p: [
+        "command:channels.part",
+        "command:act.ping",
+        "command:timeline.previous",
+        "command:say.to",
+      ],
       slash: "command:say.action",
     });
   });

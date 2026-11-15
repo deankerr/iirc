@@ -355,6 +355,7 @@ describe("reading a line", () => {
       "act.away": "Optional",
       "act.back": "None",
       "act.ban": "Required",
+      "act.ctcp": "Required",
       "act.deop": "Required",
       "act.devoice": "Required",
       "act.invite": "Required",
@@ -362,6 +363,7 @@ describe("reading a line", () => {
       "act.mode": "Required",
       "act.nick": "Required",
       "act.op": "Required",
+      "act.ping": "Required",
       "act.quote": "Required",
       "act.topic": "Optional",
       "act.unban": "Required",
@@ -939,6 +941,44 @@ describe("acting on a Network", () => {
       quote: act({ _tag: "Raw", line: "WHOIS peer" }),
       quoteNone: "Send what? /quote <raw line>",
       raw: act({ _tag: "Raw", line: "PING x" }),
+    });
+  });
+
+  it("sends a CTCP request to a nick, the rest of the line its text, and a PING", () => {
+    expect({
+      ctcp: interpret("/ctcp peer version", inNetwork),
+      ctcpAction: words("/ctcp peer ACTION waves"),
+      ctcpChannel: words("/ctcp #iirc VERSION", acting),
+      ctcpDcc: words("/ctcp peer dcc send x"),
+      ctcpMask: words("/ctcp *!*@host VERSION"),
+      ctcpNoCommand: words("/ctcp peer"),
+      ctcpNone: words("/ctcp "),
+      ctcpOffline: message("/ctcp peer VERSION", offline),
+      ctcpPrefix: words("/ctcp @peer VERSION", acting),
+      ctcpText: interpret("/ctcp peer FINGER  are  you there ", inDirect),
+      ping: interpret("/ping peer", acting),
+      pingChannel: words("/ping #iirc", acting),
+      pingNone: words("/ping"),
+      pingTwo: words("/ping a b"),
+    }).toStrictEqual({
+      ctcp: act({ _tag: "Ctcp", args: "", command: "VERSION", nick: "peer" }),
+      ctcpAction: "ACTION is what /me sends: /me <text>",
+      ctcpChannel:
+        "A CTCP request goes to one nick, never a Channel, a mask, or a list. /ctcp <nick> <command> [text]",
+      ctcpDcc: "DCC is not sent. /ctcp <nick> <command> [text]",
+      ctcpMask:
+        "A CTCP request goes to one nick, never a Channel, a mask, or a list. /ctcp <nick> <command> [text]",
+      ctcpNoCommand: "Which request? /ctcp <nick> <command> [text]",
+      ctcpNone: "To whom? /ctcp <nick> <command> [text]",
+      ctcpOffline: "libera is not connected, so nothing can be said there now.",
+      ctcpPrefix:
+        "Leave off the prefix @: a nick does not start with it. /ctcp <nick> <command> [text]",
+      ctcpText: act({ _tag: "Ctcp", args: " are  you there ", command: "FINGER", nick: "peer" }),
+      ping: act({ _tag: "Ping", nick: "peer" }),
+      pingChannel:
+        "A CTCP request goes to one nick, never a Channel, a mask, or a list. /ping <nick>",
+      pingNone: "To whom? /ping <nick>",
+      pingTwo: "Give one nick. /ping <nick>",
     });
   });
 

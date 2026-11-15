@@ -92,7 +92,7 @@ const Activity = Schema.TaggedUnion({
     away: Schema.NullOr(Schema.Struct({ message: Schema.String })),
     nick: Schema.String,
   },
-  CtcpReply: ctcp,
+  CtcpReply: { ...ctcp, roundTrip: Schema.NullOr(Schema.Finite) },
   CtcpRequest: {
     ...ctcp,
     answer: Schema.TaggedUnion({
@@ -109,6 +109,7 @@ const Activity = Schema.TaggedUnion({
       },
     }),
   },
+  CtcpSent: { args: Schema.String, command: Schema.String, nick: Schema.String },
   CtcpUnsent: { command: Schema.String, nick: Schema.String, target: Schema.String },
   Joined: { channel: Schema.String, nick: Schema.String },
   Kicked: {
@@ -156,10 +157,12 @@ const Delivery = Schema.TaggedUnion({
 /** What an action of the Owner's tried, in short. */
 const Attempted = Schema.TaggedUnion({
   Away: { away: Schema.Boolean },
+  Ctcp: { command: Schema.String, nick: Schema.String },
   Invite: { channel: Schema.String, nick: Schema.String },
   Kick: { channel: Schema.String, nicks: Schema.Array(Schema.String) },
   Mode: { modes: Schema.String, target: Schema.String },
   Nick: { nick: Schema.String },
+  Ping: { nick: Schema.String },
   Raw: { command: Schema.NullOr(Schema.String) },
   Topic: { channel: Schema.String },
 });

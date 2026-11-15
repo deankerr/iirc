@@ -8,6 +8,7 @@ import { DaemonApi, requestParseOptions } from "./api.ts";
 import {
   ActRequest,
   Activity,
+  Attempted,
   CallerIntent,
   Cursor,
   IfSequence,
@@ -190,6 +191,37 @@ describe("the contract", () => {
       ].map((each) => act(each)._tag)
     ).toStrictEqual(Array.from({ length: 7 }, () => "Failure"));
     expect(strict({ action: { _tag: "Nick", extra: 1, nick: "a" } })._tag).toBe("Failure");
+  });
+
+  it("takes a CTCP request or a PING to a nick, with no line break or NUL, and refuses one with nothing to send", () => {
+    const act = Schema.decodeUnknownResult(ActRequest);
+
+    expect(
+      [
+        { action: { _tag: "Ctcp", args: "", command: "VERSION", nick: "peer" } },
+        { action: { _tag: "Ctcp", args: "are you there", command: "finger", nick: "peer" } },
+        { action: { _tag: "Ping", nick: "peer" } },
+        { action: { _tag: "Ctcp", args: "", command: "", nick: "peer" } },
+        { action: { _tag: "Ctcp", args: "a\r\nb", command: "PING", nick: "peer" } },
+        { action: { _tag: "Ctcp", command: "VERSION", nick: "peer" } },
+        { action: { _tag: "Ping", nick: "" } },
+        { action: { _tag: "Ping", nick: "a\0" } },
+      ].map((each) => act(each)._tag)
+    ).toStrictEqual([
+      "Success",
+      "Success",
+      "Success",
+      "Failure",
+      "Failure",
+      "Failure",
+      "Failure",
+      "Failure",
+    ]);
+    expect([
+      Schema.is(Attempted)({ _tag: "Ctcp", command: "VERSION", nick: "peer" }),
+      Schema.is(Attempted)({ _tag: "Ping", nick: "peer" }),
+      Schema.is(Attempted)({ _tag: "Ping" }),
+    ]).toStrictEqual([true, true, false]);
   });
 
   it("takes a read up to an instant, of a Target or, with null, the Network's own", () => {
@@ -805,18 +837,31 @@ describe("the contract", () => {
       args: "irssi",
       command: "VERSION",
       nick: "peer",
+      roundTrip: null,
       target: "iirc",
     } as const;
 
+    const pong = { ...reply, args: "1767225600000", command: "PING", roundTrip: 250 } as const;
     const unsent = { _tag: "CtcpUnsent", command: "PING", nick: "peer", target: "iirc" } as const;
+
+    const sent = {
+      _tag: "CtcpSent",
+      args: "1767225600000",
+      command: "PING",
+      nick: "peer",
+    } as const;
 
     expect([
       roundTrip(request),
       roundTrip(refused),
       roundTrip(reply),
+      roundTrip(pong),
       roundTrip(unsent),
+      roundTrip(sent),
       Schema.is(Activity)({ ...refused, answer: { _tag: "Unanswered", reason: "Bored" } }),
-    ]).toStrictEqual([request, refused, reply, unsent, false]);
+      Schema.is(Activity)({ ...pong, roundTrip: -1 }),
+      Schema.is(Activity)({ ...pong, roundTrip: 0.5 }),
+    ]).toStrictEqual([request, refused, reply, pong, unsent, sent, false, false, false]);
   });
 
   it("marks every nick, mode, and symbol of a Channel's members as Untrusted, never a key", () => {

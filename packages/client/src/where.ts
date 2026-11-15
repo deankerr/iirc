@@ -37,6 +37,19 @@ export const named = (run: Run, name: string): Named => ({
   name,
 });
 
+/**
+ * Where a CTCP to or from a User belongs: their Direct Messages, if they already exist,
+ * and the Network's own Timeline. A CTCP is no reason to start a Direct Message Timeline,
+ * and is worth showing where Self and the User talk.
+ * @param run - The step.
+ * @param nick - The User.
+ * @returns The Timelines.
+ */
+export const byPartner = (run: Run, nick: string): readonly Where[] => [
+  { _tag: "Direct", existing: true, ...named(run, nick) },
+  network,
+];
+
 const channel = (run: Run, name: string): Where => ({ _tag: "Channel", ...named(run, name) });
 
 const direct = (run: Run, nick: string, existing: boolean): Where => ({
@@ -238,6 +251,7 @@ const activityTimelines = (
     case "StandardReply":
     case "CtcpRequest":
     case "CtcpReply":
+    case "CtcpSent":
     case "CtcpUnsent": {
       return [network];
     }
@@ -347,7 +361,8 @@ export const routeActivity = (run: Run, activity: Unrouted<ActivityNews>): Activ
  * Moves what the Client remembers of where Self said something to a partner who changed
  * nick, as their Timeline follows the nick, so a reply that comes later is shown where the
  * Message stands, and of who asked for each CTCP answer, so an `Unsent` of it is reported
- * where its request is. A Target is one Channel or one nick, since a `Say` has no list, and a
+ * where its request is, and of the remembered `PING`s, so a reply from the nick it went to
+ * is still measured. A Target is one Channel or one nick, since a `Say` has no list, and a
  * Target that names the old nick, by the Network's casemapping now, names the new one.
  * Channels never move.
  *
@@ -407,5 +422,11 @@ export const followSays = (run: Run, where: readonly Where[]): void => {
   updateOpen(run, (open) => ({
     ...open,
     lastSaid: { NOTICE: follow(open.lastSaid.NOTICE), PRIVMSG: follow(open.lastSaid.PRIVMSG) },
+    // A `PING` follows the User it went to. One whose nick another User took is forgotten.
+    pings: open.pings.flatMap((ping) => {
+      const nick = follow(ping.nick);
+
+      return nick === undefined ? [] : [{ ...ping, nick }];
+    }),
   }));
 };

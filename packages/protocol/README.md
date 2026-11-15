@@ -21,7 +21,7 @@ The floor is RFC 1459 and 2812 as Modern IRC describes them. What sits above it 
 3. **Sources and raw parameters.** `parseSource` splits `nick!user@host`, where a server's name is all nick. `rawParams` gives each parameter as the bytes that arrived, as a `RawParam`, split exactly as `parse` splits them, so a `PING` token that is not UTF-8 can be echoed byte for byte.
 4. **Sending.** `outbound` builds an `OutboundLine` or says why it cannot, and `encode` gives its bytes with CRLF, writing the last parameter as trailing only when it must be. A parameter is text, sent as UTF-8, or a `RawParam`, sent as its bytes, which `pong` uses to echo a token exactly. The builders cover the Lines a Client sends: `nick`, `user`, `join`, `part`, `privmsg`, `notice`, `quit`, `ping`, `pong`, `names`, `mode`, `who`, `whois`, `whowas`, `away`, `topic`, `kick`, and `invite` on the floor, and `cap`, `authenticate`, `tagmsg`, and `withTags` above it. `quote` builds a Line from text, as `/quote` takes it.
 5. **Credentials.** `fillSecret` fills `PASS`, a `JOIN` with a key, and a service's `IDENTIFY` on the floor, and the SASL `PLAIN` response above it.
-6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, and `ctcpReply` build CTCP that is safe to send, and a reply only ever to a User.
+6. **CTCP.** `parseCtcp` reads `ACTION`, `DCC`, and other CTCP, with or without the closing `\x01`. `ctcpText`, `action`, `parseReplyTarget`, `ctcpRequest`, and `ctcpReply` build CTCP that is safe to send, and a request or a reply only ever to a User.
 7. **Formatting.** `parseFormatting` reads bold, italic, underline, strikethrough, monospace, reverse, reset, palette colours, and hex colours into spans, and `stripFormatting` removes exactly the codes it reads. Spans are data for a Frontend to draw, never markup.
 8. **ISUPPORT.** `isupportTokens` reads one `005`'s tokens, set or taken back, with `\xHH` escapes undone as bytes. `prefixOf`, `channelModesOf`, `chantypesOf`, `statusmsgOf`, `modesOf`, `limitOf`, `limitsOf`, and `targetLimitsOf` read the values whose shape the protocol fixes, each with its default when the token is not sent.
 9. **Casemapping.** `casemappingOf` reads `CASEMAPPING` and `UTF8MAPPING`, and `casefold` and `sameName` compare names under `ascii`, `rfc1459`, `rfc1459-strict`, or `rfc8265`.
@@ -117,10 +117,11 @@ parseCtcp(text: string): Ctcp      // NotCtcp | Action { text } | Dcc { subcomma
 ctcpText(command, args): CtcpText | { _tag: "Rejected", reason: "InvalidCommand" | "InvalidArguments" }
 action(target, text): OutboundLine | Rejected
 parseReplyTarget(nick, { chantypes, statusmsg }): ReplyTarget | undefined
+ctcpRequest(target: ReplyTarget, text: CtcpText): OutboundLine | Rejected
 ctcpReply(target: ReplyTarget, text: CtcpText): OutboundLine | Rejected
 ```
 
-`parseCtcp` acts on nothing: whether to answer is the caller's choice, and a `DCC` is only read. It ignores anything after the closing `\x01`, and does not undo low-level quoting. Whether it is a request or a reply is for the carrying command to say. A reply goes only to a `ReplyTarget`, a nick that could name nothing but a User, so a forged source such as `#victims!u@h` cannot turn a reply into a `NOTICE` to a Channel or a mask.
+`parseCtcp` acts on nothing: whether to answer is the caller's choice, and a `DCC` is only read. It ignores anything after the closing `\x01`, and does not undo low-level quoting. Whether it is a request or a reply is for the carrying command to say. A request or a reply goes only to a `ReplyTarget`, a nick that could name nothing but a User, so a forged source such as `#victims!u@h` cannot turn a reply into a `NOTICE` to a Channel or a mask, and a request is never sent to a Channel.
 
 ## `@iirc/protocol/format`
 

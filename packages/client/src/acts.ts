@@ -1,6 +1,6 @@
 /**
- * The Owner's actions beyond saying: a topic, a kick, modes, an invite, a nick, away, and
- * a Line written as text. Each is built only through `@iirc/protocol`'s builders, and
+ * The Owner's actions beyond saying: a topic, a kick, modes, an invite, a nick, away, a
+ * CTCP request or `PING` to a User, and a Line written as text. Each is built only through `@iirc/protocol`'s builders, and
  * checked against what the Client knows of the Network, by `CHANTYPES`, `PREFIX`,
  * `CHANMODES`, `MODES`, `TARGMAX`, and the lengths ISUPPORT gives. One that cannot be
  * sent whole, as the Ircd would read and relay it, is refused, and never cut short.
@@ -12,6 +12,7 @@
  * @packageDocumentation
  */
 import { casefold, defaultCasemapping } from "@iirc/protocol/casemapping";
+import { CtcpText, ctcpRequest, ctcpText, parseReplyTarget } from "@iirc/protocol/ctcp";
 import { limitOf, modesOf, targetLimitsOf } from "@iirc/protocol/isupport";
 import {
   away as awayLine,
@@ -27,6 +28,7 @@ import {
   upperCaseAscii,
 } from "@iirc/protocol/line";
 import type { Line, OutboundLine, Rejected } from "@iirc/protocol/line";
+import { Schema } from "effect";
 
 import type { IntentId } from "./ids.ts";
 import type { Action, Input, ModeRequest } from "./input.ts";
@@ -35,9 +37,10 @@ import { parseChannel, parseNick } from "./names.ts";
 import type { ActionWhere, Attempted, ModeChange, RefusedAction } from "./news.ts";
 import type { Run } from "./run.ts";
 import { folder, ignore, linkOf, refuseIntent, send, updateOpen } from "./run.ts";
-import type { Acting, Awaiting } from "./state.ts";
+import type { Acting, Awaiting, Pinged } from "./state.ts";
 import { maxActing, maxActions } from "./state.ts";
 import { openOf, sessionOf } from "./views.ts";
+import { byPartner } from "./where.ts";
 
 const utf8 = new TextEncoder();
 
@@ -86,15 +89,24 @@ const within = (run: Run, token: string, text: string, fallback?: number): boole
   return limit === undefined || utf8.encode(text).length <= limit;
 };
 
+/** A CTCP request the Owner sends: who to, its command, upper-cased, and its arguments. */
+interface Requested {
+  readonly nick: string;
+  readonly command: string;
+  readonly args: string;
+}
+
 /**
  * One Line of an action: what the whole Line is about, its targets, each answered by
- * itself, and for an `AWAY`, the message it sends, or `null` for none.
+ * itself, for an `AWAY`, the message it sends, or `null` for none, and for a CTCP, the
+ * request it carries.
  */
 interface Planned {
   readonly line: OutboundLine;
   readonly names: readonly string[];
   readonly targets: readonly Awaiting[];
   readonly away?: string | null;
+  readonly ctcp?: Requested;
 }
 
 const one = (run: Run, line: OutboundLine | Rejected, names: readonly string[]) =>
@@ -121,6 +133,44 @@ const nickLines = (run: Run, { nick: name }: Of<"Nick">) =>
   isNick(run, name) && within(run, "NICKLEN", name, rfcNickLength)
     ? one(run, nick(name), [name])
     : undefined;
+
+/** CTCP the Owner never sends as a request: `ACTION` is a `Say`, and `DCC` is not sent. */
+const unrequested: ReadonlySet<string> = new Set(["ACTION", "DCC"]);
+
+/**
+ * A CTCP request to one User, never a Channel, a `STATUSMSG` Target, a list, or a mask,
+ * which `parseReplyTarget` keeps out by the naming rules now.
+ * @param run - The step.
+ * @param ctcp - The request, its command as the Owner gave it.
+ * @returns Its Line, or `undefined` when it cannot be sent whole.
+ */
+const ctcpLines = (
+  run: Run,
+  { nick: name, command, args }: Requested
+): readonly Planned[] | undefined => {
+  const to = parseReplyTarget(name, namingNow(run));
+  const verb = upperCaseAscii(command);
+  const text = ctcpText(verb, args);
+
+  const line =
+    to === undefined || unrequested.has(verb) || !Schema.is(CtcpText)(text)
+      ? undefined
+      : ctcpRequest(to, text);
+
+  return line !== undefined && fits(run, line)
+    ? [{ ctcp: { args, command: verb, nick: name }, line, names: [name], targets: [] }]
+    : undefined;
+};
+
+/**
+ * The token of a `PING` the Owner sends: the instant it is sent, in milliseconds, which
+ * is what the Runtime journaled the action at, and after a hyphen how many `PING`s the
+ * Owner has sent on this Connection before it. No two on a Connection share one, so a
+ * reply that comes twice is never taken for the reply to another `PING`.
+ * @param run - The step.
+ * @returns The token.
+ */
+const pingToken = (run: Run): string => `${run.at}-${openOf(run.state)?.pingsSent ?? 0}`;
 
 /**
  * Splits items into Lines, as many to a Line as fit and as `limit` allows, keeping their
@@ -370,6 +420,14 @@ const plan = (
       return rawLines(run, action);
     }
 
+    case "Ctcp": {
+      return ctcpLines(run, action);
+    }
+
+    case "Ping": {
+      return ctcpLines(run, { args: pingToken(run), command: "PING", nick: action.nick });
+    }
+
     default: {
       return action satisfies never;
     }
@@ -423,6 +481,14 @@ const attemptedOf = (action: Action): Attempted => {
       const line = quote(action.line);
 
       return { _tag: "Raw", command: isRejected(line) ? null : line.command };
+    }
+
+    case "Ctcp": {
+      return { _tag: "Ctcp", command: upperCaseAscii(action.command), nick: action.nick };
+    }
+
+    case "Ping": {
+      return { _tag: "Ping", nick: action.nick };
     }
 
     default: {
@@ -521,6 +587,33 @@ const awaitAnswer = (
   });
 };
 
+/**
+ * A CTCP request went out: it is reported where its User's replies are, and a `PING` is
+ * remembered, so its reply tells its round trip. Nothing waits for that reply.
+ * @param run - The step.
+ * @param ctcp - The request.
+ */
+const requested = (run: Run, ctcp: Requested): void => {
+  run.news.push({
+    _tag: "Activity",
+    activity: { _tag: "CtcpSent", ...ctcp },
+    at: { _tag: "Known", at: run.at, from: "receipt", value: run.at },
+    id: { _tag: "Unknown" },
+    live: true,
+    where: byPartner(run, ctcp.nick),
+  });
+
+  if (ctcp.command === "PING") {
+    const ping: Pinged = { at: run.at, nick: ctcp.nick, token: ctcp.args };
+
+    updateOpen(run, (open) => ({
+      ...open,
+      pings: [...open.pings, ping].slice(-maxActions),
+      pingsSent: open.pingsSent + 1,
+    }));
+  }
+};
+
 // An `AWAY` went out with a message, or `null` for none: a `306` confirms it.
 const asked = (run: Run, message: string | null): void => {
   updateOpen(run, (open) => ({ ...open, asked: message }));
@@ -609,7 +702,7 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
 
   remember(run, intent, action);
 
-  for (const { line, names, targets, away: message } of planned) {
+  for (const { line, names, targets, away: message, ctcp } of planned) {
     const sent = send(run, line, line.command, { _tag: "Acted", intent });
 
     // A Feature refused it at egress, and `send` reported it.
@@ -621,7 +714,13 @@ export const act = (run: Run, input: Input & { readonly _tag: "Act" }): void => 
       asked(run, message);
     }
 
-    if (!sent.echo) {
+    if (ctcp !== undefined) {
+      requested(run, ctcp);
+    }
+
+    // A CTCP request waits for no error numeric: a `PRIVMSG` to a nick that is gone gets a
+    // `401` no parameter ties to it rather than to a later `Say`. Only its label does.
+    if (!sent.echo && ctcp === undefined) {
       awaitAnswer(run, intent, line, names, targets);
     }
   }
