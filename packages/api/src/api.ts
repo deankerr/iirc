@@ -36,6 +36,7 @@ import {
   UnknownTimeline,
   UnknownUpload,
   UploadTooLarge,
+  UploadUnreadable,
   UploadsOff,
   StoreUnavailable,
   VaultFailed,
@@ -352,7 +353,7 @@ export class OptionsGroup extends HttpApiGroup.make("options")
 export class UploadsGroup extends HttpApiGroup.make("uploads")
   .add(
     HttpApiEndpoint.post("upload", "/uploads", {
-      error: [UploadsOff, UploadTooLarge, StoreUnavailable, JournalFailed],
+      error: [UploadsOff, UploadTooLarge, UploadUnreadable, StoreUnavailable, JournalFailed],
       payload: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
       query: UploadQuery,
       success: Upload,

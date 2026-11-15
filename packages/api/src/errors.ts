@@ -171,6 +171,15 @@ export class UploadTooLarge extends Schema.TaggedError<
 >()("UploadTooLarge", { maxSize: ByteCount }, { httpApiStatus: 413 }) {}
 
 /**
+ * The body is an image of `type` whose structure could not be walked, as `reason` says, so
+ * it could not be stripped of its metadata and nothing was kept: a 422.
+ */
+export class UploadUnreadable extends Schema.TaggedError<
+  UploadUnreadable,
+  { readonly brand: unique symbol }
+>()("UploadUnreadable", { reason: Schema.String, type: Schema.String }, { httpApiStatus: 422 }) {}
+
+/**
  * The store that keeps Uploads' bytes could not be reached, refused what was asked, or
  * holds no key the options name, so nothing was kept. Asking again may succeed: a 503.
  */

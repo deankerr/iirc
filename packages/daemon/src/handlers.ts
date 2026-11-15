@@ -31,6 +31,7 @@ import {
   UnknownTimeline,
   UnknownUpload,
   UploadTooLarge,
+  UploadUnreadable,
   UploadsOff,
   StoreUnavailable,
   VaultFailed,
@@ -1227,6 +1228,8 @@ const uploads = HttpApiBuilder.group(
                 })
               ),
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            UnreadableImage: (error) =>
+              Effect.fail(new UploadUnreadable({ reason: error.reason, type: error.type })),
             UploadsAreOff: (error) => Effect.fail(new UploadsOff({ missing: error.missing })),
           })
         )
