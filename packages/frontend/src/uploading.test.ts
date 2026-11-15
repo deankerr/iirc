@@ -8,8 +8,12 @@ import type { Composers, Place } from "./composer.ts";
 import {
   anchorAfter,
   caretAfter,
+  checking,
+  editOf,
+  failureOf,
   failureText,
   followed,
+  heldBack,
   initialUploading,
   insertLink,
   noteIn,
@@ -19,7 +23,7 @@ import {
   sending,
   uploaded,
 } from "./uploading.ts";
-import type { AddedFile, Uploading, UploadingEvent } from "./uploading.ts";
+import type { AddedFile, Readiness, Uploading, UploadingEvent } from "./uploading.ts";
 
 const place: Place = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
 const elsewhere: Place = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
@@ -47,19 +51,34 @@ const typed = (composers: Composers, text: string, at: Place = place) =>
   reduceComposers(composers, { _tag: "Edited", text, timeline: at });
 
 /**
+ * Files added to a composer with its caret at `anchor`, and what the Daemon said of whether
+ * Uploads are on.
+ * @param anchor - Where the caret was.
+ * @param files - The files.
+ * @param readiness - What the Daemon said.
+ * @param at - The composer's place.
+ * @returns The events.
+ */
+const arrived = (
+  anchor: number,
+  files: readonly AddedFile[],
+  readiness: Readiness,
+  at: Place = place
+): readonly UploadingEvent[] => [
+  { _tag: "Added", anchor, files, place: at },
+  { _tag: "Checked", keys: files.map((one) => one.key), readiness },
+];
+
+const on: Readiness = { _tag: "On", maxSize: 100 * mib };
+
+/**
  * Files added to the composer at `place` with its caret at `anchor`, while Uploads are on.
  * @param anchor - Where the caret was.
  * @param files - The files.
  * @returns What is pending.
  */
 const addedAt = (anchor: number, ...files: readonly AddedFile[]) =>
-  fold(initialUploading, {
-    _tag: "Added",
-    anchor,
-    files,
-    place,
-    readiness: { _tag: "On", maxSize: 100 * mib },
-  });
+  fold(initialUploading, ...arrived(anchor, files, on));
 
 /**
  * Edits a draft with its files pending, as the composer does: the text changes, and each
@@ -109,6 +128,46 @@ describe("where an anchor goes as the draft is edited", () => {
 
   it("is clamped to the text when the draft is cleared", () => {
     expect(anchorAfter(5, "hello", "")).toBe(0);
+  });
+
+  it("follows the edit the Owner made where text repeats, not the first it could be", () => {
+    // Between the words of "hi hi", the first "hi " selected and deleted.
+    expect(anchorAfter(3, "hi hi", "hi", { caret: 0, from: 0 })).toBe(0);
+  });
+
+  it("stays before text typed at it, with the selection known", () => {
+    expect(anchorAfter(3, "hi hi", "hi hhi", { caret: 4, from: 3 })).toBe(3);
+  });
+
+  it("moves back with a Backspace before it", () => {
+    expect(editOf("aa", "a", { caret: 0, from: 1 })).toStrictEqual({
+      newEnd: 0,
+      oldEnd: 1,
+      start: 0,
+    });
+    expect(anchorAfter(2, "aa", "a", { caret: 0, from: 1 })).toBe(1);
+  });
+
+  it("stays with a forward delete after it", () => {
+    expect(editOf("aa", "a", { caret: 1, from: 1 })).toStrictEqual({
+      newEnd: 1,
+      oldEnd: 2,
+      start: 1,
+    });
+    expect(anchorAfter(1, "aa", "a", { caret: 1, from: 1 })).toBe(1);
+  });
+
+  it("goes to the end of what replaced a selection across it", () => {
+    // "bb b" selected across the anchor and replaced by "X".
+    expect(anchorAfter(3, "abb bbc", "aXc", { caret: 2, from: 1 })).toBe(2);
+  });
+
+  it("finds the edit from the texts when the selection does not explain it", () => {
+    // An undo, which the selection before says nothing of.
+    expect(editOf("hello world", "hey world", { caret: 0, from: 11 })).toStrictEqual(
+      editOf("hello world", "hey world")
+    );
+    expect(anchorAfter(6, "hello world", "hey world", { caret: 0, from: 11 })).toBe(4);
   });
 
   it("stays within the text, whatever the edit", () => {
@@ -181,20 +240,8 @@ describe("putting a link into the draft", () => {
 
     const uploading = fold(
       addedAt(7, file("late")),
-      {
-        _tag: "Added",
-        anchor: 0,
-        files: [file("early")],
-        place,
-        readiness: { _tag: "On", maxSize: 100 },
-      },
-      {
-        _tag: "Added",
-        anchor: 3,
-        files: [file("middle")],
-        place,
-        readiness: { _tag: "On", maxSize: 100 },
-      }
+      ...arrived(0, [file("early")], { _tag: "On", maxSize: 100 }, place),
+      ...arrived(3, [file("middle")], { _tag: "On", maxSize: 100 }, place)
     );
 
     const after = keep(keep(keep({ composers, uploading }, "middle"), "late"), "early");
@@ -229,13 +276,10 @@ describe("putting a link into the draft", () => {
     const draft: Place = "draft libera peer";
     const composers = typed(initialComposers, "hi", draft);
 
-    const uploading = fold(initialUploading, {
-      _tag: "Added",
-      anchor: 2,
-      files: [file("a")],
-      place: draft,
-      readiness: { _tag: "On", maxSize: 100 },
-    });
+    const uploading = fold(
+      initialUploading,
+      ...arrived(2, [file("a")], { _tag: "On", maxSize: 100 }, draft)
+    );
 
     const carried = reduceComposers(composers, { _tag: "Carried", from: draft, to: elsewhere });
     const kept = uploaded(followed(uploading, composers, carried), carried, "a", "L");
@@ -245,18 +289,108 @@ describe("putting a link into the draft", () => {
 });
 
 describe("adding files", () => {
-  it("refuses a file over maxSize before it is sent, saying the limit", () => {
+  it("holds each file at once, checking, its place in the draft fixed as it is added", () => {
+    const state = fold(
+      initialUploading,
+      { _tag: "Added", anchor: 0, files: [file("a")], place },
+      { _tag: "Added", anchor: 0, files: [file("b")], place },
+      // The second answer arrives first.
+      { _tag: "Checked", keys: ["b"], readiness: on },
+      { _tag: "Checked", keys: ["a"], readiness: on }
+    );
+
+    const start = { composers: initialComposers, uploading: state };
+
+    expect(textOf(keep(keep(start, "b"), "a"))).toBe("https://f.test/a https://f.test/b");
+  });
+
+  it("follows the draft while Uploads are asked about, edits and all", () => {
+    const composers = typed(initialComposers, "abcdef");
+
+    const uploading = fold(initialUploading, {
+      _tag: "Added",
+      anchor: 3,
+      files: [file("a")],
+      place,
+    });
+
+    const during = edited(edited({ composers, uploading }, "Xabcdef"), "XabcdefY");
+
+    const after = keep(
+      {
+        ...during,
+        uploading: fold(during.uploading, { _tag: "Checked", keys: ["a"], readiness: on }),
+      },
+      "a"
+    );
+
+    expect(textOf(after)).toBe("Xabc https://f.test/a defY");
+  });
+
+  it("follows a draft carried to its Timeline while Uploads are asked about", () => {
+    const draft: Place = "draft libera peer";
+    const composers = typed(initialComposers, "hi", draft);
+
+    const uploading = fold(initialUploading, {
+      _tag: "Added",
+      anchor: 2,
+      files: [file("a")],
+      place: draft,
+    });
+
+    const carried = reduceComposers(composers, { _tag: "Carried", from: draft, to: elsewhere });
+
+    const answered = fold(followed(uploading, composers, carried), {
+      _tag: "Checked",
+      keys: ["a"],
+      readiness: on,
+    });
+
+    expect(draftOf(uploaded(answered, carried, "a", "L").composers, elsewhere).text).toBe("hi L");
+  });
+
+  it("sends nothing of a file cancelled while Uploads are asked about", () => {
+    const state = fold(
+      initialUploading,
+      { _tag: "Added", anchor: 0, files: [file("a")], place },
+      { _tag: "Dropped", key: "a" },
+      { _tag: "Checked", keys: ["a"], readiness: on }
+    );
+
+    expect({ pending: state.pending, sending: [...sending(state)] }).toStrictEqual({
+      pending: [],
+      sending: [],
+    });
+  });
+
+  it("checks a file until the Daemon says whether Uploads are on", () => {
     const state = fold(initialUploading, {
       _tag: "Added",
       anchor: 0,
-      files: [file("big", 120 * mib, "cat.mp4"), file("small")],
+      files: [file("a")],
       place,
-      readiness: { _tag: "On", maxSize: 100 * mib },
     });
+
+    expect({ checking: [...checking(state)], sending: [...sending(state)] }).toStrictEqual({
+      checking: ["a"],
+      sending: [],
+    });
+  });
+
+  it("refuses a file over maxSize before it is sent, saying the limit", () => {
+    const state = fold(
+      initialUploading,
+      ...arrived(
+        0,
+        [file("big", 120 * mib, "cat.mp4"), file("small")],
+        { _tag: "On", maxSize: 100 * mib },
+        place
+      )
+    );
 
     expect({
       sending: [...sending(state)],
-      words: pendingIn(state, place).map((one) => failureText(one)),
+      words: pendingIn(state, place).map((one) => failureText({ ...one, failure: failureOf(one) })),
     }).toStrictEqual({
       sending: ["small"],
       words: ["cat.mp4 is 120 MiB, over the 100 MiB limit.", undefined],
@@ -264,13 +398,15 @@ describe("adding files", () => {
   });
 
   it("adds nothing while Uploads are off, and notes the options to set", () => {
-    const state = fold(initialUploading, {
-      _tag: "Added",
-      anchor: 0,
-      files: [file("a")],
-      place,
-      readiness: { _tag: "Off", maxSize: 100, missing: ["store.s3.bucket", "uploads.publicUrl"] },
-    });
+    const state = fold(
+      initialUploading,
+      ...arrived(
+        0,
+        [file("a")],
+        { _tag: "Off", maxSize: 100, missing: ["store.s3.bucket", "uploads.publicUrl"] },
+        place
+      )
+    );
 
     expect({ note: noteIn(state, place), pending: state.pending }).toStrictEqual({
       note: ["store.s3.bucket", "uploads.publicUrl"],
@@ -281,20 +417,13 @@ describe("adding files", () => {
   it("lets the note go once files are added while Uploads are on", () => {
     const state = fold(
       initialUploading,
-      {
-        _tag: "Added",
-        anchor: 0,
-        files: [file("a")],
-        place,
-        readiness: { _tag: "Off", maxSize: 100, missing: ["uploads.publicUrl"] },
-      },
-      {
-        _tag: "Added",
-        anchor: 0,
-        files: [file("b")],
-        place,
-        readiness: { _tag: "On", maxSize: 100 },
-      }
+      ...arrived(
+        0,
+        [file("a")],
+        { _tag: "Off", maxSize: 100, missing: ["uploads.publicUrl"] },
+        place
+      ),
+      ...arrived(0, [file("b")], { _tag: "On", maxSize: 100 }, place)
     );
 
     expect(noteIn(state, place)).toBeUndefined();
@@ -314,17 +443,11 @@ describe("adding files", () => {
   });
 
   it("fails each file, sending none, when the Daemon did not say whether Uploads are on", () => {
-    const state = fold(initialUploading, {
-      _tag: "Added",
-      anchor: 0,
-      files: [file("a")],
-      place,
-      readiness: { _tag: "NoAnswer" },
-    });
+    const state = fold(initialUploading, ...arrived(0, [file("a")], { _tag: "NoAnswer" }, place));
 
     expect({
       sending: [...sending(state)],
-      words: state.pending.map((one) => failureText(one)),
+      words: state.pending.map((one) => failureText({ ...one, failure: failureOf(one) })),
     }).toStrictEqual({
       sending: [],
       words: ["The Daemon did not answer, so a.png was not sent."],
@@ -339,7 +462,54 @@ describe("adding files", () => {
       total: 100,
     });
 
-    expect(state.pending[0]?.progress).toStrictEqual({ loaded: 40, total: 100 });
+    expect(state.pending[0]?.stage).toStrictEqual({
+      _tag: "Sending",
+      progress: { loaded: 40, total: 100 },
+    });
+  });
+});
+
+describe("sending a draft while its files upload", () => {
+  const composers = typed(initialComposers, "look");
+
+  it("holds the draft back while a file is checked or sent, saying which", () => {
+    const one = fold(initialUploading, {
+      _tag: "Added",
+      anchor: 4,
+      files: [file("cat")],
+      place,
+    });
+
+    const two = fold(addedAt(4, file("a")), {
+      _tag: "Added",
+      anchor: 4,
+      files: [file("b")],
+      place,
+    });
+
+    expect([heldBack(one, composers, place), heldBack(two, composers, place)]).toStrictEqual([
+      "Wait for cat.png to finish uploading, or cancel it.",
+      "Wait for a.png and b.png to finish uploading, or cancel them.",
+    ]);
+  });
+
+  it("holds nothing back for a failed file, or for another composer's", () => {
+    const failed = fold(addedAt(4, file("a")), {
+      _tag: "Failed",
+      failure: { _tag: "StoreUnavailable" },
+      key: "a",
+    });
+
+    expect([
+      heldBack(failed, composers, place),
+      heldBack(addedAt(4, file("a")), composers, elsewhere),
+    ]).toStrictEqual([undefined, undefined]);
+  });
+
+  it("holds nothing back for a draft typing a Credential's value, so it is let go of", () => {
+    const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
+
+    expect(heldBack(addedAt(0, file("a")), credential, place)).toBeUndefined();
   });
 });
 

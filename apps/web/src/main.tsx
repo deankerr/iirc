@@ -17,6 +17,7 @@ import { App } from "./app/app.tsx";
 import { channelSync } from "./channel/atoms.ts";
 import { draftsCarried } from "./composer/atoms.ts";
 import { chantypesSync, completer } from "./composer/completion.ts";
+import { uploadsSignedOut } from "./composer/uploading.ts";
 import { lookupSync } from "./lookup/atoms.ts";
 import { optionsSync } from "./options/atoms.ts";
 import { ownerSync } from "./options/owner.ts";
@@ -61,6 +62,9 @@ registry.mount(draftsCarried);
 
 // Each Pane's Lookup card, let go of with its Pane, and every one on signing out.
 registry.mount(lookupSync);
+
+// Every file uploading from the composers, and its preview, let go of on signing out.
+registry.mount(uploadsSignedOut);
 
 // Whether the Owner can see the page, and its title, kept in one place for its whole life.
 watchPage(registry);

@@ -1,18 +1,22 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import { TimelineId } from "@iirc/api";
+import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
+import { draftOf, placeOfDraft, reduceComposers } from "@iirc/frontend/composer";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { mainView } from "../options/atoms.ts";
-import { check } from "../sign-in/atoms.ts";
+import { check, signOut } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
 import { testUploader } from "../testing/uploader.ts";
 import { open, sync } from "../timelines/atoms.ts";
+import { composerState, setComposers } from "./atoms.ts";
+import { uploadingState } from "./uploading-state.ts";
+import { addFiles, previews, uploadsSignedOut } from "./uploading.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -74,6 +78,7 @@ const signedIn = async () => {
 
   await run(registry, check, undefined);
   registry.mount(sync);
+  registry.mount(uploadsSignedOut);
 
   const container = document.createElement("div");
 
@@ -131,6 +136,51 @@ const typeIn = async (container: HTMLElement, text: string, caret = text.length)
     );
     composer.setSelectionRange(caret, caret);
     composer.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * Edits the composer as the browser does as the Owner types: the selection as it was, the
+ * `beforeinput` that reads it, then the text and the caret after.
+ * @param container - The page.
+ * @param edit - The selection before, the kind of edit, and the text and caret after.
+ */
+const editIn = async (
+  container: HTMLElement,
+  edit: {
+    readonly selected: readonly [number, number];
+    readonly inputType: string;
+    readonly text: string;
+    readonly caret: number;
+  }
+) => {
+  const composer = composerOf(container);
+
+  await act(async () => {
+    composer.setSelectionRange(...edit.selected);
+    composer.dispatchEvent(
+      new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: edit.inputType })
+    );
+    Reflect.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+      composer,
+      edit.text
+    );
+    composer.setSelectionRange(edit.caret, edit.caret);
+    composer.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+};
+
+/**
+ * Presses Enter in the composer, which sends under `ui.enter` `send`, as it starts.
+ * @param container - The page.
+ */
+const enter = async (container: HTMLElement) => {
+  await act(async () => {
+    composerOf(container).dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, code: "Enter", key: "Enter" })
+    );
     await Promise.resolve();
   });
 };
@@ -466,5 +516,178 @@ describe("uploading from the Composer", () => {
       dropping: true,
       sent: [{ name: "cat.png", size: 8 }],
     });
+  });
+
+  it("follows the edit the Owner made, where the draft repeats itself", async () => {
+    const { container, uploader } = await signedIn();
+
+    uploader.hold = true;
+    await typeIn(container, "hi hi", 3);
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    // The first "hi " selected, and deleted.
+    await editIn(container, {
+      caret: 0,
+      inputType: "deleteContentBackward",
+      selected: [0, 3],
+      text: "hi",
+    });
+    uploader.sending[0]?.release();
+    await settled(() => composerOf(container).value.includes(publicUrl));
+
+    expect(composerOf(container).value).toBe(`${linkOf(10, "cat.png")} hi`);
+  });
+
+  it("lands files in the order added, whichever answer of whether Uploads are on comes first", async () => {
+    const { container, daemon, uploader } = await signedIn();
+
+    daemon.holdUploadsStatus = true;
+    uploader.hold = true;
+    await paste(container, image("a.png"));
+    await paste(container, image("b.png"));
+    await settled(() => daemon.statusesHeld.length === 2);
+    daemon.statusesHeld[1]?.();
+    await settled(() => uploader.sending.length === 1);
+    daemon.statusesHeld[0]?.();
+    await settled(() => uploader.sending.length === 2);
+
+    // Each is kept in the order its answer came, b first.
+    for (const one of uploader.sending) {
+      one.release();
+      // oxlint-disable-next-line no-await-in-loop -- each finishes before the next is let go
+      await settled(() => composerOf(container).value.includes(one.url.slice(-5)));
+    }
+
+    expect(composerOf(container).value).toBe(`${linkOf(11, "a.png")} ${linkOf(10, "b.png")}`);
+  });
+
+  it("keeps the link where the caret was through edits made while Uploads are asked about", async () => {
+    const { container, daemon } = await signedIn();
+
+    daemon.holdUploadsStatus = true;
+    await typeIn(container, "abcdef", 3);
+    await paste(container, image("cat.png"));
+    await settled(() => daemon.statusesHeld.length === 1);
+    await editIn(container, {
+      caret: 1,
+      inputType: "insertText",
+      selected: [0, 0],
+      text: "Xabcdef",
+    });
+    await editIn(container, {
+      caret: 8,
+      inputType: "insertText",
+      selected: [7, 7],
+      text: "XabcdefY",
+    });
+    daemon.statusesHeld[0]?.();
+    await settled(() => composerOf(container).value.includes(publicUrl));
+
+    expect(composerOf(container).value).toBe(`Xabc ${linkOf(10, "cat.png")} defY`);
+  });
+
+  it("puts the link in the Timeline a draft was carried to while Uploads were asked about", async () => {
+    const { daemon, registry } = await signedIn();
+    const draft = placeOfDraft(Schema.decodeSync(NetworkId)("libera"), "bob");
+    const timeline = Schema.decodeSync(TimelineId)(iirc);
+
+    daemon.holdUploadsStatus = true;
+    setComposers(
+      registry,
+      reduceComposers(registry.get(composerState), { _tag: "Edited", text: "hi", timeline: draft })
+    );
+    registry.set(addFiles, { anchor: 2, files: [image("cat.png")], place: draft, text: "hi" });
+    await settled(() => daemon.statusesHeld.length === 1);
+    setComposers(
+      registry,
+      reduceComposers(registry.get(composerState), { _tag: "Carried", from: draft, to: timeline })
+    );
+    daemon.statusesHeld[0]?.();
+    await settled(() => draftOf(registry.get(composerState), timeline).text.includes(publicUrl));
+
+    expect(draftOf(registry.get(composerState), timeline).text).toBe(`hi ${linkOf(10, "cat.png")}`);
+  });
+
+  it("sends nothing while a file is uploading, saying why, and sends once it is in", async () => {
+    const { container, daemon, uploader } = await signedIn();
+
+    uploader.hold = true;
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    await enter(container);
+
+    const notice = container.querySelector('[role="alert"] p')?.textContent;
+    const held = { said: daemon.says.length, value: composerOf(container).value };
+
+    uploader.sending[0]?.release();
+    await settled(() => composerOf(container).value.includes(publicUrl));
+    await enter(container);
+    await settled(() => daemon.says.length === 1);
+
+    expect({ held, notice, said: daemon.says.map((one) => one.text) }).toStrictEqual({
+      held: { said: 0, value: "look" },
+      notice: "Wait for cat.png to finish uploading, or cancel it.",
+      said: [`look ${linkOf(10, "cat.png")}`],
+    });
+  });
+
+  it("sends with a failed file still shown, as it holds nothing back", async () => {
+    const { container, daemon } = await signedIn();
+
+    daemon.uploadRefusals.push({
+      body: { _tag: "StoreUnavailable", reason: "the bucket did not answer" },
+      status: 503,
+    });
+    await typeIn(container, "look");
+    await paste(container, image("cat.png"));
+    await settled(() => alerts(container).length === 1);
+    await enter(container);
+    await settled(() => daemon.says.length === 1);
+
+    expect(daemon.says.map((one) => one.text)).toStrictEqual(["look"]);
+  });
+
+  it("lets go of every upload on signing out, aborting its request and its preview", async () => {
+    const { container, daemon, registry, uploader } = await signedIn();
+    const revoked = vi.spyOn(URL, "revokeObjectURL");
+
+    uploader.hold = true;
+    await paste(container, image("cat.png"));
+    await settled(() => uploader.sending.length === 1);
+    daemon.holdUploadsStatus = true;
+    await paste(container, image("dog.png"));
+    await settled(() => daemon.statusesHeld.length === 1);
+
+    const shown = [...registry.get(previews).values()];
+
+    await act(async () => {
+      await run(registry, signOut, undefined);
+    });
+    daemon.holdUploadsStatus = false;
+    daemon.statusesHeld[0]?.();
+    uploader.sending[0]?.release();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({
+      aborted: uploader.sending.map((one) => one.aborted),
+      pending: registry.get(uploadingState),
+      previews: registry.get(previews).size,
+      revoked: shown.every((url) => revoked.mock.calls.some(([one]) => one === url)),
+      sending: uploader.sending.length,
+      sent: daemon.uploadsSent,
+      shown: shown.length,
+    }).toStrictEqual({
+      aborted: [true],
+      pending: { notes: new Map(), pending: [] },
+      previews: 0,
+      revoked: true,
+      sending: 1,
+      sent: [],
+      shown: 2,
+    });
+    revoked.mockRestore();
   });
 });

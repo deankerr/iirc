@@ -1,4 +1,3 @@
-import type { Composers } from "@iirc/frontend/composer";
 /**
  * The files pending in the composers, as the core folds them, apart from what sends them,
  * so every change of a draft can carry their anchors along without depending on the
@@ -6,7 +5,9 @@ import type { Composers } from "@iirc/frontend/composer";
  *
  * @packageDocumentation
  */
+import type { Composers, Place } from "@iirc/frontend/composer";
 import { followed, initialUploading } from "@iirc/frontend/uploading";
+import type { Typing } from "@iirc/frontend/uploading";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
 
@@ -25,11 +26,13 @@ export const caretAsked = Atom.make({ asked: 0, caret: 0 }).pipe(Atom.keepAlive)
  * @param registry - The registry.
  * @param before - The composers before.
  * @param after - The composers after.
+ * @param typing - Where the Owner's selection was in the draft they typed in, if they did.
  */
 export const anchorsFollow = (
   registry: AtomRegistry.AtomRegistry,
   before: Composers,
-  after: Composers
+  after: Composers,
+  typing?: Typing & { readonly place: Place }
 ) => {
-  registry.set(uploadingState, followed(registry.get(uploadingState), before, after));
+  registry.set(uploadingState, followed(registry.get(uploadingState), before, after, typing));
 };

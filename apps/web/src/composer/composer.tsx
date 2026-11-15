@@ -183,6 +183,18 @@ const FileButtons = ({ add }: { readonly add: (files: readonly File[]) => void }
   );
 };
 
+/**
+ * Whether the browser's selection says where an edit of this kind is: not for an undo or a
+ * redo, a drag, or a spelling correction, which edit elsewhere than the selection.
+ * @param inputType - The kind of edit, as `beforeinput` names it.
+ * @returns Whether it does.
+ */
+const atSelection = (inputType: string) =>
+  !inputType.startsWith("history") &&
+  !inputType.endsWith("Drop") &&
+  !inputType.endsWith("Drag") &&
+  inputType !== "insertReplacementText";
+
 /** Why nothing can be said where the composer is: above it, and in it before anything is typed. */
 interface Sayable {
   readonly offline: string | undefined;
@@ -259,6 +271,9 @@ const Composer = ({
   const spellcheck = useAtomValue(spellcheckShown);
   const sendKeys = showChord(sendChord(enter), platform);
   const input = useRef<HTMLTextAreaElement>(null);
+  // Where the selection began just before the Owner's edit, read as the browser is about to
+  // make it, so the files' anchors follow the edit made and not a guess at it.
+  const selectedFrom = useRef<number | undefined>(undefined);
   const focusSeen = useRef(focusAsked);
   const appliedSeen = useRef(completion.applied);
   const id = useId();
@@ -293,6 +308,21 @@ const Composer = ({
     appliedSeen.current = applied;
     input.current?.setSelectionRange(caret, caret);
   }, [completion]);
+
+  useEffect(() => {
+    const element = input.current;
+
+    const before = (event: InputEvent) => {
+      selectedFrom.current =
+        element !== null && atSelection(event.inputType) ? element.selectionStart : undefined;
+    };
+
+    element?.addEventListener("beforeinput", before);
+
+    return () => {
+      element?.removeEventListener("beforeinput", before);
+    };
+  }, []);
 
   // Each time a link goes into the draft while the Owner writes in it, the caret goes where
   // the core says, once the new text is in the textarea.
@@ -587,7 +617,16 @@ const Composer = ({
           data-composer=""
           id={id}
           onChange={(event) => {
-            setText({ text: event.currentTarget.value, timeline });
+            const { selectionStart, value } = event.currentTarget;
+            const from = selectedFrom.current;
+
+            // A selection read for one edit says nothing of the next.
+            selectedFrom.current = undefined;
+            setText(
+              from === undefined
+                ? { text: value, timeline }
+                : { text: value, timeline, typing: { caret: selectionStart, from } }
+            );
           }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}

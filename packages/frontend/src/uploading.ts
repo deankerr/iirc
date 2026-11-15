@@ -12,7 +12,8 @@
  */
 import type { OwnerOptionName, UploadsStatus } from "@iirc/api";
 
-import { draftOf, reduceComposers } from "./composer.ts";
+import { typesCredential } from "./commands.ts";
+import { draftOf, linesOf, reduceComposers } from "./composer.ts";
 import type { Composers, Place } from "./composer.ts";
 import { sizeText } from "./uploads.ts";
 
@@ -45,14 +46,28 @@ export type UploadFailure =
   | { readonly _tag: "NoAnswer"; readonly sent: boolean }
   | { readonly _tag: "Unexpected" };
 
-/** A file pending in a composer: being sent, or failed and shown until dismissed. */
+/**
+ * Where a file pending stands.
+ *
+ * - `Checking`: whether Uploads are on is being asked, before anything is sent.
+ * - `Sending`: it is being sent, with how much of it was, of how much, as the browser last
+ *   said, if it has.
+ * - `Failed`: it was not kept, or might not have been, and is shown until dismissed.
+ */
+export type Stage =
+  | { readonly _tag: "Checking" }
+  | {
+      readonly _tag: "Sending";
+      readonly progress: { readonly loaded: number; readonly total: number } | undefined;
+    }
+  | { readonly _tag: "Failed"; readonly failure: UploadFailure };
+
+/** A file pending in a composer, from the moment it was added until it is let go of. */
 export interface Pending extends AddedFile {
   readonly place: Place;
   /** Where its link goes in the draft. */
   readonly anchor: number;
-  /** How many of its bytes were sent, of how many, as the browser last said, if it has. */
-  readonly progress: { readonly loaded: number; readonly total: number } | undefined;
-  readonly failure: UploadFailure | undefined;
+  readonly stage: Stage;
 }
 
 /**
@@ -75,8 +90,13 @@ export type Readiness = UploadsStatus | { readonly _tag: "NoAnswer" };
 /**
  * What happened.
  *
- * - `Added`: files were added to a composer with its caret at `anchor`, while Uploads
- *   stood as `readiness` says.
+ * - `Added`: files were added to a composer with its caret at `anchor`. Each is pending at
+ *   once, in the order added, checking whether Uploads are on, so its place in the draft
+ *   follows every edit from then.
+ * - `Checked`: the Daemon said whether Uploads are on, or did not, as files were added.
+ *   Those still checking are let go of while they are off, with a note naming the options
+ *   to set, fail without an answer, and are sent while they are on, but for one larger
+ *   than `maxSize`, which fails before it is sent.
  * - `Progressed`: the browser sent more of a file.
  * - `Failed`: a file was not kept, or might not have been.
  * - `Off`: the Daemon said Uploads are off as a file was sent, so it was not kept.
@@ -89,8 +109,8 @@ export type UploadingEvent =
       readonly place: Place;
       readonly anchor: number;
       readonly files: readonly AddedFile[];
-      readonly readiness: Readiness;
     }
+  | { readonly _tag: "Checked"; readonly keys: readonly string[]; readonly readiness: Readiness }
   | {
       readonly _tag: "Progressed";
       readonly key: string;
@@ -111,13 +131,30 @@ export type UploadingEvent =
 export const pendingIn = (state: Uploading, place: Place): readonly Pending[] =>
   state.pending.filter((one) => one.place === place);
 
+const keysAt = (state: Uploading, tag: Stage["_tag"]): ReadonlySet<string> =>
+  new Set(state.pending.filter((one) => one.stage._tag === tag).map((one) => one.key));
+
 /**
- * The files of a state that are to be sent: being sent, and not yet failed.
+ * The files of a state that are being sent.
  * @param state - What is pending.
  * @returns Their keys.
  */
-export const sending = (state: Uploading): ReadonlySet<string> =>
-  new Set(state.pending.filter((one) => one.failure === undefined).map((one) => one.key));
+export const sending = (state: Uploading): ReadonlySet<string> => keysAt(state, "Sending");
+
+/**
+ * The files of a state whose readiness is still being asked.
+ * @param state - What is pending.
+ * @returns Their keys.
+ */
+export const checking = (state: Uploading): ReadonlySet<string> => keysAt(state, "Checking");
+
+/**
+ * Why a file pending was not kept, or might not have been, or none while it is not failed.
+ * @param file - The file.
+ * @returns Why.
+ */
+export const failureOf = (file: Pick<Pending, "stage">): UploadFailure | undefined =>
+  file.stage._tag === "Failed" ? file.stage.failure : undefined;
 
 /**
  * The note under a composer while Uploads are off, naming the options not set, or none.
@@ -155,32 +192,75 @@ const changed = (state: Uploading, key: string, change: (one: Pending) => Pendin
 });
 
 /**
- * The files added, each pending: one larger than `maxSize` failed already, never to be
- * sent, and the rest being sent.
- * @param place - The composer's place.
- * @param anchor - Where the caret was.
- * @param files - The files.
- * @param maxSize - The largest an Upload may be.
- * @returns Them, pending.
+ * The stage a file checking comes to once the Daemon said whether Uploads are on: sent
+ * while they are, unless larger than `maxSize`, and failed without an answer.
+ * @param file - The file.
+ * @param readiness - What the Daemon said, Uploads off aside.
+ * @returns Its stage.
  */
-const addedOn = (
-  place: Place,
-  anchor: number,
-  files: readonly AddedFile[],
-  maxSize: number
-): readonly Pending[] =>
-  files.map((file) => ({
-    ...file,
-    anchor,
-    failure: file.size > maxSize ? { _tag: "OverLimit", before: true, maxSize } : undefined,
-    place,
-    progress: undefined,
-  }));
+const checkedStage = (
+  file: Pending,
+  readiness: Exclude<Readiness, { readonly _tag: "Off" }>
+): Stage => {
+  if (readiness._tag === "NoAnswer") {
+    return { _tag: "Failed", failure: { _tag: "NoAnswer", sent: false } };
+  }
+
+  return file.size > readiness.maxSize
+    ? { _tag: "Failed", failure: { _tag: "OverLimit", before: true, maxSize: readiness.maxSize } }
+    : { _tag: "Sending", progress: undefined };
+};
 
 /**
- * Folds one event into what is pending. Files added while Uploads are off are not pending:
- * the composer notes it instead, naming the options to set, and the note goes once files
- * are added there while they are on.
+ * Folds what the Daemon said of whether Uploads are on into the files still checking among
+ * those it was asked for.
+ * @param state - What is pending.
+ * @param keys - The files it was asked for.
+ * @param readiness - What it said.
+ * @returns What is pending now.
+ */
+const checked = (state: Uploading, keys: readonly string[], readiness: Readiness): Uploading => {
+  const asked = new Set(keys);
+  const isAsked = (one: Pending) => asked.has(one.key) && one.stage._tag === "Checking";
+  const places = new Set(state.pending.filter(isAsked).map((one) => one.place));
+
+  if (places.size === 0) {
+    return state;
+  }
+
+  if (readiness._tag === "Off") {
+    let after: Uploading = {
+      ...state,
+      pending: state.pending.filter((one) => !isAsked(one)),
+    };
+
+    for (const place of places) {
+      after = withNote(after, place, readiness.missing);
+    }
+
+    return after;
+  }
+
+  let after: Uploading = {
+    ...state,
+    pending: state.pending.map((one) =>
+      isAsked(one) ? { ...one, stage: checkedStage(one, readiness) } : one
+    ),
+  };
+
+  if (readiness._tag === "On") {
+    for (const place of places) {
+      after = withNote(after, place, undefined);
+    }
+  }
+
+  return after;
+};
+
+/**
+ * Folds one event into what is pending. Files added are pending at once, checking, and
+ * those found while Uploads are off are let go of: the composer notes it instead, naming
+ * the options to set, and the note goes once files are found there while they are on.
  * @param state - What is pending.
  * @param event - What happened.
  * @returns What is pending now.
@@ -188,57 +268,43 @@ const addedOn = (
 export const reduceUploading = (state: Uploading, event: UploadingEvent): Uploading => {
   switch (event._tag) {
     case "Added": {
-      const { anchor, files, place, readiness } = event;
+      const { anchor, files, place } = event;
 
-      if (files.length === 0) {
-        return state;
-      }
-
-      switch (readiness._tag) {
-        case "Off": {
-          return withNote(state, place, readiness.missing);
-        }
-
-        case "NoAnswer": {
-          return {
+      return files.length === 0
+        ? state
+        : {
             ...state,
             pending: [
               ...state.pending,
-              ...addedOn(place, anchor, files, Number.POSITIVE_INFINITY).map((one) => ({
-                ...one,
-                failure: { _tag: "NoAnswer", sent: false } as const,
+              ...files.map((file): Pending => ({
+                ...file,
+                anchor,
+                place,
+                stage: { _tag: "Checking" },
               })),
             ],
           };
-        }
+    }
 
-        case "On": {
-          return withNote(
-            {
-              ...state,
-              pending: [...state.pending, ...addedOn(place, anchor, files, readiness.maxSize)],
-            },
-            place,
-            undefined
-          );
-        }
-
-        default: {
-          return readiness satisfies never;
-        }
-      }
+    case "Checked": {
+      return checked(state, event.keys, event.readiness);
     }
 
     case "Progressed": {
       const { key, loaded, total } = event;
 
       return changed(state, key, (one) =>
-        one.failure === undefined ? { ...one, progress: { loaded, total } } : one
+        one.stage._tag === "Sending"
+          ? { ...one, stage: { ...one.stage, progress: { loaded, total } } }
+          : one
       );
     }
 
     case "Failed": {
-      return changed(state, event.key, (one) => ({ ...one, failure: event.failure }));
+      return changed(state, event.key, (one) => ({
+        ...one,
+        stage: { _tag: "Failed", failure: event.failure },
+      }));
     }
 
     case "Off": {
@@ -264,21 +330,33 @@ export const reduceUploading = (state: Uploading, event: UploadingEvent): Upload
 };
 
 /**
- * Where an anchor is once the text it is in was edited from `before` to `after`. The edit is
- * found as the text between their common start and common end. An anchor before the edit,
- * or exactly where text was typed, stays, so text typed at the anchor goes after the link:
- * paste a screenshot, then type a caption, and the link leads. One after the edit moves
- * with the text after it. One the edit replaced goes to the end of what replaced it.
- * @param anchor - Where it was.
+ * One edit of a draft's text: what lay from `start` to `oldEnd` before lies from `start` to
+ * `newEnd` after, and the rest is as it was.
+ */
+export interface Edit {
+  readonly start: number;
+  readonly oldEnd: number;
+  readonly newEnd: number;
+}
+
+/**
+ * Where the Owner's selection was as they edited a draft: where it began just before the
+ * edit, and where the caret was just after.
+ */
+export interface Typing {
+  readonly from: number;
+  readonly caret: number;
+}
+
+/**
+ * The edit found as the text between the common start and the common end of the text
+ * before and after. Where text repeats, more than one edit explains the change, and this
+ * guesses the one that keeps the most of the start.
  * @param before - The text before.
  * @param after - The text after.
- * @returns Where it is, within the text after.
+ * @returns The edit.
  */
-export const anchorAfter = (anchor: number, before: string, after: string): number => {
-  if (before === after) {
-    return Math.min(Math.max(anchor, 0), after.length);
-  }
-
+const diffed = (before: string, after: string): Edit => {
   const shortest = Math.min(before.length, after.length);
   let start = 0;
 
@@ -295,14 +373,70 @@ export const anchorAfter = (anchor: number, before: string, after: string): numb
     end += 1;
   }
 
-  const beforeEnd = before.length - end;
-  const afterEnd = after.length - end;
+  return { newEnd: after.length - end, oldEnd: before.length - end, start };
+};
 
-  let moved = afterEnd;
+/**
+ * The edit that changed a draft's text from `before` to `after`. Where the Owner typed it,
+ * the selection says it exactly: it began at the lesser of where the selection began and
+ * where the caret is after, and ended at the caret, what it replaced being as much longer
+ * or shorter as the text was. That is taken when the text agrees with it, outside what it
+ * says was replaced. Otherwise, as for an undo, a drag, or a change the composer made
+ * itself, such as a completion or a recall, the edit is found from the texts alone.
+ * @param before - The text before.
+ * @param after - The text after.
+ * @param typing - Where the Owner's selection was, if they typed it.
+ * @returns The edit.
+ */
+export const editOf = (before: string, after: string, typing?: Typing): Edit => {
+  if (typing !== undefined) {
+    const start = Math.min(typing.from, typing.caret);
+    const newEnd = typing.caret;
+    const oldEnd = newEnd + before.length - after.length;
+
+    if (
+      start >= 0 &&
+      newEnd <= after.length &&
+      oldEnd >= start &&
+      oldEnd <= before.length &&
+      before.slice(0, start) === after.slice(0, start) &&
+      before.slice(oldEnd) === after.slice(newEnd)
+    ) {
+      return { newEnd, oldEnd, start };
+    }
+  }
+
+  return diffed(before, after);
+};
+
+/**
+ * Where an anchor is once the text it is in was edited from `before` to `after`. An anchor
+ * before the edit, or exactly where text was typed, stays, so text typed at the anchor goes
+ * after the link: paste a screenshot, then type a caption, and the link leads. One after
+ * the edit moves with the text after it. One the edit replaced goes to the end of what
+ * replaced it.
+ * @param anchor - Where it was.
+ * @param before - The text before.
+ * @param after - The text after.
+ * @param typing - Where the Owner's selection was, if they typed it.
+ * @returns Where it is, within the text after.
+ */
+export const anchorAfter = (
+  anchor: number,
+  before: string,
+  after: string,
+  typing?: Typing
+): number => {
+  if (before === after) {
+    return Math.min(Math.max(anchor, 0), after.length);
+  }
+
+  const { newEnd, oldEnd, start } = editOf(before, after, typing);
+  let moved = newEnd;
 
   if (anchor <= start) {
     moved = anchor;
-  } else if (anchor >= beforeEnd) {
+  } else if (anchor >= oldEnd) {
     moved = anchor + after.length - before.length;
   }
 
@@ -316,9 +450,15 @@ export const anchorAfter = (anchor: number, before: string, after: string): numb
  * @param state - What is pending.
  * @param before - The composers before.
  * @param after - The composers after.
+ * @param typing - Where the Owner's selection was in the draft they typed in, if they did.
  * @returns What is pending now.
  */
-export const followed = (state: Uploading, before: Composers, after: Composers): Uploading => {
+export const followed = (
+  state: Uploading,
+  before: Composers,
+  after: Composers,
+  typing?: Typing & { readonly place: Place }
+): Uploading => {
   if (state.pending.length === 0 || before === after) {
     return state;
   }
@@ -329,10 +469,11 @@ export const followed = (state: Uploading, before: Composers, after: Composers):
       const place = after.carried.get(one.place) ?? one.place;
       const was = draftOf(before, one.place).text;
       const now = draftOf(after, place).text;
+      const typed = place === one.place && typing?.place === place ? typing : undefined;
 
       return was === now && place === one.place
         ? one
-        : { ...one, anchor: anchorAfter(one.anchor, was, now), place };
+        : { ...one, anchor: anchorAfter(one.anchor, was, now, typed), place };
     }),
   };
 };
@@ -404,7 +545,7 @@ export const uploaded = (
   const index = state.pending.findIndex((one) => one.key === key);
   const file = state.pending[index];
 
-  if (file === undefined || file.failure !== undefined) {
+  if (file?.stage._tag !== "Sending") {
     return { composers, inserted: undefined, state };
   }
 
@@ -469,12 +610,40 @@ export const offNote = (missing: readonly OwnerOptionName[]): string => {
 };
 
 /**
+ * Why a composer's draft cannot be sent yet, or none: a file added to it is still being
+ * checked or sent, so its link is not in yet. A failed file holds nothing back, and nor
+ * does a draft that types a Credential's value, which is let go of as it is submitted.
+ * @param state - What is pending.
+ * @param composers - The composers.
+ * @param place - The composer's place.
+ * @returns Why, in words, or none.
+ */
+export const heldBack = (
+  state: Uploading,
+  composers: Composers,
+  place: Place
+): string | undefined => {
+  const waiting = pendingIn(state, place).filter((one) => one.stage._tag !== "Failed");
+
+  if (
+    waiting.length === 0 ||
+    linesOf(draftOf(composers, place).text).some((line) => typesCredential(line))
+  ) {
+    return undefined;
+  }
+
+  const names = listed(waiting.map((one) => one.name));
+
+  return `Wait for ${names} to finish uploading, or cancel ${waiting.length === 1 ? "it" : "them"}.`;
+};
+
+/**
  * Why a file was not kept, or might not have been, in words.
  * @param file - The file.
  * @returns The words, or none while it is being sent.
  */
 export const failureText = (
-  file: Pick<Pending, "failure" | "name" | "size">
+  file: Pick<Pending, "name" | "size"> & { readonly failure: UploadFailure | undefined }
 ): string | undefined => {
   const { failure, name, size } = file;
 

@@ -520,6 +520,7 @@ export const fakeDaemon = () => {
   const membersRead: string[] = [];
   const uiFollowers: Follower[] = [];
   const uiReadsHeld: (() => void)[] = [];
+  const statusesHeld: (() => void)[] = [];
   const uiChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
   const ownerFollowers: Follower[] = [];
   const ownerChanges: { readonly route: string; readonly ifSequence: string | null }[] = [];
@@ -605,6 +606,8 @@ export const fakeDaemon = () => {
     holdUiReads: false,
     /** Whether each page of the Uploads, taken as it is asked for, waits until released to answer. */
     holdUploadPages: false,
+    /** Whether each read of whether Uploads are on waits until released, then answers as they are then. */
+    holdUploadsStatus: false,
     /** Where each request that never began its answer asked to follow from. */
     hung,
     /**
@@ -692,6 +695,8 @@ export const fakeDaemon = () => {
     ]),
     signInsFail: false,
     signedIn: false,
+    /** The release of each read of whether Uploads are on held, in the order asked. */
+    statusesHeld,
     /** Each `GET /api/uploads/status` asked. */
     statusesRead: 0,
     /** The last step folded, which every Timeline read gives as `through`. */
@@ -1492,6 +1497,10 @@ export const fakeDaemon = () => {
 
     if (url.pathname === "/api/uploads/status") {
       daemon.statusesRead += 1;
+
+      if (daemon.holdUploadsStatus) {
+        await heldUntilReleased(daemon.statusesHeld, init);
+      }
 
       return signedInOnly(() => Response.json(daemon.uploadsStatus));
     }

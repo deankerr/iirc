@@ -18,6 +18,7 @@ import type { Completed, CompletionEvent } from "@iirc/frontend/completion";
 import type { Place } from "@iirc/frontend/composer";
 import { draftOf, reduceComposers } from "@iirc/frontend/composer";
 import { listed } from "@iirc/frontend/options";
+import type { Typing } from "@iirc/frontend/uploading";
 import { Clock, Duration, Effect, FiberMap, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";
@@ -110,11 +111,21 @@ export const escapeCompletion = Atom.fnSync((place: Place, get) => {
   completing(get.registry, place, { _tag: "Escaped", place });
 }).pipe(Atom.keepAlive);
 
-/** The Owner typed: what was being completed is let go of, and the draft is what they typed. */
+/**
+ * The Owner typed: what was being completed is let go of, and the draft is what they typed,
+ * where their selection was if the composer knows it.
+ */
 export const typed = Atom.fnSync(
-  ({ text, timeline }: { readonly timeline: Place; readonly text: string }, get) => {
+  (
+    {
+      text,
+      timeline,
+      typing,
+    }: { readonly timeline: Place; readonly text: string; readonly typing?: Typing },
+    get
+  ) => {
     completing(get.registry, timeline, { _tag: "LetGo" });
-    get.registry.set(edit, { text, timeline });
+    get.registry.set(edit, typing === undefined ? { text, timeline } : { text, timeline, typing });
   }
 ).pipe(Atom.keepAlive);
 

@@ -9,7 +9,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { Place } from "@iirc/frontend/composer";
-import { failureText, noteIn, offNote, pendingIn } from "@iirc/frontend/uploading";
+import { failureOf, failureText, noteIn, offNote, pendingIn } from "@iirc/frontend/uploading";
 import type { Pending } from "@iirc/frontend/uploading";
 import { sizeText } from "@iirc/frontend/uploads";
 
@@ -29,8 +29,9 @@ import styles from "./composer.module.css";
 const Row = ({ file }: { readonly file: Pending }) => {
   const preview = useAtomValue(previews).get(file.key);
   const drop = useAtomSet(dropUpload);
-  const failure = failureText(file);
-  const { progress } = file;
+  const failure = failureText({ ...file, failure: failureOf(file) });
+  // A file still checking whether Uploads are on shows as one sent nothing yet.
+  const progress = file.stage._tag === "Sending" ? file.stage.progress : undefined;
 
   return (
     <li className={styles.upload}>

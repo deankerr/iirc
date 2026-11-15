@@ -13,6 +13,8 @@ import { draftOf } from "@iirc/frontend/composer";
 import {
   anchorAfter,
   caretAfter,
+  checking,
+  initialUploading,
   reduceUploading,
   sending,
   uploaded,
@@ -25,6 +27,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 import { DaemonClient } from "../app/daemon-client.ts";
 import { runtime } from "../app/runtime.ts";
 import { signedOut } from "../options/atoms.ts";
+import { signedIn } from "../sign-in/atoms.ts";
 import { composerState, placeOf } from "./atoms.ts";
 import { cancelCompletion } from "./completion-state.ts";
 import { composerInput } from "./input.ts";
@@ -77,6 +80,24 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: UploadingEvent) =>
 const lettingGo = (registry: AtomRegistry.AtomRegistry, key: string) =>
   AtomRegistry.toStream(registry, uploadingState).pipe(
     Stream.filter((state) => !sending(state).has(key)),
+    Stream.take(1),
+    Stream.runDrain
+  );
+
+/**
+ * Waits until none of the files added together is still checking: each was cancelled, or
+ * let go another way, as on signing out.
+ * @param registry - The registry.
+ * @param keys - The files' keys.
+ * @returns Once none is.
+ */
+const noneChecking = (registry: AtomRegistry.AtomRegistry, keys: readonly string[]) =>
+  AtomRegistry.toStream(registry, uploadingState).pipe(
+    Stream.filter((state) => {
+      const still = checking(state);
+
+      return keys.every((key) => !still.has(key));
+    }),
     Stream.take(1),
     Stream.runDrain
   );
@@ -213,9 +234,11 @@ export interface Adding {
 }
 
 /**
- * Adds files to a composer: asks the Daemon whether Uploads are on, and, if they are, sends
- * each file the core did not refuse, each in a fiber of its own, so cancelling one stops it
- * alone. While they are off, nothing is sent and the composer notes it.
+ * Adds files to a composer: each is pending at once, checking, its place in the draft fixed
+ * as it is added and following every edit from then, and the Daemon is asked whether
+ * Uploads are on. If they are, each file the core did not refuse is sent, each in a fiber
+ * of its own, so cancelling one stops it alone. While they are off, nothing is sent and
+ * the composer notes it. Cancelling every file, or signing out, stops the asking.
  */
 export const addFiles = runtime
   .fn(
@@ -224,12 +247,6 @@ export const addFiles = runtime
         const { registry } = get;
 
         if (files.length === 0) {
-          return;
-        }
-
-        const ready = yield* readiness(registry);
-
-        if (ready === undefined) {
           return;
         }
 
@@ -242,26 +259,36 @@ export const addFiles = runtime
           named.push({ added: { key, name: file.name, size: file.size, type: file.type }, file });
         }
 
-        // Only files that will show are previewed, so every URL made is let go of with its file.
-        const shown = ready._tag === "Off" ? [] : named;
+        const keys = named.map((one) => one.added.key);
 
         registry.set(
           previews,
           new Map([
             ...registry.get(previews),
-            ...shown.flatMap(({ added, file }) =>
+            ...named.flatMap(({ added, file }) =>
               thumbnailed(added.type) ? [[added.key, URL.createObjectURL(file)] as const] : []
             ),
           ])
         );
         happened(registry, {
           _tag: "Added",
-          // What was typed while the Daemon was asked moves the anchor as it would any other.
+          // The files are added before anything else happens, so the text is as the caret
+          // was read in, and this moves nothing unless the composer changed it meanwhile.
           anchor: anchorAfter(anchor, text, draftOf(registry.get(composerState), place).text),
           files: named.map((one) => one.added),
           place,
-          readiness: ready,
         });
+
+        const ready = yield* Effect.raceFirst(
+          readiness(registry),
+          noneChecking(registry, keys).pipe(Effect.as(undefined))
+        );
+
+        if (ready === undefined) {
+          return;
+        }
+
+        happened(registry, { _tag: "Checked", keys, readiness: ready });
 
         const toSend = sending(registry.get(uploadingState));
 
@@ -275,7 +302,7 @@ export const addFiles = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** Cancels a file being sent, which aborts its request, or lets go of one that failed. */
+/** Cancels a file checking or being sent, which aborts its request, or lets go of one that failed. */
 export const dropUpload = Atom.fnSync((key: string, get) => {
   happened(get.registry, { _tag: "Dropped", key });
 }).pipe(Atom.keepAlive);
@@ -283,4 +310,16 @@ export const dropUpload = Atom.fnSync((key: string, get) => {
 /** Lets go of the note under a composer that Uploads are off. */
 export const dismissUploadNote = Atom.fnSync((place: Place, get) => {
   happened(get.registry, { _tag: "NoteDismissed", place });
+}).pipe(Atom.keepAlive);
+
+/**
+ * Signing out lets go of every file pending and every note, which stops each asking and
+ * aborts each request, and of every preview, so none comes back on signing in again.
+ * Mounted once for the page.
+ */
+export const uploadsSignedOut = Atom.make((get) => {
+  if (!get(signedIn)) {
+    get.registry.set(uploadingState, initialUploading);
+    letGoOfPreviews(get.registry);
+  }
 }).pipe(Atom.keepAlive);
