@@ -98,6 +98,7 @@ const inChannel: CommandContext = {
   shown: [],
   timelines: [own, channel, direct],
   unread: [],
+  unreadClosed: [],
 };
 
 const nowhere: CommandContext = { ...inChannel, focus: undefined, open: undefined, session: false };

@@ -345,9 +345,9 @@ export type Acted = typeof Acted.Type;
 
 /**
  * Why the Client closed nothing in the step that took a `close`: `Joined`, a Channel Self
- * is in as it was stepped, or `NoTimeline`, a Target that names no one Timeline.
+ * is in as it was stepped, named as the Client resolved the Target, or `NoTimeline`, a Target that names no one Timeline.
  */
-export const CloseRefusal = Schema.TaggedUnion({ Joined: {}, NoTimeline: {} });
+export const CloseRefusal = Schema.TaggedUnion({ Joined: { channel: Untrusted }, NoTimeline: {} });
 
 /** The decoded form of {@link CloseRefusal}. */
 export type CloseRefusal = typeof CloseRefusal.Type;
@@ -557,8 +557,8 @@ const inputTags = everyOf<Input["_tag"]>()([
 export const IgnoredReason = Schema.TaggedUnion({
   Endless: { command: Untrusted },
   FeatureFailed: { feature: Schema.String },
-  /** A `close` of a Channel Self is in, which stays open while Self is there. */
-  Joined: {},
+  /** A `close` of a Channel Self is in, which stays open while Self is there, named as the Client checked it. */
+  Joined: { channel: Untrusted },
   Malformed: { command: Untrusted },
   /** A `read` or a `close` whose Target names no one Timeline, such as a list or a mask. */
   NoTimeline: {},

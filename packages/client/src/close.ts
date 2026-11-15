@@ -14,7 +14,8 @@ import { markedBy } from "./where.ts";
  * The Owner closed a Timeline, named as `Read` names one, so a Target names a Channel or a
  * Direct Message partner and never the Network's own, which is never closed. A Target that
  * names no one Timeline is `Ignored` as `NoTimeline`, and a Channel Self is in now is
- * `Ignored` as `Joined`, since it stays where the Owner can see it. Otherwise it reports
+ * `Ignored` as `Joined` naming that Channel as resolved, a status prefix taken off, since it
+ * stays where the Owner can see it. Otherwise it reports
  * `TimelineClosed`, whether or not any Timeline is there, which is the projection's to know.
  * @param run - The step.
  * @param input - The `CloseTimeline`.
@@ -35,7 +36,7 @@ export const closeTimeline = (
     where._tag === "Channel" &&
     run.state.channels.get(folder(run.state)(where.name))?.phase._tag === "Joined"
   ) {
-    ignore(run, { _tag: "Joined" });
+    ignore(run, { _tag: "Joined", channel: where.name });
 
     return;
   }

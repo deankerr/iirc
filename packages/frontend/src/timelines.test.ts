@@ -1730,6 +1730,41 @@ describe("the Timelines' state", () => {
     });
   });
 
+  it("marks a closed Timeline read with /read all, though navigation and the sidebar leave it out", () => {
+    // #b is closed with a Message unread, and no Pane shows it, so it is not listed.
+    const closed = reduceTimelines(
+      following(),
+      changed(6, {
+        timelines: [
+          {
+            ...Schema.encodeSync(Timeline)(timelineOf(idOf(2), "Channel", "#b", 6)),
+            closed: true,
+            latest: cursor(6000, 6),
+            unread: { activity: 0, direct: 0, highlights: 0, messages: 2 },
+          },
+        ],
+      })
+    );
+
+    const context = contextOf(closed);
+    const all = interpret("/read all", context);
+
+    expect({
+      listed: listedAndClosed(closed),
+      marked:
+        all._tag === "Parsed"
+          ? all.value.map((one) => (one._tag === "MarkRead" ? one.timeline : one))
+          : all,
+      navigation: context.unread,
+      next: interpret("/next-unread", context),
+    }).toStrictEqual({
+      listed: [[["alpha", "#a"], ["#b"]]],
+      marked: [two],
+      navigation: [],
+      next: { _tag: "Parsed", value: [] },
+    });
+  });
+
   it("draws a Network as its own Timeline's row, with its Channels and Direct Messages under it", () => {
     const [network] = sidebar(following());
     const tree = network === undefined ? undefined : treeOf(network);

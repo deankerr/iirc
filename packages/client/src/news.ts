@@ -355,8 +355,12 @@ export type IgnoredReason =
   | { readonly _tag: "UnmatchedEcho" }
   /** A `Read` or a `CloseTimeline` whose Target names no one Timeline, such as a list or a mask. */
   | { readonly _tag: "NoTimeline" }
-  /** A `CloseTimeline` of a Channel Self is in, which stays open while Self is there. */
-  | { readonly _tag: "Joined" };
+  /**
+   * A `CloseTimeline` of a Channel Self is in, which stays open while Self is there. It
+   * names the Channel as the Client checked it, with a status prefix taken off, which is
+   * what leaving it takes.
+   */
+  | { readonly _tag: "Joined"; readonly channel: string };
 
 /**
  * What happened in one step, in order.

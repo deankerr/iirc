@@ -28,6 +28,7 @@ const around = {
   shown: [],
   timelines: [],
   unread: [],
+  unreadClosed: [],
 };
 
 const inChannel: CommandContext = { ...around, focus: focus("Channel", "#iirc"), session: true };

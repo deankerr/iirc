@@ -82,6 +82,7 @@ const inChannel: CommandContext = {
   shown: [],
   timelines: [timeline],
   unread: [],
+  unreadClosed: [],
 };
 
 const nowhere: CommandContext = {
@@ -95,6 +96,7 @@ const nowhere: CommandContext = {
   shown: [],
   timelines: [],
   unread: [],
+  unreadClosed: [],
 };
 
 const read = (line: string, context: CommandContext = nowhere) => interpret(line, context);

@@ -1093,10 +1093,13 @@ export const fakeDaemon = () => {
       return json(401, { _tag: "Unauthorized" });
     }
 
-    const { target } = Schema.decodeSync(CloseBody)(await new Response(init.body).text());
+    const { target: typed } = Schema.decodeSync(CloseBody)(await new Response(init.body).text());
+    // The Client resolves a Target as it does a `Read`'s, so a status prefix names the Channel
+    // without it, and that is what a refusal names.
+    const target = typed.replace(/^[~&@%+]+(?=[#&])/u, "");
     const sequence = daemon.nextSequence;
 
-    daemon.closes.push({ network, target });
+    daemon.closes.push({ network, target: typed });
     daemon.nextSequence += 1;
     daemon.through = sequence;
 
@@ -1134,7 +1137,7 @@ export const fakeDaemon = () => {
     }
 
     const closed: typeof Closed.Encoded = joined
-      ? { _tag: "Refused", reason: { _tag: "Joined" }, sequence }
+      ? { _tag: "Refused", reason: { _tag: "Joined", channel: target }, sequence }
       : { _tag: "Closed", sequence };
 
     return json(200, closed);

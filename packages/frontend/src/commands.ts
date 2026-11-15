@@ -81,8 +81,13 @@ export interface CommandContext {
   readonly shown: readonly TimelineId[];
   /** How many Panes there are. */
   readonly panes: number;
-  /** Every Timeline with something unread, in the sidebar's order. */
+  /** Every Timeline the sidebar lists with something unread, in its order. */
   readonly unread: readonly Unseen[];
+  /**
+   * Every Timeline closed, with something unread, that no Pane shows, which navigation
+   * skips since the sidebar does not list it, and which `/read all` still marks.
+   */
+  readonly unreadClosed: readonly Unseen[];
   /**
    * The head of the Channel in focus, as last read, or none before it is read or when the
    * focus is no Channel's: its topic, and the Network's `PREFIX`, `CHANMODES`, and
@@ -915,7 +920,7 @@ const readArguments = (args: string, context: CommandContext): Parsed<readonly M
   const what = args.trim().toLowerCase();
 
   if (what === "all") {
-    return parsed(marksOf(context.unread));
+    return parsed(marksOf([...context.unread, ...context.unreadClosed]));
   }
 
   if (what !== "") {

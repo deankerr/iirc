@@ -982,7 +982,10 @@ describe("closing a Timeline", () => {
       Effect.gen(function* () {
         const client = scripted([
           { when: "Configured" },
-          { news: [{ _tag: "Ignored", reason: { _tag: "Joined" } }], when: "CloseTimeline" },
+          {
+            news: [{ _tag: "Ignored", reason: { _tag: "Joined", channel: "#iirc" } }],
+            when: "CloseTimeline",
+          },
           { news: [{ _tag: "Ignored", reason: { _tag: "NoTimeline" } }], when: "CloseTimeline" },
         ]);
 
@@ -990,12 +993,12 @@ describe("closing a Timeline", () => {
 
         yield* runtime.configure(libera, configuration);
 
-        return [yield* runtime.close(libera, "#iirc"), yield* runtime.close(libera, "#a,#b")];
+        return [yield* runtime.close(libera, "@#iirc"), yield* runtime.close(libera, "#a,#b")];
       })
     );
 
     expect(result).toStrictEqual([
-      { _tag: "Refused", reason: { _tag: "Joined" }, sequence: 2 },
+      { _tag: "Refused", reason: { _tag: "Joined", channel: "#iirc" }, sequence: 2 },
       { _tag: "Refused", reason: { _tag: "NoTimeline" }, sequence: 3 },
     ]);
   });

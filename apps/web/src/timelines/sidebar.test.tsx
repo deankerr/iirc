@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import { TimelineId } from "@iirc/api";
+import { NetworkId, TimelineId } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
 import { openOf } from "@iirc/frontend/timelines";
 import { Redacted, Schema } from "effect";
@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { perform } from "../composer/atoms.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
@@ -435,6 +436,34 @@ describe("closing a Timeline from the sidebar", () => {
       listed: ["libera", "#iirc", "#other"],
       offered: "You are in #iirc. Leave it?",
       puts: 1,
+    });
+  });
+
+  it("offers to leave the Channel the Daemon checked, not the status-prefixed Target typed", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.joined.set("libera", ["#iirc"]);
+    const registry = await signedIn(undefined, fake);
+
+    // What `/close-timeline @#iirc` asks.
+    registry.set(perform, [
+      { _tag: "CloseTimeline", network: Schema.decodeSync(NetworkId)("libera"), target: "@#iirc" },
+    ]);
+    await settled(() => document.querySelector('[role="alertdialog"]') !== null);
+
+    const offered = document.querySelector('[role="alertdialog"] h2')?.textContent;
+
+    await pressButton("Leave");
+    await settled(() => document.querySelector('[role="alertdialog"]') === null);
+
+    expect({
+      channels: fake.daemon.configurations.get("libera")?.configuration.channels,
+      closes: fake.daemon.closes,
+      offered,
+    }).toStrictEqual({
+      channels: [],
+      closes: [{ network: "libera", target: "@#iirc" }],
+      offered: "You are in #iirc. Leave it?",
     });
   });
 

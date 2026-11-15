@@ -714,7 +714,10 @@ const ignoredReason = (source: IgnoredReason): WireIgnoredReason => {
     }
 
     case "Joined": {
-      const wire: Case<IgnoredReason, WireIgnoredReason, "Joined"> = { _tag: "Joined" };
+      const wire: Case<IgnoredReason, WireIgnoredReason, "Joined"> = {
+        _tag: "Joined",
+        channel: source.channel,
+      };
 
       return wire;
     }

@@ -1229,7 +1229,7 @@ describe("the handlers", () => {
     );
 
     expect(result).toStrictEqual({
-      answer: { _tag: "Joined" },
+      answer: { _tag: "Joined", channel: "#iirc" },
       closed: false,
       looked: [],
     });

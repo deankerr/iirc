@@ -214,7 +214,7 @@ A machine that is not running is left out.
 | An input or a Line that makes no sense now, such as a second `001` | `Ignored` with `NotNow`. A Line the Client does not read is not an error. |
 | An Owner intent that cannot be carried out | `Refused` with the intent id. It is not queued. |
 | A `Read` or a `CloseTimeline` whose Target names no one Timeline | `Ignored` with `NoTimeline`. |
-| A `CloseTimeline` of a Channel Self is in | `Ignored` with `Joined`. |
+| A `CloseTimeline` of a Channel Self is in | `Ignored` with `Joined`, naming the Channel as resolved, without a status prefix. |
 | A Line a Feature refuses at egress | A `Say` is `Refused` with `Unsendable`. Any other is `Ignored`. Nothing is sent. |
 | `Unsent` | A `Say` or an `Act` whose Line is among them is `Refused` with `Unsent`, once. A CTCP answer among them, from any Connection, is a `CtcpUnsent`, where its request is. |
 | `Unfilled` | SASL counts it as a failed login. A service login's Channels are joined at once. An `OPER` awaits no answer. A Channel whose key is unfilled is refused. Registration goes on without `PASS`. |

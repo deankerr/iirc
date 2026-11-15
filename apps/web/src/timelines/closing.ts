@@ -121,7 +121,11 @@ export const closeTimeline = (
     }
 
     if (stayed) {
-      happened(registry, { _tag: "Offered", channel: close.target, network: close.network });
+      happened(registry, {
+        _tag: "Offered",
+        channel: closed.reason.channel,
+        network: close.network,
+      });
     }
 
     return { _tag: "Done" } satisfies Outcome;

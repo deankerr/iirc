@@ -185,9 +185,12 @@ const writeIgnored = (reason: IgnoredReason): string => {
       return "UnmatchedEcho";
     }
 
-    case "NoTimeline":
-    case "Joined": {
+    case "NoTimeline": {
       return reason._tag;
+    }
+
+    case "Joined": {
+      return `Joined ${atom(reason.channel)}`;
     }
 
     default: {

@@ -8,7 +8,14 @@ import { describe, expect, it } from "vitest";
 import type { Step } from "../client.ts";
 import { client } from "../core.ts";
 import { Instant } from "../ids.ts";
-import { configured, describeNews, joined, play, registered } from "../testing/index.ts";
+import {
+  configured,
+  describeNews,
+  floorIsupport,
+  joined,
+  play,
+  registered,
+} from "../testing/index.ts";
 
 const base = configured();
 
@@ -45,7 +52,7 @@ describe("closing a Timeline", () => {
         joined(base, "#iirc", ["peer"]),
         lines(
           "!! close #IIRC",
-          "?? ignored Joined",
+          "?? ignored Joined #IIRC",
           "<< :iirc!~iirc@iirc.test PART #iirc :forced",
           "!! close #iirc",
           "?? timeline-closed in=channel:#iirc"
@@ -53,7 +60,23 @@ describe("closing a Timeline", () => {
       ],
     });
 
-    expect(closes(played)).toStrictEqual(["ignored Joined", "timeline-closed in=channel:#iirc"]);
+    expect(closes(played)).toStrictEqual([
+      "ignored Joined #IIRC",
+      "timeline-closed in=channel:#iirc",
+    ]);
+  });
+
+  it("names the Channel it checked when a status prefix typed in front of it is taken off", () => {
+    const played = play(client, {
+      configuration: base,
+      transcript: [
+        registered(base, { isupport: [...floorIsupport, "STATUSMSG=@+"] }),
+        joined(base, "#chan", ["peer"]),
+        lines("!! close @#chan", "?? ignored Joined #chan"),
+      ],
+    });
+
+    expect(closes(played)).toStrictEqual(["ignored Joined #chan"]);
   });
 
   it("reports a Channel Self never joined, which may hold what was said before", () => {

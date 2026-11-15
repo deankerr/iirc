@@ -305,7 +305,7 @@ What is new, from the counts the Daemon keeps, and when marking a Timeline read 
 
 `@iirc/frontend/closing`: what closes a Timeline from its row (`closeOf`), and the offer to leave a Channel Self is in instead, as a reducer, `reduceLeaving`.
 
-- **A Channel Self is in is never closed.** The Daemon decides as it steps the close, and its answer, refused as `Joined`, is what offers to leave it, so a join just before the close is never missed.
+- **A Channel Self is in is never closed.** The Daemon decides as it steps the close, and its answer, refused as `Joined`, is what offers to leave it, and names the Channel it checked, so `@#iirc` offers and leaves `#iirc`, so a join just before the close is never missed.
 - **Leaving is `/part` with its name,** sent once, only once the Owner chooses it, and it does not close the Channel, since the part arrives in it.
 - **Only a Channel's or a Direct Message's Timeline has a Target to close it by.** A Network's own, a Direct Message that no longer follows its partner, and a removed Network's have none.
 
