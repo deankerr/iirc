@@ -35,6 +35,7 @@ import type {
   OwnerInForce,
   UiInForce,
   Upload,
+  UploadsStatus,
 } from "@iirc/api";
 import { importTheme } from "@iirc/frontend/theme-import";
 import { Effect, Layer, Redacted, Result, Schema } from "effect";
@@ -46,6 +47,8 @@ import type { Atom } from "effect/reactivity";
 import { layerDaemonClient } from "../app/daemon-client.ts";
 import { IntentNames } from "../app/intent-names.ts";
 import { runtime } from "../app/runtime.ts";
+import { Uploader } from "../composer/uploader.ts";
+import type { UploaderPort } from "../composer/uploader.ts";
 import { Notifier } from "../notifications/notifier.ts";
 import type { NotifierPort } from "../notifications/notifier.ts";
 import { writeChoice } from "../page/device.ts";
@@ -54,6 +57,7 @@ import type { ThemeReaderPort } from "../theme/reader.ts";
 import { layoutKey, Waits } from "../timelines/atoms.ts";
 import type { WaitTimes } from "../timelines/atoms.ts";
 import { testNotifier } from "./notifier.ts";
+import { testUploader } from "./uploader.ts";
 
 /** A reader of themes that reads in the page at once, as no Worker runs in happy-dom. */
 export const instantThemeReader: ThemeReaderPort = {
@@ -473,6 +477,16 @@ const heldUntilReleased = async (releases: (() => void)[], init: RequestInit) =>
 };
 
 /**
+ * Uploads on, with `uploads.maxSize` at its default, as a function's answer, so the field it
+ * starts takes every status, not this one alone.
+ * @returns The status.
+ */
+const uploadsOn = (): typeof UploadsStatus.Encoded => ({
+  _tag: "On",
+  maxSize: 100 * 1024 * 1024,
+});
+
+/**
  * A Daemon's sign-in routes and Network list as the wire carries them, with one key and
  * the one cookie a browser would hold. It can be down, answer through a gateway that
  * cannot reach it, or fail to write its sign-ins.
@@ -515,6 +529,8 @@ export const fakeDaemon = () => {
   const uploadPagesHeld: (() => void)[] = [];
   // Each Upload `upload` made, as its event, at its Change's sequence, oldest first.
   const uploadChanges: { readonly sequence: number; readonly text: string }[] = [];
+  const uploadsSent: { readonly name: string | null; readonly size: number }[] = [];
+  const uploadRefusals: { readonly status: number; readonly body: object }[] = [];
 
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
@@ -676,6 +692,8 @@ export const fakeDaemon = () => {
     ]),
     signInsFail: false,
     signedIn: false,
+    /** Each `GET /api/uploads/status` asked. */
+    statusesRead: 0,
     /** The last step folded, which every Timeline read gives as `through`. */
     through: 1,
     /** The Timelines of each Network, in the order they opened. */
@@ -694,10 +712,19 @@ export const fakeDaemon = () => {
     uploadPagesHeld,
     /** Each page of the Uploads read, by the `after` it was read from. */
     uploadPagesRead,
+    /**
+     * How the next uploads are refused, first to last, as the API's errors on the wire;
+     * past them, each is kept.
+     */
+    uploadRefusals,
     /** The Uploads held, newest first, as the wire carries them. */
     uploads,
     /** How many Uploads a page holds when its request gives no `limit`. */
     uploadsPage: 50,
+    /** Each file sent to `POST /api/uploads`, by the name its query gave and its size. */
+    uploadsSent,
+    /** Whether Uploads are on, as `GET /api/uploads/status` answers. */
+    uploadsStatus: uploadsOn(),
     /** Each read of a window, by its query, for a test to look at. */
     windowsRead,
   };
@@ -1397,6 +1424,51 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * A file sent to be kept: refused as the next of `uploadRefusals` says, or kept as an
+   * Upload, newest of all, its link made from `uploads.publicUrl` in force, or `null`
+   * without one.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const uploaded = async (url: URL, init: RequestInit): Promise<Response> => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const name = url.searchParams.get("name");
+    const { size } = await new Response(init.body).blob();
+
+    uploadsSent.push({ name, size });
+
+    const refusal = uploadRefusals.shift();
+
+    if (refusal !== undefined) {
+      return Response.json(refusal.body, { status: refusal.status });
+    }
+
+    const id = String(daemon.nextSequence).padStart(16, "0");
+    const safeName = name ?? "file.bin";
+    const publicUrl = daemon.owner.options["uploads.publicUrl"];
+
+    const added: typeof Upload.Encoded = {
+      at: 1_700_000_000_000,
+      hash: "0".repeat(64),
+      id,
+      link: publicUrl === undefined ? null : `${publicUrl}/${id}/${safeName}`,
+      safeName,
+      size,
+      type: "image/png",
+    };
+
+    const named = name === null ? added : { ...added, name };
+
+    upload(named);
+
+    return Response.json(named);
+  };
+
+  /**
    * The Uploads: a page of them, newest first, from just after one, refusing a cursor that
    * names none held, through the last Change `upload` made, or `0`; their Changes, each
    * `upload` made after `Last-Event-ID` or `after`, then live, or live from now with
@@ -1410,8 +1482,18 @@ export const fakeDaemon = () => {
     const method = init.method ?? "GET";
     const content = /^\/api\/uploads\/(?<id>[^/]+)\/content$/u.exec(url.pathname)?.groups;
 
+    if (method === "POST" && url.pathname === "/api/uploads") {
+      return await uploaded(url, init);
+    }
+
     if (method !== "GET") {
       return undefined;
+    }
+
+    if (url.pathname === "/api/uploads/status") {
+      daemon.statusesRead += 1;
+
+      return signedInOnly(() => Response.json(daemon.uploadsStatus));
     }
 
     if (url.pathname === "/api/uploads/changes") {
@@ -1873,13 +1955,15 @@ export const fakeDaemon = () => {
  * may give nothing before it is followed again.
  * @param notifier - The notifications' host, a test's, which shows none by default.
  * @param reader - The reader of themes, which reads at once, in the page, by default.
+ * @param uploader - The sender of files, which hands each to `fetch` at once by default.
  * @returns The registry.
  */
 export const registryFor = (
   fetch: typeof globalThis.fetch,
   waits: Partial<WaitTimes> = {},
   notifier: NotifierPort = testNotifier().port,
-  reader: ThemeReaderPort = instantThemeReader
+  reader: ThemeReaderPort = instantThemeReader,
+  uploader: UploaderPort = testUploader(fetch).port
 ) => {
   let named = 0;
 
@@ -1909,6 +1993,7 @@ export const registryFor = (
           }),
           Layer.succeed(Notifier, notifier),
           Layer.succeed(ThemeReader, reader),
+          Layer.succeed(Uploader, uploader),
           // Intents named in order, web-1, web-2, and on, so a test can name them.
           Layer.succeed(IntentNames, () => {
             named += 1;

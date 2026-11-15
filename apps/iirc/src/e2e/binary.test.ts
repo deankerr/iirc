@@ -26,7 +26,7 @@ const unit = path.join(app, "systemd", "iirc.service");
 const analyze = Bun.which("systemd-analyze");
 
 const contentSecurityPolicy =
-  "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 /** What a run reads of one News event: how each Session it tells of ended. */
 const decodeHappened = Schema.decodeUnknownSync(

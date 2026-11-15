@@ -8,8 +8,9 @@
  * `ui.spellcheck` says. Escape lets go of an error or a confirmation, or, with
  * neither, closes what stands in front of the focused Pane's Timeline, the options, the
  * search, or a Direct Message not yet begun, or with nothing in front, puts its Lookup card
- * away. What it says goes through the command
- * registry in the core, and the runtime carries it out.
+ * away. Files pasted, dropped on it, picked, or photographed are uploaded, each link going
+ * where the caret was. What it says goes through the command registry in the core, and the
+ * runtime carries it out.
  *
  * @packageDocumentation
  */
@@ -21,8 +22,8 @@ import { linesOf, placeOfDraft } from "@iirc/frontend/composer";
 import type { Offer, Place } from "@iirc/frontend/composer";
 import { enterPressed, sendChord, showChord } from "@iirc/frontend/keymap";
 import { allScope } from "@iirc/frontend/palette";
-import type { KeyboardEvent, ReactNode } from "react";
-import { useEffect, useId, useLayoutEffect, useRef } from "react";
+import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { dismissCard } from "../lookup/atoms.ts";
 import { closeOptions, mainView } from "../options/atoms.ts";
@@ -45,6 +46,9 @@ import {
 } from "./atoms.ts";
 import { completionState } from "./completion-state.ts";
 import { escapeCompletion, tab, typed } from "./completion.ts";
+import { PendingUploads } from "./pending-uploads.tsx";
+import { caretAsked } from "./uploading-state.ts";
+import { addFiles } from "./uploading.ts";
 
 import styles from "./composer.module.css";
 
@@ -104,6 +108,78 @@ const PaletteButton = () => {
       }}
       size="small"
     />
+  );
+};
+
+/**
+ * Whether a drag carries files, rather than text or a link.
+ * @param event - The drag.
+ * @returns Whether it does.
+ */
+const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+
+/**
+ * The ways to add files to the composer beside the drop and the paste: a picker of several
+ * files, and, where the palette's button shows, as on a phone, the camera.
+ * @param props - What adding files does.
+ * @returns The buttons, and the inputs they open.
+ */
+const FileButtons = ({ add }: { readonly add: (files: readonly File[]) => void }) => {
+  const picker = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+
+  // A file input holds what was chosen until it is cleared, so choosing the same file
+  // again would change nothing.
+  const chosen = (input: HTMLInputElement) => {
+    const files = [...(input.files ?? [])];
+
+    input.value = "";
+    add(files);
+  };
+
+  return (
+    <>
+      <input
+        aria-label="Files to upload"
+        className={styles.files}
+        multiple
+        onChange={(event) => {
+          chosen(event.currentTarget);
+        }}
+        ref={picker}
+        tabIndex={-1}
+        type="file"
+      />
+      <input
+        accept="image/*"
+        aria-label="Photo to upload"
+        capture="environment"
+        className={styles.files}
+        onChange={(event) => {
+          chosen(event.currentTarget);
+        }}
+        ref={camera}
+        tabIndex={-1}
+        type="file"
+      />
+      <IconButton
+        icon="attach"
+        label="Upload files"
+        onPress={() => {
+          picker.current?.click();
+        }}
+        size="small"
+      />
+      <IconButton
+        className={styles.camera}
+        icon="camera"
+        label="Take a photo"
+        onPress={() => {
+          camera.current?.click();
+        }}
+        size="small"
+      />
+    </>
   );
 };
 
@@ -168,6 +244,10 @@ const Composer = ({
   const sendNow = useAtomSet(send);
   const confirmNow = useAtomSet(confirmSend);
   const again = useAtomSet(takeUp);
+  const addNow = useAtomSet(addFiles);
+  const caretWanted = useAtomValue(caretAsked);
+  const caretSeen = useRef(caretWanted.asked);
+  const [dropping, setDropping] = useState(false);
   const closeCard = useAtomSet(dismissCard);
   const closeTheDraft = useAtomSet(closeDraft);
   const closeTheOptions = useAtomSet(closeOptions);
@@ -213,6 +293,58 @@ const Composer = ({
     appliedSeen.current = applied;
     input.current?.setSelectionRange(caret, caret);
   }, [completion]);
+
+  // Each time a link goes into the draft while the Owner writes in it, the caret goes where
+  // the core says, once the new text is in the textarea.
+  useLayoutEffect(() => {
+    if (caretWanted.asked === caretSeen.current) {
+      return;
+    }
+
+    caretSeen.current = caretWanted.asked;
+    input.current?.setSelectionRange(caretWanted.caret, caretWanted.caret);
+  }, [caretWanted]);
+
+  /**
+   * Adds files to this composer, their links to go where the caret is now.
+   * @param files - The files.
+   */
+  const add = (files: readonly File[]) => {
+    if (files.length > 0) {
+      addNow({
+        anchor: input.current?.selectionStart ?? draft.text.length,
+        files,
+        place: timeline,
+        text: draft.text,
+      });
+    }
+  };
+
+  // A paste of files uploads them, and one of text alone is the textarea's own.
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = [...event.clipboardData.files];
+
+    if (files.length > 0) {
+      event.preventDefault();
+      add(files);
+    }
+  };
+
+  const onDragOver = (event: DragEvent) => {
+    if (carriesFiles(event)) {
+      event.preventDefault();
+      setDropping(true);
+    }
+  };
+
+  const onDrop = (event: DragEvent) => {
+    setDropping(false);
+
+    if (carriesFiles(event)) {
+      event.preventDefault();
+      add([...event.dataTransfer.files]);
+    }
+  };
 
   const network = context.focus?.network ?? context.draft?.network;
   const { offline, placeholder } = sayable(context);
@@ -358,7 +490,21 @@ const Composer = ({
     .join(" ");
 
   return (
-    <div className={styles.composer}>
+    <div
+      className={dropping ? `${styles.composer} ${styles.dropping}` : styles.composer}
+      data-dropping={dropping ? "" : undefined}
+      onDragLeave={(event) => {
+        // Moving between what the composer holds leaves one part of it, not the composer.
+        const to = event.relatedTarget;
+
+        if (!(to instanceof Node && event.currentTarget.contains(to))) {
+          setDropping(false);
+        }
+      }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <PendingUploads place={timeline} />
       {confirming === undefined ? null : (
         <div className={styles.notice} id={noticeId} role="alert">
           <p>
@@ -444,6 +590,7 @@ const Composer = ({
             setText({ text: event.currentTarget.value, timeline });
           }}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={placeholder}
           ref={input}
           rows={1}
@@ -462,6 +609,7 @@ const Composer = ({
             size="small"
           />
         ) : null}
+        <FileButtons add={add} />
         <PaletteButton />
       </div>
     </div>

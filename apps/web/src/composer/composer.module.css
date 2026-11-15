@@ -13,7 +13,8 @@
   border-bottom: var(--border-width) solid var(--color-border);
 }
 
-.notice > p {
+.notice > p,
+.notice > .note {
   flex: 1;
   min-width: 0;
 }
@@ -123,9 +124,79 @@
   color: var(--color-muted);
 }
 
-/* The palette's button, drawn only where there may be no keys to open it with. */
-.line .palette {
+/* The palette's and the camera's buttons, drawn only where there may be no keys to open
+   the palette with, as on a phone, which is where a camera is. */
+.line .palette,
+.line .camera {
   display: none;
+}
+
+/* A file input is reached through its button, never drawn. */
+.files {
+  display: none;
+}
+
+/* Files dragged over the composer: it says it takes them. */
+.dropping {
+  box-shadow: inset 0 0 0 var(--border-width) var(--color-accent);
+}
+
+/* The files pending, one dense row each, above the line. */
+.uploads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  list-style: none;
+}
+
+.upload {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* Two lines tall, and square, at any size of text. */
+.thumbnail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 2lh;
+  block-size: 2lh;
+  overflow: hidden;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.image {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.fileIcon {
+  color: var(--color-muted);
+}
+
+.about {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  inline-size: 100%;
+  block-size: 0.5lh;
+  accent-color: var(--color-accent);
 }
 
 /* On a touch screen the field itself is a finger's height, its one line in the middle. */
@@ -148,7 +219,8 @@
     align-items: center;
   }
 
-  .line .palette {
+  .line .palette,
+  .line .camera {
     display: inline-flex;
   }
 }

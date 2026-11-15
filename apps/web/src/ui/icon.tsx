@@ -13,6 +13,10 @@ import styles from "./icon.module.css";
  * font lacks falls back to the system's own, in the same box.
  */
 const glyphs = {
+  /** Adds files to the composer, to upload. */
+  attach: "+",
+  /** Takes a photo with the device's camera, as a lens is drawn. */
+  camera: "◉",
   /** Puts away what stands in front, or lets a notice go. */
   close: "×",
   /** A Network's Timelines are hidden under it. */

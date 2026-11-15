@@ -64,6 +64,7 @@ import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
 import { closeTimeline } from "../timelines/closing.ts";
 import { cancelCompletion } from "./completion-state.ts";
+import { anchorsFollow } from "./uploading-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
 export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
@@ -91,6 +92,18 @@ export const placeOf = (registry: AtomRegistry.AtomRegistry): Place =>
   placeIn(registry.get(timelinesState));
 
 /**
+ * Sets the composers, and carries the anchors of the files pending in them along.
+ * @param registry - The registry.
+ * @param state - The composers after.
+ */
+export const setComposers = (registry: AtomRegistry.AtomRegistry, state: Composers) => {
+  const before = registry.get(composerState);
+
+  registry.set(composerState, state);
+  anchorsFollow(registry, before, state);
+};
+
+/**
  * Folds one event into the composers.
  * @param registry - The registry.
  * @param event - What happened.
@@ -100,7 +113,7 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent) => 
     cancelCompletion(registry);
   }
 
-  registry.set(composerState, reduceComposers(registry.get(composerState), event));
+  setComposers(registry, reduceComposers(registry.get(composerState), event));
 };
 
 /**
@@ -111,7 +124,7 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent) => 
  */
 const replaced = (registry: AtomRegistry.AtomRegistry, state: Composers) => {
   cancelCompletion(registry);
-  registry.set(composerState, state);
+  setComposers(registry, state);
 };
 
 // A gateway in front of the Daemon answers these when it could not reach it.

@@ -313,7 +313,7 @@ describe("iirc", () => {
         authorized: [200, "[]"],
         deep: { body: indexHtml, cache: "no-cache", status: 200, type: "text/html; charset=utf-8" },
         headers: {
-          csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+          csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
           nosniff: "nosniff",
           referrer: "no-referrer",
         },

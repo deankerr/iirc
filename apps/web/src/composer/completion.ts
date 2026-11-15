@@ -28,7 +28,7 @@ import { optionsState, signedOut } from "../options/atoms.ts";
 import { uiInEffect } from "../options/ui.ts";
 import { signedIn } from "../sign-in/atoms.ts";
 import { sidebarNetworks, timelinesState, Waits } from "../timelines/atoms.ts";
-import { composerState, edit, placeOf } from "./atoms.ts";
+import { composerState, edit, placeOf, setComposers } from "./atoms.ts";
 import { chantypesState } from "./chantypes-state.ts";
 import { completionState } from "./completion-state.ts";
 
@@ -53,8 +53,8 @@ const completing = (registry: AtomRegistry.AtomRegistry, place: Place, event: Co
   registry.set(completionState, step.state);
 
   if (step.edit !== undefined) {
-    registry.set(
-      composerState,
+    setComposers(
+      registry,
       reduceComposers(registry.get(composerState), {
         _tag: "Edited",
         text: step.edit.text,
