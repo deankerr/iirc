@@ -1,6 +1,7 @@
 /**
  * GIF: walked block by block from its header to its trailer, keeping the screen, colour
- * tables, images, their graphic controls, and the looping extension that animates them.
+ * tables, images, their graphic controls, the looping extension that animates them, and
+ * the colour profile.
  *
  * @packageDocumentation
  */
@@ -39,14 +40,20 @@ const subBlocksEnd = (bytes: Uint8Array, from: number): number | undefined => {
   }
 };
 
-// The application extensions that loop an animation: Netscape's and AnimExts'.
-const isLooping = (bytes: Uint8Array, at: number) =>
+// The application extensions kept: those that loop an animation, Netscape's and AnimExts',
+// and the one that holds its ICC colour profile.
+const isKeptApplication = (bytes: Uint8Array, at: number) =>
+  bytes[at + 1] === 0xff &&
   bytes[at + 2] === 11 &&
-  (asciiAt(bytes, at + 3, "NETSCAPE2.0") || asciiAt(bytes, at + 3, "ANIMEXTS1.0"));
+  (asciiAt(bytes, at + 3, "NETSCAPE2.0") ||
+    asciiAt(bytes, at + 3, "ANIMEXTS1.0") ||
+    asciiAt(bytes, at + 3, "ICCRGBG1012"));
 
 /**
  * Strips a GIF. Comments, plain text, which no browser draws, and every application
- * extension but looping are dropped.
+ * extension but looping and the colour profile are dropped. A graphic control applies to
+ * the next block that draws, an image or plain text, so it is kept only before an image,
+ * and goes with the plain text it would have applied to.
  * @param bytes - The GIF.
  * @returns What to keep, through the trailer.
  */
@@ -62,6 +69,8 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
   }
 
   const kept: Uint8Array[] = [bytes.subarray(0, screenEnd)];
+  // The graphic control awaiting the block it applies to: none, or one.
+  let pendingControl: Uint8Array[] = [];
   let imaged = false;
   let at = screenEnd;
 
@@ -85,7 +94,8 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
         return broken("a GIF image runs past the end");
       }
 
-      kept.push(bytes.subarray(at, end));
+      kept.push(...pendingControl, bytes.subarray(at, end));
+      pendingControl = [];
       imaged = true;
       at = end;
     } else if (introducer === 0x21) {
@@ -96,7 +106,11 @@ export const stripGif = (bytes: Uint8Array): Stripped => {
         return broken("a GIF extension runs past the end");
       }
 
-      if (label === 0xf9 || (label === 0xff && isLooping(bytes, at))) {
+      if (label === 0xf9) {
+        pendingControl = [bytes.subarray(at, end)];
+      } else if (label === 0x01) {
+        pendingControl = [];
+      } else if (isKeptApplication(bytes, at)) {
         kept.push(bytes.subarray(at, end));
       }
 

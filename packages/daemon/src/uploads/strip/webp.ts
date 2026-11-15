@@ -16,8 +16,20 @@ const alphaFlag = 0x10;
 const exifFlag = 0x08;
 const animationFlag = 0x02;
 
-// What a frame of an animation holds.
+// What a frame of an animation holds, and what each holds once: a second is no use to a reader.
 const frameParts: ReadonlySet<string> = new Set(["ALPH", "VP8 ", "VP8L"]);
+
+// What a file of the extended format holds, besides its frames, and what each holds once.
+const fileParts: ReadonlySet<string> = new Set([
+  "VP8X",
+  "ICCP",
+  "ANIM",
+  "EXIF",
+  "ANMF",
+  ...frameParts,
+]);
+
+const fileOnce: ReadonlySet<string> = new Set(["VP8X", "ICCP", "ANIM", "EXIF", ...frameParts]);
 
 /** One chunk as walked: its FourCC and its data. */
 interface Chunk {
@@ -35,32 +47,50 @@ const riffChunk = (fourCC: string, data: Uint8Array) =>
   concat([ascii(fourCC), le(data.length, 4), data, new Uint8Array(data.length % 2)]);
 
 /**
- * Walks the chunks between `from` and `end`. A chunk that runs past `end` stops the walk;
- * its last padding byte alone may be missing.
+ * Walks the chunks between `from` and `end`, holding only those on the keep-list, so that
+ * what is held is bounded by what is kept and never by how many chunks a hostile file
+ * strings together. A chunk that runs past `end` stops the walk; its last padding byte
+ * alone may be missing.
  * @param bytes - The bytes.
  * @param from - Where the first chunk begins.
  * @param end - Where the chunks end.
- * @returns The chunks walked whole, and whether the walk reached `end`.
+ * @param keep - The FourCCs to hold.
+ * @param once - The FourCCs, among those, to hold only the first of.
+ * @returns The chunks kept, the first chunk's FourCC whether kept or not, and whether the
+ * walk reached `end`.
  */
-const chunksOf = (bytes: Uint8Array, from: number, end: number) => {
+const chunksOf = (
+  bytes: Uint8Array,
+  from: number,
+  end: number,
+  keep: ReadonlySet<string>,
+  once: ReadonlySet<string>
+) => {
   const chunks: Chunk[] = [];
+  const seen = new Set<string>();
+  let first;
   let at = from;
 
   while (at + 8 <= end) {
     const size = readLe(bytes, at + 4, 4);
 
     if (at + 8 + size > end) {
-      return { chunks, whole: false };
+      return { chunks, first, whole: false };
     }
 
-    chunks.push({
-      data: bytes.subarray(at + 8, at + 8 + size),
-      fourCC: String.fromCodePoint(...bytes.subarray(at, at + 4)),
-    });
+    const fourCC = String.fromCodePoint(...bytes.subarray(at, at + 4));
+
+    first ??= fourCC;
+
+    if (keep.has(fourCC) && !(once.has(fourCC) && seen.has(fourCC))) {
+      seen.add(fourCC);
+      chunks.push({ data: bytes.subarray(at + 8, at + 8 + size), fourCC });
+    }
+
     at += 8 + size + (size % 2);
   }
 
-  return { chunks, whole: at >= end };
+  return { chunks, first, whole: at >= end };
 };
 
 /**
@@ -73,8 +103,7 @@ const frameOf = (frame: Uint8Array): Uint8Array | undefined => {
     return undefined;
   }
 
-  const { chunks, whole } = chunksOf(frame, 16, frame.length);
-  const kept = chunks.filter((chunk) => frameParts.has(chunk.fourCC));
+  const { chunks: kept, whole } = chunksOf(frame, 16, frame.length, frameParts, frameParts);
 
   if (!whole || !kept.some((chunk) => chunk.fourCC !== "ALPH")) {
     return undefined;
@@ -159,14 +188,23 @@ export const stripWebp = (bytes: Uint8Array): Stripped => {
     return unreadable("a WebP begins with its RIFF header");
   }
 
-  const { chunks, whole } = chunksOf(bytes, 12, Math.min(8 + readLe(bytes, 4, 4), bytes.length));
+  const {
+    chunks,
+    first: firstFourCC,
+    whole,
+  } = chunksOf(bytes, 12, Math.min(8 + readLe(bytes, 4, 4), bytes.length), fileParts, fileOnce);
+
   const [first, ...rest] = chunks;
   let parts: readonly Uint8Array[] = [];
 
-  if (first?.fourCC === "VP8 " || first?.fourCC === "VP8L") {
+  if (first === undefined || first.fourCC !== firstFourCC) {
+    return unreadable("a WebP begins with VP8, VP8L, or a whole VP8X");
+  }
+
+  if (first.fourCC === "VP8 " || first.fourCC === "VP8L") {
     // A simple file holds its image and nothing else.
     parts = [riffChunk(first.fourCC, first.data)];
-  } else if (first?.fourCC === "VP8X" && first.data.length >= 10) {
+  } else if (first.fourCC === "VP8X" && first.data.length >= 10) {
     const extended = extendedOf(rest);
     const { orientation } = extended;
 

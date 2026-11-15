@@ -396,12 +396,23 @@ const gifImageData = (indices: readonly number[]) => {
   return Uint8Array.of(2, bytes.length, ...bytes, 0);
 };
 
-const gifFrame = (indices: readonly number[]) =>
-  concat(
-    Uint8Array.of(0x21, 0xf9, 4, 0x04, 50, 0, 0, 0),
-    Uint8Array.of(0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0),
-    gifImageData(indices)
-  );
+/**
+ * A graphic control extension.
+ * @param transparent - Whether colour index 3 is transparent.
+ * @returns The block.
+ */
+export const gifControl = (transparent = false) =>
+  Uint8Array.of(0x21, 0xf9, 4, transparent ? 0x05 : 0x04, 50, 0, transparent ? 3 : 0, 0);
+
+/**
+ * An image of the 2×2 screen.
+ * @param indices - The four pixels' colour indices.
+ * @returns The block.
+ */
+export const gifImage = (indices: readonly number[]) =>
+  concat(Uint8Array.of(0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0), gifImageData(indices));
+
+const gifFrame = (indices: readonly number[]) => concat(gifControl(), gifImage(indices));
 
 const gifSubBlocks = (data: Uint8Array) => {
   const blocks: Uint8Array[] = [];
@@ -428,6 +439,30 @@ const looping = concat(
   Uint8Array.of(3, 1, 0, 0, 0)
 );
 
+/** A comment extension. */
+export const gifComment = concat(Uint8Array.of(0x21, 0xfe), gifSubBlocks(utf8(planted.comment)));
+
+/** A plain text extension, which no browser draws. */
+export const gifPlainText = concat(
+  Uint8Array.of(0x21, 0x01, 12, ...new Uint8Array(12)),
+  gifSubBlocks(utf8(planted.text))
+);
+
+/** The application extension that holds a GIF's ICC colour profile. */
+export const gifIccExtension = concat(
+  Uint8Array.of(0x21, 0xff, 11),
+  utf8("ICCRGBG1012"),
+  gifSubBlocks(iccProfile)
+);
+
+/**
+ * A GIF of blocks, under the 2×2 screen.
+ * @param blocks - The blocks.
+ * @returns They, ended by the trailer.
+ */
+export const gifOf = (...blocks: readonly Uint8Array[]) =>
+  concat(gifHead, ...blocks, Uint8Array.of(0x3b));
+
 /** A 2×2 GIF of two frames, looping forever. */
 export const gif = concat(
   gifHead,
@@ -435,6 +470,14 @@ export const gif = concat(
   gifFrame([0, 1, 2, 3]),
   gifFrame([3, 3, 3, 3]),
   Uint8Array.of(0x3b)
+);
+
+/** The GIF with an ICC colour profile, and its frames. */
+export const gifWithIcc = gifOf(
+  gifIccExtension,
+  looping,
+  gifFrame([0, 1, 2, 3]),
+  gifFrame([3, 3, 3, 3])
 );
 
 /** The GIF with a comment, plain text, and an XMP application extension. */

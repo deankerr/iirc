@@ -15,8 +15,10 @@ import {
   animatedWebp,
   apng,
   gif,
+  gifIccExtension,
   gifImages,
   gifWithComment,
+  gifWithIcc,
   holds,
   iccProfile,
   jpegScans,
@@ -286,6 +288,16 @@ describe("stripping an image as it is uploaded", () => {
       recorded,
       survivors: survivors(bytes),
     }).toStrictEqual({ frames: gifImages(gif), looping: true, recorded: true, survivors: [] });
+  });
+
+  it("keeps a GIF's ICC colour profile extension byte for byte", async () => {
+    const { bytes, recorded } = await run((served) => servedBack(served, gifWithIcc, "colour.gif"));
+
+    expect({
+      frames: gifImages(bytes),
+      profile: Buffer.from(bytes).includes(gifIccExtension),
+      recorded,
+    }).toStrictEqual({ frames: gifImages(gifWithIcc), profile: true, recorded: true });
   });
 
   it("keeps a file that is not an image byte for byte", async () => {

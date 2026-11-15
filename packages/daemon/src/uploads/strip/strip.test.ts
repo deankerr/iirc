@@ -4,8 +4,15 @@ import {
   animatedWebp,
   apng,
   gif,
+  gifComment,
+  gifControl,
+  gifIccExtension,
+  gifImage,
   gifImages,
+  gifOf,
+  gifPlainText,
   gifWithComment,
+  gifWithIcc,
   holds,
   iccProfile,
   iccSegments,
@@ -75,6 +82,7 @@ const fixtures = [
   ["image/png", apng],
   ["image/gif", gif],
   ["image/gif", gifWithComment],
+  ["image/gif", gifWithIcc],
   ["image/webp", webpLossless],
   ["image/webp", animatedWebp],
 ] as const;
@@ -304,6 +312,39 @@ describe("stripping a GIF", () => {
     expect(kept("image/gif", gifWithComment)).toStrictEqual(gif);
   });
 
+  it("keeps the ICC colour profile extension byte for byte", () => {
+    const out = kept("image/gif", gifWithIcc);
+
+    expect({
+      kept: out,
+      profile: Buffer.from(out).includes(gifIccExtension),
+    }).toStrictEqual({ kept: gifWithIcc, profile: true });
+  });
+
+  it("drops a graphic control with the plain text it applies to, not leaving it on the image", () => {
+    const pixels = [0, 1, 2, 3];
+
+    expect(
+      kept("image/gif", gifOf(gifControl(true), gifPlainText, gifImage(pixels)))
+    ).toStrictEqual(gifOf(gifImage(pixels)));
+  });
+
+  it("keeps the graphic control that follows plain text for the image it precedes", () => {
+    const pixels = [0, 1, 2, 3];
+
+    expect(
+      kept("image/gif", gifOf(gifControl(true), gifPlainText, gifControl(false), gifImage(pixels)))
+    ).toStrictEqual(gifOf(gifControl(false), gifImage(pixels)));
+  });
+
+  it("keeps a graphic control for its image across a comment", () => {
+    const pixels = [0, 1, 2, 3];
+
+    expect(kept("image/gif", gifOf(gifControl(true), gifComment, gifImage(pixels)))).toStrictEqual(
+      gifOf(gifControl(true), gifImage(pixels))
+    );
+  });
+
   it("keeps the frames walked whole when cut short after the first", () => {
     const [first] = gifImages(gif);
     const firstEnd = Buffer.from(gif).indexOf(first ?? new Uint8Array()) + (first?.length ?? 0);
@@ -377,6 +418,29 @@ describe("stripping a WebP", () => {
     expect(kept("image/webp", original)).toStrictEqual(
       webpOf(vp8x(0x10), alpha, riffChunk("VP8 ", vp8First))
     );
+  });
+
+  it("strips a WebP of two hundred thousand empty unknown chunks to the same as one without them", () => {
+    const junkChunk = riffChunk("JUNK", new Uint8Array());
+    const count = 200_000;
+    const junk = new Uint8Array(count * junkChunk.length);
+
+    for (let i = 0; i < count; i += 1) {
+      junk.set(junkChunk, i * junkChunk.length);
+    }
+
+    expect(
+      kept("image/webp", webpOf(vp8x(0), junk, riffChunk("VP8 ", vp8First), junk))
+    ).toStrictEqual(webpOf(vp8x(0), riffChunk("VP8 ", vp8First)));
+  });
+
+  it("keeps only the first of a chunk that a file holds once", () => {
+    const icc = riffChunk("ICCP", iccProfile);
+    const other = riffChunk("ICCP", encoder.encode("a second profile"));
+
+    expect(
+      kept("image/webp", webpOf(vp8x(0x20), icc, other, riffChunk("VP8 ", vp8First)))
+    ).toStrictEqual(webpOf(vp8x(0x20), icc, riffChunk("VP8 ", vp8First)));
   });
 
   it("accepts a final odd-sized chunk whose padding byte is missing, and pads it", () => {
