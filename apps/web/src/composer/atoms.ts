@@ -34,6 +34,8 @@ import type {
 import { allScope } from "@iirc/frontend/palette";
 import { draftsMetBetween, followFrom, originOf, reduceTimelines } from "@iirc/frontend/timelines";
 import type { Origin, Timelines } from "@iirc/frontend/timelines";
+import { heldBack, reduceUploading } from "@iirc/frontend/uploading";
+import type { Typing } from "@iirc/frontend/uploading";
 import { Effect, Option, Schedule, Semaphore, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
@@ -64,6 +66,7 @@ import { changeThemes, chooseTheme, showImport } from "../theme/atoms.ts";
 import { latest, open, paned, showDraft, timelinesState, Waits } from "../timelines/atoms.ts";
 import { closeTimeline } from "../timelines/closing.ts";
 import { cancelCompletion } from "./completion-state.ts";
+import { anchorsFollow, uploadingState } from "./uploading-state.ts";
 
 /** Every Timeline's composer, as the core folds it. */
 export const composerState = Atom.make<Composers>(initialComposers).pipe(Atom.keepAlive);
@@ -91,16 +94,40 @@ export const placeOf = (registry: AtomRegistry.AtomRegistry): Place =>
   placeIn(registry.get(timelinesState));
 
 /**
+ * Sets the composers, and carries the anchors of the files pending in them along.
+ * @param registry - The registry.
+ * @param state - The composers after.
+ * @param typing - Where the Owner's selection was in the draft they typed in, if they did.
+ */
+export const setComposers = (
+  registry: AtomRegistry.AtomRegistry,
+  state: Composers,
+  typing?: Typing & { readonly place: Place }
+) => {
+  const before = registry.get(composerState);
+
+  registry.set(composerState, state);
+  anchorsFollow(registry, before, state, typing);
+};
+
+/**
  * Folds one event into the composers.
  * @param registry - The registry.
  * @param event - What happened.
+ * @param typing - Where the Owner's selection was, if they typed the edit.
  */
-const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent) => {
+const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent, typing?: Typing) => {
   if (event._tag === "Edited" || event._tag === "Recalled") {
     cancelCompletion(registry);
   }
 
-  registry.set(composerState, reduceComposers(registry.get(composerState), event));
+  setComposers(
+    registry,
+    reduceComposers(registry.get(composerState), event),
+    event._tag === "Edited" && typing !== undefined
+      ? { ...typing, place: event.timeline }
+      : undefined
+  );
 };
 
 /**
@@ -111,7 +138,7 @@ const happened = (registry: AtomRegistry.AtomRegistry, event: ComposerEvent) => 
  */
 const replaced = (registry: AtomRegistry.AtomRegistry, state: Composers) => {
   cancelCompletion(registry);
-  registry.set(composerState, state);
+  setComposers(registry, state);
 };
 
 // A gateway in front of the Daemon answers these when it could not reach it.
@@ -766,10 +793,17 @@ export const draftsCarried = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** Edits a Timeline's draft. */
+/** Edits a Timeline's draft, where the Owner's selection was if they typed it. */
 export const edit = Atom.fnSync(
-  ({ text, timeline }: { readonly timeline: Place; readonly text: string }, get) => {
-    happened(get.registry, { _tag: "Edited", text, timeline });
+  (
+    {
+      text,
+      timeline,
+      typing,
+    }: { readonly timeline: Place; readonly text: string; readonly typing?: Typing },
+    get
+  ) => {
+    happened(get.registry, { _tag: "Edited", text, timeline }, typing);
   }
 ).pipe(Atom.keepAlive);
 
@@ -800,12 +834,41 @@ const letGoOfTyped = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
   }
 };
 
-/** Submits a Timeline's draft, and carries out what it asks. */
+/**
+ * Remembers that a draft was not sent while a file added to it is still uploading, as the
+ * core decides, if it was not. The composer says why while any file still waits, which the
+ * core derives from the files pending, so the words are never kept.
+ * @param registry - The registry.
+ * @param timeline - Where the draft is.
+ * @returns Whether it was held back.
+ */
+const heldBackNow = (registry: AtomRegistry.AtomRegistry, timeline: Place) => {
+  const held = heldBack(registry.get(uploadingState), registry.get(composerState), timeline);
+
+  if (held !== undefined) {
+    registry.set(
+      uploadingState,
+      reduceUploading(registry.get(uploadingState), { _tag: "HeldBack", place: timeline })
+    );
+  }
+
+  return held !== undefined;
+};
+
+/**
+ * Submits a Timeline's draft, and carries out what it asks, unless a file added to it is
+ * still uploading.
+ */
 export const send = runtime
   .fn(
     (timeline: Place, get) =>
       Effect.gen(function* () {
         const { registry } = get;
+
+        if (heldBackNow(registry, timeline)) {
+          return;
+        }
+
         const step = submit(registry.get(composerState), timeline, registry.get(commandContext));
 
         replaced(registry, step.state);
@@ -816,12 +879,20 @@ export const send = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** Sends the lines a Timeline's composer is waiting to have confirmed. */
+/**
+ * Sends the lines a Timeline's composer is waiting to have confirmed, unless a file added to
+ * it is still uploading.
+ */
 export const confirmSend = runtime
   .fn(
     (timeline: Place, get) =>
       Effect.gen(function* () {
         const { registry } = get;
+
+        if (heldBackNow(registry, timeline)) {
+          return;
+        }
+
         const step = confirm(registry.get(composerState), timeline);
 
         replaced(registry, step.state);

@@ -24,6 +24,7 @@
     "./theme": "./src/theme.ts",
     "./theme-import": "./src/theme-import.ts",
     "./ui": "./src/ui.ts",
+    "./uploading": "./src/uploading.ts",
     "./uploads": "./src/uploads.ts"
   },
   "scripts": {

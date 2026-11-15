@@ -1,14 +1,18 @@
 /// <reference lib="dom" />
 /**
  * What the end-to-end runs share: running `iirc`, from source or compiled, starting its
- * Daemon on a port the kernel picks, and a page that keeps what the console says.
+ * Daemon on a port the kernel picks, a page that keeps what the console says, and what a run
+ * needs to drive the Composer.
  *
  * @packageDocumentation
  */
 import { once } from "node:events";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
+import path from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 
 /**
  * Runs `iirc` to its end.
@@ -138,4 +142,80 @@ export const watchedPage = async (browser: Browser) => {
   page.on("pageerror", (error) => problems.push(error.message));
 
   return { page, problems };
+};
+
+/** How a Network's row ends its label, once its connection is known: the word for it. */
+const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
+
+/**
+ * The first Network's row in the sidebar, once its connection is known.
+ * @param page - The page.
+ * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol.
+ */
+export const networkRow = async (page: Page) => {
+  await page.getByRole("row", { name: standingWord }).first().waitFor();
+
+  return (await page.getByRole("row").first().textContent()) ?? "";
+};
+
+/**
+ * One chunk of a PNG: its length, type, data, and checksum.
+ * @param type - The four letters of its type.
+ * @param data - Its data.
+ * @returns The chunk's bytes.
+ */
+const pngChunk = (type: string, data: Uint8Array) => {
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const length = Buffer.alloc(4);
+  const checksum = Buffer.alloc(4);
+
+  length.writeUInt32BE(data.length);
+  checksum.writeUInt32BE(crc32(body));
+
+  return Buffer.concat([length, body, checksum]);
+};
+
+/**
+ * A PNG of one colour, made here so the run holds real image bytes with no metadata.
+ * @param side - Its width and height, in pixels.
+ * @param rgb - Its colour.
+ * @returns The file's bytes.
+ */
+export const solidPng = (side: number, rgb: readonly [number, number, number]) => {
+  const header = Buffer.alloc(13);
+
+  header.writeUInt32BE(side, 0);
+  header.writeUInt32BE(side, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+
+  // Each row is a filter byte, 0, then the pixels.
+  const row = Buffer.concat([
+    Buffer.from([0]),
+    Buffer.from(Array.from({ length: side }, () => rgb).flat()),
+  ]);
+
+  const pixels = Buffer.concat(Array.from({ length: side }, () => row));
+
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      pngChunk("IHDR", header),
+      pngChunk("IDAT", deflateSync(pixels)),
+      pngChunk("IEND", new Uint8Array()),
+    ])
+  );
+};
+
+/**
+ * Writes a screenshot where `IIRC_E2E_SCREENSHOTS` says, if it says.
+ * @param page - The page.
+ * @param name - The file's name.
+ */
+export const screenshot = async (page: Page, name: string) => {
+  const directory = process.env.IIRC_E2E_SCREENSHOTS;
+
+  if (directory !== undefined && directory !== "") {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(path.join(directory, name), await page.screenshot());
+  }
 };

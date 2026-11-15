@@ -35,14 +35,15 @@ const embeddedName = "dist";
 
 /**
  * What the page may load, and from where: its own origin only, never a frame of another
- * page, and no inline script or style.
+ * page, and no inline script or style. A `blob:` image is one the page made itself, as the
+ * composer previews a file it is about to upload.
  */
 const contentSecurityPolicy = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
   "connect-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

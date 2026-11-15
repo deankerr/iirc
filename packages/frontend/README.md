@@ -220,6 +220,16 @@ The Uploads the options list, newest first, as a reducer (`reduceUploads`) over 
 - **The stream only gives what is newer.** A Change after `through` moves it on, and one not held goes first, one held is replaced in place. A Change before the first page, or no later than `through`, is passed over, so an Upload is never held twice.
 - **What is shown is derived, never held.** `linkOf` makes a link from the public URL given, as `<publicUrl>/<id>/<safeName>`, or none without one. `thumbnailed` says whether a type is an image every browser draws, `sizeText` a size in binary units, such as `1.2 MiB`, and `shownName` the name given, else the safe name.
 
+## Uploading
+
+The files added to a composer, as a reducer (`reduceUploading`) over what the runtime found out, each named by a key the runtime makes, since the core makes no randomness.
+
+- **A file's link goes where the caret was when it was added.** It is pending from that moment, before the Daemon is asked whether Uploads are on, so its order among files added at one caret and its anchor are fixed then. Its anchor follows the draft as it changes however it changes (`followed`): an edit wholly after it leaves it, one wholly before moves it, one across it puts it at the end of what replaced it, and text typed exactly at it goes after it, so a caption typed after a pasted screenshot follows its link. Where the Owner typed the edit, the selection just before it and the caret just after say exactly what changed (`editOf`), however the text repeats, and the texts alone are compared only when they do not, as for an undo. A draft carried to its Timeline takes its files with it.
+- **A link is a word of its own.** `insertLink` adds a space on whichever side touches anything but whitespace, and `caretAfter` moves a caret at or after it past it. Files added at one caret land in the order added, whatever order they finish in.
+- **Whether Uploads are on is the Daemon's answer when the files were added, never kept.** Files are checking until it answers. While they are off, those files are let go of, and `offNote` names the options to set. A file over `maxSize` is refused before it is sent. A link of `null`, with no public URL, puts nothing in and notes it the same way.
+- **A draft waits for its links.** While a file added to it is checking or being sent, `heldBack` says to wait for it or cancel it, and nothing is sent. A failed file holds nothing back. What is kept of a send held back is only that it was, per composer (`HeldBack`), and `heldNoteIn` derives the words from the files still pending, so they name only those and go with the last of them, kept, failed, or cancelled, and never come back.
+- **Every failure is said in words** by `failureText`, from the API's typed errors, and a request with no answer says only that whether the file was kept is unknown.
+
 ## Themes
 
 Every colour a Frontend draws, derived from a terminal's palette of a foreground, a background, and 16 ANSI colours. `drawn` gives the colours and `cssVariables` their names.

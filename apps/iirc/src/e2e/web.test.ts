@@ -10,7 +10,9 @@ import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { run, startDaemon as startWith, watchedPage } from "./daemon.ts";
+import { networkRow, run, startDaemon as startWith, watchedPage } from "./daemon.ts";
+import { privateNetwork as sharedNetwork } from "./testing/network.ts";
+import type { Preparing } from "./testing/network.ts";
 
 const main = path.join(import.meta.dirname, "..", "main.ts");
 const web = path.join(import.meta.dirname, "..", "..", "..", "web", "dist");
@@ -33,6 +35,17 @@ const iirc = async (...args: readonly string[]) => await run(source, ...args);
  */
 const startDaemon = async (dataDir: string) => await startWith(source, dataDir, `--web=${web}`);
 
+/**
+ * A private ngircd, a real `iirc daemon --web` from source with a key, and a Network joined
+ * there, as `privateNetwork` makes.
+ * @param dataDir - The Daemon's data directory.
+ * @param channel - The Channel.
+ * @param preparing - What the peer does first, and the Channel's key.
+ * @returns Everything, for the test to stop.
+ */
+const privateNetwork = async (dataDir: string, channel: string, preparing: Preparing = {}) =>
+  await sharedNetwork(source, [`--web=${web}`], dataDir, channel, preparing);
+
 const wrongKey = "iirc_not-the-key-but-close";
 
 /**
@@ -47,15 +60,6 @@ const hexOf = (rgb: string) =>
 const nordAlacritty = readFileSync(
   path.join(import.meta.dirname, "..", "..", "..", "..", "fixtures", "themes", "nord.toml"),
   "utf-8"
-);
-
-/** What the end-to-end run reads of `known`: which Channels the Client has joined. */
-const decodeKnown = Schema.decodeUnknownSync(
-  Schema.fromJsonString(
-    Schema.Struct({
-      channels: Schema.Array(Schema.Struct({ name: Schema.String, standing: Schema.String })),
-    })
-  )
 );
 
 /** A Channel's head as the Daemon answers it, whatever it holds, to answer it changed. */
@@ -185,20 +189,6 @@ const countLayoutWrites = () => {
   };
 };
 
-/** How a Network's row ends its label, once its connection is known: the word for it. */
-const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
-
-/**
- * The first Network's row in the sidebar, once its connection is known.
- * @param page - The page.
- * @returns The row's text: its chevron, its id, what is unread, and its connection's symbol.
- */
-const networkRow = async (page: Page) => {
-  await page.getByRole("row", { name: standingWord }).first().waitFor();
-
-  return (await page.getByRole("row").first().textContent()) ?? "";
-};
-
 /**
  * How the first Network's connection stands, as its row's label says it.
  * @param page - The page.
@@ -261,92 +251,6 @@ const tracked = (
     readonly _valueTracker?: { readonly getValue: () => string } | null;
   }
 ) => input._valueTracker?.getValue() ?? null;
-
-/**
- * What the peer does in the Channel before the Daemon joins it, the Channel's key, if it has
- * one, and the Ircd, ngircd unless it is another.
- */
-interface Preparing {
-  readonly prepare?: (peer: Peer) => Promise<void>;
-  readonly channelKey?: string;
-  readonly start?: () => Promise<Ircd>;
-}
-
-/**
- * A private ngircd on a loopback port the kernel picks, a real `iirc daemon --web` with a
- * key, a Network configured through the API to join a Channel there, joined as the Client
- * knows it, and a raw IRC connection as the other User, `peer`, in the Channel, who may
- * set the Channel up first, with a key the Daemon holds as a Credential. Another Ircd may
- * stand in for ngircd, as one whose nicks are longer than RFC 2812's nine characters.
- * @param dataDir - The Daemon's data directory.
- * @param channel - The Channel.
- * @param preparing - What the peer does first, and the Channel's key.
- * @returns Everything, for the test to stop.
- */
-const privateNetwork = async (
-  dataDir: string,
-  channel: string,
-  { channelKey, prepare, start = startNgircd }: Preparing = {}
-) => {
-  const ngircd: Ircd = await start();
-  const created = await iirc("key", "create", "browser", "--data-dir", dataDir);
-  const key = created.stdout.trim();
-  const { base, child } = await startDaemon(dataDir);
-  const authorization = { authorization: `Bearer ${key}`, "content-type": "application/json" };
-
-  const api = async (method: string, route: string, body: string | null = null) =>
-    await fetch(`${base}/api${route}`, { body, headers: authorization, method });
-
-  const peer = await connectPeer({ host: ngircd.host, nick: "peer", port: ngircd.plainPort });
-
-  peer.send(`JOIN ${channel}`);
-  await prepare?.(peer);
-
-  if (channelKey !== undefined) {
-    const held = await api(
-      "PUT",
-      "/credentials/channel-key",
-      JSON.stringify({ value: channelKey })
-    );
-
-    expect(held.status).toBe(204);
-  }
-
-  const configured = await api(
-    "PUT",
-    "/networks/private",
-    JSON.stringify({
-      channels: [
-        channelKey === undefined ? { name: channel } : { key: "channel-key", name: channel },
-      ],
-      declined: [],
-      enabled: true,
-      fallbackEncoding: "windows-1252",
-      ircds: [{ host: ngircd.host, port: ngircd.plainPort, tls: false }],
-      login: { _tag: "None" },
-      nicks: ["iirc"],
-      realname: "iirc",
-      username: "iirc",
-    })
-  );
-
-  expect(configured.status).toBe(200);
-
-  // Joined, as the Client knows it, decided from its Knowledge's structure.
-  await expect
-    .poll(
-      async () => {
-        const answer = await api("GET", "/networks/private/known");
-        const known = decodeKnown(await answer.text());
-
-        return known.channels.some((one) => one.name === channel && one.standing === "Joined");
-      },
-      { interval: 100, timeout: 20_000 }
-    )
-    .toBe(true);
-
-  return { api, base, channel, child, key, ngircd, peer };
-};
 
 /**
  * The smaller of an element's width and height, as drawn.
