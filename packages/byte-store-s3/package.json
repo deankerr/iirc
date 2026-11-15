@@ -1,0 +1,13 @@
+{
+  "name": "@iirc/byte-store-s3",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@iirc/byte-store": "workspace:*",
+    "effect": "catalog:"
+  }
+}

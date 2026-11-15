@@ -137,8 +137,9 @@ The options under `ui` are a projection of the Journal's `Change`s, in `src/ui.t
 
 - **ngircd** is `~/.local/opt/ngircd/ngircd`, or `IIRC_NGIRCD`, with a configuration of its own in a temporary directory.
 - **Ergo** 2.19.1 is fetched into the gitignored `.cache/ergo/` and checked against its checksums file and a pinned SHA-256 before it runs. The Daemon dials it over TLS and trusts its self-signed root through the Transport's `trust`, never by turning verification off.
+- **MinIO** is the maintained pgsty/minio fork, since MinIO itself no longer publishes binaries. It is fetched into `.cache/minio/` and checked the same way, and serves its S3 API on loopback with an empty bucket, and more on asking.
 
-`@iirc/daemon/testing` exports the private Ircds and the raw peer, `startNgircd`, `startErgo`, and `connectPeer`, so another package's end-to-end run, such as the web frontend's in `apps/iirc`, starts them the same way.
+`@iirc/daemon/testing` exports the private Ircds, MinIO, and the raw peer, `startNgircd`, `startErgo`, `startMinio`, and `connectPeer`, so another package's end-to-end run, such as the web frontend's in `apps/iirc`, starts them the same way.
 
 ## Not yet
 

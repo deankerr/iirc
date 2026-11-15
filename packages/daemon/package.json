@@ -27,6 +27,8 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@iirc/byte-store": "workspace:*",
+    "@iirc/byte-store-s3": "workspace:*",
     "vitest": "catalog:"
   }
 }

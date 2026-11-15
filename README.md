@@ -27,7 +27,7 @@ bun run build:web     # the web frontend, into apps/web/dist
 bun run build:iirc    # one executable, dist/iirc, with the web frontend inside
 ```
 
-`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches.
+`bun run e2e` needs ngircd at `~/.local/opt/ngircd/ngircd`, or its path in `IIRC_NGIRCD`, fetches Ergo and MinIO itself, and needs Playwright's Chromium, which `bunx playwright install chromium` fetches.
 
 ## Run a Daemon
 
@@ -83,10 +83,12 @@ Each package's README says what it does, what it guarantees, and what it does no
 | `packages/api` | contract | The HTTP API every Frontend uses, as Schemas and typed errors |
 | `packages/runtime` | no | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
 | `packages/timeline-store` | no | The Timeline store port, its in-memory adapter, and its laws |
+| `packages/byte-store` | no | The byte store port, its in-memory adapter, and its laws |
 | `packages/transport-bun` | no | The production Transport: TCP and TLS on Bun |
 | `packages/journal-sqlite` | no | The production Journal: Entries in SQLite |
 | `packages/vault-file` | no | The production Vault: Credentials in a `0600` file |
 | `packages/timeline-store-sqlite` | no | The production Timeline store, in SQLite |
+| `packages/byte-store-s3` | no | The byte store in an S3-compatible bucket |
 | `packages/daemon` | no | The Daemon: wires it all together and serves the API |
 | `apps/iirc` | no | The `iirc` executable |
 | `apps/web` | no | The web frontend: React over its core, built with Vite |

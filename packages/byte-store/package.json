@@ -1,0 +1,20 @@
+{
+  "name": "@iirc/byte-store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/store.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/runtime": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}
