@@ -5,7 +5,7 @@
  */
 import { ByteStore, ByteStoreNotFound, ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
 import type { ByteStoreService, Stored } from "@iirc/byte-store";
-import { Effect, Layer, Option, Redacted, Ref, Schema, Stream } from "effect";
+import { Effect, Exit, FiberSet, Layer, Option, Pull, Redacted, Ref, Schema, Stream } from "effect";
 
 /** Where the bucket is, and the keys to it. */
 export interface S3Options {
@@ -107,32 +107,91 @@ export const makeS3ByteStore = (options: S3Options): Effect.Effect<ByteStoreServ
 
     // Runs the stream again into the bucket, hashing what it gives as it goes. A failure of
     // the stream is the caller's, and anything else is the bucket's.
+    //
+    // Bun's `write` takes no signal, so the body is the only way to stop it: erroring the body
+    // makes Bun abandon the request, or abort a multipart upload. The stream is pulled in this
+    // Effect's own scope, one chunk each time Bun reads, so an interrupted put errors the body,
+    // waits for the write to settle, and only then interrupts the pull and closes the stream.
+    // Once Bun has read the stream's end, though, the bytes are all sent or buffered and the
+    // write runs to completion, and the object then exists, as a put that completed would
+    // leave it, by the time the interruption returns.
     const upload = <E>(key: string, bytes: Stream.Stream<Uint8Array, E>) =>
-      Effect.gen(function* () {
-        const seen = tally();
-        const failed = yield* Ref.make(Option.none<E>());
+      Effect.scoped(
+        Effect.gen(function* () {
+          const seen = tally();
+          const failed = yield* Ref.make(Option.none<E>());
 
-        const passing = bytes.pipe(
-          Stream.tap((chunk) =>
-            Effect.sync(() => {
-              seen.add(chunk);
-            })
-          ),
-          Stream.tapError((error) => Ref.set(failed, Option.some(error)))
-        );
-
-        yield* attempt(
-          async () => await client.write(key, new Response(Stream.toReadableStream(passing)))
-        ).pipe(
-          Effect.catch((error) =>
-            Ref.get(failed).pipe(
-              Effect.flatMap((own) => Effect.fail(Option.getOrElse(own, () => error)))
+          // Finalizers run last first: a pull in flight is interrupted, then the stream closes.
+          const pull = yield* Stream.toPull(
+            bytes.pipe(
+              Stream.tap((chunk) =>
+                Effect.sync(() => {
+                  seen.add(chunk);
+                })
+              ),
+              Stream.tapError((error) => Ref.set(failed, Option.some(error)))
             )
-          )
-        );
+          );
 
-        return seen.stored();
-      });
+          const run = yield* FiberSet.makeRuntimePromise();
+
+          const next = pull.pipe(
+            Effect.asSome,
+            Pull.catchDone(() => Effect.succeedNone)
+          );
+
+          // A rejected `pull` errors the body, so a failing stream fails the write.
+          const body = yield* Effect.sync(() => {
+            let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+            const stream = new ReadableStream<Uint8Array>(
+              {
+                pull: async (into) => {
+                  Option.match(await run(next), {
+                    onNone: () => {
+                      into.close();
+                    },
+                    onSome: (chunks) => {
+                      for (const chunk of chunks) {
+                        into.enqueue(chunk);
+                      }
+                    },
+                  });
+                },
+                start: (into) => {
+                  controller = into;
+                },
+              },
+              { highWaterMark: 0 }
+            );
+
+            // Erroring a body that has already ended does nothing, and its write finishes.
+            const abandon = () => controller?.error(new Error("the put was interrupted"));
+
+            return { abandon, stream };
+          });
+
+          yield* Effect.acquireUseRelease(
+            Effect.sync(() => ({ writing: client.write(key, new Response(body.stream)) })),
+            ({ writing }) => attempt(async () => await writing),
+            ({ writing }, exit) =>
+              Exit.hasInterrupts(exit)
+                ? Effect.promise(async () => {
+                    body.abandon();
+                    await Promise.allSettled([writing]);
+                  })
+                : Effect.void
+          ).pipe(
+            Effect.catch((error) =>
+              Ref.get(failed).pipe(
+                Effect.flatMap((own) => Effect.fail(Option.getOrElse(own, () => error)))
+              )
+            )
+          );
+
+          return seen.stored();
+        })
+      );
 
     const put: ByteStoreService["put"] = (bytes) =>
       Effect.gen(function* () {

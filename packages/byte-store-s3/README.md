@@ -15,6 +15,7 @@ The secret is `Redacted`, and the region is always given, never read from the en
 
 - **Each hash is the object `sha256/<hex>`,** so the bucket may hold other things beside them. `held` sums the sizes of everything under `sha256/`, a page of a listing at a time.
 - **A put runs its stream twice.** A write names its key first, and the key is the hash, so the first run hashes the bytes. When the object is already there, that is the answer. Otherwise the second run writes them, hashed again as they go. S3 makes an object readable only once its write completes, so a put that fails leaves nothing. A second run that gives other bytes than the first is a defect of the caller's stream: what it wrote is deleted, and the put dies.
+- **An interrupted put stops its write.** Bun's `write` takes no signal, so the store errors the body it is reading, which makes Bun abandon the request or abort the multipart upload, waits for the write to settle, and then closes the stream, all before the interruption returns. Once Bun has read to the end of the stream, the write can no longer be stopped: the interruption waits for it, and the object is then held, as a put that completed would leave it.
 - **A range that holds nothing never reaches S3,** which refuses one, so the store reads the object's size first and clamps the range to it.
 
 ## Missing or unreachable

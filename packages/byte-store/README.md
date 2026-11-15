@@ -15,7 +15,7 @@ held: Effect<number, ByteStoreUnavailable>         // bytes held in all
 Sha256                                             // a Schema: 64 lower-case hex digits
 ```
 
-`ByteStore` is an Effect service. An adapter provides it as a Layer from its own package: `@iirc/byte-store-s3` keeps the bytes in an S3-compatible bucket.
+`ByteStore` is an Effect service. An adapter provides it as a Layer from its own package.
 
 ## What it promises
 
@@ -23,6 +23,7 @@ Sha256                                             // a Schema: 64 lower-case he
 - **`put` may run its stream more than once,** so the stream must give the same bytes each time it runs, as one that reads a file does. A failure of the stream is the caller's own, and fails the put as itself. A put that fails leaves nothing readable under the hash that was not there before.
 - **A range is `[start, end)`,** as `Blob.slice` takes it, clamped to what is held. A range that holds nothing reads as no bytes.
 - **Whether the bytes are held is decided before any byte flows,** so a caller can answer "not found" or begin an answer before reading the stream.
+- **The bytes given to `put`, and those a read gives, are the caller's own,** so changing them changes nothing held.
 - **Deleting what is not held succeeds.**
 
 ## Failure

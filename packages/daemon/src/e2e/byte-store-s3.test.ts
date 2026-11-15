@@ -8,7 +8,7 @@ import { makeS3ByteStore } from "@iirc/byte-store-s3";
 import type { S3Options } from "@iirc/byte-store-s3";
 import { byteStoreLaws } from "@iirc/byte-store/testing";
 import { holds } from "@iirc/runtime/testing";
-import { Effect, Exit, Redacted, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Redacted, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { freePort, loopback } from "../testing/children.ts";
@@ -166,6 +166,90 @@ describe("the S3 byte store", () => {
 
     expect(Exit.hasDies(exit)).toBeTruthy();
     await expect(Effect.runPromise(store.held)).resolves.toBe(0);
+  });
+
+  // The second run gives its first chunk and then waits, until long after the put is
+  // interrupted. A large first chunk makes Bun begin a multipart upload before the wait.
+  it.each([
+    { first: 1, what: "a small" },
+    { first: 6 * 1024 * 1024, what: "a multipart" },
+  ])(
+    "$what put interrupted while its stream waits closes the stream and leaves nothing",
+    async ({ first }) => {
+      const bucket = await minio.freshBucket();
+      const store = await make(optionsFor(bucket));
+      const waiting = Deferred.makeUnsafe<undefined>();
+      const released = Deferred.makeUnsafe<undefined>();
+      const whole = new Uint8Array(first + 3).fill(97);
+      let runs = 0;
+      let closed = false;
+
+      const blocking = Stream.suspend(() => {
+        runs += 1;
+
+        if (runs === 1) {
+          return Stream.make(whole);
+        }
+
+        return Stream.make(whole.subarray(0, first)).pipe(
+          Stream.concat(
+            Stream.fromEffect(
+              Deferred.succeed(waiting, undefined).pipe(
+                Effect.andThen(Deferred.await(released)),
+                Effect.as(whole.subarray(first))
+              )
+            )
+          ),
+          Stream.ensuring(
+            Effect.sync(() => {
+              closed = true;
+            })
+          )
+        );
+      });
+
+      const putting = Effect.runFork(store.put(blocking));
+      await Effect.runPromise(Deferred.await(waiting));
+      await Effect.runPromise(Fiber.interrupt(putting));
+
+      expect(closed).toBeTruthy();
+
+      await Effect.runPromise(Deferred.succeed(released, undefined));
+      await Bun.sleep(500);
+
+      const hash = Sha256.make(new Bun.CryptoHasher("sha256").update(whole).digest("hex"));
+      await expect(tagOf(store.read(hash))).resolves.toBe("ByteStoreNotFound");
+      await expect(Effect.runPromise(store.held)).resolves.toBe(0);
+    }
+  );
+
+  // S3 lists a thousand keys a page, so this takes more than one page, and what the bucket
+  // holds beside the store's own objects is not counted.
+  it("held sums every page of the store's objects and nothing else", async () => {
+    const bucket = await minio.freshBucket();
+    const store = await make(optionsFor(bucket));
+    const texts = Array.from({ length: 1005 }, (_, index) => `object ${index}`);
+
+    await Effect.runPromise(
+      Effect.forEach(texts, (text) => store.put(Stream.make(new TextEncoder().encode(text))), {
+        concurrency: 32,
+        discard: true,
+      })
+    );
+
+    const raw = new Bun.S3Client({
+      accessKeyId: minio.accessKeyId,
+      bucket,
+      endpoint: minio.endpoint,
+      region: minio.region,
+      secretAccessKey: minio.secretAccessKey,
+    });
+
+    await raw.write("elsewhere/beside", "not the store's");
+    await raw.write("sha256-but-not-under-it", "nor this");
+
+    const expected = texts.reduce((sum, text) => sum + new TextEncoder().encode(text).length, 0);
+    await expect(Effect.runPromise(store.held)).resolves.toBe(expected);
   });
 
   it("a bucket that does not exist is unavailable, not not found", async () => {

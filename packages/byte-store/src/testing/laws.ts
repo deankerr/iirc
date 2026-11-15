@@ -223,6 +223,32 @@ const unreachableStore: ByteStoreLaw = {
   name: "an unreachable store is unavailable, never not found",
 };
 
+const chunksRead = (store: ByteStoreService, hash: Sha256, range?: ByteRange) =>
+  store.read(hash, range).pipe(Effect.flatMap(Stream.runCollect));
+
+const overwrite = (chunks: Iterable<Uint8Array>) => {
+  for (const chunk of chunks) {
+    chunk.fill(0x7a);
+  }
+};
+
+const heldApart: ByteStoreLaw = {
+  check: ({ store }) =>
+    Effect.gen(function* () {
+      const given = encoder.encode("abc");
+      const { hash } = yield* store.put(Stream.make(given));
+      overwrite([given]);
+      yield* same("after changing what was put", textOf(yield* read(store, hash)), "abc");
+
+      overwrite(yield* chunksRead(store, hash));
+      yield* same("after changing a read", textOf(yield* read(store, hash)), "abc");
+
+      overwrite(yield* chunksRead(store, hash, { end: 2, start: 1 }));
+      yield* same("after changing a range read", textOf(yield* read(store, hash)), "abc");
+    }),
+  name: "changing the bytes given to put, or given by a read, changes nothing held",
+};
+
 /** The laws every byte store adapter keeps, each against a fresh, empty store. */
 export const byteStoreLaws: readonly ByteStoreLaw[] = [
   putThenRead,
@@ -232,4 +258,5 @@ export const byteStoreLaws: readonly ByteStoreLaw[] = [
   deleteMissing,
   neverPutRead,
   unreachableStore,
+  heldApart,
 ];

@@ -54,6 +54,7 @@ export const makeMemoryByteStore: Effect.Effect<ByteStoreHarness> = Effect.sync(
       }),
     held: Effect.sync(() => held.values().reduce((total, bytes) => total + bytes.length, 0)),
     put: (bytes) =>
+      // `mkUint8Array` copies the chunks into a new array, so the caller's are never held.
       Stream.mkUint8Array(bytes).pipe(
         Effect.map((all) => {
           const hash = Sha256.make(createHash("sha256").update(all).digest("hex"));
@@ -70,7 +71,8 @@ export const makeMemoryByteStore: Effect.Effect<ByteStoreHarness> = Effect.sync(
           return Effect.fail(new ByteStoreNotFound({ hash }));
         }
 
-        const part = sliced(bytes, range);
+        // A copy, so a reader can never change what is held.
+        const part = new Uint8Array(sliced(bytes, range));
 
         return Effect.succeed(part.length === 0 ? Stream.empty : Stream.make(part));
       }),
