@@ -830,7 +830,7 @@ describe("Uploads over the API", () => {
     expect(result.read).toStrictEqual(result.record);
   });
 
-  it("builds the link from the public URL in force, and gives none while there is none", async () => {
+  it("builds the link from the public URL in force, whatever else is set, and gives none while there is none", async () => {
     const result = await run((served) =>
       Effect.gen(function* () {
         yield* turnOn(served);
@@ -844,9 +844,12 @@ describe("Uploads over the API", () => {
         yield* setOption(served, "uploads.publicUrl", "https://files.example/u/");
         const moved = yield* link;
 
+        yield* unsetOption(served, "store.s3.accessKeyId");
+        const off = yield* link;
+
         yield* unsetOption(served, "uploads.publicUrl");
 
-        return { id, moved, none: yield* link };
+        return { id, moved, none: yield* link, off };
       })
     );
 
@@ -854,6 +857,7 @@ describe("Uploads over the API", () => {
       id: result.id,
       moved: `https://files.example/u/${result.id}/cat.png`,
       none: null,
+      off: `https://files.example/u/${result.id}/cat.png`,
     });
   });
 });

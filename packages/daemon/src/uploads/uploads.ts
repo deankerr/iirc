@@ -27,6 +27,7 @@ import {
   Data,
   Effect,
   FileSystem,
+  HashMap,
   Layer,
   Option,
   Redacted,
@@ -204,14 +205,14 @@ const keptOf = Schema.decodeUnknownOption(Kept);
  * @param change - The Change.
  * @returns The Uploads after it.
  */
-const foldUpload = (held: ReadonlyMap<UploadId, Kept>, change: Change) => {
+const foldUpload = (held: HashMap.HashMap<UploadId, Kept>, change: Change) => {
   if (change._tag !== "Uploaded") {
     return held;
   }
 
   const kept = keptOf(change);
 
-  return Option.isNone(kept) ? held : new Map(held).set(kept.value.id, kept.value);
+  return Option.isNone(kept) ? held : HashMap.set(held, kept.value.id, kept.value);
 };
 
 /**
@@ -239,7 +240,8 @@ export const layerUploads = (dataDir: string) =>
         Effect.mapError((error) => new DataDirectoryFailed({ dataDir, reason: error.message }))
       );
 
-      const nothingKept: ReadonlyMap<UploadId, Kept> = new Map();
+      // A persistent map, so folding N Uploads, or keeping one more, never copies the rest.
+      const nothingKept = HashMap.empty<UploadId, Kept>();
 
       const folded = yield* journal.read({}).pipe(
         Stream.runFold(
@@ -279,18 +281,24 @@ export const layerUploads = (dataDir: string) =>
           });
         });
 
+      // A link needs only the public URL, so it is shown while one is set, whether or not
+      // new Uploads may be made.
       const shown = (record: Kept) =>
-        switchNow.pipe(
-          Effect.map((now) => ({
-            link: now._tag === "On" ? linkOf(now.publicUrl, record) : undefined,
-            record,
-          }))
+        owner.inForce.pipe(
+          Effect.map(({ options }) => {
+            const publicUrl = options["uploads.publicUrl"];
+
+            return {
+              link: publicUrl === undefined ? undefined : linkOf(publicUrl, record),
+              record,
+            };
+          })
         );
 
       // An id no Upload has, though two drawn alike are a one in 2^80 chance.
       const freshId: Effect.Effect<UploadId> = Effect.gen(function* () {
         const id = UploadId.make(encodeUploadId(yield* random.randomBytes(idBytes)));
-        const taken = (yield* Ref.get(held)).has(id);
+        const taken = HashMap.has(yield* Ref.get(held), id);
 
         return taken ? yield* freshId : id;
       });
@@ -301,7 +309,7 @@ export const layerUploads = (dataDir: string) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
             yield* journal.append({ _tag: "Change", change: { _tag: "Uploaded", ...kept } });
-            yield* Ref.update(held, (all) => new Map(all).set(kept.id, kept));
+            yield* Ref.update(held, (all) => HashMap.set(all, kept.id, kept));
             yield* Effect.logInfo("Kept an Upload", {
               size: kept.size,
               type: kept.type,
@@ -349,11 +357,13 @@ export const layerUploads = (dataDir: string) =>
 
       const open = (id: UploadId) =>
         Effect.gen(function* () {
-          const found = (yield* Ref.get(held)).get(id);
+          const kept = HashMap.get(yield* Ref.get(held), id);
 
-          if (found === undefined) {
+          if (Option.isNone(kept)) {
             return yield* new NoSuchUpload();
           }
+
+          const found = kept.value;
 
           const now = yield* switchNow;
 
@@ -373,11 +383,12 @@ export const layerUploads = (dataDir: string) =>
       return {
         find: (id: UploadId) =>
           Ref.get(held).pipe(
-            Effect.flatMap((all) => {
-              const found = all.get(id);
-
-              return found === undefined ? Effect.succeedNone : Effect.asSome(shown(found));
-            })
+            Effect.flatMap((all) =>
+              Option.match(HashMap.get(all, id), {
+                onNone: () => Effect.succeedNone,
+                onSome: (found) => Effect.asSome(shown(found)),
+              })
+            )
           ),
         open,
         status: switchNow.pipe(
