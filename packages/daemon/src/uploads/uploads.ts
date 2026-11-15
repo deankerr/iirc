@@ -44,8 +44,8 @@ import { OwnerConfiguration } from "../options.ts";
 import { encodeUploadId, idBytes } from "./id.ts";
 import { detectKind } from "./kind.ts";
 import { safeName } from "./names.ts";
-import type { BodyTooLarge } from "./staging.ts";
-import { clearStaging, stage } from "./staging.ts";
+import type { BodyTooLarge, UnreadableImage } from "./staging.ts";
+import { clearStaging, keepable, stage } from "./staging.ts";
 
 /** An Upload as the Journal records it, parsed. */
 export const Kept = Schema.Struct({
@@ -205,17 +205,24 @@ export class Uploads extends Context.Service<
      */
     readonly changes: (after: number | undefined) => Stream.Stream<Changed>;
     /**
-     * Stages a body, reads its type from its bytes, puts it to the store, and journals its
-     * `Uploaded`, in that order, with `uploads.maxSize` read once as it begins. A body that
-     * passes it is cut off unread. The staged file is gone however it ends, and nothing is
-     * journaled unless the bytes were kept.
+     * Stages a body, reads its type from its bytes, strips it if it is an image, puts it to
+     * the store, and journals its `Uploaded`, in that order, with `uploads.maxSize` read once
+     * as it begins. A body that passes it is cut off unread, and an image that cannot be
+     * walked is refused. The staged file is gone however it ends, and nothing is journaled
+     * unless the bytes were kept.
      */
     readonly upload: <E>(
       body: Stream.Stream<Uint8Array, E>,
       name: string | undefined
     ) => Effect.Effect<
       Shown,
-      E | UploadsAreOff | EmptyUpload | BodyTooLarge | ByteStoreUnavailable | JournalFailed
+      | E
+      | UploadsAreOff
+      | EmptyUpload
+      | BodyTooLarge
+      | UnreadableImage
+      | ByteStoreUnavailable
+      | JournalFailed
     >;
     /**
      * An Upload's record and bytes, for its link. Whether the bytes are held is decided
@@ -468,11 +475,12 @@ export const layerUploads = (dataDir: string) =>
           }
 
           const kind = detectKind(staged.head);
+          const keeping = yield* keepable(staged, kind.type);
           const store = yield* storeOf(now.bucket);
-          const stored = yield* store.put(fs.stream(staged.path).pipe(Stream.orDie));
+          const stored = yield* store.put(keeping.bytes);
 
-          if (stored.hash !== staged.hash || stored.size !== staged.size) {
-            return yield* Effect.die(new Error("the store kept other bytes than were staged"));
+          if (stored.hash !== keeping.hash || stored.size !== keeping.size) {
+            return yield* Effect.die(new Error("the store kept other bytes than were meant"));
           }
 
           const kept: Kept = {

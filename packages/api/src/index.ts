@@ -40,6 +40,7 @@ export {
   UnknownTimeline,
   UnknownUpload,
   UploadTooLarge,
+  UploadUnreadable,
   UploadsOff,
   StoreUnavailable,
   VaultFailed,

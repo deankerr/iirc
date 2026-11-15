@@ -29,6 +29,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "playwright": "1.65.0",
     "vitest": "catalog:"
   }
 }
