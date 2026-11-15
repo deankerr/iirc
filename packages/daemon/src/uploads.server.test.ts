@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 
 import { BunHttpServer } from "@effect/platform-bun";
 import { Upload, UploadsStatus } from "@iirc/api";
-import { ByteStoreUnavailable } from "@iirc/byte-store";
+import { ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
 import type { ByteStoreService } from "@iirc/byte-store";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
 import {
@@ -20,7 +20,7 @@ import {
 import { HttpRouter, HttpServer } from "effect/http";
 import { describe, expect, it } from "vitest";
 
-import { ApiRoutes, Stopping } from "./handlers.ts";
+import { ApiRoutes, Heartbeat, Stopping } from "./handlers.ts";
 import { freePort, loopback } from "./testing/children.ts";
 import {
   layerWorld,
@@ -93,7 +93,8 @@ const start = (world: World, dataDir: string, stopping: Effect.Effect<void>) =>
         BunHttpServer.layer({ gracefulShutdownTimeout: 100, hostname: loopback, port: 0 })
       ),
       Layer.provide(layerWorld(world, dataDir)),
-      Layer.provide(Layer.succeed(Stopping, stopping))
+      Layer.provide(Layer.succeed(Stopping, stopping)),
+      Layer.provide(Layer.succeed(Heartbeat, Duration.millis(50)))
     );
 
     const context = yield* Layer.buildWithScope(server, scope);
@@ -1229,5 +1230,537 @@ describe("the link listener", () => {
       unset: "refused",
       whileOff: "refused",
     });
+  });
+});
+
+const decodePage = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      more: Schema.Boolean,
+      next: Schema.NullOr(Schema.String),
+      uploads: Schema.Array(Upload),
+    })
+  )
+);
+
+const pageOf = (response: Response) => Effect.map(textOf(response), decodePage);
+
+/**
+ * Uploads a few files, one after another, named `1.png` and on.
+ * @param served - The server.
+ * @param count - How many.
+ * @returns Their records, oldest first.
+ */
+const uploadedMany = (served: Served, count: number) =>
+  Effect.forEach(
+    Array.from({ length: count }, (_, index) => `${index + 1}.png`),
+    (name) => uploaded(served, png, name)
+  );
+
+/**
+ * Every page of the Uploads, following `next` from the first until none follows.
+ * @param served - The server.
+ * @param limit - How many a page holds.
+ * @returns The pages.
+ */
+const allPages = (served: Served, limit: number) =>
+  Effect.gen(function* () {
+    const pages = [yield* pageOf(yield* served.request(`/api/uploads?limit=${limit}`))];
+
+    for (let next = pages[0]?.next; next !== null && next !== undefined;) {
+      const page = yield* pageOf(
+        yield* served.request(`/api/uploads?limit=${limit}&after=${next}`)
+      );
+
+      pages.push(page);
+      ({ next } = page);
+    }
+
+    return pages;
+  });
+
+const signedIn = (served: Served) =>
+  Effect.map(
+    served.request("/api/sign-in", {
+      body: JSON.stringify({ key: served.key }),
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
+      key: null,
+      method: "POST",
+    }),
+    (response) => response.headers.getSetCookie()[0]?.split(";")[0] ?? ""
+  );
+
+describe("the list of Uploads", () => {
+  it("lists Uploads newest first, a page at a time, and following next gives each once", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const records = yield* uploadedMany(served, 5);
+        const pages = yield* allPages(served, 2);
+
+        return {
+          pages: pages.map((page) => ({
+            more: page.more,
+            next: page.next,
+            uploads: page.uploads.map((one) => one.name),
+          })),
+          records,
+          uploads: pages.flatMap((page) => page.uploads),
+          whole: yield* pageOf(yield* served.request("/api/uploads")),
+        };
+      })
+    );
+
+    const [first, second, third, fourth, fifth] = result.records;
+
+    expect(result.pages).toStrictEqual([
+      { more: true, next: fourth?.id, uploads: ["5.png", "4.png"] },
+      { more: true, next: second?.id, uploads: ["3.png", "2.png"] },
+      { more: false, next: null, uploads: ["1.png"] },
+    ]);
+    expect(result.uploads).toStrictEqual([fifth, fourth, third, second, first]);
+    expect(result.whole).toStrictEqual({
+      more: false,
+      next: null,
+      uploads: result.records.toReversed(),
+    });
+  });
+
+  it("gives an empty page with nothing uploaded", async () => {
+    const result = await run((served) =>
+      Effect.flatMap(served.request("/api/uploads"), (response) =>
+        Effect.map(pageOf(response), (page) => [response.status, page])
+      )
+    );
+
+    expect(result).toStrictEqual([200, { more: false, next: null, uploads: [] }]);
+  });
+
+  it("refuses a cursor that names no Upload", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* uploadedMany(served, 1);
+        const refused = yield* served.request("/api/uploads?after=0000000000000000");
+
+        return [refused.status, yield* jsonOf(refused)];
+      })
+    );
+
+    expect(result).toStrictEqual([
+      400,
+      {
+        _tag: "InvalidRequest",
+        issues: [{ message: "Names no Upload", path: ["query", "after"] }],
+      },
+    ]);
+  });
+
+  it("refuses a malformed cursor or limit", async () => {
+    const result = await run((served) =>
+      Effect.forEach(
+        [
+          "/api/uploads?after=NOT-AN-ID",
+          "/api/uploads?after=5",
+          "/api/uploads?limit=0",
+          "/api/uploads?limit=501",
+        ],
+        (path) => Effect.map(served.request(path), (response) => response.status)
+      )
+    );
+
+    expect(result).toStrictEqual([400, 400, 400, 400]);
+  });
+
+  it("lists in the same order after a restart on the same Journal", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* uploadedMany(served, 3);
+        const before = yield* allPages(served, 2);
+
+        yield* served.restart;
+
+        return { after: yield* allPages(served, 2), before };
+      })
+    );
+
+    expect(result.before).toHaveLength(2);
+    expect(result.after).toStrictEqual(result.before);
+  });
+
+  it("lists each Upload with its link from the public URL in force", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const [record] = yield* uploadedMany(served, 1);
+
+        const links = Effect.map(Effect.flatMap(served.request("/api/uploads"), pageOf), (page) =>
+          page.uploads.map((one) => one.link)
+        );
+
+        yield* setOption(served, "uploads.publicUrl", "https://files.example/u");
+        const moved = yield* links;
+
+        yield* unsetOption(served, "uploads.publicUrl");
+
+        return { id: record?.id, moved, none: yield* links };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      id: result.id,
+      moved: [`https://files.example/u/${result.id}/1.png`],
+      none: [null],
+    });
+  });
+});
+
+describe("an Upload's bytes on the API", () => {
+  it("serves an Upload's bytes with a key, with exactly the link listener's headers", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const record = yield* uploaded(served, png, "cat.png");
+        const content = yield* served.request(`/api/uploads/${record.id}/content`);
+        const link = yield* fromBound(port, pathOf(record.link));
+
+        return {
+          bytes: yield* bytesOf(content),
+          headers: headersOf(content),
+          link: headersOf(link),
+          status: content.status,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      bytes: png,
+      headers: result.link,
+      link: {
+        ...safety,
+        "cache-control": "no-cache",
+        "content-disposition": `inline; filename="cat.png"; filename*=UTF-8''cat.png`,
+        "content-length": String(png.length),
+        "content-type": "image/png",
+      },
+      status: 200,
+    });
+  });
+
+  it("makes what is not shown in place download, as its link does", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const page = encoder.encode("<!DOCTYPE html><p>hi</p>");
+        const record = yield* uploaded(served, page, "x");
+        const content = yield* served.request(`/api/uploads/${record.id}/content`);
+        const link = yield* fromBound(port, pathOf(record.link));
+
+        return { content: headersOf(content), link: headersOf(link) };
+      })
+    );
+
+    expect(result.content).toStrictEqual(result.link);
+    expect(result.content["content-disposition"]).toMatch(/^attachment;/u);
+  });
+
+  it("serves an Upload's bytes to a Sign-in cookie, and answers neither key nor cookie with 401", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const cookie = yield* signedIn(served);
+        const path = `/api/uploads/${record.id}/content`;
+        const byCookie = yield* served.request(path, { headers: { cookie }, key: null });
+        const byNeither = yield* served.request(path, { key: null });
+
+        return {
+          byCookie: [byCookie.status, yield* bytesOf(byCookie)],
+          byNeither: byNeither.status,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ byCookie: [200, png], byNeither: 401 });
+  });
+
+  it("answers an id no Upload has with 404", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const unknown = yield* served.request("/api/uploads/0000000000000000/content");
+
+        return [unknown.status, yield* jsonOf(unknown)];
+      })
+    );
+
+    expect(result).toStrictEqual([404, { _tag: "UnknownUpload", id: "0000000000000000" }]);
+  });
+
+  it("answers 404 when the store confirms an Upload's bytes are gone", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* served.world.bytes.store.delete(Sha256.make(record.hash)).pipe(Effect.orDie);
+        const gone = yield* served.request(`/api/uploads/${record.id}/content`);
+
+        return { body: yield* jsonOf(gone), id: record.id, status: gone.status };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      body: { _tag: "UnknownUpload", id: result.id },
+      id: result.id,
+      status: 404,
+    });
+  });
+
+  it("answers 503 with no-store while the store cannot be reached, fails before the first byte, or Uploads are off", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        const answer = Effect.flatMap(
+          served.request(`/api/uploads/${record.id}/content`),
+          (response) =>
+            Effect.map(jsonOf(response), (body) => [
+              response.status,
+              response.headers.get("cache-control"),
+              body,
+            ])
+        );
+
+        yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+        const unreachable = yield* answer;
+
+        yield* setOption(served, "store.s3.endpoint", "http://bucket.test");
+        const { store } = served.world.bytes;
+
+        // A store that holds the bytes, and then fails the read before any arrives.
+        const failing: ByteStoreService = {
+          ...store,
+          read: () => Effect.succeed(Stream.fail(new ByteStoreUnavailable({ reason: "reset" }))),
+        };
+
+        Object.assign(served.world.bytes, { store: failing });
+        const reset = yield* answer;
+
+        Object.assign(served.world.bytes, { store });
+        yield* unsetOption(served, "store.s3.bucket");
+
+        return { off: yield* answer, reset, unreachable };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      off: [503, "no-store", { _tag: "StoreUnavailable", reason: "Uploads are off" }],
+      reset: [503, "no-store", { _tag: "StoreUnavailable", reason: "reset" }],
+      unreachable: [503, "no-store", { _tag: "StoreUnavailable", reason: "unreachable" }],
+    });
+  });
+});
+
+/** One Server-Sent Event, as the wire carries it. */
+interface Sse {
+  readonly id: string | undefined;
+  readonly event: string;
+  readonly data: string;
+}
+
+/** A stream of Server-Sent Events, read further as a test goes. */
+interface Following {
+  /** Reads until `enough` holds of every event read so far, and gives them all. */
+  readonly until: (enough: (events: readonly Sse[]) => boolean) => Effect.Effect<readonly Sse[]>;
+}
+
+/**
+ * One event, from the lines that make it.
+ * @param text - Its lines.
+ * @returns The event.
+ */
+const sseOf = (text: string): Sse => {
+  const fields = new Map(
+    text
+      .split("\n")
+      .map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 2)])
+  );
+
+  return {
+    data: fields.get("data") ?? "",
+    event: fields.get("event") ?? "message",
+    id: fields.get("id"),
+  };
+};
+
+/**
+ * Follows an SSE response until the test's Scope closes.
+ * @param response - The response.
+ * @returns How to read it further.
+ */
+const following = (response: Response) =>
+  Effect.gen(function* () {
+    const body: ReadableStream<Uint8Array> | null = response.body;
+    const reader = body?.getReader();
+
+    if (reader === undefined) {
+      return yield* Effect.die(new Error("the stream has no body"));
+    }
+
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        await reader.cancel();
+      })
+    );
+
+    const decoder = new TextDecoder();
+    const events: Sse[] = [];
+    let buffered = "";
+
+    const stream: Following = {
+      until: (enough) =>
+        Effect.promise(async () => {
+          while (!enough(events)) {
+            // oxlint-disable-next-line no-await-in-loop -- reading a stream in order
+            const chunk = await reader.read();
+
+            if (chunk.done) {
+              break;
+            }
+
+            buffered += decoder.decode(chunk.value, { stream: true });
+
+            for (let end = buffered.indexOf("\n\n"); end !== -1; end = buffered.indexOf("\n\n")) {
+              events.push(sseOf(buffered.slice(0, end)));
+              buffered = buffered.slice(end + 2);
+            }
+          }
+
+          return [...events];
+        }),
+    };
+
+    return stream;
+  });
+
+const changedOf = (events: readonly Sse[]) =>
+  events.flatMap((event) =>
+    event.event === "changed" ? [{ id: event.id, upload: decodeUpload(event.data) }] : []
+  );
+
+/**
+ * Opens the stream of Upload Changes, and waits for its first heartbeat, which says it has
+ * begun, so nothing made after this is made before the stream follows.
+ * @param served - The server.
+ * @param init - Its query and headers.
+ * @returns The stream.
+ */
+const openChanges = (
+  served: Served,
+  init: { readonly query?: string; readonly headers?: Readonly<Record<string, string>> } = {}
+) =>
+  Effect.gen(function* () {
+    const response = yield* served.request(`/api/uploads/changes${init.query ?? ""}`, {
+      ...(init.headers !== undefined && { headers: init.headers }),
+    });
+
+    const stream = yield* following(response);
+
+    yield* stream.until((events) => events.some((event) => event.event === "heartbeat"));
+
+    return stream;
+  });
+
+/**
+ * The first `count` Upload Changes a stream carries, once it has carried them.
+ * @param stream - The stream.
+ * @param count - How many.
+ * @returns Them.
+ */
+const changesOf = (stream: Following, count: number) =>
+  Effect.map(
+    stream.until((events) => changedOf(events).length >= count),
+    changedOf
+  );
+
+describe("the stream of Upload Changes", () => {
+  it("delivers an Upload made after it was opened, with its Change's sequence as id, and none from before", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* uploadedMany(served, 1);
+        const stream = yield* openChanges(served);
+        const record = yield* uploaded(served, png, "after.png");
+        const events = yield* changesOf(stream, 1);
+
+        return {
+          events: events.map((event) => event.upload),
+          id: Number(events[0]?.id) > 0,
+          record,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ events: [result.record], id: true, record: result.record });
+  });
+
+  it("replays exactly the Uploads made after `after`, then live ones, none twice", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const live = yield* openChanges(served);
+        const records = yield* uploadedMany(served, 3);
+        const seen = yield* changesOf(live, 3);
+        const resumed = yield* openChanges(served, { query: `?after=${seen[0]?.id ?? ""}` });
+        const fourth = yield* uploaded(served, png, "4.png");
+
+        return { fourth, records, resumed: yield* changesOf(resumed, 3), seen };
+      })
+    );
+
+    const [, second, third] = result.records;
+
+    expect(result.seen.map((event) => event.upload)).toStrictEqual(result.records);
+    expect(result.resumed.map((event) => event.upload)).toStrictEqual([
+      second,
+      third,
+      result.fourth,
+    ]);
+    expect(result.resumed.slice(0, 2).map((event) => event.id)).toStrictEqual(
+      result.seen.slice(1).map((event) => event.id)
+    );
+  });
+
+  it("resumes after Last-Event-ID over `after`, as a reconnecting EventSource sends both", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const live = yield* openChanges(served);
+        const records = yield* uploadedMany(served, 3);
+        const seen = yield* changesOf(live, 3);
+
+        const resumed = yield* openChanges(served, {
+          headers: { "last-event-id": seen[1]?.id ?? "" },
+          query: `?after=${seen[0]?.id ?? ""}`,
+        });
+
+        // One made after it, so the replay is known to be over when it arrives.
+        const fourth = yield* uploaded(served, png, "4.png");
+
+        return { fourth, records, resumed: yield* changesOf(resumed, 2) };
+      })
+    );
+
+    expect(result.resumed.map((event) => event.upload)).toStrictEqual([
+      result.records[2],
+      result.fourth,
+    ]);
   });
 });
