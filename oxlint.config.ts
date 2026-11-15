@@ -168,6 +168,12 @@ const toByteStore = ours(
   "`@iirc/byte-store` depends on no other package of ours."
 );
 
+// The link fetch port is pure: it says what may be fetched and how an answer is bounded, and
+// its adapter does the fetching. Nothing in it, its test kit included, reaches the world.
+const linkFetchAlone = "`@iirc/link-fetch` is pure: its adapter fetches, never the port.";
+
+const toLinkFetch = ours([], "`@iirc/link-fetch` depends on no other package of ours.");
+
 const viewless =
   "The web frontend's core is pure: no React, no DOM, no Effect services, and no clock. Its state is plain data, and React renders it from `apps/web`.";
 
@@ -237,6 +243,11 @@ const coreFence: OxlintOverride[] = [
   })),
   ...layer(["packages/byte-store/src/**"], (production) => ({
     "no-restricted-imports": imports(production, ...(production ? [adapters] : []), toByteStore),
+  })),
+  ...layer(["packages/link-fetch/src/**"], (production) => ({
+    "no-restricted-globals": globals(linkFetchAlone),
+    "no-restricted-imports": imports(production, adapters, toLinkFetch),
+    "no-restricted-properties": noMathRandom(linkFetchAlone),
   })),
   ...layer(["packages/frontend/src/**"], (production) => ({
     "no-restricted-globals": globals(viewless, browser),

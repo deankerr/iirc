@@ -1,0 +1,34 @@
+# @iirc/link-fetch-bun
+
+The guard: an adapter of the link fetch port on Bun's own `fetch`, which connects only to an address it checked. It provides `LinkFetch` given iirc's version.
+
+```ts
+import { layerBunLinkFetch, makeBunLinkFetch, systemResolver } from "@iirc/link-fetch-bun";
+
+layerBunLinkFetch({ version, policy?, resolver?, trust? }): Layer<LinkFetch>
+makeBunLinkFetch({ version, policy?, resolver?, trust? }): LinkFetchService
+
+Resolver: { resolve(name): Effect<readonly string[], LinkUnreachable> }   // every A and AAAA
+```
+
+Production gives the version alone, so it fetches under the fixed policy, resolves with `systemResolver`, which is `Bun.dns.lookup`, and trusts the system's roots. A test gives the loopback policy, a resolver it scripts, and its own certificate to `trust`, never turning verification off.
+
+## How a link is fetched
+
+- **Each hop resolves once, and connects to what it checked.** The name is resolved through the resolver, every record is checked by the policy, and the fetch names the checked address in its URL, IPv4 first, with `Host` and `tls.serverName` naming the link's own name. So SNI and the certificate are checked against the name, while the TCP peer is the address. It never fetches by name, so neither a name that answers differently the second time nor Bun's own DNS cache decides where a connection goes.
+- **Redirects are followed by hand,** at most three. Each `Location` is resolved against the link that redirected, by name, then parsed, checked, and pinned as a new link. A fourth is refused, and a redirect's body is never read.
+- **`proxy: false` always,** so `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` are ignored.
+- **What is sent:** `User-Agent: iirc/<version> (+https://github.com/deankerr/iirc) bot`, an `Accept` for the purpose, `Accept-Language: en, *;q=0.5`, and never a cookie or a `Referer`. A stream asks for its bytes as the host keeps them, with one `Range` when it has one, and a `206` is answered as it came.
+- **The body is read as a stream and never whole.** Bun decompresses it, and the bounds count what it gives. An image's leading bytes are read before it is answered, to match them to its header. A declared length over the bound, of bytes not compressed, is refused before any byte is read.
+
+## Failure
+
+A failure is told from the error's code, never its wording. A name that resolves to nothing, a refused or broken connection, and a certificate that does not name the link's name are `LinkUnreachable`. Anything that fails once the time is up is `LinkTimedOut`.
+
+## Tests
+
+`bun run test` runs the adversarial suite against servers on loopback ports the kernel picks, with the loopback policy and a scripted resolver. Waiting out the real 10 seconds takes `bun run e2e`, at the root or in this package, which runs `src/e2e/`.
+
+## Not yet
+
+- **Trying another checked address** when the first does not answer. A name is fetched at one address, IPv4 first.

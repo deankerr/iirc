@@ -84,11 +84,13 @@ Each package's README says what it does, what it guarantees, and what it does no
 | `packages/runtime` | no | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
 | `packages/timeline-store` | no | The Timeline store port, its in-memory adapter, and its laws |
 | `packages/byte-store` | no | The byte store port, its in-memory adapter, and its laws |
+| `packages/link-fetch` | no | The link fetch port, the address policy, and a fake adapter |
 | `packages/transport-bun` | no | The production Transport: TCP and TLS on Bun |
 | `packages/journal-sqlite` | no | The production Journal: Entries in SQLite |
 | `packages/vault-file` | no | The production Vault: Credentials in a `0600` file |
 | `packages/timeline-store-sqlite` | no | The production Timeline store, in SQLite |
 | `packages/byte-store-s3` | no | The byte store in an S3-compatible bucket |
+| `packages/link-fetch-bun` | no | The guard: fetches a stranger's link on Bun, pinned to the addresses it checked |
 | `packages/daemon` | no | The Daemon: wires it all together and serves the API |
 | `apps/iirc` | no | The `iirc` executable |
 | `apps/web` | no | The web frontend: React over its core, built with Vite |

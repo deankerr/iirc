@@ -57,8 +57,9 @@ flowchart LR
 | Clock | Tell the time, and wait until a time | Effect's `Clock` | Effect's `TestClock` |
 | Timeline store | Keep the Timelines folded from News, and answer windows, changes, and searches | `@iirc/timeline-store-sqlite` | the memory store in `@iirc/timeline-store/testing` |
 | Byte store | Keep bytes by their hash | `@iirc/byte-store-s3`: an S3-compatible bucket, where the Uploads keep their bytes | the memory store in `@iirc/byte-store/testing` |
+| Link fetch | Fetch a stranger's link, bounded, or refuse it | `@iirc/link-fetch-bun`: the guard, used by nothing yet | the fake in `@iirc/link-fetch/testing` |
 
-Ports are named for the job, not the technology behind them. Each port has laws that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake: the Runtime's in `@iirc/runtime/testing`, the Timeline store's in `@iirc/timeline-store/testing`, and the byte store's in `@iirc/byte-store/testing`.
+Ports are named for the job, not the technology behind them. A port has laws that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake: the Runtime's in `@iirc/runtime/testing`, the Timeline store's in `@iirc/timeline-store/testing`, and the byte store's in `@iirc/byte-store/testing`. The link fetch is the exception: its fake answers whatever it is told, so the guard proves itself against adversarial tests of its own.
 
 ## Packages
 

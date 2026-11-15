@@ -1,0 +1,20 @@
+{
+  "name": "@iirc/link-fetch-bun",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run --exclude 'src/e2e/**'",
+    "e2e": "bun --bun vitest run src/e2e"
+  },
+  "dependencies": {
+    "@iirc/link-fetch": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}
