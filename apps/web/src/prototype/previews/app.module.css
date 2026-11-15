@@ -1,0 +1,320 @@
+/* PROTOTYPE (#30): a rough iirc screen around the Timelines. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar,
+.toolbarWrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) dashed var(--color-level-highlight);
+  background: var(--color-surface);
+  font-size: 12px;
+}
+
+.toolbarCompact {
+  border-bottom: var(--border-width) dashed var(--color-level-highlight);
+  background: var(--color-surface);
+  font-size: 12px;
+}
+
+.toolbarCompact summary {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-level-highlight);
+}
+
+.protoName {
+  color: var(--color-level-highlight);
+  font-weight: normal;
+}
+
+.knob {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.knob > .dim {
+  margin-right: var(--space-1);
+}
+
+.option {
+  padding: 0 0.6ch;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.option[data-selected="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.dim {
+  color: var(--color-muted);
+}
+
+.stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  flex: 0 0 180px;
+  padding: var(--space-2) 0;
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.network,
+.item {
+  padding: var(--space-1) var(--space-3);
+}
+
+.network {
+  color: var(--color-muted);
+}
+
+.item {
+  padding-left: calc(var(--space-3) + 2ch);
+}
+
+.item[data-selected="true"] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane + .pane {
+  border-left: var(--border-width) solid var(--color-border);
+}
+
+.bar {
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  white-space: nowrap;
+}
+
+.barName {
+  color: var(--color-accent);
+}
+
+.barName[data-dim="true"] {
+  color: var(--color-muted);
+}
+
+.barRest {
+  overflow: hidden;
+  color: var(--color-muted);
+  text-overflow: ellipsis;
+}
+
+.scroller {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  container-type: inline-size;
+}
+
+.rows {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-bottom: var(--space-2);
+}
+
+.composer {
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  unicode-bidi: isolate;
+}
+
+.failMark {
+  color: var(--color-muted);
+  cursor: help;
+}
+
+/* What each case shows, in the column a delivery's state would be in. */
+.rowRel {
+  position: relative;
+}
+
+.note {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  align-self: start;
+  max-width: 22ch;
+  color: var(--color-level-highlight);
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.8;
+  text-align: right;
+}
+
+@container (max-width: 36em) {
+  .note {
+    display: none;
+  }
+}
+
+/* The phone: a device-sized frame on a desktop, or the whole screen on a small one. */
+.phoneStage {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--space-4);
+  background: var(--color-surface);
+}
+
+.phoneFrame,
+.phoneBleed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-background);
+}
+
+.phoneFrame {
+  width: 390px;
+  max-height: 844px;
+  flex: 0 0 auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 8px 30px var(--color-shadow);
+}
+
+.phoneBleed {
+  flex: 1;
+}
+
+.phoneFrame .pane,
+.phoneBleed .pane {
+  flex: 1;
+}
+
+.phoneBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.tab {
+  padding: var(--space-1) 1ch;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  font: inherit;
+}
+
+.tab[data-selected="true"] {
+  color: var(--color-accent);
+  box-shadow: inset 0 calc(-1 * var(--edge-width)) 0 var(--color-accent);
+}
+
+/* The larger view. */
+.largeDialog {
+  max-width: 100vw;
+  max-height: 100dvh;
+  width: 100vw;
+  height: 100dvh;
+  margin: 0;
+  padding: var(--space-4);
+  border: 0;
+  background: transparent;
+}
+
+.largeDialog[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.largeDialog::backdrop {
+  background: rgb(0 0 0 / 90%);
+}
+
+.largePane {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  background: rgb(0 0 0 / 90%);
+}
+
+.largeFigure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+}
+
+.largeMedia {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 7em);
+  min-height: 0;
+  object-fit: contain;
+}
+
+.largePane .largeMedia {
+  max-height: calc(100% - 3em);
+}
+
+.largeCaption {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  color: #d4d7d6;
+  font-size: 12px;
+}
+
+.largeCaption a {
+  overflow: hidden;
+  color: #8fd0cf;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.largeCaption .dim {
+  color: #9aa2a5;
+}

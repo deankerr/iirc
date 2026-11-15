@@ -1,0 +1,439 @@
+/* PROTOTYPE (#30): a Preview below its Message, in the text's column. */
+
+/* Under the text, in its column, as wide as the text may be. */
+.block {
+  grid-column: 3 / 4;
+  grid-row: 2;
+  position: relative;
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: min(100%, 72ch);
+  margin: var(--space-1) 0 var(--space-2);
+  font-size: 0.93em;
+}
+
+.block[data-frame="rule"] {
+  padding-left: var(--space-3);
+  box-shadow: inset var(--edge-width) 0 0 var(--color-border);
+}
+
+.block[data-frame="box"] {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+@container (max-width: 36em) {
+  .block {
+    max-width: 100%;
+  }
+
+}
+
+.items {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.items[data-several="row"] {
+  flex-flow: row wrap;
+}
+
+.items[data-several="row"] > .item {
+  flex: 1 1 14em;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.item {
+  min-width: 0;
+}
+
+/* The fold: a quiet chevron at the block's corner. */
+.fold,
+.summary,
+.chip,
+.show {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fold {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--space-3) - 1.4ch);
+  width: 1.4ch;
+  line-height: inherit;
+}
+
+.block[data-frame="box"] .fold {
+  left: calc(-1.6ch);
+  top: var(--space-2);
+}
+
+.fold:hover,
+.summary:hover,
+.chip:hover,
+.show:hover {
+  color: var(--color-accent);
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.summaryLine {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  color: var(--color-muted);
+}
+
+.chip {
+  white-space: nowrap;
+}
+
+.show {
+  padding: 0 1ch;
+  border: var(--border-width) dashed var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+}
+
+.dim {
+  color: var(--color-muted);
+}
+
+/* A page. */
+.pageText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.site {
+  color: var(--color-muted);
+}
+
+.title {
+  color: var(--color-text);
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.description {
+  color: var(--color-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pageThumb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.thumb {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.thumb img {
+  display: block;
+  width: 4.5em;
+  height: 4.5em;
+  object-fit: cover;
+  border-radius: var(--radius);
+}
+
+.pageCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pageCard .description {
+  -webkit-line-clamp: 3;
+}
+
+.pageLine {
+  display: flex;
+  gap: 1ch;
+  align-items: center;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pageLine .title {
+  display: block;
+  overflow: hidden;
+  font-weight: normal;
+  text-overflow: ellipsis;
+}
+
+.pageLine:hover .title {
+  text-decoration: underline;
+}
+
+.lineThumb {
+  flex-shrink: 0;
+  width: 1.3em;
+  height: 1.3em;
+  object-fit: cover;
+  border-radius: var(--radius);
+}
+
+/* Media, sized from its own width and height. */
+.mediaWrap {
+  position: relative;
+  max-width: 100%;
+}
+
+.media {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--color-surface);
+  cursor: zoom-in;
+}
+
+.mediaWrap > .media {
+  width: 100%;
+  height: 100%;
+}
+
+.media img,
+.media canvas,
+.video,
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.video,
+.frame {
+  border: 0;
+  border-radius: var(--radius);
+  background: #000;
+}
+
+.badge {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  padding: 0 0.6ch;
+  border-radius: var(--radius);
+  background: rgb(0 0 0 / 65%);
+  color: #fff;
+  font-size: 11px;
+}
+
+.expand {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  padding: 0 0.5ch;
+  border: 0;
+  border-radius: var(--radius);
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  font: inherit;
+  opacity: 0;
+  cursor: zoom-in;
+}
+
+.mediaWrap:hover .expand,
+.expand:focus-visible {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .expand {
+    opacity: 1;
+  }
+}
+
+/* A player: its poster, a play button, and where it plays from on hover. */
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 3em;
+  height: 3em;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 65%);
+  color: #fff;
+  transform: translate(-50%, -50%);
+}
+
+.where {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 2em);
+  padding: 0 0.8ch;
+  border-radius: var(--radius);
+  background: rgb(0 0 0 / 75%);
+  color: #fff;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 120ms;
+}
+
+.media:hover .where,
+.media:focus-visible .where {
+  opacity: 1;
+}
+
+.player .media {
+  cursor: pointer;
+}
+
+/* A sound: one quiet line. */
+.audio {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  max-width: 36em;
+  min-width: 0;
+}
+
+.audioButton {
+  flex-shrink: 0;
+  width: 2.2em;
+  padding: 0;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.audioName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audioTrack {
+  position: relative;
+  flex: 1;
+  min-width: 3em;
+  height: 2px;
+  background: var(--color-border);
+}
+
+.audioFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+}
+
+/* Loading. */
+.pendingLine {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  color: var(--color-muted);
+}
+
+.spinner {
+  width: 0.8em;
+  height: 0.8em;
+  border: var(--border-width) solid var(--color-muted);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(100%, 32em);
+}
+
+.skeleton span {
+  height: 0.8em;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton span:first-child {
+  width: 40%;
+}
+
+.block[data-frame="box"] .skeleton span {
+  background: var(--color-border);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .skeleton span {
+    animation: none;
+  }
+}
+
+/* With no senders' column to sit in, the fold sits at the block's own start. */
+@container (max-width: 36em) {
+  .fold,
+  .block[data-frame="box"] .fold {
+    position: static;
+    flex-shrink: 0;
+    align-self: flex-start;
+  }
+}
