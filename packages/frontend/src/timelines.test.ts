@@ -49,6 +49,7 @@ import {
   windowCap,
 } from "./timelines.ts";
 import type {
+  Divider,
   PaneChange,
   Place,
   Read,
@@ -56,6 +57,7 @@ import type {
   Timelines,
   TimelinesEvent,
   WindowRequest,
+  Zone,
 } from "./timelines.ts";
 
 // Wire forms, parsed as the API parses them, so every value here is one the runtime could
@@ -1482,7 +1484,23 @@ const rowText = (row: Row) => {
     return row.item.sequence;
   }
 
-  return row._tag === "Gap" ? `gap ${row.gap.count}` : "new";
+  switch (row._tag) {
+    case "Gap": {
+      return `gap ${row.gap.count}`;
+    }
+
+    case "Day": {
+      return `day ${row.at}`;
+    }
+
+    case "New": {
+      return "new";
+    }
+
+    default: {
+      return row satisfies never;
+    }
+  }
 };
 
 // The rows of a window holding the Timeline's items 30 and 40, with these Gaps, and whether
@@ -4853,5 +4871,257 @@ describe("removing a Network", () => {
       after: { _tag: "Offline", reason: undefined, since: 90 },
       before: { _tag: "Offline", reason: undefined, since: 90 },
     });
+  });
+});
+
+const hour = 3_600_000;
+
+// Midnight UTC on 2026-11-15.
+const midnightUtc = 1_794_700_800_000;
+
+/**
+ * The instant this many hours after midnight UTC on the 15th.
+ * @param hours - The hours.
+ * @returns The instant.
+ */
+const hoursIn = (hours: number) => midnightUtc + hours * hour;
+
+/**
+ * A zone that is the same offset at every instant.
+ * @param offset - The offset, in minutes east of UTC.
+ * @returns The zone.
+ */
+const fixed =
+  (offset: number): Zone =>
+  () =>
+    offset;
+
+/**
+ * A zone that is UTC, but cannot place one instant.
+ * @param instant - The instant.
+ * @returns The zone.
+ */
+const unplacedAt =
+  (instant: number): Zone =>
+  (at) =>
+    at === instant ? undefined : 0;
+
+/**
+ * The rows of a window holding items at these instants, each the next step, in a zone.
+ * @param instants - When each item is, in order.
+ * @param options - The zone, and what else the rows are made with.
+ * @returns The rows.
+ */
+const dayRows = (
+  instants: readonly number[],
+  options: {
+    readonly zone?: Zone;
+    readonly gaps?: readonly (typeof WindowGap.Encoded)[];
+    readonly divider?: Divider;
+    readonly shows?: (item: TimelineItem) => boolean;
+    readonly earlier?: boolean;
+  } = {}
+) => {
+  const state = reduceTimelines(following(), {
+    _tag: "WindowRead",
+    read: latestOf(three, 0),
+    window: decodeWindow({
+      earlier: options.earlier ?? false,
+      gaps: [...(options.gaps ?? [])],
+      items: encodedItems(instants.map((at, index) => message(idOf(3), at, index + 1))),
+      later: false,
+      network: "alpha",
+      through: 5,
+      timeline: idOf(3),
+      version: 1,
+    }),
+  });
+
+  const shown = opened(state);
+
+  return shown._tag === "Shown"
+    ? rowsOf(shown.window, options.divider, options.shows, options.zone)
+    : [];
+};
+
+/**
+ * Rows as the tests below compare them: an item by its sequence, a Day by the instant it
+ * says, and the others as `rowText` says.
+ * @param rows - The rows.
+ * @returns Each row's text.
+ */
+const dayText = (rows: readonly Row[]) => rows.map((row) => rowText(row));
+
+describe("where the day changes", () => {
+  it("says the day of a window's first item at its top, when the window begins mid-day", () => {
+    const at = midnightUtc + 15 * hour;
+
+    expect(dayText(dayRows([at, at + hour], { zone: fixed(0) }))).toStrictEqual([
+      `day ${at}`,
+      1,
+      2,
+    ]);
+  });
+
+  it("stands between the last item of one day and the first of the next, and not between items of one", () => {
+    const a = hoursIn(10);
+    const b = hoursIn(20);
+    const c = hoursIn(36);
+    const d = hoursIn(40);
+
+    expect(dayText(dayRows([a, b, c, d], { zone: fixed(0) }))).toStrictEqual([
+      `day ${a}`,
+      1,
+      2,
+      `day ${c}`,
+      3,
+      4,
+    ]);
+  });
+
+  it("begins at midnight in the zone, not in UTC", () => {
+    const east = fixed(600);
+    const before = midnightUtc + 13 * hour + 59 * 60_000;
+    const after = midnightUtc + 14 * hour + 60_000;
+    const late = midnightUtc + 23 * hour + 59 * 60_000;
+    const early = midnightUtc + 24 * hour + 60_000;
+
+    expect({
+      acrossLocalMidnight: dayText(dayRows([before, after], { zone: east })),
+      acrossUtcMidnight: dayText(dayRows([late, early], { zone: east })),
+      west: dayText(dayRows([before, after], { zone: fixed(-300) })),
+    }).toStrictEqual({
+      acrossLocalMidnight: [`day ${before}`, 1, `day ${after}`, 2],
+      acrossUtcMidnight: [`day ${late}`, 1, 2],
+      west: [`day ${before}`, 1, 2],
+    });
+  });
+
+  it("reads the offset in force at each instant, as a zone that changes it does", () => {
+    // Twelve hours ahead of UTC from noon on the 15th, as when a zone moves its clocks.
+    const moved: Zone = (at) => (at >= hoursIn(12) ? 720 : 0);
+    const first = hoursIn(11);
+    const second = hoursIn(12.5);
+    const third = hoursIn(23);
+
+    expect({
+      moving: dayText(dayRows([first, second, third], { zone: moved })),
+      still: dayText(dayRows([first, second, third], { zone: fixed(0) })),
+    }).toStrictEqual({
+      // Past the move, 12:30 UTC is half past midnight on the 16th, and 23:00 UTC is still it.
+      moving: [`day ${first}`, 1, `day ${second}`, 2, 3],
+      still: [`day ${first}`, 1, 2, 3],
+    });
+  });
+
+  it("stands in either direction, as a Network's time can go back", () => {
+    const [a, b] = [midnightUtc + 36 * hour, midnightUtc + 12 * hour];
+
+    expect(dayText(dayRows([a, b], { zone: fixed(0) }))).toStrictEqual([
+      `day ${a}`,
+      1,
+      `day ${b}`,
+      2,
+    ]);
+  });
+
+  it("is never before an item a view hides, and stands before the next one drawn", () => {
+    const a = hoursIn(10);
+    const hidden = hoursIn(36);
+    const c = hoursIn(37);
+
+    expect({
+      hiddenFirst: dayText(
+        dayRows([hidden, a, c], { shows: (item) => item.sequence !== 1, zone: fixed(0) })
+      ),
+      hiddenMiddle: dayText(
+        dayRows([a, hidden, c], { shows: (item) => item.sequence !== 2, zone: fixed(0) })
+      ),
+      sameDayAsHidden: dayText(
+        dayRows([a, hidden, c], { shows: (item) => item.sequence !== 1, zone: fixed(0) })
+      ),
+    }).toStrictEqual({
+      hiddenFirst: [`day ${a}`, 2, `day ${c}`, 3],
+      hiddenMiddle: [`day ${a}`, 1, `day ${c}`, 3],
+      sameDayAsHidden: [`day ${hidden}`, 2, 3],
+    });
+  });
+
+  it('stands after a Gap and before the "new" divider that come before the same item', () => {
+    const [a, b] = [midnightUtc + 10 * hour, midnightUtc + 34 * hour];
+    // A Gap that began after the first item, so it comes before the second.
+    const gaps = [{ count: 1, from: cursor(a, 1), to: cursor(b, 2) }];
+    const divider: Divider = { read: message(idOf(3), a, 1).position.at, timeline: three };
+
+    expect({
+      withGap: dayText(dayRows([a, b], { gaps, zone: fixed(0) })),
+      withGapAndDivider: dayText(dayRows([a, b], { divider, gaps, zone: fixed(0) })),
+    }).toStrictEqual({
+      withGap: [`day ${a}`, 1, "gap 1", `day ${b}`, 2],
+      withGapAndDivider: [`day ${a}`, 1, "gap 1", `day ${b}`, "new", 2],
+    });
+  });
+
+  it("is no row for an item the zone cannot place, which does not end the day it stands in", () => {
+    const a = hoursIn(10);
+    const b = hoursIn(11);
+    const c = hoursIn(12);
+
+    expect({
+      first: dayText(dayRows([a, b, c], { zone: unplacedAt(a) })),
+      middle: dayText(dayRows([a, b, c], { zone: unplacedAt(b) })),
+    }).toStrictEqual({
+      first: [1, `day ${b}`, 2, 3],
+      middle: [`day ${a}`, 1, 2, 3],
+    });
+  });
+
+  it("is no row without a zone", () => {
+    const instants = [10, 36, 60].map(hoursIn);
+
+    expect(dayText(dayRows(instants))).toStrictEqual([1, 2, 3]);
+  });
+
+  it("has a key that is the item's it stands before, so keys stay unique and stable", () => {
+    const instants = [10, 36, 60].map(hoursIn);
+    const all = dayRows(instants, { zone: fixed(0) });
+    const keys = all.map((row) => row.key);
+    const days = all.filter((row) => row._tag === "Day").map((row) => row.key);
+
+    expect({
+      days,
+      unique: new Set(keys).size === keys.length,
+    }).toStrictEqual({
+      days: instants.map((at, index) => `day-${cursor(at, index + 1)}`),
+      unique: true,
+    });
+  });
+
+  it("ends a run of failed Connections like any other row between them", () => {
+    const state = reduceTimelines(following(), {
+      _tag: "WindowRead",
+      read: latestOf(three, 0),
+      window: decodeWindow({
+        earlier: false,
+        gaps: [],
+        items: [
+          failure(midnightUtc + 10 * hour, 1),
+          failure(midnightUtc + 11 * hour, 2),
+          failure(midnightUtc + 36 * hour, 3),
+        ].map((item) => Schema.encodeSync(TimelineItem)(item)),
+        later: false,
+        network: "alpha",
+        through: 5,
+        timeline: idOf(3),
+        version: 1,
+      }),
+    });
+
+    const shown = opened(state);
+    const rows = shown._tag === "Shown" ? rowsOf(shown.window, undefined, undefined, fixed(0)) : [];
+
+    expect(
+      rows.map((row) => (row._tag === "Item" ? [row.item.sequence, row.repeated?.count] : row._tag))
+    ).toStrictEqual(["Day", [2, 2], "Day", [3, undefined]]);
   });
 });

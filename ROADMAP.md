@@ -9,7 +9,6 @@ The order bends to what the Owner finds in daily use. Refining what is built com
 Options under `ui`, shared by every device and overridable on one, as `ui.size` and `ui.font` are.
 
 - **How a line is laid out:** the nick in a column of its own, in the line, or above what was said, with a run of Messages from one User under one nick.
-- **A 12-hour clock,** and how a day is written.
 - **Styles of the Owner's own,** as CSS, for what no option covers.
 - **The palette as part of the Composer,** opening above it rather than over the middle of the page: one list for commands, completions and Timelines. To be tried before it is decided.
 
@@ -56,7 +55,7 @@ Small things, each independent of the rest.
 - **Invitations:** an invite shown with an offer to join.
 - **A menu on a nick,** wherever one is shown: look up, message, ignore, and op, voice, kick or ban where Self may.
 - **Writing:** keys for bold, italic and colour, shown as they will look; emoji completed from `:name`; and aliases of the Owner's own.
-- **Reading:** a line where the day changes; a run of joins, parts and quits folded into one line, with an option to hide those of Users who have not spoken; jumping to a date; and a Timeline exported as text.
+- **Reading:** a run of joins, parts and quits folded into one line, with an option to hide those of Users who have not spoken; jumping to a date; and a Timeline exported as text.
 - **The Sidebar in the Owner's order,** with Timelines pinned or muted.
 - **Away by itself,** when no Frontend has been open for a time the Owner sets.
 

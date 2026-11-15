@@ -27,7 +27,7 @@ A reducer over what the Frontend asked and what the API answered. The state is `
 
 Everything the Frontend holds of the Timelines, as a reducer (`reduceTimelines`) over what it read from the API and what the changes stream said. It never folds News: the Daemon does that, and this keeps what was read up to date.
 
-For each Network it holds its Timelines, its connection, and whether Self is away. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows.
+For each Network it holds its Timelines, its connection, and whether Self is away. For each Timeline a Pane has open it holds a window: its items in position order, its collapsed Gaps, and whether more lie earlier and later. `wanted` gives the reads to make, `followFrom` where to follow the stream from, `sidebar` the Networks as a sidebar lists them, `treeOf` a Network as its own Timeline's row with the rest under it, `chosenOf` and `elsewhereOf` what the focused Pane and the others show, and `rowsOf` a window as rows: its items, its Gaps, the "new" divider, and, given a time zone, a Day where the day changes.
 
 ### Reading and following
 
@@ -50,6 +50,7 @@ For each Network it holds its Timelines, its connection, and whether Self is awa
 - **Only the view says what the Owner has seen.** A window's `seen` is the last item the view's `Following` event said is in view, at the latest or not, so opening a Timeline never makes the core believe anything in it was read.
 - **The "new" divider stays where it was when the Timeline opened,** and does not jump as the Daemon's Read Marker moves.
 - **Failed Connections in a row are one row,** counted, when they are to the same Ircd for the same reason.
+- **A Day is derived as a window is read,** from the items either side of it, and never stored. It stands before each item drawn on a different day from the one drawn before it, and before the first drawn, so a window that begins mid-day says which day it is. A day begins at midnight in the zone `rowsOf` is given, which is the offset from UTC at an instant, since the core reads no zone itself, and an item the zone cannot place starts no day. With no zone there are no Days.
 - **A Gap before anything is no row.** A Gap that ended, with no item before it, in a window that holds the Timeline's start, says nothing was missed, so `rowsOf` leaves it out and the window keeps it. A Gap still open, or one before the first item of a window with older items beyond it, is a row. Items a view hides still count as before a Gap.
 
 ### What a Pane shows

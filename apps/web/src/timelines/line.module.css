@@ -23,7 +23,8 @@
 .activity,
 .refused,
 .session,
-.gap {
+.gap,
+.day {
   display: grid;
   grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) auto;
   column-gap: var(--space-3);
@@ -173,6 +174,32 @@
   border-top: var(--border-width) dashed var(--color-border);
 }
 
+/* Where the day changes: a calm rule through the senders' column, the day's words after it. */
+.day {
+  align-items: center;
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+  color: var(--color-muted);
+}
+
+.day .rule {
+  border-top-style: solid;
+}
+
+.dayText {
+  display: flex;
+  grid-column: 3 / -1;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.dayText::after {
+  content: "";
+  flex: 1;
+  border-top: var(--border-width) solid var(--color-border);
+}
+
 /* Where what is new begins, as the Timeline opened. */
 .new {
   display: flex;
@@ -210,14 +237,15 @@
   .activity,
   .refused,
   .session,
-  .gap {
+  .gap,
+  .day {
     display: block;
   }
 
   /*
    * As one run, a row's words wrap at the widest line from its start, the end's padding
-   * taking up the rest, so a Highlight's tint still runs the width. A Gap is no one's words,
-   * and runs the width as it does in columns. With no bound, the padding is as it was.
+   * taking up the rest, so a Highlight's tint still runs the width. A Gap or a Day is no
+   * one's words, and runs the width as it does in columns. With no bound, the padding is as it was.
    */
   .message,
   .highlight,
@@ -260,12 +288,13 @@
     white-space: normal;
   }
 
-  /* A Gap is a rule either side of its words, which wrap in the middle. */
+  /* A Gap or a Day is a rule either side of its words, which wrap in the middle. */
   .rule {
     display: none;
   }
 
-  .gapText {
+  .gapText,
+  .dayText {
     grid-column: auto;
     justify-content: center;
     text-align: center;
@@ -275,6 +304,12 @@
     content: "";
     flex: 1;
     border-top: var(--border-width) dashed var(--color-border);
+  }
+
+  .dayText::before {
+    content: "";
+    flex: 1;
+    border-top: var(--border-width) solid var(--color-border);
   }
 }
 

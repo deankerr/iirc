@@ -1,8 +1,8 @@
 /**
  * One row of a Timeline as a terminal line: the time, then a Message by its sender in
  * their colour, or a dimmer description of an Activity, marked in the senders' column as
- * WeeChat marks one, or of a Session, or a Gap as a divider, each one's words starting
- * where a Message's text does. In a Timeline too narrow for those columns, a row is one
+ * WeeChat marks one, or of a Session, or a Gap or the day changing as a divider, each one's
+ * words starting where a Message's text does. In a Timeline too narrow for those columns, a row is one
  * run of text that wraps under itself. Failed Connections in a row say how many and when.
  * Every name and every text a Network sent sits in its own isolate, as a text node.
  *
@@ -13,9 +13,10 @@ import { lineOf } from "@iirc/frontend/render";
 import type { Delivery, Part } from "@iirc/frontend/render";
 import type { Row } from "@iirc/frontend/timelines";
 
-import { timeShown } from "../options/ui.ts";
+import { dayShown, timeShown } from "../options/ui.ts";
 import { clockFor, datedClockFor, hasSeconds, sampleOf } from "../ui/clock.ts";
 import { dateOf, formattedAt } from "../ui/dates.ts";
+import { dayIso, dayWritten } from "../ui/day.ts";
 import { Inlines } from "./inlines.tsx";
 
 import styles from "./line.module.css";
@@ -158,6 +159,28 @@ const GapLine = ({ gap }: { readonly gap: Extract<Row, { _tag: "Gap" }>["gap"] }
 };
 
 /**
+ * Where the day changes: the day's words, as `ui.day` says, after a rule. Its time column is
+ * there and empty, so the line shows and lines up whether or not any line's time does.
+ * @param props - The instant of the first item of the day.
+ * @returns The divider.
+ */
+const DayLine = ({ at }: { readonly at: number }) => {
+  const format = useAtomValue(timeShown);
+  const written = dayWritten(useAtomValue(dayShown), at);
+  const iso = dayIso(at);
+
+  return (
+    <p className={styles.day}>
+      <span className={styles.time} data-sample={sampleOf(format)} />
+      <span aria-hidden className={styles.rule} />
+      <span className={styles.dayText}>
+        {written === undefined ? "an unknown day" : <time dateTime={iso}>{written}</time>}
+      </span>
+    </p>
+  );
+};
+
+/**
  * How many times a failed Connection repeated, and from when to when, as the times show.
  * @param props - How many, and the instants of the first and the latest.
  * @returns The words.
@@ -194,6 +217,10 @@ const toneClass = {
 const RowLine = ({ row }: { readonly row: Row }) => {
   if (row._tag === "Gap") {
     return <GapLine gap={row.gap} />;
+  }
+
+  if (row._tag === "Day") {
+    return <DayLine at={row.at} />;
   }
 
   if (row._tag === "New") {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dateOf, formattedAt } from "./dates.ts";
+import { dateOf, formattedAt, zone } from "./dates.ts";
 
 const clock = new Intl.DateTimeFormat("en-GB", {
   hour: "2-digit",
@@ -23,6 +23,20 @@ describe("an instant shown", () => {
       hostile: [undefined, undefined],
       negative: undefined,
       ordinary: "01:00",
+    });
+  });
+});
+
+describe("the device's zone", () => {
+  it("gives the offset in force at an instant in minutes east, and none past a Date's range", () => {
+    const at = new Date(2026, 10, 15, 12).getTime();
+
+    expect({
+      hostile: zone(9_000_000_000_000_000),
+      ordinary: zone(at),
+    }).toStrictEqual({
+      hostile: undefined,
+      ordinary: -new Date(at).getTimezoneOffset(),
     });
   });
 });

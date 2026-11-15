@@ -6,6 +6,7 @@
  *
  * @packageDocumentation
  */
+import type { Zone } from "@iirc/frontend/timelines";
 
 /**
  * The date of an instant, or none when a `Date` cannot hold it.
@@ -28,4 +29,17 @@ export const formattedAt = (format: Intl.DateTimeFormat, at: number): string | u
   const date = dateOf(at);
 
   return date === undefined ? undefined : format.format(date);
+};
+
+/**
+ * The device's time zone, as the core is given it: the offset from UTC in force at an
+ * instant, in minutes east, or none when a `Date` cannot hold the instant. This is the one
+ * place the page reads the zone, so a day begins at the device's midnight everywhere.
+ * @param at - The instant.
+ * @returns The offset, or none.
+ */
+export const zone: Zone = (at) => {
+  const date = dateOf(at);
+
+  return date === undefined ? undefined : -date.getTimezoneOffset();
 };

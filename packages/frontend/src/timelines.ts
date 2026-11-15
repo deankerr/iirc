@@ -3924,8 +3924,16 @@ export const treeOf = (network: SidebarNetwork): NetworkTree => {
 };
 
 /**
- * One row of a window as shown: an item, a collapsed Gap among them, or the "new" divider
- * before the first item after the Read Marker the Timeline opened with.
+ * A time zone, as the core is given it: the offset from UTC in force at an instant, in
+ * minutes east of it, or none when the instant cannot be placed, as one outside the range a
+ * `Date` holds. The core reads no zone itself, so a Frontend gives it the device's.
+ */
+export type Zone = (at: number) => number | undefined;
+
+/**
+ * One row of a window as shown: an item, a collapsed Gap among them, the "new" divider
+ * before the first item after the Read Marker the Timeline opened with, or a Day, where the
+ * day changes.
  */
 export type Row =
   | {
@@ -3940,7 +3948,13 @@ export type Row =
       readonly repeated?: Repeated;
     }
   | { readonly _tag: "Gap"; readonly key: string; readonly gap: WindowGap }
-  | { readonly _tag: "New"; readonly key: string };
+  | { readonly _tag: "New"; readonly key: string }
+  | {
+      readonly _tag: "Day";
+      readonly key: string;
+      /** The instant of the first item of the day, which a view writes as a date. */
+      readonly at: number;
+    };
 
 /** How many failed Connections one row stands for, and the instant of the first. */
 export interface Repeated {
@@ -3965,7 +3979,7 @@ const repeats = (item: TimelineItem, before: TimelineItem): boolean =>
  * The rows with each run of failed Connections that repeat one another made one: the
  * latest item, which a view draws with its hint, under the key of the first, which stays
  * as the run grows, with how many there were and when the first was. Only items next to
- * one another join, so a Gap, the "new" divider, or anything else between ends a run.
+ * one another join, so a Gap, the "new" divider, a Day, or anything else between ends a run.
  * @param rows - The rows.
  * @returns The rows, collapsed.
  */
@@ -4003,10 +4017,32 @@ const isNew = (divider: Divider, item: TimelineItem): boolean =>
 
 const gapRow = (gap: WindowGap): Row => ({ _tag: "Gap", gap, key: `gap-${cursorOf(gap.from)}` });
 
+const msPerDay = 86_400_000;
+const msPerMinute = 60_000;
+
+/**
+ * The day an instant falls on in a zone, as a count of days since the epoch's.
+ * @param zone - The zone.
+ * @param at - The instant.
+ * @returns The day, or none when the zone cannot place the instant.
+ */
+const dayOf = (zone: Zone, at: number): number | undefined => {
+  const offset = zone(at);
+
+  return offset === undefined ? undefined : Math.floor((at + offset * msPerMinute) / msPerDay);
+};
+
 /**
  * A window's rows: its items in order, each collapsed Gap after the items at or before
  * where it began, and with a divider, the "new" divider before the first item after its
  * Read Marker, if the window holds one. Each row's key is stable as rows are added around it.
+ *
+ * Given a zone, a Day row stands before each item drawn on a different day from the item
+ * drawn before it, in either direction since a Network's time can go back, and before the
+ * first item drawn, so a window that begins mid-day says which day it is. A day begins at
+ * midnight in the zone. An item the zone cannot place starts no day and does not end one.
+ * A Day comes after any Gap and before the "new" divider that stand before the same item.
+ * With no zone, there are no Day rows.
  *
  * A Gap that ended, with no item of the Timeline before it, in a window that holds the
  * Timeline's start, says nothing: nothing was there to miss. It is left out of the rows and
@@ -4016,12 +4052,14 @@ const gapRow = (gap: WindowGap): Row => ({ _tag: "Gap", gap, key: `gap-${cursorO
  * @param window - The window.
  * @param divider - The divider, if the Timeline opened with something unread.
  * @param shows - Which items are drawn, or every one.
+ * @param zone - The zone a day is read in, if the rows should show where it changes.
  * @returns The rows.
  */
 export const rowsOf = (
   window: Window,
   divider?: Divider,
-  shows: (item: TimelineItem) => boolean = () => true
+  shows: (item: TimelineItem) => boolean = () => true,
+  zone?: Zone
 ): readonly Row[] => {
   const rows: Row[] = [];
   let next = 0;
@@ -4029,6 +4067,8 @@ export const rowsOf = (
   let waiting = divider !== undefined;
   // Whether an item stands before what comes next, drawn or not.
   let anyBefore = false;
+  // The day of the last item drawn that the zone could place.
+  let today: number | undefined;
 
   /**
    * Draws a Gap, unless it is one of nothing: one that ended before the start of a
@@ -4055,6 +4095,13 @@ export const rowsOf = (
 
     if (!shows(item)) {
       continue;
+    }
+
+    const day = zone === undefined ? undefined : dayOf(zone, item.position.at);
+
+    if (day !== undefined && day !== today) {
+      today = day;
+      rows.push({ _tag: "Day", at: item.position.at, key: `day-${cursorOf(item.position)}` });
     }
 
     if (waiting && divider !== undefined && isNew(divider, item)) {
