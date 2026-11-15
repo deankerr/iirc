@@ -67,10 +67,14 @@ const uploadOf = (letter: string, type: string, name?: string): typeof Upload.En
  * A page signed in to the fake, showing the options, following them and the Uploads, and
  * rendered.
  * @param fake - The fake Daemon.
+ * @param waits - Waits other than the tests' defaults.
  * @returns The registry and the page.
  */
-const page = async (fake: ReturnType<typeof fakeDaemon>) => {
-  const registry = registryFor(fake.fetch);
+const page = async (
+  fake: ReturnType<typeof fakeDaemon>,
+  waits: Parameters<typeof registryFor>[1] = {}
+) => {
+  const registry = registryFor(fake.fetch, waits);
 
   await run(registry, check, undefined);
   registry.mount(optionsSync);
@@ -414,6 +418,26 @@ describe("the Uploads beside the options", () => {
     ]);
     expect(moreButton(container)).toBeUndefined();
     expect(fake.daemon.uploadPagesRead).toStrictEqual([undefined]);
+  });
+
+  it("gives up a first page that stalls, and reads it again", async () => {
+    const fake = signedIn(cat);
+
+    fake.daemon.holdUploadPages = true;
+
+    const { container } = await page(fake, { idle: "100 millis" });
+
+    await eventually(() => fake.daemon.uploadPagesRead.length >= 2);
+    await doing(() => {
+      fake.daemon.holdUploadPages = false;
+
+      for (const release of fake.daemon.uploadPagesHeld.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => listed(container).length === 1);
+
+    expect(names(container)).toStrictEqual(["Cat picture.png"]);
   });
 
   it("forgets the Uploads on signing out", async () => {

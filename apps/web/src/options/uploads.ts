@@ -101,8 +101,9 @@ export const uploadsSync = runtime
       const schedule = yield* retrying;
 
       const follow = Effect.gen(function* () {
+        // Bounded as the stream is, so a page read that stalls is given up and tried again.
         if (registry.get(uploadsState).through === undefined) {
-          yield* readPage(registry, undefined);
+          yield* readPage(registry, undefined).pipe(Effect.timeout(idle));
         }
 
         const { through } = registry.get(uploadsState);
