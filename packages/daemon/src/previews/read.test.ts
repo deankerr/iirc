@@ -670,3 +670,101 @@ describe("the players a page names", () => {
     ]);
   });
 });
+
+const GIPHY = "https://media.giphy.com/media/X/giphy.mp4";
+
+const STREAMABLE =
+  "https://cdn-cf-east.streamable.com/video/mp4/x.mp4?Expires=1700000000&Signature=abc~def";
+
+describe("the video file a page names", () => {
+  it("reads Giphy's head: its og:video of type video/mp4, beside its image and player", () => {
+    const page = read(`<title>A cat</title>
+      <meta property="og:video" content="${GIPHY}">
+      <meta property="og:video:secure_url" content="${GIPHY}">
+      <meta property="og:video:type" content="video/mp4">
+      <meta property="og:image" content="https://media.giphy.com/media/X/giphy.gif">
+      <meta name="twitter:player" content="https://giphy.com/embed/X/video">`);
+
+    expect(page.video).toStrictEqual({ link: GIPHY, type: "video/mp4" });
+    expect(page.image).toBe("https://media.giphy.com/media/X/giphy.gif");
+  });
+
+  it("reads Streamable's head, its signed address with the entities decoded", () => {
+    const page = read(`<title>A clip</title>
+      <meta property="og:video" content="${STREAMABLE.replaceAll("&", "&amp;")}">
+      <meta property="og:video:type" content="video/mp4">
+      <meta property="og:image" content="https://cdn-cf-east.streamable.com/image/x.jpg">
+      <meta name="twitter:player" content="https://streamable.com/e/x">`);
+
+    expect(page.video).toStrictEqual({ link: STREAMABLE, type: "video/mp4" });
+  });
+
+  it("prefers og:video:secure_url, then og:video:url, then og:video", () => {
+    const type = `<meta property="og:video:type" content="video/webm">`;
+
+    expect(
+      read(`${type}<meta property="og:video" content="https://c.example/v.webm">
+        <meta property="og:video:url" content="https://b.example/v.webm">
+        <meta property="og:video:secure_url" content="https://a.example/v.webm">`).video
+    ).toStrictEqual({ link: "https://a.example/v.webm", type: "video/webm" });
+    expect(
+      read(`${type}<meta property="og:video" content="https://c.example/v.webm">
+        <meta property="og:video:url" content="https://b.example/v.webm">`).video?.link
+    ).toBe("https://b.example/v.webm");
+  });
+
+  it("keeps the type's essence, lower-cased, without its parameters", () => {
+    expect(
+      read(`<meta property="og:video" content="${GIPHY}">
+        <meta property="og:video:type" content=" Video/MP4 ; codecs=avc1 ">`).video
+    ).toStrictEqual({ link: GIPHY, type: "video/mp4" });
+  });
+
+  it("resolves the address against the page's, and takes only http or https", () => {
+    expect(
+      read(`<meta property="og:video" content="/v/1.mp4">
+        <meta property="og:video:type" content="video/mp4">`).video?.link
+    ).toBe("https://example.com/v/1.mp4");
+    expect(
+      read(`<meta property="og:video:secure_url" content="javascript:alert(1)">
+        <meta property="og:video" content="${GIPHY}">
+        <meta property="og:video:type" content="video/mp4">`).video?.link
+    ).toBe(GIPHY);
+    expect(
+      read(`<meta property="og:video" content="data:video/mp4;base64,AAAA">
+        <meta property="og:video:type" content="video/mp4">`).video
+    ).toBeUndefined();
+  });
+
+  it("is absent for a player in a frame: YouTube's text/html type", () => {
+    expect(
+      read(`<meta property="og:video:url" content="https://www.youtube.com/embed/dQw4w9WgXcQ">
+        <meta property="og:video:type" content="text/html">`).video
+    ).toBeUndefined();
+  });
+
+  it("is absent when the page gives no type, or one that is not a plain video type", () => {
+    const named = (type: string | undefined) =>
+      read(
+        `<meta property="og:video" content="${GIPHY}">${
+          type === undefined ? "" : `<meta property="og:video:type" content="${type}">`
+        }`
+      ).video;
+
+    expect([
+      named(undefined),
+      named(""),
+      named("application/x-shockwave-flash"),
+      named("video"),
+      named("video/"),
+      named("video/mp4 extra"),
+      named("video/mp4/x"),
+      named("video/<b>"),
+      named("audio/mpeg"),
+    ]).toStrictEqual(Array.from({ length: 9 }, () => {}));
+  });
+
+  it("is absent when the page names no video address", () => {
+    expect(read(`<meta property="og:video:type" content="video/mp4">`).video).toBeUndefined();
+  });
+});

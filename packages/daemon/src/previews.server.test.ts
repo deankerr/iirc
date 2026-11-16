@@ -346,6 +346,7 @@ const media = (link: string, kind: string, type: string) => ({
     image: null,
     kind,
     link,
+    media: kind === "image" ? null : link,
     player: null,
     site: new URL(link).host,
     title: null,
@@ -398,6 +399,7 @@ describe("Previews over a real server", () => {
               image: null,
               kind: "page",
               link: "https://cats.example/",
+              media: null,
               player: null,
               site: "Cat News",
               title: "Cats",
@@ -811,6 +813,7 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     image: null,
     kind: "page",
     link: "https://page.example/",
+    media: null,
     player: null,
     site: "page.example",
     title: null,
@@ -1415,6 +1418,7 @@ describe("a Preview's image over a real server", () => {
         image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
         kind: "page",
         link: CAT,
+        media: null,
         player: null,
         site: "cat.example",
         title: "Cat",
@@ -1477,6 +1481,7 @@ describe("a Preview's image over a real server", () => {
         image: { animated: true, hash: sha256(gif), size: gif.length, type: "image/gif" },
         kind: "image",
         link,
+        media: null,
         player: null,
         site: "image.example",
         title: null,
@@ -1550,6 +1555,7 @@ describe("a Preview's image over a real server", () => {
         image: null,
         kind: "page",
         link: CAT,
+        media: null,
         player: null,
         site: "cat.example",
         title: "Cat",
@@ -3530,6 +3536,7 @@ describe("a player over a real server", () => {
         image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
         kind: "player",
         link: CLIP,
+        media: null,
         player: { link: VIMEO, size: { height: 720, width: 1280 } },
         site: "clip.example",
         title: "Clip",
@@ -3749,5 +3756,100 @@ describe("a player over a real server", () => {
         player: { link: VIMEO, size: { height: 720, width: 1280 } },
       },
     });
+  });
+});
+
+describe("a page that names a video file over a real server", () => {
+  const WATCH = "https://streamable.com/x";
+  const FILE =
+    "https://cdn-cf-east.streamable.com/video/mp4/x.mp4?Expires=1700000000&Signature=abc";
+  const POSTER = "https://cdn-cf-east.streamable.com/image/x.jpg";
+
+  // Streamable's head: the file, its type, a poster, and a player of its own beside them.
+  const streamable = page(
+    `<title>A clip</title><meta property="og:image" content="${POSTER}">` +
+      `<meta property="og:video" content="${FILE.replaceAll("&", "&amp;")}">` +
+      `<meta property="og:video:type" content="video/mp4">` +
+      `<meta name="twitter:player" content="https://streamable.com/e/x">`
+  );
+
+  const answers = {
+    [FILE]: { body: clip, type: "video/mp4" },
+    [POSTER]: { body: png, type: "image/png" },
+    [WATCH]: streamable,
+  };
+
+  it("is a video with its page's image as the poster, the player list notwithstanding, and nothing else fetched or kept", async () => {
+    const result = await run(answers, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        yield* setPlayers(served, ["streamable.com"]);
+        const { asked, state } = yield* previewedOn(served, WATCH);
+        const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+
+        return {
+          asked,
+          held: yield* served.world.bytes.store.held,
+          poster: yield* bytesOf(response),
+          state,
+        };
+      })
+    );
+
+    expect(result.state).toStrictEqual({
+      _tag: "Ready",
+      preview: {
+        description: null,
+        image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
+        kind: "video",
+        link: WATCH,
+        media: FILE,
+        player: null,
+        site: "streamable.com",
+        title: "A clip",
+        type: "video/mp4",
+      },
+    });
+    expect(result.asked).toStrictEqual([
+      { link: WATCH, purpose: asPageAgain },
+      { link: POSTER, purpose: asImage },
+    ]);
+    expect(result.poster).toStrictEqual(png);
+    expect(result.held).toBe(png.length);
+  });
+
+  it("is a video with no image under links only, fetching nothing but the page", async () => {
+    const result = await run(answers, (served) => previewedOn(served, WATCH, "links only"));
+
+    expect(result.asked).toStrictEqual([{ link: WATCH, purpose: asPageAgain }]);
+    expect(result.state?._tag === "Ready" ? result.state.preview : undefined).toMatchObject({
+      image: null,
+      kind: "video",
+      media: FILE,
+      type: "video/mp4",
+    });
+  });
+
+  it("streams the file the page names, not the page, passing a Range through, once it is asked", async () => {
+    const result = await run(answers, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        const { id, place } = yield* linked(served, `watch ${WATCH}`);
+        const before = yield* served.asked;
+        const response = yield* stream(served, place, id, { headers: { range: "bytes=10-19" } });
+        const body = yield* bytesOf(response);
+
+        return { after: yield* served.asked, before, body, response };
+      })
+    );
+
+    expect(streamsOf(result.before)).toStrictEqual([]);
+    expect(result.before.map((one) => one.link)).not.toContain(FILE);
+    expect(result.response.status).toBe(206);
+    expect(result.response.headers.get("content-range")).toBe("bytes 10-19/256");
+    expect(result.body).toStrictEqual(clip.slice(10, 20));
+    expect(streamsOf(result.after)).toStrictEqual([
+      { link: FILE, purpose: { kind: "stream", range: { end: 20, start: 10 } } },
+    ]);
   });
 });

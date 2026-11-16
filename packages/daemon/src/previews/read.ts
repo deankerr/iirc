@@ -11,10 +11,20 @@ export interface PlayerCandidate {
 }
 
 /**
+ * A video file a page names, as an address kept as data: nothing here fetches it. The type is
+ * the page's own, parsed down to its essence.
+ */
+export interface PageVideo {
+  readonly link: string;
+  readonly type: string;
+}
+
+/**
  * What a page says of itself. The image is an address kept as data: nothing here fetches it.
  * The oEmbed address is the one the page itself names, for the Daemon to fetch and then fill
  * the gaps with {@link fillFromOembed}. The players are the ones it names, in the order they
- * are tried, and are present only when it names one.
+ * are tried, and are present only when it names one. The video is the file it names with a
+ * `video/*` type, which is not a player, and is present only when it names one.
  */
 export interface PageRead {
   readonly title?: string;
@@ -25,6 +35,7 @@ export interface PageRead {
   readonly imageHeight?: number;
   readonly oembed?: string;
   readonly players?: readonly PlayerCandidate[];
+  readonly video?: PageVideo;
 }
 
 const TITLE_LIMIT = 200;
@@ -382,6 +393,7 @@ interface Draft {
   imageHeight?: number;
   oembed?: string;
   players?: readonly PlayerCandidate[];
+  video?: PageVideo;
 }
 
 // A size is one whole number of CSS pixels, in plain decimal digits and more than zero.
@@ -426,6 +438,29 @@ const playersOf = (meta: ReadonlyMap<string, string>, base: string): PlayerCandi
   return [...found.values()];
 };
 
+const VIDEO_TYPE = /^video\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u;
+
+// The video file a page names: its first address, with the essence of the type it gives it.
+// `text/html`, as YouTube says of its player, a missing type, or one that is not a plain
+// `video/*` is a player in a frame at most, never a file.
+const videoOf = (meta: ReadonlyMap<string, string>, base: string): PageVideo | undefined => {
+  const type = (firstOf(meta, ["og:video:type"])?.split(";")[0] ?? "").trim().toLowerCase();
+
+  if (!VIDEO_TYPE.test(type)) {
+    return undefined;
+  }
+
+  for (const key of ["og:video:secure_url", "og:video:url", "og:video"]) {
+    const link = httpAddress(firstOf(meta, [key]), base);
+
+    if (link !== undefined) {
+      return { link, type };
+    }
+  }
+
+  return undefined;
+};
+
 /**
  * A page's head and its Content-Type in, what it says of itself out.
  *
@@ -466,6 +501,7 @@ export const readPage = (input: {
 
   const page: Draft = {};
   const players = playersOf(meta, base);
+  const video = videoOf(meta, base);
 
   if (title !== undefined) {
     page.title = title;
@@ -491,6 +527,10 @@ export const readPage = (input: {
 
   if (players.length > 0) {
     page.players = players;
+  }
+
+  if (video !== undefined) {
+    page.video = video;
   }
 
   return page;

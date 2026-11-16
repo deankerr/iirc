@@ -237,6 +237,7 @@ const mediaPreview = (link: string, type: string): Read => {
             image: null,
             kind,
             link,
+            media: kind === "image" ? null : link,
             player: null,
             site: hostOf(link),
             title: null,
@@ -362,8 +363,8 @@ const answered = (fetched: Fetched) =>
 
 /**
  * A page's Preview, from what it said of itself, filled from the oEmbed address it names,
- * with the image it names, which is a player's poster when the first player it names is on
- * the list. Nothing is fetched from the player's address. The page's own fetch is over by
+ * with the image it names, which is the poster of a video file it names, or of a player when
+ * the first player it names is on the list. Nothing is fetched from either's address. The page's own fetch is over by
  * now, so it holds no place with the pacer while its oEmbed waits for one.
  * @param links - The link fetch.
  * @param link - The link the page answered as.
@@ -382,10 +383,19 @@ const pageRead = (
 
     const player = playerOf(page.players ?? [], hosts);
 
-    // A player is something to show even with no words of its own.
-    if (page.title === undefined && page.description === undefined && player === undefined) {
+    // A video file or a player is something to show even with no words of its own.
+    if (
+      page.title === undefined &&
+      page.description === undefined &&
+      player === undefined &&
+      page.video === undefined
+    ) {
       return failedRead("NothingToShow");
     }
+
+    // A page that names a video file is a video, whatever player it names beside it.
+    const { video } = page;
+    const kind = video === undefined ? (player === undefined ? "page" : "player") : "video";
 
     const read: Read = {
       image: page.image,
@@ -394,12 +404,13 @@ const pageRead = (
         preview: {
           description: page.description ?? null,
           image: null,
-          kind: player === undefined ? "page" : "player",
+          kind,
           link,
-          player: player ?? null,
+          media: video?.link ?? null,
+          player: video === undefined ? (player ?? null) : null,
           site: page.site ?? hostOf(link),
           title: page.title ?? null,
-          type: null,
+          type: video?.type ?? null,
         },
       },
     };
@@ -965,7 +976,12 @@ export const layerPreviews = Layer.effect(Previews)(
               ? kept.value.state.preview
               : undefined;
 
-          if (preview === undefined || (preview.kind !== "video" && preview.kind !== "audio")) {
+          // Only a video or sound, and only from the address its Preview recorded.
+          if (
+            preview === undefined ||
+            (preview.kind !== "video" && preview.kind !== "audio") ||
+            preview.media === null
+          ) {
             return yield* new UnknownStream({ id });
           }
 
@@ -981,7 +997,7 @@ export const layerPreviews = Layer.effect(Previews)(
 
           const fetched = yield* links
             .fetch(
-              preview.link,
+              preview.media,
               asking === undefined ? { kind: "stream" } : { kind: "stream", range: asking }
             )
             .pipe(
