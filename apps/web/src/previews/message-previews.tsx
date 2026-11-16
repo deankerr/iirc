@@ -256,9 +256,9 @@ const PreviewPlayer = ({
 };
 
 /**
- * A page's video: its text with its poster under it and a play button over the poster, or
- * beside the text with no poster or once it fails to load, and the control that opens it
- * large in the poster's corner. Pressing play swaps the poster for the video in the same
+ * A page's video: its text with its poster under it, a play button over the poster, and the
+ * control that opens it large in the poster's corner; a poster that fails to load leaves
+ * the video as a link to one is drawn, the browser's own player with that control. Pressing play swaps the poster for the video in the same
  * place, already playing, which streams only then. Where it fails to play, the text
  * stands alone.
  * @param props - The video's media, its poster, the page's link, what to call it, and its
@@ -288,6 +288,10 @@ const PosterVideo = ({
     return text;
   }
 
+  const fail = () => {
+    setFailed(true);
+  };
+
   if (playing) {
     return (
       <VideoFrame
@@ -297,9 +301,7 @@ const PosterVideo = ({
             link={link}
             media={media}
             name={name}
-            onError={() => {
-              setFailed(true);
-            }}
+            onError={fail}
             poster={poster}
           />
         }
@@ -308,8 +310,26 @@ const PosterVideo = ({
     );
   }
 
+  // A poster that fails is a video with none, as a link to one is, with its own ⤢.
+  const without = (
+    <VideoFrame
+      box={
+        <VideoPlayer
+          autoPlay={false}
+          link={link}
+          media={media}
+          name={name}
+          onError={fail}
+          poster={undefined}
+        />
+      }
+      text={text}
+    />
+  );
+
   return (
     <PreviewPoster
+      without={without}
       corner={
         <EnlargeControl large={{ _tag: "Video", poster, src: media.src }} link={link} name={name} />
       }

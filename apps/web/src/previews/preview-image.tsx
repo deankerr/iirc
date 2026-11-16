@@ -437,10 +437,10 @@ const FramePoster = ({
  * A poster, a player's or a video's: a still image with its play button over the middle,
  * under the text above it, and what else sits in its corner. It opens nothing when pressed
  * except the play button, which calls `play.onPlay`. Where it fails to load, or to be
- * fetched, what stands without it shows instead, the text with the same play button beside
- * it.
- * @param props - The poster, its play button, what else sits in its corner, and the text
- * above it.
+ * fetched, what stands without it shows instead: the one given, or else the text with the
+ * same play button beside it.
+ * @param props - The poster, its play button, what else sits in its corner, the text above
+ * it, and what stands without it, if not the text and the button.
  * @returns The poster with its text, or what stands without it.
  */
 export const PreviewPoster = ({
@@ -448,13 +448,15 @@ export const PreviewPoster = ({
   image,
   play,
   text,
+  without: given,
 }: {
   readonly corner: ReactNode;
   readonly image: ImageShown;
   readonly play: Play;
   readonly text: ReactElement;
+  readonly without?: ReactElement | undefined;
 }) => {
-  const without = (
+  const without = given ?? (
     <>
       {text}
       <PlayButton {...play} over="text" />

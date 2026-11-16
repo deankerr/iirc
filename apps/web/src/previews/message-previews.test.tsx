@@ -986,6 +986,31 @@ describe("a Message's Previews", () => {
       }).toStrictEqual({ enlarge: true, preload: "none", src: streamOfCats });
     });
 
+    it("draws the video as it is, with the control to open it large, when its poster fails to load", async () => {
+      await withVideo();
+
+      await act(async () => {
+        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+        await Promise.resolve();
+      });
+
+      const video = list()?.querySelector("video");
+
+      expect({
+        enlarge: imageButton(`Open ${name} large`) !== null,
+        image: list()?.querySelector("img"),
+        poster: video?.getAttribute("poster") ?? null,
+        preload: video?.getAttribute("preload"),
+        src: video?.getAttribute("src"),
+      }).toStrictEqual({
+        enlarge: true,
+        image: null,
+        poster: null,
+        preload: "none",
+        src: streamOfCats,
+      });
+    });
+
     it("leaves the text alone when it fails to play", async () => {
       await withVideo();
       await pressed(play());
