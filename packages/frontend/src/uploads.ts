@@ -12,7 +12,9 @@
  * @packageDocumentation
  */
 import { uploadNameMaxLength } from "@iirc/api";
-import type { Upload, UploadId } from "@iirc/api";
+import type { TimelineItem, Upload, UploadId } from "@iirc/api";
+
+import { contained } from "./contained.ts";
 
 /**
  * The Uploads held, newest first, where the next page begins, and how far they were
@@ -56,8 +58,8 @@ export interface UploadsPage {
  *
  * - `Paged`: a page was read, from just after `after`, or the first page when none.
  * - `Changed`: the stream gave an Upload whole, as it is now, by the Change at `sequence`.
- * - `Answered`: the Daemon answered a rename or a delete with the Upload as it is now,
- *   ahead of the Change the stream gives for it.
+ * - `Answered`: the Daemon answered a rename, a delete, or a read with the Upload as it is
+ *   now, ahead of any Change the stream gives for it.
  * - `Missing`: the stream gave the ids of every Upload whose bytes are gone, whole, which
  *   replaces those held.
  * - `DeletedShown`: the Owner chose whether the deleted Uploads show, which starts the list
@@ -439,4 +441,40 @@ export const sizeText = (size: number): string => {
   const shown = value < 9.95 ? value.toFixed(1) : Math.round(value).toFixed(0);
 
   return `${shown} ${units[unit]}`;
+};
+
+/**
+ * Where an Upload was said, in words: the Network and the Target of a Message, the
+ * Target's direction marks closed so they reach nothing after it.
+ * @param item - The Message.
+ * @returns The words, such as `libera #iirc`.
+ */
+export const saidPlace = (item: TimelineItem): string =>
+  item.content._tag === "Message"
+    ? `${item.network} ${contained(item.content.target)}`
+    : item.network;
+
+/**
+ * The Uploads held whose link a Message of ours among some items holds, as `/<id>/`, by
+ * its own text or the text the Ircd confirmed: those whose `said` the items may have
+ * changed, to be read again, since no Upload Change says so. Each is given once, in the
+ * order held.
+ * @param state - The Uploads held.
+ * @param items - The items, as a change of the Timelines gave them.
+ * @returns Their ids.
+ */
+export const saidIn = (state: Pick<Uploads, "uploads">, items: readonly TimelineItem[]) => {
+  const texts = items.flatMap(({ content }) => {
+    if (content._tag !== "Message" || content.ours === null) {
+      return [];
+    }
+
+    const { delivery } = content.ours;
+
+    return delivery._tag === "Confirmed" ? [content.text, delivery.text] : [content.text];
+  });
+
+  return state.uploads.flatMap(({ id }) =>
+    texts.some((text) => text.includes(`/${id}/`)) ? [id] : []
+  );
 };
