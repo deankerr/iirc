@@ -1,13 +1,14 @@
 /**
  * The fake link fetch: answers recorded responses by link, as the guard would for the
- * purpose asked, and records what was asked.
+ * purpose asked, paced as the guard is, and records what was fetched.
  *
  * @packageDocumentation
  */
-import { Effect, Ref, Stream } from "effect";
+import { Effect, Latch, Ref, Stream } from "effect";
 
 import { LinkTooLarge, LinkUnreachable, LinkWrongType, limits } from "../link-fetch.ts";
 import type { Fetched, LinkFetchFailure, LinkFetchService, Purpose } from "../link-fetch.ts";
+import { makePacer } from "../pacer.ts";
 
 /** A response to answer, with the status 200 and no headers beyond its type unless given. */
 export interface Recorded {
@@ -22,16 +23,28 @@ export interface Recorded {
 /** What a link answers: a response, or a failure. */
 export type Answer = Recorded | LinkFetchFailure;
 
-/** One fetch asked of the fake. */
+/** One fetch made by the fake, once its turn came. */
 export interface Asked {
   readonly link: string;
   readonly purpose: Purpose;
 }
 
-/** The fake, and what has been asked of it, in order. */
+/** The fake, and what it has fetched, in order. */
 export interface FakeLinkFetch {
   readonly service: LinkFetchService;
+  /** Each fetch made, once its turn came, in the order they were made. */
   readonly asked: Effect.Effect<readonly Asked[]>;
+  /** Lets a held link answer, now and from then on. */
+  readonly release: (link: string) => Effect.Effect<void>;
+}
+
+/** How the fake answers beyond what each link answers. */
+export interface FakeOptions {
+  /**
+   * Links whose fetches are made but answer nothing until {@link FakeLinkFetch}'s `release`,
+   * holding their place with the pacer meanwhile.
+   */
+  readonly held?: readonly string[];
 }
 
 /**
@@ -125,26 +138,45 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
 /**
  * Makes a fake link fetch. A link is matched as the URL parser normalises it, and one with no
  * answer is unreachable. A recorded response is answered as the guard would for the purpose:
- * of a type the purpose takes, and bounded for it.
+ * of a type the purpose takes, and bounded for it. Each fetch is paced as the guard paces it,
+ * as one hop to the name of the link asked, holding its place until the caller's Scope closes.
  * @param answers - What each link answers.
+ * @param options - Which links are held.
  * @returns The fake.
  */
 export const makeFakeLinkFetch = (
-  answers: Readonly<Record<string, Answer>>
+  answers: Readonly<Record<string, Answer>>,
+  options: FakeOptions = {}
 ): Effect.Effect<FakeLinkFetch> =>
   Effect.gen(function* () {
     const asked = yield* Ref.make<readonly Asked[]>([]);
+    const pacer = yield* makePacer;
 
     const byLink = new Map(
       Object.entries(answers).map(([link, answer]) => [normalised(link), answer])
     );
 
+    const holds = new Map<string, Latch.Latch>();
+
+    for (const link of options.held ?? []) {
+      holds.set(normalised(link), yield* Latch.make(false));
+    }
+
     const service: LinkFetchService = {
       fetch: (link, purpose) =>
         Effect.gen(function* () {
+          const key = normalised(link);
+
+          yield* pacer.hop(URL.parse(key)?.hostname ?? key);
+          yield* pacer.start;
           yield* Ref.update(asked, (all) => [...all, { link, purpose }]);
 
-          const key = normalised(link);
+          const hold = holds.get(key);
+
+          if (hold !== undefined) {
+            yield* hold.await;
+          }
+
           const answer = byLink.get(key);
 
           if (answer === undefined) {
@@ -159,5 +191,11 @@ export const makeFakeLinkFetch = (
         }),
     };
 
-    return { asked: Ref.get(asked), service };
+    const release = (link: string) => {
+      const hold = holds.get(normalised(link));
+
+      return hold === undefined ? Effect.void : Effect.asVoid(hold.open);
+    };
+
+    return { asked: Ref.get(asked), release, service };
   });

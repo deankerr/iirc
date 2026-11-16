@@ -1,9 +1,10 @@
+import type * as Http from "node:http";
 import { gzipSync } from "node:zlib";
 
 import { limits } from "@iirc/link-fetch";
 import type { Purpose } from "@iirc/link-fetch";
 import { loopbackPolicy } from "@iirc/link-fetch/testing";
-import { Effect, Stream } from "effect";
+import { Effect, Schedule, Stream } from "effect";
 import type { Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
@@ -44,7 +45,7 @@ type Guard = Omit<BunLinkFetchOptions, "version">;
  */
 const fetched = (guard: Guard, link: string, purpose: Purpose = page) =>
   Effect.gen(function* () {
-    const service = makeBunLinkFetch({ version: "1.2.3", ...guard });
+    const service = yield* makeBunLinkFetch({ version: "1.2.3", ...guard });
     const answer = yield* service.fetch(link, purpose);
     const body = yield* Stream.mkUint8Array(answer.body);
 
@@ -483,7 +484,12 @@ describe("bounds are on the decompressed stream", () => {
       const result = await run(
         Effect.gen(function* () {
           const site = yield* serve(bomb(type, lead));
-          const service = makeBunLinkFetch({ policy: loopbackPolicy(site.port), version: "1.2.3" });
+
+          const service = yield* makeBunLinkFetch({
+            policy: loopbackPolicy(site.port),
+            version: "1.2.3",
+          });
+
           const answer = yield* service.fetch(`http://127.0.0.1:${site.port}/`, purpose);
           let size = 0;
 
@@ -738,7 +744,10 @@ describe("bounds are on the decompressed stream", () => {
           response.write("....");
         });
 
-        const service = makeBunLinkFetch({ policy: loopbackPolicy(site.port), version: "1.2.3" });
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(site.port),
+          version: "1.2.3",
+        });
 
         yield* Effect.scoped(service.fetch(`http://127.0.0.1:${site.port}/`, { kind: "stream" }));
 
@@ -757,7 +766,11 @@ describe("bounds are on the decompressed stream", () => {
           response.write("....");
         });
 
-        const service = makeBunLinkFetch({ policy: loopbackPolicy(site.port), version: "1.2.3" });
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(site.port),
+          version: "1.2.3",
+        });
+
         const answer = yield* service.fetch(`http://127.0.0.1:${site.port}/`, { kind: "stream" });
 
         yield* Stream.runHead(answer.body);
@@ -989,5 +1002,153 @@ describe("what is sent", () => {
     );
 
     expect(headers?.range).toBe("bytes=500-");
+  });
+});
+
+/** A site that holds each answer until it is let go, oldest first. */
+interface Holding {
+  readonly handler: Handler;
+  /** Answers the oldest request still held, with a page. */
+  readonly letGo: Effect.Effect<void>;
+}
+
+/**
+ * Makes a site that holds every request to `/held/…` and redirects every other to the link
+ * its path names after `/to/`.
+ * @returns The site's handler, and what lets a held answer go.
+ */
+const holding = (): Holding => {
+  const held: Http.ServerResponse[] = [];
+
+  return {
+    handler: (request, response) => {
+      const url = request.url ?? "";
+
+      if (url.startsWith("/to/")) {
+        response.writeHead(302, { location: decodeURIComponent(url.slice("/to/".length)) });
+        response.end();
+      } else {
+        held.push(response);
+      }
+    },
+    letGo: Effect.sync(() => {
+      const response = held.shift();
+
+      response?.writeHead(200, { "content-type": "text/html" });
+      response?.end("<html><head><title>held</title></head><body>x</body></html>");
+    }),
+  };
+};
+
+/**
+ * The paths a site has seen, once it has seen as many as asked, or after two seconds.
+ * @param site - The site.
+ * @param count - How many to wait for.
+ * @returns The paths.
+ */
+const seenPaths = (site: Site, count: number) =>
+  Effect.suspend(() => Effect.succeed(site.seen.map((each) => each.url))).pipe(
+    Effect.repeat({
+      schedule: Schedule.spaced("10 millis"),
+      until: (seen) => seen.length >= count,
+    }),
+    Effect.timeoutOrElse({
+      duration: "2 seconds",
+      orElse: () => Effect.succeed(site.seen.map((each) => each.url)),
+    })
+  );
+
+/** Waits long enough for a fetch that was free to go to have reached the site. */
+const quiet = Effect.sleep("200 millis");
+
+describe("fetches are paced", () => {
+  it("a third fetch to one name waits until one of the first two is done, and then is made", async () => {
+    const paths = await run(
+      Effect.gen(function* () {
+        const site = holding();
+        const listening = yield* serve(site.handler);
+        const names = scripted({ "a.test": [["127.0.0.1"]] });
+
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(listening.port),
+          resolver: names.resolver,
+          version: "1.2.3",
+        });
+
+        const fetching = (path: string) =>
+          Effect.forkChild(
+            Effect.scoped(
+              Effect.flatMap(
+                service.fetch(`http://a.test:${listening.port}${path}`, page),
+                (answer) => Stream.runDrain(answer.body)
+              )
+            )
+          );
+
+        yield* fetching("/held/1");
+        yield* fetching("/held/2");
+        yield* fetching("/held/3");
+        yield* seenPaths(listening, 2);
+        yield* quiet;
+
+        const two = yield* seenPaths(listening, 2);
+
+        yield* site.letGo;
+
+        return { three: yield* seenPaths(listening, 3), two };
+      })
+    );
+
+    expect(paths).toStrictEqual({
+      three: ["/held/1", "/held/2", "/held/3"],
+      two: ["/held/1", "/held/2"],
+    });
+  });
+
+  it("a redirect waits by the name it goes to, and gives up the name it left", async () => {
+    const paths = await run(
+      Effect.gen(function* () {
+        const site = holding();
+        const listening = yield* serve(site.handler);
+        const names = scripted({ "a.test": [["127.0.0.1"]], "b.test": [["127.0.0.1"]] });
+        const at = (name: string, path: string) => `http://${name}:${listening.port}${path}`;
+
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(listening.port),
+          resolver: names.resolver,
+          version: "1.2.3",
+        });
+
+        const fetching = (link: string) =>
+          Effect.forkChild(
+            Effect.scoped(
+              Effect.flatMap(service.fetch(link, page), (answer) => Stream.runDrain(answer.body))
+            )
+          );
+
+        yield* fetching(at("b.test", "/held/b1"));
+        yield* fetching(at("b.test", "/held/b2"));
+        yield* seenPaths(listening, 2);
+        yield* fetching(at("a.test", `/to/${encodeURIComponent(at("b.test", "/held/b3"))}`));
+        yield* seenPaths(listening, 3);
+        // Were the redirect still holding its place at a.test, only one of these would go.
+        yield* fetching(at("a.test", "/held/a1"));
+        yield* fetching(at("a.test", "/held/a2"));
+        yield* seenPaths(listening, 5);
+        yield* quiet;
+
+        const waiting = yield* seenPaths(listening, 5);
+
+        yield* site.letGo;
+
+        return { after: (yield* seenPaths(listening, 6)).slice(5), waiting };
+      })
+    );
+
+    expect(paths.waiting).toHaveLength(5);
+    expect(paths.waiting).toContain("/held/a1");
+    expect(paths.waiting).toContain("/held/a2");
+    expect(paths.waiting).not.toContain("/held/b3");
+    expect(paths.after).toStrictEqual(["/held/b3"]);
   });
 });

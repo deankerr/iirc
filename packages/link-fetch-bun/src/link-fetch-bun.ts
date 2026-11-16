@@ -15,6 +15,7 @@ import {
   admit,
   fixedPolicy,
   limits,
+  makePacer,
   parseLink,
   writeAddress,
 } from "@iirc/link-fetch";
@@ -25,12 +26,15 @@ import type {
   LinkFetchFailure,
   LinkFetchService,
   LinkPolicy,
+  Pacer,
   Purpose,
   Target,
 } from "@iirc/link-fetch";
 import {
   Array as Arr,
   Cause,
+  Clock,
+  Deferred,
   Effect,
   Exit,
   Fiber,
@@ -316,18 +320,18 @@ const bounded = (
     }
   );
 
-  // A reader that stops early closes the connection too.
-  return Stream.fromPull(Effect.succeed(pull)).pipe(
-    Stream.ensuring(Effect.suspend(() => (finished ? Effect.void : stop)))
-  );
+  // However the body ends, read to its end or stopped early, the connection closes, which
+  // also gives up its place with the pacer.
+  return Stream.fromPull(Effect.succeed(pull)).pipe(Stream.ensuring(stop));
 };
 
 /**
- * Makes the guard.
+ * The guard, paced.
  * @param options - Its version, and in tests a policy, a resolver, and roots to trust.
+ * @param pacer - What each fetch waits its turn on, and each hop.
  * @returns The link fetch.
  */
-export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService => {
+const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => {
   const policy = options.policy ?? fixedPolicy;
   const resolver = options.resolver ?? systemResolver;
   const userAgent = `iirc/${options.version} (+https://github.com/deankerr/iirc) bot`;
@@ -361,7 +365,8 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
     Effect.gen(function* () {
       // The connection lives in a Scope of its own, which the caller's closes, so it can end
       // at a bound, at the time limit, or when the caller is done, whichever is first.
-      const scope = yield* Scope.fork(yield* Scope.Scope);
+      const outer = yield* Scope.Scope;
+      const scope = yield* Scope.fork(outer);
       const signal = yield* Scope.provide(Effect.abortSignal, scope);
       let late = false;
 
@@ -371,17 +376,46 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
           late ? new LinkTimedOut() : new LinkUnreachable({ reason: describe(cause) }),
       };
 
-      const timer = yield* Effect.forkIn(
-        Effect.andThen(
-          Effect.sleep(limits.milliseconds),
-          Effect.suspend(() => {
-            late = true;
+      // The time limit runs only while the fetch is not waiting its turn, so waiting never
+      // makes it time out. It starts once the first hop's turn comes.
+      const expired = yield* Deferred.make<undefined>();
+      let left: number = limits.milliseconds;
+      let since = 0;
+      let timer: Fiber.Fiber<void> | undefined;
 
-            return connection.close;
-          })
-        ),
-        yield* Scope.Scope
-      );
+      const run = Effect.gen(function* () {
+        since = yield* Clock.currentTimeMillis;
+        timer = yield* Effect.forkIn(
+          Effect.sleep(left).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                late = true;
+
+                return connection.close;
+              })
+            ),
+            Effect.andThen(Deferred.succeed(expired, undefined)),
+            Effect.asVoid
+          ),
+          outer
+        );
+      });
+
+      const pause = Effect.suspend(() => {
+        const running = timer;
+
+        timer = undefined;
+
+        return running === undefined
+          ? Effect.void
+          : Effect.gen(function* () {
+              yield* Fiber.interrupt(running);
+              left -= (yield* Clock.currentTimeMillis) - since;
+            });
+      });
+
+      const waiting = (turn: Effect.Effect<void>) =>
+        pause.pipe(Effect.andThen(turn), Effect.andThen(run));
 
       // Each hop is parsed, resolved once, checked, and pinned to what was checked.
       const follow = Effect.gen(function* () {
@@ -390,6 +424,17 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
 
         for (let hop = 0; ; hop += 1) {
           const target = yield* Effect.fromResult(parseLink(policy, next, base));
+
+          // Each hop waits its turn by the name it is made to, and holds its place until it
+          // is done: a redirect once it is read, and the last hop until its connection closes.
+          const held = yield* Scope.fork(scope);
+
+          yield* waiting(
+            Effect.andThen(
+              Scope.provide(pacer.hop(target.hostname), held),
+              hop === 0 ? pacer.start : Effect.void
+            )
+          );
 
           const addresses =
             target.literal === undefined
@@ -418,6 +463,7 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
           yield* Effect.promise(async () => {
             await response.body?.cancel().catch(() => null);
           });
+          yield* Scope.close(held, Exit.void);
 
           if (hop === limits.redirects) {
             return yield* new LinkRefused({ reason: `more than ${limits.redirects} redirects` });
@@ -467,12 +513,12 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
       // An answer that is refused closes its connection at once, rather than with the Scope.
       const fetched = yield* Effect.raceFirst(
         answer,
-        Effect.andThen(Fiber.await(timer), Effect.fail(new LinkTimedOut()))
-      ).pipe(Effect.onError(() => Effect.andThen(Fiber.interrupt(timer), connection.close)));
+        Effect.andThen(Deferred.await(expired), Effect.fail(new LinkTimedOut()))
+      ).pipe(Effect.onError(() => Effect.andThen(pause, connection.close)));
 
       // A stream is held to the time to its first byte, which has come.
       if (purpose.kind === "stream") {
-        yield* Fiber.interrupt(timer);
+        yield* pause;
       }
 
       return fetched;
@@ -485,9 +531,17 @@ export const makeBunLinkFetch = (options: BunLinkFetchOptions): LinkFetchService
 };
 
 /**
+ * Makes the guard, with a pacer of its own, which every fetch it makes waits on.
+ * @param options - Its version, and in tests a policy, a resolver, and roots to trust.
+ * @returns The link fetch.
+ */
+export const makeBunLinkFetch = (options: BunLinkFetchOptions): Effect.Effect<LinkFetchService> =>
+  makePacer.pipe(Effect.map((pacer) => guard(options, pacer)));
+
+/**
  * The guard as a Layer.
  * @param options - Its version. Tests also give a policy, a resolver, and roots to trust.
  * @returns The Layer.
  */
 export const layerBunLinkFetch = (options: BunLinkFetchOptions): Layer.Layer<LinkFetch> =>
-  Layer.succeed(LinkFetch)(makeBunLinkFetch(options));
+  Layer.effect(LinkFetch)(makeBunLinkFetch(options));

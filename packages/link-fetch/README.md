@@ -17,6 +17,9 @@ LinkRefused { reason } | LinkUnreachable { reason } | LinkTimedOut
 
 parseLink(policy, link, base?): Result<Target, LinkRefused>     // scheme, userinfo, port
 admit(policy, port, addresses): Result<Address, LinkRefused>    // every record, or none
+
+makePacer: Effect<Pacer>                                        // pacing: { perName: 2, perMinute: 30 }
+Pacer: { start: Effect<void>, hop(name): Effect<void, never, Scope> }
 ```
 
 `LinkFetch` is an Effect service. An adapter provides it as a Layer from its own package.
@@ -28,6 +31,7 @@ admit(policy, port, addresses): Result<Address, LinkRefused>    // every record,
 - **The type is the purpose's.** A page is `text/html` or `application/xhtml+xml`, an image is PNG, JPEG, GIF, WebP, AVIF, or SVG by its header and its leading bytes alike, an oEmbed is JSON, and a stream is `video/*` or `audio/*`. Anything else is `LinkWrongType`, which names the `link` that answered, after any redirects.
 - **The connection lives in the Scope.** Closing it stops the fetch and its body, read or not, and a body that ends at a bound closes its connection.
 - **`link` is the last link fetched, by name,** as the URL parser normalised it, after any redirects.
+- **Fetches wait their turn, and never fail for waiting.** Every adapter builds in a pacer of its own. At most two hops run at once to one name, each counted by the name it is made to and held until it is done, and at most 30 fetches start in any rolling minute, read through `Clock`. A fetch beyond either bound waits, in the order it asked, and its time limit does not run while it waits. Every purpose counts, a stream included.
 
 ## The policy
 
@@ -37,6 +41,6 @@ A link is parsed by the WHATWG URL parser first, and what it produced is checked
 
 ## Testing
 
-`loopbackPolicy(port, address?)` is the fixed policy that also admits one loopback address, `127.0.0.1` unless given, on one port, where a test's server listens. `makeFakeLinkFetch(answers)` answers recorded responses or failures by link, as the parser normalises it, and records each fetch asked of it, in `asked`. A link with no answer is unreachable. A recorded response is answered as the guard would for the purpose, by its declared type alone: a type the purpose does not take is `LinkWrongType`, a page is cut at its bound, and any other body over its bound fails with `LinkTooLarge` as it is read.
+`loopbackPolicy(port, address?)` is the fixed policy that also admits one loopback address, `127.0.0.1` unless given, on one port, where a test's server listens. `makeFakeLinkFetch(answers, { held? })` answers recorded responses or failures by link, as the parser normalises it, and records each fetch in `asked` once the pacer gives it its turn, as one hop to the name of the link asked, held until the caller's Scope closes. A `held` link's fetch is made but answers nothing until `release(link)`. A link with no answer is unreachable. A recorded response is answered as the guard would for the purpose, by its declared type alone: a type the purpose does not take is `LinkWrongType`, a page is cut at its bound, and any other body over its bound fails with `LinkTooLarge` as it is read.
 
 Production code may not import `@iirc/link-fetch/testing`.

@@ -276,13 +276,12 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 };
 
 /**
- * What a page's answer shows: a Preview of media from its type alone, or of the page read
- * from its head and filled from the oEmbed address it names, with the image it names.
- * @param links - The link fetch.
+ * What a page's answer says: a Preview of media from its type alone, or what the page says
+ * of itself in its head, which is read whole.
  * @param fetched - The answer.
- * @returns What it came to.
+ * @returns What it came to, or the page and the link it answered as.
  */
-const answered = (links: LinkFetchService, fetched: Fetched) =>
+const answered = (fetched: Fetched) =>
   Effect.gen(function* () {
     if (readMedia(fetched.type) !== undefined) {
       return mediaPreview(fetched.link, fetched.type);
@@ -290,10 +289,24 @@ const answered = (links: LinkFetchService, fetched: Fetched) =>
 
     const head = joined(yield* Stream.runCollect(fetched.body));
 
-    const page = yield* filled(
-      links,
-      readPage({ contentType: fetched.headers["content-type"], head, link: fetched.link })
-    );
+    return {
+      link: fetched.link,
+      page: readPage({ contentType: fetched.headers["content-type"], head, link: fetched.link }),
+    };
+  });
+
+/**
+ * A page's Preview, from what it said of itself, filled from the oEmbed address it names,
+ * with the image it names. The page's own fetch is over by now, so it holds no place with
+ * the pacer while its oEmbed waits for one.
+ * @param links - The link fetch.
+ * @param link - The link the page answered as.
+ * @param said - What the page said of itself.
+ * @returns What it came to.
+ */
+const pageRead = (links: LinkFetchService, link: string, said: PageRead) =>
+  Effect.gen(function* () {
+    const page = yield* filled(links, said);
 
     if (page.title === undefined && page.description === undefined) {
       return failedRead("NothingToShow");
@@ -307,8 +320,8 @@ const answered = (links: LinkFetchService, fetched: Fetched) =>
           description: page.description ?? null,
           image: null,
           kind: "page",
-          link: fetched.link,
-          site: page.site ?? hostOf(fetched.link),
+          link,
+          site: page.site ?? hostOf(link),
           title: page.title ?? null,
           type: null,
         },
@@ -545,12 +558,12 @@ export const layerPreviews = Layer.effect(Previews)(
     // Every failure of the fetch is answered with its reason, and anything unforeseen with
     // `Unreachable`, so no Preview stays pending for ever.
     const fetchOne = (key: string, link: string, shown: PreviewsShown) =>
-      Effect.scoped(
-        links.fetch(key, { kind: "page" }).pipe(
-          Effect.flatMap((fetched) => answered(links, fetched)),
-          Effect.catch((error) => Effect.succeed(failedFetch(error)))
-        )
-      ).pipe(
+      Effect.scoped(Effect.flatMap(links.fetch(key, { kind: "page" }), answered)).pipe(
+        Effect.filterOrElse(
+          (said): said is Read => "state" in said,
+          (said) => pageRead(links, said.link, said.page)
+        ),
+        Effect.catch((error) => Effect.succeed(failedFetch(error))),
         Effect.catchDefect(() => Effect.succeed(failedRead("Unreachable"))),
         // An image stays claimed until the cache refers to it.
         Effect.flatMap((read) =>

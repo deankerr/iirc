@@ -9,7 +9,7 @@ import type { LinkPolicy } from "../policy.ts";
 
 export { makeFakeLinkFetch } from "./fake.ts";
 
-export type { Answer, Asked, FakeLinkFetch, Recorded } from "./fake.ts";
+export type { Answer, Asked, FakeLinkFetch, FakeOptions, Recorded } from "./fake.ts";
 
 /**
  * The fixed policy, admitting also one loopback address on one port, where a test's server
