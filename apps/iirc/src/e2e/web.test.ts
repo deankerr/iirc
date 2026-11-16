@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -4949,6 +4950,108 @@ describe("the web frontend on iirc daemon --web", () => {
         } finally {
           started.child.kill("SIGTERM");
           await started.child.exited;
+        }
+      } finally {
+        await minio.stop();
+      }
+    }
+  );
+
+  it(
+    "refuses a file chosen in the composer whose bytes would pass uploads.maxTotal, saying the store is full, and keeps nothing",
+    { timeout: 120_000 },
+    async () => {
+      const minio: Minio = await startMinio();
+
+      // MinIO goes with the run, however far its setup got.
+      try {
+        const { api, base, channel, child, key, ngircd, peer } = await privateNetwork(
+          path.join(directory, "store-full"),
+          "#iirc-full"
+        );
+
+        try {
+          const listen = freePort();
+          const held = solidPng(8, [208, 96, 40]);
+          const refused = solidPng(16, [40, 96, 208]);
+
+          await api("PUT", "/credentials/minio-key", JSON.stringify({ value: minio.accessKeyId }));
+          await api(
+            "PUT",
+            "/credentials/minio-secret",
+            JSON.stringify({ value: minio.secretAccessKey })
+          );
+
+          const options = {
+            "store.s3.accessKeyId": "minio-key",
+            "store.s3.bucket": minio.bucket,
+            "store.s3.endpoint": minio.endpoint,
+            "store.s3.region": minio.region,
+            "store.s3.secretAccessKey": "minio-secret",
+            "uploads.listen": `${loopback}:${listen}`,
+            // Room for the first file, and no more.
+            "uploads.maxTotal": held.length,
+            "uploads.publicUrl": `http://${loopback}:${listen}`,
+          };
+
+          for (const [option, value] of Object.entries(options)) {
+            // oxlint-disable-next-line no-await-in-loop -- set in order
+            await api("PUT", `/options/${option}`, JSON.stringify({ value }));
+          }
+
+          const first = await fetch(`${base}/api/uploads?name=held.png`, {
+            body: held,
+            headers: { authorization: `Bearer ${key}` },
+            method: "POST",
+          });
+
+          expect(first.status).toBe(200);
+
+          const { page, problems } = await watchedPage(browser);
+
+          await page.goto(base);
+          await page.getByLabel("Key").fill(key);
+          await page.getByRole("button", { name: "Sign in" }).click();
+          await networkRow(page);
+          await page.getByRole("row", { name: channel }).click();
+          await page.getByRole("textbox", { name: channel }).waitFor();
+
+          await page.getByLabel("Files to upload").setInputFiles({
+            buffer: Buffer.from(refused),
+            mimeType: "image/png",
+            name: "refused.png",
+          });
+
+          // However it ends: refused, or, before the limit was kept to, kept with its link.
+          const full = page.getByText(/store is full/u);
+          const kept = page.getByText(/refused\.png/u).and(page.getByText(/http:/u));
+
+          await full.or(kept).first().waitFor();
+          await screenshot(page, "154-after.png");
+
+          const listed = await api("GET", "/uploads");
+          const { uploads } = decodeUploads(await listed.text());
+
+          expect({
+            full: await full.count(),
+            listed: uploads.map((upload) => upload.safeName),
+            problems: problems.filter((problem) => problem.includes("Content Security Policy")),
+            storeHolds: await holdsBytes(
+              minio,
+              minio.bucket,
+              createHash("sha256").update(refused).digest("hex")
+            ),
+          }).toStrictEqual({
+            full: 1,
+            listed: ["held.png"],
+            problems: [],
+            storeHolds: false,
+          });
+        } finally {
+          peer.close();
+          child.kill("SIGTERM");
+          await child.exited;
+          await ngircd.stop();
         }
       } finally {
         await minio.stop();
