@@ -90,7 +90,7 @@ import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
 import type { OptionsChangedSince } from "./options.ts";
 import { Previews } from "./previews/previews.ts";
-import { servedMedia } from "./previews/serving.ts";
+import { servedMedia, servedStream } from "./previews/serving.ts";
 import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
@@ -1327,7 +1327,9 @@ const previews = HttpApiBuilder.group(
       .handle("ask", ({ params, payload }) =>
         held.ask(params.timeline, payload.position).pipe(
           Effect.map((found) => ({ previews: found })),
-          Effect.catchTags({ TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)) })
+          Effect.catchTags({
+            TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)),
+          })
         )
       )
       .handle("press", ({ params, payload }) =>
@@ -1350,6 +1352,13 @@ const previews = HttpApiBuilder.group(
           Effect.catchTags({
             ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
             NoSuchMedia: () => Effect.fail(new UnknownMedia({ hash: params.hash })),
+          })
+        )
+      )
+      .handleRaw("stream", ({ params, query, request }) =>
+        servedStream(held, query.timeline, query.position, params.id, request.headers.range).pipe(
+          Effect.catchTags({
+            TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)),
           })
         )
       );

@@ -58,6 +58,40 @@ const oneRangeOf = (header: string | undefined) => {
 };
 
 /**
+ * A range of bytes that starts at a position: up to but not including `end`, as `Blob.slice`
+ * takes it, or without `end`, to the end, whatever it is.
+ */
+export interface StartingRange {
+  readonly start: number;
+  readonly end?: number;
+}
+
+/**
+ * The one range a `Range` asks for when it starts at a position, for bytes of a size not
+ * known: `bytes=N-` or `bytes=N-M`. A suffix range, several ranges, another unit, an end
+ * before its start, and a header that does not parse each ask for nothing, as RFC 9110 allows.
+ * @param header - The header, if there is one.
+ * @returns The range, or nothing.
+ */
+export const startingRangeOf = (header: string | undefined): StartingRange | undefined => {
+  const range = oneRangeOf(header);
+
+  if (range === undefined || range.first === "") {
+    return undefined;
+  }
+
+  const start = Number(range.first);
+
+  if (range.last === "") {
+    return { start };
+  }
+
+  const last = Number(range.last);
+
+  return last < start ? undefined : { end: last + 1, start };
+};
+
+/**
  * What a `Range` asks of bytes of a size. A range of another unit, one that does not parse,
  * and several ranges are each answered as if no range were asked, as RFC 9110 allows.
  * @param header - The header, if there is one.

@@ -2,15 +2,29 @@
  * How an image a Preview holds is answered, on the API's own origin, for a signed-in
  * Frontend: as the type its bytes show, never sniffed again by the browser, kept only by the
  * browser itself, named by its hash, and under a sandbox in which nothing may run or load.
+ * A video or sound a link is, is answered likewise, as the host's type, kept by no cache.
  *
  * @packageDocumentation
  */
-import type { MediaHash, MediaType } from "@iirc/api";
+import type {
+  LinksOnly,
+  MediaHash,
+  MediaType,
+  PreviewId,
+  PreviewsOff,
+  StreamFailed,
+  UnknownMessage,
+  UnknownStream,
+  UnknownTimeline,
+} from "@iirc/api";
 import type { ByteStoreUnavailable } from "@iirc/byte-store";
+import type { TimelineStoreFailed } from "@iirc/timeline-store";
+import type { Position, TimelineId } from "@iirc/timelines";
 import { Effect } from "effect";
 import type { Scope } from "effect";
 import { HttpServerResponse } from "effect/http";
 
+import { startingRangeOf } from "../uploads/wanted.ts";
 import type { NoSuchMedia, Previews } from "./previews.ts";
 
 /**
@@ -73,5 +87,63 @@ export const servedMedia = (
         "content-security-policy": policyOf(type),
         "x-content-type-options": "nosniff",
       },
+    });
+  });
+
+/**
+ * A video or sound a link of a Message is, streamed through the guard from the address the
+ * Daemon read for it: the host's `200` or `206` with its `Content-Range`, or its `416`. Only
+ * a single range starting at a position is passed on, and any other `Range` is answered as
+ * if there were none. The body is served as the host's media type, never sniffed, kept by no
+ * cache, and under a sandbox. A body that fails in the guard, passing its limit among other
+ * ways, cuts the response off.
+ * @param previews - The Previews.
+ * @param timeline - The Message's Timeline.
+ * @param position - The Message's place in it.
+ * @param id - The Preview's id.
+ * @param range - The request's `Range`, if any.
+ * @returns The response, whose body needs the Scope until it is written.
+ */
+export const servedStream = (
+  previews: (typeof Previews)["Service"],
+  timeline: TimelineId,
+  position: Position,
+  id: PreviewId,
+  range: string | undefined
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  | UnknownTimeline
+  | UnknownMessage
+  | PreviewsOff
+  | LinksOnly
+  | UnknownStream
+  | StreamFailed
+  | TimelineStoreFailed,
+  Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const streamed = yield* previews.stream(timeline, position, id, startingRangeOf(range));
+
+    if (streamed._tag === "Unsatisfiable") {
+      return HttpServerResponse.empty({
+        headers: {
+          "cache-control": "private, no-store",
+          ...(streamed.contentRange !== undefined && { "content-range": streamed.contentRange }),
+        },
+        status: 416,
+      });
+    }
+
+    return HttpServerResponse.stream(streamed.body, {
+      contentType: streamed.type,
+      headers: {
+        "cache-control": "private, no-store",
+        "content-security-policy": "default-src 'none'; sandbox",
+        "x-content-type-options": "nosniff",
+        ...(streamed.acceptRanges !== undefined && { "accept-ranges": streamed.acceptRanges }),
+        ...(streamed.contentRange !== undefined && { "content-range": streamed.contentRange }),
+      },
+      status: streamed.status,
+      ...(streamed.contentLength !== undefined && { contentLength: streamed.contentLength }),
     });
   });
