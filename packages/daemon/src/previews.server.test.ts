@@ -3653,6 +3653,68 @@ describe("a player over a real server", () => {
     });
   });
 
+  it("shows a listed player with its poster though the page says nothing else of itself", async () => {
+    const bare = page(
+      `<meta property="og:image" content="${CAT_IMAGE}"><meta property="og:video:url" content="${VIMEO}">`
+    );
+
+    const result = await run({ [CLIP]: bare, ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+
+        return playing((yield* previewedOn(served, CLIP)).state);
+      })
+    );
+
+    expect(result).toStrictEqual({
+      image: true,
+      kind: "player",
+      player: { link: VIMEO, size: null },
+    });
+  });
+
+  it("carries a player as a page on the stream when its host is removed while its poster is fetched", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const fake = yield* makeFakeLinkFetch(
+          { [CLIP]: playerPage(VIMEO), ...withPoster },
+          { held: [CAT_IMAGE] }
+        );
+
+        const served = yield* serve({}, { links: fake });
+
+        yield* setBucket(served);
+        yield* setPreviews(served, "on");
+        const stream = yield* follow(served);
+        yield* talk(served, [`see ${CLIP}`]);
+        const [place] = yield* live(messages(served, 1));
+        yield* ask(served, place ?? { position: "", timeline: "" });
+        // The page is read, and its player chosen, before its poster is fetched.
+        yield* reaching(served, 2);
+        yield* setPlayers(served, ["w.soundcloud.com"]);
+        yield* fake.release(CAT_IMAGE);
+        yield* stream.until((read) => read.includes('"Ready"'));
+        yield* stream.stop;
+
+        const ready = stream
+          .text()
+          .split("\n\n")
+          .flatMap((block) => {
+            const data = block.split("\n").find((line) => line.startsWith("data: "));
+
+            return block.startsWith("event: changed") && data !== undefined
+              ? [decodeItem(data.slice("data: ".length)).state]
+              : [];
+          })
+          .find((state) => state._tag === "Ready");
+
+        return playing(ready);
+      })
+    );
+
+    expect(result).toStrictEqual({ image: true, kind: "page", player: null });
+  });
+
   it("gives a text Preview under links only: a page, with no player and no image", async () => {
     const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
       Effect.gen(function* () {

@@ -25,6 +25,9 @@ import { PreviewImage, PreviewPoster } from "./preview-image.tsx";
 
 import styles from "./message-previews.module.css";
 
+/** No host listed as a player, before the shared options are read. */
+const noPlayers: readonly string[] = [];
+
 /**
  * A link as a Preview draws it: an anchor that opens in a new tab, or its text alone when
  * the core found no link in it.
@@ -243,11 +246,12 @@ export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
   const block = useRef<HTMLUListElement>(null);
   const { content, position, timeline } = item;
   const mode = modeIn(modes, timeline);
+  const players = modes?.players ?? noPlayers;
   const watched = mayPreview(mode, content);
 
   const shown = useMemo(
-    () => previewsOf(state, mode, timeline, position, content),
-    [content, mode, position, state, timeline]
+    () => previewsOf(state, mode, timeline, position, content, players),
+    [content, mode, players, position, state, timeline]
   );
 
   // Seen once, and asked for then: the core asks for a Message once, however often it

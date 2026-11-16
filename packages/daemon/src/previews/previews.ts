@@ -380,11 +380,12 @@ const pageRead = (
   Effect.gen(function* () {
     const page = yield* filled(links, said);
 
-    if (page.title === undefined && page.description === undefined) {
+    const player = playerOf(page.players ?? [], hosts);
+
+    // A player is something to show even with no words of its own.
+    if (page.title === undefined && page.description === undefined && player === undefined) {
       return failedRead("NothingToShow");
     }
-
-    const player = playerOf(page.players ?? [], hosts);
 
     const read: Read = {
       image: page.image,
@@ -439,6 +440,21 @@ const asShown = (
 
   return stripped === preview ? state : { ...state, preview: stripped };
 };
+
+/**
+ * A state as the stream carries it, to Frontends of every Timeline at once: a player whose
+ * address the list in force now no longer allows is a page again, so a host removed while
+ * its link was being fetched never comes back as a player.
+ * @param state - The state, as settled.
+ * @param hosts - The hosts the Owner lists as players now.
+ * @returns The state to carry.
+ */
+const asStreamed = (state: PreviewState, hosts: readonly string[]): PreviewState =>
+  state._tag === "Ready" &&
+  state.preview.player !== null &&
+  !stillListed(state.preview.player.link, hosts)
+    ? { ...state, preview: { ...state.preview, kind: "page", player: null } }
+    : state;
 
 const decodeMediaType = Schema.decodeUnknownOption(MediaType);
 
@@ -868,7 +884,14 @@ export const layerPreviews = Layer.effect(Previews)(
 
           return asked.map(({ item }) => item);
         }),
-      changes: Stream.fromPubSub(changed),
+      changes: Stream.fromPubSub(changed).pipe(
+        Stream.mapEffect((item) =>
+          Effect.map(ui.inForce, ({ options }) => ({
+            ...item,
+            state: asStreamed(item.state, options["previews.players"]),
+          }))
+        )
+      ),
       media: (hash) =>
         Effect.gen(function* () {
           if (!(yield* refers(hash))) {

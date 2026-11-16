@@ -17,6 +17,7 @@ import type {
   PreviewId,
   PreviewItem,
   PreviewsByTimeline,
+  PreviewsPlayers,
   PreviewsShown,
   TimelineId,
   UiInForce,
@@ -141,8 +142,12 @@ export type PreviewsEvent =
 export const messageKey = (timeline: TimelineId, position: Position): string =>
   `${timeline} ${cursorOf(position)}`;
 
-/** `ui.previews`, and each Timeline's own choice over it, by its id. */
+/**
+ * `ui.previews`, each Timeline's own choice over it, by its id, and the hosts
+ * `ui.previews.players` lists now.
+ */
 export interface PreviewsModes {
+  readonly players: PreviewsPlayers;
   readonly shown: PreviewsShown;
   readonly timelines: PreviewsByTimeline;
 }
@@ -156,7 +161,11 @@ export interface PreviewsModes {
 export const previewsModesOf = (shared: UiInForce | undefined): PreviewsModes | undefined =>
   shared === undefined
     ? undefined
-    : { shown: shared.options.previews, timelines: shared.options["previews.timelines"] };
+    : {
+        players: shared.options["previews.players"],
+        shown: shared.options.previews,
+        timelines: shared.options["previews.timelines"],
+      };
 
 /**
  * A Timeline's own choice over `ui.previews`, if it made one.
@@ -765,6 +774,22 @@ const playerOf = (preview: Preview): PlayerShown | undefined => {
 };
 
 /**
+ * A Preview as the hosts listed now allow: a player whose host the list no longer names is
+ * a page again, as the Daemon answers it, so a host removed stops showing as a player at
+ * once, even in a Preview answered before.
+ * @param preview - The Preview, as answered.
+ * @param players - The hosts `ui.previews.players` lists now.
+ * @returns The Preview.
+ */
+const listedNow = (preview: Preview, players: PreviewsPlayers): Preview => {
+  const host = preview.player === null ? undefined : URL.parse(preview.player.link)?.hostname;
+
+  return preview.player === null || (host !== undefined && players.includes(host))
+    ? preview
+    : { ...preview, kind: "page", player: null };
+};
+
+/**
  * One Preview, as drawn:
  *
  * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
@@ -807,6 +832,7 @@ export type PreviewShown =
  * @param address - The link as the Message holds it.
  * @param index - Which of its Message's links it is.
  * @param on - Whether Previews are `on`, as images and media are shown only then.
+ * @param players - The hosts `ui.previews.players` lists now.
  * @param timeline - The Message's Timeline.
  * @param position - Its place there.
  * @returns It.
@@ -816,6 +842,7 @@ const itemShown = (
   address: string,
   index: number,
   on: boolean,
+  players: PreviewsPlayers,
   timeline: TimelineId,
   position: Position
 ): PreviewShown => {
@@ -828,7 +855,7 @@ const itemShown = (
     }
 
     case "Ready": {
-      const { preview } = item.state;
+      const preview = listedNow(item.state.preview, players);
 
       return {
         _tag: "Ready",
@@ -898,6 +925,7 @@ export const mayPreview = (mode: PreviewsShown | undefined, content: ItemContent
  * @param timeline - The Message's Timeline.
  * @param position - Its place.
  * @param content - What it holds.
+ * @param players - The hosts `ui.previews.players` lists now.
  * @returns Its Previews, in its order.
  */
 export const previewsOf = (
@@ -905,7 +933,8 @@ export const previewsOf = (
   mode: PreviewsShown | undefined,
   timeline: TimelineId,
   position: Position,
-  content: ItemContent
+  content: ItemContent,
+  players: PreviewsPlayers
 ): readonly PreviewShown[] => {
   const text = messageText(content);
 
@@ -935,6 +964,7 @@ export const previewsOf = (
               found[index]?.href ?? item.item.link,
               index,
               mode === "on",
+              players,
               timeline,
               position
             ),
