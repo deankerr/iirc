@@ -1249,8 +1249,11 @@ const parseFieldText = (
     return invalid(`${name}: ${json.message}`);
   }
 
-  // A key its Schema refuses, such as a Timeline's id that is none, is refused, never dropped.
-  const value = Schema.decodeResult(codec)(json.value, { onExcessProperty: "error" });
+  // A key of a map of choices its Schema refuses, such as a Timeline's id that is none, is
+  // refused, never dropped. Every other option drops what it does not know, as it always has.
+  const value = Schema.decodeResult(codec)(json.value, {
+    onExcessProperty: field.kind._tag === "ChoiceByKey" ? "error" : "ignore",
+  });
 
   if (Result.isSuccess(value)) {
     return parsed(Schema.encodeUnknownSync(codec)(value.success));

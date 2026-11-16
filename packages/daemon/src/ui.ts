@@ -39,10 +39,11 @@ const optionName = Schema.decodeUnknownOption(UiOptionName);
  * @returns The value, decoded.
  */
 export const parseUiValue = (option: UiOptionName, value: Schema.Json): Option.Option<UiValue> =>
-  // A key its Schema refuses, such as a Timeline's id that is none, refuses the value whole,
-  // never dropped, so what is journaled is what was sent.
+  // A key of `previews.timelines` that is not a Timeline's id refuses the value whole, never
+  // dropped, so an override set is the override kept. Every other option drops what it
+  // does not know, as it always has.
   Schema.decodeOption(Schema.toCodecJson(UiOptions.fields[option]))(value, {
-    onExcessProperty: "error",
+    onExcessProperty: option === "previews.timelines" ? "error" : "ignore",
   });
 
 /**
