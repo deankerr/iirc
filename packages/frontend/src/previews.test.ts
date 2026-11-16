@@ -318,12 +318,12 @@ describe("what a Message shows", () => {
     expect(previewsOf(initialPreviews, "links only", timeline, at(1), links)).toStrictEqual([
       {
         _tag: "Pending",
-        key: "https://a.example/",
+        key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
       },
       {
         _tag: "Pending",
-        key: "https://b.example/",
+        key: "1",
         link: { href: "https://b.example/", text: "https://b.example/" },
       },
     ]);
@@ -372,31 +372,31 @@ describe("what a Message shows", () => {
       {
         _tag: "Ready",
         description: "A page about cats.",
-        key: idOf("a"),
+        key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
         summary: "example.com · Cats",
       },
       {
         _tag: "Plain",
-        key: idOf("b"),
+        key: "1",
         link: { href: "https://b.example/", text: "https://b.example/" },
         reason: "No preview: the Daemon never fetches this address.",
       },
       {
         _tag: "Plain",
-        key: idOf("c"),
+        key: "2",
         link: { href: "https://c.example/", text: "https://c.example/" },
         reason: undefined,
       },
       {
         _tag: "Pending",
-        key: idOf("d"),
+        key: "3",
         link: { href: "https://d.example/", text: "https://d.example/" },
       },
     ]);
   });
 
-  it("draws a link that is not one http or https link as text, never as an anchor", () => {
+  it("draws the links its Message holds, never an address the Daemon gave", () => {
     const { ask, state } = asking(1);
 
     const answered = fold(state, {
@@ -406,8 +406,62 @@ describe("what a Message shows", () => {
     });
 
     expect(previewsOf(answered, "on", timeline, at(1), links)).toStrictEqual([
-      { _tag: "Pending", key: idOf("a"), link: { href: undefined, text: "data:text/html,hi" } },
+      {
+        _tag: "Pending",
+        key: "0",
+        link: { href: "https://a.example/", text: "https://a.example/" },
+      },
     ]);
+  });
+
+  it("shows two links that differ only by a fragment, each with the shared state, under distinct keys", () => {
+    const { ask, state } = asking(1);
+    const message = said("https://a.example/#one https://a.example/#two");
+
+    const answered = fold(state, {
+      _tag: "Answered",
+      ask,
+      previews: [
+        item("a", ready, "https://a.example/#two"),
+        item("a", ready, "https://a.example/#two"),
+      ],
+    });
+
+    const shown = previewsOf(answered, "on", timeline, at(1), message);
+
+    expect(shown.map((one) => [one._tag, one.link.href, one.key])).toStrictEqual([
+      ["Ready", "https://a.example/#one", "0"],
+      ["Ready", "https://a.example/#two", "1"],
+    ]);
+  });
+
+  it("keeps each Message's own link when two Messages differ only by a fragment", () => {
+    const first = asking(1);
+    const one = said("https://a.example/#one");
+    const two = said("https://a.example/#two");
+
+    const answered = fold(
+      first.state,
+      { _tag: "Answered", ask: first.ask, previews: [item("a", ready, "https://a.example/#one")] },
+      { _tag: "Shown", position: at(2), timeline }
+    );
+
+    const [second] = asksWanted(answered, "on");
+
+    if (second === undefined) {
+      throw new Error("nothing to ask");
+    }
+
+    const both = fold(
+      answered,
+      { _tag: "Asked", ask: second },
+      { _tag: "Answered", ask: second, previews: [item("a", ready, "https://a.example/#two")] }
+    );
+
+    expect([
+      previewsOf(both, "on", timeline, at(1), one).map((shown) => shown.link.href),
+      previewsOf(both, "on", timeline, at(2), two).map((shown) => shown.link.href),
+    ]).toStrictEqual([["https://a.example/#one"], ["https://a.example/#two"]]);
   });
 });
 

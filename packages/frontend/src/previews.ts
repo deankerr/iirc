@@ -440,16 +440,19 @@ export type PreviewShown =
     };
 
 /**
- * An item as drawn.
+ * An item as drawn, under the link its Message holds, which may differ from the item's
+ * by a fragment the id leaves out.
  * @param item - The item.
+ * @param address - The link as the Message holds it.
+ * @param key - Which row of its Message it is.
  * @returns It.
  */
-const itemShown = (item: PreviewItem): PreviewShown => {
-  const link = linkShown(item.link);
+const itemShown = (item: PreviewItem, address: string, key: string): PreviewShown => {
+  const link = linkShown(address);
 
   switch (item.state._tag) {
     case "Pending": {
-      return { _tag: "Pending", key: item.id, link };
+      return { _tag: "Pending", key, link };
     }
 
     case "Ready": {
@@ -461,19 +464,19 @@ const itemShown = (item: PreviewItem): PreviewShown => {
           preview.description === null || preview.description === ""
             ? undefined
             : contained(preview.description),
-        key: item.id,
+        key,
         link,
         summary: summaryOf(preview),
       };
     }
 
     case "Failed": {
-      return { _tag: "Plain", key: item.id, link, reason: reasonWords(item.state.reason) };
+      return { _tag: "Plain", key, link, reason: reasonWords(item.state.reason) };
     }
 
     // A press is out of reach here, so a link waiting for one is the plain link.
     case "WaitingForPress": {
-      return { _tag: "Plain", key: item.id, link, reason: undefined };
+      return { _tag: "Plain", key, link, reason: undefined };
     }
 
     default: {
@@ -542,17 +545,23 @@ export const previewsOf = (
     return [];
   }
 
+  const found = previewableLinksOf(text);
+
+  // The answer's items are the Message's links, one for one, but an id leaves out a link's
+  // fragment, so each Message draws its own links and shares only the state.
   if (held?.ids !== undefined) {
-    return held.ids.flatMap((id) => {
+    return held.ids.flatMap((id, index) => {
       const item = state.items.get(id);
 
-      return item === undefined ? [] : [itemShown(item.item)];
+      return item === undefined
+        ? []
+        : [itemShown(item.item, found[index]?.href ?? item.item.link, String(index))];
     });
   }
 
-  return previewableLinksOf(text).map((link) => ({
+  return found.map((link, index) => ({
     _tag: "Pending",
-    key: link.href,
+    key: String(index),
     link: linkShown(link.href),
   }));
 };
