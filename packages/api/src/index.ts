@@ -169,6 +169,7 @@ export {
   NickSuffix,
   Palette,
   PreviewsByTimeline,
+  PreviewsAnimate,
   PreviewsShown,
   ReadRule,
   SpellcheckShown,
