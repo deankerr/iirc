@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { PreviewId, PreviewsOff, UnknownMessage, UnknownTimeline } from "@iirc/api";
 import type { PreviewFailure, PreviewItem, PreviewState } from "@iirc/api";
 import { LinkFetch } from "@iirc/link-fetch";
-import type { Fetched, LinkFetchFailure } from "@iirc/link-fetch";
+import type { Fetched, LinkFetchFailure, LinkFetchService } from "@iirc/link-fetch";
 import { previewableLinksOf } from "@iirc/protocol/links";
 import { TimelineStore } from "@iirc/timeline-store";
 import type { TimelineStoreFailed } from "@iirc/timeline-store";
@@ -20,7 +20,8 @@ import type { Position, TimelineId } from "@iirc/timelines";
 import { Context, Effect, Layer, Option, PubSub, Ref, Schema, Scope, Stream } from "effect";
 
 import { UiConfiguration } from "../ui.ts";
-import { readMedia, readPage } from "./read.ts";
+import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
+import type { PageRead } from "./read.ts";
 
 /** What the Daemon offers of Previews. */
 export class Previews extends Context.Service<
@@ -148,13 +149,46 @@ const joined = (chunks: readonly Uint8Array[]): Uint8Array => {
   return whole;
 };
 
+const utf8 = new TextDecoder("utf-8");
+
+/**
+ * The page's own reading, with its gaps filled from the oEmbed address it names, fetched
+ * through the same port and so the same guard. Whatever goes wrong there, in any way at
+ * all, leaves the page's own reading exactly as it was.
+ * @param links - The link fetch.
+ * @param page - What the page said of itself.
+ * @returns The page, filled as far as the answer allowed.
+ */
+const filled = (links: LinkFetchService, page: PageRead) => {
+  const { oembed: address } = page;
+
+  return address === undefined
+    ? Effect.succeed(page)
+    : Effect.gen(function* () {
+        const answer = yield* links.fetch(address, { kind: "oembed" });
+
+        if (answer.status < 200 || answer.status > 299) {
+          return page;
+        }
+
+        const read = readOembed(utf8.decode(joined(yield* Stream.runCollect(answer.body))));
+
+        return read === undefined ? page : fillFromOembed(page, read, answer.link);
+      }).pipe(
+        Effect.scoped,
+        Effect.orElseSucceed(() => page),
+        Effect.catchDefect(() => Effect.succeed(page))
+      );
+};
+
 /**
  * What a page's answer shows: a Preview of media from its type alone, or of the page read
- * from its head.
+ * from its head and filled from the oEmbed address it names.
+ * @param links - The link fetch.
  * @param fetched - The answer.
  * @returns The state.
  */
-const answered = (fetched: Fetched) =>
+const answered = (links: LinkFetchService, fetched: Fetched) =>
   Effect.gen(function* () {
     if (readMedia(fetched.type) !== undefined) {
       return mediaPreview(fetched.link, fetched.type);
@@ -162,13 +196,12 @@ const answered = (fetched: Fetched) =>
 
     const head = joined(yield* Stream.runCollect(fetched.body));
 
-    const page = readPage({
-      contentType: fetched.headers["content-type"],
-      head,
-      link: fetched.link,
-    });
+    const page = yield* filled(
+      links,
+      readPage({ contentType: fetched.headers["content-type"], head, link: fetched.link })
+    );
 
-    return page === undefined
+    return page.title === undefined && page.description === undefined
       ? failed("NothingToShow")
       : ({
           _tag: "Ready",
@@ -218,7 +251,7 @@ export const layerPreviews = Layer.effect(Previews)(
     const fetchOne = (key: string, link: string) =>
       Effect.scoped(
         links.fetch(key, { kind: "page" }).pipe(
-          Effect.flatMap(answered),
+          Effect.flatMap((fetched) => answered(links, fetched)),
           Effect.catch((error) => Effect.succeed(failedFetch(error)))
         )
       ).pipe(

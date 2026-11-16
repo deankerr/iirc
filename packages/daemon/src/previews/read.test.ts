@@ -1,6 +1,8 @@
+import type { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { readMedia, readPage } from "./read.ts";
+import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
+import type { PageRead } from "./read.ts";
 
 const LINK = "https://example.com/a/b/page.html";
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -235,17 +237,25 @@ describe("limits", () => {
   });
 });
 
-describe("nothing to show", () => {
-  it("an empty head is nothing", () => {
-    expect(read("")).toBeUndefined();
+describe("a head that says little", () => {
+  it("an empty head reads as nothing", () => {
+    expect(read("")).toStrictEqual({});
   });
 
-  it("an image alone is nothing", () => {
-    expect(read(`<meta property="og:image" content="https://x.example/i.png">`)).toBeUndefined();
+  it("an image alone has no title or description", () => {
+    expect(read(`<meta property="og:image" content="https://x.example/i.png">`)).toStrictEqual({
+      image: "https://x.example/i.png",
+    });
   });
 
-  it("a site name alone is nothing", () => {
-    expect(read(`<meta property="og:site_name" content="Site">`)).toBeUndefined();
+  it("a site name alone has no title or description", () => {
+    expect(read(`<meta property="og:site_name" content="Site">`)).toStrictEqual({ site: "Site" });
+  });
+
+  it("an oEmbed address alone is still read, for the fill that follows", () => {
+    expect(
+      read(`<link rel="alternate" type="application/json+oembed" href="https://p.example/o">`)
+    ).toStrictEqual({ oembed: "https://p.example/o" });
   });
 
   it("a description alone is enough", () => {
@@ -276,6 +286,235 @@ describe("nothing to show", () => {
     expect(() =>
       readBytes(Uint8Array.from({ length: 4096 }, (_, i) => (i * 37) % 256))
     ).not.toThrow();
+  });
+});
+
+const OEMBED = "https://p.example/oembed?url=x";
+
+// oxlint-disable-next-line no-script-url -- a hostile address, which must be dropped.
+const SCRIPT_URL = "javascript:alert(1)";
+
+const oembedOf = (head: string) => read(head)?.oembed;
+
+describe("the oEmbed address a page names", () => {
+  it("is the href of an alternate link of type application/json+oembed", () => {
+    expect(oembedOf(`<link rel="alternate" type="application/json+oembed" href="${OEMBED}">`)).toBe(
+      OEMBED
+    );
+  });
+
+  it("reads rel as a list of tokens, and rel and type without regard to case", () => {
+    expect(
+      oembedOf(
+        `<link rel="ICON  Alternate\tfoo" type=" Application/JSON+oEmbed " href="${OEMBED}">`
+      )
+    ).toBe(OEMBED);
+  });
+
+  it("needs the alternate token", () => {
+    expect(
+      oembedOf(`<link rel="alternates" type="application/json+oembed" href="${OEMBED}">`)
+    ).toBeUndefined();
+  });
+
+  it("ignores the XML flavour and any other type", () => {
+    expect(
+      oembedOf(`<link rel="alternate" type="application/xml+oembed" href="${OEMBED}">
+        <link rel="alternate" type="text/xml+oembed" href="${OEMBED}">
+        <link rel="alternate" href="${OEMBED}">`)
+    ).toBeUndefined();
+  });
+
+  it("is resolved against the page's address, or its <base>", () => {
+    expect(oembedOf('<link rel="alternate" type="application/json+oembed" href="/o?u=1">')).toBe(
+      "https://example.com/o?u=1"
+    );
+    expect(
+      oembedOf(
+        '<base href="https://b.example/dir/"><link rel="alternate" type="application/json+oembed" href="o.json">'
+      )
+    ).toBe("https://b.example/dir/o.json");
+  });
+
+  it("has its entities decoded", () => {
+    expect(
+      oembedOf(
+        '<link rel="alternate" type="application/json+oembed" href="https://p.example/o?a=1&amp;b=2">'
+      )
+    ).toBe("https://p.example/o?a=1&b=2");
+  });
+
+  it("is dropped unless it is http or https", () => {
+    for (const href of [SCRIPT_URL, "data:application/json,{}", "ftp://p.example/o"]) {
+      expect(
+        oembedOf(`<link rel="alternate" type="application/json+oembed" href="${href}">`)
+      ).toBeUndefined();
+    }
+  });
+
+  it("is the first one when a page names several", () => {
+    expect(
+      oembedOf(`<link rel="alternate" type="application/json+oembed" href="https://one.example/o">
+        <link rel="alternate" type="application/json+oembed" href="https://two.example/o">`)
+    ).toBe("https://one.example/o");
+  });
+
+  it("is not read past the body", () => {
+    expect(
+      oembedOf(`<body><link rel="alternate" type="application/json+oembed" href="${OEMBED}">`)
+    ).toBeUndefined();
+  });
+});
+
+// What the Daemon does with an answer: its JSON text read, then the gaps filled.
+const fill = (page: PageRead, answer: Schema.Json): PageRead => {
+  const read = readOembed(JSON.stringify(answer));
+
+  return read === undefined ? page : fillFromOembed(page, read, OEMBED);
+};
+
+describe(fillFromOembed, () => {
+  it("fills the title, the author as the site, and the thumbnail with its size", () => {
+    expect(
+      fill(
+        {},
+        {
+          author_name: "  Some  Author ",
+          thumbnail_height: 90,
+          thumbnail_url: "https://cdn.example/t.jpg",
+          thumbnail_width: 120,
+          title: "A\n title",
+        }
+      )
+    ).toStrictEqual({
+      image: "https://cdn.example/t.jpg",
+      imageHeight: 90,
+      imageWidth: 120,
+      site: "Some Author",
+      title: "A title",
+    });
+  });
+
+  it("fills only what the page left empty", () => {
+    const page: PageRead = {
+      description: "Page description",
+      image: "https://page.example/i.png",
+      oembed: OEMBED,
+      site: "Page Site",
+      title: "Page title",
+    };
+
+    expect(
+      fill(page, {
+        author_name: "Author",
+        thumbnail_height: 9,
+        thumbnail_url: "https://cdn.example/t.jpg",
+        thumbnail_width: 9,
+        title: "oEmbed title",
+      })
+    ).toStrictEqual(page);
+  });
+
+  it("fills each gap on its own", () => {
+    expect(
+      fill(
+        { site: "Page Site", title: "Page title" },
+        { author_name: "Author", thumbnail_url: "https://cdn.example/t.jpg", title: "Other" }
+      )
+    ).toStrictEqual({
+      image: "https://cdn.example/t.jpg",
+      site: "Page Site",
+      title: "Page title",
+    });
+  });
+
+  it("never fills the description", () => {
+    expect(fill({}, { description: "From oEmbed", title: "T" })).toStrictEqual({ title: "T" });
+  });
+
+  it("never reads html, whatever the type", () => {
+    for (const type of ["rich", "video", "photo", "link"]) {
+      expect(fill({}, { html: "<script>alert(1)</script><b>Hi</b>", type })).toStrictEqual({});
+      expect(
+        fill({}, { html: "<iframe src='https://evil.example/'></iframe>", title: "T", type })
+      ).toStrictEqual({ title: "T" });
+    }
+  });
+
+  it("cuts a title at 200 code points", () => {
+    const title = fill({}, { title: `${"a".repeat(199)}😀tail` }).title ?? "";
+
+    // oxlint-disable-next-line typescript/no-misused-spread -- counting code points.
+    expect([...title]).toHaveLength(200);
+    expect(title.endsWith("😀")).toBeTruthy();
+  });
+
+  it("does not decode entities: text in JSON is not HTML", () => {
+    expect(fill({}, { title: "Fish &amp; <b>Chips</b>" })).toStrictEqual({
+      title: "Fish &amp; <b>Chips</b>",
+    });
+  });
+
+  it("resolves the thumbnail against the oEmbed address, and keeps only http and https", () => {
+    expect(fill({}, { thumbnail_url: "/t.png" }).image).toBe("https://p.example/t.png");
+
+    for (const thumbnail_url of [SCRIPT_URL, "data:image/png;base64,AAAA", "file:///x"]) {
+      expect(fill({}, { thumbnail_height: 5, thumbnail_url, thumbnail_width: 5 })).toStrictEqual(
+        {}
+      );
+    }
+  });
+
+  it("keeps a thumbnail's size only as positive integers, numeric strings included", () => {
+    const thumbnail_url = "https://cdn.example/t.jpg";
+
+    expect(
+      fill({}, { thumbnail_height: "90", thumbnail_url, thumbnail_width: "120" })
+    ).toStrictEqual({ image: thumbnail_url, imageHeight: 90, imageWidth: 120 });
+
+    expect(fill({}, { thumbnail_height: -3, thumbnail_url, thumbnail_width: 1.5 })).toStrictEqual({
+      image: thumbnail_url,
+    });
+
+    expect(fill({}, { thumbnail_height: 0, thumbnail_url, thumbnail_width: "wide" })).toStrictEqual(
+      { image: thumbnail_url }
+    );
+  });
+
+  it("does not keep a size alongside a thumbnail the page's own image replaced", () => {
+    expect(
+      fill(
+        { image: "https://page.example/i.png" },
+        { thumbnail_height: 90, thumbnail_url: "https://cdn.example/t.jpg", thumbnail_width: 120 }
+      )
+    ).toStrictEqual({ image: "https://page.example/i.png" });
+  });
+
+  it("drops a malformed field on its own, never the rest, and never throws", () => {
+    expect(
+      fill(
+        {},
+        {
+          author_name: ["a"],
+          thumbnail_url: 42,
+          title: "Kept",
+        }
+      )
+    ).toStrictEqual({ title: "Kept" });
+
+    expect(fill({}, { author_name: "Kept", title: { text: "no" } })).toStrictEqual({
+      site: "Kept",
+    });
+
+    expect(fill({}, { author_name: "   ", title: "" })).toStrictEqual({});
+  });
+
+  it("leaves the page as it was when the answer is not an object", () => {
+    const page: PageRead = { title: "T" };
+
+    for (const answer of [null, "title", 42, true, ["title"], []]) {
+      expect(fill(page, answer)).toStrictEqual(page);
+    }
   });
 });
 
