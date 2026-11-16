@@ -656,12 +656,14 @@ describe("the compiled iirc", () => {
           await expect
             .poll(async () => await composer.inputValue(), { timeout: 20_000 })
             .toMatch(link);
-          await pending.waitFor({ state: "detached" });
+          // Kept, it stays listed until the draft is sent, so it can still be renamed.
+          await pending.getByRole("button", { name: "Rename cat.png" }).waitFor();
 
           const draft = await composer.inputValue();
           const url = /\S+\/cat\.png/u.exec(draft)?.[0] ?? "";
 
           await composer.press("Enter");
+          await pending.waitFor({ state: "detached" });
 
           const said = await peer.waitFor(
             (line) => line.command === "PRIVMSG" && line.params[0] === channel,
