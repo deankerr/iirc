@@ -487,9 +487,10 @@ const hash = "ab".repeat(32);
 /**
  * What a Message shows of one Ready Preview, with some fields other than the page's.
  * @param fields - Those fields, as the wire carries them.
+ * @param mode - `ui.previews`, `on` unless given.
  * @returns What it shows, or none.
  */
-const shownReady = (fields: Partial<typeof Preview.Encoded>) => {
+const shownReady = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") => {
   const { ask, state } = asking(1);
 
   const answered = fold(state, {
@@ -504,7 +505,7 @@ const shownReady = (fields: Partial<typeof Preview.Encoded>) => {
     ],
   });
 
-  const [only] = previewsOf(answered, "on", timeline, at(1), said("https://a.example/"));
+  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"));
 
   return only?._tag === "Ready" ? only : undefined;
 };
@@ -535,6 +536,13 @@ describe("a Preview's image", () => {
       drawn: "Whole",
       src: `/api/previews/media/${hash}`,
     });
+  });
+
+  it("is none under links only, even one held from while Previews were on", () => {
+    expect(
+      shownReady({ image: { animated: false, hash, size: 10, type: "image/png" } }, "links only")
+        ?.image
+    ).toBeUndefined();
   });
 
   it("is none when the Daemon kept none", () => {

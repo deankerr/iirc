@@ -298,6 +298,18 @@ const answered = (links: LinkFetchService, fetched: Fetched) =>
     return read;
   });
 
+/**
+ * A state as it is answered under a mode: under `links only`, a Preview holds text only,
+ * even one kept with its image while Previews were `on`.
+ * @param state - The state, as kept.
+ * @param shown - Whether Previews are `on` or `links only`.
+ * @returns The state to answer.
+ */
+const asShown = (state: PreviewState, shown: PreviewsShown): PreviewState =>
+  shown === "on" || state._tag !== "Ready" || state.preview.image === null
+    ? state
+    : { ...state, preview: { ...state.preview, image: null } };
+
 const decodeMediaType = Schema.decodeUnknownOption(MediaType);
 
 /** Why an image was not kept, beyond what the fetch and the store say. */
@@ -574,7 +586,7 @@ export const layerPreviews = Layer.effect(Previews)(
           yield* Effect.forkIn(fetchOne(key, link, shown), scope);
         }
 
-        const item: PreviewItem = { id: idOf(key), link, state };
+        const item: PreviewItem = { id: idOf(key), link, state: asShown(state, shown) };
 
         return item;
       });

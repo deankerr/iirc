@@ -1417,6 +1417,25 @@ describe("a Preview's image over a real server", () => {
     });
   });
 
+  it("answers a Preview kept under on as text only once Previews are links only", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          const { state } = yield* previewedOn(served, CAT);
+          yield* setPreviews(served, "links only");
+          const [place] = yield* messages(served, 1);
+          const [item] = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
+
+          return { after: item?.state, before: state };
+        })
+    );
+
+    expect(imageOf(result.before)?.hash).toBe(sha256(png));
+    expect(imageOf(result.after)).toBeNull();
+  });
+
   it("previews a link to an animated GIF as an image, kept, and animated", async () => {
     const link = "https://image.example/cat.gif";
 

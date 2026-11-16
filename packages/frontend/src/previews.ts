@@ -477,9 +477,15 @@ export type PreviewShown =
  * @param item - The item.
  * @param address - The link as the Message holds it.
  * @param key - Which row of its Message it is.
+ * @param images - Whether images are shown, as they are only while Previews are `on`.
  * @returns It.
  */
-const itemShown = (item: PreviewItem, address: string, key: string): PreviewShown => {
+const itemShown = (
+  item: PreviewItem,
+  address: string,
+  key: string,
+  images: boolean
+): PreviewShown => {
   const link = linkShown(address);
 
   switch (item.state._tag) {
@@ -496,7 +502,7 @@ const itemShown = (item: PreviewItem, address: string, key: string): PreviewShow
           preview.description === null || preview.description === ""
             ? undefined
             : contained(preview.description),
-        image: imageOf(preview),
+        image: images ? imageOf(preview) : undefined,
         key,
         link,
         summary: summaryOf(preview),
@@ -588,7 +594,14 @@ export const previewsOf = (
 
       return item === undefined
         ? []
-        : [itemShown(item.item, found[index]?.href ?? item.item.link, String(index))];
+        : [
+            itemShown(
+              item.item,
+              found[index]?.href ?? item.item.link,
+              String(index),
+              mode === "on"
+            ),
+          ];
     });
   }
 
