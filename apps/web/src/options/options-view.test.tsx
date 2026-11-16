@@ -193,7 +193,7 @@ describe("the options view, under store, uploads, and previews", () => {
         "uploads.maxTotal",
         "unset",
         "unset",
-        "The most bytes the store may hold for Uploads, in bytes. Unset, there is no limit.",
+        "The most bytes the store may hold for live Uploads, each distinct file counted once; an upload that would pass it is refused, and nothing is evicted. Unset, there is no limit.",
       ],
       [
         "uploads.publicUrl",
