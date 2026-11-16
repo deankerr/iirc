@@ -362,7 +362,8 @@ const timelineDrawn = async (log: ReturnType<Page["getByRole"]>) =>
   await log.evaluate((element) => {
     const { right } = element.getBoundingClientRect();
 
-    const rows = [...element.querySelectorAll("time")].flatMap((time) => {
+    // A time column cell is the `time` that carries a sample; the day-change line's `time` does not.
+    const rows = [...element.querySelectorAll("time[data-sample]")].flatMap((time) => {
       const row = time.parentElement;
 
       if (row === null) {
@@ -447,7 +448,7 @@ const timeColumnDrawn = async (
   options: Intl.DateTimeFormatOptions
 ) =>
   await log.evaluate((element, formOptions) => {
-    const time = element.querySelector("time");
+    const time = element.querySelector("time[data-sample]");
     const parent = time?.parentElement;
 
     if (time === null || parent === null || parent === undefined) {
@@ -2924,7 +2925,7 @@ describe("the web frontend on iirc daemon --web", () => {
               await type(`/set ui.time ${time}`);
               // oxlint-disable-next-line no-await-in-loop -- one format after another
               await expect
-                .poll(async () => await log.locator("time").first().textContent())
+                .poll(async () => await log.locator("time[data-sample]").first().textContent())
                 .toMatch(text);
               // oxlint-disable-next-line no-await-in-loop -- once it is drawn
               await settled(page);
