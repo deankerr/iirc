@@ -762,7 +762,7 @@ describe("a Message's Previews", () => {
         text: list()?.textContent,
       }).toStrictEqual({
         alt: "A song",
-        disabled: true,
+        disabled: false,
         drawn: "poster",
         hover: `plays from ${playerHost}`,
         src: `/api/previews/media/${hash}`,
@@ -793,6 +793,73 @@ describe("a Message's Previews", () => {
       }).toStrictEqual({
         withPoster: { address: [], frames: 0 },
         without: { address: [], frames: 0 },
+      });
+    });
+
+    /**
+     * What the player's frame is, as drawn.
+     * @returns Every frame's attributes, and whether a poster or the play button is left.
+     */
+    const framed = () => ({
+      frames: [...document.body.querySelectorAll("iframe")].map((frame) =>
+        Object.fromEntries([...frame.attributes].map(({ name, value }) => [name, value]))
+      ),
+      poster: list()?.querySelector("img, canvas") !== null,
+      press: playButton() !== null,
+      text: list()?.textContent,
+    });
+
+    const frame = {
+      allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
+      class: expect.any(String),
+      referrerpolicy: "strict-origin",
+      sandbox: "allow-scripts allow-same-origin allow-presentation allow-popups",
+      src: `${playerAddress}?autoplay=1`,
+      style: expect.any(String),
+      title: `Player from ${playerHost}`,
+    };
+
+    it("swaps its poster for the player, already playing, when its play button is pressed", async () => {
+      await withPlayer(true);
+      await pressed(playButton());
+
+      expect(framed()).toStrictEqual({
+        frames: [frame],
+        poster: false,
+        press: false,
+        text: "example.com · A song",
+      });
+    });
+
+    it("swaps its play button for the player when the Daemon kept no poster", async () => {
+      await withPlayer(false);
+      await pressed(playButton());
+
+      expect(framed()).toStrictEqual({
+        frames: [frame],
+        poster: false,
+        press: false,
+        text: "example.com · A song",
+      });
+    });
+
+    it("swaps an animated poster's first frame for the player too", async () => {
+      stubMedia();
+
+      const { daemon } = await opened("on", catsItem(readyPlayer(true, true)));
+
+      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+      await scrolledIntoView();
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("canvas") !== null);
+      await pressed(playButton());
+
+      expect(framed()).toStrictEqual({
+        frames: [frame],
+        poster: false,
+        press: false,
+        text: "example.com · A song",
       });
     });
 
@@ -851,7 +918,7 @@ describe("a Message's Previews", () => {
         image: list()?.querySelector("img"),
         pressable: list()?.querySelector("canvas")?.closest("button"),
       }).toStrictEqual({
-        button: true,
+        button: false,
         fetches: [`/api/previews/media/${hash}`],
         image: null,
         pressable: null,

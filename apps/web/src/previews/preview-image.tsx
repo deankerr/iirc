@@ -317,17 +317,20 @@ const Stacked = ({
 
 /**
  * A poster that does not move.
- * @param props - The poster, its player, the text above it, and what stands without it.
+ * @param props - The poster, its player, what pressing play does, the text above it, and what
+ * stands without it.
  * @returns The poster, or what stands without it.
  */
 const StillPoster = ({
   image,
+  onPlay,
   player,
   text,
   without,
 }: {
   readonly image: ImageShown;
   readonly player: PlayerShown;
+  readonly onPlay: () => void;
   readonly text: ReactElement;
   readonly without: ReactElement;
 }) => {
@@ -355,7 +358,7 @@ const StillPoster = ({
             referrerPolicy="no-referrer"
             src={image.src}
           />
-          <PlayButton over="poster" player={player} />
+          <PlayButton onPlay={onPlay} over="poster" player={player} />
         </>
       ) : null}
     </Stacked>
@@ -365,17 +368,20 @@ const StillPoster = ({
 /**
  * A poster that is animated, which never moves here: its first frame, taken from the
  * Daemon's bytes, since a player's poster is still until something plays.
- * @param props - The poster, its player, the text above it, and what stands without it.
+ * @param props - The poster, its player, what pressing play does, the text above it, and what
+ * stands without it.
  * @returns The poster, or what stands without it.
  */
 const FramePoster = ({
   image,
+  onPlay,
   player,
   text,
   without,
 }: {
   readonly image: ImageShown;
   readonly player: PlayerShown;
+  readonly onPlay: () => void;
   readonly text: ReactElement;
   readonly without: ReactElement;
 }) => {
@@ -392,7 +398,7 @@ const FramePoster = ({
       {fetched._tag === "Ready" ? (
         <>
           <FirstFrame frame={fetched.frame} />
-          <PlayButton over="poster" player={player} />
+          <PlayButton onPlay={onPlay} over="poster" player={player} />
         </>
       ) : null}
     </Stacked>
@@ -401,31 +407,70 @@ const FramePoster = ({
 
 /**
  * A player's poster: a still image with its play button over the middle, under the text
- * above it. It opens nothing when pressed. Where it fails to load, or to be fetched, what
- * stands without it shows instead, the text with the same play button beside it.
- * @param props - The poster, its player, and the text above it.
+ * above it. It opens nothing when pressed except the play button, which calls `onPlay`.
+ * Where it fails to load, or to be fetched, what stands without it shows instead, the text
+ * with the same play button beside it.
+ * @param props - The poster, its player, what pressing play does, and the text above it.
  * @returns The poster with its text, or what stands without it.
  */
 export const PreviewPoster = ({
   image,
+  onPlay,
   player,
   text,
 }: {
   readonly image: ImageShown;
   readonly player: PlayerShown;
+  readonly onPlay: () => void;
   readonly text: ReactElement;
 }) => {
   const without = (
     <>
       {text}
-      <PlayButton over="text" player={player} />
+      <PlayButton onPlay={onPlay} over="text" player={player} />
     </>
   );
 
   return image.animated ? (
-    <FramePoster image={image} player={player} text={text} without={without} />
+    <FramePoster image={image} onPlay={onPlay} player={player} text={text} without={without} />
   ) : (
-    <StillPoster image={image} player={player} text={text} without={without} />
+    <StillPoster image={image} onPlay={onPlay} player={player} text={text} without={without} />
+  );
+};
+
+/**
+ * A player playing: its frame under the text, in the shape its page gave, at most as tall
+ * as a poster. The frame is sandboxed, so what plays there can run scripts and open a
+ * window of its own, but cannot navigate this page, submit a form, or reach anything else
+ * of it, and is told its origin and no more of where it was embedded.
+ * @param props - The player, as drawn, and the text above it.
+ * @returns The text with the frame under it.
+ */
+export const PlayerFrame = ({
+  player,
+  text,
+}: {
+  readonly player: PlayerShown;
+  readonly text: ReactElement;
+}) => {
+  const { height, width } = player.size;
+
+  return (
+    <div className={styles.stacked}>
+      {text}
+      <iframe
+        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+        className={styles.frame}
+        referrerPolicy="strict-origin"
+        sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+        src={player.src}
+        style={{
+          aspectRatio: `${width} / ${height}`,
+          width: `min(100%, calc(var(--frame-tallest) * ${width} / ${height}))`,
+        }}
+        title={`Player from ${player.host}`}
+      />
+    </div>
   );
 };
 

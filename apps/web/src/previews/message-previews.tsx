@@ -6,7 +6,9 @@
  * that is itself a video or a sound is its summary with a native player under it, which
  * fetches nothing until pressed. A player is its text with its poster under it and a play
  * button, which says where it plays from, over the poster, or beside the text with no
- * poster; nothing loads from where it plays from. An image is loaded only once it scrolls into view. Its
+ * poster; nothing loads from where it plays from until play is pressed, which swaps the
+ * poster for the player in a sandboxed frame, already playing. An image is loaded only
+ * once it scrolls into view. Its
  * Previews are asked for only once the Message scrolls into view, as an intersection
  * observer sees it, never ahead, and only while its Timeline's mode asks.
  *
@@ -15,13 +17,20 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
 import { mayPreview, modeIn, previewsOf } from "@iirc/frontend/previews";
-import type { LinkShown, MediaShown, PreviewShown } from "@iirc/frontend/previews";
+import type {
+  ImageShown,
+  LinkShown,
+  MediaShown,
+  PlayerShown,
+  PreviewShown,
+} from "@iirc/frontend/previews";
+import type { ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
 import { pressPreview, previewsModes, previewsShown, previewsState } from "./atoms.ts";
 import { PlayButton } from "./play-button.tsx";
-import { PreviewImage, PreviewPoster } from "./preview-image.tsx";
+import { PlayerFrame, PreviewImage, PreviewPoster } from "./preview-image.tsx";
 
 import styles from "./message-previews.module.css";
 
@@ -123,6 +132,43 @@ const ReadyText = ({
 };
 
 /**
+ * A player: its text with its poster under it and a play button, which says where it plays
+ * from, over the poster, or beside the text with no poster or once it fails to load.
+ * Pressing play swaps the poster, or the button, for the player. Whether it plays is this
+ * view's own, held nowhere else, and nothing is loaded from the player's host before then.
+ * @param props - The player, its image if it has one, and its text.
+ * @returns The player.
+ */
+const PreviewPlayer = ({
+  image,
+  player,
+  text,
+}: {
+  readonly image: ImageShown | undefined;
+  readonly player: PlayerShown;
+  readonly text: ReactElement;
+}) => {
+  const [playing, setPlaying] = useState(false);
+
+  const play = () => {
+    setPlaying(true);
+  };
+
+  if (playing) {
+    return <PlayerFrame player={player} text={text} />;
+  }
+
+  return image?.drawn === "Poster" ? (
+    <PreviewPoster image={image} key={image.src} onPlay={play} player={player} text={text} />
+  ) : (
+    <>
+      {text}
+      <PlayButton onPlay={play} over="text" player={player} />
+    </>
+  );
+};
+
+/**
  * One Preview.
  * @param props - The Preview, as drawn, and what presses a link waiting for it.
  * @returns Its row.
@@ -161,20 +207,12 @@ const PreviewRow = ({
         );
       }
 
-      // A player is its text with its poster under it, and a play button over the poster. With
-      // no poster, or once it fails to load, the text has the play button beside it. Nothing
-      // else of it is drawn, and nothing is loaded from where it plays from.
+      // A player is its text with its poster under it, and a play button over the poster,
+      // which becomes the player, already playing, once pressed.
       if (player !== undefined) {
         return (
           <div className={styles.ready} data-preview="ready">
-            {image?.drawn === "Poster" ? (
-              <PreviewPoster image={image} key={image.src} player={player} text={text} />
-            ) : (
-              <>
-                {text}
-                <PlayButton over="text" player={player} />
-              </>
-            )}
+            <PreviewPlayer image={image} player={player} text={text} />
           </div>
         );
       }
