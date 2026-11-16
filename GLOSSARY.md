@@ -18,7 +18,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
 
-**Change**: Something the Owner altered that belongs to no Network, such as an option or an Upload. _Avoid_: Update, mutation
+**Change**: Something the Owner altered, or the Daemon on the Owner's behalf, that belongs to no Network, such as an option or an Upload. _Avoid_: Update, mutation
 
 **Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
 
@@ -28,9 +28,9 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Link listener**: The Daemon's second address, which answers a request for an Upload's link and nothing else, and is all of iirc the Owner puts on the internet. _Avoid_: Public listener, second listener, file server
 
-**Store**: The S3-compatible bucket the Owner names, where the Daemon keeps the bytes of Uploads and of Preview images. _Avoid_: Bucket (for the role), storage, byte store, blob store
+**Store**: The S3-compatible bucket the Owner names, where the Daemon keeps the bytes of Uploads, and is meant to keep a Preview's media. _Avoid_: Bucket (for the role), storage, byte store, blob store
 
-**Key**: A secret the Owner makes so a Frontend can use the API, held by a script or agent or traded by a browser for a Sign-in. Not a Credential, which the Daemon uses on a Network. _Avoid_: Token, API token, password
+**Key**: A secret the Owner makes so a Frontend can use the API, held by a script or agent or traded by a browser for a Sign-in. Not a Credential, which the Daemon uses on the Owner's behalf. _Avoid_: Token, API token, password
 
 **Sign-in**: A browser's proof that it was given a Key, which it holds as a cookie so that no script ever holds the Key. _Avoid_: Session, login
 
