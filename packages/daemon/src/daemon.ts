@@ -32,6 +32,7 @@ import { OwnerConfiguration, layerOwnerConfiguration } from "./options.ts";
 import { layerPreviews } from "./previews/previews.ts";
 import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
+import { layerStoreBytes } from "./store-bytes.ts";
 import { layerUiConfiguration } from "./ui.ts";
 import { ByteStoreMaker, layerUploads } from "./uploads/uploads.ts";
 
@@ -199,14 +200,14 @@ const layerCore = (options: DaemonOptions) => {
   // Previews read the Timelines and the `ui` options, fetch through the link fetch, are
   // kept in the Preview cache, and keep their images in the bucket the options name.
   const previews = layerPreviews.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        linkFetch,
-        layerSqlitePreviewCache(`${dataDir}/previews.sqlite`).pipe(
-          Layer.provide(BunFileSystem.layer)
-        ),
-        Layer.succeed(ByteStoreMaker, makeS3ByteStore)
-      )
+    Layer.provide(Layer.merge(linkFetch, Layer.succeed(ByteStoreMaker, makeS3ByteStore)))
+  );
+
+  // Uploads and Previews share the bytes in the store, which leave it only once neither
+  // refers to them, so both are given the one record of what is claimed and released.
+  const shared = layerStoreBytes.pipe(
+    Layer.provideMerge(
+      layerSqlitePreviewCache(`${dataDir}/previews.sqlite`).pipe(Layer.provide(BunFileSystem.layer))
     )
   );
 
@@ -214,7 +215,8 @@ const layerCore = (options: DaemonOptions) => {
   // the Uploads. The options under `store` and `uploads` are folded before it starts, since
   // it spares the Credentials they name, even as it finishes a removal cut short.
   const owned = previews.pipe(
-    Layer.provideMerge(Layer.mergeAll(timelines, layerUiConfiguration, uploads))
+    Layer.provideMerge(Layer.mergeAll(timelines, layerUiConfiguration, uploads)),
+    Layer.provideMerge(shared)
   );
 
   const runtime = runtimeFirstToStop(options).pipe(

@@ -1319,6 +1319,10 @@ const setBucket = (served: Served, endpoint = "http://bucket.test") =>
     yield* setOption(served, "store.s3.secretAccessKey", "bucket-secret");
   });
 
+const decodeUploaded = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ hash: Schema.String, id: Schema.String }))
+);
+
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 const CAT = "https://cat.example/";
@@ -1644,6 +1648,39 @@ describe("a Preview's image over a real server", () => {
       { cache: "no-store", status: 503 },
       { cache: "no-store", status: 503 },
     ]);
+  });
+
+  it("keeps a Preview's image when an Upload of the same bytes is deleted", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          yield* setOption(served, "uploads.publicUrl", "https://up.example");
+
+          const sent = yield* served.request("/api/uploads", { body: png, method: "POST" });
+          const { id, hash } = decodeUploaded(yield* bodyOf(sent));
+          const { state } = yield* previewedOn(served, CAT);
+          const deleted = yield* served.request(`/api/uploads/${id}`, { method: "DELETE" });
+          const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+
+          return {
+            body: yield* bytesOf(response),
+            deleted: deleted.status,
+            hash,
+            image: imageOf(state)?.hash,
+            status: response.status,
+          };
+        })
+    );
+
+    expect(result).toStrictEqual({
+      body: png,
+      deleted: 200,
+      hash: sha256(png),
+      image: sha256(png),
+      status: 200,
+    });
   });
 });
 

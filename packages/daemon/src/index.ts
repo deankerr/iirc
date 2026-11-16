@@ -26,6 +26,8 @@ export { DataDirectoryFailed, DataDirectoryLocked, holdDataDirectory } from "./l
 
 export { ByteStoreMaker, Uploads, layerUploads } from "./uploads/uploads.ts";
 
+export { StoreBytes, layerStoreBytes } from "./store-bytes.ts";
+
 export { layerLinkListener } from "./link-listener.ts";
 
 export { Previews, layerPreviews } from "./previews/previews.ts";
