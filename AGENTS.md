@@ -6,6 +6,8 @@
 
 Formatting is automatic: a commit fixes and re-stages its own files. A push runs `bun run check`, `bun run knip`, and `bun run test`, and CI runs them again on the pull request.
 
+One test file runs from the root, as `bun --bun vitest run packages/outbox/src/outbox.test.ts`. An end-to-end file runs only from inside its package, as `cd packages/daemon && bun --bun vitest run src/e2e/uploads.test.ts`, and `apps/iirc`'s need `bun run build:web`, at the root, first. `bun run e2e` runs them all. End-to-end tests run in neither the hooks nor CI, so whoever changes behaviour one covers runs it.
+
 # Determinism
 
 `@iirc/protocol`, `@iirc/client`, `@iirc/timelines`, and `@iirc/frontend` are pure functions of their inputs. They never read the clock, randomness, the locale, the time zone, the environment, or the world, and their state holds only plain data: strings, numbers, booleans, arrays, plain objects, `Map`, and `Set`. The Runtime reaches the world only through its ports, reads time only through Effect's `Clock`, and takes randomness only from Effect's `Random`.
@@ -18,7 +20,7 @@ The docs are a tree, not a wiki. This file is the root for agents, and `README.m
 
 - `GLOSSARY.md` and `VISION.md`, above, are sources of truth the codebase implements.
 - `README.md` holds the one index, of every package and root document.
-- `ARCHITECTURE.md` says how the pieces fit and where to extend each. `ROADMAP.md` says what is intended and in what order, and `KNOWN-ISSUES.md` what is built but not yet right.
+- `ARCHITECTURE.md` says how the pieces fit, and `KNOWN-ISSUES.md` what is built but not yet right. What is intended is the open issues.
 - `docs/adr/` holds the decisions, which the codebase implements too.
 - `docs/agents/` tells the agent skills where issues live, what each label means, and how to read these documents.
 - A package's README is its interface: what it is for, how a caller uses it, what it guarantees, and what it does not do yet. Read it before changing the package, and keep it true in the same commit.

@@ -89,7 +89,7 @@ Each Timeline's row keeps its Read Marker, `read`, and a count for each level, s
 | --- | --- | --- |
 | `journal_mode` | `WAL` | Reads never block the projector's writes, nor an inspector with `sqlite3`. Set once the file is known to be a store. |
 | `synchronous` | `NORMAL` | In WAL mode a commit does not wait for the disk, and a power failure may lose the last commits, but never part of one. That is all a derived store needs: it may lag the Journal after a crash, and folds the rest again on start. It is never ahead of what it records as folded, because `through` commits in the same transaction as the rows it describes. The Journal's own `FULL` is what makes the Journal durable. |
-| One connection | serialized by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, and a transaction holds it, so a read never sees part of an apply. |
+| One connection | serialised by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, and a transaction holds it, so a read never sees part of an apply. |
 
 ## Whole or absent
 

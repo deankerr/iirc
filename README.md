@@ -4,14 +4,15 @@ iirc is an always-on IRC client you can build on. A headless Daemon stays on you
 
 ## What works today
 
-- **The Daemon** stays on any number of Networks, redials with backoff, rejoins Channels, and answers the keepalive. It paces what it sends, and stops gracefully with a `QUIT`.
+- **The Daemon** stays on any number of Networks, redials with backoff, rejoins Channels, and answers the keepalive. It paces what it sends, and stops gracefully with a `QUIT`. It logs in to a service where there is no SASL, sends `OPER` with a Credential as each Session begins, takes a configured nick back once its holder leaves it, and answers CTCP `VERSION`, `PING`, `TIME`, and `CLIENTINFO` within a budget.
 - **The RFC floor,** on any Ircd that speaks RFC 1459 and 2812, with or without cap negotiation.
 - **IRCv3:** `cap-notify`, SASL PLAIN, `message-tags`, `server-time`, `batch`, `echo-message` with `labeled-response`, `multi-prefix`, `away-notify`, `standard-replies`, `UTF8ONLY`, and STS.
 - **The Journal** in SQLite. A restart rebuilds every Network from it, and News resumes from any point in it.
-- **The API:** configure and remove Networks, say things, hold Credentials, read what the Client knows and its machines' states, follow News as Server-Sent Events, read Timelines, and upload a file to an S3-compatible bucket, whose link a listener of its own serves safely.
-- **The web frontend,** served by `iirc daemon --web` on the API's own origin: Timelines in split Panes, a Composer with commands and completion, a palette and a keymap, search, Lookups, a Channel's members, notifications, options, and themes, on a desktop or a phone.
+- **The API:** configure and remove Networks, say things, hold Credentials, read what the Client knows and its machines' states, run Lookups, follow News as Server-Sent Events, read and close Timelines, and ask for a Message's Previews, which the Daemon fetches through a guard that keeps a stranger's link off our own network.
+- **Uploads** to an S3-compatible bucket, stripped of their metadata first if they are JPEG, PNG, GIF, or WebP images, and served at their links by a listener of their own.
+- **The web frontend,** served by `iirc daemon --web` on the API's own origin: Timelines in split Panes, a Composer with commands, completion, and uploading, a palette and a keymap, search, Lookups, a Channel's members, a page's Preview under its link, the list of Uploads, notifications, options, and themes, on a desktop or a phone.
 
-Each module's README ends with what it does not do yet.
+Most packages' READMEs end with what the package does not do yet.
 
 ## Quick start
 
@@ -71,12 +72,12 @@ Configuration always goes whole, so joining or parting a Channel is another `PUT
 
 ## Repository
 
-Each package's README says what it does, what it guarantees, and what it does not do yet.
+Each package's README says what it does and what it guarantees.
 
 | Path | Pure | What |
 | --- | --- | --- |
 | `packages/protocol` | yes | The IRC protocol as values: Lines in and out, ISUPPORT, casemapping, CTCP, formatting, and links |
-| `packages/client` | yes | The IRC client for one Network, and its transcript test kit |
+| `packages/client` | yes | The Client, iirc's pure understanding of one Network, and its transcript test kit |
 | `packages/outbox` | yes | Pacing: which Line leaves next, and when |
 | `packages/timelines` | yes | Timelines as a fold over News |
 | `packages/frontend` | yes | The web frontend's core: what it shows, as plain data and reducers |
@@ -98,12 +99,13 @@ Each package's README says what it does, what it guarantees, and what it does no
 | `fixtures/nicks` |  | How a nick is read, as data two packages' tests run |
 | `fixtures/themes` |  | Real terminal theme files, for the theme importer's tests |
 
-| Document                    | Read it for                                           |
-| --------------------------- | ----------------------------------------------------- |
-| `ARCHITECTURE.md`           | How the pieces fit together, and where to extend them |
-| `ROADMAP.md`                | What we plan to build next                            |
-| `KNOWN-ISSUES.md`           | What is built but not yet right                       |
-| `docs/adr/`                 | Decisions and why                                     |
-| `docs/agents/`              | How the agent skills use this repository              |
-| `docs/irc-docs-2026-10-26/` | The IRC protocol documents we work from               |
-| `AGENTS.md`                 | Instructions for coding agents                        |
+| Document                    | Read it for                              |
+| --------------------------- | ---------------------------------------- |
+| `VISION.md`                 | What iirc is for, and how we build it    |
+| `GLOSSARY.md`               | What each word means here                |
+| `ARCHITECTURE.md`           | How the pieces fit together              |
+| `KNOWN-ISSUES.md`           | What is built but not yet right          |
+| `docs/adr/`                 | Decisions and why                        |
+| `docs/agents/`              | How the agent skills use this repository |
+| `docs/irc-docs-2026-10-26/` | The IRC protocol documents we work from  |
+| `AGENTS.md`                 | Instructions for every agent             |

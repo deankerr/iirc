@@ -24,10 +24,11 @@ iirc is MIT licensed. We will publish the library once it has earned a stable AP
 - **Parse, don't validate.** Bytes from the network and input from frontends become precise types at the boundary. A value that exists is a value that is valid, and that goes for outbound lines too: an IRC line that cannot be sent safely cannot be constructed.
 - **Don't sync state. Derive it.** History is an append-only record of what happened. Everything else, including Configuration and what a Frontend shows, is a projection of it that can be rebuilt.
 - **Deep modules, compositional packages.** Small interfaces hide real work. One package has one job, and packages combine without knowing about each other.
-- **Contract-driven.** Schemas define the boundaries first, and implementations follow. `HttpApi` is the primary surface. Other transports, such as Effect RPC, SSE, or a wire format of our own, are adapters over the same contract.
+- **Contract-driven.** Schemas define the boundaries first, and implementations follow. `HttpApi` is the primary surface. Other transports, such as Effect RPC or a wire format of our own, are adapters over the same contract.
 - **Agent-drivable and observable from the start.** Everything the Daemon can do is reachable through its API, and everything it knows can be inspected, except Credentials. An agent can run a real Daemon on a real Network, see exactly what happened, and check its own work. We build this first because it is what makes everything else fast.
-- **The RFC protocol is the floor.** Any Ircd that speaks RFC 1459 and 2812 gets at least base support, and nothing core depends on an IRCv3 capability. Beyond that, features arrive by progressive enhancement, when they are worth their cost, which is a high bar for anything that needs polling.
+- **The RFC protocol is the floor.** Any Ircd that speaks RFC 1459 and 2812 gets at least base support, and nothing core depends on an IRCv3 capability. Beyond that, features arrive by progressive enhancement, when they are worth their cost, which is a high bar for anything that needs polling. An IRCv3 draft waits until it is ratified, or until something cannot be done well without it.
 - **Hostile input is the normal case.** Networks and Users can send anything. Bad input never takes down a Connection, loses a Message, or reaches another system as a command. Security is proportionate: we defend against hostile Networks and text, not the Owner's own software.
+- **Refine before adding.** Making what is built right comes before anything new, and the order bends to what the Owner finds in daily use.
 - **Prove it against the real thing.** Shared conformance vectors, fuzzing, and real networks matter more than fakes.
 
 ## Core stack
