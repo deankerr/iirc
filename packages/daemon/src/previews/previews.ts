@@ -1,8 +1,8 @@
 /**
  * Previews: a Message's links, fetched through the link fetch when a Frontend asks, read
- * into a Preview, and kept in memory by link, so one link in many Messages is fetched once.
- * A Preview is a cache outside the Journal (ADR 0017): nothing here is journaled, and a
- * restart forgets every one.
+ * into a Preview, and kept in the Preview cache by link, so one link in many Messages is
+ * fetched once. A Preview is a cache outside the Journal (ADR 0017): nothing here is
+ * journaled, and losing the cache loses nothing but fetches.
  *
  * @packageDocumentation
  */
@@ -12,12 +12,27 @@ import { PreviewId, PreviewsOff, UnknownMessage, UnknownTimeline } from "@iirc/a
 import type { PreviewFailure, PreviewItem, PreviewState } from "@iirc/api";
 import { LinkFetch } from "@iirc/link-fetch";
 import type { Fetched, LinkFetchFailure, LinkFetchService } from "@iirc/link-fetch";
+import { PreviewCache } from "@iirc/preview-cache";
+import type { Kept, Settled } from "@iirc/preview-cache";
 import { previewableLinksOf } from "@iirc/protocol/links";
 import { TimelineStore } from "@iirc/timeline-store";
 import type { TimelineStoreFailed } from "@iirc/timeline-store";
 import { comparePositions } from "@iirc/timelines";
 import type { Position, TimelineId } from "@iirc/timelines";
-import { Context, Effect, Layer, Option, PubSub, Ref, Schema, Scope, Stream } from "effect";
+import {
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  PubSub,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import { UiConfiguration } from "../ui.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
@@ -79,7 +94,7 @@ const idOf = (key: string): PreviewId =>
  */
 const hostOf = (link: string): string => URL.parse(link)?.host ?? link;
 
-const failed = (reason: PreviewFailure): PreviewState => ({ _tag: "Failed", reason });
+const failed = (reason: PreviewFailure): Settled => ({ _tag: "Failed", reason });
 
 /**
  * A text Preview of a link to media itself, from its type alone: its body is never read.
@@ -87,7 +102,7 @@ const failed = (reason: PreviewFailure): PreviewState => ({ _tag: "Failed", reas
  * @param type - Its media type.
  * @returns The state, or nothing to show when the type is not media.
  */
-const mediaPreview = (link: string, type: string): PreviewState => {
+const mediaPreview = (link: string, type: string): Settled => {
   const kind = readMedia(type);
 
   return kind === undefined
@@ -104,7 +119,7 @@ const mediaPreview = (link: string, type: string): PreviewState => {
  * @param failure - Why the fetch gave no page.
  * @returns The state.
  */
-const failedFetch = (failure: LinkFetchFailure): PreviewState => {
+const failedFetch = (failure: LinkFetchFailure): Settled => {
   switch (failure._tag) {
     case "LinkRefused": {
       return failed("Refused");
@@ -213,7 +228,7 @@ const answered = (links: LinkFetchService, fetched: Fetched) =>
             title: page.title ?? null,
             type: null,
           },
-        } satisfies PreviewState);
+        } satisfies Settled);
   });
 
 /** A Direct Message's link that is not yet kept: fetched only once the Owner presses it. */
@@ -221,30 +236,96 @@ const waiting: PreviewState = { _tag: "WaitingForPress" };
 
 const pending: PreviewState = { _tag: "Pending" };
 
-/** A link's state when asked, and whether the ask started its fetch. */
+/**
+ * How long a ready Preview is served as it is before it is fetched again: a page's title
+ * and description change slowly, so a day keeps the text fresh without a fetch per view.
+ */
+const readyFor = Duration.toMillis(Duration.days(1));
+
+/**
+ * How long a failure is served without fetching again: a dead link stays dead for a while,
+ * and an hour bounds what asking it costs, yet lets a page that was down be tried again.
+ */
+const failedFor = Duration.toMillis(Duration.hours(1));
+
+/**
+ * Logs a Preview cache that failed. A cache that cannot be read or written never fails an
+ * ask: a read is a miss, and a write leaves the item shown but not kept.
+ * @param what - What it could not be.
+ * @returns What logs a failure.
+ */
+const warn = (what: string) => (error: { readonly reason: string }) =>
+  Effect.logWarning(`The Preview cache could not be ${what}: ${error.reason}`);
+
+/** A link being fetched now: what to answer meanwhile, and when it was last shown. */
+interface Flight {
+  readonly state: PreviewState;
+  readonly shown: number;
+}
+
+/** A link's state when asked, and whether the ask started its fetch, and published it. */
 interface Claimed {
   readonly state: PreviewState;
   readonly started: boolean;
+  readonly publish: boolean;
 }
 
 /**
- * The Previews, kept in memory by link, needing the link fetch, the Timeline store, and the
- * `ui` options. Each fetch runs in the Layer's Scope, so it ends when the Daemon stops.
+ * Whether a kept record is served as it is, and if not, whether it is fetched again.
+ * @param kept - The record.
+ * @param now - The time, in milliseconds since the epoch.
+ * @param direct - Whether it is in a Direct Message, which never fetches.
+ * @returns Whether it is stale.
+ */
+const stale = (kept: Kept, now: number, direct: boolean): boolean => {
+  if (direct) {
+    return false;
+  }
+
+  const age = now - kept.fetched;
+
+  return kept.state._tag === "Ready" ? age > readyFor : age >= failedFor;
+};
+
+/**
+ * The Previews, kept in the Preview cache by link, needing the link fetch, the Preview
+ * cache, the Timeline store, and the `ui` options. Only the links being fetched now are
+ * held in memory. Each fetch runs in the Layer's Scope, so it ends when the Daemon stops.
  */
 export const layerPreviews = Layer.effect(Previews)(
   Effect.gen(function* () {
     const links = yield* LinkFetch;
+    const cache = yield* PreviewCache;
     const store = yield* TimelineStore;
     const ui = yield* UiConfiguration;
     const scope = yield* Scope.Scope;
-    const kept = yield* Ref.make<ReadonlyMap<string, PreviewState>>(new Map());
+    const flying = yield* Ref.make<ReadonlyMap<string, Flight>>(new Map());
+    // Looking in flight and in the cache, and claiming a fetch, is one turn, and so is
+    // keeping what settled and leaving flight, so no link is fetched twice.
+    const turn = yield* Semaphore.make(1);
     const changed = yield* PubSub.unbounded<PreviewItem>();
 
-    const settle = (key: string, link: string, state: PreviewState) =>
-      Effect.andThen(
-        Ref.update(kept, (now) => new Map([...now, [key, state]])),
-        PubSub.publish(changed, { id: idOf(key), link, state })
-      );
+    const settle = (key: string, link: string, state: Settled) =>
+      Effect.gen(function* () {
+        yield* turn.withPermit(
+          Effect.gen(function* () {
+            const fetched = yield* Clock.currentTimeMillis;
+            const flight = (yield* Ref.get(flying)).get(key);
+
+            yield* cache
+              .put({ fetched, image: null, link: key, shown: flight?.shown ?? fetched, state })
+              .pipe(Effect.catch(warn("written")));
+            yield* Ref.update(flying, (now) => {
+              const rest = new Map(now);
+
+              rest.delete(key);
+
+              return rest;
+            });
+          })
+        );
+        yield* PubSub.publish(changed, { id: idOf(key), link, state });
+      });
 
     // Every failure of the fetch is answered with its reason, and anything unforeseen with
     // `Unreachable`, so no Preview stays pending for ever.
@@ -260,7 +341,52 @@ export const layerPreviews = Layer.effect(Previews)(
       );
 
     /**
-     * A link's state, starting its fetch if it is neither kept nor being fetched, or in a
+     * Decides what an ask of a link answers and whether it starts a fetch, in one turn.
+     * @param key - The link it is kept under.
+     * @param direct - Whether it is in a Direct Message.
+     * @returns What it answers and whether it started.
+     */
+    const claim = (key: string, direct: boolean) =>
+      turn.withPermit(
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const flight = (yield* Ref.get(flying)).get(key);
+
+          if (flight !== undefined) {
+            yield* Ref.update(
+              flying,
+              (held) => new Map([...held, [key, { ...flight, shown: now }]])
+            );
+
+            return { publish: false, started: false, state: flight.state } satisfies Claimed;
+          }
+
+          const kept = yield* cache
+            .shown(key, now)
+            .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())));
+
+          if (Option.isSome(kept) && !stale(kept.value, now, direct)) {
+            return { publish: false, started: false, state: kept.value.state } satisfies Claimed;
+          }
+
+          if (Option.isNone(kept) && direct) {
+            return { publish: false, started: false, state: waiting } satisfies Claimed;
+          }
+
+          // A ready Preview is served as it is while it is fetched again, and the stream
+          // carries the new one, so only a link with nothing to show is published pending.
+          const old = Option.isSome(kept) && kept.value.state._tag === "Ready";
+          const state: PreviewState = old ? kept.value.state : pending;
+          const shown = Option.isSome(kept) ? Math.max(kept.value.shown, now) : now;
+
+          yield* Ref.update(flying, (held) => new Map([...held, [key, { shown, state }]]));
+
+          return { publish: !old, started: true, state } satisfies Claimed;
+        })
+      );
+
+    /**
+     * A link's state, starting its fetch if it is not kept fresh or being fetched, or in a
      * Direct Message, waiting for a press until it is kept.
      * @param link - The link, as the URL parser wrote it.
      * @param direct - Whether it is in a Direct Message.
@@ -269,24 +395,13 @@ export const layerPreviews = Layer.effect(Previews)(
     const stateOf = (link: string, direct: boolean) =>
       Effect.gen(function* () {
         const key = keyOf(link);
+        const { publish, started, state } = yield* claim(key, direct);
 
-        const { started, state } = yield* Ref.modify(
-          kept,
-          (now): readonly [Claimed, ReadonlyMap<string, PreviewState>] => {
-            const held = now.get(key);
-
-            if (held !== undefined) {
-              return [{ started: false, state: held }, now];
-            }
-
-            return direct
-              ? [{ started: false, state: waiting }, now]
-              : [{ started: true, state: pending }, new Map([...now, [key, pending]])];
-          }
-        );
+        if (publish) {
+          yield* PubSub.publish(changed, { id: idOf(key), link, state });
+        }
 
         if (started) {
-          yield* PubSub.publish(changed, { id: idOf(key), link, state: pending });
           yield* Effect.forkIn(fetchOne(key, link), scope);
         }
 

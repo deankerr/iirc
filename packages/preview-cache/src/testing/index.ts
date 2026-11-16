@@ -5,3 +5,5 @@
  * @packageDocumentation
  */
 export { makeMemoryPreviewCache } from "./memory-cache.ts";
+
+export { previewCacheLaws } from "./laws.ts";

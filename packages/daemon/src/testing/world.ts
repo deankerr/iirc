@@ -17,6 +17,9 @@ import { client } from "@iirc/client";
 import { LinkFetch } from "@iirc/link-fetch";
 import type { LinkFetchService } from "@iirc/link-fetch";
 import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
+import { PreviewCache } from "@iirc/preview-cache";
+import type { PreviewCacheService } from "@iirc/preview-cache";
+import { makeMemoryPreviewCache } from "@iirc/preview-cache/testing";
 import { layerRuntime } from "@iirc/runtime";
 import type { RuntimeOptions } from "@iirc/runtime";
 import { Journal, JournalFailed } from "@iirc/runtime/journal";
@@ -104,6 +107,8 @@ export interface World {
   readonly bytes: ByteStoreHarness;
   /** How Previews fetch a link: a fake that answers none unless the test gave one. */
   readonly links: LinkFetchService;
+  /** What Previews are kept in: in memory unless the test gave another. */
+  readonly previews: PreviewCacheService;
   readonly logged: string[];
 }
 
@@ -115,12 +120,14 @@ export const unreachableEndpoint = "http://unreachable.invalid";
  * @param journal - A Journal to use instead of a fresh one.
  * @param store - A Timeline store to use instead of a fresh one in memory.
  * @param links - A link fetch to use instead of a fake that answers no link.
+ * @param previews - A Preview cache to use instead of a fresh one in memory.
  * @returns The world.
  */
 export const makeWorld = (
   journal?: JournalService,
   store?: TimelineStoreService,
-  links?: LinkFetchService
+  links?: LinkFetchService,
+  previews?: PreviewCacheService
 ): Effect.Effect<World> =>
   Effect.gen(function* () {
     return {
@@ -129,6 +136,7 @@ export const makeWorld = (
       links: links ?? (yield* makeFakeLinkFetch({})).service,
       logged: [],
       memory: yield* makeMemoryTransport,
+      previews: previews ?? (yield* makeMemoryPreviewCache),
       store: store ?? (yield* makeMemoryTimelineStore),
       vault: yield* makeMemoryVault,
     };
@@ -151,7 +159,12 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
       layerProjector,
       layerPreviews.pipe(
         Layer.provideMerge(layerUiConfiguration),
-        Layer.provide(Layer.succeed(LinkFetch, world.links))
+        Layer.provide(
+          Layer.merge(
+            Layer.succeed(LinkFetch, world.links),
+            Layer.succeed(PreviewCache, world.previews)
+          )
+        )
       ),
       layerLinkListener.pipe(
         Layer.provideMerge(layerUploads(dataDir)),

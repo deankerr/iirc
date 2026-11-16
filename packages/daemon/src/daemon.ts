@@ -12,6 +12,7 @@ import { layerSqliteJournal } from "@iirc/journal-sqlite";
 import type { LinkFetch } from "@iirc/link-fetch";
 import { layerBunLinkFetch } from "@iirc/link-fetch-bun";
 import type { Pacing } from "@iirc/outbox";
+import { layerSqlitePreviewCache } from "@iirc/preview-cache-sqlite";
 import { layerRuntime } from "@iirc/runtime";
 import { layerSqliteTimelineStore } from "@iirc/timeline-store-sqlite";
 import { layer as layerTransport } from "@iirc/transport-bun";
@@ -195,8 +196,18 @@ const layerCore = (options: DaemonOptions) => {
 
   const linkFetch = options.linkFetch ?? layerBunLinkFetch({ version: options.version ?? "0.0.0" });
 
-  // Previews read the Timelines and the `ui` options, and fetch through the link fetch.
-  const previews = layerPreviews.pipe(Layer.provide(linkFetch));
+  // Previews read the Timelines and the `ui` options, fetch through the link fetch, and are
+  // kept in the Preview cache.
+  const previews = layerPreviews.pipe(
+    Layer.provide(
+      Layer.merge(
+        linkFetch,
+        layerSqlitePreviewCache(`${dataDir}/previews.sqlite`).pipe(
+          Layer.provide(BunFileSystem.layer)
+        )
+      )
+    )
+  );
 
   // The `ui` options are folded from the Journal's Changes, beside the Runtime, and so are
   // the Uploads. The options under `store` and `uploads` are folded before it starts, since

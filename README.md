@@ -84,12 +84,14 @@ Each package's README says what it does and what it guarantees.
 | `packages/api` | contract | The HTTP API every Frontend uses, as Schemas and typed errors |
 | `packages/runtime` | no | The Runtime, and the ports it drives Clients through: Transport, Journal, Vault, and Clock |
 | `packages/timeline-store` | no | The Timeline store port, its in-memory adapter, and its laws |
+| `packages/preview-cache` | no | The Preview cache port, its in-memory adapter, and its laws |
 | `packages/byte-store` | no | The byte store port, its in-memory adapter, and its laws |
 | `packages/link-fetch` | no | The link fetch port, the address policy, and a fake adapter |
 | `packages/transport-bun` | no | The production Transport: TCP and TLS on Bun |
 | `packages/journal-sqlite` | no | The production Journal: Entries in SQLite |
 | `packages/vault-file` | no | The production Vault: Credentials in a `0600` file |
 | `packages/timeline-store-sqlite` | no | The production Timeline store, in SQLite |
+| `packages/preview-cache-sqlite` | no | The production Preview cache, in SQLite |
 | `packages/byte-store-s3` | no | The byte store in an S3-compatible bucket |
 | `packages/link-fetch-bun` | no | The guard: fetches a stranger's link on Bun, pinned to the addresses it checked |
 | `packages/daemon` | no | The Daemon: wires it all together and serves the API |

@@ -168,6 +168,12 @@ const daemon = Command.make(
             );
           }
 
+          case "PreviewCacheFailed": {
+            return failed(
+              `The Previews in ${directory}/previews.sqlite could not be opened: ${error.reason}. Removing the file loses nothing but fetches.`
+            );
+          }
+
           case "DecodersMissing": {
             return failed(
               `This runtime cannot decode ${error.missing.join(", ")}, so it would read the Journal wrongly. Run iirc on the Bun it was built for.`

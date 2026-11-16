@@ -1,13 +1,18 @@
-import { BunHttpServer } from "@effect/platform-bun";
+import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
 import { MessagePreviews, PreviewsEvent, TimelineList } from "@iirc/api";
 import type { PreviewItem } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { LinkRefused, LinkTimedOut, LinkTooLarge, LinkWrongType } from "@iirc/link-fetch";
-import type { Answer, Asked } from "@iirc/link-fetch/testing";
+import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
 import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
-import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import type { PreviewCacheService } from "@iirc/preview-cache";
+import { makeSqlitePreviewCache } from "@iirc/preview-cache-sqlite";
+import type { JournalService } from "@iirc/runtime/journal";
+import type { TimelineStoreService } from "@iirc/timeline-store";
+import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema } from "effect";
 import type { Scope } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
@@ -32,23 +37,49 @@ interface Served {
     init?: RequestInit & { readonly key?: string | null }
   ) => Effect.Effect<Response>;
   /** Every fetch asked of the fake link fetch, in order. */
-  readonly asked: Effect.Effect<readonly Asked[]>;
+  readonly asked: FakeLinkFetch["asked"];
+  readonly dataDir: string;
   readonly key: string;
   readonly world: World;
+}
+
+/** What a test brings to a server beyond what it answers. */
+interface Setup {
+  /** The link fetch to use instead of a fake answering the given answers. */
+  readonly links?: FakeLinkFetch;
+  /** The Preview cache to use instead of a fresh one in memory. */
+  readonly previews?: PreviewCacheService;
+  /** What a Daemon that was stopped left, for the next one to start on. */
+  readonly left?: Left;
+}
+
+/** What outlives a Daemon: its data directory and key, its Journal, and its Timelines. */
+interface Left {
+  readonly dataDir: string;
+  readonly key: string;
+  readonly journal?: JournalService;
+  readonly store?: TimelineStoreService;
 }
 
 /**
  * Serves the API over a real Bun server on an ephemeral loopback port, on the in-memory
  * ports, with the fake link fetch answering as told.
  * @param answers - What each link answers.
+ * @param setup - What else it runs on.
  * @returns The server, which stops when the Scope closes.
  */
-const serve = (answers: Readonly<Record<string, Answer>>) =>
+const serve = (answers: Readonly<Record<string, Answer>>, setup: Setup = {}) =>
   Effect.gen(function* () {
-    const dataDir = yield* temporaryDirectory;
-    const key = yield* makeKey(dataDir);
-    const fake = yield* makeFakeLinkFetch(answers);
-    const world = yield* makeWorld(undefined, undefined, fake.service);
+    const dataDir = setup.left?.dataDir ?? (yield* temporaryDirectory);
+    const key = setup.left?.key ?? (yield* makeKey(dataDir));
+    const fake = setup.links ?? (yield* makeFakeLinkFetch(answers));
+
+    const world = yield* makeWorld(
+      setup.left?.journal,
+      setup.left?.store,
+      fake.service,
+      setup.previews
+    );
 
     const server = HttpRouter.serve(ApiRoutes, {
       disableListenLog: true,
@@ -70,6 +101,7 @@ const serve = (answers: Readonly<Record<string, Answer>>) =>
 
     const served: Served = {
       asked: fake.asked,
+      dataDir,
       key,
       request: (path, init = {}) =>
         Effect.promise(async () => {
@@ -92,6 +124,18 @@ const run = async <A, E>(
   answers: Readonly<Record<string, Answer>>,
   test: (served: Served) => Effect.Effect<A, E, Scope.Scope>
 ) => await Effect.runPromise(Effect.scoped(serve(answers).pipe(Effect.flatMap(test))));
+
+/**
+ * Runs a test on the TestClock, which only the test moves. The server's own timers wait for
+ * it, so what a test waits for on the real clock is wrapped in {@link live}.
+ * @param test - The test.
+ * @returns What the test returned.
+ */
+const runClocked = async <A, E>(test: Effect.Effect<A, E, Scope.Scope>) =>
+  await Effect.runPromise(Effect.scoped(test).pipe(Effect.provide(TestClock.layer())));
+
+/** Waits on the real clock, within a test on the TestClock. */
+const live = TestClock.withLive;
 
 const bodyOf = (response: Response) => Effect.promise(async () => await response.text());
 
@@ -888,5 +932,314 @@ describe("a page's oEmbed over a real server", () => {
     const result = await previewed({ "https://page.example/": cats }, "https://page.example/");
 
     expect(result.asked).toStrictEqual([{ link: "https://page.example/", purpose: asPage }]);
+  });
+});
+
+/**
+ * A link fetch whose links answer one way until it is turned, and the other way after, with
+ * what both were asked, in order.
+ * @param before - What each link answers at first.
+ * @param after - What each link answers once turned.
+ * @returns The link fetch, and what turns it.
+ */
+const turning = (
+  before: Readonly<Record<string, Answer>>,
+  after: Readonly<Record<string, Answer>>
+) =>
+  Effect.gen(function* () {
+    const first = yield* makeFakeLinkFetch(before);
+    const second = yield* makeFakeLinkFetch(after);
+    const turned = yield* Ref.make(false);
+
+    const links: FakeLinkFetch = {
+      asked: Effect.map(Effect.all([first.asked, second.asked]), ([a, b]) => [...a, ...b]),
+      service: {
+        fetch: (link, purpose) =>
+          Effect.flatMap(Ref.get(turned), (now) =>
+            (now ? second : first).service.fetch(link, purpose)
+          ),
+      },
+    };
+
+    return { links, turn: Ref.set(turned, true) };
+  });
+
+const dogs = page(
+  '<title>Dogs</title><meta property="og:site_name" content="Dog News"><meta name="description" content="All about dogs.">'
+);
+
+/**
+ * Follows the changes stream, and reads it as it comes.
+ * @param served - The server.
+ * @returns What it has read so far, and what waits until a read satisfies a test.
+ */
+const follow = (served: Served) =>
+  Effect.gen(function* () {
+    // The heartbeat is on the TestClock, so it is moved, a beat at a time, until one says
+    // the stream is followed. The response may wait for it, too.
+    const beat = Effect.gen(function* () {
+      yield* TestClock.adjust(50);
+      yield* Effect.promise(async () => {
+        await Bun.sleep(10);
+      });
+    }).pipe(Effect.forever);
+
+    const following = yield* served
+      .request("/api/previews/changes")
+      .pipe((request) => Effect.raceFirst(beat, request));
+
+    const body: ReadableStream<Uint8Array> | null = following.body;
+    const reader = body?.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+
+    const until = (done: (read: string) => boolean) =>
+      Effect.promise(async () => {
+        while (!done(text)) {
+          // oxlint-disable-next-line no-await-in-loop -- reading a stream in order
+          const chunk = await reader?.read();
+
+          if (chunk === undefined || chunk.done) {
+            return;
+          }
+
+          text += decoder.decode(chunk.value, { stream: true });
+        }
+      }).pipe(Effect.timeout("5 seconds"), Effect.orDie);
+
+    yield* Effect.raceFirst(
+      beat,
+      until((read) => read.includes("event: heartbeat"))
+    );
+
+    return {
+      stop: Effect.promise(async () => await reader?.cancel()),
+      text: () => text,
+      until: (done: (read: string) => boolean) => live(until(done)),
+    };
+  });
+
+/**
+ * What a Message's Previews show: each title, or the state of one that has none.
+ * @param items - The items.
+ * @returns What each shows.
+ */
+const titles = (items: readonly PreviewItem[]) =>
+  items.map((one) => (one.state._tag === "Ready" ? one.state.preview.title : one.state._tag));
+
+const hour = 60 * 60 * 1000;
+const day = 24 * hour;
+
+/**
+ * Says a Message with one link, with Previews on.
+ * @param served - The server.
+ * @returns Its place.
+ */
+const said = (served: Served) =>
+  Effect.gen(function* () {
+    yield* setPreviews(served, "links only");
+    yield* talk(served, ["see https://cats.example/"]);
+    const [message] = yield* live(messages(served, 1));
+
+    return message ?? { position: "", text: "", timeline: "" };
+  });
+
+/**
+ * A Message's Previews, as they are now.
+ * @param served - The server.
+ * @param place - The Message's place.
+ * @returns Its items.
+ */
+const asking = (served: Served, place: Place) =>
+  Effect.gen(function* () {
+    return decodePreviews(yield* bodyOf(yield* ask(served, place))).previews;
+  });
+
+/**
+ * Waits until the link fetch has been asked as many times as given.
+ * @param served - The server.
+ * @param count - How many.
+ * @returns An Effect that ends when it has.
+ */
+const fetches = (served: Served, count: number) =>
+  live(
+    Effect.gen(function* () {
+      return (yield* served.asked).length === count ? count : yield* new NotYet();
+    }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"), Effect.orDie)
+  );
+
+describe("the Preview cache over a real server", () => {
+  it("serves a Preview over a day old as it was and fetches it again, the stream carrying the new one", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { links, turn } = yield* turning(
+          { "https://cats.example/": cats },
+          {
+            "https://cats.example/": dogs,
+          }
+        );
+
+        const served = yield* serve({}, { links });
+        const place = yield* said(served);
+
+        yield* TestClock.setTime(day);
+        yield* live(settled(served, place));
+
+        // The clock moves before the stream is followed, as each heartbeat is a wake-up.
+        yield* turn;
+        yield* TestClock.adjust(day + 1);
+        const stream = yield* follow(served);
+        const old = yield* asking(served, place);
+
+        yield* stream.until((read) => read.includes("Dog News"));
+        yield* stream.stop;
+        yield* fetches(served, 2);
+
+        return {
+          after: titles(yield* live(settled(served, place))),
+          carried: stream.text().includes("Dog News"),
+          old: titles(old),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ after: ["Dogs"], carried: true, old: ["Cats"] });
+  });
+
+  it("serves a Preview under a day old without fetching it again", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve({ "https://cats.example/": cats });
+        const place = yield* said(served);
+
+        yield* live(settled(served, place));
+        yield* TestClock.adjust(day);
+        const again = yield* asking(served, place);
+
+        return { again: titles(again), asked: (yield* served.asked).length };
+      })
+    );
+
+    expect(result).toStrictEqual({ again: ["Cats"], asked: 1 });
+  });
+
+  it("serves a failure for an hour with no fetch, then fetches it again on the next ask", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { links, turn } = yield* turning(
+          { "https://cats.example/": new LinkRefused({ reason: "private" }) },
+          { "https://cats.example/": cats }
+        );
+
+        const served = yield* serve({}, { links });
+        const place = yield* said(served);
+
+        yield* live(settled(served, place));
+        yield* turn;
+        yield* TestClock.adjust(hour - 1);
+        const within = titles(yield* asking(served, place));
+        const askedWithin = (yield* served.asked).length;
+
+        yield* TestClock.adjust(1);
+        const next = titles(yield* asking(served, place));
+
+        return {
+          askedWithin,
+          later: titles(yield* live(settled(served, place))),
+          next,
+          within,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      askedWithin: 1,
+      later: ["Cats"],
+      next: ["Pending"],
+      within: ["Failed"],
+    });
+  });
+
+  it("moves when a Preview was last shown with each ask", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve({ "https://cats.example/": cats });
+        const place = yield* said(served);
+
+        yield* TestClock.setTime(1000);
+        yield* live(settled(served, place));
+        const first = yield* served.world.previews.get("https://cats.example/");
+
+        yield* TestClock.adjust(5000);
+        yield* asking(served, place);
+        const second = yield* served.world.previews.get("https://cats.example/");
+
+        const read = (kept: typeof first) =>
+          Option.isSome(kept) ? [kept.value.fetched, kept.value.shown] : [];
+
+        return { first: read(first), second: read(second) };
+      })
+    );
+
+    expect(result).toStrictEqual({ first: [1000, 1000], second: [1000, 6000] });
+  });
+
+  it("keeps Previews across a restart, fetching nothing again", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const dataDir = yield* temporaryDirectory;
+        const key = yield* makeKey(dataDir);
+        const file = `${dataDir}/previews.sqlite`;
+        const answers = { "https://cats.example/": cats };
+
+        // The cache is opened, and closed, with each Daemon, on the same file.
+        const opened = makeSqlitePreviewCache(file).pipe(
+          Effect.provide(BunFileSystem.layer),
+          Effect.orDie
+        );
+
+        const before = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const served = yield* serve(answers, {
+              left: { dataDir, key },
+              previews: yield* opened,
+            });
+
+            const place = yield* said(served);
+            const items = yield* live(settled(served, place));
+
+            return {
+              asked: (yield* served.asked).length,
+              items,
+              left: { dataDir, journal: served.world.journal, key, store: served.world.store },
+              place,
+            };
+          })
+        );
+
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const served = yield* serve(answers, {
+              left: before.left,
+              previews: yield* opened,
+            });
+
+            const items = yield* asking(served, before.place);
+
+            return {
+              again: items,
+              asked: (yield* served.asked).length,
+              before: before.items,
+              firstAsked: before.asked,
+            };
+          })
+        );
+      })
+    );
+
+    expect(result.firstAsked).toBe(1);
+    expect(result.asked).toBe(0);
+    expect(titles(result.again)).toStrictEqual(["Cats"]);
+    expect(result.again).toStrictEqual(result.before);
   });
 });
