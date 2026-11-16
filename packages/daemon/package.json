@@ -18,6 +18,8 @@
     "@iirc/byte-store-s3": "workspace:*",
     "@iirc/client": "workspace:*",
     "@iirc/journal-sqlite": "workspace:*",
+    "@iirc/link-fetch": "workspace:*",
+    "@iirc/link-fetch-bun": "workspace:*",
     "@iirc/outbox": "workspace:*",
     "@iirc/protocol": "workspace:*",
     "@iirc/runtime": "workspace:*",
@@ -26,7 +28,8 @@
     "@iirc/timelines": "workspace:*",
     "@iirc/transport-bun": "workspace:*",
     "@iirc/vault-file": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "entities": "8.1.0"
   },
   "devDependencies": {
     "playwright": "1.65.0",
