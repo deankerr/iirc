@@ -212,7 +212,9 @@ const PreviewRow = ({
       if (player !== undefined) {
         return (
           <div className={styles.ready} data-preview="ready">
-            <PreviewPlayer image={image} player={player} text={text} />
+            {/* Keyed by its address, a press plays only the player it was given for: one
+                the Daemon answers anew waits for a press of its own. */}
+            <PreviewPlayer image={image} key={player.src} player={player} text={text} />
           </div>
         );
       }

@@ -487,9 +487,11 @@ const animated = () => ({
  * Opens the Message with the player's Preview ready, and its poster, if any, in view.
  * @param poster - Whether the Daemon kept a poster.
  * @param mode - `ui.previews`, on unless given.
+ * @returns The fake Daemon, to send the stream more.
  */
 const withPlayer = async (poster: boolean, mode: "on" | "links only" = "on") => {
-  const { daemon } = await opened(mode, catsItem(readyPlayer(poster)));
+  const fake = await opened(mode, catsItem(readyPlayer(poster)));
+  const { daemon } = fake;
 
   await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
   await scrolledIntoView();
@@ -499,6 +501,8 @@ const withPlayer = async (poster: boolean, mode: "on" | "links only" = "on") => 
     await imageSeen();
     await settled(() => list()?.querySelector("img") !== null);
   }
+
+  return fake;
 };
 
 const playButton = () => imageButton(`Play from ${playerHost}`);
@@ -835,6 +839,31 @@ describe("a Message's Previews", () => {
         press: false,
         text: "example.com · A song",
       });
+    });
+
+    it("asks for a press again when the player's address changes after one", async () => {
+      const { sendPreview } = await withPlayer(false);
+
+      await pressed(playButton());
+
+      const before = framed().frames.length;
+      const moved = readyPlayer(false);
+
+      await act(async () => {
+        sendPreview(
+          catsItem({
+            ...moved,
+            preview: {
+              ...moved.preview,
+              player: { link: "https://player.vimeo.com/video/7", size: null },
+            },
+          })
+        );
+        await Promise.resolve();
+      });
+      await settled(() => imageButton("Play from player.vimeo.com") !== null);
+
+      expect({ after: framed().frames.length, before }).toStrictEqual({ after: 0, before: 1 });
     });
 
     it("swaps its play button for the player when the Daemon kept no poster", async () => {
