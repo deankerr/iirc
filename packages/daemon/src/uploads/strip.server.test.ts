@@ -35,6 +35,7 @@ import {
 } from "../testing/images.ts";
 import { layerWorld, makeKey, makeWorld, temporaryDirectory } from "../testing/world.ts";
 import type { World } from "../testing/world.ts";
+import { safety } from "./serving.ts";
 
 const encoder = new TextEncoder();
 
@@ -51,17 +52,25 @@ interface Served {
     path: string,
     init?: { readonly method?: string; readonly body?: Uint8Array | string }
   ) => Effect.Effect<Response>;
-  /** Fetches a path from the link listener, once it is bound. */
+  /** Fetches a path from the link listener. */
   readonly fromLinks: (path: string) => Effect.Effect<Response>;
 }
 
 const publicUrl = "https://up.example";
 
+/**
+ * Whether an answer to `/` is the link listener's: a 404 carrying its safety headers.
+ * @param response - The answer.
+ * @returns Whether it is.
+ */
+const answersAsLinks = (response: Response) =>
+  response.status === 404 &&
+  response.headers.get("content-security-policy") === safety["content-security-policy"];
+
 const serve = Effect.gen(function* () {
   const dataDir = yield* temporaryDirectory;
   const key = yield* makeKey(dataDir);
   const world = yield* makeWorld(yield* makeMemoryJournal);
-  const port = freePort();
 
   const server = HttpRouter.serve(ApiRoutes, { disableListenLog: true, disableLogger: true }).pipe(
     Layer.provideMerge(
@@ -106,17 +115,40 @@ const serve = Effect.gen(function* () {
     ["store.s3.accessKeyId", "bucket-key-id"],
     ["store.s3.secretAccessKey", "bucket-secret"],
     ["uploads.publicUrl", publicUrl],
-    ["uploads.listen", `${loopback}:${port}`],
   ] as const) {
     yield* put(`/api/options/${option}`, value, 200);
   }
 
-  // The listener is bound as the options change, so ask until it answers.
+  // A free port can be taken by anything between being found and being bound, and the
+  // listener then stays closed and something else answers there. So ask at each port until
+  // the listener answers as only it does, and move to another port if it never does.
+  const listenForLinks = (tries: number): Effect.Effect<number> =>
+    Effect.gen(function* () {
+      const port = freePort();
+
+      yield* put("/api/options/uploads.listen", `${loopback}:${port}`, 200);
+
+      const bound = yield* Effect.tryPromise(
+        async () => await fetch(`http://${loopback}:${port}/`)
+      ).pipe(
+        Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }),
+        Effect.map(answersAsLinks),
+        Effect.orElseSucceed(() => false)
+      );
+
+      if (bound) {
+        return port;
+      }
+
+      return tries > 1
+        ? yield* listenForLinks(tries - 1)
+        : yield* Effect.die(new Error("the link listener bound at none of the ports it was given"));
+    });
+
+  const port = yield* listenForLinks(5);
+
   const fromLinks = (path: string): Effect.Effect<Response> =>
-    Effect.tryPromise(async () => await fetch(`http://${loopback}:${port}${path}`)).pipe(
-      Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }),
-      Effect.orDie
-    );
+    Effect.promise(async () => await fetch(`http://${loopback}:${port}${path}`));
 
   const served: Served = { dataDir, fromLinks, request, world };
 
