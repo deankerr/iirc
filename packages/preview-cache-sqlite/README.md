@@ -17,7 +17,7 @@ Both open the file, creating it when it does not exist, and close it when their 
 CREATE TABLE previews (link TEXT PRIMARY KEY, state TEXT NOT NULL, image TEXT,
   fetched INTEGER NOT NULL, shown INTEGER NOT NULL) STRICT;
 CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL;
-PRAGMA user_version = 2;  -- the layout's version
+PRAGMA user_version = 3;  -- the layout's version
 ```
 
 - **`state` is the JSON text of `Settled`'s encoding.** Every read decodes it, and a row that does not decode fails that read with `PreviewCacheFailed`.

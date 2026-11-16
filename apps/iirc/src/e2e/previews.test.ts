@@ -832,6 +832,154 @@ describe("a link's Preview, end to end", () => {
     }
   }, 120_000);
 
+  it("draws a player's poster with a play button that says where it plays from, and loads nothing from there", async () => {
+    if (browser === undefined) {
+      throw new Error("no browser");
+    }
+
+    const poster = solidPng(400, [60, 90, 200]);
+    const embed = "https://www.youtube.com/embed/dQw4w9WgXcQ";
+    const asked: string[] = [];
+
+    const fixture = Bun.serve({
+      fetch: (request) => {
+        const { pathname } = new URL(request.url);
+
+        asked.push(pathname);
+
+        if (pathname === "/poster.png") {
+          return new Response(poster, { headers: { "content-type": "image/png" } });
+        }
+
+        return new Response(
+          `<!doctype html><html><head><meta charset="utf-8"><title>ignored</title>` +
+            `<meta property="og:title" content="A song everyone knows">` +
+            `<meta property="og:site_name" content="YouTube">` +
+            `<meta property="og:image" content="/poster.png">` +
+            `<meta property="og:video:url" content="${embed}">` +
+            `<meta property="og:video:secure_url" content="${embed}">` +
+            `<meta property="og:video:type" content="text/html">` +
+            `<meta property="og:video:width" content="1280">` +
+            `<meta property="og:video:height" content="720"></head><body></body></html>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } }
+        );
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    const [minio, ircd] = await Promise.all([startMinio(), startNgircd()]);
+    const channel = "#players";
+
+    const scope = await Effect.runPromise(Scope.make());
+
+    try {
+      const stack = await startStack({
+        channel,
+        dataDir: path.join(directory, "players-data"),
+        fixturePort: fixture.port ?? 0,
+        ircd,
+        scope,
+      });
+
+      const { api, base, peer } = stack;
+
+      const held = await Promise.all(
+        Object.entries({
+          "minio-key": minio.accessKeyId,
+          "minio-secret": minio.secretAccessKey,
+        }).map(
+          async ([name, value]) =>
+            await status(api("PUT", `/credentials/${name}`, JSON.stringify({ value })))
+        )
+      );
+
+      const options = {
+        "store.s3.accessKeyId": "minio-key",
+        "store.s3.bucket": minio.bucket,
+        "store.s3.endpoint": minio.endpoint,
+        "store.s3.region": minio.region,
+        "store.s3.secretAccessKey": "minio-secret",
+      };
+
+      const set = await Promise.all(
+        Object.entries(options).map(
+          async ([option, value]) =>
+            await status(api("PUT", `/options/${option}`, JSON.stringify({ value })))
+        )
+      );
+
+      const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
+
+      const { page: tab, problems } = await watchedPage(browser);
+      const requested: string[] = [];
+
+      tab.on("request", (request) => {
+        requested.push(new URL(request.url()).origin);
+      });
+
+      const log = await openChannel(tab, stack, channel);
+
+      await expect
+        .poll(
+          async () => {
+            peer.send(`PRIVMSG ${channel} :hello`);
+
+            return await log.getByText("hello").count();
+          },
+          { interval: 500, timeout: 20_000 }
+        )
+        .toBeGreaterThan(0);
+
+      peer.send(`PRIVMSG ${channel} :song http://127.0.0.1:${fixture.port}/watch`);
+
+      const row = log.locator('[data-preview="ready"]');
+      const button = row.getByRole("button", { name: "Play from www.youtube-nocookie.com" });
+
+      await button.waitFor();
+
+      const drawn = await loadedImage(row);
+
+      await shoot(row, "preview-player.png");
+
+      const hover = button.locator("xpath=..");
+
+      await hover.hover();
+      await shoot(log, "preview-player-hover.png");
+
+      expect({
+        disabled: await button.isDisabled(),
+        frames: await tab.locator("iframe, frame, embed, object").count(),
+        hover: await hover.getAttribute("title"),
+        mediaRoute: /^\/api\/previews\/media\/[0-9a-f]{64}$/u.test(drawn.src),
+        posterLoaded: drawn.naturalWidth > 0,
+        // The page asks who is signed in before anyone is, and is told no.
+        problems: problems.filter((problem) => !problem.includes("401")),
+        statuses: [...held, ...set, on],
+      }).toStrictEqual({
+        disabled: true,
+        frames: 0,
+        hover: "plays from www.youtube-nocookie.com",
+        mediaRoute: true,
+        posterLoaded: true,
+        problems: [],
+        statuses: [204, 204, 200, 200, 200, 200, 200, 200],
+      });
+
+      // The browser spoke to the Daemon alone, and the player's address was never fetched.
+      expect({
+        embedFetched: asked.filter((pathname) => pathname.startsWith("/embed/")),
+        origins: [...new Set(requested)],
+      }).toStrictEqual({ embedFetched: [], origins: [base] });
+
+      peer.close();
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await fixture.stop(true);
+      await Promise.all([minio.stop(), ircd.stop()]);
+    }
+  }, 120_000);
+
   it("shows an animated image still under a play badge until pressed, and opens an image large over the whole screen", async () => {
     if (browser === undefined) {
       throw new Error("no browser");

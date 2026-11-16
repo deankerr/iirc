@@ -66,6 +66,7 @@ import { StoreBytes, hashOf } from "../store-bytes.ts";
 import { UiConfiguration } from "../ui.ts";
 import type { StartingRange } from "../uploads/wanted.ts";
 import { animated } from "./animated.ts";
+import { playerOf, stillListed } from "./players.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
 import type { PageRead } from "./read.ts";
 import { makeRoom } from "./room.ts";
@@ -236,6 +237,7 @@ const mediaPreview = (link: string, type: string): Read => {
             image: null,
             kind,
             link,
+            player: null,
             site: hostOf(link),
             title: null,
             type,
@@ -360,18 +362,28 @@ const answered = (fetched: Fetched) =>
 
 /**
  * A page's Preview, from what it said of itself, filled from the oEmbed address it names,
- * with the image it names. The page's own fetch is over by now, so it holds no place with
- * the pacer while its oEmbed waits for one.
+ * with the image it names, which is a player's poster when the first player it names is on
+ * the list. Nothing is fetched from the player's address. The page's own fetch is over by
+ * now, so it holds no place with the pacer while its oEmbed waits for one.
  * @param links - The link fetch.
  * @param link - The link the page answered as.
  * @param said - What the page said of itself.
+ * @param hosts - The hosts the Owner lists as players, as they are when the page is read.
  * @returns What it came to.
  */
-const pageRead = (links: LinkFetchService, link: string, said: PageRead) =>
+const pageRead = (
+  links: LinkFetchService,
+  link: string,
+  said: PageRead,
+  hosts: readonly string[]
+) =>
   Effect.gen(function* () {
     const page = yield* filled(links, said);
 
-    if (page.title === undefined && page.description === undefined) {
+    const player = playerOf(page.players ?? [], hosts);
+
+    // A player is something to show even with no words of its own.
+    if (page.title === undefined && page.description === undefined && player === undefined) {
       return failedRead("NothingToShow");
     }
 
@@ -382,8 +394,9 @@ const pageRead = (links: LinkFetchService, link: string, said: PageRead) =>
         preview: {
           description: page.description ?? null,
           image: null,
-          kind: "page",
+          kind: player === undefined ? "page" : "player",
           link,
+          player: player ?? null,
           site: page.site ?? hostOf(link),
           title: page.title ?? null,
           type: null,
@@ -395,16 +408,53 @@ const pageRead = (links: LinkFetchService, link: string, said: PageRead) =>
   });
 
 /**
- * A state as it is answered under a mode: under `links only`, a Preview holds text only,
- * even one kept with its image while Previews were `on`.
+ * A state as it is answered under a mode and the list in force now: under `links only`, a
+ * Preview holds text only, even one kept with its image while Previews were `on`, and a
+ * player whose address the list no longer allows, or which `links only` forbids, is a page
+ * again.
  * @param state - The state, as kept.
  * @param shown - Whether Previews are `on` or `links only`.
+ * @param hosts - The hosts the Owner lists as players now.
  * @returns The state to answer.
  */
-const asShown = (state: PreviewState, shown: PreviewsShown): PreviewState =>
-  shown === "on" || state._tag !== "Ready" || state.preview.image === null
-    ? state
-    : { ...state, preview: { ...state.preview, image: null } };
+const asShown = (
+  state: PreviewState,
+  shown: PreviewsShown,
+  hosts: readonly string[]
+): PreviewState => {
+  if (state._tag !== "Ready") {
+    return state;
+  }
+
+  const { preview } = state;
+
+  const plays =
+    preview.player !== null && shown === "on" && stillListed(preview.player.link, hosts);
+
+  const demoted =
+    preview.player === null || plays
+      ? preview
+      : { ...preview, kind: "page" as const, player: null };
+
+  const stripped = shown === "on" || demoted.image === null ? demoted : { ...demoted, image: null };
+
+  return stripped === preview ? state : { ...state, preview: stripped };
+};
+
+/**
+ * A state as the stream carries it, to Frontends of every Timeline at once: a player whose
+ * address the list in force now no longer allows is a page again, so a host removed while
+ * its link was being fetched never comes back as a player.
+ * @param state - The state, as settled.
+ * @param hosts - The hosts the Owner lists as players now.
+ * @returns The state to carry.
+ */
+const asStreamed = (state: PreviewState, hosts: readonly string[]): PreviewState =>
+  state._tag === "Ready" &&
+  state.preview.player !== null &&
+  !stillListed(state.preview.player.link, hosts)
+    ? { ...state, preview: { ...state.preview, kind: "page", player: null } }
+    : state;
 
 const decodeMediaType = Schema.decodeUnknownOption(MediaType);
 
@@ -463,9 +513,13 @@ interface Flight {
   readonly shown: number;
 }
 
-/** How a link is asked for: its Timeline's mode, and whether it waits for a press or is one. */
+/**
+ * How a link is asked for: its Timeline's mode, the hosts listed as players now, and whether
+ * it waits for a press or is one.
+ */
 interface How {
   readonly pressed: boolean;
+  readonly players: readonly string[];
   readonly shown: PreviewsShown;
   readonly waits: boolean;
 }
@@ -665,7 +719,13 @@ export const layerPreviews = Layer.effect(Previews)(
       Effect.scoped(Effect.flatMap(links.fetch(key, { kind: "page" }), answered)).pipe(
         Effect.filterOrElse(
           (said): said is Read => "state" in said,
-          (said) => pageRead(links, said.link, said.page)
+          (said) =>
+            // The list in force when the page is read decides which player it names.
+            ui.inForce.pipe(
+              Effect.flatMap(({ options }) =>
+                pageRead(links, said.link, said.page, options["previews.players"])
+              )
+            )
         ),
         Effect.catch((error) => Effect.succeed(failedFetch(error))),
         Effect.catchDefect(() => Effect.succeed(failedRead("Unreachable"))),
@@ -748,7 +808,11 @@ export const layerPreviews = Layer.effect(Previews)(
           yield* Effect.forkIn(fetchOne(key, link, how.shown), scope);
         }
 
-        const item: PreviewItem = { id: idOf(key), link, state: asShown(state, how.shown) };
+        const item: PreviewItem = {
+          id: idOf(key),
+          link,
+          state: asShown(state, how.shown, how.players),
+        };
 
         return { item, started };
       });
@@ -792,6 +856,7 @@ export const layerPreviews = Layer.effect(Previews)(
         return {
           // Only a Direct Message the Owner has not chosen a mode for waits.
           links: previewableLinksOf(said).map((found) => found.href),
+          players: options["previews.players"],
           shown,
           waits: summary.value.kind === "Direct" && override === undefined,
         };
@@ -810,16 +875,25 @@ export const layerPreviews = Layer.effect(Previews)(
     return {
       ask: (timeline, position) =>
         Effect.gen(function* () {
-          const { links: previewable, shown, waits } = yield* locate(timeline, position);
+          const { links: previewable, players, shown, waits } = yield* locate(timeline, position);
 
           // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
           const asked = yield* Effect.forEach(previewable, (link) =>
-            stateOf(link, { pressed: false, shown, waits })
+            stateOf(link, { players, pressed: false, shown, waits })
           );
 
           return asked.map(({ item }) => item);
         }),
-      changes: Stream.fromPubSub(changed),
+      changes: Stream.fromPubSub(changed).pipe(
+        Stream.mapEffect((item) =>
+          ui.inForce.pipe(
+            Effect.map(({ options }) => ({
+              ...item,
+              state: asStreamed(item.state, options["previews.players"]),
+            }))
+          )
+        )
+      ),
       media: (hash) =>
         Effect.gen(function* () {
           if (!(yield* refers(hash))) {
@@ -848,14 +922,19 @@ export const layerPreviews = Layer.effect(Previews)(
         }),
       press: (timeline, position, link) =>
         Effect.gen(function* () {
-          const { links: found, shown, waits } = yield* locate(timeline, position);
+          const { links: found, players, shown, waits } = yield* locate(timeline, position);
           const address = found[link];
 
           if (!waits || address === undefined) {
             return yield* new NotWaiting({ link, position, timeline });
           }
 
-          const { item, started } = yield* stateOf(address, { pressed: true, shown, waits });
+          const { item, started } = yield* stateOf(address, {
+            players,
+            pressed: true,
+            shown,
+            waits,
+          });
 
           // Claiming is decided in one turn, so a link kept or fetched meanwhile starts nothing.
           return started ? item : yield* new NotWaiting({ link, position, timeline });

@@ -9,7 +9,7 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import { motionOf, pressOn } from "@iirc/frontend/previews";
-import type { ImageShown, LinkShown, Motion } from "@iirc/frontend/previews";
+import type { ImageShown, LinkShown, Motion, PlayerShown } from "@iirc/frontend/previews";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
@@ -17,6 +17,7 @@ import { Button as AriaButton } from "react-aria-components";
 import { animateShown } from "../options/ui.ts";
 import { Icon } from "../ui/icon.tsx";
 import { OpensLarger } from "./larger-view.tsx";
+import { PlayButton } from "./play-button.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 import styles from "./preview-image.module.css";
@@ -165,7 +166,7 @@ const Holder = ({
   readonly reference: (element: HTMLSpanElement | null) => void;
 }) => (
   <span
-    className={drawn === "Whole" ? styles.whole : styles.thumbnail}
+    className={drawn === "Thumbnail" ? styles.thumbnail : styles.whole}
     data-loaded={loaded}
     ref={reference}
   >
@@ -287,6 +288,144 @@ const AnimatedImage = ({
         </>
       ) : null}
     </Holder>
+  );
+};
+
+/**
+ * What a poster draws: the text, and the poster under it in a box of its own.
+ * @param props - The text, the box's content, whether it is loaded, and how it is found.
+ * @returns The column.
+ */
+const Stacked = ({
+  children,
+  loaded,
+  reference,
+  text,
+}: {
+  readonly children: ReactNode;
+  readonly loaded: boolean;
+  readonly reference: (element: HTMLSpanElement | null) => void;
+  readonly text: ReactElement;
+}) => (
+  <div className={styles.stacked}>
+    {text}
+    <Holder drawn="Poster" loaded={loaded} reference={reference}>
+      {children}
+    </Holder>
+  </div>
+);
+
+/**
+ * A poster that does not move.
+ * @param props - The poster, its player, the text above it, and what stands without it.
+ * @returns The poster, or what stands without it.
+ */
+const StillPoster = ({
+  image,
+  player,
+  text,
+  without,
+}: {
+  readonly image: ImageShown;
+  readonly player: PlayerShown;
+  readonly text: ReactElement;
+  readonly without: ReactElement;
+}) => {
+  const [element, setElement] = useState<HTMLSpanElement | null>(null);
+  const seen = useSeen(element);
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return without;
+  }
+
+  return (
+    <Stacked loaded={seen} reference={setElement} text={text}>
+      {seen ? (
+        <>
+          <img
+            alt={image.alt}
+            className={styles.picture}
+            data-drawn="poster"
+            decoding="async"
+            loading="lazy"
+            onError={() => {
+              setFailed(true);
+            }}
+            referrerPolicy="no-referrer"
+            src={image.src}
+          />
+          <PlayButton over="poster" player={player} />
+        </>
+      ) : null}
+    </Stacked>
+  );
+};
+
+/**
+ * A poster that is animated, which never moves here: its first frame, taken from the
+ * Daemon's bytes, since a player's poster is still until something plays.
+ * @param props - The poster, its player, the text above it, and what stands without it.
+ * @returns The poster, or what stands without it.
+ */
+const FramePoster = ({
+  image,
+  player,
+  text,
+  without,
+}: {
+  readonly image: ImageShown;
+  readonly player: PlayerShown;
+  readonly text: ReactElement;
+  readonly without: ReactElement;
+}) => {
+  const [element, setElement] = useState<HTMLSpanElement | null>(null);
+  const seen = useSeen(element);
+  const fetched = useFetched(seen ? image.src : undefined);
+
+  if (fetched._tag === "Failed") {
+    return without;
+  }
+
+  return (
+    <Stacked loaded={fetched._tag === "Ready"} reference={setElement} text={text}>
+      {fetched._tag === "Ready" ? (
+        <>
+          <FirstFrame frame={fetched.frame} />
+          <PlayButton over="poster" player={player} />
+        </>
+      ) : null}
+    </Stacked>
+  );
+};
+
+/**
+ * A player's poster: a still image with its play button over the middle, under the text
+ * above it. It opens nothing when pressed. Where it fails to load, or to be fetched, what
+ * stands without it shows instead, the text with the same play button beside it.
+ * @param props - The poster, its player, and the text above it.
+ * @returns The poster with its text, or what stands without it.
+ */
+export const PreviewPoster = ({
+  image,
+  player,
+  text,
+}: {
+  readonly image: ImageShown;
+  readonly player: PlayerShown;
+  readonly text: ReactElement;
+}) => {
+  const without = (
+    <>
+      {text}
+      <PlayButton over="text" player={player} />
+    </>
+  );
+
+  return image.animated ? (
+    <FramePoster image={image} player={player} text={text} without={without} />
+  ) : (
+    <StillPoster image={image} player={player} text={text} without={without} />
   );
 };
 

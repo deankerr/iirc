@@ -65,6 +65,7 @@ const kept: Kept = {
       image: null,
       kind: "page",
       link,
+      player: null,
       site: "example.com",
       title: "Ünïcode 🙂",
       type: null,

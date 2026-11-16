@@ -80,6 +80,7 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
+  player: null,
   site: "example.com",
   title: "Cats",
   type: null,
@@ -98,6 +99,9 @@ const item = (
   link = `https://${letter}.example/`
 ) => Schema.decodeSync(PreviewItem)({ id: idOf(letter), link, state });
 
+/** The hosts `ui.previews.players` lists by default. */
+const listed = uiDefaults["previews.players"];
+
 const pending = { _tag: "Pending" } as const;
 const waitingForPress = { _tag: "WaitingForPress" } as const;
 
@@ -106,7 +110,12 @@ const waitingForPress = { _tag: "WaitingForPress" } as const;
  * @param shown - `ui.previews`.
  * @returns The modes.
  */
-const everywhere = (shown: PreviewsShown): PreviewsModes => ({ shown, timelines: {} });
+const everywhere = (shown: PreviewsShown): PreviewsModes => ({
+  players: listed,
+  shown,
+  timelines: {},
+});
+
 const ready = { _tag: "Ready", preview: page } as const;
 
 const fold = (state: Previews, ...events: readonly PreviewsEvent[]) => {
@@ -160,12 +169,12 @@ describe("whether to ask", () => {
 
     expect([previewsModesOf(undefined), previewsModesOf(shared)]).toStrictEqual([
       undefined,
-      { shown: "on", timelines: {} },
+      { players: listed, shown: "on", timelines: {} },
     ]);
   });
 
   it("takes a Timeline's own choice over ui.previews, and ui.previews where it has none", () => {
-    const modes: PreviewsModes = { shown: "on", timelines: { [other]: "off" } };
+    const modes: PreviewsModes = { players: listed, shown: "on", timelines: { [other]: "off" } };
 
     expect([modeIn(modes, timeline), modeIn(modes, other), modeIn(undefined, other)]).toStrictEqual(
       ["on", "off", undefined]
@@ -186,9 +195,9 @@ describe("whether to ask", () => {
     expect([
       asksAnywhere(undefined),
       asksAnywhere(everywhere("off")),
-      asksAnywhere({ shown: "off", timelines: { [other]: "off" } }),
-      asksAnywhere({ shown: "off", timelines: { [other]: "links only" } }),
-      asksAnywhere({ shown: "on", timelines: { [other]: "off" } }),
+      asksAnywhere({ players: listed, shown: "off", timelines: { [other]: "off" } }),
+      asksAnywhere({ players: listed, shown: "off", timelines: { [other]: "links only" } }),
+      asksAnywhere({ players: listed, shown: "on", timelines: { [other]: "off" } }),
     ]).toStrictEqual([false, false, false, true, true]);
   });
 
@@ -245,7 +254,7 @@ describe("asking", () => {
     expect(
       asksWanted(fold(refused, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on"))
     ).toStrictEqual([]);
-    expect(previewsOf(refused, "on", timeline, at(1), links)).toStrictEqual([]);
+    expect(previewsOf(refused, "on", timeline, at(1), links, listed)).toStrictEqual([]);
   });
 
   it("asks again, once followed again, for a Message still pending when the stream was lost", () => {
@@ -295,15 +304,21 @@ describe("asking per Timeline", () => {
     const keys = (modes: PreviewsModes) => asksWanted(shown, modes).map((one) => one.timeline);
 
     expect([
-      keys({ shown: "on", timelines: { [other]: "off" } }),
-      keys({ shown: "off", timelines: { [other]: "links only" } }),
+      keys({ players: listed, shown: "on", timelines: { [other]: "off" } }),
+      keys({ players: listed, shown: "off", timelines: { [other]: "links only" } }),
     ]).toStrictEqual([[timeline], [other]]);
   });
 
   it("asks again for a Message waiting for a press once its Timeline chooses to be previewed", () => {
     const { ask, state } = asking(1);
     const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
-    const chosen: PreviewsModes = { shown: "links only", timelines: { [timeline]: "on" } };
+
+    const chosen: PreviewsModes = {
+      players: listed,
+      shown: "links only",
+      timelines: { [timeline]: "on" },
+    };
+
     const [again] = asksWanted(answered, chosen);
 
     if (again === undefined) {
@@ -319,7 +334,7 @@ describe("asking per Timeline", () => {
     expect({
       default: asksWanted(answered, everywhere("on")),
       onceAnswered: asksWanted(reanswered, chosen),
-      shown: previewsOf(reanswered, "on", timeline, at(1), said("https://a.example/")).map(
+      shown: previewsOf(reanswered, "on", timeline, at(1), said("https://a.example/"), listed).map(
         (one) => one._tag
       ),
     }).toStrictEqual({ default: [], onceAnswered: [], shown: ["Pending"] });
@@ -342,7 +357,7 @@ const waiting = () => {
 
 describe("a link waiting for a press", () => {
   it("is drawn as the plain link with a press, by its index among the Message's links", () => {
-    expect(previewsOf(waiting(), "on", timeline, at(1), links)).toStrictEqual([
+    expect(previewsOf(waiting(), "on", timeline, at(1), links, listed)).toStrictEqual([
       expect.objectContaining({ _tag: "Ready", key: "0" }),
       {
         _tag: "Waiting",
@@ -377,7 +392,7 @@ describe("a link waiting for a press", () => {
     );
 
     const tags = (one: Previews) =>
-      previewsOf(one, "on", timeline, at(1), links).map((shown) => shown._tag);
+      previewsOf(one, "on", timeline, at(1), links, listed).map((shown) => shown._tag);
 
     expect([tags(pressed), tags(raced)]).toStrictEqual([
       ["Ready", "Pending"],
@@ -420,7 +435,7 @@ describe("folding a change", () => {
 
     expect(
       [at(1), at(2)].map((position) =>
-        previewsOf(both, "on", timeline, position, said("https://a.example/")).map(
+        previewsOf(both, "on", timeline, position, said("https://a.example/"), listed).map(
           (shownItem) => shownItem._tag
         )
       )
@@ -436,9 +451,9 @@ describe("folding a change", () => {
       { _tag: "Answered", ask, previews: [item("a", pending)] }
     );
 
-    expect(previewsOf(raced, "on", timeline, at(1), links).map((one) => one._tag)).toStrictEqual([
-      "Ready",
-    ]);
+    expect(
+      previewsOf(raced, "on", timeline, at(1), links, listed).map((one) => one._tag)
+    ).toStrictEqual(["Ready"]);
   });
 
   it("takes an answer over a change the stream gave before its ask began", () => {
@@ -465,7 +480,9 @@ describe("folding a change", () => {
     );
 
     expect(
-      previewsOf(again, "on", timeline, at(1), said("https://a.example/")).map((one) => one._tag)
+      previewsOf(again, "on", timeline, at(1), said("https://a.example/"), listed).map(
+        (one) => one._tag
+      )
     ).toStrictEqual(["Pending"]);
   });
 
@@ -487,18 +504,20 @@ describe("folding a change", () => {
 
 describe("what a Message shows", () => {
   it("shows a placeholder for each link that may be previewed before it is answered", () => {
-    expect(previewsOf(initialPreviews, "links only", timeline, at(1), links)).toStrictEqual([
-      {
-        _tag: "Pending",
-        key: "0",
-        link: { href: "https://a.example/", text: "https://a.example/" },
-      },
-      {
-        _tag: "Pending",
-        key: "1",
-        link: { href: "https://b.example/", text: "https://b.example/" },
-      },
-    ]);
+    expect(previewsOf(initialPreviews, "links only", timeline, at(1), links, listed)).toStrictEqual(
+      [
+        {
+          _tag: "Pending",
+          key: "0",
+          link: { href: "https://a.example/", text: "https://a.example/" },
+        },
+        {
+          _tag: "Pending",
+          key: "1",
+          link: { href: "https://b.example/", text: "https://b.example/" },
+        },
+      ]
+    );
   });
 
   it("shows at most three, as the protocol counts them", () => {
@@ -506,7 +525,7 @@ describe("what a Message shows", () => {
       "https://a.example/ https://b.example/ https://c.example/ https://d.example/"
     );
 
-    expect(previewsOf(initialPreviews, "on", timeline, at(1), four)).toHaveLength(3);
+    expect(previewsOf(initialPreviews, "on", timeline, at(1), four, listed)).toHaveLength(3);
   });
 
   it("shows nothing while the mode is off or unknown, nor for anything but a Message", () => {
@@ -521,8 +540,8 @@ describe("what a Message shows", () => {
     const modes: readonly (PreviewsShown | undefined)[] = ["off", undefined];
 
     expect([
-      ...modes.map((mode) => previewsOf(initialPreviews, mode, timeline, at(1), links)),
-      previewsOf(initialPreviews, "on", timeline, at(1), joined),
+      ...modes.map((mode) => previewsOf(initialPreviews, mode, timeline, at(1), links, listed)),
+      previewsOf(initialPreviews, "on", timeline, at(1), joined, listed),
     ]).toStrictEqual([[], [], []]);
   });
 
@@ -540,7 +559,7 @@ describe("what a Message shows", () => {
       ],
     });
 
-    expect(previewsOf(answered, "on", timeline, at(1), links)).toStrictEqual([
+    expect(previewsOf(answered, "on", timeline, at(1), links, listed)).toStrictEqual([
       {
         _tag: "Ready",
         description: "A page about cats.",
@@ -548,6 +567,7 @@ describe("what a Message shows", () => {
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
         media: undefined,
+        player: undefined,
         summary: "example.com · Cats",
       },
       {
@@ -579,7 +599,7 @@ describe("what a Message shows", () => {
       previews: [item("a", pending, "data:text/html,hi")],
     });
 
-    expect(previewsOf(answered, "on", timeline, at(1), links)).toStrictEqual([
+    expect(previewsOf(answered, "on", timeline, at(1), links, listed)).toStrictEqual([
       {
         _tag: "Pending",
         key: "0",
@@ -601,7 +621,7 @@ describe("what a Message shows", () => {
       ],
     });
 
-    const shown = previewsOf(answered, "on", timeline, at(1), message);
+    const shown = previewsOf(answered, "on", timeline, at(1), message, listed);
 
     expect(shown.map((one) => [one._tag, one.link.href, one.key])).toStrictEqual([
       ["Ready", "https://a.example/#one", "0"],
@@ -633,8 +653,8 @@ describe("what a Message shows", () => {
     );
 
     expect([
-      previewsOf(both, "on", timeline, at(1), one).map((shown) => shown.link.href),
-      previewsOf(both, "on", timeline, at(2), two).map((shown) => shown.link.href),
+      previewsOf(both, "on", timeline, at(1), one, listed).map((shown) => shown.link.href),
+      previewsOf(both, "on", timeline, at(2), two, listed).map((shown) => shown.link.href),
     ]).toStrictEqual([["https://a.example/#one"], ["https://a.example/#two"]]);
   });
 });
@@ -660,9 +680,14 @@ const hash = "ab".repeat(32);
  * What a Message shows of one Ready Preview, with some fields other than the page's.
  * @param fields - Those fields, as the wire carries them.
  * @param mode - `ui.previews`, `on` unless given.
+ * @param players - The hosts `ui.previews.players` lists, its default unless given.
  * @returns What it shows, or none.
  */
-const shownReady = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") => {
+const shownReady = (
+  fields: Partial<typeof Preview.Encoded>,
+  mode: "on" | "links only" = "on",
+  players: readonly string[] = listed
+) => {
   const { ask, state } = asking(1);
 
   const answered = fold(state, {
@@ -677,7 +702,7 @@ const shownReady = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links
     ],
   });
 
-  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"));
+  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"), players);
 
   return only?._tag === "Ready" ? only : undefined;
 };
@@ -724,6 +749,95 @@ describe("a Preview's image", () => {
 
 const streamed = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") =>
   shownReady({ title: null, ...fields }, mode)?.media;
+
+const playing = {
+  image: { animated: false, hash, size: 10, type: "image/jpeg" },
+  kind: "player",
+  link: "https://www.youtube.com/watch?v=abc",
+  player: { link: "https://www.youtube-nocookie.com/embed/abc", size: { height: 360, width: 640 } },
+  title: "A song",
+} as const;
+
+describe("a Preview's player", () => {
+  it("is the host it plays from, and the words that say so, under on", () => {
+    expect(shownReady(playing)?.player).toStrictEqual({
+      host: "www.youtube-nocookie.com",
+      words: "plays from www.youtube-nocookie.com",
+    });
+  });
+
+  it("is none under links only, even one held from while Previews were on", () => {
+    expect(shownReady(playing, "links only")?.player).toBeUndefined();
+  });
+
+  it("is none for any kind but a player", () => {
+    expect(
+      (["page", "image", "video", "audio"] as const).map(
+        (kind) => shownReady({ ...playing, kind, player: null })?.player
+      )
+    ).toStrictEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("is a page with its thumbnail once the list no longer names its host, as the Daemon would answer it", () => {
+    const shown = shownReady(playing, "on", ["player.vimeo.com"]);
+
+    expect([
+      shown?.player,
+      shown?.image?.drawn,
+      shownReady(playing, "on", [])?.player,
+    ]).toStrictEqual([undefined, "Thumbnail", undefined]);
+  });
+
+  it("matches its host exactly, never by a suffix or a look-alike", () => {
+    expect(
+      [["youtube-nocookie.com"], ["nocookie.com"], ["www.youtube-nocookie.com."]].map(
+        (players) => shownReady(playing, "on", players)?.player
+      )
+    ).toStrictEqual([undefined, undefined, undefined]);
+  });
+
+  it("is none when its address cannot be read", () => {
+    expect(
+      shownReady({ ...playing, player: { link: "not a link", size: null } })?.player
+    ).toBeUndefined();
+  });
+
+  it("draws its image as the poster, served from our own origin", () => {
+    expect(shownReady(playing)?.image).toStrictEqual({
+      alt: "A song",
+      animated: false,
+      drawn: "Poster",
+      src: `/api/previews/media/${hash}`,
+    });
+  });
+
+  it("is text alone under links only: no image, no player", () => {
+    const shown = shownReady(playing, "links only");
+
+    expect([shown?.image, shown?.player, shown?.media, shown?.summary]).toStrictEqual([
+      undefined,
+      undefined,
+      undefined,
+      "example.com · A song",
+    ]);
+  });
+
+  it("has no poster when the Daemon kept none, and still plays", () => {
+    const shown = shownReady({ ...playing, image: null });
+
+    expect([shown?.image, shown?.player?.host]).toStrictEqual([
+      undefined,
+      "www.youtube-nocookie.com",
+    ]);
+  });
+
+  it("is summed up as a page is, by its site and title", () => {
+    expect([summary(playing), summary({ ...playing, title: null })]).toStrictEqual([
+      "example.com · A song",
+      "example.com",
+    ]);
+  });
+});
 
 describe("a Preview's media", () => {
   it("is a video to stream under on, from the route by the Message's place", () => {
