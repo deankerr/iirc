@@ -3,7 +3,8 @@
  * says what deleting promises: the link stops working at once, everywhere it was said, and
  * a copy already opened or saved elsewhere cannot be called back. Nothing is sent until the
  * Owner confirms, and Cancel, Escape, or a press outside sends nothing. It is open only
- * while the Upload asked about is listed, so one deleted elsewhere meanwhile closes it.
+ * while the Upload asked about is listed and live, so one deleted elsewhere, or expired,
+ * meanwhile closes it.
  *
  * @packageDocumentation
  */
@@ -25,7 +26,8 @@ export const DeleteDialog = () => {
   const { uploads } = useAtomValue(uploadsState);
   const close = useAtomSet(closeDelete);
   const confirm = useAtomSet(confirmDelete);
-  const upload = uploads.find((one) => one.id === asking);
+  // A deleted Upload stays listed while the deleted show, but has nothing left to delete.
+  const upload = uploads.find((one) => one.id === asking && one.deleted === undefined);
 
   return (
     <ModalOverlay

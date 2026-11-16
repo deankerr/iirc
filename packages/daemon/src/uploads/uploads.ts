@@ -806,44 +806,40 @@ export const layerUploads = (dataDir: string) =>
 
       // Deletes each live Upload strictly older than `uploads.expireAfter` days, by the
       // Daemon's own clock, and releases its bytes as the Owner's delete does. None is old
-      // while the option is unset. `amend` checks again inside its turn that the Upload is
-      // still live, so one the Owner deleted meanwhile is left to them.
+      // while the option is unset. Each Upload is judged again inside its own turn, by the
+      // option and the clock then, so one the Owner deleted meanwhile is left to them, and
+      // none expires under an option changed while an earlier one's bytes were released.
+      const expiryOf = (record: Recorded) =>
+        Effect.gen(function* () {
+          const { options } = yield* owner.inForce;
+          const days = options["uploads.expireAfter"];
+          const now = yield* Clock.currentTimeMillis;
+
+          return days === undefined ||
+            record.deleted !== undefined ||
+            now - record.at <= days * dayMillis
+            ? Option.none<Change>()
+            : Option.some<Change>({
+                _tag: "Deleted",
+                at: Instant.make(now),
+                id: record.id,
+                why: "expired",
+              });
+        });
+
       const expire = Effect.gen(function* () {
-        const { options } = yield* owner.inForce;
-        const days = options["uploads.expireAfter"];
-
-        if (days === undefined) {
-          return;
-        }
-
-        const now = yield* Clock.currentTimeMillis;
-        const age = days * dayMillis;
         const all = yield* SubscriptionRef.get(held);
 
-        const old = Chunk.toReadonlyArray(all.order)
-          .map((id) => HashMap.getUnsafe(all.byId, id))
-          .filter(({ record }) => record.deleted === undefined && now - record.at > age);
-
         // Each is its own turn, in the order uploaded.
-        for (const { record } of old) {
-          const expired = yield* amend(
-            record.id,
-            (current) =>
-              Effect.succeed(
-                current.deleted === undefined
-                  ? Option.some<Change>({
-                      _tag: "Deleted",
-                      at: Instant.make(now),
-                      id: record.id,
-                      why: "expired",
-                    })
-                  : Option.none()
-              ),
-            "Expired an Upload"
-          );
+        for (const id of all.order) {
+          const { record } = HashMap.getUnsafe(all.byId, id);
 
-          if (expired.deleted?.why === "expired") {
-            yield* release(expired.hash);
+          if (Option.isSome(yield* expiryOf(record))) {
+            const expired = yield* amend(id, expiryOf, "Expired an Upload");
+
+            if (expired.deleted?.why === "expired") {
+              yield* release(expired.hash);
+            }
           }
         }
       }).pipe(

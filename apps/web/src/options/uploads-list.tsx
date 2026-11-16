@@ -93,7 +93,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
         )}
       </span>
       <span className={styles.about}>
-        {renaming ? (
+        {renaming && deleted === undefined ? (
           <RenameField
             label={`New name for ${name}`}
             name={name}

@@ -2864,6 +2864,49 @@ describe("expiring Uploads", () => {
     expect(result.after.deleted).toStrictEqual({ at: 2 * day, why: "expired" });
   });
 
+  it("expires nothing more once uploads.expireAfter is unset while a pass is releasing bytes", async () => {
+    const result = await runClocked((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.expireAfter", 1);
+        const first = yield* uploaded(served, png, "first.png");
+        const second = yield* uploaded(served, "second body\n", "second.txt");
+        const releasing = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+
+        // A store whose delete waits before it removes anything.
+        const holding: ByteStoreService = {
+          ...store,
+          delete: (hash) =>
+            releasing.open.pipe(Effect.andThen(go.await), Effect.andThen(store.delete(hash))),
+        };
+
+        Object.assign(served.world.bytes, { store: holding });
+
+        yield* TestClock.adjust(day + 3_600_000);
+        yield* live(releasing.await);
+        yield* unsetOption(served, "uploads.expireAfter");
+        yield* go.open;
+        yield* live(Effect.sleep("200 millis"));
+
+        return {
+          expiries: yield* expiries(served.world),
+          first: first.id,
+          second: yield* read(served, second.id),
+          secondRecord: second,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      expiries: [{ id: result.first, why: "expired" }],
+      first: result.first,
+      second: result.secondRecord,
+      secondRecord: result.secondRecord,
+    });
+  });
+
   it("keeps bytes another Upload shares when the older one expires", async () => {
     const result = await runClocked((served) =>
       Effect.gen(function* () {

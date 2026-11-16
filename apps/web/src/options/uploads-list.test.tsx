@@ -797,6 +797,38 @@ describe("the Uploads beside the options", () => {
     });
   });
 
+  it("closes a rename field and a delete question on an Upload that expires while the deleted are shown", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+    const cats = "a".repeat(16);
+    const field = () => container.querySelector('input[aria-label="New name for b-safe.bin"]');
+
+    await settled(() => listed(container).length === 2);
+    await toggleDeleted(container);
+    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
+    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await press(container, "Rename b-safe.bin");
+    const renaming = field() !== null;
+
+    await press(container, "Delete Cat picture.png");
+    const asking = deleteDialog() !== undefined;
+
+    await doing(() => {
+      fake.expire(cats);
+      fake.expire("b".repeat(16));
+    });
+    await settled(() =>
+      listed(container).every((row) => row.details?.includes(" · expired ") === true)
+    );
+
+    expect({ asked: deleteDialog(), asking, field: field(), renaming }).toStrictEqual({
+      asked: undefined,
+      asking: true,
+      field: null,
+      renaming: true,
+    });
+  });
+
   it("forgets the Uploads on signing out", async () => {
     const fake = signedIn(cat, notes);
     const { container, registry } = await page(fake);
