@@ -4,6 +4,8 @@
 
 ## Evidence
 
+<!-- A screenshot goes on the orphan `evidence` branch, in a folder named for the issue, such as `119/`, and is linked here by that commit's SHA, never by the branch. -->
+
 - **Before:** <!-- a failing test, output, or screenshot -->
 - **After:** <!-- the same, now passing -->
 

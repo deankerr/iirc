@@ -39,11 +39,11 @@ Reading is filtered in SQL: `read` and `follow` ask for `sequence > after`, and 
 | `journal_mode` | `WAL` | Appends are one small write each, and readers (an inspector with `sqlite3`, for instance) never block the Daemon's writes. Set only once the file is known to be a Journal, because it persists in the file. |
 | `synchronous` | `FULL` | Every commit syncs the WAL to the disk before it returns. With `NORMAL` the last commits could be lost on power failure, which would break "durable before `append` returns". |
 | `busy_timeout` | 5 seconds | The default of `@effect/sql-sqlite-bun`. One Daemon owns the file, so it matters only if something else holds a write lock. |
-| One connection | serialized by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, one at a time. That orders statements, not appends: the scheduler can still yield between an append's insert and its signal, so appends take a lock of our own. |
+| One connection | serialised by the client | `@effect/sql-sqlite-bun` runs every statement on one connection, one at a time. That orders statements, not appends: the scheduler can still yield between an append's insert and its signal, so appends take a lock of our own. |
 
 ## Durable
 
-An `append` that has returned has been committed by SQLite with `synchronous = FULL` in WAL mode, which means the WAL has been synced to the storage device. It survives the Daemon being killed and the machine losing power, so far as the device honors a sync. A record that cannot be encoded, or would not decode again, is refused with `JournalFailed` before anything is written, so nothing is kept that cannot be read.
+An `append` that has returned has been committed by SQLite with `synchronous = FULL` in WAL mode, which means the WAL has been synced to the storage device. It survives the Daemon being killed and the machine losing power, so far as the device honours a sync. A record that cannot be encoded, or would not decode again, is refused with `JournalFailed` before anything is written, so nothing is kept that cannot be read.
 
 ## Whole or absent, and `follow`
 

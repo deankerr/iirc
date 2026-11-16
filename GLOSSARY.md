@@ -6,15 +6,19 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Daemon**: The headless program that stays on Networks on the Owner's behalf and exposes the API. _Avoid_: Server, client, bouncer, iircd
 
+**Runtime**: What drives one Client per Network inside the Daemon: it journals each input, steps the Client, and carries out what the Client asked for. _Avoid_: Engine, driver, supervisor
+
+**Client**: iirc's pure understanding of one Network, which takes each input in turn and answers with what to send and what happened, holding nothing the Journal cannot rebuild. _Avoid_: Core, engine, state machine, IRC client
+
 **Frontend**: Any program that uses the Daemon's API, including the web app, a script, or an agent. _Avoid_: Client, operator, consumer
 
 **Owner**: The one human a deployment belongs to. _Avoid_: User, admin, operator
 
-**Journal**: The Daemon's ordered record of everything that happened, as Entries: what it was told, and what it did. Everything else is derived from it. _Avoid_: Log (overloaded), history, scrollback, buffer
+**Journal**: The Daemon's ordered record of everything that happened, as Entries: what it was told, and what it did. Everything else is derived from it, except what a Preview fetched and the bytes of an Upload. _Avoid_: Log (overloaded), history, scrollback, buffer
 
 **Entry**: One numbered record in the Journal, such as a Line, a Connection opening or closing, or a Change. _Avoid_: Event, record, row
 
-**Change**: Something altered by the Owner, or by the Daemon on the Owner's behalf, such as Configuration, a Read Marker, or an Upload. _Avoid_: Update, mutation
+**Change**: Something the Owner altered, or the Daemon on the Owner's behalf, that belongs to no Network, such as an option or an Upload. _Avoid_: Update, mutation
 
 **Configuration**: What the Owner wants to be true, as opposed to what is true. _Avoid_: Settings, desired state
 
@@ -22,7 +26,13 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Upload**: A file the Owner gave the Daemon to host, reached by a link anyone can open. _Avoid_: Attachment, file, media item, asset
 
-**Sign-in**: A browser's proof that it was given a key, which it holds as a cookie so that no script ever holds the key. _Avoid_: Session, login
+**Link listener**: The Daemon's second address, which answers a request for an Upload's link and nothing else, and is all of iirc the Owner puts on the internet. _Avoid_: Public listener, second listener, file server
+
+**Store**: The S3-compatible bucket the Owner names, where the Daemon keeps the bytes of Uploads, and is meant to keep a Preview's media. _Avoid_: Bucket (for the role), storage, byte store, blob store
+
+**Key**: A secret the Owner makes so a Frontend can use the API, held by a script or agent or traded by a browser for a Sign-in. Not a Credential, which the Daemon uses on the Owner's behalf. _Avoid_: Token, API token, password
+
+**Sign-in**: A browser's proof that it was given a Key, which it holds as a cookie so that no script ever holds the Key. _Avoid_: Session, login
 
 ## The IRC side
 
@@ -30,7 +40,9 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Ircd**: A single IRC server process that a Connection reaches. One Network may be served by many. _Avoid_: Server, IRC server
 
-**IRC client**: Any other software connected to an Ircd, such as irssi. Always the full phrase. _Avoid_: Client
+**IRC client**: Any IRC software, such as irssi; another one when it means not iirc. Always the full phrase. _Avoid_: Client
+
+**Feature**: The Client's support for one IRCv3 capability or ISUPPORT token, or a tight group of them, which refines what the Client already works out and is on only while the Ircd offers it. _Avoid_: Extension, plugin, cap (for the support rather than what the Ircd offers)
 
 **User**: Any participant on a Network, including our own presence there. _Avoid_: Client, person, peer
 
@@ -62,6 +74,8 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 ## What a Frontend sees
 
+**News**: What happened in one step of a Client, such as a Message, an Activity, or a Read Marker moving, derived from the Journal and never journaled itself. _Avoid_: Event, update, feed, notification
+
 **Timeline**: The ordered Messages and Activity of one Channel, Direct Message partner, or Network. _Avoid_: Buffer, window, scrollback, conversation
 
 **Pane**: One part of a Frontend's screen, showing a Timeline or the options, beside others it was split from. _Avoid_: Window, buffer, split
@@ -70,7 +84,7 @@ iirc is an always-on IRC client made of a library, a daemon, and frontends. IRC 
 
 **Composer**: Where the Owner writes a Message or a command. _Avoid_: Input, message input, prompt
 
-**Preview**: What a Frontend shows of a link in a Message beyond its address: a page's title and image, or the media itself. _Avoid_: Embed, unfurl, card
+**Preview**: What the Daemon learns of a link in a Message beyond its address, such as a page's title and image or the media itself, for any Frontend to show. _Avoid_: Embed, unfurl, card
 
 **Read Marker**: How far through a Timeline the Owner has read, shared by every Frontend. _Avoid_: Unread pointer, last seen
 

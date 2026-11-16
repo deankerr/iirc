@@ -1,6 +1,6 @@
 # @iirc/client
 
-The pure IRC client for one Network. It does no I/O and reads no clock. Every input carries its time, and every effect leaves as an output, so the same inputs always give the same states and outputs.
+The Client: iirc's pure understanding of one Network. It does no I/O and reads no clock. Every input carries its time, and every effect leaves as an output, so the same inputs always give the same states and outputs.
 
 The Client is `client`, exported from `@iirc/client`. Its machines are reducers: the Network and its Connection, cap negotiation, Presence, the keepalive, and a keyed `Map` of Channels.
 
