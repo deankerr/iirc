@@ -37,12 +37,12 @@
 
 /*
  * Where it writes: up to half the line, so a nick wider in a sans font than in monospace
- * still shows whole where there is room, and never less than the sixteen columns it had in
- * monospace, so it holds at least what it held there on a narrow screen.
+ * still shows whole where there is room, and up to the sixteen columns it had in monospace,
+ * so it holds what it held there on a narrow screen. Where the buttons beside it leave too
+ * little room for that and the field, as on a phone at a large size, it yields to the field.
  */
 .prompt {
   display: flex;
-  flex-shrink: 0;
   gap: var(--space-1);
   max-width: max(16ch, 50%);
   overflow: hidden;
@@ -60,10 +60,10 @@
   text-overflow: ellipsis;
 }
 
-/* It grows with what is typed, up to six lines, then scrolls. */
+/* It grows with what is typed, up to six lines, then scrolls, and always has room for a word. */
 .input {
   flex: 1;
-  min-width: 0;
+  min-width: 8ch;
   max-height: calc(6 * var(--line-height) * 1em);
   padding: 0;
   border: 0;

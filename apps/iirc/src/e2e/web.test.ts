@@ -362,7 +362,8 @@ const timelineDrawn = async (log: ReturnType<Page["getByRole"]>) =>
   await log.evaluate((element) => {
     const { right } = element.getBoundingClientRect();
 
-    const rows = [...element.querySelectorAll("time")].flatMap((time) => {
+    // A time column cell is the `time` that carries a sample; the day-change line's `time` does not.
+    const rows = [...element.querySelectorAll("time[data-sample]")].flatMap((time) => {
       const row = time.parentElement;
 
       if (row === null) {
@@ -447,7 +448,7 @@ const timeColumnDrawn = async (
   options: Intl.DateTimeFormatOptions
 ) =>
   await log.evaluate((element, formOptions) => {
-    const time = element.querySelector("time");
+    const time = element.querySelector("time[data-sample]");
     const parent = time?.parentElement;
 
     if (time === null || parent === null || parent === undefined) {
@@ -2818,8 +2819,9 @@ describe("the web frontend on iirc daemon --web", () => {
         await members.getByRole("row", { name: "ab, voice" }).waitFor();
 
         // The composer's prompt for a Direct Message not yet begun with the widest nick, on a
-        // wide screen and on a phone: cut or not, how tall its line is, and how far anything
-        // reaches past it. Then back to the Channel.
+        // wide screen and on a phone, and there with the send button too: cut or not, how tall
+        // its line is, how far anything reaches past it, and whether the field beside it still
+        // has room for eight of its own "0". Then back to the Channel.
         const prompt = async () => {
           await type(`/query ${widest}`);
 
@@ -2837,6 +2839,27 @@ describe("the web frontend on iirc daemon --web", () => {
               const line = element.parentElement;
               const { right } = line?.getBoundingClientRect() ?? { right: 0 };
 
+              const field = line?.querySelector("textarea") ?? undefined;
+              const zeros = document.createElement("span");
+
+              if (field !== undefined) {
+                const { fontFamily, fontSize, fontWeight } = getComputedStyle(field);
+
+                Object.assign(zeros.style, {
+                  fontFamily,
+                  fontSize,
+                  fontWeight,
+                  position: "absolute",
+                });
+              }
+
+              zeros.textContent = "0".repeat(8);
+              document.body.append(zeros);
+
+              const room = zeros.getBoundingClientRect().width;
+
+              zeros.remove();
+
               return {
                 clipped: [element, ...element.querySelectorAll("*")].some(
                   (one) => one.scrollWidth > one.clientWidth
@@ -2848,6 +2871,7 @@ describe("the web frontend on iirc daemon --web", () => {
                     Math.round(one.getBoundingClientRect().right - right)
                   )
                 ),
+                roomy: Math.round(field?.getBoundingClientRect().width ?? 0) >= Math.round(room),
               };
             });
           };
@@ -2858,11 +2882,23 @@ describe("the web frontend on iirc daemon --web", () => {
 
           const onPhone = await drawn();
 
+          // Under ui.enter newline, the send button stands beside the others.
+          const send = page.getByRole("button", { exact: true, name: "Send" });
+
+          await textbox.fill("/set -device ui.enter newline");
+          await textbox.press("Enter");
+          await send.waitFor();
+
+          const sending = await drawn();
+
+          await textbox.fill("/set -device ui.enter send");
+          await textbox.press("ControlOrMeta+Enter");
+          await send.waitFor({ state: "detached" });
           await page.setViewportSize(wide);
           await page.getByRole("row", { name: channel }).click();
           await composer.waitFor();
 
-          return { onPhone, onWide };
+          return { onPhone, onWide, sending };
         };
 
         // How far anything in the widest nick's Lookup reaches past its card, then put away.
@@ -2924,7 +2960,7 @@ describe("the web frontend on iirc daemon --web", () => {
               await type(`/set ui.time ${time}`);
               // oxlint-disable-next-line no-await-in-loop -- one format after another
               await expect
-                .poll(async () => await log.locator("time").first().textContent())
+                .poll(async () => await log.locator("time[data-sample]").first().textContent())
                 .toMatch(text);
               // oxlint-disable-next-line no-await-in-loop -- once it is drawn
               await settled(page);
@@ -2993,7 +3029,8 @@ describe("the web frontend on iirc daemon --web", () => {
         // What monospace showed whole it shows still, and every font shows it whole too: the
         // Timeline cuts only nicks past fourteen letters, the members only past fifteen, and the
         // prompt on a wide screen none. On a phone monospace's prompt still holds the widest
-        // nick, and no prompt reaches past its line. Every row, the refusal's too, lines up,
+        // nick at the smaller size, and at the larger yields to the field, which keeps its
+        // room, and no prompt reaches past its line. Every row, the refusal's too, lines up,
         // and is as tall as monospace's at its size.
         const heightsAt = new Map(
           rest.flatMap((one) => (one.font === "system" ? [[one.size, one]] : []))
@@ -3021,14 +3058,22 @@ describe("the web frontend on iirc daemon --web", () => {
             membersPast: 0,
             prompt: {
               onPhone: {
-                clipped: monospace.has(font) ? false : drawn.onPhone.clipped,
+                clipped: monospace.has(font) && size === 14 ? false : drawn.onPhone.clipped,
                 height: heightsAt.get(size)?.prompt.onPhone.height,
                 past: 0,
+                roomy: true,
               },
               onWide: {
                 clipped: false,
                 height: heightsAt.get(size)?.prompt.onWide.height,
                 past: 0,
+                roomy: true,
+              },
+              sending: {
+                clipped: monospace.has(font) && size === 14 ? false : drawn.sending.clipped,
+                height: heightsAt.get(size)?.prompt.onPhone.height,
+                past: 0,
+                roomy: true,
               },
             },
             sidebar: heightsAt.get(size)?.sidebar,
