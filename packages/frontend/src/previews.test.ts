@@ -80,6 +80,7 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
+  media: null,
   player: null,
   site: "example.com",
   title: "Cats",
@@ -744,6 +745,15 @@ describe("a Preview's image", () => {
 
   it("is none when the Daemon kept none", () => {
     expect(shownReady({ image: null })?.image).toBeUndefined();
+  });
+
+  it("is a poster for a video, and a thumbnail for a sound", () => {
+    const image = { animated: false, hash, size: 10, type: "image/jpeg" } as const;
+
+    expect([
+      shownReady({ image, kind: "video", media: "https://example.com/cats.mp4" })?.image?.drawn,
+      shownReady({ image, kind: "audio", media: "https://example.com/cats.ogg" })?.image?.drawn,
+    ]).toStrictEqual(["Poster", "Thumbnail"]);
   });
 });
 

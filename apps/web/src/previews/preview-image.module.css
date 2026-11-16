@@ -59,6 +59,25 @@
   background: var(--color-surface);
 }
 
+/*
+ * A video in a box of a fixed shape, as tall as the medium size at most, so playing it
+ * moves nothing below it, with the control that opens it large in its corner.
+ */
+.boxed {
+  position: relative;
+  display: block;
+  width: min(100%, 462px);
+}
+
+.video {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
 /* The press of an image fills its box, and is nothing but the image. */
 .press {
   display: block;
@@ -115,7 +134,7 @@
   background: var(--color-scrim);
 }
 
-/* While it plays, the control that opens it large, in its corner. */
+/* The control that opens an image or a video large, in its corner. */
 .enlarge {
   position: absolute;
   inset: var(--space-1) var(--space-1) auto auto;

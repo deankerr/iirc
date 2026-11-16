@@ -14,7 +14,6 @@ declare const styles: {
   readonly summary: string;
   readonly text: string;
   readonly unseen: string;
-  readonly video: string;
   readonly waiting: string;
 };
 

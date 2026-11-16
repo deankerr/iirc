@@ -52,19 +52,7 @@
   flex: none;
 }
 
-/*
- * A video fills a box of a fixed shape, as tall as the medium size at most, so playing it
- * moves nothing below it. A sound runs the row, up to a width that stays calm.
- */
-.video {
-  display: block;
-  width: min(100%, 462px);
-  max-height: 260px;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius);
-  background: var(--color-surface);
-}
-
+/* A sound runs the row, up to a width that stays calm. */
 .audio {
   display: block;
   width: 100%;
