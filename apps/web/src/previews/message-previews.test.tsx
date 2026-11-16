@@ -5,9 +5,10 @@ import type { PreviewItem, Timeline, TimelineItem } from "@iirc/api";
 import { Schema } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
+import { deviceUi } from "../options/device.ts";
 import { uiSync } from "../options/ui.ts";
 import { check } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
@@ -108,18 +109,22 @@ const hash = "cd".repeat(32);
 /**
  * A ready Preview of the link, with an image the Daemon kept.
  * @param kind - A page, or a link that is itself an image.
+ * @param animated - Whether the image moves.
  * @returns Its state.
  */
-const readyWithImage = (kind: "page" | "image") =>
-  ({
+const readyWithImage = (kind: "page" | "image", animated = false) => {
+  const imageType = animated ? "image/gif" : "image/png";
+
+  return {
     _tag: "Ready",
     preview: {
       ...ready.preview,
-      image: { animated: false, hash, size: 1234, type: "image/png" },
+      image: { animated, hash, size: 1234, type: imageType },
       kind,
-      type: kind === "image" ? "image/png" : null,
+      type: kind === "image" ? imageType : null,
     },
-  }) as const;
+  } as const;
+};
 
 /**
  * A ready Preview of the link, which is itself a video or a sound.
@@ -234,18 +239,25 @@ const layOut = () => {
  * @param previews - `ui.previews`.
  * @param answer - What the Daemon answers for the Message, as it stands then.
  * @param timelines - `ui.previews.timelines`, none unless given.
- * @returns The fake, and the page.
+ * @param animate - `ui.previews.animate`, shared, off unless given.
+ * @returns The fake, the registry, and the page.
  */
 const opened = async (
   previews: "off" | "links only" | "on",
   answer: typeof PreviewItem.Encoded = catsItem({ _tag: "Pending" }),
-  timelines: { readonly [timeline: string]: "off" | "links only" | "on" } = {}
+  timelines: { readonly [timeline: string]: "off" | "links only" | "on" } = {},
+  animate = false
 ) => {
   const fake = fakeDaemon();
 
   fake.daemon.signedIn = true;
   fake.daemon.ui = {
-    options: { ...uiDefaults, previews, "previews.timelines": timelines },
+    options: {
+      ...uiDefaults,
+      previews,
+      "previews.animate": animate,
+      "previews.timelines": timelines,
+    },
     sequence: 1,
   };
   fake.daemon.through = 2;
@@ -295,7 +307,7 @@ const opened = async (
     () => container.querySelector('[role="log"]')?.textContent?.includes("look") ?? false
   );
 
-  return { ...fake, container };
+  return { ...fake, container, registry };
 };
 
 /**
@@ -320,6 +332,125 @@ const drawn = () =>
  */
 const summaryLine = () => list()?.querySelector("button")?.textContent;
 
+/**
+ * Waits for the Message's image to be drawn, and says it came into view, as a browser
+ * would as the Owner scrolls it there.
+ */
+const imageSeen = async () => {
+  await settled(() => list()?.querySelector("[data-loaded]") !== null);
+  await scrolledIntoView();
+};
+
+/**
+ * One of the Message's image's buttons, by what it says.
+ * @param name - Its accessible name.
+ * @returns It, or none.
+ */
+const imageButton = (name: string) =>
+  list()?.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`) ?? null;
+
+/**
+ * The larger view, if it is open.
+ * @returns It, or none.
+ */
+const larger = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
+
+/**
+ * Presses a button as a person does: it takes focus, and then it is pressed.
+ * @param button - The button.
+ */
+const pressed = async (button: HTMLButtonElement | null) => {
+  await act(async () => {
+    button?.focus();
+    button?.click();
+    await Promise.resolve();
+  });
+};
+
+/** Each stub a test made of the browser, to be put back. */
+const restores: (() => void)[] = [];
+
+/**
+ * Stands in the browser's media: the Daemon's bytes fetched, decoded to a frame of a size,
+ * drawn on a canvas, and held by an object URL.
+ * @returns What it was asked.
+ */
+const stubMedia = () => {
+  const revoked: string[] = [];
+  const draws: [number, number][] = [];
+  let made = 0;
+
+  const fetching = vi
+    .fn<(input: string) => Promise<Response>>()
+    .mockResolvedValue(new Response(new Uint8Array([71, 73, 70]), { status: 200 }));
+
+  vi.stubGlobal("fetch", fetching);
+  vi.stubGlobal(
+    "createImageBitmap",
+    vi
+      .fn<() => Promise<{ close: () => void; height: number; width: number }>>()
+      .mockResolvedValue({ close: vi.fn<() => void>(), height: 48, width: 64 })
+  );
+
+  vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+    made += 1;
+
+    return `blob:media-${made}`;
+  });
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+    revoked.push(url);
+  });
+
+  // happy-dom draws nothing, so a stand-in takes the one call the page makes.
+  const context = {
+    drawImage: (frame: { width: number; height: number }) => {
+      draws.push([frame.width, frame.height]);
+    },
+  };
+
+  // SAFETY: the page only draws an image onto what it is given.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as never);
+
+  restores.push(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  return { draws, fetches: () => fetching.mock.calls.map(([input]) => input), revoked };
+};
+
+/**
+ * Sets the device to reduce motion, or not, for what mounts after.
+ * @param reduce - Whether it does.
+ */
+const reducingMotion = (reduce: boolean) => {
+  const original = window.matchMedia.bind(window);
+
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => {
+    const list = original(query);
+
+    if (query.includes("prefers-reduced-motion")) {
+      Object.defineProperty(list, "matches", { value: reduce });
+    }
+
+    return list;
+  });
+  restores.push(() => {
+    vi.restoreAllMocks();
+  });
+};
+
+/**
+ * The Message's animated image, played or not, once it was fetched.
+ * @returns What is drawn of it.
+ */
+const animated = () => ({
+  badge: list()?.querySelector('[data-badge="play"]') !== null,
+  canvas: list()?.querySelector("canvas") !== null,
+  playing: list()?.querySelector("img")?.getAttribute("src") ?? null,
+});
+
 describe("a Message's Previews", () => {
   beforeEach(() => {
     layOut();
@@ -331,6 +462,10 @@ describe("a Message's Previews", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
+    }
+
+    for (const restore of restores.splice(0)) {
+      restore();
     }
 
     Reflect.deleteProperty(globalThis, "IntersectionObserver");
@@ -418,6 +553,7 @@ describe("a Message's Previews", () => {
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
     await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
 
     const image = list()?.querySelector("img");
 
@@ -445,6 +581,8 @@ describe("a Message's Previews", () => {
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
     await settled(() => list()?.querySelector("img") !== null);
 
     const image = list()?.querySelector("img");
@@ -548,6 +686,8 @@ describe("a Message's Previews", () => {
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
     await settled(() => list()?.querySelector("img") !== null);
 
     await act(async () => {
@@ -567,6 +707,8 @@ describe("a Message's Previews", () => {
 
     await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
     await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
     await settled(() => list()?.querySelector("img") !== null);
 
     await act(async () => {
@@ -660,5 +802,281 @@ describe("a Message's Previews", () => {
       list: list(),
       shown: container.textContent?.includes("https://example.com/cats"),
     }).toStrictEqual({ asks: [], followers: 0, list: null, shown: true });
+  });
+
+  it("draws no image, and gives none a source, until it scrolls into view", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    const before = list()?.querySelectorAll("img, canvas").length;
+
+    await imageSeen();
+
+    expect({ after: list()?.querySelectorAll("img").length, before }).toStrictEqual({
+      after: 1,
+      before: 0,
+    });
+  });
+
+  it("opens a still image large on a press, with a link to its page, which Escape closes, and focus returns", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("image")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => imageButton("Open Cats large") !== null);
+
+    const button = imageButton("Open Cats large");
+
+    await pressed(button);
+    await settled(() => larger() !== null);
+
+    const link = larger()?.querySelector("a");
+
+    const open = {
+      href: link?.getAttribute("href"),
+      image: larger()?.querySelector("img")?.getAttribute("src"),
+      name: larger()?.getAttribute("aria-label"),
+      // It lies over the page, outside the Pane that holds the Message.
+      outside: list()?.contains(larger()) === false && document.body.contains(larger()),
+      rel: link?.getAttribute("rel"),
+      target: link?.getAttribute("target"),
+      text: link?.textContent,
+    };
+
+    await act(async () => {
+      larger()?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
+      );
+      await Promise.resolve();
+    });
+    await settled(() => larger() === null);
+    await settled(() => document.activeElement === button);
+
+    expect(open).toStrictEqual({
+      href: "https://example.com/cats",
+      image: `/api/previews/media/${hash}`,
+      name: "Cats",
+      outside: true,
+      rel: "noopener noreferrer",
+      target: "_blank",
+      text: "https://example.com/cats",
+    });
+  });
+
+  it("closes the larger view on a press outside it", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => imageButton("Open Cats large") !== null);
+
+    const button = imageButton("Open Cats large");
+
+    await pressed(button);
+    await settled(() => larger() !== null);
+
+    // The overlay, React Aria's dimmed layer around the dialog, is what a tap beside it lands on.
+    const overlay = larger()?.closest('[style*="--visual-viewport"]');
+
+    await act(async () => {
+      overlay?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      overlay?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await settled(() => larger() === null);
+    await settled(() => document.activeElement === button);
+
+    expect(larger()).toBeNull();
+  });
+
+  it("draws an animated image as its first frame under a play badge, fetched once it is in view, and plays it on a press", async () => {
+    const { fetches, draws, revoked } = stubMedia();
+    const { daemon } = await opened("on", catsItem(readyWithImage("image", true)));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    const unseen = { fetches: fetches(), image: list()?.querySelectorAll("img, canvas").length };
+
+    await imageSeen();
+    await settled(() => list()?.querySelector("canvas") !== null);
+
+    const still = { ...animated(), draws: [...draws], fetches: fetches() };
+    const canvas = list()?.querySelector("canvas");
+
+    await pressed(imageButton("Play Cats"));
+    await settled(() => list()?.querySelector("img") !== null);
+
+    const playing = {
+      ...animated(),
+      fetches: fetches(),
+      stop: imageButton("Stop Cats") !== null,
+    };
+
+    await pressed(imageButton("Stop Cats"));
+    await settled(() => list()?.querySelector("canvas") !== null);
+
+    expect({
+      back: animated(),
+      playing,
+      size: [canvas?.getAttribute("width"), canvas?.getAttribute("height")],
+      still,
+      unseen,
+    }).toStrictEqual({
+      back: { badge: true, canvas: true, playing: null },
+      playing: {
+        badge: false,
+        canvas: false,
+        fetches: [`/api/previews/media/${hash}`],
+        playing: "blob:media-1",
+        stop: true,
+      },
+      size: ["64", "48"],
+      still: {
+        badge: true,
+        canvas: true,
+        draws: [[64, 48]],
+        fetches: [`/api/previews/media/${hash}`],
+        playing: null,
+      },
+      unseen: { fetches: [], image: 0 },
+    });
+    expect(revoked).toStrictEqual([]);
+  });
+
+  it("opens a playing animated image large from its own control, playing there", async () => {
+    stubMedia();
+    const { daemon } = await opened("on", catsItem(readyWithImage("page", true)));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => list()?.querySelector("canvas") !== null);
+
+    const stillOnly = imageButton("Open Cats large");
+
+    await pressed(imageButton("Play Cats"));
+    await settled(() => imageButton("Open Cats large") !== null);
+
+    const enlarge = imageButton("Open Cats large");
+
+    await pressed(enlarge);
+    await settled(() => larger() !== null);
+
+    expect({
+      href: larger()?.querySelector("a")?.getAttribute("href"),
+      src: larger()?.querySelector("img")?.getAttribute("src"),
+      stillOnly,
+    }).toStrictEqual({
+      href: "https://example.com/cats",
+      src: "blob:media-1",
+      stillOnly: null,
+    });
+  });
+
+  it("plays an animated image on its own with animate on, shared or this device's own, and keeps it still where this device's is off", async () => {
+    stubMedia();
+
+    const shared = await opened("on", catsItem(readyWithImage("image", true)), {}, true);
+
+    await settled(() => shared.daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => list()?.querySelector("img") !== null);
+
+    const playsShared = animated();
+
+    await act(async () => {
+      shared.registry.set(deviceUi, { "previews.animate": false });
+      await Promise.resolve();
+    });
+    await settled(() => list()?.querySelector("canvas") !== null);
+
+    const stillOverridden = animated();
+
+    expect({ playsShared, stillOverridden }).toStrictEqual({
+      playsShared: { badge: false, canvas: false, playing: "blob:media-1" },
+      stillOverridden: { badge: true, canvas: true, playing: null },
+    });
+  });
+
+  it("plays an animated image on its own where only this device turns animate on", async () => {
+    stubMedia();
+
+    const { daemon, registry } = await opened("on", catsItem(readyWithImage("image", true)));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => list()?.querySelector("canvas") !== null);
+
+    const before = animated();
+
+    await act(async () => {
+      registry.set(deviceUi, { "previews.animate": true });
+      await Promise.resolve();
+    });
+    await settled(() => list()?.querySelector("img") !== null);
+
+    expect({ after: animated(), before }).toStrictEqual({
+      after: { badge: false, canvas: false, playing: "blob:media-1" },
+      before: { badge: true, canvas: true, playing: null },
+    });
+  });
+
+  it("keeps an animated image still under reduced motion with animate on, and plays it on a press", async () => {
+    stubMedia();
+    reducingMotion(true);
+
+    const { daemon } = await opened("on", catsItem(readyWithImage("image", true)), {}, true);
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => list()?.querySelector("canvas") !== null);
+
+    const still = animated();
+
+    await pressed(imageButton("Play Cats"));
+    await settled(() => list()?.querySelector("img") !== null);
+
+    expect({ playing: animated(), still }).toStrictEqual({
+      playing: { badge: false, canvas: false, playing: "blob:media-1" },
+      still: { badge: true, canvas: true, playing: null },
+    });
+  });
+
+  it("falls back to the text row when an animated image cannot be fetched", async () => {
+    stubMedia();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<() => Promise<Response>>().mockResolvedValue(new Response(null, { status: 404 }))
+    );
+
+    const { daemon } = await opened("on", catsItem(readyWithImage("page", true)));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+    await imageSeen();
+    await settled(() => list()?.querySelector("[data-loaded]") === null);
+
+    expect({
+      image: list()?.querySelectorAll("img, canvas").length,
+      state: drawn()[0]?.state,
+      text: summaryLine(),
+    }).toStrictEqual({ image: 0, state: "ready", text: "example.com · Cats" });
   });
 });

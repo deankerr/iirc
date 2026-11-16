@@ -20,14 +20,24 @@ import {
   initialPreviews,
   mayPreview,
   modeIn,
+  motionOf,
   pressOf,
+  pressOn,
   previewsModesOf,
   previewsOf,
   reasonWords,
   reducePreviews,
   summaryOf,
 } from "./previews.ts";
-import type { Previews, PreviewsAsk, PreviewsEvent, PreviewsModes } from "./previews.ts";
+import type {
+  Motion,
+  MotionAsked,
+  PressDoes,
+  Previews,
+  PreviewsAsk,
+  PreviewsEvent,
+  PreviewsModes,
+} from "./previews.ts";
 
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
 const other = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
@@ -787,5 +797,64 @@ describe("a failure's words", () => {
       "No preview: this link's answer was too large to read.",
       "No preview: this link had nothing to show.",
     ]);
+  });
+});
+
+describe("whether an image moves", () => {
+  const every = [false, true] as const;
+  const choices = [undefined, "Still", "Moving"] as const;
+
+  const rows = (animated: boolean) =>
+    every.flatMap((animate) =>
+      every.flatMap((reducedMotion) =>
+        choices.map((chosen): [boolean, boolean, Motion | undefined, Motion] => [
+          animate,
+          reducedMotion,
+          chosen,
+          motionOf({ animate, animated, chosen, reducedMotion } satisfies MotionAsked),
+        ])
+      )
+    );
+
+  it("is still for an image that is not animated, however it is set and pressed", () => {
+    expect(rows(false).map((row) => row[3])).toStrictEqual(
+      Array.from({ length: 12 }, (): Motion => "Still")
+    );
+  });
+
+  it("is, for an animated one, as it was last pressed, and until then moving only with animate on and no reduced motion", () => {
+    expect(rows(true)).toStrictEqual([
+      // animate, reduced motion, last pressed into, then its motion
+      [false, false, undefined, "Still"],
+      [false, false, "Still", "Still"],
+      [false, false, "Moving", "Moving"],
+      [false, true, undefined, "Still"],
+      [false, true, "Still", "Still"],
+      [false, true, "Moving", "Moving"],
+      [true, false, undefined, "Moving"],
+      [true, false, "Still", "Still"],
+      [true, false, "Moving", "Moving"],
+      [true, true, undefined, "Still"],
+      [true, true, "Still", "Still"],
+      [true, true, "Moving", "Moving"],
+    ]);
+  });
+});
+
+describe("what a press of an image does", () => {
+  it("opens a still image large, whatever its motion", () => {
+    const motions = ["Still", "Moving"] as const;
+
+    expect(motions.map((motion) => pressOn({ animated: false }, motion))).toStrictEqual([
+      "OpenLarge",
+      "OpenLarge",
+    ] satisfies PressDoes[]);
+  });
+
+  it("plays an animated image that is still, and stops one that moves", () => {
+    expect({
+      moving: pressOn({ animated: true }, "Moving"),
+      still: pressOn({ animated: true }, "Still"),
+    }).toStrictEqual({ moving: "Stop", still: "Play" });
   });
 });

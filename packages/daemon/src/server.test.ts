@@ -801,7 +801,7 @@ describe("the API over a real server", () => {
       ],
       first: [
         {
-          data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+          data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
           event: "changed",
           id: "0",
         },
@@ -816,7 +816,7 @@ describe("the API over a real server", () => {
       ],
       resumed: [
         {
-          data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":1}',
+          data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":1}',
           event: "changed",
           id: "1",
         },

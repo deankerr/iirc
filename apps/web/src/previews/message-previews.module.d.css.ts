@@ -13,11 +13,9 @@ declare const styles: {
   readonly row: string;
   readonly summary: string;
   readonly text: string;
-  readonly thumbnail: string;
   readonly unseen: string;
   readonly video: string;
   readonly waiting: string;
-  readonly whole: string;
 };
 
 export default styles;

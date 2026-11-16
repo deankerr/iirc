@@ -597,6 +597,59 @@ export interface ImageShown {
   readonly src: string;
 }
 
+/** Whether an image is `Still`, at its first frame, or `Moving`. */
+export type Motion = "Still" | "Moving";
+
+/**
+ * What decides whether an image moves: whether it is animated, `ui.previews.animate` on
+ * this device, whether the device is set to reduce motion, and what the Owner last pressed
+ * it into, if they did.
+ */
+export interface MotionAsked {
+  readonly animated: boolean;
+  readonly animate: boolean;
+  readonly reducedMotion: boolean;
+  readonly chosen: Motion | undefined;
+}
+
+/**
+ * Whether an image moves. An image that is not animated is always `Still`. An animated one
+ * is as the Owner last pressed it, which is a choice made, so it plays even where the
+ * device is set to reduce motion, and until then moves only when `animate` is on and the
+ * device is not set to reduce motion, which keeps it still.
+ * @param asked - What decides it.
+ * @returns Its motion.
+ */
+export const motionOf = ({ animated, animate, reducedMotion, chosen }: MotionAsked): Motion => {
+  if (!animated) {
+    return "Still";
+  }
+
+  return chosen ?? (animate && !reducedMotion ? "Moving" : "Still");
+};
+
+/**
+ * What a press of an image does: `OpenLarge`, the larger view; `Play`, from its first
+ * frame; or `Stop`, back to its first frame.
+ */
+export type PressDoes = "OpenLarge" | "Play" | "Stop";
+
+/**
+ * What a press of an image does. An image that is not animated opens large. An animated one
+ * plays when it is still, and stops when it moves, so it opens large only from the control
+ * beside it while it moves.
+ * @param image - The image.
+ * @param motion - Whether it moves now.
+ * @returns What a press does.
+ */
+export const pressOn = (image: Pick<ImageShown, "animated">, motion: Motion): PressDoes => {
+  if (!image.animated) {
+    return "OpenLarge";
+  }
+
+  return motion === "Still" ? "Play" : "Stop";
+};
+
 /**
  * A ready Preview's image as drawn.
  * @param preview - The Preview.

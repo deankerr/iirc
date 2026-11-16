@@ -465,6 +465,20 @@ export const PreviewsShown = Schema.Literals(["off", "links only", "on"]).annota
 export type PreviewsShown = typeof PreviewsShown.Type;
 
 /**
+ * Whether an animated image in a Preview plays on its own, which it otherwise does only
+ * once pressed. It is a device's own to choose, since a device draws it, and one set to
+ * reduce motion keeps animated images still whatever this says.
+ */
+export const PreviewsAnimate = Schema.Boolean.annotate({
+  default: false,
+  description:
+    "Whether an animated image in a Preview plays on its own: off, it shows its first frame until pressed. A device set to reduce motion keeps them still either way.",
+});
+
+/** The decoded form of {@link PreviewsAnimate}. */
+export type PreviewsAnimate = typeof PreviewsAnimate.Type;
+
+/**
  * Each Timeline's own choice of whether the Daemon previews its links, by its id, over
  * `ui.previews`: `off`, `links only`, or `on`. A Timeline it does not name follows
  * `ui.previews`, and an entry for a Timeline that no longer exists does nothing. A Direct
@@ -495,6 +509,7 @@ export const UiOptions = Schema.Struct({
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
   previews: PreviewsShown,
+  "previews.animate": PreviewsAnimate,
   "previews.timelines": PreviewsByTimeline,
   read: ReadRule,
   size: TextSize,

@@ -4,7 +4,7 @@
  * to its description, a failed one as the plain link, saying why on hover, and one the
  * Daemon holds for a press as the plain link and "show preview", which fetches it. A link
  * that is itself a video or a sound is its summary with a native player under it, which
- * fetches nothing until pressed. Its
+ * fetches nothing until pressed. An image is loaded only once it scrolls into view. Its
  * Previews are asked for only once the Message scrolls into view, as an intersection
  * observer sees it, never ahead, and only while its Timeline's mode asks.
  *
@@ -13,12 +13,12 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
 import { mayPreview, modeIn, previewsOf } from "@iirc/frontend/previews";
-import type { ImageShown, LinkShown, MediaShown, PreviewShown } from "@iirc/frontend/previews";
-import type { ReactElement } from "react";
+import type { LinkShown, MediaShown, PreviewShown } from "@iirc/frontend/previews";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
 import { pressPreview, previewsModes, previewsShown, previewsState } from "./atoms.ts";
+import { PreviewImage } from "./preview-image.tsx";
 
 import styles from "./message-previews.module.css";
 
@@ -50,39 +50,6 @@ const PlainLink = ({
       <bdi>{link.text}</bdi>
     </a>
   );
-
-/**
- * An image the Daemon kept, drawn from its own origin, which the browser loads lazily and
- * scales. Where it fails to load, nothing is drawn, and what is drawn without it shows.
- * @param props - The image, and what to draw in its place.
- * @returns The image, or what stands without it.
- */
-const PreviewImage = ({
-  image,
-  without,
-}: {
-  readonly image: ImageShown;
-  readonly without: ReactElement | null;
-}) => {
-  const [failed, setFailed] = useState(false);
-
-  return failed ? (
-    without
-  ) : (
-    <img
-      alt={image.alt}
-      className={image.drawn === "Whole" ? styles.whole : styles.thumbnail}
-      data-drawn={image.drawn === "Whole" ? "whole" : "thumbnail"}
-      decoding="async"
-      loading="lazy"
-      onError={() => {
-        setFailed(true);
-      }}
-      referrerPolicy="no-referrer"
-      src={image.src}
-    />
-  );
-};
 
 /**
  * A link that is itself a video or a sound, as the browser's own player, which fetches
@@ -194,12 +161,12 @@ const PreviewRow = ({
       return (
         <div className={styles.ready} data-preview="ready">
           {image?.drawn === "Whole" ? (
-            <PreviewImage image={image} key={image.src} without={text} />
+            <PreviewImage image={image} key={image.src} link={shown.link} without={text} />
           ) : (
             <>
               {text}
               {image === undefined ? null : (
-                <PreviewImage image={image} key={image.src} without={null} />
+                <PreviewImage image={image} key={image.src} link={shown.link} without={null} />
               )}
             </>
           )}
