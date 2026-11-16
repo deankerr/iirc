@@ -537,19 +537,21 @@ export const reasonWords = (reason: PreviewFailure): string => {
 };
 
 /** What a link to media itself is called in its summary. */
-const kindWords = { audio: "sound", image: "image", player: "player", video: "video" } as const;
+const kindWords = { audio: "sound", image: "image", video: "video" } as const;
 
 /**
  * A ready Preview's summary, its one line: a page's site and title, or the site alone with
- * no title, and a link to media itself as what it is, its type, and its site. Every part a
- * stranger wrote is contained.
+ * no title, as a player's is too, and a link to media itself as what it is, its type, and
+ * its site. Every part a stranger wrote is contained.
  * @param preview - The Preview.
  * @returns The line.
  */
 export const summaryOf = (preview: Preview): string => {
   const site = contained(preview.site);
 
-  if (preview.kind === "page") {
+  // A player is its page's summary: what it plays is its title, and where it plays from is
+  // said by its play button.
+  if (preview.kind === "page" || preview.kind === "player") {
     return preview.title === null ? site : `${site} · ${contained(preview.title)}`;
   }
 
@@ -587,13 +589,14 @@ const linkShown = (link: string): LinkShown => {
 /**
  * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
  * its link; where the Daemon serves it, from its own origin and never the host it came
- * from; whether it moves; and how it is drawn, `Thumbnail` beside a page's summary, or
- * `Whole` for a link that is itself the image.
+ * from; whether it moves; and how it is drawn, `Thumbnail` beside a page's summary,
+ * `Whole` for a link that is itself the image, or `Poster` for a player's, which a play
+ * button is drawn over.
  */
 export interface ImageShown {
   readonly alt: string;
   readonly animated: boolean;
-  readonly drawn: "Thumbnail" | "Whole";
+  readonly drawn: "Poster" | "Thumbnail" | "Whole";
   readonly src: string;
 }
 
@@ -651,6 +654,33 @@ export const pressOn = (image: Pick<ImageShown, "animated">, motion: Motion): Pr
 };
 
 /**
+ * How a Preview's image is drawn, by what the Preview is.
+ * @param kind - The Preview's kind.
+ * @returns How its image is drawn.
+ */
+const drawnOf = (kind: Preview["kind"]): ImageShown["drawn"] => {
+  switch (kind) {
+    case "image": {
+      return "Whole";
+    }
+
+    case "player": {
+      return "Poster";
+    }
+
+    case "page":
+    case "video":
+    case "audio": {
+      return "Thumbnail";
+    }
+
+    default: {
+      return kind satisfies never;
+    }
+  }
+};
+
+/**
  * A ready Preview's image as drawn.
  * @param preview - The Preview.
  * @returns The image, or none when the Daemon kept none.
@@ -663,7 +693,7 @@ const imageOf = (preview: Preview): ImageShown | undefined =>
           preview.title === null || preview.title === "" ? preview.link : preview.title
         ),
         animated: preview.image.animated,
-        drawn: preview.kind === "image" ? "Whole" : "Thumbnail",
+        drawn: drawnOf(preview.kind),
         src: `/api/previews/media/${preview.image.hash}`,
       };
 
@@ -704,11 +734,43 @@ const mediaOf = (
     : undefined;
 
 /**
+ * A player, as drawn: the host it plays from, which is all of it a view shows, and the
+ * words that say so. Its address is never given: nothing is loaded from it, and nothing
+ * here can be turned into a frame.
+ */
+export interface PlayerShown {
+  readonly host: string;
+  readonly words: string;
+}
+
+/**
+ * A ready Preview's player as drawn.
+ * @param preview - The Preview.
+ * @returns The player, or none for any other kind, or when its address cannot be read.
+ */
+const playerOf = (preview: Preview): PlayerShown | undefined => {
+  if (preview.kind !== "player" || preview.player === null) {
+    return undefined;
+  }
+
+  const url = URL.parse(preview.player.link);
+
+  if (url === null || url.hostname === "") {
+    return undefined;
+  }
+
+  const host = contained(url.hostname);
+
+  return { host, words: `plays from ${host}` };
+};
+
+/**
  * One Preview, as drawn:
  *
  * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
  * - `Ready`: its summary, opening to its description when it has one, its image when the
- *   Daemon kept one, and, for a link that is itself a video or a sound, its media.
+ *   Daemon kept one, for a link that is itself a video or a sound, its media, and for a
+ *   player, where it plays from. Images, media, and players are shown only under `on`.
  * - `Plain`: the plain link, with why there is no Preview, when it failed.
  * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
  *   Message's links, as the Daemon holds it until the Owner presses.
@@ -723,6 +785,7 @@ export type PreviewShown =
       readonly description: string | undefined;
       readonly image: ImageShown | undefined;
       readonly media: MediaShown | undefined;
+      readonly player: PlayerShown | undefined;
     }
   | {
       readonly _tag: "Plain";
@@ -777,6 +840,7 @@ const itemShown = (
         key,
         link,
         media: on ? mediaOf(preview, item.id, timeline, position) : undefined,
+        player: on ? playerOf(preview) : undefined,
         summary: summaryOf(preview),
       };
     }

@@ -1146,6 +1146,9 @@ const suffixRefused = (why: string) => `ui.suffix must ${why}.`;
 const widthRefused = (text: string) =>
   `ui.width: Give a whole number from 40 to 400, or none, not "${text}".`;
 
+const defaultPlayers =
+  "www.youtube-nocookie.com,player.vimeo.com,w.soundcloud.com,bandcamp.com,open.spotify.com,player.twitch.tv";
+
 describe("the options under ui", () => {
   const shared = {
     options: {
@@ -1159,6 +1162,7 @@ describe("the options under ui", () => {
       light: "light",
       previews: "off",
       "previews.animate": false,
+      "previews.players": ["player.vimeo.com", "w.soundcloud.com"],
       "previews.timelines": {},
       read: "latest",
       size: 14,
@@ -1206,6 +1210,7 @@ describe("the options under ui", () => {
         { _tag: "Text" },
         { _tag: "Choice", choices: ["off", "links only", "on"] },
         { _tag: "Toggle" },
+        { _tag: "Texts", nonEmpty: false },
         { _tag: "ChoiceByKey", choices: ["off", "links only", "on"] },
         { _tag: "Choice", choices: ["shown", "latest", "asked"] },
         { _tag: "Integer", maximum: 24, minimum: 10 },
@@ -1238,6 +1243,12 @@ describe("the options under ui", () => {
         ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
         ["ui.previews", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
         ["ui.previews.animate", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
+        [
+          "ui.previews.players",
+          { _tag: "Shown", text: defaultPlayers },
+          { _tag: "Unset" },
+          undefined,
+        ],
         ["ui.previews.timelines", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.read", { _tag: "Shown", text: "latest" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
@@ -1318,6 +1329,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "off" },
           undefined,
           "off",
+        ],
+        [
+          "ui.previews.players",
+          { _tag: "Shown", text: "player.vimeo.com,w.soundcloud.com" },
+          { _tag: "Shown", text: "player.vimeo.com,w.soundcloud.com" },
+          undefined,
+          defaultPlayers,
         ],
         [
           "ui.previews.timelines",
@@ -1412,7 +1430,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-19),
+        .slice(-20),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1427,6 +1445,7 @@ describe("the options under ui", () => {
         "ui.light",
         "ui.previews",
         "ui.previews.animate",
+        "ui.previews.players",
         "ui.previews.timelines",
         "ui.read",
         "ui.size",
@@ -1510,6 +1529,43 @@ describe("the options under ui", () => {
         _tag: "Invalid",
         message:
           "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
+      },
+    });
+  });
+
+  it("offer ui.previews.players as a list of hosts, shared by every device, and read back the same", () => {
+    const option = uiOptionsOf(shared, {}).find((found) => found.option === "previews.players");
+    const typed = read("/set ui.previews.players player.vimeo.com, w.soundcloud.com");
+
+    expect({
+      device: read("/set -device ui.previews.players player.vimeo.com"),
+      kind: option?.kind,
+      notAHost: read("/set ui.previews.players Vimeo")._tag,
+      shown: [option?.value, option?.device, option?.starts],
+      typed,
+    }).toStrictEqual({
+      device: {
+        _tag: "Invalid",
+        message:
+          "ui.previews.players is shared by every device, so no device overrides it. Use /set ui.previews.players without -device.",
+      },
+      kind: { _tag: "Texts", nonEmpty: false },
+      notAHost: "Invalid",
+      shown: [
+        { _tag: "Shown", text: "player.vimeo.com,w.soundcloud.com" },
+        undefined,
+        defaultPlayers,
+      ],
+      typed: {
+        _tag: "Parsed",
+        value: [
+          {
+            _tag: "ChangeUi",
+            device: false,
+            option: "previews.players",
+            value: ["player.vimeo.com", "w.soundcloud.com"],
+          },
+        ],
       },
     });
   });

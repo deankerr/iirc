@@ -80,6 +80,7 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
+  player: null,
   site: "example.com",
   title: "Cats",
   type: null,
@@ -548,6 +549,7 @@ describe("what a Message shows", () => {
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
         media: undefined,
+        player: undefined,
         summary: "example.com · Cats",
       },
       {
@@ -724,6 +726,77 @@ describe("a Preview's image", () => {
 
 const streamed = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") =>
   shownReady({ title: null, ...fields }, mode)?.media;
+
+const playing = {
+  image: { animated: false, hash, size: 10, type: "image/jpeg" },
+  kind: "player",
+  link: "https://www.youtube.com/watch?v=abc",
+  player: { link: "https://www.youtube-nocookie.com/embed/abc", size: { height: 360, width: 640 } },
+  title: "A song",
+} as const;
+
+describe("a Preview's player", () => {
+  it("is the host it plays from, and the words that say so, under on", () => {
+    expect(shownReady(playing)?.player).toStrictEqual({
+      host: "www.youtube-nocookie.com",
+      words: "plays from www.youtube-nocookie.com",
+    });
+  });
+
+  it("is none under links only, even one held from while Previews were on", () => {
+    expect(shownReady(playing, "links only")?.player).toBeUndefined();
+  });
+
+  it("is none for any kind but a player", () => {
+    expect(
+      (["page", "image", "video", "audio"] as const).map(
+        (kind) => shownReady({ ...playing, kind, player: null })?.player
+      )
+    ).toStrictEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("is none when its address cannot be read", () => {
+    expect(
+      shownReady({ ...playing, player: { link: "not a link", size: null } })?.player
+    ).toBeUndefined();
+  });
+
+  it("draws its image as the poster, served from our own origin", () => {
+    expect(shownReady(playing)?.image).toStrictEqual({
+      alt: "A song",
+      animated: false,
+      drawn: "Poster",
+      src: `/api/previews/media/${hash}`,
+    });
+  });
+
+  it("is text alone under links only: no image, no player", () => {
+    const shown = shownReady(playing, "links only");
+
+    expect([shown?.image, shown?.player, shown?.media, shown?.summary]).toStrictEqual([
+      undefined,
+      undefined,
+      undefined,
+      "example.com · A song",
+    ]);
+  });
+
+  it("has no poster when the Daemon kept none, and still plays", () => {
+    const shown = shownReady({ ...playing, image: null });
+
+    expect([shown?.image, shown?.player?.host]).toStrictEqual([
+      undefined,
+      "www.youtube-nocookie.com",
+    ]);
+  });
+
+  it("is summed up as a page is, by its site and title", () => {
+    expect([summary(playing), summary({ ...playing, title: null })]).toStrictEqual([
+      "example.com · A song",
+      "example.com",
+    ]);
+  });
+});
 
 describe("a Preview's media", () => {
   it("is a video to stream under on, from the route by the Message's place", () => {
