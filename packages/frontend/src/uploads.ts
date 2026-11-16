@@ -1,29 +1,39 @@
 /**
- * The Uploads, as a list the options show beside them: every one held, newest first, as
- * pages read and the stream of their Changes give them, where the next page begins, and the
- * sequence of the last Change folded in, which the stream is followed after. A page only
+ * The Uploads, as a list the options show beside them: every live one held, newest first,
+ * as pages read and the stream of their Changes give them, where the next page begins, and
+ * the sequence of the last Change folded in, which the stream is followed after. A page only
  * ever extends the list at its end, and the stream only ever gives what is newer than
  * everything held, so an Upload is held once. Its link, whether it gets a thumbnail, and its
- * size are derived as it is drawn, never held.
+ * size are derived as it is drawn, never held. Beside them, what the Owner asked of each,
+ * a rename or a delete, while it waits on the Daemon or after it failed.
  *
  * @packageDocumentation
  */
+import { uploadNameMaxLength } from "@iirc/api";
 import type { Upload, UploadId } from "@iirc/api";
 
 /**
  * The Uploads held, newest first, where the next page begins, and how far they were
  * folded: `next` is an Upload's id, as a page gave it, or `null` once the last page was
  * read, and `through` the sequence of the last Upload Change folded in. Both are none
- * before the first page was read.
+ * before the first page was read. `unpaged` holds each Upload a Change gave that was not
+ * held, as that Change gave it, so a later page read before the Change, and arriving after
+ * it, is folded as the Change left it rather than bringing back what it undid.
  */
 export interface Uploads {
   readonly uploads: readonly Upload[];
   readonly next: UploadId | null | undefined;
   readonly through: number | undefined;
+  readonly unpaged: ReadonlyMap<UploadId, Upload>;
 }
 
 /** Nothing held, and no page read. */
-export const initialUploads: Uploads = { next: undefined, through: undefined, uploads: [] };
+export const initialUploads: Uploads = {
+  next: undefined,
+  through: undefined,
+  unpaged: new Map(),
+  uploads: [],
+};
 
 /** A page of the Uploads, newest first, as the API gives it. */
 export interface UploadsPage {
@@ -37,25 +47,36 @@ export interface UploadsPage {
  *
  * - `Paged`: a page was read, from just after `after`, or the first page when none.
  * - `Changed`: the stream gave an Upload whole, as it is now, by the Change at `sequence`.
+ * - `Answered`: the Daemon answered a rename or a delete with the Upload as it is now,
+ *   ahead of the Change the stream gives for it.
  * - `Forgotten`: the page signed out, so nothing is held.
  */
 export type UploadsEvent =
   | { readonly _tag: "Paged"; readonly after: UploadId | undefined; readonly page: UploadsPage }
   | { readonly _tag: "Changed"; readonly sequence: number; readonly upload: Upload }
+  | { readonly _tag: "Answered"; readonly upload: Upload }
   | { readonly _tag: "Forgotten" };
 
 /**
- * A page's Uploads after those held, passing over any already held.
+ * A page's Uploads after those held, passing over any already held, each as a Change since
+ * gave it, if one did, and passing over any deleted.
  * @param held - The Uploads held.
  * @param page - The page's Uploads, newest first.
+ * @param unpaged - The Uploads Changes gave that were not held.
  * @returns The Uploads held now.
  */
-const extended = (held: readonly Upload[], page: readonly Upload[]): readonly Upload[] => {
+const extended = (
+  held: readonly Upload[],
+  page: readonly Upload[],
+  unpaged: ReadonlyMap<UploadId, Upload>
+): readonly Upload[] => {
   const ids = new Set(held.map((upload) => upload.id));
   const added: Upload[] = [];
 
-  for (const upload of page) {
-    if (!ids.has(upload.id)) {
+  for (const read of page) {
+    const upload = unpaged.get(read.id) ?? read;
+
+    if (!ids.has(upload.id) && upload.deleted === undefined) {
       ids.add(upload.id);
       added.push(upload);
     }
@@ -65,12 +86,42 @@ const extended = (held: readonly Upload[], page: readonly Upload[]): readonly Up
 };
 
 /**
+ * The Uploads held once one is as an answer or a Change gives it: dropped when deleted,
+ * since the list shows the live ones, and otherwise replaced in place.
+ * @param held - The Uploads held.
+ * @param upload - The Upload, as it is now.
+ * @returns The Uploads held now.
+ */
+const replaced = (held: readonly Upload[], upload: Upload): readonly Upload[] =>
+  upload.deleted === undefined
+    ? held.map((one) => (one.id === upload.id ? upload : one))
+    : held.filter((one) => one.id !== upload.id);
+
+/**
+ * Whether a Change gives an Upload that a page not yet read holds: one uploaded before the
+ * oldest held, while more pages follow, as a rename of an old Upload is. That page gives
+ * it as it is when read, so the Change is passed over rather than put first, out of order.
+ * @param state - The Uploads held.
+ * @param upload - The Upload the Change gives.
+ * @returns Whether a later page holds it.
+ */
+const unread = (state: Uploads, upload: Upload): boolean => {
+  const oldest = state.uploads.at(-1);
+
+  return (
+    state.next !== null && state.next !== undefined && oldest !== undefined && upload.at < oldest.at
+  );
+};
+
+/**
  * Folds one event into the Uploads held. A page is folded only when it was read from where
  * the list stands, the first page into an empty list and each later one from `next`, so one
  * read twice, or late, is folded once. Only the first page says how far the list was folded,
  * since the stream gives what is newer than any later page. A Change is folded only when it
- * is after the last folded in: one not held is newer than all, so it goes first, and one
- * held is replaced in place.
+ * is after the last folded in: one held is replaced in place, or dropped once deleted, and
+ * one not held is newer than all, so it goes first, unless it is deleted, or a page not yet
+ * read holds it, when it is kept aside for that page. An answer to a rename or a delete is folded at once, into one held only,
+ * and moves nothing on, since the stream still gives its Change.
  * @param state - The Uploads held.
  * @param event - What happened.
  * @returns The Uploads held now.
@@ -84,10 +135,17 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
         return state;
       }
 
+      const unpaged = new Map(state.unpaged);
+
+      for (const read of page.uploads) {
+        unpaged.delete(read.id);
+      }
+
       return {
         next: page.next,
         through: state.through ?? page.through,
-        uploads: extended(state.uploads, page.uploads),
+        unpaged,
+        uploads: extended(state.uploads, page.uploads, state.unpaged),
       };
     }
 
@@ -99,14 +157,23 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
       }
 
       const known = state.uploads.some((one) => one.id === upload.id);
+      const after = { ...state, through: sequence };
 
-      return {
-        ...state,
-        through: sequence,
-        uploads: known
-          ? state.uploads.map((one) => (one.id === upload.id ? upload : one))
-          : [upload, ...state.uploads],
-      };
+      if (known) {
+        return { ...after, uploads: replaced(state.uploads, upload) };
+      }
+
+      return upload.deleted !== undefined || unread(state, upload)
+        ? { ...after, unpaged: new Map(state.unpaged).set(upload.id, upload) }
+        : { ...after, uploads: [upload, ...state.uploads] };
+    }
+
+    case "Answered": {
+      const { upload } = event;
+
+      return state.uploads.some((one) => one.id === upload.id)
+        ? { ...state, uploads: replaced(state.uploads, upload) }
+        : state;
     }
 
     case "Forgotten": {
@@ -115,6 +182,155 @@ export const reduceUploads = (state: Uploads, event: UploadsEvent): Uploads => {
 
     default: {
       return event satisfies never;
+    }
+  }
+};
+
+/** What the Owner asked of an Upload in the list: a new name, or that it be deleted. */
+export type Asked = "Rename" | "Delete";
+
+/**
+ * Why a rename or a delete did not go as asked, or might not have.
+ *
+ * - `UnknownUpload`: the Daemon has no such Upload, or it was deleted.
+ * - `JournalFailed`: the Daemon could not write its Journal.
+ * - `NoAnswer`: the Daemon did not answer, so whether it was done is unknown.
+ * - `Unexpected`: the Daemon answered in a way the Frontend could not read.
+ */
+export type EditFailure =
+  | { readonly _tag: "UnknownUpload" }
+  | { readonly _tag: "JournalFailed" }
+  | { readonly _tag: "NoAnswer" }
+  | { readonly _tag: "Unexpected" };
+
+/**
+ * Where what the Owner asked of one Upload stands: `Waiting` on the Daemon, or `Failed`,
+ * shown in its row until it is asked again.
+ */
+export type UploadEdit =
+  | { readonly _tag: "Waiting"; readonly of: Asked }
+  | { readonly _tag: "Failed"; readonly of: Asked; readonly failure: EditFailure };
+
+/**
+ * What the Owner asked of the Uploads listed: the one a delete is being confirmed for, if
+ * any, and where each rename or delete sent stands, by its Upload's id, until it is done.
+ */
+export interface UploadEdits {
+  readonly asking: UploadId | undefined;
+  readonly doing: ReadonlyMap<UploadId, UploadEdit>;
+}
+
+/** Nothing asked. */
+export const initialUploadEdits: UploadEdits = { asking: undefined, doing: new Map() };
+
+/**
+ * What happened.
+ *
+ * - `AskedToDelete`: the Owner asked to delete an Upload, which is confirmed first.
+ * - `Closed`: the Owner let the question go, deleting nothing.
+ * - `Sent`: a rename or a delete was sent, which closes the question.
+ * - `Answered`: the Daemon answered it, done or failed as `failure` says.
+ * - `Forgotten`: the page signed out.
+ */
+export type UploadEditsEvent =
+  | { readonly _tag: "AskedToDelete"; readonly id: UploadId }
+  | { readonly _tag: "Closed" }
+  | { readonly _tag: "Sent"; readonly id: UploadId; readonly of: Asked }
+  | { readonly _tag: "Answered"; readonly id: UploadId; readonly failure: EditFailure | undefined }
+  | { readonly _tag: "Forgotten" };
+
+/**
+ * Folds one event into what the Owner asked of the Uploads listed. A rename or a delete is
+ * held while it waits, and once failed until it is sent again; one done is let go of, as
+ * the Upload as answered shows it.
+ * @param state - What was asked.
+ * @param event - What happened.
+ * @returns What is asked now.
+ */
+export const reduceUploadEdits = (state: UploadEdits, event: UploadEditsEvent): UploadEdits => {
+  switch (event._tag) {
+    case "AskedToDelete": {
+      return { ...state, asking: event.id };
+    }
+
+    case "Closed": {
+      return { ...state, asking: undefined };
+    }
+
+    case "Sent": {
+      return {
+        asking: event.of === "Delete" ? undefined : state.asking,
+        doing: new Map(state.doing).set(event.id, { _tag: "Waiting", of: event.of }),
+      };
+    }
+
+    case "Answered": {
+      const { failure, id } = event;
+      const was = state.doing.get(id);
+
+      if (was?._tag !== "Waiting") {
+        return state;
+      }
+
+      const doing = new Map(state.doing);
+
+      if (failure === undefined) {
+        doing.delete(id);
+      } else {
+        doing.set(id, { _tag: "Failed", failure, of: was.of });
+      }
+
+      return { ...state, doing };
+    }
+
+    case "Forgotten": {
+      return initialUploadEdits;
+    }
+
+    default: {
+      return event satisfies never;
+    }
+  }
+};
+
+/**
+ * A name typed for an Upload, as the contract takes it: the text as typed, of 1 to 1024
+ * code units, or none.
+ * @param text - The text.
+ * @returns The name, or none.
+ */
+export const nameOf = (text: string): string | undefined =>
+  text.length === 0 || text.length > uploadNameMaxLength ? undefined : text;
+
+/**
+ * Why a rename or a delete did not go as asked, or might not have, in words.
+ * @param failure - Why.
+ * @param name - The name the Upload is shown by.
+ * @param of - What was asked.
+ * @returns The words.
+ */
+export const editFailureText = (failure: EditFailure, name: string, of: Asked): string => {
+  const done = of === "Rename" ? "renamed" : "deleted";
+
+  switch (failure._tag) {
+    case "UnknownUpload": {
+      return `The Daemon no longer has ${name}, so it was not ${done}.`;
+    }
+
+    case "JournalFailed": {
+      return `The Daemon could not write its Journal, so ${name} was not ${done}.`;
+    }
+
+    case "NoAnswer": {
+      return `The Daemon did not answer, so whether ${name} was ${done} is unknown.`;
+    }
+
+    case "Unexpected": {
+      return `The Daemon answered in a way the Frontend could not read, so whether ${name} was ${done} is unknown.`;
+    }
+
+    default: {
+      return failure satisfies never;
     }
   }
 };

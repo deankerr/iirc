@@ -15,6 +15,7 @@ import {
   UiOptions,
   uiDefaults,
   uiOptionNames,
+  UploadRename,
 } from "@iirc/api";
 import type {
   ChannelHeader,
@@ -109,6 +110,8 @@ type Answer =
   | { readonly _tag: "NotJournaled" };
 
 const json = (status: number, body: Answer) => Response.json(body, { status });
+
+const decodeRename = Schema.decodeUnknownSync(Schema.fromJsonString(UploadRename));
 
 /** A Channel the fake holds behind a Channel Timeline: its head, and its members in rank order. */
 export interface FakeChannel {
@@ -535,6 +538,11 @@ export const fakeDaemon = () => {
   const uploadChanges: { readonly sequence: number; readonly text: string }[] = [];
   const uploadsSent: { readonly name: string | null; readonly size: number }[] = [];
   const uploadRefusals: { readonly status: number; readonly body: object }[] = [];
+
+  const uploadEdits: { readonly method: string; readonly id: string; readonly name?: string }[] =
+    [];
+
+  const uploadEditRefusals: { readonly status: number; readonly body: object }[] = [];
   const previewAsks: { readonly timeline: string; readonly position: string }[] = [];
   const previewFollowers: Follower[] = [];
 
@@ -725,6 +733,13 @@ export const fakeDaemon = () => {
     uiFollowers,
     /** Releases each read of the `ui` options held, in the order they came. */
     uiReadsHeld,
+    /**
+     * How the next renames and deletes of an Upload are refused, first to last, as the API's
+     * errors on the wire; past them, each is done.
+     */
+    uploadEditRefusals,
+    /** Each rename and delete of an Upload asked for, as `PATCH` or `DELETE`, in order. */
+    uploadEdits,
     /** Each follower of the Uploads' Changes. */
     uploadFollowers,
     /** Releases each page of the Uploads held, in the order they came. */
@@ -736,7 +751,7 @@ export const fakeDaemon = () => {
      * past them, each is kept.
      */
     uploadRefusals,
-    /** The Uploads held, newest first, as the wire carries them. */
+    /** The Uploads held, newest first, deleted ones too, as the wire carries them. */
     uploads,
     /** How many Uploads a page holds when its request gives no `limit`. */
     uploadsPage: 50,
@@ -1423,14 +1438,11 @@ export const fakeDaemon = () => {
   };
 
   /**
-   * Holds a new Upload, newest of all, and sends it to every follower of the Uploads'
-   * Changes, as another device's upload would, at the next sequence, which a follower
-   * resuming before it is sent too.
+   * Sends an Upload whole, as it is now, to every follower of the Uploads' Changes, at the
+   * next sequence, which a follower resuming before it is sent too.
    * @param added - The Upload, as the wire carries it.
    */
-  const upload = (added: typeof Upload.Encoded) => {
-    uploads.unshift(added);
-
+  const changedUpload = (added: typeof Upload.Encoded) => {
     const sequence = daemon.nextSequence;
     const text = `event: changed\nid: ${sequence}\ndata: ${JSON.stringify(added)}\n\n`;
 
@@ -1440,6 +1452,17 @@ export const fakeDaemon = () => {
     for (const follower of uploadFollowers) {
       follower.controller.enqueue(encoder.encode(text));
     }
+  };
+
+  /**
+   * Holds a new Upload, newest of all, and sends it to every follower of the Uploads'
+   * Changes, as another device's upload would, at the next sequence, which a follower
+   * resuming before it is sent too.
+   * @param added - The Upload, as the wire carries it.
+   */
+  const upload = (added: typeof Upload.Encoded) => {
+    uploads.unshift(added);
+    changedUpload(added);
   };
 
   /**
@@ -1488,6 +1511,62 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * A rename or a delete of an Upload: refused as the next of `uploadEditRefusals` says, or
+   * `UnknownUpload` for one not held or deleted, and otherwise done, its name and safe name
+   * the one given, or marked deleted by the Owner with no link, and sent to every follower
+   * of the Uploads' Changes as it is now.
+   * @param method - `PATCH` or `DELETE`.
+   * @param id - The Upload's id.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const editedUpload = async (
+    method: "PATCH" | "DELETE",
+    id: string,
+    init: RequestInit
+  ): Promise<Response> => {
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const name =
+      method === "PATCH" ? decodeRename(await new Response(init.body).text()).name : undefined;
+
+    uploadEdits.push(name === undefined ? { id, method } : { id, method, name });
+
+    const refusal = uploadEditRefusals.shift();
+
+    if (refusal !== undefined) {
+      return Response.json(refusal.body, { status: refusal.status });
+    }
+
+    const at = uploads.findIndex((held) => held.id === id && held.deleted === undefined);
+    const was = uploads[at];
+
+    if (was === undefined) {
+      return json(404, { _tag: "UnknownUpload", id });
+    }
+
+    const publicUrl = daemon.owner.options["uploads.publicUrl"];
+
+    const now: typeof Upload.Encoded =
+      name === undefined
+        ? { ...was, deleted: { at: 1_700_000_001_000, why: "owner" }, link: null }
+        : {
+            ...was,
+            link: publicUrl === undefined ? null : `${publicUrl}/${id}/${name}`,
+            name,
+            renamedAt: 1_700_000_001_000,
+            safeName: name,
+          };
+
+    uploads[at] = now;
+    changedUpload(now);
+
+    return Response.json(now);
+  };
+
+  /**
    * The Uploads: a page of them, newest first, from just after one, refusing a cursor that
    * names none held, through the last Change `upload` made, or `0`; their Changes, each
    * `upload` made after `Last-Event-ID` or `after`, then live, or live from now with
@@ -1500,9 +1579,14 @@ export const fakeDaemon = () => {
   const uploadsRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
     const method = init.method ?? "GET";
     const content = /^\/api\/uploads\/(?<id>[^/]+)\/content$/u.exec(url.pathname)?.groups;
+    const one = /^\/api\/uploads\/(?<id>[0-9a-z]{16})$/u.exec(url.pathname)?.groups;
 
     if (method === "POST" && url.pathname === "/api/uploads") {
       return await uploaded(url, init);
+    }
+
+    if ((method === "PATCH" || method === "DELETE") && one?.id !== undefined) {
+      return await editedUpload(method, one.id, init);
     }
 
     if (method !== "GET") {
@@ -1537,7 +1621,12 @@ export const fakeDaemon = () => {
       const answer = signedInOnly(() => {
         const after = url.searchParams.get("after") ?? undefined;
         const limit = Number(url.searchParams.get("limit") ?? daemon.uploadsPage);
-        const start = after === undefined ? 0 : uploads.findIndex((one) => one.id === after) + 1;
+
+        const live = uploads.filter(
+          (one) => url.searchParams.get("deleted") === "true" || one.deleted === undefined
+        );
+
+        const start = after === undefined ? 0 : live.findIndex((one) => one.id === after) + 1;
 
         uploadPagesRead.push(after);
 
@@ -1545,8 +1634,8 @@ export const fakeDaemon = () => {
           return Response.json({ _tag: "InvalidRequest", issues: [] }, { status: 400 });
         }
 
-        const page = uploads.slice(start, start + limit);
-        const more = start + limit < uploads.length;
+        const page = live.slice(start, start + limit);
+        const more = start + limit < live.length;
 
         return Response.json({
           more,
@@ -1567,7 +1656,7 @@ export const fakeDaemon = () => {
       const { id } = content;
 
       return signedInOnly(() =>
-        uploads.some((one) => one.id === id)
+        uploads.some((one) => one.id === id && one.deleted === undefined)
           ? new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
               headers: { "content-type": "application/octet-stream" },
             })

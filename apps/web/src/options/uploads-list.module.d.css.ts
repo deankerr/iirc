@@ -1,9 +1,10 @@
 // The class names in uploads-list.module.css, which CSS Modules exports.
 declare const styles: {
   readonly about: string;
+  readonly actions: string;
   readonly copied: string;
-  readonly copy: string;
   readonly details: string;
+  readonly failure: string;
   readonly heading: string;
   readonly icon: string;
   readonly image: string;

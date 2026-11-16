@@ -166,8 +166,12 @@ const names = (container: HTMLElement) => listed(container).map((row) => row.nam
  * @returns The buttons.
  */
 const copyButtons = (container: HTMLElement) =>
-  [...container.querySelectorAll<HTMLButtonElement>('ul[aria-label="Uploads"] button')].map(
-    (button) => button.getAttribute("aria-label")
+  [...container.querySelectorAll<HTMLButtonElement>('ul[aria-label="Uploads"] button')].flatMap(
+    (button) => {
+      const label = button.getAttribute("aria-label");
+
+      return label?.startsWith("Copy the link") === true ? [label] : [];
+    }
   );
 
 /**
@@ -203,6 +207,88 @@ const copy = async (container: HTMLElement, name: string) => {
 const moreButton = (container: HTMLElement) =>
   [...container.querySelectorAll<HTMLButtonElement>('section[aria-label="Uploads"] button')].find(
     (button) => button.textContent === "More"
+  );
+
+/**
+ * Presses a button in the page by its accessible name.
+ * @param container - The page, or the document for a dialog.
+ * @param label - The name.
+ */
+const press = async (container: ParentNode, label: string) => {
+  const found = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+  if (found === null) {
+    throw new Error(`no button ${label}`);
+  }
+
+  await doing(() => {
+    found.click();
+  });
+};
+
+/**
+ * The dialog asking before a delete, while it is open, with its heading, body, and buttons.
+ * @returns It, or none.
+ */
+const deleteDialog = () => {
+  const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
+
+  return dialog === null
+    ? undefined
+    : {
+        body: dialog.querySelector("p")?.textContent,
+        button: (text: string) =>
+          [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(
+            (one) => one.textContent === text
+          ),
+        heading: dialog.querySelector("h2, h3, [slot='title']")?.textContent,
+      };
+};
+
+/**
+ * Renames an Upload from its row: opens the field, types the name, and presses a key in it.
+ * @param container - The page.
+ * @param name - The Upload's name.
+ * @param to - The name typed.
+ * @param key - The key pressed: Enter saves, Escape cancels.
+ */
+const renameIn = async (
+  container: HTMLElement,
+  name: string,
+  to: string,
+  key: "Enter" | "Escape"
+) => {
+  await press(container, `Rename ${name}`);
+
+  const field = container.querySelector<HTMLInputElement>(
+    `input[aria-label="New name for ${name}"]`
+  );
+
+  if (field === null) {
+    throw new Error("no field");
+  }
+
+  await doing(() => {
+    Reflect.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(field, to);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await doing(() => {
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key });
+
+    if (field.dispatchEvent(event) && key === "Enter") {
+      field.form?.requestSubmit();
+    }
+  });
+};
+
+/**
+ * What a row says of a rename or a delete that failed.
+ * @param container - The page.
+ * @returns Each, in words.
+ */
+const rowAlerts = (container: HTMLElement) =>
+  [...container.querySelectorAll('ul[aria-label="Uploads"] [role="alert"]')].map(
+    (one) => one.textContent
   );
 
 const cat = uploadOf("a", "image/png", "Cat picture.png");
@@ -438,6 +524,140 @@ describe("the Uploads beside the options", () => {
     await settled(() => listed(container).length === 1);
 
     expect(names(container)).toStrictEqual(["Cat picture.png"]);
+  });
+
+  it("renames an Upload from its row, Enter saving and Escape keeping the name", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await renameIn(container, "Cat picture.png", "Not this.png", "Escape");
+
+    const kept = { edits: [...fake.daemon.uploadEdits], names: names(container) };
+
+    await renameIn(container, "Cat picture.png", "Tabby.png", "Enter");
+    await settled(() => names(container).includes("Tabby.png"));
+
+    expect({
+      edits: fake.daemon.uploadEdits,
+      field: container.querySelector('ul[aria-label="Uploads"] input'),
+      kept,
+      names: names(container),
+    }).toStrictEqual({
+      edits: [{ id: "a".repeat(16), method: "PATCH", name: "Tabby.png" }],
+      field: null,
+      kept: { edits: [], names: ["b-safe.bin", "Cat picture.png"] },
+      names: ["b-safe.bin", "Tabby.png"],
+    });
+  });
+
+  it("says in the row why a rename failed, calmly", async () => {
+    const fake = signedIn(cat);
+
+    fake.daemon.uploadEditRefusals.push({
+      body: { _tag: "JournalFailed", reason: "the disk is full" },
+      status: 500,
+    });
+
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 1);
+    await renameIn(container, "Cat picture.png", "Tabby.png", "Enter");
+    await settled(() => rowAlerts(container).length === 1);
+
+    expect({ alerts: rowAlerts(container), names: names(container) }).toStrictEqual({
+      alerts: ["The Daemon could not write its Journal, so Cat picture.png was not renamed."],
+      names: ["Cat picture.png"],
+    });
+  });
+
+  it("asks before deleting, saying what it promises, and deletes nothing on Cancel", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await press(container, "Delete Cat picture.png");
+
+    const asked = deleteDialog();
+
+    await doing(() => {
+      asked?.button("Cancel")?.click();
+    });
+
+    expect({
+      asked: { body: asked?.body, heading: asked?.heading },
+      closed: deleteDialog(),
+      edits: fake.daemon.uploadEdits,
+      names: names(container),
+    }).toStrictEqual({
+      asked: {
+        body: "Its link stops working at once, wherever it was said. A copy someone already opened or saved cannot be called back.",
+        heading: "Delete Cat picture.png?",
+      },
+      closed: undefined,
+      edits: [],
+      names: ["b-safe.bin", "Cat picture.png"],
+    });
+  });
+
+  it("deletes once confirmed, and the Upload leaves the list", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await press(container, "Delete Cat picture.png");
+    await doing(() => {
+      deleteDialog()?.button("Delete")?.click();
+    });
+    await settled(() => listed(container).length === 1);
+
+    expect({
+      dialog: deleteDialog(),
+      edits: fake.daemon.uploadEdits,
+      names: names(container),
+    }).toStrictEqual({
+      dialog: undefined,
+      edits: [{ id: "a".repeat(16), method: "DELETE" }],
+      names: ["b-safe.bin"],
+    });
+  });
+
+  it("drops an Upload another device deleted", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await eventually(() => fake.daemon.uploadFollowers.length === 1);
+    await act(async () => {
+      await fake.fetch(new URL(`http://daemon.test/api/uploads/${"b".repeat(16)}`), {
+        method: "DELETE",
+      });
+    });
+    await settled(() => listed(container).length === 1);
+
+    expect(names(container)).toStrictEqual(["Cat picture.png"]);
+  });
+
+  it("says in the row that an Upload the Daemon no longer has was not deleted", async () => {
+    const fake = signedIn(cat);
+
+    fake.daemon.uploadEditRefusals.push({
+      body: { _tag: "UnknownUpload", id: "a".repeat(16) },
+      status: 404,
+    });
+
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 1);
+    await press(container, "Delete Cat picture.png");
+    await doing(() => {
+      deleteDialog()?.button("Delete")?.click();
+    });
+    await settled(() => rowAlerts(container).length === 1);
+
+    expect(rowAlerts(container)).toStrictEqual([
+      "The Daemon no longer has Cat picture.png, so it was not deleted.",
+    ]);
   });
 
   it("forgets the Uploads on signing out", async () => {

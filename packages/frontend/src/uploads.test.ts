@@ -3,24 +3,29 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  editFailureText,
+  initialUploadEdits,
   initialUploads,
   linkOf,
+  nameOf,
+  reduceUploadEdits,
   reduceUploads,
   shownName,
   sizeText,
   thumbnailed,
 } from "./uploads.ts";
-import type { Uploads, UploadsEvent } from "./uploads.ts";
+import type { UploadEdits, UploadEditsEvent, Uploads, UploadsEvent } from "./uploads.ts";
 
 /**
  * An Upload, by a letter that makes its id.
  * @param letter - The letter.
  * @param name - The name it was given, if any.
+ * @param at - When it was uploaded.
  * @returns The Upload.
  */
-const upload = (letter: string, name?: string) => {
+const upload = (letter: string, name?: string, at = 1_700_000_000_000) => {
   const given = {
-    at: 1_700_000_000_000,
+    at,
     hash: "0".repeat(64),
     id: letter.repeat(16),
     link: null,
@@ -37,6 +42,18 @@ const [a, b, c, d, e] = ["a", "b", "c", "d", "e"].map((letter) => upload(letter)
 if (a === undefined || b === undefined || c === undefined || d === undefined || e === undefined) {
   throw new Error("no Uploads");
 }
+
+/**
+ * An Upload as it is once deleted.
+ * @param one - The Upload.
+ * @returns It, deleted.
+ */
+const deleted = (one: typeof a) =>
+  Schema.decodeSync(Upload)({
+    ...Schema.encodeSync(Upload)(one),
+    deleted: { at: 1_700_000_000_500, why: "owner" },
+    link: null,
+  });
 
 const after = (...events: readonly UploadsEvent[]): Uploads => {
   let state = initialUploads;
@@ -135,6 +152,83 @@ describe("the Uploads held", () => {
     expect(after({ _tag: "Changed", sequence: 4, upload: e })).toStrictEqual(initialUploads);
   });
 
+  it("drops an Upload a Change says was deleted, and never holds a deleted one it did not", () => {
+    const state = after(
+      { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [d, c] } },
+      { _tag: "Changed", sequence: 4, upload: deleted(d) },
+      { _tag: "Changed", sequence: 5, upload: deleted(e) }
+    );
+
+    expect({ ids: ids(state), through: state.through }).toStrictEqual({ ids: ["c"], through: 5 });
+  });
+
+  it("passes over a Change of an Upload older than those held while a page not yet read holds it", () => {
+    const old = upload("a", "renamed.png", 1_600_000_000_000);
+    const newer = upload("f", undefined, 1_800_000_000_000);
+
+    const state = after(
+      { _tag: "Paged", after: undefined, page: { next: c.id, through: 3, uploads: [d, c] } },
+      { _tag: "Changed", sequence: 4, upload: old },
+      { _tag: "Changed", sequence: 5, upload: newer }
+    );
+
+    expect({ ids: ids(state), through: state.through }).toStrictEqual({
+      ids: ["f", "d", "c"],
+      through: 5,
+    });
+  });
+
+  it("folds a later page over the Changes that arrived while it was read, never bringing back one deleted", () => {
+    const [olderA, olderB, olderC] = ["a", "b", "c"].map((letter) =>
+      upload(letter, undefined, 1_600_000_000_000)
+    );
+
+    if (olderA === undefined || olderB === undefined || olderC === undefined) {
+      throw new Error("no Uploads");
+    }
+
+    const renamedC = upload("c", "renamed.png", 1_600_000_000_000);
+
+    const state = after(
+      { _tag: "Paged", after: undefined, page: { next: d.id, through: 5, uploads: [e, d] } },
+      { _tag: "Changed", sequence: 6, upload: deleted(olderB) },
+      { _tag: "Changed", sequence: 7, upload: renamedC },
+      {
+        _tag: "Paged",
+        after: d.id,
+        page: { next: null, through: 5, uploads: [olderC, olderB, olderA] },
+      }
+    );
+
+    expect({
+      ids: ids(state),
+      names: state.uploads.map((one) => one.name),
+      through: state.through,
+    }).toStrictEqual({
+      ids: ["e", "d", "c", "a"],
+      names: [undefined, undefined, "renamed.png", undefined],
+      through: 7,
+    });
+  });
+
+  it("takes the Daemon's answer to a rename in place, and to a delete by dropping it, ahead of its Change", () => {
+    const renamed = upload("d", "renamed.png");
+    const gone = deleted(c);
+
+    const state = after(
+      { _tag: "Paged", after: undefined, page: { next: null, through: 3, uploads: [d, c] } },
+      { _tag: "Answered", upload: renamed },
+      { _tag: "Answered", upload: gone },
+      // One not held, as one another device deleted, is left alone.
+      { _tag: "Answered", upload: e }
+    );
+
+    expect({
+      shown: state.uploads.map(shownName),
+      through: state.through,
+    }).toStrictEqual({ shown: ["renamed.png"], through: 3 });
+  });
+
   it("forgets everything, how far it was folded too", () => {
     expect(
       after(
@@ -203,6 +297,108 @@ describe("a size", () => {
       "1.0 MiB",
       "5.0 TiB",
       "1024 PiB",
+    ]);
+  });
+});
+
+const edits = (...events: readonly UploadEditsEvent[]): UploadEdits => {
+  let state = initialUploadEdits;
+
+  for (const event of events) {
+    state = reduceUploadEdits(state, event);
+  }
+
+  return state;
+};
+
+describe("renaming and deleting from the list", () => {
+  it("asks before deleting, and asks nothing once let go", () => {
+    expect({
+      asked: edits({ _tag: "AskedToDelete", id: a.id }).asking,
+      closed: edits({ _tag: "AskedToDelete", id: a.id }, { _tag: "Closed" }).asking,
+    }).toStrictEqual({ asked: a.id, closed: undefined });
+  });
+
+  it("closes the question as the delete is sent, and holds what each Upload is waiting on", () => {
+    const state = edits(
+      { _tag: "AskedToDelete", id: a.id },
+      { _tag: "Sent", id: a.id, of: "Delete" },
+      { _tag: "Sent", id: b.id, of: "Rename" }
+    );
+
+    expect({ asking: state.asking, doing: [...state.doing] }).toStrictEqual({
+      asking: undefined,
+      doing: [
+        [a.id, { _tag: "Waiting", of: "Delete" }],
+        [b.id, { _tag: "Waiting", of: "Rename" }],
+      ],
+    });
+  });
+
+  it("lets go of an Upload done, and keeps why one failed until it is tried again", () => {
+    const failed = edits(
+      { _tag: "Sent", id: a.id, of: "Rename" },
+      { _tag: "Sent", id: b.id, of: "Delete" },
+      { _tag: "Answered", failure: { _tag: "JournalFailed" }, id: a.id },
+      { _tag: "Answered", failure: undefined, id: b.id }
+    );
+
+    expect({
+      again: [...reduceUploadEdits(failed, { _tag: "Sent", id: a.id, of: "Rename" }).doing],
+      failed: [...failed.doing],
+    }).toStrictEqual({
+      again: [[a.id, { _tag: "Waiting", of: "Rename" }]],
+      failed: [[a.id, { _tag: "Failed", failure: { _tag: "JournalFailed" }, of: "Rename" }]],
+    });
+  });
+
+  it("forgets everything on signing out", () => {
+    expect(
+      edits(
+        { _tag: "AskedToDelete", id: a.id },
+        { _tag: "Sent", id: b.id, of: "Rename" },
+        {
+          _tag: "Forgotten",
+        }
+      )
+    ).toStrictEqual(initialUploadEdits);
+  });
+});
+
+describe("a name typed for an Upload", () => {
+  it("is the text as typed, of 1 to 1024 code units", () => {
+    expect([nameOf("cat.png"), nameOf(" spaced "), nameOf("x".repeat(1024))]).toStrictEqual([
+      "cat.png",
+      " spaced ",
+      "x".repeat(1024),
+    ]);
+  });
+
+  it("is none when empty or too long", () => {
+    expect([nameOf(""), nameOf("x".repeat(1025))]).toStrictEqual([undefined, undefined]);
+  });
+});
+
+describe("why a rename or a delete did not go as asked, in words", () => {
+  it("says the Daemon no longer has it", () => {
+    expect(editFailureText({ _tag: "UnknownUpload" }, "cat.png", "Delete")).toBe(
+      "The Daemon no longer has cat.png, so it was not deleted."
+    );
+  });
+
+  it("says the Journal could not be written", () => {
+    expect(editFailureText({ _tag: "JournalFailed" }, "cat.png", "Rename")).toBe(
+      "The Daemon could not write its Journal, so cat.png was not renamed."
+    );
+  });
+
+  it("says whether it was done is unknown without an answer, or one it could not read", () => {
+    expect([
+      editFailureText({ _tag: "NoAnswer" }, "cat.png", "Rename"),
+      editFailureText({ _tag: "Unexpected" }, "cat.png", "Delete"),
+    ]).toStrictEqual([
+      "The Daemon did not answer, so whether cat.png was renamed is unknown.",
+      "The Daemon answered in a way the Frontend could not read, so whether cat.png was deleted is unknown.",
     ]);
   });
 });

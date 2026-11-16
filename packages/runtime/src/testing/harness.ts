@@ -197,7 +197,7 @@ export const outline = (journal: JournalService): Effect.Effect<readonly string[
         case "Change": {
           const { change } = record;
 
-          return `${sequence} ${change._tag} ${change._tag === "Uploaded" ? change.id : change.option}`;
+          return `${sequence} ${change._tag} ${"id" in change ? change.id : change.option}`;
         }
 
         case "Forgotten": {

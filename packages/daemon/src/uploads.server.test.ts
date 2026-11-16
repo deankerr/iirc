@@ -10,6 +10,7 @@ import {
   Duration,
   Effect,
   Exit,
+  Fiber,
   Latch,
   Layer,
   Option,
@@ -1782,5 +1783,503 @@ describe("the stream of Upload Changes", () => {
       result.records[2],
       result.fourth,
     ]);
+  });
+});
+
+/**
+ * The Upload Changes a world's Journal holds, as their tag, id, and sequence.
+ * @param world - The world.
+ * @returns Them, in order.
+ */
+const journaledChanges = (world: World) =>
+  Stream.runCollect(world.journal.read({})).pipe(
+    Effect.map((entries) =>
+      entries.flatMap(({ record, sequence }) =>
+        record._tag === "Change" && "id" in record.change
+          ? [{ change: record.change, sequence }]
+          : []
+      )
+    )
+  );
+
+const rename = (
+  served: Served,
+  id: string,
+  name: string,
+  init: { readonly headers?: Readonly<Record<string, string>>; readonly key?: string | null } = {}
+) =>
+  served.request(`/api/uploads/${id}`, {
+    body: JSON.stringify({ name }),
+    method: "PATCH",
+    ...init,
+    headers: { "content-type": "application/json", ...init.headers },
+  });
+
+const remove = (
+  served: Served,
+  id: string,
+  init: { readonly headers?: Readonly<Record<string, string>>; readonly key?: string | null } = {}
+) => served.request(`/api/uploads/${id}`, { method: "DELETE", ...init });
+
+/**
+ * Whether the world's byte store holds bytes under a hash.
+ * @param served - The server.
+ * @param hash - The hash.
+ * @returns Whether it does.
+ */
+const inStore = (served: Served, hash: string) =>
+  served.world.bytes.store.read(Sha256.make(hash)).pipe(
+    Effect.as(true),
+    Effect.catchTag("ByteStoreNotFound", () => Effect.succeed(false)),
+    Effect.orDie
+  );
+
+/**
+ * An answer, as these tests compare two: its status, every header but `Date`, and its body.
+ * @param answer - The answer.
+ * @returns Them.
+ */
+const wholly = (answer: Response | "refused") =>
+  Effect.gen(function* () {
+    const body = answer === "refused" ? "refused" : yield* textOf(answer);
+
+    return { body, headers: headersOf(answer), status: statusOf(answer) };
+  });
+
+const dispositionOf = (answer: Response | "refused") =>
+  answer === "refused" ? "refused" : answer.headers.get("content-disposition");
+
+const statusFrom = (answer: Effect.Effect<Response>) => answer.pipe(Effect.map(statusOf));
+
+const errorFrom = (answer: Response) =>
+  Effect.gen(function* () {
+    return [answer.status, yield* jsonOf(answer)];
+  });
+
+describe("renaming and deleting an Upload", () => {
+  it("renames an Upload: journals Renamed with the safe name remade from the type, and both its old and new links serve it under the new name", async () => {
+    const port = freePort();
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* fromBound(port, pathOf(record.link));
+        const answer = yield* rename(served, record.id, "my holiday photo.jpg");
+        const renamed = yield* recordOf(answer);
+
+        return {
+          content: dispositionOf(yield* served.request(`/api/uploads/${record.id}/content`)),
+          journaled: (yield* journaledChanges(served.world)).map(({ change }) => change),
+          newLink: dispositionOf(yield* fromLinks(port, pathOf(renamed.link))),
+          oldLink: dispositionOf(yield* fromLinks(port, pathOf(record.link))),
+          read: yield* Effect.flatMap(served.request(`/api/uploads/${record.id}`), recordOf),
+          record,
+          renamed,
+          status: answer.status,
+        };
+      })
+    );
+
+    const { id } = result.record;
+    const served = `inline; filename="my-holiday-photo.png"; filename*=UTF-8''my-holiday-photo.png`;
+
+    expect(result).toStrictEqual({
+      content: served,
+      journaled: [
+        { _tag: "Uploaded", ...result.journaled[0] },
+        {
+          _tag: "Renamed",
+          at: result.renamed.renamedAt,
+          id,
+          name: "my holiday photo.jpg",
+          safeName: "my-holiday-photo.png",
+        },
+      ],
+      newLink: served,
+      oldLink: served,
+      read: result.renamed,
+      record: result.record,
+      renamed: {
+        ...result.record,
+        link: `${publicUrl}/${id}/my-holiday-photo.png`,
+        name: "my holiday photo.jpg",
+        renamedAt: result.renamed.renamedAt,
+        safeName: "my-holiday-photo.png",
+      },
+      status: 200,
+    });
+    expect(result.renamed.renamedAt).toBeGreaterThanOrEqual(result.record.at);
+  });
+
+  it("answers a deleted Upload at its link and its content exactly as an id that never was, still reads its record marked deleted, and lists it only when asked", async () => {
+    const port = freePort();
+    const never = "0000000000000000";
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served, port);
+        const record = yield* uploaded(served, png, "cat.png");
+        const other = yield* uploaded(served, png, "dog.png");
+
+        yield* fromBound(port, pathOf(record.link));
+        const answer = yield* remove(served, record.id);
+        const deleted = yield* recordOf(answer);
+
+        const link = (id: string, method: string) =>
+          Effect.flatMap(fromLinks(port, `/${id}/cat.png`, { method }), wholly);
+
+        const content = (id: string) =>
+          Effect.flatMap(served.request(`/api/uploads/${id}/content`), wholly);
+
+        const listed = (query: string) =>
+          Effect.gen(function* () {
+            const page = yield* pageOf(yield* served.request(`/api/uploads${query}`));
+
+            return page.uploads.map((one) => one.id);
+          });
+
+        return {
+          content: yield* content(record.id),
+          contentNever: yield* content(never),
+          deleted,
+          get: yield* link(record.id, "GET"),
+          getNever: yield* link(never, "GET"),
+          head: yield* link(record.id, "HEAD"),
+          headNever: yield* link(never, "HEAD"),
+          journaled: (yield* journaledChanges(served.world)).map(({ change }) => change._tag),
+          listed: yield* listed(""),
+          listedDeleted: yield* listed("?deleted=true"),
+          other,
+          read: yield* Effect.flatMap(served.request(`/api/uploads/${record.id}`), recordOf),
+          record,
+          status: answer.status,
+        };
+      })
+    );
+
+    const { id } = result.record;
+
+    expect({
+      ...result,
+      contentNever: undefined,
+      getNever: undefined,
+      headNever: undefined,
+    }).toStrictEqual({
+      content: { ...result.contentNever, body: result.contentNever.body.replace(never, id) },
+      contentNever: undefined,
+      deleted: {
+        ...result.record,
+        deleted: { at: result.deleted.deleted?.at, why: "owner" },
+        link: null,
+      },
+      get: result.getNever,
+      getNever: undefined,
+      head: result.headNever,
+      headNever: undefined,
+      journaled: ["Uploaded", "Uploaded", "Deleted"],
+      listed: [result.other.id],
+      listedDeleted: [result.other.id, id],
+      other: result.other,
+      read: result.deleted,
+      record: result.record,
+      status: 200,
+    });
+    expect([result.get.status, result.head.status, result.content.status]).toStrictEqual([
+      404, 404, 404,
+    ]);
+  });
+
+  it("keeps bytes another Upload shares: deleting one leaves the other served, and deleting both releases them", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const first = yield* uploaded(served, png, "first.png");
+        const second = yield* uploaded(served, png, "second.png");
+
+        yield* expecting(remove(served, first.id), 200);
+        const shared = yield* served.request(`/api/uploads/${second.id}/content`);
+        const sharedBytes = yield* bytesOf(shared);
+        const heldAfterOne = yield* inStore(served, first.hash);
+
+        yield* expecting(remove(served, second.id), 200);
+
+        return {
+          heldAfterBoth: yield* inStore(served, first.hash),
+          heldAfterOne,
+          same: first.hash === second.hash,
+          shared: [shared.status, sharedBytes],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      heldAfterBoth: false,
+      heldAfterOne: true,
+      same: true,
+      shared: [200, png],
+    });
+  });
+
+  it("never releases bytes an upload of the same bytes has put but not yet journaled", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const first = yield* uploaded(served, png, "first.png");
+        const put = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+
+        // A store whose put keeps the bytes, then waits before it answers, so the upload has
+        // put them to the store and not yet journaled its Upload.
+        const holding: ByteStoreService = {
+          ...store,
+          put: (body) =>
+            store.put(body).pipe(
+              Effect.tap(() => put.open),
+              Effect.tap(() => go.await)
+            ),
+        };
+
+        Object.assign(served.world.bytes, { store: holding });
+
+        const second = yield* Effect.forkChild(uploaded(served, png, "second.png"));
+
+        yield* put.await;
+        yield* expecting(remove(served, first.id), 200);
+        const heldMeanwhile = yield* inStore(served, first.hash);
+
+        yield* go.open;
+
+        const { id } = yield* Fiber.join(second);
+        const kept = yield* served.request(`/api/uploads/${id}/content`);
+
+        return { heldMeanwhile, kept: [kept.status, yield* bytesOf(kept)] };
+      })
+    );
+
+    expect(result).toStrictEqual({ heldMeanwhile: true, kept: [200, png] });
+  });
+
+  it("has an upload of the same bytes wait for their release in progress, then keeps them", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const first = yield* uploaded(served, png, "first.png");
+        const releasing = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+
+        // A store whose delete waits before it removes anything.
+        const holding: ByteStoreService = {
+          ...store,
+          delete: (hash) =>
+            releasing.open.pipe(Effect.andThen(go.await), Effect.andThen(store.delete(hash))),
+        };
+
+        Object.assign(served.world.bytes, { store: holding });
+
+        const deleting = yield* Effect.forkChild(remove(served, first.id));
+
+        yield* releasing.await;
+        const second = yield* Effect.forkChild(uploaded(served, png, "second.png"));
+
+        // Long enough for an upload that did not wait to put its bytes and journal them.
+        yield* Effect.sleep("200 millis");
+        yield* go.open;
+        const deleted = yield* Fiber.join(deleting);
+
+        const { id } = yield* Fiber.join(second);
+        const kept = yield* served.request(`/api/uploads/${id}/content`);
+
+        return { deleted: deleted.status, kept: [kept.status, yield* bytesOf(kept)] };
+      })
+    );
+
+    expect(result).toStrictEqual({ deleted: 200, kept: [200, png] });
+  });
+
+  it("keeps a rename and a delete across a restart on the same Journal", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const kept = yield* uploaded(served, png, "kept.png");
+        const gone = yield* uploaded(served, png, "gone.png");
+        const renamed = yield* recordOf(yield* rename(served, kept.id, "renamed.png"));
+        const deleted = yield* recordOf(yield* remove(served, gone.id));
+
+        yield* served.restart;
+
+        const read = (id: string) => Effect.flatMap(served.request(`/api/uploads/${id}`), recordOf);
+
+        return {
+          after: [yield* read(kept.id), yield* read(gone.id)],
+          before: [renamed, deleted],
+          gone: statusOf(yield* served.request(`/api/uploads/${gone.id}/content`)),
+          listed: (yield* pageOf(yield* served.request("/api/uploads"))).uploads,
+        };
+      })
+    );
+
+    expect(result.after).toStrictEqual(result.before);
+    expect(result.gone).toBe(404);
+    expect(result.listed).toStrictEqual([result.before[0]]);
+  });
+
+  it("renames and deletes only with a key or a Sign-in, and refuses a cookie from another origin", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const cookie = yield* signedIn(served);
+
+        const asBrowser = (site: string) => ({
+          headers: { cookie, "sec-fetch-site": site },
+          key: null,
+        });
+
+        const crossSite = [
+          yield* statusFrom(rename(served, record.id, "x.png", asBrowser("cross-site"))),
+          yield* statusFrom(remove(served, record.id, asBrowser("cross-site"))),
+        ];
+
+        const neither = [
+          yield* statusFrom(rename(served, record.id, "x.png", { key: null })),
+          yield* statusFrom(remove(served, record.id, { key: null })),
+        ];
+
+        const journaledBefore = (yield* journaledChanges(served.world)).length;
+
+        const sameOrigin = [
+          yield* statusFrom(rename(served, record.id, "x.png", asBrowser("same-origin"))),
+          yield* statusFrom(remove(served, record.id, asBrowser("same-origin"))),
+        ];
+
+        return {
+          crossSite,
+          journaled: (yield* journaledChanges(served.world)).map(({ change }) => change._tag),
+          journaledBefore,
+          neither,
+          sameOrigin,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      crossSite: [403, 403],
+      journaled: ["Uploaded", "Renamed", "Deleted"],
+      journaledBefore: 1,
+      neither: [401, 401],
+      sameOrigin: [200, 200],
+    });
+  });
+
+  it("answers an unknown id with 404, an empty name with 400, renaming a deleted Upload with 404, and deleting one again with its record, journaling nothing for any", async () => {
+    const never = "0000000000000000";
+
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const record = yield* uploaded(served, png, "cat.png");
+        const empty = yield* errorFrom(yield* rename(served, record.id, ""));
+        const unknownRename = yield* errorFrom(yield* rename(served, never, "x.png"));
+        const unknownDelete = yield* errorFrom(yield* remove(served, never));
+        const deleted = yield* recordOf(yield* remove(served, record.id));
+        const journaled = (yield* journaledChanges(served.world)).length;
+        const again = yield* remove(served, record.id);
+
+        return {
+          again: [again.status, yield* recordOf(again)],
+          deleted,
+          empty: empty[0],
+          journaled: [journaled, (yield* journaledChanges(served.world)).length],
+          renameDeleted: yield* errorFrom(yield* rename(served, record.id, "x.png")),
+          unknownDelete,
+          unknownRename,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: [200, result.deleted],
+      deleted: result.deleted,
+      empty: 400,
+      journaled: [2, 2],
+      renameDeleted: [404, { _tag: "UnknownUpload", id: result.deleted.id }],
+      unknownDelete: [404, { _tag: "UnknownUpload", id: never }],
+      unknownRename: [404, { _tag: "UnknownUpload", id: never }],
+    });
+  });
+
+  it("pages past deleted Uploads, follows a cursor naming one since deleted, and reads through the latest Change", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const records = yield* uploadedMany(served, 5);
+        const first = yield* pageOf(yield* served.request("/api/uploads?limit=2"));
+
+        yield* expecting(remove(served, records[3]?.id ?? ""), 200);
+        yield* expecting(remove(served, records[2]?.id ?? ""), 200);
+
+        const after = yield* pageOf(
+          yield* served.request(`/api/uploads?limit=2&after=${first.next ?? ""}`)
+        );
+
+        const top = yield* pageOf(yield* served.request("/api/uploads?limit=2"));
+        const changes = yield* journaledChanges(served.world);
+
+        return { after, latest: changes.at(-1)?.sequence, records, top };
+      })
+    );
+
+    const one = result.records.at(0);
+    const two = result.records.at(1);
+
+    expect(result.after).toStrictEqual({
+      more: false,
+      next: null,
+      through: result.latest,
+      uploads: [two, one],
+    });
+    expect(result.top).toStrictEqual({
+      more: true,
+      next: two?.id,
+      through: result.latest,
+      uploads: [result.records.at(4), two],
+    });
+  });
+
+  it("delivers a rename and a delete as the Upload whole, with their Changes' sequences, and replays them after `after` as it is now", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const live = yield* openChanges(served);
+        const record = yield* uploaded(served, png, "cat.png");
+
+        yield* changesOf(live, 1);
+        const renamed = yield* recordOf(yield* rename(served, record.id, "dog.png"));
+
+        yield* changesOf(live, 2);
+        const deleted = yield* recordOf(yield* remove(served, record.id));
+        const seen = yield* changesOf(live, 3);
+        const resumed = yield* openChanges(served, { query: `?after=${seen[0]?.id ?? ""}` });
+
+        return {
+          journaled: (yield* journaledChanges(served.world)).map(({ sequence }) =>
+            String(sequence)
+          ),
+          resumed: yield* changesOf(resumed, 2),
+          seen,
+          uploads: [record, renamed, deleted],
+        };
+      })
+    );
+
+    expect(result.seen.map((event) => event.upload)).toStrictEqual(result.uploads);
+    expect(result.seen.map((event) => event.id)).toStrictEqual(result.journaled);
+    expect(result.resumed).toStrictEqual(
+      result.seen.slice(1).map(({ id }) => ({ id, upload: result.uploads[2] }))
+    );
   });
 });

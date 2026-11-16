@@ -1,4 +1,4 @@
-import { TimelineId } from "@iirc/api";
+import { TimelineId, Upload } from "@iirc/api";
 import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -21,6 +21,8 @@ import {
   offNote,
   pendingIn,
   reduceUploading,
+  relinkedAt,
+  renamed,
   sending,
   uploaded,
 } from "./uploading.ts";
@@ -97,12 +99,31 @@ const edited = (
   return { composers, uploading: followed(state.uploading, state.composers, composers) };
 };
 
+/**
+ * An Upload as the Daemon answers it, its id made from a key, with a link and a name.
+ * @param key - The key, of letters Crockford's base32 holds.
+ * @param link - Its link, or `null` without a public URL.
+ * @param name - Its name.
+ * @returns The Upload.
+ */
+const uploadOf = (key: string, link: string | null, name = `${key}.png`) =>
+  Schema.decodeSync(Upload)({
+    at: 1_700_000_000_000,
+    hash: "0".repeat(64),
+    id: key.replaceAll(/[ilou]/gu, "x").padEnd(16, "0"),
+    link,
+    name,
+    safeName: name,
+    size: 10,
+    type: "image/png",
+  });
+
 const keep = (
   state: { readonly uploading: Uploading; readonly composers: Composers },
   key: string,
   link: string | null = `https://f.test/${key}`
 ) => {
-  const kept = uploaded(state.uploading, state.composers, key, link);
+  const kept = uploaded(state.uploading, state.composers, key, uploadOf(key, link));
 
   return { composers: kept.composers, uploading: kept.state };
 };
@@ -283,9 +304,184 @@ describe("putting a link into the draft", () => {
     );
 
     const carried = reduceComposers(composers, { _tag: "Carried", from: draft, to: elsewhere });
-    const kept = uploaded(followed(uploading, composers, carried), carried, "a", "L");
+
+    const kept = uploaded(
+      followed(uploading, composers, carried),
+      carried,
+      "a",
+      uploadOf("a", "L")
+    );
 
     expect(draftOf(kept.composers, elsewhere).text).toBe("hi L");
+  });
+});
+
+/**
+ * A draft with files added at one place in it and kept, each with its link.
+ * @param text - The draft.
+ * @param anchor - Where the files were added.
+ * @param keys - The files' keys.
+ * @returns What is pending, and the composers.
+ */
+const kept = (text: string, anchor: number, ...keys: readonly string[]) => {
+  let state = {
+    composers: typed(initialComposers, text),
+    uploading: addedAt(anchor, ...keys.map((key) => file(key))),
+  };
+
+  for (const key of keys) {
+    state = keep(state, key);
+  }
+
+  return state;
+};
+
+/**
+ * Where a file stands.
+ * @param uploading - What is pending.
+ * @param key - The file's key.
+ * @returns Its stage.
+ */
+const stageOf = (uploading: Uploading, key: string) =>
+  uploading.pending.find((one) => one.key === key)?.stage;
+
+/**
+ * A kept file renamed, as the Daemon answered, with a new link.
+ * @param state - What is pending, and the composers.
+ * @param key - The file's key.
+ * @param link - The new link.
+ * @returns Both, after, and what was relinked.
+ */
+const rename = (
+  state: { readonly uploading: Uploading; readonly composers: Composers },
+  key: string,
+  link: string | null
+) => {
+  const after = renamed(
+    fold(state.uploading, { _tag: "Renaming", key }),
+    state.composers,
+    key,
+    uploadOf(key, link, "renamed.png")
+  );
+
+  return { composers: after.composers, relinked: after.relinked, uploading: after.state };
+};
+
+describe("a file kept", () => {
+  it("stays listed under its composer, holding nothing back, until its draft is sent", () => {
+    const state = kept("look", 4, "a");
+
+    const other = keep(
+      {
+        composers: typed(state.composers, "there", elsewhere),
+        uploading: fold(state.uploading, ...arrived(5, [file("b")], on, elsewhere)),
+      },
+      "b"
+    );
+
+    const sent = fold(other.uploading, { _tag: "Sent", place });
+
+    expect({
+      held: heldBack(state.uploading, state.composers, place),
+      kept: pendingIn(state.uploading, place).map((one) => one.stage._tag),
+      sent: pendingIn(sent, place),
+      text: textOf(state),
+      untouched: pendingIn(sent, elsewhere).map((one) => one.key),
+    }).toStrictEqual({
+      held: undefined,
+      kept: ["Kept"],
+      sent: [],
+      text: "look https://f.test/a",
+      untouched: ["b"],
+    });
+  });
+
+  it("is let go of once dismissed", () => {
+    expect(fold(kept("", 0, "a").uploading, { _tag: "Dropped", key: "a" }).pending).toStrictEqual(
+      []
+    );
+  });
+
+  it("puts its new link in the draft in place of the old, wherever it now sits", () => {
+    const state = edited(kept("look", 4, "a"), "oh look https://f.test/a now!");
+    const after = rename(state, "a", "https://f.test/a2/renamed.png");
+    const stage = stageOf(after.uploading, "a");
+
+    expect({
+      link: stage?._tag === "Kept" ? stage.link : undefined,
+      name: stage?._tag === "Kept" ? stage.upload.name : undefined,
+      renaming: stage?._tag === "Kept" ? stage.renaming : undefined,
+      text: textOf(after),
+    }).toStrictEqual({
+      link: "https://f.test/a2/renamed.png",
+      name: "renamed.png",
+      renaming: false,
+      text: "oh look https://f.test/a2/renamed.png now!",
+    });
+  });
+
+  it("moves an anchor after the old link by the change in its length, and leaves one before it", () => {
+    const state = kept("one two", 4, "a");
+
+    const pending = fold(
+      state.uploading,
+      ...arrived(0, [file("early")], on, place),
+      ...arrived(state.composers.drafts.get(place)?.text.length ?? 0, [file("late")], on, place)
+    );
+
+    const after = keep(
+      keep(rename({ ...state, uploading: pending }, "a", "https://f.test/a/longer.png"), "late"),
+      "early"
+    );
+
+    expect(textOf(after)).toBe(
+      "https://f.test/early one https://f.test/a/longer.png two https://f.test/late"
+    );
+  });
+
+  it("says where a caret goes: on by the change in length after the link, to its end within it", () => {
+    const relink = { from: 3, starts: [2, 8], to: 5 };
+
+    expect([0, 2, 3, 5, 6, 8, 9, 11, 12].map((at) => relinkedAt(at, relink))).toStrictEqual([
+      0, 2, 7, 7, 8, 10, 15, 15, 16,
+    ]);
+  });
+
+  it("replaces nothing once the Owner edited the link away, but takes the new name", () => {
+    const state = edited(kept("look", 4, "a"), "look at this");
+    const after = rename(state, "a", "https://f.test/a/renamed.png");
+    const stage = stageOf(after.uploading, "a");
+
+    expect({
+      name: stage?._tag === "Kept" ? stage.upload.name : undefined,
+      relinked: after.relinked,
+      text: textOf(after),
+    }).toStrictEqual({ name: "renamed.png", relinked: undefined, text: "look at this" });
+  });
+
+  it("keeps the link with no public URL to make a new one", () => {
+    const after = rename(kept("look", 4, "a"), "a", null);
+
+    expect(textOf(after)).toBe("look https://f.test/a");
+  });
+
+  it("says why a rename failed, and lets go of it as it is tried again", () => {
+    const failed = fold(
+      kept("", 0, "a").uploading,
+      { _tag: "Renaming", key: "a" },
+      { _tag: "RenameFailed", failure: { _tag: "JournalFailed" }, key: "a" }
+    );
+
+    const again = fold(failed, { _tag: "Renaming", key: "a" });
+
+    expect(
+      [stageOf(failed, "a"), stageOf(again, "a")].map((stage) =>
+        stage?._tag === "Kept" ? { failure: stage.failure, renaming: stage.renaming } : stage
+      )
+    ).toStrictEqual([
+      { failure: { _tag: "JournalFailed" }, renaming: false },
+      { failure: undefined, renaming: true },
+    ]);
   });
 });
 
@@ -347,7 +543,9 @@ describe("adding files", () => {
       readiness: on,
     });
 
-    expect(draftOf(uploaded(answered, carried, "a", "L").composers, elsewhere).text).toBe("hi L");
+    expect(
+      draftOf(uploaded(answered, carried, "a", uploadOf("a", "L")).composers, elsewhere).text
+    ).toBe("hi L");
   });
 
   it("sends nothing of a file cancelled while Uploads are asked about", () => {
@@ -530,7 +728,7 @@ describe("what a composer says of a send held back", () => {
 
   it("names only the files still waiting, as each is kept, fails, or is cancelled", () => {
     const state = fold(addedAt(4, file("a"), file("b"), file("c")), held);
-    const kept = uploaded(state, composers, "a", "https://f.test/a.png");
+    const kept = uploaded(state, composers, "a", uploadOf("a", "https://f.test/a.png"));
 
     const failed = fold(kept.state, {
       _tag: "Failed",
@@ -548,7 +746,11 @@ describe("what a composer says of a send held back", () => {
   });
 
   it.each([
-    ["kept", (state: Uploading) => uploaded(state, composers, "a", "https://f.test/a.png").state],
+    [
+      "kept",
+      (state: Uploading) =>
+        uploaded(state, composers, "a", uploadOf("a", "https://f.test/a.png")).state,
+    ],
     [
       "failed",
       (state: Uploading) =>

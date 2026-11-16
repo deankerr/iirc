@@ -1168,6 +1168,8 @@ const upload = ({ link, record }: Shown): Upload => ({
   size: record.size,
   type: record.type,
   ...(record.name !== undefined && { name: record.name }),
+  ...(record.renamedAt !== undefined && { renamedAt: record.renamedAt }),
+  ...(record.deleted !== undefined && { deleted: record.deleted }),
 });
 
 const storeUnavailable = (error: { readonly reason: string }) =>
@@ -1239,7 +1241,7 @@ const uploads = HttpApiBuilder.group(
         )
       )
       .handle("list", ({ query }) =>
-        held.page(query.after, query.limit ?? windowLimit.default).pipe(
+        held.page(query.after, query.limit ?? windowLimit.default, query.deleted === "true").pipe(
           Effect.map(({ next, through, uploads: page }) => ({
             more: next !== undefined,
             next: next ?? null,
@@ -1287,6 +1289,24 @@ const uploads = HttpApiBuilder.group(
           Effect.flatMap(servedUpload),
           Effect.catchTags({
             ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
+            NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),
+          })
+        )
+      )
+      .handle("rename", ({ params, payload }) =>
+        held.rename(params.id, payload.name).pipe(
+          Effect.map(upload),
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),
+          })
+        )
+      )
+      .handle("delete", ({ params }) =>
+        held.delete(params.id).pipe(
+          Effect.map(upload),
+          Effect.catchTags({
+            JournalFailed: (error) => Effect.fail(journalFailed(error)),
             NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),
           })
         )

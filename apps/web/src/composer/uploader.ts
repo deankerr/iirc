@@ -90,13 +90,13 @@ export const uploadUrl = (name: string): string =>
 /**
  * What a file sent came to, as the Daemon answered.
  *
- * - `Kept`: it was kept, with its link, or `null` while no public URL is set.
+ * - `Kept`: it was kept as `upload`, its link `null` while no public URL is set.
  * - `Off`: Uploads are off, so it was not kept.
  * - `Failed`: it was not kept, or might not have been.
  * - `SignedOut`: the Daemon refused the sign-in.
  */
 export type Answer =
-  | { readonly _tag: "Kept"; readonly link: string | null }
+  | { readonly _tag: "Kept"; readonly upload: Upload }
   | { readonly _tag: "Off"; readonly missing: readonly OwnerOptionName[] }
   | { readonly _tag: "Failed"; readonly failure: UploadFailure }
   | { readonly _tag: "SignedOut" };
@@ -124,7 +124,7 @@ export const answerOf = (sent: Sent): Answer => {
   if (sent.status === 200) {
     return Option.match(decodeUpload(sent.body), {
       onNone: (): Answer => ({ _tag: "Failed", failure: { _tag: "Unexpected" } }),
-      onSome: (upload): Answer => ({ _tag: "Kept", link: upload.link }),
+      onSome: (upload): Answer => ({ _tag: "Kept", upload }),
     });
   }
 
