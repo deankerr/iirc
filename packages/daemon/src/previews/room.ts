@@ -35,14 +35,16 @@ export const makeRoom = Effect.gen(function* () {
 
   // Each Preview that loses its image gives up its reference first, and then its bytes are
   // released, which leaves them in the store while a live Upload, a claim, or another Preview
-  // has them. An image a record already holds adds nothing, so nothing is dropped for it.
+  // has them. An image a record already holds adds nothing and is never dropped for itself,
+  // though the others still are while the total passes a limit lowered since.
   const dropping = (hash: Sha256, size: number, store: ByteStoreService, maxTotal: number) =>
     Effect.gen(function* () {
       const held = yield* cache.images;
+      const adds = held.some((kept) => kept.hash === hash) ? 0 : size;
       let total = held.reduce((sum, one) => sum + one.size, 0);
 
-      for (const one of held.some((kept) => kept.hash === hash) ? [] : held) {
-        if (total + size > maxTotal) {
+      for (const one of held.filter((kept) => kept.hash !== hash)) {
+        if (total + adds > maxTotal) {
           yield* cache.evict(one.hash);
           yield* Effect.logInfo("Dropped a Preview's image to make room", {
             hash: one.hash,

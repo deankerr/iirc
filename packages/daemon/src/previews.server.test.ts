@@ -1850,6 +1850,44 @@ describe("evicting Preview images over a real server", () => {
     });
   });
 
+  it("evicts down to a lowered previews.maxTotal even for an image a Preview already holds", async () => {
+    const images = { aa: tinted(1), bb: tinted(2), cc: tinted(2) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        const [a, b, c] = yield* pictures(served, ["aa", "bb", "cc"], 2 * tintedSize);
+
+        if (a === undefined || b === undefined || c === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* live(settled(served, a));
+        yield* TestClock.adjust(1000);
+        yield* live(settled(served, b));
+        yield* TestClock.adjust(1000);
+        yield* setOption(served, "previews.maxTotal", tintedSize);
+        yield* live(settled(served, c));
+
+        return {
+          held: yield* served.world.bytes.store.held,
+          images: [
+            (yield* recordOf(served, "aa"))?.image,
+            (yield* recordOf(served, "bb"))?.image,
+            (yield* recordOf(served, "cc"))?.image,
+          ],
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      held: tintedSize,
+      images: [null, sha256(images.bb), sha256(images.bb)],
+    });
+  });
+
   it("serves an evicted Preview's text, and fetches it again, its image included, when it is asked", async () => {
     const images = { aa: tinted(1), bb: tinted(2) };
 
