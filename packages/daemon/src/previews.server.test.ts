@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
-import { MessagePreviews, PreviewItem, PreviewsEvent, TimelineList } from "@iirc/api";
+import { MessagePreviews, PreviewItem, PreviewsEvent, TimelineList, UiInForce } from "@iirc/api";
 import { configured } from "@iirc/client/testing";
 import { LinkRefused, LinkTimedOut, LinkTooLarge, LinkWrongType } from "@iirc/link-fetch";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
@@ -1971,11 +1971,9 @@ describe("a Direct Message's press and a Timeline's override over a real server"
           })
         );
 
-        const read = yield* served.request("/api/ui");
-
-        const { options } = (yield* Effect.promise(async () => read.json())) as {
-          readonly options: Readonly<Record<string, unknown>>;
-        };
+        const { options } = yield* Schema.decodeEffect(Schema.fromJsonString(UiInForce))(
+          yield* bodyOf(yield* served.request("/api/ui"))
+        );
 
         return { refused, timelines: options["previews.timelines"] };
       })
@@ -1984,6 +1982,75 @@ describe("a Direct Message's press and a Timeline's override over a real server"
     expect(result).toStrictEqual({
       refused: [400, "InvalidRequest"],
       timelines: {},
+    });
+  });
+
+  it("decides a merged Timeline's Previews by the Timeline it went to, never the merged id's override", async () => {
+    const result = await run({ "https://cats.example/": cats }, (served) =>
+      Effect.gen(function* () {
+        const configured = yield* served.request("/api/networks/libera", {
+          method: "PUT",
+          ...json(floor),
+        });
+
+        expect(configured.status).toBe(200);
+        const call = yield* registerOnFloor(served.world.memory);
+
+        yield* say(call, ":irc.test 005 iirc CASEMAPPING=ascii :are supported by this server");
+        yield* say(call, ":a[!u@h PRIVMSG iirc :first");
+        yield* say(call, ":a{!u@h PRIVMSG iirc :see https://cats.example/");
+
+        const named = (name: string) =>
+          Effect.gen(function* () {
+            const listed = decodeList(
+              yield* bodyOf(yield* served.request("/api/networks/libera/timelines"))
+            );
+
+            const found = listed.timelines.find((one) => one.name === name);
+
+            return found === undefined ? yield* new NotYet() : found.id;
+          }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"));
+
+        const kept = yield* named("a[");
+        const merged = yield* named("a{");
+
+        const window = decodeWindow(
+          yield* bodyOf(yield* served.request(`/api/timelines/${merged}?limit=50`))
+        );
+
+        const place = { position: window.items.at(-1)?.position ?? "", text: "", timeline: merged };
+
+        yield* say(call, ":irc.test 005 iirc -CASEMAPPING :are supported by this server");
+        // Once merged, the Network lists only the Timeline it went to.
+        yield* Effect.gen(function* () {
+          const listed = decodeList(
+            yield* bodyOf(yield* served.request("/api/networks/libera/timelines"))
+          );
+
+          return listed.timelines.some((one) => one.id === merged) ? yield* new NotYet() : true;
+        }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"));
+
+        yield* setPreviews(served, "links only");
+        // The merged id is `on`, but the Direct Message it went to has no override, so it waits.
+        yield* setOverrides(served, { [merged]: "on" });
+        const waiting = yield* asking(served, place);
+
+        // The Timeline it went to is `off`, which the merged id's `on` never overrides.
+        yield* setOverrides(served, { [kept]: "off", [merged]: "on" });
+        const off = yield* refusal(yield* press(served, place, 0));
+
+        return {
+          asked: (yield* served.asked).length,
+          off,
+          waiting: waiting.map(stateOf),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: 0,
+      off: [409, "PreviewsOff"],
+      waiting: [{ _tag: "WaitingForPress" }],
     });
   });
 

@@ -640,7 +640,9 @@ export const layerPreviews = Layer.effect(Previews)(
         }
 
         const { options } = yield* ui.inForce;
-        const override = options["previews.timelines"][timeline];
+        // A merged id is read as the Timeline it went to, whose own override decides, never
+        // one left under the merged id.
+        const override = options["previews.timelines"][summary.value.id];
         const shown = override ?? options.previews;
 
         if (shown === "off") {
