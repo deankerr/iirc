@@ -28,9 +28,10 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `layerProjector` | The projector alone, given a `Runtime` and a `TimelineStore`. |
 | `UiConfiguration`, `layerUiConfiguration`, `UiChangedSince` | The options under `ui`, folded from the Journal's Changes, and how a Change is checked and journaled, failing with `UiChangedSince` when made from other options than those in force. The Layer needs the `Journal`. |
 | `OwnerConfiguration`, `layerOwnerConfiguration`, `OptionsChangedSince` | The options under `store` and `uploads`, likewise, with `OptionsChangedSince`, and the Credentials they name now, in `credentialsNamed`. |
-| `Uploads`, `layerUploads(dataDir)`, `ByteStoreMaker` | The Uploads folded from the Journal's Upload Changes, whether they are on, how a body becomes a kept Upload, and how one is renamed and deleted, below. The Layer needs the `Journal`, the `Vault`, `OwnerConfiguration`, the file system, `SecureRandom`, and a `ByteStoreMaker`, which makes the byte store from where a bucket is and its keys: `makeS3ByteStore` in the Daemon. |
+| `Uploads`, `layerUploads(dataDir)`, `ByteStoreMaker` | The Uploads folded from the Journal's Upload Changes, whether they are on, how a body becomes a kept Upload, and how one is renamed and deleted, below. The Layer needs the `Journal`, the `Vault`, `OwnerConfiguration`, the file system, `SecureRandom`, `StoreBytes`, and a `ByteStoreMaker`, which makes the byte store from where a bucket is and its keys: `makeS3ByteStore` in the Daemon. |
 | `layerLinkListener` | The link listener, below, given `Uploads` and `OwnerConfiguration`. |
-| `Previews`, `layerPreviews` | A Message's Previews, below, each change of one, and the images they hold. The Layer needs `LinkFetch`, `PreviewCache`, the `TimelineStore`, `UiConfiguration`, `OwnerConfiguration`, the `Vault`, and a `ByteStoreMaker`. |
+| `Previews`, `layerPreviews` | A Message's Previews, below, each change of one, and the images they hold. The Layer needs `LinkFetch`, `PreviewCache`, the `TimelineStore`, `UiConfiguration`, `OwnerConfiguration`, the `Vault`, `StoreBytes`, and a `ByteStoreMaker`. |
+| `StoreBytes`, `layerStoreBytes` | The bytes Uploads and Previews share in the store, below. The Layer needs `PreviewCache`, and the Uploads and the Previews must be given one instance of it. |
 
 ## The data directory
 
