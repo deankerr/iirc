@@ -34,6 +34,14 @@ const shoot = async (shown: Locator, name: string) => {
 };
 
 /**
+ * A player's own page, as a fixture host answers it.
+ * @param from - Which host answered.
+ * @returns The page.
+ */
+const playerPage = (from: string) =>
+  `<!doctype html><title>player</title><body data-player="${from}">playing</body>`;
+
+/**
  * Starts a Daemon that serves the web frontend, with a Key and a Network on a private Ircd
  * that joins a Channel, and a peer in it.
  * @param options - The data directory, the fixture site's port, the Ircd, the Channel, and the Scope the Daemon lives in.
@@ -832,7 +840,7 @@ describe("a link's Preview, end to end", () => {
     }
   }, 120_000);
 
-  it("draws a player's poster with a play button that says where it plays from, and loads nothing from there", async () => {
+  it("draws a player's poster with a play button that says where it plays from, loads nothing from there until pressed, then plays it in a frame the page's policy allows", async () => {
     if (browser === undefined) {
       throw new Error("no browser");
     }
@@ -957,7 +965,7 @@ describe("a link's Preview, end to end", () => {
         problems: problems.filter((problem) => !problem.includes("401")),
         statuses: [...held, ...set, on],
       }).toStrictEqual({
-        disabled: true,
+        disabled: false,
         frames: 0,
         hover: "plays from www.youtube-nocookie.com",
         mediaRoute: true,
@@ -971,6 +979,69 @@ describe("a link's Preview, end to end", () => {
         embedFetched: asked.filter((pathname) => pathname.startsWith("/embed/")),
         origins: [...new Set(requested)],
       }).toStrictEqual({ embedFetched: [], origins: [base] });
+
+      // The player's host and one the Owner never listed, both answered by the browser's
+      // own routing, so whatever is refused is refused by the page's policy, not the network.
+      const framedFrom: string[] = [];
+
+      await tab.context().route("https://www.youtube-nocookie.com/**", async (route) => {
+        framedFrom.push(route.request().url());
+        await route.fulfill({ body: playerPage("listed"), contentType: "text/html" });
+      });
+      await tab.context().route("https://player.unlisted.example/**", async (route) => {
+        framedFrom.push(route.request().url());
+        await route.fulfill({ body: playerPage("unlisted"), contentType: "text/html" });
+      });
+
+      await button.click();
+
+      const frame = row.locator("iframe");
+
+      await frame.waitFor();
+
+      await expect
+        .poll(async () => await frame.contentFrame().locator("body").getAttribute("data-player"), {
+          timeout: 20_000,
+        })
+        .toBe("listed");
+      await shoot(row, "preview-player-playing.png");
+
+      // A frame of a host the Owner does not list, put in the page by hand, is refused.
+      await tab.evaluate(() => {
+        const unlisted = document.createElement("iframe");
+
+        unlisted.src = "https://player.unlisted.example/embed/1";
+        document.body.append(unlisted);
+      });
+      await expect
+        .poll(
+          async () =>
+            (await tab.evaluate(() => document.documentElement.dataset.cspViolations)) ?? "",
+          {
+            timeout: 10_000,
+          }
+        )
+        .toContain("frame-src https://player.unlisted.example;");
+
+      expect({
+        attributes: await frame.evaluate((one: HTMLIFrameElement) => ({
+          allow: one.getAttribute("allow"),
+          referrerpolicy: one.getAttribute("referrerpolicy"),
+          sandbox: one.getAttribute("sandbox"),
+          src: one.getAttribute("src"),
+        })),
+        framedFrom,
+        poster: await row.locator("img").count(),
+      }).toStrictEqual({
+        attributes: {
+          allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
+          referrerpolicy: "strict-origin",
+          sandbox: "allow-scripts allow-same-origin allow-presentation allow-popups",
+          src: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1",
+        },
+        framedFrom: ["https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1"],
+        poster: 0,
+      });
 
       peer.close();
     } finally {

@@ -743,13 +743,29 @@ const mediaOf = (
     : undefined;
 
 /**
- * A player, as drawn: the host it plays from, which is all of it a view shows, and the
- * words that say so. Its address is never given: nothing is loaded from it, and nothing
- * here can be turned into a frame.
+ * How a host's player is asked to start by itself: the query parameter that does it, and its
+ * value. A host not named here has none, so its link is loaded as the page gave it.
+ */
+const autoplayBy: ReadonlyMap<string, readonly [name: string, value: string]> = new Map([
+  ["player.vimeo.com", ["autoplay", "1"]],
+  ["w.soundcloud.com", ["auto_play", "true"]],
+  ["www.youtube-nocookie.com", ["autoplay", "1"]],
+]);
+
+/** The size of a player whose page gave none. */
+const defaultPlayerSize = { height: 9, width: 16 } as const;
+
+/**
+ * A player, as drawn: the host it plays from, the words that say so, and what a frame
+ * needs once the Owner presses play. A view loads `src` only then, never before, and shows
+ * the frame at `size`, in CSS pixels, whose shape is all that matters.
  */
 export interface PlayerShown {
   readonly host: string;
   readonly words: string;
+  /** The player's address, set to start playing where its host allows that. */
+  readonly src: string;
+  readonly size: { readonly height: number; readonly width: number };
 }
 
 /**
@@ -768,9 +784,20 @@ const playerOf = (preview: Preview): PlayerShown | undefined => {
     return undefined;
   }
 
+  const autoplay = autoplayBy.get(url.hostname);
+
+  if (autoplay !== undefined) {
+    url.searchParams.set(...autoplay);
+  }
+
   const host = contained(url.hostname);
 
-  return { host, words: `plays from ${host}` };
+  return {
+    host,
+    size: preview.player.size ?? defaultPlayerSize,
+    src: url.href,
+    words: `plays from ${host}`,
+  };
 };
 
 /**

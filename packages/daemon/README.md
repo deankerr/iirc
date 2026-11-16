@@ -15,7 +15,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | Export | Role |
 | --- | --- |
 | `layerDaemon(options, listen?, beside?)` | The Daemon, serving the API on `listen` (`127.0.0.1:7667` unless given), for as long as the Layer lives. It also provides its `HttpServer`, so a test can find an ephemeral port. `beside` is a Layer of routes served on the same origin, such as `iirc daemon --web`'s, which the Daemon knows nothing of. |
-| `Beside` | The type of those routes: a Layer that adds to the `HttpRouter`, and may use the server's `FileSystem`, `Path`, and file responses. |
+| `Beside` | The type of those routes: a Layer that adds to the `HttpRouter`, and may use the server's `FileSystem`, `Path`, and file responses, and read the `ui` options in force through `UiConfiguration`. |
 | `DaemonOptions` | `dataDir`, the Transport's options (such as extra roots to `trust`), the News `heartbeat` (15 s), and the Runtime's `pacing` (a burst of 5, then one Line every 2 s), `hangupDrain` (5 s), and `stopTimeout` (5 s), iirc's `version`, for the link fetch's user agent (`0.0.0`), and `linkFetch`, how Previews fetch a link: the guard under the fixed policy unless given. |
 | `layerLogger` | logfmt on stderr, so stdout holds only what a command was asked for. |
 | `ApiRoutes`, `ApiHandlers` | The API's routes with the key and sign-in check, request validation, and the body limit, and the handler groups alone, for an in-process client. They need `Runtime`, `Vault`, `TimelineStore`, `Projector`, `UiConfiguration`, `OwnerConfiguration`, `Uploads`, `Previews`, `ApiKeys`, and `SignIns`. |

@@ -2,6 +2,7 @@
 declare const styles: {
   readonly badge: string;
   readonly enlarge: string;
+  readonly frame: string;
   readonly picture: string;
   readonly press: string;
   readonly stacked: string;

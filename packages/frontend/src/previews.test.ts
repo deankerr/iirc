@@ -758,12 +758,53 @@ const playing = {
   title: "A song",
 } as const;
 
+/**
+ * The address a player's frame loads, once pressed.
+ * @param link - The player's address, as the Daemon answered it.
+ * @param hosts - The hosts listed now.
+ * @returns What the frame loads.
+ */
+const srcOf = (link: string, hosts: readonly string[]) =>
+  shownReady({ ...playing, player: { link, size: null } }, "on", hosts)?.player?.src;
+
 describe("a Preview's player", () => {
-  it("is the host it plays from, and the words that say so, under on", () => {
+  it("is the host it plays from, the words that say so, and what a frame needs, under on", () => {
     expect(shownReady(playing)?.player).toStrictEqual({
       host: "www.youtube-nocookie.com",
+      size: { height: 360, width: 640 },
+      src: "https://www.youtube-nocookie.com/embed/abc?autoplay=1",
       words: "plays from www.youtube-nocookie.com",
     });
+  });
+
+  it("starts playing by its host's own parameter, keeping the rest of its query", () => {
+    expect([
+      srcOf("https://www.youtube-nocookie.com/embed/abc?start=30&autoplay=0", listed),
+      srcOf("https://player.vimeo.com/video/1?h=9f", listed),
+      srcOf("https://w.soundcloud.com/player/?url=https%3A%2F%2Fa.example%2Fb", listed),
+      srcOf("https://w.soundcloud.com/player/?auto_play=false", listed),
+    ]).toStrictEqual([
+      "https://www.youtube-nocookie.com/embed/abc?start=30&autoplay=1",
+      "https://player.vimeo.com/video/1?h=9f&autoplay=1",
+      "https://w.soundcloud.com/player/?url=https%3A%2F%2Fa.example%2Fb&auto_play=true",
+      "https://w.soundcloud.com/player/?auto_play=true",
+    ]);
+  });
+
+  it("leaves the link of a host with no autoplay parameter as it is", () => {
+    expect(
+      shownReady(
+        { ...playing, player: { link: "https://bandcamp.com/EmbeddedPlayer/album=1", size: null } },
+        "on",
+        listed
+      )?.player?.src
+    ).toBe("https://bandcamp.com/EmbeddedPlayer/album=1");
+  });
+
+  it("is 16 by 9 when its page gave no size", () => {
+    expect(
+      shownReady({ ...playing, player: { link: playing.player.link, size: null } })?.player?.size
+    ).toStrictEqual({ height: 9, width: 16 });
   });
 
   it("is none under links only, even one held from while Previews were on", () => {

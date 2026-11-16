@@ -46,6 +46,19 @@
   flex: none;
 }
 
+/*
+ * A player's frame under its text: as tall as a poster at most, and never wider than the
+ * column, in the shape its page gave it.
+ */
+.frame {
+  --frame-tallest: 260px;
+
+  display: block;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
 /* The press of an image fills its box, and is nothing but the image. */
 .press {
   display: block;
