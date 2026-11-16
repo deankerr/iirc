@@ -74,8 +74,8 @@ const begun = (bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>) =>
  * name, and the safety headers. Its entity tag is its id, never its hash, which a link must
  * not give away, and it is strong, as an id's bytes never change. An `If-None-Match` holding
  * it is `304`, one range of a `GET` is `206`, and one past the end is `416`, though each
- * still asks the store first, so bytes it confirms are gone are `NoSuchUpload` whatever the
- * request holds.
+ * still reads the first byte, so bytes the store confirms are gone are `NoSuchUpload`, and
+ * a store that fails is `ByteStoreUnavailable`, whatever the request holds.
  * @param request - The request.
  * @param opened - The Upload.
  * @returns The response.
@@ -94,15 +94,18 @@ export const servedUpload = (request: Asking, { read, record }: Opened) =>
 
     const wanted = wantedOf(request, tag, record.size);
 
-    // An answer of no bytes still asks the store, so bytes it confirms are gone are never one.
+    // An answer of no bytes still reads the first, so bytes the store confirms are gone, or
+    // a store that fails before any arrives, are answered as a `GET` of them would be.
+    const firstByte = Effect.asVoid(Effect.flatMap(read({ end: 1, start: 0 }), begun));
+
     if (wanted._tag === "Unchanged") {
-      yield* Effect.asVoid(read());
+      yield* firstByte;
 
       return HttpServerResponse.empty({ headers, status: 304 });
     }
 
     if (wanted._tag === "Unsatisfiable") {
-      yield* Effect.asVoid(read());
+      yield* firstByte;
 
       return HttpServerResponse.empty({
         headers: { ...headers, "content-range": `bytes */${record.size}` },

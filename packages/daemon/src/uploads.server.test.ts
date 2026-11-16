@@ -1137,7 +1137,7 @@ describe("the link listener", () => {
     ]);
   });
 
-  it("answers 503 with no-store, for GET and HEAD, when the store fails before the first byte", async () => {
+  it("answers 503 with no-store, for GET and HEAD, plain, revalidated, or out of range, when the store fails before the first byte", async () => {
     const port = freePort();
 
     const result = await run((served) =>
@@ -1154,10 +1154,18 @@ describe("the link listener", () => {
         Object.assign(served.world.bytes, { store: failing });
 
         const path = pathOf(record.link);
-        const get = yield* fromLinks(port, path);
-        const head = yield* fromLinks(port, path, { method: "HEAD" });
 
-        return [get, head].map((got) => [statusOf(got), headersOf(got)]);
+        const answers = yield* Effect.forEach(
+          ["GET", "HEAD"].flatMap((method) =>
+            [{}, { "if-none-match": "*" }, { range: "bytes=100000-" }].map((headers) => ({
+              headers,
+              method,
+            }))
+          ),
+          (init) => fromLinks(port, path, init)
+        );
+
+        return answers.map((got) => [statusOf(got), headersOf(got)]);
       })
     );
 
@@ -1172,7 +1180,7 @@ describe("the link listener", () => {
       },
     ];
 
-    expect(result).toStrictEqual([expected, expected]);
+    expect(result).toStrictEqual(Array.from({ length: 6 }, () => expected));
   });
 
   it("serves every chunk of a read the store gives in parts, after the first", async () => {
@@ -1569,16 +1577,29 @@ describe("an Upload's bytes on the API", () => {
         Object.assign(served.world.bytes, { store: failing });
         const reset = yield* answer;
 
+        const resetAsked = yield* Effect.forEach(
+          [{ "if-none-match": "*" }, { range: "bytes=100000-" }],
+          (headers) =>
+            Effect.map(
+              served.request(`/api/uploads/${record.id}/content`, { headers }),
+              (response) => [response.status, response.headers.get("cache-control")]
+            )
+        );
+
         Object.assign(served.world.bytes, { store });
         yield* unsetOption(served, "store.s3.bucket");
 
-        return { off: yield* answer, reset, unreachable };
+        return { off: yield* answer, reset, resetAsked, unreachable };
       })
     );
 
     expect(result).toStrictEqual({
       off: [503, "no-store", { _tag: "StoreUnavailable", reason: "Uploads are off" }],
       reset: [503, "no-store", { _tag: "StoreUnavailable", reason: "reset" }],
+      resetAsked: [
+        [503, "no-store"],
+        [503, "no-store"],
+      ],
       unreachable: [503, "no-store", { _tag: "StoreUnavailable", reason: "unreachable" }],
     });
   });
