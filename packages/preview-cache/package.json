@@ -1,0 +1,22 @@
+{
+  "name": "@iirc/preview-cache",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/cache.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@iirc/api": "workspace:*",
+    "@iirc/byte-store": "workspace:*",
+    "@iirc/runtime": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}
