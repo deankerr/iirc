@@ -13,8 +13,8 @@ import {
   initialPreviews,
   previewsModeOf,
   reducePreviews,
-} from "@iirc/frontend/render";
-import type { Previews, PreviewsAsk, PreviewsEvent } from "@iirc/frontend/render";
+} from "@iirc/frontend/previews";
+import type { Previews, PreviewsAsk, PreviewsEvent } from "@iirc/frontend/previews";
 import { Effect, FiberSet, Schedule, Stream } from "effect";
 import { Atom } from "effect/reactivity";
 import type { AtomRegistry } from "effect/reactivity";

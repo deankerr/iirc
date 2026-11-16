@@ -9,8 +9,8 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
-import { mayPreview, previewsOf } from "@iirc/frontend/render";
-import type { LinkShown, PreviewShown } from "@iirc/frontend/render";
+import { mayPreview, previewsOf } from "@iirc/frontend/previews";
+import type { LinkShown, PreviewShown } from "@iirc/frontend/previews";
 import { useEffect, useMemo, useRef } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 

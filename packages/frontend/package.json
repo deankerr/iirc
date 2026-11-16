@@ -16,6 +16,7 @@
     "./notifications": "./src/notifications.ts",
     "./options": "./src/options.ts",
     "./palette": "./src/palette.ts",
+    "./previews": "./src/previews.ts",
     "./removal": "./src/removal.ts",
     "./render": "./src/render.ts",
     "./search": "./src/search.ts",

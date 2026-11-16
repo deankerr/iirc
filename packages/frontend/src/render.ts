@@ -29,21 +29,6 @@ export type { Colour, Style } from "@iirc/protocol/format";
 
 export { contained } from "./contained.ts";
 
-export {
-  asksFor,
-  asksWanted,
-  initialPreviews,
-  mayPreview,
-  messageKey,
-  previewsModeOf,
-  previewsOf,
-  reasonWords,
-  reducePreviews,
-  summaryOf,
-} from "./previews.ts";
-
-export type { LinkShown, PreviewShown, Previews, PreviewsAsk, PreviewsEvent } from "./previews.ts";
-
 /**
  * A run of text in one style: plain text, or a link a view may open. A link's `href` is
  * always `http`, `https`, `irc`, or `ircs`, as the URL parser wrote it.

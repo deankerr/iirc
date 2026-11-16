@@ -313,7 +313,7 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 
 ## Previews
 
-What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`). It lives in `src/previews.ts` and is reached through `@iirc/frontend/render`.
+What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`). It is `@iirc/frontend/previews`.
 
 - **Nothing is asked for ahead of the screen.** A Message is asked for only once the view says it came into view, only once, and only while the stream is followed, so no change an ask starts is missed. `asksWanted` gives the asks to make.
 - **`ui.previews` is the shared value alone** (`previewsModeOf`), since the Daemon acts on it. Under `off`, or before it is read, nothing is asked for, followed, or shown.
