@@ -1,0 +1,35 @@
+/*
+ * A player's play button: a small scrim chip with the play glyph, quiet beside a summary,
+ * larger over a poster, where it stands in the middle. It is disabled until a press can
+ * play, and then takes no pointer, so the words on hover are the element around it.
+ */
+.hover {
+  display: inline-flex;
+  flex: none;
+}
+
+.hover[data-over="poster"] {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  font-size: 1.4em;
+  transform: translate(-50%, -50%);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--color-scrim);
+  color: var(--color-text);
+  font: inherit;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.hover[data-over="poster"] .button {
+  padding: var(--space-1) var(--space-2);
+}
