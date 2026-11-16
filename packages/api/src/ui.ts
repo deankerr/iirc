@@ -532,7 +532,7 @@ export const PreviewsPlayers = Schema.Array(PlayerHost).annotate({
     "player.twitch.tv",
   ],
   description:
-    "The hosts a link's player may play from, each matched exactly, so a player from any other host shows as a page. YouTube's players always play from www.youtube-nocookie.com. Every device shares it.",
+    "The hosts a link's player may play from, each matched exactly, so a player from any other host shows as a page. YouTube's players always play from www.youtube-nocookie.com. Every device shares it. A change applies to the web frontend on its next load.",
 });
 
 /** The decoded form of {@link PreviewsPlayers}. */

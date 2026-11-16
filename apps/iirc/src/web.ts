@@ -6,6 +6,7 @@
  *
  * @packageDocumentation
  */
+import { UiConfiguration } from "@iirc/daemon";
 import type { Beside } from "@iirc/daemon";
 import { Data, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -33,22 +34,36 @@ export type WebSource =
  */
 const embeddedName = "dist";
 
+/** The hosts a player may play from, as the `ui` options in force hold them. */
+type Players = Effect.Success<UiConfiguration["Service"]["inForce"]>["options"]["previews.players"];
+
 /**
- * What the page may load, and from where: its own origin only, never a frame of another
- * page, and no inline script or style. A `blob:` image is one the page made itself, as the
- * composer previews a file it is about to upload.
+ * What the page may load, and from where: its own origin only, and no inline script or
+ * style, never framed by another page, and framing only the Owner's player hosts. A `blob:`
+ * image is one the page made itself, as the composer previews a file it is about to upload.
+ *
+ * The one directive that depends on the Owner is `frame-src`. A player is a frame of
+ * another site, so the page may frame exactly the hosts `ui.previews.players` lists, over
+ * `https`, no port, no wildcard, and nothing wider, and none at all when the list is empty.
+ * A player host is already a lower-case DNS name, so it is written as it is, never checked
+ * again. It is read on every response, never once at start, so a change to the list applies
+ * on the next load.
+ * @param players - The hosts a player may play from, in the Owner's order.
+ * @returns The `Content-Security-Policy` header's value.
  */
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "connect-src 'self'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "frame-ancestors 'none'",
-  "base-uri 'none'",
-  "form-action 'self'",
-].join("; ");
+const contentSecurityPolicy = (players: Players) =>
+  [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "connect-src 'self'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    `frame-src ${players.length === 0 ? "'none'" : players.map((host) => `https://${host}`).join(" ")}`,
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join("; ");
 
 /** A file Vite named by a hash of its content, under `assets/`, never changes. */
 const forever = "public, max-age=31536000, immutable";
@@ -57,7 +72,6 @@ const forever = "public, max-age=31536000, immutable";
 const revalidate = "no-cache";
 
 const securityHeaders = {
-  "content-security-policy": contentSecurityPolicy,
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
 };
@@ -262,17 +276,22 @@ export const layerWeb = Effect.fnUntraced(function* (source: WebSource) {
     source._tag === "Directory" ? yield* directoryFiles(source.directory) : yield* embeddedFiles;
 
   /**
-   * A file as a response, with its type, its cache header, and the security headers.
+   * A file as a response, with its type, its cache header, and the security headers, whose
+   * policy is built from the player hosts in force as it is served.
+   * @param ui - The `ui` options.
    * @param file - Its canonical path.
    * @param cacheControl - How long it may be kept.
    * @returns The response, or a 404 when it cannot be read.
    */
-  const serve = (file: string, cacheControl: string) =>
-    HttpServerResponse.file(file, {
-      contentType:
-        contentTypes.get(path.extname(file).slice(1).toLowerCase()) ?? "application/octet-stream",
-    }).pipe(
-      Effect.map((response) =>
+  const serve = (ui: UiConfiguration["Service"], file: string, cacheControl: string) =>
+    Effect.all([
+      HttpServerResponse.file(file, {
+        contentType:
+          contentTypes.get(path.extname(file).slice(1).toLowerCase()) ?? "application/octet-stream",
+      }),
+      ui.inForce,
+    ]).pipe(
+      Effect.map(([response, { options }]) =>
         HttpServerResponse.setHeaders(
           dated
             ? response
@@ -280,53 +299,59 @@ export const layerWeb = Effect.fnUntraced(function* (source: WebSource) {
                 HttpServerResponse.removeHeader(response, "etag"),
                 "last-modified"
               ),
-          { ...securityHeaders, "cache-control": cacheControl }
+          {
+            ...securityHeaders,
+            "cache-control": cacheControl,
+            "content-security-policy": contentSecurityPolicy(options["previews.players"]),
+          }
         )
       ),
       Effect.orElseSucceed(() => notFound)
     );
 
-  const handler = HttpServerRequest.HttpServerRequest.use((request) => {
-    const segments = pathOf(request.url);
+  const handler = (ui: UiConfiguration["Service"]) =>
+    HttpServerRequest.HttpServerRequest.use((request) => {
+      const segments = pathOf(request.url);
 
-    // A target that names nothing, and a path under `/api` the API does not have, are
-    // answered as the router answers any route it does not have: an empty 404, exactly as
-    // without `--web`.
-    if (segments === undefined || segments[0] === "api") {
-      return Effect.succeed(notFound);
-    }
+      // A target that names nothing, and a path under `/api` the API does not have, are
+      // answered as the router answers any route it does not have: an empty 404, exactly as
+      // without `--web`.
+      if (segments === undefined || segments[0] === "api") {
+        return Effect.succeed(notFound);
+      }
 
-    const wanted = segments.length === 0 ? ["index.html"] : segments;
+      const wanted = segments.length === 0 ? ["index.html"] : segments;
 
-    return fileAt(wanted).pipe(
-      Effect.flatMap(
-        Option.match({
-          onNone: () =>
-            isNavigation(request, segments)
-              ? fileAt(["index.html"]).pipe(
-                  Effect.flatMap(
-                    Option.match({
-                      onNone: () => Effect.succeed(notFound),
-                      onSome: (file) => serve(file, revalidate),
-                    })
+      return fileAt(wanted).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              isNavigation(request, segments)
+                ? fileAt(["index.html"]).pipe(
+                    Effect.flatMap(
+                      Option.match({
+                        onNone: () => Effect.succeed(notFound),
+                        onSome: (file) => serve(ui, file, revalidate),
+                      })
+                    )
                   )
-                )
-              : Effect.succeed(notFound),
-          onSome: (file) => serve(file, wanted[0] === "assets" ? forever : revalidate),
-        })
-      )
-    );
-  });
+                : Effect.succeed(notFound),
+            onSome: (file) => serve(ui, file, wanted[0] === "assets" ? forever : revalidate),
+          })
+        )
+      );
+    });
 
   const routes: Beside<never> = Layer.effectDiscard(
     Effect.gen(function* () {
       const router = yield* HttpRouter.HttpRouter;
       const platform = yield* HttpPlatform.HttpPlatform;
+      const ui = yield* UiConfiguration;
 
       yield* router.add(
         "GET",
         "/*",
-        handler.pipe(Effect.provideService(HttpPlatform.HttpPlatform, platform))
+        handler(ui).pipe(Effect.provideService(HttpPlatform.HttpPlatform, platform))
       );
     })
   );

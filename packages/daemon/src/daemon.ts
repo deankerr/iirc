@@ -34,6 +34,7 @@ import { layerProjector } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
 import { layerStoreBytes } from "./store-bytes.ts";
 import { layerUiConfiguration } from "./ui.ts";
+import type { UiConfiguration } from "./ui.ts";
 import { ByteStoreMaker, layerUploads } from "./uploads/uploads.ts";
 
 /** What a Daemon needs besides where to listen. */
@@ -247,12 +248,16 @@ const stopsFirst = Layer.effectDiscard(
 
 /**
  * Routes served beside the API on its origin, which the Daemon knows nothing of. They may
- * use the server's file system and file responses.
+ * use the server's file system and file responses, and read the `ui` options in force.
  */
 export type Beside<E> = Layer.Layer<
   never,
   E,
-  HttpRouter.HttpRouter | HttpPlatform.HttpPlatform | FileSystem.FileSystem | Path.Path
+  | HttpRouter.HttpRouter
+  | HttpPlatform.HttpPlatform
+  | FileSystem.FileSystem
+  | Path.Path
+  | UiConfiguration
 >;
 
 /**

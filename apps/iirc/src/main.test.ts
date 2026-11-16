@@ -313,7 +313,7 @@ describe("iirc", () => {
         authorized: [200, "[]"],
         deep: { body: indexHtml, cache: "no-cache", status: 200, type: "text/html; charset=utf-8" },
         headers: {
-          csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+          csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com https://w.soundcloud.com https://bandcamp.com https://open.spotify.com https://player.twitch.tv; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
           nosniff: "nosniff",
           referrer: "no-referrer",
         },
@@ -334,6 +334,73 @@ describe("iirc", () => {
         page: { body: indexHtml, cache: "no-cache", status: 200, type: "text/html; charset=utf-8" },
         traversals: Array.from({ length: 5 }, () => ({ leaked: false, status: "404" })),
         unauthorized: [401, '{"_tag":"Unauthorized"}'],
+      });
+    });
+
+    describe("frame-src", () => {
+      const policy = (frameSrc: string) =>
+        `default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`;
+
+      const defaults = [
+        "https://www.youtube-nocookie.com",
+        "https://player.vimeo.com",
+        "https://w.soundcloud.com",
+        "https://bandcamp.com",
+        "https://open.spotify.com",
+        "https://player.twitch.tv",
+      ].join(" ");
+
+      /** Sets `ui.previews.players` through the API, as a Frontend would. */
+      const setPlayers = async (base: string, key: string, value: readonly string[]) =>
+        await fetch(`${base}/api/ui/previews.players`, {
+          body: JSON.stringify({ value }),
+          headers: { authorization: `Bearer ${key.trim()}`, "content-type": "application/json" },
+          method: "PUT",
+        });
+
+      it("allows the default player hosts, in order, and nothing else", async () => {
+        const { base, child } = await startDaemon(dataDir(), `--web=${webDir()}`);
+        const response = await fetch(base, navigate);
+
+        child.kill("SIGTERM");
+        await child.exited;
+
+        expect(response.headers.get("content-security-policy")).toBe(policy(defaults));
+      });
+
+      it("follows the Owner's list on the next load, with no restart, and none when it is empty", async () => {
+        const directory = dataDir();
+        const { stdout: key } = await iirc("key", "create", "phone", "--data-dir", directory);
+        const { base, child } = await startDaemon(directory, `--web=${webDir()}`);
+        const csp = async (target = "/") =>
+          (await fetch(`${base}${target}`, navigate)).headers.get("content-security-policy");
+
+        const before = await csp();
+        const custom = await setPlayers(base, key, ["media.example.org", "a.b.example.net"]);
+        const afterCustom = await csp();
+        const afterCustomAsset = await csp("/assets/app-Ab12Cd34.js");
+        const empty = await setPlayers(base, key, []);
+        const afterEmpty = await csp();
+        const afterEmptyDeep = await csp("/some/where");
+
+        child.kill("SIGTERM");
+        await child.exited;
+
+        expect({
+          afterCustom,
+          afterCustomAsset,
+          afterEmpty,
+          afterEmptyDeep,
+          before,
+          statuses: [custom.status, empty.status],
+        }).toStrictEqual({
+          afterCustom: policy("https://media.example.org https://a.b.example.net"),
+          afterCustomAsset: policy("https://media.example.org https://a.b.example.net"),
+          afterEmpty: policy("'none'"),
+          afterEmptyDeep: policy("'none'"),
+          before: policy(defaults),
+          statuses: [200, 200],
+        });
       });
     });
 
