@@ -533,6 +533,27 @@ describe("uploading from the Composer", () => {
     });
   });
 
+  it("says the store is full, from the typed error, and lets it be dismissed", async () => {
+    const { container, daemon } = await signedIn();
+
+    daemon.uploadRefusals.push({
+      body: { _tag: "StoreFull", maxTotal: 2 * 1024 * 1024 },
+      status: 507,
+    });
+    await paste(container, image("cat.png"));
+    await settled(() => alerts(container).length === 1);
+
+    const said = alerts(container);
+
+    await press(button(container, "Dismiss upload of cat.png"));
+
+    expect({ after: alerts(container), said, value: composerOf(container).value }).toStrictEqual({
+      after: [],
+      said: ["The store is full: Uploads may hold 2.0 MiB in all, so cat.png was not kept."],
+      value: "",
+    });
+  });
+
   it("adds files from the picker", async () => {
     const { container, daemon } = await signedIn();
     const picker = container.querySelector<HTMLInputElement>('input[aria-label="Files to upload"]');

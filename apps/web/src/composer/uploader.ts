@@ -6,7 +6,14 @@
  *
  * @packageDocumentation
  */
-import { JournalFailed, StoreUnavailable, Upload, UploadsOff, UploadTooLarge } from "@iirc/api";
+import {
+  JournalFailed,
+  StoreFull,
+  StoreUnavailable,
+  Upload,
+  UploadsOff,
+  UploadTooLarge,
+} from "@iirc/api";
 import type { OwnerOptionName } from "@iirc/api";
 import type { UploadFailure } from "@iirc/frontend/uploading";
 import { Context, Data, Effect, Option, Schema } from "effect";
@@ -104,7 +111,9 @@ export type Answer =
 const decodeUpload = Schema.decodeUnknownOption(Schema.fromJsonString(Upload));
 
 const decodeRefusal = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Union([UploadsOff, UploadTooLarge, StoreUnavailable, JournalFailed]))
+  Schema.fromJsonString(
+    Schema.Union([UploadsOff, UploadTooLarge, StoreFull, StoreUnavailable, JournalFailed])
+  )
 );
 
 // A gateway in front of the Daemon answers these when it could not reach it.
@@ -145,6 +154,10 @@ export const answerOf = (sent: Sent): Answer => {
             _tag: "Failed",
             failure: { _tag: "OverLimit", before: false, maxSize: refusal.maxSize },
           };
+        }
+
+        case "StoreFull": {
+          return { _tag: "Failed", failure: { _tag: "StoreFull", maxTotal: refusal.maxTotal } };
         }
 
         case "StoreUnavailable": {

@@ -705,6 +705,16 @@ describe("sending a draft while its files upload", () => {
     ]).toStrictEqual([undefined, undefined]);
   });
 
+  it("holds nothing back for a file refused as the store being full", () => {
+    const full = fold(addedAt(4, file("a")), {
+      _tag: "Failed",
+      failure: { _tag: "StoreFull", maxTotal: mib },
+      key: "a",
+    });
+
+    expect(heldBack(full, composers, place)).toBeUndefined();
+  });
+
   it("holds nothing back for a draft typing a Credential's value, so it is let go of", () => {
     const credential = typed(initialComposers, "/set store.s3.secretAccessKey hunter2");
 
@@ -835,6 +845,12 @@ describe("why a file was not kept, in words", () => {
   it("says the store could not be reached", () => {
     expect(failureText({ ...named, failure: { _tag: "StoreUnavailable" } })).toBe(
       "The store that keeps Uploads could not be reached, so cat.png was not kept."
+    );
+  });
+
+  it("says the store is full, and how much Uploads may hold in all", () => {
+    expect(failureText({ ...named, failure: { _tag: "StoreFull", maxTotal: 2 * mib } })).toBe(
+      "The store is full: Uploads may hold 2.0 MiB in all, so cat.png was not kept."
     );
   });
 
