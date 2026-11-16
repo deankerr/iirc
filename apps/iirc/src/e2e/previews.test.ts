@@ -14,7 +14,7 @@ import type { Browser, Locator, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { layerWeb } from "../web.ts";
-import { networkRow, run, solidPng, watchedPage } from "./daemon.ts";
+import { networkRow, run, screenshot, solidPng, watchedPage } from "./daemon.ts";
 
 const main = path.join(import.meta.dirname, "..", "main.ts");
 const web = path.join(import.meta.dirname, "..", "..", "..", "web", "dist");
@@ -294,6 +294,83 @@ const served = (
     headers: { ...headers, "content-range": `bytes ${first}-${last}/${bytes.length}` },
     status: 206,
   });
+};
+
+/**
+ * A number as two bytes, least significant first, as a GIF writes it.
+ * @param value - The number.
+ * @returns Its bytes.
+ */
+const word = (value: number) => [value % 256, Math.floor(value / 256)];
+
+/**
+ * An animated GIF of two frames, each one solid colour, made here so that no binary is
+ * kept. Its pixels are coded as literals, a clear code after every two, which keeps every
+ * code three bits wide, so it needs no compressor.
+ * @param side - Its width and height, in pixels.
+ * @returns The file's bytes.
+ */
+const twoFrameGif = (side: number) => {
+  // Red and blue, the two frames' colours, and two the table needs to hold four.
+  const palette = [255, 0, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255];
+
+  const coded = (colour: number) => {
+    const bytes: number[] = [];
+    let held = 0;
+    let bits = 0;
+
+    const put = (code: number) => {
+      held += code * 2 ** bits;
+      bits += 3;
+
+      while (bits >= 8) {
+        bytes.push(held % 256);
+        held = Math.floor(held / 256);
+        bits -= 8;
+      }
+    };
+
+    for (let pixel = 0; pixel < side * side; pixel += 2) {
+      put(4);
+      put(colour);
+      put(colour);
+    }
+
+    put(5);
+
+    if (bits > 0) {
+      bytes.push(held);
+    }
+
+    // Sub-blocks of at most 255 bytes, then the empty one that ends them.
+    const blocks: number[] = [];
+
+    for (let at = 0; at < bytes.length; at += 255) {
+      const block = bytes.slice(at, at + 255);
+
+      blocks.push(block.length, ...block);
+    }
+
+    return [2, ...blocks, 0];
+  };
+
+  const frame = (colour: number) => [
+    [0x21, 0xf9, 4, 0, ...word(50), 0, 0],
+    [0x2c, 0, 0, 0, 0, ...word(side), ...word(side), 0],
+    coded(colour),
+  ];
+
+  return Uint8Array.from(
+    [
+      [...Buffer.from("GIF89a"), ...word(side), ...word(side), 0xf1, 0, 0],
+      palette,
+      // Loops for ever.
+      [0x21, 0xff, 11, ...Buffer.from("NETSCAPE2.0"), 3, 1, 0, 0, 0],
+      ...frame(0),
+      ...frame(1),
+      [0x3b],
+    ].flat()
+  );
 };
 
 describe("a link's Preview, end to end", () => {
@@ -745,6 +822,194 @@ describe("a link's Preview, end to end", () => {
         problems: [],
         statuses: [204, 204, 200, 200, 200, 200, 200, 200],
         thumbnail: { loaded: true, mediaRoute: true },
+      });
+
+      peer.close();
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await fixture.stop(true);
+      await Promise.all([minio.stop(), ircd.stop()]);
+    }
+  }, 120_000);
+
+  it("shows an animated image still under a play badge until pressed, and opens an image large over the whole screen", async () => {
+    if (browser === undefined) {
+      throw new Error("no browser");
+    }
+
+    const still = solidPng(1000, [40, 120, 200]);
+    const moving = twoFrameGif(64);
+
+    const fixture = Bun.serve({
+      fetch: (request) => {
+        const { pathname } = new URL(request.url);
+
+        if (pathname === "/still.png") {
+          return new Response(still, { headers: { "content-type": "image/png" } });
+        }
+
+        if (pathname === "/moving.gif") {
+          return new Response(moving, { headers: { "content-type": "image/gif" } });
+        }
+
+        return new Response("", { status: 404 });
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    const [minio, ircd] = await Promise.all([startMinio(), startNgircd()]);
+    const channel = "#large";
+
+    const scope = await Effect.runPromise(Scope.make());
+
+    try {
+      const stack = await startStack({
+        channel,
+        dataDir: path.join(directory, "large-data"),
+        fixturePort: fixture.port ?? 0,
+        ircd,
+        scope,
+      });
+
+      const { api, peer } = stack;
+
+      await Promise.all(
+        Object.entries({
+          "minio-key": minio.accessKeyId,
+          "minio-secret": minio.secretAccessKey,
+        }).map(
+          async ([name, value]) =>
+            await api("PUT", `/credentials/${name}`, JSON.stringify({ value }))
+        )
+      );
+
+      await Promise.all(
+        Object.entries({
+          "store.s3.accessKeyId": "minio-key",
+          "store.s3.bucket": minio.bucket,
+          "store.s3.endpoint": minio.endpoint,
+          "store.s3.region": minio.region,
+          "store.s3.secretAccessKey": "minio-secret",
+        }).map(
+          async ([option, value]) =>
+            await api("PUT", `/options/${option}`, JSON.stringify({ value }))
+        )
+      );
+
+      await api("PUT", "/ui/previews", JSON.stringify({ value: "on" }));
+
+      const { page: tab, problems } = await watchedPage(browser);
+
+      await tab.setViewportSize({ height: 800, width: 1280 });
+
+      const log = await openChannel(tab, stack, channel);
+
+      await expect
+        .poll(
+          async () => {
+            peer.send(`PRIVMSG ${channel} :hello`);
+
+            return await log.getByText("hello").count();
+          },
+          { interval: 500, timeout: 20_000 }
+        )
+        .toBeGreaterThan(0);
+
+      const site = `http://127.0.0.1:${fixture.port}`;
+      const stillLink = `${site}/still.png`;
+      const movingLink = `${site}/moving.gif`;
+
+      peer.send(`PRIVMSG ${channel} :still ${stillLink}`);
+      peer.send(`PRIVMSG ${channel} :moving ${movingLink}`);
+
+      // An animated image is its first frame, drawn on a canvas, under a play badge.
+      const play = log.getByRole("button", { name: `Play ${movingLink}` });
+      const movingRow = log.locator("[data-index]").filter({ hasText: "moving " });
+
+      await play.waitFor({ timeout: 20_000 });
+
+      const before = {
+        badge: await play.locator('[data-badge="play"]').count(),
+        canvas: await play.locator("canvas").count(),
+        playing: await movingRow.locator("img[data-playing]").count(),
+      };
+
+      await shoot(movingRow, "after-animated-still.png");
+      await play.click();
+      await movingRow.locator("img[data-playing]").waitFor();
+
+      const after = {
+        badge: await movingRow.locator('[data-badge="play"]').count(),
+        canvas: await movingRow.locator("canvas").count(),
+        playing: await movingRow.locator("img[data-playing]").count(),
+        src: ((await movingRow.locator("img[data-playing]").getAttribute("src")) ?? "").slice(0, 5),
+      };
+
+      await shoot(movingRow, "after-animated-playing.png");
+
+      // A still image opens large over the whole screen, with a link to its page.
+      const open = log.getByRole("button", { name: `Open ${stillLink} large` });
+      const dialog = tab.getByRole("dialog");
+
+      await open.waitFor({ timeout: 20_000 });
+      await open.click();
+      await dialog.waitFor();
+
+      // The layer around the dialog, as large as the window, whatever Pane holds the Message.
+      const covered = async () =>
+        await dialog.evaluate((element) => {
+          let layer: Element | null = element;
+
+          while (layer !== null && getComputedStyle(layer).position !== "fixed") {
+            layer = layer.parentElement;
+          }
+
+          const box = layer?.getBoundingClientRect();
+
+          return {
+            height: box?.height === window.innerHeight,
+            width: box?.width === window.innerWidth,
+          };
+        });
+
+      const largeDesktop = {
+        covers: await covered(),
+        href: await dialog.getByRole("link", { name: stillLink }).getAttribute("href"),
+      };
+
+      await screenshot(tab, "after-large-desktop.png");
+      await tab.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+
+      const focused = async () => await open.evaluate((one) => one === document.activeElement);
+
+      await expect.poll(focused).toBe(true);
+
+      // Narrow, as a phone is, and a press outside closes it.
+      await tab.setViewportSize({ height: 844, width: 390 });
+      await open.click();
+      await dialog.waitFor();
+
+      const largePhone = { covers: await covered() };
+
+      await screenshot(tab, "after-large-phone.png");
+      await tab.mouse.click(2, 2);
+      await dialog.waitFor({ state: "hidden" });
+      await expect.poll(focused).toBe(true);
+
+      expect({
+        after,
+        before,
+        largeDesktop,
+        largePhone,
+        problems: problems.filter((problem) => !problem.includes("401")),
+      }).toStrictEqual({
+        after: { badge: 0, canvas: 0, playing: 1, src: "blob:" },
+        before: { badge: 1, canvas: 1, playing: 0 },
+        largeDesktop: { covers: { height: true, width: true }, href: stillLink },
+        largePhone: { covers: { height: true, width: true } },
+        problems: [],
       });
 
       peer.close();

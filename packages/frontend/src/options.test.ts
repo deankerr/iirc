@@ -1158,6 +1158,7 @@ describe("the options under ui", () => {
       leading: 1.45,
       light: "light",
       previews: "off",
+      "previews.animate": false,
       "previews.timelines": {},
       read: "latest",
       size: 14,
@@ -1204,6 +1205,7 @@ describe("the options under ui", () => {
         { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Text" },
         { _tag: "Choice", choices: ["off", "links only", "on"] },
+        { _tag: "Toggle" },
         { _tag: "ChoiceByKey", choices: ["off", "links only", "on"] },
         { _tag: "Choice", choices: ["shown", "latest", "asked"] },
         { _tag: "Integer", maximum: 24, minimum: 10 },
@@ -1235,6 +1237,7 @@ describe("the options under ui", () => {
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
         ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
         ["ui.previews", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
+        ["ui.previews.animate", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
         ["ui.previews.timelines", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.read", { _tag: "Shown", text: "latest" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
@@ -1304,6 +1307,13 @@ describe("the options under ui", () => {
         ],
         [
           "ui.previews",
+          { _tag: "Shown", text: "off" },
+          { _tag: "Shown", text: "off" },
+          undefined,
+          "off",
+        ],
+        [
+          "ui.previews.animate",
           { _tag: "Shown", text: "off" },
           { _tag: "Shown", text: "off" },
           undefined,
@@ -1407,7 +1417,6 @@ describe("the options under ui", () => {
     }).toStrictEqual({
       kept: shared,
       last: [
-        "network.libera.username",
         "ui.activity",
         "ui.colours",
         "ui.dark",
@@ -1417,6 +1426,7 @@ describe("the options under ui", () => {
         "ui.leading",
         "ui.light",
         "ui.previews",
+        "ui.previews.animate",
         "ui.previews.timelines",
         "ui.read",
         "ui.size",

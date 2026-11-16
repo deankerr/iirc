@@ -49,6 +49,9 @@ export const enterShown = Atom.make((get) => get(uiInEffect).enter);
 /** Whether the Composer checks spelling on this device, alone, as `timeShown` is. */
 export const spellcheckShown = Atom.make((get) => get(uiInEffect).spellcheck);
 
+/** Whether animated images play on their own on this device, alone, as `timeShown` is. */
+export const animateShown = Atom.make((get) => get(uiInEffect)["previews.animate"]);
+
 /**
  * When a Timeline is marked read on this device, as `timeShown` is, but none until it is
  * known: this device's override, or the shared options once read.

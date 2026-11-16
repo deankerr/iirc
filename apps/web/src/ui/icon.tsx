@@ -27,6 +27,8 @@ const glyphs = {
   connected: "●",
   /** A Network connecting: half filled. */
   connecting: "◐",
+  /** Opens an image over the whole screen: arrows pointing out. */
+  enlarge: "⤢",
   /** A Network's Timelines show under it. */
   expanded: "▾",
   /** An Upload of a type no thumbnail is drawn for: a page of lines. */
@@ -43,6 +45,8 @@ const glyphs = {
   offline: "○",
   /** The command palette, where a command starts as it does in the composer. */
   palette: "/",
+  /** Plays an animated image, as a play button is drawn. */
+  play: "▶",
   /** A Network removed, whose Timelines are kept to read: a circle struck through. */
   removed: "⊘",
   /** Sends what the Composer holds, as a return key is drawn. */
