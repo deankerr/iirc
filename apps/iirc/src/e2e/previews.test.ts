@@ -67,6 +67,23 @@ describe("a link's Preview, end to end", () => {
           return new Response(page("All about cats"), html);
         }
 
+        // A page with no tags of its own, whose oEmbed answer is on the same fixture.
+        if (pathname === "/embedded") {
+          return new Response(
+            `<!doctype html><html><head><link rel="alternate" type="application/json+oembed" href="/oembed.json"></head><body></body></html>`,
+            html
+          );
+        }
+
+        if (pathname === "/oembed.json") {
+          return Response.json({
+            author_name: "Embed Author",
+            html: "<script>document.title = 'hijacked'</script>",
+            title: "From oEmbed",
+            type: "rich",
+          });
+        }
+
         if (pathname === "/slow") {
           await released;
 
@@ -220,11 +237,20 @@ describe("a link's Preview, end to end", () => {
       release();
       await previews.getByRole("button", { name: "Cat Fixture · Worth the wait" }).waitFor();
 
+      // An oEmbed address the page names, fetched through the real guard: its title shows.
+      peer.send(`PRIVMSG ${channel} :embedded ${site}/embedded`);
+      // It has no description, so its summary is not a button.
+      await previews
+        .locator('[data-preview="ready"]', { hasText: "Embed Author · From oEmbed" })
+        .waitFor();
+      const hijacked = await tab.title();
+
       expect({
         before,
         closed,
         configured: configured.status,
         failedWith: reason.startsWith("No preview: "),
+        hijacked: hijacked === "hijacked",
         opened,
         pendingAfter: await pending.count(),
         pendingWhileSlow: whileSlow,
@@ -237,11 +263,12 @@ describe("a link's Preview, end to end", () => {
         closed: "false",
         configured: 200,
         failedWith: true,
+        hijacked: false,
         opened: "true",
         pendingAfter: 0,
         pendingWhileSlow: 1,
         problems: [],
-        readyAfter: 2,
+        readyAfter: 3,
         // The page asks who is signed in before anyone is, and is told no.
         refused: ["/api/networks"],
         set: 200,

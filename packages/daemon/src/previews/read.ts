@@ -1,11 +1,19 @@
+import { Effect, Option, Schema } from "effect";
 import { decodeHTML, decodeHTMLAttribute } from "entities/decode";
 
-/** What a page says of itself. */
+/**
+ * What a page says of itself. The image is an address kept as data: nothing here fetches it.
+ * The oEmbed address is the one the page itself names, for the Daemon to fetch and then fill
+ * the gaps with {@link fillFromOembed}.
+ */
 export interface PageRead {
   readonly title?: string;
   readonly description?: string;
   readonly site?: string;
   readonly image?: string;
+  readonly imageWidth?: number;
+  readonly imageHeight?: number;
+  readonly oembed?: string;
 }
 
 const TITLE_LIMIT = 200;
@@ -120,7 +128,7 @@ const elementEnd = (text: string, name: keyof typeof CLOSERS, from: number): num
   return found === null ? text.length : found.index;
 };
 
-// A tolerant walk over the head, keeping `<meta>`, `<base>` and `<title>` only.
+// A tolerant walk over the head, keeping `<meta>`, `<base>`, `<link>` and `<title>` only.
 const scan = (text: string): Piece[] => {
   const pieces: Piece[] = [];
   let i = 0;
@@ -174,7 +182,7 @@ const scan = (text: string): Piece[] => {
       }
 
       i = stop;
-    } else if (name === "meta" || name === "base") {
+    } else if (name === "meta" || name === "base" || name === "link") {
       pieces.push({ kind: "tag", tag: { attrs, name } });
     }
   }
@@ -278,7 +286,7 @@ const absolute = (value: string | undefined, base: string): string | undefined =
   }
 };
 
-const httpImage = (value: string | undefined, base: string): string | undefined => {
+const httpAddress = (value: string | undefined, base: string): string | undefined => {
   const resolved = absolute(value, base);
 
   return resolved !== undefined && /^https?:\/\//iu.test(resolved) ? resolved : undefined;
@@ -303,13 +311,24 @@ interface Gathered {
   readonly meta: Map<string, string>;
   readonly titleText: string | undefined;
   readonly baseHref: string | undefined;
+  readonly oembedHref: string | undefined;
 }
 
-// The first value of each `<meta>` key, the `<title>` text and the `<base href>`, entities decoded.
+const OEMBED_TYPE = "application/json+oembed";
+
+const isOembedLink = (attrs: ReadonlyMap<string, string>): boolean =>
+  (attrs.get("rel") ?? "")
+    .toLowerCase()
+    .split(/[ \t\n\r\f]+/u)
+    .includes("alternate") && (attrs.get("type") ?? "").trim().toLowerCase() === OEMBED_TYPE;
+
+// The first value of each `<meta>` key, the `<title>` text, the `<base href>` and the first
+// oEmbed `<link href>`, entities decoded.
 const gather = (text: string): Gathered => {
   const meta = new Map<string, string>();
   let titleText: string | undefined;
   let baseHref: string | undefined;
+  let oembedHref: string | undefined;
 
   for (const piece of scan(text)) {
     if (piece.kind === "title") {
@@ -323,6 +342,10 @@ const gather = (text: string): Gathered => {
 
     if (name === "base" && baseHref === undefined && href !== undefined) {
       baseHref = decodeHTMLAttribute(href);
+    } else if (name === "link" && oembedHref === undefined && href !== undefined) {
+      if (isOembedLink(attrs)) {
+        oembedHref = decodeHTMLAttribute(href);
+      }
     } else if (name === "meta" && content !== undefined) {
       const keys = [attrs.get("property"), attrs.get("name")].map((key) =>
         key?.trim().toLowerCase()
@@ -336,7 +359,7 @@ const gather = (text: string): Gathered => {
     }
   }
 
-  return { baseHref, meta, titleText };
+  return { baseHref, meta, oembedHref, titleText };
 };
 
 interface Draft {
@@ -344,20 +367,27 @@ interface Draft {
   description?: string;
   site?: string;
   image?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  oembed?: string;
 }
 
 /**
  * A page's head and its Content-Type in, what it says of itself out.
  *
  * @param input - the page's head as bytes, its Content-Type, and the address it was read from.
- * @returns what the page says of itself, or undefined when there is nothing to show.
+ * @returns what the page says of itself, which may be nothing: whether that is enough to show
+ * is decided once an oEmbed address it names has filled its gaps.
  */
 export const readPage = (input: {
   readonly head: Uint8Array;
   readonly contentType: string | undefined;
   readonly link: string;
-}): PageRead | undefined => {
-  const { meta, titleText, baseHref } = gather(decodeHead(input.head, input.contentType));
+}): PageRead => {
+  const { meta, titleText, baseHref, oembedHref } = gather(
+    decodeHead(input.head, input.contentType)
+  );
+
   const base = absolute(baseHref, input.link) ?? input.link;
 
   const title = cut(firstOf(meta, ["og:title", "twitter:title"]) ?? titleText, TITLE_LIMIT);
@@ -367,13 +397,9 @@ export const readPage = (input: {
     DESCRIPTION_LIMIT
   );
 
-  if (title === undefined && description === undefined) {
-    return undefined;
-  }
-
   const site = firstOf(meta, ["og:site_name"]);
 
-  const image = httpImage(
+  const image = httpAddress(
     firstOf(meta, [
       "og:image",
       "og:image:url",
@@ -402,7 +428,102 @@ export const readPage = (input: {
     page.image = image;
   }
 
+  const oembed = httpAddress(oembedHref, base);
+
+  if (oembed !== undefined) {
+    page.oembed = oembed;
+  }
+
   return page;
+};
+
+// A field of the wrong type is dropped on its own, so it never discards the rest.
+const lenient = <S extends Schema.Constraint>(field: S) =>
+  Schema.optional(
+    Schema.UndefinedOr(field).pipe(Schema.catchDecoding(() => Effect.succeedSome(undefined)))
+  );
+
+// Providers sometimes send a size as a numeric string.
+const Size = Schema.Union([Schema.Finite, Schema.FiniteFromString]).check(
+  Schema.isInt(),
+  Schema.isGreaterThan(0)
+);
+
+// Only these fields are read. `html` is not among them, whatever the answer's `type`.
+const Oembed = Schema.Struct({
+  author_name: lenient(Schema.String),
+  thumbnail_height: lenient(Size),
+  thumbnail_url: lenient(Schema.String),
+  thumbnail_width: lenient(Size),
+  title: lenient(Schema.String),
+});
+
+/** What an oEmbed answer says, of the fields read, each as the provider sent it or absent. */
+export type OembedAnswer = typeof Oembed.Type;
+
+const decodeOembed = Schema.decodeUnknownOption(Schema.fromJsonString(Oembed));
+
+/**
+ * An oEmbed answer's JSON text in, its fields out.
+ *
+ * @param json - the answer's body, decoded as text.
+ * @returns the fields it carries, each dropped on its own when malformed, or undefined when
+ * the text is not a JSON object.
+ */
+export const readOembed = (json: string): OembedAnswer | undefined =>
+  Option.getOrUndefined(decodeOembed(json));
+
+/**
+ * What an oEmbed answer adds to a page's own reading: only what the page left empty. The
+ * title, the author as the site, and the thumbnail as the image with its size. Text in JSON
+ * is not HTML, so nothing is decoded. The answer's `html` is never read, whatever its
+ * `type`, and the description is never filled.
+ *
+ * @param page - What the page said of itself.
+ * @param answer - What the oEmbed answer said.
+ * @param oembedLink - The address the answer came from, which a thumbnail is resolved against.
+ * @returns The page with its gaps filled.
+ */
+export const fillFromOembed = (
+  page: PageRead,
+  answer: OembedAnswer,
+  oembedLink: string
+): PageRead => {
+  const filled: Draft = { ...page };
+
+  if (page.title === undefined) {
+    const title = cut(tidy(answer.title), TITLE_LIMIT);
+
+    if (title !== undefined) {
+      filled.title = title;
+    }
+  }
+
+  if (page.site === undefined) {
+    const site = tidy(answer.author_name);
+
+    if (site !== undefined) {
+      filled.site = site;
+    }
+  }
+
+  if (page.image === undefined) {
+    const image = httpAddress(tidy(answer.thumbnail_url), oembedLink);
+
+    if (image !== undefined) {
+      filled.image = image;
+
+      if (answer.thumbnail_width !== undefined) {
+        filled.imageWidth = answer.thumbnail_width;
+      }
+
+      if (answer.thumbnail_height !== undefined) {
+        filled.imageHeight = answer.thumbnail_height;
+      }
+    }
+  }
+
+  return filled;
 };
 
 /**

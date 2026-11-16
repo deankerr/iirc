@@ -693,3 +693,200 @@ describe("Previews over a real server", () => {
     });
   });
 });
+
+const OEMBED = "https://media.example/oembed?url=https%3A%2F%2Fpage.example%2F";
+
+/**
+ * A page whose head names an oEmbed address, besides `head`.
+ * @param head - The rest of its head.
+ * @param address - The oEmbed address it names.
+ * @returns The page's answer.
+ */
+const withOembed = (head: string, address = OEMBED) =>
+  page(`${head}<link rel="alternate" type="application/json+oembed" href="${address}">`);
+
+const answer = (value: Schema.Json) => ({
+  body: JSON.stringify(value),
+  type: "application/json",
+});
+
+/**
+ * Previews the one link in a Message under `links only`.
+ * @param answers - What each link answers.
+ * @param link - The link.
+ * @returns Its state, and every fetch asked.
+ */
+const previewed = async (answers: Readonly<Record<string, Answer>>, link: string) =>
+  await run(answers, (served) =>
+    Effect.gen(function* () {
+      yield* setPreviews(served, "links only");
+      yield* talk(served, [`see ${link}`]);
+      const [place] = yield* messages(served, 1);
+      const [item] = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
+
+      return { asked: yield* served.asked, state: item?.state };
+    })
+  );
+
+const asPage = { kind: "page" } as const;
+const asOembed = { kind: "oembed" } as const;
+
+const ready = (preview: Partial<Record<string, string | null>>) => ({
+  _tag: "Ready",
+  preview: {
+    description: null,
+    kind: "page",
+    link: "https://page.example/",
+    site: "page.example",
+    title: null,
+    type: null,
+    ...preview,
+  },
+});
+
+describe("a page's oEmbed over a real server", () => {
+  it("fills only the gaps the page's own tags left, fetching the address it names and never the thumbnail", async () => {
+    const result = await previewed(
+      {
+        [OEMBED]: answer({
+          author_name: "Author",
+          thumbnail_height: 90,
+          thumbnail_url: "https://cdn.example/t.jpg",
+          thumbnail_width: 120,
+          title: "oEmbed title",
+          type: "video",
+        }),
+        "https://page.example/": withOembed(
+          '<title>Tag title</title><meta name="description" content="Tag description">'
+        ),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(
+      ready({ description: "Tag description", site: "Author", title: "Tag title" })
+    );
+
+    expect(result.asked).toStrictEqual([
+      { link: "https://page.example/", purpose: asPage },
+      { link: OEMBED, purpose: asOembed },
+    ]);
+  });
+
+  it("lets the page's tags win where they have the field", async () => {
+    const result = await previewed(
+      {
+        [OEMBED]: answer({ author_name: "Author", title: "oEmbed title" }),
+        "https://page.example/": withOembed(
+          '<meta property="og:title" content="Tag title"><meta property="og:site_name" content="Tag Site">'
+        ),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(ready({ site: "Tag Site", title: "Tag title" }));
+  });
+
+  it("shows a page with only an oEmbed link as the oEmbed title, with its author as the site", async () => {
+    const result = await previewed(
+      {
+        [OEMBED]: answer({ author_name: "Some Author", title: "From oEmbed", type: "rich" }),
+        "https://page.example/": withOembed(""),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(ready({ site: "Some Author", title: "From oEmbed" }));
+  });
+
+  it("uses nothing from a rich answer's html", async () => {
+    const result = await previewed(
+      {
+        [OEMBED]: answer({
+          html: '<script>alert("x")</script><b>Hijacked</b>',
+          type: "rich",
+        }),
+        "https://page.example/": withOembed("<title>Tag title</title>"),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(ready({ title: "Tag title" }));
+    expect(JSON.stringify(result.state)).not.toMatch(/<script|alert|Hijacked/u);
+  });
+
+  it("leaves a page with only an oEmbed link and an html-only answer with nothing to show", async () => {
+    const result = await previewed(
+      {
+        [OEMBED]: answer({ html: "<b>Hijacked</b>", type: "rich" }),
+        "https://page.example/": withOembed(""),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual({ _tag: "Failed", reason: "NothingToShow" });
+  });
+
+  it("is unaffected when the guard refuses the oEmbed address as a private host", async () => {
+    const address = "http://127.0.0.1/oembed";
+
+    const result = await previewed(
+      {
+        [address]: new LinkRefused({ reason: "a private address" }),
+        "https://page.example/": withOembed("<title>Tag title</title>", address),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(ready({ title: "Tag title" }));
+
+    expect(result.asked).toStrictEqual([
+      { link: "https://page.example/", purpose: asPage },
+      { link: address, purpose: asOembed },
+    ]);
+  });
+
+  it("is unaffected when the oEmbed answer is too large", async () => {
+    const result = await previewed(
+      {
+        [OEMBED]: new LinkTooLarge({ limit: 64 * 1024 }),
+        "https://page.example/": withOembed("<title>Tag title</title>"),
+      },
+      "https://page.example/"
+    );
+
+    expect(result.state).toStrictEqual(ready({ title: "Tag title" }));
+  });
+
+  it("is unaffected by an oEmbed answer that is not JSON, not a success, or not recorded", async () => {
+    const link = "https://page.example/";
+
+    const recorded: Answer[] = [
+      { body: "<html>", type: "application/json" },
+      { ...answer({ title: "No" }), status: 404 },
+      { ...answer({ title: "No" }), status: 301 },
+      { body: "[1,2]", type: "application/json" },
+    ];
+
+    const states = await Promise.all([
+      previewed({ "https://page.example/": withOembed("<title>Tag title</title>") }, link),
+      ...recorded.map(
+        async (one) =>
+          await previewed(
+            { [OEMBED]: one, "https://page.example/": withOembed("<title>Tag title</title>") },
+            link
+          )
+      ),
+    ]);
+
+    for (const result of states) {
+      expect(result.state).toStrictEqual(ready({ title: "Tag title" }));
+    }
+  });
+
+  it("fetches no oEmbed when the page names none", async () => {
+    const result = await previewed({ "https://page.example/": cats }, "https://page.example/");
+
+    expect(result.asked).toStrictEqual([{ link: "https://page.example/", purpose: asPage }]);
+  });
+});
