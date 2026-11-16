@@ -707,18 +707,18 @@ describe("the video file a page names", () => {
     expect(page.video).toStrictEqual({ link: STREAMABLE, type: "video/mp4" });
   });
 
-  it("prefers og:video:secure_url, then og:video:url, then og:video", () => {
+  it("prefers an entry's og:video:secure_url to its own address, og:video or og:video:url", () => {
     const type = `<meta property="og:video:type" content="video/webm">`;
 
-    expect(
-      read(`${type}<meta property="og:video" content="https://c.example/v.webm">
-        <meta property="og:video:url" content="https://b.example/v.webm">
-        <meta property="og:video:secure_url" content="https://a.example/v.webm">`).video
-    ).toStrictEqual({ link: "https://a.example/v.webm", type: "video/webm" });
-    expect(
-      read(`${type}<meta property="og:video" content="https://c.example/v.webm">
-        <meta property="og:video:url" content="https://b.example/v.webm">`).video?.link
-    ).toBe("https://b.example/v.webm");
+    expect({
+      secure: read(`<meta property="og:video" content="http://c.example/v.webm">
+        <meta property="og:video:secure_url" content="https://a.example/v.webm">${type}`).video,
+      url: read(`<meta property="og:video:url" content="https://b.example/v.webm">${type}`).video
+        ?.link,
+    }).toStrictEqual({
+      secure: { link: "https://a.example/v.webm", type: "video/webm" },
+      url: "https://b.example/v.webm",
+    });
   });
 
   it("keeps the type's essence, lower-cased, without its parameters", () => {
@@ -765,6 +765,38 @@ describe("the video file a page names", () => {
         named("audio/mpeg"),
       ].filter((video) => video !== undefined)
     ).toStrictEqual([]);
+  });
+
+  it("keeps each og:video entry's own address and type, as OpenGraph arrays them", () => {
+    const player = "https://example.com/embed/1";
+
+    expect({
+      // A file, then a player whose secure address follows it: the file at its own address.
+      fileFirst: read(`<meta property="og:video" content="${GIPHY}">
+        <meta property="og:video:type" content="video/mp4">
+        <meta property="og:video" content="${player}">
+        <meta property="og:video:secure_url" content="${player}">
+        <meta property="og:video:type" content="text/html">`).video,
+      // A player, then a file: the file, found past the player.
+      playerFirst: read(`<meta property="og:video" content="${player}">
+        <meta property="og:video:secure_url" content="${player}">
+        <meta property="og:video:type" content="text/html">
+        <meta property="og:video" content="${GIPHY}">
+        <meta property="og:video:type" content="video/mp4">`).video,
+      // og:video:url repeating og:video is the same entry.
+      repeated: read(`<meta property="og:video" content="${GIPHY}">
+        <meta property="og:video:url" content="${GIPHY}">
+        <meta property="og:video:type" content="video/mp4">`).video,
+      // An entry's type is its own: the address after it takes none of it.
+      typeOfAnother: read(`<meta property="og:video" content="${player}">
+        <meta property="og:video:type" content="video/mp4">
+        <meta property="og:video" content="${GIPHY}">`).video?.link,
+    }).toStrictEqual({
+      fileFirst: { link: GIPHY, type: "video/mp4" },
+      playerFirst: { link: GIPHY, type: "video/mp4" },
+      repeated: { link: GIPHY, type: "video/mp4" },
+      typeOfAnother: player,
+    });
   });
 
   it("is absent when the page names no video address", () => {

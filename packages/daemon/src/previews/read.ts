@@ -334,6 +334,7 @@ interface Gathered {
   readonly titleText: string | undefined;
   readonly baseHref: string | undefined;
   readonly oembedHref: string | undefined;
+  readonly videos: readonly VideoEntry[];
 }
 
 const OEMBED_TYPE = "application/json+oembed";
@@ -344,10 +345,67 @@ const isOembedLink = (attrs: ReadonlyMap<string, string>): boolean =>
     .split(/[ \t\n\r\f]+/u)
     .includes("alternate") && (attrs.get("type") ?? "").trim().toLowerCase() === OEMBED_TYPE;
 
-// The first value of each `<meta>` key, the `<title>` text, the `<base href>` and the first
-// oEmbed `<link href>`, entities decoded.
+/**
+ * One `og:video` a page names, as OpenGraph structures an array: its own address, and the
+ * secure address and type the tags after it give it, until the next one starts.
+ */
+interface VideoEntry {
+  root?: string;
+  secure?: string;
+  type?: string;
+}
+
+const VIDEO_ROOTS: ReadonlySet<string> = new Set(["og:video", "og:video:url"]);
+
+const VIDEO_FIELDS: ReadonlyMap<string, "secure" | "type"> = new Map([
+  ["og:video:secure_url", "secure"],
+  ["og:video:type", "type"],
+]);
+
+/**
+ * A `<meta>` tag folded into a page's video entries: an address starts the next entry, unless
+ * it is the one the entry already has, as `og:video:url` repeating `og:video` is; a secure
+ * address or a type belongs to the entry before it, and only its first counts.
+ * @param videos - The entries so far, which it adds to.
+ * @param key - The tag's key.
+ * @param given - Its value, entities decoded; one that is only space counts for nothing.
+ */
+const foldVideo = (videos: VideoEntry[], key: string, given: string): void => {
+  const value = tidy(given);
+  const current = videos.at(-1);
+
+  if (value === undefined) {
+    return;
+  }
+
+  if (VIDEO_ROOTS.has(key)) {
+    if (current === undefined || (current.root !== undefined && current.root !== value)) {
+      videos.push({ root: value });
+    } else {
+      current.root ??= value;
+    }
+
+    return;
+  }
+
+  const field = VIDEO_FIELDS.get(key);
+
+  if (field === undefined) {
+    return;
+  }
+
+  if (current === undefined) {
+    videos.push({ [field]: value });
+  } else {
+    current[field] ??= value;
+  }
+};
+
+// The first value of each `<meta>` key, the page's video entries in order, the `<title>`
+// text, the `<base href>` and the first oEmbed `<link href>`, entities decoded.
 const gather = (text: string): Gathered => {
   const meta = new Map<string, string>();
+  const videos: VideoEntry[] = [];
   let titleText: string | undefined;
   let baseHref: string | undefined;
   let oembedHref: string | undefined;
@@ -374,14 +432,20 @@ const gather = (text: string): Gathered => {
       );
 
       for (const key of new Set(keys)) {
-        if (key !== undefined && tidy(meta.get(key)) === undefined) {
-          meta.set(key, decodeHTMLAttribute(content));
+        if (key !== undefined) {
+          const value = decodeHTMLAttribute(content);
+
+          foldVideo(videos, key, value);
+
+          if (tidy(meta.get(key)) === undefined) {
+            meta.set(key, value);
+          }
         }
       }
     }
   }
 
-  return { baseHref, meta, oembedHref, titleText };
+  return { baseHref, meta, oembedHref, titleText, videos };
 };
 
 interface Draft {
@@ -440,20 +504,17 @@ const playersOf = (meta: ReadonlyMap<string, string>, base: string): PlayerCandi
 
 const VIDEO_TYPE = /^video\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u;
 
-// The video file a page names: its first address, with the essence of the type it gives it.
-// `text/html`, as YouTube says of its player, a missing type, or one that is not a plain
-// `video/*` is a player in a frame at most, never a file.
-const videoOf = (meta: ReadonlyMap<string, string>, base: string): PageVideo | undefined => {
-  const type = (firstOf(meta, ["og:video:type"])?.split(";")[0] ?? "").trim().toLowerCase();
+// The video file a page names: the first of its `og:video` entries whose own type is a
+// plain `video/*`, at its own secure address or else its own address, with that type's
+// essence. `text/html`, as YouTube says of its player, a missing type, or one that is not a
+// plain `video/*` is a player in a frame at most, never a file, and an entry never takes
+// another's address or type.
+const videoOf = (videos: readonly VideoEntry[], base: string): PageVideo | undefined => {
+  for (const entry of videos) {
+    const type = (entry.type?.split(";")[0] ?? "").trim().toLowerCase();
+    const link = httpAddress(entry.secure, base) ?? httpAddress(entry.root, base);
 
-  if (!VIDEO_TYPE.test(type)) {
-    return undefined;
-  }
-
-  for (const key of ["og:video:secure_url", "og:video:url", "og:video"]) {
-    const link = httpAddress(firstOf(meta, [key]), base);
-
-    if (link !== undefined) {
+    if (VIDEO_TYPE.test(type) && link !== undefined) {
       return { link, type };
     }
   }
@@ -473,7 +534,7 @@ export const readPage = (input: {
   readonly contentType: string | undefined;
   readonly link: string;
 }): PageRead => {
-  const { meta, titleText, baseHref, oembedHref } = gather(
+  const { meta, titleText, baseHref, oembedHref, videos } = gather(
     decodeHead(input.head, input.contentType)
   );
 
@@ -501,7 +562,7 @@ export const readPage = (input: {
 
   const page: Draft = {};
   const players = playersOf(meta, base);
-  const video = videoOf(meta, base);
+  const video = videoOf(videos, base);
 
   if (title !== undefined) {
     page.title = title;
