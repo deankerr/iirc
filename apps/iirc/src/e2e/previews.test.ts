@@ -169,6 +169,133 @@ const page = (title: string) =>
   `<meta property="og:description" content="Cats, and the people who keep them.">` +
   `<meta property="og:site_name" content="Cat Fixture"></head><body>${title}</body></html>`;
 
+/**
+ * A short sound: one second of a sine tone, as a 16-bit mono PCM WAV file.
+ * @returns The file's bytes.
+ */
+const toneWav = () => {
+  const rate = 8000;
+  const samples = rate;
+  const bytes = Buffer.alloc(44 + samples * 2);
+
+  bytes.write("RIFF", 0);
+  bytes.writeUInt32LE(36 + samples * 2, 4);
+  bytes.write("WAVEfmt ", 8);
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(rate, 24);
+  bytes.writeUInt32LE(rate * 2, 28);
+  bytes.writeUInt16LE(2, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write("data", 36);
+  bytes.writeUInt32LE(samples * 2, 40);
+
+  for (let index = 0; index < samples; index += 1) {
+    bytes.writeInt16LE(
+      Math.round(8000 * Math.sin((2 * Math.PI * 440 * index) / rate)),
+      44 + index * 2
+    );
+  }
+
+  return new Uint8Array(bytes);
+};
+
+/**
+ * A short video, made by the browser itself so that no binary is kept: three seconds of
+ * moving colour, drawn on a canvas and recorded as VP8 WebM.
+ * @param browser - The browser that records it.
+ * @returns The file's bytes.
+ */
+const recordClip = async (browser: Browser) => {
+  const recorder = await browser.newPage();
+
+  try {
+    const bytes = await recorder.evaluate(async () => {
+      const canvas = document.createElement("canvas");
+
+      canvas.width = 320;
+      canvas.height = 180;
+
+      const context = canvas.getContext("2d");
+
+      if (context === null) {
+        throw new Error("no canvas");
+      }
+
+      const media = new MediaRecorder(canvas.captureStream(15), {
+        mimeType: "video/webm;codecs=vp8",
+      });
+
+      const chunks: Blob[] = [];
+
+      media.addEventListener("dataavailable", (event) => chunks.push(event.data));
+
+      const { promise: stopped, resolve: stop } = Promise.withResolvers<undefined>();
+
+      media.addEventListener("stop", () => {
+        stop(undefined);
+      });
+
+      media.start();
+
+      let frame = 0;
+
+      const drawing = setInterval(() => {
+        context.fillStyle = `hsl(${(frame * 20) % 360} 70% 50%)`;
+        context.fillRect(0, 0, 320, 180);
+        context.fillStyle = "#fff";
+        context.fillRect(10 + ((frame * 8) % 290), 80, 20, 20);
+        frame += 1;
+      }, 66);
+
+      const { promise: recorded, resolve: record } = Promise.withResolvers<undefined>();
+
+      setTimeout(() => {
+        record(undefined);
+      }, 3000);
+      await recorded;
+      clearInterval(drawing);
+      media.stop();
+      await stopped;
+
+      return [...new Uint8Array(await new Blob(chunks).arrayBuffer())];
+    });
+
+    return new Uint8Array(bytes);
+  } finally {
+    await recorder.close();
+  }
+};
+
+/**
+ * Serves a file as a host that honours one `Range`.
+ * @param request - The request.
+ * @param file - The file's bytes and media type.
+ * @returns The answer: `206` with `Content-Range` for a range, `200` otherwise.
+ */
+const served = (
+  request: Request,
+  file: { readonly bytes: Uint8Array<ArrayBuffer>; readonly type: string }
+) => {
+  const { bytes, type } = file;
+  const headers = { "accept-ranges": "bytes", "content-type": type };
+  const range = /^bytes=(?<from>\d*)-(?<to>\d*)$/u.exec(request.headers.get("range") ?? "");
+
+  if (range?.groups === undefined) {
+    return new Response(bytes, { headers });
+  }
+
+  const { from = "", to = "" } = range.groups;
+  const first = from === "" ? Math.max(0, bytes.length - Number(to)) : Number(from);
+  const last = from === "" || to === "" ? bytes.length - 1 : Math.min(Number(to), bytes.length - 1);
+
+  return new Response(bytes.slice(first, last + 1), {
+    headers: { ...headers, "content-range": `bytes ${first}-${last}/${bytes.length}` },
+    status: 206,
+  });
+};
+
 describe("a link's Preview, end to end", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "iirc-previews-"));
   let browser: Browser | undefined;
@@ -625,6 +752,197 @@ describe("a link's Preview, end to end", () => {
       await Effect.runPromise(Scope.close(scope, Exit.void));
       await fixture.stop(true);
       await Promise.all([minio.stop(), ircd.stop()]);
+    }
+  }, 120_000);
+
+  it("plays a video and a sound link in place, fetching nothing from the host until a press", async () => {
+    if (browser === undefined) {
+      throw new Error("no browser");
+    }
+
+    const video = { bytes: await recordClip(browser), type: "video/webm" };
+    const sound = { bytes: toneWav(), type: "audio/wav" };
+    const asked: { readonly path: string; readonly range: string | null }[] = [];
+
+    const fixture = Bun.serve({
+      fetch: (request) => {
+        const { pathname } = new URL(request.url);
+
+        asked.push({ path: pathname, range: request.headers.get("range") });
+
+        if (pathname === "/clip.webm") {
+          return served(request, video);
+        }
+
+        if (pathname === "/tone.wav") {
+          return served(request, sound);
+        }
+
+        return new Response("", { status: 404 });
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    const ircd = await startNgircd();
+    const channel = "#media";
+
+    const scope = await Effect.runPromise(Scope.make());
+
+    try {
+      const stack = await startStack({
+        channel,
+        dataDir: path.join(directory, "media-data"),
+        fixturePort: fixture.port ?? 0,
+        ircd,
+        scope,
+      });
+
+      const { api, peer } = stack;
+      const site = `http://127.0.0.1:${fixture.port}`;
+      const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
+
+      const { page: tab, problems } = await watchedPage(browser);
+
+      const streamed: { readonly headers: Record<string, string>; readonly status: number }[] = [];
+
+      tab.on("response", (response) => {
+        if (new URL(response.url()).pathname.endsWith("/stream")) {
+          streamed.push({ headers: response.headers(), status: response.status() });
+        }
+      });
+
+      const log = await openChannel(tab, stack, channel);
+
+      await expect
+        .poll(
+          async () => {
+            peer.send(`PRIVMSG ${channel} :hello`);
+
+            return await log.getByText("hello").count();
+          },
+          { interval: 500, timeout: 20_000 }
+        )
+        .toBeGreaterThan(0);
+
+      peer.send(`PRIVMSG ${channel} :clip ${site}/clip.webm`);
+      peer.send(`PRIVMSG ${channel} :sound ${site}/tone.wav`);
+
+      const player = log.locator('video[data-preview-media="video"]');
+      const listener = log.locator('audio[data-preview-media="audio"]');
+
+      await player.waitFor();
+      await listener.waitFor();
+
+      // Each is shot as its whole message, the link and its Preview.
+      const clipRow = log.locator("[data-index]").filter({ hasText: "clip " });
+      const soundRow = log.locator("[data-index]").filter({ hasText: "sound " });
+
+      const drawn = {
+        audio: {
+          preload: await listener.getAttribute("preload"),
+          src: await listener.getAttribute("src"),
+        },
+        video: {
+          preload: await player.getAttribute("preload"),
+          src: await player.getAttribute("src"),
+        },
+      };
+
+      // Given the players a moment to fetch what they should not.
+      await tab.waitForTimeout(1500);
+
+      const beforePress = [...asked];
+
+      await shoot(clipRow, "after-video-controls.png");
+      await shoot(soundRow, "after-sound-controls.png");
+
+      // Pressed: the video plays.
+      await player.evaluate(async (one: HTMLVideoElement) => {
+        await one.play();
+      });
+
+      await expect
+        .poll(async () => await player.evaluate((one: HTMLVideoElement) => one.currentTime), {
+          timeout: 20_000,
+        })
+        .toBeGreaterThan(0.3);
+
+      await shoot(clipRow, "after-video-playing.png");
+
+      const played = await player.evaluate((one: HTMLVideoElement) => ({
+        error: one.error?.message ?? null,
+        height: one.videoHeight,
+        paused: one.paused,
+      }));
+
+      // And the sound.
+      await listener.evaluate(async (one: HTMLAudioElement) => {
+        await one.play();
+      });
+
+      await expect
+        .poll(async () => await listener.evaluate((one: HTMLAudioElement) => one.currentTime), {
+          timeout: 20_000,
+        })
+        .toBeGreaterThan(0.2);
+
+      await shoot(soundRow, "after-sound-playing.png");
+
+      const heard = await listener.evaluate((one: HTMLAudioElement) => ({
+        error: one.error?.message ?? null,
+      }));
+
+      const afterPress = asked.slice(beforePress.length);
+      const pathsAfter = new Set(afterPress.map((request) => request.path));
+
+      const streamRoute = /^\/api\/previews\/[^/]+\/stream\?/u;
+
+      expect({
+        afterPress: {
+          audioRange: afterPress.some(
+            (request) => request.path === "/tone.wav" && request.range !== null
+          ),
+          paths: [...pathsAfter].toSorted(),
+          videoRange: afterPress.some(
+            (request) => request.path === "/clip.webm" && request.range !== null
+          ),
+        },
+        beforePress: {
+          ranged: beforePress.filter((request) => request.range !== null),
+          // Only each Preview's own fetch of the link, headers read and the body left.
+          reads: beforePress.map((request) => request.path).toSorted(),
+        },
+        drawn: {
+          audio: { preload: drawn.audio.preload, stream: streamRoute.test(drawn.audio.src ?? "") },
+          video: { preload: drawn.video.preload, stream: streamRoute.test(drawn.video.src ?? "") },
+        },
+        heard,
+        on,
+        played: { ...played, height: played.height > 0 },
+        // The page asks who is signed in before anyone is, and is told no.
+        problems: problems.filter((problem) => !problem.includes("401")),
+        streamedOk:
+          streamed.length > 0 && streamed.every((one) => one.status === 200 || one.status === 206),
+      }).toStrictEqual({
+        afterPress: { audioRange: true, paths: ["/clip.webm", "/tone.wav"], videoRange: true },
+        beforePress: { ranged: [], reads: ["/clip.webm", "/tone.wav"] },
+        drawn: {
+          audio: { preload: "none", stream: true },
+          video: { preload: "none", stream: true },
+        },
+        heard: { error: null },
+        on: 200,
+        played: { error: null, height: true, paused: false },
+        problems: [],
+        streamedOk: true,
+      });
+
+      peer.close();
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await fixture.stop(true);
+      await ircd.stop();
     }
   }, 120_000);
 });
