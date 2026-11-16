@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import { NetworkId, TimelineId } from "@iirc/api";
+import { NetworkId, TimelineId, uiDefaults } from "@iirc/api";
 import type { Timeline } from "@iirc/api";
 import { openOf } from "@iirc/frontend/timelines";
 import { Redacted, Schema } from "effect";
@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { perform } from "../composer/atoms.ts";
+import { optionsState } from "../options/atoms.ts";
+import { uiSync } from "../options/ui.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice } from "../page/device.ts";
 import { drawerState } from "../page/drawer.ts";
@@ -331,7 +333,7 @@ const names = () => rows().map((one) => one.querySelector("bdi")?.textContent);
 const chooseFromMenu = async (text: string) => {
   await settled(() => document.querySelector('[role="menu"]') !== null);
 
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+  const item = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(
     (one) => one.textContent === text
   );
 
@@ -405,8 +407,8 @@ describe("closing a Timeline from the sidebar", () => {
       back: [["libera", "#iirc", "#other", "peer"], "peer, 1 unread"],
       closed: ["libera", "#iirc", "#other"],
       closes: [{ network: "libera", target: "peer" }],
-      // A Network's own row has no menu, and every Channel's and Direct Message's does.
-      menus: [false, true, true, true],
+      // Every Timeline's row has a menu, a Network's own too.
+      menus: [true, true, true, true],
     });
   });
 
@@ -604,6 +606,108 @@ describe("closing a Timeline from the sidebar", () => {
       after: ["libera", "#iirc", "#other"],
       before: ["libera", "#iirc", "#other"],
       opened: [["libera", "#iirc", "#other", "peer"], "true"],
+    });
+  });
+});
+
+/**
+ * The Previews the menu open marks as the Timeline's choice.
+ * @returns Their text, with the mark.
+ */
+const marked = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')].map(
+    (one) => one.textContent
+  );
+
+describe("a Timeline's own Previews, from the sidebar", () => {
+  afterEach(() => {
+    for (const unmount of mounted.splice(0)) {
+      act(unmount);
+    }
+
+    localStorage.clear();
+  });
+
+  it("sets a Timeline's choice from its menu, sending the option whole from the sequence read, and marks the one in force", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.ui = {
+      options: { ...uiDefaults, "previews.timelines": { [other]: "off" } },
+      sequence: 4,
+    };
+
+    const registry = await signedIn(undefined, fake);
+
+    registry.mount(uiSync);
+    await settled(() => registry.get(optionsState).ui !== undefined);
+
+    await pressButton("More for #iirc");
+    await settled(() => document.querySelector('[role="menu"]') !== null);
+
+    const before = marked();
+
+    await chooseFromMenu("on");
+    await settled(() => fake.daemon.ui.sequence !== 4);
+    await pressButton("More for #other");
+    await settled(() => document.querySelector('[role="menu"]') !== null);
+
+    const otherMarked = marked();
+
+    await chooseFromMenu("default");
+    await settled(() => fake.daemon.uiChanges.length === 2);
+
+    expect({
+      before,
+      changes: fake.daemon.uiChanges,
+      network: buttonNamed("More for libera") !== undefined,
+      now: fake.daemon.ui.options["previews.timelines"],
+      otherMarked,
+    }).toStrictEqual({
+      before: ["✓default"],
+      changes: [
+        { ifSequence: "4", route: "PUT previews.timelines" },
+        { ifSequence: String(fake.daemon.ui.sequence - 1), route: "PUT previews.timelines" },
+      ],
+      network: true,
+      now: { [iirc]: "on" },
+      otherMarked: ["✓off"],
+    });
+  });
+
+  it("makes the choice once more from the options read again after a conflict", async () => {
+    const fake = fakeDaemon();
+
+    fake.daemon.ui = { options: uiDefaults, sequence: 4 };
+
+    const registry = await signedIn(undefined, fake);
+
+    registry.mount(uiSync);
+    await settled(() => registry.get(optionsState).ui !== undefined);
+
+    // Another device chooses for #other between this one's read and its change.
+    fake.daemon.holdUiReads = true;
+    await pressButton("More for #iirc");
+    await chooseFromMenu("links only");
+    await settled(() => fake.daemon.uiReadsHeld.length === 1);
+    fake.daemon.ui = {
+      options: { ...uiDefaults, "previews.timelines": { [other]: "off" } },
+      sequence: 9,
+    };
+    fake.daemon.holdUiReads = false;
+    await doing(() => {
+      for (const release of fake.daemon.uiReadsHeld.splice(0)) {
+        release();
+      }
+    });
+    await settled(() => fake.daemon.uiChanges.length === 2);
+    await settled(() => fake.daemon.ui.sequence !== 9);
+
+    expect({
+      changes: fake.daemon.uiChanges.map((one) => one.ifSequence),
+      now: fake.daemon.ui.options["previews.timelines"],
+    }).toStrictEqual({
+      changes: ["4", "9"],
+      now: { [iirc]: "links only", [other]: "off" },
     });
   });
 });

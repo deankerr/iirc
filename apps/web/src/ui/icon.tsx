@@ -17,6 +17,8 @@ const glyphs = {
   attach: "+",
   /** Takes a photo with the device's camera, as a lens is drawn. */
   camera: "◉",
+  /** The choice in force among a few, as a menu marks it. */
+  chosen: "✓",
   /** Puts away what stands in front, or lets a notice go. */
   close: "×",
   /** A Network's Timelines are hidden under it. */

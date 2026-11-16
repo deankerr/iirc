@@ -8,7 +8,7 @@
  */
 import type { ActionRequest, ChannelHeader, Level, NetworkId, TimelineId } from "@iirc/api";
 import type { OwnerOptionName } from "@iirc/api/options";
-import type { ThemeName, UiOptionName } from "@iirc/api/ui";
+import type { PreviewsShown, ThemeName, UiOptionName } from "@iirc/api/ui";
 import type { Casemapping } from "@iirc/protocol/casemapping";
 
 import { rank } from "./activity.ts";
@@ -196,6 +196,9 @@ export interface Act {
  * - `ListThemes`: open the palette on the themes alone, each drawn while it is
  *   highlighted, where choosing one sets `option` to it.
  * - `ImportTheme`: open the dialog that reads a theme from a terminal's theme file.
+ * - `ChoosePreviews`: set a Timeline's own choice in `ui.previews.timelines` to `mode`, or
+ *   remove it with none, so it follows `ui.previews`: the option read, the choice made,
+ *   and the option sent whole, made once more after a conflict, as `EditThemes` is.
  * - `PromptCredential`: ask for a Credential option's value in a password prompt, which
  *   gives it to the Vault and points the option at it: a Network's, by its Network and
  *   path, or one under `store` or `uploads`, by its name. A value never goes through the
@@ -254,6 +257,11 @@ export type Intent =
   | { readonly _tag: "EditThemes"; readonly edit: ThemesEdit }
   | { readonly _tag: "ListThemes"; readonly option: ThemeOption }
   | { readonly _tag: "ImportTheme" }
+  | {
+      readonly _tag: "ChoosePreviews";
+      readonly timeline: TimelineId;
+      readonly mode: PreviewsShown | undefined;
+    }
   | ({ readonly _tag: "PromptCredential" } & Asked)
   | { readonly _tag: "Open"; readonly timeline: TimelineId }
   | { readonly _tag: "Latest"; readonly timeline: TimelineId }
@@ -1170,6 +1178,28 @@ const notifyArguments = (args: string): Parsed<boolean> => {
   }
 
   return invalid("Use /notify on or /notify off.");
+};
+
+/** Each word `/previews` takes, and the choice it makes, none returning to `ui.previews`. */
+const previewsWords: ReadonlyMap<string, PreviewsShown | undefined> = new Map([
+  ["default", undefined],
+  ["links", "links only"],
+  ["links only", "links only"],
+  ["off", "off"],
+  ["on", "on"],
+]);
+
+/**
+ * What `/previews` was given: `off`, `links`, `on`, or `default`, in any case.
+ * @param args - The text after `/previews`.
+ * @returns The Timeline's own choice, none to follow `ui.previews`, or why it cannot tell.
+ */
+const previewsArguments = (args: string): Parsed<PreviewsShown | undefined> => {
+  const said = args.trim().toLowerCase().replaceAll(/\s+/gu, " ");
+
+  return previewsWords.has(said)
+    ? parsed(previewsWords.get(said))
+    : invalid("Use /previews off, links, on, or default.");
 };
 
 /**
@@ -2401,6 +2431,20 @@ export const commands: readonly Command[] = [
     parse: readArguments,
     usage: "/read [all]",
     when: [],
+  }),
+  command({
+    aliases: [],
+    arguments: "Required",
+    description:
+      "Choose whether the open Timeline's links are previewed, over ui.previews, for every device: off, links only, on, or default to follow ui.previews. A Direct Message chosen links or on is previewed without a press.",
+    id: "previews.choose",
+    intents: (mode: PreviewsShown | undefined, focus) => [
+      { _tag: "ChoosePreviews", mode, timeline: focus.timeline },
+    ],
+    name: "previews",
+    parse: previewsArguments,
+    usage: "/previews off|links|on|default",
+    when: focused,
   }),
   unfocused({
     aliases: [],

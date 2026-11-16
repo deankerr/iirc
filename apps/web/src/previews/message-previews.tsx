@@ -1,21 +1,22 @@
 /**
  * A Message's Previews, under its text behind a left rule, one row each: a pulsing
  * placeholder while pending, a ready one's site and title on one line, which a press opens
- * to its description, and a failed one as the plain link, saying why on hover. Its
+ * to its description, a failed one as the plain link, saying why on hover, and one the
+ * Daemon holds for a press as the plain link and "show preview", which fetches it. Its
  * Previews are asked for only once the Message scrolls into view, as an intersection
- * observer sees it, never ahead.
+ * observer sees it, never ahead, and only while its Timeline's mode asks.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
-import { mayPreview, previewsOf } from "@iirc/frontend/previews";
+import { mayPreview, modeIn, previewsOf } from "@iirc/frontend/previews";
 import type { ImageShown, LinkShown, PreviewShown } from "@iirc/frontend/previews";
 import type { ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
-import { previewsMode, previewsShown, previewsState } from "./atoms.ts";
+import { pressPreview, previewsModes, previewsShown, previewsState } from "./atoms.ts";
 
 import styles from "./message-previews.module.css";
 
@@ -113,10 +114,16 @@ const ReadyText = ({
 
 /**
  * One Preview.
- * @param props - The Preview, as drawn.
+ * @param props - The Preview, as drawn, and what presses a link waiting for it.
  * @returns Its row.
  */
-const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
+const PreviewRow = ({
+  onPress,
+  shown,
+}: {
+  readonly shown: PreviewShown;
+  readonly onPress: (link: number) => void;
+}) => {
   switch (shown._tag) {
     case "Pending": {
       return (
@@ -163,6 +170,24 @@ const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
       );
     }
 
+    // Pressed twice, the second press is refused, and the Message is asked for again.
+    case "Waiting": {
+      return (
+        <div className={styles.waiting} data-preview="waiting">
+          <PlainLink link={shown.link} title={undefined} />
+          <AriaButton
+            aria-label={`Show a preview of ${shown.link.text}`}
+            className={styles.press}
+            onPress={() => {
+              onPress(shown.index);
+            }}
+          >
+            show preview
+          </AriaButton>
+        </div>
+      );
+    }
+
     default: {
       return shown satisfies never;
     }
@@ -175,11 +200,13 @@ const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
  * @returns Its Previews, or nothing.
  */
 export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
-  const mode = useAtomValue(previewsMode);
+  const modes = useAtomValue(previewsModes);
   const state = useAtomValue(previewsState);
   const show = useAtomSet(previewsShown);
+  const press = useAtomSet(pressPreview);
   const block = useRef<HTMLUListElement>(null);
   const { content, position, timeline } = item;
+  const mode = modeIn(modes, timeline);
   const watched = mayPreview(mode, content);
 
   const shown = useMemo(
@@ -219,7 +246,12 @@ export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
     <ul aria-label="Previews" className={styles.previews} ref={block}>
       {shown.map((one) => (
         <li className={styles.row} key={one.key}>
-          <PreviewRow shown={one} />
+          <PreviewRow
+            onPress={(link) => {
+              press({ link, position, timeline });
+            }}
+            shown={one}
+          />
         </li>
       ))}
     </ul>

@@ -7,7 +7,7 @@ import { BunServices } from "@effect/platform-bun";
 import { layerDaemon } from "@iirc/daemon";
 import { connectPeer, layerLoopbackLinkFetch, startMinio, startNgircd } from "@iirc/daemon/testing";
 import type { Ircd } from "@iirc/daemon/testing";
-import { Context, Effect, Exit, Layer, Scope } from "effect";
+import { Context, Effect, Exit, Layer, Schema, Scope } from "effect";
 import { HttpServer } from "effect/http";
 import { chromium } from "playwright";
 import type { Browser, Locator, Page } from "playwright";
@@ -153,6 +153,15 @@ const status = async (response: Promise<Response>) => {
 
   return code;
 };
+
+/** Each Timeline's own choice of Previews, from the `ui` options read. */
+const decodeChoices = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      options: Schema.Struct({ "previews.timelines": Schema.Record(Schema.String, Schema.String) }),
+    })
+  )
+);
 
 const page = (title: string) =>
   `<!doctype html><html><head><meta charset="utf-8"><title>ignored</title>` +
@@ -350,6 +359,134 @@ describe("a link's Preview, end to end", () => {
       peer.close();
     } finally {
       release();
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await fixture.stop(true);
+      await ircd.stop();
+    }
+  }, 90_000);
+
+  it("holds a Direct Message's link for a press, fetches it once pressed, and takes a Timeline's own choice from its menu", async () => {
+    if (browser === undefined) {
+      throw new Error("no browser");
+    }
+
+    const asked: string[] = [];
+
+    const fixture = Bun.serve({
+      fetch: (request) => {
+        const { pathname } = new URL(request.url);
+
+        asked.push(pathname);
+
+        return new Response(page(pathname === "/dogs" ? "All about dogs" : "All about cats"), {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    const ircd = await startNgircd();
+    const channel = "#direct";
+
+    const scope = await Effect.runPromise(Scope.make());
+
+    try {
+      const stack = await startStack({
+        channel,
+        dataDir: path.join(directory, "direct-data"),
+        fixturePort: fixture.port ?? 0,
+        ircd,
+        scope,
+      });
+
+      const { api, peer } = stack;
+      const site = `http://127.0.0.1:${fixture.port}`;
+      const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "links only" })));
+
+      const { page: tab, problems } = await watchedPage(browser);
+      const log = await openChannel(tab, stack, channel);
+
+      await expect
+        .poll(
+          async () => {
+            peer.send(`PRIVMSG ${channel} :hello`);
+
+            return await log.getByText("hello").count();
+          },
+          { interval: 500, timeout: 20_000 }
+        )
+        .toBeGreaterThan(0);
+
+      // A stranger's link in a Direct Message waits for a press, and nothing is fetched.
+      peer.send(`PRIVMSG iirc :look ${site}/cats`);
+
+      const row = tab.getByRole("row", { name: /^peer/u });
+
+      await row.click();
+
+      const direct = tab.getByRole("log", { name: "peer" });
+      const said = direct.locator("[data-index]").filter({ hasText: "look " });
+      const press = said.getByRole("button", { name: `Show a preview of ${site}/cats` });
+
+      await press.waitFor();
+
+      const waiting = {
+        asked: [...asked],
+        shown: await said.locator('[data-preview="waiting"]').textContent(),
+      };
+
+      await shoot(said, "direct-waiting.png");
+
+      // Pressed: fetched, and its Preview shows.
+      await press.click();
+      await said.getByRole("button", { name: "Cat Fixture · All about cats" }).waitFor();
+      await shoot(said, "direct-pressed.png");
+
+      // The Timeline's menu chooses on for it, for every device.
+      await row.click({ button: "right" });
+
+      const menu = tab.getByRole("menu");
+
+      await menu.waitFor();
+
+      const marked = await menu
+        .locator('[role="menuitemradio"][aria-checked="true"]')
+        .textContent();
+
+      await shoot(menu, "direct-menu.png");
+      await menu.getByRole("menuitemradio", { exact: true, name: "on" }).click();
+
+      const chosen = async () => {
+        const read = await fetch(`${stack.base}/api/ui`, {
+          headers: { authorization: `Bearer ${stack.key}` },
+        });
+
+        return Object.values(decodeChoices(await read.text()).options["previews.timelines"]);
+      };
+
+      await expect.poll(chosen, { timeout: 10_000 }).toStrictEqual(["on"]);
+
+      // Chosen on, a new link there is fetched unpressed.
+      peer.send(`PRIVMSG iirc :and ${site}/dogs`);
+      await direct.getByRole("button", { name: "Cat Fixture · All about dogs" }).waitFor();
+
+      expect({
+        asked,
+        marked,
+        on,
+        problems: problems.filter((problem) => !problem.includes("401")),
+        waiting,
+      }).toStrictEqual({
+        asked: ["/cats", "/dogs"],
+        marked: "✓default",
+        on: 200,
+        problems: [],
+        waiting: { asked: [], shown: `${site}/catsshow preview` },
+      });
+
+      peer.close();
+    } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));
       await fixture.stop(true);
       await ircd.stop();

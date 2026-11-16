@@ -214,16 +214,21 @@ const layOut = () => {
  * with a link to a page, which the Daemon answers for with the item given.
  * @param previews - `ui.previews`.
  * @param answer - What the Daemon answers for the Message, as it stands then.
+ * @param timelines - `ui.previews.timelines`, none unless given.
  * @returns The fake, and the page.
  */
 const opened = async (
   previews: "off" | "links only" | "on",
-  answer: typeof PreviewItem.Encoded = catsItem({ _tag: "Pending" })
+  answer: typeof PreviewItem.Encoded = catsItem({ _tag: "Pending" }),
+  timelines: { readonly [timeline: string]: "off" | "links only" | "on" } = {}
 ) => {
   const fake = fakeDaemon();
 
   fake.daemon.signedIn = true;
-  fake.daemon.ui = { options: { ...uiDefaults, previews }, sequence: 1 };
+  fake.daemon.ui = {
+    options: { ...uiDefaults, previews, "previews.timelines": timelines },
+    sequence: 1,
+  };
   fake.daemon.through = 2;
   fake.daemon.previews.set(cursor(2), [answer]);
   fake.daemon.timelines.set("libera", [
@@ -486,6 +491,56 @@ describe("a Message's Previews", () => {
       state: drawn()[0]?.state,
       text: summaryLine(),
     }).toStrictEqual({ image: null, state: "ready", text: "example.com · Cats" });
+  });
+
+  it("shows a link waiting for a press with a press, which fetches it, and its Preview arrives", async () => {
+    const { daemon, sendPreview } = await opened(
+      "links only",
+      catsItem({ _tag: "WaitingForPress" })
+    );
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "waiting");
+
+    const waiting = { drawn: drawn(), presses: [...daemon.presses] };
+    const press = list()?.querySelector<HTMLButtonElement>("button");
+
+    await act(async () => {
+      press?.click();
+      await Promise.resolve();
+    });
+    await settled(() => drawn()[0]?.state === "pending");
+    await act(async () => {
+      sendPreview(catsItem(ready));
+      await Promise.resolve();
+    });
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect({
+      label: press?.getAttribute("aria-label"),
+      presses: daemon.presses,
+      text: summaryLine(),
+      waiting,
+    }).toStrictEqual({
+      label: "Show a preview of https://example.com/cats",
+      presses: [{ link: 0, position: cursor(2), timeline: iirc }],
+      text: "example.com · Cats",
+      waiting: {
+        drawn: [{ state: "waiting", text: "https://example.com/catsshow preview" }],
+        presses: [],
+      },
+    });
+  });
+
+  it("follows a Timeline's own choice over ui.previews", async () => {
+    const { daemon } = await opened("off", catsItem({ _tag: "Pending" }), { [iirc]: "links only" });
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => daemon.previewAsks.length === 1);
+
+    expect(daemon.previewAsks).toStrictEqual([{ position: cursor(2), timeline: iirc }]);
   });
 
   it("under off, shows nothing, follows nothing, and asks nothing", async () => {

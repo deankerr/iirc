@@ -233,6 +233,7 @@ describe("the palette's entries", () => {
         "command:timeline.previous",
         "command:timeline.unread",
         "command:timeline.read",
+        "command:previews.choose",
         "command:notify.set",
         "command:timeline.query",
         "command:lookup.whois",
@@ -274,7 +275,8 @@ describe("the palette's entries", () => {
       none: sections(listing(), "zzzz", []),
       // `nxt` is only in `next` as characters in order.
       nxt: first(sections(listing(), "nxt", [])),
-      // `p`: `part`, `ping`, and `previous` by length, then `msg`, whose alias `privmsg` it starts.
+      // `p`: `part`, `ping`, then `previous` and `previews` by length, before `msg`, whose
+      // alias `privmsg` it starts.
       p: keysOf("p").slice(0, 4),
       // A slash before a command's name is ignored.
       slash: first(sections(listing(), "/me", [])),
@@ -288,7 +290,7 @@ describe("the palette's entries", () => {
         "command:channels.part",
         "command:act.ping",
         "command:timeline.previous",
-        "command:say.to",
+        "command:previews.choose",
       ],
       slash: "command:say.action",
     });

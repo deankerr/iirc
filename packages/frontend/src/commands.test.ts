@@ -53,6 +53,18 @@ const message = (line: string, context: CommandContext) => {
   return read._tag === "Invalid" ? read.message : undefined;
 };
 
+/**
+ * What a line gives, or why it gives nothing.
+ * @param line - The line.
+ * @param context - Where it is typed, a Direct Message unless given.
+ * @returns Its intents, or the refusal's words.
+ */
+const chosen = (line: string, context: CommandContext = inDirect) => {
+  const read = interpret(line, context);
+
+  return read._tag === "Parsed" ? read.value : read.message;
+};
+
 describe("the command registry", () => {
   it("names each command once, by its name and aliases, in lower case", () => {
     const names = commands.flatMap((one) => [one.name, ...one.aliases]);
@@ -427,6 +439,7 @@ describe("reading a line", () => {
       "pane.split": "Optional",
       "pane.swap": "Required",
       "pane.zoom": "None",
+      "previews.choose": "Required",
       "say.action": "Required",
       "say.notice": "Required",
       "say.privmsg": "Required",
@@ -618,6 +631,30 @@ describe("what is unread", () => {
       { _tag: "Parsed", value: [{ _tag: "Notify", on: false }] },
       "Use /notify on or /notify off.",
     ]);
+  });
+
+  it("chooses the focused Timeline's own Previews with /previews, or returns it to ui.previews", () => {
+    expect({
+      default: chosen("/previews default"),
+      links: chosen("/previews links"),
+      linksOnly: chosen("/previews Links Only"),
+      network: chosen("/previews off", inNetwork),
+      none: chosen("/previews"),
+      nowhere: chosen("/previews on", nowhere),
+      on: chosen("/previews on"),
+      removed: chosen("/previews on", { ...inChannel, focus: removedFocus }),
+      sometimes: chosen("/previews sometimes"),
+    }).toStrictEqual({
+      default: [{ _tag: "ChoosePreviews", mode: undefined, timeline }],
+      links: [{ _tag: "ChoosePreviews", mode: "links only", timeline }],
+      linksOnly: [{ _tag: "ChoosePreviews", mode: "links only", timeline }],
+      network: [{ _tag: "ChoosePreviews", mode: "off", timeline }],
+      none: "Use /previews off, links, on, or default.",
+      nowhere: "Open a Timeline first.",
+      on: [{ _tag: "ChoosePreviews", mode: "on", timeline }],
+      removed: [{ _tag: "ChoosePreviews", mode: "on", timeline }],
+      sometimes: "Use /previews off, links, on, or default.",
+    });
   });
 });
 

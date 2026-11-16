@@ -358,6 +358,10 @@ const CloseBody = Schema.fromJsonString(Schema.Struct({ target: Schema.String })
 
 const PreviewsBody = Schema.fromJsonString(Schema.Struct({ position: Schema.String }));
 
+const PressBody = Schema.fromJsonString(
+  Schema.Struct({ link: Schema.Int, position: Schema.String })
+);
+
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
   answerCtcp: true,
@@ -546,6 +550,12 @@ export const fakeDaemon = () => {
   const previewAsks: { readonly timeline: string; readonly position: string }[] = [];
   const previewFollowers: Follower[] = [];
 
+  const presses: {
+    readonly timeline: string;
+    readonly position: string;
+    readonly link: number;
+  }[] = [];
+
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
   const looked: string[] = [];
@@ -684,6 +694,8 @@ export const fakeDaemon = () => {
     ownerFollowers,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
+    /** Each press of a link waiting for one, by its Timeline, its place, and its index, refused or not. */
+    presses,
     /** Each ask for a Message's Previews, by its Timeline and its place, refused or not. */
     previewAsks,
     /** Each follower of the stream of Previews. */
@@ -1815,6 +1827,35 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * A press of a link waiting for one, which the fake answers as pending, holding it so
+   * until a test sends its change, and refuses as `NotWaiting` for any other link.
+   * @param timeline - The Message's Timeline.
+   * @param init - The request.
+   * @returns The answer.
+   */
+  const pressRoute = async (timeline: string, init: RequestInit): Promise<Response> => {
+    const { link, position } = Schema.decodeSync(PressBody)(await new Response(init.body).text());
+
+    daemon.presses.push({ link, position, timeline });
+
+    const items = daemon.previews.get(position);
+    const item = items?.[link];
+
+    if (items === undefined || item?.state._tag !== "WaitingForPress") {
+      return Response.json({ _tag: "NotWaiting", link, position, timeline }, { status: 409 });
+    }
+
+    const fetching = { ...item, state: { _tag: "Pending" } } as const;
+
+    daemon.previews.set(
+      position,
+      items.map((one, index) => (index === link ? fetching : one))
+    );
+
+    return Response.json(fetching);
+  };
+
+  /**
    * A Message's Previews asked for, refused while `ui.previews` is `off`, and their stream,
    * or nothing for any other route.
    * @param url - The request's URL.
@@ -1823,6 +1864,16 @@ export const fakeDaemon = () => {
    */
   const previewsRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
     const ask = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)\/previews$/u.exec(url.pathname)?.groups;
+
+    const pressed = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)\/previews\/press$/u.exec(
+      url.pathname
+    )?.groups;
+
+    if (init.method === "POST" && pressed?.timeline !== undefined) {
+      return daemon.signedIn
+        ? await pressRoute(pressed.timeline, init)
+        : json(401, { _tag: "Unauthorized" });
+    }
 
     if (url.pathname === "/api/previews/changes") {
       return signedInOnly(() => following(previewFollowers, url, new Headers(init.headers), init));
