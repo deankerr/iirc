@@ -19,7 +19,6 @@ import {
   NotAChannel,
   NotInChannel,
   OptionsChanged,
-  PreviewsOff,
   RequestValidation,
   Sequence as WireSequence,
   SignInsFailed,
@@ -89,6 +88,7 @@ import { ApiKeys } from "./keys.ts";
 import { membersPage, rankOrder } from "./members.ts";
 import { OwnerConfiguration, optionValueJson } from "./options.ts";
 import type { OptionsChangedSince } from "./options.ts";
+import { Previews } from "./previews/previews.ts";
 import { Projector } from "./projector.ts";
 import type { Progress } from "./projector.ts";
 import { SignIns } from "./sign-ins.ts";
@@ -1294,13 +1294,29 @@ const uploads = HttpApiBuilder.group(
   })
 );
 
-// Previews are not fetched yet: every ask is off, and the stream carries only heartbeats.
-const previews = HttpApiBuilder.group(DaemonApi, "previews", (handlers) =>
-  handlers
-    .handle("ask", ({ params }) => Effect.fail(new PreviewsOff({ timeline: params.timeline })))
-    .handle("changes", () =>
-      followed<PreviewsEvent, never, never>(Stream.never, { data: {}, event: "heartbeat" })
-    )
+// A Message's Previews, asked for by its place, and every change of one, as it happens.
+const previews = HttpApiBuilder.group(
+  DaemonApi,
+  "previews",
+  Effect.fn(function* (handlers) {
+    const held = yield* Previews;
+
+    return handlers
+      .handle("ask", ({ params, payload }) =>
+        held.ask(params.timeline, payload.position).pipe(
+          Effect.map((found) => ({ previews: found })),
+          Effect.catchTags({ TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)) })
+        )
+      )
+      .handle("changes", () =>
+        followed(
+          held.changes.pipe(
+            Stream.map((item): PreviewsEvent => ({ data: item, event: "changed" }))
+          ),
+          { data: {}, event: "heartbeat" }
+        )
+      );
+  })
 );
 
 // A body over the limit is refused unread, and Bun's graceful stop waits for a client

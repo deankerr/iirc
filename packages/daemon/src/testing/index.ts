@@ -1,6 +1,7 @@
 /**
  * What other packages' end-to-end runs share with the Daemon's: private Ircds and a private
- * MinIO on loopback ports the kernel picks, and a raw IRC connection as another User.
+ * MinIO on loopback ports the kernel picks, a raw IRC connection as another User, and the
+ * guard admitting a loopback fixture site.
  *
  * @packageDocumentation
  */
@@ -9,6 +10,8 @@ export { startErgo, startNgircd } from "./ircd.ts";
 export type { Ircd } from "./ircd.ts";
 
 export { freePort, loopback } from "./children.ts";
+
+export { layerLoopbackLinkFetch } from "./links.ts";
 
 export { startMinio } from "./minio.ts";
 
