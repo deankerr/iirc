@@ -52,10 +52,9 @@ export const parseHex = (text: string): Colour | undefined => {
 
 const unit = (value: number) => Math.min(1, Math.max(0, value));
 
-const byte = (value: number) =>
-  Math.round(unit(value) * 255)
-    .toString(16)
-    .padStart(2, "0");
+const roundedByte = (value: number) => Math.round(unit(value) * 255);
+
+const byte = (value: number) => roundedByte(value).toString(16).padStart(2, "0");
 
 /**
  * A colour as hex, each channel kept within sRGB and rounded to a byte.
@@ -110,16 +109,39 @@ export const fromDisplayP3 = (rgb: Rgb): Rgb => {
   };
 };
 
+/** Each byte's channel in linear light, worked out once, since a hex colour has only 256. */
+const linearOfByte = Array.from({ length: 256 }, (_, value) => linear(value / 255));
+
+const byteAt = (colour: Colour, at: number) => Number.parseInt(colour.slice(at, at + 2), 16);
+
+/**
+ * The relative luminance of a colour's bytes, as WCAG 2 defines it.
+ * @param r - Its red byte.
+ * @param g - Its green byte.
+ * @param b - Its blue byte.
+ * @returns Its luminance, from 0 to 1.
+ */
+const luminanceOfBytes = (r: number, g: number, b: number): number =>
+  0.2126 * (linearOfByte[r] ?? 0) +
+  0.7152 * (linearOfByte[g] ?? 0) +
+  0.0722 * (linearOfByte[b] ?? 0);
+
 /**
  * A colour's relative luminance, as WCAG 2 defines it.
  * @param colour - The colour.
  * @returns Its luminance, from 0 to 1.
  */
-const luminance = (colour: Colour): number => {
-  const { b, g, r } = rgbOf(colour);
+const luminance = (colour: Colour): number =>
+  luminanceOfBytes(byteAt(colour, 1), byteAt(colour, 3), byteAt(colour, 5));
 
-  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
-};
+/**
+ * The contrast ratio of two luminances: from 1, the same, to 21, black on white.
+ * @param first - One luminance.
+ * @param second - The other.
+ * @returns The ratio.
+ */
+const ratio = (first: number, second: number) =>
+  (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 
 /**
  * The contrast ratio of two colours, as WCAG 2 defines it: from 1, the same, to 21, black
@@ -128,12 +150,8 @@ const luminance = (colour: Colour): number => {
  * @param other - The other.
  * @returns The ratio.
  */
-export const contrast = (one: Colour, other: Colour): number => {
-  const first = luminance(one);
-  const second = luminance(other);
-
-  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
-};
+export const contrast = (one: Colour, other: Colour): number =>
+  ratio(luminance(one), luminance(other));
 
 /**
  * A colour in OKLab, from sRGB, by Björn Ottosson's matrices.
@@ -194,21 +212,23 @@ const labOfLch = (lch: Lch): Lab => ({
 /** How far outside 0 to 1 a linear channel may fall and still count as inside sRGB. */
 const gamutSlack = 1e-4;
 
+const channelInGamut = (one: number) => one >= -gamutSlack && one <= 1 + gamutSlack;
+
 const inGamut = (rgb: Rgb) =>
-  [rgb.r, rgb.g, rgb.b].every((one) => one >= -gamutSlack && one <= 1 + gamutSlack);
+  channelInGamut(rgb.r) && channelInGamut(rgb.g) && channelInGamut(rgb.b);
 
 /**
  * A colour from OKLCH, kept within sRGB by lowering its chroma, never its lightness or hue,
  * as CSS Color 4 maps a colour into gamut.
  * @param lch - The colour.
- * @returns Its hex.
+ * @returns Its channels on sRGB's curve, not yet kept within 0 to 1 or rounded to bytes.
  */
-export const fromLch = (lch: Lch): Colour => {
+const mappedOfLch = (lch: Lch): Rgb => {
   const l = unit(lch.l);
-  const whole = linearOfLab(labOfLch({ ...lch, l }));
+  const whole = linearOfLab(labOfLch({ c: lch.c, h: lch.h, l }));
 
   if (inGamut(whole)) {
-    return hexOf({ b: encoded(whole.b), g: encoded(whole.g), r: encoded(whole.r) });
+    return { b: encoded(whole.b), g: encoded(whole.g), r: encoded(whole.r) };
   }
 
   let low = 0;
@@ -226,7 +246,26 @@ export const fromLch = (lch: Lch): Colour => {
 
   const kept = linearOfLab(labOfLch({ c: low, h: lch.h, l }));
 
-  return hexOf({ b: encoded(kept.b), g: encoded(kept.g), r: encoded(kept.r) });
+  return { b: encoded(kept.b), g: encoded(kept.g), r: encoded(kept.r) };
+};
+
+/**
+ * A colour from OKLCH, kept within sRGB by lowering its chroma, never its lightness or hue,
+ * as CSS Color 4 maps a colour into gamut.
+ * @param lch - The colour.
+ * @returns Its hex.
+ */
+export const fromLch = (lch: Lch): Colour => hexOf(mappedOfLch(lch));
+
+/**
+ * The luminance of a colour from OKLCH once it is hex, without writing and reading the hex.
+ * @param lch - The colour.
+ * @returns The luminance of `fromLch(lch)`.
+ */
+const luminanceOfLch = (lch: Lch): number => {
+  const { b, g, r } = mappedOfLch(lch);
+
+  return luminanceOfBytes(roundedByte(r), roundedByte(g), roundedByte(b));
 };
 
 /**
@@ -249,13 +288,20 @@ const white: Colour = "#ffffff";
 const black: Colour = "#000000";
 
 /**
- * The least contrast a colour has against any of some backgrounds.
- * @param colour - The colour.
- * @param backgrounds - The backgrounds.
+ * The least contrast a luminance has against any of some others.
+ * @param own - The luminance.
+ * @param grounds - The others, each a background's.
  * @returns The least ratio.
  */
-const leastContrast = (colour: Colour, backgrounds: readonly Colour[]) =>
-  Math.min(...backgrounds.map((one) => contrast(colour, one)));
+const leastRatio = (own: number, grounds: readonly number[]) => {
+  let least = Number.POSITIVE_INFINITY;
+
+  for (const ground of grounds) {
+    least = Math.min(least, ratio(own, ground));
+  }
+
+  return least;
+};
 
 /**
  * A colour made readable on its backgrounds: itself, when it has at least `floor`
@@ -270,22 +316,24 @@ const leastContrast = (colour: Colour, backgrounds: readonly Colour[]) =>
  */
 export const readable = (colour: Colour, backgrounds: readonly Colour[], floor: number): Colour => {
   const [ground] = backgrounds;
+  const grounds = backgrounds.map(luminance);
 
-  if (ground === undefined || leastContrast(colour, backgrounds) >= floor) {
+  if (ground === undefined || leastRatio(luminance(colour), grounds) >= floor) {
     return colour;
   }
 
   const lighter = contrast(white, ground) >= contrast(black, ground);
   const own = lchOf(colour);
   const groundLightness = lchOf(ground).l;
+  const at = (l: number) => leastRatio(luminanceOfLch({ c: own.c, h: own.h, l }), grounds);
 
   // Searching only beyond the background's lightness, contrast only grows as it goes.
   let near = lighter ? Math.max(own.l, groundLightness) : Math.min(own.l, groundLightness);
   let far = lighter ? 1 : 0;
 
-  if (leastContrast(fromLch({ ...own, l: far }), backgrounds) < floor) {
+  if (at(far) < floor) {
     const extremes = [white, black].toSorted(
-      (one, other) => leastContrast(other, backgrounds) - leastContrast(one, backgrounds)
+      (one, other) => leastRatio(luminance(other), grounds) - leastRatio(luminance(one), grounds)
     );
 
     return extremes[0] ?? white;
@@ -294,7 +342,7 @@ export const readable = (colour: Colour, backgrounds: readonly Colour[], floor: 
   for (let step = 0; step < 32; step += 1) {
     const middle = (near + far) / 2;
 
-    if (leastContrast(fromLch({ ...own, l: middle }), backgrounds) >= floor) {
+    if (at(middle) >= floor) {
       far = middle;
     } else {
       near = middle;

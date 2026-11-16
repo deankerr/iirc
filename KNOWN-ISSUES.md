@@ -40,5 +40,5 @@ Remove an entry in the change that fixes it. A defect someone means to fix is an
 
 ## Tests
 
-- **A few tests bound time** (the Client's scale test, the theme importers, search timing). They pass with wide margins on an idle machine, but under load they can fail: `packages/frontend/src/theme.test.ts` has timed out at Vitest's 5 s.
+- **A few tests bound time** (the Client's scale test, the theme importers, search timing). They pass with wide margins on an idle machine, but under load they can fail.
 - **No test covers a Lookup's recovery when one `GET` times out and the next succeeds,** though a review exercised it by hand.
