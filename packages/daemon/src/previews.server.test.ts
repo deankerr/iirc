@@ -365,19 +365,20 @@ describe("Previews over a real server", () => {
           yield* say(call, ":irc.test 001 iirc :Welcome");
           yield* say(call, ":iirc!u@h JOIN #iirc");
 
+          // The Client asks a Channel's modes once it has stepped our JOIN, so the welcome
+          // before it is stepped too, and the say is not refused as Offline.
+          expect(yield* heard(call)).toBe("MODE #iirc");
+
           const said = yield* served.request("/api/networks/libera/say", {
             method: "POST",
             ...json({ kind: "Privmsg", target: "#iirc", text: "see https://ours.example/" }),
           });
 
-          expect(said.status).toBe(200);
-          let got = yield* heard(call);
+          expect([said.status, decodeError(yield* bodyOf(said))._tag]).toStrictEqual([200, "Said"]);
+          const sent = yield* heard(call);
 
-          while (!got.startsWith("@label=")) {
-            got = yield* heard(call);
-          }
-
-          const [tags = ""] = got.split(" ");
+          expect(sent).toMatch(/^@label=\S+ PRIVMSG #iirc :see https:\/\/ours\.example\/$/u);
+          const [tags = ""] = sent.split(" ");
 
           yield* say(call, `${tags} :iirc!u@h PRIVMSG #iirc :see https://cats.example/`);
 
