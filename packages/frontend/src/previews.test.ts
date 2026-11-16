@@ -680,6 +680,7 @@ const hash = "ab".repeat(32);
  * What a Message shows of one Ready Preview, with some fields other than the page's.
  * @param fields - Those fields, as the wire carries them.
  * @param mode - `ui.previews`, `on` unless given.
+ * @param players - The hosts `ui.previews.players` lists, its default unless given.
  * @returns What it shows, or none.
  */
 const shownReady = (

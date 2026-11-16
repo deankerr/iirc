@@ -886,10 +886,12 @@ export const layerPreviews = Layer.effect(Previews)(
         }),
       changes: Stream.fromPubSub(changed).pipe(
         Stream.mapEffect((item) =>
-          Effect.map(ui.inForce, ({ options }) => ({
-            ...item,
-            state: asStreamed(item.state, options["previews.players"]),
-          }))
+          ui.inForce.pipe(
+            Effect.map(({ options }) => ({
+              ...item,
+              state: asStreamed(item.state, options["previews.players"]),
+            }))
+          )
         )
       ),
       media: (hash) =>
