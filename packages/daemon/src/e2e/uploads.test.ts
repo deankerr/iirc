@@ -129,6 +129,23 @@ describe("Uploads through a real Daemon and MinIO", () => {
             "5 seconds"
           );
 
+          // A seek, and a revalidation, of what the bucket holds.
+          const ask = (headers: Record<string, string>) =>
+            Effect.promise(async () => {
+              const answer = await fetch(`http://${loopback}:${listen}/${record.id}/cat.png`, {
+                headers,
+              });
+
+              return {
+                bytes: [...new Uint8Array(await answer.arrayBuffer())],
+                range: answer.headers.get("content-range"),
+                status: answer.status,
+              };
+            });
+
+          const part = yield* ask({ range: "bytes=1-3" });
+          const unchanged = yield* ask({ "if-none-match": `"${record.id}"` });
+
           return {
             bytes: new Uint8Array(yield* Effect.promise(async () => await opened.arrayBuffer())),
             // Every header but `Date`, which says nothing of what was served.
@@ -137,8 +154,10 @@ describe("Uploads through a real Daemon and MinIO", () => {
             ),
             kept: kept.status,
             opened: opened.status,
+            part,
             record,
             statuses,
+            unchanged,
           };
         })
       )
@@ -147,6 +166,7 @@ describe("Uploads through a real Daemon and MinIO", () => {
     expect(result).toStrictEqual({
       bytes: png,
       headers: {
+        "accept-ranges": "bytes",
         "access-control-allow-origin": "*",
         "cache-control": "no-cache",
         "content-disposition": `inline; filename="cat.png"; filename*=UTF-8''cat.png`,
@@ -154,11 +174,13 @@ describe("Uploads through a real Daemon and MinIO", () => {
         "content-security-policy": "sandbox allow-downloads; default-src 'none'",
         "content-type": "image/png",
         "cross-origin-resource-policy": "cross-origin",
+        etag: `"${result.record.id}"`,
         "referrer-policy": "no-referrer",
         "x-content-type-options": "nosniff",
       },
       kept: 200,
       opened: 200,
+      part: { bytes: [...png.subarray(1, 4)], range: `bytes 1-3/${png.length}`, status: 206 },
       record: {
         ...result.record,
         link: `https://up.example/${result.record.id}/cat.png`,
@@ -168,6 +190,7 @@ describe("Uploads through a real Daemon and MinIO", () => {
         type: "image/png",
       },
       statuses: [204, 204, 200, 200, 200, 200, 200, 200, 200],
+      unchanged: { bytes: [], range: null, status: 304 },
     });
   });
 

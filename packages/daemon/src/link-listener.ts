@@ -59,7 +59,7 @@ const answer = Effect.gen(function* () {
   }
 
   return yield* uploads.open(UploadId.make(id)).pipe(
-    Effect.flatMap(servedUpload),
+    Effect.flatMap((opened) => servedUpload(request, opened)),
     Effect.catchTags({
       ByteStoreUnavailable: () => Effect.succeed(unavailable),
       NoSuchUpload: () => Effect.succeed(notFound),

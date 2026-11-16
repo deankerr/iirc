@@ -15,7 +15,7 @@ import type {
   UploadsStatus,
 } from "@iirc/api";
 import { ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
-import type { ByteStoreService } from "@iirc/byte-store";
+import type { ByteRange, ByteStoreService } from "@iirc/byte-store";
 import type { S3Options } from "@iirc/byte-store-s3";
 import { Instant } from "@iirc/client";
 import type { CredentialName } from "@iirc/protocol/line";
@@ -79,6 +79,17 @@ export const Recorded = Schema.Struct({
 
 /** The decoded form of {@link Recorded}. */
 export type Recorded = typeof Recorded.Type;
+
+/** An Upload found for its link: its record, and a read of its bytes, or one range of them. */
+export interface Opened {
+  readonly record: Recorded;
+  readonly read: (
+    range?: ByteRange
+  ) => Effect.Effect<
+    Stream.Stream<Uint8Array, ByteStoreUnavailable>,
+    NoSuchUpload | ByteStoreUnavailable
+  >;
+}
 
 /** A `Renamed` Change, parsed. */
 const Renaming = Schema.Struct({
@@ -261,17 +272,12 @@ export class Uploads extends Context.Service<
       | JournalFailed
     >;
     /**
-     * An Upload's record and bytes, for its link. A deleted one is `NoSuchUpload`, as an id
-     * no Upload has, before the store is asked. Whether the bytes are held is decided before
-     * any flows.
+     * An Upload's record, and how to read its bytes, or one range of them, for its link. A
+     * deleted one is `NoSuchUpload`, as an id no Upload has, before the store is asked. Each
+     * read asks the store, and bytes it confirms are gone are `NoSuchUpload` too. Whether
+     * they are held is decided before any flows.
      */
-    readonly open: (id: UploadId) => Effect.Effect<
-      {
-        readonly record: Recorded;
-        readonly bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>;
-      },
-      NoSuchUpload | ByteStoreUnavailable
-    >;
+    readonly open: (id: UploadId) => Effect.Effect<Opened, NoSuchUpload | ByteStoreUnavailable>;
     /**
      * Gives an Upload a new name, journaling its `Renamed` with the safe name made again from
      * it and the type its bytes were read as. Its id, and so every link already said, is
@@ -774,11 +780,15 @@ export const layerUploads = (dataDir: string) =>
 
           const store = yield* storeOf(now.bucket);
 
-          const bytes = yield* store
-            .read(found.hash)
-            .pipe(Effect.catchTag("ByteStoreNotFound", () => Effect.fail(new NoSuchUpload())));
+          const opened: Opened = {
+            read: (range) =>
+              store
+                .read(found.hash, range)
+                .pipe(Effect.catchTag("ByteStoreNotFound", () => Effect.fail(new NoSuchUpload()))),
+            record: found,
+          };
 
-          return { bytes, record: found };
+          return opened;
         });
 
       // Journals the Change `change` makes from an Upload's record, if it makes one, and

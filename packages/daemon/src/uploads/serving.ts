@@ -11,7 +11,9 @@ import { Effect, Sink, Stream } from "effect";
 import { HttpServerResponse } from "effect/http";
 
 import { knownKinds } from "./kind.ts";
-import type { Recorded } from "./uploads.ts";
+import type { Opened } from "./uploads.ts";
+import { wantedOf } from "./wanted.ts";
+import type { Asking } from "./wanted.ts";
 
 /**
  * What every answer of an Upload carries: no sniffing, a sandbox with nothing allowed but
@@ -55,29 +57,76 @@ const shownInPlace = (type: string) =>
   knownKinds.find((kind) => kind.type === type)?.inline ?? false;
 
 /**
- * An Upload's bytes as an answer: its record's type and size, its safe name, and the safety
- * headers. The first chunk is read before answering, so a store found to be unreachable
- * before any byte arrives fails here, where it can still be answered, rather than resetting
- * the Connection. A failure after the first byte can only end the body early, as the status
- * and headers are already sent.
- * @param opened - The record, and its bytes.
+ * The first chunk of bytes read before answering, so a store found to be unreachable before
+ * any byte arrives fails here, where it can still be answered, rather than resetting the
+ * Connection. A failure after the first byte can only end the body early, as the status and
+ * headers are already sent.
+ * @param bytes - The bytes.
+ * @returns The same bytes, once the first has arrived.
+ */
+const begun = (bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>) =>
+  Effect.map(Stream.peel(bytes, Sink.take<Uint8Array>(1)), ([first, rest]) =>
+    Stream.concat(Stream.fromIterable(first), rest)
+  );
+
+/**
+ * An Upload's bytes as an answer to a `GET` or `HEAD`: its record's type and size, its safe
+ * name, and the safety headers. Its entity tag is its id, never its hash, which a link must
+ * not give away, and it is strong, as an id's bytes never change. An `If-None-Match` holding
+ * it is `304`, one range of a `GET` is `206`, and one past the end is `416`, though each
+ * still reads the first byte, so bytes the store confirms are gone are `NoSuchUpload`, and
+ * a store that fails is `ByteStoreUnavailable`, whatever the request holds.
+ * @param request - The request.
+ * @param opened - The Upload.
  * @returns The response.
  */
-export const servedUpload = ({
-  bytes,
-  record,
-}: {
-  readonly record: Recorded;
-  readonly bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>;
-}) =>
-  Effect.map(Stream.peel(bytes, Sink.take<Uint8Array>(1)), ([first, rest]) =>
-    HttpServerResponse.stream(Stream.concat(Stream.fromIterable(first), rest), {
-      contentLength: record.size,
+export const servedUpload = (request: Asking, { read, record }: Opened) =>
+  Effect.gen(function* () {
+    const tag = `"${record.id}"`;
+
+    const headers = {
+      ...safety,
+      "accept-ranges": "bytes",
+      "cache-control": "no-cache",
+      "content-disposition": contentDisposition(shownInPlace(record.type), record.safeName),
+      etag: tag,
+    };
+
+    const wanted = wantedOf(request, tag, record.size);
+
+    // An answer of no bytes still reads the first, so bytes the store confirms are gone, or
+    // a store that fails before any arrives, are answered as a `GET` of them would be.
+    const firstByte = Effect.asVoid(Effect.flatMap(read({ end: 1, start: 0 }), begun));
+
+    if (wanted._tag === "Unchanged") {
+      yield* firstByte;
+
+      return HttpServerResponse.empty({ headers, status: 304 });
+    }
+
+    if (wanted._tag === "Unsatisfiable") {
+      yield* firstByte;
+
+      return HttpServerResponse.empty({
+        headers: { ...headers, "content-range": `bytes */${record.size}` },
+        status: 416,
+      });
+    }
+
+    if (wanted._tag === "Whole") {
+      return HttpServerResponse.stream(yield* begun(yield* read()), {
+        contentLength: record.size,
+        contentType: record.type,
+        headers,
+      });
+    }
+
+    const { end, start } = wanted;
+
+    return HttpServerResponse.stream(yield* begun(yield* read({ end, start })), {
+      contentLength: end - start,
       contentType: record.type,
-      headers: {
-        ...safety,
-        "cache-control": "no-cache",
-        "content-disposition": contentDisposition(shownInPlace(record.type), record.safeName),
-      },
-    })
-  );
+      headers: { ...headers, "content-range": `bytes ${start}-${end - 1}/${record.size}` },
+      status: 206,
+    });
+  });

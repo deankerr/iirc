@@ -1285,10 +1285,10 @@ const uploads = HttpApiBuilder.group(
             : Effect.succeed(upload(found.value))
         )
       )
-      .handleRaw("content", ({ params }) =>
+      .handleRaw("content", ({ params, request }) =>
         held.open(params.id).pipe(
-          // Answered as the link listener answers them, safety headers and all.
-          Effect.flatMap(servedUpload),
+          // Answered as the link listener answers them, safety headers, ranges and all.
+          Effect.flatMap((opened) => servedUpload(request, opened)),
           Effect.catchTags({
             ByteStoreUnavailable: (error) => Effect.fail(storeUnavailable(error)),
             NoSuchUpload: () => Effect.fail(new UnknownUpload({ id: params.id })),
