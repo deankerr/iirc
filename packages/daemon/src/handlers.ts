@@ -34,6 +34,7 @@ import {
   UploadTooLarge,
   UploadUnreadable,
   UploadsOff,
+  StoreFull,
   StoreUnavailable,
   VaultFailed,
   ownerValueKept,
@@ -1237,6 +1238,7 @@ const uploads = HttpApiBuilder.group(
                 })
               ),
             JournalFailed: (error) => Effect.fail(journalFailed(error)),
+            PastMaxTotal: (error) => Effect.fail(new StoreFull({ maxTotal: error.maxTotal })),
             UnreadableImage: (error) =>
               Effect.fail(new UploadUnreadable({ reason: error.reason, type: error.type })),
             UploadsAreOff: (error) => Effect.fail(new UploadsOff({ missing: error.missing })),

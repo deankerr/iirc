@@ -2119,6 +2119,109 @@ describe("evicting Preview images over a real server", () => {
 });
 
 /**
+ * Sends an upload.
+ * @param served - The server.
+ * @param body - The bytes.
+ * @returns The response.
+ */
+const sendUpload = (served: Served, body: Uint8Array) =>
+  served.request("/api/uploads", { body, method: "POST" });
+
+describe("bytes a Preview and an Upload share, over a real server", () => {
+  it("counts an image towards uploads.maxTotal once an Upload holds it, and never while only a Preview does", async () => {
+    // As many bytes as the PNG, which are not an image and so are kept as they are.
+    const other = new TextEncoder().encode("y".repeat(png.length));
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured({ aa: png }));
+
+        yield* TestClock.setTime(first);
+        const [a] = yield* pictures(served, ["aa"], 1_000_000);
+
+        if (a === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* setOption(served, "uploads.publicUrl", "https://up.example");
+        yield* setOption(served, "uploads.maxTotal", png.length);
+        yield* live(settled(served, a));
+        const previewed = (yield* recordOf(served, "aa"))?.image;
+
+        // The Preview holds the PNG, and does not count: an Upload of as many other bytes fits.
+        const beside = yield* sendUpload(served, other);
+        const { id } = decodeUploaded(yield* bodyOf(beside));
+
+        yield* expecting(served.request(`/api/uploads/${id}`, { method: "DELETE" }), 200);
+
+        // Once an Upload holds the PNG too, it counts, though the Preview shares it.
+        const sharing = yield* sendUpload(served, png);
+        const refused = yield* sendUpload(served, other);
+
+        return {
+          beside: beside.status,
+          previewed,
+          refused: [refused.status, yield* bodyOf(refused)],
+          sharing: sharing.status,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      beside: 200,
+      previewed: sha256(png),
+      refused: [507, JSON.stringify({ _tag: "StoreFull", maxTotal: png.length })],
+      sharing: 200,
+    });
+  });
+
+  it("counts an image an Upload holds towards previews.maxTotal, so a Preview of another image evicts the shared one's, and the Upload's link still works", async () => {
+    const images = { aa: png, bb: tinted(2) };
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const served = yield* serve(pictured(images));
+
+        yield* TestClock.setTime(first);
+        yield* setBucket(served);
+        yield* setOption(served, "uploads.publicUrl", "https://up.example");
+        const sent = yield* sendUpload(served, png);
+        const { id } = decodeUploaded(yield* bodyOf(sent));
+        const [a, b] = yield* pictures(served, ["aa", "bb"], tintedSize);
+
+        if (a === undefined || b === undefined) {
+          return yield* Effect.die(new Error("a Message is missing"));
+        }
+
+        yield* live(settled(served, a));
+        const before = yield* served.request(`/api/previews/media/${sha256(png)}`);
+
+        yield* TestClock.adjust(1000);
+        yield* live(settled(served, b));
+        const preview = yield* served.request(`/api/previews/media/${sha256(png)}`);
+        const upload = yield* served.request(`/api/uploads/${id}/content`);
+
+        return {
+          before: before.status,
+          held: yield* served.world.bytes.store.held,
+          preview: preview.status,
+          record: yield* recordOf(served, "aa"),
+          upload: { body: yield* bytesOf(upload), status: upload.status },
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      before: 200,
+      held: png.length + tintedSize,
+      preview: 404,
+      record: { fetched: 0, image: null, named: null, shown: first },
+      upload: { body: png, status: 200 },
+    });
+  });
+});
+
+/**
  * Presses a link of a Message waiting for a press.
  * @param served - The server.
  * @param place - The Message's place.
