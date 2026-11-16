@@ -35,7 +35,6 @@ import {
 } from "../testing/images.ts";
 import { layerWorld, makeKey, makeWorld, temporaryDirectory } from "../testing/world.ts";
 import type { World } from "../testing/world.ts";
-import { safety } from "./serving.ts";
 
 const encoder = new TextEncoder();
 
@@ -54,18 +53,14 @@ interface Served {
   ) => Effect.Effect<Response>;
   /** Fetches a path from the link listener. */
   readonly fromLinks: (path: string) => Effect.Effect<Response>;
+  /** The id of the Upload made to find the link listener, before the test's own. */
+  readonly probe: string;
 }
 
 const publicUrl = "https://up.example";
 
-/**
- * Whether an answer to `/` is the link listener's: a 404 carrying its safety headers.
- * @param response - The answer.
- * @returns Whether it is.
- */
-const answersAsLinks = (response: Response) =>
-  response.status === 404 &&
-  response.headers.get("content-security-policy") === safety["content-security-policy"];
+/** What the probe Upload holds, which the link listener serves back unchanged. */
+const probeText = "probe\n";
 
 const serve = Effect.gen(function* () {
   const dataDir = yield* temporaryDirectory;
@@ -119,20 +114,35 @@ const serve = Effect.gen(function* () {
     yield* put(`/api/options/${option}`, value, 200);
   }
 
-  // A free port can be taken by anything between being found and being bound, and the
-  // listener then stays closed and something else answers there. So ask at each port until
-  // the listener answers as only it does, and move to another port if it never does.
+  // A free port can be taken by anything between being found and being bound, even another
+  // test's link listener, and this one then stays closed. So upload a probe, and keep a port
+  // only once the probe's link answers there with its bytes, which only this listener holds.
+  const probe = decodeUpload(
+    yield* Effect.promise(async () => {
+      const answer = await fetch(`${base}/api/uploads?name=probe.txt`, {
+        body: probeText,
+        headers: { authorization: `Bearer ${key}` },
+        method: "POST",
+      });
+
+      return await answer.text();
+    })
+  );
+
+  const probePath = new URL(probe.link ?? "http://invalid/").pathname;
+
   const listenForLinks = (tries: number): Effect.Effect<number> =>
     Effect.gen(function* () {
       const port = freePort();
 
       yield* put("/api/options/uploads.listen", `${loopback}:${port}`, 200);
 
-      const bound = yield* Effect.tryPromise(
-        async () => await fetch(`http://${loopback}:${port}/`)
-      ).pipe(
+      const bound = yield* Effect.tryPromise(async () => {
+        const answer = await fetch(`http://${loopback}:${port}${probePath}`);
+
+        return answer.status === 200 && (await answer.text()) === probeText;
+      }).pipe(
         Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }),
-        Effect.map(answersAsLinks),
         Effect.orElseSucceed(() => false)
       );
 
@@ -150,7 +160,7 @@ const serve = Effect.gen(function* () {
   const fromLinks = (path: string): Effect.Effect<Response> =>
     Effect.promise(async () => await fetch(`http://${loopback}:${port}${path}`));
 
-  const served: Served = { dataDir, fromLinks, request, world };
+  const served: Served = { dataDir, fromLinks, probe: probe.id, request, world };
 
   return served;
 });
@@ -354,7 +364,10 @@ describe("stripping an image as it is uploaded", () => {
         const journaled = yield* Stream.runCollect(served.world.journal.read({})).pipe(
           Effect.map((entries) =>
             entries.filter(
-              ({ record }) => record._tag === "Change" && record.change._tag === "Uploaded"
+              ({ record }) =>
+                record._tag === "Change" &&
+                record.change._tag === "Uploaded" &&
+                record.change.id !== served.probe
             )
           )
         );
