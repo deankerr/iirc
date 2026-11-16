@@ -752,17 +752,19 @@ describe("the video file a page names", () => {
   });
 
   it("is absent when the page gives no type, or one that is not a plain video type", () => {
-    expect([
-      named(undefined),
-      named(""),
-      named("application/x-shockwave-flash"),
-      named("video"),
-      named("video/"),
-      named("video/mp4 extra"),
-      named("video/mp4/x"),
-      named("video/<b>"),
-      named("audio/mpeg"),
-    ]).toStrictEqual(Array.from({ length: 9 }, () => {}));
+    expect(
+      [
+        named(undefined),
+        named(""),
+        named("application/x-shockwave-flash"),
+        named("video"),
+        named("video/"),
+        named("video/mp4 extra"),
+        named("video/mp4/x"),
+        named("video/<b>"),
+        named("audio/mpeg"),
+      ].filter((video) => video !== undefined)
+    ).toStrictEqual([]);
   });
 
   it("is absent when the page names no video address", () => {
