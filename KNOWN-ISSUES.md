@@ -36,6 +36,7 @@ Remove an entry in the change that fixes it. A defect someone means to fix is an
 - **A Frontend that reads News must be as new as the Daemon.** News is a closed set, so a reader built before a kind of News was added, such as `ChannelLearned`, refuses an event that holds one. The Timelines and their changes only gain fields, which an older reader passes over.
 - **A SQLite Journal from before Changes could not store `ui` options,** and a change to one answers 500. No Daemon has written a Journal in earnest yet; a new data directory has the current layout.
 - **The web script is one file of about 1.1 MB,** 350 kB gzipped, not split.
+- **A deleted Upload's bytes can stay in the bucket.** They are released as its delete is answered, so a store that cannot be reached then, Uploads turned off, or a Daemon stopped between the two, leaves them there, unlinked. Deleting the Upload again tries once more.
 - **Rebuilding `views.sqlite`** after a new projection version folds the whole Journal again on start, which grows with history.
 
 ## Tests

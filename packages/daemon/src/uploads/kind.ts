@@ -107,6 +107,14 @@ export const knownKinds: readonly Kind[] = [
 /** The kind of bytes that are none of the others: no extension names it. */
 const unknownKind: Kind = { ...unknown, extensions: [] };
 
+/**
+ * The Kind a type was read as, so a name can be made safe again for bytes read before.
+ * @param type - The type a record holds.
+ * @returns Its Kind, or the Kind of bytes that are none of the others for a type no Kind has.
+ */
+export const kindOfType = (type: string): Kind =>
+  knownKinds.find((kind) => kind.type === type) ?? unknownKind;
+
 const ascii = (head: Uint8Array, at: number, expected: string): boolean => {
   if (head.length < at + expected.length) {
     return false;

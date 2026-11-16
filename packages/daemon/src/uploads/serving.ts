@@ -11,7 +11,7 @@ import { Effect, Sink, Stream } from "effect";
 import { HttpServerResponse } from "effect/http";
 
 import { knownKinds } from "./kind.ts";
-import type { Kept } from "./uploads.ts";
+import type { Recorded } from "./uploads.ts";
 
 /**
  * What every answer of an Upload carries: no sniffing, a sandbox with nothing allowed but
@@ -67,7 +67,7 @@ export const servedUpload = ({
   bytes,
   record,
 }: {
-  readonly record: Kept;
+  readonly record: Recorded;
   readonly bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>;
 }) =>
   Effect.map(Stream.peel(bytes, Sink.take<Uint8Array>(1)), ([first, rest]) =>
