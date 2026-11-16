@@ -40,6 +40,7 @@ import { forgetChantypes } from "../composer/chantypes-state.ts";
 import { cancelCompletion } from "../composer/completion-state.ts";
 import { lookupsHappened } from "../lookup/state.ts";
 import { notifyAll } from "../notifications/notifier.ts";
+import { saidChanged } from "../options/uploads-state.ts";
 import { pageState } from "../page/atoms.ts";
 import { readChoice, writeChoice } from "../page/device.ts";
 import { signedIn, signInState } from "../sign-in/atoms.ts";
@@ -359,7 +360,8 @@ const reader = (registry: AtomRegistry.AtomRegistry, changes: Stream.Stream<Time
  * Folds one event of the changes stream into the core, the Timelines, the open Channel, and
  * the Lookup cards, whose masks an act refused, or an overflow or a reset that may have
  * hidden its refusal, shows again, and shows the notifications the core says a change calls for. A heartbeat only says the
- * stream is alive.
+ * stream is alive. An Upload held whose link a Message of ours in a change holds is read
+ * again, to learn where it was said.
  * @param registry - The registry.
  * @param event - The event.
  * @returns Once folded and shown.
@@ -380,9 +382,13 @@ const changed = (registry: AtomRegistry.AtomRegistry, event: TimelineChangesEven
         registry.get(pageState)
       );
 
-      return notifyAll(notifies, (notify) => {
-        happened(registry, { _tag: "Opened", timeline: notify.timeline });
-      });
+      // Where an Upload was said is read again beside the stream, never holding it up.
+      return Effect.andThen(
+        Effect.forkChild(saidChanged(registry, event.data.items)),
+        notifyAll(notifies, (notify) => {
+          happened(registry, { _tag: "Opened", timeline: notify.timeline });
+        })
+      );
     }
 
     case "overflowed": {

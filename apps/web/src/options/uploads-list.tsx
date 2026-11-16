@@ -3,7 +3,9 @@
  * deleted" is on, muted, saying expired or deleted and when, with nothing to do to them
  * and an icon for a thumbnail, as their bytes are gone: an image the browser draws as a
  * thumbnail of its own bytes, scaled down and fetched only once near the screen, an icon
- * for any other type, then its name, type, size, and when it was uploaded, and buttons
+ * for any other type, then its name, type, size, and when it was uploaded, where it was
+ * said, each Network and Target a Message of ours held its link, newest first, which goes
+ * to that Message in its Timeline when pressed, and buttons
  * that copy its link, rename it in place, and delete it once the Owner confirms. A live
  * one whose bytes the Daemon found gone has an icon too, since nothing is to be fetched,
  * says "missing" in the danger colour where the time would be, and offers no link, which
@@ -15,17 +17,19 @@
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import type { Upload } from "@iirc/api";
+import type { TimelineItem, Upload } from "@iirc/api";
 import {
   deletedText,
   editFailureText,
   linkOf,
+  saidPlace,
   shownName,
   sizeText,
   thumbnailed,
 } from "@iirc/frontend/uploads";
 import { useRef, useState } from "react";
 
+import { jumpTo } from "../search/atoms.ts";
 import { Button, ToggleButton } from "../ui/button.tsx";
 import { datedClockFor } from "../ui/clock.ts";
 import { formattedAt } from "../ui/dates.ts";
@@ -33,6 +37,7 @@ import { Icon } from "../ui/icon.tsx";
 import { DeleteDialog } from "./delete-dialog.tsx";
 import { RenameField } from "./rename-field.tsx";
 import { timeShown } from "./ui.ts";
+import { uploadsState } from "./uploads-state.ts";
 import {
   askToDelete,
   copiedLink,
@@ -44,7 +49,6 @@ import {
   showDeleted,
   uploadEditsState,
   uploadMissing,
-  uploadsState,
 } from "./uploads.ts";
 
 import styles from "./uploads-list.module.css";
@@ -107,6 +111,47 @@ const Details = ({ missing, upload }: { readonly upload: Upload; readonly missin
 };
 
 /**
+ * Where an Upload was said: each Message of ours that held its link, newest first, as its
+ * Network and Target, which goes to the Message in its Timeline when pressed.
+ * @param props - The name the Upload is shown by, and the Messages.
+ * @returns Where, or nothing before it was said.
+ */
+const Said = ({
+  name,
+  said,
+}: {
+  readonly name: string;
+  readonly said: readonly TimelineItem[];
+}) => {
+  const jump = useAtomSet(jumpTo);
+
+  return said.length === 0 ? null : (
+    <span className={styles.said}>
+      said in{" "}
+      {said.map((item, index) => {
+        const place = saidPlace(item);
+
+        return (
+          <span key={`${item.timeline}.${item.sequence}`}>
+            {index === 0 ? null : ", "}
+            <Button
+              aria-label={`Go to where ${name} was said in ${place}`}
+              className={styles.place}
+              onPress={() => {
+                jump(item);
+              }}
+              variant="text"
+            >
+              <bdi>{place}</bdi>
+            </Button>
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
+/**
  * One Upload's row.
  * @param props - The Upload, and its link, if a public URL is set.
  * @returns The row.
@@ -153,6 +198,7 @@ const Row = ({ link, upload }: { readonly upload: Upload; readonly link: string 
           </span>
         )}
         <Details missing={missing} upload={upload} />
+        <Said name={name} said={upload.said} />
         {doing?._tag === "Failed" ? (
           <span className={styles.failure} role="alert">
             {editFailureText(doing.failure, name, doing.of)}

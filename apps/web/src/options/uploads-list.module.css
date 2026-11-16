@@ -92,6 +92,16 @@
   overflow-wrap: anywhere;
 }
 
+/* Where it was said, each place a way to its Message. */
+.said {
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.place {
+  color: var(--color-accent);
+}
+
 /* An Upload whose bytes are gone, said where its time would be. */
 .missing {
   color: var(--color-danger);

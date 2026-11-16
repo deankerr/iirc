@@ -1626,6 +1626,26 @@ export const fakeDaemon = () => {
   };
 
   /**
+   * One Upload, as held, or 404 for an id none has, or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const uploadRoute = (url: URL, init: RequestInit): Response | undefined => {
+    const id = /^\/api\/uploads\/(?<id>[0-9a-z]{16})$/u.exec(url.pathname)?.groups?.id;
+
+    if ((init.method ?? "GET") !== "GET" || id === undefined) {
+      return undefined;
+    }
+
+    return signedInOnly(() => {
+      const held = uploads.find((each) => each.id === id);
+
+      return held === undefined ? json(404, { _tag: "UnknownUpload", id }) : Response.json(held);
+    });
+  };
+
+  /**
    * The Uploads: a page of them, newest first, from just after one, refusing a cursor that
    * names none held, through the last Change `upload` made, or `0`; their Changes, each
    * `upload` made after `Last-Event-ID` or `after`, then live, or live from now with
@@ -1958,6 +1978,7 @@ export const fakeDaemon = () => {
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
     (await ownerRoute(url, init)) ??
+    uploadRoute(url, init) ??
     (await uploadsRoute(url, init)) ??
     (await configurationRoute(url, init)) ??
     timelineRoute(url, init) ??

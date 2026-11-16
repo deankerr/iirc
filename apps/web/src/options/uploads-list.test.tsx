@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { RegistryContext } from "@effect/atom-react";
-import type { Upload } from "@iirc/api";
+import type { Timeline, TimelineItem, Upload } from "@iirc/api";
 import { deviceUiKey } from "@iirc/frontend/ui";
 import { initialUploads } from "@iirc/frontend/uploads";
 import { act } from "react";
@@ -11,9 +11,11 @@ import { App } from "../app/app.tsx";
 import { writeChoice } from "../page/device.ts";
 import { check, signOut } from "../sign-in/atoms.ts";
 import { eventually, fakeDaemon, registryFor, run } from "../testing/fake-daemon.ts";
+import { sync } from "../timelines/atoms.ts";
 import { optionsState, optionsSync } from "./atoms.ts";
 import { ownerSync } from "./owner.ts";
-import { publicUrl, uploadsState, uploadsSync } from "./uploads.ts";
+import { uploadsState } from "./uploads-state.ts";
+import { publicUrl, uploadsSync } from "./uploads.ts";
 
 // React warns about updates outside `act` unless told this is a test.
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -66,14 +68,16 @@ const uploadOf = (letter: string, type: string, name?: string): typeof Upload.En
 
 /**
  * A page signed in to the fake, showing the options, following them and the Uploads, and
- * rendered.
+ * rendered, and following the Timelines too when asked.
  * @param fake - The fake Daemon.
  * @param waits - Waits other than the tests' defaults.
+ * @param timelines - Whether the Timelines are read and followed, before the options show.
  * @returns The registry and the page.
  */
 const page = async (
   fake: ReturnType<typeof fakeDaemon>,
-  waits: Parameters<typeof registryFor>[1] = {}
+  waits: Parameters<typeof registryFor>[1] = {},
+  timelines = false
 ) => {
   const registry = registryFor(fake.fetch, waits);
 
@@ -81,6 +85,11 @@ const page = async (
   registry.mount(optionsSync);
   registry.mount(ownerSync);
   registry.mount(uploadsSync);
+
+  if (timelines) {
+    registry.mount(sync);
+    await eventually(() => fake.daemon.followers.length === 1);
+  }
 
   const container = document.createElement("div");
 
@@ -148,7 +157,7 @@ const listed = (container: HTMLElement) =>
     const [thumbnail, about] = row.children;
 
     return {
-      details: about?.lastElementChild?.textContent,
+      details: about?.children[1]?.textContent,
       name: about?.firstElementChild?.textContent,
       thumbnail: thumbnail?.querySelector("img")?.getAttribute("src") ?? "icon",
     };
@@ -339,6 +348,101 @@ const withPublicUrl = (fake: ReturnType<typeof fakeDaemon>) => {
 
 const cat = uploadOf("a", "image/png", "Cat picture.png");
 const notes = uploadOf("b", "application/pdf");
+
+const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
+
+/**
+ * A Message in `#iirc`, as the wire carries it: of ours, unless someone else said it.
+ * @param network - Its Network.
+ * @param target - Its Target.
+ * @param sequence - The step that made it, which places it.
+ * @param text - What it says.
+ * @param mine - Whether it is ours.
+ * @returns The item.
+ */
+const ours = (
+  network: string,
+  target: string,
+  sequence: number,
+  text: string,
+  mine = true
+): typeof TimelineItem.Encoded => ({
+  changed: sequence,
+  content: {
+    _tag: "Message",
+    at: { _tag: "Unknown" },
+    id: { _tag: "Unknown" },
+    kind: "Privmsg",
+    live: true,
+    ours: mine ? { delivery: { _tag: "Unconfirmed" }, intent: `web-${sequence}` } : null,
+    sender: mine ? "iirc" : "peer",
+    tags: [],
+    target,
+    text,
+  },
+  level: mine ? null : "Message",
+  network,
+  position: `${hex(2n ** 53n + BigInt(sequence) * 1000n, 14)}-${hex(BigInt(sequence), 14)}-${hex(0n, 8)}`,
+  sequence,
+  timeline: `${hex(BigInt(sequence), 14)}-00000000-00000000`,
+});
+
+/**
+ * A Timeline of `libera`, as a list of them carries it.
+ * @param sequence - The step that opened it, which makes its id.
+ * @param name - Its name.
+ * @param kind - What it is of.
+ * @returns The Timeline.
+ */
+const libera = (
+  sequence: number,
+  name: string,
+  kind: "Network" | "Channel"
+): typeof Timeline.Encoded => ({
+  changed: 1,
+  closed: false,
+  detached: false,
+  head: null,
+  id: `${hex(BigInt(sequence), 14)}-00000000-00000000`,
+  key: kind === "Network" ? null : name,
+  kind,
+  latest: null,
+  life: 1,
+  name,
+  network: "libera",
+  read: null,
+  removed: false,
+  unread: { activity: 0, direct: 0, highlights: 0, messages: 0 },
+});
+
+/**
+ * Has the fake hold `libera`, with `#iirc`, opened at step 7, so the Timelines are read and
+ * followed.
+ * @param fake - The fake Daemon.
+ * @returns The fake.
+ */
+const onLibera = (fake: ReturnType<typeof fakeDaemon>) => {
+  fake.daemon.timelines.set("libera", [
+    { gaps: [], items: [], timeline: libera(1, "libera", "Network") },
+    { gaps: [], items: [], timeline: libera(7, "#iirc", "Channel") },
+  ]);
+
+  return fake;
+};
+
+/**
+ * Where each Upload listed says it was said, as the names of its jumps.
+ * @param container - The page.
+ * @returns Each row's jumps.
+ */
+const saidListed = (container: HTMLElement) =>
+  [...container.querySelectorAll<HTMLElement>('ul[aria-label="Uploads"] > li')].map((row) =>
+    [...row.querySelectorAll("button")].flatMap((button) => {
+      const label = button.getAttribute("aria-label") ?? "";
+
+      return label.startsWith("Go to where") ? [`${label} | ${button.textContent}`] : [];
+    })
+  );
 
 describe("the Uploads beside the options", () => {
   afterEach(() => {
@@ -925,5 +1029,83 @@ describe("the Uploads beside the options", () => {
       held: initialUploads,
       listed: [],
     });
+  });
+
+  it("says where each Upload was said, newest first, and goes to the Message from there", async () => {
+    const link = "https://up.example/aaaaaaaaaaaaaaaa/a-safe.png";
+    const later = ours("oftc", "friend", 9, `again ${link}`);
+    const first = ours("libera", "#iirc", 7, `look ${link}`);
+    const fake = onLibera(signedIn({ ...cat, said: [later, first] }, notes));
+    const { container } = await page(fake, {}, true);
+
+    await settled(() => listed(container).length === 2);
+    const before = saidListed(container);
+    const reads = fake.daemon.windowsRead.length;
+
+    await doing(() => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Go to where Cat picture.png was said in libera #iirc"]'
+        )
+        ?.click();
+    });
+    await eventually(() => fake.daemon.windowsRead.length > reads);
+
+    expect({
+      read: fake.daemon.windowsRead.slice(reads),
+      said: before,
+    }).toStrictEqual({
+      read: [`?around=${encodeURIComponent(first.position)}&limit=100`],
+      said: [
+        [
+          "Go to where Cat picture.png was said in oftc friend | oftc friend",
+          "Go to where Cat picture.png was said in libera #iirc | libera #iirc",
+        ],
+        [],
+      ],
+    });
+  });
+
+  it("learns where an Upload was said once a Message of ours holding its link arrives", async () => {
+    const fake = onLibera(signedIn(cat, notes));
+    const { container } = await page(fake, {}, true);
+
+    await settled(() => listed(container).length === 2);
+
+    const said = ours("libera", "#iirc", 7, "look https://up.example/aaaaaaaaaaaaaaaa/a-safe.png");
+
+    const theirs = ours(
+      "libera",
+      "#iirc",
+      8,
+      "and https://up.example/bbbbbbbbbbbbbbbb/b-safe.bin",
+      false
+    );
+
+    // The Daemon now finds ours, as it will when the Upload is read again. The other is
+    // planted, so a read of it, which someone else's Message must not cause, would show.
+    fake.daemon.uploads.splice(0, 2, { ...cat, said: [said] }, { ...notes, said: [theirs] });
+
+    await doing(() => {
+      fake.send({
+        data: JSON.stringify({
+          dropped: [],
+          gaps: [],
+          items: [said, theirs],
+          merged: [],
+          removals: [],
+          sequence: 8,
+          timelines: [],
+        }),
+        event: "changed",
+        id: "1.8",
+      });
+    });
+    await settled(() => saidListed(container)[0]?.length === 1);
+
+    expect(saidListed(container)).toStrictEqual([
+      ["Go to where Cat picture.png was said in libera #iirc | libera #iirc"],
+      [],
+    ]);
   });
 });
