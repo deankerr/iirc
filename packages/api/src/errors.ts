@@ -244,6 +244,18 @@ export class UploadUnreadable extends Schema.TaggedError<
 >()("UploadUnreadable", { reason: Schema.String, type: Schema.String }, { httpApiStatus: 422 }) {}
 
 /**
+ * Keeping the body would take the distinct bytes held by live Uploads past `maxTotal`,
+ * `uploads.maxTotal` when it was checked, so nothing was kept and nothing was evicted. Bytes
+ * a live Upload already holds add nothing. Deleting Uploads, or raising the limit, makes
+ * room: a 507.
+ */
+export class StoreFull extends Schema.TaggedError<StoreFull, { readonly brand: unique symbol }>()(
+  "StoreFull",
+  { maxTotal: ByteCount },
+  { httpApiStatus: 507 }
+) {}
+
+/**
  * The store that keeps Uploads' bytes could not be reached, refused what was asked, or
  * holds no key the options name, so nothing was kept. Asking again may succeed: a 503.
  */
