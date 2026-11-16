@@ -477,7 +477,10 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
       const answer = Effect.gen(function* () {
         const { response, target } = yield* follow;
         const header = essence(response.headers.get("content-type"));
-        const type = declared(purpose, header);
+        // A stream's 416 says only that its range is past the end, so its type is never media,
+        // and only its status and `Content-Range` are of use.
+        const unsatisfied = purpose.kind === "stream" && response.status === 416;
+        const type = unsatisfied ? header : declared(purpose, header);
 
         if (type === undefined) {
           return yield* new LinkWrongType({ link: target.href, type: header });
@@ -486,7 +489,14 @@ const guard = (options: BunLinkFetchOptions, pacer: Pacer): LinkFetchService => 
         const cap = capOf(purpose, type);
         const length = declaredLength(response);
 
-        if (purpose.kind !== "page" && length !== undefined && length > cap) {
+        // A stream that declares more than its cap is cut off at it as it streams, as a page is
+        // cut, rather than refused, so its first bytes still play.
+        if (
+          purpose.kind !== "page" &&
+          purpose.kind !== "stream" &&
+          length !== undefined &&
+          length > cap
+        ) {
           return yield* new LinkTooLarge({ limit: cap });
         }
 

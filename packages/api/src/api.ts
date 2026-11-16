@@ -26,6 +26,7 @@ import {
   NetworkStopped,
   NotAChannel,
   NotInChannel,
+  LinksOnly,
   NotWaiting,
   PreviewsOff,
   SignInsFailed,
@@ -37,7 +38,9 @@ import {
   UnknownNetwork,
   UnknownMessage,
   UnknownTimeline,
+  StreamFailed,
   UnknownMedia,
+  UnknownStream,
   UnknownUpload,
   UploadTooLarge,
   UploadUnreadable,
@@ -52,7 +55,9 @@ import {
   PressRequest,
   PreviewItem,
   PreviewsEvent,
+  PreviewId,
   PreviewsRequest,
+  StreamQuery,
 } from "./previews.ts";
 import {
   Acted,
@@ -440,6 +445,20 @@ export class PreviewsGroup extends HttpApiGroup.make("previews")
     HttpApiEndpoint.get("media", "/previews/media/:hash", {
       error: [UnknownMedia, StoreUnavailable],
       params: { hash: MediaHash },
+      success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
+    }),
+    HttpApiEndpoint.get("stream", "/previews/:id/stream", {
+      error: [
+        UnknownTimeline,
+        UnknownMessage,
+        PreviewsOff,
+        LinksOnly,
+        UnknownStream,
+        StreamFailed,
+        TimelinesFailed,
+      ],
+      params: { id: PreviewId },
+      query: StreamQuery,
       success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
     })
   )

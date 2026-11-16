@@ -89,7 +89,8 @@ export interface Fetched {
   readonly status: number;
   /**
    * The media type, checked against the purpose, lower-cased and without parameters. For an
-   * image, it is the type its leading bytes show, which matched its header.
+   * image, it is the type its leading bytes show, which matched its header. A stream's `416`
+   * is answered whatever its type, which is then unchecked, since it carries no media.
    */
   readonly type: string;
   /** Every header, by its lower-cased name. */

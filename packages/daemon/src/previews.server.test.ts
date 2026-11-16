@@ -4,7 +4,14 @@ import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
 import { MessagePreviews, PreviewItem, PreviewsEvent, TimelineList, UiInForce } from "@iirc/api";
 import { Sha256 } from "@iirc/byte-store";
 import { configured } from "@iirc/client/testing";
-import { LinkRefused, LinkTimedOut, LinkTooLarge, LinkWrongType } from "@iirc/link-fetch";
+import {
+  LinkRefused,
+  LinkTimedOut,
+  LinkTooLarge,
+  LinkUnreachable,
+  LinkWrongType,
+  limits,
+} from "@iirc/link-fetch";
 import type { Answer, FakeLinkFetch } from "@iirc/link-fetch/testing";
 import { makeFakeLinkFetch } from "@iirc/link-fetch/testing";
 import type { PreviewCacheService } from "@iirc/preview-cache";
@@ -2820,5 +2827,518 @@ describe("bounds and the queue over a real server", () => {
     expect(result.first).toStrictEqual(links.slice(0, 2));
     expect(result.second).toStrictEqual(links.slice(0, 3));
     expect(result.third).toStrictEqual(links);
+  });
+});
+
+const VIDEO = "https://video.example/clip.mp4";
+
+/** A clip's bytes: each is its own place. */
+const clip = Uint8Array.from({ length: 256 }, (_, at) => at);
+
+/**
+ * Previews on, a peer saying each text in the Channel, and the Previews of each Message
+ * asked until none is pending.
+ * @param served - The server.
+ * @param texts - What the peer says, a Message each.
+ * @returns Each Message's place and its Previews, in order.
+ */
+const shown = (served: Served, texts: readonly string[]) =>
+  Effect.gen(function* () {
+    yield* setPreviews(served, "on");
+    yield* talk(served, texts);
+
+    const places = yield* messages(served, texts.length);
+    const each: { readonly place: Place; readonly items: readonly PreviewItem[] }[] = [];
+
+    for (const place of places) {
+      each.push({ items: yield* settled(served, place), place });
+    }
+
+    return each;
+  });
+
+/**
+ * Asks for a link's stream.
+ * @param served - The server.
+ * @param place - The Message's place.
+ * @param id - The Preview's id.
+ * @param init - Headers and the key.
+ * @returns The response.
+ */
+const stream = (
+  served: Served,
+  place: Pick<Place, "timeline" | "position">,
+  id: string,
+  init: RequestInit & { readonly key?: string | null } = {}
+) =>
+  served.request(
+    `/api/previews/${id}/stream?timeline=${encodeURIComponent(place.timeline)}&position=${encodeURIComponent(place.position)}`,
+    init
+  );
+
+/** Nowhere in particular, for what is not there. */
+const nowhere: Place = { position: "", text: "", timeline: "" };
+
+/**
+ * The one Message the peer says, and the id of the Preview of its first link.
+ * @param served - The server.
+ * @param text - What the peer says.
+ * @returns Its place and the id.
+ */
+const linked = (served: Served, text: string) =>
+  Effect.map(shown(served, [text]), ([first]) => ({
+    id: first?.items[0]?.id ?? "",
+    place: first?.place ?? nowhere,
+  }));
+
+/** Each Message's place and its Previews, as {@link shown} gives them. */
+type Shown = Effect.Success<ReturnType<typeof shown>>;
+
+/**
+ * The id of the Preview of the first link of the Message at an index.
+ * @param each - Each Message's place and its Previews.
+ * @param at - The index.
+ * @returns The id.
+ */
+const idOf = (each: Shown, at: number) => each[at]?.items[0]?.id ?? "";
+
+/**
+ * The first Message's place and the id of its first Preview.
+ * @param each - Each Message's place and its Previews.
+ * @returns The place and the id.
+ */
+const firstOf = (each: Shown) => [each[0]?.place ?? nowhere, idOf(each, 0)] as const;
+
+/**
+ * The streams asked of the link fetch.
+ * @param asked - Every fetch asked.
+ * @returns Those that were streams.
+ */
+const streamsOf = (asked: readonly { readonly purpose: { readonly kind: string } }[]) =>
+  asked.filter((one) => one.purpose.kind === "stream");
+
+/**
+ * Streams the one video the one Message links, and what the fake link fetch was asked.
+ * @param answers - What each link answers.
+ * @param init - The request's headers.
+ * @param link - The link the Message holds.
+ * @returns What was asked of the link fetch, the body, and the response.
+ */
+const streaming = async (
+  answers: Readonly<Record<string, Answer>>,
+  init: RequestInit = {},
+  link = VIDEO
+) =>
+  await run(answers, (served) =>
+    Effect.gen(function* () {
+      const { id, place } = yield* linked(served, `watch ${link}`);
+      const response = yield* stream(served, place, id, init);
+      const body = yield* Effect.promise(async () => new Uint8Array(await response.arrayBuffer()));
+
+      return { asked: yield* served.asked, body, response };
+    })
+  );
+
+/**
+ * How much of a body a response gave, and whether it ended cleanly or broke off.
+ * @param response - The response.
+ * @returns The bytes it gave and whether it ended.
+ */
+const counted = async (response: Response) => {
+  let size = 0;
+
+  try {
+    for await (const chunk of response.body ?? []) {
+      size += chunk instanceof Uint8Array ? chunk.length : 0;
+    }
+
+    return { ended: true, size };
+  } catch {
+    return { ended: false, size };
+  }
+};
+
+const decodeStreamFailed = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ _tag: Schema.String, reason: Schema.String }))
+);
+
+const video = { body: clip, type: "video/mp4" };
+
+/**
+ * The ranges a request with a `Range` made the link fetch ask for as streams.
+ * @param range - The `Range`.
+ * @returns What each stream asked for.
+ */
+const asks = async (range: string) => {
+  const result = await streaming({ [VIDEO]: video }, { headers: { range } });
+
+  return streamsOf(result.asked).map((one) => one.purpose);
+};
+
+/**
+ * Streams after the peer says each text, once `then` has been done, with the place and id
+ * that `pick` gives, and what that was refused as.
+ * @param texts - What the peer says.
+ * @param answers - What each link answers.
+ * @param then - What to do before asking for the stream.
+ * @param pick - Which place and id to ask with.
+ * @returns The streams asked of the link fetch and the refusal.
+ */
+const refused = async (
+  texts: readonly string[],
+  answers: Readonly<Record<string, Answer>>,
+  then: (served: Served) => Effect.Effect<void, never, Scope.Scope>,
+  pick: (each: Shown) => readonly [Place, string]
+) =>
+  await run(answers, (served) =>
+    Effect.gen(function* () {
+      const each = yield* shown(served, texts);
+
+      yield* then(served);
+
+      const [place, id] = pick(each);
+      const response = yield* stream(served, place, id);
+
+      return {
+        asked: streamsOf(yield* served.asked),
+        refusal: yield* refusal(response),
+      };
+    })
+  );
+
+describe("a link that is itself video or sound, streamed over a real server", () => {
+  it("passes a single range on and answers the host's 206 and Content-Range, with those bytes", async () => {
+    const result = await streaming({ [VIDEO]: video }, { headers: { range: "bytes=10-19" } });
+
+    expect(result.response.status).toBe(206);
+    expect(result.response.headers.get("content-range")).toBe("bytes 10-19/256");
+    expect(result.body).toStrictEqual(clip.slice(10, 20));
+    expect(streamsOf(result.asked)).toStrictEqual([
+      { link: VIDEO, purpose: { kind: "stream", range: { end: 20, start: 10 } } },
+    ]);
+  });
+
+  it("answers the whole body with 200 and asks for no range when there is none", async () => {
+    const result = await streaming({ [VIDEO]: video });
+
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get("content-range")).toBeNull();
+    expect(result.body).toStrictEqual(clip);
+    expect(streamsOf(result.asked)).toStrictEqual([{ link: VIDEO, purpose: { kind: "stream" } }]);
+  });
+
+  it("takes a range with no end as ending at the limit, and no other range as a range at all", async () => {
+    await expect(asks("bytes=200-")).resolves.toStrictEqual([
+      { kind: "stream", range: { end: limits.stream, start: 200 } },
+    ]);
+
+    const others = ["bytes=-5", "bytes=0-4,10-14", "items=0-4", "bytes=9-4", "junk"];
+
+    await expect(Promise.all(others.map(asks))).resolves.toStrictEqual(
+      others.map(() => [{ kind: "stream" }])
+    );
+  });
+
+  it("answers with its headers: the host's type, nosniff, kept by no cache, and sandboxed", async () => {
+    const result = await streaming({
+      [VIDEO]: { ...video, headers: { "accept-ranges": "bytes" } },
+    });
+
+    expect(headersOf(result.response)).toMatchObject({
+      "accept-ranges": "bytes",
+      "cache-control": "private, no-store",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "content-type": "video/mp4",
+      "x-content-type-options": "nosniff",
+    });
+  });
+
+  it("streams a sound as the type the host gave", async () => {
+    const result = await streaming(
+      {
+        "https://audio.example/a.ogg": { body: clip, type: "audio/ogg; codecs=opus" },
+      },
+      {},
+      "https://audio.example/a.ogg"
+    );
+
+    expect(result.response.headers.get("content-type")).toBe("audio/ogg");
+  });
+
+  it("answers a range at the limit or past it with 416, and asks for no stream", async () => {
+    const result = await streaming(
+      { [VIDEO]: video },
+      { headers: { range: `bytes=${limits.stream}-` } }
+    );
+
+    expect(result.response.status).toBe(416);
+    expect(result.body).toHaveLength(0);
+    expect(streamsOf(result.asked)).toStrictEqual([]);
+  });
+
+  it("clamps the end of a range to the limit in what it asks for", async () => {
+    const result = await streaming(
+      { [VIDEO]: video },
+      { headers: { range: `bytes=5-${limits.stream * 2}` } }
+    );
+
+    expect(streamsOf(result.asked).map((one) => one.purpose)).toStrictEqual([
+      { kind: "stream", range: { end: limits.stream, start: 5 } },
+    ]);
+    expect(result.response.status).toBe(206);
+  });
+
+  it("answers the host's 416 as 416, with its Content-Range and no body", async () => {
+    const result = await streaming({ [VIDEO]: video }, { headers: { range: "bytes=1000-" } });
+
+    expect(result.response.status).toBe(416);
+    expect(result.response.headers.get("content-range")).toBe("bytes */256");
+    expect(result.body).toHaveLength(0);
+  });
+
+  it("cuts a body that passes the limit off, giving no more than the limit and not ending cleanly", async () => {
+    const result = await run(
+      { [VIDEO]: { type: "video/mp4", zeros: limits.stream + 1 } },
+      (served) =>
+        Effect.gen(function* () {
+          const { id, place } = yield* linked(served, `watch ${VIDEO}`);
+          const response = yield* stream(served, place, id);
+
+          return yield* Effect.promise(async () => await counted(response));
+        })
+    );
+
+    expect(result.ended).toBeFalsy();
+    expect(result.size).toBeLessThanOrEqual(limits.stream);
+  }, 30_000);
+
+  it("fetches nothing as a stream until the stream is asked for", async () => {
+    const result = await run({ [VIDEO]: video }, (served) =>
+      Effect.gen(function* () {
+        yield* shown(served, [`watch ${VIDEO}`]);
+        yield* Effect.sleep("200 millis");
+
+        return yield* served.asked;
+      })
+    );
+
+    expect(result).toStrictEqual([{ link: VIDEO, purpose: { kind: "page" } }]);
+  });
+
+  it("streams from the address the Daemon read for the link, never the link itself", async () => {
+    const read = "https://cdn.example/clip.mp4";
+
+    const result = await streaming(
+      {
+        "https://short.example/v": { body: "NOT THIS", link: read, type: "video/mp4" },
+        [read]: { body: "THIS", type: "video/mp4" },
+      },
+      {},
+      "https://short.example/v"
+    );
+
+    expect(new TextDecoder().decode(result.body)).toBe("THIS");
+    expect(result.asked.map((one) => [one.link, one.purpose.kind])).toStrictEqual([
+      ["https://short.example/v", "page"],
+      [read, "stream"],
+    ]);
+  });
+
+  it("holds the connection's Scope until the whole body is written", async () => {
+    const result = await run({}, () =>
+      Effect.gen(function* () {
+        const fake = yield* makeFakeLinkFetch({
+          [VIDEO]: { type: "video/mp4", zeros: 5 * 1024 * 1024 },
+        });
+
+        const closed = yield* Ref.make(false);
+        const late = yield* Ref.make(0);
+        const read = yield* Ref.make(0);
+
+        const guarded: FakeLinkFetch = {
+          ...fake,
+          service: {
+            fetch: (link, purpose) =>
+              Effect.gen(function* () {
+                const fetched = yield* fake.service.fetch(link, purpose);
+
+                if (purpose.kind !== "stream") {
+                  return fetched;
+                }
+
+                yield* Effect.addFinalizer(() => Ref.set(closed, true));
+
+                return {
+                  ...fetched,
+                  body: fetched.body.pipe(
+                    Stream.tap(() =>
+                      Effect.gen(function* () {
+                        yield* Ref.update(read, (count) => count + 1);
+
+                        if (yield* Ref.get(closed)) {
+                          yield* Ref.update(late, (count) => count + 1);
+                        }
+                      })
+                    )
+                  ),
+                };
+              }),
+          },
+        };
+
+        const own = yield* serve({}, { links: guarded });
+        const { id, place } = yield* linked(own, `watch ${VIDEO}`);
+        const response = yield* stream(own, place, id);
+        const bytes = yield* Effect.promise(async () => await response.arrayBuffer());
+
+        yield* Effect.retry(
+          Effect.flatMap(Ref.get(closed), (now) => (now ? Effect.void : Effect.fail("open"))),
+          Schedule.spaced("20 millis")
+        ).pipe(Effect.timeout("5 seconds"), Effect.orDie);
+
+        return { body: bytes.byteLength, late: yield* Ref.get(late), read: yield* Ref.get(read) };
+      })
+    );
+
+    expect(result.body).toBe(5 * 1024 * 1024);
+    expect(result.read).toBeGreaterThan(1);
+    expect(result.late).toBe(0);
+  });
+
+  describe("answers 502 StreamFailed, with the reason the guard gave", () => {
+    const read = "https://cdn.example/clip.mp4";
+
+    // The Message's link answers as video from the read address, which then answers as given.
+    const answering = (answer: Answer) => ({
+      "https://short.example/v": { link: read, type: "video/mp4" },
+      [read]: answer,
+    });
+
+    const failing = async (answer: Answer) => {
+      const result = await streaming(answering(answer), {}, "https://short.example/v");
+
+      return [
+        result.response.status,
+        decodeStreamFailed(new TextDecoder().decode(result.body)),
+      ] as const;
+    };
+
+    it.each([
+      [new LinkRefused({ reason: "private" }), "Refused"],
+      [new LinkUnreachable({ reason: "down" }), "Unreachable"],
+      [new LinkTimedOut(), "TimedOut"],
+      [new LinkTooLarge({ limit: limits.stream }), "TooLarge"],
+      [new LinkWrongType({ link: read, type: "text/html" }), "NothingToShow"],
+      [{ type: "text/html" }, "NothingToShow"],
+      [{ status: 500, type: "video/mp4" }, "NothingToShow"],
+    ] as const)("for %j: %s", async (answer, reason) => {
+      const [status, error] = await failing(answer);
+
+      expect([status, error._tag, error.reason]).toStrictEqual([502, "StreamFailed", reason]);
+    });
+  });
+
+  describe("answers no stream, and asks for none", () => {
+    it("for a Preview of a page, which is not video or sound: UnknownStream", async () => {
+      const result = await refused(
+        ["see https://cats.example/"],
+        { "https://cats.example/": cats },
+        () => Effect.void,
+        firstOf
+      );
+
+      expect(result).toStrictEqual({ asked: [], refusal: [404, "UnknownStream"] });
+    });
+
+    it("for a text Preview of an image: UnknownStream", async () => {
+      const result = await refused(
+        ["see https://img.example/a.png"],
+        { "https://img.example/a.png": { type: "image/png" } },
+        () => Effect.void,
+        firstOf
+      );
+
+      expect(result).toStrictEqual({ asked: [], refusal: [404, "UnknownStream"] });
+    });
+
+    it("for an id that no Preview has: UnknownStream", async () => {
+      const result = await refused(
+        [`watch ${VIDEO}`],
+        { [VIDEO]: video },
+        () => Effect.void,
+        (each) => [each[0]?.place ?? nowhere, "0".repeat(32)]
+      );
+
+      expect(result).toStrictEqual({ asked: [], refusal: [404, "UnknownStream"] });
+    });
+
+    it("for the id of a link of another Message: UnknownStream", async () => {
+      const other = "https://video.example/other.mp4";
+
+      const result = await refused(
+        [`watch ${VIDEO}`, `watch ${other}`],
+        { [VIDEO]: video, [other]: video },
+        () => Effect.void,
+        (each) => [each[0]?.place ?? nowhere, idOf(each, 1)]
+      );
+
+      expect(result).toStrictEqual({ asked: [], refusal: [404, "UnknownStream"] });
+    });
+
+    it("while the Timeline is off: PreviewsOff", async () => {
+      const result = await refused(
+        [`watch ${VIDEO}`],
+        { [VIDEO]: video },
+        (served) => setPreviews(served, "off"),
+        firstOf
+      );
+
+      expect(result).toStrictEqual({ asked: [], refusal: [409, "PreviewsOff"] });
+    });
+
+    it("while the Timeline is links only: LinksOnly", async () => {
+      const result = await refused(
+        [`watch ${VIDEO}`],
+        { [VIDEO]: video },
+        (served) => setPreviews(served, "links only"),
+        firstOf
+      );
+
+      expect(result).toStrictEqual({ asked: [], refusal: [409, "LinksOnly"] });
+    });
+
+    it("for a Timeline or a Message that is not there: UnknownTimeline, UnknownMessage", async () => {
+      const result = await run({ [VIDEO]: video }, (served) =>
+        Effect.gen(function* () {
+          const { id, place } = yield* linked(served, `watch ${VIDEO}`);
+          const before = place.position.replace(/-[0-9a-f]{8}$/u, "-0000ffff");
+
+          return [
+            yield* refusal(yield* stream(served, { ...place, position: before }, id)),
+            yield* refusal(
+              yield* stream(served, { ...place, timeline: "00000000000999-00000000-00000000" }, id)
+            ),
+          ];
+        })
+      );
+
+      expect(result).toStrictEqual([
+        [404, "UnknownMessage"],
+        [404, "UnknownTimeline"],
+      ]);
+    });
+  });
+
+  it("answers 401 with no key, and asks for nothing", async () => {
+    const result = await run({ [VIDEO]: video }, (served) =>
+      Effect.gen(function* () {
+        const { id, place } = yield* linked(served, `watch ${VIDEO}`);
+        const response = yield* stream(served, place, id, { key: null });
+
+        return { asked: streamsOf(yield* served.asked), status: response.status };
+      })
+    );
+
+    expect(result).toStrictEqual({ asked: [], status: 401 });
   });
 });

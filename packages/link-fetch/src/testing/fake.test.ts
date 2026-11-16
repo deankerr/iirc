@@ -106,6 +106,140 @@ describe("the fake link fetch", () => {
     expect(exit).toStrictEqual(Exit.fail(new LinkUnreachable({ reason: "no recorded answer" })));
   });
 
+  describe("serves a stream as a host serving ranges would", () => {
+    const link = "https://example.com/v.mp4";
+    const bytes = Uint8Array.from({ length: 100 }, (_, at) => at);
+
+    /**
+     * Fetches the video as a stream and reads what came of it, whole or until it failed.
+     * @param answer - What the link answers.
+     * @param range - The range asked, if any.
+     * @returns The answer's status and headers, how many bytes were read and the first of them,
+     * and why reading stopped, if it did.
+     */
+    const streaming = async (answer: Answer, range?: { start: number; end?: number }) =>
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fake = yield* makeFakeLinkFetch({ [link]: answer });
+
+            const fetched = yield* fake.service.fetch(
+              link,
+              range === undefined ? { kind: "stream" } : { kind: "stream", range }
+            );
+
+            // Only the first bytes are held, so a body of the stream limit is never collected.
+            const first: number[] = [];
+            let size = 0;
+
+            const failure = yield* Stream.runForEach(fetched.body, (chunk) =>
+              Effect.sync(() => {
+                size += chunk.length;
+
+                if (first.length < 1000) {
+                  first.push(...chunk.subarray(0, 1000));
+                }
+              })
+            ).pipe(
+              Effect.as(undefined),
+              Effect.catch((error) => Effect.succeed(error._tag))
+            );
+
+            return {
+              asked: yield* fake.asked,
+              failure,
+              first,
+              headers: fetched.headers,
+              size,
+              status: fetched.status,
+              type: fetched.type,
+            };
+          })
+        )
+      );
+
+    it("answers the part of a range with 206, its Content-Range, and its Content-Length", async () => {
+      const result = await streaming({ body: bytes, type: "video/mp4" }, { end: 20, start: 10 });
+
+      expect(result).toMatchObject({
+        asked: [{ link, purpose: { kind: "stream", range: { end: 20, start: 10 } } }],
+        first: bytes.slice(10, 20),
+        headers: { "content-length": "10", "content-range": "bytes 10-19/100" },
+        size: 10,
+        status: 206,
+        type: "video/mp4",
+      });
+    });
+
+    it("answers a range with no end to the end of the bytes, and an end past it as to the end", async () => {
+      const open = await streaming({ body: bytes, type: "video/mp4" }, { start: 90 });
+      const past = await streaming({ body: bytes, type: "video/mp4" }, { end: 500, start: 95 });
+
+      expect([open.status, open.headers["content-range"], open.size]).toStrictEqual([
+        206,
+        "bytes 90-99/100",
+        10,
+      ]);
+      expect([past.status, past.headers["content-range"], past.size]).toStrictEqual([
+        206,
+        "bytes 95-99/100",
+        5,
+      ]);
+    });
+
+    it("answers a range that begins at the end of the bytes or past it with 416 and no body", async () => {
+      const result = await streaming({ body: bytes, type: "video/mp4" }, { start: 100 });
+
+      expect(result).toMatchObject({
+        headers: { "content-range": "bytes */100" },
+        size: 0,
+        status: 416,
+      });
+    });
+
+    it("answers a recorded 416 to a stream whatever its type, as the guard does", async () => {
+      const result = await streaming(
+        { headers: { "content-range": "bytes */100" }, status: 416, type: "text/html" },
+        { start: 500 }
+      );
+
+      expect(result).toMatchObject({ headers: { "content-range": "bytes */100" }, status: 416 });
+    });
+
+    it("answers no range with the whole body and the recorded status", async () => {
+      const result = await streaming({ body: bytes, type: "video/mp4" });
+
+      expect(result.status).toBe(200);
+      expect(result.size).toBe(100);
+      expect(result.headers["content-range"]).toBeUndefined();
+    });
+
+    it("answers a recorded status as recorded, a host that ignores the range, whole", async () => {
+      const result = await streaming(
+        { body: bytes, status: 200, type: "video/mp4" },
+        { end: 20, start: 10 }
+      );
+
+      expect(result.status).toBe(200);
+      expect(result.size).toBe(100);
+    });
+
+    it("gives a body over the stream limit up to the limit, and then fails it as too large", async () => {
+      const result = await streaming({ type: "video/mp4", zeros: limits.stream + 1 });
+
+      expect(result).toMatchObject({ failure: "LinkTooLarge", size: limits.stream });
+    });
+
+    it("gives a range of a body over the limit up to the limit from where it begins, and then fails it", async () => {
+      const result = await streaming(
+        { type: "video/mp4", zeros: limits.stream + 1000 },
+        { start: 500 }
+      );
+
+      expect(result).toMatchObject({ failure: "LinkTooLarge", size: limits.stream });
+    });
+  });
+
   describe("answers as the guard would for the purpose", () => {
     it("refuses an image answer fetched as a page as the wrong type, naming the link that answered", async () => {
       const exit = await fetching(

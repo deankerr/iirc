@@ -7,6 +7,7 @@ import {
   uiDefaults,
 } from "@iirc/api";
 import type { Preview, PreviewsShown } from "@iirc/api";
+import { cursorOf } from "@iirc/timelines";
 import type { Position } from "@iirc/timelines";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
@@ -536,6 +537,7 @@ describe("what a Message shows", () => {
         image: undefined,
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
+        media: undefined,
         summary: "example.com · Cats",
       },
       {
@@ -707,6 +709,45 @@ describe("a Preview's image", () => {
 
   it("is none when the Daemon kept none", () => {
     expect(shownReady({ image: null })?.image).toBeUndefined();
+  });
+});
+
+const streamed = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") =>
+  shownReady({ title: null, ...fields }, mode)?.media;
+
+describe("a Preview's media", () => {
+  it("is a video to stream under on, from the route by the Message's place", () => {
+    expect(streamed({ kind: "video", type: "video/mp4" })).toStrictEqual({
+      kind: "video",
+      src: `/api/previews/${idOf("a")}/stream?timeline=${timeline}&position=${cursorOf(at(1))}`,
+      type: "video/mp4",
+    });
+  });
+
+  it("is a sound likewise, and has no type when the Daemon read none", () => {
+    expect(streamed({ kind: "audio", type: null })?.kind).toBe("audio");
+    expect(streamed({ kind: "audio", type: null })?.type).toBeNull();
+  });
+
+  it("is none under links only, even one held from while Previews were on", () => {
+    expect(streamed({ kind: "video", type: "video/mp4" }, "links only")).toBeUndefined();
+    expect(streamed({ kind: "audio", type: "audio/ogg" }, "links only")).toBeUndefined();
+  });
+
+  it("is none for a page, an image, or a player", () => {
+    expect(streamed({ kind: "page" })).toBeUndefined();
+    expect(streamed({ kind: "image", type: "image/png" })).toBeUndefined();
+    expect(streamed({ kind: "player" })).toBeUndefined();
+  });
+
+  it("encodes the Timeline and the place in the route's query", () => {
+    const src = streamed({ kind: "video", type: "video/mp4" })?.src ?? "";
+    const query = new URL(src, "http://daemon.test").searchParams;
+
+    expect({ position: query.get("position"), timeline: query.get("timeline") }).toStrictEqual({
+      position: cursorOf(at(1)),
+      timeline,
+    });
   });
 });
 

@@ -10,12 +10,21 @@ import { LinkTooLarge, LinkUnreachable, LinkWrongType, limits } from "../link-fe
 import type { Fetched, LinkFetchFailure, LinkFetchService, Purpose } from "../link-fetch.ts";
 import { makePacer } from "../pacer.ts";
 
-/** A response to answer, with the status 200 and no headers beyond its type unless given. */
+/**
+ * A response to answer, with the status 200 and no headers beyond its type unless given. Given
+ * no status, a stream with a range is answered as a host serving ranges would: `206` and the
+ * part asked, or `416` for a range past the end. Given a status, it is answered as recorded, whole.
+ */
 export interface Recorded {
   readonly type: string;
   readonly status?: number;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: Uint8Array | string;
+  /**
+   * In place of a body, this many bytes of zeros, made as they are read, so a body as large
+   * as the stream limit is never held.
+   */
+  readonly zeros?: number;
   /** The link it answers as, as after a redirect. Defaults to the link asked for. */
   readonly link?: string;
 }
@@ -68,6 +77,46 @@ const isFailure = (answer: Answer): answer is LinkFetchFailure => "_tag" in answ
 
 const encoder = new TextEncoder();
 
+/** Bytes a recorded response holds, and how to read part of them. */
+interface Content {
+  readonly total: number;
+  /** The bytes from `start` up to but not including `end`, as they arrive. */
+  readonly slice: (start: number, end: number) => Stream.Stream<Uint8Array>;
+}
+
+const zeroChunk = new Uint8Array(1024 * 1024);
+
+/**
+ * The bytes of a recorded response.
+ * @param recorded - The response.
+ * @returns Its bytes.
+ */
+const contentOf = ({ body, zeros }: Recorded): Content => {
+  if (zeros !== undefined) {
+    return {
+      slice: (start, end) =>
+        Stream.unfold(Math.max(0, end - start), (left) =>
+          Effect.succeed(
+            left <= 0
+              ? undefined
+              : ([
+                  zeroChunk.subarray(0, Math.min(left, zeroChunk.length)),
+                  left - zeroChunk.length,
+                ] as const)
+          )
+        ),
+      total: zeros,
+    };
+  }
+
+  const bytes = body instanceof Uint8Array ? body : encoder.encode(body);
+
+  return {
+    slice: (start, end) => Stream.make(bytes.slice(start, end)),
+    total: bytes.length,
+  };
+};
+
 // The image types the guard takes, `image/jpg` standing for `image/jpeg` as it does there.
 const imageTypes = new Map([
   ["image/png", "image/png"],
@@ -100,19 +149,23 @@ const caps: Record<Purpose["kind"], (type: string) => number> = {
 /**
  * A recorded response as the guard answers it for a purpose: refused as `LinkWrongType`
  * when the purpose does not take its type, a page cut cleanly at its limit, and any other
- * body over its limit failing with `LinkTooLarge` as it is read. Its leading bytes are not
- * read, so an image is taken by its declared type alone.
+ * body over its limit giving its bytes up to the limit and then failing with `LinkTooLarge`
+ * as it is read. Its leading bytes are not read, so an image is taken by its declared type
+ * alone. A stream with a range, of a response with no status recorded, is answered as a host
+ * serving ranges would.
  * @param link - The link asked, normalised.
  * @param purpose - What it is fetched for.
  * @param recorded - The response.
  * @returns The answer, or why there is none.
  */
 const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
-  const raw = recorded.body ?? new Uint8Array();
-  const body = raw instanceof Uint8Array ? new Uint8Array(raw) : encoder.encode(raw);
+  const content = contentOf(recorded);
   const answeredAs = recorded.link === undefined ? link : normalised(recorded.link);
   const declared = recorded.type.split(";")[0]?.trim().toLowerCase() ?? "";
-  const type = takes[purpose.kind](declared);
+
+  // A stream's 416 carries no media, so its type is taken as it is, as the guard takes it.
+  const type =
+    purpose.kind === "stream" && recorded.status === 416 ? declared : takes[purpose.kind](declared);
 
   if (type === undefined) {
     return Effect.fail(new LinkWrongType({ link: answeredAs, type: declared }));
@@ -120,19 +173,41 @@ const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
 
   const limit = caps[purpose.kind](type);
 
-  const over = body.length > limit;
+  const range =
+    purpose.kind === "stream" && recorded.status === undefined ? purpose.range : undefined;
+
+  const answer = (status: number, headers: Record<string, string>, body: Fetched["body"]) =>
+    Effect.succeed({
+      body,
+      headers: { "content-type": recorded.type, ...headers, ...recorded.headers },
+      link: answeredAs,
+      status,
+      type,
+    } satisfies Fetched);
+
+  if (range !== undefined && range.start >= content.total) {
+    return answer(416, { "content-range": `bytes */${content.total}` }, Stream.empty);
+  }
+
+  const start = range?.start ?? 0;
+  const end = Math.min(range?.end ?? content.total, content.total);
   const page = purpose.kind === "page";
 
-  const bounded: Fetched["body"] =
-    over && !page ? Stream.fail(new LinkTooLarge({ limit })) : Stream.make(body.slice(0, limit));
+  const body: Fetched["body"] =
+    end - start > limit && !page
+      ? Stream.concat(content.slice(start, start + limit), Stream.fail(new LinkTooLarge({ limit })))
+      : content.slice(start, Math.min(end, start + limit));
 
-  return Effect.succeed({
-    body: bounded,
-    headers: { "content-type": recorded.type, ...recorded.headers },
-    link: answeredAs,
-    status: recorded.status ?? 200,
-    type,
-  } satisfies Fetched);
+  return answer(
+    range === undefined ? (recorded.status ?? 200) : 206,
+    range === undefined
+      ? {}
+      : {
+          "content-length": String(end - start),
+          "content-range": `bytes ${start}-${end - 1}/${content.total}`,
+        },
+    body
+  );
 };
 
 /**

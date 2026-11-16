@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { wantedOf } from "./wanted.ts";
+import { startingRangeOf, wantedOf } from "./wanted.ts";
 
 const tag = '"k3x9abcdefgh7f2q"';
 
@@ -79,5 +79,31 @@ describe("what a request for bytes wants", () => {
       get({ "if-range": `W/${tag}`, range: "bytes=2-5" }),
       get({ "if-range": "Wed, 21 Oct 2026 07:28:00 GMT", range: "bytes=2-5" }),
     ]).toStrictEqual([{ _tag: "Part", end: 6, start: 2 }, { _tag: "Whole" }, { _tag: "Whole" }]);
+  });
+});
+
+describe("the one range that starts somewhere, of a size not known", () => {
+  it("is where it starts and, when it ends, where it ends, not included", () => {
+    expect([
+      startingRangeOf("bytes=10-19"),
+      startingRangeOf("bytes=10-"),
+      startingRangeOf(" BYTES=0-0 "),
+    ]).toStrictEqual([{ end: 20, start: 10 }, { start: 10 }, { end: 1, start: 0 }]);
+  });
+
+  it("is nothing for a suffix, several ranges, another unit, an end before its start, or junk", () => {
+    const asks = [
+      undefined,
+      "bytes=-5",
+      "bytes=0-4,10-14",
+      "items=0-4",
+      "bytes=9-4",
+      "bytes=a-b",
+      "bytes=",
+      "bytes=-",
+      "",
+    ];
+
+    expect(asks.flatMap((header) => startingRangeOf(header) ?? [])).toStrictEqual([]);
   });
 });

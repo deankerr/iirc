@@ -10,11 +10,14 @@
 import { createHash } from "node:crypto";
 
 import {
+  LinksOnly,
   MediaType,
   NotWaiting,
   PreviewId,
   PreviewsOff,
+  StreamFailed,
   UnknownMessage,
+  UnknownStream,
   UnknownTimeline,
 } from "@iirc/api";
 import type {
@@ -26,8 +29,14 @@ import type {
   PreviewState,
 } from "@iirc/api";
 import { ByteStoreUnavailable, Sha256 } from "@iirc/byte-store";
-import { LinkFetch } from "@iirc/link-fetch";
-import type { Fetched, LinkFetchFailure, LinkFetchService } from "@iirc/link-fetch";
+import { LinkFetch, limits } from "@iirc/link-fetch";
+import type {
+  BodyFailure,
+  Fetched,
+  LinkFetchFailure,
+  LinkFetchService,
+  StreamRange,
+} from "@iirc/link-fetch";
 import { sniff, sniffed } from "@iirc/link-fetch-bun";
 import { PreviewCache } from "@iirc/preview-cache";
 import type { Kept, Settled } from "@iirc/preview-cache";
@@ -55,6 +64,7 @@ import {
 
 import { StoreBytes, hashOf } from "../store-bytes.ts";
 import { UiConfiguration } from "../ui.ts";
+import type { StartingRange } from "../uploads/wanted.ts";
 import { animated } from "./animated.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
 import type { PageRead } from "./read.ts";
@@ -69,6 +79,23 @@ export interface Media {
   readonly type: MediaType;
   readonly bytes: Stream.Stream<Uint8Array, ByteStoreUnavailable>;
 }
+
+/**
+ * What a stream of a link answers: nothing that satisfies the range asked, with the host's
+ * `Content-Range` when it gave one, or a body, whole or a part of the media, as it arrives.
+ * Its headers are the host's own, when it sent them. No length is given, since the body is
+ * sent in chunks, and a length beside them is forbidden.
+ */
+export type Streamed =
+  | { readonly _tag: "Unsatisfiable"; readonly contentRange?: string }
+  | {
+      readonly _tag: "Body";
+      readonly status: 200 | 206;
+      readonly type: string;
+      readonly contentRange?: string;
+      readonly acceptRanges?: string;
+      readonly body: Stream.Stream<Uint8Array, BodyFailure>;
+    };
 
 /** What the Daemon offers of Previews. */
 export class Previews extends Context.Service<
@@ -107,6 +134,30 @@ export class Previews extends Context.Service<
     readonly media: (
       hash: MediaHash
     ) => Effect.Effect<Media, NoSuchMedia | ByteStoreUnavailable, Scope.Scope>;
+    /**
+     * The video or sound a link of the Message at a position in a Timeline is, streamed from
+     * the address the Daemon read for its Preview, never any other, and kept nowhere. Only a
+     * Timeline whose mode is `on` streams, and only a link whose kept Preview is ready and of
+     * kind video or audio. A start at or past `limits.stream` is unsatisfiable without a
+     * fetch, and any other range ends at `limits.stream` at the latest, so no byte past it is
+     * ever asked for. The connection lives in the Scope, which must outlast the body.
+     */
+    readonly stream: (
+      timeline: TimelineId,
+      position: Position,
+      id: PreviewId,
+      range: StartingRange | undefined
+    ) => Effect.Effect<
+      Streamed,
+      | UnknownTimeline
+      | UnknownMessage
+      | PreviewsOff
+      | LinksOnly
+      | UnknownStream
+      | StreamFailed
+      | TimelineStoreFailed,
+      Scope.Scope
+    >;
     /**
      * Whether any Preview kept holds the image with the hash, without reading its bytes. A
      * cache that cannot be read is as unavailable as the store.
@@ -194,31 +245,31 @@ const mediaPreview = (link: string, type: string): Read => {
 };
 
 /**
- * What a fetch that failed shows: the reason, or for an answer of another type than a page,
- * a text Preview of it when it is media.
- * @param failure - Why the fetch gave no page.
- * @returns What it came to.
+ * Why a fetch gave nothing, as a Preview's failure. An answer of another type than the
+ * purpose takes is nothing to show.
+ * @param failure - Why the fetch gave nothing.
+ * @returns The reason.
  */
-const failedFetch = (failure: LinkFetchFailure): Read => {
+const reasonOf = (failure: LinkFetchFailure): PreviewFailure => {
   switch (failure._tag) {
     case "LinkRefused": {
-      return failedRead("Refused");
+      return "Refused";
     }
 
     case "LinkUnreachable": {
-      return failedRead("Unreachable");
+      return "Unreachable";
     }
 
     case "LinkTimedOut": {
-      return failedRead("TimedOut");
+      return "TimedOut";
     }
 
     case "LinkTooLarge": {
-      return failedRead("TooLarge");
+      return "TooLarge";
     }
 
     case "LinkWrongType": {
-      return mediaPreview(failure.link, failure.type);
+      return "NothingToShow";
     }
 
     default: {
@@ -226,6 +277,17 @@ const failedFetch = (failure: LinkFetchFailure): Read => {
     }
   }
 };
+
+/**
+ * What a fetch that failed shows: the reason, or for an answer of another type than a page,
+ * a text Preview of it when it is media.
+ * @param failure - Why the fetch gave no page.
+ * @returns What it came to.
+ */
+const failedFetch = (failure: LinkFetchFailure): Read =>
+  failure._tag === "LinkWrongType"
+    ? mediaPreview(failure.link, failure.type)
+    : failedRead(reasonOf(failure));
 
 /**
  * Bytes, one after another.
@@ -431,6 +493,41 @@ const stale = (kept: Kept, now: number, waits: boolean): boolean => {
   const age = now - kept.fetched;
 
   return kept.state._tag === "Ready" ? age > readyFor : age >= failedFor;
+};
+
+/**
+ * A fetch of a stream as it is answered: the host's `200` or `206` with its headers, its `416`,
+ * or, for any other status, nothing to show.
+ * @param id - The Preview's id.
+ * @param fetched - What the host answered.
+ * @returns What to answer.
+ */
+const streamed = (id: PreviewId, fetched: Fetched) => {
+  const { headers, status } = fetched;
+
+  if (status === 416) {
+    const contentRange = headers["content-range"];
+
+    return Effect.succeed(
+      (contentRange === undefined
+        ? { _tag: "Unsatisfiable" }
+        : { _tag: "Unsatisfiable", contentRange }) satisfies Streamed
+    );
+  }
+
+  if (status !== 200 && status !== 206) {
+    return Effect.fail(new StreamFailed({ id, reason: "NothingToShow" }));
+  }
+
+  return Effect.succeed({
+    _tag: "Body",
+    body: fetched.body,
+    status,
+    type: fetched.type,
+    ...(status === 206 &&
+      headers["content-range"] !== undefined && { contentRange: headers["content-range"] }),
+    ...(headers["accept-ranges"] !== undefined && { acceptRanges: headers["accept-ranges"] }),
+  } satisfies Streamed);
 };
 
 /**
@@ -764,6 +861,56 @@ export const layerPreviews = Layer.effect(Previews)(
           return started ? item : yield* new NotWaiting({ link, position, timeline });
         }),
       refers,
+      stream: (timeline, position, id, range) =>
+        Effect.gen(function* () {
+          const { links: found, shown } = yield* locate(timeline, position);
+
+          if (shown === "links only") {
+            return yield* new LinksOnly({ timeline });
+          }
+
+          const key = found.map(keyOf).find((one) => idOf(one) === id);
+
+          // A cache that cannot be read keeps nothing to stream from.
+          const kept =
+            key === undefined
+              ? Option.none<Kept>()
+              : yield* cache
+                  .get(key)
+                  .pipe(
+                    Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>()))
+                  );
+
+          const preview =
+            Option.isSome(kept) && kept.value.state._tag === "Ready"
+              ? kept.value.state.preview
+              : undefined;
+
+          if (preview === undefined || (preview.kind !== "video" && preview.kind !== "audio")) {
+            return yield* new UnknownStream({ id });
+          }
+
+          // No byte past the limit is asked for, however many seeks add up to it.
+          if (range !== undefined && range.start >= limits.stream) {
+            return { _tag: "Unsatisfiable" } satisfies Streamed;
+          }
+
+          const asking: StreamRange | undefined =
+            range === undefined
+              ? undefined
+              : { end: Math.min(range.end ?? limits.stream, limits.stream), start: range.start };
+
+          const fetched = yield* links
+            .fetch(
+              preview.link,
+              asking === undefined ? { kind: "stream" } : { kind: "stream", range: asking }
+            )
+            .pipe(
+              Effect.mapError((failure) => new StreamFailed({ id, reason: reasonOf(failure) }))
+            );
+
+          return yield* streamed(id, fetched);
+        }),
     };
   })
 );

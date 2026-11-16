@@ -21,6 +21,7 @@
 .row,
 .pending,
 .ready,
+.media,
 .failed,
 .text {
   min-width: 0;
@@ -38,6 +39,36 @@
 
 .text {
   flex: 1 1 0;
+}
+
+/* A link that is itself a video or a sound: its text, and the player under it. */
+.media {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.media > .text {
+  flex: none;
+}
+
+/*
+ * A video fills a box of a fixed shape, as tall as the medium size at most, so playing it
+ * moves nothing below it. A sound runs the row, up to a width that stays calm.
+ */
+.video {
+  display: block;
+  width: min(100%, 462px);
+  max-height: 260px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.audio {
+  display: block;
+  width: 100%;
+  max-width: 32em;
 }
 
 /* A page's image: a small fixed box, cropped to fill it, so the row stays calm. */
