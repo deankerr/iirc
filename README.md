@@ -9,7 +9,7 @@ iirc is an always-on IRC client you can build on. A headless Daemon stays on you
 - **IRCv3:** `cap-notify`, SASL PLAIN, `message-tags`, `server-time`, `batch`, `echo-message` with `labeled-response`, `multi-prefix`, `away-notify`, `standard-replies`, `UTF8ONLY`, and STS.
 - **The Journal** in SQLite. A restart rebuilds every Network from it, and News resumes from any point in it.
 - **The API:** configure and remove Networks, say things, hold Credentials, read what the Client knows and its machines' states, run Lookups, follow News as Server-Sent Events, read and close Timelines, and ask for a Message's Previews, which the Daemon fetches through a guard that keeps a stranger's link off our own network.
-- **Uploads** to an S3-compatible bucket, stripped first of any metadata drawing them does not need if they are JPEG, PNG, GIF, or WebP images, and served at their links by a listener of their own.
+- **Uploads** to an S3-compatible bucket, stripped first of any metadata drawing them does not need if they are JPEG, PNG, GIF, WebP, HEIC, or AVIF images, or MP4 or MOV videos, and served at their links by a listener of their own.
 - **The web frontend,** served by `iirc daemon --web` on the API's own origin: Timelines in split Panes, a Composer with commands, completion, and uploading, a palette and a keymap, search, Lookups, a Channel's members, a page's Preview under its link, the list of Uploads, notifications, options, and themes, on a desktop or a phone.
 
 Most packages' READMEs end with what the package does not do yet.
