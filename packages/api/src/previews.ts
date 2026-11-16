@@ -39,14 +39,58 @@ export const PreviewKind = Schema.Literals(["page", "image", "video", "audio", "
 export type PreviewKind = typeof PreviewKind.Type;
 
 /**
+ * The hash of an image a Preview holds: the SHA-256 of its bytes, as 64 lower-case hex
+ * digits, which names it at `GET /api/previews/media/{hash}`.
+ */
+export const MediaHash = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{64}$/u, { message: "must be 64 lower-case hex digits" })
+).annotate({
+  description: "The SHA-256 of an image a Preview holds, which names it on the media route.",
+  identifier: "MediaHash",
+});
+
+/** The decoded form of {@link MediaHash}. */
+export type MediaHash = typeof MediaHash.Type;
+
+/** The types an image a Preview holds may be, as read from its leading bytes. */
+export const MediaType = Schema.Literals([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/svg+xml",
+]).annotate({ identifier: "MediaType" });
+
+/** The decoded form of {@link MediaType}. */
+export type MediaType = typeof MediaType.Type;
+
+/**
+ * An image a Preview holds, kept by the Daemon and served from its own origin at
+ * `GET /api/previews/media/{hash}`, never from the host it came from: its hash, its type
+ * and whether it moves, both read from its bytes, and its size in bytes.
+ */
+export const PreviewImage = Schema.Struct({
+  animated: Schema.Boolean,
+  hash: MediaHash,
+  size: Schema.Int.check(Schema.isGreaterThan(0)),
+  type: MediaType,
+}).annotate({ identifier: "PreviewImage" });
+
+/** The decoded form of {@link PreviewImage}. */
+export type PreviewImage = typeof PreviewImage.Type;
+
+/**
  * A Preview: the link it was read from, after any redirects, as the URL parser wrote it,
  * what it is, and what it says of itself. `site` is the name the page gives its site, or
  * else the link's host, so it is always there. `type` is the media type of a link to media
- * itself, read from its headers alone, and `null` for a page. Every field but `kind` is
- * what a stranger wrote.
+ * itself, read from its headers alone, and `null` for a page. `image` is the image the
+ * Daemon kept for it, a page's own or the link itself, or `null` for none. Every field but
+ * `kind` and `image` is what a stranger wrote.
  */
 export const Preview = Schema.Struct({
   description: Schema.NullOr(Untrusted),
+  image: Schema.NullOr(PreviewImage),
   kind: PreviewKind,
   link: Untrusted,
   site: Untrusted,

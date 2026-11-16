@@ -448,8 +448,8 @@ export const sharedOnly = { sharedOnly: true } as const;
 
 /**
  * Whether the Daemon previews the links in Messages: `off`; `links only`, a page's title,
- * description, and site, with no image or media fetched; or `on`, which adds images and
- * media as they are offered, and until then previews as `links only` does. The Daemon
+ * description, and site, with no image or media fetched; or `on`, which adds a page's
+ * image, or a link's own image, kept in the store when a bucket is set. The Daemon
  * fetches each link itself, never the browser, so it is shared only: no device turns
  * fetching on for itself.
  */
@@ -457,7 +457,7 @@ export const PreviewsShown = Schema.Literals(["off", "links only", "on"]).annota
   ...sharedOnly,
   default: "off",
   description:
-    "Whether the Daemon previews links in Messages, fetching them itself, never the browser: off, links only for a page's title, description, and site, or on, which is links only too for now. Every device shares it.",
+    "Whether the Daemon previews links in Messages, fetching them itself, never the browser: off, links only for a page's title, description, and site, or on, which adds images, kept in the store when a bucket is set. Every device shares it.",
 });
 
 /** The decoded form of {@link PreviewsShown}. */

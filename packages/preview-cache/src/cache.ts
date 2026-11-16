@@ -58,6 +58,8 @@ export interface PreviewCacheService {
     link: string,
     at: number
   ) => Effect.Effect<Option.Option<Kept>, PreviewCacheFailed>;
+  /** Whether any record kept holds the image with this hash. */
+  readonly refers: (hash: Sha256) => Effect.Effect<boolean, PreviewCacheFailed>;
 }
 
 /** The Preview cache port. */

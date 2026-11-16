@@ -36,6 +36,7 @@ import {
   UnknownNetwork,
   UnknownMessage,
   UnknownTimeline,
+  UnknownMedia,
   UnknownUpload,
   UploadTooLarge,
   UploadUnreadable,
@@ -44,7 +45,7 @@ import {
   VaultFailed,
 } from "./errors.ts";
 import { OwnerInForce, OwnerOptionName } from "./options.ts";
-import { MessagePreviews, PreviewsEvent, PreviewsRequest } from "./previews.ts";
+import { MediaHash, MessagePreviews, PreviewsEvent, PreviewsRequest } from "./previews.ts";
 import {
   Acted,
   ActRequest,
@@ -420,6 +421,11 @@ export class PreviewsGroup extends HttpApiGroup.make("previews")
     }),
     HttpApiEndpoint.get("changes", "/previews/changes", {
       success: HttpApiSchema.StreamSse({ events: PreviewsEvent }),
+    }),
+    HttpApiEndpoint.get("media", "/previews/media/:hash", {
+      error: [UnknownMedia, StoreUnavailable],
+      params: { hash: MediaHash },
+      success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
     })
   )
   .middleware(Authorization) {}

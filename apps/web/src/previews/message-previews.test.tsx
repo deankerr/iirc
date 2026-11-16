@@ -94,6 +94,7 @@ const ready = {
   _tag: "Ready",
   preview: {
     description: "A page about cats.",
+    image: null,
     kind: "page",
     link: "https://example.com/cats",
     site: "example.com",
@@ -101,6 +102,24 @@ const ready = {
     type: null,
   },
 } as const;
+
+const hash = "cd".repeat(32);
+
+/**
+ * A ready Preview of the link, with an image the Daemon kept.
+ * @param kind - A page, or a link that is itself an image.
+ * @returns Its state.
+ */
+const readyWithImage = (kind: "page" | "image") =>
+  ({
+    _tag: "Ready",
+    preview: {
+      ...ready.preview,
+      image: { animated: false, hash, size: 1234, type: "image/png" },
+      kind,
+      type: kind === "image" ? "image/png" : null,
+    },
+  }) as const;
 
 /** What the view reads of an entry. */
 interface Seen {
@@ -271,6 +290,12 @@ const drawn = () =>
     text: one.textContent,
   }));
 
+/**
+ * The summary line of the Message's first Preview, without the description under it.
+ * @returns Its text.
+ */
+const summaryLine = () => list()?.querySelector("button")?.textContent;
+
 describe("a Message's Previews", () => {
   beforeEach(() => {
     layOut();
@@ -361,6 +386,106 @@ describe("a Message's Previews", () => {
       text: "https://example.com/cats",
       title: "No preview: the Daemon could not reach this link.",
     });
+  });
+
+  it("shows a page's image as a thumbnail from the media route, beside its summary", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    const image = list()?.querySelector("img");
+
+    expect({
+      alt: image?.getAttribute("alt"),
+      decoding: image?.getAttribute("decoding"),
+      drawn: image?.dataset.drawn,
+      loading: image?.getAttribute("loading"),
+      referrerPolicy: image?.getAttribute("referrerpolicy"),
+      src: image?.getAttribute("src"),
+      text: summaryLine(),
+    }).toStrictEqual({
+      alt: "Cats",
+      decoding: "async",
+      drawn: "thumbnail",
+      loading: "lazy",
+      referrerPolicy: "no-referrer",
+      src: `/api/previews/media/${hash}`,
+      text: "example.com · Cats",
+    });
+  });
+
+  it("shows a link that is itself an image as the image", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("image")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => list()?.querySelector("img") !== null);
+
+    const image = list()?.querySelector("img");
+
+    expect({
+      alt: image?.getAttribute("alt"),
+      drawn: image?.dataset.drawn,
+      src: image?.getAttribute("src"),
+    }).toStrictEqual({ alt: "Cats", drawn: "whole", src: `/api/previews/media/${hash}` });
+  });
+
+  it("falls back to the text row when an image fails to load", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("page")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => list()?.querySelector("img") !== null);
+
+    await act(async () => {
+      list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+      await Promise.resolve();
+    });
+
+    expect({
+      image: list()?.querySelector("img"),
+      state: drawn()[0]?.state,
+      text: summaryLine(),
+    }).toStrictEqual({ image: null, state: "ready", text: "example.com · Cats" });
+  });
+
+  it("falls back to the text row, summary and all, when a link that is an image fails to load", async () => {
+    const { daemon } = await opened("on", catsItem(readyWithImage("image")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => list()?.querySelector("img") !== null);
+
+    await act(async () => {
+      list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+      await Promise.resolve();
+    });
+
+    expect({
+      image: list()?.querySelector("img"),
+      state: drawn()[0]?.state,
+      text: summaryLine(),
+    }).toStrictEqual({
+      image: null,
+      state: "ready",
+      text: "image · image/png · Cats · example.com",
+    });
+  });
+
+  it("draws a Preview with no image as the text row alone", async () => {
+    const { daemon } = await opened("on", catsItem(ready));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect({
+      image: list()?.querySelector("img"),
+      state: drawn()[0]?.state,
+      text: summaryLine(),
+    }).toStrictEqual({ image: null, state: "ready", text: "example.com · Cats" });
   });
 
   it("under off, shows nothing, follows nothing, and asks nothing", async () => {

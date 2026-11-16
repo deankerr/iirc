@@ -61,6 +61,7 @@ const idOf = (letter: string) => letter.repeat(32);
 
 const page = {
   description: "A page about cats.",
+  image: null,
   kind: "page",
   link: "https://example.com/cats",
   site: "example.com",
@@ -372,6 +373,7 @@ describe("what a Message shows", () => {
       {
         _tag: "Ready",
         description: "A page about cats.",
+        image: undefined,
         key: "0",
         link: { href: "https://a.example/", text: "https://a.example/" },
         summary: "example.com · Cats",
@@ -479,6 +481,74 @@ const summary = (fields: Partial<typeof Preview.Encoded>) => {
 
   return decoded.state._tag === "Ready" ? summaryOf(decoded.state.preview) : undefined;
 };
+
+const hash = "ab".repeat(32);
+
+/**
+ * What a Message shows of one Ready Preview, with some fields other than the page's.
+ * @param fields - Those fields, as the wire carries them.
+ * @param mode - `ui.previews`, `on` unless given.
+ * @returns What it shows, or none.
+ */
+const shownReady = (fields: Partial<typeof Preview.Encoded>, mode: "on" | "links only" = "on") => {
+  const { ask, state } = asking(1);
+
+  const answered = fold(state, {
+    _tag: "Answered",
+    ask,
+    previews: [
+      Schema.decodeSync(PreviewItem)({
+        id: idOf("a"),
+        link: "https://a.example/",
+        state: { _tag: "Ready", preview: { ...page, ...fields } },
+      }),
+    ],
+  });
+
+  const [only] = previewsOf(answered, mode, timeline, at(1), said("https://a.example/"));
+
+  return only?._tag === "Ready" ? only : undefined;
+};
+
+describe("a Preview's image", () => {
+  it("is a thumbnail, served from our own origin, for a page that has one", () => {
+    expect(
+      shownReady({ image: { animated: false, hash, size: 10, type: "image/png" } })?.image
+    ).toStrictEqual({
+      alt: "Cats",
+      animated: false,
+      drawn: "Thumbnail",
+      src: `/api/previews/media/${hash}`,
+    });
+  });
+
+  it("is the whole image for a link that is itself an image, and says when it moves", () => {
+    expect(
+      shownReady({
+        image: { animated: true, hash, size: 10, type: "image/gif" },
+        kind: "image",
+        title: null,
+        type: "image/gif",
+      })?.image
+    ).toStrictEqual({
+      alt: "https://example.com/cats",
+      animated: true,
+      drawn: "Whole",
+      src: `/api/previews/media/${hash}`,
+    });
+  });
+
+  it("is none under links only, even one held from while Previews were on", () => {
+    expect(
+      shownReady({ image: { animated: false, hash, size: 10, type: "image/png" } }, "links only")
+        ?.image
+    ).toBeUndefined();
+  });
+
+  it("is none when the Daemon kept none", () => {
+    expect(shownReady({ image: null })?.image).toBeUndefined();
+  });
+});
 
 describe("the summary line", () => {
   it("says a page's site and title", () => {

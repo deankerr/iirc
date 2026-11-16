@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { BunHttpServer, BunFileSystem } from "@effect/platform-bun";
 import { MessagePreviews, PreviewsEvent, TimelineList } from "@iirc/api";
 import type { PreviewItem } from "@iirc/api";
@@ -9,13 +11,14 @@ import type { PreviewCacheService } from "@iirc/preview-cache";
 import { makeSqlitePreviewCache } from "@iirc/preview-cache-sqlite";
 import type { JournalService } from "@iirc/runtime/journal";
 import type { TimelineStoreService } from "@iirc/timeline-store";
-import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema } from "effect";
+import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { HttpRouter, HttpServer } from "effect/http";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { ApiRoutes, Heartbeat } from "./handlers.ts";
+import { gif, png } from "./testing/images.ts";
 import {
   heard,
   layerWorld,
@@ -24,6 +27,7 @@ import {
   registerOnFloor,
   say,
   temporaryDirectory,
+  unreachableEndpoint,
 } from "./testing/world.ts";
 import type { World } from "./testing/world.ts";
 
@@ -323,7 +327,15 @@ const stateOf = (item: PreviewItem | undefined) => item?.state;
  */
 const media = (link: string, kind: string, type: string) => ({
   _tag: "Ready",
-  preview: { description: null, kind, link, site: new URL(link).host, title: null, type },
+  preview: {
+    description: null,
+    image: null,
+    kind,
+    link,
+    site: new URL(link).host,
+    title: null,
+    type,
+  },
 });
 
 describe("Previews over a real server", () => {
@@ -368,6 +380,7 @@ describe("Previews over a real server", () => {
             _tag: "Ready",
             preview: {
               description: "All about cats.",
+              image: null,
               kind: "page",
               link: "https://cats.example/",
               site: "Cat News",
@@ -779,6 +792,7 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
   _tag: "Ready",
   preview: {
     description: null,
+    image: null,
     kind: "page",
     link: "https://page.example/",
     site: "page.example",
@@ -1241,5 +1255,387 @@ describe("the Preview cache over a real server", () => {
     expect(result.asked).toBe(0);
     expect(titles(result.again)).toStrictEqual(["Cats"]);
     expect(result.again).toStrictEqual(result.before);
+  });
+});
+
+/**
+ * Sends a request that must be answered with a status.
+ * @param answer - The request.
+ * @param status - The status.
+ * @returns An Effect that dies otherwise.
+ */
+const expecting = (answer: Effect.Effect<Response>, status: number) =>
+  Effect.gen(function* () {
+    const response = yield* answer;
+
+    if (response.status === status) {
+      return response;
+    }
+
+    const text = yield* bodyOf(response);
+
+    return yield* Effect.die(new Error(`answered ${response.status}: ${text}`));
+  });
+
+/**
+ * Sets an option.
+ * @param served - The server.
+ * @param option - Its name.
+ * @param value - Its value.
+ * @returns An Effect that sets it.
+ */
+const setOption = (served: Served, option: string, value: string) =>
+  expecting(served.request(`/api/options/${option}`, { method: "PUT", ...json({ value }) }), 200);
+
+/**
+ * Sets up a bucket: its keys, held, and where it is.
+ * @param served - The server.
+ * @param endpoint - Where it is, which the world's byte store reaches unless it is the
+ * unreachable endpoint.
+ * @returns An Effect that sets it up.
+ */
+const setBucket = (served: Served, endpoint = "http://bucket.test") =>
+  Effect.gen(function* () {
+    const keys = { "bucket-key-id": "AKIA-test", "bucket-secret": "s3cr3t" };
+
+    for (const [name, value] of Object.entries(keys)) {
+      yield* expecting(
+        served.request(`/api/credentials/${name}`, { method: "PUT", ...json({ value }) }),
+        204
+      );
+    }
+
+    yield* setOption(served, "store.s3.endpoint", endpoint);
+    yield* setOption(served, "store.s3.bucket", "previews");
+    yield* setOption(served, "store.s3.region", "us-east-1");
+    yield* setOption(served, "store.s3.accessKeyId", "bucket-key-id");
+    yield* setOption(served, "store.s3.secretAccessKey", "bucket-secret");
+  });
+
+const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+const CAT = "https://cat.example/";
+const CAT_IMAGE = "https://cdn.example/cat.png";
+
+const catPage = page(`<title>Cat</title><meta property="og:image" content="${CAT_IMAGE}">`);
+
+const svg = new TextEncoder().encode(
+  '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><style>rect{fill:red}</style><rect width="2" height="2"/></svg>'
+);
+
+/**
+ * Previews the one link in a Message, under a mode, and gives its state, and every fetch.
+ * @param served - The server.
+ * @param link - The link.
+ * @param mode - `on` or `links only`.
+ * @returns Its state, and every fetch asked.
+ */
+const previewedOn = (served: Served, link: string, mode = "on") =>
+  Effect.gen(function* () {
+    yield* setPreviews(served, mode);
+    yield* talk(served, [`see ${link}`]);
+    const [place] = yield* messages(served, 1);
+    const [item] = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
+
+    return { asked: yield* served.asked, state: item?.state };
+  });
+
+/**
+ * The image a Ready state's Preview holds.
+ * @param state - The state.
+ * @returns The image, or null.
+ */
+const imageOf = (state: PreviewItem["state"] | undefined) =>
+  state?._tag === "Ready" ? state.preview.image : undefined;
+
+/**
+ * A response's headers, as a plain record.
+ * @param response - The response.
+ * @returns Its headers.
+ */
+const headersOf = (response: Response) => Object.fromEntries(response.headers.entries());
+
+const bytesOf = (response: Response) =>
+  Effect.promise(async () => new Uint8Array(await response.arrayBuffer()));
+
+const asPageAgain = { kind: "page" } as const;
+const asImage = { kind: "image" } as const;
+
+describe("a Preview's image over a real server", () => {
+  it("keeps a page's og:image in the store and serves it on the media route, bytes and headers exact", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          const { asked, state } = yield* previewedOn(served, CAT);
+          const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+
+          const again = yield* served.request(`/api/previews/media/${sha256(png)}`, {
+            headers: { "if-none-match": `W/"other", "${sha256(png)}"` },
+          });
+
+          return {
+            again: { body: yield* bodyOf(again), headers: headersOf(again), status: again.status },
+            asked,
+            body: yield* bytesOf(response),
+            headers: headersOf(response),
+            state,
+            status: response.status,
+          };
+        })
+    );
+
+    expect(result.state).toStrictEqual({
+      _tag: "Ready",
+      preview: {
+        description: null,
+        image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
+        kind: "page",
+        link: CAT,
+        site: "cat.example",
+        title: "Cat",
+        type: null,
+      },
+    });
+    expect(result.asked).toStrictEqual([
+      { link: CAT, purpose: asPageAgain },
+      { link: CAT_IMAGE, purpose: asImage },
+    ]);
+    expect({ body: result.body, status: result.status }).toStrictEqual({ body: png, status: 200 });
+    expect(result.headers).toMatchObject({
+      "cache-control": "private",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "content-type": "image/png",
+      etag: `"${sha256(png)}"`,
+      "x-content-type-options": "nosniff",
+    });
+    expect(result.again).toMatchObject({
+      body: "",
+      headers: { "cache-control": "private", etag: `"${sha256(png)}"` },
+      status: 304,
+    });
+  });
+
+  it("answers a Preview kept under on as text only once Previews are links only", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          const { state } = yield* previewedOn(served, CAT);
+          yield* setPreviews(served, "links only");
+          const [place] = yield* messages(served, 1);
+          const [item] = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
+
+          return { after: item?.state, before: state };
+        })
+    );
+
+    expect(imageOf(result.before)?.hash).toBe(sha256(png));
+    expect(imageOf(result.after)).toBeNull();
+  });
+
+  it("previews a link to an animated GIF as an image, kept, and animated", async () => {
+    const link = "https://image.example/cat.gif";
+
+    const result = await run({ [link]: { body: gif, type: "image/gif" } }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+
+        return yield* previewedOn(served, link);
+      })
+    );
+
+    expect(result.state).toStrictEqual({
+      _tag: "Ready",
+      preview: {
+        description: null,
+        image: { animated: true, hash: sha256(gif), size: gif.length, type: "image/gif" },
+        kind: "image",
+        link,
+        site: "image.example",
+        title: null,
+        type: "image/gif",
+      },
+    });
+    expect(result.asked).toStrictEqual([
+      { link, purpose: asPageAgain },
+      { link, purpose: asImage },
+    ]);
+  });
+
+  it("serves an SVG under a policy that lets it style itself and nothing else", async () => {
+    const result = await run(
+      {
+        [CAT]: page(
+          `<title>Cat</title><meta property="og:image" content="https://cdn.example/cat.svg">`
+        ),
+        "https://cdn.example/cat.svg": { body: svg, type: "image/svg+xml" },
+      },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          const { state } = yield* previewedOn(served, CAT);
+          const response = yield* served.request(`/api/previews/media/${sha256(svg)}`);
+
+          return { body: yield* bytesOf(response), headers: headersOf(response), state };
+        })
+    );
+
+    expect(imageOf(result.state)).toStrictEqual({
+      animated: false,
+      hash: sha256(svg),
+      size: svg.length,
+      type: "image/svg+xml",
+    });
+    expect(result.body).toStrictEqual(svg);
+    expect(result.headers).toMatchObject({
+      "cache-control": "private",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "content-type": "image/svg+xml",
+      etag: `"${sha256(svg)}"`,
+      "x-content-type-options": "nosniff",
+    });
+  });
+
+  it("fails a 9 MB image as too large, keeping nothing, while the page's text still shows", async () => {
+    const big = new Uint8Array(9 * 1024 * 1024);
+
+    big.set(png);
+
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: big, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          const previewed = yield* previewedOn(served, CAT);
+
+          return {
+            ...previewed,
+            held: yield* served.world.bytes.store.held,
+            logged: served.world.logged,
+          };
+        })
+    );
+
+    expect(result.state).toStrictEqual({
+      _tag: "Ready",
+      preview: {
+        description: null,
+        image: null,
+        kind: "page",
+        link: CAT,
+        site: "cat.example",
+        title: "Cat",
+        type: null,
+      },
+    });
+    expect(result.asked).toContainEqual({ link: CAT_IMAGE, purpose: asImage });
+    expect(result.held).toBe(0);
+    expect(result.logged.join("\n")).toContain("LinkTooLarge");
+  });
+
+  it("fetches no image under links only", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+
+          return yield* previewedOn(served, CAT, "links only");
+        })
+    );
+
+    expect(imageOf(result.state)).toBeNull();
+    expect(result.asked).toStrictEqual([{ link: CAT, purpose: asPageAgain }]);
+  });
+
+  it("gives text only with no bucket set, and fetches no image", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) => previewedOn(served, CAT)
+    );
+
+    expect(result.state).toMatchObject({ _tag: "Ready", preview: { image: null, title: "Cat" } });
+    expect(result.asked).toStrictEqual([{ link: CAT, purpose: asPageAgain }]);
+  });
+
+  it("gives text only when the store is unreachable", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served, unreachableEndpoint);
+
+          return yield* previewedOn(served, CAT);
+        })
+    );
+
+    expect(result.state).toMatchObject({ _tag: "Ready", preview: { image: null, title: "Cat" } });
+  });
+
+  it("refuses a hash no Preview holds with 404, even one the store holds", async () => {
+    const result = await run({}, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        yield* served.world.bytes.store.put(Stream.make(png));
+        const response = yield* served.request(`/api/previews/media/${sha256(png)}`);
+
+        const etagged = yield* served.request(`/api/previews/media/${sha256(png)}`, {
+          headers: { "if-none-match": "*" },
+        });
+
+        return {
+          body: decodeError(yield* bodyOf(response)),
+          etagged: etagged.status,
+          status: response.status,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({ body: { _tag: "UnknownMedia" }, etagged: 404, status: 404 });
+  });
+
+  it("refuses the media route without a key, with 401", async () => {
+    const result = await run({}, (served) =>
+      Effect.map(
+        served.request(`/api/previews/media/${sha256(png)}`, { key: null }),
+        (response) => response.status
+      )
+    );
+
+    expect(result).toBe(401);
+  });
+
+  it("answers 503, never kept, when the store is unreachable or no bucket is set", async () => {
+    const result = await run(
+      { [CAT]: catPage, [CAT_IMAGE]: { body: png, type: "image/png" } },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          yield* previewedOn(served, CAT);
+          const path = `/api/previews/media/${sha256(png)}`;
+
+          yield* setOption(served, "store.s3.endpoint", unreachableEndpoint);
+          const unreachable = yield* served.request(path);
+
+          yield* expecting(
+            served.request("/api/options/store.s3.bucket", { method: "DELETE" }),
+            200
+          );
+          const unset = yield* served.request(path);
+
+          return [unreachable, unset].map((response) => ({
+            cache: response.headers.get("cache-control"),
+            status: response.status,
+          }));
+        })
+    );
+
+    expect(result).toStrictEqual([
+      { cache: "no-store", status: 503 },
+      { cache: "no-store", status: 503 },
+    ]);
   });
 });

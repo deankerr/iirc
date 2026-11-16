@@ -14,6 +14,8 @@ export const makeMemoryPreviewCache: Effect.Effect<PreviewCacheService> = Effect
   return {
     get: (link) => Effect.map(Ref.get(kept), (now) => Option.fromUndefinedOr(now.get(link))),
     put: (record) => Ref.update(kept, (now) => new Map([...now, [record.link, record]])),
+    refers: (hash) =>
+      Effect.map(Ref.get(kept), (now) => [...now.values()].some((one) => one.image === hash)),
     shown: (link, at) =>
       Ref.modify(kept, (now): readonly [Option.Option<Kept>, ReadonlyMap<string, Kept>] => {
         const held = now.get(link);

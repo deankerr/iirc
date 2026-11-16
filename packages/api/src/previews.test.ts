@@ -19,6 +19,7 @@ const id = "0123456789abcdef0123456789abcdef";
 
 const page = {
   description: "A page about cats.",
+  image: null,
   kind: "page",
   link: "https://example.com/cats",
   site: "example.com",
@@ -33,6 +34,12 @@ const states = [
     _tag: "Ready",
     preview: {
       description: null,
+      image: {
+        animated: false,
+        hash: "a".repeat(64),
+        size: 1024,
+        type: "image/png",
+      },
       kind: "image",
       link: "https://example.com/cat.png",
       site: "example.com",
@@ -68,10 +75,21 @@ describe("Previews on the wire", () => {
         { _tag: "Failed" },
         { _tag: "Ready", preview: { ...page, kind: "embed" } },
         { _tag: "Ready", preview: { ...page, site: null } },
+        {
+          _tag: "Ready",
+          preview: { ...page, image: { animated: false, hash: "A", size: 1, type: "image/png" } },
+        },
+        {
+          _tag: "Ready",
+          preview: {
+            ...page,
+            image: { animated: false, hash: "a".repeat(64), size: 1, type: "image/bmp" },
+          },
+        },
         { _tag: "Ready", preview: { description: null, kind: "page", link: page.link, site: "x" } },
         { _tag: "Loading" },
       ].map((each) => Option.isSome(state(each)))
-    ).toStrictEqual([false, false, false, false, false, false]);
+    ).toStrictEqual([false, false, false, false, false, false, false, false]);
   });
 
   it("takes a Preview's id as 32 lower-case hex digits, and nothing else", () => {

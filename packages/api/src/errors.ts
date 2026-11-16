@@ -163,6 +163,12 @@ export class PreviewsOff extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("PreviewsOff", { timeline: TimelineId }, { httpApiStatus: 409 }) {}
 
+/** No Preview holds an image with this hash, so none is served: a 404. */
+export class UnknownMedia extends Schema.TaggedError<
+  UnknownMedia,
+  { readonly brand: unique symbol }
+>()("UnknownMedia", { hash: Schema.String }, { httpApiStatus: 404 }) {}
+
 /** No Upload has this id: a 404. */
 export class UnknownUpload extends Schema.TaggedError<
   UnknownUpload,

@@ -10,8 +10,9 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
 import { mayPreview, previewsOf } from "@iirc/frontend/previews";
-import type { LinkShown, PreviewShown } from "@iirc/frontend/previews";
-import { useEffect, useMemo, useRef } from "react";
+import type { ImageShown, LinkShown, PreviewShown } from "@iirc/frontend/previews";
+import type { ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
 import { previewsMode, previewsShown, previewsState } from "./atoms.ts";
@@ -48,6 +49,69 @@ const PlainLink = ({
   );
 
 /**
+ * An image the Daemon kept, drawn from its own origin, which the browser loads lazily and
+ * scales. Where it fails to load, nothing is drawn, and what is drawn without it shows.
+ * @param props - The image, and what to draw in its place.
+ * @returns The image, or what stands without it.
+ */
+const PreviewImage = ({
+  image,
+  without,
+}: {
+  readonly image: ImageShown;
+  readonly without: ReactElement | null;
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  return failed ? (
+    without
+  ) : (
+    <img
+      alt={image.alt}
+      className={image.drawn === "Whole" ? styles.whole : styles.thumbnail}
+      data-drawn={image.drawn === "Whole" ? "whole" : "thumbnail"}
+      decoding="async"
+      loading="lazy"
+      onError={() => {
+        setFailed(true);
+      }}
+      referrerPolicy="no-referrer"
+      src={image.src}
+    />
+  );
+};
+
+/**
+ * A ready Preview's text: its summary, opening to its description when it has one.
+ * @param props - The Preview, as drawn.
+ * @returns Its text.
+ */
+const ReadyText = ({
+  shown,
+}: {
+  readonly shown: Extract<PreviewShown, { readonly _tag: "Ready" }>;
+}) => {
+  if (shown.description === undefined) {
+    return (
+      <div className={styles.text}>
+        <bdi className={styles.summary}>{shown.summary}</bdi>
+      </div>
+    );
+  }
+
+  return (
+    <Disclosure className={styles.text}>
+      <AriaButton className={styles.summary} slot="trigger">
+        <bdi>{shown.summary}</bdi>
+      </AriaButton>
+      <DisclosurePanel className={styles.description}>
+        <bdi>{shown.description}</bdi>
+      </DisclosurePanel>
+    </Disclosure>
+  );
+};
+
+/**
  * One Preview.
  * @param props - The Preview, as drawn.
  * @returns Its row.
@@ -66,23 +130,25 @@ const PreviewRow = ({ shown }: { readonly shown: PreviewShown }) => {
     }
 
     case "Ready": {
-      if (shown.description === undefined) {
-        return (
-          <div className={styles.ready} data-preview="ready">
-            <bdi className={styles.summary}>{shown.summary}</bdi>
-          </div>
-        );
-      }
+      const text = <ReadyText shown={shown} />;
+      const { image } = shown;
 
+      // A link that is itself an image is the image alone; a page's is beside its text.
+      // Keyed by its source, a new image gets a fresh try, and one that fails leaves
+      // exactly the text it would have been without.
       return (
-        <Disclosure className={styles.ready} data-preview="ready">
-          <AriaButton className={styles.summary} slot="trigger">
-            <bdi>{shown.summary}</bdi>
-          </AriaButton>
-          <DisclosurePanel className={styles.description}>
-            <bdi>{shown.description}</bdi>
-          </DisclosurePanel>
-        </Disclosure>
+        <div className={styles.ready} data-preview="ready">
+          {image?.drawn === "Whole" ? (
+            <PreviewImage image={image} key={image.src} without={text} />
+          ) : (
+            <>
+              {text}
+              {image === undefined ? null : (
+                <PreviewImage image={image} key={image.src} without={null} />
+              )}
+            </>
+          )}
+        </div>
       );
     }
 

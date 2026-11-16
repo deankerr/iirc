@@ -41,6 +41,7 @@ export {
   UnknownMessage,
   UnknownNetwork,
   UnknownTimeline,
+  UnknownMedia,
   UnknownUpload,
   UploadTooLarge,
   UploadUnreadable,
@@ -232,10 +233,13 @@ export {
 } from "./uploads.ts";
 
 export {
+  MediaHash,
+  MediaType,
   MessagePreviews,
   Preview,
   PreviewFailure,
   PreviewId,
+  PreviewImage,
   PreviewItem,
   PreviewKind,
   PreviewState,

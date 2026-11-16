@@ -16,7 +16,7 @@ import { SqlError } from "effect/sql/SqlError";
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is made
  * again.
  */
-const layoutVersion = 1;
+const layoutVersion = 2;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is generic,
 // and keeps SQLite's error in its reason's cause. Another error may keep one in its cause.
@@ -49,6 +49,9 @@ const layout = `CREATE TABLE previews (
   fetched INTEGER NOT NULL,
   shown INTEGER NOT NULL
 ) STRICT`;
+
+// Whether a record holds an image is asked by its hash, for every image served.
+const imageIndex = "CREATE INDEX previews_image ON previews (image) WHERE image IS NOT NULL";
 
 // The layout's tables and their columns, each with its declared type, as SQLite's
 // `table_info` describes them, in the order they were declared.
@@ -175,7 +178,10 @@ export const makeSqlitePreviewCache = (
               case "Empty": {
                 return sql
                   .unsafe(layout)
-                  .pipe(Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`)));
+                  .pipe(
+                    Effect.andThen(sql.unsafe(imageIndex)),
+                    Effect.andThen(sql.unsafe(`PRAGMA user_version = ${layoutVersion}`))
+                  );
               }
 
               case "Ready": {
@@ -225,6 +231,13 @@ export const makeSqlitePreviewCache = (
               `.pipe(Effect.mapError(failed("cannot keep a Preview")))
           ),
           Effect.asVoid
+        ),
+      refers: (hash) =>
+        sql<{ readonly held: number }>`
+          SELECT EXISTS (SELECT 1 FROM previews WHERE image = ${hash}) AS held
+        `.pipe(
+          Effect.mapError(failed("cannot read a Preview's image")),
+          Effect.map(([row]) => row?.held === 1)
         ),
       shown: (link, at) =>
         one(

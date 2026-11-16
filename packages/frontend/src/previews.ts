@@ -417,10 +417,41 @@ const linkShown = (link: string): LinkShown => {
 };
 
 /**
+ * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
+ * its link; where the Daemon serves it, from its own origin and never the host it came
+ * from; whether it moves; and how it is drawn, `Thumbnail` beside a page's summary, or
+ * `Whole` for a link that is itself the image.
+ */
+export interface ImageShown {
+  readonly alt: string;
+  readonly animated: boolean;
+  readonly drawn: "Thumbnail" | "Whole";
+  readonly src: string;
+}
+
+/**
+ * A ready Preview's image as drawn.
+ * @param preview - The Preview.
+ * @returns The image, or none when the Daemon kept none.
+ */
+const imageOf = (preview: Preview): ImageShown | undefined =>
+  preview.image === null
+    ? undefined
+    : {
+        alt: contained(
+          preview.title === null || preview.title === "" ? preview.link : preview.title
+        ),
+        animated: preview.image.animated,
+        drawn: preview.kind === "image" ? "Whole" : "Thumbnail",
+        src: `/api/previews/media/${preview.image.hash}`,
+      };
+
+/**
  * One Preview, as drawn:
  *
  * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
- * - `Ready`: its summary, opening to its description when it has one.
+ * - `Ready`: its summary, opening to its description when it has one, and its image when
+ *   the Daemon kept one.
  * - `Plain`: the plain link, with why there is no Preview, when it failed.
  */
 export type PreviewShown =
@@ -431,6 +462,7 @@ export type PreviewShown =
       readonly link: LinkShown;
       readonly summary: string;
       readonly description: string | undefined;
+      readonly image: ImageShown | undefined;
     }
   | {
       readonly _tag: "Plain";
@@ -445,9 +477,15 @@ export type PreviewShown =
  * @param item - The item.
  * @param address - The link as the Message holds it.
  * @param key - Which row of its Message it is.
+ * @param images - Whether images are shown, as they are only while Previews are `on`.
  * @returns It.
  */
-const itemShown = (item: PreviewItem, address: string, key: string): PreviewShown => {
+const itemShown = (
+  item: PreviewItem,
+  address: string,
+  key: string,
+  images: boolean
+): PreviewShown => {
   const link = linkShown(address);
 
   switch (item.state._tag) {
@@ -464,6 +502,7 @@ const itemShown = (item: PreviewItem, address: string, key: string): PreviewShow
           preview.description === null || preview.description === ""
             ? undefined
             : contained(preview.description),
+        image: images ? imageOf(preview) : undefined,
         key,
         link,
         summary: summaryOf(preview),
@@ -555,7 +594,14 @@ export const previewsOf = (
 
       return item === undefined
         ? []
-        : [itemShown(item.item, found[index]?.href ?? item.item.link, String(index))];
+        : [
+            itemShown(
+              item.item,
+              found[index]?.href ?? item.item.link,
+              String(index),
+              mode === "on"
+            ),
+          ];
     });
   }
 

@@ -146,38 +146,34 @@ export const makeWorld = (
  * The Runtime, on the world's ports, with the real Client, the projector folding its News
  * into the world's Timeline store, the `ui` options and those under `store` and `uploads`
  * folded from the Journal's Changes, the Runtime sparing the Credentials those name, the
- * Uploads on the world's byte store, staged in a data directory, and their link listener,
+ * Previews and the Uploads on the world's byte store, staged in a data directory, and their link listener,
  * and the keys and browser sign-ins of that directory.
  * @param world - The ports.
  * @param dataDir - Where the keys and the sign-ins are.
  * @param pacing - How fast Lines leave each Connection, the Runtime's own unless given.
  * @returns The Layer.
  */
-export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOptions["pacing"]) =>
-  Layer.mergeAll(
+export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOptions["pacing"]) => {
+  const bytes = Layer.succeed(ByteStoreMaker, ({ endpoint }) =>
+    Effect.succeed(endpoint === unreachableEndpoint ? world.bytes.unreachable : world.bytes.store)
+  );
+
+  return Layer.mergeAll(
     Layer.mergeAll(
       layerProjector,
       layerPreviews.pipe(
         Layer.provideMerge(layerUiConfiguration),
         Layer.provide(
-          Layer.merge(
+          Layer.mergeAll(
             Layer.succeed(LinkFetch, world.links),
-            Layer.succeed(PreviewCache, world.previews)
+            Layer.succeed(PreviewCache, world.previews),
+            bytes
           )
         )
       ),
       layerLinkListener.pipe(
         Layer.provideMerge(layerUploads(dataDir)),
-        Layer.provide(
-          Layer.merge(
-            Layer.succeed(ByteStoreMaker, ({ endpoint }) =>
-              Effect.succeed(
-                endpoint === unreachableEndpoint ? world.bytes.unreachable : world.bytes.store
-              )
-            ),
-            platform
-          )
-        )
+        Layer.provide(Layer.merge(bytes, platform))
       )
     ).pipe(
       Layer.provideMerge(Layer.succeed(TimelineStore, world.store)),
@@ -208,6 +204,7 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
       }),
     ])
   );
+};
 
 /**
  * The client side of the key check, presenting a key, or none.

@@ -10,6 +10,7 @@ import { PreviewCache } from "@iirc/preview-cache";
 get(link): Effect<Option<Kept>, PreviewCacheFailed>
 put(kept): Effect<void, PreviewCacheFailed>
 shown(link, at): Effect<Option<Kept>, PreviewCacheFailed>   // marks it shown, gives the record
+refers(hash): Effect<boolean, PreviewCacheFailed>             // whether any record's image is it
 
 Kept       // { link, state: Settled, image: Sha256 | null, fetched, shown }, times in ms since the epoch
 Settled    // Ready with its Preview, or Failed with why; never a Preview still being fetched
@@ -21,12 +22,13 @@ Settled    // Ready with its Preview, or Failed with why; never a Preview still 
 
 - **A record is whole.** `put` keeps a record under its link, replacing any record there, entirely or not at all, and `get` gives back exactly what was put.
 - **Links are independent.** A record under one link is never changed by another.
+- **`refers` reads every record kept.** It is true exactly while some record's `image` is the hash, so replacing the last record that held it makes it false.
 - **`shown` only moves forward.** It moves when the link was last shown to `at`, unless that was already later, changes no other field, and gives the record as it then stands. A link with no record gets `None`, and nothing is kept for it.
 - **A record that cannot be read back fails** with `PreviewCacheFailed`, rather than reading as absent.
 
 ## Not yet
 
-- **Images and eviction.** `image` is only a hash a caller keeps; the cache neither fetches the bytes nor forgets old records.
+- **Eviction.** `image` is only a hash a caller keeps; the cache neither fetches the bytes nor forgets old records.
 
 ## The laws
 

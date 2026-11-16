@@ -1,11 +1,12 @@
 /**
- * The fake link fetch: answers recorded responses by link, and records what was asked.
+ * The fake link fetch: answers recorded responses by link, as the guard would for the
+ * purpose asked, and records what was asked.
  *
  * @packageDocumentation
  */
 import { Effect, Ref, Stream } from "effect";
 
-import { LinkUnreachable } from "../link-fetch.ts";
+import { LinkTooLarge, LinkUnreachable, LinkWrongType, limits } from "../link-fetch.ts";
 import type { Fetched, LinkFetchFailure, LinkFetchService, Purpose } from "../link-fetch.ts";
 
 /** A response to answer, with the status 200 and no headers beyond its type unless given. */
@@ -54,21 +55,77 @@ const isFailure = (answer: Answer): answer is LinkFetchFailure => "_tag" in answ
 
 const encoder = new TextEncoder();
 
-const answered = (link: string, recorded: Recorded): Fetched => {
-  const body = recorded.body ?? new Uint8Array();
+// The image types the guard takes, `image/jpg` standing for `image/jpeg` as it does there.
+const imageTypes = new Map([
+  ["image/png", "image/png"],
+  ["image/jpeg", "image/jpeg"],
+  ["image/jpg", "image/jpeg"],
+  ["image/gif", "image/gif"],
+  ["image/webp", "image/webp"],
+  ["image/avif", "image/avif"],
+  ["image/svg+xml", "image/svg+xml"],
+]);
 
-  return {
-    body: Stream.make(body instanceof Uint8Array ? new Uint8Array(body) : encoder.encode(body)),
+const pageTypes = new Set(["text/html", "application/xhtml+xml"]);
+
+/** The type a purpose takes a declared type as, or nothing when it does not take it. */
+const takes: Record<Purpose["kind"], (type: string) => string | undefined> = {
+  image: (type) => imageTypes.get(type),
+  oembed: (type) => (type === "application/json" || type.endsWith("+json") ? type : undefined),
+  page: (type) => (pageTypes.has(type) ? type : undefined),
+  stream: (type) => (type.startsWith("video/") || type.startsWith("audio/") ? type : undefined),
+};
+
+/** The most a body of a purpose and type may give. */
+const caps: Record<Purpose["kind"], (type: string) => number> = {
+  image: (type) => (type === "image/svg+xml" ? limits.svg : limits.raster),
+  oembed: () => limits.oembed,
+  page: () => limits.page,
+  stream: () => limits.stream,
+};
+
+/**
+ * A recorded response as the guard answers it for a purpose: refused as `LinkWrongType`
+ * when the purpose does not take its type, a page cut cleanly at its limit, and any other
+ * body over its limit failing with `LinkTooLarge` as it is read. Its leading bytes are not
+ * read, so an image is taken by its declared type alone.
+ * @param link - The link asked, normalised.
+ * @param purpose - What it is fetched for.
+ * @param recorded - The response.
+ * @returns The answer, or why there is none.
+ */
+const answered = (link: string, purpose: Purpose, recorded: Recorded) => {
+  const raw = recorded.body ?? new Uint8Array();
+  const body = raw instanceof Uint8Array ? new Uint8Array(raw) : encoder.encode(raw);
+  const answeredAs = recorded.link === undefined ? link : normalised(recorded.link);
+  const declared = recorded.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  const type = takes[purpose.kind](declared);
+
+  if (type === undefined) {
+    return Effect.fail(new LinkWrongType({ link: answeredAs, type: declared }));
+  }
+
+  const limit = caps[purpose.kind](type);
+
+  const over = body.length > limit;
+  const page = purpose.kind === "page";
+
+  const bounded: Fetched["body"] =
+    over && !page ? Stream.fail(new LinkTooLarge({ limit })) : Stream.make(body.slice(0, limit));
+
+  return Effect.succeed({
+    body: bounded,
     headers: { "content-type": recorded.type, ...recorded.headers },
-    link: recorded.link ?? link,
+    link: answeredAs,
     status: recorded.status ?? 200,
-    type: recorded.type,
-  };
+    type,
+  } satisfies Fetched);
 };
 
 /**
  * Makes a fake link fetch. A link is matched as the URL parser normalises it, and one with no
- * answer is unreachable.
+ * answer is unreachable. A recorded response is answered as the guard would for the purpose:
+ * of a type the purpose takes, and bounded for it.
  * @param answers - What each link answers.
  * @returns The fake.
  */
@@ -98,7 +155,7 @@ export const makeFakeLinkFetch = (
             return yield* answer;
           }
 
-          return answered(key, answer);
+          return yield* answered(key, purpose, answer);
         }),
     };
 
