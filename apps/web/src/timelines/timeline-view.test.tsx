@@ -5,7 +5,7 @@ import type { ReadRule, TimeShown, Timeline, TimelineItem, WindowGap } from "@ii
 import { Effect } from "effect";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../app/app.tsx";
 import { deviceUi } from "../options/device.ts";
@@ -466,6 +466,8 @@ describe("what the view says it shows", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+
     for (const unmount of mounted.splice(0)) {
       act(unmount);
     }
@@ -757,6 +759,11 @@ describe("what the view says it shows", () => {
 
     await openFromPalette();
     await settled(() => registry.get(openTimeline)._tag === "Shown");
+
+    // The view tells the Owner's scrolls by how long ago their input was, and the virtualizer
+    // ends a run of scrolls after a pause, so the clock stands still from here: on a busy
+    // machine, real time would end the run between one step and the next.
+    vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
 
     // Join 59, row 39, at the top of the view, and line 61 two rows below it.
     await scrollTo(780, 100_000);

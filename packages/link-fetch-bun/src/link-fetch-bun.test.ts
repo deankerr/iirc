@@ -435,7 +435,15 @@ describe("bounds are on the decompressed stream", () => {
   ] as const)(
     "a 1 GiB gzip bomb is cut with bounded memory: %s",
     async (_, type, lead, purpose, ending) => {
+      // Garbage is counted until it is collected, and a collector short of cores comes late, so
+      // the baseline is taken after a full collection and the peak is sampled throughout.
+      Bun.gc(true);
       const before = rss();
+      let peak = before;
+
+      const sampler = setInterval(() => {
+        peak = Math.max(peak, rss());
+      }, 1);
 
       const result = await run(
         Effect.gen(function* () {
@@ -454,13 +462,18 @@ describe("bounds are on the decompressed stream", () => {
         })
       );
 
+      clearInterval(sampler);
+      const grown = Math.max(peak, rss()) - before;
+
       expect(result.end).toBe(ending);
       expect(result.size).toBeLessThanOrEqual(
         purpose.kind === "page" ? limits.page : limits.raster
       );
       expect(result.size).toBeGreaterThan(limits.page - 1);
-      // Read whole, it takes about 2 GB. Cut at its cap, it takes tens of MB.
-      expect(rss() - before).toBeLessThan(256 * 1024 * 1024);
+      // Read whole, it holds at least the gibibyte it inflates to, and takes about 2 GB. Cut at
+      // its cap, it holds a few MB, and its garbage peaks at tens of MB with cores to spare or a
+      // few hundred without.
+      expect(grown).toBeLessThan(512 * 1024 * 1024);
       expect(result.closed).toBe(1);
     }
   );

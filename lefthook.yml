@@ -1,34 +1,27 @@
+# Formatting is never an agent's job: a commit fixes and re-stages its own files, and never
+# fails on what is left. A push runs the full checks, and CI runs them again on the PR.
 pre-commit:
   jobs:
-    - run: bunx ultracite fix {staged_files}
+    - name: fix
+      run: bun run fix {staged_files} || true
       glob:
-        - "*.js"
-        - "*.jsx"
-        - "*.mjs"
-        - "*.cjs"
         - "*.ts"
         - "*.tsx"
-        - "*.mts"
-        - "*.cts"
         - "*.json"
         - "*.jsonc"
         - "*.css"
-        - "*.scss"
-        - "*.less"
-        - "*.vue"
-        - "*.svelte"
-        - "*.astro"
         - "*.html"
         - "*.md"
-        - "*.mdx"
         - "*.yaml"
         - "*.yml"
-        - "*.graphql"
-        - "*.gql"
       stage_fixed: true
 
 pre-push:
+  parallel: true
   jobs:
-    - run: bun run check
-    - run: bun run knip
-    - run: bun run test
+    - name: check
+      run: bun run check
+    - name: knip
+      run: bun run knip
+    - name: test
+      run: bun run test

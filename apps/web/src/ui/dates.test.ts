@@ -58,7 +58,8 @@ describe("the device's zone", () => {
       ordinary: zone(at),
     }).toStrictEqual({
       hostile: undefined,
-      ordinary: -new Date(at).getTimezoneOffset() * 60_000,
+      // `0 -` so that UTC's offset is +0, as the zone gives it, never -0.
+      ordinary: 0 - new Date(at).getTimezoneOffset() * 60_000,
     });
   });
 
