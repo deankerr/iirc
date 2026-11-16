@@ -42,18 +42,33 @@ export const UploadName = Schema.String.check(
 /** The query of an upload: the name, when there is one. */
 export const UploadQuery = Schema.Struct({ name: Schema.optionalKey(UploadName) });
 
+/** A rename of an Upload: the new name, from which its safe name is made again. */
+export const UploadRename = Schema.Struct({ name: UploadName });
+
+/** The decoded form of {@link UploadRename}. */
+export type UploadRename = typeof UploadRename.Type;
+
+/** Why an Upload was deleted: by the `owner`, or by the Daemon once it `expired`. */
+export const UploadDeletedWhy = Schema.Literals(["owner", "expired"]);
+
+/** When an Upload was deleted, and why. */
+export const UploadDeleted = Schema.Struct({ at: Instant, why: UploadDeletedWhy });
+
 /**
- * An Upload: its id, the name it was given, if any, the safe name its link and download
- * use, the type read from its bytes, their size and SHA-256 hash, when it was uploaded, and
- * its link, `<uploads.publicUrl>/<id>/<safeName>` from the public URL in force, or `null`
- * while none is set.
+ * An Upload: its id, the name it was given or last renamed to, if any, the safe name its
+ * link and download use, the type read from its bytes, their size and SHA-256 hash, when it
+ * was uploaded, when it was last renamed, if it was, when and why it was deleted, if it was,
+ * and its link, `<uploads.publicUrl>/<id>/<safeName>` from the public URL in force, or
+ * `null` while none is set or once it is deleted.
  */
 export const Upload = Schema.Struct({
   at: Instant,
+  deleted: Schema.optionalKey(UploadDeleted),
   hash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u)),
   id: UploadId,
   link: Schema.NullOr(Schema.String),
   name: Schema.optionalKey(Schema.String),
+  renamedAt: Schema.optionalKey(Instant),
   safeName: Schema.String,
   size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   type: Schema.String,
@@ -85,9 +100,15 @@ export const UploadsAfter = UploadId.annotate({
   identifier: "UploadsAfter",
 });
 
-/** A page of the Uploads: those after `after`, newest first, up to `limit`. */
+/**
+ * A page of the Uploads: those after `after`, newest first, up to `limit`. Deleted Uploads
+ * are left out unless `deleted` is `true`.
+ */
 export const UploadsQuery = Schema.Struct({
   after: Schema.optionalKey(UploadsAfter),
+  deleted: Schema.optionalKey(
+    Schema.Literal("true").annotate({ description: "Give true to list deleted Uploads too." })
+  ),
   limit: Schema.optionalKey(Limit),
 });
 

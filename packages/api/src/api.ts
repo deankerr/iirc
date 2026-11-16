@@ -98,6 +98,7 @@ import {
   UploadId,
   UploadPage,
   UploadQuery,
+  UploadRename,
   UploadsEvent,
   UploadsQuery,
   UploadsStatus,
@@ -360,8 +361,8 @@ export class OptionsGroup extends HttpApiGroup.make("options")
  * Uploads: a file's bytes as the raw body, with no multipart, whatever its `Content-Type`,
  * which is never read, kept and recorded, and answered with its record and link; the
  * Uploads, newest first, a page at a time; one Upload by its id, and its bytes, on the
- * API's own origin with the link's safety headers; whether Uploads are on; and their
- * Changes, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
+ * API's own origin with the link's safety headers; renaming and deleting one; whether
+ * Uploads are on; and their Changes, as Server-Sent Events from just after `after` or `Last-Event-ID`, and then live.
  */
 export class UploadsGroup extends HttpApiGroup.make("uploads")
   .add(
@@ -387,6 +388,17 @@ export class UploadsGroup extends HttpApiGroup.make("uploads")
       error: [UnknownUpload, StoreUnavailable],
       params: { id: UploadId },
       success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
+    }),
+    HttpApiEndpoint.patch("rename", "/uploads/:id", {
+      error: [UnknownUpload, JournalFailed],
+      params: { id: UploadId },
+      payload: UploadRename,
+      success: Upload,
+    }),
+    HttpApiEndpoint.delete("delete", "/uploads/:id", {
+      error: [UnknownUpload, JournalFailed],
+      params: { id: UploadId },
+      success: Upload,
     })
   )
   .middleware(Authorization) {}

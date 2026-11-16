@@ -52,10 +52,17 @@ export type Sequence = typeof Sequence.Type;
  * - `Uploaded`: an Upload was kept. Its `id`, the `name` it was given, if any, the
  *   `safeName` its link uses, the `type` read from its bytes, their `size` and SHA-256
  *   `hash`, and `at`, when it was uploaded, since an Entry carries no time of its own.
+ * - `Renamed`: an earlier `Uploaded`'s Upload was given a new `name`, with the `safeName`
+ *   made from it, at `at`. Its link's id is unchanged, so links already said still work.
+ * - `Deleted`: an earlier `Uploaded`'s Upload was deleted at `at`, `why` says by whom: the
+ *   `owner`, or the Daemon on the Owner's behalf once it `expired`. Its record stays, and its
+ *   hold on its bytes is released.
  */
 export const Change = Schema.TaggedUnion({
+  Deleted: { at: Instant, id: Schema.String, why: Schema.Literals(["owner", "expired"]) },
   OptionSet: { option: Schema.String, value: Schema.Json },
   OptionUnset: { option: Schema.String },
+  Renamed: { at: Instant, id: Schema.String, name: Schema.String, safeName: Schema.String },
   UiSet: { option: Schema.String, value: Schema.Json },
   UiUnset: { option: Schema.String },
   Uploaded: {

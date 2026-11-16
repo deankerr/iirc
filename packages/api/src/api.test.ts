@@ -62,7 +62,7 @@ const roundTrip = (each: Activity) =>
 describe("the contract", () => {
   it("puts every route under /api, and every one but signing in and out behind a key or a sign-in", () => {
     const routes = Object.entries(document.paths).flatMap(([path, operations]) =>
-      (["get", "put", "post", "delete"] as const).flatMap((method) => {
+      (["get", "put", "post", "patch", "delete"] as const).flatMap((method) => {
         const operation = operations[method];
 
         return operation === undefined
@@ -79,6 +79,7 @@ describe("the contract", () => {
       "DELETE /api/options/{option}",
       "DELETE /api/sign-in",
       "DELETE /api/ui/{option}",
+      "DELETE /api/uploads/{id}",
       "GET /api/credentials",
       "GET /api/networks",
       "GET /api/networks/{network}/at/{sequence}",
@@ -104,6 +105,7 @@ describe("the contract", () => {
       "GET /api/uploads/status",
       "GET /api/uploads/{id}",
       "GET /api/uploads/{id}/content",
+      "PATCH /api/uploads/{id}",
       "POST /api/networks/{network}/act",
       "POST /api/networks/{network}/close",
       "POST /api/networks/{network}/lookups",
