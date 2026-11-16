@@ -3,7 +3,8 @@
  * were uploaded, whether they are on, derived from the options in force, the byte store
  * those options name, the path from an arriving body to a kept, recorded Upload, and
  * renaming one, and deleting one, which the Owner does and `uploads.expireAfter` does once
- * an Upload is old enough. Beside the projection, and never journaled, it holds which bytes a
+ * an Upload is old enough. An upload that would take the distinct bytes of the live Uploads
+ * past `uploads.maxTotal` is refused, and nothing is ever evicted to make room. Beside the projection, and never journaled, it holds which bytes a
  * read of the store confirmed are gone from it, a fact about the store, which marks each live
  * Upload holding them missing (ADR 0016).
  *
@@ -225,6 +226,14 @@ export class UploadsAreOff extends Data.TaggedError("UploadsAreOff")<{
   readonly missing: readonly OwnerOptionName[];
 }> {}
 
+/**
+ * Keeping the bytes would take the distinct bytes of the live Uploads past `maxTotal`,
+ * `uploads.maxTotal` as it was when they were counted.
+ */
+export class PastMaxTotal extends Data.TaggedError("PastMaxTotal")<{
+  readonly maxTotal: number;
+}> {}
+
 /** The body held no bytes, however it was sent. */
 export class EmptyUpload extends Data.TaggedError("EmptyUpload") {}
 
@@ -270,8 +279,12 @@ export class Uploads extends Context.Service<
      * Stages a body, reads its type from its bytes, strips it if it is an image, puts it to
      * the store, and journals its `Uploaded`, in that order, with `uploads.maxSize` read once
      * as it begins. A body that passes it is cut off unread, and an image that cannot be
-     * walked is refused. The staged file is gone however it ends, and nothing is journaled
-     * unless the bytes were kept.
+     * walked is refused. Before the bytes are put, room is reserved for them under
+     * `uploads.maxTotal`, as it is then: the distinct bytes of the live Uploads, and of the
+     * uploads already holding room, count once each, and bytes among them add nothing. Bytes
+     * that would pass it are `PastMaxTotal`, and nothing is put, journaled, or evicted. The
+     * room is held until the upload ends, however it ends. The staged file is gone however it
+     * ends, and nothing is journaled unless the bytes were kept.
      */
     readonly upload: <E>(
       body: Stream.Stream<Uint8Array, E>,
@@ -282,6 +295,7 @@ export class Uploads extends Context.Service<
       | UploadsAreOff
       | EmptyUpload
       | BodyTooLarge
+      | PastMaxTotal
       | UnreadableImage
       | ByteStoreUnavailable
       | JournalFailed
@@ -526,6 +540,23 @@ const liveHas = (held: Held, hash: string) => {
 };
 
 /**
+ * The size of each distinct bytes the live Uploads hold, by hash.
+ * @param held - The Uploads.
+ * @returns Each hash's size.
+ */
+const liveSizes = (held: Held) => {
+  const sizes = new Map<string, number>();
+
+  for (const { record } of HashMap.values(held.byId)) {
+    if (record.deleted === undefined) {
+      sizes.set(record.hash, record.size);
+    }
+  }
+
+  return sizes;
+};
+
+/**
  * The hashes a read of the store confirmed are gone from it, how many times the store has
  * changed, and how many times each hash was put, so a read answered by a store since
  * changed marks nothing and takes nothing away, and one begun before its own bytes were put
@@ -617,6 +648,13 @@ export const layerUploads = (dataDir: string) =>
       });
 
       const turn = yield* Semaphore.make(1);
+
+      // The room uploads hold for bytes they have checked and not yet recorded, by hash, with
+      // how many hold each. Counted by hash with the live Uploads', so one whose Upload is
+      // recorded while its upload is still ending is never counted twice. It is read and changed
+      // only under `counting`, which is held for one count and never for an upload.
+      const counting = yield* Semaphore.make(1);
+      const reservations = new Map<string, { readonly size: number; readonly holders: number }>();
 
       // Bytes were put again, so they are held, and a read of them begun before this marks
       // nothing.
@@ -747,6 +785,49 @@ export const layerUploads = (dataDir: string) =>
           )
         );
 
+      // Holds room for bytes until the Scope closes, if `uploads.maxTotal`, as it is now, has
+      // it: the distinct bytes of the live Uploads and of the room already held, with these
+      // added unless among them. Bytes that add nothing are always kept, since they cannot pass
+      // a limit, whatever it was lowered to. The reservations are read before the Uploads, so
+      // an upload that records and lets go between the two is counted in one of them.
+      const reserved = (hash: Sha256, size: number) =>
+        Effect.acquireRelease(
+          counting.withPermit(
+            Effect.gen(function* () {
+              const { options } = yield* owner.inForce;
+              const maxTotal = options["uploads.maxTotal"];
+
+              const sizes = new Map(
+                [...reservations].map(([each, { size: held }]) => [each, held] as const)
+              );
+
+              for (const [each, one] of liveSizes(yield* SubscriptionRef.get(held))) {
+                sizes.set(each, one);
+              }
+
+              const adds = sizes.has(hash) ? 0 : size;
+              const total = sizes.values().reduce((sum, one) => sum + one, 0);
+
+              return maxTotal !== undefined && adds > 0 && total + adds > maxTotal
+                ? yield* new PastMaxTotal({ maxTotal })
+                : reservations.set(hash, {
+                    holders: (reservations.get(hash)?.holders ?? 0) + 1,
+                    size,
+                  });
+            })
+          ),
+          () =>
+            Effect.sync(() => {
+              const left = (reservations.get(hash)?.holders ?? 1) - 1;
+
+              if (left === 0) {
+                reservations.delete(hash);
+              } else {
+                reservations.set(hash, { holders: left, size });
+              }
+            })
+        );
+
       const upload = <E>(body: Stream.Stream<Uint8Array, E>, name: string | undefined) =>
         Effect.gen(function* () {
           const now = yield* switchNow;
@@ -764,6 +845,7 @@ export const layerUploads = (dataDir: string) =>
           const kind = detectKind(staged.head);
           const keeping = yield* keepable(staged, kind.type);
 
+          yield* reserved(Sha256.make(keeping.hash), keeping.size);
           yield* bytes.claimed(Sha256.make(keeping.hash));
           const store = yield* storeOf(now.bucket);
           const stored = yield* store.put(keeping.bytes);

@@ -3309,3 +3309,246 @@ describe("an Upload whose bytes are missing", () => {
     });
   });
 });
+
+/**
+ * `size` bytes of one letter, which are never stripped or changed, so an Upload of them is
+ * exactly that big.
+ * @param letter - The letter.
+ * @param size - How many bytes.
+ * @returns The bytes.
+ */
+const letters = (letter: string, size: number) => encoder.encode(letter.repeat(size));
+
+/**
+ * Counts the puts the world's store is given from now on.
+ * @param served - The server.
+ * @returns How many puts so far.
+ */
+const countingPuts = (served: Served) => {
+  const { store } = served.world.bytes;
+  let puts = 0;
+
+  Object.assign(served.world.bytes, {
+    store: {
+      ...store,
+      put: (body) => {
+        puts += 1;
+
+        return store.put(body);
+      },
+    } satisfies ByteStoreService,
+  });
+
+  return () => puts;
+};
+
+const refusal = (answer: Response) =>
+  Effect.map(jsonOf(answer), (body) => [answer.status, body] as const);
+
+describe("uploads.maxTotal over the API", () => {
+  it("refuses an upload that would pass it with 507 StoreFull, keeping and putting nothing, and keeps one that fits exactly", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.maxTotal", 10);
+        const puts = countingPuts(served);
+        const first = yield* uploaded(served, letters("a", 6), "a.txt");
+        const putsBefore = puts();
+        const refused = yield* upload(served, letters("b", 5), "b.txt");
+        const putsAfterRefusal = puts() - putsBefore;
+        const fits = yield* upload(served, letters("c", 4), "c.txt");
+        const listed = yield* pageOf(yield* served.request("/api/uploads"));
+
+        return {
+          first: first.size,
+          fits: fits.status,
+          held: yield* served.world.bytes.store.held,
+          journaled: (yield* journaledUploads(served.world)).length,
+          listed: listed.uploads.length,
+          putsAfterRefusal,
+          refused: yield* refusal(refused),
+          staged: yield* emptied(served),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      first: 6,
+      fits: 200,
+      held: 10,
+      journaled: 2,
+      listed: 2,
+      putsAfterRefusal: 0,
+      refused: [507, { _tag: "StoreFull", maxTotal: 10 }],
+      staged: [],
+    });
+  });
+
+  it("keeps the same bytes again under a full limit, since they add nothing", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.maxTotal", 6);
+        const first = yield* uploaded(served, letters("a", 6), "a.txt");
+        const again = yield* upload(served, letters("a", 6), "again.txt");
+        const other = yield* upload(served, letters("b", 1), "b.txt");
+
+        return {
+          again: again.status,
+          held: yield* served.world.bytes.store.held,
+          journaled: (yield* journaledUploads(served.world)).length,
+          other: other.status,
+          sameHash: (yield* recordOf(again)).hash === first.hash,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      again: 200,
+      held: 6,
+      journaled: 2,
+      other: 507,
+      sameHash: true,
+    });
+  });
+
+  it("makes room when an Upload is deleted", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.maxTotal", 6);
+        const first = yield* uploaded(served, letters("a", 6), "a.txt");
+        const full = yield* upload(served, letters("b", 6), "b.txt");
+
+        yield* expecting(remove(served, first.id), 200);
+        const room = yield* upload(served, letters("b", 6), "b.txt");
+
+        return { full: full.status, room: room.status };
+      })
+    );
+
+    expect(result).toStrictEqual({ full: 507, room: 200 });
+  });
+
+  it("has no limit while uploads.maxTotal is unset, and none again once it is unset", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const big = yield* upload(served, letters("a", 100_000), "a.txt");
+
+        yield* setOption(served, "uploads.maxTotal", 1);
+        const refused = yield* upload(served, letters("b", 2), "b.txt");
+
+        yield* unsetOption(served, "uploads.maxTotal");
+        const free = yield* upload(served, letters("c", 100_000), "c.txt");
+
+        return [big.status, refused.status, free.status];
+      })
+    );
+
+    expect(result).toStrictEqual([200, 507, 200]);
+  });
+
+  it("reads uploads.maxTotal as the upload is checked, so a limit lowered below what is held refuses new bytes, and the held ones stay", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        const first = yield* uploaded(served, letters("a", 6), "a.txt");
+
+        yield* setOption(served, "uploads.maxTotal", 3);
+        const refused = yield* upload(served, letters("b", 1), "b.txt");
+        const again = yield* upload(served, letters("a", 6), "again.txt");
+        const read = yield* served.request(`/api/uploads/${first.id}/content`);
+
+        return [refused.status, again.status, read.status];
+      })
+    );
+
+    expect(result).toStrictEqual([507, 200, 200]);
+  });
+
+  it("keeps exactly one of two concurrent uploads of different bytes that fit alone but not together", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.maxTotal", 10);
+        const put = yield* Latch.make();
+        const go = yield* Latch.make();
+        const { store } = served.world.bytes;
+        let first = true;
+
+        // A store whose first put keeps the bytes, then waits before it answers, so the
+        // first upload has been checked and not yet journaled.
+        Object.assign(served.world.bytes, {
+          store: {
+            ...store,
+            put: (body) =>
+              Effect.suspend(() => {
+                const waits = first;
+
+                first = false;
+
+                return waits
+                  ? store.put(body).pipe(
+                      Effect.tap(() => put.open),
+                      Effect.tap(() => go.await)
+                    )
+                  : store.put(body);
+              }),
+          } satisfies ByteStoreService,
+        });
+
+        const holder = yield* Effect.forkChild(upload(served, letters("a", 6), "a.txt"));
+
+        yield* put.await;
+        const second = yield* upload(served, letters("b", 6), "b.txt");
+        const sameBytes = yield* Effect.forkChild(upload(served, letters("a", 6), "a2.txt"));
+
+        yield* go.open;
+        const kept = yield* Fiber.join(holder);
+        const same = yield* Fiber.join(sameBytes);
+
+        return {
+          first: kept.status,
+          journaled: (yield* journaledUploads(served.world)).length,
+          same: same.status,
+          second: yield* refusal(second),
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      first: 200,
+      journaled: 2,
+      same: 200,
+      second: [507, { _tag: "StoreFull", maxTotal: 10 }],
+    });
+  });
+
+  it("releases the room an upload held when it fails, however it ends", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        yield* turnOn(served);
+        yield* setOption(served, "uploads.maxTotal", 10);
+        const { store } = served.world.bytes;
+
+        // A store that cannot put, though it is reached.
+        Object.assign(served.world.bytes, {
+          store: {
+            ...store,
+            put: () => Effect.fail(new ByteStoreUnavailable({ reason: "full disk" })),
+          } satisfies ByteStoreService,
+        });
+
+        const failed = yield* upload(served, letters("a", 8), "a.txt");
+
+        Object.assign(served.world.bytes, { store });
+        const retry = yield* upload(served, letters("b", 8), "b.txt");
+
+        return { failed: failed.status, retry: retry.status };
+      })
+    );
+
+    expect(result).toStrictEqual({ failed: 503, retry: 200 });
+  });
+});

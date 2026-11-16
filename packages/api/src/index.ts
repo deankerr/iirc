@@ -50,6 +50,7 @@ export {
   UploadTooLarge,
   UploadUnreadable,
   UploadsOff,
+  StoreFull,
   StoreUnavailable,
   VaultFailed,
 } from "./errors.ts";

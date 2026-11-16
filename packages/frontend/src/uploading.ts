@@ -36,6 +36,8 @@ export interface AddedFile {
  *
  * - `OverLimit`: it is larger than `maxSize`, refused before it was sent when `before`, or
  *   by the Daemon as it read it.
+ * - `StoreFull`: keeping it would take Uploads past `maxTotal`, in bytes, which they may
+ *   hold in all, so nothing was kept.
  * - `StoreUnavailable`: the store that keeps Uploads could not be reached.
  * - `JournalFailed`: the Daemon could not write its Journal.
  * - `NoAnswer`: the Daemon did not answer, `sent` once the file was being sent, so whether
@@ -44,6 +46,7 @@ export interface AddedFile {
  */
 export type UploadFailure =
   | { readonly _tag: "OverLimit"; readonly maxSize: number; readonly before: boolean }
+  | { readonly _tag: "StoreFull"; readonly maxTotal: number }
   | { readonly _tag: "StoreUnavailable" }
   | { readonly _tag: "JournalFailed" }
   | { readonly _tag: "NoAnswer"; readonly sent: boolean }
@@ -880,6 +883,10 @@ export const failureText = (
       return failure.before
         ? `${name} is ${sizeText(size)}, over the ${sizeText(failure.maxSize)} limit.`
         : `${name} is over the ${sizeText(failure.maxSize)} limit, so it was not kept.`;
+    }
+
+    case "StoreFull": {
+      return `The store is full: Uploads may hold ${sizeText(failure.maxTotal)} in all, so ${name} was not kept.`;
     }
 
     case "StoreUnavailable": {
