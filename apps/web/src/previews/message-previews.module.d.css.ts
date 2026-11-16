@@ -9,7 +9,10 @@ declare const styles: {
   readonly ready: string;
   readonly row: string;
   readonly summary: string;
+  readonly text: string;
+  readonly thumbnail: string;
   readonly unseen: string;
+  readonly whole: string;
 };
 
 export default styles;

@@ -21,8 +21,44 @@
 .row,
 .pending,
 .ready,
-.failed {
+.failed,
+.text {
   min-width: 0;
+}
+
+/*
+ * A ready Preview: its text, which takes the room, and a page's thumbnail on the right.
+ * Without an image, or once it fails, the text stands alone, as one line.
+ */
+.ready {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.text {
+  flex: 1 1 0;
+}
+
+/* A page's image: a small fixed box, cropped to fill it, so the row stays calm. */
+.thumbnail {
+  flex: none;
+  width: 4em;
+  height: 4em;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  object-fit: cover;
+}
+
+/* A link that is itself an image: as tall as the medium size, never wider than the column. */
+.whole {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 260px;
+  border-radius: var(--radius);
+  background: var(--color-surface);
 }
 
 /* While pending: a bar a line high, pulsing, standing where the line will be. */
@@ -117,6 +153,11 @@ a.plain:focus-visible {
 @container (max-width: 36em) {
   .previews {
     max-width: 100%;
+  }
+
+  .thumbnail {
+    width: 3em;
+    height: 3em;
   }
 }
 
