@@ -615,11 +615,47 @@ const imageOf = (preview: Preview): ImageShown | undefined =>
       };
 
 /**
+ * A link that is itself a video or a sound, as drawn: which, where the Daemon streams it
+ * from, its own origin and never the host it came from, by the Message's place, and its
+ * media type as the Daemon read it. Nothing is fetched until the Owner presses play.
+ */
+export interface MediaShown {
+  readonly kind: "audio" | "video";
+  readonly src: string;
+  readonly type: string | null;
+}
+
+/**
+ * A ready Preview's media as drawn.
+ * @param preview - The Preview.
+ * @param id - The Preview's id.
+ * @param timeline - The Message's Timeline.
+ * @param position - Its place there.
+ * @returns The media, or none for any other kind.
+ */
+const mediaOf = (
+  preview: Preview,
+  id: PreviewId,
+  timeline: TimelineId,
+  position: Position
+): MediaShown | undefined =>
+  preview.kind === "video" || preview.kind === "audio"
+    ? {
+        kind: preview.kind,
+        src: `/api/previews/${id}/stream?${new URLSearchParams([
+          ["timeline", timeline],
+          ["position", cursorOf(position)],
+        ]).toString()}`,
+        type: preview.type,
+      }
+    : undefined;
+
+/**
  * One Preview, as drawn:
  *
  * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
- * - `Ready`: its summary, opening to its description when it has one, and its image when
- *   the Daemon kept one.
+ * - `Ready`: its summary, opening to its description when it has one, its image when the
+ *   Daemon kept one, and, for a link that is itself a video or a sound, its media.
  * - `Plain`: the plain link, with why there is no Preview, when it failed.
  * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
  *   Message's links, as the Daemon holds it until the Owner presses.
@@ -633,6 +669,7 @@ export type PreviewShown =
       readonly summary: string;
       readonly description: string | undefined;
       readonly image: ImageShown | undefined;
+      readonly media: MediaShown | undefined;
     }
   | {
       readonly _tag: "Plain";
@@ -653,14 +690,18 @@ export type PreviewShown =
  * @param item - The item.
  * @param address - The link as the Message holds it.
  * @param index - Which of its Message's links it is.
- * @param images - Whether images are shown, as they are only while Previews are `on`.
+ * @param on - Whether Previews are `on`, as images and media are shown only then.
+ * @param timeline - The Message's Timeline.
+ * @param position - Its place there.
  * @returns It.
  */
 const itemShown = (
   item: PreviewItem,
   address: string,
   index: number,
-  images: boolean
+  on: boolean,
+  timeline: TimelineId,
+  position: Position
 ): PreviewShown => {
   const link = linkShown(address);
   const key = String(index);
@@ -679,9 +720,10 @@ const itemShown = (
           preview.description === null || preview.description === ""
             ? undefined
             : contained(preview.description),
-        image: images ? imageOf(preview) : undefined,
+        image: on ? imageOf(preview) : undefined,
         key,
         link,
+        media: on ? mediaOf(preview, item.id, timeline, position) : undefined,
         summary: summaryOf(preview),
       };
     }
@@ -770,7 +812,16 @@ export const previewsOf = (
 
       return item === undefined
         ? []
-        : [itemShown(item.item, found[index]?.href ?? item.item.link, index, mode === "on")];
+        : [
+            itemShown(
+              item.item,
+              found[index]?.href ?? item.item.link,
+              index,
+              mode === "on",
+              timeline,
+              position
+            ),
+          ];
     });
   }
 

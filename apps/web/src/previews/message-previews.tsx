@@ -2,7 +2,9 @@
  * A Message's Previews, under its text behind a left rule, one row each: a pulsing
  * placeholder while pending, a ready one's site and title on one line, which a press opens
  * to its description, a failed one as the plain link, saying why on hover, and one the
- * Daemon holds for a press as the plain link and "show preview", which fetches it. Its
+ * Daemon holds for a press as the plain link and "show preview", which fetches it. A link
+ * that is itself a video or a sound is its summary with a native player under it, which
+ * fetches nothing until pressed. Its
  * Previews are asked for only once the Message scrolls into view, as an intersection
  * observer sees it, never ahead, and only while its Timeline's mode asks.
  *
@@ -11,7 +13,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import type { TimelineItem } from "@iirc/api";
 import { mayPreview, modeIn, previewsOf } from "@iirc/frontend/previews";
-import type { ImageShown, LinkShown, PreviewShown } from "@iirc/frontend/previews";
+import type { ImageShown, LinkShown, MediaShown, PreviewShown } from "@iirc/frontend/previews";
 import type { ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
@@ -83,6 +85,41 @@ const PreviewImage = ({
 };
 
 /**
+ * A link that is itself a video or a sound, as the browser's own player, which fetches
+ * nothing from the Daemon's stream until the Owner presses play. Where it fails to play,
+ * nothing is drawn, and the text beside it stands alone.
+ * @param props - The media, and what to call it.
+ * @returns The player, or nothing.
+ */
+const PreviewMedia = ({ media, name }: { readonly media: MediaShown; readonly name: string }) => {
+  const [failed, setFailed] = useState(false);
+
+  const shared = {
+    "aria-label": `Play ${name}`,
+    controls: true,
+    "data-preview-media": media.kind,
+    onError: () => {
+      setFailed(true);
+    },
+    preload: "none",
+    src: media.src,
+  } as const;
+
+  if (failed) {
+    return null;
+  }
+
+  // A stranger's media carries no captions the Daemon could offer.
+  return media.kind === "video" ? (
+    // oxlint-disable-next-line jsx-a11y/media-has-caption
+    <video {...shared} className={styles.video} />
+  ) : (
+    // oxlint-disable-next-line jsx-a11y/media-has-caption
+    <audio {...shared} className={styles.audio} />
+  );
+};
+
+/**
  * A ready Preview's text: its summary, opening to its description when it has one.
  * @param props - The Preview, as drawn.
  * @returns Its text.
@@ -138,7 +175,18 @@ const PreviewRow = ({
 
     case "Ready": {
       const text = <ReadyText shown={shown} />;
-      const { image } = shown;
+      const { image, media } = shown;
+
+      // A link that is itself a video or a sound is its text, with the player under it,
+      // and one that fails to play leaves the text alone.
+      if (media !== undefined) {
+        return (
+          <div className={styles.media} data-preview="ready">
+            {text}
+            <PreviewMedia key={media.src} media={media} name={shown.summary} />
+          </div>
+        );
+      }
 
       // A link that is itself an image is the image alone; a page's is beside its text.
       // Keyed by its source, a new image gets a fresh try, and one that fails leaves

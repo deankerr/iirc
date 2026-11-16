@@ -121,6 +121,25 @@ const readyWithImage = (kind: "page" | "image") =>
     },
   }) as const;
 
+/**
+ * A ready Preview of the link, which is itself a video or a sound.
+ * @param kind - Which.
+ * @returns Its state.
+ */
+const readyMedia = (kind: "video" | "audio") =>
+  ({
+    _tag: "Ready",
+    preview: {
+      ...ready.preview,
+      kind,
+      title: null,
+      type: kind === "video" ? "video/mp4" : "audio/ogg",
+    },
+  }) as const;
+
+/** The route the Daemon streams `cats` from, for the Message at step 2 in `#iirc`. */
+const streamOfCats = `/api/previews/${cats}/stream?timeline=${iirc}&position=${cursor(2)}`;
+
 /** What the view reads of an entry. */
 interface Seen {
   readonly isIntersecting: boolean;
@@ -435,6 +454,93 @@ describe("a Message's Previews", () => {
       drawn: image?.dataset.drawn,
       src: image?.getAttribute("src"),
     }).toStrictEqual({ alt: "Cats", drawn: "whole", src: `/api/previews/media/${hash}` });
+  });
+
+  it("draws a link that is itself a video as a player that fetches nothing until pressed", async () => {
+    const { daemon } = await opened("on", catsItem(readyMedia("video")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => list()?.querySelector("video") !== null);
+
+    const video = list()?.querySelector("video");
+
+    expect({
+      audio: list()?.querySelector("audio"),
+      autoplay: video?.autoplay,
+      controls: video?.controls,
+      kind: video?.dataset.previewMedia,
+      label: video?.getAttribute("aria-label"),
+      preload: video?.getAttribute("preload"),
+      src: video?.getAttribute("src"),
+      text: summaryLine(),
+    }).toStrictEqual({
+      audio: null,
+      autoplay: false,
+      controls: true,
+      kind: "video",
+      label: "Play video · video/mp4 · example.com",
+      preload: "none",
+      src: streamOfCats,
+      text: "video · video/mp4 · example.com",
+    });
+  });
+
+  it("draws a link that is itself a sound as a player likewise", async () => {
+    const { daemon } = await opened("on", catsItem(readyMedia("audio")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => list()?.querySelector("audio") !== null);
+
+    const audio = list()?.querySelector("audio");
+
+    expect({
+      controls: audio?.controls,
+      kind: audio?.dataset.previewMedia,
+      preload: audio?.getAttribute("preload"),
+      src: audio?.getAttribute("src"),
+      video: list()?.querySelector("video"),
+    }).toStrictEqual({
+      controls: true,
+      kind: "audio",
+      preload: "none",
+      src: streamOfCats,
+      video: null,
+    });
+  });
+
+  it("falls back to the text alone when a player fails to load", async () => {
+    const { daemon } = await opened("on", catsItem(readyMedia("video")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => list()?.querySelector("video") !== null);
+
+    await act(async () => {
+      list()?.querySelector("video")?.dispatchEvent(new Event("error"));
+      await Promise.resolve();
+    });
+
+    expect({
+      state: drawn()[0]?.state,
+      text: summaryLine(),
+      video: list()?.querySelector("video"),
+    }).toStrictEqual({ state: "ready", text: "video · video/mp4 · example.com", video: null });
+  });
+
+  it("draws a video or sound link as its text alone under links only", async () => {
+    const { daemon } = await opened("links only", catsItem(readyMedia("video")));
+
+    await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+    await scrolledIntoView();
+    await settled(() => drawn()[0]?.state === "ready");
+
+    expect({
+      media: list()?.querySelectorAll("video, audio").length,
+      state: drawn()[0]?.state,
+      text: summaryLine(),
+    }).toStrictEqual({ media: 0, state: "ready", text: "video · video/mp4 · example.com" });
   });
 
   it("falls back to the text row when an image fails to load", async () => {
