@@ -31,6 +31,7 @@ export {
   NetworkStopped,
   NotAChannel,
   NotInChannel,
+  NotWaiting,
   OptionsChanged,
   PreviewsOff,
   SignInsFailed,
@@ -164,6 +165,7 @@ export {
   Leading,
   NickSuffix,
   Palette,
+  PreviewsByTimeline,
   PreviewsShown,
   ReadRule,
   SpellcheckShown,
@@ -245,6 +247,7 @@ export {
   PreviewState,
   PreviewsEvent,
   PreviewsRequest,
+  PressRequest,
 } from "./previews.ts";
 
 export { SearchText, TimelineId, unreadCap } from "@iirc/timelines";
