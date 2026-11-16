@@ -536,3 +536,137 @@ describe(readMedia, () => {
     expect(readMedia("")).toBeUndefined();
   });
 });
+
+const players = (text: string) => read(text).players;
+
+const sized = (width: string | undefined, height: string | undefined) =>
+  players(
+    `<meta property="og:video" content="https://a.example/">${
+      width === undefined ? "" : `<meta property="og:video:width" content="${width}">`
+    }${height === undefined ? "" : `<meta property="og:video:height" content="${height}">`}`
+  )?.[0]?.size;
+
+describe("the players a page names", () => {
+  it("reads YouTube's tags, sized by og:video:width and height", () => {
+    expect(
+      players(`<meta property="og:video:url" content="https://www.youtube.com/embed/dQw4w9WgXcQ">
+        <meta property="og:video:secure_url" content="https://www.youtube.com/embed/dQw4w9WgXcQ">
+        <meta property="og:video:type" content="text/html">
+        <meta property="og:video:width" content="1280">
+        <meta property="og:video:height" content="720">`)
+    ).toStrictEqual([
+      {
+        link: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+        size: { height: 720, width: 1280 },
+      },
+    ]);
+  });
+
+  it("reads Vimeo's og:video and twitter:player, each sized by its own tags", () => {
+    expect(
+      players(`<meta name="twitter:player" content="https://player.vimeo.com/video/76979871?h=8272103f6e">
+        <meta name="twitter:player:width" content="640">
+        <meta name="twitter:player:height" content="360">
+        <meta property="og:video:url" content="https://player.vimeo.com/video/1?h=a">
+        <meta property="og:video:width" content="1280">
+        <meta property="og:video:height" content="720">`)
+    ).toStrictEqual([
+      { link: "https://player.vimeo.com/video/1?h=a", size: { height: 720, width: 1280 } },
+      {
+        link: "https://player.vimeo.com/video/76979871?h=8272103f6e",
+        size: { height: 360, width: 640 },
+      },
+    ]);
+  });
+
+  it("reads SoundCloud's twitter:player by property, with its entities decoded", () => {
+    expect(
+      players(`<meta property="twitter:player" content="https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F293&amp;auto_play=false&amp;visual=true">
+        <meta property="twitter:player:height" content="400">
+        <meta property="twitter:player:width" content="435">`)
+    ).toStrictEqual([
+      {
+        link: "https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F293&auto_play=false&visual=true",
+        size: { height: 400, width: 435 },
+      },
+    ]);
+  });
+
+  it("tries og:video:secure_url, og:video:url, og:video, then twitter:player", () => {
+    expect(
+      players(`<meta name="twitter:player" content="https://d.example/">
+        <meta property="og:video" content="https://c.example/">
+        <meta property="og:video:url" content="https://b.example/">
+        <meta property="og:video:secure_url" content="https://a.example/">`)?.map(
+        ({ link }) => link
+      )
+    ).toStrictEqual([
+      "https://a.example/",
+      "https://b.example/",
+      "https://c.example/",
+      "https://d.example/",
+    ]);
+  });
+
+  it("drops an address that repeats, and keeps the first one's size", () => {
+    expect(
+      players(`<meta property="og:video:secure_url" content="https://a.example/p">
+        <meta property="og:video:url" content="https://a.example/p">
+        <meta property="og:video:width" content="10">
+        <meta property="og:video:height" content="20">`)
+    ).toStrictEqual([{ link: "https://a.example/p", size: { height: 20, width: 10 } }]);
+  });
+
+  it("resolves an address against the page's address, or its <base>", () => {
+    expect(players(`<meta property="og:video" content="/embed/1">`)).toStrictEqual([
+      { link: "https://example.com/embed/1", size: null },
+    ]);
+    expect(
+      players(`<base href="https://b.example/x/"><meta property="og:video" content="embed/1">`)
+    ).toStrictEqual([{ link: "https://b.example/x/embed/1", size: null }]);
+  });
+
+  it("is dropped unless it is http or https, and when empty", () => {
+    expect(
+      players(`<meta property="og:video" content="javascript:alert(1)">
+        <meta property="og:video:url" content="data:text/html,x">
+        <meta property="og:video:secure_url" content="  ">`)
+    ).toBeUndefined();
+  });
+
+  it("is absent when the page names none", () => {
+    expect(read(`<title>Plain</title>`)).toStrictEqual({ title: "Plain" });
+  });
+
+  it("gives a size only when both are positive integers in plain decimal digits", () => {
+    expect([
+      sized("640", "360"),
+      sized(" 640 ", "360"),
+      sized("640", undefined),
+      sized(undefined, "360"),
+      sized("0", "360"),
+      sized("640", "0"),
+      sized("640px", "360"),
+      sized("64.5", "360"),
+      sized("-640", "360"),
+      sized("1e3", "360"),
+      sized("0x40", "360"),
+      sized("", "360"),
+      sized("99999999999999999999", "360"),
+    ]).toStrictEqual([
+      { height: 360, width: 640 },
+      { height: 360, width: 640 },
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+});
