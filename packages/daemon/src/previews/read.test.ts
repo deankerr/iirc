@@ -673,6 +673,14 @@ describe("the players a page names", () => {
 
 const GIPHY = "https://media.giphy.com/media/X/giphy.mp4";
 
+// The video a page reads as, naming Giphy's file with a type, or none.
+const named = (type: string | undefined) =>
+  read(
+    `<meta property="og:video" content="${GIPHY}">${
+      type === undefined ? "" : `<meta property="og:video:type" content="${type}">`
+    }`
+  ).video;
+
 const STREAMABLE =
   "https://cdn-cf-east.streamable.com/video/mp4/x.mp4?Expires=1700000000&Signature=abc~def";
 
@@ -744,13 +752,6 @@ describe("the video file a page names", () => {
   });
 
   it("is absent when the page gives no type, or one that is not a plain video type", () => {
-    const named = (type: string | undefined) =>
-      read(
-        `<meta property="og:video" content="${GIPHY}">${
-          type === undefined ? "" : `<meta property="og:video:type" content="${type}">`
-        }`
-      ).video;
-
     expect([
       named(undefined),
       named(""),

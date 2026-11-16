@@ -3761,8 +3761,10 @@ describe("a player over a real server", () => {
 
 describe("a page that names a video file over a real server", () => {
   const WATCH = "https://streamable.com/x";
+
   const FILE =
     "https://cdn-cf-east.streamable.com/video/mp4/x.mp4?Expires=1700000000&Signature=abc";
+
   const POSTER = "https://cdn-cf-east.streamable.com/image/x.jpg";
 
   // Streamable's head: the file, its type, a poster, and a player of its own beside them.
@@ -3843,13 +3845,21 @@ describe("a page that names a video file over a real server", () => {
       })
     );
 
-    expect(streamsOf(result.before)).toStrictEqual([]);
-    expect(result.before.map((one) => one.link)).not.toContain(FILE);
-    expect(result.response.status).toBe(206);
-    expect(result.response.headers.get("content-range")).toBe("bytes 10-19/256");
-    expect(result.body).toStrictEqual(clip.slice(10, 20));
-    expect(streamsOf(result.after)).toStrictEqual([
-      { link: FILE, purpose: { kind: "stream", range: { end: 20, start: 10 } } },
-    ]);
+    expect({
+      after: streamsOf(result.after),
+      before: {
+        file: result.before.some((one) => one.link === FILE),
+        streams: streamsOf(result.before),
+      },
+      body: result.body,
+      range: result.response.headers.get("content-range"),
+      status: result.response.status,
+    }).toStrictEqual({
+      after: [{ link: FILE, purpose: { kind: "stream", range: { end: 20, start: 10 } } }],
+      before: { file: false, streams: [] },
+      body: clip.slice(10, 20),
+      range: "bytes 10-19/256",
+      status: 206,
+    });
   });
 });

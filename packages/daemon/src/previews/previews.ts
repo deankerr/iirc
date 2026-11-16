@@ -395,7 +395,12 @@ const pageRead = (
 
     // A page that names a video file is a video, whatever player it names beside it.
     const { video } = page;
-    const kind = video === undefined ? (player === undefined ? "page" : "player") : "video";
+    const playing = video === undefined ? player : undefined;
+    let kind: "page" | "player" | "video" = playing === undefined ? "page" : "player";
+
+    if (video !== undefined) {
+      kind = "video";
+    }
 
     const read: Read = {
       image: page.image,
@@ -407,7 +412,7 @@ const pageRead = (
           kind,
           link,
           media: video?.link ?? null,
-          player: video === undefined ? (player ?? null) : null,
+          player: playing ?? null,
           site: page.site ?? hostOf(link),
           title: page.title ?? null,
           type: video?.type ?? null,
