@@ -211,6 +211,7 @@ describe("a Preview's image through a real Daemon and MinIO", () => {
             image: { animated: false, hash, size: png.length, type: "image/png" },
             kind: "page",
             link,
+            media: null,
             player: null,
             site: `127.0.0.1:${fixture.port}`,
             title: "Cat",

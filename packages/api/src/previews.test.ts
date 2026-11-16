@@ -23,6 +23,7 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
+  media: null,
   player: null,
   site: "example.com",
   title: "Cats",
@@ -44,6 +45,7 @@ const states = [
       },
       kind: "image",
       link: "https://example.com/cat.png",
+      media: null,
       player: null,
       site: "example.com",
       title: null,
@@ -67,6 +69,15 @@ const states = [
       ...page,
       kind: "player",
       player: { link: "https://player.vimeo.com/video/1", size: null },
+    },
+  },
+  {
+    _tag: "Ready",
+    preview: {
+      ...page,
+      kind: "video",
+      media: "https://cdn.example/clip.mp4?Signature=abc",
+      type: "video/mp4",
     },
   },
   { _tag: "WaitingForPress" },
@@ -109,6 +120,7 @@ describe("Previews on the wire", () => {
           },
         },
         { _tag: "Ready", preview: { description: null, kind: "page", link: page.link, site: "x" } },
+        { _tag: "Ready", preview: { ...page, media: undefined } },
         { _tag: "Ready", preview: { ...page, player: undefined } },
         { _tag: "Ready", preview: { ...page, player: { link: page.link } } },
         {
@@ -122,6 +134,7 @@ describe("Previews on the wire", () => {
         { _tag: "Loading" },
       ].map((each) => Option.isSome(state(each)))
     ).toStrictEqual([
+      false,
       false,
       false,
       false,

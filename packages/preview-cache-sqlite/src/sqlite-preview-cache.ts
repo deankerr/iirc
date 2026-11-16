@@ -16,7 +16,7 @@ import { SqlError } from "effect/sql/SqlError";
  * The version of the file's layout, in SQLite's `user_version`. A file of any other is made
  * again.
  */
-const layoutVersion = 3;
+const layoutVersion = 4;
 
 // What SQLite itself said, when the error carries it. An SQL error's own message is generic,
 // and keeps SQLite's error in its reason's cause. Another error may keep one in its cause.

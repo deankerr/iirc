@@ -599,8 +599,8 @@ const linkShown = (link: string): LinkShown => {
  * An image a Preview shows, as drawn: what it is said to show, the Preview's title or else
  * its link; where the Daemon serves it, from its own origin and never the host it came
  * from; whether it moves; and how it is drawn, `Thumbnail` beside a page's summary,
- * `Whole` for a link that is itself the image, or `Poster` for a player's, which a play
- * button is drawn over.
+ * `Whole` for a link that is itself the image, or `Poster` for a player's or a video's,
+ * which a play button is drawn over.
  */
 export interface ImageShown {
   readonly alt: string;
@@ -673,12 +673,12 @@ const drawnOf = (kind: Preview["kind"]): ImageShown["drawn"] => {
       return "Whole";
     }
 
-    case "player": {
+    case "player":
+    case "video": {
       return "Poster";
     }
 
     case "page":
-    case "video":
     case "audio": {
       return "Thumbnail";
     }
@@ -707,7 +707,7 @@ const imageOf = (preview: Preview): ImageShown | undefined =>
       };
 
 /**
- * A link that is itself a video or a sound, as drawn: which, where the Daemon streams it
+ * A video or a sound, a link that is itself one or a page that names a video file, as drawn: which, where the Daemon streams it
  * from, its own origin and never the host it came from, by the Message's place, and its
  * media type as the Daemon read it. Nothing is fetched until the Owner presses play.
  */
@@ -821,8 +821,9 @@ const listedNow = (preview: Preview, players: PreviewsPlayers): Preview => {
  *
  * - `Pending`: a pulsing placeholder, while it is fetched or before it is asked for.
  * - `Ready`: its summary, opening to its description when it has one, its image when the
- *   Daemon kept one, for a link that is itself a video or a sound, its media, and for a
- *   player, where it plays from. Images, media, and players are shown only under `on`.
+ *   Daemon kept one, for a video or a sound, its media, and for a player, where it plays
+ *   from. A video's image is its poster. Images, media, and players are shown only under
+ *   `on`.
  * - `Plain`: the plain link, with why there is no Preview, when it failed.
  * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
  *   Message's links, as the Daemon holds it until the Owner presses.

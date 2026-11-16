@@ -29,8 +29,9 @@ export const PreviewId = Schema.String.check(
 export type PreviewId = typeof PreviewId.Type;
 
 /**
- * What a link is: a `page`; or `image`, `video`, or `audio`, a link to the media itself;
- * or a `player`, a page whose media plays in a frame.
+ * What a link is: a `page`; or `image`, `video`, or `audio`, a link to the media itself,
+ * or `video`, a page that names a video file; or a `player`, a page whose media plays in a
+ * frame.
  */
 export const PreviewKind = Schema.Literals(["page", "image", "video", "audio", "player"]).annotate({
   identifier: "PreviewKind",
@@ -107,16 +108,21 @@ export type PreviewPlayer = typeof PreviewPlayer.Type;
  * A Preview: the link it was read from, after any redirects, as the URL parser wrote it,
  * what it is, and what it says of itself. `site` is the name the page gives its site, or
  * else the link's host, so it is always there. `type` is the media type of a link to media
- * itself, read from its headers alone, and `null` for a page. `image` is the image the
- * Daemon kept for it, a page's own or the link itself, or `null` for none: a player's is its
- * poster. `player` is the player of a Preview of kind `player`, and `null` for any other.
- * Every field but `kind` and `image` is what a stranger wrote.
+ * itself, read from its headers alone, or of the video file a page names, as the page gave
+ * it, and `null` for any other page. `image` is the image the
+ * Daemon kept for it, a page's own or the link itself, or `null` for none: a player's or a
+ * video's is its poster. `media` is where a Preview of kind `video` or `audio` is: the link
+ * itself, or the video file its page names, which only the Daemon fetches, through
+ * `GET /api/previews/{id}/stream`, and `null` for any other kind. `player` is the player of
+ * a Preview of kind `player`, and `null` for any other. Every field but `kind` and `image`
+ * is what a stranger wrote.
  */
 export const Preview = Schema.Struct({
   description: Schema.NullOr(Untrusted),
   image: Schema.NullOr(PreviewImage),
   kind: PreviewKind,
   link: Untrusted,
+  media: Schema.NullOr(Untrusted),
   player: Schema.NullOr(PreviewPlayer),
   site: Untrusted,
   title: Schema.NullOr(Untrusted),

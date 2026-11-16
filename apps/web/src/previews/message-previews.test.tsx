@@ -98,6 +98,7 @@ const ready = {
     image: null,
     kind: "page",
     link: "https://example.com/cats",
+    media: null,
     player: null,
     site: "example.com",
     title: "Cats",
@@ -138,8 +139,39 @@ const readyMedia = (kind: "video" | "audio") =>
     preview: {
       ...ready.preview,
       kind,
+      media: ready.preview.link,
       title: null,
       type: kind === "video" ? "video/mp4" : "audio/ogg",
+    },
+  }) as const;
+
+/** Where the page's video file is, which no page of ours may ever draw or load. */
+const videoFile = "https://media.example.com/cat.mp4";
+
+/**
+ * A ready Preview of the link, which is a page that names a video file, with its poster.
+ * @param poster - Whether the Daemon kept the poster.
+ * @param animated - Whether the poster moves.
+ * @returns Its state.
+ */
+const readyVideoPage = (poster = true, animated = false) =>
+  ({
+    _tag: "Ready",
+    preview: {
+      ...ready.preview,
+      description: null,
+      image: poster
+        ? {
+            animated,
+            hash,
+            size: 1234,
+            type: animated ? ("image/gif" as const) : ("image/jpeg" as const),
+          }
+        : null,
+      kind: "video",
+      media: videoFile,
+      title: "A cat",
+      type: "video/mp4",
     },
   }) as const;
 
@@ -169,6 +201,7 @@ const readyPlayer = (poster: boolean, animated = false) =>
         : null,
       kind: "player",
       link: "https://www.youtube.com/watch?v=abc123",
+      media: null,
       player: { link: playerAddress, size: { height: 360, width: 640 } },
       title: "A song",
     },
@@ -549,6 +582,32 @@ const frame = {
   title: `Player from ${playerHost}`,
 };
 
+/**
+ * Opens the Message with the page's video ready, and its poster, if any, in view.
+ * @param mode - `ui.previews`, on unless given.
+ * @param poster - Whether the Daemon kept a poster.
+ * @param animatedPoster - Whether the poster moves.
+ * @returns The fake Daemon.
+ */
+const withVideo = async (
+  mode: "on" | "links only" = "on",
+  poster = true,
+  animatedPoster = false
+) => {
+  const fake = await opened(mode, catsItem(readyVideoPage(poster, animatedPoster)));
+
+  await settled(() => fake.daemon.previewFollowers.length === 1 && list() !== null);
+  await scrolledIntoView();
+  await settled(() => drawn()[0]?.state === "ready");
+
+  if (poster && mode === "on") {
+    await imageSeen();
+    await settled(() => list()?.querySelector("img, canvas") !== null);
+  }
+
+  return fake;
+};
+
 describe("a Message's Previews", () => {
   beforeEach(() => {
     layOut();
@@ -777,6 +836,240 @@ describe("a Message's Previews", () => {
       state: drawn()[0]?.state,
       text: summaryLine(),
     }).toStrictEqual({ media: 0, state: "ready", text: "video · video/mp4 · example.com" });
+  });
+
+  describe("a page's video", () => {
+    const name = "video · video/mp4 · A cat · example.com";
+
+    const play = () => imageButton(`Play ${name}`);
+    const enlarge = () => imageButton(`Open ${name} large`);
+
+    it("draws its poster from the media route with a play button, and no video, and asks the stream for nothing", async () => {
+      const media = stubMedia();
+
+      await withVideo();
+
+      expect({
+        fetches: media.fetches(),
+        holding: [...document.body.querySelectorAll("*")].flatMap((element) =>
+          [...element.attributes].flatMap((attribute) =>
+            /stream|cat\.mp4/u.test(attribute.value)
+              ? [`${element.localName}[${attribute.name}]`]
+              : []
+          )
+        ),
+        poster: list()?.querySelector("img")?.getAttribute("src"),
+        press: play()?.disabled,
+        title: play()?.closest("[title]"),
+        video: list()?.querySelector("video"),
+      }).toStrictEqual({
+        fetches: [],
+        holding: [],
+        poster: `/api/previews/media/${hash}`,
+        press: false,
+        title: null,
+        video: null,
+      });
+    });
+
+    it("plays through the stream route in place when its play button is pressed", async () => {
+      await withVideo();
+      await pressed(play());
+
+      const video = list()?.querySelector("video");
+
+      expect({
+        autoplay: video?.autoplay,
+        controls: video?.controls,
+        poster: video?.getAttribute("poster"),
+        press: play(),
+        src: video?.getAttribute("src"),
+        still: list()?.querySelector("img"),
+        text: list()?.querySelector("bdi")?.textContent,
+      }).toStrictEqual({
+        autoplay: true,
+        controls: true,
+        poster: `/api/previews/media/${hash}`,
+        press: null,
+        src: streamOfCats,
+        still: null,
+        text: name,
+      });
+    });
+
+    it("opens a video large from its control, with the stream as its source, which Escape closes", async () => {
+      await withVideo();
+
+      const button = enlarge();
+
+      await pressed(button);
+      await settled(() => larger() !== null);
+
+      const video = larger()?.querySelector("video");
+      const link = larger()?.querySelector("a");
+
+      const open = {
+        autoplay: video?.autoplay,
+        controls: video?.controls,
+        href: link?.getAttribute("href"),
+        name: larger()?.getAttribute("aria-label"),
+        poster: video?.getAttribute("poster"),
+        src: video?.getAttribute("src"),
+      };
+
+      await act(async () => {
+        larger()?.dispatchEvent(
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" })
+        );
+        await Promise.resolve();
+      });
+      await settled(() => larger() === null);
+      await settled(() => document.activeElement === button);
+
+      expect(open).toStrictEqual({
+        autoplay: true,
+        controls: true,
+        href: "https://example.com/cats",
+        name,
+        poster: `/api/previews/media/${hash}`,
+        src: streamOfCats,
+      });
+    });
+
+    it("pauses the video playing in place when its larger view opens", async () => {
+      const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+
+      restores.push(() => {
+        vi.restoreAllMocks();
+      });
+
+      await withVideo();
+      await pressed(play());
+      await pressed(enlarge());
+      await settled(() => larger() !== null);
+
+      expect(pause).toHaveBeenCalledOnce();
+    });
+
+    it("draws an animated poster as its first frame, not the GIF, and plays without a poster attribute", async () => {
+      const media = stubMedia();
+
+      await withVideo("on", true, true);
+
+      expect({
+        button: play() !== null,
+        fetches: media.fetches(),
+        image: list()?.querySelector("img"),
+      }).toStrictEqual({
+        button: true,
+        fetches: [`/api/previews/media/${hash}`],
+        image: null,
+      });
+
+      await pressed(play());
+
+      expect({
+        poster: list()?.querySelector("video")?.getAttribute("poster"),
+        src: list()?.querySelector("video")?.getAttribute("src"),
+      }).toStrictEqual({ poster: null, src: streamOfCats });
+    });
+
+    it("draws the video as it is, with the control to open it large, when the Daemon kept no poster", async () => {
+      await withVideo("on", false);
+
+      const video = list()?.querySelector("video");
+
+      expect({
+        enlarge: imageButton("Open video · video/mp4 · A cat · example.com large") !== null,
+        preload: video?.getAttribute("preload"),
+        src: video?.getAttribute("src"),
+      }).toStrictEqual({ enlarge: true, preload: "none", src: streamOfCats });
+    });
+
+    it("draws the video as it is, with the control to open it large, when its poster fails to load", async () => {
+      await withVideo();
+
+      await act(async () => {
+        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+        await Promise.resolve();
+      });
+
+      const video = list()?.querySelector("video");
+
+      expect({
+        enlarge: imageButton(`Open ${name} large`) !== null,
+        image: list()?.querySelector("img"),
+        poster: video?.getAttribute("poster") ?? null,
+        preload: video?.getAttribute("preload"),
+        src: video?.getAttribute("src"),
+      }).toStrictEqual({
+        enlarge: true,
+        image: null,
+        poster: null,
+        preload: "none",
+        src: streamOfCats,
+      });
+    });
+
+    it("leaves the text alone when it fails to play", async () => {
+      await withVideo();
+      await pressed(play());
+
+      await act(async () => {
+        list()?.querySelector("video")?.dispatchEvent(new Event("error"));
+        await Promise.resolve();
+      });
+
+      expect({
+        state: drawn()[0]?.state,
+        text: list()?.querySelector("bdi")?.textContent,
+        video: list()?.querySelector("video"),
+      }).toStrictEqual({ state: "ready", text: name, video: null });
+    });
+
+    it("is its text alone under links only: no poster, play button, video, or control", async () => {
+      await withVideo("links only");
+
+      expect({
+        buttons: [...(list()?.querySelectorAll("button") ?? [])].map((button) =>
+          button.getAttribute("aria-label")
+        ),
+        media: list()?.querySelectorAll("video, img, canvas").length,
+        text: list()?.querySelector("bdi")?.textContent,
+      }).toStrictEqual({ buttons: [], media: 0, text: name });
+    });
+  });
+
+  describe("a link that is itself a video", () => {
+    it("has the control to open it large, with the stream as its source", async () => {
+      const { daemon } = await opened("on", catsItem(readyMedia("video")));
+
+      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+      await scrolledIntoView();
+      await settled(() => list()?.querySelector("video") !== null);
+
+      const label = "Open video · video/mp4 · example.com large";
+
+      await pressed(imageButton(label));
+      await settled(() => larger() !== null);
+
+      const video = larger()?.querySelector("video");
+
+      expect({
+        poster: video?.getAttribute("poster"),
+        src: video?.getAttribute("src"),
+      }).toStrictEqual({ poster: null, src: streamOfCats });
+    });
+
+    it("has no such control for a sound", async () => {
+      const { daemon } = await opened("on", catsItem(readyMedia("audio")));
+
+      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+      await scrolledIntoView();
+      await settled(() => list()?.querySelector("audio") !== null);
+
+      expect(list()?.querySelectorAll("button[aria-label^='Open']").length).toBe(0);
+    });
   });
 
   describe("a player", () => {

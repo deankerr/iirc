@@ -10,14 +10,16 @@
 import { useAtomValue } from "@effect/atom-react";
 import { motionOf, pressOn } from "@iirc/frontend/previews";
 import type { ImageShown, LinkShown, Motion, PlayerShown } from "@iirc/frontend/previews";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement, ReactNode, RefObject, VideoHTMLAttributes } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
 
 import { animateShown } from "../options/ui.ts";
 import { Icon } from "../ui/icon.tsx";
 import { OpensLarger } from "./larger-view.tsx";
+import type { Large } from "./larger-view.tsx";
 import { PlayButton } from "./play-button.tsx";
+import type { Play } from "./play-button.tsx";
 import { useReducedMotion } from "./reduced-motion.ts";
 
 import styles from "./preview-image.module.css";
@@ -175,6 +177,30 @@ const Holder = ({
 );
 
 /**
+ * The control in the corner of what is drawn, which opens it large.
+ * @param props - What is drawn large, its page's link, what to call it, and what else
+ *   happens as it opens.
+ * @returns The control, and the larger view it opens.
+ */
+export const EnlargeControl = ({
+  large,
+  link,
+  name,
+  onOpen,
+}: {
+  readonly large: Large;
+  readonly link: LinkShown;
+  readonly name: string;
+  readonly onOpen?: (() => void) | undefined;
+}) => (
+  <OpensLarger alt={name} large={large} link={link} onOpen={onOpen}>
+    <AriaButton aria-label={`Open ${name} large`} className={styles.enlarge}>
+      <Icon name="enlarge" />
+    </AriaButton>
+  </OpensLarger>
+);
+
+/**
  * An image that does not move, which opens large when pressed.
  * @param props - The image, its page's link, and what to draw in its place.
  * @returns The image, or what stands without it.
@@ -199,7 +225,7 @@ const StillImage = ({
   return (
     <Holder drawn={image.drawn} loaded={seen} reference={setElement}>
       {seen ? (
-        <OpensLarger alt={image.alt} link={link} src={image.src}>
+        <OpensLarger alt={image.alt} large={{ _tag: "Image", src: image.src }} link={link}>
           <AriaButton aria-label={`Open ${image.alt} large`} className={styles.press}>
             <img
               alt={image.alt}
@@ -279,11 +305,11 @@ const AnimatedImage = ({
             )}
           </AriaButton>
           {moving ? (
-            <OpensLarger alt={image.alt} link={link} src={fetched.url}>
-              <AriaButton aria-label={`Open ${image.alt} large`} className={styles.enlarge}>
-                <Icon name="enlarge" />
-              </AriaButton>
-            </OpensLarger>
+            <EnlargeControl
+              large={{ _tag: "Image", src: fetched.url }}
+              link={link}
+              name={image.alt}
+            />
           ) : null}
         </>
       ) : null}
@@ -317,20 +343,20 @@ const Stacked = ({
 
 /**
  * A poster that does not move.
- * @param props - The poster, its player, what pressing play does, the text above it, and what
- * stands without it.
+ * @param props - The poster, its play button, what else sits in its corner, the text above
+ * it, and what stands without it.
  * @returns The poster, or what stands without it.
  */
 const StillPoster = ({
+  corner,
   image,
-  onPlay,
-  player,
+  play,
   text,
   without,
 }: {
+  readonly corner: ReactNode;
   readonly image: ImageShown;
-  readonly player: PlayerShown;
-  readonly onPlay: () => void;
+  readonly play: Play;
   readonly text: ReactElement;
   readonly without: ReactElement;
 }) => {
@@ -358,7 +384,8 @@ const StillPoster = ({
             referrerPolicy="no-referrer"
             src={image.src}
           />
-          <PlayButton onPlay={onPlay} over="poster" player={player} />
+          <PlayButton {...play} over="poster" />
+          {corner}
         </>
       ) : null}
     </Stacked>
@@ -367,21 +394,21 @@ const StillPoster = ({
 
 /**
  * A poster that is animated, which never moves here: its first frame, taken from the
- * Daemon's bytes, since a player's poster is still until something plays.
- * @param props - The poster, its player, what pressing play does, the text above it, and what
- * stands without it.
+ * Daemon's bytes, since a poster is still until something plays.
+ * @param props - The poster, its play button, what else sits in its corner, the text above
+ * it, and what stands without it.
  * @returns The poster, or what stands without it.
  */
 const FramePoster = ({
+  corner,
   image,
-  onPlay,
-  player,
+  play,
   text,
   without,
 }: {
+  readonly corner: ReactNode;
   readonly image: ImageShown;
-  readonly player: PlayerShown;
-  readonly onPlay: () => void;
+  readonly play: Play;
   readonly text: ReactElement;
   readonly without: ReactElement;
 }) => {
@@ -398,7 +425,8 @@ const FramePoster = ({
       {fetched._tag === "Ready" ? (
         <>
           <FirstFrame frame={fetched.frame} />
-          <PlayButton onPlay={onPlay} over="poster" player={player} />
+          <PlayButton {...play} over="poster" />
+          {corner}
         </>
       ) : null}
     </Stacked>
@@ -406,35 +434,39 @@ const FramePoster = ({
 };
 
 /**
- * A player's poster: a still image with its play button over the middle, under the text
- * above it. It opens nothing when pressed except the play button, which calls `onPlay`.
- * Where it fails to load, or to be fetched, what stands without it shows instead, the text
- * with the same play button beside it.
- * @param props - The poster, its player, what pressing play does, and the text above it.
+ * A poster, a player's or a video's: a still image with its play button over the middle,
+ * under the text above it, and what else sits in its corner. It opens nothing when pressed
+ * except the play button, which calls `play.onPlay`. Where it fails to load, or to be
+ * fetched, what stands without it shows instead: the one given, or else the text with the
+ * same play button beside it.
+ * @param props - The poster, its play button, what else sits in its corner, the text above
+ * it, and what stands without it, if not the text and the button.
  * @returns The poster with its text, or what stands without it.
  */
 export const PreviewPoster = ({
+  corner,
   image,
-  onPlay,
-  player,
+  play,
   text,
+  without: given,
 }: {
+  readonly corner: ReactNode;
   readonly image: ImageShown;
-  readonly player: PlayerShown;
-  readonly onPlay: () => void;
+  readonly play: Play;
   readonly text: ReactElement;
+  readonly without?: ReactElement | undefined;
 }) => {
-  const without = (
+  const without = given ?? (
     <>
       {text}
-      <PlayButton onPlay={onPlay} over="text" player={player} />
+      <PlayButton {...play} over="text" />
     </>
   );
 
   return image.animated ? (
-    <FramePoster image={image} onPlay={onPlay} player={player} text={text} without={without} />
+    <FramePoster corner={corner} image={image} play={play} text={text} without={without} />
   ) : (
-    <StillPoster image={image} onPlay={onPlay} player={player} text={text} without={without} />
+    <StillPoster corner={corner} image={image} play={play} text={text} without={without} />
   );
 };
 
@@ -474,6 +506,46 @@ export const PlayerFrame = ({
     </div>
   );
 };
+
+/**
+ * A video in a box of a fixed shape, as tall as a poster at most, so playing it moves
+ * nothing below it, with what else sits in its corner.
+ * @param props - What sits in the corner, which video element to ask for it, and the
+ * video's own attributes.
+ * @returns The box.
+ */
+export const VideoBox = ({
+  corner,
+  reference,
+  ...video
+}: VideoHTMLAttributes<HTMLVideoElement> & {
+  readonly corner: ReactNode;
+  readonly reference: RefObject<HTMLVideoElement | null>;
+}) => (
+  <span className={styles.boxed}>
+    {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- a stranger's media carries no captions the Daemon could offer */}
+    <video {...video} className={styles.video} controls ref={reference} />
+    {corner}
+  </span>
+);
+
+/**
+ * A video playing under its text, in the box a poster stood in.
+ * @param props - The text above it, and what draws the video.
+ * @returns The text with the video under it.
+ */
+export const VideoFrame = ({
+  box,
+  text,
+}: {
+  readonly box: ReactElement;
+  readonly text: ReactElement;
+}) => (
+  <div className={styles.stacked}>
+    {text}
+    {box}
+  </div>
+);
 
 /**
  * An image the Daemon kept, drawn from its own origin once it scrolls into view. Where it

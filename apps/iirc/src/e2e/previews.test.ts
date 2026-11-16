@@ -1429,4 +1429,190 @@ describe("a link's Preview, end to end", () => {
       await ircd.stop();
     }
   }, 120_000);
+
+  it("draws a page's video as its poster, plays it through the stream on a press, and opens it large", async () => {
+    if (browser === undefined) {
+      throw new Error("no browser");
+    }
+
+    const video = { bytes: await recordClip(browser), type: "video/webm" };
+    const poster = solidPng(400, [200, 120, 40]);
+    const asked: { readonly path: string; readonly range: string | null }[] = [];
+
+    const fixture = Bun.serve({
+      fetch: (request) => {
+        const { pathname } = new URL(request.url);
+
+        asked.push({ path: pathname, range: request.headers.get("range") });
+
+        if (pathname === "/clip.webm") {
+          return served(request, video);
+        }
+
+        if (pathname === "/poster.png") {
+          return new Response(poster, { headers: { "content-type": "image/png" } });
+        }
+
+        // A page as Giphy's names its video file, with a player of its own beside it.
+        return new Response(
+          `<!doctype html><html><head><meta charset="utf-8"><title>ignored</title>` +
+            `<meta property="og:title" content="A cat dancing">` +
+            `<meta property="og:site_name" content="Giphy">` +
+            `<meta property="og:image" content="/poster.png">` +
+            `<meta property="og:video" content="/clip.webm">` +
+            `<meta property="og:video:type" content="video/webm">` +
+            `<meta name="twitter:player" content="/embed"></head><body></body></html>`,
+          { headers: { "content-type": "text/html; charset=utf-8" } }
+        );
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+
+    const [minio, ircd] = await Promise.all([startMinio(), startNgircd()]);
+    const channel = "#videos";
+
+    const scope = await Effect.runPromise(Scope.make());
+
+    try {
+      const stack = await startStack({
+        channel,
+        dataDir: path.join(directory, "video-page-data"),
+        fixturePort: fixture.port ?? 0,
+        ircd,
+        scope,
+      });
+
+      const { api, base, peer } = stack;
+
+      await Promise.all(
+        Object.entries({
+          "minio-key": minio.accessKeyId,
+          "minio-secret": minio.secretAccessKey,
+        }).map(
+          async ([name, value]) =>
+            await status(api("PUT", `/credentials/${name}`, JSON.stringify({ value })))
+        )
+      );
+
+      await Promise.all(
+        Object.entries({
+          "store.s3.accessKeyId": "minio-key",
+          "store.s3.bucket": minio.bucket,
+          "store.s3.endpoint": minio.endpoint,
+          "store.s3.region": minio.region,
+          "store.s3.secretAccessKey": "minio-secret",
+        }).map(
+          async ([option, value]) =>
+            await status(api("PUT", `/options/${option}`, JSON.stringify({ value })))
+        )
+      );
+
+      const on = await status(api("PUT", "/ui/previews", JSON.stringify({ value: "on" })));
+
+      const { page: tab, problems } = await watchedPage(browser);
+      const requested: string[] = [];
+
+      tab.on("request", (request) => {
+        requested.push(new URL(request.url()).origin);
+      });
+
+      const log = await openChannel(tab, stack, channel);
+
+      await expect
+        .poll(
+          async () => {
+            peer.send(`PRIVMSG ${channel} :hello`);
+
+            return await log.getByText("hello").count();
+          },
+          { interval: 500, timeout: 20_000 }
+        )
+        .toBeGreaterThan(0);
+
+      peer.send(`PRIVMSG ${channel} :dance http://127.0.0.1:${fixture.port}/gifs/cat`);
+
+      const name = "video · video/webm · A cat dancing · Giphy";
+      const row = log.locator('[data-preview="ready"]');
+      const play = row.getByRole("button", { name: `Play ${name}` });
+
+      await play.waitFor();
+
+      const drawn = await loadedImage(row);
+      const messageRow = log.locator("[data-index]").filter({ hasText: "dance " });
+
+      // Given the page a moment to fetch what it should not.
+      await tab.waitForTimeout(1500);
+
+      const beforePress = asked.map((one) => one.path);
+      const videosBefore = await row.locator("video").count();
+
+      await shoot(messageRow, "after-video-page-poster.png");
+
+      await play.click();
+
+      const inline = row.locator('video[data-preview-media="video"]');
+
+      await inline.waitFor();
+      await expect
+        .poll(async () => await inline.evaluate((one: HTMLVideoElement) => one.currentTime), {
+          timeout: 20_000,
+        })
+        .toBeGreaterThan(0.3);
+
+      await shoot(messageRow, "after-video-page-playing.png");
+
+      const afterPress = asked.slice(beforePress.length);
+
+      await row.getByRole("button", { name: `Open ${name} large` }).click();
+
+      const dialog = tab.getByRole("dialog");
+      const large = dialog.locator("video");
+
+      await large.waitFor();
+      await expect
+        .poll(async () => await large.evaluate((one: HTMLVideoElement) => one.currentTime), {
+          timeout: 20_000,
+        })
+        .toBeGreaterThan(0.3);
+
+      await screenshot(tab, "after-video-page-large.png");
+
+      const streamRoute = /^\/api\/previews\/[^/]+\/stream\?/u;
+
+      expect({
+        afterPress: {
+          paths: [...new Set(afterPress.map((one) => one.path))],
+          ranged: afterPress.some((one) => one.range !== null),
+        },
+        beforePress: beforePress.toSorted(),
+        inlinePaused: await inline.evaluate((one: HTMLVideoElement) => one.paused),
+        large: streamRoute.test((await large.getAttribute("src")) ?? ""),
+        mediaRoute: /^\/api\/previews\/media\/[0-9a-f]{64}$/u.test(drawn.src),
+        on,
+        origins: [...new Set(requested)],
+        posterLoaded: drawn.naturalWidth > 0,
+        // The page asks who is signed in before anyone is, and is told no.
+        problems: problems.filter((problem) => !problem.includes("401")),
+        videosBefore,
+      }).toStrictEqual({
+        afterPress: { paths: ["/clip.webm"], ranged: true },
+        beforePress: ["/gifs/cat", "/poster.png"],
+        inlinePaused: true,
+        large: true,
+        mediaRoute: true,
+        on: 200,
+        origins: [base],
+        posterLoaded: true,
+        problems: [],
+        videosBefore: 0,
+      });
+
+      peer.close();
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await fixture.stop(true);
+      await Promise.all([minio.stop(), ircd.stop()]);
+    }
+  }, 120_000);
 });

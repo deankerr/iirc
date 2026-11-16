@@ -45,6 +45,17 @@
   object-fit: contain;
 }
 
+/*
+ * A video fills the room the view gives it, at its own proportions inside, however small its
+ * frames: the player's controls need the width, and a press of ⤢ asks for it large.
+ */
+video.large {
+  width: 100vw;
+  height: calc(100vh - 2 * var(--space-3) - 3em);
+  height: calc(100dvh - 2 * var(--space-3) - 3em);
+  background: black;
+}
+
 /* The link sits on the page's own colour, so it reads on any image or scrim. */
 .page {
   display: block;
