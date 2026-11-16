@@ -33,6 +33,20 @@ import {
   webpChunks,
   webpData,
 } from "../testing/images.ts";
+import {
+  box,
+  cat,
+  clipMov,
+  clipMp4,
+  itemData,
+  itemsOf,
+  mdatOf,
+  photoAvif,
+  photoHeic,
+  propertyTypes,
+  text,
+  u,
+} from "../testing/isobmff.ts";
 import { layerWorld, makeKey, makeWorld, temporaryDirectory } from "../testing/world.ts";
 import type { World } from "../testing/world.ts";
 
@@ -388,6 +402,147 @@ describe("stripping an image as it is uploaded", () => {
         type: "image/jpeg",
       },
       journaled: 0,
+      staged: [],
+      status: 422,
+    });
+  });
+});
+
+describe("stripping HEIC, AVIF, MP4 and MOV as they are uploaded", () => {
+  const imageItems = new Set(["hvc1", "av01", "grid", "iden"]);
+
+  // What of a photo is image must come out where it went in, byte for byte, and what is
+  // Exif or XMP must come out of the file with its bytes.
+  it.each([
+    ["photo.heic", photoHeic, "hvcC"],
+    ["photo.avif", photoAvif, "av1C"],
+  ] as const)(
+    "drops %s's Exif and XMP items and their bytes, keeping its images and %s colour",
+    async (name, photo, codec) => {
+      const { bytes, recorded } = await run((served) => servedBack(served, photo, name));
+      const before = itemsOf(photo);
+      const kept = before.filter(({ type }) => imageItems.has(type));
+
+      expect({
+        beforeHolds: ["Exif", "PLANTED-XMP", "iPhone", "Apple"].map((word) => holds(photo, word)),
+        dropped: [
+          ...new Set(before.filter(({ type }) => !imageItems.has(type)).map(({ type }) => type)),
+        ].toSorted(),
+        ftyp: bytes.subarray(0, 12),
+        keptData: kept.map((item) => itemData(bytes, item)),
+        length: bytes.length,
+        properties: [
+          ...new Set(propertyTypes(bytes).filter((type) => [codec, "colr", "irot"].includes(type))),
+        ].toSorted(),
+        recorded,
+        survivors: ["Exif", "PLANTED-", "iPhone", "Apple", "GPS", "xpacket"].filter((word) =>
+          holds(bytes, word)
+        ),
+        types: itemsOf(bytes)
+          .map(({ type }) => type)
+          .toSorted(),
+      }).toStrictEqual({
+        beforeHolds: [true, true, true, true],
+        dropped: ["Exif", "mime"],
+        ftyp: photo.subarray(0, 12),
+        keptData: kept.map((item) => itemData(photo, item)),
+        length: photo.length,
+        properties: [codec, "colr", "irot"].toSorted(),
+        recorded: true,
+        survivors: [],
+        types: kept.map(({ type }) => type).toSorted(),
+      });
+    }
+  );
+
+  // What is planted in a video, which a reader of metadata would find: a location, a make, a
+  // title, and XMP, in the boxes a phone and an editor leave them in.
+  const planted4 = [
+    "PLANTED-MAKE",
+    "PLANTED-TITLE",
+    "PLANTED-XMP",
+    "xpacket",
+    "loci",
+    Uint8Array.of(0xa9, 0x6d, 0x61, 0x6b),
+  ] as const;
+
+  const planted5 = [
+    "+51.5007",
+    "PLANTED-SOFTWARE",
+    "PLANTED-XMP",
+    "XMP_",
+    "com.apple.quicktime.location",
+    "iPhone",
+    Uint8Array.of(0xa9, 0x78, 0x79, 0x7a),
+  ] as const;
+
+  it.each([
+    ["clip.mp4", clipMp4, planted4],
+    ["clip.mov", clipMov, planted5],
+  ] as const)(
+    "drops %s's location and metadata boxes, keeping its length and its media data",
+    async (name, clip, words) => {
+      const { bytes, recorded } = await run((served) => servedBack(served, clip, name));
+      const has = (from: Uint8Array) => words.map((word) => Buffer.from(from).includes(word));
+
+      expect({
+        after: has(bytes),
+        before: has(clip),
+        ftyp: bytes.subarray(0, 20),
+        length: bytes.length,
+        mdat: mdatOf(bytes),
+        recorded,
+      }).toStrictEqual({
+        after: words.map(() => false),
+        before: words.map(() => true),
+        ftyp: clip.subarray(0, 20),
+        length: clip.length,
+        mdat: mdatOf(clip),
+        recorded: true,
+      });
+    }
+  );
+
+  it("zeroes a large box that is on no keep-list in pieces, keeping the media after it", async () => {
+    const big = new Uint8Array(3 * 1024 * 1024 + 5).fill(0x41);
+    const file = cat(clipMp4.subarray(0, 32), box("uuid", big), clipMp4.subarray(32));
+    const { bytes, recorded } = await run((served) => servedBack(served, file, "big.mp4"));
+
+    expect({
+      length: bytes.length,
+      mdat: mdatOf(bytes),
+      recorded,
+      untouched: holds(bytes, "AAAA"),
+    }).toStrictEqual({
+      length: file.length,
+      mdat: mdatOf(file),
+      recorded: true,
+      untouched: false,
+    });
+  });
+
+  it("refuses a video it cannot walk with 422, keeping nothing", async () => {
+    const result = await run((served) =>
+      Effect.gen(function* () {
+        const answer = yield* served.request("/api/uploads?name=broken.mp4", {
+          body: cat(clipMp4.subarray(0, 32), u(4, 4), text("moov")),
+          method: "POST",
+        });
+
+        return {
+          body: decodeJson(yield* Effect.promise(async () => await answer.text())),
+          staged: readdirSync(`${served.dataDir}/staging`),
+          status: answer.status,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      body: {
+        _tag: "UploadUnreadable",
+        reason: "a box is smaller than its header",
+        type: "video/mp4",
+      },
       staged: [],
       status: 422,
     });

@@ -9,13 +9,16 @@
  * @packageDocumentation
  */
 import { createHash } from "node:crypto";
+import { open } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 
 import { Data, Effect, FileSystem, Stream } from "effect";
 import type { Scope } from "effect";
 import { SecureRandom } from "effect/crypto";
 
 import { headLength } from "./kind.ts";
-import { stripperFor } from "./strip/strip.ts";
+import { patcherFor, stripperFor } from "./strip/strip.ts";
+import type { Patch, Reader } from "./strip/strip.ts";
 
 /** A body staged whole: where it is, its SHA-256 as hex, its size, and its leading bytes. */
 export interface Staged {
@@ -122,10 +125,110 @@ export const stage = <E>(
     };
   });
 
+// How much is read at a time when a walk reads a few bytes, so that a file of many small
+// boxes is not a file of as many reads.
+const window = 64 * 1024;
+
+// How much zero is written at a time, which is never more than this however large a box is.
+const zeros = new Uint8Array(1024 * 1024);
+
 /**
- * What of a staged body is kept. An image of a type that is stripped is read whole, stripped,
- * and hashed again, so the store is given, and checked against, only what it keeps. Any
- * other type streams from staging as it came. Nothing can skip stripping.
+ * Reads a file as a walk asks, from where it asks, a window at a time.
+ * @param file - The open file.
+ * @returns The reader.
+ */
+const readerOf = (file: FileSystem.File): Reader => {
+  let held = { at: 0, bytes: new Uint8Array() };
+
+  const readFrom = (at: number, length: number) =>
+    Effect.gen(function* () {
+      const buffer = new Uint8Array(length);
+      let got = 0;
+
+      while (got < length) {
+        const n = yield* file
+          .read(buffer.subarray(got), { position: BigInt(at + got) })
+          .pipe(Effect.orDie);
+
+        if (n === 0) {
+          break;
+        }
+
+        got += n;
+      }
+
+      return buffer.subarray(0, got);
+    });
+
+  return (at, length) =>
+    Effect.gen(function* () {
+      if (at >= held.at && at + length <= held.at + held.bytes.length) {
+        return held.bytes.subarray(at - held.at, at - held.at + length);
+      }
+
+      if (length > window) {
+        return yield* readFrom(at, length);
+      }
+
+      const bytes = yield* readFrom(at, window);
+
+      held = { at, bytes };
+
+      return bytes.subarray(0, Math.min(length, bytes.length));
+    });
+};
+
+// Writes bytes at a place in a file through Node's file handle, since Bun, as of 1.4, ignores
+// the position of a write made through the file system service.
+const writeAt = (handle: FileHandle, buffer: Uint8Array, at: number): Effect.Effect<void> =>
+  Effect.promise(async () => await handle.write(buffer, 0, buffer.length, at)).pipe(
+    Effect.flatMap(({ bytesWritten }) =>
+      bytesWritten === buffer.length
+        ? Effect.void
+        : writeAt(handle, buffer.subarray(bytesWritten), at + bytesWritten)
+    )
+  );
+
+/**
+ * Writes patches into a file, each where it says, so that a box of any size is zeroed a
+ * piece at a time.
+ * @param path - The file.
+ * @param patches - The patches.
+ * @returns An Effect that applies them.
+ */
+const applied = (path: string, patches: readonly Patch[]) =>
+  Effect.acquireUseRelease(
+    Effect.promise(async () => await open(path, "r+")),
+    (handle) =>
+      Effect.forEach(
+        patches,
+        (patch) =>
+          "bytes" in patch
+            ? writeAt(handle, patch.bytes, patch.at)
+            : Effect.forEach(
+                Array.from({ length: Math.ceil(patch.zeros / zeros.length) }, (_, n) => n),
+                (n) =>
+                  writeAt(
+                    handle,
+                    zeros.subarray(0, Math.min(patch.zeros - n * zeros.length, zeros.length)),
+                    patch.at + n * zeros.length
+                  ),
+                { discard: true }
+              ),
+        { discard: true }
+      ),
+    (handle) =>
+      Effect.promise(async () => {
+        await handle.close();
+      })
+  );
+
+/**
+ * What of a staged body is kept. An image of a type that is stripped is stripped, and hashed
+ * again, so the store is given, and checked against, only what it keeps. A JPEG, PNG, GIF or
+ * WebP is read whole. A HEIC, AVIF, MP4 or MOV is patched in place, which the staged file,
+ * ours alone, allows, so that no video is ever read whole, and is then read again to be hashed.
+ * Any other type streams from staging as it came. Nothing can skip stripping.
  * @param staged - The staged body.
  * @param type - The type read from its bytes.
  * @returns What to put, or {@link UnreadableImage} for an image whose structure could not
@@ -138,6 +241,43 @@ export const keepable = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const stripper = stripperFor(type);
+    const patcher = patcherFor(type);
+
+    if (patcher !== undefined) {
+      const planned = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const file = yield* fs.open(staged.path, { flag: "r" }).pipe(Effect.orDie);
+          const walked = yield* patcher(readerOf(file), staged.size);
+
+          if (walked._tag === "Planned") {
+            yield* applied(staged.path, walked.patches);
+          }
+
+          return walked;
+        })
+      );
+
+      if (planned._tag === "Unreadable") {
+        return yield* new UnreadableImage({ reason: planned.reason, type });
+      }
+
+      const hasher = createHash("sha256");
+
+      yield* fs.stream(staged.path).pipe(
+        Stream.orDie,
+        Stream.runForEach((chunk) =>
+          Effect.sync(() => {
+            hasher.update(chunk);
+          })
+        )
+      );
+
+      return {
+        bytes: fs.stream(staged.path).pipe(Stream.orDie),
+        hash: hasher.digest("hex"),
+        size: staged.size,
+      };
+    }
 
     if (stripper === undefined) {
       return {

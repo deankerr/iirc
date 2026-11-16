@@ -42,7 +42,7 @@ import {
   webpLossless,
   webpOf,
 } from "../../testing/images.ts";
-import { stripperFor } from "./strip.ts";
+import { patcherFor, stripperFor } from "./strip.ts";
 
 const encoder = new TextEncoder();
 
@@ -566,10 +566,23 @@ describe("stripping an image of very many small parts", () => {
 });
 
 describe("stripping in general", () => {
-  it("keeps any type but JPEG, PNG, GIF and WebP as it is", () => {
-    expect(
-      ["image/avif", "image/heic", "video/mp4", "text/plain; charset=utf-8"].map(stripperFor)
-    ).toStrictEqual([undefined, undefined, undefined, undefined]);
+  it("keeps any type but JPEG, PNG, GIF and WebP as it is, but for the boxes of HEIC, AVIF, MP4 and MOV, which are patched", () => {
+    const types = [
+      "image/avif",
+      "image/heic",
+      "video/mp4",
+      "video/quicktime",
+      "audio/mp4",
+      "text/plain; charset=utf-8",
+    ];
+
+    expect({
+      patched: types.map((type) => patcherFor(type) !== undefined),
+      whole: types.map((type) => stripperFor(type) !== undefined),
+    }).toStrictEqual({
+      patched: [true, true, true, true, false, false],
+      whole: [false, false, false, false, false, false],
+    });
   });
 
   it("strips what it stripped to the same bytes", () => {
