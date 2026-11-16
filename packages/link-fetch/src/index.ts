@@ -22,6 +22,10 @@ export type {
   StreamRange,
 } from "./link-fetch.ts";
 
+export { makePacer, pacing } from "./pacer.ts";
+
+export type { Pacer } from "./pacer.ts";
+
 export { admit, fixedPolicy, parseLink, readAddress, writeAddress } from "./policy.ts";
 
 export type { Address, Admitted, LinkPolicy, Target } from "./policy.ts";

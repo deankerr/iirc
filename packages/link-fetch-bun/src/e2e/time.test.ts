@@ -5,7 +5,7 @@ import { Effect, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { makeBunLinkFetch } from "../link-fetch-bun.ts";
-import { closes, serve } from "../testing/sites.ts";
+import { closes, scripted, serve } from "../testing/sites.ts";
 import type { Handler } from "../testing/sites.ts";
 
 // Each of these waits out the real ten seconds a fetch is held to, which is why they run in
@@ -41,7 +41,12 @@ const timed = async (handler: Handler, purpose: Purpose) =>
     Effect.scoped(
       Effect.gen(function* () {
         const site = yield* serve(handler);
-        const service = makeBunLinkFetch({ policy: loopbackPolicy(site.port), version: "1.2.3" });
+
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(site.port),
+          version: "1.2.3",
+        });
+
         const started = performance.now();
         let size = 0;
 
@@ -122,5 +127,98 @@ describe.concurrent("each fetch is held to ten seconds", () => {
 
     expect(result.end).toBe("ended");
     expect(result.seconds).toBeGreaterThan(limit + 1);
+  });
+});
+
+/**
+ * A site where `/play` streams for twelve seconds and ends, `/page` answers a page at once,
+ * and `/to/…` redirects to the link its path names.
+ * @param request - The request.
+ * @param response - Its response.
+ */
+const playing: Handler = (request, response) => {
+  const url = request.url ?? "";
+
+  if (url.startsWith("/to/")) {
+    response.writeHead(302, { location: decodeURIComponent(url.slice("/to/".length)) });
+    response.end();
+  } else if (url === "/play") {
+    response.writeHead(200, { "content-type": "audio/ogg" });
+    response.write("OggS");
+
+    const timer = setInterval(() => response.write("."), 500);
+
+    setTimeout(
+      () => {
+        clearInterval(timer);
+        response.end();
+      },
+      (limit + 2) * 1000
+    );
+  } else {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<html><head><title>page</title></head><body>x</body></html>");
+  }
+};
+
+/**
+ * Plays two streams from one name, and while they play, fetches a page from the link given,
+ * which reaches that name, timing it from the start.
+ * @param link - The page's link, from the site's port.
+ * @returns How the page's fetch ended, and after how many seconds.
+ */
+const behindTwo = async (link: (port: number) => string) =>
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const site = yield* serve(playing);
+        const names = scripted({ "a.test": [["127.0.0.1"]], "b.test": [["127.0.0.1"]] });
+
+        const service = yield* makeBunLinkFetch({
+          policy: loopbackPolicy(site.port),
+          resolver: names.resolver,
+          version: "1.2.3",
+        });
+
+        const play = Effect.scoped(
+          Effect.flatMap(
+            service.fetch(`http://b.test:${site.port}/play`, { kind: "stream" }),
+            (answer) => Stream.runDrain(answer.body)
+          )
+        );
+
+        yield* Effect.forkChild(play);
+        yield* Effect.forkChild(play);
+        yield* Effect.sleep("500 millis");
+
+        const started = performance.now();
+
+        const end = yield* Effect.scoped(
+          service.fetch(link(site.port), { kind: "page" }).pipe(
+            Effect.flatMap((answer) => Stream.runDrain(answer.body)),
+            Effect.match({ onFailure: (failure) => failure._tag, onSuccess: () => "ended" })
+          )
+        );
+
+        return { end, seconds: (performance.now() - started) / 1000 };
+      })
+    )
+  );
+
+describe.concurrent("a fetch never fails for waiting its turn", () => {
+  it("a third fetch to one name waits out two longer than 10 s, and is answered", async () => {
+    const result = await behindTwo((port) => `http://b.test:${port}/page`);
+
+    expect(result.end).toBe("ended");
+    expect(result.seconds).toBeGreaterThan(limit);
+  });
+
+  it("a redirect that waits longer than 10 s at the name it goes to is answered", async () => {
+    const result = await behindTwo(
+      (port) => `http://a.test:${port}/to/${encodeURIComponent(`http://b.test:${port}/page`)}`
+    );
+
+    expect(result.end).toBe("ended");
+    expect(result.seconds).toBeGreaterThan(limit);
   });
 });

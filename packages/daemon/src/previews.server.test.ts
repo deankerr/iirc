@@ -973,6 +973,7 @@ const turning = (
 
     const links: FakeLinkFetch = {
       asked: Effect.map(Effect.all([first.asked, second.asked]), ([a, b]) => [...a, ...b]),
+      release: (link) => Effect.andThen(first.release(link), second.release(link)),
       service: {
         fetch: (link, purpose) =>
           Effect.flatMap(Ref.get(turned), (now) =>
@@ -2085,5 +2086,275 @@ describe("a Direct Message's press and a Timeline's override over a real server"
       titles: ["Cats"],
       waiting: [{ _tag: "WaitingForPress" }],
     });
+  });
+});
+
+/**
+ * Says each link to Self in the Channel, three to a Message, with Previews on.
+ * @param served - The server.
+ * @param links - The links, in the order a peer says them.
+ * @returns Each Message's place, in order.
+ */
+const saying = (served: Served, links: readonly string[]) =>
+  Effect.gen(function* () {
+    yield* setPreviews(served, "links only");
+
+    const texts = Array.from({ length: Math.ceil(links.length / 3) }, (_, at) =>
+      links.slice(at * 3, at * 3 + 3).join(" ")
+    );
+
+    yield* talk(served, texts);
+
+    return yield* live(messages(served, texts.length));
+  });
+
+/**
+ * Asks for each Message's Previews in turn, which starts the fetch of each link in the order
+ * they were said.
+ * @param served - The server.
+ * @param places - The Messages' places.
+ * @returns Every item answered, in order.
+ */
+const askingEach = (served: Served, places: readonly Place[]) =>
+  Effect.gen(function* () {
+    const items: PreviewItem[] = [];
+
+    for (const place of places) {
+      items.push(...(yield* asking(served, place)));
+    }
+
+    return items;
+  });
+
+/**
+ * Each change a changes stream has carried, in order.
+ * @param text - What was read of the stream.
+ * @returns Each change's link and the tag of its state.
+ */
+const changesIn = (text: string) =>
+  text
+    .split("\n\n")
+    .filter((block) => block.startsWith("event: changed"))
+    .flatMap((block) => {
+      const fields = new Map(
+        block
+          .split("\n")
+          .map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 2)])
+      );
+
+      const event = decodeEvent({ data: fields.get("data"), event: fields.get("event") });
+
+      return event.event === "changed" ? [[event.data.link, event.data.state._tag] as const] : [];
+    });
+
+/** Waits on the real clock, long enough for a fetch that was going to start to have started. */
+const settling = live(Effect.sleep("200 millis"));
+
+/**
+ * A server on a link fetch that holds the given links, and what each asked link answers.
+ * @param links - The links, each answering a page.
+ * @param held - The links held until they are released.
+ * @returns The server, and the link fetch.
+ */
+const holding = (links: readonly string[], held: readonly string[] = []) =>
+  Effect.gen(function* () {
+    const fake = yield* makeFakeLinkFetch(Object.fromEntries(links.map((link) => [link, cats])), {
+      held,
+    });
+
+    return { fake, served: yield* serve({}, { links: fake }) };
+  });
+
+/**
+ * The links fetched so far, in the order their fetches were made.
+ * @param served - The server.
+ * @returns The links.
+ */
+const linksAsked = (served: Served) =>
+  served.asked.pipe(Effect.map((all) => all.map((one) => one.link)));
+
+/**
+ * Waits until the link fetch has been asked at least as many times as given, so that a pacer
+ * that lets too many through fails the test's own assertions rather than a wait.
+ * @param served - The server.
+ * @param count - How many.
+ * @returns An Effect that ends when it has.
+ */
+const reaching = (served: Served, count: number) =>
+  live(
+    Effect.gen(function* () {
+      return (yield* served.asked).length >= count ? count : yield* new NotYet();
+    }).pipe(Effect.retry(Schedule.spaced("20 millis")), Effect.timeout("5 seconds"), Effect.orDie)
+  );
+
+describe("bounds and the queue over a real server", () => {
+  const same = ["https://one.example/a", "https://one.example/b", "https://one.example/c"];
+
+  it("makes a third fetch to one name wait until one of the first two finishes", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { fake, served } = yield* holding(same, same);
+        const places = yield* saying(served, same);
+        const stream = yield* follow(served);
+        const answered = yield* askingEach(served, places);
+
+        yield* reaching(served, 2);
+        yield* settling;
+
+        const waiting = {
+          asked: yield* linksAsked(served),
+          states: (yield* askingEach(served, places)).map(stateOf),
+        };
+
+        yield* fake.release("https://one.example/a");
+        yield* reaching(served, 3);
+        yield* fake.release("https://one.example/b");
+        yield* fake.release("https://one.example/c");
+        yield* stream.until(
+          (read) => changesIn(read).filter(([, tag]) => tag === "Ready").length === 3
+        );
+        yield* stream.stop;
+
+        return {
+          answered: answered.map(stateOf),
+          changes: changesIn(stream.text()),
+          fetched: yield* linksAsked(served),
+          settled: titles(
+            yield* live(settled(served, places[0] ?? { position: "", text: "", timeline: "" }))
+          ),
+          waiting,
+        };
+      })
+    );
+
+    expect(result.answered).toStrictEqual([
+      { _tag: "Pending" },
+      { _tag: "Pending" },
+      { _tag: "Pending" },
+    ]);
+
+    expect(result.waiting).toStrictEqual({
+      asked: ["https://one.example/a", "https://one.example/b"],
+      states: [{ _tag: "Pending" }, { _tag: "Pending" }, { _tag: "Pending" }],
+    });
+
+    expect(result.fetched).toStrictEqual(same);
+    expect(result.settled).toStrictEqual(["Cats", "Cats", "Cats"]);
+    expect(result.changes.map(([, tag]) => tag).filter((tag) => tag !== "Pending")).toStrictEqual([
+      "Ready",
+      "Ready",
+      "Ready",
+    ]);
+  });
+
+  it("makes a 31st fetch in a minute wait until the minute turns, and never fails it", async () => {
+    const names = Array.from({ length: 31 }, (_, at) => `https://h${at + 1}.example/`);
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { served } = yield* holding(names);
+        const places = yield* saying(served, names);
+        const stream = yield* follow(served);
+        const answered = yield* askingEach(served, places);
+
+        yield* reaching(served, 30);
+        yield* stream.until(
+          (read) =>
+            changesIn(read).filter(([, tag]) => tag === "Ready").length === 30 &&
+            changesIn(read).some(([link]) => link === names[30])
+        );
+
+        yield* settling;
+
+        const beforeMinute = {
+          asked: (yield* served.asked).length,
+          last: changesIn(stream.text())
+            .filter(([link]) => link === names[30])
+            .map(([, tag]) => tag),
+        };
+
+        yield* TestClock.adjust(59_999);
+        yield* settling;
+        const justBefore = (yield* served.asked).length;
+
+        yield* TestClock.adjust(1);
+        yield* reaching(served, 31);
+        yield* stream.until((read) =>
+          changesIn(read).some(([link, tag]) => link === names[30] && tag === "Ready")
+        );
+        yield* stream.stop;
+
+        return {
+          answered: answered.at(-1)?.state,
+          beforeMinute,
+          changes: changesIn(stream.text()),
+          justBefore,
+        };
+      })
+    );
+
+    expect(result.answered).toStrictEqual({ _tag: "Pending" });
+    expect(result.beforeMinute).toStrictEqual({ asked: 30, last: ["Pending"] });
+    expect(result.justBefore).toBe(30);
+
+    expect(
+      result.changes.filter(([link]) => link === names[30]).map(([, tag]) => tag)
+    ).toStrictEqual(["Pending", "Ready"]);
+
+    expect(result.changes.filter(([, tag]) => tag === "Failed")).toStrictEqual([]);
+  });
+
+  it("fetches the fetches that waited for the minute in the order they were asked", async () => {
+    const names = Array.from({ length: 32 }, (_, at) => `https://h${at + 1}.example/`);
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { served } = yield* holding(names);
+        const places = yield* saying(served, names);
+
+        yield* askingEach(served, places);
+        yield* reaching(served, 30);
+        yield* settling;
+        const before = yield* linksAsked(served);
+
+        yield* TestClock.adjust(60_000);
+        yield* reaching(served, 32);
+
+        return { after: yield* linksAsked(served), before };
+      })
+    );
+
+    expect(result.before).toStrictEqual(names.slice(0, 30));
+    expect(result.after).toStrictEqual(names);
+  });
+
+  it("gives a name's places to its waiting fetches in the order they were asked, as earlier ones finish", async () => {
+    const links = ["a", "b", "c", "d"].map((one) => `https://one.example/${one}`);
+
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const { fake, served } = yield* holding(links, links);
+        const places = yield* saying(served, links);
+
+        yield* askingEach(served, places);
+        yield* reaching(served, 2);
+        yield* settling;
+        const first = yield* linksAsked(served);
+
+        yield* fake.release("https://one.example/b");
+        yield* reaching(served, 3);
+        yield* settling;
+        const second = yield* linksAsked(served);
+
+        yield* fake.release("https://one.example/a");
+        yield* reaching(served, 4);
+
+        return { first, second, third: yield* linksAsked(served) };
+      })
+    );
+
+    expect(result.first).toStrictEqual(links.slice(0, 2));
+    expect(result.second).toStrictEqual(links.slice(0, 3));
+    expect(result.third).toStrictEqual(links);
   });
 });
