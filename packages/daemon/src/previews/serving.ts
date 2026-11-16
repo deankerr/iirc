@@ -144,6 +144,5 @@ export const servedStream = (
         ...(streamed.contentRange !== undefined && { "content-range": streamed.contentRange }),
       },
       status: streamed.status,
-      ...(streamed.contentLength !== undefined && { contentLength: streamed.contentLength }),
     });
   });

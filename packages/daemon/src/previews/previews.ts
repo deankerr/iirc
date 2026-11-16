@@ -83,8 +83,8 @@ export interface Media {
 /**
  * What a stream of a link answers: nothing that satisfies the range asked, with the host's
  * `Content-Range` when it gave one, or a body, whole or a part of the media, as it arrives.
- * Its headers are the host's own, when it sent them, and its length is given only when it
- * is of the bytes the body gives.
+ * Its headers are the host's own, when it sent them. No length is given, since the body is
+ * sent in chunks, and a length beside them is forbidden.
  */
 export type Streamed =
   | { readonly _tag: "Unsatisfiable"; readonly contentRange?: string }
@@ -92,7 +92,6 @@ export type Streamed =
       readonly _tag: "Body";
       readonly status: 200 | 206;
       readonly type: string;
-      readonly contentLength?: number;
       readonly contentRange?: string;
       readonly acceptRanges?: string;
       readonly body: Stream.Stream<Uint8Array, BodyFailure>;
@@ -520,20 +519,11 @@ const streamed = (id: PreviewId, fetched: Fetched) => {
     return Effect.fail(new StreamFailed({ id, reason: "NothingToShow" }));
   }
 
-  // A length is of the bytes the host sent, which are not the bytes of the body when the host
-  // encoded them.
-  const encoding = (headers["content-encoding"] ?? "identity").trim().toLowerCase();
-
-  const length = /^\d+$/u.test(headers["content-length"] ?? "")
-    ? Number(headers["content-length"])
-    : Number.NaN;
-
   return Effect.succeed({
     _tag: "Body",
     body: fetched.body,
     status,
     type: fetched.type,
-    ...(encoding === "identity" && Number.isSafeInteger(length) && { contentLength: length }),
     ...(status === 206 &&
       headers["content-range"] !== undefined && { contentRange: headers["content-range"] }),
     ...(headers["accept-ranges"] !== undefined && { acceptRanges: headers["accept-ranges"] }),
