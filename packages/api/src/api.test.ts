@@ -429,6 +429,14 @@ describe("the contract", () => {
         light: "light",
         previews: "off",
         "previews.animate": false,
+        "previews.players": [
+          "www.youtube-nocookie.com",
+          "player.vimeo.com",
+          "w.soundcloud.com",
+          "bandcamp.com",
+          "open.spotify.com",
+          "player.twitch.tv",
+        ],
         "previews.timelines": {},
         read: "latest",
         size: 14,
@@ -450,6 +458,7 @@ describe("the contract", () => {
         "light",
         "previews",
         "previews.animate",
+        "previews.players",
         "previews.timelines",
         "read",
         "size",
@@ -662,12 +671,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.timelines":{},"read":"latest","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","previews":"off","previews.animate":false,"previews.players":["www.youtube-nocookie.com","player.vimeo.com","w.soundcloud.com","bandcamp.com","open.spotify.com","player.twitch.tv"],"previews.timelines":{},"read":"latest","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },
