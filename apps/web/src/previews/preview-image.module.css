@@ -81,6 +81,7 @@
 .badge > * {
   inline-size: auto;
   padding: var(--space-1) var(--space-2);
+  font-size: 1.4em;
   border-radius: var(--radius);
   background: var(--color-scrim);
 }
