@@ -391,6 +391,31 @@ describe("Previews over a real server", () => {
     expect(result).toStrictEqual(["https://cats.example/"]);
   }, 20_000);
 
+  it("gives a link to media reached through a redirect as a Preview of the final link", async () => {
+    const result = await run(
+      {
+        "https://short.example/p": new LinkWrongType({
+          link: "https://cdn.example/cat.png",
+          type: "image/png",
+        }),
+      },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setPreviews(served, "links only");
+          yield* talk(served, ["https://short.example/p"]);
+          const [place] = yield* messages(served, 1);
+
+          return (yield* settled(served, place ?? { position: "", text: "", timeline: "" })).map(
+            (one) => [one.link, one.state]
+          );
+        })
+    );
+
+    expect(result).toStrictEqual([
+      ["https://short.example/p", media("https://cdn.example/cat.png", "image", "image/png")],
+    ]);
+  });
+
   it("gives three items for a Message of four links, in its order, each fetched once", async () => {
     const links = [
       "https://a.example/",
@@ -463,14 +488,23 @@ describe("Previews over a real server", () => {
 
   it("shows each failure as its reason, and a link to media as a text Preview from its type", async () => {
     const answers = {
-      "https://audio.example/": new LinkWrongType({ type: "audio/ogg" }),
+      "https://audio.example/": new LinkWrongType({
+        link: "https://audio.example/",
+        type: "audio/ogg",
+      }),
       "https://bare.example/": page("<style></style>"),
       "https://big.example/": new LinkTooLarge({ limit: 1024 }),
       "https://image.example/cat.png": { body: "not read", type: "image/png" },
-      "https://plain.example/": new LinkWrongType({ type: "text/plain" }),
+      "https://plain.example/": new LinkWrongType({
+        link: "https://plain.example/",
+        type: "text/plain",
+      }),
       "https://private.example/": new LinkRefused({ reason: "a private address" }),
       "https://slow.example/": new LinkTimedOut(),
-      "https://video.example/": new LinkWrongType({ type: "video/mp4" }),
+      "https://video.example/": new LinkWrongType({
+        link: "https://video.example/",
+        type: "video/mp4",
+      }),
     } satisfies Record<string, Answer>;
 
     const texts = [

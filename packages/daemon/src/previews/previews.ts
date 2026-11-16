@@ -100,11 +100,10 @@ const mediaPreview = (link: string, type: string): PreviewState => {
 /**
  * What a fetch that failed shows: the reason, or for an answer of another type than a page,
  * a text Preview of it when it is media.
- * @param link - The link asked for.
  * @param failure - Why the fetch gave no page.
  * @returns The state.
  */
-const failedFetch = (link: string, failure: LinkFetchFailure): PreviewState => {
+const failedFetch = (failure: LinkFetchFailure): PreviewState => {
   switch (failure._tag) {
     case "LinkRefused": {
       return failed("Refused");
@@ -123,7 +122,7 @@ const failedFetch = (link: string, failure: LinkFetchFailure): PreviewState => {
     }
 
     case "LinkWrongType": {
-      return mediaPreview(link, failure.type);
+      return mediaPreview(failure.link, failure.type);
     }
 
     default: {
@@ -220,7 +219,7 @@ export const layerPreviews = Layer.effect(Previews)(
       Effect.scoped(
         links.fetch(key, { kind: "page" }).pipe(
           Effect.flatMap(answered),
-          Effect.catch((error) => Effect.succeed(failedFetch(key, error)))
+          Effect.catch((error) => Effect.succeed(failedFetch(error)))
         )
       ).pipe(
         Effect.catchDefect(() => Effect.succeed(failed("Unreachable"))),
