@@ -13,7 +13,8 @@
  *
  * The options under `ui` are the Owner's rather than any Network's, named `ui.<option>`,
  * and come from the contract's `UiOptions` the same way (ADR 0015). Every device shares
- * them, and a device may override any of them for itself, which it never sends.
+ * them, and a device may override any but those annotated shared only for itself, which
+ * it never sends.
  *
  * The options under `store` and `uploads` are the Owner's too, each named in full, such as
  * `store.s3.bucket`, and come from the contract's `OwnerOptions` the same way. They are not
@@ -40,7 +41,7 @@ import {
 } from "effect";
 
 import type { Parsed } from "./commands.ts";
-import { effectiveUi, noOverrides } from "./ui.ts";
+import { effectiveUi, noOverrides, overridesHeld } from "./ui.ts";
 import type { DeviceUi } from "./ui.ts";
 
 /** The decoded form of a Network's Configuration. */
@@ -1225,7 +1226,7 @@ export const uiOptionsOf = (
     }
 
     const name = option.value;
-    const own = device[name];
+    const own = overridesHeld(device)[name];
 
     return [
       {

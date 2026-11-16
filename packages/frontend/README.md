@@ -199,7 +199,7 @@ An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `netwo
 
 An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived from `UiOptions` in `@iirc/api/ui` the same way.
 
-- **Every device shares them, and one may override any for itself** with `-device`. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
+- **Every device shares them, and one may override any for itself** with `-device`, but those annotated shared only, such as `ui.previews`, which the Daemon acts on: `-device` refuses them, and an override of one a device kept is dropped. `effectiveUi`, in `@iirc/frontend/ui`, gives the override, else the shared value, else the default.
 - **A change is written for this device when it overrides the option, and for a font's family always,** since each device has its own fonts. `writtenOnDevice`, in `@iirc/frontend/ui`, decides it, for the options view and the palette alike.
 - **Overrides are parsed option by option,** so one bad override kept on a device never loses the others.
 - **`ui.activity` changes what is drawn, never what is counted.**

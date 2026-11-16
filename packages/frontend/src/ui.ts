@@ -2,7 +2,8 @@
  * The options under `ui` as they take effect on this device: each one this device
  * overrides for itself, else the one every device shares, else its default, derived and
  * never kept (ADR 0013, ADR 0015). A device keeps its overrides as text, parsed here
- * option by option, so one it cannot read is dropped rather than the rest. What the
+ * option by option, so one it cannot read is dropped rather than the rest, and so is one
+ * of an option every device shares only, such as `previews`. What the
  * options decide that is not drawing, such as which items a Timeline shows, is here too.
  *
  * @packageDocumentation
@@ -16,6 +17,7 @@ import {
   isFontName,
   themesCap,
   uiDefaults,
+  uiSharedOnly,
   uiValueKept,
 } from "@iirc/api/ui";
 import type { UiOptions, ActivityShown, ReadRule, UiInForce } from "@iirc/api/ui";
@@ -66,10 +68,18 @@ const decodeObject = Schema.decodeUnknownOption(
 const decodeName = Schema.decodeUnknownOption(UiOptionName);
 
 /**
- * The overrides a device kept, from their text: every option it names that `ui` has, with
- * a value its Schema takes, each option on its own, and each theme of `themes` on its own.
- * Anything else, and text that is not an object or is longer than `deviceUiLimit`, is
- * dropped.
+ * Whether a device may override an option for itself: any but those every device shares
+ * only, which the Daemon acts on.
+ * @param option - The option.
+ * @returns Whether it may.
+ */
+export const isOverridable = (option: UiOptionName): boolean => !uiSharedOnly.has(option);
+
+/**
+ * The overrides a device kept, from their text: every option it names that `ui` has and a
+ * device may override, with a value its Schema takes, each option on its own, and each
+ * theme of `themes` on its own. Anything else, and text that is not an object or is longer
+ * than `deviceUiLimit`, is dropped.
  * @param text - The text kept, or none.
  * @returns The overrides.
  */
@@ -83,7 +93,7 @@ export const deviceUiOf = (text: string | undefined): DeviceUi => {
 
   return Object.fromEntries(
     Object.entries(kept.value).flatMap(([key, value]) => {
-      const name = decodeName(key);
+      const name = Option.filter(decodeName(key), isOverridable);
 
       const parsed = Option.isSome(name) ? uiValueKept(name.value, value) : undefined;
 
@@ -126,7 +136,8 @@ const decodeFont = Schema.decodeUnknownOption(FontShown);
  * Whether a change of an option under `ui` is written as this device's own value, rather
  * than the one every device shares. A font's family is always a device's own, since each
  * device has its own fonts. Any other value is the shared one's, unless this device
- * overrides the option already, since its override would win over the change here.
+ * overrides the option already, since its override would win over the change here. One
+ * every device shares only is never a device's own.
  * @param option - The option.
  * @param value - The value it is set to, as JSON, or none to unset it.
  * @param overridden - Whether this device overrides the option.
@@ -137,6 +148,10 @@ export const writtenOnDevice = (
   value: Schema.Json | undefined,
   overridden: boolean
 ): boolean => {
+  if (!isOverridable(option)) {
+    return false;
+  }
+
   if (overridden || option !== "font") {
     return overridden;
   }
@@ -147,8 +162,20 @@ export const writtenOnDevice = (
 };
 
 /**
- * The options in effect on this device: each one it overrides, else the shared one, else
- * its default, which holds until the shared ones are read.
+ * A device's overrides with any of an option every device shares only left out, so one
+ * kept by hand or before the option was shared only never takes effect.
+ * @param device - The overrides.
+ * @returns Those a device may hold.
+ */
+export const overridesHeld = (device: DeviceUi): DeviceUi =>
+  Object.fromEntries(
+    Object.entries(device).filter(([key]) => Option.exists(decodeName(key), isOverridable))
+  );
+
+/**
+ * The options in effect on this device: each one it overrides, but those every device
+ * shares only, else the shared one, else its default, which holds until the shared ones
+ * are read.
  * @param shared - The shared options, once read.
  * @param device - This device's overrides.
  * @returns The options.
@@ -156,7 +183,7 @@ export const writtenOnDevice = (
 export const effectiveUi = (shared: UiInForce | undefined, device: DeviceUi): UiOptions => ({
   ...uiDefaults,
   ...shared?.options,
-  ...device,
+  ...overridesHeld(device),
 });
 
 /**

@@ -19,6 +19,7 @@ import {
   NotAChannel,
   NotInChannel,
   OptionsChanged,
+  PreviewsOff,
   RequestValidation,
   Sequence as WireSequence,
   SignInsFailed,
@@ -41,6 +42,7 @@ import {
 import type {
   NewsEvent,
   OptionsEvent,
+  PreviewsEvent,
   TimelineChangesEvent,
   UiEvent,
   Upload,
@@ -1292,6 +1294,15 @@ const uploads = HttpApiBuilder.group(
   })
 );
 
+// Previews are not fetched yet: every ask is off, and the stream carries only heartbeats.
+const previews = HttpApiBuilder.group(DaemonApi, "previews", (handlers) =>
+  handlers
+    .handle("ask", ({ params }) => Effect.fail(new PreviewsOff({ timeline: params.timeline })))
+    .handle("changes", () =>
+      followed<PreviewsEvent, never, never>(Stream.never, { data: {}, event: "heartbeat" })
+    )
+);
+
 // A body over the limit is refused unread, and Bun's graceful stop waits for a client
 // still sending one, so the 413 closes its Connection rather than hold up the Daemon's
 // shutdown. The limit's error reaches here as a defect. An upload answered with an error may
@@ -1350,6 +1361,7 @@ export const ApiHandlers = Layer.mergeAll(
   ui,
   options,
   uploads,
+  previews,
   credentials
 ).pipe(Layer.provideMerge(Layer.mergeAll(requestValidation, authorization)));
 

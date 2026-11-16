@@ -440,6 +440,29 @@ export const ReadRule = Schema.Literals(["shown", "latest", "asked"]).annotate({
 /** The decoded form of {@link ReadRule}. */
 export type ReadRule = typeof ReadRule.Type;
 
+/**
+ * The annotation of an option under `ui` that no device may override for itself, as one
+ * the Daemon acts on is: every device shares it, and a device's override of it is ignored.
+ */
+export const sharedOnly = { sharedOnly: true } as const;
+
+/**
+ * Whether the Daemon previews the links in Messages: `off`; `links only`, a page's title,
+ * description, and site, with no image or media fetched; or `on`, which adds images and
+ * media as they are offered, and until then previews as `links only` does. The Daemon
+ * fetches each link itself, never the browser, so it is shared only: no device turns
+ * fetching on for itself.
+ */
+export const PreviewsShown = Schema.Literals(["off", "links only", "on"]).annotate({
+  ...sharedOnly,
+  default: "off",
+  description:
+    "Whether the Daemon previews links in Messages, fetching them itself, never the browser: off, links only for a page's title, description, and site, or on, which is links only too for now. Every device shares it.",
+});
+
+/** The decoded form of {@link PreviewsShown}. */
+export type PreviewsShown = typeof PreviewsShown.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
@@ -450,6 +473,7 @@ export const UiOptions = Schema.Struct({
   font: FontShown,
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
+  previews: PreviewsShown,
   read: ReadRule,
   size: TextSize,
   spellcheck: SpellcheckShown,
@@ -480,6 +504,14 @@ export const uiDefaults: UiOptions = Schema.decodeUnknownSync(UiOptions)(
   Object.fromEntries(
     uiOptionNames.map((name) => [name, SchemaAST.resolve(UiOptions.fields[name].ast)?.default])
   )
+);
+
+/**
+ * The options under `ui` no device overrides for itself, from each field's
+ * {@link sharedOnly} annotation.
+ */
+export const uiSharedOnly: ReadonlySet<UiOptionName> = new Set(
+  uiOptionNames.filter((name) => SchemaAST.resolve(UiOptions.fields[name].ast)?.sharedOnly === true)
 );
 
 /**
