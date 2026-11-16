@@ -311,6 +311,16 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 - **A failed Connection names its Ircd, and hints when TLS looks wrong.** `mismatchedTls` decides from the item's structure: a plaintext Connection to 6697 that opened and ended before registration, or a TLS handshake that failed on 6667. No text is parsed.
 - **Activity is a few words, marked** `-->` for a join, `<--` for a part, a quit, or a kick, and `--` otherwise, as WeeChat marks it. A standard reply shows its kind, command, code, context, and description as the Network gave them, and a `FAIL` takes the `Refused` tone. A CTCP request shows who asked for what, and the answer sent or why none was, and an answer that never left takes the `Refused` tone. One the Owner sent shows whom they asked for what, and a reply to their `PING` shows how long it took, in seconds to the millisecond, as the Daemon journaled the two, never by a clock the page reads. An answer to Self's `OPER` says whether Self is an IRC operator now, a refusal by its numeric in the `Refused` tone.
 
+## Previews
+
+What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`). It lives in `src/previews.ts` and is reached through `@iirc/frontend/render`.
+
+- **Nothing is asked for ahead of the screen.** A Message is asked for only once the view says it came into view, only once, and only while the stream is followed, so no change an ask starts is missed. `asksWanted` gives the asks to make.
+- **`ui.previews` is the shared value alone** (`previewsModeOf`), since the Daemon acts on it. Under `off`, or before it is read, nothing is asked for, followed, or shown.
+- **An item is held once, by its id,** so a change the stream gives updates every Message that shows it. An answer is taken only by the ask in flight, and never replaces an item the stream changed after that ask began.
+- **A stream followed again asks again** for each Message still waiting on a Preview, since a Preview is not in the Journal and its stream resumes nothing.
+- **What a Message shows is derived.** Before its answer, a placeholder for each link `previewableLinksOf` finds, so its height does not change once answered, and after it, each item as it is now: pending, ready as its summary line (`summaryOf`) and description, or failed as the plain link with its reason in words (`reasonWords`). A link is an anchor only when it reads as one `http` or `https` link, and everything a stranger wrote is contained.
+
 ## Activity
 
 What is new, from the counts the Daemon keeps, and when marking a Timeline read is due (`markDue`), by the rule `ui.read` gives. It never counts items itself, since a window holds only some of them.

@@ -33,6 +33,7 @@ import type {
   TimelineWindow,
   WindowGap,
   OwnerInForce,
+  PreviewItem,
   UiInForce,
   Upload,
   UploadsStatus,
@@ -352,6 +353,8 @@ const ReadBody = Schema.fromJsonString(
 
 const CloseBody = Schema.fromJsonString(Schema.Struct({ target: Schema.String }));
 
+const PreviewsBody = Schema.fromJsonString(Schema.Struct({ position: Schema.String }));
+
 /** The Configuration the fake's Network `libera` starts with. */
 export const liberaConfiguration: ConfigurationOnWire = {
   answerCtcp: true,
@@ -532,6 +535,8 @@ export const fakeDaemon = () => {
   const uploadChanges: { readonly sequence: number; readonly text: string }[] = [];
   const uploadsSent: { readonly name: string | null; readonly size: number }[] = [];
   const uploadRefusals: { readonly status: number; readonly body: object }[] = [];
+  const previewAsks: { readonly timeline: string; readonly position: string }[] = [];
+  const previewFollowers: Follower[] = [];
 
   const looks: (typeof LookBody.Type & { readonly network: string })[] = [];
   const lookScripts: LookScript[] = [];
@@ -671,6 +676,15 @@ export const fakeDaemon = () => {
     ownerFollowers,
     /** The items each step placed, which `at/{sequence}` answers with. */
     placed: new Map<number, (typeof TimelineItem.Encoded)[]>(),
+    /** Each ask for a Message's Previews, by its Timeline and its place, refused or not. */
+    previewAsks,
+    /** Each follower of the stream of Previews. */
+    previewFollowers,
+    /**
+     * Each Message's Previews, by its place, which an ask answers with while `ui.previews`
+     * is not `off`; a Message with none is unknown.
+     */
+    previews: new Map<string, (typeof PreviewItem.Encoded)[]>(),
     /** Each `PUT` of Configuration, with the sequence it was made from. */
     puts,
     /** How many of the next marks read get no answer. */
@@ -1699,7 +1713,58 @@ export const fakeDaemon = () => {
     );
   };
 
+  /**
+   * Sends an item to every follower of the stream of Previews, as one `changed` event.
+   * @param item - The item, as the wire carries it.
+   */
+  const sendPreview = (item: typeof PreviewItem.Encoded) => {
+    const text = `event: changed\ndata: ${JSON.stringify(item)}\n\n`;
+
+    for (const follower of previewFollowers) {
+      follower.controller.enqueue(encoder.encode(text));
+    }
+  };
+
+  /**
+   * A Message's Previews asked for, refused while `ui.previews` is `off`, and their stream,
+   * or nothing for any other route.
+   * @param url - The request's URL.
+   * @param init - The request.
+   * @returns The answer, or nothing.
+   */
+  const previewsRoute = async (url: URL, init: RequestInit): Promise<Response | undefined> => {
+    const ask = /^\/api\/timelines\/(?<timeline>[0-9a-f-]+)\/previews$/u.exec(url.pathname)?.groups;
+
+    if (url.pathname === "/api/previews/changes") {
+      return signedInOnly(() => following(previewFollowers, url, new Headers(init.headers), init));
+    }
+
+    if (init.method !== "POST" || ask?.timeline === undefined) {
+      return undefined;
+    }
+
+    if (!daemon.signedIn) {
+      return json(401, { _tag: "Unauthorized" });
+    }
+
+    const { timeline } = ask;
+    const { position } = Schema.decodeSync(PreviewsBody)(await new Response(init.body).text());
+
+    daemon.previewAsks.push({ position, timeline });
+
+    if (daemon.ui.options.previews === "off") {
+      return Response.json({ _tag: "PreviewsOff", timeline }, { status: 409 });
+    }
+
+    const previews = daemon.previews.get(position);
+
+    return previews === undefined
+      ? Response.json({ _tag: "UnknownMessage", position, timeline }, { status: 404 })
+      : Response.json({ previews });
+  };
+
   const elsewhere = async (url: URL, init: RequestInit) =>
+    (await previewsRoute(url, init)) ??
     removeRoute(url, init) ??
     (await lookupRoute(url, init)) ??
     (await uiRoute(url, init)) ??
@@ -1954,7 +2019,7 @@ export const fakeDaemon = () => {
     return daemon.gatewayOnly ? new Response(null, { status: 502 }) : await answer(url, init);
   };
 
-  return { daemon, endStreams, fetch, send, sendUi, upload };
+  return { daemon, endStreams, fetch, send, sendPreview, sendUi, upload };
 };
 
 /**
