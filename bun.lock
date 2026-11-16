@@ -124,6 +124,8 @@
         "@iirc/link-fetch": "workspace:*",
         "@iirc/link-fetch-bun": "workspace:*",
         "@iirc/outbox": "workspace:*",
+        "@iirc/preview-cache": "workspace:*",
+        "@iirc/preview-cache-sqlite": "workspace:*",
         "@iirc/protocol": "workspace:*",
         "@iirc/runtime": "workspace:*",
         "@iirc/timeline-store": "workspace:*",
@@ -196,6 +198,33 @@
       },
       "devDependencies": {
         "fast-check": "4.10.2",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/preview-cache": {
+      "name": "@iirc/preview-cache",
+      "version": "0.0.0",
+      "dependencies": {
+        "@iirc/api": "workspace:*",
+        "@iirc/byte-store": "workspace:*",
+        "@iirc/runtime": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "vitest": "catalog:",
+      },
+    },
+    "packages/preview-cache-sqlite": {
+      "name": "@iirc/preview-cache-sqlite",
+      "version": "0.0.0",
+      "dependencies": {
+        "@effect/sql-sqlite-bun": "catalog:",
+        "@iirc/preview-cache": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@iirc/runtime": "workspace:*",
         "vitest": "catalog:",
       },
     },
@@ -415,6 +444,10 @@
     "@iirc/link-fetch-bun": ["@iirc/link-fetch-bun@workspace:packages/link-fetch-bun"],
 
     "@iirc/outbox": ["@iirc/outbox@workspace:packages/outbox"],
+
+    "@iirc/preview-cache": ["@iirc/preview-cache@workspace:packages/preview-cache"],
+
+    "@iirc/preview-cache-sqlite": ["@iirc/preview-cache-sqlite@workspace:packages/preview-cache-sqlite"],
 
     "@iirc/protocol": ["@iirc/protocol@workspace:packages/protocol"],
 

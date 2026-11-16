@@ -30,7 +30,7 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | `OwnerConfiguration`, `layerOwnerConfiguration`, `OptionsChangedSince` | The options under `store` and `uploads`, likewise, with `OptionsChangedSince`, and the Credentials they name now, in `credentialsNamed`. |
 | `Uploads`, `layerUploads(dataDir)`, `ByteStoreMaker` | The Uploads folded from the Journal's `Uploaded` Changes, whether they are on, and how a body becomes a kept Upload, below. The Layer needs the `Journal`, the `Vault`, `OwnerConfiguration`, the file system, `SecureRandom`, and a `ByteStoreMaker`, which makes the byte store from where a bucket is and its keys: `makeS3ByteStore` in the Daemon. |
 | `layerLinkListener` | The link listener, below, given `Uploads` and `OwnerConfiguration`. |
-| `Previews`, `layerPreviews` | A Message's Previews, below, and each change of one. The Layer needs `LinkFetch`, the `TimelineStore`, and `UiConfiguration`. |
+| `Previews`, `layerPreviews` | A Message's Previews, below, and each change of one. The Layer needs `LinkFetch`, `PreviewCache`, the `TimelineStore`, and `UiConfiguration`. |
 
 ## The data directory
 
@@ -38,13 +38,14 @@ Layer.launch(layerDaemon({ dataDir: "/var/lib/iirc" }, { host: "127.0.0.1", port
 | --- | --- | --- |
 | `journal.sqlite` | The Journal | `@iirc/journal-sqlite` |
 | `views.sqlite` | The Timelines, derived from the Journal | `@iirc/timeline-store-sqlite`, by the projector |
+| `previews.sqlite` | The Previews, kept by link, with what each was and when it was fetched and last shown | `@iirc/preview-cache-sqlite`, by Previews |
 | `credentials.json` | The Credentials, mode `0600` | `@iirc/vault-file` |
 | `keys.json` | The API keys as SHA-256 hashes | `iirc key create` |
 | `sign-ins.json` | The sign-ins as SHA-256 hashes | the Daemon |
 | `daemon.lock` | The lock below. It holds nothing | the Daemon and `iirc key create` |
 | `staging/` | Uploads' bodies as they arrive, a file each, mode `0600`, in a directory of mode `0700`. Each lives only as long as its upload, and the Daemon empties it as it starts | the Daemon |
 
-The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is read at start: there is no configuration file. `views.sqlite` is derived: removing it while the Daemon is stopped rebuilds it on the next start.
+The Daemon makes the directory, mode `0700`, if it is missing. Nothing else is read at start: there is no configuration file. `views.sqlite` is derived: removing it while the Daemon is stopped rebuilds it on the next start. `previews.sqlite` is a cache: removing it while the Daemon is stopped loses nothing but fetches.
 
 **One Daemon to a directory.** Neither the Journal nor the Vault refuses a second owner of its file, so the Daemon holds the directory before it opens either: an open `BEGIN EXCLUSIVE` on `daemon.lock`, a SQLite database of its own. SQLite takes it with a POSIX lock, which the kernel frees however the process dies, so a crash never leaves the directory locked. SQLite tracks it per file within one process too, so a second Daemon in the same process is refused as well. A second Daemon, or `iirc key create` while one runs, fails with `DataDirectoryLocked`.
 
@@ -101,10 +102,11 @@ The link listener, in `src/link-listener.ts`, is a second HTTP server, never a r
 A Preview is a cache outside the Journal (ADR 0017), in `src/previews/`. The Daemon fetches a stranger's link only through the link fetch port, `@iirc/link-fetch`, whose production adapter is the guard, `@iirc/link-fetch-bun`.
 
 - **Asking is what fetches.** An ask names a Message by its Timeline and position, which the store's window around that position finds. The Daemon reads `ui.previews` as journaled, and while it is `off` answers `PreviewsOff` and fetches nothing. Otherwise each of the Message's links that `previewableLinksOf` gives, at most three, is answered from what is kept, or starts a fetch and is `Pending`.
-- **A link is kept by its address without its fragment,** in memory, so one link in many Messages, or asked by many Frontends, is fetched once, and an ask while it is fetched joins that fetch. Its id is the first 128 bits of that address's SHA-256. Nothing is kept on disk: a restart forgets every Preview, and asking fetches again.
+- **A link is kept by its address without its fragment,** in the Preview cache, so one link in many Messages, or asked by many Frontends, is fetched once, and an ask while it is fetched joins that fetch. Its id is the first 128 bits of that address's SHA-256. Only the links being fetched now are held in memory. A restart keeps every Preview.
+- **Asking applies the cache's rules.** Asking moves when the link was last shown. A ready Preview fetched a day ago or less is served as it is. An older one is served as it is and fetched again, the changes stream carrying the new one when it ends. A failure fetched less than an hour ago is served with no fetch, and an older one is fetched again, `Pending` meanwhile. Checking, reading the cache, and claiming a fetch are one turn with keeping an outcome, so a link is never fetched twice at once. A cache that cannot be read is a miss, and one that cannot be written still publishes the outcome, each logged as a warning.
 - **A link is fetched as a page,** under `links only` and, until images are offered, under `on`. A page's head is read by the pure reader in `src/previews/read.ts`. If the head names an oEmbed address, only that one, as `<link rel="alternate" type="application/json+oembed">`, it is fetched through the link fetch as `oembed` and fills only what the tags left empty: the title, the author as the site, and the thumbnail as an image address that is kept but never fetched. Its `html` is never read, and any failure there leaves the page's own reading as it was. A page that then has neither a title nor a description has nothing to show. An answer of an image, video, or audio type, which the guard refuses as a page without reading its body, is a text Preview of its kind, its type, and its host as its site.
 - **A failure is its reason,** from the link fetch's error: refused, unreachable, timed out, or too large, and any other type nothing to show. Anything unforeseen is unreachable, so no Preview stays pending. A failure is kept as a Preview is.
-- **A Direct Message's link waits for a press,** fetching nothing, unless it is already kept.
+- **A Direct Message's link waits for a press,** fetching nothing. A kept one is served whatever its age.
 - **Each change of a state is published** to every follower of the changes stream, `Pending` as a fetch starts and its outcome as it ends. A fetch runs in the Daemon's Scope, so it ends when the Daemon stops.
 
 ## API keys
@@ -192,5 +194,5 @@ Previews are tested over a real server with the link fetch's fake, which answers
 - **A bound on shutdown.** Effect's Bun server waits for its graceful stop with no bound once its own timeout passes, so a client in the middle of sending a body under 1 MiB to a route other than an upload, or one that has stopped reading a stream it follows, could still hold up shutdown.
 - **Trusting extra roots from the command line.** `DaemonOptions.transport.trust` exists, and `iirc daemon` has no flag for it yet.
 - **Key scopes, keys through the API, and ending sign-ins other than by signing out.**
-- **Previews beyond a page's text.** Images, players, the press for a Direct Message, Timeline overrides, bounds on fetching, a cache that survives a restart and refreshes, and forgetting a failure after an hour.
+- **Previews beyond a page's text.** Images, players, the press for a Direct Message, Timeline overrides, bounds on fetching, and the images' bytes in the Uploads store.
 - **Snapshots for News.** Each reader folds the Journal from the start, as the Runtime does, which costs time on a long Journal.

@@ -21,6 +21,8 @@
     "@iirc/link-fetch": "workspace:*",
     "@iirc/link-fetch-bun": "workspace:*",
     "@iirc/outbox": "workspace:*",
+    "@iirc/preview-cache": "workspace:*",
+    "@iirc/preview-cache-sqlite": "workspace:*",
     "@iirc/protocol": "workspace:*",
     "@iirc/runtime": "workspace:*",
     "@iirc/timeline-store": "workspace:*",

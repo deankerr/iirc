@@ -42,6 +42,7 @@ flowchart LR
     vault["Vault port"]
     clock["Clock port"]
     timelines["Timeline store port"]
+    previewcache["Preview cache port"]
     bytes["Byte store port"]
     fetch["Link fetch port"]
   end
@@ -52,11 +53,12 @@ flowchart LR
   projector --> timelines
   api -->|"Timeline reads"| timelines
   uploads --> journal & bytes
-  previews --> fetch
+  previews --> fetch & previewcache
   transport --- ircd[("Ircds")]
   journal --- sqlite[("journal.sqlite")]
   vault --- store[("credentials.json")]
   timelines --- views[("views.sqlite")]
+  previewcache --- previewsdb[("previews.sqlite")]
   bytes --- bucket[("S3-compatible bucket")]
   fetch --- internet[("Strangers' links")]
 ```
@@ -70,10 +72,11 @@ flowchart LR
 | Vault | Hold Credentials, and give a value at the last moment | `@iirc/vault-file` | the memory Vault |
 | Clock | Tell the time, and wait until a time | Effect's `Clock` | Effect's `TestClock` |
 | Timeline store | Keep the Timelines folded from News, and answer windows, changes, and searches | `@iirc/timeline-store-sqlite` | the memory store in `@iirc/timeline-store/testing` |
+| Preview cache | Keep each link's Preview, or why it failed, by the link, with when it was fetched and last shown | `@iirc/preview-cache-sqlite` | the memory cache in `@iirc/preview-cache/testing` |
 | Byte store | Keep bytes by their hash | `@iirc/byte-store-s3`: an S3-compatible bucket, where the Uploads keep their bytes | the memory store in `@iirc/byte-store/testing` |
 | Link fetch | Fetch a stranger's link, bounded, or refuse it | `@iirc/link-fetch-bun`: the guard, through which the Daemon fetches Previews | the fake in `@iirc/link-fetch/testing` |
 
-Ports are named for the job, not the technology behind them. A port has laws that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake: the Runtime's in `@iirc/runtime/testing`, the Timeline store's in `@iirc/timeline-store/testing`, and the byte store's in `@iirc/byte-store/testing`. The link fetch is the exception: its fake answers whatever it is told, so the guard proves itself against adversarial tests of its own.
+Ports are named for the job, not the technology behind them. A port has laws that every adapter of it must pass, so a new adapter proves itself against the same tests as the fake: the Runtime's in `@iirc/runtime/testing`, the Timeline store's in `@iirc/timeline-store/testing`, the Preview cache's in `@iirc/preview-cache/testing`, and the byte store's in `@iirc/byte-store/testing`. The link fetch is the exception: its fake answers whatever it is told, so the guard proves itself against adversarial tests of its own.
 
 ## Packages
 
@@ -84,6 +87,7 @@ flowchart TB
   outbox["@iirc/outbox<br/>pacing"]
   timelines["@iirc/timelines<br/>Timelines folded from News"]
   store["@iirc/timeline-store<br/>the Timeline store port"]
+  previewcache["@iirc/preview-cache<br/>the Preview cache port"]
   bytestore["@iirc/byte-store<br/>the byte store port"]
   linkfetch["@iirc/link-fetch<br/>the link fetch port, the address policy"]
   runtime["@iirc/runtime<br/>the ports, drives Clients"]
@@ -98,6 +102,7 @@ flowchart TB
     jsql["journal-sqlite"]
     vfile["vault-file"]
     tsql["timeline-store-sqlite"]
+    psql["preview-cache-sqlite"]
     bs3["byte-store-s3"]
     lfbun["link-fetch-bun"]
   end
@@ -108,11 +113,13 @@ flowchart TB
   store --> timelines
   tbun & jsql & vfile --> runtime
   tsql --> store
+  previewcache --> bytestore
+  psql --> previewcache
   bytestore --> runtime
   bs3 --> bytestore
   lfbun --> linkfetch
   api --> client & timelines
-  daemon --> api & runtime & store & bytestore & linkfetch & adapters
+  daemon --> api & runtime & store & previewcache & bytestore & linkfetch & adapters
   app --> daemon
   frontend --> protocol & timelines
   frontend -.->|"the Configuration's Schema"| client

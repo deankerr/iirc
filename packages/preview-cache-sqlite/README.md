@@ -1,0 +1,38 @@
+# @iirc/preview-cache-sqlite
+
+The production adapter of the Preview cache port, on SQLite. It keeps every link's record in one file, which the Daemon calls `previews.sqlite`. The cache holds nothing the Daemon cannot fetch again, so deleting the file loses nothing but fetches.
+
+```ts
+import { layerSqlitePreviewCache, makeSqlitePreviewCache } from "@iirc/preview-cache-sqlite";
+
+layerSqlitePreviewCache(path): Layer<PreviewCache, PreviewCacheFailed, FileSystem>
+makeSqlitePreviewCache(path, { busyTimeout? }): Effect<PreviewCacheService, PreviewCacheFailed, Scope | FileSystem>
+```
+
+Both open the file, creating it when it does not exist, and close it when their Scope ends. `makeSqlitePreviewCache` is what the port's laws run against. The `FileSystem` is for removing a file it cannot use.
+
+## The file
+
+```sql
+CREATE TABLE previews (link TEXT PRIMARY KEY, state TEXT NOT NULL, image TEXT,
+  fetched INTEGER NOT NULL, shown INTEGER NOT NULL) STRICT;
+PRAGMA user_version = 1;  -- the layout's version
+```
+
+- **`state` is the JSON text of `Settled`'s encoding.** Every read decodes it, and a row that does not decode fails that read with `PreviewCacheFailed`.
+- **`image` is a hash, or `NULL`.** `fetched` and `shown` are milliseconds since the epoch.
+- **`shown` is one statement,** `UPDATE ... SET shown = max(shown, ?) ... RETURNING`, so it never moves backward and a read after it sees it.
+- **`journal_mode` is `WAL` and `synchronous` is `NORMAL`.** A power failure may lose the last commits, which costs only fetches, never part of one.
+
+## A file it cannot use is made again
+
+When it opens a file, it reads, changing nothing:
+
+- A file with nothing in it is new: the table is made and `user_version` is set.
+- A file of the layout's `user_version` whose table and columns, by name and declared type, are exactly the layout's is opened as it is.
+- Any other file is removed, with its `-wal`, `-shm`, and `-journal`, and made again from nothing, with a warning in the log: one of another `user_version`, one whose table or columns differ, and one SQLite says is not a database or is corrupt, which it says with `SQLITE_NOTADB` or `SQLITE_CORRUPT`, read from the native error's result code, never its text.
+- Any other failure fails with `PreviewCacheFailed` and leaves the file as it was: a lock another connection holds past the busy timeout (5 seconds unless `busyTimeout` says otherwise), a failed read, or a file it may not read. A path that cannot be opened at all, such as one in a directory that does not exist, fails the same way and removes nothing.
+
+## Not yet
+
+- **Eviction.** Every record kept stays, however old.
