@@ -74,6 +74,9 @@ type Record = Schema.JsonObject;
  *   name. Each record's other fields are options of their own under its name.
  * - `Tagged`: one of `members`, by its tag in lower case, such as `none` or `sasl`. Each
  *   member's fields are options of their own under the option's name.
+ * - `ChoiceByKey`: one of `choices` for each key, each `key=choice`, comma-separated, such
+ *   as each Timeline's own Previews. A choice is in any ASCII case, and may be given by its
+ *   first word alone where no other choice starts with it, such as `links` for `links only`.
  */
 export type Kind =
   | { readonly _tag: "Toggle" }
@@ -97,7 +100,8 @@ export type Kind =
   | { readonly _tag: "Texts"; readonly nonEmpty: boolean }
   | { readonly _tag: "Ircds" }
   | { readonly _tag: "Names"; readonly fields: readonly Field[] }
-  | { readonly _tag: "Tagged"; readonly members: readonly Member[] };
+  | { readonly _tag: "Tagged"; readonly members: readonly Member[] }
+  | { readonly _tag: "ChoiceByKey"; readonly choices: readonly string[] };
 
 /** One member of a tagged union, and its fields. */
 export interface Member {
@@ -458,6 +462,26 @@ const listKindOf = (
 };
 
 /**
+ * The kind of a record from text keys to one of a few choices, from its AST.
+ * @param ast - The record.
+ * @returns Its kind, or none for any other object.
+ */
+const choiceByKeyOf = (ast: SchemaAST.Objects): Kind | undefined => {
+  const [only, ...others] = ast.indexSignatures;
+
+  if (ast.propertySignatures.length > 0 || only === undefined || others.length > 0) {
+    return undefined;
+  }
+
+  const choices =
+    only.parameter._tag === "String" && only.type._tag === "Union"
+      ? literalsOf(only.type)
+      : undefined;
+
+  return choices === undefined ? undefined : { _tag: "ChoiceByKey", choices };
+};
+
+/**
  * The kind of a field, from its AST, or none for a shape no option can take.
  * @param ast - The field's AST.
  * @returns Its kind.
@@ -477,6 +501,10 @@ const kindOf = (ast: SchemaAST.AST): Kind | undefined => {
 
   if (ast._tag === "Arrays") {
     return listKindOf(ast, kindOf);
+  }
+
+  if (ast._tag === "Objects") {
+    return choiceByKeyOf(ast);
   }
 
   if (ast._tag !== "Union") {
@@ -760,6 +788,62 @@ const choiceOf = (choices: readonly string[], text: string): Parsed<string> => {
 };
 
 /**
+ * One of a list of choices, in any ASCII case, or by its first word alone where no other
+ * choice starts with that word.
+ * @param choices - The choices.
+ * @param text - The text.
+ * @returns The choice, or why not.
+ */
+const choiceOrWordOf = (choices: readonly string[], text: string): Parsed<string> => {
+  const chosen = choiceOf(choices, text);
+  const wanted = lower(text.trim());
+  const [only, ...others] = choices.filter((one) => lower(one).split(" ")[0] === wanted);
+
+  return chosen._tag === "Parsed" || only === undefined || others.length > 0
+    ? chosen
+    : parsed(only);
+};
+
+/**
+ * A choice for each key, each `key=choice`, comma-separated.
+ * @param choices - The choices.
+ * @param text - The text.
+ * @returns The record, or why not.
+ */
+const parseChoiceByKey = (choices: readonly string[], text: string): Parsed<Json> => {
+  const items = parseList(text);
+
+  if (items._tag === "Invalid") {
+    return items;
+  }
+
+  const record: { [key: string]: Json } = {};
+
+  for (const item of items.value) {
+    const equals = item.indexOf("=");
+    const key = equals === -1 ? "" : item.slice(0, equals).trim();
+
+    if (key === "") {
+      return invalid(`Give each as key=choice, not "${item}".`);
+    }
+
+    if (Object.hasOwn(record, key)) {
+      return invalid(`${key} is given more than once.`);
+    }
+
+    const choice = choiceOrWordOf(choices, item.slice(equals + 1));
+
+    if (choice._tag === "Invalid") {
+      return choice;
+    }
+
+    record[key] = choice.value;
+  }
+
+  return parsed(record);
+};
+
+/**
  * A whole number within an `Integer`'s bounds, in decimal digits.
  * @param bounds - The least and the most it may be.
  * @param text - The text.
@@ -802,6 +886,47 @@ const decimalOf = (
 };
 
 /**
+ * One of an `IntegerOrChoice`'s choices, or a whole number within its bounds.
+ * @param kind - The kind.
+ * @param text - The text.
+ * @returns The value, or why not.
+ */
+const integerOrChoiceText = (
+  kind: Extract<Kind, { readonly _tag: "IntegerOrChoice" }>,
+  text: string
+): Parsed<Json> => {
+  const chosen = choiceOf(kind.choices, text);
+  const counted = chosen._tag === "Parsed" ? chosen : integerOf(kind, text);
+
+  return counted._tag === "Parsed"
+    ? counted
+    : invalid(
+        `Give a whole number from ${kind.minimum} to ${kind.maximum}, or ${kind.choices.map(lower).join(", ")}, not "${text}".`
+      );
+};
+
+/**
+ * A number's text, as JSON holds it.
+ * @param value - The value.
+ * @returns Its digits, or nothing for anything but a number.
+ */
+const numberText = (value: Json): string =>
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
+  typeof value === "number" ? String(value) : "";
+
+/**
+ * A choice for each key, as `parseChoiceByKey` reads it.
+ * @param value - The record, as JSON.
+ * @returns The text.
+ */
+const showChoiceByKey = (value: Json): string =>
+  showList(
+    Object.entries(isRecord(value) ? value : {}).map(
+      ([key, choice]) => `${key}=${textOf(choice) ?? ""}`
+    )
+  );
+
+/**
  * A value of a kind, from its text syntax. A `Names` list gives its names, and a `Tagged`
  * one its tag.
  * @param kind - The kind.
@@ -835,14 +960,7 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
     }
 
     case "IntegerOrChoice": {
-      const chosen = choiceOf(kind.choices, text);
-      const counted = chosen._tag === "Parsed" ? chosen : integerOf(kind, text);
-
-      return counted._tag === "Parsed"
-        ? counted
-        : invalid(
-            `Give a whole number from ${kind.minimum} to ${kind.maximum}, or ${kind.choices.map(lower).join(", ")}, not "${text}".`
-          );
+      return integerOrChoiceText(kind, text);
     }
 
     case "Decimal": {
@@ -880,6 +998,10 @@ export const parseText = (kind: Kind, text: string): Parsed<Json> => {
       );
     }
 
+    case "ChoiceByKey": {
+      return parseChoiceByKey(kind.choices, text);
+    }
+
     default: {
       return kind satisfies never;
     }
@@ -907,13 +1029,11 @@ export const showText = (kind: Kind, value: Json): string => {
 
     case "Integer":
     case "Decimal": {
-      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
-      return typeof value === "number" ? String(value) : "";
+      return numberText(value);
     }
 
     case "IntegerOrChoice": {
-      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON is told apart by its type.
-      return typeof value === "number" ? String(value) : (textOf(value) ?? "");
+      return textOf(value) ?? numberText(value);
     }
 
     case "Texts": {
@@ -930,6 +1050,10 @@ export const showText = (kind: Kind, value: Json): string => {
 
     case "Tagged": {
       return isRecord(value) ? lower(textOf(value._tag) ?? "") : "";
+    }
+
+    case "ChoiceByKey": {
+      return showChoiceByKey(value);
     }
 
     default: {
@@ -1125,7 +1249,11 @@ const parseFieldText = (
     return invalid(`${name}: ${json.message}`);
   }
 
-  const value = Schema.decodeResult(codec)(json.value);
+  // A key of a map of choices its Schema refuses, such as a Timeline's id that is none, is
+  // refused, never dropped. Every other option drops what it does not know, as it always has.
+  const value = Schema.decodeResult(codec)(json.value, {
+    onExcessProperty: field.kind._tag === "ChoiceByKey" ? "error" : "ignore",
+  });
 
   if (Result.isSuccess(value)) {
     return parsed(Schema.encodeUnknownSync(codec)(value.success));

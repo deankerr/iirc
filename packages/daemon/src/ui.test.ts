@@ -3,7 +3,7 @@ import { Journal, NetworkId } from "@iirc/runtime/journal";
 import type { Change, JournalRecord } from "@iirc/runtime/journal";
 import { makeMemoryJournal } from "@iirc/runtime/testing";
 import type { Schema } from "effect";
-import { Deferred, Effect, Exit, Fiber, Layer, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,6 +13,7 @@ import {
   inForceOf,
   layerUiConfiguration,
   nothingHeld,
+  parseUiValue,
 } from "./ui.ts";
 
 const set = (option: string, value: string) => ({ _tag: "UiSet", option, value }) as const;
@@ -44,6 +45,7 @@ describe("folding the ui options", () => {
         leading: 1.45,
         light: "light",
         previews: "off",
+        "previews.timelines": {},
         read: "latest",
         size: 14,
         spellcheck: true,
@@ -77,6 +79,7 @@ describe("folding the ui options", () => {
         leading: 1.45,
         light: "light",
         previews: "off",
+        "previews.timelines": {},
         read: "latest",
         size: 14,
         spellcheck: true,
@@ -104,6 +107,7 @@ describe("folding the ui options", () => {
         leading: 1.45,
         light: "light",
         previews: "off",
+        "previews.timelines": {},
         read: "latest",
         size: 14,
         spellcheck: true,
@@ -187,6 +191,7 @@ describe("the ui options, kept", () => {
           leading: 1.45,
           light: "light",
           previews: "off",
+          "previews.timelines": {},
           read: "latest",
           size: 14,
           spellcheck: true,
@@ -210,6 +215,7 @@ describe("the ui options, kept", () => {
             leading: 1.45,
             light: "light",
             previews: "off",
+            "previews.timelines": {},
             read: "latest",
             size: 14,
             spellcheck: true,
@@ -278,6 +284,24 @@ describe("the ui options, kept", () => {
       changes: ["UiSet time"],
       first: Exit.succeed(1),
       second: Exit.fail(new UiChangedSince({ sequence: 1 })),
+    });
+  });
+});
+
+describe("a ui option's value, parsed as it is set", () => {
+  it("refuses a key of ui.previews.timelines that is not a Timeline's id, and drops an extra field of a theme as it always did", () => {
+    const palette = {
+      ansi: Array.from({ length: 16 }, () => "#808080"),
+      background: "#000000",
+      foreground: "#ffffff",
+    };
+
+    expect({
+      themes: parseUiValue("themes", [{ extra: true, name: "mine", palette }]),
+      timelines: Option.isNone(parseUiValue("previews.timelines", { "#iirc": "on" })),
+    }).toStrictEqual({
+      themes: Option.some([{ name: "mine", palette }]),
+      timelines: true,
     });
   });
 });

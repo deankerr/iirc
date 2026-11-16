@@ -4,6 +4,7 @@ declare const styles: {
   readonly failed: string;
   readonly pending: string;
   readonly plain: string;
+  readonly press: string;
   readonly previews: string;
   readonly pulse: string;
   readonly ready: string;
@@ -12,6 +13,7 @@ declare const styles: {
   readonly text: string;
   readonly thumbnail: string;
   readonly unseen: string;
+  readonly waiting: string;
   readonly whole: string;
 };
 

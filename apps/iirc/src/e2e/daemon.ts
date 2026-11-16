@@ -155,7 +155,23 @@ const standingWord = /, (?:connected|offline|stopped)(?:: .*)?$/u;
 export const networkRow = async (page: Page) => {
   await page.getByRole("row", { name: standingWord }).first().waitFor();
 
-  return (await page.getByRole("row").first().textContent()) ?? "";
+  // The button that opens the row's menu is not part of what the row says.
+  return await page
+    .getByRole("row")
+    .first()
+    .evaluate((row) => {
+      const copy = row.cloneNode(true);
+
+      if (!(copy instanceof Element)) {
+        return "";
+      }
+
+      for (const button of copy.querySelectorAll('[aria-label^="More for"]')) {
+        button.remove();
+      }
+
+      return copy.textContent;
+    });
 };
 
 /**

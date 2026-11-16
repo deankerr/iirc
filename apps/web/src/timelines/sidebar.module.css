@@ -241,6 +241,9 @@
   visibility: hidden;
 }
 
+.network[data-hovered] .more,
+.network[data-focus-visible] .more,
+.network[data-menu] .more,
 .item[data-hovered] .more,
 .item[data-focus-visible] .more,
 .item[data-menu] .more,
@@ -257,6 +260,7 @@
   outline: var(--border-width) solid var(--color-focus);
 }
 
+.network[data-selected] .more,
 .item[data-selected] .more {
   color: inherit;
 }
@@ -284,6 +288,26 @@
   outline: none;
   cursor: default;
   white-space: nowrap;
+}
+
+/* The menu's parts: the Previews, under their heading, then closing, a rule between. */
+.section + .section {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: var(--border-width) solid var(--color-border);
+}
+
+.header {
+  padding: 0 var(--space-3);
+  color: var(--color-muted);
+  font-size: 0.85em;
+}
+
+/* Where a choice in force is marked, kept for every choice, so their words line up. */
+.mark {
+  display: inline-flex;
+  width: 2ch;
+  color: var(--color-accent);
 }
 
 .action[data-hovered],

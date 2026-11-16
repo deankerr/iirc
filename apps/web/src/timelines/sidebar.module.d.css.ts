@@ -12,6 +12,7 @@ declare const styles: {
   readonly failure: string;
   readonly footer: string;
   readonly gutter: string;
+  readonly header: string;
   readonly heading: string;
   readonly hide: string;
   readonly item: string;
@@ -20,6 +21,7 @@ declare const styles: {
   readonly levelHighlight: string;
   readonly levelMessage: string;
   readonly levelNone: string;
+  readonly mark: string;
   readonly menu: string;
   readonly messages: string;
   readonly more: string;
@@ -30,6 +32,7 @@ declare const styles: {
   readonly pane: string;
   readonly popover: string;
   readonly scroll: string;
+  readonly section: string;
   readonly sidebar: string;
   readonly standing: string;
   readonly tree: string;

@@ -1330,6 +1330,13 @@ const previews = HttpApiBuilder.group(
           Effect.catchTags({ TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)) })
         )
       )
+      .handle("press", ({ params, payload }) =>
+        held.press(params.timeline, payload.position, payload.link).pipe(
+          Effect.catchTags({
+            TimelineStoreFailed: (error) => Effect.fail(timelinesFailed(error)),
+          })
+        )
+      )
       .handle("changes", () =>
         followed(
           held.changes.pipe(

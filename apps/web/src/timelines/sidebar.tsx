@@ -6,16 +6,17 @@
  * opens the options view there, each closing the sidebar's drawer on a compact screen. What
  * the focused Pane shows is chosen, in the accent, and what another Pane shows is marked
  * dimly, with its number, as the Panes' status bars accent the focused one and dim the rest. React Aria's Tree gives it its keyboard: arrows move and expand, and
- * Enter or Space opens. A Channel's or Direct Message's row has a menu, opened by its
+ * Enter or Space opens. Every Timeline's row has a menu, a Network's own too, opened by its
  * button, which ArrowRight reaches and which shows while the row is hovered or focused, and
  * always on a touch screen, or by the context menu, as a right-click, the menu key, or
- * Shift+F10 opens it. It closes the Timeline, which the Daemon keeps out of the sidebar
- * until something arrives in it.
+ * Shift+F10 opens it. It chooses the Timeline's own Previews over `ui.previews`, for every
+ * device, marking the choice in force, and closes a Channel's or Direct Message's Timeline,
+ * which the Daemon keeps out of the sidebar until something arrives in it.
  *
  * @packageDocumentation
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import type { Level, Timeline, TimelineId } from "@iirc/api";
+import type { Level, PreviewsShown, Timeline, TimelineId } from "@iirc/api";
 import {
   activityOf,
   callingCount,
@@ -25,6 +26,7 @@ import {
 } from "@iirc/frontend/activity";
 import type { Activity } from "@iirc/frontend/activity";
 import { closeOf } from "@iirc/frontend/closing";
+import { chosenIn } from "@iirc/frontend/previews";
 import { endReason } from "@iirc/frontend/render";
 import { explain } from "@iirc/frontend/sign-in";
 import type { Attempt } from "@iirc/frontend/sign-in";
@@ -35,8 +37,10 @@ import { useRef, useState } from "react";
 import type { MouseEvent, RefObject } from "react";
 import {
   Button as AriaButton,
+  Header,
   Menu,
   MenuItem,
+  MenuSection,
   Popover,
   Tree,
   TreeItem,
@@ -47,6 +51,7 @@ import type { Key, Selection } from "react-aria-components";
 import { perform } from "../composer/atoms.ts";
 import { openOptions } from "../options/atoms.ts";
 import { compact, drawerState } from "../page/drawer.ts";
+import { previewsModes } from "../previews/atoms.ts";
 import { signOut } from "../sign-in/atoms.ts";
 import { Button, IconButton } from "../ui/button.tsx";
 import { Icon } from "../ui/icon.tsx";
@@ -217,9 +222,36 @@ const PaneMark = ({ pane }: { readonly pane: number | undefined }) =>
 const timelineAttribute = "data-timeline";
 
 /**
- * A Timeline's row, under its Network, with the button that opens its menu when it has one.
+ * The button that opens a Timeline's menu, placed by its row.
+ * @param props - The Timeline's name, and what opens its menu.
+ * @returns The button.
+ */
+const MoreButton = ({
+  name,
+  onMenu,
+}: {
+  readonly name: string;
+  readonly onMenu: (row: HTMLElement) => void;
+}) => (
+  <AriaButton
+    aria-label={`More for ${name}`}
+    className={styles.more}
+    onPress={(event) => {
+      const row = event.target.closest<HTMLElement>('[role="row"]');
+
+      if (row !== null) {
+        onMenu(row);
+      }
+    }}
+  >
+    <Icon name="more" />
+  </AriaButton>
+);
+
+/**
+ * A Timeline's row, under its Network, with the button that opens its menu.
  * @param props - The Timeline, the number of the other Pane that shows it, if one does,
- * whether it has a menu, and what opens it.
+ * whether its menu is open, and what opens it.
  * @returns The row.
  */
 const TimelineItem = ({
@@ -230,7 +262,7 @@ const TimelineItem = ({
 }: {
   readonly pane: number | undefined;
   readonly timeline: Timeline;
-  readonly menu: "None" | "Closed" | "Open";
+  readonly menu: boolean;
   readonly onMenu: (row: HTMLElement) => void;
 }) => {
   const activity = activityOf(timeline);
@@ -239,7 +271,7 @@ const TimelineItem = ({
     <TreeItem
       aria-label={rowLabel(timeline.name, activity, pane)}
       className={`${styles.item} ${pane === undefined ? "" : styles.elsewhere}`}
-      data-menu={menu === "Open" || undefined}
+      data-menu={menu || undefined}
       id={timeline.id}
       textValue={timeline.name}
       {...{ [timelineAttribute]: timeline.id }}
@@ -256,45 +288,26 @@ const TimelineItem = ({
           {timeline.name}
         </bdi>
         <Counts activity={activity} calling={false} />
-        {menu === "None" ? null : (
-          <AriaButton
-            aria-label={`More for ${timeline.name}`}
-            className={styles.more}
-            onPress={(event) => {
-              const row = event.target.closest<HTMLElement>('[role="row"]');
-
-              if (row !== null) {
-                onMenu(row);
-              }
-            }}
-          >
-            <Icon name="more" />
-          </AriaButton>
-        )}
+        <MoreButton name={timeline.name} onMenu={onMenu} />
       </TreeItemContent>
     </TreeItem>
   );
 };
 
-/**
- * Whether a Timeline's row has a menu, and whether it is open.
- * @param timeline - The Timeline.
- * @param open - The Timeline whose menu is open, if any.
- * @returns Whether it has none, or has one closed or open.
- */
-const menuShown = (
-  timeline: Timeline,
-  open: TimelineId | undefined
-): "None" | "Closed" | "Open" => {
-  if (closeOf(timeline) === undefined) {
-    return "None";
-  }
-
-  return open === timeline.id ? "Open" : "Closed";
-};
+/** A Timeline's own Previews as its menu offers them: `default` follows `ui.previews`. */
+const previewsChoices: readonly {
+  readonly id: string;
+  readonly mode: PreviewsShown | undefined;
+}[] = [
+  { id: "default", mode: undefined },
+  { id: "off", mode: "off" },
+  { id: "links only", mode: "links only" },
+  { id: "on", mode: "on" },
+];
 
 /**
- * What can be done with a Timeline from its row: closing it.
+ * What can be done with a Timeline from its row: choosing its own Previews, the choice in
+ * force marked, and closing it, when it can be closed.
  * @param props - The Timeline, its row, and what closes the menu.
  * @returns The menu, placed under its row.
  */
@@ -308,9 +321,9 @@ const TimelineMenu = ({
   readonly onClose: () => void;
 }) => {
   const carryOut = useAtomSet(perform);
+  const modes = useAtomValue(previewsModes);
   const close = closeOf(timeline);
-
-  const actions = close === undefined ? [] : [{ id: "close", intent: close, text: "Close" }];
+  const chosen = modes === undefined ? undefined : (chosenIn(modes, timeline.id) ?? "default");
 
   return (
     <Popover
@@ -329,21 +342,56 @@ const TimelineMenu = ({
         aria-label={`What to do with ${timeline.name}`}
         autoFocus="first"
         className={styles.menu}
-        items={actions}
-        onAction={(key) => {
-          const chosen = actions.find((action) => action.id === String(key));
-
-          onClose();
-
-          if (chosen !== undefined) {
-            carryOut([chosen.intent]);
-          }
-        }}
       >
-        {(action) => (
-          <MenuItem className={styles.action} id={action.id} textValue={action.text}>
-            {action.text}
-          </MenuItem>
+        <MenuSection
+          className={styles.section}
+          disallowEmptySelection
+          onSelectionChange={(keys) => {
+            const [key] = keys === "all" ? [] : keys;
+            const choice = previewsChoices.find((one) => one.id === key);
+
+            onClose();
+
+            if (choice !== undefined && choice.id !== chosen) {
+              carryOut([{ _tag: "ChoosePreviews", mode: choice.mode, timeline: timeline.id }]);
+            }
+          }}
+          selectedKeys={chosen === undefined ? [] : [chosen]}
+          selectionMode="single"
+        >
+          <Header className={styles.header}>Previews</Header>
+          {previewsChoices.map((choice) => (
+            <MenuItem
+              className={styles.action}
+              id={choice.id}
+              key={choice.id}
+              // The choice in force, chosen again, changes nothing, and closes the menu.
+              onAction={onClose}
+              textValue={`Previews ${choice.id}`}
+            >
+              {({ isSelected }) => (
+                <>
+                  <span className={styles.mark}>{isSelected ? <Icon name="chosen" /> : null}</span>
+                  {choice.id}
+                </>
+              )}
+            </MenuItem>
+          ))}
+        </MenuSection>
+        {close === undefined ? null : (
+          <MenuSection className={styles.section}>
+            <MenuItem
+              className={styles.action}
+              id="close"
+              onAction={() => {
+                onClose();
+                carryOut([close]);
+              }}
+              textValue="Close"
+            >
+              Close
+            </MenuItem>
+          </MenuSection>
         )}
       </Menu>
     </Popover>
@@ -369,14 +417,17 @@ const networkUnread = (
 
 /**
  * A Network's row: its chevron, which expands and collapses it without choosing, its id,
- * coloured by what is unread, and how its connection stands, as a symbol.
- * @param props - The Network, its own Timeline, and whether its Timelines are shown.
+ * coloured by what is unread, how its connection stands, as a symbol, and, once it has its
+ * own Timeline, the button that opens that Timeline's menu.
+ * @param props - The Network, its own Timeline, whether its Timelines are shown, and what
+ * opens the menu.
  * @returns The row's content.
  */
 const NetworkRow = ({
   expandable,
   expanded,
   network,
+  onMenu,
   own,
   pane,
 }: {
@@ -385,6 +436,7 @@ const NetworkRow = ({
   readonly network: SidebarNetwork;
   readonly own: Timeline | undefined;
   readonly pane: number | undefined;
+  readonly onMenu: (row: HTMLElement) => void;
 }) => {
   const { activity, calling } = networkUnread(network, own, expanded && expandable);
   const standing = standingOf(network);
@@ -408,6 +460,7 @@ const NetworkRow = ({
       <span className={styles.standing} title={standingWords(standing)}>
         <Icon className={standing.className} name={standing.icon} />
       </span>
+      {own === undefined ? null : <MoreButton name={own.name} onMenu={onMenu} />}
     </>
   );
 };
@@ -526,7 +579,7 @@ const NetworkTrees = ({
 
     const timeline = timelineOf(row?.getAttribute(timelineAttribute) ?? "");
 
-    if (row !== null && timeline !== undefined && closeOf(timeline) !== undefined) {
+    if (row !== null && timeline !== undefined) {
       event.preventDefault();
       openMenu(timeline, row);
     }
@@ -582,10 +635,12 @@ const NetworkTrees = ({
             <TreeItem
               aria-label={`${rowLabel(network.network, activity, pane)}, ${standingWords(standingOf(network))}`}
               className={`${styles.network} ${pane === undefined ? "" : styles.elsewhere}`}
+              data-menu={(tree.own !== undefined && menu === tree.own.id) || undefined}
               id={rowKey(one)}
               // React Aria never changes an item's id, so a row that gains its own Timeline is drawn anew.
               key={rowKey(one)}
               textValue={network.network}
+              {...(tree.own === undefined ? {} : { [timelineAttribute]: tree.own.id })}
             >
               <TreeItemContent>
                 {({ hasChildItems, isExpanded }) => (
@@ -593,6 +648,11 @@ const NetworkTrees = ({
                     expandable={hasChildItems}
                     expanded={isExpanded}
                     network={network}
+                    onMenu={(row) => {
+                      if (tree.own !== undefined) {
+                        openMenu(tree.own, row);
+                      }
+                    }}
                     own={tree.own}
                     pane={pane}
                   />
@@ -601,7 +661,7 @@ const NetworkTrees = ({
               {tree.children.map((timeline) => (
                 <TimelineItem
                   key={timeline.id}
-                  menu={menuShown(timeline, menu)}
+                  menu={menu === timeline.id}
                   onMenu={(row) => {
                     openMenu(timeline, row);
                   }}

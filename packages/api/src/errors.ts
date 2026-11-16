@@ -163,6 +163,17 @@ export class PreviewsOff extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("PreviewsOff", { timeline: TimelineId }, { httpApiStatus: 409 }) {}
 
+/**
+ * The link pressed is not waiting for a press: the Message has no link at that index, or
+ * the link is already kept, being fetched, or in a Timeline that does not wait, so nothing
+ * was fetched: a 409.
+ */
+export class NotWaiting extends Schema.TaggedError<NotWaiting, { readonly brand: unique symbol }>()(
+  "NotWaiting",
+  { link: Schema.Int, position: Cursor, timeline: TimelineId },
+  { httpApiStatus: 409 }
+) {}
+
 /** No Preview holds an image with this hash, so none is served: a 404. */
 export class UnknownMedia extends Schema.TaggedError<
   UnknownMedia,

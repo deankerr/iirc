@@ -9,7 +9,14 @@
  */
 import { createHash } from "node:crypto";
 
-import { MediaType, PreviewId, PreviewsOff, UnknownMessage, UnknownTimeline } from "@iirc/api";
+import {
+  MediaType,
+  NotWaiting,
+  PreviewId,
+  PreviewsOff,
+  UnknownMessage,
+  UnknownTimeline,
+} from "@iirc/api";
 import type {
   MediaHash,
   PreviewFailure,
@@ -75,6 +82,18 @@ export class Previews extends Context.Service<
     ) => Effect.Effect<
       readonly PreviewItem[],
       UnknownTimeline | UnknownMessage | PreviewsOff | TimelineStoreFailed
+    >;
+    /**
+     * Fetches one link of the Message at a position in a Timeline that waits for a press,
+     * answering its item, pending. A link that is not waiting is `NotWaiting`.
+     */
+    readonly press: (
+      timeline: TimelineId,
+      position: Position,
+      link: number
+    ) => Effect.Effect<
+      PreviewItem,
+      UnknownTimeline | UnknownMessage | PreviewsOff | NotWaiting | TimelineStoreFailed
     >;
     /** Each link's item, every time its Preview's state changes, from now on. */
     readonly changes: Stream.Stream<PreviewItem>;
@@ -332,7 +351,10 @@ const head = Sink.fold(
     Effect.succeed({ chunks: [...chunks, chunk], size: size + chunk.length })
 );
 
-/** A Direct Message's link that is not yet kept: fetched only once the Owner presses it. */
+/**
+ * A link not yet kept in a Direct Message the Owner has set no mode for: fetched only once
+ * the Owner presses it.
+ */
 const waiting: PreviewState = { _tag: "WaitingForPress" };
 
 const pending: PreviewState = { _tag: "Pending" };
@@ -364,6 +386,13 @@ interface Flight {
   readonly shown: number;
 }
 
+/** How a link is asked for: its Timeline's mode, and whether it waits for a press or is one. */
+interface How {
+  readonly pressed: boolean;
+  readonly shown: PreviewsShown;
+  readonly waits: boolean;
+}
+
 /** A link's state when asked, and whether the ask started its fetch, and published it. */
 interface Claimed {
   readonly state: PreviewState;
@@ -375,11 +404,12 @@ interface Claimed {
  * Whether a kept record is served as it is, and if not, whether it is fetched again.
  * @param kept - The record.
  * @param now - The time, in milliseconds since the epoch.
- * @param direct - Whether it is in a Direct Message, which never fetches.
+ * @param waits - Whether it is in a Timeline that waits for a press, which never fetches
+ * again.
  * @returns Whether it is stale.
  */
-const stale = (kept: Kept, now: number, direct: boolean): boolean => {
-  if (direct) {
+const stale = (kept: Kept, now: number, waits: boolean): boolean => {
+  if (waits) {
     return false;
   }
 
@@ -521,12 +551,15 @@ export const layerPreviews = Layer.effect(Previews)(
       );
 
     /**
-     * Decides what an ask of a link answers and whether it starts a fetch, in one turn.
+     * Decides what an ask or a press of a link answers and whether it starts a fetch, in one
+     * turn. A link that is being fetched or kept is served as it is, and one not kept in a
+     * Timeline that waits is waiting, unless pressed, which starts its fetch.
      * @param key - The link it is kept under.
-     * @param direct - Whether it is in a Direct Message.
+     * @param waits - Whether its Timeline waits for a press.
+     * @param pressed - Whether it is a press rather than an ask.
      * @returns What it answers and whether it started.
      */
-    const claim = (key: string, direct: boolean) =>
+    const claim = (key: string, waits: boolean, pressed: boolean) =>
       turn.withPermit(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
@@ -545,11 +578,11 @@ export const layerPreviews = Layer.effect(Previews)(
             .shown(key, now)
             .pipe(Effect.catch((error) => Effect.as(warn("read")(error), Option.none<Kept>())));
 
-          if (Option.isSome(kept) && !stale(kept.value, now, direct)) {
+          if (Option.isSome(kept) && !stale(kept.value, now, waits)) {
             return { publish: false, started: false, state: kept.value.state } satisfies Claimed;
           }
 
-          if (Option.isNone(kept) && direct) {
+          if (Option.isNone(kept) && waits && !pressed) {
             return { publish: false, started: false, state: waiting } satisfies Claimed;
           }
 
@@ -567,28 +600,72 @@ export const layerPreviews = Layer.effect(Previews)(
 
     /**
      * A link's state, starting its fetch if it is not kept fresh or being fetched, or in a
-     * Direct Message, waiting for a press until it is kept.
+     * Timeline that waits for a press, waiting until it is kept or pressed.
      * @param link - The link, as the URL parser wrote it.
-     * @param direct - Whether it is in a Direct Message.
-     * @param shown - Whether Previews are `on` or `links only`, which a fetch it starts keeps.
-     * @returns Its item.
+     * @param how - Whether its Timeline waits, whether it is a press, and whether Previews
+     * are `on` or `links only`, which a fetch it starts keeps.
+     * @returns Its item, and whether it started its fetch.
      */
-    const stateOf = (link: string, direct: boolean, shown: PreviewsShown) =>
+    const stateOf = (link: string, how: How) =>
       Effect.gen(function* () {
         const key = keyOf(link);
-        const { publish, started, state } = yield* claim(key, direct);
+        const { publish, started, state } = yield* claim(key, how.waits, how.pressed);
 
         if (publish) {
           yield* PubSub.publish(changed, { id: idOf(key), link, state });
         }
 
         if (started) {
-          yield* Effect.forkIn(fetchOne(key, link, shown), scope);
+          yield* Effect.forkIn(fetchOne(key, link, how.shown), scope);
         }
 
-        const item: PreviewItem = { id: idOf(key), link, state: asShown(state, shown) };
+        const item: PreviewItem = { id: idOf(key), link, state: asShown(state, how.shown) };
 
-        return item;
+        return { item, started };
+      });
+
+    /**
+     * The links of the Message at a position in a Timeline that may be previewed, and how
+     * they are asked for there: whether the Timeline waits for a press, and under which mode.
+     * @param timeline - The Timeline.
+     * @param position - The Message's place in it.
+     * @returns The links as the URL parser wrote them, with the mode and whether it waits.
+     */
+    const locate = (timeline: TimelineId, position: Position) =>
+      Effect.gen(function* () {
+        const summary = yield* store.timeline(timeline);
+
+        if (Option.isNone(summary)) {
+          return yield* new UnknownTimeline({ timeline });
+        }
+
+        const { options } = yield* ui.inForce;
+        // A merged id is read as the Timeline it went to, whose own override decides, never
+        // one left under the merged id.
+        const override = options["previews.timelines"][summary.value.id];
+        const shown = override ?? options.previews;
+
+        if (shown === "off") {
+          return yield* new PreviewsOff({ timeline });
+        }
+
+        const window = yield* store.window(timeline, { _tag: "Around", position }, 1);
+        const [item] = Option.isSome(window) ? window.value.items : [];
+
+        if (item?.content._tag !== "Message" || comparePositions(item.position, position) !== 0) {
+          return yield* new UnknownMessage({ position, timeline });
+        }
+
+        const { ours, text } = item.content;
+        // What is shown is the echo's text once the Ircd confirmed it, which may differ from ours.
+        const said = ours?.delivery._tag === "Confirmed" ? ours.delivery.text : text;
+
+        return {
+          // Only a Direct Message the Owner has not chosen a mode for waits.
+          links: previewableLinksOf(said).map((found) => found.href),
+          shown,
+          waits: summary.value.kind === "Direct" && override === undefined,
+        };
       });
 
     const refers = (hash: MediaHash) =>
@@ -604,33 +681,14 @@ export const layerPreviews = Layer.effect(Previews)(
     return {
       ask: (timeline, position) =>
         Effect.gen(function* () {
-          const summary = yield* store.timeline(timeline);
+          const { links: previewable, shown, waits } = yield* locate(timeline, position);
 
-          if (Option.isNone(summary)) {
-            return yield* new UnknownTimeline({ timeline });
-          }
-
-          const { options } = yield* ui.inForce;
-
-          if (options.previews === "off") {
-            return yield* new PreviewsOff({ timeline });
-          }
-
-          const window = yield* store.window(timeline, { _tag: "Around", position }, 1);
-          const [item] = Option.isSome(window) ? window.value.items : [];
-
-          if (item?.content._tag !== "Message" || comparePositions(item.position, position) !== 0) {
-            return yield* new UnknownMessage({ position, timeline });
-          }
-
-          const direct = summary.value.kind === "Direct";
-          const { ours, text } = item.content;
-          // What is shown is the echo's text once the Ircd confirmed it, which may differ from ours.
-          const shown = ours?.delivery._tag === "Confirmed" ? ours.delivery.text : text;
-
-          return yield* Effect.forEach(previewableLinksOf(shown), (found) =>
-            stateOf(found.href, direct, options.previews)
+          // oxlint-disable-next-line unicorn/no-array-method-this-argument -- Effect.forEach takes the iterable first; it has no thisArg.
+          const asked = yield* Effect.forEach(previewable, (link) =>
+            stateOf(link, { pressed: false, shown, waits })
           );
+
+          return asked.map(({ item }) => item);
         }),
       changes: Stream.fromPubSub(changed),
       media: (hash) =>
@@ -658,6 +716,20 @@ export const layerPreviews = Layer.effect(Previews)(
             bytes: Stream.concat(Stream.fromIterable(leading.chunks), rest),
             type: type.value,
           } satisfies Media;
+        }),
+      press: (timeline, position, link) =>
+        Effect.gen(function* () {
+          const { links: found, shown, waits } = yield* locate(timeline, position);
+          const address = found[link];
+
+          if (!waits || address === undefined) {
+            return yield* new NotWaiting({ link, position, timeline });
+          }
+
+          const { item, started } = yield* stateOf(address, { pressed: true, shown, waits });
+
+          // Claiming is decided in one turn, so a link kept or fetched meanwhile starts nothing.
+          return started ? item : yield* new NotWaiting({ link, position, timeline });
         }),
       refers,
     };

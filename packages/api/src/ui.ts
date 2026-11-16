@@ -8,6 +8,7 @@
  *
  * @packageDocumentation
  */
+import { TimelineId } from "@iirc/timelines";
 import { Schema, SchemaAST, Struct } from "effect";
 
 /**
@@ -463,6 +464,26 @@ export const PreviewsShown = Schema.Literals(["off", "links only", "on"]).annota
 /** The decoded form of {@link PreviewsShown}. */
 export type PreviewsShown = typeof PreviewsShown.Type;
 
+/**
+ * Each Timeline's own choice of whether the Daemon previews its links, by its id, over
+ * `ui.previews`: `off`, `links only`, or `on`. A Timeline it does not name follows
+ * `ui.previews`, and an entry for a Timeline that no longer exists does nothing. A Direct
+ * Message's Timeline named here as `links only` or `on` is fetched without waiting for a
+ * press. It is set whole, like any option, and shared only, as `ui.previews` is.
+ */
+export const PreviewsByTimeline = Schema.Record(
+  TimelineId,
+  Schema.Literals(["off", "links only", "on"])
+).annotate({
+  ...sharedOnly,
+  default: {},
+  description:
+    "Each Timeline's own choice over ui.previews, by its id: off, links only, or on. A Timeline it does not name follows ui.previews, and a Direct Message named links only or on is previewed without a press. /previews off|links|on|default sets the focused Timeline's. Every device shares it.",
+});
+
+/** The decoded form of {@link PreviewsByTimeline}. */
+export type PreviewsByTimeline = typeof PreviewsByTimeline.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
@@ -474,6 +495,7 @@ export const UiOptions = Schema.Struct({
   leading: Leading,
   light: themeForScheme("light", "solarized-light"),
   previews: PreviewsShown,
+  "previews.timelines": PreviewsByTimeline,
   read: ReadRule,
   size: TextSize,
   spellcheck: SpellcheckShown,

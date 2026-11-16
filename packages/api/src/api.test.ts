@@ -115,6 +115,7 @@ describe("the contract", () => {
       "POST /api/networks/{network}/say",
       "POST /api/sign-in",
       "POST /api/timelines/{timeline}/previews",
+      "POST /api/timelines/{timeline}/previews/press",
       "POST /api/uploads",
       "PUT /api/credentials/{name}",
       "PUT /api/networks/{network}",
@@ -426,6 +427,7 @@ describe("the contract", () => {
         leading: 1.45,
         light: "light",
         previews: "off",
+        "previews.timelines": {},
         read: "latest",
         size: 14,
         spellcheck: true,
@@ -445,6 +447,7 @@ describe("the contract", () => {
         "leading",
         "light",
         "previews",
+        "previews.timelines",
         "read",
         "size",
         "spellcheck",
@@ -656,12 +659,12 @@ describe("the contract", () => {
   it("carries the ui options whole with the last Change's sequence as the event id, from 0 for none", () => {
     const wire = [
       {
-        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
+        data: '{"options":{"activity":"all","colours":"theme","dark":"dark","day":"full","enter":"send","font":"system","leading":1.45,"light":"light","previews":"off","previews.timelines":{},"read":"latest","size":14,"spellcheck":true,"suffix":": ","theme":"system","themes":[],"time":"HH:mm","width":"none"},"sequence":0}',
         event: "changed",
         id: "0",
       },
       {
-        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","previews":"off","read":"latest","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
+        data: '{"options":{"activity":"quiet","colours":"theme","dark":"dark","day":"full","enter":"newline","font":"ibm-plex-mono","leading":1.45,"light":"light","previews":"off","previews.timelines":{},"read":"latest","size":16,"spellcheck":false,"suffix":", ","theme":"dark","themes":[],"time":"HH:mm:ss","width":"none"},"sequence":9}',
         event: "changed",
         id: "9",
       },

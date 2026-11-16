@@ -179,3 +179,15 @@ export const PreviewsEvent = Schema.Union([
 
 /** The decoded form of {@link PreviewsEvent}. */
 export type PreviewsEvent = typeof PreviewsEvent.Type;
+
+/**
+ * A press of a link waiting for one: the Message's place in its Timeline, as for an ask,
+ * and the link's index among the Message's links that may be previewed, from `0`.
+ */
+export const PressRequest = Schema.Struct({
+  link: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  position: Cursor,
+});
+
+/** The decoded form of {@link PressRequest}. */
+export type PressRequest = typeof PressRequest.Type;

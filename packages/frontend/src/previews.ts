@@ -2,8 +2,11 @@
  * Previews, as a Frontend holds them: which Messages were shown and so may be asked for,
  * what the Daemon answered for each, and each Preview by its id, kept up to date by the
  * stream of their changes. A Message is asked for only once it was shown, and only once
- * while the stream is followed, since the Daemon fetches on the ask. What each Message
- * shows, the summary line, and a failure's words are derived as it is drawn, never held.
+ * while the stream is followed, since the Daemon fetches on the ask. Whether a Message is
+ * asked for, and what it shows, follows its Timeline's own mode: its choice in
+ * `ui.previews.timelines`, or else `ui.previews`. A link the Daemon holds for a press is
+ * fetched only once the Owner presses it. What each Message shows, the summary line, and a
+ * failure's words are derived as it is drawn, never held.
  *
  * @packageDocumentation
  */
@@ -13,6 +16,7 @@ import type {
   PreviewFailure,
   PreviewId,
   PreviewItem,
+  PreviewsByTimeline,
   PreviewsShown,
   TimelineId,
   UiInForce,
@@ -31,8 +35,9 @@ import { contained } from "./contained.ts";
 type Asking = "Wanted" | "Asking" | "Answered" | "Refused";
 
 /**
- * One Message shown: where it is, where its asking stands, and the ids the Daemon answered
- * with, in the Message's order, kept while it is asked again.
+ * One Message shown: where it is, where its asking stands, the ids the Daemon answered
+ * with, in the Message's order, kept while it is asked again, and its Timeline's own
+ * choice when it was last asked for, which a link waiting for a press is answered by.
  */
 interface MessageHeld {
   readonly timeline: TimelineId;
@@ -40,6 +45,7 @@ interface MessageHeld {
   readonly asking: Asking;
   readonly since: number;
   readonly ids: readonly PreviewId[] | undefined;
+  readonly chosen: PreviewsShown | undefined;
 }
 
 /** A Preview held: the item as last given, and the stream's count when it was. */
@@ -69,11 +75,28 @@ export const initialPreviews: Previews = {
   tick: 0,
 };
 
-/** An ask to make: of which Message, under its key, and at which count of the stream. */
+/**
+ * An ask to make: of which Message, under its key, at which count of the stream, and under
+ * which choice of its Timeline's own, if any.
+ */
 export interface PreviewsAsk {
   readonly key: string;
   readonly timeline: TimelineId;
   readonly position: Position;
+  readonly since: number;
+  readonly chosen: PreviewsShown | undefined;
+}
+
+/**
+ * A press of a link waiting for one: its Message, under its key and by its place, the
+ * link's index among the Message's links that may be previewed, and the stream's count
+ * when it was pressed, which orders its answer against a change.
+ */
+export interface PreviewsPress {
+  readonly key: string;
+  readonly timeline: TimelineId;
+  readonly position: Position;
+  readonly link: number;
   readonly since: number;
 }
 
@@ -85,6 +108,9 @@ export interface PreviewsAsk {
  * - `Answered`: the Daemon answered an ask with the Message's items.
  * - `Refused`: the Daemon refused an ask for good: no such Timeline or Message, or Previews
  *   are off.
+ * - `Pressed`: the Daemon answered a press with the link's item.
+ * - `PressRefused`: the Daemon refused a press, as the link was not waiting for one, so
+ *   its Message is asked for again, to draw what the Daemon holds.
  * - `Followed`: the stream is followed, from now.
  * - `Changed`: the stream gave an item as it is now.
  * - `Lost`: the stream is no longer followed, and every ask in flight was let go of.
@@ -99,6 +125,8 @@ export type PreviewsEvent =
       readonly previews: readonly PreviewItem[];
     }
   | { readonly _tag: "Refused"; readonly ask: PreviewsAsk }
+  | { readonly _tag: "Pressed"; readonly press: PreviewsPress; readonly item: PreviewItem }
+  | { readonly _tag: "PressRefused"; readonly press: PreviewsPress }
   | { readonly _tag: "Followed" }
   | { readonly _tag: "Changed"; readonly item: PreviewItem }
   | { readonly _tag: "Lost" }
@@ -113,23 +141,81 @@ export type PreviewsEvent =
 export const messageKey = (timeline: TimelineId, position: Position): string =>
   `${timeline} ${cursorOf(position)}`;
 
-/**
- * `ui.previews` as the Daemon acts on it: the shared value alone, since no device overrides
- * it, and none until the shared options are read.
- * @param shared - The shared options, once read.
- * @returns The mode, or none.
- */
-export const previewsModeOf = (shared: UiInForce | undefined): PreviewsShown | undefined =>
-  shared?.options.previews;
+/** `ui.previews`, and each Timeline's own choice over it, by its id. */
+export interface PreviewsModes {
+  readonly shown: PreviewsShown;
+  readonly timelines: PreviewsByTimeline;
+}
 
 /**
- * Whether a Frontend asks for Previews, and follows their stream: under `links only` or
- * `on`, never under `off`, and never before the mode is known.
- * @param mode - The mode.
+ * The modes as the Daemon acts on them: the shared values alone, since no device overrides
+ * them, and none until the shared options are read.
+ * @param shared - The shared options, once read.
+ * @returns The modes, or none.
+ */
+export const previewsModesOf = (shared: UiInForce | undefined): PreviewsModes | undefined =>
+  shared === undefined
+    ? undefined
+    : { shown: shared.options.previews, timelines: shared.options["previews.timelines"] };
+
+/**
+ * A Timeline's own choice over `ui.previews`, if it made one.
+ * @param modes - The modes, once read.
+ * @param timeline - The Timeline.
+ * @returns Its choice, or none.
+ */
+export const chosenIn = (
+  modes: PreviewsModes | undefined,
+  timeline: TimelineId
+): PreviewsShown | undefined => modes?.timelines[timeline];
+
+/**
+ * A Timeline's mode: its own choice, or else `ui.previews`, and none before they are read.
+ * @param modes - The modes, once read.
+ * @param timeline - The Timeline.
+ * @returns Its mode, or none.
+ */
+export const modeIn = (
+  modes: PreviewsModes | undefined,
+  timeline: TimelineId
+): PreviewsShown | undefined => chosenIn(modes, timeline) ?? modes?.shown;
+
+/**
+ * Each Timeline's own choice with one Timeline's made, or with none, removed, so it
+ * follows `ui.previews`.
+ * @param timelines - Each Timeline's own choice, as read.
+ * @param timeline - The Timeline.
+ * @param mode - Its choice, or none.
+ * @returns Each Timeline's own choice now.
+ */
+export const choosing = (
+  timelines: PreviewsByTimeline,
+  timeline: TimelineId,
+  mode: PreviewsShown | undefined
+): PreviewsByTimeline => {
+  const { [timeline]: _, ...others } = timelines;
+
+  return mode === undefined ? others : { ...others, [timeline]: mode };
+};
+
+/**
+ * Whether a Frontend asks for a Timeline's Previews: under `links only` or `on`, never
+ * under `off`, and never before the mode is known.
+ * @param mode - The Timeline's mode.
  * @returns Whether it asks.
  */
 export const asksFor = (mode: PreviewsShown | undefined): boolean =>
   mode === "links only" || mode === "on";
+
+/**
+ * Whether a Frontend follows the stream of Previews: while any Timeline could ask, as
+ * `ui.previews` asks or some Timeline's own choice does.
+ * @param modes - The modes, once read.
+ * @returns Whether it follows.
+ */
+export const asksAnywhere = (modes: PreviewsModes | undefined): boolean =>
+  modes !== undefined &&
+  (asksFor(modes.shown) || Object.values(modes.timelines).some((mode) => asksFor(mode)));
 
 /**
  * Whether a Message's ids still wait on a Preview, so a stream followed again must ask for
@@ -141,6 +227,15 @@ export const asksFor = (mode: PreviewsShown | undefined): boolean =>
 const waiting = (held: MessageHeld, items: ReadonlyMap<PreviewId, ItemHeld>): boolean =>
   held.ids === undefined ||
   held.ids.some((id) => (items.get(id)?.item.state._tag ?? "Pending") === "Pending");
+
+/**
+ * Whether a Message answered holds a link waiting for a press.
+ * @param held - The Message.
+ * @param items - The items held.
+ * @returns Whether one waits.
+ */
+const pressable = (held: MessageHeld, items: ReadonlyMap<PreviewId, ItemHeld>): boolean =>
+  held.ids?.some((id) => items.get(id)?.item.state._tag === "WaitingForPress") === true;
 
 /**
  * Only the items some answered Message names, unless an ask is in flight, whose answer may
@@ -185,6 +280,43 @@ const askedOf = (state: Previews, ask: PreviewsAsk): MessageHeld | undefined => 
   const held = state.messages.get(ask.key);
 
   return held?.asking === "Asking" && held.since === ask.since ? held : undefined;
+};
+
+/**
+ * An ask begun: of a Message wanted, or of one answered under another choice of its
+ * Timeline's, and only while the stream is followed.
+ * @param state - The state.
+ * @param ask - The ask.
+ * @returns The state.
+ */
+const asked = (state: Previews, ask: PreviewsAsk): Previews => {
+  const held = state.messages.get(ask.key);
+
+  const wanted =
+    held?.asking === "Wanted" || (held?.asking === "Answered" && held.chosen !== ask.chosen);
+
+  return held !== undefined && wanted && state.following
+    ? withMessage(state, ask.key, {
+        ...held,
+        asking: "Asking",
+        chosen: ask.chosen,
+        since: ask.since,
+      })
+    : state;
+};
+
+/**
+ * An answered Message wanted again, to be asked for once more.
+ * @param state - The state.
+ * @param key - Its key.
+ * @returns The state.
+ */
+const wantedAgain = (state: Previews, key: string): Previews => {
+  const held = state.messages.get(key);
+
+  return held?.asking === "Answered"
+    ? withMessage(state, key, { ...held, asking: "Wanted" })
+    : state;
 };
 
 /**
@@ -233,6 +365,7 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
         ? state
         : withMessage(state, key, {
             asking: "Wanted",
+            chosen: undefined,
             ids: undefined,
             position: event.position,
             since: 0,
@@ -241,15 +374,7 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
     }
 
     case "Asked": {
-      const held = state.messages.get(event.ask.key);
-
-      return held?.asking === "Wanted" && state.following
-        ? withMessage(state, event.ask.key, {
-            ...held,
-            asking: "Asking",
-            since: event.ask.since,
-          })
-        : state;
+      return asked(state, event.ask);
     }
 
     case "Answered": {
@@ -274,6 +399,17 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
       return held === undefined
         ? state
         : pruned(withMessage(state, event.ask.key, { ...held, asking: "Refused" }));
+    }
+
+    case "Pressed": {
+      return pruned({
+        ...state,
+        items: answeredItems(state, event.press.since, [event.item]),
+      });
+    }
+
+    case "PressRefused": {
+      return wantedAgain(state, event.press.key);
     }
 
     case "Followed": {
@@ -317,23 +453,55 @@ export const reducePreviews = (state: Previews, event: PreviewsEvent): Previews 
 };
 
 /**
- * The asks to make now: each Message wanted, while the mode asks and the stream is
- * followed, and none otherwise.
+ * The asks to make now, while the stream is followed, and none otherwise: each Message
+ * wanted whose Timeline's mode asks, and each holding a link waiting for a press whose
+ * Timeline has since chosen a mode of its own that asks, which the Daemon then fetches
+ * unpressed.
  * @param state - The state.
- * @param mode - `ui.previews`, once known.
+ * @param modes - The modes, once read.
  * @returns The asks.
  */
 export const asksWanted = (
   state: Previews,
-  mode: PreviewsShown | undefined
+  modes: PreviewsModes | undefined
 ): readonly PreviewsAsk[] =>
-  asksFor(mode) && state.following
-    ? [...state.messages].flatMap(([key, held]) =>
-        held.asking === "Wanted"
-          ? [{ key, position: held.position, since: state.tick, timeline: held.timeline }]
-          : []
-      )
+  state.following
+    ? [...state.messages].flatMap(([key, held]) => {
+        const chosen = chosenIn(modes, held.timeline);
+
+        const wanted =
+          held.asking === "Wanted" ||
+          (held.asking === "Answered" &&
+            asksFor(chosen) &&
+            held.chosen !== chosen &&
+            pressable(held, state.items));
+
+        return wanted && asksFor(modeIn(modes, held.timeline))
+          ? [{ chosen, key, position: held.position, since: state.tick, timeline: held.timeline }]
+          : [];
+      })
     : [];
+
+/**
+ * A press of a link waiting for one, at the stream's count now.
+ * @param state - The state.
+ * @param timeline - The Message's Timeline.
+ * @param position - Its place.
+ * @param link - The link's index among its links that may be previewed.
+ * @returns The press.
+ */
+export const pressOf = (
+  state: Previews,
+  timeline: TimelineId,
+  position: Position,
+  link: number
+): PreviewsPress => ({
+  key: messageKey(timeline, position),
+  link,
+  position,
+  since: state.tick,
+  timeline,
+});
 
 /**
  * A failure's reason, in words, as a hover says it.
@@ -453,6 +621,8 @@ const imageOf = (preview: Preview): ImageShown | undefined =>
  * - `Ready`: its summary, opening to its description when it has one, and its image when
  *   the Daemon kept one.
  * - `Plain`: the plain link, with why there is no Preview, when it failed.
+ * - `Waiting`: the plain link, and a press that fetches it, by its `index` among the
+ *   Message's links, as the Daemon holds it until the Owner presses.
  */
 export type PreviewShown =
   | { readonly _tag: "Pending"; readonly key: string; readonly link: LinkShown }
@@ -469,6 +639,12 @@ export type PreviewShown =
       readonly key: string;
       readonly link: LinkShown;
       readonly reason: string | undefined;
+    }
+  | {
+      readonly _tag: "Waiting";
+      readonly key: string;
+      readonly link: LinkShown;
+      readonly index: number;
     };
 
 /**
@@ -476,17 +652,18 @@ export type PreviewShown =
  * by a fragment the id leaves out.
  * @param item - The item.
  * @param address - The link as the Message holds it.
- * @param key - Which row of its Message it is.
+ * @param index - Which of its Message's links it is.
  * @param images - Whether images are shown, as they are only while Previews are `on`.
  * @returns It.
  */
 const itemShown = (
   item: PreviewItem,
   address: string,
-  key: string,
+  index: number,
   images: boolean
 ): PreviewShown => {
   const link = linkShown(address);
+  const key = String(index);
 
   switch (item.state._tag) {
     case "Pending": {
@@ -513,9 +690,8 @@ const itemShown = (
       return { _tag: "Plain", key, link, reason: reasonWords(item.state.reason) };
     }
 
-    // A press is out of reach here, so a link waiting for one is the plain link.
     case "WaitingForPress": {
-      return { _tag: "Plain", key, link, reason: undefined };
+      return { _tag: "Waiting", index, key, link };
     }
 
     default: {
@@ -542,8 +718,8 @@ const messageText = (content: ItemContent): string | undefined => {
 
 /**
  * Whether a Message may have Previews at all: one that holds a link that may be previewed,
- * while the mode asks. Only such a Message is watched for coming into view.
- * @param mode - `ui.previews`, once known.
+ * while its Timeline's mode asks. Only such a Message is watched for coming into view.
+ * @param mode - Its Timeline's mode, once known.
  * @param content - The item's content.
  * @returns Whether it may.
  */
@@ -554,12 +730,12 @@ export const mayPreview = (mode: PreviewsShown | undefined, content: ItemContent
 };
 
 /**
- * What a Message shows below it: nothing while the mode does not ask, or for a Message
+ * What a Message shows below it: nothing while its Timeline's mode does not ask, or for a Message
  * with no link that may be previewed, or one the Daemon refused; the items the Daemon
  * answered with, as each is now; and before then, a placeholder for each link, so the
  * Message's height is the same once it is answered.
  * @param state - The state.
- * @param mode - `ui.previews`, once known.
+ * @param mode - Its Timeline's mode, once known.
  * @param timeline - The Message's Timeline.
  * @param position - Its place.
  * @param content - What it holds.
@@ -594,14 +770,7 @@ export const previewsOf = (
 
       return item === undefined
         ? []
-        : [
-            itemShown(
-              item.item,
-              found[index]?.href ?? item.item.link,
-              String(index),
-              mode === "on"
-            ),
-          ];
+        : [itemShown(item.item, found[index]?.href ?? item.item.link, index, mode === "on")];
     });
   }
 

@@ -149,6 +149,42 @@ a.plain:focus-visible {
   outline: var(--border-width) solid var(--color-focus);
 }
 
+/*
+ * A link the Daemon holds for a press: the plain link, cut to the room left, and the press
+ * after it, quiet until hovered, on the same line.
+ */
+.waiting {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.waiting > .plain {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.press {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: default;
+}
+
+.press[data-hovered] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.press[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
 /* With no columns, the Previews run the Timeline's width under the words. */
 @container (max-width: 36em) {
   .previews {
@@ -162,7 +198,8 @@ a.plain:focus-visible {
 }
 
 @media (pointer: coarse) {
-  button.summary {
+  button.summary,
+  .press {
     min-height: var(--target-size);
   }
 }

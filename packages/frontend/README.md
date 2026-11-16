@@ -104,7 +104,7 @@ The one registry of commands, `commands`, as data, behind the composer's `/comma
 | Configuration | `/set`, `/unset`, `/join`, `/part`, `/network add`, `/network remove`, `/connect`, `/disconnect` |
 | Themes | `/theme`, `/theme -light`, `/theme -dark`, `/theme import`, `/theme remove` |
 | Moving | `/next`, `/previous`, `/next-unread`, `/latest`, `/search`, `/palette`, `/focus` |
-| Reading | `/read`, `/read all`, `/close-timeline`, `/notify`, `/members`, `/sidebar` |
+| Reading | `/read`, `/read all`, `/close-timeline`, `/previews`, `/notify`, `/members`, `/sidebar` |
 | Panes | `/split`, `/close`, `/pane`, `/swap`, `/equalize`, `/zoom`, `/grow`, `/shrink` |
 
 Each entry in `src/commands.ts` carries its usage, aliases, and description, which the palette shows.
@@ -174,18 +174,19 @@ Configuration as an option tree. Every option comes from the annotations on the 
 
 An option is named `network.<id>.<path>`, such as `network.libera.nicks`, `network.libera.login.account`, or `network.libera.channels.#iirc.key`. Ids and Channel names may hold dots, so a name is an option only when exactly one way of splitting it is valid.
 
-| Kind               | Text                                                         |
-| ------------------ | ------------------------------------------------------------ |
-| `Toggle`           | `on` or `off`                                                |
-| `Text`             | The raw text, exactly                                        |
-| `Choice`, `Tagged` | One of the Schema's literals or tags                         |
-| `ChoiceOrText`     | One of the Schema's literals, else the text, trimmed         |
-| `Integer`          | A whole number within the Schema's bounds                    |
-| `IntegerOrChoice`  | One of the Schema's literals, else a whole number as above   |
-| `Decimal`          | A number within the Schema's bounds, a multiple of its step  |
-| `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes |
-| `Ircds`            | A list of `host` or `host/port`, TLS unless `plain` follows  |
-| `Credential`       | Never text: its Credential's name, and whether it is held    |
+| Kind               | Text                                                          |
+| ------------------ | ------------------------------------------------------------- |
+| `Toggle`           | `on` or `off`                                                 |
+| `Text`             | The raw text, exactly                                         |
+| `Choice`, `Tagged` | One of the Schema's literals or tags                          |
+| `ChoiceOrText`     | One of the Schema's literals, else the text, trimmed          |
+| `Integer`          | A whole number within the Schema's bounds                     |
+| `IntegerOrChoice`  | One of the Schema's literals, else a whole number as above    |
+| `Decimal`          | A number within the Schema's bounds, a multiple of its step   |
+| `Texts`, `Names`   | A comma-separated list, with `\,`, `\\`, and `\ ` as escapes  |
+| `Ircds`            | A list of `host` or `host/port`, TLS unless `plain` follows   |
+| `Credential`       | Never text: its Credential's name, and whether it is held     |
+| `ChoiceByKey`      | `key=choice`, comma-separated, a choice by its first word too |
 
 - **The syntax reads back what it shows,** for every value the Schema admits.
 - **An edit is a pure function of the Configuration** (`apply`), parsed again by the Schema, so the runtime applies the same edit again after a conflict.
@@ -319,10 +320,11 @@ What an item shows, as data for a view to draw. `lineOf` gives a line and `forma
 What a Frontend holds of Previews, as a reducer (`reducePreviews`) over what the view saw, what the Daemon answered, and what the stream of Previews said, and what each Message shows below it (`previewsOf`). It is `@iirc/frontend/previews`.
 
 - **Nothing is asked for ahead of the screen.** A Message is asked for only once the view says it came into view, only once, and only while the stream is followed, so no change an ask starts is missed. `asksWanted` gives the asks to make.
-- **`ui.previews` is the shared value alone** (`previewsModeOf`), since the Daemon acts on it. Under `off`, or before it is read, nothing is asked for, followed, or shown.
+- **A Timeline's mode is its own choice in `ui.previews.timelines`, else `ui.previews`** (`modeIn`), the shared values alone (`previewsModesOf`), since the Daemon acts on them. Under `off`, or before they are read, nothing of that Timeline's is asked for or shown, and the stream is followed while any Timeline's mode asks (`asksAnywhere`). `choosing` makes or removes one Timeline's choice in the map, which is sent whole.
+- **A link the Daemon holds for a press is drawn as waiting,** the plain link and a press of its index (`pressOf`). The press's answer is folded in as an ask's is, and a refused press asks its Message again. A Message holding one is asked again once its Timeline chooses a mode that asks, which the Daemon fetches unpressed.
 - **An item is held once, by its id,** so a change the stream gives updates every Message that shows it. An answer is taken only by the ask in flight, and never replaces an item the stream changed after that ask began.
 - **A stream followed again asks again** for each Message still waiting on a Preview, since a Preview is not in the Journal and its stream resumes nothing.
-- **What a Message shows is derived.** Before its answer, a placeholder for each link `previewableLinksOf` finds, so its height does not change once answered, and after it, each of those links with the state of its item as it is now, shared by every link with the same id: pending, ready as its summary line (`summaryOf`), description, and image, drawn as a thumbnail for a page's or whole for a link that is itself an image, with its `src` on the Daemon's own origin and its `alt` the title or else the link, or failed as the plain link with its reason in words (`reasonWords`). A link is an anchor only when it reads as one `http` or `https` link, and everything a stranger wrote is contained.
+- **What a Message shows is derived.** Before its answer, a placeholder for each link `previewableLinksOf` finds, so its height does not change once answered, and after it, each of those links with the state of its item as it is now, shared by every link with the same id: pending, ready as its summary line (`summaryOf`), description, and image, drawn as a thumbnail for a page's or whole for a link that is itself an image, with its `src` on the Daemon's own origin and its `alt` the title or else the link, failed as the plain link with its reason in words (`reasonWords`), or waiting for a press. A link is an anchor only when it reads as one `http` or `https` link, and everything a stranger wrote is contained.
 
 ## Activity
 

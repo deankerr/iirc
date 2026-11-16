@@ -59,6 +59,7 @@ import { askRemoval } from "../options/removal.ts";
 import { changeUi } from "../options/ui.ts";
 import { showSidebar } from "../page/sidebar.ts";
 import { openPalette } from "../palette/state.ts";
+import { choosePreviews } from "../previews/atoms.ts";
 import { markRead } from "../reading/atoms.ts";
 import { showSearch } from "../search/atoms.ts";
 import { signedIn } from "../sign-in/atoms.ts";
@@ -508,6 +509,10 @@ const changeOne = (
 
     case "EditThemes": {
       return changeThemes(registry, intent.edit);
+    }
+
+    case "ChoosePreviews": {
+      return choosePreviews(registry, intent);
     }
 
     case "MarkRead": {

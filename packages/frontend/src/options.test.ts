@@ -1158,6 +1158,7 @@ describe("the options under ui", () => {
       leading: 1.45,
       light: "light",
       previews: "off",
+      "previews.timelines": {},
       read: "latest",
       size: 14,
       spellcheck: false,
@@ -1203,6 +1204,7 @@ describe("the options under ui", () => {
         { _tag: "Decimal", maximum: 2, minimum: 1, step: 0.01 },
         { _tag: "Text" },
         { _tag: "Choice", choices: ["off", "links only", "on"] },
+        { _tag: "ChoiceByKey", choices: ["off", "links only", "on"] },
         { _tag: "Choice", choices: ["shown", "latest", "asked"] },
         { _tag: "Integer", maximum: 24, minimum: 10 },
         { _tag: "Toggle" },
@@ -1233,6 +1235,7 @@ describe("the options under ui", () => {
         ["ui.leading", { _tag: "Shown", text: "1.45" }, { _tag: "Unset" }, undefined],
         ["ui.light", { _tag: "Shown", text: "light" }, { _tag: "Unset" }, undefined],
         ["ui.previews", { _tag: "Shown", text: "off" }, { _tag: "Unset" }, undefined],
+        ["ui.previews.timelines", { _tag: "Shown", text: "" }, { _tag: "Unset" }, undefined],
         ["ui.read", { _tag: "Shown", text: "latest" }, { _tag: "Unset" }, undefined],
         ["ui.size", { _tag: "Shown", text: "14" }, { _tag: "Unset" }, undefined],
         ["ui.spellcheck", { _tag: "Shown", text: "on" }, { _tag: "Unset" }, undefined],
@@ -1305,6 +1308,13 @@ describe("the options under ui", () => {
           { _tag: "Shown", text: "off" },
           undefined,
           "off",
+        ],
+        [
+          "ui.previews.timelines",
+          { _tag: "Shown", text: "" },
+          { _tag: "Shown", text: "" },
+          undefined,
+          "",
         ],
         [
           "ui.read",
@@ -1392,7 +1402,7 @@ describe("the options under ui", () => {
       kept: state.ui,
       last: listed(state, "")
         .map((option) => option.name)
-        .slice(-18),
+        .slice(-19),
       time: listed(state, "*time", { time: "HH:mm:ss" }).map((option) => option.value),
     }).toStrictEqual({
       kept: shared,
@@ -1407,6 +1417,7 @@ describe("the options under ui", () => {
         "ui.leading",
         "ui.light",
         "ui.previews",
+        "ui.previews.timelines",
         "ui.read",
         "ui.size",
         "ui.spellcheck",
@@ -1491,6 +1502,55 @@ describe("the options under ui", () => {
           "ui.previews is shared by every device, so no device overrides it. Use /set ui.previews without -device.",
       },
     });
+  });
+
+  it("offer ui.previews.timelines as each Timeline's choice, typed id=mode and read back the same", () => {
+    const one = "00000000000002-00000000-00000000";
+    const two = "00000000000003-00000000-00000000";
+    const kind: Kind = { _tag: "ChoiceByKey", choices: ["off", "links only", "on"] };
+    const typed = parseText(kind, ` ${one}=LINKS, ${two} = on `);
+    const option = uiOptionsOf(shared, {}).find((found) => found.option === "previews.timelines");
+
+    expect({
+      kind: option?.kind,
+      named: read(`/set ui.previews.timelines ${one}=links only`),
+      notAnId: read("/set ui.previews.timelines libera=on"),
+      shown: [option?.value, option?.starts],
+      twice: parseText(kind, `${one}=on,${one}=off`),
+      typed,
+      typedBack: typed._tag === "Parsed" ? parseText(kind, showText(kind, typed.value)) : undefined,
+      unknownMode: parseText(kind, `${one}=sometimes`),
+      without: parseText(kind, one),
+    }).toStrictEqual({
+      kind,
+      named: {
+        _tag: "Parsed",
+        value: [
+          {
+            _tag: "ChangeUi",
+            device: false,
+            option: "previews.timelines",
+            value: { [one]: "links only" },
+          },
+        ],
+      },
+      notAnId: { _tag: "Invalid", message: 'ui.previews.timelines cannot be "libera=on".' },
+      shown: [{ _tag: "Shown", text: "" }, ""],
+      twice: { _tag: "Invalid", message: `${one} is given more than once.` },
+      typed: { _tag: "Parsed", value: { [one]: "links only", [two]: "on" } },
+      typedBack: { _tag: "Parsed", value: { [one]: "links only", [two]: "on" } },
+      unknownMode: {
+        _tag: "Invalid",
+        message: 'Choose one of off, links only, on, not "sometimes".',
+      },
+      without: {
+        _tag: "Invalid",
+        message: `Give each as key=choice, not "${one}".`,
+      },
+    });
+    expect(showText(kind, { [one]: "links only", [two]: "on" })).toBe(
+      `${one}=links only,${two}=on`
+    );
   });
 
   it("are set and unset with /set and /unset, for every device or with -device for this one", () => {

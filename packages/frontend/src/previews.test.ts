@@ -12,19 +12,24 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
+  asksAnywhere,
   asksFor,
   asksWanted,
+  choosing,
   initialPreviews,
   mayPreview,
-  previewsModeOf,
+  modeIn,
+  pressOf,
+  previewsModesOf,
   previewsOf,
   reasonWords,
   reducePreviews,
   summaryOf,
 } from "./previews.ts";
-import type { Previews, PreviewsAsk, PreviewsEvent } from "./previews.ts";
+import type { Previews, PreviewsAsk, PreviewsEvent, PreviewsModes } from "./previews.ts";
 
 const timeline = Schema.decodeSync(TimelineId)("00000000000002-00000000-00000000");
+const other = Schema.decodeSync(TimelineId)("00000000000003-00000000-00000000");
 
 const hex = (value: bigint, digits: number) => value.toString(16).padStart(digits, "0");
 
@@ -83,6 +88,14 @@ const item = (
 ) => Schema.decodeSync(PreviewItem)({ id: idOf(letter), link, state });
 
 const pending = { _tag: "Pending" } as const;
+const waitingForPress = { _tag: "WaitingForPress" } as const;
+
+/**
+ * `ui.previews` alone, with no Timeline choosing its own.
+ * @param shown - `ui.previews`.
+ * @returns The modes.
+ */
+const everywhere = (shown: PreviewsShown): PreviewsModes => ({ shown, timelines: {} });
 const ready = { _tag: "Ready", preview: page } as const;
 
 const fold = (state: Previews, ...events: readonly PreviewsEvent[]) => {
@@ -107,7 +120,7 @@ const asking = (sequence: number) => {
     { _tag: "Shown", position: at(sequence), timeline }
   );
 
-  const [ask] = asksWanted(shown, "links only");
+  const [ask] = asksWanted(shown, everywhere("links only"));
 
   if (ask === undefined) {
     throw new Error("nothing to ask");
@@ -134,7 +147,38 @@ describe("whether to ask", () => {
       sequence: 3,
     });
 
-    expect([previewsModeOf(undefined), previewsModeOf(shared)]).toStrictEqual([undefined, "on"]);
+    expect([previewsModesOf(undefined), previewsModesOf(shared)]).toStrictEqual([
+      undefined,
+      { shown: "on", timelines: {} },
+    ]);
+  });
+
+  it("takes a Timeline's own choice over ui.previews, and ui.previews where it has none", () => {
+    const modes: PreviewsModes = { shown: "on", timelines: { [other]: "off" } };
+
+    expect([modeIn(modes, timeline), modeIn(modes, other), modeIn(undefined, other)]).toStrictEqual(
+      ["on", "off", undefined]
+    );
+  });
+
+  it("makes or removes one Timeline's own choice, leaving the others", () => {
+    const timelines = { [other]: "off", [timeline]: "on" } as const;
+
+    expect([
+      choosing(timelines, timeline, "links only"),
+      choosing(timelines, timeline, undefined),
+      choosing({}, other, undefined),
+    ]).toStrictEqual([{ [other]: "off", [timeline]: "links only" }, { [other]: "off" }, {}]);
+  });
+
+  it("follows the stream while any Timeline asks, even with ui.previews off", () => {
+    expect([
+      asksAnywhere(undefined),
+      asksAnywhere(everywhere("off")),
+      asksAnywhere({ shown: "off", timelines: { [other]: "off" } }),
+      asksAnywhere({ shown: "off", timelines: { [other]: "links only" } }),
+      asksAnywhere({ shown: "on", timelines: { [other]: "off" } }),
+    ]).toStrictEqual([false, false, false, true, true]);
   });
 
   it("watches only a Message with a link that may be previewed, while the mode asks", () => {
@@ -151,9 +195,9 @@ describe("asking", () => {
   it("asks for a Message only once it was shown, and only while the stream is followed", () => {
     const shown = fold(initialPreviews, { _tag: "Shown", position: at(1), timeline });
 
-    expect(asksWanted(initialPreviews, "on")).toStrictEqual([]);
-    expect(asksWanted(shown, "on")).toStrictEqual([]);
-    expect(asksWanted(fold(shown, { _tag: "Followed" }), "on")).toHaveLength(1);
+    expect(asksWanted(initialPreviews, everywhere("on"))).toStrictEqual([]);
+    expect(asksWanted(shown, everywhere("on"))).toStrictEqual([]);
+    expect(asksWanted(fold(shown, { _tag: "Followed" }), everywhere("on"))).toHaveLength(1);
   });
 
   it("never asks while the mode is off, or unknown", () => {
@@ -163,7 +207,10 @@ describe("asking", () => {
       { _tag: "Shown", position: at(1), timeline }
     );
 
-    expect([asksWanted(shown, "off"), asksWanted(shown, undefined)]).toStrictEqual([[], []]);
+    expect([asksWanted(shown, everywhere("off")), asksWanted(shown, undefined)]).toStrictEqual([
+      [],
+      [],
+    ]);
   });
 
   it("asks once for a Message shown again and again", () => {
@@ -176,17 +223,17 @@ describe("asking", () => {
       { _tag: "Shown", position: at(1), timeline }
     );
 
-    expect(asksWanted(state, "on")).toStrictEqual([]);
-    expect(asksWanted(again, "on")).toStrictEqual([]);
+    expect(asksWanted(state, everywhere("on"))).toStrictEqual([]);
+    expect(asksWanted(again, everywhere("on"))).toStrictEqual([]);
   });
 
   it("never asks again for a Message the Daemon refused", () => {
     const { ask, state } = asking(1);
     const refused = fold(state, { _tag: "Refused", ask });
 
-    expect(asksWanted(fold(refused, { _tag: "Lost" }, { _tag: "Followed" }), "on")).toStrictEqual(
-      []
-    );
+    expect(
+      asksWanted(fold(refused, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on"))
+    ).toStrictEqual([]);
     expect(previewsOf(refused, "on", timeline, at(1), links)).toStrictEqual([]);
   });
 
@@ -194,9 +241,11 @@ describe("asking", () => {
     const { ask, state } = asking(1);
     const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", pending)] });
 
-    expect(asksWanted(fold(answered, { _tag: "Lost" }), "on")).toStrictEqual([]);
+    expect(asksWanted(fold(answered, { _tag: "Lost" }), everywhere("on"))).toStrictEqual([]);
     expect(
-      asksWanted(fold(answered, { _tag: "Lost" }, { _tag: "Followed" }), "on").map((one) => one.key)
+      asksWanted(fold(answered, { _tag: "Lost" }, { _tag: "Followed" }), everywhere("on")).map(
+        (one) => one.key
+      )
     ).toStrictEqual([ask.key]);
   });
 
@@ -211,7 +260,7 @@ describe("asking", () => {
       { _tag: "Followed" }
     );
 
-    expect(asksWanted(settled, "on")).toStrictEqual([]);
+    expect(asksWanted(settled, everywhere("on"))).toStrictEqual([]);
   });
 
   it("asks again for an ask in flight when the stream was lost, and takes no answer of the first", () => {
@@ -219,7 +268,118 @@ describe("asking", () => {
     const lost = fold(state, { _tag: "Lost" }, { _tag: "Followed" });
     const late = fold(lost, { _tag: "Answered", ask, previews: [item("a", pending)] });
 
-    expect(asksWanted(late, "on").map((one) => one.key)).toStrictEqual([ask.key]);
+    expect(asksWanted(late, everywhere("on")).map((one) => one.key)).toStrictEqual([ask.key]);
+  });
+});
+
+describe("asking per Timeline", () => {
+  it("asks only for Messages in a Timeline whose own mode asks", () => {
+    const shown = fold(
+      initialPreviews,
+      { _tag: "Followed" },
+      { _tag: "Shown", position: at(1), timeline },
+      { _tag: "Shown", position: at(2), timeline: other }
+    );
+
+    const keys = (modes: PreviewsModes) => asksWanted(shown, modes).map((one) => one.timeline);
+
+    expect([
+      keys({ shown: "on", timelines: { [other]: "off" } }),
+      keys({ shown: "off", timelines: { [other]: "links only" } }),
+    ]).toStrictEqual([[timeline], [other]]);
+  });
+
+  it("asks again for a Message waiting for a press once its Timeline chooses to be previewed", () => {
+    const { ask, state } = asking(1);
+    const answered = fold(state, { _tag: "Answered", ask, previews: [item("a", waitingForPress)] });
+    const chosen: PreviewsModes = { shown: "links only", timelines: { [timeline]: "on" } };
+    const [again] = asksWanted(answered, chosen);
+
+    if (again === undefined) {
+      throw new Error("nothing to ask");
+    }
+
+    const reanswered = fold(
+      answered,
+      { _tag: "Asked", ask: again },
+      { _tag: "Answered", ask: again, previews: [item("a", pending)] }
+    );
+
+    expect({
+      default: asksWanted(answered, everywhere("on")),
+      onceAnswered: asksWanted(reanswered, chosen),
+      shown: previewsOf(reanswered, "on", timeline, at(1), said("https://a.example/")).map(
+        (one) => one._tag
+      ),
+    }).toStrictEqual({ default: [], onceAnswered: [], shown: ["Pending"] });
+  });
+});
+
+/**
+ * A Message answered with a ready Preview and a link waiting for a press.
+ * @returns The state.
+ */
+const waiting = () => {
+  const { ask, state } = asking(1);
+
+  return fold(state, {
+    _tag: "Answered",
+    ask,
+    previews: [item("a", ready), item("b", waitingForPress)],
+  });
+};
+
+describe("a link waiting for a press", () => {
+  it("is drawn as the plain link with a press, by its index among the Message's links", () => {
+    expect(previewsOf(waiting(), "on", timeline, at(1), links)).toStrictEqual([
+      expect.objectContaining({ _tag: "Ready", key: "0" }),
+      {
+        _tag: "Waiting",
+        index: 1,
+        key: "1",
+        link: { href: "https://b.example/", text: "https://b.example/" },
+      },
+    ]);
+  });
+
+  it("is a press of its Message's place and its index, at the stream's count", () => {
+    const state = fold(waiting(), { _tag: "Changed", item: item("a", ready) });
+
+    expect(pressOf(state, timeline, at(1), 1)).toStrictEqual({
+      key: asking(1).ask.key,
+      link: 1,
+      position: at(1),
+      since: 1,
+      timeline,
+    });
+  });
+
+  it("shows what a press answered, unless the stream changed it since", () => {
+    const state = waiting();
+    const press = pressOf(state, timeline, at(1), 1);
+    const pressed = fold(state, { _tag: "Pressed", item: item("b", pending), press });
+
+    const raced = fold(
+      state,
+      { _tag: "Changed", item: item("b", ready) },
+      { _tag: "Pressed", item: item("b", pending), press }
+    );
+
+    const tags = (one: Previews) =>
+      previewsOf(one, "on", timeline, at(1), links).map((shown) => shown._tag);
+
+    expect([tags(pressed), tags(raced)]).toStrictEqual([
+      ["Ready", "Pending"],
+      ["Ready", "Ready"],
+    ]);
+  });
+
+  it("asks its Message again when a press is refused, so what is drawn is the Daemon's", () => {
+    const state = waiting();
+    const press = pressOf(state, timeline, at(1), 1);
+    const refused = fold(state, { _tag: "PressRefused", press });
+
+    expect(asksWanted(refused, everywhere("on")).map((one) => one.key)).toStrictEqual([press.key]);
   });
 });
 
@@ -234,7 +394,7 @@ describe("folding a change", () => {
     });
 
     const shown = fold(one, { _tag: "Shown", position: at(2), timeline });
-    const [second] = asksWanted(shown, "on");
+    const [second] = asksWanted(shown, everywhere("on"));
 
     if (second === undefined) {
       throw new Error("nothing to ask");
@@ -280,7 +440,7 @@ describe("folding a change", () => {
       { _tag: "Shown", position: at(2), timeline }
     );
 
-    const [second] = asksWanted(failed, "on");
+    const [second] = asksWanted(failed, everywhere("on"));
 
     if (second === undefined) {
       throw new Error("nothing to ask");
@@ -385,10 +545,10 @@ describe("what a Message shows", () => {
         reason: "No preview: the Daemon never fetches this address.",
       },
       {
-        _tag: "Plain",
+        _tag: "Waiting",
+        index: 2,
         key: "2",
         link: { href: "https://c.example/", text: "https://c.example/" },
-        reason: undefined,
       },
       {
         _tag: "Pending",
@@ -448,7 +608,7 @@ describe("what a Message shows", () => {
       { _tag: "Shown", position: at(2), timeline }
     );
 
-    const [second] = asksWanted(answered, "on");
+    const [second] = asksWanted(answered, everywhere("on"));
 
     if (second === undefined) {
       throw new Error("nothing to ask");
