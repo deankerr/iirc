@@ -905,7 +905,12 @@ describe("the link listener", () => {
         const record = yield* uploaded(served, png, "cat.png");
         const got = yield* fromBound(port, pathOf(record.link));
 
-        return { bytes: yield* bytesOf(got), headers: headersOf(got), status: statusOf(got) };
+        return {
+          bytes: yield* bytesOf(got),
+          headers: headersOf(got),
+          id: record.id,
+          status: statusOf(got),
+        };
       })
     );
 
@@ -913,11 +918,14 @@ describe("the link listener", () => {
       bytes: png,
       headers: {
         ...safety,
+        "accept-ranges": "bytes",
         "cache-control": "no-cache",
         "content-disposition": `inline; filename="cat.png"; filename*=UTF-8''cat.png`,
         "content-length": String(png.length),
         "content-type": "image/png",
+        etag: `"${result.id}"`,
       },
+      id: result.id,
       status: 200,
     });
   });
@@ -1434,6 +1442,7 @@ describe("an Upload's bytes on the API", () => {
         return {
           bytes: yield* bytesOf(content),
           headers: headersOf(content),
+          id: record.id,
           link: headersOf(link),
           status: content.status,
         };
@@ -1443,12 +1452,15 @@ describe("an Upload's bytes on the API", () => {
     expect(result).toStrictEqual({
       bytes: png,
       headers: result.link,
+      id: result.id,
       link: {
         ...safety,
+        "accept-ranges": "bytes",
         "cache-control": "no-cache",
         "content-disposition": `inline; filename="cat.png"; filename*=UTF-8''cat.png`,
         "content-length": String(png.length),
         "content-type": "image/png",
+        etag: `"${result.id}"`,
       },
       status: 200,
     });

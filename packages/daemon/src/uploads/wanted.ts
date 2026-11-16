@@ -1,7 +1,6 @@
 /**
- * What a request for an Upload's bytes wants, read from its method and its conditional and
- * range headers, as RFC 9110 orders them: `If-None-Match` first, then `If-Range`, then
- * `Range`, which only a `GET` has.
+ * What a `GET` or `HEAD` of an Upload's bytes wants, read from its conditional and range
+ * headers, as RFC 9110 orders them: `If-None-Match` first, then `If-Range`, then `Range`.
  *
  * @packageDocumentation
  */
@@ -19,7 +18,6 @@ export type Wanted =
 
 /** The parts of a request what it wants is read from, its header names in lower case. */
 export interface Asking {
-  readonly method: string;
   readonly headers: Readonly<Record<string, string | undefined>>;
 }
 
@@ -99,17 +97,18 @@ const rangeOf = (header: string | undefined, size: number): Wanted => {
  * @param size - How many bytes there are.
  * @returns What it wants.
  */
-export const wantedOf = ({ headers, method }: Asking, tag: string, size: number): Wanted => {
+export const wantedOf = ({ headers }: Asking, tag: string, size: number): Wanted => {
   const ifNoneMatch = headers["if-none-match"];
 
   if (ifNoneMatch !== undefined && holds(ifNoneMatch, tag)) {
     return { _tag: "Unchanged" };
   }
 
-  // Only a `GET` is answered in part, and only while the bytes it holds part of are current.
+  // A part is answered only while the bytes it holds part of are current. A `HEAD` is
+  // answered as its `GET` would be, as RFC 9110 asks of its headers, range and all.
   const ifRange = headers["if-range"];
 
-  if (method !== "GET" || (ifRange !== undefined && ifRange.trim() !== tag)) {
+  if (ifRange !== undefined && ifRange.trim() !== tag) {
     return whole;
   }
 

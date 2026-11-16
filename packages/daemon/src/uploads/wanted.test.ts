@@ -4,7 +4,7 @@ import { wantedOf } from "./wanted.ts";
 
 const tag = '"k3x9abcdefgh7f2q"';
 
-const get = (headers: Record<string, string>) => wantedOf({ headers, method: "GET" }, tag, 10);
+const get = (headers: Record<string, string>) => wantedOf({ headers }, tag, 10);
 
 describe("what a request for bytes wants", () => {
   it("is the whole with no Range", () => {
@@ -79,15 +79,5 @@ describe("what a request for bytes wants", () => {
       get({ "if-range": `W/${tag}`, range: "bytes=2-5" }),
       get({ "if-range": "Wed, 21 Oct 2026 07:28:00 GMT", range: "bytes=2-5" }),
     ]).toStrictEqual([{ _tag: "Part", end: 6, start: 2 }, { _tag: "Whole" }, { _tag: "Whole" }]);
-  });
-
-  it("never answers a HEAD in part, though it may be unchanged", () => {
-    const head = (headers: Record<string, string>) =>
-      wantedOf({ headers, method: "HEAD" }, tag, 10);
-
-    expect([head({ range: "bytes=2-5" }), head({ "if-none-match": tag })]).toStrictEqual([
-      { _tag: "Whole" },
-      { _tag: "Unchanged" },
-    ]);
   });
 });
