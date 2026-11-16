@@ -498,6 +498,46 @@ export const PreviewsByTimeline = Schema.Record(
 /** The decoded form of {@link PreviewsByTimeline}. */
 export type PreviewsByTimeline = typeof PreviewsByTimeline.Type;
 
+/**
+ * A host a player may play from: a DNS name of two labels or more, in lower case, with no
+ * port, as the URL parser writes a link's host. A player's address matches it only when its
+ * host is exactly this, so no other host under it, and no name that contains it, plays.
+ */
+export const PlayerHost = Schema.String.check(
+  Schema.isPattern(
+    /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u,
+    { message: "must be a host name in lower case, such as player.vimeo.com, with no port" }
+  )
+).annotate({ identifier: "PlayerHost" });
+
+/** The decoded form of {@link PlayerHost}. */
+export type PlayerHost = typeof PlayerHost.Type;
+
+/**
+ * The hosts a link's player may play from, each matched exactly. A page whose `og:video` or
+ * `twitter:player` names a host not listed is a page Preview, with its image. A YouTube
+ * player is always read as `www.youtube-nocookie.com`, whatever YouTube host it names. The
+ * defaults are the hosts YouTube, Vimeo, SoundCloud, Bandcamp, Spotify and Twitch name in
+ * their tags. It decides which third parties a page may load, so it is shared only: no
+ * device adds a host for itself.
+ */
+export const PreviewsPlayers = Schema.Array(PlayerHost).annotate({
+  ...sharedOnly,
+  default: [
+    "www.youtube-nocookie.com",
+    "player.vimeo.com",
+    "w.soundcloud.com",
+    "bandcamp.com",
+    "open.spotify.com",
+    "player.twitch.tv",
+  ],
+  description:
+    "The hosts a link's player may play from, each matched exactly, so a player from any other host shows as a page. YouTube's players always play from www.youtube-nocookie.com. Every device shares it.",
+});
+
+/** The decoded form of {@link PreviewsPlayers}. */
+export type PreviewsPlayers = typeof PreviewsPlayers.Type;
+
 /** The options under `ui`, each with its description and what it starts as. */
 export const UiOptions = Schema.Struct({
   activity: ActivityShown,
@@ -510,6 +550,7 @@ export const UiOptions = Schema.Struct({
   light: themeForScheme("light", "solarized-light"),
   previews: PreviewsShown,
   "previews.animate": PreviewsAnimate,
+  "previews.players": PreviewsPlayers,
   "previews.timelines": PreviewsByTimeline,
   read: ReadRule,
   size: TextSize,

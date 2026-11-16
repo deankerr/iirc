@@ -98,6 +98,7 @@ const ready = {
     image: null,
     kind: "page",
     link: "https://example.com/cats",
+    player: null,
     site: "example.com",
     title: "Cats",
     type: null,
@@ -139,6 +140,37 @@ const readyMedia = (kind: "video" | "audio") =>
       kind,
       title: null,
       type: kind === "video" ? "video/mp4" : "audio/ogg",
+    },
+  }) as const;
+
+/** Where the page's player plays from, which no page of ours may ever draw or load. */
+const playerAddress = "https://www.youtube-nocookie.com/embed/abc123";
+const playerHost = "www.youtube-nocookie.com";
+
+/**
+ * A ready Preview of the link, which is a player from a listed host.
+ * @param poster - Whether the Daemon kept the poster.
+ * @param animated - Whether the poster moves.
+ * @returns Its state.
+ */
+const readyPlayer = (poster: boolean, animated = false) =>
+  ({
+    _tag: "Ready",
+    preview: {
+      ...ready.preview,
+      description: null,
+      image: poster
+        ? {
+            animated,
+            hash,
+            size: 1234,
+            type: animated ? ("image/gif" as const) : ("image/jpeg" as const),
+          }
+        : null,
+      kind: "player",
+      link: "https://www.youtube.com/watch?v=abc123",
+      player: { link: playerAddress, size: { height: 360, width: 640 } },
+      title: "A song",
     },
   }) as const;
 
@@ -451,6 +483,39 @@ const animated = () => ({
   playing: list()?.querySelector("img")?.getAttribute("src") ?? null,
 });
 
+/**
+ * Opens the Message with the player's Preview ready, and its poster, if any, in view.
+ * @param poster - Whether the Daemon kept a poster.
+ * @param mode - `ui.previews`, on unless given.
+ */
+const withPlayer = async (poster: boolean, mode: "on" | "links only" = "on") => {
+  const { daemon } = await opened(mode, catsItem(readyPlayer(poster)));
+
+  await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+  await scrolledIntoView();
+  await settled(() => drawn()[0]?.state === "ready");
+
+  if (poster && mode === "on") {
+    await imageSeen();
+    await settled(() => list()?.querySelector("img") !== null);
+  }
+};
+
+const playButton = () => imageButton(`Play from ${playerHost}`);
+
+/**
+ * Every attribute in the page that holds the player's address.
+ * @returns Each, as its element and name.
+ */
+const holdingAddress = () =>
+  [...document.body.querySelectorAll("*")].flatMap((element) =>
+    [...element.attributes].flatMap((attribute) =>
+      /embed\/abc123|youtube-nocookie\.com\//u.test(attribute.value)
+        ? [`${element.localName}[${attribute.name}]`]
+        : []
+    )
+  );
+
 describe("a Message's Previews", () => {
   beforeEach(() => {
     layOut();
@@ -679,6 +744,135 @@ describe("a Message's Previews", () => {
       state: drawn()[0]?.state,
       text: summaryLine(),
     }).toStrictEqual({ media: 0, state: "ready", text: "video · video/mp4 · example.com" });
+  });
+
+  describe("a player", () => {
+    it("draws its poster from the media route, with a play button that says where it plays from", async () => {
+      await withPlayer(true);
+
+      const image = list()?.querySelector("img");
+      const button = playButton();
+
+      expect({
+        alt: image?.getAttribute("alt"),
+        disabled: button?.disabled,
+        drawn: image?.dataset.drawn,
+        hover: button?.closest("[title]")?.getAttribute("title"),
+        src: image?.getAttribute("src"),
+        text: list()?.textContent,
+      }).toStrictEqual({
+        alt: "A song",
+        disabled: true,
+        drawn: "poster",
+        hover: `plays from ${playerHost}`,
+        src: `/api/previews/media/${hash}`,
+        text: "example.com · A song▶",
+      });
+    });
+
+    it("draws no frame, and holds the player's address in no attribute, with or without a poster", async () => {
+      await withPlayer(true);
+
+      const withPoster = {
+        address: holdingAddress(),
+        frames: document.body.querySelectorAll("iframe, frame, embed, object").length,
+      };
+
+      for (const unmount of mounted.splice(0)) {
+        act(unmount);
+      }
+
+      await withPlayer(false);
+
+      expect({
+        withPoster,
+        without: {
+          address: holdingAddress(),
+          frames: document.body.querySelectorAll("iframe, frame, embed, object").length,
+        },
+      }).toStrictEqual({
+        withPoster: { address: [], frames: 0 },
+        without: { address: [], frames: 0 },
+      });
+    });
+
+    it("does not open the larger view when its poster is pressed", async () => {
+      await withPlayer(true);
+
+      await act(async () => {
+        list()?.querySelector("img")?.click();
+        await Promise.resolve();
+      });
+
+      expect({
+        dialog: larger(),
+        pressable: list()?.querySelector("img")?.closest("button"),
+      }).toStrictEqual({ dialog: null, pressable: null });
+    });
+
+    it("draws the text row with the same play button when the Daemon kept no poster", async () => {
+      await withPlayer(false);
+
+      expect({
+        button: playButton()?.closest("[title]")?.getAttribute("title"),
+        image: list()?.querySelector("img"),
+        text: list()?.textContent?.includes("example.com · A song"),
+      }).toStrictEqual({ button: `plays from ${playerHost}`, image: null, text: true });
+    });
+
+    it("falls back to the text row with the play button when its poster fails to load", async () => {
+      await withPlayer(true);
+
+      await act(async () => {
+        list()?.querySelector("img")?.dispatchEvent(new Event("error"));
+        await Promise.resolve();
+      });
+
+      expect({
+        button: playButton()?.closest("[title]")?.getAttribute("title"),
+        image: list()?.querySelector("img"),
+        text: list()?.textContent?.includes("example.com · A song"),
+      }).toStrictEqual({ button: `plays from ${playerHost}`, image: null, text: true });
+    });
+
+    it("draws an animated poster as its first frame, still, with the play button over it", async () => {
+      const media = stubMedia();
+      const { daemon } = await opened("on", catsItem(readyPlayer(true, true)));
+
+      await settled(() => daemon.previewFollowers.length === 1 && list() !== null);
+      await scrolledIntoView();
+      await settled(() => drawn()[0]?.state === "ready");
+      await imageSeen();
+      await settled(() => list()?.querySelector("canvas") !== null);
+
+      expect({
+        button: playButton()?.disabled,
+        fetches: media.fetches(),
+        image: list()?.querySelector("img"),
+        pressable: list()?.querySelector("canvas")?.closest("button"),
+      }).toStrictEqual({
+        button: true,
+        fetches: [`/api/previews/media/${hash}`],
+        image: null,
+        pressable: null,
+      });
+    });
+
+    it("is its text alone under links only: no poster, no play button", async () => {
+      await withPlayer(true, "links only");
+
+      expect({
+        button: playButton(),
+        buttons: list()?.querySelectorAll("button").length,
+        image: list()?.querySelector("img"),
+        text: list()?.textContent,
+      }).toStrictEqual({
+        button: null,
+        buttons: 0,
+        image: null,
+        text: "example.com · A song",
+      });
+    });
   });
 
   it("falls back to the text row when an image fails to load", async () => {

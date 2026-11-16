@@ -14,7 +14,7 @@ import {
   PreviewsRequest,
   PressRequest,
 } from "./previews.ts";
-import { UiOptions, uiDefaults, uiSharedOnly } from "./ui.ts";
+import { PlayerHost, UiOptions, uiDefaults, uiSharedOnly } from "./ui.ts";
 
 const id = "0123456789abcdef0123456789abcdef";
 
@@ -23,6 +23,7 @@ const page = {
   image: null,
   kind: "page",
   link: "https://example.com/cats",
+  player: null,
   site: "example.com",
   title: "Cats",
   type: null,
@@ -43,9 +44,29 @@ const states = [
       },
       kind: "image",
       link: "https://example.com/cat.png",
+      player: null,
       site: "example.com",
       title: null,
       type: "image/png",
+    },
+  },
+  {
+    _tag: "Ready",
+    preview: {
+      ...page,
+      kind: "player",
+      player: {
+        link: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+        size: { height: 720, width: 1280 },
+      },
+    },
+  },
+  {
+    _tag: "Ready",
+    preview: {
+      ...page,
+      kind: "player",
+      player: { link: "https://player.vimeo.com/video/1", size: null },
     },
   },
   { _tag: "WaitingForPress" },
@@ -88,9 +109,32 @@ describe("Previews on the wire", () => {
           },
         },
         { _tag: "Ready", preview: { description: null, kind: "page", link: page.link, site: "x" } },
+        { _tag: "Ready", preview: { ...page, player: undefined } },
+        { _tag: "Ready", preview: { ...page, player: { link: page.link } } },
+        {
+          _tag: "Ready",
+          preview: { ...page, player: { link: page.link, size: { height: 0, width: 640 } } },
+        },
+        {
+          _tag: "Ready",
+          preview: { ...page, player: { link: page.link, size: { height: 360.5, width: 640 } } },
+        },
         { _tag: "Loading" },
       ].map((each) => Option.isSome(state(each)))
-    ).toStrictEqual([false, false, false, false, false, false, false, false]);
+    ).toStrictEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 
   it("takes a Preview's id as 32 lower-case hex digits, and nothing else", () => {
@@ -193,9 +237,82 @@ describe("ui.previews", () => {
       ),
     }).toStrictEqual({
       default: "off",
-      sharedOnly: ["previews", "previews.timelines"],
+      sharedOnly: ["previews", "previews.players", "previews.timelines"],
       taken: [true, true, true, false, false, false],
     });
+  });
+});
+
+describe("ui.previews.players", () => {
+  it("lists the embed hosts the six services name by default, and no device overrides it", () => {
+    expect({
+      default: uiDefaults["previews.players"],
+      sharedOnly: uiSharedOnly.has("previews.players"),
+    }).toStrictEqual({
+      default: [
+        "www.youtube-nocookie.com",
+        "player.vimeo.com",
+        "w.soundcloud.com",
+        "bandcamp.com",
+        "open.spotify.com",
+        "player.twitch.tv",
+      ],
+      sharedOnly: true,
+    });
+  });
+
+  it("takes host names in lower case alone, with no port, scheme, path, wildcard or space", () => {
+    const host = Schema.decodeUnknownOption(PlayerHost);
+
+    expect(
+      [
+        "player.vimeo.com",
+        "bandcamp.com",
+        "127.0.0.1",
+        "xn--bcher-kva.example",
+        "Player.Vimeo.com",
+        "player.vimeo.com:443",
+        "https://player.vimeo.com",
+        "player.vimeo.com/video",
+        "*.vimeo.com",
+        ".vimeo.com",
+        "vimeo.com.",
+        "localhost",
+        " player.vimeo.com",
+        "player..vimeo.com",
+        "-player.vimeo.com",
+        "",
+        `${"a".repeat(64)}.com`,
+      ].map((each) => Option.isSome(host(each)))
+    ).toStrictEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("takes an empty list, and refuses a list holding one host it does not take", () => {
+    const options = Schema.decodeUnknownOption(UiOptions);
+
+    expect(
+      [[], ["player.vimeo.com"], ["player.vimeo.com", "*.evil.test"]].map((players) =>
+        Option.isSome(options({ ...uiDefaults, "previews.players": players }))
+      )
+    ).toStrictEqual([true, true, false]);
   });
 });
 

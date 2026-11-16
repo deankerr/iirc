@@ -2,9 +2,19 @@ import { Effect, Option, Schema } from "effect";
 import { decodeHTML, decodeHTMLAttribute } from "entities/decode";
 
 /**
+ * A player a page names, as an address kept as data: nothing here fetches it, or says it may
+ * play. Its size is the one the page gave beside it, or null.
+ */
+export interface PlayerCandidate {
+  readonly link: string;
+  readonly size: { readonly width: number; readonly height: number } | null;
+}
+
+/**
  * What a page says of itself. The image is an address kept as data: nothing here fetches it.
  * The oEmbed address is the one the page itself names, for the Daemon to fetch and then fill
- * the gaps with {@link fillFromOembed}.
+ * the gaps with {@link fillFromOembed}. The players are the ones it names, in the order they
+ * are tried, and are present only when it names one.
  */
 export interface PageRead {
   readonly title?: string;
@@ -14,6 +24,7 @@ export interface PageRead {
   readonly imageWidth?: number;
   readonly imageHeight?: number;
   readonly oembed?: string;
+  readonly players?: readonly PlayerCandidate[];
 }
 
 const TITLE_LIMIT = 200;
@@ -370,7 +381,50 @@ interface Draft {
   imageWidth?: number;
   imageHeight?: number;
   oembed?: string;
+  players?: readonly PlayerCandidate[];
 }
+
+// A size is one whole number of CSS pixels, in plain decimal digits and more than zero.
+const dimension = (value: string | undefined): number | undefined => {
+  const digits = tidy(value);
+
+  if (digits === undefined || !/^\d+$/u.test(digits)) {
+    return undefined;
+  }
+
+  const number = Number(digits);
+
+  return Number.isSafeInteger(number) && number > 0 ? number : undefined;
+};
+
+// The players a page names, each beside the size its own tags give, in the order they are
+// tried and without repeating an address.
+const playersOf = (meta: ReadonlyMap<string, string>, base: string): PlayerCandidate[] => {
+  const named = [
+    ["og:video:secure_url", "og:video"],
+    ["og:video:url", "og:video"],
+    ["og:video", "og:video"],
+    ["twitter:player", "twitter:player"],
+  ] as const;
+
+  const found = new Map<string, PlayerCandidate>();
+
+  for (const [key, sized] of named) {
+    const link = httpAddress(firstOf(meta, [key]), base);
+
+    if (link !== undefined && !found.has(link)) {
+      const width = dimension(meta.get(`${sized}:width`));
+      const height = dimension(meta.get(`${sized}:height`));
+
+      found.set(link, {
+        link,
+        size: width === undefined || height === undefined ? null : { height, width },
+      });
+    }
+  }
+
+  return [...found.values()];
+};
 
 /**
  * A page's head and its Content-Type in, what it says of itself out.
@@ -411,6 +465,7 @@ export const readPage = (input: {
   );
 
   const page: Draft = {};
+  const players = playersOf(meta, base);
 
   if (title !== undefined) {
     page.title = title;
@@ -432,6 +487,10 @@ export const readPage = (input: {
 
   if (oembed !== undefined) {
     page.oembed = oembed;
+  }
+
+  if (players.length > 0) {
+    page.players = players;
   }
 
   return page;

@@ -4,7 +4,9 @@
  * to its description, a failed one as the plain link, saying why on hover, and one the
  * Daemon holds for a press as the plain link and "show preview", which fetches it. A link
  * that is itself a video or a sound is its summary with a native player under it, which
- * fetches nothing until pressed. An image is loaded only once it scrolls into view. Its
+ * fetches nothing until pressed. A player is its text with its poster under it and a play
+ * button, which says where it plays from, over the poster, or beside the text with no
+ * poster; nothing loads from where it plays from. An image is loaded only once it scrolls into view. Its
  * Previews are asked for only once the Message scrolls into view, as an intersection
  * observer sees it, never ahead, and only while its Timeline's mode asks.
  *
@@ -18,9 +20,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button as AriaButton, Disclosure, DisclosurePanel } from "react-aria-components";
 
 import { pressPreview, previewsModes, previewsShown, previewsState } from "./atoms.ts";
-import { PreviewImage } from "./preview-image.tsx";
+import { PlayButton } from "./play-button.tsx";
+import { PreviewImage, PreviewPoster } from "./preview-image.tsx";
 
 import styles from "./message-previews.module.css";
+
+/** No host listed as a player, before the shared options are read. */
+const noPlayers: readonly string[] = [];
 
 /**
  * A link as a Preview draws it: an anchor that opens in a new tab, or its text alone when
@@ -142,7 +148,7 @@ const PreviewRow = ({
 
     case "Ready": {
       const text = <ReadyText shown={shown} />;
-      const { image, media } = shown;
+      const { image, media, player } = shown;
 
       // A link that is itself a video or a sound is its text, with the player under it,
       // and one that fails to play leaves the text alone.
@@ -151,6 +157,24 @@ const PreviewRow = ({
           <div className={styles.media} data-preview="ready">
             {text}
             <PreviewMedia key={media.src} media={media} name={shown.summary} />
+          </div>
+        );
+      }
+
+      // A player is its text with its poster under it, and a play button over the poster. With
+      // no poster, or once it fails to load, the text has the play button beside it. Nothing
+      // else of it is drawn, and nothing is loaded from where it plays from.
+      if (player !== undefined) {
+        return (
+          <div className={styles.ready} data-preview="ready">
+            {image?.drawn === "Poster" ? (
+              <PreviewPoster image={image} key={image.src} player={player} text={text} />
+            ) : (
+              <>
+                {text}
+                <PlayButton over="text" player={player} />
+              </>
+            )}
           </div>
         );
       }
@@ -222,11 +246,12 @@ export const MessagePreviews = ({ item }: { readonly item: TimelineItem }) => {
   const block = useRef<HTMLUListElement>(null);
   const { content, position, timeline } = item;
   const mode = modeIn(modes, timeline);
+  const players = modes?.players ?? noPlayers;
   const watched = mayPreview(mode, content);
 
   const shown = useMemo(
-    () => previewsOf(state, mode, timeline, position, content),
-    [content, mode, position, state, timeline]
+    () => previewsOf(state, mode, timeline, position, content, players),
+    [content, mode, players, position, state, timeline]
   );
 
   // Seen once, and asked for then: the core asks for a Message once, however often it

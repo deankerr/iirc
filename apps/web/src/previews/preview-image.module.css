@@ -15,7 +15,10 @@
   background: var(--color-surface);
 }
 
-/* A link that is itself an image: as tall as the medium size, never wider than the column. */
+/*
+ * A link that is itself an image, or a player's poster: as tall as the medium size, never
+ * wider than the column.
+ */
 .whole {
   position: relative;
   display: block;
@@ -28,6 +31,19 @@
 .whole[data-loaded="false"] {
   width: 12em;
   height: 6em;
+}
+
+/* A player's poster under its text, which keeps its own height. */
+.stacked {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.stacked > * {
+  flex: none;
 }
 
 /* The press of an image fills its box, and is nothing but the image. */

@@ -4,6 +4,7 @@ declare const styles: {
   readonly enlarge: string;
   readonly picture: string;
   readonly press: string;
+  readonly stacked: string;
   readonly thumbnail: string;
   readonly whole: string;
 };

@@ -346,6 +346,7 @@ const media = (link: string, kind: string, type: string) => ({
     image: null,
     kind,
     link,
+    player: null,
     site: new URL(link).host,
     title: null,
     type,
@@ -397,6 +398,7 @@ describe("Previews over a real server", () => {
               image: null,
               kind: "page",
               link: "https://cats.example/",
+              player: null,
               site: "Cat News",
               title: "Cats",
               type: null,
@@ -809,6 +811,7 @@ const ready = (preview: Partial<Record<string, string | null>>) => ({
     image: null,
     kind: "page",
     link: "https://page.example/",
+    player: null,
     site: "page.example",
     title: null,
     type: null,
@@ -1412,6 +1415,7 @@ describe("a Preview's image over a real server", () => {
         image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
         kind: "page",
         link: CAT,
+        player: null,
         site: "cat.example",
         title: "Cat",
         type: null,
@@ -1473,6 +1477,7 @@ describe("a Preview's image over a real server", () => {
         image: { animated: true, hash: sha256(gif), size: gif.length, type: "image/gif" },
         kind: "image",
         link,
+        player: null,
         site: "image.example",
         title: null,
         type: "image/gif",
@@ -1545,6 +1550,7 @@ describe("a Preview's image over a real server", () => {
         image: null,
         kind: "page",
         link: CAT,
+        player: null,
         site: "cat.example",
         title: "Cat",
         type: null,
@@ -3443,5 +3449,305 @@ describe("a link that is itself video or sound, streamed over a real server", ()
     );
 
     expect(result).toStrictEqual({ asked: [], status: 401 });
+  });
+});
+
+/**
+ * A page that names a player in the tags a service puts in its pages, and a poster.
+ * @param player - The player's address.
+ * @param size - Its width and height as `WxH`.
+ * @returns What the link answers.
+ */
+const playerPage = (player: string, size = "1280x720") => {
+  const [width, height] = size.split("x");
+
+  return page(
+    `<title>Clip</title><meta property="og:image" content="${CAT_IMAGE}">` +
+      `<meta property="og:video:url" content="${player}">` +
+      `<meta property="og:video:width" content="${width}"><meta property="og:video:height" content="${height}">`
+  );
+};
+
+const VIMEO = "https://player.vimeo.com/video/76979871?h=8272103f6e";
+const CLIP = "https://clip.example/watch";
+
+/**
+ * Sets `ui.previews.players`.
+ * @param served - The server.
+ * @param value - The hosts.
+ * @returns An Effect that sets it.
+ */
+const setPlayers = (served: Served, value: readonly string[]) =>
+  expecting(
+    served.request("/api/ui/previews.players", { method: "PUT", ...json({ value: [...value] }) }),
+    200
+  );
+
+/**
+ * What the one link of the one Message answers now.
+ * @param served - The server.
+ * @returns Its state.
+ */
+const answeredNow = (served: Served) =>
+  Effect.gen(function* () {
+    const [place] = yield* messages(served, 1);
+    const [item] = yield* settled(served, place ?? { position: "", text: "", timeline: "" });
+
+    return item?.state;
+  });
+
+/**
+ * A Preview's `kind`, `player` and whether it holds an image, from a Ready state.
+ * @param state - The state.
+ * @returns Those, or the state itself when it is not Ready.
+ */
+const playing = (state: PreviewItem["state"] | undefined) =>
+  state?._tag === "Ready"
+    ? {
+        image: state.preview.image !== null,
+        kind: state.preview.kind,
+        player: state.preview.player,
+      }
+    : state;
+
+describe("a player over a real server", () => {
+  const withPoster = { [CAT_IMAGE]: { body: png, type: "image/png" } };
+
+  it("gives a listed host's player its address and size, and keeps its poster, fetching nothing from the player", async () => {
+    const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        const { asked, state } = yield* previewedOn(served, CLIP);
+
+        return { asked, state };
+      })
+    );
+
+    expect(result.state).toStrictEqual({
+      _tag: "Ready",
+      preview: {
+        description: null,
+        image: { animated: false, hash: sha256(png), size: png.length, type: "image/png" },
+        kind: "player",
+        link: CLIP,
+        player: { link: VIMEO, size: { height: 720, width: 1280 } },
+        site: "clip.example",
+        title: "Clip",
+        type: null,
+      },
+    });
+    expect(result.asked).toStrictEqual([
+      { link: CLIP, purpose: asPageAgain },
+      { link: CAT_IMAGE, purpose: asImage },
+    ]);
+  });
+
+  it("reads a YouTube player as youtube-nocookie, with its path and query", async () => {
+    const result = await run(
+      {
+        [CLIP]: playerPage("https://www.youtube.com/embed/dQw4w9WgXcQ?start=7"),
+        ...withPoster,
+      },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+
+          return playing((yield* previewedOn(served, CLIP)).state);
+        })
+    );
+
+    expect(result).toStrictEqual({
+      image: true,
+      kind: "player",
+      player: {
+        link: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=7",
+        size: { height: 720, width: 1280 },
+      },
+    });
+  });
+
+  it("gives a page Preview with its image for a host that is not listed, or a look-alike of one", async () => {
+    const results = await Promise.all(
+      [
+        "https://cdn.evil.example/embed/1",
+        "https://player.vimeo.com.evil.example/video/1",
+        "https://www.youtube.com.evil.example/embed/1",
+        "http://player.vimeo.com/video/1",
+        "https://player.vimeo.com:8443/video/1",
+      ].map(
+        async (player) =>
+          await run({ [CLIP]: playerPage(player), ...withPoster }, (served) =>
+            Effect.gen(function* () {
+              yield* setBucket(served);
+
+              return playing((yield* previewedOn(served, CLIP)).state);
+            })
+          )
+      )
+    );
+
+    expect(results).toStrictEqual(
+      Array.from({ length: 5 }, () => ({ image: true, kind: "page", player: null }))
+    );
+  });
+
+  it("takes the host a custom list names, and no longer the defaults", async () => {
+    const result = await run(
+      {
+        [CLIP]: playerPage("https://videos.example.org/embed/1", "640x360"),
+        ...withPoster,
+      },
+      (served) =>
+        Effect.gen(function* () {
+          yield* setBucket(served);
+          yield* setPlayers(served, ["videos.example.org"]);
+
+          return playing((yield* previewedOn(served, CLIP)).state);
+        })
+    );
+
+    expect(result).toStrictEqual({
+      image: true,
+      kind: "player",
+      player: { link: "https://videos.example.org/embed/1", size: { height: 360, width: 640 } },
+    });
+  });
+
+  it("gives a page for every host once the list is empty", async () => {
+    const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        yield* setPlayers(served, []);
+
+        return playing((yield* previewedOn(served, CLIP)).state);
+      })
+    );
+
+    expect(result).toStrictEqual({ image: true, kind: "page", player: null });
+  });
+
+  it("answers a kept player as a page, with no new fetch, once its host is removed from the list", async () => {
+    const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        const before = yield* previewedOn(served, CLIP);
+        yield* setPlayers(served, ["w.soundcloud.com"]);
+        const after = yield* answeredNow(served);
+
+        return {
+          after: playing(after),
+          before: playing(before.state),
+          fetches: (yield* served.asked).length - before.asked.length,
+        };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      after: { image: true, kind: "page", player: null },
+      before: {
+        image: true,
+        kind: "player",
+        player: { link: VIMEO, size: { height: 720, width: 1280 } },
+      },
+      fetches: 0,
+    });
+  });
+
+  it("shows a listed player with its poster though the page says nothing else of itself", async () => {
+    const bare = page(
+      `<meta property="og:image" content="${CAT_IMAGE}"><meta property="og:video:url" content="${VIMEO}">`
+    );
+
+    const result = await run({ [CLIP]: bare, ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+
+        return playing((yield* previewedOn(served, CLIP)).state);
+      })
+    );
+
+    expect(result).toStrictEqual({
+      image: true,
+      kind: "player",
+      player: { link: VIMEO, size: null },
+    });
+  });
+
+  it("carries a player as a page on the stream when its host is removed while its poster is fetched", async () => {
+    const result = await runClocked(
+      Effect.gen(function* () {
+        const fake = yield* makeFakeLinkFetch(
+          { [CLIP]: playerPage(VIMEO), ...withPoster },
+          { held: [CAT_IMAGE] }
+        );
+
+        const served = yield* serve({}, { links: fake });
+
+        yield* setBucket(served);
+        yield* setPreviews(served, "on");
+        const stream = yield* follow(served);
+        yield* talk(served, [`see ${CLIP}`]);
+        const [place] = yield* live(messages(served, 1));
+        yield* ask(served, place ?? { position: "", timeline: "" });
+        // The page is read, and its player chosen, before its poster is fetched.
+        yield* reaching(served, 2);
+        yield* setPlayers(served, ["w.soundcloud.com"]);
+        yield* fake.release(CAT_IMAGE);
+        yield* stream.until((read) => read.includes('"Ready"'));
+        yield* stream.stop;
+
+        const ready = stream
+          .text()
+          .split("\n\n")
+          .flatMap((block) => {
+            const data = block.split("\n").find((line) => line.startsWith("data: "));
+
+            return block.startsWith("event: changed") && data !== undefined
+              ? [decodeItem(data.slice("data: ".length)).state]
+              : [];
+          })
+          .find((state) => state._tag === "Ready");
+
+        return playing(ready);
+      })
+    );
+
+    expect(result).toStrictEqual({ image: true, kind: "page", player: null });
+  });
+
+  it("gives a text Preview under links only: a page, with no player and no image", async () => {
+    const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        const { asked, state } = yield* previewedOn(served, CLIP, "links only");
+
+        return { asked, state: playing(state) };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      asked: [{ link: CLIP, purpose: asPageAgain }],
+      state: { image: false, kind: "page", player: null },
+    });
+  });
+
+  it("answers a player kept under on as a text Preview once Previews are links only", async () => {
+    const result = await run({ [CLIP]: playerPage(VIMEO), ...withPoster }, (served) =>
+      Effect.gen(function* () {
+        yield* setBucket(served);
+        const before = yield* previewedOn(served, CLIP);
+        yield* setPreviews(served, "links only");
+
+        return { after: playing(yield* answeredNow(served)), before: playing(before.state) };
+      })
+    );
+
+    expect(result).toStrictEqual({
+      after: { image: false, kind: "page", player: null },
+      before: {
+        image: true,
+        kind: "player",
+        player: { link: VIMEO, size: { height: 720, width: 1280 } },
+      },
+    });
   });
 });
