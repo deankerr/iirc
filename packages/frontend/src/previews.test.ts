@@ -758,6 +758,15 @@ const playing = {
   title: "A song",
 } as const;
 
+/**
+ * The address a player's frame loads, once pressed.
+ * @param link - The player's address, as the Daemon answered it.
+ * @param hosts - The hosts listed now.
+ * @returns What the frame loads.
+ */
+const srcOf = (link: string, hosts: readonly string[]) =>
+  shownReady({ ...playing, player: { link, size: null } }, "on", hosts)?.player?.src;
+
 describe("a Preview's player", () => {
   it("is the host it plays from, the words that say so, and what a frame needs, under on", () => {
     expect(shownReady(playing)?.player).toStrictEqual({
@@ -769,9 +778,6 @@ describe("a Preview's player", () => {
   });
 
   it("starts playing by its host's own parameter, keeping the rest of its query", () => {
-    const srcOf = (link: string, hosts: readonly string[]) =>
-      shownReady({ ...playing, player: { link, size: null } }, "on", hosts)?.player?.src;
-
     expect([
       srcOf("https://www.youtube-nocookie.com/embed/abc?start=30&autoplay=0", listed),
       srcOf("https://player.vimeo.com/video/1?h=9f", listed),

@@ -516,6 +516,35 @@ const holdingAddress = () =>
     )
   );
 
+/**
+ * What the player's frame is, as drawn.
+ * @returns Every frame's attributes, with how it is styled only as present, and whether a
+ * poster or the play button is left.
+ */
+const framed = () => ({
+  frames: [...document.body.querySelectorAll("iframe")].map((frame) =>
+    Object.fromEntries(
+      [...frame.attributes].map(({ name, value }) => [
+        name,
+        name === "class" || name === "style" ? "drawn" : value,
+      ])
+    )
+  ),
+  poster: list()?.querySelector("img, canvas") !== null,
+  press: playButton() !== null,
+  text: list()?.textContent,
+});
+
+const frame = {
+  allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
+  class: "drawn",
+  referrerpolicy: "strict-origin",
+  sandbox: "allow-scripts allow-same-origin allow-presentation allow-popups",
+  src: `${playerAddress}?autoplay=1`,
+  style: "drawn",
+  title: `Player from ${playerHost}`,
+};
+
 describe("a Message's Previews", () => {
   beforeEach(() => {
     layOut();
@@ -795,29 +824,6 @@ describe("a Message's Previews", () => {
         without: { address: [], frames: 0 },
       });
     });
-
-    /**
-     * What the player's frame is, as drawn.
-     * @returns Every frame's attributes, and whether a poster or the play button is left.
-     */
-    const framed = () => ({
-      frames: [...document.body.querySelectorAll("iframe")].map((frame) =>
-        Object.fromEntries([...frame.attributes].map(({ name, value }) => [name, value]))
-      ),
-      poster: list()?.querySelector("img, canvas") !== null,
-      press: playButton() !== null,
-      text: list()?.textContent,
-    });
-
-    const frame = {
-      allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
-      class: expect.any(String),
-      referrerpolicy: "strict-origin",
-      sandbox: "allow-scripts allow-same-origin allow-presentation allow-popups",
-      src: `${playerAddress}?autoplay=1`,
-      style: expect.any(String),
-      title: `Player from ${playerHost}`,
-    };
 
     it("swaps its poster for the player, already playing, when its play button is pressed", async () => {
       await withPlayer(true);

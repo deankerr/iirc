@@ -137,6 +137,37 @@ const startDaemon = async (directory: string, ...args: readonly string[]) => {
   }
 };
 
+/**
+ * The page's whole policy, with its `frame-src` as given.
+ * @param frameSrc - What `frame-src` allows.
+ * @returns The `Content-Security-Policy`.
+ */
+const policy = (frameSrc: string) =>
+  `default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`;
+
+const defaults = [
+  "https://www.youtube-nocookie.com",
+  "https://player.vimeo.com",
+  "https://w.soundcloud.com",
+  "https://bandcamp.com",
+  "https://open.spotify.com",
+  "https://player.twitch.tv",
+].join(" ");
+
+/**
+ * Sets `ui.previews.players` through the API, as a Frontend would.
+ * @param base - The Daemon's base URL.
+ * @param key - A key.
+ * @param value - The hosts.
+ * @returns The response.
+ */
+const setPlayers = async (base: string, key: string, value: readonly string[]) =>
+  await fetch(`${base}/api/ui/previews.players`, {
+    body: JSON.stringify({ value }),
+    headers: { authorization: `Bearer ${key.trim()}`, "content-type": "application/json" },
+    method: "PUT",
+  });
+
 describe("iirc", () => {
   afterEach(() => {
     for (const directory of directories.splice(0)) {
@@ -338,26 +369,6 @@ describe("iirc", () => {
     });
 
     describe("frame-src", () => {
-      const policy = (frameSrc: string) =>
-        `default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self'; frame-src ${frameSrc}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`;
-
-      const defaults = [
-        "https://www.youtube-nocookie.com",
-        "https://player.vimeo.com",
-        "https://w.soundcloud.com",
-        "https://bandcamp.com",
-        "https://open.spotify.com",
-        "https://player.twitch.tv",
-      ].join(" ");
-
-      /** Sets `ui.previews.players` through the API, as a Frontend would. */
-      const setPlayers = async (base: string, key: string, value: readonly string[]) =>
-        await fetch(`${base}/api/ui/previews.players`, {
-          body: JSON.stringify({ value }),
-          headers: { authorization: `Bearer ${key.trim()}`, "content-type": "application/json" },
-          method: "PUT",
-        });
-
       it("allows the default player hosts, in order, and nothing else", async () => {
         const { base, child } = await startDaemon(dataDir(), `--web=${webDir()}`);
         const response = await fetch(base, navigate);
@@ -372,8 +383,12 @@ describe("iirc", () => {
         const directory = dataDir();
         const { stdout: key } = await iirc("key", "create", "phone", "--data-dir", directory);
         const { base, child } = await startDaemon(directory, `--web=${webDir()}`);
-        const csp = async (target = "/") =>
-          (await fetch(`${base}${target}`, navigate)).headers.get("content-security-policy");
+
+        const csp = async (target = "/") => {
+          const response = await fetch(`${base}${target}`, navigate);
+
+          return response.headers.get("content-security-policy");
+        };
 
         const before = await csp();
         const custom = await setPlayers(base, key, ["media.example.org", "a.b.example.net"]);

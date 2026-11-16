@@ -462,6 +462,7 @@ export const PlayerFrame = ({
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
         className={styles.frame}
         referrerPolicy="strict-origin"
+        // oxlint-disable-next-line react/iframe-missing-sandbox -- the frame is another site's, which the page's frame-src limits to the Owner's player hosts, so its own origin gives it nothing of ours, and a player needs both to play
         sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
         src={player.src}
         style={{
