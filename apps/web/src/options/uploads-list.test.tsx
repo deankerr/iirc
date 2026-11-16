@@ -291,6 +291,51 @@ const rowAlerts = (container: HTMLElement) =>
     (one) => one.textContent
   );
 
+/**
+ * The switch that shows the deleted Uploads too.
+ * @param container - The page.
+ * @returns It, or none.
+ */
+const deletedSwitch = (container: HTMLElement) =>
+  [...container.querySelectorAll<HTMLButtonElement>('section[aria-label="Uploads"] button')].find(
+    (button) => button.textContent === "Show deleted"
+  );
+
+/**
+ * Presses the switch that shows the deleted Uploads too.
+ * @param container - The page.
+ */
+const toggleDeleted = async (container: HTMLElement) => {
+  await doing(() => {
+    deletedSwitch(container)?.click();
+  });
+};
+
+/**
+ * What each row offers: the labels of its buttons.
+ * @param container - The page.
+ * @returns The labels, by row.
+ */
+const offered = (container: HTMLElement) =>
+  [...container.querySelectorAll('ul[aria-label="Uploads"] > li')].map((row) =>
+    [...row.querySelectorAll("button")].map((button) => button.getAttribute("aria-label"))
+  );
+
+/**
+ * Sets a public URL, so every live row offers its link.
+ * @param fake - The fake Daemon.
+ */
+const withPublicUrl = (fake: ReturnType<typeof fakeDaemon>) => {
+  fake.daemon.owner = {
+    options: {
+      "previews.maxTotal": 1_073_741_824,
+      "uploads.maxSize": 104_857_600,
+      "uploads.publicUrl": "https://files.example.com",
+    },
+    sequence: 1,
+  };
+};
+
 const cat = uploadOf("a", "image/png", "Cat picture.png");
 const notes = uploadOf("b", "application/pdf");
 
@@ -662,6 +707,126 @@ describe("the Uploads beside the options", () => {
     expect(rowAlerts(container)).toStrictEqual([
       "The Daemon no longer has Cat picture.png, so it was not deleted.",
     ]);
+  });
+
+  it("hides an expired Upload, and shows it marked expired, with nothing to do to it, once the deleted are asked for", async () => {
+    const fake = signedIn(notes, {
+      ...uploadOf("c", "image/png", "Old picture.png"),
+      deleted: { at: 1_700_000_002_000, why: "expired" },
+      link: null,
+    });
+
+    withPublicUrl(fake);
+
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 1);
+
+    const hidden = names(container);
+
+    await toggleDeleted(container);
+    await settled(() => listed(container).length === 2);
+
+    expect({
+      hidden,
+      offered: offered(container),
+      pressed: deletedSwitch(container)?.getAttribute("aria-pressed"),
+      rows: listed(container).map((row) => ({
+        expired: row.details?.includes(" · expired ") === true,
+        name: row.name,
+        thumbnail: row.thumbnail,
+      })),
+    }).toStrictEqual({
+      hidden: ["b-safe.bin"],
+      offered: [["Copy the link to b-safe.bin", "Rename b-safe.bin", "Delete b-safe.bin"], []],
+      pressed: "true",
+      rows: [
+        { expired: false, name: "b-safe.bin", thumbnail: "icon" },
+        // Its bytes are gone, so the thumbnail does not ask for them.
+        { expired: true, name: "Old picture.png", thumbnail: "icon" },
+      ],
+    });
+  });
+
+  it("says deleted, not expired, of an Upload the Owner deleted, and reads again without them when switched off", async () => {
+    const fake = signedIn(notes, {
+      ...cat,
+      deleted: { at: 1_700_000_001_000, why: "owner" },
+      link: null,
+    });
+
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 1);
+    await toggleDeleted(container);
+    await settled(() => listed(container).length === 2);
+
+    const shown = listed(container).at(1)?.details?.includes(" · deleted ");
+
+    await toggleDeleted(container);
+    await settled(() => listed(container).length === 1);
+
+    expect({ names: names(container), read: fake.daemon.uploadPagesRead, shown }).toStrictEqual({
+      names: ["b-safe.bin"],
+      read: [undefined, undefined, undefined],
+      shown: true,
+    });
+  });
+
+  it("turns an Upload that expires while the deleted are shown into an expired row in place", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+
+    await settled(() => listed(container).length === 2);
+    await toggleDeleted(container);
+    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
+    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await doing(() => {
+      fake.expire("a".repeat(16));
+    });
+    await settled(() => listed(container).at(1)?.details?.includes(" · expired ") === true);
+
+    expect({
+      names: names(container),
+      offered: offered(container),
+      thumbnails: listed(container).map((row) => row.thumbnail),
+    }).toStrictEqual({
+      names: ["b-safe.bin", "Cat picture.png"],
+      offered: [["Rename b-safe.bin", "Delete b-safe.bin"], []],
+      thumbnails: ["icon", "icon"],
+    });
+  });
+
+  it("closes a rename field and a delete question on an Upload that expires while the deleted are shown", async () => {
+    const fake = signedIn(notes, cat);
+    const { container } = await page(fake);
+    const cats = "a".repeat(16);
+    const field = () => container.querySelector('input[aria-label="New name for b-safe.bin"]');
+
+    await settled(() => listed(container).length === 2);
+    await toggleDeleted(container);
+    await eventually(() => fake.daemon.uploadPagesRead.length === 2);
+    await eventually(() => fake.daemon.uploadFollowers.length >= 1);
+    await press(container, "Rename b-safe.bin");
+    const renaming = field() !== null;
+
+    await press(container, "Delete Cat picture.png");
+    const asking = deleteDialog() !== undefined;
+
+    await doing(() => {
+      fake.expire(cats);
+      fake.expire("b".repeat(16));
+    });
+    await settled(() =>
+      listed(container).every((row) => row.details?.includes(" · expired ") === true)
+    );
+
+    expect({ asked: deleteDialog(), asking, field: field(), renaming }).toStrictEqual({
+      asked: undefined,
+      asking: true,
+      field: null,
+      renaming: true,
+    });
   });
 
   it("forgets the Uploads on signing out", async () => {
