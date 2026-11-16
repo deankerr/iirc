@@ -1,8 +1,8 @@
 /**
- * The options view: every option under `store` and `uploads`, every option of every
+ * The options view: every option under `store`, `uploads`, and `previews`, every option of every
  * Network, and every option under `ui`, as the core derives them from the Schemas, filtered
  * as the Owner types. An option under `ui` this device overrides says so, beside the value
- * every device shares. No device overrides one under `store` or `uploads`. React Aria's
+ * every device shares. No device overrides one under `store`, `uploads`, or `previews`. React Aria's
  * GridList gives it its keyboard: arrows move, Enter edits the focused value in place as
  * its raw text, or a whole number in a number field, turns a toggle over, or opens the
  * password prompt for a Credential, Escape lets an edit go, and Delete or Backspace asks to
@@ -83,7 +83,7 @@ const Shown = ({ value }: { readonly value: Value }) => {
 
 /**
  * Sets an option to a value in its text syntax: a Network's through its Configuration, one
- * under `store` or `uploads` through the Daemon, and one under `ui` for every device, or for
+ * under `store`, `uploads`, or `previews` through the Daemon, and one under `ui` for every device, or for
  * this device alone while it overrides it here, and a font's family always for this device
  * alone.
  * @returns How to set one.

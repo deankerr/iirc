@@ -58,6 +58,7 @@ import { UiConfiguration } from "../ui.ts";
 import { animated } from "./animated.ts";
 import { fillFromOembed, readMedia, readOembed, readPage } from "./read.ts";
 import type { PageRead } from "./read.ts";
+import { makeRoom } from "./room.ts";
 import { previewStore } from "./store.ts";
 
 /** No Preview holds an image with the hash, or the store no longer holds its bytes. */
@@ -434,8 +435,9 @@ const stale = (kept: Kept, now: number, waits: boolean): boolean => {
 
 /**
  * The Previews, kept in the Preview cache by link, needing the link fetch, the Preview
- * cache, the Timeline store, and the `ui` options. Only the links being fetched now are
- * held in memory. Each fetch runs in the Layer's Scope, so it ends when the Daemon stops.
+ * cache, the Timeline store, the Uploads, and the `ui` options. Only the links being fetched
+ * now are held in memory. Each fetch runs in the Layer's Scope, so it ends when the Daemon
+ * stops.
  */
 export const layerPreviews = Layer.effect(Previews)(
   Effect.gen(function* () {
@@ -445,6 +447,7 @@ export const layerPreviews = Layer.effect(Previews)(
     const ui = yield* UiConfiguration;
     const { made: bucket } = yield* previewStore;
     const shared = yield* StoreBytes;
+    const room = yield* makeRoom;
     const scope = yield* Scope.Scope;
     const flying = yield* Ref.make<ReadonlyMap<string, Flight>>(new Map());
     // Looking in flight and in the cache, and claiming a fetch, is one turn, and so is
@@ -486,7 +489,8 @@ export const layerPreviews = Layer.effect(Previews)(
      * Fetches an image as an image, through the same guard, and keeps its bytes in the store,
      * collected first, since the store may run what it is given more than once. No bucket
      * means no fetch at all. Its hash is claimed in `holding` before the put, so no release
-     * of the same bytes takes them before the cache refers to them.
+     * of the same bytes takes them before the cache refers to them, and room is made for it
+     * there, under `previews.maxTotal`, in the same turn.
      * @param address - Where the image is.
      * @param holding - The Scope the claim lasts for.
      * @returns The image as a Preview holds it.
@@ -512,7 +516,10 @@ export const layerPreviews = Layer.effect(Previews)(
           return yield* new NoImage({ reason: "it is empty" });
         }
 
-        yield* Scope.provide(shared.claimed(hashOf(bytes)), holding);
+        const hash = hashOf(bytes);
+
+        yield* Scope.provide(shared.claimed(hash), holding);
+        yield* room.fit(hash, bytes.length, bytesStore, holding);
         const stored = yield* bytesStore.put(Stream.make(bytes));
 
         return {

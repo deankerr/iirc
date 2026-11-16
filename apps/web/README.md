@@ -30,7 +30,7 @@ The core decides and this package draws and does the I/O.
 - **Changes Configuration as an option tree**, by `/set` and its kin or in the options view, which edits each option in place. A Credential is given only in a password prompt.
 - **Removes a Network after asking,** from `/network remove`, a button for each Network in the options view, or the palette. A dialog asks whether its Timelines stay readable, keeping them unless the Owner chooses otherwise. A Pane showing a kept Timeline says its Network was removed, with a button that asks to drop them, and its composer says nothing can be said there. Adding a Network under a name still held by kept Timelines says why it cannot.
 - **Shares the options under `ui` between devices, and lets one override them** with `-device`.
-- **Lists and sets the Owner's options under `store` and `uploads`** as it does any other, followed from the Daemon while the options show, so another device's change shows. No device overrides them.
+- **Lists and sets the Owner's options under `store`, `uploads`, and `previews`** as it does any other, followed from the Daemon while the options show, so another device's change shows. No device overrides them.
 - **Lists the Uploads beside the options,** newest first, a page at a time with "More": an image of a type every browser draws, PNG, JPEG, GIF, WebP, or AVIF, as a thumbnail the browser scales from the `content` route and fetches only near the screen, any other type as an icon, then its name, type, size, and when, and buttons that copy its link, rename it in place, Enter saving and Escape cancelling, and delete it once the Owner confirms in a dialog that says its link stops working at once and a copy already opened cannot be called back. A rename or a delete that fails says why in its row. The link is made from `uploads.publicUrl` as it is now, so a new public URL changes every link copied from then on, and with none set the list says there is no link to copy. Another device's Upload, rename, or delete shows without a reload.
 - **Draws in themes made from terminal palettes,** built in or imported from a theme file. Under `system`, the page draws the theme for light or the one for dark, and follows the device the moment it changes. A theme highlighted in the palette, or being imported, previews on the whole page.
 - **Bounds how wide a Timeline's text runs,** by `ui.width`: what was said wraps at that many characters, from 40 to 400, each as wide as the font's `0`, so the bound grows with the size, or runs the width of its Pane at `none`, which it starts as. The text stays where it starts, and a Pane narrower than the bound is drawn as without one. The Composer and the Sidebar are never bounded.
@@ -69,7 +69,7 @@ The core decides and this package draws and does the I/O.
   | --- | --- |
   | `sync` | Makes the reads `wanted` gives, follows the changes stream, and keeps the layout |
   | `uiSync` | Follows the options under `ui` |
-  | `ownerSync` | Follows the options under `store` and `uploads` while the options show |
+  | `ownerSync` | Follows the options under `store`, `uploads`, and `previews` while the options show |
   | `uploadsSync` | Reads the Uploads' first page while the options show, then follows their Changes after it, and after the last one folded in whenever it follows again |
   | `channelSync` | Reads each shown Channel's head and members, and the head of each Channel whose list a Lookup card is |
   | `marking` | Marks read what `markDue` says, after a second |

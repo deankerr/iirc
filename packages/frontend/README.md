@@ -206,9 +206,9 @@ An option under `ui` is named `ui.<option>`, such as `ui.time`, and is derived f
 - **`ui.activity` changes what is drawn, never what is counted.**
 - **A font's family the device lacks is said to be not found,** when it is the one in effect. Only the device can find that out, so it hands the families it lacks to `uiOptionsOf`.
 
-### The options under `store` and `uploads`
+### The options under `store`, `uploads`, and `previews`
 
-An option under `store` or `uploads` is named in full, such as `store.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options` the same way. They are listed first, ahead of every Network's.
+An option under `store`, `uploads`, or `previews` is named in full, such as `store.s3.bucket` or `uploads.maxSize`, and is derived from `OwnerOptions` in `@iirc/api/options` the same way. They are listed first, ahead of every Network's.
 
 - **They are the Owner's, not a device's,** so no device overrides one, and `-device` refuses them. A change is made from the options read, and `unset` returns one to its default, or leaves it unset.
 - **A Credential option names a Credential, `Owner.` and the option's name** until it names another, such as `Owner.store.s3.accessKeyId`. A Network's id starts with a lower-case letter or a digit, so no Network's Credential is ever named so.

@@ -298,7 +298,7 @@ describe("names", () => {
       dotted: [dotted, "nicks"],
       member: [dotted, "login", "account"],
       noNetwork:
-        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
+        "There is no option libera.nicks. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       none: "There is no option network.libera.nope.",
       uppercase: "There is no option network.Libera.nicks.",
     });
@@ -1674,7 +1674,7 @@ describe("the options under ui", () => {
       unknown: {
         _tag: "Invalid",
         message:
-          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
+          "There is no option ui.palette. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       },
       unset: change("activity", undefined, false),
       unsetDevice: change("theme", undefined, true),
@@ -1705,6 +1705,7 @@ const owned = (option: string, value: Json | undefined) => ({
 
 const owner: OwnerInForce = {
   options: Schema.decodeSync(OwnerOptions)({
+    "previews.maxTotal": 2048,
     "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
     "store.s3.bucket": "uploads",
     "uploads.maxSize": 1024,
@@ -1714,7 +1715,7 @@ const owner: OwnerInForce = {
 };
 
 /**
- * What the options view lists under `store` and `uploads`: each one's name, value, and what
+ * What the options view lists under `store`, `uploads`, and `previews`: each one's name, value, and what
  * it starts as.
  * @param inForce - The options in force, once read.
  * @param held - The Credentials the Vault holds, when known.
@@ -1723,7 +1724,7 @@ const owner: OwnerInForce = {
 const ownerRows = (inForce: OwnerInForce | undefined, held: ReadonlySet<string> | undefined) =>
   ownerOptionsOf(inForce, held).map((option) => [option.name, option.value, option.starts]);
 
-describe("the options under store and uploads", () => {
+describe("the options under store, uploads, and previews", () => {
   it("are every field of the contract's Schema, by its full name, each described, with its kind", () => {
     expect({
       described: ownerFields.every((field) => field.description !== ""),
@@ -1732,6 +1733,7 @@ describe("the options under store and uploads", () => {
     }).toStrictEqual({
       described: true,
       kinds: {
+        "previews.maxTotal": "Integer",
         "store.s3.accessKeyId": "Credential",
         "store.s3.bucket": "Text",
         "store.s3.endpoint": "Text",
@@ -1749,8 +1751,8 @@ describe("the options under store and uploads", () => {
 
   it("list each value in force, its default or unset, and a Credential's name and whether it is held", () => {
     expect({
-      held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(0, 2),
-      notHeld: ownerRows(owner, new Set()).slice(0, 1),
+      held: ownerRows(owner, new Set(["Owner.store.s3.accessKeyId"])).slice(1, 3),
+      notHeld: ownerRows(owner, new Set()).slice(1, 2),
       read: ownerRows(owner, undefined),
       unread: ownerOptionsOf(undefined, undefined)
         .filter((option) => option.value._tag !== "Unset")
@@ -1772,6 +1774,7 @@ describe("the options under store and uploads", () => {
         ],
       ],
       read: [
+        ["previews.maxTotal", { _tag: "Shown", text: "2048" }, "1073741824"],
         [
           "store.s3.accessKeyId",
           { _tag: "Credential", held: undefined, name: "Owner.store.s3.accessKeyId" },
@@ -1788,7 +1791,10 @@ describe("the options under store and uploads", () => {
         ["uploads.publicUrl", { _tag: "Shown", text: "https://files.example.com" }, "unset"],
       ],
       // Before they are read, each is what it starts as.
-      unread: [["uploads.maxSize", { _tag: "Shown", text: "104857600" }, "104857600"]],
+      unread: [
+        ["previews.maxTotal", { _tag: "Shown", text: "1073741824" }, "1073741824"],
+        ["uploads.maxSize", { _tag: "Shown", text: "104857600" }, "104857600"],
+      ],
     });
   });
 
@@ -1811,7 +1817,7 @@ describe("the options under store and uploads", () => {
       store: listed(state, "store.s3.b*").map((option) => [option._tag, option.name]),
       uploads: listed(state, "uploads").length,
     }).toStrictEqual({
-      first: "store.s3.accessKeyId",
+      first: "previews.maxTotal",
       forgotten: undefined,
       kept: owner,
       store: [["Owner", "store.s3.bucket"]],
@@ -1829,12 +1835,12 @@ describe("the options under store and uploads", () => {
       root: {
         _tag: "Invalid",
         message:
-          "There is no option store. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
+          "There is no option store. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       },
       typo: {
         _tag: "Invalid",
         message:
-          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, store.<option>, or uploads.<option>.",
+          "There is no option uploads.maxsize. Options are named network.<id>.<option>, ui.<option>, store.<option>, uploads.<option>, or previews.<option>.",
       },
     });
   });
@@ -1948,7 +1954,11 @@ describe("the options under store and uploads", () => {
     expect({
       derived: derivedOwnerCredential("store.s3.secretAccessKey"),
       named: ownerCredentialFor(
-        Schema.decodeSync(OwnerOptions)({ "store.s3.accessKeyId": "kept", "uploads.maxSize": 1 }),
+        Schema.decodeSync(OwnerOptions)({
+          "previews.maxTotal": 1,
+          "store.s3.accessKeyId": "kept",
+          "uploads.maxSize": 1,
+        }),
         "store.s3.accessKeyId"
       ),
       // A Network's derived names start with its id, which never starts upper-case.

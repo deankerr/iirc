@@ -148,7 +148,7 @@ const rowOf = (container: HTMLElement, name: string) =>
   rows(container).find(([shown]) => shown === name);
 
 /**
- * Waits for the options under `store` and `uploads` to be read, as the view shows them.
+ * Waits for the options under `store`, `uploads`, and `previews` to be read, as the view shows them.
  * @param registry - The registry.
  * @param sequence - The sequence they must be read at.
  */
@@ -156,7 +156,7 @@ const readAt = async (registry: AtomRegistry.AtomRegistry, sequence: number) => 
   await settled(() => registry.get(optionsState).owner?.sequence === sequence);
 };
 
-describe("the options view, under store and uploads", () => {
+describe("the options view, under store, uploads, and previews", () => {
   afterEach(() => {
     for (const unmount of mounted.splice(0)) {
       act(unmount);
@@ -204,6 +204,23 @@ describe("the options view, under store and uploads", () => {
     ]);
   });
 
+  it("lists the Previews' option from the Schema, at its default", async () => {
+    const fake = signedIn();
+    const { container, registry, type } = await page(fake);
+
+    await type("/set previews.max");
+    await readAt(registry, 0);
+
+    expect(rows(container)).toStrictEqual([
+      [
+        "previews.maxTotal",
+        "1073741824",
+        "1073741824",
+        "The most bytes the store may hold for Previews' images. 1073741824, 1 GiB, unless set; the least recently shown lose their images first.",
+      ],
+    ]);
+  });
+
   it("sets one with /set, made from the options read, and refuses a bad value before sending anything", async () => {
     const fake = signedIn();
     const { container, registry, type } = await page(fake);
@@ -228,7 +245,11 @@ describe("the options view, under store and uploads", () => {
         { ifSequence: "10", route: "DELETE uploads.maxSize" },
       ],
       owner: {
-        options: { "store.s3.bucket": "my-bucket", "uploads.maxSize": 104_857_600 },
+        options: {
+          "previews.maxTotal": 1_073_741_824,
+          "store.s3.bucket": "my-bucket",
+          "uploads.maxSize": 104_857_600,
+        },
         sequence: 11,
       },
       refused: 0,
@@ -285,7 +306,10 @@ describe("the options view, under store and uploads", () => {
     await readAt(registry, 0);
 
     // Another device's Change, which this page has not heard of yet.
-    fake.daemon.owner = { options: { "uploads.maxSize": 2048 }, sequence: 7 };
+    fake.daemon.owner = {
+      options: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 2048 },
+      sequence: 7,
+    };
     await type("/set uploads.expireAfter 30");
     await settled(() => fake.daemon.owner.sequence === 10);
 
@@ -294,7 +318,14 @@ describe("the options view, under store and uploads", () => {
         { ifSequence: "0", route: "PUT uploads.expireAfter" },
         { ifSequence: "7", route: "PUT uploads.expireAfter" },
       ],
-      owner: { options: { "uploads.expireAfter": 30, "uploads.maxSize": 2048 }, sequence: 10 },
+      owner: {
+        options: {
+          "previews.maxTotal": 1_073_741_824,
+          "uploads.expireAfter": 30,
+          "uploads.maxSize": 2048,
+        },
+        sequence: 10,
+      },
     });
   });
 
@@ -354,6 +385,7 @@ describe("the options view, under store and uploads", () => {
 
     fake.daemon.owner = {
       options: {
+        "previews.maxTotal": 1_073_741_824,
         "store.s3.accessKeyId": "Owner.store.s3.accessKeyId",
         "uploads.maxSize": 104_857_600,
       },

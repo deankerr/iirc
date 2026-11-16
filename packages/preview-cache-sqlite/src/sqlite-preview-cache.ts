@@ -4,7 +4,7 @@
 // Each operation is one statement, so it is kept whole or not at all. `@effect/sql-sqlite-bun`
 // runs every statement on one connection, so a read never sees part of another's write.
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { Kept, PreviewCache, PreviewCacheFailed, Settled } from "@iirc/preview-cache";
+import { Held, Kept, PreviewCache, PreviewCacheFailed, Settled } from "@iirc/preview-cache";
 import type { PreviewCacheService } from "@iirc/preview-cache";
 import { Effect, FileSystem, Layer, Option, Schema } from "effect";
 import type { Duration, Scope } from "effect";
@@ -134,6 +134,7 @@ const Row = Schema.Struct({
 });
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Row));
+const decodeHeld = Schema.decodeUnknownEffect(Schema.Array(Held));
 const encodeState = Schema.encodeEffect(Row.fields.state);
 
 /**
@@ -216,11 +217,33 @@ export const makeSqlitePreviewCache = (
       );
 
     return {
+      evict: (hash) =>
+        sql`
+          UPDATE previews
+          SET image = NULL,
+              fetched = 0,
+              state = json_set(state, '$.preview.image', json('null'))
+          WHERE image = ${hash}
+        `.pipe(Effect.mapError(failed("cannot drop a Preview's image")), Effect.asVoid),
       get: (link) =>
         one(
           "read a Preview",
           sql`SELECT link, state, image, fetched, shown FROM previews WHERE link = ${link}`
         ),
+      images: sql`
+        SELECT image AS hash,
+               max(shown) AS shown,
+               coalesce(max(json_extract(state, '$.preview.image.size')), 0) AS size
+        FROM previews
+        WHERE image IS NOT NULL
+        GROUP BY image
+        ORDER BY max(shown), image
+      `.pipe(
+        Effect.mapError(failed("cannot read the Previews' images")),
+        Effect.flatMap((rows) =>
+          decodeHeld(rows).pipe(Effect.mapError(failed("cannot decode the Previews' images")))
+        )
+      ),
       put: (kept) =>
         encodeState(kept.state).pipe(
           Effect.mapError(failed("cannot encode a Preview")),

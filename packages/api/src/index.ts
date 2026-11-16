@@ -209,6 +209,7 @@ export {
   byteCountBounds,
   credentialsNamed,
   defaultMaxSize,
+  defaultPreviewsMaxTotal,
   expireAfterBounds,
   ownerCredentialOptions,
   ownerDefaults,

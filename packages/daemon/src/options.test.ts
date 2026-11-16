@@ -30,9 +30,12 @@ const fold = (changes: readonly Change[]) => {
   return ownerInForceOf(held);
 };
 
-describe("folding the options under store and uploads", () => {
-  it("starts with only uploads.maxSize, at 100 MiB, and sequence 0", () => {
-    expect(fold([])).toStrictEqual({ options: { "uploads.maxSize": 104_857_600 }, sequence: 0 });
+describe("folding the options under store, uploads, and previews", () => {
+  it("starts with only uploads.maxSize, at 100 MiB, and previews.maxTotal, at 1 GiB, and sequence 0", () => {
+    expect(fold([])).toStrictEqual({
+      options: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 104_857_600 },
+      sequence: 0,
+    });
   });
 
   it("takes the latest Change of each option, and an unset back to its default or to none", () => {
@@ -48,6 +51,7 @@ describe("folding the options under store and uploads", () => {
       ])
     ).toStrictEqual({
       options: {
+        "previews.maxTotal": 1_073_741_824,
         "store.s3.accessKeyId": "bucket-key",
         "store.s3.bucket": "second",
         "uploads.maxSize": 104_857_600,
@@ -67,20 +71,27 @@ describe("folding the options under store and uploads", () => {
         set("store.s3.colour", "blue"),
         unset("nope"),
       ])
-    ).toStrictEqual({ options: { "uploads.maxSize": 2048 }, sequence: 7 });
+    ).toStrictEqual({
+      options: { "previews.maxTotal": 1_073_741_824, "uploads.maxSize": 2048 },
+      sequence: 7,
+    });
   });
 
   it("passes over a Change of a ui option, and its sequence", () => {
     expect(
       fold([set("uploads.expireAfter", 30), { _tag: "UiSet", option: "time", value: "none" }])
     ).toStrictEqual({
-      options: { "uploads.expireAfter": 30, "uploads.maxSize": 104_857_600 },
+      options: {
+        "previews.maxTotal": 1_073_741_824,
+        "uploads.expireAfter": 30,
+        "uploads.maxSize": 104_857_600,
+      },
       sequence: 1,
     });
   });
 });
 
-describe("the options under store and uploads, kept", () => {
+describe("the options under store, uploads, and previews, kept", () => {
   it("folds them again from the Journal on a restart, past every Network's Entries and the ui options", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -128,6 +139,7 @@ describe("the options under store and uploads, kept", () => {
 
     const inForce = {
       options: {
+        "previews.maxTotal": 1_073_741_824,
         "store.s3.bucket": "uploads",
         "store.s3.secretAccessKey": "bucket-secret",
         "uploads.maxSize": 104_857_600,

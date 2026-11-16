@@ -136,7 +136,7 @@ export class UiChanged extends Schema.TaggedError<UiChanged, { readonly brand: u
 ) {}
 
 /**
- * A change of an option under `store` or `uploads` was made from other options than those
+ * A change of an option under `store`, `uploads`, or `previews` was made from other options than those
  * now in force: another Change of one was journaled since, at `sequence`, the last one.
  * Nothing was journaled: a 409.
  */

@@ -357,7 +357,7 @@ describe("the handlers", () => {
     });
   });
 
-  it("journals an option under store or uploads by its full name and its value, apart from the ui options", async () => {
+  it("journals an option under store, uploads, or previews by its full name and its value, apart from the ui options", async () => {
     const result = await run((world, api) =>
       Effect.gen(function* () {
         const ui = yield* api.ui.set({
@@ -398,7 +398,11 @@ describe("the handlers", () => {
 
     expect(result).toStrictEqual({
       inForce: {
-        options: { "uploads.expireAfter": 30, "uploads.maxSize": 104_857_600 },
+        options: {
+          "previews.maxTotal": 1_073_741_824,
+          "uploads.expireAfter": 30,
+          "uploads.maxSize": 104_857_600,
+        },
         sequence: 3,
       },
       journaled: [

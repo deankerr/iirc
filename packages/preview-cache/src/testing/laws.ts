@@ -198,6 +198,132 @@ const refers: PreviewCacheLaw = {
   name: "refers says whether any record kept holds the image, as records are replaced",
 };
 
+const third = Sha256.make("ef".repeat(32));
+
+// A Ready record whose Preview holds an image of a size, kept under the image's hash.
+const imaged = (
+  link: string,
+  image: Sha256,
+  size: number,
+  overrides: Partial<Kept> = {}
+): Kept => ({
+  ...ready(link),
+  image,
+  state: {
+    _tag: "Ready",
+    preview: {
+      description: null,
+      image: { animated: false, hash: image, size, type: "image/png" },
+      kind: "page",
+      link,
+      site: "example.com",
+      title: "Nothing",
+      type: null,
+    },
+  },
+  ...overrides,
+});
+
+// What an eviction leaves of a record: no image, and fetched at the epoch.
+const evicted = (kept: Kept): Kept => ({
+  ...kept,
+  fetched: 0,
+  image: null,
+  state:
+    kept.state._tag === "Ready"
+      ? { ...kept.state, preview: { ...kept.state.preview, image: null } }
+      : kept.state,
+});
+
+const images: PreviewCacheLaw = {
+  check: (cache) =>
+    Effect.gen(function* () {
+      yield* same("images of an empty cache", yield* cache.images, []);
+
+      yield* cache.put(imaged(a, hash, 100, { shown: 2000 }));
+      yield* cache.put(imaged(b, hash, 100, { shown: 5000 }));
+      yield* cache.put(imaged("https://example.com/c", other, 50, { shown: 3000 }));
+      yield* cache.put(imaged("https://example.com/d", third, 70, { shown: 3000 }));
+      yield* cache.put(ready("https://example.com/e"));
+      yield* cache.put(failed("https://example.com/f", "Refused"));
+      yield* same(
+        "each image once, least recently shown first, ties by hash",
+        yield* cache.images,
+        [
+          { hash: other, shown: 3000, size: 50 },
+          { hash: third, shown: 3000, size: 70 },
+          { hash, shown: 5000, size: 100 },
+        ]
+      );
+
+      yield* cache.shown(a, 9000);
+      yield* cache.shown("https://example.com/c", 8000);
+      yield* same("images after two are shown", yield* cache.images, [
+        { hash: third, shown: 3000, size: 70 },
+        { hash: other, shown: 8000, size: 50 },
+        { hash, shown: 9000, size: 100 },
+      ]);
+
+      yield* cache.put(ready(a));
+      yield* cache.put(failed(b, "Refused"));
+      yield* same("images once no record holds one", yield* cache.images, [
+        { hash: third, shown: 3000, size: 70 },
+        { hash: other, shown: 8000, size: 50 },
+      ]);
+    }),
+  name: "images gives each image some record holds once, with its size and when it was last shown, least recently shown first",
+};
+
+const imageWithoutReady: PreviewCacheLaw = {
+  check: (cache) =>
+    Effect.gen(function* () {
+      yield* cache.put({ ...failed(a, "Unreachable"), image: hash, shown: 6000 });
+      yield* same("images held by a failure", yield* cache.images, [
+        { hash, shown: 6000, size: 0 },
+      ]);
+    }),
+  name: "images gives size 0 for an image only a Failed record holds",
+};
+
+const evict: PreviewCacheLaw = {
+  check: (cache) =>
+    Effect.gen(function* () {
+      const c = "https://example.com/c";
+      const first = imaged(a, hash, 100, { fetched: 1000, shown: 2000 });
+      const second = imaged(b, hash, 100, { fetched: 1500, shown: 4000 });
+      const kept = imaged(c, other, 50, { fetched: 1200, shown: 3000 });
+      const bare = ready("https://example.com/d");
+      const refused = { ...failed("https://example.com/e", "Refused"), image: hash };
+
+      for (const one of [first, second, kept, bare, refused]) {
+        yield* cache.put(one);
+      }
+
+      yield* cache.evict(third);
+      yield* same("evict of an image no record holds", yield* cache.images, [
+        { hash: other, shown: 3000, size: 50 },
+        { hash, shown: 4000, size: 100 },
+      ]);
+
+      yield* cache.evict(hash);
+      yield* same("the first record", yield* cache.get(a), Option.some(evicted(first)));
+      yield* same("the second record", yield* cache.get(b), Option.some(evicted(second)));
+      yield* same("a failure", yield* cache.get(refused.link), Option.some(evicted(refused)));
+      yield* same("a record of another image", yield* cache.get(c), Option.some(kept));
+      yield* same("a record of none", yield* cache.get(bare.link), Option.some(bare));
+      yield* same("refers to the image", yield* cache.refers(hash), false);
+      yield* same("refers to the other", yield* cache.refers(other), true);
+      yield* same("images", yield* cache.images, [{ hash: other, shown: 3000, size: 50 }]);
+
+      yield* same(
+        "shown after",
+        yield* cache.shown(a, 5000),
+        Option.some({ ...evicted(first), shown: 5000 })
+      );
+    }),
+  name: "evict drops an image from every record that holds it, makes them stale, and changes nothing else",
+};
+
 /** The laws every Preview cache adapter keeps. */
 export const previewCacheLaws: readonly PreviewCacheLaw[] = [
   unknownLink,
@@ -208,4 +334,7 @@ export const previewCacheLaws: readonly PreviewCacheLaw[] = [
   shownMoves,
   shownEarlier,
   refers,
+  images,
+  imageWithoutReady,
+  evict,
 ];

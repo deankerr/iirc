@@ -145,7 +145,7 @@ export const makeWorld = (
 
 /**
  * The Runtime, on the world's ports, with the real Client, the projector folding its News
- * into the world's Timeline store, the `ui` options and those under `store` and `uploads`
+ * into the world's Timeline store, the `ui` options and those under `store`, `uploads`, and `previews`
  * folded from the Journal's Changes, the Runtime sparing the Credentials those name, the
  * Previews and the Uploads on the world's byte store, staged in a data directory, and their link listener,
  * and the keys and browser sign-ins of that directory.
@@ -166,11 +166,10 @@ export const layerWorld = (world: World, dataDir: string, pacing?: RuntimeOption
         Layer.provideMerge(layerUiConfiguration),
         Layer.provide(Layer.merge(Layer.succeed(LinkFetch, world.links), bytes))
       ),
-      layerLinkListener.pipe(
-        Layer.provideMerge(layerUploads(dataDir)),
-        Layer.provide(Layer.merge(bytes, platform))
-      )
+      layerLinkListener
     ).pipe(
+      // The one Uploads instance is the Previews' and the link listener's.
+      Layer.provideMerge(layerUploads(dataDir).pipe(Layer.provide(Layer.merge(bytes, platform)))),
       Layer.provideMerge(
         layerStoreBytes.pipe(Layer.provideMerge(Layer.succeed(PreviewCache, world.previews)))
       ),

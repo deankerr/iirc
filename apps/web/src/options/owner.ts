@@ -1,5 +1,5 @@
 /**
- * The options under `store` and `uploads`, as atoms: the Owner's, so the same on every
+ * The options under `store`, `uploads`, and `previews`, as atoms: the Owner's, so the same on every
  * device, with no override on any. They are followed from the Daemon while the page is
  * signed in and the options show, as nothing else here draws on them. A change is made
  * from the options read, as one under `ui` is, so the Daemon refuses it if another device
@@ -136,7 +136,7 @@ export const ownerSync = runtime
   )
   .pipe(Atom.keepAlive);
 
-/** A change of an option under `store` or `uploads`: its value as JSON, or none to unset it. */
+/** A change of an option under `store`, `uploads`, or `previews`: its value as JSON, or none to unset it. */
 export interface OwnerChange {
   readonly option: OwnerOptionName;
   readonly value: Json | undefined;
@@ -157,7 +157,7 @@ const ownerFailed = (tag: string): Outcome => {
       return {
         _tag: "NotDone",
         message:
-          "The options under store and uploads changed while this was being made, twice, so nothing was changed. Try again.",
+          "The options under store, uploads, and previews changed while this was being made, twice, so nothing was changed. Try again.",
       };
     }
 
@@ -225,7 +225,7 @@ const tryOwner = (registry: AtomRegistry.AtomRegistry, change: OwnerChange, fres
   );
 
 /**
- * Changes an option under `store` or `uploads` through the Daemon, made from the options
+ * Changes an option under `store`, `uploads`, or `previews` through the Daemon, made from the options
  * read and made once more after a conflict.
  * @param registry - The registry.
  * @param change - The change.
@@ -244,7 +244,7 @@ export const changeOwner = (registry: AtomRegistry.AtomRegistry, change: OwnerCh
     return second._tag === "Conflict" ? ownerFailed("OptionsChanged") : second;
   });
 
-/** Makes a change of an option under `store` or `uploads` from the options view, and says there what it came to. */
+/** Makes a change of an option under `store`, `uploads`, or `previews` from the options view, and says there what it came to. */
 export const changeOwnerOption = runtime
   .fn(
     (change: OwnerChange, get) =>
@@ -259,7 +259,7 @@ export const changeOwnerOption = runtime
 const credentialName = Schema.decodeUnknownOption(CredentialPathName);
 
 /**
- * Holds a value for a Credential option under `store` or `uploads`, under the Credential
+ * Holds a value for a Credential option under `store`, `uploads`, or `previews`, under the Credential
  * it names, or the one the core derives, then sets the option to that name. The value
  * goes to the Vault in one request, and is wiped once that has answered, whatever it said.
  * @param registry - The registry.
