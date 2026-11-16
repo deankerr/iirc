@@ -602,26 +602,31 @@ export type Motion = "Still" | "Moving";
 
 /**
  * What decides whether an image moves: whether it is animated, `ui.previews.animate` on
- * this device, whether the device is set to reduce motion, and whether the Owner pressed it
- * to play.
+ * this device, whether the device is set to reduce motion, and what the Owner last pressed
+ * it into, if they did.
  */
 export interface MotionAsked {
   readonly animated: boolean;
   readonly animate: boolean;
   readonly reducedMotion: boolean;
-  readonly pressed: boolean;
+  readonly chosen: Motion | undefined;
 }
 
 /**
  * Whether an image moves. An image that is not animated is always `Still`. An animated one
- * moves once the Owner pressed it, which is a choice made, so it plays even where the
- * device is set to reduce motion, and otherwise only when `animate` is on and the device
- * is not set to reduce motion, which keeps it still.
+ * is as the Owner last pressed it, which is a choice made, so it plays even where the
+ * device is set to reduce motion, and until then moves only when `animate` is on and the
+ * device is not set to reduce motion, which keeps it still.
  * @param asked - What decides it.
  * @returns Its motion.
  */
-export const motionOf = ({ animated, animate, reducedMotion, pressed }: MotionAsked): Motion =>
-  animated && (pressed || (animate && !reducedMotion)) ? "Moving" : "Still";
+export const motionOf = ({ animated, animate, reducedMotion, chosen }: MotionAsked): Motion => {
+  if (!animated) {
+    return "Still";
+  }
+
+  return chosen ?? (animate && !reducedMotion ? "Moving" : "Still");
+};
 
 /**
  * What a press of an image does: `OpenLarge`, the larger view; `Play`, from its first

@@ -802,46 +802,41 @@ describe("a failure's words", () => {
 
 describe("whether an image moves", () => {
   const every = [false, true] as const;
+  const choices = [undefined, "Still", "Moving"] as const;
 
-  const asked = (
-    animated: boolean,
-    animate: boolean,
-    reducedMotion: boolean,
-    pressed: boolean
-  ): MotionAsked => ({ animate, animated, pressed, reducedMotion });
-
-  it("is still for an image that is not animated, however it is set and pressed", () => {
-    expect(
-      every.flatMap((animate) =>
-        every.flatMap((reducedMotion) =>
-          every.map((pressed) => motionOf(asked(false, animate, reducedMotion, pressed)))
-        )
-      )
-    ).toStrictEqual(Array.from({ length: 8 }, (): Motion => "Still"));
-  });
-
-  it("is, for an animated one, moving once pressed, or with animate on and no reduced motion", () => {
-    const table = every.flatMap((animate) =>
+  const rows = (animated: boolean) =>
+    every.flatMap((animate) =>
       every.flatMap((reducedMotion) =>
-        every.map((pressed): [boolean, boolean, boolean, Motion] => [
+        choices.map((chosen): [boolean, boolean, Motion | undefined, Motion] => [
           animate,
           reducedMotion,
-          pressed,
-          motionOf(asked(true, animate, reducedMotion, pressed)),
+          chosen,
+          motionOf({ animate, animated, chosen, reducedMotion } satisfies MotionAsked),
         ])
       )
     );
 
-    expect(table).toStrictEqual([
-      // animate, reduced motion, pressed, then its motion
-      [false, false, false, "Still"],
-      [false, false, true, "Moving"],
-      [false, true, false, "Still"],
-      [false, true, true, "Moving"],
-      [true, false, false, "Moving"],
-      [true, false, true, "Moving"],
-      [true, true, false, "Still"],
-      [true, true, true, "Moving"],
+  it("is still for an image that is not animated, however it is set and pressed", () => {
+    expect(rows(false).map((row) => row[3])).toStrictEqual(
+      Array.from({ length: 12 }, (): Motion => "Still")
+    );
+  });
+
+  it("is, for an animated one, as it was last pressed, and until then moving only with animate on and no reduced motion", () => {
+    expect(rows(true)).toStrictEqual([
+      // animate, reduced motion, last pressed into, then its motion
+      [false, false, undefined, "Still"],
+      [false, false, "Still", "Still"],
+      [false, false, "Moving", "Moving"],
+      [false, true, undefined, "Still"],
+      [false, true, "Still", "Still"],
+      [false, true, "Moving", "Moving"],
+      [true, false, undefined, "Moving"],
+      [true, false, "Still", "Still"],
+      [true, false, "Moving", "Moving"],
+      [true, true, undefined, "Still"],
+      [true, true, "Still", "Still"],
+      [true, true, "Moving", "Moving"],
     ]);
   });
 });

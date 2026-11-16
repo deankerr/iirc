@@ -71,27 +71,6 @@
   max-width: 32em;
 }
 
-/* A page's image: a small fixed box, cropped to fill it, so the row stays calm. */
-.thumbnail {
-  flex: none;
-  width: 4em;
-  height: 4em;
-  border-radius: var(--radius);
-  background: var(--color-surface);
-  object-fit: cover;
-}
-
-/* A link that is itself an image: as tall as the medium size, never wider than the column. */
-.whole {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  max-height: 260px;
-  border-radius: var(--radius);
-  background: var(--color-surface);
-}
-
 /* While pending: a bar a line high, pulsing, standing where the line will be. */
 .pending {
   display: flex;
@@ -220,11 +199,6 @@ a.plain:focus-visible {
 @container (max-width: 36em) {
   .previews {
     max-width: 100%;
-  }
-
-  .thumbnail {
-    width: 3em;
-    height: 3em;
   }
 }
 

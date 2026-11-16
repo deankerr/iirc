@@ -1,0 +1,126 @@
+/*
+ * A Preview's image, in a box of its own that its press, its play badge, and its control
+ * to open it large sit in. Until it loads, the box stands where the image will be, so a
+ * Message's height changes as little as it can.
+ */
+
+/* A page's image: a small fixed box, cropped to fill it, so the row stays calm. */
+.thumbnail {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 4em;
+  height: 4em;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+/* A link that is itself an image: as tall as the medium size, never wider than the column. */
+.whole {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.whole[data-loaded="false"] {
+  width: 12em;
+  height: 6em;
+}
+
+/* The press of an image fills its box, and is nothing but the image. */
+.press {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  font: inherit;
+}
+
+.press[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+  outline-offset: var(--border-width);
+}
+
+.picture {
+  display: block;
+  border-radius: var(--radius);
+}
+
+.thumbnail .picture {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.whole .picture {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 260px;
+}
+
+/* The play badge, over the middle of an animated image's first frame. */
+.badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text);
+  pointer-events: none;
+}
+
+.badge > * {
+  inline-size: auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  background: var(--color-scrim);
+}
+
+/* While it plays, the control that opens it large, in its corner. */
+.enlarge {
+  position: absolute;
+  inset: var(--space-1) var(--space-1) auto auto;
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--color-scrim);
+  color: var(--color-text);
+  cursor: default;
+  font: inherit;
+  line-height: 1;
+}
+
+.enlarge[data-hovered] {
+  background: var(--color-background);
+}
+
+.enlarge[data-focus-visible] {
+  outline: var(--border-width) solid var(--color-focus);
+}
+
+/* With no columns, a page's image is smaller. */
+@container (max-width: 36em) {
+  .thumbnail {
+    width: 3em;
+    height: 3em;
+  }
+}
+
+@media (pointer: coarse) {
+  .enlarge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--target-size);
+    min-height: var(--target-size);
+  }
+}
