@@ -173,7 +173,7 @@ const filled = (links: LinkFetchService, page: PageRead) => {
 
         const read = readOembed(utf8.decode(joined(yield* Stream.runCollect(answer.body))));
 
-        return read === undefined ? page : fillFromOembed(page, read, address);
+        return read === undefined ? page : fillFromOembed(page, read, answer.link);
       }).pipe(
         Effect.scoped,
         Effect.orElseSucceed(() => page),
